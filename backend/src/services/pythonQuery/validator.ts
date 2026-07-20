@@ -33,7 +33,9 @@ export const ALLOWED_MODELS = new Set([
   'scheduledMessage',
   'emailDraft',
   'callParticipant',
-  'bookmark'
+  'bookmark',
+  'savedUserConfiguration',
+  'savedUserConfigurationValue'
 ])
 
 // Allowed operators for where conditions

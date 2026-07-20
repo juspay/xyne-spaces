@@ -67,3 +67,5 @@ export {
 
 export { getUserGroupIds } from './user-group-helper'
 
+export { SavedUserConfigurationsACL } from './saved-user-configurations-acl'
+export { SavedUserConfigurationValuesACL } from './saved-user-configuration-values-acl'

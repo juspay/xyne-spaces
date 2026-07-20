@@ -5625,12 +5625,124 @@ const spacesMyItems: ToolDef = {
   },
 };
 
+// ── spaces-saved-views (Project / Ticket board "Views") ──────────────
+// READ-ONLY list of the user's SAVED VIEWS — the named filter presets shown in
+// the VIEWS panel of a Tickets/Project board (e.g. a "Created By" view). Data
+// model: SavedUserConfiguration (the view: name, board = contextId, visibility,
+// isStarred) + SavedUserConfigurationValue (the stored filter rows:
+// entityName/fieldName/fieldValue). Both are exposed through the /api/query/claw
+// gateway and MUST be ACL-scoped there (SavedUserConfigurationsACL /
+// SavedUserConfigurationValuesACL → userId === ctx.userId OR visibility PUBLIC).
+//
+// NOTE: the gateway AST strips `include`/`select`, so the view's filter rows can
+// only be fetched with a SECOND query against `savedUserConfigurationValue` —
+// hence the two interact() calls below. Each view's filters are returned so the
+// agent can reproduce the same filtering with spaces-tickets.
+const spacesSavedViews: ToolDef = {
+  name: "spaces-saved-views",
+  description:
+    "List the current user's SAVED VIEWS on Ticket/Project boards (READ-ONLY, scoped to you and PUBLIC views). " +
+    "A saved view is a named filter preset (the VIEWS panel on a board) — e.g. a 'Created By' or 'My open bugs' view. " +
+    "Each view returns its stored filter definition (entity/field/value rows) so you can REPRODUCE it with spaces-tickets. " +
+    "Use it for 'what views do I have on this board?', 'read my <name> view', or to resolve a saved view's filters before fetching tickets. " +
+    "Filter by `contextId` (the boardId the view belongs to) and/or `name`. This tool does NOT return tickets — read the view's filters, then call spaces-tickets.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      contextId: { type: "string", description: "Limit to views saved on ONE board. SavedUserConfiguration.contextId === boardId (use spaces-boards to resolve a board)." },
+      name: { type: "string", description: "Case-insensitive substring match on the view name (e.g. 'Created By')." },
+      starredOnly: { type: "boolean", description: "If true, only return starred/favourite views." },
+      limit: { type: "number", minimum: 1, maximum: 100, default: 50, description: "Max views (default 50)." },
+      offset: { type: "number", minimum: 0, default: 0, description: "Pagination offset." },
+    },
+  },
+  async handler(args, ctx) {
+    try {
+      const limit = Math.min(Math.max(Number(args["limit"] ?? 50), 1), 100);
+      const offset = Math.max(Number(args["offset"] ?? 0), 0);
+      const contextId = args["contextId"] ? String(args["contextId"]) : undefined;
+      const nameFilter = args["name"] ? String(args["name"]) : undefined;
+      const starredOnly = args["starredOnly"] === true;
+
+      // 1) The views themselves (ACL: own + PUBLIC). No `include` — the gateway
+      //    strips it — so filters come from a second query below.
+      const views = (await interact({
+        model: "savedUserConfiguration",
+        operation: "findMany",
+        where: {
+          ...(contextId ? { contextId: { equals: contextId } } : {}),
+          ...(nameFilter ? { name: { contains: nameFilter, mode: "insensitive" } } : {}),
+          ...(starredOnly ? { isStarred: { equals: true } } : {}),
+        },
+        orderBy: [{ isStarred: "desc" }, { updatedAt: "desc" }],
+        take: limit,
+        skip: offset,
+      })) as Array<{
+        id: string;
+        name?: string;
+        contextType?: string;
+        contextId?: string;
+        visibility?: string;
+        isStarred?: boolean;
+        userId?: string;
+        updatedAt?: string;
+      }>;
+
+      if (views.length === 0) return ok(contextId ? "No saved views on that board." : "No saved views.");
+
+      // 2) Stored filter rows for those views. ACL scopes via the parent config,
+      //    so only rows under views you can read come back.
+      const configIds = views.map((v) => v.id);
+      const values = (await interact({
+        model: "savedUserConfigurationValue",
+        operation: "findMany",
+        where: { configId: { in: configIds } },
+        orderBy: [{ createdAt: "asc" }],
+        take: 1000,
+      })) as Array<{ configId?: string; entityName?: string; fieldName?: string; fieldValue?: string }>;
+
+      const valuesByConfig = new Map<string, Array<{ entityName?: string; fieldName?: string; fieldValue?: string }>>();
+      for (const v of values) {
+        if (!v.configId) continue;
+        const list = valuesByConfig.get(v.configId) ?? [];
+        list.push(v);
+        valuesByConfig.set(v.configId, list);
+      }
+
+      const lines = views.map((view, idx) => {
+        const shared = view.userId && view.userId !== ctx.userId;
+        const head =
+          `${view.name || "(unnamed view)"}` +
+          `${view.isStarred ? " ⭐" : ""}` +
+          `${view.visibility === "PUBLIC" ? " [public]" : ""}` +
+          `${shared ? " (shared by another user)" : ""}`;
+        const parts = [head];
+        if (view.contextId) parts.push(`  boardId (contextId): ${view.contextId}`);
+        const vals = valuesByConfig.get(view.id) ?? [];
+        if (vals.length > 0) {
+          parts.push(`  Filters (${vals.length}):`);
+          for (const v of vals) parts.push(`    - ${v.entityName ?? "?"}.${v.fieldName ?? "?"} = ${v.fieldValue ?? ""}`);
+        } else {
+          parts.push(`  Filters: (none stored)`);
+        }
+        parts.push(`  viewId: ${view.id}`);
+        return prefixChunk(idx + 1, parts[0]!, parts.slice(1));
+      });
+
+      return ok(`${views.length} saved view(s):\n\n${lines.join("\n\n")}${paginationFooter({ returned: views.length, limit, offset })}`);
+    } catch (e) {
+      return err(`saved-views error: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  },
+};
+
 export const tools: ToolDef[] = [
   spacesWhoami,
   ...(CONFIG.directVespaSearch ? [spacesVespaSchema, spacesVespaQuery, spacesVespaSearch] : []),
   spacesSearch,
   spacesSearchV2,
   spacesMyItems,
+  spacesSavedViews,
   spacesWorkflowStats,
   userSendMessage,
   spacesMeetingInsights,
