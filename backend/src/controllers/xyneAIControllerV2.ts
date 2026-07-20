@@ -21,6 +21,7 @@ import {
   approveClawAction,
   downloadClawAttachment,
   listAccessibleClawAgents,
+  listClawAgentModels,
   deleteClawConversation,
   type ClawRunRequest,
 } from '@/services/clawAgentService';
@@ -159,6 +160,12 @@ const XyneAIRequestSchemaV2 = z.object({
   displayQuery: z.string().optional(),
   draftMode: z.boolean().optional().default(false),
   provider: z.enum(['spaces', 'copilot', 'claude', 'codex']).optional().default('spaces'),
+  /** Per-run model pin from the composer's model picker. Rides the agent's
+   *  shared LiteLLM credential, so it names a model from that key's own
+   *  /v1/models list (see GET /agents/:slug/models). claw-auth re-validates and
+   *  no-ops the pin when it can't serve it, so an unservable id can't silently
+   *  swap the model. */
+  model: z.string().min(1).optional(),
   agentSlug: z.string().optional().default('ask-ai'),
 });
 
@@ -237,6 +244,7 @@ export class XyneAIControllerV2 {
       displayQuery: _displayQuery,
       draftMode,
       provider,
+      model,
       agentSlug,
     } = parseResult.data;
 
@@ -381,6 +389,11 @@ export class XyneAIControllerV2 {
           query,
           agentSlug,
           provider,
+          // Build the pin here rather than forwarding a caller-supplied
+          // agentConfig: claw-auth merges that over the agent's stored config,
+          // and its platform-key strip covers secrets but NOT `tools` /
+          // `subagents` / `outputFormat`. A bare model id can't reach those.
+          ...(model && { providerOverride: { provider: 'litellm', model } }),
           conversationId: effectiveConversationId || '',
           channelId: effectiveChannelIds[0] || '',
           canvasIds: effectiveCanvasIds,
@@ -914,6 +927,30 @@ export class XyneAIControllerV2 {
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Internal server error';
       logger.error('[XyneAIv2] listAccessibleAgents error:', error);
+      res.status(503).json({ success: false, error: message });
+    }
+  };
+
+  /**
+   * GET /api/xyne-ai/agents/:slug/models
+   * Models the agent's shared LiteLLM credential can serve, for the composer's
+   * model picker. Agent-scoped by design: the list comes off that agent's own
+   * key, so the picker can't offer a model the run would reject. Agents with no
+   * litellm credential return `[]` and the picker hides.
+   */
+  listAgentModels = async (req: Request, res: Response): Promise<void> => {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      res.status(401).json({ error: 'Authentication required' });
+      return;
+    }
+
+    try {
+      const result = await listClawAgentModels({ headers: req.headers, userId }, req.params['slug']);
+      res.json(result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Internal server error';
+      logger.error('[XyneAIv2] listAgentModels error:', error);
       res.status(503).json({ success: false, error: message });
     }
   };

@@ -56,6 +56,8 @@ export interface WorkerStartStreamMessage {
       version?: 'v1' | 'v2';
       disableTools?: boolean;
       agentSlug?: string;
+      /** Per-run model pin from the composer's model picker. */
+      model?: string;
     };
   };
 }
@@ -180,6 +182,7 @@ async function executeStream(
         ...(requestBody.version && { version: requestBody.version }),
         ...(requestBody.disableTools && { disable_tools: true }),
         ...(requestBody.agentSlug && { agentSlug: requestBody.agentSlug }),
+        ...(requestBody.model && { model: requestBody.model }),
         /* eslint-enable @typescript-eslint/naming-convention */
       }),
       signal: abortController.signal,

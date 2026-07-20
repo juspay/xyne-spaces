@@ -50,6 +50,8 @@ import { VoiceInput } from '../../../ui/InputBox/VoiceInput';
 import type { VoiceInputHandle } from '../../../ui/InputBox/VoiceInput';
 import { StopIcon } from './StopIcon';
 import { AgentSelector } from './AgentSelector';
+import { ModelSelector } from './ModelSelector';
+import type { ClawAgentModel } from '../../../../services/clawAgentModelsService';
 import type { AgentOption } from './AgentSelector';
 import {
   ChannelMentionExtension,
@@ -161,6 +163,13 @@ export interface XyneAIInputBoxProps {
   selectedAgentSlug?: string | null;
   agents?: AgentOption[];
   onSelectAgent?: (slug: string | null) => void;
+  /** Models the selected agent's LiteLLM key can serve. Empty ⇒ picker hides. */
+  models?: ClawAgentModel[];
+  /** The agent's configured model, shown against the default row. */
+  defaultModel?: string | null;
+  /** Currently pinned model, or null for the agent's default. */
+  selectedModel?: string | null;
+  onSelectModel?: (model: string | null) => void;
   kbCollectionId?: string | undefined;
   // Bumped by xyneAIMachine on every OPEN with a kbCollectionId. When this
   // changes, the auto-add effect re-attaches the KB collection chip even if
@@ -259,6 +268,10 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       selectedAgentSlug = null,
       agents = [],
       onSelectAgent,
+      models = [],
+      defaultModel = null,
+      selectedModel = null,
+      onSelectModel,
       collectionsList: collectionsListProp = [],
       agentKbGrants,
       compactToolbar = false,
@@ -2237,6 +2250,19 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                         selectedAgentSlug={selectedAgentSlug}
                         agents={agents}
                         onSelect={onSelectAgent}
+                        compact={true}
+                      />
+                    </div>
+                  )}
+                  {/* Model selector — hides itself when the agent exposes no
+                      switchable models. */}
+                  {onSelectModel && (
+                    <div className='flex items-center shrink-0'>
+                      <ModelSelector
+                        selectedModel={selectedModel}
+                        models={models}
+                        defaultModel={defaultModel}
+                        onSelect={onSelectModel}
                         compact={true}
                       />
                     </div>

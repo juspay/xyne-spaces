@@ -82,12 +82,24 @@ export interface ClawRunRequest {
   parentMessageId?: string;
   parentAssistantMessageId?: string;
   editedUserMessageId?: string;
+  /** Per-run provider/model pin from the Ask AI model picker. Built in the
+   *  controller from a validated model id — never accepted as raw agentConfig,
+   *  which would let a crafted request rewrite the agent's tools config.
+   *  claw-auth re-validates and no-ops the pin if it can't serve it. */
+  providerOverride?: { provider: string; model?: string };
 }
 
 export interface ClawRunStreamResult {
   success: boolean;
   sessionId?: string;
   error?: string;
+}
+
+/** A model the agent's LiteLLM key can serve. `name` is claw's label, which is
+ *  the raw model id today — the picker maps it to a friendlier label. */
+export interface ClawAgentModel {
+  id: string;
+  name: string;
 }
 
 export interface AccessibleClawAgent {
@@ -482,6 +494,7 @@ export async function runClawAgentStream(
     task: request.query,
     agentSlug: request.agentSlug,
     provider: request.provider,
+    ...(request.providerOverride && { providerOverride: request.providerOverride }),
     conversationId: clawConversationId,
     channelId: request.channelId,
     ...(request.canvasIds?.length && { canvasIds: request.canvasIds }),
@@ -836,6 +849,42 @@ export async function listAccessibleClawAgents(req: {
   });
 
   return { success: true, data: transformedData };
+}
+
+/**
+ * Models the agent's shared (admin-set) LiteLLM credential can serve, for the
+ * Ask AI model picker. Scoped to the AGENT's key — claw-auth lists them off
+ * that key's own /v1/models, so the picker can only ever offer models the run
+ * will actually accept. The key itself is never exposed.
+ *
+ * An agent with no litellm credential yields `[]` (not an error) so the UI can
+ * simply hide the picker — same contract the claw console's ModelSelect uses.
+ */
+export async function listClawAgentModels(
+  req: { headers?: { cookie?: string }; userId: string },
+  agentSlug?: string
+): Promise<{ success: boolean; data: ClawAgentModel[]; defaultModel: string | null }> {
+  const slug = agentSlug || 'ask-ai';
+  const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/${encodeURIComponent(slug)}/litellm-models`;
+  const response = await fetch(url, {
+    headers: {
+      ...extractUserIdHeader(req.userId),
+      ...extractCookieHeader(req),
+    },
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    logger.error(`[ClawAgentService] listAgentModels failed: ${response.status} ${errorText}`);
+    throw new Error('Failed to fetch models');
+  }
+
+  const result = (await response.json()) as {
+    success: boolean;
+    data: ClawAgentModel[];
+    defaultModel?: string | null;
+  };
+  return { success: result.success, data: result.data ?? [], defaultModel: result.defaultModel ?? null };
 }
 
 export async function listClawConversations(
