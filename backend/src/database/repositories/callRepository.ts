@@ -52,6 +52,7 @@ export interface CreateCallWithParticipantsInput {
   externalId: string;
   title: string;
   createdByUserId: string;
+  workspaceId?: string; // denormalized tenant key (background callers thread it in — no request-scoped stamp)
   channelId: string; // required for CHANNEL/CONVERSATION origin
   callType: CallType;
   callOrigin: CallOrigin;
@@ -407,6 +408,7 @@ export class CallRepository {
         externalId: params.externalId,
         title: params.title,
         createdByUserId: params.createdByUserId,
+        ...(params.workspaceId && { workspaceId: params.workspaceId }),
         channelId: params.channelId,
         callType: params.callType,
         callOrigin: params.callOrigin,
@@ -1156,6 +1158,7 @@ export class CallRepository {
           externalId: roomName,
           createdByUserId: createdBy,
           channelId,
+          ...(workspaceId && { workspaceId }),
           callType,
           status: CallStatus.ACTIVE,
           roomLink,

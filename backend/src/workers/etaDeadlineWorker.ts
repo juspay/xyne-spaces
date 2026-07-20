@@ -1,5 +1,6 @@
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
+import { runWithContext } from '@/database/tenant/context';
 import { etaDeadlineQueue } from '@/queues/etaDeadlineQueue';
 import { TicketsSideEffectHandler } from '@/zero/side-effects/tables/tickets-handler';
 import {
@@ -105,12 +106,17 @@ class EtaDeadlineWorker {
           });
 
           if (ticket.conversationId) {
-            await createEtaSystemMessage({
-              conversationId: ticket.conversationId,
-              content: `Ticket ${ticket.xyneId} is overdue (${daysOverdue} days)`,
-              createdAt: now,
-              activityType: 'ETA',
-            });
+            // Multi-workspace cron → open a per-ticket tenant context so the system message's
+            // workspaceId gets stamped from this ticket's workspace.
+            await runWithContext(
+              { userId: 'eta-deadline-worker', workspaceId: ticket.workspaceId },
+              () => createEtaSystemMessage({
+                conversationId: ticket.conversationId!,
+                content: `Ticket ${ticket.xyneId} is overdue (${daysOverdue} days)`,
+                createdAt: now,
+                activityType: 'ETA',
+              }),
+            );
           }
 
           logger.info(

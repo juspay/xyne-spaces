@@ -19,6 +19,7 @@
 
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
+import { runWithContext } from '@/database/tenant/context';
 import { config } from '@/config/env';
 import { getStorageService, type StorageService } from './storage';
 import { redisService } from './redisService';
@@ -55,6 +56,7 @@ export class GcsPollingService {
   private userGroupId: string = '';
   private channelId: string = '';
   private systemUserId: string = '';
+  private workspaceId: string = '';
   private isInitialized: boolean = false;
 
   private constructor() {
@@ -132,6 +134,7 @@ export class GcsPollingService {
     this.userGroupId = userGroup.id;
     this.channelId = channel.id;
     this.systemUserId = systemUser.id;
+    this.workspaceId = channel.workspaceId;
     this.isInitialized = true;
     logger.info('[GCS_POLLING] Configuration initialized:', {
       projectId: this.projectId,
@@ -206,7 +209,14 @@ export class GcsPollingService {
         if (!file.name.toLowerCase().endsWith('.pdf')) {
           continue;
         }
-        await this.processFile(file);
+        // No req.user in this setInterval poller — open a tenant context so the
+        // workspaceId stamper fills every Prisma write (ticket, conversation, etc.)
+        // for this file's target workspace. Scoped per-file so multi-workspace
+        // support is correct even though today all files share one channel.
+        await runWithContext(
+          { userId: this.systemUserId, workspaceId: this.workspaceId },
+          () => this.processFile(file),
+        );
       }
     } catch (error) {
       logger.error('[GCS_POLLING] Error during polling:', error);

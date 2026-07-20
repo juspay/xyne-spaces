@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from 'express';
 import { WorkflowEventType } from '@prisma/client';
 import { db } from '@/database/client';
+import { runWithContext } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import { automationQueue } from '../queue/automation.queue';
 import { storedSecretMatches } from '../services/webhook-secret.service';
@@ -93,23 +94,31 @@ router.post(
       __meta: { error: null, chain: [] },
     };
 
-    const execution = await db.$transaction(async tx => {
-      const created = await tx.workflowExecution.create({
-        data: {
-          workflowId: workflow.id,
-          workflowType: AUTOMATION_WORKFLOW_TYPE,
-          status: AutomationRunStatus.PENDING,
-          tag: 'root',
-        },
-      });
-      await tx.workflowExecutionState.create({
-        data: {
-          workflowExecutionId: created.id,
-          context: JSON.stringify(initialContext),
-        },
-      });
-      return created;
-    });
+    // Unauthenticated webhook — no HTTP session to derive the tenant from, so open
+    // a tenant scope explicitly off the workflow's workspaceId. This stamps
+    // workspaceId onto the execution rows (and the downstream job's step writes).
+    const execution = await runWithContext(
+      { userId: 'automation-webhook', workspaceId: workflow.workspaceId },
+      () =>
+        db.$transaction(async tx => {
+          const created = await tx.workflowExecution.create({
+            data: {
+              workflowId: workflow.id,
+              workflowType: AUTOMATION_WORKFLOW_TYPE,
+              status: AutomationRunStatus.PENDING,
+              tag: 'root',
+              workspaceId: workflow.workspaceId,
+            },
+          });
+          await tx.workflowExecutionState.create({
+            data: {
+              workflowExecutionId: created.id,
+              context: JSON.stringify(initialContext),
+            },
+          });
+          return created;
+        }),
+    );
 
     await automationQueue.enqueueRun({ executionId: execution.id });
     logger.info(

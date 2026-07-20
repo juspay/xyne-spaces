@@ -26,6 +26,7 @@ import {
 import { vespaQueue } from '@/queues/vespaQueue';
 import { db } from '@/database/client';
 import { DatabaseClient } from '@/database/client';
+import { runWithContext } from '@/database/tenant/context';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import { VespaOperationType } from './vespa-injection/core/mapper';
 import { wrapTransactionWithACL } from './acl';
@@ -253,7 +254,15 @@ export async function handleMutate(request: Request): Promise<unknown> {
         }
       })
     )
-    processSideEffectJobs(sideEffectJobs, { userID: authData.sub, workspaceId: authData.workspaceId, role: authData.role, orgRole: authData.orgRole, memberId: authData.memberId });
+    // Side-effect handlers run on the Zero server, which has NO tenantScopeMiddleware and writes via
+    // Prisma db.* (not tx.mutate, so the Zero stamp misses them too). Open a Prisma tenant context
+    // from authData.workspaceId so the stamp fills workspaceId on every side-effect create (message,
+    // conversation, ticketActivity, …). Fire-and-forget is fine — AsyncLocalStorage propagates to the
+    // async chain scheduled inside the callback.
+    void runWithContext(
+      { userId: authData.sub, workspaceId: authData.workspaceId },
+      () => processSideEffectJobs(sideEffectJobs, { userID: authData.sub, workspaceId: authData.workspaceId, role: authData.role, orgRole: authData.orgRole, memberId: authData.memberId }),
+    );
 
     return result;
   } catch (error) {
@@ -560,7 +569,15 @@ export async function handleMutateFallback(request: Request): Promise<unknown> {
         }
       })
     );
-    processSideEffectJobs(sideEffectJobs, { userID: authData.sub, workspaceId: authData.workspaceId, role: authData.role, orgRole: authData.orgRole, memberId: authData.memberId });
+    // Side-effect handlers run on the Zero server, which has NO tenantScopeMiddleware and writes via
+    // Prisma db.* (not tx.mutate, so the Zero stamp misses them too). Open a Prisma tenant context
+    // from authData.workspaceId so the stamp fills workspaceId on every side-effect create (message,
+    // conversation, ticketActivity, …). Fire-and-forget is fine — AsyncLocalStorage propagates to the
+    // async chain scheduled inside the callback.
+    void runWithContext(
+      { userId: authData.sub, workspaceId: authData.workspaceId },
+      () => processSideEffectJobs(sideEffectJobs, { userID: authData.sub, workspaceId: authData.workspaceId, role: authData.role, orgRole: authData.orgRole, memberId: authData.memberId }),
+    );
     return { success: true };
   } catch (error) {
     console.error('Fallback mutate request failed:', error);

@@ -7,6 +7,7 @@ import { workflowManager } from '@/workflows/services/workflowManager';
 import { WorkflowType, WorkflowExecutionStatus, isActiveStatus } from '@/workflows/types/workflow-enums';
 import { buildPRWorkflowContext } from './prWorkflowContextBuilder';
 import { randomUUID } from 'crypto';
+import { runWithContext } from '@/database/tenant/context';
 
 interface ProcessedComment {
   text: string;
@@ -128,13 +129,19 @@ export class XyneCommentService {
       { version: '1.0' }
     );
 
-    // Step 4: Continue workflow with PR comments
-    await this.continueWorkflowWithPRComments(
+    const ticketForScope = await this.db.ticket.findUnique({
+      where: { id: workflowInfo.ticketId },
+      select: { workspaceId: true },
+    });
+    const continueWork = (): Promise<void> => this.continueWorkflowWithPRComments(
       workflowInfo.ticketId,
       filteredComments,
       prId,
       prUrl
     );
+    await (ticketForScope?.workspaceId
+      ? runWithContext({ userId: 'xyne-comment', workspaceId: ticketForScope.workspaceId }, continueWork)
+      : continueWork());
 
     logger.info(`[Xyne-Comment] Triggered workflow continuation with ${filteredComments.length} PR comments`, {
       version: '1.0',

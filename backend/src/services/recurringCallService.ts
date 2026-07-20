@@ -9,6 +9,7 @@ import { scheduledCallNotificationService } from '@/services/scheduledCallNotifi
 import { addHHMMDuration } from '@/utils/dateUtils';
 import { DatabaseClient } from '@/database/client';
 import { CallVespaFeedSource, queueCallVespaFeed } from '@/services/callVespaQueue';
+import { runWithContext } from '@/database/tenant/context';
 
 // Number of milliseconds to buffer recurring call instances ahead of time (60 days)
 const INSTANCE_BUFFER_DAYS = 60 * 24 * 60 * 60 * 1000;
@@ -17,6 +18,7 @@ const INSTANCE_BUFFER_DAYS = 60 * 24 * 60 * 60 * 1000;
 
 interface RecurringSeriesShape {
   id: string;
+  workspaceId: string | null;
   title: string;
   organizerId: string;
   channelId: string;
@@ -71,65 +73,89 @@ class RecurringCallService {
     const { targetUserIds, externalInvitees } =
       await repositories.recurringCallParticipants.findInstanceSeed(recurringSeries.id, tx);
 
-    const { participantUserIds } = await repositories.calls.createCallWithParticipants({
-      callId,
-      externalId,
-      title: recurringSeries.title,
-      createdByUserId: recurringSeries.organizerId,
-      channelId: recurringSeries.channelId,
-      callType: CallType.AUDIO,
-      callOrigin: CallOrigin.CHANNEL,
-      roomLink,
-      timezone: recurringSeries.timezone,
-      isRecurring: true,
-      recurringSeriesId: recurringSeries.id,
-      startsAt,
-      endsAt,
-      targetUserIds,
-      ...(externalInvitees.length > 0 && { externalInvitees }),
-      callUpdatesChannel: callUpdatesChannel ?? null,
-    }, tx);
-
-    queueCallVespaFeed(callId, { source: CallVespaFeedSource.RecurringCallServiceCreateInstance });
-
-    // Send immediate CALL_SCHEDULED notifications + activities for the first instance only
-    if (notifyParticipants) {
-      try {
-        await scheduledCallNotificationService.sendScheduledCallNotifications({
-          callId,
-          callExternalId: externalId,
-          title: recurringSeries.title,
-          startsAt,
-          endsAt,
-          channelId: recurringSeries.channelId,
-          organizerUserId: recurringSeries.organizerId,
-          participantUserIds,
-        });
-      } catch (err) {
-        logger.error(`Failed to send scheduled notifications for recurring instance ${callId}:`, err);
-      }
+    // Background schedulers (callValidationWorker setInterval, scheduledCallNotificationService
+    // Bull handler) open no HTTP tenant scope, and RecurringCallSeries.workspaceId is nullable.
+    // Resolve a guaranteed-non-null workspaceId from the series' channel (Channel.workspaceId is
+    // NOT NULL) and open a tenant context so the call insert AND the sibling callParticipant
+    // createMany (which carries no explicit workspaceId) both get stamped instead of leaking NULL.
+    let workspaceId = recurringSeries.workspaceId;
+    if (!workspaceId) {
+      const channel = await tx.channel.findUnique({
+        where: { id: recurringSeries.channelId },
+        select: { workspaceId: true },
+      });
+      workspaceId = channel?.workspaceId ?? null;
+    }
+    if (!workspaceId) {
+      logger.error('Recurring series has no resolvable workspaceId', {
+        seriesId: recurringSeries.id,
+        channelId: recurringSeries.channelId,
+      });
+      throw new Error(`recurringCallService: no resolvable workspaceId for series ${recurringSeries.id} (channel ${recurringSeries.channelId})`);
     }
 
-    // Schedule 10-min reminder and auto-end Bull jobs (only if requested)
-    if (scheduleJobs) {
-      try {
-        await scheduledCallNotificationService.scheduleCallReminder(
-          callId,
-          externalId,
-          recurringSeries.title,
-          startsAt,
-          participantUserIds,
-        );
-        await scheduledCallNotificationService.scheduleCallAutoEnd(callId, externalId, endsAt);
-      } catch (err) {
-        logger.error(`Failed to schedule jobs for recurring instance ${callId}:`, err);
-      }
-    }
+    return runWithContext({ userId: recurringSeries.organizerId, workspaceId }, async () => {
+      const { participantUserIds } = await repositories.calls.createCallWithParticipants({
+        callId,
+        externalId,
+        title: recurringSeries.title,
+        createdByUserId: recurringSeries.organizerId,
+        workspaceId: workspaceId ?? undefined,
+        channelId: recurringSeries.channelId,
+        callType: CallType.AUDIO,
+        callOrigin: CallOrigin.CHANNEL,
+        roomLink,
+        timezone: recurringSeries.timezone,
+        isRecurring: true,
+        recurringSeriesId: recurringSeries.id,
+        startsAt,
+        endsAt,
+        targetUserIds,
+        ...(externalInvitees.length > 0 && { externalInvitees }),
+        callUpdatesChannel: callUpdatesChannel ?? null,
+      }, tx);
 
-    logger.info(
-      `Created recurring instance ${callId} (${externalId}) for series ${recurringSeries.id} at ${startsAt.toISOString()}`,
-    );
-    return callId;
+      queueCallVespaFeed(callId, { source: CallVespaFeedSource.RecurringCallServiceCreateInstance });
+
+      // Send immediate CALL_SCHEDULED notifications + activities for the first instance only
+      if (notifyParticipants) {
+        try {
+          await scheduledCallNotificationService.sendScheduledCallNotifications({
+            callId,
+            callExternalId: externalId,
+            title: recurringSeries.title,
+            startsAt,
+            endsAt,
+            channelId: recurringSeries.channelId,
+            organizerUserId: recurringSeries.organizerId,
+            participantUserIds,
+          });
+        } catch (err) {
+          logger.error(`Failed to send scheduled notifications for recurring instance ${callId}:`, err);
+        }
+      }
+
+      // Schedule 10-min reminder and auto-end Bull jobs (only if requested)
+      if (scheduleJobs) {
+        try {
+          await scheduledCallNotificationService.scheduleCallReminder(
+            callId,
+            externalId,
+            recurringSeries.title,
+            startsAt,
+            participantUserIds,
+          );
+          await scheduledCallNotificationService.scheduleCallAutoEnd(callId, externalId, endsAt);
+        } catch (err) {
+          logger.error(`Failed to schedule jobs for recurring instance ${callId}:`, err);
+        }
+      }
+
+      logger.info(
+        `Created recurring instance ${callId} (${externalId}) for series ${recurringSeries.id} at ${startsAt.toISOString()}`,
+      );
+      return callId;
+    });
   }
 
   /**

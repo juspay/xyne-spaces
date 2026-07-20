@@ -15,6 +15,7 @@ import { logger } from '@/utils/logger';
 import { AuthProvider } from '@prisma/client';
 import { repositories } from '@/database/repositories';
 import { getCalendarCredentialsBySourceId } from '@/services/calendarTokenRefresh';
+import { runWithContext } from '@/database/tenant/context';
 import {
   fetchMicrosoftEventsInRange,
   fetchMicrosoftDeltaChanges,
@@ -77,11 +78,13 @@ async function performManualSync(sourceId: string): Promise<void> {
       MAX_CALENDAR_EVENTS_PER_SYNC,
     );
 
-    await storeMsCalEventsAsCallsForUser(events, userId, user.email, {
-      isFullSync: true,
-      timeRange: { startsAfter: now, startsBefore: future },
-      skipCancelRemoved: truncated,
-    });
+    await runWithContext({ userId, workspaceId: user.workspaceId }, () =>
+      storeMsCalEventsAsCallsForUser(events, userId, user.email, {
+        isFullSync: true,
+        timeRange: { startsAfter: now, startsBefore: future },
+        skipCancelRemoved: truncated,
+      }),
+    );
 
     await MicrosoftCalendarSubscriptionService.updateSyncStateBySourceId(sourceId, undefined, true);
 
@@ -128,10 +131,12 @@ async function performIncrementalSync(
       MAX_CALENDAR_EVENTS_PER_SYNC,
     );
 
-    await storeMsCalEventsAsCallsForUser(events, userId, user.email, {
-      isFullSync: true,
-      skipCancelRemoved: truncated,
-    });
+    await runWithContext({ userId, workspaceId: user.workspaceId }, () =>
+      storeMsCalEventsAsCallsForUser(events, userId, user.email, {
+        isFullSync: true,
+        skipCancelRemoved: truncated,
+      }),
+    );
     await MicrosoftCalendarSubscriptionService.updateSyncStateBySourceId(sourceId, deltaLink, true);
 
     logger.info(`[MICROSOFT_CALENDAR] Baseline established for user ${user.email}: ${events.length} event(s)`);
@@ -160,10 +165,12 @@ async function performIncrementalSync(
         MAX_CALENDAR_EVENTS_PER_SYNC,
       );
 
-      await storeMsCalEventsAsCallsForUser(events, userId, user.email, {
-        isFullSync: true,
-        skipCancelRemoved: truncated,
-      });
+      await runWithContext({ userId, workspaceId: user.workspaceId }, () =>
+        storeMsCalEventsAsCallsForUser(events, userId, user.email, {
+          isFullSync: true,
+          skipCancelRemoved: truncated,
+        }),
+      );
       await MicrosoftCalendarSubscriptionService.updateSyncStateBySourceId(sourceId, newDeltaLink, true);
 
       logger.info(`[MICROSOFT_CALENDAR] Baseline re-established for user ${user.email}: ${events.length} event(s)`);
@@ -173,7 +180,9 @@ async function performIncrementalSync(
       return null;
     }
 
-    await storeMsCalEventsAsCallsForUser(result.events, userId, user.email, { isFullSync: false });
+    await runWithContext({ userId, workspaceId: user.workspaceId }, () =>
+      storeMsCalEventsAsCallsForUser(result.events, userId, user.email, { isFullSync: false }),
+    );
 
     if (result.nextLink) {
       logger.warn(`[MICROSOFT_CALENDAR] Incremental sync hit event cap, scheduling continuation`, {

@@ -648,7 +648,7 @@ export class AuthController {
       logger.info(`✅ [${requestId}] User resolved: ${user.email} (ID: ${user.id})`);
 
       // Ensure user presence entry exists (create if not exists, update timestamps if exists)
-      await this.userService.ensureUserPresence(user.id);
+      await this.userService.ensureUserPresence(user.id, user.workspaceId);
       logger.info(`✅ [${requestId}] User presence ensured for user ${user.id}`);
 
       // Generate custom JWT token

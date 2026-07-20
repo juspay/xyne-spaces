@@ -9,6 +9,7 @@
  * Inserts the pending_split row; the splitter takes over.
  */
 import { db } from '@/database/client';
+import { runWithContext } from '@/database/tenant/context';
 import { IngestionStatus } from '@prisma/client';
 import { SubApp } from '@/vespa/src/types';
 import { config } from '@/config/env';
@@ -46,14 +47,17 @@ const routeCollection = async (fileId: string): Promise<boolean> => {
   const sourceKey = toGcsKey(attachment.url);
   const { basePriority } = inferDoclingSourcePriority({ collectionId: item.rootCollectionId });
 
-  const inserted = await upsertDoclingAsyncFileForSplit({
-    fileId: item.fileId,
-    collectionId: item.rootCollectionId,
-    sourcePath: sourceKey,
-    sourceStorageKey: sourceKey,
-    basePriority,
-    pageChunkSize: pageChunkSize(),
-  });
+  const inserted = await runWithContext(
+    { userId: 'docling-intake', workspaceId: attachment.workspaceId },
+    () => upsertDoclingAsyncFileForSplit({
+      fileId: item.fileId,
+      collectionId: item.rootCollectionId,
+      sourcePath: sourceKey,
+      sourceStorageKey: sourceKey,
+      basePriority,
+      pageChunkSize: pageChunkSize(),
+    }),
+  );
 
   if (inserted !== null) {
     await db.collectionItem.updateMany({
@@ -78,14 +82,17 @@ const routeAttachment = async (attachmentId: string, app: SubApp): Promise<boole
   const sourceKey = toGcsKey(att.url);
   const { basePriority } = inferDoclingSourcePriority({ collectionId: '' });
 
-  const inserted = await upsertDoclingAsyncFileForSplit({
-    fileId: att.id,
-    collectionId: '',  // empty sentinel = attachment, not collection
-    sourcePath: sourceKey,
-    sourceStorageKey: sourceKey,
-    basePriority,
-    pageChunkSize: pageChunkSize(),
-  });
+  const inserted = await runWithContext(
+    { userId: 'docling-intake', workspaceId: att.workspaceId },
+    () => upsertDoclingAsyncFileForSplit({
+      fileId: att.id,
+      collectionId: '',  // empty sentinel = attachment, not collection
+      sourcePath: sourceKey,
+      sourceStorageKey: sourceKey,
+      basePriority,
+      pageChunkSize: pageChunkSize(),
+    }),
+  );
 
   logger.info('[DOCLING_SCHEDULER] Routed ATTACHMENT PDF to scheduler', {
     attachmentId: att.id, app, basePriority, alreadyQueued: inserted === null,
