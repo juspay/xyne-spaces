@@ -22,6 +22,7 @@ export interface DeskMetricsTicketRow {
   rtSeconds: number | null;
   csatScore: number | null; // 1..5
   csatRating: string | null; // GOOD | BAD
+  customFields: Record<string, string> | null; // form field name → value; only fields with non-empty values included
 }
 
 export interface DeskMetricsResponse {
