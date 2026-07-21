@@ -9,20 +9,27 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 
 # --- Secret scanning (fail fast, before expensive build checks) ---------------
 # Scans ONLY staged changes so no secret can be committed by accident.
-# Config: .gitleaks.toml  | Accepted findings: .gitleaksignore
+# Config + accepted/known findings both live in .gitleaks.toml ([allowlist] paths & regexes)
+# -v prints File / Line / Fingerprint for every hit so you can see WHAT tripped it.
 echo "🔐 Scanning staged changes for secrets (gitleaks)..."
 if command -v gitleaks >/dev/null 2>&1; then
-  if ! gitleaks git --staged --redact --no-banner \
-        --config "$REPO_ROOT/.gitleaks.toml" \
-        --gitleaks-ignore-path "$REPO_ROOT/.gitleaksignore"; then
+  if gitleaks git --staged -v --redact --no-color --no-banner \
+        --config "$REPO_ROOT/.gitleaks.toml"; then
+    echo "✅ No secrets detected in staged changes."
+  else
     echo ""
-    echo "❌ gitleaks found a potential secret in your staged changes. Commit blocked."
-    echo "   • If it's a real secret: remove it, use an env var / secret manager."
-    echo "   • If it's a verified false positive: add its fingerprint to .gitleaksignore"
-    echo "     (get it reviewed — see comments in that file)."
+    echo "❌ A secret was detected in your staged changes — commit blocked."
+    echo "   See the File / Line / RuleID printed above for each hit."
+    echo ""
+    echo "   ▸ REAL secret  → remove it (use an env var / secret manager), then commit again."
+    echo "   ▸ PUBLIC/SAFE  → if it's a config file or a false positive, allowlist it in"
+    echo "                    .gitleaks.toml under [allowlist], then commit again:"
+    echo "        • whole safe file  → add its path to the  paths   list"
+    echo "        • a specific value → add the value to the  regexes list"
+    echo "     Copy the format from the existing entries in .gitleaks.toml."
+    echo "     (Your PR reviewer will see the .gitleaks.toml change.)"
     exit 1
   fi
-  echo "✅ No secrets detected in staged changes."
 else
   echo "⚠️  gitleaks not installed — SKIPPING secret scan."
   echo "   Install it: brew install gitleaks   (https://github.com/gitleaks/gitleaks)"

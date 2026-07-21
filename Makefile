@@ -71,6 +71,25 @@ clean-external-dashboard:
 	docker rmi $(EXTERNAL_DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) || true
 	docker rmi $(NS)/$(EXTERNAL_DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) || true
 
+# push-built-* : push an image that the matching build-* target already built into this
+# machine's Docker daemon (retag that image to the registry ref and push it). Used by CI
+# so the EXACT image Trivy scanned is what gets pushed - no rebuild, no registry round-trip.
+push-built-backend:
+	docker tag $(BACKEND_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) $(NS)/$(BACKEND_IMAGE_NAME):$(SOURCE_SHORT_COMMIT)
+	docker push $(NS)/$(BACKEND_IMAGE_NAME):$(SOURCE_SHORT_COMMIT)
+
+push-built-runner:
+	docker tag $(RUNNER_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) $(NS)/$(RUNNER_IMAGE_NAME):$(SOURCE_SHORT_COMMIT)
+	docker push $(NS)/$(RUNNER_IMAGE_NAME):$(SOURCE_SHORT_COMMIT)
+
+push-built-dashboard:
+	docker tag $(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) $(NS)/$(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT)
+	docker push $(NS)/$(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT)
+
+push-built-external-dashboard:
+	docker tag $(EXTERNAL_DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) $(NS)/$(EXTERNAL_DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT)
+	docker push $(NS)/$(EXTERNAL_DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT)
+
 lint-dashboard:
 	$(info Running dashboard quality checks)
 	cd dashboard && npm ci && npm run lint:errors-only && npm run type-check
