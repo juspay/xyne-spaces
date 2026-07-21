@@ -26,12 +26,27 @@ import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
 import rehypeRaw from 'rehype-raw';
+import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import { RefineInput } from '../RefineInput/RefineInput';
 import { aiMarkdownProseClassName } from '../../../utils/markdownStyles';
 import { cn } from '../../../utils/classNames';
 import type { AIRefineQuickAction } from '../../../hooks/useDeskAIDraft';
 import { stripCitationBlock, stripCitationMarks } from '../../ui/TipTapExtensions/CitationMark';
 import type { ToolInvocation } from '../../Chat/XyneAISidebar/utils/XyneAITypes';
+
+// rehypeRaw turns raw HTML embedded in the draft markdown into real DOM nodes, so
+// the rendered output MUST be sanitized — otherwise malicious HTML in draft content
+// (e.g. `<iframe srcdoc="<script>…">`, which inherits the parent origin) executes as
+// stored XSS. Starts from rehype-sanitize's safe defaults (drops iframe/script/etc.
+// and restricts href/src to safe protocols) and re-allows `checked` so GFM task-list
+// checkboxes still render their state.
+const draftSanitizeSchema = {
+  ...defaultSchema,
+  attributes: {
+    ...defaultSchema.attributes,
+    input: [...(defaultSchema.attributes?.['input'] ?? []), 'checked'],
+  },
+};
 
 const DRAFT_SELECTION_HIGHLIGHT_KEY = 'desk-ai-draft-selection';
 
@@ -379,7 +394,7 @@ export const DraftCard = ({
             <div className={aiMarkdownProseClassName}>
               <Markdown
                 remarkPlugins={[remarkGfm, remarkBreaks]}
-                rehypePlugins={[rehypeRaw]}
+                rehypePlugins={[rehypeRaw, [rehypeSanitize, draftSanitizeSchema]]}
                 urlTransform={url => url}
                 components={{
                   a: ({ href, children }) => (

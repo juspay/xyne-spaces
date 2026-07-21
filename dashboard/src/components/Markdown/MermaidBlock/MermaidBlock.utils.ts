@@ -1,6 +1,27 @@
 import mermaid from 'mermaid';
+import DOMPurify from 'dompurify';
 import { v4 as uuidv4 } from 'uuid';
 import { loadMermaidDiagram, saveMermaidDiagram } from '../../../machines/xyneAIMachine';
+
+/**
+ * Sanitize a mermaid-rendered SVG before it is injected via dangerouslySetInnerHTML.
+ *
+ * Fresh renders are already sanitized by mermaid itself (securityLevel:'antiscript'),
+ * but SVGs served from the IndexedDB cache may have been produced under the previous
+ * 'loose' setting, which skipped sanitization — so we re-sanitize at the sink to
+ * neutralize any poisoned/legacy cache entries and as defense-in-depth.
+ *
+ * The config mirrors mermaid's own pass (see mermaid.core.mjs): foreignObject +
+ * dominant-baseline are re-allowed and foreignObject is treated as an HTML
+ * integration point so HTML labels are preserved, while <script>, on* event-handler
+ * attributes and javascript: URLs are stripped.
+ */
+export const sanitizeMermaidSvg = (svg: string): string =>
+  DOMPurify.sanitize(svg, {
+    ADD_TAGS: ['foreignobject'],
+    ADD_ATTR: ['dominant-baseline'],
+    HTML_INTEGRATION_POINTS: { foreignobject: true },
+  });
 
 /**
  * Validates if a Mermaid diagram syntax is complete
@@ -76,7 +97,8 @@ export const renderMermaidDiagram = async ({
     try {
       const cached = await loadMermaidDiagram(messageId);
       if (cached && cached.diagram === chart && cached.renderedSvg) {
-        onSuccess(cached.renderedSvg, chart);
+        // Re-sanitize: cache entries may predate the securityLevel fix.
+        onSuccess(sanitizeMermaidSvg(cached.renderedSvg), chart);
         onError('');
         onLoading(false);
         return; // Use cached version, skip rendering
@@ -93,14 +115,15 @@ export const renderMermaidDiagram = async ({
     // Generate unique ID for each diagram
     const id = generateMermaidId();
 
-    // Render the diagram
+    // Render the diagram, then sanitize before it is injected / cached.
     const { svg: renderedSvg } = await mermaid.render(id, chart);
-    onSuccess(renderedSvg, chart);
+    const safeSvg = sanitizeMermaidSvg(renderedSvg);
+    onSuccess(safeSvg, chart);
     onError('');
 
-    // Save to cache if messageId is provided
+    // Save the sanitized SVG so cached entries are clean going forward
     if (messageId) {
-      void saveMermaidDiagram(messageId, chart, renderedSvg);
+      void saveMermaidDiagram(messageId, chart, safeSvg);
     }
   } catch (err) {
     console.error('Mermaid rendering error:', err);
