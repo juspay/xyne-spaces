@@ -1405,11 +1405,27 @@ const XyneAISidebar = ({
       threadConversationId: activeThreadInfo?.conversationId ?? null,
       streamSessionKey: conversationId,
     });
-    if (oldTid === newTid) return;
 
-    xyneAIStreamManager.migrateThreadId(oldTid, newTid);
-    setStreamThreadKey(conversationId);
-    usesDraftStreamKeyRef.current = false;
+    if (oldTid !== newTid) {
+      // v1: the backend mints a fresh server session id (id changed) — migrate
+      // the threadId onto it and promote out of draft.
+      xyneAIStreamManager.migrateThreadId(oldTid, newTid);
+      setStreamThreadKey(conversationId);
+      usesDraftStreamKeyRef.current = false;
+    } else {
+      // Same id, so there's nothing to migrate. Two cases land here:
+      //   • v2 (claw reuses the client conversationId verbatim) after a turn
+      //     completes — the slot is now server-backed, so promote out of draft.
+      //   • An errored/never-established first turn (e.g. offline): conversationId
+      //     is still the seeded draft key. Do NOT promote — there's no real
+      //     session yet, and the next submit clears the dead turn (handleSubmit).
+      // Without promoting the v2 case, the draft flag would stay stuck and every
+      // later turn would be wrongly treated as a fresh draft.
+      const lastBot = [...messages].reverse().find(m => m.type === 'bot');
+      if (!lastBot?.errorInfo) {
+        usesDraftStreamKeyRef.current = false;
+      }
+    }
   }, [messages, conversationId, streamThreadKey, channelId, activeThreadInfo?.conversationId]);
 
   const handleOpenContextModal = useCallback(() => setShowContextModal(true), []);
@@ -1781,6 +1797,25 @@ const XyneAISidebar = ({
             ...(selection.canvasTitle && { canvasTitle: selection.canvasTitle }),
           }))
         : undefined;
+
+    // Stuck-draft recovery: a fresh draft slot still holding a completed turn
+    // means the first turn ended without ever establishing a server session
+    // (it errored/aborted before the sessionId arrived). A follow-up would be
+    // inserted as a second parentless root and resolveActivePath would fork the
+    // tree (phantom 1/2 branch arrows). The dead turn was never persisted — a
+    // reload already shows only the surviving turn — so drop it and start the
+    // retry as a clean single-chain conversation. Only clears local message
+    // state (not streamThreadKey/conversationId), so the submitQuery closure
+    // stays valid and live-stream routing is unaffected.
+    if (
+      !editingMessageId &&
+      usesDraftStreamKeyRef.current &&
+      messages.length > 0 &&
+      !messages.some((m: Message) => m.isStreaming)
+    ) {
+      setMessages([]);
+      setBranchSelections({});
+    }
 
     // Determine parentMessageId for branching
     let parentMessageId: string | undefined;
