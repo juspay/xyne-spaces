@@ -20,6 +20,7 @@ interface SearchParticipantsProps {
   helperText?: React.ReactNode;
   channelMembersOptions?: ParticipantOptions[];
   excludedChannelMembers?: Set<string>;
+  hoistSelectedChannelMembers?: boolean;
   toggleExcludedChannelMember?: (
     userId: string,
     isSelectAll?: boolean,
@@ -38,6 +39,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
   helperText,
   channelMembersOptions,
   excludedChannelMembers,
+  hoistSelectedChannelMembers = false,
   toggleExcludedChannelMember,
 }) => {
   const [selectedOptionsMap, setSelectedOptionsMap] = useState<Map<string, ParticipantOptions>>(
@@ -114,6 +116,29 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
     const query = searchQuery.trim();
     return query.includes('@');
   }, [searchQuery]);
+
+  const visibleChannelMemberOptions = useMemo(() => {
+    if (!channelMembersOptions) return [];
+
+    const matchingOptions = channelMembersOptions.filter(opt =>
+      opt.label.toLowerCase().includes(participantSearchQuery.toLowerCase()),
+    );
+
+    if (!hoistSelectedChannelMembers) return matchingOptions;
+
+    return matchingOptions.sort((a, b) => {
+      const aUserId = a.value.replace('user:', '');
+      const bUserId = b.value.replace('user:', '');
+      const aSelected = !excludedChannelMembers?.has(aUserId);
+      const bSelected = !excludedChannelMembers?.has(bUserId);
+      return Number(bSelected) - Number(aSelected);
+    });
+  }, [
+    channelMembersOptions,
+    excludedChannelMembers,
+    hoistSelectedChannelMembers,
+    participantSearchQuery,
+  ]);
 
   const toggleValue = (value: string) => {
     const isChannel = value.startsWith('channel:');
@@ -430,40 +455,36 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
                   />
                 </div>
                 <div className='p-2'>
-                  {channelMembersOptions
-                    .filter(opt =>
-                      opt.label.toLowerCase().includes(participantSearchQuery.toLowerCase()),
-                    )
-                    .map(opt => {
-                      const userId = opt.value.replace('user:', '');
-                      const isChecked = !excludedChannelMembers?.has(userId);
-                      return (
-                        <div
-                          key={opt.value}
-                          className='flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg text-sm text-foreground hover:bg-muted'
-                        >
-                          <label className='flex items-center gap-2 flex-1 cursor-pointer min-w-0'>
-                            {opt.icon && <span className='shrink-0'>{opt.icon}</span>}
-                            <div className='flex-1 min-w-0 text-left truncate'>
-                              <div className='truncate text-sm text-foreground'>{opt.label}</div>
-                              {opt.subtitle && (
-                                <div className='truncate text-xs text-muted-foreground'>
-                                  {opt.subtitle}
-                                </div>
-                              )}
-                            </div>
-                            <input
-                              type='checkbox'
-                              checked={isChecked}
-                              onChange={() => toggleExcludedChannelMember(userId)}
-                              data-track-category='calls'
-                              data-track-name='toggle-channel-member-inclusion'
-                              className='shrink-0'
-                            />
-                          </label>
-                        </div>
-                      );
-                    })}
+                  {visibleChannelMemberOptions.map(opt => {
+                    const userId = opt.value.replace('user:', '');
+                    const isChecked = !excludedChannelMembers?.has(userId);
+                    return (
+                      <div
+                        key={opt.value}
+                        className='flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg text-sm text-foreground hover:bg-muted'
+                      >
+                        <label className='flex items-center gap-2 flex-1 cursor-pointer min-w-0'>
+                          {opt.icon && <span className='shrink-0'>{opt.icon}</span>}
+                          <div className='flex-1 min-w-0 text-left truncate'>
+                            <div className='truncate text-sm text-foreground'>{opt.label}</div>
+                            {opt.subtitle && (
+                              <div className='truncate text-xs text-muted-foreground'>
+                                {opt.subtitle}
+                              </div>
+                            )}
+                          </div>
+                          <input
+                            type='checkbox'
+                            checked={isChecked}
+                            onChange={() => toggleExcludedChannelMember(userId)}
+                            data-track-category='calls'
+                            data-track-name='toggle-channel-member-inclusion'
+                            className='shrink-0'
+                          />
+                        </label>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}
