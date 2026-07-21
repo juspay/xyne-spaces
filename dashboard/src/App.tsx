@@ -20,6 +20,7 @@ import { ShortcutsProvider } from './shortcuts';
 import { TooltipProvider } from './components/ui/Tooltip';
 import { initializeTelemetry } from './services/otel/init';
 import { KeyboardProvider } from './contexts/KeyboardContext';
+import { SwitchLoadingOverlay } from './components/SwitchLoadingOverlay/SwitchLoadingOverlay';
 import { TRUSTED_ORIGINS } from '@xyne/shared';
 import { DEFAULT_WORKSPACE_ID } from './config';
 
@@ -114,6 +115,7 @@ const App = (): ReactElement => {
                     <main className='h-screen' style={{ background: 'var(--root-bg)' }}>
                       <RouterProvider router={router}></RouterProvider>
                     </main>
+                    <SwitchLoadingOverlay />
                     <Toaster
                       position='top-right'
                       richColors

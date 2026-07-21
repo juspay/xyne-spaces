@@ -14,7 +14,7 @@ import { normalizeExternalUrl } from '../utils/validation';
 import {
   requestAllMediaPermissions,
 } from '../services/media-permission';
-import { setCustomScreenPickerEnabled, setCachedUser } from '../services/request-interceptor';
+import { setCustomScreenPickerEnabled, setCachedUser, setDynamicHeaders } from '../services/request-interceptor';
 import { hideMeetingPopup, hideMeetingPopupAfter } from '../services/meeting-popup-window';
 import { showRecordingPill, hideRecordingPill } from '../services/recording-pill-window';
 import { meetingDetectorService } from '../services/meeting-detector';
@@ -161,6 +161,10 @@ export function setupIpcHandlers(): void {
       throw new Error('Cookie sync only allowed for Xyne origins');
     }
     await syncXyneCookiesToBrowserPanel(url);
+  });
+
+  ipcMain.handle('set-dynamic-headers', (_event, headers: unknown) => {
+    setDynamicHeaders(headers);
   });
 
   ipcMain.on('open-external', (_event, url: string) => {
