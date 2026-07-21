@@ -341,7 +341,7 @@ export const SearchUserV2: React.FC<SearchParticipantsProps> = ({
               'w-full text-[14px] min-w-[120px] text-foreground border-none font-normal bg-transparent relative placeholder:text-muted-foreground outline-none focus:outline-none',
             )}
             style={{
-              paddingLeft: `${pillsWidth + 4}px`,
+              paddingLeft: `${pillsWidth + 10}px`,
               paddingTop: pillsHeight > 36 ? `${pillsHeight - 30}px` : '0px',
             }}
           />
