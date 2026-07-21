@@ -77,6 +77,13 @@ async function buildMemoryYql(params: {
 
   const conditions: string[] = [];
 
+  // NOTE: These are *scoping* filters over cumulative memory, not an access-control
+  // boundary. Memory documents are shared, so widening this WHERE clause only surfaces
+  // records the user is already permitted to read (confirmed with the Vespa/memory team).
+  // Values are therefore interpolated directly into the YQL string. If memory ever becomes
+  // per-user/tenant-confidential, revisit this and bind user input as @-parameters
+  // (see YqlBuilder) so it can't break out of the string literal and rewrite the query.
+
   // get the email of that user
   const prisma = DatabaseClient.getInstance();
   const user: User | null = await prisma.user.findUnique({
@@ -95,7 +102,7 @@ async function buildMemoryYql(params: {
 
   // DocId filter
   if (docId) {
-    conditions.push(`docId contains "${docId}`);
+    conditions.push(`docId contains "${docId}"`);
   }
 
   // Tags filter
