@@ -11,13 +11,11 @@
     "build:dashboard": "cd ../dashboard && cross-env NODE_OPTIONS=--max-old-space-size=16384 npm run build",
     "build:mic-monitor": "bash native/mic-monitor/build.sh",
     "build": "npm run build:mic-monitor && tsc && electron-builder --config build.prod.json",
-    "build:sentry": "npm run build:mic-monitor && tsc && electron-builder --config build.sentry.json && npm run sentry:sourcemaps",
     "build:sandbox": "npm run build:mic-monitor && tsc && electron-builder --config build.sbx.json",
     "copy-ui": "rimraf ui-active && cpy \"../dashboard/dist/**\" ui-active",
     "clear-ui-data": "rimraf ~/Library/Application\\ Support/xyne-spaces-electron/ui-data/",
     "typecheck": "tsc --noEmit",
-    "clean": "rimraf dist release ui-active",
-    "sentry:sourcemaps": "sentry-cli sourcemaps inject --org juspay-p3 --project xyne-spaces-electron ./dist && sentry-cli sourcemaps upload --org juspay-p3 --project xyne-spaces-electron ./dist"
+    "clean": "rimraf dist release ui-active"
   },
   "keywords": [
     "electron",
@@ -38,8 +36,6 @@
     "@opentelemetry/sdk-logs": "^0.211.0",
     "@opentelemetry/sdk-metrics": "^2.5.0",
     "@opentelemetry/semantic-conventions": "^1.39.0",
-    "@sentry/cli": "^2.58.5",
-    "@sentry/electron": "^7.10.0",
     "@types/node": "^24.3.1",
     "archiver": "^7.0.0",
     "electron-log": "^5.4.3",

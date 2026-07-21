@@ -17,7 +17,6 @@ import { handleCertificateError, isCertificateError } from '../services/certific
 import { dashboardLoad, enrollmentSkipped, mtlsFrontendLoaded } from '../services/enrollmentMetrics';
 import { safeRecordMetric } from '../services/telemetry';
 import type { Counter } from '@opentelemetry/api';
-import { logger } from '@sentry/electron/main';
 
 let mainWindow: BrowserWindow | null = null;
 let isCompactMode = false;

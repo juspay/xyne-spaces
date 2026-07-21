@@ -24,7 +24,6 @@ import { initializeUIUpdater } from '../services/ui-updater';
 import { initializeTelemetry } from '../services/telemetry';
 import { setupGlobalErrorHandlers } from '../services/error-handler';
 import { setupWebviewShortcuts } from '../services/webview-shortcuts';
-import Sentry from "@sentry/electron/main";
 import Store from 'electron-store';
 
 const store = new Store();
@@ -57,9 +56,6 @@ log.info('[Main] Electron app starting...');
 
 // Setup global error handlers FIRST to catch any initialization errors
 setupGlobalErrorHandlers();
-
-// Initialize Sentry for crash reporting
-Sentry.init({ dsn: config.SENTRY_DSN });
 
 // Log app opened event
 Logger.info(EnrollmentEvent.APP_OPENED);
