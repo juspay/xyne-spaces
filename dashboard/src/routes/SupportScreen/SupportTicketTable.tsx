@@ -113,7 +113,7 @@ export const SupportTicketTable = ({
     const map = new Map<string, TicketTag[]>();
     for (const ticket of supportTickets ?? []) {
       const tags = (ticket.tagMappings ?? []).map(m => ({
-        id: m.tagId,
+        id: m.id,
         name: m.tagName,
         ticketId: m.ticketId,
       }));
