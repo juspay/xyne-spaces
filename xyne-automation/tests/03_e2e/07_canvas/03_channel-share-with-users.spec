@@ -6,10 +6,10 @@
 * Ensuring user "user-1" is logged in
 * Creating channel canvas for user "user-1"
 * clicking on "[data-testid='canvas-share-button']"
-* verifying "Make canvas public" is visible in "[data-testid='canvas-share-modal']"
-* verifying "Users with access" is visible in "[data-testid='canvas-share-modal']"
+* verifying "Who has access" is visible in "[data-testid='canvas-share-modal']"
+* verifying "General access" is visible in "[data-testid='canvas-share-modal']"
 * verifying "Owner" is visible in "[data-testid='canvas-share-modal']"
-* verifying "[data-testid='user-search-input']" is visible
+* verifying "[data-testid='canvas-user-search-input']" is visible
 
 ## Channel Owner can copy shareable link
 * using browser
@@ -21,14 +21,16 @@
 
 ## Channel Owner adds user as Viewer
 * using browser
-* Logging in user "user-2" on temp browser "user2-browser-1"
+* Logging in user "user-4" on temp browser "user4-browser-1"
 * Ensuring user "user-1" is logged in
 * Creating channel canvas for user "user-1"
 * clicking on "[data-testid='canvas-share-button']"
-* typing stored user "user-2" field "name" in "[data-testid='user-search-input']"
-* waiting for "[data-testid='user-search-results']" to appear
-* clicking on "[data-testid='user-search-results'] li:first-child"
-* clicking button with text "Viewer"
+* typing stored user "user-4" field "name" in "[data-testid='canvas-user-search-input']"
+* waiting for text "user:user-4.name" to appear in "[data-testid='canvas-share-modal']"
+* clicking on text "user:user-4.name" in "[data-testid='canvas-share-modal']"
+* clicking on text "Editor" in "[data-testid='canvas-share-modal']"
+* clicking on text "Viewer"
+* clicking button with text "Share"
 
 ## Channel Owner adds user as Editor
 * using browser
@@ -36,15 +38,16 @@
 * Ensuring user "user-1" is logged in
 * Creating channel canvas for user "user-1"
 * clicking on "[data-testid='canvas-share-button']"
-* typing stored user "user-3" field "name" in "[data-testid='user-search-input']"
-* waiting for "[data-testid='user-search-results']" to appear
-* clicking on "[data-testid='user-search-results'] li:first-child"
-* clicking button with text "Editor"
+* typing stored user "user-3" field "name" in "[data-testid='canvas-user-search-input']"
+* waiting for text "user:user-3.name" to appear in "[data-testid='canvas-share-modal']"
+* clicking on text "user:user-3.name" in "[data-testid='canvas-share-modal']"
+* clicking button with text "Share"
 
 ## Channel Owner toggles canvas visibility
 * using browser
 * Ensuring user "user-1" is logged in
 * Creating channel canvas for user "user-1"
 * clicking on "[data-testid='canvas-share-button']"
-* clicking on "[data-testid='canvas-visibility-public-button']"
-* verifying "Make canvas private" is visible in "[data-testid='canvas-share-modal']"
+* clicking on "[data-testid='canvas-visibility-select']"
+* clicking on text "Anyone with the link"
+* verifying "Anyone in the workspace with the link can view" is visible in "[data-testid='canvas-share-modal']"

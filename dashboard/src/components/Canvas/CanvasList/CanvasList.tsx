@@ -8,17 +8,19 @@ import {
   Share2,
   Globe,
   Lock,
-  Check,
   Star,
+  Users,
+  Hash,
 } from 'lucide-react';
 import { CanvasListProps, Canvas, CanvasParticipant } from '../Canvas.types';
 import { CanvasRole, CanvasVisibility } from '@xyne/shared';
 import Avatar from '../../ui/Avatar/Avatar';
-import AvatarGroup from '../../ui/Avatar/AvatarGroup';
+import { AvatarStackItem } from '../../ui/Avatar/AvatarGroup';
 import Input from '../../ui/Input';
+import { Tooltip } from '../../ui/Tooltip/Tooltip';
 import { Dialog } from '../../ui/Dialog';
-import { UserHoverWrapper } from '../../ui/UserMentionPopover/UserMentionPopover';
 import { useUser } from '../../../hooks/useUsers';
+import { useUserGroups } from '../../../hooks/useUserGroup';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -33,7 +35,7 @@ import { queries } from '../../../zero/queries';
 import { CanvasParticipantsTray, type ParticipantItem } from '../CanvasParticipantsTray';
 import { useNavigate } from 'react-router-dom';
 import { useCanvasPrefetch } from '../../../hooks/useCanvasPrefetch';
-import { useCachedQuery } from '@xyne/shared/hooks';
+import { useCachedQuery, useAllVisibleChannels } from '@xyne/shared/hooks';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { useShortcut } from '../../../shortcuts';
 import { toast } from 'sonner';
@@ -45,6 +47,42 @@ import {
 
 type FilterTab = 'all' | 'created_by_me';
 type CanvasCursor = { id: string; updatedAt: number };
+
+type RowAccessEntry =
+  | { kind: 'user'; key: string; userId: string }
+  | { kind: 'group'; key: string; name: string }
+  | { kind: 'channel'; key: string; name: string };
+
+const AccessAvatars: React.FC<{ entries: RowAccessEntry[]; max: number }> = ({ entries, max }) => {
+  const shown = entries.slice(0, max);
+  const remaining = entries.length - shown.length;
+  return (
+    <div data-slot='avatar-group' className='flex items-center'>
+      {shown.map(entry => (
+        <AvatarStackItem key={entry.key} size={20}>
+          {entry.kind === 'user' ? (
+            <Avatar userId={entry.userId} size='sm' showActiveStatus={false} />
+          ) : (
+            <div className='flex size-full items-center justify-center rounded-full bg-muted text-muted-foreground'>
+              {entry.kind === 'group' ? (
+                <Users className='h-3 w-3' />
+              ) : (
+                <Hash className='h-3 w-3' />
+              )}
+            </div>
+          )}
+        </AvatarStackItem>
+      ))}
+      {remaining > 0 && (
+        <AvatarStackItem size={20}>
+          <div className='flex size-full items-center justify-center rounded-full bg-muted text-xs font-medium text-muted-foreground'>
+            {remaining}
+          </div>
+        </AvatarStackItem>
+      )}
+    </div>
+  );
+};
 
 const CANVAS_PAGE_SIZE = 25;
 
@@ -120,23 +158,66 @@ const CreatorName: React.FC<{ userId: string; isCurrentUser: boolean }> = ({
 const ParticipantsTray: React.FC<{
   isOpen: boolean;
   onClose: () => void;
-  canvasId: string;
-}> = ({ isOpen, onClose, canvasId }) => {
-  const [participants] = useCachedQuery(queries.canvasParticipants({ canvasId }));
+  canvas: Canvas;
+}> = ({ isOpen, onClose, canvas }) => {
+  const participants = (
+    canvas as Canvas & {
+      participants?: {
+        id: string;
+        userId?: string | null;
+        userGroupId?: string | null;
+        channelId?: string | null;
+        role: CanvasRole;
+      }[];
+    }
+  ).participants;
+  const allUserGroups = useUserGroups();
+  const allVisibleChannels = useAllVisibleChannels();
+  const groupNameById = useMemo(
+    () => new Map(allUserGroups.map(g => [g.id, g.name])),
+    [allUserGroups],
+  );
+  const channelNameById = useMemo(
+    () => new Map(allVisibleChannels.map(c => [c.id, c.name])),
+    [allVisibleChannels],
+  );
 
   const formattedParticipants: ParticipantItem[] = useMemo(() => {
-    if (!participants) return [];
-
-    return participants.reduce<ParticipantItem[]>((acc, p) => {
-      if (!p.userId) return acc;
-      acc.push({
-        id: p.id,
-        userId: p.userId,
-        role: p.role,
+    const rows = participants ?? [];
+    const entries: ParticipantItem[] = [];
+    const seenUserIds = new Set<string>();
+    if (canvas.createdBy) {
+      entries.push({
+        id: `creator:${canvas.createdBy}`,
+        kind: 'user',
+        userId: canvas.createdBy,
+        role: CanvasRole.OWNER,
       });
-      return acc;
-    }, []);
-  }, [participants]);
+      seenUserIds.add(canvas.createdBy);
+    }
+    for (const p of rows) {
+      if (p.userId) {
+        if (seenUserIds.has(p.userId)) continue;
+        seenUserIds.add(p.userId);
+        entries.push({ id: p.id, kind: 'user', userId: p.userId, role: p.role });
+      } else if (p.userGroupId) {
+        entries.push({
+          id: p.id,
+          kind: 'group',
+          name: groupNameById.get(p.userGroupId) ?? 'Group',
+          role: p.role,
+        });
+      } else if (p.channelId) {
+        entries.push({
+          id: p.id,
+          kind: 'channel',
+          name: channelNameById.get(p.channelId) ?? 'Private channel',
+          role: p.role,
+        });
+      }
+    }
+    return entries;
+  }, [participants, canvas.createdBy, groupNameById, channelNameById]);
 
   return (
     <Dialog open={isOpen} onOpenChange={open => !open && onClose()} title='Participants'>
@@ -207,6 +288,16 @@ export const CanvasList: React.FC<CanvasListProps> = ({
 }) => {
   const navigate = useNavigate();
   const { isMobile } = usePlatform();
+  const allUserGroups = useUserGroups();
+  const allVisibleChannels = useAllVisibleChannels();
+  const groupNameById = useMemo(
+    () => new Map(allUserGroups.map(g => [g.id, g.name])),
+    [allUserGroups],
+  );
+  const channelNameById = useMemo(
+    () => new Map(allVisibleChannels.map(c => [c.id, c.name])),
+    [allVisibleChannels],
+  );
   const [searchQuery, setSearchQuery] = useState('');
   const [deletingCanvasId, setDeletingCanvasId] = useState<string | null>(null);
   const [internalActiveFilter, setInternalActiveFilter] = useState<FilterTab>('all');
@@ -463,14 +554,43 @@ export const CanvasList: React.FC<CanvasListProps> = ({
 
   const renderCanvasItem = (canvas: Canvas): React.ReactNode => {
     const canvasWithParticipants = canvas as Canvas & {
-      participants?: { userId: string; role: CanvasRole }[];
+      participants?: {
+        id: string;
+        userId?: string | null;
+        userGroupId?: string | null;
+        channelId?: string | null;
+        role: CanvasRole;
+      }[];
     };
 
-    const participantUserIds = [
-      canvas.createdBy,
-      ...(canvasWithParticipants.participants
-        ?.map(p => p.userId)
-        .filter(id => id !== canvas.createdBy) || []),
+    const accessEntries: RowAccessEntry[] = [
+      { kind: 'user', key: `user:${canvas.createdBy}`, userId: canvas.createdBy },
+      ...(canvasWithParticipants.participants ?? []).flatMap<RowAccessEntry>(p => {
+        if (p.userId) {
+          return p.userId === canvas.createdBy
+            ? []
+            : [{ kind: 'user', key: `user:${p.userId}`, userId: p.userId }];
+        }
+        if (p.userGroupId) {
+          return [
+            {
+              kind: 'group',
+              key: `group:${p.userGroupId}`,
+              name: groupNameById.get(p.userGroupId) ?? 'Group',
+            },
+          ];
+        }
+        if (p.channelId) {
+          return [
+            {
+              kind: 'channel',
+              key: `channel:${p.channelId}`,
+              name: channelNameById.get(p.channelId) ?? 'Private channel',
+            },
+          ];
+        }
+        return [];
+      }),
     ];
 
     const isSelected = selectedCanvasId === canvas.id;
@@ -480,8 +600,8 @@ export const CanvasList: React.FC<CanvasListProps> = ({
       <div
         role='button'
         tabIndex={0}
-        className={`group flex items-center px-6 py-4 transition-colors cursor-pointer border-b border-border ${
-          isSelected ? 'bg-accent' : 'hover:bg-accent'
+        className={`group flex items-center px-6 py-4 transition-colors cursor-pointer border-b border-border border-l-4 ${
+          isSelected ? 'border-l-foreground bg-muted' : 'border-l-transparent hover:bg-accent'
         }`}
         onClick={e => onSelect(e, canvas)}
         data-track-category='CANVAS'
@@ -512,102 +632,109 @@ export const CanvasList: React.FC<CanvasListProps> = ({
         }}
       >
         <div className='flex-shrink-0 mr-4'>
-          <div className='w-8 h-8 flex items-center justify-center rounded bg-muted'>
-            <FileText className='w-4 h-4 text-muted-foreground' strokeWidth={2.5} />
-          </div>
+          <Tooltip
+            content={
+              canvas.visibility === CanvasVisibility.PUBLIC
+                ? 'Anyone with the link can view'
+                : 'Private'
+            }
+            side='top'
+            align='start'
+          >
+            <div className='w-8 h-8 flex items-center justify-center rounded-full bg-muted'>
+              {canvas.visibility === CanvasVisibility.PUBLIC ? (
+                <Globe className='w-4 h-4 text-muted-foreground' strokeWidth={2.2} />
+              ) : (
+                <Lock className='w-4 h-4 text-muted-foreground' strokeWidth={2.2} />
+              )}
+            </div>
+          </Tooltip>
         </div>
 
         <div className='flex-1 min-w-0'>
           <div className='flex items-center gap-2 mb-1'>
-            <h3 className='font-medium text-foreground truncate' title={canvas.title}>
-              {canvas.title}
-            </h3>
+            <Tooltip
+              content={canvas.title}
+              side='top'
+              align='start'
+              delayDuration={400}
+              className='max-w-xs break-words'
+            >
+              <h3 className='font-medium text-foreground truncate'>{canvas.title}</h3>
+            </Tooltip>
           </div>
 
-          <div className='flex flex-wrap items-center gap-3 text-sm text-muted-foreground'>
-            <UserHoverWrapper userId={canvas.createdBy}>
-              <span className='flex items-center gap-1.5 cursor-pointer'>
-                <Avatar userId={canvas.createdBy} size='sm' />
-                <span className='hidden md:inline'>
-                  <CreatorName
-                    userId={canvas.createdBy}
-                    isCurrentUser={canvas.createdBy === currentUserId}
-                  />
-                </span>
+          <div className='flex items-center gap-2 text-sm text-muted-foreground min-w-0'>
+            <span className='flex items-center gap-1.5 min-w-0'>
+              <Avatar userId={canvas.createdBy} size='sm' />
+              <span className='hidden md:inline truncate'>
+                <CreatorName
+                  userId={canvas.createdBy}
+                  isCurrentUser={canvas.createdBy === currentUserId}
+                />
               </span>
-            </UserHoverWrapper>
-
-            <span className='text-muted-foreground'>|</span>
-
-            <span
-              className='flex items-center'
-              aria-label={
-                canvas.visibility === CanvasVisibility.PUBLIC ? 'Public canvas' : 'Private canvas'
-              }
-              title={canvas.visibility === CanvasVisibility.PUBLIC ? 'Public' : 'Private'}
-            >
-              {canvas.visibility === CanvasVisibility.PUBLIC ? (
-                <Globe className='w-3.5 h-3.5 text-green-500' strokeWidth={2.5} />
-              ) : (
-                <Lock className='w-3.5 h-3.5 text-muted-foreground' strokeWidth={2.5} />
-              )}
             </span>
           </div>
         </div>
 
         <div className='flex items-center gap-3 ml-4'>
-          {isSelected && (
-            <div className='flex-shrink-0 w-5 h-5 rounded-full bg-primary flex items-center justify-center'>
-              <Check className='w-3 h-3 text-primary-foreground' strokeWidth={3} />
-            </div>
-          )}
-          {canToggleStar && (
+          <Tooltip
+            content={
+              accessEntries.length > 0
+                ? `${accessEntries.length} ${accessEntries.length === 1 ? 'participant' : 'participants'}`
+                : 'View participants'
+            }
+            side='top'
+          >
             <button
               onClick={e => {
                 e.stopPropagation();
-                const nextIsStarred = !canvas.isStarred;
-                setCanvasItems(items =>
-                  items.map(item =>
-                    updateOptimisticStarState(item, canvas.id, currentUserId, nextIsStarred),
-                  ),
-                );
-                toast.success(nextIsStarred ? 'Added to starred' : 'Removed from starred');
-                onToggleStar?.(canvas);
+                setParticipantsTrayCanvas(canvas);
               }}
-              className='p-1.5 rounded hover:bg-accent'
-              title={canvas.isStarred ? 'Unstar canvas' : 'Star canvas'}
+              className='cursor-pointer'
               data-track-category='CANVAS'
-              data-track-name='TOGGLE_CANVAS_STAR'
-              data-track-metadata={JSON.stringify({
-                canvasId: canvas.id,
-                isStarred: canvas.isStarred,
-              })}
+              data-track-name='Open_Participants_Tray'
+              data-track-metadata={JSON.stringify({ canvasId: canvas.id })}
             >
-              <Star
-                className={`w-4 h-4 ${
-                  canvas.isStarred ? 'fill-yellow-400 text-yellow-500' : 'text-muted-foreground'
-                }`}
-                strokeWidth={2.2}
-              />
+              <div className='md:hidden'>
+                <AccessAvatars entries={accessEntries} max={2} />
+              </div>
+              <div className='hidden md:block'>
+                <AccessAvatars entries={accessEntries} max={3} />
+              </div>
             </button>
+          </Tooltip>
+          {canToggleStar && (
+            <Tooltip content={canvas.isStarred ? 'Unstar canvas' : 'Star canvas'} side='top'>
+              <button
+                onClick={e => {
+                  e.stopPropagation();
+                  const nextIsStarred = !canvas.isStarred;
+                  setCanvasItems(items =>
+                    items.map(item =>
+                      updateOptimisticStarState(item, canvas.id, currentUserId, nextIsStarred),
+                    ),
+                  );
+                  toast.success(nextIsStarred ? 'Added to starred' : 'Removed from starred');
+                  onToggleStar?.(canvas);
+                }}
+                className='p-1.5 rounded hover:bg-accent'
+                data-track-category='CANVAS'
+                data-track-name='TOGGLE_CANVAS_STAR'
+                data-track-metadata={JSON.stringify({
+                  canvasId: canvas.id,
+                  isStarred: canvas.isStarred,
+                })}
+              >
+                <Star
+                  className={`w-4 h-4 ${
+                    canvas.isStarred ? 'fill-yellow-400 text-yellow-500' : 'text-muted-foreground'
+                  }`}
+                  strokeWidth={2.2}
+                />
+              </button>
+            </Tooltip>
           )}
-          <button
-            onClick={e => {
-              e.stopPropagation();
-              setParticipantsTrayCanvas(canvas);
-            }}
-            className='cursor-pointer'
-            data-track-category='CANVAS'
-            data-track-name='Open_Participants_Tray'
-            data-track-metadata={JSON.stringify({ canvasId: canvas.id })}
-          >
-            <div className='md:hidden'>
-              <AvatarGroup userIds={participantUserIds} size='sm' count={2} />
-            </div>
-            <div className='hidden md:block'>
-              <AvatarGroup userIds={participantUserIds} size='sm' count={3} />
-            </div>
-          </button>
 
           <DropdownMenu modal={false}>
             <DropdownMenuTrigger asChild>
@@ -701,11 +828,23 @@ export const CanvasList: React.FC<CanvasListProps> = ({
       )}
 
       <div className='px-4 md:px-6 py-4 border-b border-border'>
-        <div className='flex flex-col gap-1 sm:flex-row sm:items-center'>
-          <div className='flex  items-center gap-2'>
+        <div className='flex flex-col gap-3'>
+          <div className='relative w-full'>
+            <Search className='absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground' />
+            <Input
+              ref={searchInputRef}
+              type='text'
+              value={searchQuery}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchQuery(e.target.value)}
+              placeholder='Search Document'
+              className='pl-9 w-full'
+            />
+          </div>
+
+          <div className='flex items-center gap-2'>
             <button
               onClick={() => setActiveFilter('all')}
-              className={`px-3 md:px-4 py-1.5 md:py-2 text-sm font-medium rounded-full transition-all ${
+              className={`px-3 md:px-4 py-1.5 md:py-2 text-sm font-medium rounded-full transition-all whitespace-nowrap ${
                 activeFilter === 'all'
                   ? 'bg-muted text-foreground'
                   : 'text-muted-foreground hover:bg-accent'
@@ -719,7 +858,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
             </button>
             <button
               onClick={() => setActiveFilter('created_by_me')}
-              className={`px-3 md:px-4 py-1.5 md:py-2 text-sm font-medium rounded-full transition-all ${
+              className={`px-3 md:px-4 py-1.5 md:py-2 text-sm font-medium rounded-full transition-all whitespace-nowrap ${
                 activeFilter === 'created_by_me'
                   ? 'bg-muted text-foreground'
                   : 'text-muted-foreground hover:bg-accent'
@@ -731,18 +870,6 @@ export const CanvasList: React.FC<CanvasListProps> = ({
             >
               Created by me
             </button>
-          </div>
-
-          <div className='relative w-full sm:w-auto'>
-            <Search className='absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground' />
-            <Input
-              ref={searchInputRef}
-              type='text'
-              value={searchQuery}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchQuery(e.target.value)}
-              placeholder='Search Document'
-              className='pl-9 w-full sm:w-48 md:w-64'
-            />
           </div>
         </div>
       </div>
@@ -817,6 +944,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
         >
           <CanvasShareModal
             key={shareCanvas.id}
+            onClose={() => setShareCanvas(null)}
             canvas={shareCanvas}
             isOwner={shareCanvas.createdBy === currentUserId}
             isEditor={shareCanvas.accessLevel === CanvasRole.EDITOR}
@@ -832,7 +960,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
         <ParticipantsTray
           isOpen={!!participantsTrayCanvas}
           onClose={() => setParticipantsTrayCanvas(null)}
-          canvasId={participantsTrayCanvas.id}
+          canvas={participantsTrayCanvas}
         />
       )}
     </div>

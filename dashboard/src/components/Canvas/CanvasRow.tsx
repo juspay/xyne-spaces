@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Copy, FileText, Globe, Lock, MoreHorizontal, Share2, Star, Trash2 } from 'lucide-react';
+import { Copy, Globe, Lock, MoreHorizontal, Share2, Star, Trash2 } from 'lucide-react';
 import { CanvasRole, CanvasVisibility } from '@xyne/shared';
 import type { Canvas } from './Canvas.types';
 import {
@@ -10,6 +10,7 @@ import {
   DropdownMenuTrigger,
 } from '../ui/dropdown-menu';
 import { Dialog } from '../ui/Dialog';
+import { Tooltip } from '../ui/Tooltip/Tooltip';
 import { CanvasShareModal } from './CanvasShareModal';
 import { formatDate } from '../../utils/dateUtils';
 
@@ -88,6 +89,11 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
   const canToggleStar = !!onToggleStar;
   const createdDateText = `Created ${formatDate(canvas.createdAt)}`;
 
+  const { Icon: RowIcon, iconColor } =
+    canvas.visibility === CanvasVisibility.PUBLIC
+      ? { Icon: Globe, iconColor: 'text-muted-foreground' }
+      : { Icon: Lock, iconColor: 'text-muted-foreground' };
+
   return (
     <>
       <div className={`flex items-center group ${indentClassName} pr-2`}>
@@ -99,26 +105,20 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
           data-track-category='CANVAS'
           data-track-name={trackNames.canvasOpen}
         >
-          <FileText className='w-4 h-4 text-muted-foreground shrink-0' />
+          <RowIcon className={`w-4 h-4 shrink-0 ${iconColor}`} />
           <div className='min-w-0 flex-1'>
-            <div className='text-sm truncate'>
-              <HighlightedText text={canvas.title || 'Untitled'} query={highlightQuery} />
-            </div>
+            <Tooltip
+              content={canvas.title || 'Untitled'}
+              side='top'
+              align='start'
+              className='max-w-xs break-words'
+            >
+              <div className='text-sm truncate'>
+                <HighlightedText text={canvas.title || 'Untitled'} query={highlightQuery} />
+              </div>
+            </Tooltip>
             <div className='text-xs text-muted-foreground truncate'>{createdDateText}</div>
           </div>
-          <span
-            className='ml-3 flex items-center text-xs text-muted-foreground shrink-0'
-            aria-label={
-              canvas.visibility === CanvasVisibility.PUBLIC ? 'Public canvas' : 'Private canvas'
-            }
-            title={canvas.visibility === CanvasVisibility.PUBLIC ? 'Public' : 'Private'}
-          >
-            {canvas.visibility === CanvasVisibility.PUBLIC ? (
-              <Globe className='w-3 h-3 text-green-500' />
-            ) : (
-              <Lock className='w-3 h-3' />
-            )}
-          </span>
         </button>
 
         {canToggleStar && (
@@ -186,6 +186,7 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
         >
           <CanvasShareModal
             key={canvas.id}
+            onClose={() => setShareOpen(false)}
             canvas={canvas}
             isOwner={isOwner}
             isEditor={isEditor}

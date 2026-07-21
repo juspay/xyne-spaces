@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Search, X, Users, AlertTriangle } from 'lucide-react';
+import { Search, X, Users, AlertTriangle, Hash } from 'lucide-react';
 import Avatar from '../../ui/Avatar/Avatar';
 import Input from '../../ui/Input';
 import type { User } from '../../../machines/stateMachine';
@@ -13,7 +13,9 @@ import { usePlatform } from '../../../hooks/usePlatform';
 
 export interface ParticipantItem {
   id: string;
-  userId: string;
+  kind?: 'user' | 'group' | 'channel';
+  userId?: string;
+  name?: string;
   role?: string;
   color?: string;
   status?: string;
@@ -60,7 +62,10 @@ export const CanvasParticipantsTray: React.FC<CanvasParticipantsTrayProps> = ({
 
     const searchLower = searchQuery.toLowerCase();
     return participants.filter(participant => {
-      const user = usersById.get(participant.userId);
+      if (participant.kind === 'group' || participant.kind === 'channel') {
+        return participant.name?.toLowerCase().includes(searchLower);
+      }
+      const user = usersById.get(participant.userId ?? '');
       return (
         user?.name?.toLowerCase().includes(searchLower) ||
         user?.email?.toLowerCase().includes(searchLower)
@@ -155,36 +160,47 @@ export const CanvasParticipantsTray: React.FC<CanvasParticipantsTrayProps> = ({
         </div>
 
         <div className='max-h-96 overflow-y-auto space-y-2'>
-          {filteredParticipants.map(participant => (
-            <div
-              key={participant.id}
-              className='flex items-center gap-3 p-2 rounded-lg hover:bg-accent transition-colors'
-            >
-              <Avatar userId={participant.userId} size='md' />
-              <div className='flex-1 min-w-0'>
-                <div className='font-medium text-foreground truncate'>
-                  {usersById.get(participant.userId)?.name || 'Unknown'}
-                </div>
-                <div className='text-sm text-muted-foreground truncate'>
-                  {usersById.get(participant.userId)?.email || ''}
-                </div>
-              </div>
-              <div className='flex items-center gap-2'>
-                {showRole && participant.role && (
-                  <div className='text-xs text-muted-foreground capitalize'>
-                    {participant.role.toLowerCase()}
+          {filteredParticipants.map(participant => {
+            const isGroup = participant.kind === 'group';
+            const isChannel = participant.kind === 'channel';
+            const user = usersById.get(participant.userId ?? '');
+            return (
+              <div
+                key={participant.id}
+                className='flex items-center gap-3 p-2 rounded-lg hover:bg-accent transition-colors'
+              >
+                {isGroup || isChannel ? (
+                  <div className='flex h-8 w-8 items-center justify-center rounded-full bg-muted text-muted-foreground'>
+                    {isGroup ? <Users className='h-4 w-4' /> : <Hash className='h-4 w-4' />}
                   </div>
+                ) : (
+                  <Avatar userId={participant.userId ?? ''} size='md' />
                 )}
-                {showColor && participant.color && (
-                  <div
-                    className='w-3 h-3 rounded-full'
-                    style={{ backgroundColor: participant.color }}
-                    title={`Cursor color: ${participant.color}`}
-                  />
-                )}
+                <div className='flex-1 min-w-0'>
+                  <div className='font-medium text-foreground truncate'>
+                    {isGroup || isChannel ? participant.name || 'Unknown' : user?.name || 'Unknown'}
+                  </div>
+                  <div className='text-sm text-muted-foreground truncate'>
+                    {isGroup ? 'Group' : isChannel ? 'Channel' : user?.email || ''}
+                  </div>
+                </div>
+                <div className='flex items-center gap-2'>
+                  {showRole && participant.role && (
+                    <div className='text-xs text-muted-foreground capitalize'>
+                      {participant.role.toLowerCase()}
+                    </div>
+                  )}
+                  {showColor && participant.color && (
+                    <div
+                      className='w-3 h-3 rounded-full'
+                      style={{ backgroundColor: participant.color }}
+                      title={`Cursor color: ${participant.color}`}
+                    />
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
 
           {filteredParticipants.length === 0 && (
             <div className='text-center py-8 text-muted-foreground'>

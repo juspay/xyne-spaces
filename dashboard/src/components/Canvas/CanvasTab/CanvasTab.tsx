@@ -1134,6 +1134,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
           >
             <CanvasShareModal
               key={canvas.id}
+              onClose={() => setShowShareModal(false)}
               canvas={canvas}
               isOwner={isCanvasOwner}
               isEditor={effectiveAccessLevel === CanvasRole.EDITOR}
