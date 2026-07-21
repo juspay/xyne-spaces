@@ -216,7 +216,7 @@ function isFormFieldGroup(value: unknown): value is FormFieldGroup {
 
 type KanbanLocalTicket = Ticket & {
   assignments?: TicketAssignment[];
-  tagMappings?: Array<{ tagId: string; tagName: string; ticketId: string }>;
+  tagMappings?: Array<{ id: string; tagId: string; tagName: string; ticketId: string }>;
   tags?: Array<{ id: string; name: string; ticketId?: string }>;
   formEntityValues?: Array<
     FormEntityValues & {
@@ -1474,9 +1474,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     for (const ticket of kanbanSourceTickets as KanbanLocalTicket[]) {
       const ticketTags =
         ticket.tagMappings && ticket.tagMappings.length > 0
-          ? ticket.tagMappings.map((m: { tagId: string; tagName: string; ticketId: string }) => ({
+          ? ticket.tagMappings.map((m: { id: string; tagName: string; ticketId: string }) => ({
               workspaceId: ticket.workspaceId ?? null,
-              id: m.tagId,
+              id: m.id,
               name: m.tagName,
               ticketId: m.ticketId,
             }))

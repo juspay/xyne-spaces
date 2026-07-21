@@ -4793,10 +4793,25 @@ export const mutators = defineMutators({
         mappingId: z.string(),
       }),
       async ({ tx, args: { tagId, mappingId } }) => {
-        // Delete from old table
-        await tx.mutate.ticket_tags.delete({ id: tagId });
-        // Delete from new table
-        await tx.mutate.ticket_tag_mappings.delete({ id: mappingId });
+        const mapping = await tx.run(zql.ticket_tag_mappings.where('id', mappingId).one());
+        if (mapping) {
+          const legacyTag = await tx.run(
+            zql.ticket_tags
+              .where('ticketId', mapping.ticketId)
+              .where('name', mapping.tagName)
+              .one(),
+          );
+          if (legacyTag) {
+            await tx.mutate.ticket_tags.delete({ id: legacyTag.id });
+          }
+          await tx.mutate.ticket_tag_mappings.delete({ id: mappingId });
+          return;
+        }
+
+        const legacyOnlyTag = await tx.run(zql.ticket_tags.where('id', tagId).one());
+        if (legacyOnlyTag) {
+          await tx.mutate.ticket_tags.delete({ id: tagId });
+        }
       },
     ),
   },
