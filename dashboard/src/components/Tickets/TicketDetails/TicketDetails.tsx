@@ -12,7 +12,6 @@ import {
   ChevronLeft,
   LinkIcon,
   Minimize2,
-  Play,
   Sparkles,
   Calendar,
   SquareKanban,
@@ -92,7 +91,6 @@ import { StageFormModal } from '../StageFormModal/StageFormModal';
 import { StageFormInlinePanel } from '../StageFormInlinePanel/StageFormInlinePanel';
 import { FormViewerDialog } from './FormViewerDialog';
 import Tooltip from '../../ui/Tooltip';
-import WorkflowTriggerModal from '../../Workflow/WorkflowTriggerModal';
 import { useShareableOrigin } from '../../../hooks/useShareableOrigin';
 import { useEmailChannelPreference } from '../../../hooks/useEmailChannelPreference';
 import ApprovalNudgeBanner from './ApprovalNudgeBanner';
@@ -521,7 +519,6 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const [selectedSubTicket, setSelectedSubTicket] = useState<SubTicket | null>(null);
   const [mappedTicketId, setMappedTicketId] = useState<string | null>(null);
   const [tagSearchQuery, setTagSearchQuery] = useState('');
-  const [isWorkflowModalOpen, setIsWorkflowModalOpen] = useState(false);
   const [stageFormModal, setStageFormModal] = useState<{
     ticket: typeof ticket;
     targetStage: StageInfo;
@@ -2655,18 +2652,6 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 <Sparkles size={20} />
               </Button>
             </Tooltip>
-            <Tooltip content='Trigger Workflow'>
-              <Button
-                className='p-2 border border-border rounded-lg h-8 w-8'
-                variant='ghost'
-                size='sm'
-                onClick={() => setIsWorkflowModalOpen(true)}
-                disabled={ticket?.isArchived}
-                aria-label='Trigger Workflow'
-              >
-                <Play size={20} />
-              </Button>
-            </Tooltip>
             <Tooltip content={'Archive Ticket'}>
               <Button
                 className='p-2 border border-border rounded-lg h-8 w-8'
@@ -4301,14 +4286,6 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           mappedTicketId={mappedTicketId}
           onClose={() => setMappedTicketId(null)}
           onNavigateToParent={setMappedTicketId}
-        />
-      )}
-      {/* Workflow Trigger Modal */}
-      {ticket && (
-        <WorkflowTriggerModal
-          isOpen={isWorkflowModalOpen}
-          onClose={() => setIsWorkflowModalOpen(false)}
-          ticketId={ticket.id}
         />
       )}
       {/* Stage Form Modal */}

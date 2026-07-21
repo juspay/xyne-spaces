@@ -24,7 +24,6 @@ import healthRoutes from '@/routes/health';
 import authRoutes from '@/routes/auth';
 import authV2Routes from '@/routes/authV2';
 import ticketRoutes from '@/routes/tickets';
-import externalStepResponseRoutes from '@/routes/externalStepResponses';
 import toolRoutes from '@/routes/tools';
 import agentToolsMappingRoutes from '@/routes/agent-tools-mappings';
 import analyticsRoutes from '@/routes/analytics';
@@ -147,7 +146,6 @@ import { handleClawCallback } from '@/automations/routes/claw-callback.handler';
 import { handleAutoDraftCallback } from '@/controllers/autodraftCallback.handler';
 import automationWebhookRoutes from '@/automations/routes/webhook-trigger.handler';
 import automationSeriesIdBackfillRoutes from '@/routes/automationSeriesIdBackfill';
-import jenkinsRoutes from '@/routes/jenkins';
 import activityLogRoutes from '@/routes/activityLog';
 import userActivityRoutes from '@/routes/userActivity';
 import activityAliasesRoutes from '@/routes/activityAliases';
@@ -490,7 +488,6 @@ export class App {
       aclMiddleware.checkAccess,
       agentToolsMappingRoutes
     );
-    this.app.use('/api/external-step-response', externalStepResponseRoutes);
     this.app.use('/api/analytics', authMiddleware.authenticate, analyticsRoutes);
     this.app.use('/api/queues', authMiddleware.authenticate, queueManagementRoutes);
 
@@ -659,9 +656,6 @@ export class App {
 
     // Vespa search routes (auth required)
     this.app.use('/api/vespaSearch', authMiddleware.authenticate, vespaSearchRoutes);
-
-    // Jenkins routes (auth required)
-    this.app.use('/api/jenkins', authMiddleware.authenticate, jenkinsRoutes);
 
     // Product Insights routes (auth and ACL required)
     this.app.use('/api/productInsights', authMiddleware.authenticate, productInsightsRoutes);
