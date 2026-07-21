@@ -24,7 +24,6 @@ import {
   File,
   Maximize2,
   LinkIcon,
-  Workflow,
   ExternalLink,
   ArrowLeft,
   ClipboardCheck,
@@ -48,9 +47,6 @@ import { BotBubble } from './BotBubble';
 import { toast } from 'sonner';
 import { TicketDetails } from '../Tickets/TicketDetails/TicketDetails';
 import { FileBubble } from '../ui/FileBubble/FileBubble';
-import { WorkflowBubble } from './WorkflowBubble/WorkflowBubble';
-import { MessageMetadata } from '../ui/MessageBubble/MessageBubble.utils';
-import { FailedStatusIcon, SuccessStatusIcon } from '../../assets/icons/WorkflowIcons';
 import { MessageType, ChannelScopeType, BaseTicketType } from '@xyne/shared';
 import { RCAPanelView } from '../Tickets/RCAPanelView';
 import Tooltip from '../ui/Tooltip';
@@ -589,43 +585,6 @@ export const ThreadMessages = ({
   }, [messages, derivedTicketId, ticketAttachments]);
 
   // Filter workflow messages
-  const workflowMessages = useMemo(() => {
-    if (!messages) return [];
-    return messages
-      .filter(msg => {
-        const metadata = msg.metadata as {
-          workflowId?: string;
-          ticketId?: string;
-          xyneId?: string;
-        } | null;
-        const isSystemMessage = msg.msgType === MessageType.SYSTEM;
-        const isBotMessage = msg.msgType === MessageType.BOT;
-        return (
-          (isSystemMessage && metadata?.workflowId && metadata?.ticketId) ||
-          (isBotMessage && metadata?.xyneId && metadata?.ticketId)
-        );
-      })
-      .sort((a, b) => b.createdAt - a.createdAt);
-  }, [messages]);
-
-  // Create workflow number map for messages in threadlist
-  const workflowNumberMap = useMemo(() => {
-    const map = new Map<string, number>();
-    if (workflowMessages.length <= 1) return map;
-
-    // Sort by createdAt ascending (oldest first) to assign numbers
-    const sortedWorkflows = [...workflowMessages].sort((a, b) => a.createdAt - b.createdAt);
-    sortedWorkflows.forEach((msg, index) => {
-      map.set(msg.messageId, index + 1); // 1-indexed
-    });
-    return map;
-  }, [workflowMessages]);
-
-  const latestWorkflowStatus = useMemo(() => {
-    if (workflowMessages.length === 0) return null;
-    const metadata = workflowMessages[0]?.metadata as MessageMetadata | null;
-    return metadata?.workflowStatus || 'UNKNOWN';
-  }, [workflowMessages]);
 
   // Build tabs array - exclude Details tab when ticketId is present
   const isFixTicket = ticket?.ticketType === BaseTicketType.Fix;
@@ -650,12 +609,6 @@ export const ThreadMessages = ({
       { value: 'thread' as const, label: 'Messages', icon: <MessageCircle size={12} /> },
       { value: 'details' as const, label: 'Details', icon: <Ticket size={12} /> },
       { value: 'files' as const, label: 'Files', count: files.length, icon: <File size={12} /> },
-      {
-        value: 'workflows' as const,
-        label: 'Workflows',
-        status: latestWorkflowStatus,
-        icon: <Workflow size={12} />,
-      },
       ...(isFixTicket
         ? [{ value: 'rca' as const, label: 'RCA', icon: <ClipboardCheck size={12} /> }]
         : []),
@@ -663,7 +616,7 @@ export const ThreadMessages = ({
 
     // Filter out Details tab when ticketId doesn't exist
     return !derivedTicketId ? allTabs.filter(tab => tab.value !== 'details') : allTabs;
-  }, [files.length, latestWorkflowStatus, ticketId, derivedTicketId, isFixTicket]);
+  }, [files.length, ticketId, derivedTicketId, isFixTicket]);
 
   const handleCreateTicket = (): void => {
     setIsCreateTicketModalOpen(true);
@@ -842,40 +795,6 @@ export const ThreadMessages = ({
                       </button>
                     </Tabs.Trigger>
 
-                    {/* Workflows Tab */}
-                    <Tabs.Trigger asChild value='workflows'>
-                      <button
-                        className={cn(
-                          'px-3 py-2 flex items-center justify-start gap-2 transition-all duration-100 cursor-pointer',
-                          underTicketActiveTab === 'workflows'
-                            ? 'border-b-2 border-primary'
-                            : 'border-b-2 border-transparent',
-                        )}
-                      >
-                        <span
-                          className={
-                            underTicketActiveTab === 'workflows'
-                              ? 'text-primary'
-                              : 'text-muted-foreground'
-                          }
-                        >
-                          <Workflow size={12} />
-                        </span>
-                        <span
-                          className={`text-sm font-medium ${underTicketActiveTab === 'workflows' ? 'text-primary' : 'text-muted-foreground'}`}
-                        >
-                          Workflows
-                        </span>
-                        {latestWorkflowStatus &&
-                          (latestWorkflowStatus === 'FAILED' ? (
-                            <FailedStatusIcon />
-                          ) : latestWorkflowStatus === 'RUNNING' ||
-                            latestWorkflowStatus === 'SUCCESS' ? (
-                            <SuccessStatusIcon />
-                          ) : null)}
-                      </button>
-                    </Tabs.Trigger>
-
                     {/* RCA Tab */}
                     {isFixTicket && (
                       <Tabs.Trigger asChild value='rca'>
@@ -952,7 +871,6 @@ export const ThreadMessages = ({
               isTicketThread={false}
               channelScopeType={channel?.scopeType}
               conversation={conversation}
-              workflowNumberMap={workflowNumberMap}
               enableCollapsing={previewCardMode}
               enableJumpFab={!previewCardMode}
               isMessagesLoaded={isMessagesLoaded}
@@ -977,41 +895,6 @@ export const ThreadMessages = ({
                 channelId={derivedChannelId}
                 {...(channel?.name && { channelTitle: channel.name })}
               />
-            )}
-          </Tabs.Content>
-
-          {/* Workflows Tab Content */}
-          <Tabs.Content
-            value='workflows'
-            className='flex-1 overflow-auto bg-background p-4 data-[state=inactive]:hidden'
-          >
-            {workflowMessages.length === 0 ? (
-              <div className='flex flex-col items-center justify-center h-full text-muted-foreground'>
-                <FileText size={48} className='mb-2 text-muted-foreground' />
-                <p>No workflows in this thread</p>
-              </div>
-            ) : (
-              <div className='space-y-3'>
-                {[...workflowMessages].reverse().map((msg, index) => {
-                  const metadata = msg.metadata as MessageMetadata;
-
-                  if (!metadata?.workflowName || !metadata?.ticketId) {
-                    return null;
-                  }
-
-                  return (
-                    <WorkflowBubble
-                      key={msg.messageId}
-                      workflowName={metadata.workflowName}
-                      workflowStatus={metadata.workflowStatus}
-                      createdAt={msg.createdAt}
-                      ticketId={metadata.ticketId}
-                      metadata={metadata}
-                      workflowNumber={workflowMessages.length > 1 ? index + 1 : undefined}
-                    />
-                  );
-                })}
-              </div>
             )}
           </Tabs.Content>
 
@@ -1314,12 +1197,6 @@ export const ThreadMessages = ({
                               {tab.count}
                             </span>
                           )}
-                          {tab.status &&
-                            (tab.status === 'FAILED' ? (
-                              <FailedStatusIcon />
-                            ) : tab.status === 'RUNNING' || tab.status === 'SUCCESS' ? (
-                              <SuccessStatusIcon />
-                            ) : null)}
                         </button>
                       </Tabs.Trigger>
                     ))}
@@ -1376,7 +1253,6 @@ export const ThreadMessages = ({
                     isTicketThread={true}
                     channelScopeType={channel?.scopeType}
                     conversation={conversation}
-                    workflowNumberMap={workflowNumberMap}
                     enableCollapsing={previewCardMode}
                     enableJumpFab={!previewCardMode}
                     isMessagesLoaded={isMessagesLoaded}
@@ -1444,41 +1320,6 @@ export const ThreadMessages = ({
                       attachment={file.attachment}
                     />
                   ))}
-                </div>
-              )}
-            </Tabs.Content>
-
-            {/* Workflows Tab Content*/}
-            <Tabs.Content
-              value='workflows'
-              className='flex-1 overflow-auto bg-background p-4 data-[state=inactive]:hidden'
-            >
-              {workflowMessages.length === 0 ? (
-                <div className='flex flex-col items-center justify-center h-full text-muted-foreground'>
-                  <FileText size={48} className='mb-2 text-muted-foreground' />
-                  <p>No workflows in this thread</p>
-                </div>
-              ) : (
-                <div className='space-y-3'>
-                  {[...workflowMessages].reverse().map((msg, index) => {
-                    const metadata = msg.metadata as MessageMetadata;
-
-                    if (!metadata?.workflowName || !metadata?.ticketId) {
-                      return null;
-                    }
-
-                    return (
-                      <WorkflowBubble
-                        key={msg.messageId}
-                        workflowName={metadata.workflowName}
-                        workflowStatus={metadata.workflowStatus}
-                        createdAt={msg.createdAt}
-                        ticketId={metadata.ticketId}
-                        metadata={metadata}
-                        workflowNumber={workflowMessages.length > 1 ? index + 1 : undefined}
-                      />
-                    );
-                  })}
                 </div>
               )}
             </Tabs.Content>
@@ -1818,7 +1659,6 @@ export const ThreadMessages = ({
                   isTicketThread={false}
                   channelScopeType={channel?.scopeType}
                   conversation={conversation}
-                  workflowNumberMap={workflowNumberMap}
                   enableCollapsing={previewCardMode}
                   enableJumpFab={!previewCardMode}
                   isMessagesLoaded={isMessagesLoaded}

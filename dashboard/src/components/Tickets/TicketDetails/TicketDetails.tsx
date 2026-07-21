@@ -93,7 +93,6 @@ import { FormViewerDialog } from './FormViewerDialog';
 import Tooltip from '../../ui/Tooltip';
 import { useShareableOrigin } from '../../../hooks/useShareableOrigin';
 import { useEmailChannelPreference } from '../../../hooks/useEmailChannelPreference';
-import ApprovalNudgeBanner from './ApprovalNudgeBanner';
 import { isReleaseTicket } from '@xyne/shared';
 import { generateReleaseNotes } from '../../../services/ticketBoardService';
 import { searchService } from '../../../services/searchService';
@@ -2687,8 +2686,6 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             style={{ backgroundColor: 'transparent' }}
           />
         )}
-
-        <ApprovalNudgeBanner ticketId={ticket.id} className='mb-4' />
 
         {ticket?.isArchived && (
           <div className='mb-4 p-3 bg-muted border border-border rounded-lg flex items-center gap-3'>

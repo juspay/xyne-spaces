@@ -520,60 +520,6 @@ class RedisService {
   }
 
   // Subscribe to workflow events (for real-time step updates)
-  async subscribeToWorkflowEvents(
-    executionId: string,
-    callback: (event: WorkflowEvent) => void
-  ): Promise<void> {
-    if (!this.subscriber) throw new Error('Redis subscriber not initialized');
-
-    const channel = `workflow:${executionId}:events`;
-
-    // Add callback to the list for this channel
-    if (!this.subscriptionCallbacks.has(channel)) {
-      this.subscriptionCallbacks.set(channel, []);
-    }
-    this.subscriptionCallbacks.get(channel)!.push(callback);
-
-    // Ensure global message handler is set up
-    this.setupGlobalMessageHandler();
-
-    // Only subscribe to Redis if we haven't already
-    if (!this.activeSubscriptions.has(channel)) {
-      logger.info(`📊 [REDIS-SUB] Subscribing to workflow events channel: ${channel}`);
-      await this.subscriber.subscribe(channel);
-      this.activeSubscriptions.add(channel);
-    }
-  }
-
-  // Unsubscribe from workflow events
-  async unsubscribeFromWorkflowEvents(
-    executionId: string,
-    callback?: (event: WorkflowEvent) => void
-  ): Promise<void> {
-    if (!this.subscriber) throw new Error('Redis subscriber not initialized');
-
-    const channel = `workflow:${executionId}:events`;
-
-    if (callback) {
-      // Remove specific callback
-      const callbacks = this.subscriptionCallbacks.get(channel) || [];
-      const index = callbacks.indexOf(callback);
-      if (index > -1) {
-        callbacks.splice(index, 1);
-        logger.info(`📊 [REDIS-UNSUB] Removed callback from workflow events channel: ${channel}`);
-      }
-
-      // If no more callbacks, unsubscribe from Redis
-      if (callbacks.length === 0) {
-        await this.unsubscribeFromChannel(channel);
-      }
-    } else {
-      // Remove all callbacks and unsubscribe
-      await this.unsubscribeFromChannel(channel);
-      logger.info(`📊 [REDIS-UNSUB] Unsubscribed from workflow events channel: ${channel}`);
-    }
-  }
-
   async subscribeToZeroFallbackConfigUpdates(
     callback: (config: { fallbackEnabled: boolean; allowMutations: boolean; pollIntervalMs: number; timestamp: Date }) => void
   ): Promise<void> {

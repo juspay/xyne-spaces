@@ -63,7 +63,6 @@ import { PostedInLink } from './PostedInLink';
 import { MessageHeader } from './MessageHeader';
 import HuddleIcon from '../../icons/HuddleIcon';
 import workflowBotAvatar from './workflowBotAvatar.png';
-import { WorkflowBubble } from '../../Chat/WorkflowBubble/WorkflowBubble';
 import { downloadAttachment } from '../../Chat/MessageAttachment/utils';
 import { PendingIcon } from '../../../assets/icons/WorkflowIcons';
 import { useIsCallActive } from '../../../hooks/useCalls';
@@ -76,8 +75,6 @@ import DOMPurify from 'dompurify';
 import { CallBubble } from './CallBubble';
 import { getEmojiDisplayName, renderEmoji } from '../../../utils/customEmojiUtils';
 import { parseMarkdownWithTicketSuggestions } from '../../../utils/markdownTicketSuggestions';
-import { parseWorkflowActionsFromMarkdown } from '../../../utils/markdownWorkflowActions';
-import { WorkflowActionButtons } from './WorkflowActionButtons';
 import { TicketSuggestions } from './TicketSuggestions';
 import { AppActions } from './AppActions';
 import { parseMarkdownWithAppActions } from '../../../utils/markdownAppActions';
@@ -584,13 +581,6 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     }
     return { ticketSuggestions: [], ticketsCreated: [], content: message.content };
   }, [isMarkdownContent, hasSuggestedTickets, message.content]);
-
-  const parsedWorkflowActions = useMemo(() => {
-    if (isBotMessage) {
-      return parseWorkflowActionsFromMarkdown(message.content);
-    }
-    return { workflowActions: null, content: message.content };
-  }, [isBotMessage, message.content]);
 
   const ticketSuggestions = parsedMarkdown.ticketSuggestions;
   const ticketsCreated = parsedMarkdown.ticketsCreated;
@@ -1413,17 +1403,6 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 />
               )}
 
-              {isWorkflowMessage && metadata?.workflowId && (
-                <WorkflowBubble
-                  workflowName={metadata.workflowName}
-                  workflowStatus={metadata.workflowStatus}
-                  createdAt={message.createdAt}
-                  ticketId={metadata.ticketId}
-                  metadata={metadata}
-                  workflowNumber={workflowNumber}
-                />
-              )}
-
               {!isForwardedMessage && (
                 <>
                   {isMobile ? (
@@ -1454,13 +1433,6 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     />
                   )}
                 </>
-              )}
-
-              {isBotMessage && parsedWorkflowActions.workflowActions && conversation?.ticketId && (
-                <WorkflowActionButtons
-                  ticketId={conversation.ticketId}
-                  metadata={parsedWorkflowActions.workflowActions}
-                />
               )}
 
               {shouldRenderLinkPreview && showLinkPreview && previewResult && (
