@@ -8,6 +8,8 @@ import { dataLoadDuration, safeRecordMetric } from '../../services/otel';
 import { logger, Event } from '../../utils/logger';
 import { TicketTable } from '../../components/Tickets/TicketTable/TicketTable';
 
+const VISIBLE_COLUMNS = new Set(['assignee', 'dueDate', 'priority', 'stage', 'tags']);
+
 export interface SupportTicketTableProps {
   channelId: string;
   ticketFilter: {
@@ -138,6 +140,7 @@ export const SupportTicketTable = ({
       ticketTags={tagsByTicketId}
       availableTags={availableTags}
       onTitleClick={onTicketClick}
+      visibleColumns={VISIBLE_COLUMNS}
     />
   );
 };
