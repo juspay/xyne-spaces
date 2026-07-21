@@ -13,6 +13,7 @@ import {
   Mails,
   MessageSquareMore,
   Smartphone,
+  Phone,
 } from 'lucide-react';
 
 import { Button } from '../../ui/Button';
@@ -33,11 +34,13 @@ import { useOAuthProviders } from '../../../hooks/useOAuthProviders';
 import { useUserGroups } from '../../../hooks/useUserGroup';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { getWorkspaceSharedMailboxStatus } from '../../../services/clients/workspaceDeskApi';
+import { getOzonetelConfig } from '../../../services/clients/telephonyApi';
 
 type ChannelFormMode = 'create' | 'promote';
 type ChannelFormData = CreateChannelFormData | PromoteGroupDmRequest;
 type ConnectorType = 'google' | 'microsoft' | null;
-type DeskType = 'EMAIL' | 'DL' | 'SLACK' | 'APP';
+type DeskType = 'EMAIL' | 'DL' | 'SLACK' | 'APP' | 'CALL';
+type CallSource = 'OZONETEL';
 type Visibility = 'public' | 'private';
 
 interface SlackChannel {
@@ -78,6 +81,12 @@ const DESK_SOURCES: ReadonlyArray<{
     description: 'Connect an external system through a Xyne App over APIs',
     icon: Smartphone,
   },
+  {
+    value: 'CALL',
+    label: 'Call desk',
+    description: 'Create a call-first desk that can be used in workspace Ozonetel routing',
+    icon: Phone,
+  },
 ];
 
 interface EligibleApp {
@@ -92,8 +101,9 @@ interface AddChannelFormProps {
   onSubmit: (
     data: ChannelFormData & {
       connector?: ConnectorType;
-      channelType?: 'EMAIL' | 'SLACK' | 'APP' | undefined;
+      channelType?: 'EMAIL' | 'SLACK' | 'APP' | 'CALL' | undefined;
       deskType?: DeskType;
+      callSource?: CallSource;
       dlEmail?: string;
       slackChannelId?: string;
       installedAppId?: string;
@@ -123,6 +133,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
   const [dlEmailInput, setDlEmailInput] = useState<string>('');
   const [selectedSlackChannelId, setSelectedSlackChannelId] = useState<string>('');
   const [selectedInstalledAppId, setSelectedInstalledAppId] = useState<string>('');
+  const selectedCallSource: CallSource = 'OZONETEL';
   const { isMobile } = usePlatform();
   const { data: oauthProviders } = useOAuthProviders();
 
@@ -152,6 +163,11 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
     queryKey: ['workspace-shared-mailbox-status'],
     queryFn: getWorkspaceSharedMailboxStatus,
     enabled: requireConnector,
+  });
+  const { data: ozonetelConfig } = useQuery({
+    queryKey: ['workspace-ozonetel-config'],
+    queryFn: () => getOzonetelConfig(),
+    enabled: requireConnector && deskType === 'CALL',
   });
 
   const workspaceDomain = workspaceMailbox?.displayName?.split('@')[1]?.toLowerCase() ?? '';
@@ -265,6 +281,15 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
             dlEmail: dlEmailInput,
             assigneeUserGroupId: value.assigneeUserGroupId,
           });
+        } else if (deskType === 'CALL') {
+          onSubmit?.({
+            ...value,
+            connector: null,
+            channelType: 'CALL',
+            deskType: 'CALL',
+            callSource: selectedCallSource,
+            assigneeUserGroupId: value.assigneeUserGroupId,
+          });
         } else {
           onSubmit?.({
             ...value,
@@ -310,6 +335,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
       (!workspaceMailbox?.configured || !dlEmailInput || !isValidDlEmail(dlEmailInput))) ||
     (requireConnector && deskType === 'SLACK' && !selectedSlackChannelId) ||
     (requireConnector && deskType === 'APP' && !selectedInstalledAppId) ||
+    (requireConnector && deskType === 'CALL' && !ozonetelConfig?.configured) ||
     duplicateCheck?.isDuplicate === true;
 
   const submitDisabledReason = ((): string | null => {
@@ -326,6 +352,8 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
         if (!isValidDlEmail(dlEmailInput)) return dlEmailError ?? 'Invalid distribution list email';
       }
       if (deskType === 'SLACK' && !selectedSlackChannelId) return 'Please select a Slack channel';
+      if (deskType === 'CALL' && !ozonetelConfig?.configured)
+        return 'Ozonetel is not configured. Set it up in Desk Integrations first.';
     }
     return null;
   })();
@@ -471,7 +499,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
                 <div className='font-medium'>Workspace shared mailbox not configured</div>
                 <div className='text-xs text-muted-foreground mt-1'>
                   An admin needs to set up the shared mailbox in{' '}
-                  <span className='font-medium'>Workspace Management</span> before DL desks can be
+                  <span className='font-medium'>Desk Integrations</span> before DL desks can be
                   created.
                 </div>
               </div>
@@ -504,6 +532,43 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
                 </div>
               </div>
             </>
+          )}
+        </div>
+      )}
+
+      {requireConnector && deskType === 'CALL' && (
+        <div className='space-y-2'>
+          <label htmlFor='call-source-select' className='text-sm font-medium text-foreground'>
+            Call source <span className='text-muted-foreground'>*</span>
+          </label>
+          <Select value={selectedCallSource} disabled>
+            <SelectTrigger id='call-source-select' className='w-full'>
+              <SelectValue placeholder='Select a source' />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value='OZONETEL'>Ozonetel</SelectItem>
+            </SelectContent>
+          </Select>
+          {!ozonetelConfig?.configured ? (
+            <div className='flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3'>
+              <AlertCircle
+                size={16}
+                className='mt-0.5 flex-shrink-0 text-amber-600 dark:text-amber-400'
+              />
+              <div className='text-sm text-foreground'>
+                <div className='font-medium'>Ozonetel is not configured yet</div>
+                <div className='text-xs text-muted-foreground mt-1'>
+                  Configure Ozonetel first from{' '}
+                  <span className='font-medium'>Desk Integrations</span>, then create this call
+                  desk.
+                </div>
+              </div>
+            </div>
+          ) : (
+            <p className='text-xs text-muted-foreground'>
+              Ozonetel is configured. You can route campaigns to this call desk from Desk
+              Integrations.
+            </p>
           )}
         </div>
       )}

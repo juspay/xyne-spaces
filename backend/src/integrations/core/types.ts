@@ -19,6 +19,7 @@ export enum ExternalSourcePlatform {
   MICROSOFT = 'microsoft',
   GOOGLE = 'google',
   APP_DESK = 'app-desk',
+  OZONETEL = 'ozonetel',
 }
 
 /**
@@ -47,6 +48,8 @@ export interface NormalizedData {
   externalParentId?: string; // Parent message ID (for replies)
   rfcMessageId?: string; // RFC Message-ID header, stable across mailboxes
   referencedMessageIds?: string[]; // RFC Message-IDs from In-Reply-To + References headers
+  /** Workspace user that should own newly created conversations and tickets. */
+  creatorUserId?: string;
 
   author: {
     name: string;

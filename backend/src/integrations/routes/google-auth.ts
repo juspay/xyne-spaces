@@ -673,13 +673,14 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
 
       const params = new URLSearchParams({
         workspaceMailboxConnected: 'true',
+        deskIntegrations: 'open',
         provider: 'google',
         email: emailAddress,
       });
       res.redirect(
         buildPostOAuthRedirect(
           frontendUrl,
-          `/${workspaceId}/workspace-management?${params.toString()}`,
+          buildSupportPath(workspaceId, undefined, params),
           stateData.platform,
         ),
       );

@@ -117,6 +117,7 @@ enum DeskType {
   DL
   SLACK
   APP
+  CALL
   @@schema("public")
 }
 
@@ -250,6 +251,7 @@ enum ChannelType {
   SUPPORT
   SLACK
   APP
+  CALL
   @@schema("public")
 }
 

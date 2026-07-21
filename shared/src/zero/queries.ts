@@ -1638,7 +1638,12 @@ export const queries = defineQueries({
       .where('isDeleted', false)
       .related('channel', ch =>
         ch
-          .where('type', 'NOT IN', [ChannelType.EMAIL, ChannelType.SLACK, ChannelType.APP])
+          .where('type', 'NOT IN', [
+            ChannelType.EMAIL,
+            ChannelType.SLACK,
+            ChannelType.APP,
+            ChannelType.CALL,
+          ])
           .related('channelStats'),
       );
   }),
@@ -1649,7 +1654,12 @@ export const queries = defineQueries({
       .where('isDeleted', false)
       .related('channel', ch =>
         ch
-          .where('type', 'IN', [ChannelType.EMAIL, ChannelType.SLACK, ChannelType.APP])
+          .where('type', 'IN', [
+            ChannelType.EMAIL,
+            ChannelType.SLACK,
+            ChannelType.APP,
+            ChannelType.CALL,
+          ])
           .related('channelStats'),
       );
   }),
@@ -3129,7 +3139,7 @@ export const queries = defineQueries({
     ({ args: { entityId } }) => {
       return zql.form_entity_values
         .where('entityId', entityId)
-        .related('formField')
+        .related('formField', q => q.related('globalField'))
         .related('globalField')
         .related('attachments')
         .orderBy('createdAt', 'asc');
