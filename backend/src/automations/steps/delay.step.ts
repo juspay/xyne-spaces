@@ -7,6 +7,7 @@ import { PauseStep } from '../engine/pause-step';
 import { automationContextStorage } from '../engine/automation-context-storage';
 import { automationScheduleQueue } from '../queue/automation-schedule.queue';
 import { logger } from '@/utils/logger';
+import { calculateETADeadline } from '@/utils/etaCalculation';
 
 const MAX_DELAY_SECONDS = 30 * 24 * 60 * 60;
 
@@ -16,6 +17,7 @@ const DelayConfigSchema = z
   .object({
     amount: variableRef(z.number().positive().describe('How long to wait')),
     unit: DelayUnitSchema.default('seconds').describe('Unit for "amount". Default seconds.'),
+    businessHoursOnly: z.boolean().default(false).describe('Business Hours Only'),
   })
   .superRefine((data, ctx) => {
     if (typeof data.amount !== 'number') {
@@ -41,6 +43,22 @@ interface DelayOutput extends Record<string, unknown> {
 
 function toSeconds(amount: number, unit: z.infer<typeof DelayUnitSchema>): number {
   return unit === 'hours' ? amount * 3600 : unit === 'minutes' ? amount * 60 : amount;
+}
+
+export function calculateDelayUntil(
+  start: Date,
+  seconds: number,
+  businessHoursOnly: boolean,
+): Date {
+  if (!businessHoursOnly) {
+    return new Date(start.getTime() + seconds * 1000);
+  }
+
+  const roundedMinutes = Math.ceil(seconds / 60);
+  const roundedDeadline = calculateETADeadline(start, roundedMinutes / 60);
+  const roundingRemainderMs = (roundedMinutes * 60 - seconds) * 1000;
+
+  return new Date(roundedDeadline.getTime() - roundingRemainderMs);
 }
 
 export class DelayStep extends BaseActionStep<typeof DelayConfigSchema, DelayOutput> {
@@ -70,8 +88,10 @@ export class DelayStep extends BaseActionStep<typeof DelayConfigSchema, DelayOut
       );
     }
 
-    const delayMs = seconds * 1000;
-    const delayedUntil = new Date(Date.now() + delayMs).toISOString();
+    const now = new Date();
+    const resumeAt = calculateDelayUntil(now, seconds, config.businessHoursOnly);
+    const delayMs = Math.max(0, resumeAt.getTime() - now.getTime());
+    const delayedUntil = resumeAt.toISOString();
 
     const stepCount = Object.keys(context.steps).length;
     const currentIndex = Math.max(0, stepCount - 1);
