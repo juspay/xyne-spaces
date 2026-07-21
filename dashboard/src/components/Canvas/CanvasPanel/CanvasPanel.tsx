@@ -193,7 +193,7 @@ const CanvasPanel = (): ReactElement => {
   const renderLeftPanel = (): ReactElement => (
     <div className='flex-1 h-full flex flex-col bg-background border-r border-border'>
       {/* Header */}
-      <div className='p-4 border-b border-border'>
+      <div className='p-[18px] border-b border-border'>
         <div className='flex items-center justify-between mb-3'>
           <div className='flex items-center gap-2'>
             {!isMobile && (
