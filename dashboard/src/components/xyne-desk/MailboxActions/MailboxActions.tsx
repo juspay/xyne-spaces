@@ -7,11 +7,15 @@ import { queries } from '../../../zero/queries';
 import { mutators } from '../../../zero/mutators';
 import { useZero } from '../../../hooks/useZero';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import Tooltip from '../../ui/Tooltip';
 import { cn } from '../../../utils/classNames';
+
+export type MailboxSlot = 'star' | 'actions' | 'chip';
 
 interface MailboxActionsProps {
   ticketId: string;
   channelId: string;
+  slot: MailboxSlot;
 }
 
 // The mailbox location rendered as a removable chip (Gmail-style), like a label.
@@ -28,7 +32,11 @@ const CHIP: Record<MailboxState, { label: string; color: string } | null> = {
  * Spam), a star toggle, and move actions. Reads the caller's overlay
  * (myTicketMailbox); absence means Inbox.
  */
-export const MailboxActions = ({ ticketId, channelId }: MailboxActionsProps): ReactElement => {
+export const MailboxActions = ({
+  ticketId,
+  channelId,
+  slot,
+}: MailboxActionsProps): ReactElement | null => {
   const zero = useZero();
   const [rows] = useCachedQuery(queries.myTicketMailbox({ ticketId }), { enabled: !!ticketId });
   const overlay = (rows ?? [])[0];
@@ -78,72 +86,85 @@ export const MailboxActions = ({ ticketId, channelId }: MailboxActionsProps): Re
   const removeTitle =
     state === MailboxState.INBOX ? 'Remove from Inbox (archive)' : 'Move to Inbox';
 
+  // Matches the row-1 toolbar buttons so the move actions are visually
+  // indistinguishable from the icons they now sit beside.
   const btn =
-    'p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors';
+    'p-1 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors';
 
+  if (slot === 'star') {
+    return (
+      <Tooltip side='bottom' delayDuration={500} content={starred ? 'Unstar' : 'Star'}>
+        <button
+          type='button'
+          onClick={() => void toggleStar()}
+          aria-label={starred ? 'Unstar' : 'Star'}
+          className={cn(btn, 'shrink-0')}
+          data-track-category='Support'
+          data-track-name='ToggleMailboxStar'
+        >
+          <Star
+            size={18}
+            className={cn(starred ? 'text-yellow-500' : '')}
+            fill={starred ? 'currentColor' : 'none'}
+          />
+        </button>
+      </Tooltip>
+    );
+  }
+
+  if (slot === 'actions') {
+    return (
+      <>
+        {/* When archived (no chip), allow adding back to Inbox. */}
+        {state === MailboxState.ARCHIVED && (
+          <Tooltip side='bottom' delayDuration={500} content='Move to Inbox'>
+            <button
+              type='button'
+              onClick={() => void setState(MailboxState.INBOX)}
+              aria-label='Move to Inbox'
+              className={btn}
+              data-track-category='Support'
+              data-track-name='MailboxToInbox'
+            >
+              <InboxIcon size={16} />
+            </button>
+          </Tooltip>
+        )}
+        {state !== MailboxState.SPAM && (
+          <Tooltip side='bottom' delayDuration={500} content='Report spam'>
+            <button
+              type='button'
+              onClick={() => void setState(MailboxState.SPAM)}
+              aria-label='Report spam'
+              className={btn}
+              data-track-category='Support'
+              data-track-name='MailboxSpam'
+            >
+              <Ban size={16} />
+            </button>
+          </Tooltip>
+        )}
+      </>
+    );
+  }
+
+  if (!chip) return null;
   return (
-    <div className='flex items-center gap-1.5 shrink-0'>
-      {chip && (
-        <span className='inline-flex items-center gap-1 pl-1.5 pr-1 py-0.5 rounded-md text-xs font-medium border border-border bg-card text-foreground'>
-          <span className='size-2 rounded-full shrink-0' style={{ backgroundColor: chip.color }} />
-          <span>{chip.label}</span>
-          <button
-            type='button'
-            onClick={removeChip}
-            aria-label={removeTitle}
-            title={removeTitle}
-            className='hover:bg-muted rounded-full p-0.5'
-            data-track-category='Support'
-            data-track-name='RemoveMailboxState'
-          >
-            <X className='size-2.5' />
-          </button>
-        </span>
-      )}
-
-      <button
-        type='button'
-        onClick={() => void toggleStar()}
-        title={starred ? 'Unstar' : 'Star'}
-        aria-label={starred ? 'Unstar' : 'Star'}
-        className={btn}
-        data-track-category='Support'
-        data-track-name='ToggleMailboxStar'
-      >
-        <Star
-          size={15}
-          className={cn(starred ? 'text-yellow-500' : '')}
-          fill={starred ? 'currentColor' : 'none'}
-        />
-      </button>
-
-      {/* When archived (no chip), allow adding back to Inbox. */}
-      {state === MailboxState.ARCHIVED && (
+    <span className='inline-flex items-center gap-1 pl-1.5 pr-1 py-0.5 rounded-md text-xs font-medium border border-border bg-card text-foreground'>
+      <span className='size-2 rounded-full shrink-0' style={{ backgroundColor: chip.color }} />
+      <span>{chip.label}</span>
+      <Tooltip side='bottom' delayDuration={500} content={removeTitle}>
         <button
           type='button'
-          onClick={() => void setState(MailboxState.INBOX)}
-          title='Move to Inbox'
-          aria-label='Move to Inbox'
-          className={btn}
+          onClick={removeChip}
+          aria-label={removeTitle}
+          className='hover:bg-muted rounded-full p-0.5'
           data-track-category='Support'
-          data-track-name='MailboxToInbox'
+          data-track-name='RemoveMailboxState'
         >
-          <InboxIcon size={15} />
+          <X className='size-2.5' />
         </button>
-      )}
-      {state !== MailboxState.SPAM && (
-        <button
-          type='button'
-          onClick={() => void setState(MailboxState.SPAM)}
-          title='Report spam'
-          aria-label='Report spam'
-          className={btn}
-          data-track-category='Support'
-          data-track-name='MailboxSpam'
-        >
-          <Ban size={15} />
-        </button>
-      )}
-    </div>
+      </Tooltip>
+    </span>
   );
 };

@@ -9,9 +9,12 @@ import { mutators } from '../../../zero/mutators';
 import { Popover } from '../../ui/Popover/Popover';
 import { cn } from '../../../utils/classNames';
 
+export type ConversationLabelSlot = 'chips' | 'picker';
+
 interface ConversationLabelsProps {
   conversationId: string;
   channelId: string;
+  slot: ConversationLabelSlot;
 }
 
 // Fallback palette used when a label has no stored color. Deterministic per name
@@ -42,7 +45,8 @@ const colorForName = (name: string): string => {
 export const ConversationLabels = ({
   conversationId,
   channelId,
-}: ConversationLabelsProps): JSX.Element => {
+  slot,
+}: ConversationLabelsProps): JSX.Element | null => {
   const zero = useZero();
   const [pickerOpen, setPickerOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -193,54 +197,60 @@ export const ConversationLabels = ({
     </div>
   );
 
-  return (
-    <div className='flex items-center gap-1.5 flex-wrap min-w-0'>
-      {applied.map(mapping => {
-        const color = colorForName(mapping.labelName);
-        return (
-          <span
-            key={mapping.id}
-            className='inline-flex items-center gap-1 pl-1.5 pr-1 py-0.5 rounded-md text-xs font-medium border border-border bg-card text-foreground'
-          >
-            <span className='size-2 rounded-full shrink-0' style={{ backgroundColor: color }} />
-            <span className='truncate max-w-[140px]'>{mapping.labelName}</span>
-            <button
-              type='button'
-              aria-label={`Remove ${mapping.labelName}`}
-              onClick={() => void removeLabel(mapping.labelId)}
-              className='hover:bg-muted rounded-full p-0.5'
-              data-track-category='Support'
-              data-track-name='RemoveConversationLabel'
+  if (slot === 'chips') {
+    if (applied.length === 0) return null;
+    return (
+      <div className='flex items-center gap-1.5 flex-wrap min-w-0'>
+        {applied.map(mapping => {
+          const color = colorForName(mapping.labelName);
+          return (
+            <span
+              key={mapping.id}
+              className='inline-flex items-center gap-1 pl-1.5 pr-1 py-0.5 rounded-md text-xs font-medium border border-border bg-card text-foreground'
             >
-              <X className='size-2.5' />
-            </button>
-          </span>
-        );
-      })}
-      <Popover
-        trigger={
-          <button
-            type='button'
-            className={cn(
-              'inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors',
-            )}
-            aria-label='Add label'
-            data-track-category='Support'
-            data-track-name='OpenLabelPicker'
-          >
-            <TagIcon className='size-3.5' />
-            {applied.length === 0 && <span>Label</span>}
-          </button>
-        }
-        open={pickerOpen}
-        onOpenChange={setPickerOpen}
-        side='bottom'
-        align='start'
-        sideOffset={6}
-        className='p-0'
-      >
-        {picker}
-      </Popover>
-    </div>
+              <span className='size-2 rounded-full shrink-0' style={{ backgroundColor: color }} />
+              <span className='truncate max-w-[140px]'>{mapping.labelName}</span>
+              <button
+                type='button'
+                aria-label={`Remove ${mapping.labelName}`}
+                onClick={() => void removeLabel(mapping.labelId)}
+                className='hover:bg-muted rounded-full p-0.5'
+                data-track-category='Support'
+                data-track-name='RemoveConversationLabel'
+              >
+                <X className='size-2.5' />
+              </button>
+            </span>
+          );
+        })}
+      </div>
+    );
+  }
+
+  return (
+    <Popover
+      trigger={
+        <button
+          type='button'
+          className={cn(
+            'p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors',
+          )}
+          aria-label='Add label'
+          title='Label'
+          data-track-category='Support'
+          data-track-name='OpenLabelPicker'
+        >
+          <TagIcon size={16} />
+        </button>
+      }
+      open={pickerOpen}
+      onOpenChange={setPickerOpen}
+      side='bottom'
+      align='start'
+      sideOffset={6}
+      className='p-0'
+    >
+      {picker}
+    </Popover>
   );
 };
