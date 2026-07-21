@@ -10099,6 +10099,20 @@ export const mutators = defineMutators({
         }
       },
     ),
+    updateRole: defineMutator(
+      z.object({
+        memberId: z.string(),
+        updates: z.object({
+          role: z.enum([OrgRole.OWNER, OrgRole.ADMIN, OrgRole.MEMBER, OrgRole.VIEWER]).optional(),
+        }),
+      }),
+      async ({ tx, args: { memberId, updates } }) => {
+        await tx.mutate.org_members.update({
+          memberId,
+          ...updates,
+        });
+      },
+    ),
     remove: defineMutator(
       z.object({
         memberId: z.string(),

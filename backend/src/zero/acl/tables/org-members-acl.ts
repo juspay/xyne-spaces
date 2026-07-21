@@ -19,6 +19,29 @@ export class OrgMembersACL extends BaseACL<'org_members'> {
     return this.ctx.orgRole === OrgRole.ADMIN || this.ctx.orgRole === OrgRole.OWNER;
   }
 
+  // NOTE: read-then-check, not atomic — two concurrent demote/remove requests can
+  // both observe count == 2 and both proceed, leaving zero admins. Same pattern as
+  // UsersACL.verifyLastAdmin (not new to this ACL). A real fix needs a DB-level
+  // constraint or advisory lock; not done here.
+  private async verifyLastAdmin(orgId: string, tx: Transaction<Schema>, errorMessage: string): Promise<void> {
+    const adminCount = await tx.run(
+      zql.org_members
+        .where('orgId', orgId)
+        .where('role', OrgRole.ADMIN)
+        .where('leftAt', 'IS', null)
+    );
+    const ownerCount = await tx.run(
+      zql.org_members
+        .where('orgId', orgId)
+        .where('role', OrgRole.OWNER)
+        .where('leftAt', 'IS', null)
+    );
+    const totalAdmins = adminCount.length + ownerCount.length;
+    if (totalAdmins <= 1) {
+      throw new MutationACLError(errorMessage, 'org_members');
+    }
+  }
+
   async canInsert(args: InsertValue<TableSchema<'org_members'>>, tx: Transaction<Schema>): Promise<void> {
     // Allow organization's createdBy user to add themselves as OWNER (for org creation flow)
     if (args.email) {
@@ -51,14 +74,44 @@ export class OrgMembersACL extends BaseACL<'org_members'> {
       throw new MutationACLError('Organization member update failed: the member does not exist', 'org_members');
     }
 
-    // Users can update themselves
+    // Users can update themselves, but cannot change their own role
     if (targetMember.memberId === this.ctx.memberId) {
+      if (args.role !== undefined && args.role !== targetMember.role) {
+        throw new MutationACLError('Organization member update failed: you cannot change your own role', 'org_members');
+      }
       return;
     }
 
     // Only ADMIN or OWNER can update others
     if (!this.isAdminOrOwner()) {
       throw new MutationACLError('Organization member update failed: only admins or owners can modify member roles', 'org_members');
+    }
+
+    // Only an OWNER can mint another OWNER — an ADMIN can promote/demote at ADMIN
+    // level but shouldn't be able to hand out ownership.
+    if (args.role === OrgRole.OWNER && this.ctx.orgRole !== OrgRole.OWNER) {
+      throw new MutationACLError('Organization member update failed: only owners can assign the owner role', 'org_members');
+    }
+
+    // Check "last admin" constraint when demoting an admin/owner
+    if (
+      args.role !== undefined &&
+      args.role !== OrgRole.ADMIN &&
+      args.role !== OrgRole.OWNER &&
+      (targetMember.role === OrgRole.ADMIN || targetMember.role === OrgRole.OWNER)
+    ) {
+      await this.verifyLastAdmin(targetMember.orgId, tx, 'Organization member update failed: cannot demote the only admin');
+    }
+
+    // Check "last admin" constraint when removing (soft-delete via leftAt) an admin/owner.
+    // `orgMember.remove` sets leftAt through an update, not a delete, so this must live
+    // here — canDelete never runs for that path.
+    if (
+      args.leftAt !== undefined &&
+      args.leftAt !== null &&
+      (targetMember.role === OrgRole.ADMIN || targetMember.role === OrgRole.OWNER)
+    ) {
+      await this.verifyLastAdmin(targetMember.orgId, tx, 'Organization member update failed: cannot remove the only admin');
     }
   }
 
@@ -76,6 +129,13 @@ export class OrgMembersACL extends BaseACL<'org_members'> {
     // Only ADMIN or OWNER can remove others
     if (!this.isAdminOrOwner()) {
       throw new MutationACLError('Organization member delete failed: only admins or owners can remove other members', 'org_members');
+    }
+
+    // Defensive: no mutator currently issues a hard delete (org_members uses the
+    // leftAt soft-delete via canUpdate above), but guard it the same way in case
+    // that changes.
+    if (memberData.role === OrgRole.ADMIN || memberData.role === OrgRole.OWNER) {
+      await this.verifyLastAdmin(memberData.orgId, tx, 'Organization member delete failed: cannot remove the only admin');
     }
   }
 }
