@@ -16,6 +16,7 @@ import {
   TicketPriority,
   TicketStatusV2,
   isFieldActive,
+  orderFieldsWithBranchChildrenAfterParent,
   resolveParentOption,
   toSelectOptions,
   type User as UserType,
@@ -1575,9 +1576,11 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     const neededOptionalParents = allFields.filter(
       field => neededParentIds.has(field.id) && field.isOptional !== false,
     );
-    return [...neededOptionalParents, ...required].sort(
+    const bySequence = [...neededOptionalParents, ...required].sort(
       (a, b) => (a.sequenceNumber ?? 0) - (b.sequenceNumber ?? 0),
     );
+    // Keep each branch child directly under its parent
+    return orderFieldsWithBranchChildrenAfterParent(bySequence);
   }, [resolvedFormFields]);
 
   // Of those, only the ones currently active given the parent values selected so far.

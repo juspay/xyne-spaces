@@ -101,6 +101,16 @@ interface FieldEditorProps {
   onNameChange: (fieldId: string, nextName: string) => void;
   onSelectExistingGlobalField: (fieldId: string, suggestion: GlobalFieldSuggestion) => void;
   onCreateAsNewField: (fieldId: string) => void;
+  getBranchFields: (optionId: string) => FormField[];
+  isOptionBranchExpanded: (optionId: string) => boolean;
+  onToggleOptionBranchPanel: (optionId: string) => void;
+  onAddBranchField: (optionId: string) => void;
+  onOptionsRemoved: (fieldId: string, optionIds: string[]) => void;
+  // A branch child's own expand/collapse state is tracked separately from its parent's (see
+  // expandedBranchFieldId in CreateFormSlideOut) — these are only used when rendering children.
+  expandedBranchFieldId: string | null;
+  onExpandBranchField: (fieldId: string) => void;
+  onToggleExpandBranchField: (fieldId: string) => void;
 }
 
 const FieldEditor = ({
@@ -117,9 +127,19 @@ const FieldEditor = ({
   onNameChange,
   onSelectExistingGlobalField,
   onCreateAsNewField,
+  getBranchFields,
+  isOptionBranchExpanded,
+  onToggleOptionBranchPanel,
+  onAddBranchField,
+  onOptionsRemoved,
+  expandedBranchFieldId,
+  onExpandBranchField,
+  onToggleExpandBranchField,
 }: FieldEditorProps): ReactElement => {
   const showOptions = isSelectField(field.fieldType);
   const options = field.fieldEnum ?? [];
+  const supportsBranching =
+    field.fieldType === FormFieldType.SINGLE_SELECT && !field.parentOptionId;
   const selectedGlobalField: GlobalFieldSuggestion | undefined = field.persistedFieldId
     ? {
         id: field.persistedFieldId,
@@ -149,7 +169,9 @@ const FieldEditor = ({
   };
 
   const removeOption = (index: number): void => {
+    const removed = options[index];
     onUpdate(field.id, { fieldEnum: options.filter((_, i) => i !== index) });
+    if (removed) onOptionsRemoved(field.id, [removed.id]);
   };
 
   // Adds one or more options at once (typed Enter or pasted list), de-duping and
@@ -180,8 +202,12 @@ const FieldEditor = ({
   const applyBulkDraft = (): void => {
     const parsed = parseBulkOptions(bulkDraft);
     const { options: next, duplicatesRemoved, truncated } = normalizeFieldOptions(parsed, options);
+    const removedOptionIds = options
+      .filter(option => !next.some(nextOption => nextOption.id === option.id))
+      .map(option => option.id);
     setBulkDraft(next.map(option => option.value).join('\n'));
     setOptions(next, { duplicatesRemoved, truncated });
+    if (removedOptionIds.length > 0) onOptionsRemoved(field.id, removedOptionIds);
   };
 
   const toggleEditMode = (): void => {
@@ -386,33 +412,96 @@ const FieldEditor = ({
                   </div>
                 ) : (
                   <div className='flex flex-col gap-[8px]'>
-                    {options.map((option, optionIndex) => (
-                      <div
-                        key={option.id}
-                        className='flex items-center gap-[8px] border border-border rounded-[8px] px-[8px] h-[34px]'
-                      >
-                        <GripVertical size={14} className='text-muted-foreground' />
-                        <input
-                          type='text'
-                          value={option.value}
-                          onChange={e => editOption(optionIndex, e.target.value)}
-                          placeholder={`Option ${optionIndex + 1}`}
-                          className='flex-1 text-[13px] text-foreground bg-transparent border-0 focus:outline-none focus:ring-0 p-0'
-                          data-track-category='board_config'
-                          data-track-name='edit_option'
-                        />
-                        <Button
-                          onClick={() => removeOption(optionIndex)}
-                          variant='ghost'
-                          size='iconSm'
-                          className='text-muted-foreground hover:text-red-500'
-                          data-track-category='board_config'
-                          data-track-name='delete_form_field_option'
-                        >
-                          <X size={14} />
-                        </Button>
-                      </div>
-                    ))}
+                    {options.map((option, optionIndex) => {
+                      const branchFields = supportsBranching ? getBranchFields(option.id) : [];
+                      const isBranchExpanded =
+                        supportsBranching && isOptionBranchExpanded(option.id);
+
+                      return (
+                        <div key={option.id}>
+                          <div className='flex items-center gap-[8px] border border-border rounded-[8px] px-[8px] h-[34px]'>
+                            <GripVertical size={14} className='text-muted-foreground' />
+                            <input
+                              type='text'
+                              value={option.value}
+                              onChange={e => editOption(optionIndex, e.target.value)}
+                              placeholder={`Option ${optionIndex + 1}`}
+                              className='flex-1 text-[13px] text-foreground bg-transparent border-0 focus:outline-none focus:ring-0 p-0'
+                              data-track-category='board_config'
+                              data-track-name='edit_option'
+                            />
+                            {supportsBranching && (
+                              <button
+                                type='button'
+                                onClick={() => onToggleOptionBranchPanel(option.id)}
+                                className={`text-[11px] font-mono px-2 py-[3px] rounded-full whitespace-nowrap flex-shrink-0 ${
+                                  branchFields.length > 0
+                                    ? 'bg-[#6276be]/10 text-[#6276be] hover:bg-[#6276be] hover:text-white'
+                                    : 'border border-dashed border-border text-muted-foreground hover:border-[#6276be] hover:text-[#6276be] hover:bg-[#6276be]/10'
+                                }`}
+                                data-track-category='board_config'
+                                data-track-name='toggle_option_branch_panel'
+                              >
+                                {branchFields.length > 0
+                                  ? `${branchFields.length} field${branchFields.length === 1 ? '' : 's'}`
+                                  : '+ Add fields'}
+                              </button>
+                            )}
+                            <Button
+                              onClick={() => removeOption(optionIndex)}
+                              variant='ghost'
+                              size='iconSm'
+                              className='text-muted-foreground hover:text-red-500'
+                              data-track-category='board_config'
+                              data-track-name='delete_form_field_option'
+                            >
+                              <X size={14} />
+                            </Button>
+                          </div>
+
+                          {supportsBranching && isBranchExpanded && (
+                            <div className='ml-6 mt-1 mb-1 flex flex-col gap-[6px] border border-border rounded-[8px] p-[6px] bg-muted/30'>
+                              {branchFields.map(childField => (
+                                <FieldEditor
+                                  key={childField.id}
+                                  field={childField}
+                                  projectId={projectId}
+                                  isExpanded={expandedBranchFieldId === childField.id}
+                                  registerInputRef={registerInputRef}
+                                  registerFieldOptionsResolver={registerFieldOptionsResolver}
+                                  onExpand={onExpandBranchField}
+                                  onToggleExpand={onToggleExpandBranchField}
+                                  onUpdate={onUpdate}
+                                  onChangeType={onChangeType}
+                                  onDelete={onDelete}
+                                  onNameChange={onNameChange}
+                                  onSelectExistingGlobalField={onSelectExistingGlobalField}
+                                  onCreateAsNewField={onCreateAsNewField}
+                                  getBranchFields={getBranchFields}
+                                  isOptionBranchExpanded={isOptionBranchExpanded}
+                                  onToggleOptionBranchPanel={onToggleOptionBranchPanel}
+                                  onAddBranchField={onAddBranchField}
+                                  onOptionsRemoved={onOptionsRemoved}
+                                  expandedBranchFieldId={expandedBranchFieldId}
+                                  onExpandBranchField={onExpandBranchField}
+                                  onToggleExpandBranchField={onToggleExpandBranchField}
+                                />
+                              ))}
+                              <button
+                                type='button'
+                                onClick={() => onAddBranchField(option.id)}
+                                className='w-full flex items-center justify-center gap-1.5 px-3 py-2 text-[12px] text-[#6276be] hover:bg-[#6276be]/10 rounded-[6px]'
+                                data-track-category='board_config'
+                                data-track-name='add_branch_field'
+                              >
+                                <Plus size={13} />
+                                Add field
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                     {/* Add Option Input */}
                     <div className='flex flex-col gap-[4px]'>
                       <div className='flex items-center gap-[8px] px-[6px] py-[4px]'>
@@ -468,6 +557,11 @@ export const CreateFormSlideOut = ({
   const [formDescription, setFormDescription] = useState('');
   const [fields, setFields] = useState<FormField[]>([]);
   const [expandedFieldId, setExpandedFieldId] = useState<string | null>(null);
+  // A branch child's own editor lives inside its parent's expanded content, so it needs its own
+  // "which one is open" state — sharing expandedFieldId would collapse the parent (and hide the
+  // child along with it) the moment a child got expanded.
+  const [expandedBranchFieldId, setExpandedBranchFieldId] = useState<string | null>(null);
+  const [expandedOptionIds, setExpandedOptionIds] = useState<Set<string>>(new Set());
   const fieldInputRefs = useRef<{ [key: string]: HTMLInputElement | null }>({});
   const fieldsContainerRef = useRef<HTMLDivElement>(null);
   const fieldOptionsResolversRef = useRef<Map<string, () => FieldEnumOption[]>>(new Map());
@@ -504,9 +598,9 @@ export const CreateFormSlideOut = ({
     }
   }, [isOpen, initialData]);
 
-  // Handle click outside to close expanded field
+  // Handle click outside to close expanded field(s)
   useEffect(() => {
-    if (!expandedFieldId) return;
+    if (!expandedFieldId && !expandedBranchFieldId) return;
 
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as Node;
@@ -520,11 +614,18 @@ export const CreateFormSlideOut = ({
       // Check if click is outside the fields container
       if (fieldsContainer && !fieldsContainer.contains(target) && !isDropdownClick) {
         // Don't close if the field name is empty
-        const expandedField = fields.find(f => f.id === expandedFieldId);
-        if (expandedField && !expandedField.fieldName.trim()) {
-          return;
+        if (expandedFieldId) {
+          const expandedField = fields.find(f => f.id === expandedFieldId);
+          if (!expandedField || expandedField.fieldName.trim()) {
+            setExpandedFieldId(null);
+          }
         }
-        setExpandedFieldId(null);
+        if (expandedBranchFieldId) {
+          const expandedChild = fields.find(f => f.id === expandedBranchFieldId);
+          if (!expandedChild || expandedChild.fieldName.trim()) {
+            setExpandedBranchFieldId(null);
+          }
+        }
       }
     };
 
@@ -532,13 +633,24 @@ export const CreateFormSlideOut = ({
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [expandedFieldId, fields]);
+  }, [expandedFieldId, expandedBranchFieldId, fields]);
 
   const expandField = (fieldId: string): void => {
     setExpandedFieldId(fieldId);
     setTimeout(() => {
       fieldInputRefs.current[fieldId]?.focus();
     }, 100);
+  };
+
+  const expandBranchField = (fieldId: string): void => {
+    setExpandedBranchFieldId(fieldId);
+    setTimeout(() => {
+      fieldInputRefs.current[fieldId]?.focus();
+    }, 100);
+  };
+
+  const handleToggleBranchExpand = (fieldId: string): void => {
+    setExpandedBranchFieldId(prev => (prev === fieldId ? null : fieldId));
   };
 
   const registerInputRef = (fieldId: string, el: HTMLInputElement | null): void => {
@@ -617,20 +729,118 @@ export const CreateFormSlideOut = ({
   };
 
   const handleChangeFieldType = (fieldId: string, nextType: FormFieldType): void => {
-    setFields(prev =>
-      prev.map(field => {
-        if (field.id !== fieldId) return field;
-        return { ...field, ...buildFieldTypeChangeUpdates(field.fieldType, nextType) };
-      }),
-    );
+    const current = fields.find(field => field.id === fieldId);
+    if (!current) return;
+    const updates = buildFieldTypeChangeUpdates(current.fieldType, nextType);
+    const leavingSingleSelect =
+      current.fieldType === FormFieldType.SINGLE_SELECT && nextType !== FormFieldType.SINGLE_SELECT;
+    const oldOptionIds = leavingSingleSelect
+      ? new Set((current.fieldEnum ?? []).map(option => option.id))
+      : null;
+
+    setFields(prev => {
+      const next = prev.map(field => (field.id === fieldId ? { ...field, ...updates } : field));
+      if (!oldOptionIds || oldOptionIds.size === 0) return next;
+
+      const orphaned = next.filter(
+        field => !!field.parentOptionId && oldOptionIds.has(field.parentOptionId),
+      );
+      if (orphaned.length > 0) {
+        toast.error(
+          `Removed field${orphaned.length === 1 ? '' : 's'} that depended on "${current.fieldName || 'this field'}": ${orphaned
+            .map(field => field.fieldName || 'Untitled')
+            .join(', ')}`,
+        );
+      }
+      return next.filter(
+        field => !(!!field.parentOptionId && oldOptionIds.has(field.parentOptionId)),
+      );
+    });
   };
 
-  // Delete field
+  // Delete field — also removes any branch children that depend on one of its options.
   const handleDeleteField = (fieldId: string): void => {
-    setFields(prev => prev.filter(field => field.id !== fieldId));
-    if (expandedFieldId === fieldId) {
+    let removedIds = new Set<string>([fieldId]);
+    setFields(prev => {
+      const target = prev.find(field => field.id === fieldId);
+      const optionIds = new Set((target?.fieldEnum ?? []).map(option => option.id));
+      const orphaned = prev.filter(
+        field =>
+          field.id !== fieldId && !!field.parentOptionId && optionIds.has(field.parentOptionId),
+      );
+      if (orphaned.length > 0) {
+        toast.error(
+          `Removed field${orphaned.length === 1 ? '' : 's'} that depended on "${target?.fieldName || 'this field'}": ${orphaned
+            .map(field => field.fieldName || 'Untitled')
+            .join(', ')}`,
+        );
+      }
+      removedIds = new Set([fieldId, ...orphaned.map(field => field.id)]);
+      return prev.filter(field => !removedIds.has(field.id));
+    });
+    if (expandedFieldId && removedIds.has(expandedFieldId)) {
       setExpandedFieldId(null);
     }
+    if (expandedBranchFieldId && removedIds.has(expandedBranchFieldId)) {
+      setExpandedBranchFieldId(null);
+    }
+  };
+
+  // Adds a branch child gated to a specific option — appears only when that option is selected.
+  const handleAddBranchField = (optionId: string): void => {
+    const newField: FormField = {
+      id: uuidv4(),
+      fieldName: '',
+      fieldType: FormFieldType.STRING,
+      isOptional: false,
+      parentOptionId: optionId,
+    };
+    setFields(prev => [...prev, newField]);
+    setExpandedOptionIds(prev => new Set(prev).add(optionId));
+    expandBranchField(newField.id);
+  };
+
+  const handleToggleOptionBranchPanel = (optionId: string): void => {
+    setExpandedOptionIds(prev => {
+      const next = new Set(prev);
+      if (next.has(optionId)) {
+        next.delete(optionId);
+      } else {
+        next.add(optionId);
+      }
+      return next;
+    });
+  };
+
+  const getBranchFields = useCallback(
+    (optionId: string): FormField[] => fields.filter(field => field.parentOptionId === optionId),
+    [fields],
+  );
+
+  const isOptionBranchExpanded = useCallback(
+    (optionId: string): boolean => expandedOptionIds.has(optionId),
+    [expandedOptionIds],
+  );
+
+  // Fired when a field's options list drops one or more ids (single remove or a bulk-edit
+  // reconciliation) — any branch child gated to a removed option is now orphaned and is dropped
+  // too, with a toast so the admin knows it happened rather than it silently disappearing.
+  const handleOptionsRemoved = (_fieldId: string, optionIds: string[]): void => {
+    setFields(prev => {
+      const orphaned = prev.filter(
+        field => !!field.parentOptionId && optionIds.includes(field.parentOptionId),
+      );
+      if (orphaned.length > 0) {
+        toast.error(
+          `Removed field${orphaned.length === 1 ? '' : 's'} that depended on the removed option${
+            optionIds.length === 1 ? '' : 's'
+          }: ${orphaned.map(field => field.fieldName || 'Untitled').join(', ')}`,
+        );
+      }
+      return prev.filter(
+        field => !(!!field.parentOptionId && optionIds.includes(field.parentOptionId)),
+      );
+    });
   };
 
   // Toggle field expansion
@@ -729,24 +939,34 @@ export const CreateFormSlideOut = ({
 
             {/* Fields List */}
             <div className='flex flex-col gap-[8px]' ref={fieldsContainerRef}>
-              {fields.map(field => (
-                <FieldEditor
-                  key={field.id}
-                  field={field}
-                  projectId={projectId}
-                  isExpanded={expandedFieldId === field.id}
-                  registerInputRef={registerInputRef}
-                  registerFieldOptionsResolver={registerFieldOptionsResolver}
-                  onExpand={expandField}
-                  onToggleExpand={handleToggleExpand}
-                  onUpdate={handleUpdateField}
-                  onChangeType={handleChangeFieldType}
-                  onDelete={handleDeleteField}
-                  onNameChange={handleNameChange}
-                  onSelectExistingGlobalField={handleSelectExistingGlobalField}
-                  onCreateAsNewField={handleCreateAsNewField}
-                />
-              ))}
+              {fields
+                .filter(field => !field.parentOptionId)
+                .map(field => (
+                  <FieldEditor
+                    key={field.id}
+                    field={field}
+                    projectId={projectId}
+                    isExpanded={expandedFieldId === field.id}
+                    registerInputRef={registerInputRef}
+                    registerFieldOptionsResolver={registerFieldOptionsResolver}
+                    onExpand={expandField}
+                    onToggleExpand={handleToggleExpand}
+                    onUpdate={handleUpdateField}
+                    onChangeType={handleChangeFieldType}
+                    onDelete={handleDeleteField}
+                    onNameChange={handleNameChange}
+                    onSelectExistingGlobalField={handleSelectExistingGlobalField}
+                    onCreateAsNewField={handleCreateAsNewField}
+                    getBranchFields={getBranchFields}
+                    isOptionBranchExpanded={isOptionBranchExpanded}
+                    onToggleOptionBranchPanel={handleToggleOptionBranchPanel}
+                    onAddBranchField={handleAddBranchField}
+                    onOptionsRemoved={handleOptionsRemoved}
+                    expandedBranchFieldId={expandedBranchFieldId}
+                    onExpandBranchField={expandBranchField}
+                    onToggleExpandBranchField={handleToggleBranchExpand}
+                  />
+                ))}
             </div>
 
             {/* Add Question Button */}
