@@ -42,7 +42,9 @@ import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useUserGroupMappings } from '../../../hooks/useUserGroup';
 import { API_BASE_URL } from '../../../config';
 import { FlowScreenManager } from '../../flowUI/FlowScreenManager';
-import type { FlowDefinition } from '@xyne/shared';
+import { ChannelScopeType, type FlowDefinition } from '@xyne/shared';
+import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
+import { formatChannelLabel } from '../ChatDirectory/ChatDirectory.utils';
 
 interface RenderMessageWithHTMLProps {
   message: string;
@@ -81,6 +83,15 @@ const getOptionalStringProperty = (value: unknown, key: string): string | undefi
   return typeof propertyValue === 'string' ? propertyValue : undefined;
 };
 
+const isChannelScopeType = (value: string | undefined): value is ChannelScopeType => {
+  return value !== undefined && (Object.values(ChannelScopeType) as string[]).includes(value);
+};
+
+const getOptionalChannelScopeType = (value: unknown): ChannelScopeType | undefined => {
+  const scopeType = getOptionalStringProperty(value, 'scopeType');
+  return isChannelScopeType(scopeType) ? scopeType : undefined;
+};
+
 const InternalXyneLink = ({
   href,
   children,
@@ -91,6 +102,9 @@ const InternalXyneLink = ({
   const resolvedHref = href ?? '';
   const parsedLink = parseInternalXyneLink(resolvedHref);
   const channel = useChannel(parsedLink?.channelId ?? '');
+  const { userID } = useAuthContextValues();
+  const { displayName: channelDisplayName } = useChannelDisplayName(channel, userID);
+  const channelScopeType = getOptionalChannelScopeType(channel);
   const [ticket] = useCachedQuery(queries.ticketByIdV2({ ticketId: parsedLink?.ticketId ?? '' }), {
     enabled: !!parsedLink?.ticketId,
   });
@@ -123,9 +137,18 @@ const InternalXyneLink = ({
     });
   };
 
+  const channelName = getOptionalStringProperty(channel, 'name');
+  const fallbackChannelLabel = channelName ? `#${channelName}` : undefined;
+  const channelLabel =
+    channelName && channelScopeType
+      ? formatChannelLabel({
+          channel: { name: channelName, scopeType: channelScopeType },
+          ...(channelDisplayName ? { searchableNames: [channelDisplayName] } : {}),
+        })
+      : fallbackChannelLabel;
   const linkLabel = getInternalLinkLabel(
     parsedLink,
-    getOptionalStringProperty(channel, 'name'),
+    channelLabel,
     getOptionalStringProperty(ticket, 'xyneId'),
     getOptionalStringProperty(canvas, 'title'),
   );
