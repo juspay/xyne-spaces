@@ -37,6 +37,7 @@ import {
   normalizeCustomFieldValue,
   normalizeHistoryLimit,
 } from './ticketController.helpers';
+import { buildTicketFilterWhere, type TicketFilters } from './ticketFilters';
 import {
   buildCustomFieldWritePayload,
   buildPartialCustomFieldWritePayload,
@@ -153,11 +154,44 @@ const ListBySenderQuerySchema = z.object({
   cursor: z.string().optional(),
 });
 
+/**
+ * Coerce a scalar-or-array query value into an array so both
+ * `field: "a"` and `field: ["a","b"]` are accepted.
+ */
+const toArrayFilter = <T extends z.ZodTypeAny>(schema: T) =>
+  z.preprocess(
+    value => (value === undefined ? undefined : Array.isArray(value) ? value : [value]),
+    z.array(schema),
+  );
+
+/**
+ * Optional filter block for POST /list/search. Covers core ticket columns and
+ * related-table data (tags via ticket_tags). Custom form fields are matched
+ * separately via the top-level `customFields` map. Every list field accepts a
+ * scalar or an array.
+ */
+const TicketFiltersSchema = z
+  .object({
+    statusV2: toArrayFilter(z.nativeEnum(TicketStatusV2)).optional(),
+    priority: toArrayFilter(z.nativeEnum(TicketPriority)).optional(),
+    stageName: toArrayFilter(z.string().trim().min(1)).optional(),
+    ticketType: toArrayFilter(z.string().trim().min(1)).optional(),
+    assignedTo: toArrayFilter(z.string().trim().min(1)).optional(),
+    createdBy: toArrayFilter(z.string().trim().min(1)).optional(),
+    userGroupId: toArrayFilter(z.string().trim().min(1)).optional(),
+    tags: toArrayFilter(z.string().trim().min(1)).optional(),
+    isArchived: z.boolean().optional(),
+    createdAfter: z.string().datetime({ message: 'createdAfter must be an ISO 8601 date string' }).optional(),
+    createdBefore: z.string().datetime({ message: 'createdBefore must be an ISO 8601 date string' }).optional(),
+  })
+  .strict();
+
 const SearchTicketsBodySchema = z.object({
   channelId: z.string().min(1, 'channelId must not be empty').trim(),
   boardIds: z.array(z.string().min(1, 'boardIds must not contain empty values').trim()).min(1, 'boardIds must not be empty').optional(),
   senderEmail: z.string().email('senderEmail must be a valid email').trim().optional(),
   senderName: z.string().trim().min(1, 'senderName must not be empty').optional(),
+  filters: TicketFiltersSchema.optional(),
   customFields: z.record(z.unknown()).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(20),
   cursor: z.string().optional(),
@@ -1145,7 +1179,7 @@ export class TicketController {
         return;
       }
 
-      const { channelId, boardIds, senderEmail, senderName, customFields, limit, cursor } = bodyResult.data;
+      const { channelId, boardIds, senderEmail, senderName, filters, customFields, limit, cursor } = bodyResult.data;
       const channelIds = [channelId.trim()];
 
       const access = await validateChannelIdsAccess(channelIds, userId);
@@ -1203,6 +1237,26 @@ export class TicketController {
                 }
               : {})),
       };
+
+      if (filters) {
+        const normalizedFilters: TicketFilters = {
+          statusV2: filters.statusV2,
+          priority: filters.priority,
+          stageName: filters.stageName,
+          ticketType: filters.ticketType,
+          assignedTo: filters.assignedTo,
+          createdBy: filters.createdBy,
+          userGroupId: filters.userGroupId,
+          tags: filters.tags,
+          isArchived: filters.isArchived,
+          createdAfter: filters.createdAfter ? new Date(filters.createdAfter) : undefined,
+          createdBefore: filters.createdBefore ? new Date(filters.createdBefore) : undefined,
+        };
+        // Merge core + related-table (tags) predicates. isArchived (if provided)
+        // overrides the default false set above; createdAt range is ANDed with
+        // the keyset cursor predicate below via distinct where keys.
+        Object.assign(where, buildTicketFilterWhere(normalizedFilters));
+      }
 
       if (decodedCursor) {
         where.AND = [{
