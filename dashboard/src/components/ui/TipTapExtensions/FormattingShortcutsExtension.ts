@@ -45,6 +45,16 @@ export const FORMATTING_SHORTCUTS: FormattingShortcut[] = [
     run: editor => editor.chain().focus().toggleStrike().run(),
   },
   {
+    id: 'blockquote',
+    label: 'Blockquote',
+    shortcutHint: '⌘⇧9',
+    // Blockquote's built-in binding is ⌘⇧B; this adds the Slack-style
+    // ⌘⇧9 alias. Safe everywhere: no editor that mounts this extension
+    // also mounts TaskList (whose extension binds Mod-Shift-9).
+    keys: ['Mod-Shift-9'],
+    run: editor => editor.chain().focus().toggleBlockquote().run(),
+  },
+  {
     id: 'clearFormatting',
     label: 'Clear Formatting',
     shortcutHint: '⌘\\',

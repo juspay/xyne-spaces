@@ -53,6 +53,22 @@ export const useGlobalShortcuts = ({ leftPanelRef }: UseGlobalShortcutsProps): v
     void navigate('/chat/activity');
   });
 
+  // Open threads view
+  useShortcutById('global.openThreads', () => {
+    void navigate('/chat/dir/threads');
+  });
+
+  // Open preferences (dispatch the same app-wide event the settings menu uses;
+  // AppSidebar owns the Preferences modal and listens for this event).
+  useShortcutById('global.openPreferences', () => {
+    window.dispatchEvent(new CustomEvent('xyne-open-preferences'));
+  });
+
+  // Set a status (AppSidebar owns the status modal and listens for this event).
+  useShortcutById('global.setStatus', () => {
+    window.dispatchEvent(new CustomEvent('xyne-open-status'));
+  });
+
   // Toggle between the main app and the in-app fullscreen browser.
   useShortcutById('global.toggleBrowser', () => {
     const onBrowser = /\/browser(\/|$)/.test(location.pathname);
