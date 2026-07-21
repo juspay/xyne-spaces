@@ -10,6 +10,7 @@ const clawStore = new Store({ name: "claw-overlay" });
 const ENABLED_KEY = "clawOverlayEnabled";
 
 let clawWindow: BrowserWindow | null = null;
+let clawRendererReady = false;
 
 let setIgnoreMouseHandler:
   | ((event: Electron.IpcMainEvent, ignore: boolean) => void)
@@ -74,14 +75,13 @@ function computeInitialBounds(): Electron.Rectangle {
 
 function redockToCorner(): void {
   if (!clawWindow || clawWindow.isDestroyed()) return;
+  const workArea = screen.getDisplayMatching(clawWindow.getBounds()).workArea;
   const bounds = getDockedBounds(
     PANEL.width,
     PANEL.height,
-    getNearestWorkArea(),
+    workArea,
   );
-  clawWindow.setResizable(true);
-  clawWindow.setBounds(bounds);
-  clawWindow.setResizable(false);
+  clawWindow.setPosition(bounds.x, bounds.y);
   log.info("[ClawOverlay] Re-docked to corner after display change");
 }
 
@@ -133,8 +133,8 @@ function applyLinuxContentShape(expanded: boolean): void {
     return;
   const content = expanded ? PANEL : PILL;
   const windowSize = getWindowSize(PANEL.width, PANEL.height);
-  const width = content.width + SHADOW_GUTTER;
-  const height = content.height + SHADOW_GUTTER;
+  const width = content.width;
+  const height = content.height;
   clawWindow.setShape([
     {
       x: windowSize.width - width,
@@ -145,30 +145,51 @@ function applyLinuxContentShape(expanded: boolean): void {
   ]);
 }
 
+function isClawOverlaySender(event: Electron.IpcMainEvent): boolean {
+  return (
+    !!clawWindow &&
+    !clawWindow.isDestroyed() &&
+    event.sender === clawWindow.webContents &&
+    event.senderFrame === clawWindow.webContents.mainFrame
+  );
+}
+
 function registerIpcHandlers(): void {
-  setIgnoreMouseHandler = (_event, ignore) => {
+  setIgnoreMouseHandler = (event, ignore) => {
+    if (!isClawOverlaySender(event)) return;
     applyIgnoreMouseEvents(ignore);
   };
   ipcMain.on("claw:set-ignore-mouse", setIgnoreMouseHandler);
 
-  setExpandedHandler = (_event, expanded) => {
+  setExpandedHandler = (event, expanded) => {
+    if (!isClawOverlaySender(event)) return;
+    const firstReady = !clawRendererReady;
+    clawRendererReady = true;
     applyLinuxContentShape(expanded);
+    if (firstReady && clawWindow && !clawWindow.isDestroyed()) {
+      clawWindow.showInactive();
+      clawWindow.webContents.send("claw:visibility", true);
+      log.info("[ClawOverlay] Showing overlay");
+    }
   };
   ipcMain.on("claw:set-expanded", setExpandedHandler);
 
-  focusHandler = () => {
+  focusHandler = (event) => {
+    if (!isClawOverlaySender(event)) return;
     if (!clawWindow || clawWindow.isDestroyed()) return;
     clawWindow.focus();
   };
   ipcMain.on("claw:focus", focusHandler);
 
-  blurHandler = () => {
+  blurHandler = (event) => {
+    if (!isClawOverlaySender(event)) return;
     if (!clawWindow || clawWindow.isDestroyed()) return;
     clawWindow.blur();
   };
   ipcMain.on("claw:blur", blurHandler);
 
-  openInMainHandler = (_event, pathname) => {
+  openInMainHandler = (event, pathname) => {
+    if (!isClawOverlaySender(event)) return;
     forwardToMainWindow(pathname);
   };
   ipcMain.on("claw:open-in-main", openInMainHandler);
@@ -215,6 +236,7 @@ function createClawOverlay(): BrowserWindow {
   if (clawWindow && !clawWindow.isDestroyed()) return clawWindow;
 
   const bounds = computeInitialBounds();
+  clawRendererReady = false;
 
   clawWindow = new BrowserWindow({
     x: bounds.x,
@@ -320,12 +342,6 @@ function createClawOverlay(): BrowserWindow {
   clawWindow.webContents.on("will-navigate", guardNavigation);
   clawWindow.webContents.on("will-redirect", guardNavigation);
 
-  clawWindow.webContents.once("did-finish-load", () => {
-    if (clawWindow && !clawWindow.isDestroyed()) {
-      clawWindow.webContents.send("claw:visibility", true);
-    }
-  });
-
   applyLinuxContentShape(false);
   applyIgnoreMouseEvents(true);
 
@@ -341,9 +357,13 @@ function createClawOverlay(): BrowserWindow {
 
   clawWindow.webContents.on("render-process-gone", (_event, details) => {
     log.error(`[ClawOverlay] Renderer gone: ${details.reason}`);
+    clawRendererReady = false;
     applyLinuxContentShape(false);
     applyIgnoreMouseEvents(true);
-    if (clawWindow && !clawWindow.isDestroyed()) clawWindow.reload();
+    if (clawWindow && !clawWindow.isDestroyed()) {
+      clawWindow.hide();
+      clawWindow.reload();
+    }
   });
 
   registerIpcHandlers();
@@ -353,9 +373,8 @@ function createClawOverlay(): BrowserWindow {
     cleanupIpcHandlers();
     unregisterDisplayListeners();
     clawWindow = null;
+    clawRendererReady = false;
   });
-
-  clawWindow.showInactive();
 
   log.info("[ClawOverlay] Window created");
   return clawWindow;
@@ -367,10 +386,9 @@ export async function showClawOverlay(): Promise<void> {
     const alreadyExisted = !!clawWindow && !clawWindow.isDestroyed();
     const win = createClawOverlay();
 
-    if (!win.isVisible()) {
+    if (alreadyExisted && clawRendererReady && !win.isVisible()) {
       win.showInactive();
-
-      if (alreadyExisted) win.webContents.send("claw:visibility", true);
+      win.webContents.send("claw:visibility", true);
       log.info("[ClawOverlay] Showing overlay");
     }
   } catch (error) {
@@ -381,7 +399,6 @@ export async function showClawOverlay(): Promise<void> {
 export function hideClawOverlay(): void {
   if (!clawWindow || clawWindow.isDestroyed()) return;
 
-  clawWindow.blur();
   clawWindow.hide();
   clawWindow.webContents.send("claw:visibility", false);
   log.info("[ClawOverlay] Hiding overlay");
@@ -395,7 +412,7 @@ function destroyClawOverlay(): void {
   if (!clawWindow || clawWindow.isDestroyed()) return;
   clawWindow.destroy();
   clawWindow = null;
-  log.info("[ClawOverlay] Destroyed (disabled)");
+  log.info("[ClawOverlay] Destroyed");
 }
 
 export function setClawOverlayEnabled(enabled: boolean): void {
@@ -444,7 +461,7 @@ export function initClawOverlayAuthGate(): void {
       }
       if (removed) {
         void isUserAuthenticated().then((stillLoggedIn) => {
-          if (!stillLoggedIn) hideClawOverlay();
+          if (!stillLoggedIn) destroyClawOverlay();
         });
       }
     },
