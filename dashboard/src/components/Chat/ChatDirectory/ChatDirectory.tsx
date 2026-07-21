@@ -1,7 +1,8 @@
-import { ReactElement, ReactNode, useState, useEffect, useRef, useMemo } from 'react';
+import { ReactElement, ReactNode, useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import { useLastVisitedChannel } from '../../../hooks/useLastVisitedChannel';
 import { usePlatform } from '../../../hooks/usePlatform';
+import { useShortcutById } from '../../../shortcuts';
 import {
   Bookmark,
   ChevronRight,
@@ -161,6 +162,44 @@ const ChatDirectory = ({
     channelData,
     allChannelsUserStatus,
   });
+
+  // Flattened, de-duplicated sidebar conversation order — mirrors exactly what
+  // ChatDirectory renders (starred → custom sections → channels → DMs) so keyboard
+  // navigation can never drift from the visual list. Collapse state is
+  // intentionally ignored: a collapsed section's channels stay valid targets.
+  const flatSidebarChannels = useMemo(() => {
+    const ordered = [
+      ...starredDisplayChannels,
+      ...displaySectioned.flatMap(({ channels: sectionChannels }) => sectionChannels),
+      ...defaultDisplayChannels,
+      ...dmDisplayChannels,
+    ];
+    const seen = new Set<string>();
+    return ordered.filter(channel => {
+      if (seen.has(channel.id)) return false;
+      seen.add(channel.id);
+      return true;
+    });
+  }, [starredDisplayChannels, displaySectioned, defaultDisplayChannels, dmDisplayChannels]);
+
+  const navigateRelativeChannel = useCallback(
+    (delta: number): void => {
+      const flat = flatSidebarChannels ?? [];
+      if (flat.length === 0) return;
+      const currentIndex = flat.findIndex(c => c.id === activeChannelId);
+      // With nothing active yet, Down enters at the top and Up at the bottom.
+      const baseIndex = currentIndex === -1 ? (delta > 0 ? -1 : flat.length) : currentIndex;
+      const nextIndex = Math.min(flat.length - 1, Math.max(0, baseIndex + delta));
+      const target = flat[nextIndex];
+      if (!target || target.id === activeChannelId) return;
+      void navigate(`/chat/dir/${target.id}`);
+    },
+    [flatSidebarChannels, activeChannelId, navigate],
+  );
+
+  useShortcutById('sidebar.nextConversation', () => navigateRelativeChannel(1));
+  useShortcutById('sidebar.prevConversation', () => navigateRelativeChannel(-1));
+
   // Base groups start open; each custom section adopts its persisted isCollapsed once.
   const [openSidebarSections, setOpenSidebarSections] = useState<string[]>([
     ChannelCategory.STARRED,
@@ -214,6 +253,52 @@ const ChatDirectory = ({
     }
     return { hasUnread };
   }, [starred, channels, directMessages, unreadCounts, allChannelsUserStatus, context.userID]);
+
+  // Unread subset of flatSidebarChannels — recomputed reactively so that once a
+  // channel is auto-marked-read on open, it drops from this list and indexes
+  // shift naturally for the next Alt+Shift+Arrow press.
+  const unreadChannelIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const c of flatSidebarChannels ?? []) {
+      if (isDeskChannelType(c.type) || c.type === ChannelType.SUPPORT) continue;
+      const status = allChannelsUserStatus.find(
+        s => s.channelId === c.id && s.userId === context.userID,
+      );
+      const isDM = c.scopeType === ChannelScopeType.DM || c.scopeType === ChannelScopeType.GROUP_DM;
+      const hasUnreadCount = (unreadCounts[c.id] ?? 0) > 0;
+      let isUnread = hasUnreadCount;
+      if (!isDM) {
+        const hasNewActivity =
+          !!status?.lastViewedAt &&
+          !!c.channelStats?.lastActivityAt &&
+          c.channelStats.lastActivityAt > status.lastViewedAt;
+        isUnread = hasUnreadCount || hasNewActivity;
+      }
+      if (isUnread) ids.add(c.id); // For DM channels, unread count is single source of truth
+    }
+    return ids;
+  }, [flatSidebarChannels, unreadCounts, allChannelsUserStatus, context.userID]);
+
+  const navigateRelativeUnreadChannel = useCallback(
+    (delta: number): void => {
+      const flat = flatSidebarChannels ?? [];
+      if (flat.length === 0 || unreadChannelIds.size === 0) return;
+      const currentIndex = flat.findIndex(c => c.id === activeChannelId);
+      const baseIndex = currentIndex === -1 ? (delta > 0 ? -1 : flat.length) : currentIndex;
+      // Scan forward/backward from current position for the next unread channel.
+      for (let i = baseIndex + delta; i >= 0 && i < flat.length; i += delta) {
+        const candidate = flat[i];
+        if (candidate && unreadChannelIds.has(candidate.id)) {
+          void navigate(`/chat/dir/${candidate.id}`);
+          return;
+        }
+      }
+    },
+    [flatSidebarChannels, unreadChannelIds, activeChannelId, navigate],
+  );
+
+  useShortcutById('sidebar.nextUnreadConversation', () => navigateRelativeUnreadChannel(1));
+  useShortcutById('sidebar.prevUnreadConversation', () => navigateRelativeUnreadChannel(-1));
 
   const starredUnreadCount = sumSectionUnread(starred, unreadCounts, activeChannelId);
   const channelsUnreadCount = sumSectionUnread(
@@ -337,10 +422,9 @@ const ChatDirectory = ({
       if (tag === 'INPUT' || tag === 'TEXTAREA' || (active as HTMLElement).isContentEditable) {
         return;
       }
-      const flat = [...starred, ...channels, ...directMessages];
+      const flat = flatSidebarChannels ?? [];
       if (flat.length === 0) return;
-      const match = location.pathname.match(/^\/chat\/dir\/([^/?#]+)/);
-      const currentId = match?.[1] ?? null;
+      const currentId = activeChannelId ?? null;
 
       if (e.key === 'Enter') {
         // Confirm current selection → focus the chat input directly
@@ -371,7 +455,7 @@ const ChatDirectory = ({
     };
     document.addEventListener('keydown', handler, true);
     return (): void => document.removeEventListener('keydown', handler, true);
-  }, [starred, channels, directMessages, location.pathname, navigate]);
+  }, [flatSidebarChannels, activeChannelId, navigate]);
 
   // only use drawer/modal for mobile view otherwise change route
   const handleAddDirectMessage = (): void => {
