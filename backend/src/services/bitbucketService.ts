@@ -80,31 +80,37 @@ export class BitbucketService {
           return (await response.json()) as T;
         }
 
-        // Handle rate limiting (429)
-        if (response.status === 429) {
-          const retryAfter = response.headers.get('Retry-After');
-          const delayMs = retryAfter
-            ? parseInt(retryAfter, 10) * 1000
-            : this.getRetryDelay(attempt);
-
-          logger.warn(
-            `Bitbucket API rate limited (429) on attempt ${attempt + 1}/${this.MAX_RETRIES}. ` +
-            `Retrying after ${delayMs}ms...`
-          );
-
-          await this.sleep(delayMs);
-          lastError = new Error(`Bitbucket API rate limit: 429`);
-          continue; // Retry
-        }
-
-        // For other errors, throw immediately with the URL so callers know
-        // exactly which endpoint failed (404 in particular is opaque without it).
+        // Read the body once — needed both for rate-limit detection and error context.
         let bodyText = '';
         try {
           bodyText = await response.text();
         } catch {
           // ignore body-read failure
         }
+
+        // Handle rate limiting. Besides the standard 429, the WAF in front of
+        // bitbucket.juspay.net rejects rate-limited requests with a 403 whose
+        // body says "you've exceeded the Rate limit Number in WAF" — treat that
+        // as retryable too, or a burst of paginated calls fails the whole run.
+        const isWafRateLimit = response.status === 403 && /rate ?limit/i.test(bodyText);
+        if (response.status === 429 || isWafRateLimit) {
+          const retryAfter = response.headers.get('Retry-After');
+          const delayMs = retryAfter
+            ? parseInt(retryAfter, 10) * 1000
+            : this.getRetryDelay(attempt);
+
+          logger.warn(
+            `Bitbucket API rate limited (${response.status}${isWafRateLimit ? ' WAF' : ''}) ` +
+            `on attempt ${attempt + 1}/${this.MAX_RETRIES}. Retrying after ${delayMs}ms...`
+          );
+
+          await this.sleep(delayMs);
+          lastError = new Error(`Bitbucket API rate limit: ${response.status}`);
+          continue; // Retry
+        }
+
+        // For other errors, throw immediately with the URL so callers know
+        // exactly which endpoint failed (404 in particular is opaque without it).
         throw new Error(
           `Bitbucket API error: ${response.status} ${response.statusText} for ${url}` +
           (bodyText ? ` — body: ${bodyText.slice(0, 200)}` : ''),
@@ -138,23 +144,39 @@ export class BitbucketService {
   /**
    * Helper to fetch all pages of a paginated response
    */
+  // Hard stop for runaway pagination, applied per fetchAllPages call (each
+  // paginated fetch gets its own budget): a single vendored/bulk commit can carry
+  // 20k+ changed files; without a cap, paging it exhausts the WAF request budget
+  // (~400-500 req/window) and fails the whole analysis. Results past the cap are
+  // dropped with a warn — analysis on such commits is best-effort by design.
+  // Effective caps: /changes @1000 → 25k files per commit; /commits @50 → 1,250.
+  private readonly MAX_PAGES_PER_FETCH = 25;
+
   private async fetchAllPages<
     T extends { values: unknown[]; isLastPage: boolean; nextPageStart?: number | null },
-  >(initialEndpoint: string): Promise<T['values'] extends Array<infer U> ? U[] : never> {
+  >(initialEndpoint: string, limit = 50): Promise<T['values'] extends Array<infer U> ? U[] : never> {
     const allValues: unknown[] = [];
     let start = 0;
-    const limit = 50;
     let hasMore = true;
+    let pages = 0;
 
     const separator = initialEndpoint.includes('?') ? '&' : '?';
 
     while (hasMore) {
+      // The server clamps `limit` to its per-endpoint max; the loop follows
+      // isLastPage/nextPageStart, so a clamp just means more (smaller) pages.
       const endpoint = `${initialEndpoint}${separator}start=${start}&limit=${limit}`;
       const response = await this.makeRequest<T>(endpoint);
 
       allValues.push(...response.values);
+      pages++;
 
       if (response.isLastPage) {
+        hasMore = false;
+      } else if (pages >= this.MAX_PAGES_PER_FETCH) {
+        logger.warn(
+          `Bitbucket pagination truncated at ${pages} pages (${allValues.length} items) for ${initialEndpoint} — remaining results dropped`
+        );
         hasMore = false;
       } else {
         start = response.nextPageStart ?? start + limit;
@@ -325,7 +347,10 @@ export class BitbucketService {
     const endpoint = `/projects/${projectKey}/repos/${repositorySlug}/commits/${commitId}/changes`;
 
     try {
-      return await this.fetchAllPages<BitbucketChangesResponse>(endpoint);
+      // limit=1000 (the server's ceiling for /changes): a 21k-file bulk commit is
+      // ~22 requests instead of ~430 at the default 50 — the difference between
+      // fitting inside the WAF request budget and tripping it mid-run.
+      return await this.fetchAllPages<BitbucketChangesResponse>(endpoint, 1000);
     } catch (error) {
       logger.error(`Failed to fetch changes for commit ${commitId}:`, error as Error);
       throw error;

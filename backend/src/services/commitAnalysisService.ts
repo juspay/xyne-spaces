@@ -548,11 +548,23 @@ export class CommitAnalysisService {
 
     let results: CommitAnalysisResult[];
     try {
-      results = await Promise.all(
-        commitIds.map((commitId) =>
-          this.analyzeEachCommit(commitId, projectKey, repositorySlug, workspaceId, ticketPrefix, request.branch)
-        )
-      );
+      // Bounded concurrency (was an unbounded Promise.all): each commit's analysis
+      // fans out further API calls (changes pagination + PR lookup), so analyzing
+      // every commit at once bursts hundreds of requests and trips the WAF in
+      // front of Bitbucket (403 "Rate limit ... in WAF"). Batches of 4 keep the
+      // request rate inside the WAF budget while preserving result order.
+      const CONCURRENCY = 4;
+      results = [];
+      for (let i = 0; i < commitIds.length; i += CONCURRENCY) {
+        const batch = await Promise.all(
+          commitIds
+            .slice(i, i + CONCURRENCY)
+            .map((commitId) =>
+              this.analyzeEachCommit(commitId, projectKey, repositorySlug, workspaceId, ticketPrefix, request.branch)
+            )
+        );
+        results.push(...batch);
+      }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       logger.error(`Failed to analyze commits: ${errorMessage}`);
