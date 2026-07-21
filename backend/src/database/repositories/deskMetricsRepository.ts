@@ -38,8 +38,13 @@ export class DeskMetricsRepository {
    */
   private resolveRange(timeRange: string | undefined): { gte: Date; lte: Date } {
     const now = new Date();
-    if (timeRange === '24h') {
-      return { gte: new Date(now.getTime() - DAY_MS), lte: now };
+    const parts = timeRange?.split('_');
+    if (parts?.length === 2) {
+      const fromMs = Number(parts[0]);
+      const toMs = Number(parts[1]);
+      if (Number.isFinite(fromMs) && Number.isFinite(toMs)) {
+        return { gte: new Date(fromMs), lte: new Date(toMs) };
+      }
     }
     return { gte: new Date(now.getTime() - 7 * DAY_MS), lte: now };
   }
@@ -233,10 +238,31 @@ export class DeskMetricsRepository {
         frt_seconds: number | null;
         rt_seconds: number | null;
         csat_value: { rating?: string; score?: number | string | null } | null;
+        custom_fields: Record<string, string> | null;
       }>
     >(
       Prisma.sql`
-        WITH ${cohortCte}
+        WITH ${cohortCte},
+        deduped_fev AS (
+          SELECT DISTINCT ON (fev."entityId", COALESCE(gf."fieldName", ff."fieldName"))
+            fev."entityId" AS ticket_id,
+            COALESCE(gf."fieldName", ff."fieldName") AS field_name,
+            COALESCE(NULLIF(fev."fieldValue", ''), fev."actualFieldValue"#>>'{}') AS field_value
+          FROM "public"."form_entity_values" fev
+          LEFT JOIN "public"."global_fields" gf ON gf.id = fev."fieldId"
+          LEFT JOIN "public"."form_fields" ff ON ff.id = fev."fieldId"
+          WHERE fev."entityId" IN (SELECT "ticketId" FROM cohort)
+            AND fev."entityType" = 'TICKET'
+          ORDER BY fev."entityId", COALESCE(gf."fieldName", ff."fieldName"), fev."updatedAt" DESC, fev.id DESC
+        ),
+        form_vals AS (
+          SELECT
+            ticket_id,
+            jsonb_object_agg(field_name, field_value)
+              FILTER (WHERE field_name IS NOT NULL AND field_value IS NOT NULL) AS custom_fields
+          FROM deduped_fev
+          GROUP BY ticket_id
+        )
         SELECT
           c."ticketId" AS ticket_id,
           t."xyneId" AS xyne_id,
@@ -251,10 +277,12 @@ export class DeskMetricsRepository {
           EXTRACT(EPOCH FROM (${resolvedAtSql} - c.created_at))::float AS rt_seconds,
           (SELECT ta.value FROM "public"."ticket_activities" ta
             WHERE ta."ticketId" = c."ticketId" AND ta."activityType" = 'CSAT_RECEIVED'
-            ORDER BY ta."timestamp" DESC LIMIT 1) AS csat_value
+            ORDER BY ta."timestamp" DESC LIMIT 1) AS csat_value,
+          fv.custom_fields
         FROM cohort c
         JOIN "public"."tickets" t ON t.id = c."ticketId"
         LEFT JOIN "public"."users" u ON u.id = t."assignedTo"
+        LEFT JOIN form_vals fv ON fv.ticket_id = c."ticketId"
         ORDER BY c.created_at DESC
       `,
     );
@@ -275,6 +303,7 @@ export class DeskMetricsRepository {
         rtSeconds: r.rt_seconds !== null && r.rt_seconds >= 0 ? r.rt_seconds : null,
         csatScore: typeof score === 'number' && Number.isFinite(score) ? score : null,
         csatRating: r.csat_value?.rating ?? null,
+        customFields: r.custom_fields ?? null,
       };
     });
   }

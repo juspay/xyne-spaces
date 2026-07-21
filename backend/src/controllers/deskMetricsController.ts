@@ -12,6 +12,9 @@ import { ChannelParticipantRepository } from '../database/repositories/channelPa
 import { ChannelRepository } from '../database/repositories/channelRepository.js';
 import { logger } from '../utils/logger.js';
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+const MAX_CUSTOM_RANGE_MS = 31 * DAY_MS;
+
 export class DeskMetricsController {
   private channelRepo = new ChannelRepository();
   private channelParticipantRepo = new ChannelParticipantRepository();
@@ -42,7 +45,7 @@ export class DeskMetricsController {
   }
 
   /**
-   * GET /channels/:channelId/metrics?timeRange=today|7d|30d|90d|YYYY-MM-DD_YYYY-MM-DD
+   * GET /channels/:channelId/metrics?timeRange=startMs_endMs
    */
   getMetrics = async (req: Request, res: Response): Promise<void> => {
     const { channelId } = req.params;
@@ -60,11 +63,26 @@ export class DeskMetricsController {
         return;
       }
 
-      const ALLOWED_TIME_RANGES = ['24h', '7d'] as const;
-      type AllowedTimeRange = typeof ALLOWED_TIME_RANGES[number];
-      const rawTimeRange = typeof req.query.timeRange === 'string' ? req.query.timeRange : '7d';
-      if (!ALLOWED_TIME_RANGES.includes(rawTimeRange as AllowedTimeRange)) {
-        res.status(400).json({ error: `Invalid timeRange. Allowed values: ${ALLOWED_TIME_RANGES.join(', ')}` });
+      const defaultEndMs = Date.now();
+      const rawTimeRange =
+        typeof req.query.timeRange === 'string'
+          ? req.query.timeRange
+          : `${defaultEndMs - 7 * DAY_MS}_${defaultEndMs}`;
+      const parts = rawTimeRange.split('_');
+      if (parts.length !== 2) {
+        res.status(400).json({ error: 'Invalid timeRange. Use startMs_endMs' });
+        return;
+      }
+      const fromMs = Number(parts[0]);
+      const toMs = Number(parts[1]);
+      const from = new Date(fromMs);
+      const to = new Date(toMs);
+      if (isNaN(from.getTime()) || isNaN(to.getTime()) || from > to) {
+        res.status(400).json({ error: 'Invalid time range' });
+        return;
+      }
+      if (toMs - fromMs > MAX_CUSTOM_RANGE_MS) {
+        res.status(400).json({ error: 'Custom time range cannot exceed 31 days' });
         return;
       }
       const timeRange = rawTimeRange;
