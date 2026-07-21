@@ -298,6 +298,27 @@ export class EmailRepository {
     });
   }
 
+  async update(
+    id: string,
+    data: Partial<{
+      subject: string;
+      body: string;
+      to: string[];
+      from: string;
+      cc: string[];
+      bcc: string[];
+      replyTo: string[];
+      externalThreadId: string;
+      externalMessageId: string;
+      sentByUserId: string | null;
+    }>,
+  ): Promise<Email> {
+    return await this.db.email.update({
+      where: { id },
+      data,
+    });
+  }
+
   async delete(id: string): Promise<Email> {
     return await this.db.email.delete({
       where: { id },

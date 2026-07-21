@@ -86,6 +86,7 @@ class AdapterRegistry {
     microsoft: ExternalSourcePlatform.MICROSOFT,
     google: ExternalSourcePlatform.GOOGLE,
     'app-desk': ExternalSourcePlatform.APP_DESK,
+    ozonetel: ExternalSourcePlatform.OZONETEL,
   };
 
   private tryMapStringToPlatform(platformStr: string): ExternalSourcePlatform | undefined {

@@ -61,8 +61,16 @@ export const DeskSettings: React.FC<DeskSettingsProps> = ({ open, onClose, chann
   const [signatures] = useCachedQuery(queries.userEmailSignatures());
 
   const form = useDeskSettingsForm(channelId, userID, open);
-  const { isEmail, isDirty, saving, save, cancel, sendAsAliasError, classificationConfigError } =
-    form;
+  const {
+    isEmail,
+    isCall,
+    isDirty,
+    saving,
+    save,
+    cancel,
+    sendAsAliasError,
+    classificationConfigError,
+  } = form;
   const saveBlockedReason = sendAsAliasError ?? classificationConfigError;
 
   const [confirmDiscardOpen, setConfirmDiscardOpen] = useState(false);
@@ -74,13 +82,12 @@ export const DeskSettings: React.FC<DeskSettingsProps> = ({ open, onClose, chann
     onClose();
   }, [isDirty, onClose]);
 
-  const availableTabs = useMemo(
-    () =>
-      isEmail
-        ? DESK_SETTINGS_TABS
-        : DESK_SETTINGS_TABS.filter(tab => tab.id !== 'automation' && tab.id !== 'tags'),
-    [isEmail],
-  );
+  const availableTabs = useMemo(() => {
+    if (isCall) {
+      return DESK_SETTINGS_TABS.filter(tab => ['assignment', 'ai-features'].includes(tab.id));
+    }
+    return isEmail ? DESK_SETTINGS_TABS : DESK_SETTINGS_TABS.filter(tab => tab.id !== 'automation');
+  }, [isCall, isEmail]);
 
   useEffect(() => {
     if (!availableTabs.some(tab => tab.id === activeTab)) {

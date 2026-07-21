@@ -11,7 +11,7 @@ export class EmailChannelPreferenceRepository {
   private db = DatabaseClient.getInstance();
 
   /**
-   * Validates that the channel is a desk type (EMAIL or SLACK)
+   * Validates that the channel is a desk type
    * @throws Error if channel is not a desk type or doesn't exist
    */
   private async validateEmailChannel(channelId: string): Promise<void> {
@@ -26,7 +26,7 @@ export class EmailChannelPreferenceRepository {
 
     if (!isDeskChannelType(channel.type)) {
       throw new Error(
-        `Channel ${channelId} is not a desk channel. EmailChannelPreference can only be created for EMAIL or SLACK channels. Current type: ${channel.type}`
+        `Channel ${channelId} is not a desk channel. EmailChannelPreference can only be created for desk channels. Current type: ${channel.type}`
       );
     }
   }

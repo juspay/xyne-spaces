@@ -98,4 +98,4 @@ export const stream = {
   write: (message: string) => {
     logger.info(message.trim());
   },
-};
+}; 

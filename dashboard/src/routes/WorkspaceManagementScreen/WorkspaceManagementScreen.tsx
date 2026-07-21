@@ -17,32 +17,29 @@ export const WorkspaceManagementScreen = (): ReactElement => {
   const queryClient = useQueryClient();
 
   useEffect(() => {
-    const connected = searchParams.get('workspaceMailboxConnected');
-    const channelEmailConnected = searchParams.get('channelEmailMailboxConnected');
-    const errorMsg = searchParams.get('emailError');
+    const connected = searchParams.get('channelEmailMailboxConnected');
+    const errorMessage = searchParams.get('emailError');
+
     if (connected === 'true') {
-      const email = searchParams.get('email');
-      toast.success(email ? `Connected ${email}` : 'Shared mailbox connected');
-      void queryClient.invalidateQueries({ queryKey: ['workspace-shared-mailbox-status'] });
-    } else if (channelEmailConnected === 'true') {
       const provider = searchParams.get('provider') ?? 'Email';
       toast.success(
         `${provider.charAt(0).toUpperCase() + provider.slice(1)} channel email mailbox connected successfully`,
       );
-      void queryClient.invalidateQueries({ queryKey: ['workspace-channel-email-mailbox-status'] });
-    } else if (errorMsg) {
-      toast.error(errorMsg);
+      void queryClient.invalidateQueries({
+        queryKey: ['workspace-channel-email-mailbox-status'],
+      });
+    } else if (errorMessage) {
+      toast.error(errorMessage);
     }
-    if (connected || channelEmailConnected || errorMsg) {
+
+    if (connected || errorMessage) {
       const next = new URLSearchParams(searchParams);
-      next.delete('workspaceMailboxConnected');
       next.delete('channelEmailMailboxConnected');
       next.delete('emailError');
-      next.delete('email');
       next.delete('provider');
       setSearchParams(next, { replace: true });
     }
-  }, [searchParams, setSearchParams, queryClient]);
+  }, [queryClient, searchParams, setSearchParams]);
 
   const handleBack = (): void => {
     void navigate(workspaceId ? `/${workspaceId}/chat/dir` : '/');

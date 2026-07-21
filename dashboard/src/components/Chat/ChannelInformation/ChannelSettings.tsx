@@ -335,7 +335,7 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({
                     onClick={handleOpenWorkspaceSettings}
                     className='shrink-0'
                   >
-                    Manage in Workspace Settings
+                    Manage in Workspace Management
                   </Button>
                 </div>
               )}

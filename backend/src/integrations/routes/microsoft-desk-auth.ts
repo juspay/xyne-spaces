@@ -623,13 +623,14 @@ router.get('/callback', async (req: Request, res: Response) => {
 
       const workspaceParams = new URLSearchParams({
         workspaceMailboxConnected: 'true',
+        deskIntegrations: 'open',
         provider: 'microsoft',
         email,
       });
       res.redirect(
         buildPostOAuthRedirect(
           frontendUrl,
-          `/${channelData.workspaceId}/workspace-management?${workspaceParams.toString()}`,
+          buildSupportPath(channelData.workspaceId, undefined, workspaceParams),
           platform,
         ),
       );

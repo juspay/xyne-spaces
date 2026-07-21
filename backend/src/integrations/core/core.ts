@@ -11,7 +11,7 @@ import { ConversationRepository } from '../../database/repositories/conversation
 import { MessageRepository } from '../../database/repositories/messageRepository';
 import { ChannelRepository } from '../../database/repositories/channelRepository';
 import { EmailChannelPreferenceRepository } from '../../database/repositories/emailChannelPreferenceRepository';
-import { ExternalSource, ExternalMessage, ExternalEntityType, EmailType, EmailMergeMode } from '@prisma/client';
+import { ExternalSource, ExternalMessage, ExternalEntityType, EmailType, EmailMergeMode, ChannelType } from '@prisma/client';
 import { isDeskChannelType } from '@xyne/shared';
 import { logger } from '../../utils/logger';
 import { conversationService } from '../../services/conversationService';
@@ -234,11 +234,24 @@ export class ExternalSourceCore {
     }
 
     if (existingExtMsg && isDeskChannel) {
-      const existingEmail = await this.emailRepo.findByExternalMessageIdAndChannel(
-        normalizedData.externalId,
-        source.channelId
-      );
+      const existingEmail =
+        source.sourceType === 'ozonetel' &&
+        existingExtMsg.entityType === ExternalEntityType.EMAIL &&
+        existingExtMsg.entityId
+          ? await this.emailRepo.findById(existingExtMsg.entityId)
+          : await this.emailRepo.findByExternalMessageIdAndChannel(
+              normalizedData.externalId,
+              source.channelId,
+            );
       if (existingEmail) {
+        if (adapter.postprocess && source.sourceType === 'ozonetel') {
+          await adapter.postprocess({
+            conversationId: existingEmail.conversationId,
+            entityId: existingEmail.id,
+            sourceId: source.id,
+            normalizedData,
+          });
+        }
         return {
           success: true,
           conversationId: existingEmail.conversationId,
@@ -317,6 +330,19 @@ export class ExternalSourceCore {
     normalizedData: NormalizedData,
   ): Promise<string[]> {
     const workspaceId = source.workspaceId!;
+    if (source.sourceType === 'ozonetel') {
+      const channelId =
+        typeof normalizedData.metadata.ozonetelChannelId === 'string'
+          ? normalizedData.metadata.ozonetelChannelId.trim()
+          : '';
+      if (!channelId) return [];
+
+      const channel = await this.channelRepo.findById(channelId);
+      return channel?.workspaceId === workspaceId && channel.type === ChannelType.CALL
+        ? [channelId]
+        : [];
+    }
+
     if (this.channelEmailAliasService.isChannelEmailSourceType(source.sourceType)) {
       const inboundRecipients = normalizedData.emailData?.to ?? [];
       const taggedChannelId = this.channelEmailAliasService.extractChannelIdFromRecipients(
@@ -396,7 +422,8 @@ export class ExternalSourceCore {
       throw new Error(`External source ${source.name} does not have a channel binding`);
     }
 
-    const channelDisplayName = (await this.channelRepo.findById(source.channelId))?.name;
+    const channel = await this.channelRepo.findById(source.channelId);
+    const channelDisplayName = channel?.name;
 
     // For desk channels, check exact duplicate for this channel first
     // before any cross-desk ExternalMessage lookups.
@@ -679,6 +706,23 @@ export class ExternalSourceCore {
         const preference = await this.emailChannelPreferenceRepo.findByChannelId(source.channelId);
         if (preference?.ownerUserId) {
           userId = preference.ownerUserId;
+        }
+      }
+
+      const creatorUserId = normalizedData.creatorUserId?.trim();
+      if (channel?.type === ChannelType.CALL && creatorUserId && channel.workspaceId) {
+        const creator = await db.user.findFirst({
+          where: { id: creatorUserId, workspaceId: channel.workspaceId },
+          select: { id: true },
+        });
+        if (creator) {
+          userId = creator.id;
+        } else {
+          logger.warn('Ignoring invalid external creator user', {
+            sourceName: source.name,
+            channelId: source.channelId,
+            creatorUserId,
+          });
         }
       }
 
