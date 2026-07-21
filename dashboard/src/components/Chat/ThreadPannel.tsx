@@ -19,7 +19,6 @@ import {
   X,
   FileText,
   Ticket,
-  Play,
   CornerDownRight,
   MessageCircle,
   File,
@@ -45,7 +44,6 @@ import { QueryResultType } from '@rocicorp/zero';
 import * as Tabs from '@radix-ui/react-tabs';
 import { cn } from '../../utils/classNames';
 import JoinChannel from './JoinChannel/JoinChannel';
-import WorkflowTriggerModal from '../Workflow/WorkflowTriggerModal';
 import { BotBubble } from './BotBubble';
 import { toast } from 'sonner';
 import { TicketDetails } from '../Tickets/TicketDetails/TicketDetails';
@@ -266,7 +264,6 @@ export const ThreadMessages = ({
     }
     return set;
   }, [messages]);
-  const [isWorkflowModalOpen, setIsWorkflowModalOpen] = useState(false);
   const [isScheduleCallModalOpen, setIsScheduleCallModalOpen] = useState(false);
   const channel = useChannel(derivedChannelId);
   const { displayName: channelDisplayName } = useChannelDisplayName(channel, currentUser?.id ?? '');
@@ -1097,12 +1094,6 @@ export const ThreadMessages = ({
     },
     ...sharedMenuItems,
     {
-      icon: <Play className='w-4 h-4' />,
-      label: 'Trigger workflow',
-      onSelect: () => setIsWorkflowModalOpen(true),
-      disabled: !!ticket?.isArchived,
-    },
-    {
       icon: <LinkIcon className='w-4 h-4' />,
       label: 'Copy ticket link',
       onSelect: handleCopyTicketViewLink,
@@ -1238,20 +1229,6 @@ export const ThreadMessages = ({
                     aria-label='Open in new window'
                   >
                     <ExternalLink size={20} />
-                  </Button>
-                </Tooltip>
-              )}
-              {!isHeaderCompact && (
-                <Tooltip content='Trigger Workflow'>
-                  <Button
-                    className='p-2 border border-border rounded-lg h-8 w-8'
-                    variant='ghost'
-                    size='sm'
-                    onClick={() => setIsWorkflowModalOpen(true)}
-                    disabled={ticket?.isArchived}
-                    aria-label='Trigger Workflow'
-                  >
-                    <Play size={20} />
                   </Button>
                 </Tooltip>
               )}
@@ -1886,14 +1863,6 @@ export const ThreadMessages = ({
           />
         )}
 
-        {/* Workflow Trigger Modal */}
-        {(isTicketThread || ticketId) && (
-          <WorkflowTriggerModal
-            isOpen={isWorkflowModalOpen}
-            onClose={() => setIsWorkflowModalOpen(false)}
-            ticketId={derivedTicketId}
-          />
-        )}
         {/* Schedule Call Modal */}
         <ScheduleCallModal
           isOpen={isScheduleCallModalOpen}

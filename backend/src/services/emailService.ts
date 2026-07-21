@@ -21,7 +21,6 @@ import { BoardRepository } from '@/database/repositories/boardRepository';
 import { EmailChannelPreferenceRepository } from '@/database/repositories/emailChannelPreferenceRepository';
 import { DatabaseClient } from '@/database/client';
 import {
-  MessageType,
   EmailType,
   ChannelType,
   Prisma,
@@ -45,7 +44,6 @@ import { ticketAssignmentService, primaryUserIdOf } from '@/services/ticketAssig
 import { BaseTicketType, type BoardMetadata, isDeskChannelType } from '@xyne/shared';
 import { UploadedFileResult } from './fileUploadService';
 import { config } from '@/config/env';
-import { workflowManager, WorkflowType } from '@/workflows';
 import { superpositionClient } from './superpositionClient';
 import { createBlockingContext } from '@/utils/superpositionUtils';
 import { vespaQueue } from '@/queues/vespaQueue';
@@ -1184,26 +1182,6 @@ export class EmailService {
       emailBody,
     });
 
-    // Start workflow (only for Zoho sources, controlled by config)
-    const isZohoSource = sourceName?.startsWith('zoho');
-    let workflowResult: { workflowId: string; executionId: string; status: string } | null = null;
-    if (isZohoSource && config.zoho.autoWorkflowEnabled) {
-      try {
-        workflowResult = await workflowManager.startWorkflow({
-          ticketId: ticket.id,
-          workflowType: WorkflowType.GENIUS_QUERY_WORKFLOW,
-          context: {
-            ticketId: ticket.id
-          }
-        });
-        logger.info(`Workflow created for ticket ${ticket.id}: ${workflowResult.workflowId}`);
-      } catch (error) {
-        logger.error("Error while creating workflow zoho: tickets", error)
-      }
-    } else {
-      logger.info(`[EmailService] Skipping auto-workflow for ticket ${ticket.id} (ZOHO_AUTO_WORKFLOW_ENABLED=false)`);
-    }
-
     // Create message with ticket
     const messageData: CreateMessageInput = {
       conversationId: conversation.conversationId,
@@ -1224,25 +1202,6 @@ export class EmailService {
     });
     await messageMetadataService.syncInitialMessageMd(conversation.conversationId);
 
-    if (isZohoSource && config.zoho.autoWorkflowEnabled) {
-      const messageDataSys: CreateMessageInput = {
-        conversationId: conversation.conversationId,
-        senderId: userId,
-        content: '',
-        msgType: MessageType.SYSTEM,
-        hasAttachment: true,
-        metadata: {
-          ticketId: ticket.id,
-          xyneId: ticket.xyneId,
-          ...(workflowResult && {
-            workflowId: workflowResult.workflowId,
-            workflowName: emailSubject,
-            workflowType: WorkflowType.GENIUS_QUERY_WORKFLOW,
-          }),
-        },
-      };
-      await this.messageRepository.create(messageDataSys);
-    }
 
     this.pushVespaJobForMail(email.id, userId, channel.workspaceId).catch(error => {
       logger.error(`[EmailService] Error pushing Vespa job for mail ${email.id}:`, error);

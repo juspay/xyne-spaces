@@ -4,7 +4,6 @@ export enum WorkflowType {
   USER_ONBOARDING = 'USER_ONBOARDING',
   QUERY_WORKFLOW = 'QUERY_WORKFLOW',
   STAGE_APPROVAL_WORKFLOW = 'STAGE_APPROVAL_WORKFLOW',
-  GENIUS_QUERY_WORKFLOW = 'GENIUS_QUERY_WORKFLOW',
   NETWORK_DOCUMENT_PROCESSING = 'NETWORK_DOCUMENT_PROCESSING',
   IT_SUPPORT_WORKFLOW = 'IT_SUPPORT_WORKFLOW',
 }
@@ -268,13 +267,14 @@ export function getWorkflowTypeDisplayName(workflowType: WorkflowType): string {
   const displayNames: Record<WorkflowType, string> = {
     [WorkflowType.USER_ONBOARDING]: 'User Onboarding',
     [WorkflowType.QUERY_WORKFLOW]: 'Query Workflow',
-    [WorkflowType.GENIUS_QUERY_WORKFLOW]: 'Genius Query Workflow',
     [WorkflowType.STAGE_APPROVAL_WORKFLOW]: 'Stage Approval Workflow',
     [WorkflowType.NETWORK_DOCUMENT_PROCESSING]: 'Network Document Processing',
     [WorkflowType.IT_SUPPORT_WORKFLOW]: 'IT Support Workflow',
   };
-  // Fallback to the raw value: historical DB rows may carry types that have
-  // since been removed from the enum (e.g. XYNE_AUTO_RCA_WORKFLOW).
+  // Rows outlive their definition: retired types (GENIUS_QUERY_WORKFLOW,
+  // XYNE_AUTO_RCA_WORKFLOW, the agentic workflows) still exist in
+  // workflow_executions, and workflowType is a plain string column. Fall back to
+  // the raw value rather than rendering undefined.
   return displayNames[workflowType] ?? workflowType
 }
 
