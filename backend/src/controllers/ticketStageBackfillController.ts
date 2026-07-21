@@ -9,14 +9,14 @@ import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { isDeskChannelType } from '@xyne/shared';
 
 const TAG = '[TicketStageBackfill]';
+const BATCH_SIZE = 50;
+const DELAY_MS = 1000;
 
 const requestSchema = z
   .object({
     channelId: z.string().trim().min(1, 'channelId is required'),
     targetStage: z.string().trim().min(1, 'targetStage is required'),
     destinationStage: z.string().trim().min(1, 'destinationStage is required'),
-    batchSize: z.number().int().min(1).max(1000).optional().default(100),
-    delayMs: z.number().int().min(0).max(60_000).optional().default(2000),
     dryRun: z.boolean().optional().default(false),
   })
   .strict()
@@ -281,7 +281,7 @@ export class TicketStageBackfillController {
           },
           select: { id: true, boardId: true },
           orderBy: { id: 'asc' },
-          take: options.batchSize,
+          take: BATCH_SIZE,
         });
 
         if (tickets.length === 0) break;
@@ -335,7 +335,7 @@ export class TicketStageBackfillController {
           ...summary,
         });
 
-        if (options.delayMs > 0) await TicketStageBackfillController.sleep(options.delayMs);
+        if (DELAY_MS > 0) await TicketStageBackfillController.sleep(DELAY_MS);
       }
 
       res.status(200).json({

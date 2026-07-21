@@ -14,8 +14,6 @@ const adminAuth = authorize('TICKET-MIGRATION', AccessType.ADMIN);
  *         channelId: string,
  *         targetStage: string,
  *         destinationStage: string,
- *         batchSize?: number,
- *         delayMs?: number,
  *         dryRun?: boolean
  *       }
  * @access TICKET-MIGRATION Admin only
