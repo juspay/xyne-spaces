@@ -2,6 +2,7 @@ import { useEffect, useRef, useMemo, useState, useCallback } from 'react';
 import * as Y from 'yjs';
 import type { Awareness } from 'y-protocols/awareness';
 import { createYjsProvider, EVENT_CONNECTION_STATUS, EVENT_LOCAL_CHANGES } from '@y-sweet/client';
+import { DYNAMIC_HEADERS_CHANGED_EVENT } from '../services/clients/dynamicHeaders';
 import type { YSweetProvider } from '@y-sweet/client';
 import { toast } from 'sonner';
 import { useQuery } from '@tanstack/react-query';
@@ -402,6 +403,19 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
       doc.destroy();
     };
   }, [doc, canvasId, authTokenData, getAuthToken]);
+
+  useEffect(() => {
+    const handleDynamicHeadersChanged = (): void => {
+      const provider = providerRef.current;
+      if (!provider) return;
+      provider.disconnect();
+      void provider.connect();
+    };
+    window.addEventListener(DYNAMIC_HEADERS_CHANGED_EVENT, handleDynamicHeadersChanged);
+    return (): void => {
+      window.removeEventListener(DYNAMIC_HEADERS_CHANGED_EVENT, handleDynamicHeadersChanged);
+    };
+  }, []);
 
   return {
     doc,

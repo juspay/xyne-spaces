@@ -279,6 +279,12 @@ class WebSocketService {
     void this.attemptReconnect();
   }
 
+  forceReconnect(): void {
+    if (!this.socket) return;
+    this.socket.disconnect();
+    this.socket.connect();
+  }
+
   startTyping(sessionId: string): void {
     if (!this.socket || !this.isConnected) return;
 

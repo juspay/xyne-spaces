@@ -16,6 +16,7 @@ interface ZeroProviderProps {
 const ZeroProvider: React.FC<ZeroProviderProps> = ({ children }): ReactElement | null => {
   const { user } = useAuth();
   const isRefreshing = useRef(false);
+  const isRecoveringRef = useRef(false);
   const refreshCount = useSelector(stateMachineActor, state => state.context.zeroRefreshCounter);
   const prevWorkspaceIdRef = useRef<string | undefined>(undefined);
 
@@ -41,6 +42,14 @@ const ZeroProvider: React.FC<ZeroProviderProps> = ({ children }): ReactElement |
         window.location.reload();
         isRefreshing.current = false;
       }
+    };
+
+    const handleClientStateNotFound = (): void => {
+      if (isRecoveringRef.current) {
+        return;
+      }
+      isRecoveringRef.current = true;
+      stateMachineActor.send({ type: 'REFRESH_ZERO' });
     };
 
     const prevWorkspaceId = prevWorkspaceIdRef.current;
@@ -77,12 +86,15 @@ const ZeroProvider: React.FC<ZeroProviderProps> = ({ children }): ReactElement |
         onUpdateNeeded: (reason: UpdateNeededReason): void => {
           void handleUpdateNeeded(reason);
         },
+        onClientStateNotFound: handleClientStateNotFound,
       });
 
       setZero(prev => {
         void prev?.close();
         return zeroObj;
       });
+
+      isRecoveringRef.current = false;
     };
 
     void initZero();

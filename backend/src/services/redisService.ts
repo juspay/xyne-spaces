@@ -19,7 +19,7 @@ export interface SessionEvent {
 }
 
 export interface UserEvent {
-  type: 'channel_added' | 'channel_removed' | 'participant_added' | 'participant_removed' | 'user_mentioned' | 'incoming_call' | 'call_ended' | 'call_cancelled' | 'recap_unread_count_updated' | 'recap_generated' | 'recap_cleanup_completed' | 'data_source_ingestion_updated' | 'data_source_ingestion_progress';
+  type: 'channel_added' | 'channel_removed' | 'participant_added' | 'participant_removed' | 'user_mentioned' | 'incoming_call' | 'call_ended' | 'call_cancelled' | 'recap_unread_count_updated' | 'recap_generated' | 'recap_cleanup_completed' | 'data_source_ingestion_updated' | 'data_source_ingestion_progress' | 'dynamic_headers_updated';
   userId: string;
   data: any;
   timestamp: Date;
@@ -1182,6 +1182,61 @@ class RedisService {
     await this.redis.set('zero:fallback_enabled', String(config.fallbackEnabled));
     await this.redis.set('zero:allow_mutations', String(config.allowMutations));
     await this.redis.set('zero:poll_interval_ms', String(config.pollIntervalMs));
+  }
+
+  private static readonly USER_HEADER_OVERRIDES_KEY = 'user-header-overrides';
+
+  async getAllUserHeaderOverrides(): Promise<Record<string, Record<string, string>>> {
+    if (!this.redis) throw new Error('Redis not initialized');
+    const raw = await this.redis.hgetall(RedisService.USER_HEADER_OVERRIDES_KEY);
+    const result: Record<string, Record<string, string>> = {};
+    for (const [userId, json] of Object.entries(raw)) {
+      try {
+        result[userId] = JSON.parse(json);
+      } catch {
+        logger.warn(`[USER-HEADERS] Skipping corrupt override entry for user ${userId}`);
+      }
+    }
+    return result;
+  }
+
+  async getUserHeaderOverrides(userId: string): Promise<Record<string, string>> {
+    if (!this.redis) throw new Error('Redis not initialized');
+    const json = await this.redis.hget(RedisService.USER_HEADER_OVERRIDES_KEY, userId);
+    if (!json) return {};
+    try {
+      return JSON.parse(json);
+    } catch {
+      logger.warn(`[USER-HEADERS] Corrupt override entry for user ${userId}, treating as empty`);
+      return {};
+    }
+  }
+
+  async setUserHeaderOverrides(userId: string, headers: Record<string, string>): Promise<Record<string, string>> {
+    if (!this.redis) throw new Error('Redis not initialized');
+    const merged = { ...(await this.getUserHeaderOverrides(userId)), ...headers };
+    await this.redis.hset(RedisService.USER_HEADER_OVERRIDES_KEY, userId, JSON.stringify(merged));
+    return merged;
+  }
+
+  async removeUserHeaderOverrides(userId: string, headerNames?: string[]): Promise<Record<string, string>> {
+    if (!this.redis) throw new Error('Redis not initialized');
+    if (!headerNames || headerNames.length === 0) {
+      await this.redis.hdel(RedisService.USER_HEADER_OVERRIDES_KEY, userId);
+      return {};
+    }
+    const current = await this.getUserHeaderOverrides(userId);
+    const toRemove = new Set(headerNames.map(name => name.toLowerCase()));
+    const remaining: Record<string, string> = {};
+    for (const [name, value] of Object.entries(current)) {
+      if (!toRemove.has(name.toLowerCase())) remaining[name] = value;
+    }
+    if (Object.keys(remaining).length === 0) {
+      await this.redis.hdel(RedisService.USER_HEADER_OVERRIDES_KEY, userId);
+    } else {
+      await this.redis.hset(RedisService.USER_HEADER_OVERRIDES_KEY, userId, JSON.stringify(remaining));
+    }
+    return remaining;
   }
 
   /**

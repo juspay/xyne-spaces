@@ -13,6 +13,7 @@ import type { Logger, MetricsRecorder } from '../logger/index.js';
 import { noopLogger, noopMetrics } from '../logger/index.js';
 import { Event } from '../logger/events.js';
 import { wasInterrupted } from './metricValidity.js';
+import { trackMutationStart, trackMutationSettled } from './pendingMutations.js';
 
 /**
  * Instrumentation context — inject logger + metrics at the app root.
@@ -59,6 +60,7 @@ export function useZero(): Zero {
             stage: 'start',
           });
 
+          trackMutationStart();
           const result = target.mutate(mutationRequest as Parameters<Zero['mutate']>[0]);
 
           Promise.all([result.client, result.server])
@@ -129,6 +131,9 @@ export function useZero(): Zero {
                 mutation: mutationName,
                 stage: 'error',
               });
+            })
+            .finally(() => {
+              trackMutationSettled();
             });
 
           return result;
