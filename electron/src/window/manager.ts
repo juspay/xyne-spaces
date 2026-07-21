@@ -8,6 +8,7 @@ import { setupPermissionRequestOnFocus } from '../services/media-permission';
 import { setMainWindow as setInterceptorMainWindow } from '../services/request-interceptor';
 import { getBundledUIUrl } from '../services/custom-protocol';
 import { browserSettingsService } from '../services/browser-settings';
+import { getCreateOptions, applyPostCreate, track, saveNow } from './window-state';
 
 import { keychain } from '../keychain';
 import { Logger } from '../services/logger/Logger';
@@ -95,9 +96,11 @@ export async function loadApp(window: BrowserWindow) {
 export async function createMainWindow(): Promise<BrowserWindow> {
   const iconPath = path.join(__dirname, '..', '..', 'assets', 'images', 'xyne.ico');
 
+  const createOpts = getCreateOptions();
+
   mainWindow = new BrowserWindow({
-    width: config.window.width,
-    height: config.window.height,
+    ...createOpts,
+    show: false,
     title: config.window.title,
     titleBarStyle: 'hiddenInset',
     icon: iconPath,
@@ -110,6 +113,11 @@ export async function createMainWindow(): Promise<BrowserWindow> {
       spellcheck: true,
     },
   });
+
+  // Restore maximized/windowed state, then reveal once painted to avoid a resize flash.
+  applyPostCreate(mainWindow);
+  track(mainWindow, () => isCompactMode);
+  mainWindow.once('ready-to-show', () => mainWindow?.show());
 
   // Handle external links
   mainWindow.webContents.setWindowOpenHandler((details) => {
@@ -279,6 +287,8 @@ export async function createMainWindow(): Promise<BrowserWindow> {
 
   // Handle close (hide on macOS, unless quitting via Cmd+Q)
   mainWindow.on('close', (event) => {
+    // Persist latest bounds before hide/quit so a cold relaunch restores them.
+    if (mainWindow) saveNow(mainWindow);
     // Normal close behavior
     if (process.platform === 'darwin' && !getIsQuitting()) {
       event.preventDefault();
