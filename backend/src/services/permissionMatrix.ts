@@ -1,6 +1,8 @@
 import { AccessType, WorkspaceRole, Prisma } from '@prisma/client';
 import { logger } from '../utils/logger';
 import { repositories } from '../database/repositories/index';
+import { db } from '../database/client';
+import { aclAuditService } from './aclAuditService';
 
 /**
  * Exhaustive union of all resource names used in the permission matrix.
@@ -26,6 +28,7 @@ export type ResourceName =
   | 'CHANNELS'
   | 'CANVASES'
   | 'WORKSPACE'
+  | 'ORGANIZATIONS'
   | 'TICKET-MIGRATION'
   | 'CONFLUENCE-MIGRATION';
 
@@ -207,5 +210,101 @@ export async function grantPermissionsForRole(
       `${logPrefix} Unexpected error granting permissions for ${role} user ${email}${wsContext}:`,
       err,
     );
+  }
+}
+
+/**
+ * Keep a single resource's ADMIN access in lockstep with a membership-role toggle
+ * (e.g. WorkspaceRole/OrgRole promote-to-admin or demote-to-member). Idempotent:
+ * grants ADMIN if missing and should be present, revokes if present and shouldn't be.
+ * Error-swallowing — a failure here must never fail the role-change mutation it's
+ * attached to as a fire-and-forget side effect.
+ */
+export async function syncResourceAdminAccess(
+  userId: string,
+  resourceName: ResourceName,
+  shouldHaveAccess: boolean,
+  actorUserId: string,
+): Promise<void> {
+  const logPrefix = '[syncResourceAdminAccess]';
+
+  try {
+    const resource = await repositories.resources.findByName(resourceName);
+    if (!resource) {
+      logger.warn(`${logPrefix} Resource "${resourceName}" not found. Skipping for user ${userId}.`);
+      return;
+    }
+
+    const existingAccess = await repositories.resourceAccess.findUserResourceAccess(userId, resource.id);
+    const hasAdminAccess = existingAccess.some(
+      access => access.userId === userId && access.accessType === AccessType.ADMIN,
+    );
+
+    if (shouldHaveAccess && !hasAdminAccess) {
+      await repositories.resourceAccess.grantAccess(
+        { userId, resourceId: resource.id, accessType: AccessType.ADMIN },
+        actorUserId,
+      );
+      logger.debug(`${logPrefix} Granted ADMIN access to ${resourceName} for user ${userId}.`);
+    } else if (!shouldHaveAccess && hasAdminAccess) {
+      // Scoped to ADMIN rows only — a demotion must not strip any independently
+      // granted WRITE/READ access to this resource. Deletes inline here (rather
+      // than via repositories.resourceAccess.revokeUserAccess, which deletes every
+      // accessType for the user+resource) so the shared repository stays untouched.
+      const adminRows = await db.resourceAccess.findMany({
+        where: { userId, resourceId: resource.id, accessType: AccessType.ADMIN },
+        include: { resource: true, user: true },
+      });
+      await db.resourceAccess.deleteMany({
+        where: { userId, resourceId: resource.id, accessType: AccessType.ADMIN },
+      });
+      for (const row of adminRows) {
+        await aclAuditService.logPermissionRevoked(
+          row.id,
+          `Revoked ADMIN access from user ${row.user?.email} for resource ${row.resource.name}`,
+          actorUserId,
+        );
+      }
+      logger.debug(`${logPrefix} Revoked ADMIN access to ${resourceName} for user ${userId}.`);
+    }
+  } catch (error) {
+    logger.error(`${logPrefix} Failed to sync ${resourceName} access for user ${userId}:`, error);
+  }
+}
+
+/**
+ * Org membership (org_members) has no live FK to `users` — it's matched by email.
+ * A promoted/demoted org member may have a `users` row in any workspace linked to
+ * their org, so resolve every matching workspace-user row and sync ORGANIZATIONS
+ * ADMIN access on each. Error-swallowing, same fire-and-forget contract as its caller.
+ */
+export async function syncOrgResourceAdminAccess(
+  orgId: string,
+  email: string,
+  shouldHaveAccess: boolean,
+  actorUserId: string,
+): Promise<void> {
+  const logPrefix = '[syncOrgResourceAdminAccess]';
+
+  try {
+    const links = await db.workspaceOrganization.findMany({
+      where: { orgId, leftAt: null },
+      select: { workspaceId: true },
+    });
+    if (links.length === 0) return;
+
+    const users = await db.user.findMany({
+      where: {
+        workspaceId: { in: links.map(l => l.workspaceId) },
+        email: { equals: email, mode: 'insensitive' },
+      },
+      select: { id: true },
+    });
+
+    for (const user of users) {
+      await syncResourceAdminAccess(user.id, 'ORGANIZATIONS', shouldHaveAccess, actorUserId);
+    }
+  } catch (error) {
+    logger.error(`${logPrefix} Failed to sync ORGANIZATIONS access for org ${orgId}, email ${email}:`, error);
   }
 }
