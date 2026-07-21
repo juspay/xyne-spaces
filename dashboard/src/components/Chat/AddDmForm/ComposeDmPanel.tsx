@@ -474,7 +474,9 @@ export const ComposeDmPanel: React.FC = () => {
         <div className='mx-auto bg-background h-full flex flex-col'>
           {/* Conversation Preview */}
           <div className='px-4'>
-            <div className='text-base font-semibold text-foreground'>New Message</div>
+            <div className='text-base font-semibold text-foreground'>
+              {existingDmChannel && latestMessage ? 'Existing Conversation' : 'New Message'}
+            </div>
             {selectedUsers.length > 0 ? (
               <div className='flex items-center gap-2 justify-between text-xs text-muted-foreground'>
                 <div className='flex justify-between items-center gap-2 w-full'>
