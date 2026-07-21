@@ -3,10 +3,13 @@
 #   - .husky/pre-commit  -> `gitleaks git --staged`  (blocks secrets before commit)
 #   - release audit       -> `gitleaks dir .`         (whole-tree scan before open-source)
 #
-# NOTE on suppression:
-#   - Whole PATH classes that never need scanning go in [allowlist].paths below.
-#   - Individual REVIEWED/ACCEPTED findings (incl. real-but-accepted values) go in
-#     the .gitleaksignore file as fingerprints, NOT here. Keep that list reviewed.
+# NOTE on suppression — ALL accepted findings go HERE (line-number-FREE, so merges/edits don't
+# re-trigger). We intentionally do NOT use a .gitleaksignore file — its fingerprints are
+# `file:rule:LINE` and break the moment a line moves (the merge problem we were hitting).
+#   - Whole files that are safe by design      -> [allowlist].paths    (e.g. google-services.json)
+#   - Specific accepted VALUES (tokens/ids/FPs) -> [allowlist].regexes  (matched ANYWHERE; a NEW
+#     secret in the same file is still caught).
+# If the pre-commit hook blocks a PUBLIC/SAFE finding, add a path or regex here and re-commit.
 
 # Inherit gitleaks' built-in default rules.
 [extend]
@@ -27,6 +30,10 @@ paths = [
   '''(^|/)electron/release/''',
   '''(^|/)\.vite/''',
 
+  # CI security-scan scratch: downloaded scanner binaries + generated reports
+  '''(^|/)\.securitybin/''',
+  '''(^|/)security-reports/''',
+
   # Signing material — must never be committed; flag via separate policy, not scan noise
   '''\.keystore$''',
   '''\.jks$''',
@@ -41,4 +48,29 @@ paths = [
   '''(^|/)Podfile\.lock$''',
   '''(^|/)package-lock\.json$''',
   '''(^|/)yarn\.lock$''',
+
+  # Firebase config — google-services.json is public-by-design client config (any flavor/location)
+  '''(^|/)google-services\.json$''',
+
+  # This config file itself — so the accepted values in `regexes` below don't self-flag
+  '''(^|/)\.gitleaks\.toml$''',
+]
+
+# Accepted VALUES — safe/public tokens, public identifiers, and false positives.
+# Matched against the detected secret ANYWHERE it appears → no line numbers, merge-proof.
+# A brand-new/different secret in the same file is still caught.
+regexes = [
+  # Mixpanel client-side analytics token (apps/xyne-spaces/.env.*, lotus/.env.*, Jenkinsfile)
+  '''ca5b322f4175470400f68cddf319f2d5''',
+  # Firebase Storage download token on the public "download the app" page (apps/public-web/public/index.html)
+  '''03f41183-48fd-4658-bedf-b21a86de6114''',
+  # Internal Euler repo UUIDs — identifiers, not credentials (integrityDebugWorkflow.ts)
+  '''8cbe7e27-7ead-4aca-8ca1-f84dc417a50a''',
+  '''47f190fd-0c7c-4e0b-bd77-4c5fe216f023''',
+  # Claude OAuth *client id* — public identifier (claude-oauth-refresh.ts)
+  '''9d1c250a-e61b-44d9-88ed-5944d1962f5e''',
+  # False positives: variable references, not literal secrets (config/env.ts)
+  '''envVars\.(XYNE_CLAW_S2S_KEY|INTERNAL_S2S_KEY)''',
+  # False positives: test-fixture labels (testAuthSeeder.ts)
+  '''(dm-fixtures-v1|thread-fixtures-v2)''',
 ]
