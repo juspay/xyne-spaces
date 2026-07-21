@@ -229,7 +229,7 @@ export const MultiSelect: React.FC<MultiSelectProps> = ({
                   setFocusedIndex(-1);
                 }}
                 placeholder='Search options...'
-                className='w-full px-2 py-1.5 text-sm border border-input rounded outline-none focus:border-ring'
+                className='w-full px-2 py-1.5 text-sm border border-input rounded bg-background text-foreground placeholder:text-muted-foreground outline-none focus:border-ring'
               />
             </div>
 

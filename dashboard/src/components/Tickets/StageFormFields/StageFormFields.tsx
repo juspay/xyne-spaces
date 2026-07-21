@@ -2,6 +2,14 @@ import { useMemo, type Dispatch, type SetStateAction } from 'react';
 import { FormFieldType, isFieldActive, parseFieldOptionValues } from '@xyne/shared';
 import type { FormEntityValues, MessageAttachment } from '@xyne/shared';
 import { StageFormDocField } from '../StageFormModal/StageFormDocField';
+import { MultiSelect } from '../../ui/MultiSelect/MultiSelect';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../../ui/Select/Select';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
 import type { ResolvedDisplayFormField } from '../../../utils/board/resolveDisplayFormFields';
@@ -182,69 +190,44 @@ export const StageFormFields = ({
               )}
 
               {field.fieldType === FormFieldType.SINGLE_SELECT && (
-                <select
+                <Select
                   value={fieldValue[0] ?? ''}
-                  onChange={event => updateFieldValue(field.id, [event.target.value])}
+                  onValueChange={value => updateFieldValue(field.id, [value])}
                   disabled={disabled}
-                  className={stageFormControlClassName}
-                  data-track-category='Tickets'
-                  data-track-name={`${trackNamePrefix}Select`}
-                  data-track-metadata={trackMetadata}
                 >
-                  <option value='' className='bg-background text-muted-foreground'>
-                    Select an option
-                  </option>
-                  {fieldEnumOptions.map(option => (
-                    <option key={option} value={option} className='bg-background text-foreground'>
-                      {option}
-                    </option>
-                  ))}
-                </select>
+                  <SelectTrigger
+                    className='w-full'
+                    data-track-category='Tickets'
+                    data-track-name={`${trackNamePrefix}Select`}
+                    data-track-metadata={trackMetadata}
+                  >
+                    <SelectValue placeholder='Select an option' />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {fieldEnumOptions.map(option => (
+                      <SelectItem key={option} value={option}>
+                        {option}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               )}
 
               {field.fieldType === FormFieldType.MULTI_SELECT && (
                 <div
-                  className='min-h-10 rounded-md border border-input bg-background p-2 text-sm text-foreground shadow-sm'
                   data-track-category='Tickets'
                   data-track-name={`${trackNamePrefix}MultiSelect`}
                   data-track-metadata={trackMetadata}
                 >
-                  {fieldEnumOptions.length > 0 ? (
-                    <div className='grid gap-1.5'>
-                      {fieldEnumOptions.map(option => {
-                        const checked = fieldValue.includes(option);
-                        return (
-                          <label
-                            key={option}
-                            className={`flex items-center gap-2 rounded px-2 py-1.5 text-sm transition-colors ${
-                              disabled
-                                ? 'cursor-not-allowed text-muted-foreground opacity-70'
-                                : 'cursor-pointer hover:bg-muted/60'
-                            }`}
-                          >
-                            <input
-                              type='checkbox'
-                              checked={checked}
-                              disabled={disabled}
-                              onChange={event => {
-                                const nextValue = event.target.checked
-                                  ? [...fieldValue, option]
-                                  : fieldValue.filter(value => value !== option);
-                                updateFieldValue(field.id, nextValue);
-                              }}
-                              className='h-4 w-4 rounded border-input bg-background text-blue-600 disabled:cursor-not-allowed dark:[color-scheme:dark]'
-                              data-track-category='Tickets'
-                              data-track-name={`${trackNamePrefix}MultiSelectOption`}
-                              data-track-metadata={trackMetadata}
-                            />
-                            <span className='min-w-0 truncate'>{option}</span>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <span className='text-muted-foreground'>No options configured</span>
-                  )}
+                  <MultiSelect
+                    options={fieldEnumOptions.map(option => ({ value: option, label: option }))}
+                    selectedValues={fieldValue}
+                    onChange={next => updateFieldValue(field.id, next)}
+                    disabled={disabled}
+                    placeholder={
+                      fieldEnumOptions.length > 0 ? 'Select options' : 'No options configured'
+                    }
+                  />
                 </div>
               )}
 
