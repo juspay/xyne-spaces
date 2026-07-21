@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { toast } from 'sonner';
-import { FormEntityType, FormFieldType, ReenterMode, TicketStageRequestStatus } from '@xyne/shared';
+import {
+  FormEntityType,
+  FormFieldType,
+  isFieldActive,
+  ReenterMode,
+  TicketStageRequestStatus,
+} from '@xyne/shared';
 import type { FormEntityValues, Ticket, TicketStageRequest } from '@xyne/shared';
 import type { Stage } from '../../../routes/KanbanBoardScreen/KanbanBoardScreen.types';
 import { useAuth } from '../../../hooks/useAuth';
@@ -328,10 +334,15 @@ export const useStageForm = ({
     [formData, localDocChanges],
   );
 
-  const missingRequiredFields = useMemo(
-    () => fields.filter(field => !field.isOptional && !isFieldFilled(field)),
-    [fields, isFieldFilled],
-  );
+  const missingRequiredFields = useMemo(() => {
+    const getFieldEffectiveValue = (fieldId: string): string | undefined => formData[fieldId]?.[0];
+    return fields.filter(
+      field =>
+        !field.isOptional &&
+        isFieldActive(field, fields, getFieldEffectiveValue) &&
+        !isFieldFilled(field),
+    );
+  }, [fields, formData, isFieldFilled]);
 
   const resolveExistingValueId = useCallback(
     (fieldId: string): string | undefined => {
@@ -367,8 +378,12 @@ export const useStageForm = ({
         >();
         const docRemovedFields = new Set<string>();
 
+        const getFormDataEffectiveValue = (fieldId: string): string | undefined =>
+          formDataToPersist[fieldId]?.[0];
+
         fields.forEach(field => {
           if (field.fieldType !== FormFieldType.DOC) return;
+          if (!isFieldActive(field, fields, getFormDataEffectiveValue)) return;
           const change = localDocChangesToPersist.get(field.id);
           if (!change) return;
           if ('file' in change) {
@@ -416,8 +431,12 @@ export const useStageForm = ({
           effectiveFormData[fieldId] = [];
         });
 
+        const getFieldEffectiveValue = (fieldId: string): string | undefined =>
+          effectiveFormData[fieldId]?.[0];
+
         const mutationPromises: Promise<unknown>[] = [];
         fields.forEach(field => {
+          if (!isFieldActive(field, fields, getFieldEffectiveValue)) return;
           const fieldValue = effectiveFormData[field.id] ?? [];
           const uploadPlan = docUploadsByField.get(field.id);
           const existingValueId = uploadPlan?.existingValueId ?? resolveExistingValueId(field.id);
