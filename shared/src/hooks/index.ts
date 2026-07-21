@@ -47,6 +47,7 @@ export {
 
 export { useZero, InstrumentationProvider, useInstrumentation } from './useZero.js';
 export type { Instrumentation } from './useZero.js';
+export { getPendingMutationCount, subscribePendingMutations } from './pendingMutations.js';
 
 export { useQuery, useRawQuery } from './useQuery.js';
 

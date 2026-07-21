@@ -228,6 +228,8 @@ class WebSocketService {
     // Add user connection to Redis with platform info
     await redisService.addUserConnection(userId, socket.id, platform);
 
+    socket.join(`user:${userId}`);
+
     // Debug: Check connections after adding
     const userConnections = await redisService.getUserConnections(userId);
     logger.info(`🔌 [CONNECT] User ${userId} now has ${userConnections.length} connections: [${userConnections.join(', ')}]`);
@@ -1155,25 +1157,12 @@ class WebSocketService {
         return;
       }
 
-      // Get all active connections for this user
-      const userConnections = await redisService.getUserConnections(userId);
+      this.io?.to(`user:${userId}`).emit(event.type, {
+        ...event.data,
+        timestamp: event.timestamp,
+      });
 
-      if (userConnections.length === 0) {
-        logger.info(`👤 [USER-EVENT] No active connections for user ${userId}, skipping broadcast`);
-        return;
-      }
-
-      logger.info(`👤 [USER-EVENT] Broadcasting ${event.type} to ${userConnections.length} connections for user ${userId}`);
-
-      // Broadcast to all user's active connections
-      for (const socketId of userConnections) {
-        this.io?.to(socketId).emit(event.type, {
-          ...event.data,
-          timestamp: event.timestamp
-        });
-      }
-
-      logger.info(`✅ [USER-EVENT] Successfully broadcasted ${event.type} to user ${userId}`);
+      logger.info(`✅ [USER-EVENT] Broadcasted ${event.type} to room user:${userId}`);
     } catch (error) {
       logger.error(`❌ [USER-EVENT] Error handling user event for ${userId}:`, error, event);
     }

@@ -26,6 +26,7 @@ export interface ElectronAPI {
   sendToHost?: (channel: string, data?: unknown) => void;
   clearAllCookies: () => void;
   syncXyneCookiesToBrowserPanel?: (url: string) => Promise<void>;
+  setDynamicHeaders?: (headers: Record<string, string>) => Promise<void>;
   setBadgeCount: (count: number) => void;
   showNotification: (data: {
     title: string;
