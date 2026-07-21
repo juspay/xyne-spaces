@@ -20,6 +20,7 @@ import {
   Paperclip,
   Link as LinkIcon,
   Settings,
+  Plug,
   Plus,
   Wand2,
   Sparkles,
@@ -133,6 +134,7 @@ import { PriorityPicker } from '../../components/Tickets/TicketListView/Priority
 import { EmailComposer } from '../../components/xyne-desk/EmailComposer/EmailComposer';
 import { ReplyPill } from '../../components/xyne-desk/EmailComposer/ReplyPill';
 import { ComposeEmailModal } from '../../components/xyne-desk/EmailComposer/ComposeEmailModal';
+import { getOzonetelConfig } from '../../services/clients/telephonyApi';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   DraftSourcesPanel,
@@ -150,8 +152,10 @@ import {
 } from '../../services/XyneAI/XyneAISessionsService';
 import { parseFromField, stripHtml } from '../../components/xyne-desk/EmailComposer/helpers';
 import { EmailBodyRenderer } from '../../components/xyne-desk/EmailBody/EmailBodyRenderer';
+import CallThread from '../../components/xyne-desk/CallThread/CallThread';
 import { SlackThread, SlackComposer } from '../../components/xyne-desk/SlackThread';
 import { EmailThreadHeader } from '../../components/xyne-desk/EmailBody/EmailThreadHeader';
+import { CloudAgentDock } from '../../components/xyne-desk/CloudAgentDock/CloudAgentDock';
 import { ConversationLabels } from '../../components/xyne-desk/ConversationLabels/ConversationLabels';
 import { TicketTagsRow } from '../../components/xyne-desk/EmailBody/TagsBadgePopover';
 import { useEmailDraft } from '../../hooks/useEmailDraft';
@@ -193,7 +197,7 @@ import { API_BASE_URL, SHAREABLE_ORIGIN } from '../../config';
 import { initDeskChannelOAuth } from '../../services/clients/integrationOAuthApi';
 import Dialog from '../../components/ui/Dialog';
 import { MergeTicketsDialog } from '../../components/Tickets/MergeTicketsDialog/MergeTicketsDialog';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { xyneAIActor } from '../../machines/xyneAIMachine';
 import { useSelector } from '@xstate/react';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
@@ -209,6 +213,8 @@ import { summarizeEmailThread } from '../../services/summarizeService';
 import { CallParticipantsSelectionModal } from '../../components/Call/CallParticipantsSelectionModal';
 import { ScheduleCallModal } from '../../components/Call/ScheduleCallModal/ScheduleCallModal';
 import { ThreadCallButton } from '../../components/Call/ThreadCallButton/ThreadCallButton';
+import { WorkspaceDeskEmailCard } from '../../components/xyne-desk/WorkspaceDeskEmailCard/WorkspaceDeskEmailCard';
+import { WorkspaceOzonetelCard } from '../../components/xyne-desk/WorkspaceOzonetelCard/WorkspaceOzonetelCard';
 
 // Unified type for tickets from the supportTicketsFiltered query
 type SupportTicket = QueryResultType<typeof queries.supportTicketsFilteredV3>[number];
@@ -542,6 +548,7 @@ const SupportScreen = (): ReactElement => {
   const { userID } = useAuthContextValues();
   const { isMobile } = usePlatform();
   const zero = useZero();
+  const queryClient = useQueryClient();
   // Channel selection is sourced strictly from the URL path (/support/:channelId).
   // A bare /support visit renders the empty state prompting the user to pick one.
   const selectedChannelId = channelIdParam ?? null;
@@ -812,6 +819,7 @@ const SupportScreen = (): ReactElement => {
     handleFilterChange,
     handleDateRangeChange,
     availablePriorities,
+    channelBoardId,
     selectedChannelId,
   ]);
 
@@ -821,6 +829,11 @@ const SupportScreen = (): ReactElement => {
   );
   const [isMetricsOpen, setIsMetricsOpen] = useState(() => searchParams.get('metrics') === 'open');
   const [showCreateChannelModal, setShowCreateChannelModal] = useState(false);
+  const [showDeskIntegrationsModal, setShowDeskIntegrationsModal] = useState(
+    () =>
+      searchParams.get('deskIntegrations') === 'open' ||
+      searchParams.get('workspaceMailboxConnected') === 'true',
+  );
   const [showRefetchDialog, setShowRefetchDialog] = useState(false);
   const [showDlMemberSyncDialog, setShowDlMemberSyncDialog] = useState(false);
 
@@ -982,8 +995,31 @@ const SupportScreen = (): ReactElement => {
     const emailConnected = searchParams.get('emailConnected');
     const emailReconnected = searchParams.get('emailReconnected');
     const channelFromCallback = searchParams.get('channel');
+    const workspaceMailboxConnected = searchParams.get('workspaceMailboxConnected');
+    const isDeskIntegrationsCallback = searchParams.get('deskIntegrations') === 'open';
 
-    if (emailConnected === 'true' || emailReconnected === 'true') {
+    if (workspaceMailboxConnected === 'true' || isDeskIntegrationsCallback) {
+      setShowDeskIntegrationsModal(true);
+      if (workspaceMailboxConnected === 'true') {
+        const email = searchParams.get('email');
+        toast.success(email ? `Connected ${email}` : 'Shared mailbox connected');
+        void queryClient.invalidateQueries({ queryKey: ['workspace-shared-mailbox-status'] });
+      } else if (emailError) {
+        toast.error(emailError);
+      }
+      setSearchParams(
+        prev => {
+          const p = new URLSearchParams(prev);
+          p.delete('deskIntegrations');
+          p.delete('workspaceMailboxConnected');
+          p.delete('emailError');
+          p.delete('email');
+          p.delete('provider');
+          return p;
+        },
+        { replace: true },
+      );
+    } else if (emailConnected === 'true' || emailReconnected === 'true') {
       const provider = searchParams.get('provider') ?? 'Email';
       const action = emailReconnected === 'true' ? 'reconnected' : 'connected';
       toast.success(
@@ -1042,7 +1078,7 @@ const SupportScreen = (): ReactElement => {
         { replace: true },
       );
     }
-  }, [searchParams, setSearchParams, navigate]);
+  }, [searchParams, setSearchParams, navigate, queryClient]);
 
   // Sync panel open/close with the URL so back button works correctly
   useEffect(() => {
@@ -1323,7 +1359,7 @@ const SupportScreen = (): ReactElement => {
   const createChannelMutation = useMutation({
     mutationFn: async (
       data: CreateChannelFormData & {
-        channelType?: 'EMAIL' | 'SLACK' | 'APP' | undefined;
+        channelType?: 'EMAIL' | 'SLACK' | 'APP' | 'CALL' | undefined;
         emailDeskOpts?: EmailDeskOpts;
       },
     ) => {
@@ -1349,15 +1385,17 @@ const SupportScreen = (): ReactElement => {
   const handleCreateEmailChannel = (
     data: CreateChannelFormData & {
       connector?: 'google' | 'microsoft' | null;
-      channelType?: 'EMAIL' | 'SLACK' | 'APP' | undefined;
+      channelType?: 'EMAIL' | 'SLACK' | 'APP' | 'CALL' | undefined;
       assigneeUserGroupId?: string;
-      deskType?: 'EMAIL' | 'DL' | 'SLACK' | 'APP';
+      deskType?: 'EMAIL' | 'DL' | 'SLACK' | 'APP' | 'CALL';
+      callSource?: 'OZONETEL';
       dlEmail?: string;
       slackChannelId?: string;
       installedAppId?: string;
     },
   ) => {
-    const { connector, deskType, dlEmail, slackChannelId, installedAppId, ...rest } = data;
+    const { connector, deskType, callSource, dlEmail, slackChannelId, installedAppId, ...rest } =
+      data;
     const isElectron = typeof window.electronAPI?.openExternal === 'function';
 
     if (deskType === 'SLACK') {
@@ -1383,6 +1421,29 @@ const SupportScreen = (): ReactElement => {
         channelType: 'APP',
         emailDeskOpts: { deskType: 'APP', installedAppId },
       });
+      return;
+    }
+
+    if (deskType === 'CALL') {
+      void (async () => {
+        if (callSource === 'OZONETEL') {
+          try {
+            const ozonetel = await getOzonetelConfig();
+            if (!ozonetel.configured) {
+              toast.error('Ozonetel is not configured. Set it up in Desk Integrations first.');
+              return;
+            }
+          } catch {
+            // Ignore preflight issues; channel creation can still continue.
+          }
+        }
+
+        await createChannelMutation.mutateAsync({
+          ...rest,
+          channelType: 'CALL',
+          emailDeskOpts: { deskType: 'CALL' },
+        });
+      })();
       return;
     }
 
@@ -1631,12 +1692,18 @@ const SupportScreen = (): ReactElement => {
               className:
                 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200',
             }
-          : {
-              label: 'Mailbox',
-              className: 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-200',
-            };
+          : c.type === ChannelType.CALL
+            ? {
+                label: 'Call',
+                className: 'bg-sky-100 text-sky-700 dark:bg-sky-500/20 dark:text-sky-200',
+              }
+            : {
+                label: 'Mailbox',
+                className: 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-200',
+              };
     const isJoined = joinedChannelIds.has(c.id);
-    const isExpanded = isJoined && expandedDeskIds.has(c.id);
+    const canExpandDesk = isJoined && c.type === ChannelType.EMAIL;
+    const isExpanded = canExpandDesk && expandedDeskIds.has(c.id);
     const isActive = selectedChannelId === c.id && deskView === 'tickets';
     const status = statusByChannelId.get(c.id);
     const isMuted = status?.desktopNotificationLevel === NotificationLevel.NONE;
@@ -1670,7 +1737,7 @@ const SupportScreen = (): ReactElement => {
           data-track-category='Support'
           data-track-name='SelectEmailChannel'
         >
-          {isJoined ? (
+          {canExpandDesk ? (
             <button
               type='button'
               onClick={e => {
@@ -1777,6 +1844,16 @@ const SupportScreen = (): ReactElement => {
                         data-track-name='CreateChannelOpen'
                       >
                         <Plus className='size-4 text-muted-foreground' />
+                      </button>
+                      <button
+                        onClick={() => setShowDeskIntegrationsModal(true)}
+                        className='p-2 hover:bg-muted rounded-md transition-colors'
+                        aria-label='Desk Integrations'
+                        title='Desk Integrations'
+                        data-track-category='Support'
+                        data-track-name='OpenDeskIntegrations'
+                      >
+                        <Plug className='size-4 text-muted-foreground' />
                       </button>
                       <button
                         onClick={() => setIsSidebarOpen(false)}
@@ -2350,23 +2427,27 @@ const SupportScreen = (): ReactElement => {
                           <Table2 size={16} />
                         </button>
                       </div>
-                      {/* Compose new email — visible only on a joined email channel */}
-                      {isSelectedChannelJoined && selectedChannelId && (
-                        <Tooltip content='Compose new email' side='bottom'>
-                          <Button
-                            variant='default'
-                            size='sm'
-                            className='rounded-[10px] bg-sidebar-badge-accent hover:bg-sidebar-badge-accent/90 text-white'
-                            onClick={() => openNewCompose(selectedChannelId)}
-                            data-track-category='Support'
-                            data-track-name='OpenComposeEmail'
-                            data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
-                          >
-                            <Pencil size={14} />
-                            <span>Compose</span>
-                          </Button>
-                        </Tooltip>
-                      )}
+                      {/* Call desks use Ozonetel here; email desks keep Compose. */}
+                      {isSelectedChannelJoined &&
+                        selectedChannelId &&
+                        (selectedChannelFull?.type === ChannelType.CALL ? (
+                          <CloudAgentDock buttonBehavior='floating' />
+                        ) : (
+                          <Tooltip content='Compose new email' side='bottom'>
+                            <Button
+                              variant='default'
+                              size='sm'
+                              className='rounded-[10px] bg-sidebar-badge-accent hover:bg-sidebar-badge-accent/90 text-white'
+                              onClick={() => openNewCompose(selectedChannelId)}
+                              data-track-category='Support'
+                              data-track-name='OpenComposeEmail'
+                              data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
+                            >
+                              <Pencil size={14} />
+                              <span>Compose</span>
+                            </Button>
+                          </Tooltip>
+                        ))}
                       {ticketId && (
                         <Button
                           size='sm'
@@ -2649,6 +2730,61 @@ const SupportScreen = (): ReactElement => {
             onCancel={() => setShowCreateChannelModal(false)}
             loading={createChannelMutation.isPending}
           />
+        </div>
+      </Dialog>
+
+      <Dialog
+        open={showDeskIntegrationsModal}
+        onOpenChange={setShowDeskIntegrationsModal}
+        title='Desk Integrations'
+        description='Manage workspace connections used by Email and Call Desks'
+        className='max-w-3xl overflow-hidden rounded-xl'
+        testId='desk-integrations-modal'
+      >
+        <div className='flex max-h-[85vh] flex-col'>
+          <div className='border-b border-border px-6 py-4'>
+            <div className='flex items-center justify-between gap-4'>
+              <div className='flex items-center gap-2'>
+                <Plug className='size-5 text-muted-foreground' />
+                <h2 className='text-lg font-semibold text-foreground'>Desk Integrations</h2>
+              </div>
+              <button
+                type='button'
+                onClick={() => setShowDeskIntegrationsModal(false)}
+                className='rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
+                aria-label='Close Desk Integrations'
+                title='Close'
+                data-track-category='Support'
+                data-track-name='CloseDeskIntegrations'
+              >
+                <X className='size-4' />
+              </button>
+            </div>
+            <p className='mt-1 text-sm text-muted-foreground'>
+              Manage workspace connections used by Email and Call Desks
+            </p>
+          </div>
+          <div className='space-y-6 overflow-y-auto p-6'>
+            <section className='space-y-3'>
+              <div>
+                <h3 className='text-base font-semibold text-foreground'>Desk Email</h3>
+                <p className='text-sm text-muted-foreground'>
+                  Connect the shared mailbox used by distribution-list desks.
+                </p>
+              </div>
+              <WorkspaceDeskEmailCard />
+            </section>
+
+            <section className='space-y-3'>
+              <div>
+                <h3 className='text-base font-semibold text-foreground'>Telephony</h3>
+                <p className='text-sm text-muted-foreground'>
+                  Configure Ozonetel and route campaigns to Call Desks.
+                </p>
+              </div>
+              <WorkspaceOzonetelCard />
+            </section>
+          </div>
         </div>
       </Dialog>
 
@@ -3540,7 +3676,7 @@ export const SupportTicketDetail = ({
                     <ConversationLabels conversationId={conversationId} channelId={channelId} />
                   )}
 
-                  {mailboxTicketId && channelId && (
+                  {channel?.type === ChannelType.EMAIL && mailboxTicketId && channelId && (
                     <MailboxActions ticketId={mailboxTicketId} channelId={channelId} />
                   )}
                 </div>
@@ -3637,6 +3773,8 @@ export const SupportTicketDetail = ({
                   </button>
                 </Tooltip>
                 <div className='w-px h-4 bg-border' />
+
+                {channel?.type === ChannelType.CALL && <CloudAgentDock buttonBehavior='floating' />}
 
                 <Tooltip
                   side='bottom'
@@ -3973,6 +4111,17 @@ export const SupportTicketDetail = ({
                           | undefined
                       }
                     />
+                  ) : channel?.type === ChannelType.CALL ? (
+                    <CallThread
+                      emails={emails}
+                      ticketId={ticket?.id}
+                      lastEmailAt={ticket?.lastEmailAt}
+                      emailReads={
+                        ticket?.emailReads as
+                          | Array<{ userId: string; lastReadEmailAt: number }>
+                          | undefined
+                      }
+                    />
                   ) : (
                     <EmailThread
                       collapseState={emailCollapseState}
@@ -4005,7 +4154,7 @@ export const SupportTicketDetail = ({
                     variant={channel?.type === ChannelType.APP ? 'app' : 'slack'}
                   />
                 ) : null
-              ) : (
+              ) : channel?.type === ChannelType.EMAIL ? (
                 <AnimatePresence mode='popLayout' initial={false}>
                   {composerOpen ? (
                     <motion.div
@@ -4076,7 +4225,7 @@ export const SupportTicketDetail = ({
                     </motion.div>
                   )}
                 </AnimatePresence>
-              )}
+              ) : null}
             </div>
           </div>
         </Panel>

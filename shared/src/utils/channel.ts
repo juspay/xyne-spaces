@@ -5,6 +5,7 @@ export const DESK_CHANNEL_TYPES: ReadonlySet<ChannelType> = new Set([
   ChannelType.EMAIL,
   ChannelType.SLACK,
   ChannelType.APP,
+  ChannelType.CALL,
 ]);
 
 export function isDeskChannelType(type: string | null | undefined): boolean {
@@ -18,6 +19,8 @@ export function deskTypeForChannelType(type: string | null | undefined): DeskTyp
       return DeskType.SLACK;
     case ChannelType.APP:
       return DeskType.APP;
+    case ChannelType.CALL:
+      return DeskType.CALL;
     default:
       return DeskType.EMAIL;
   }

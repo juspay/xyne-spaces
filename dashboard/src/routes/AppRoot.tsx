@@ -70,6 +70,7 @@ import { ElectronBadgeSync } from '../components/ElectronBadgeSync/ElectronBadge
 import { ElectronUpdateNudge } from '../components/ElectronUpdateNudge/ElectronUpdateNudge';
 import { SosAlertBanner } from '../components/SosAlert/SosAlertBanner';
 import { CallFromRecentsHandler } from '../components/CallFromRecentsHandler/CallFromRecentsHandler';
+import { CloudAgentFloatingHost } from '../components/xyne-desk/CloudAgentDock/CloudAgentDock';
 import { usePlatform } from '../hooks/usePlatform';
 import { useIsInPanelWebview } from '../hooks/useIsInPanelWebview';
 import { roomActor } from '../machines/roomMachine';
@@ -708,6 +709,7 @@ const AppRoot = (): ReactElement => {
                     <ElectronUpdateNudge />
                     <SosAlertBanner />
                     <CallFromRecentsHandler />
+                    <CloudAgentFloatingHost />
                     <BrowserPanelHandler />
                     <GlobalCommandMenu />
                     <ShortcutsHelpModal
@@ -1303,6 +1305,10 @@ export const router = createBrowserRouter([
                         'emailConnected',
                         'emailError',
                         'channelEmailMailboxConnected',
+                        'deskIntegrations',
+                        'workspaceMailboxConnected',
+                        'email',
+                        'provider',
                       ]}
                       redirectOnlyAt={/^\/[^/]+\/support\/?$/}
                     >

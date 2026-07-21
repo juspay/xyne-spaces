@@ -773,7 +773,7 @@ export class ChannelController {
         visibility?: ChannelVisibility;
         projectId: string;
         participants?: string[];
-        type?: 'DEFAULT' | 'EMAIL' | 'SUPPORT' | 'SLACK' | 'APP';
+        type?: 'DEFAULT' | 'EMAIL' | 'SUPPORT' | 'SLACK' | 'APP' | 'CALL';
         assigneeUserGroupId?: string;
         deskType?: DeskType;
         dlEmail?: string;
@@ -858,6 +858,13 @@ export class ChannelController {
             res.status(409).json({ error: 'A desk already exists for this DL' });
             return;
           }
+        }
+      }
+
+      if (channelType === 'CALL') {
+        if (!deskType || deskType !== DeskType.CALL) {
+          res.status(400).json({ error: 'deskType CALL is required for CALL channels' });
+          return;
         }
       }
 
@@ -1029,7 +1036,7 @@ export class ChannelController {
         }
       }
 
-      // Save EmailChannelPreference for EMAIL channels
+      // Save EmailChannelPreference for EMAIL desks
       if (channelType === 'EMAIL') {
         const isDl = deskType === DeskType.DL;
         let resolvedBoardId: string | undefined = boardId;
@@ -1076,6 +1083,41 @@ export class ChannelController {
           }
           logger.error('Failed to create EmailChannelPreference:', error);
           // Don't fail the entire channel creation if preference fails
+        }
+      }
+
+      if (channelType === 'CALL') {
+        try {
+          let callBoardId = boardId;
+          if (!callBoardId) {
+            const firstBoard = await db.board.findFirst({
+              where: { projectId: channel.projectId },
+              orderBy: { createdAt: 'asc' },
+              select: { id: true },
+            });
+            if (!firstBoard) {
+              await db.channel.delete({ where: { id: channel.id } }).catch(() => {});
+              res.status(409).json({ error: 'Project has no boards configured — cannot create call desk' });
+              return;
+            }
+            callBoardId = firstBoard.id;
+          }
+
+          await this.emailChannelPreferenceRepository.create({
+            channelId: channel.id,
+            ownerUserId: userId,
+            deskType: DeskType.CALL,
+            boardId: callBoardId,
+            emailMergeMode: EmailMergeMode.DISABLED,
+            ...(assigneeUserGroupId && { assigneeUserGroupId }),
+          });
+        } catch (error) {
+          logger.error('Failed to create call desk resources, rolling back channel', error);
+          await db.channel.delete({ where: { id: channel.id } }).catch(err => {
+            logger.error(`Channel rollback failed for ${channel.id}`, err);
+          });
+          res.status(500).json({ error: 'Failed to create call desk' });
+          return;
         }
       }
 

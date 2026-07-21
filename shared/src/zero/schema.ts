@@ -575,6 +575,7 @@ export enum ChannelType {
   SUPPORT = 'SUPPORT',
   SLACK = 'SLACK',
   APP = 'APP',
+  CALL = 'CALL',
 }
 
 // @ts-ignore TS1294
@@ -583,6 +584,7 @@ export enum DeskType {
   DL = 'DL',
   SLACK = 'SLACK',
   APP = 'APP',
+  CALL = 'CALL',
 }
 
 // @ts-ignore TS1294

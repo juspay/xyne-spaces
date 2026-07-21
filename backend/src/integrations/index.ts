@@ -9,6 +9,7 @@ import './adapters/slack-webhook-tickets';
 import './adapters/slack-desk';
 import './adapters/microsoft';
 import './adapters/google';
+import './adapters/ozonetel';
 
 
 // Export public API

@@ -13,7 +13,7 @@ export class EmailChannelPreferencesACL extends BaseACL<'email_channel_preferenc
     }
 
     if (!isDeskChannelType(channel.type)) {
-      throw new MutationACLError('Email channel preference insert failed: preferences can only be set on desk channels (EMAIL, SLACK, APP)', 'email_channel_preferences');
+      throw new MutationACLError('Email channel preference insert failed: preferences can only be set on desk channels', 'email_channel_preferences');
     }
 
     if (channel.isArchived) {
@@ -43,7 +43,7 @@ export class EmailChannelPreferencesACL extends BaseACL<'email_channel_preferenc
     }
 
     if (!isDeskChannelType(channel.type)) {
-      throw new MutationACLError('Email channel preference update failed: preferences can only be set on desk channels (EMAIL, SLACK, APP)', 'email_channel_preferences');
+      throw new MutationACLError('Email channel preference update failed: preferences can only be set on desk channels', 'email_channel_preferences');
     }
 
     if (channel.isArchived) {

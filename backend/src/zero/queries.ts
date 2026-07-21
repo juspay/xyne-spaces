@@ -1354,7 +1354,20 @@ export const queries = defineQueries({
       start: z.object({ id: z.string(), lastEmailAt: z.number() }).nullable(),
       dir: z.literal('forward').or(z.literal('backward')),
     }),
-    ({ ctx, args: { channelId, assignedTo, priority, stageName, aiCategory, hasAiDraft, mailboxFolder, userGroups, lastEmailAtStart, lastEmailAtEnd, limit, start, dir } }) => {
+    ({
+      ctx,
+      args: {
+        channelId,
+        assignedTo,
+        priority,
+        stageName,
+        aiCategory,
+        hasAiDraft,
+        mailboxFolder, userGroups, lastEmailAtStart, lastEmailAtEnd, limit,
+        start,
+        dir,
+      },
+    }) => {
       let query = zql.tickets.where('channelId', channelId);
       query = query.where('isArchived', false);
 
@@ -1798,7 +1811,12 @@ export const queries = defineQueries({
       .where('isDeleted', false)
       .related('channel', ch =>
         ch
-          .where('type', 'NOT IN', [ChannelType.EMAIL, ChannelType.SLACK, ChannelType.APP])
+          .where('type', 'NOT IN', [
+            ChannelType.EMAIL,
+            ChannelType.SLACK,
+            ChannelType.APP,
+            ChannelType.CALL,
+          ])
           .related('channelStats'),
       );
   }),
@@ -1809,7 +1827,12 @@ export const queries = defineQueries({
       .where('isDeleted', false)
       .related('channel', ch =>
         ch
-          .where('type', 'IN', [ChannelType.EMAIL, ChannelType.SLACK, ChannelType.APP])
+          .where('type', 'IN', [
+            ChannelType.EMAIL,
+            ChannelType.SLACK,
+            ChannelType.APP,
+            ChannelType.CALL,
+          ])
           .related('channelStats'),
       );
   }),
@@ -3398,7 +3421,7 @@ dmChannelsLatestMessagesPaginated: defineQuery(
     ({ args: { entityId } }) => {
       return zql.form_entity_values
         .where('entityId', entityId)
-        .related('formField')
+        .related('formField', q => q.related('globalField'))
         .related('globalField')
         .related('attachments')
         .orderBy('createdAt', 'asc');
