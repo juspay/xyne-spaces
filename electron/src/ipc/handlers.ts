@@ -20,7 +20,6 @@ import { showRecordingPill, hideRecordingPill } from '../services/recording-pill
 import { meetingDetectorService } from '../services/meeting-detector';
 import { browserSettingsService, BrowserSettings } from '../services/browser-settings';
 import { errorReportRecorder } from '../services/error-report-recorder';
-import Sentry from '@sentry/electron/main';
 
 
 let previewBrowserView: BrowserView | null = null;
@@ -188,14 +187,13 @@ export function setupIpcHandlers(): void {
 
   ipcMain.on('set-user-email', (event, email: string) => {
     if (!isMainWindowSender(event)) return;
-    // XYNE Issue 393: validate the email format before applying it to Sentry /
-    // logger identity so a compromised renderer cannot poison telemetry.
+    // XYNE Issue 393: validate the email format before applying it to logger
+    // identity so a compromised renderer cannot poison telemetry.
     if (
       typeof email === 'string' &&
       email.length <= 254 &&
       /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
     ) {
-      Sentry.setUser({ email });
       Logger.setEmailId(email);
       setCachedUser(email);
     }
