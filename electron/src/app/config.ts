@@ -2,7 +2,7 @@
  * Application configuration constants
  */
 
-const { APP_ENV, SENTRY_DSN } = require('../../package.json');
+const { APP_ENV } = require('../../package.json');
 
 export interface AppConfig {
   BACKEND_URL: string;
@@ -16,7 +16,6 @@ export interface AppConfig {
   APP_NAME: string;
   APP_CONFIG: string;
   APP_ID: string;
-  SENTRY_DSN?: string;
   window: {
     width: number;
     height: number;
@@ -98,7 +97,6 @@ const prodConfig: AppConfig = {
     method: "POST"
   },
   preProdKey: 'preProdFeaturesEnabled',
-  ...(SENTRY_DSN ? { SENTRY_DSN } : {}),
 };
 
 const sandboxConfig: AppConfig = {
