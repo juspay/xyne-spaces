@@ -10,11 +10,19 @@ import {
   isValidMermaidSyntax,
 } from './MermaidBlock.utils';
 
-// Initialize Mermaid once
+// Initialize Mermaid once.
+// securityLevel MUST NOT be 'loose': under 'loose' mermaid skips its internal
+// DOMPurify pass entirely, so raw HTML in diagram labels (e.g. `A["<img src=x
+// onerror=...>"]`) survives into the rendered SVG and executes when injected via
+// dangerouslySetInnerHTML — an XSS sink, because `chart` comes from chat/AI
+// messages. 'antiscript' keeps HTML labels working but makes mermaid sanitize the
+// SVG (stripping <script>, on* handlers and javascript: URLs). The output is also
+// re-sanitized at the injection sink in MermaidBlock.utils.ts (defense-in-depth +
+// to clean any SVG cached under the previous 'loose' setting).
 mermaid.initialize({
   startOnLoad: false,
   theme: 'default',
-  securityLevel: 'loose',
+  securityLevel: 'antiscript',
   fontFamily: 'Inter, sans-serif',
 });
 

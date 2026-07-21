@@ -498,6 +498,11 @@ function parseEpochMsParam(value: unknown): Date | null {
 router.get(
   '/:automationId/runs',
   async (req: Request<{ automationId: string }>, res: Response) => {
+    const auth = getAuthContext(req);
+    if (!auth) {
+      sendUnauthorized(res);
+      return;
+    }
     const { automationId } = req.params;
     const limitRaw = req.query['limit'];
     const limit = Math.min(Math.max(Number.parseInt(String(limitRaw ?? 50), 10) || 50, 1), 200);
@@ -508,8 +513,15 @@ router.get(
     const from = parseEpochMsParam(req.query['from']);
     const to = parseEpochMsParam(req.query['to']);
 
-    const workflow = await db.workflow.findUnique({ where: { id: automationId } });
-    if (!workflow || workflow.workflowType !== AUTOMATION_WORKFLOW_TYPE) {
+    // Scope by workspaceId so a user cannot read another tenant's run history.
+    const workflow = await db.workflow.findFirst({
+      where: {
+        id: automationId,
+        workflowType: AUTOMATION_WORKFLOW_TYPE,
+        workspaceId: auth.workspaceId,
+      },
+    });
+    if (!workflow) {
       res.status(404).json({ success: false, error: 'Automation not found' });
       return;
     }
@@ -549,10 +561,22 @@ router.get(
 router.get(
   '/runs/:executionId',
   async (req: Request<{ executionId: string }>, res: Response) => {
+    const auth = getAuthContext(req);
+    if (!auth) {
+      sendUnauthorized(res);
+      return;
+    }
     const { executionId } = req.params;
 
-    const execution = await db.workflowExecution.findUnique({ where: { id: executionId } });
-    if (!execution || execution.workflowType !== AUTOMATION_WORKFLOW_TYPE) {
+    // Scope by workspaceId so a user cannot read another tenant's run detail.
+    const execution = await db.workflowExecution.findFirst({
+      where: {
+        id: executionId,
+        workflowType: AUTOMATION_WORKFLOW_TYPE,
+        workspaceId: auth.workspaceId,
+      },
+    });
+    if (!execution) {
       res.status(404).json({ success: false, error: 'Run not found' });
       return;
     }
@@ -599,9 +623,18 @@ function webhookEndpoint(): string {
 
 async function resolveWebhookAutomation(
   automationId: string,
+  workspaceId: string,
 ): Promise<{ seriesId: string } | { error: { status: number; message: string } }> {
-  const workflow = await db.workflow.findUnique({ where: { id: automationId } });
-  if (!workflow || workflow.workflowType !== AUTOMATION_WORKFLOW_TYPE) {
+  // Scope by workspaceId so an authenticated user in one workspace cannot resolve
+  // (and mint/read the webhook secret for) an automation owned by another workspace.
+  const workflow = await db.workflow.findFirst({
+    where: {
+      id: automationId,
+      workflowType: AUTOMATION_WORKFLOW_TYPE,
+      workspaceId,
+    },
+  });
+  if (!workflow) {
     return { error: { status: 404, message: 'Automation not found' } };
   }
   return { seriesId: workflow.automationSeriesId ?? workflow.id };
@@ -612,7 +645,12 @@ async function resolveWebhookAutomation(
 router.get(
   '/:automationId/webhook',
   async (req: Request<{ automationId: string }>, res: Response) => {
-    const resolved = await resolveWebhookAutomation(req.params.automationId);
+    const auth = getAuthContext(req);
+    if (!auth) {
+      sendUnauthorized(res);
+      return;
+    }
+    const resolved = await resolveWebhookAutomation(req.params.automationId, auth.workspaceId);
     if ('error' in resolved) {
       res.status(resolved.error.status).json({ success: false, error: resolved.error.message });
       return;
@@ -631,7 +669,12 @@ router.get(
 router.post(
   '/:automationId/webhook',
   async (req: Request<{ automationId: string }>, res: Response) => {
-    const resolved = await resolveWebhookAutomation(req.params.automationId);
+    const auth = getAuthContext(req);
+    if (!auth) {
+      sendUnauthorized(res);
+      return;
+    }
+    const resolved = await resolveWebhookAutomation(req.params.automationId, auth.workspaceId);
     if ('error' in resolved) {
       res.status(resolved.error.status).json({ success: false, error: resolved.error.message });
       return;

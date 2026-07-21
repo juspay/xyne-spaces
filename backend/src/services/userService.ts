@@ -693,6 +693,23 @@ export class UserService {
       });
 
       if (workspaceUser) {
+        // NOTE: This is NOT cross-account linking of two different people. It is
+        // reached only when a row for this (email, workspaceId) already exists but
+        // did NOT match on providerUserId above — in practice the seed/invite path:
+        // a pre-provisioned row (e.g. a seed user with a placeholder providerUserId
+        // like 'admin-seed-user-001') binding its real OAuth subject on first login.
+        // After that first bind, later logins match on providerUserId and return
+        // early above, so this branch is not hit again for that user.
+        //
+        // Cross-provider rebind is safe because every login path verifies email
+        // ownership before reaching here: Google via Workspace domain verification,
+        // Microsoft via the xms_edov ("email domain owner verified") claim
+        // (microsoftAuthController — rejects tokens where xms_edov !== true). A
+        // provider can therefore only assert an email whose domain it owns, so the
+        // only way two providers resolve to the same email is the same real principal
+        // on a shared domain. If a future caller ever reaches this method with an
+        // UNVERIFIED email, add a provider/subject guard here (and in
+        // findOrCreateOAuthUser, which shares this pattern) before trusting the rebind.
         workspaceUser = await this.prisma.user.update({
           where: { id: workspaceUser.id },
           data: {
