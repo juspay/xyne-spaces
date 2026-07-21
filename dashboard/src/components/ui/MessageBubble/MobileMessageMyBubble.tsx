@@ -9,7 +9,6 @@ import { getEmojiFontSizeClass } from '../../../utils/emojiUtils';
 import { ExpandableMessage } from '../../Chat/ExpandableMessage/ExpandableMessage';
 import { MessageMetadata } from './MessageBubble.utils';
 import { CallMessageOverlay } from '../../Chat/CallMessageOverlay/CallMessageOverlay';
-import { WorkflowBubble } from '../../Chat/WorkflowBubble/WorkflowBubble';
 import { useIsCallActive } from '../../../hooks/useCalls';
 import { PinnedIcon } from '../../../assets/icons/PinnedIcon';
 import { ReactionView } from './MessageBubble';
@@ -72,7 +71,6 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
   threadInfo,
   channelScopeType,
   isFirstInThread = false,
-  workflowNumber,
   onClick,
 }) => {
   const { toggleReaction } = useReactions();
@@ -283,17 +281,6 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
                   />
                 </div>
               )
-            )}
-
-            {isWorkflowMessage && metadata?.workflowId && (
-              <WorkflowBubble
-                workflowName={metadata.workflowName}
-                workflowStatus={metadata.workflowStatus}
-                createdAt={message.createdAt}
-                ticketId={metadata.ticketId}
-                metadata={metadata}
-                workflowNumber={workflowNumber}
-              />
             )}
 
             {/* Attachments (only for non-forwarded messages) */}

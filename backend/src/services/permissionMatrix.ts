@@ -15,7 +15,6 @@ export type ResourceName =
   | 'MODELS'
   | 'TOOLS'
   | 'AGENT-TOOLS-MAPPINGS'
-  | 'EXTERNAL-STEP-RESPONSE'
   | 'ANALYTICS'
   | 'PROJECTS'
   | 'XYNE-APPS'
@@ -56,7 +55,6 @@ export const PERMISSION_MATRIX: Record<WorkspaceRole, readonly PermissionEntry[]
     { resourceName: 'MODELS', accessType: AccessType.WRITE },
     { resourceName: 'TOOLS', accessType: AccessType.WRITE },
     { resourceName: 'AGENT-TOOLS-MAPPINGS', accessType: AccessType.WRITE },
-    { resourceName: 'EXTERNAL-STEP-RESPONSE', accessType: AccessType.WRITE },
     { resourceName: 'ANALYTICS', accessType: AccessType.WRITE },
     { resourceName: 'PROJECTS', accessType: AccessType.WRITE },
     { resourceName: 'XYNE-APPS', accessType: AccessType.WRITE },
@@ -70,7 +68,6 @@ export const PERMISSION_MATRIX: Record<WorkspaceRole, readonly PermissionEntry[]
     { resourceName: 'MODELS', accessType: AccessType.ADMIN },
     { resourceName: 'TOOLS', accessType: AccessType.ADMIN },
     { resourceName: 'AGENT-TOOLS-MAPPINGS', accessType: AccessType.ADMIN },
-    { resourceName: 'EXTERNAL-STEP-RESPONSE', accessType: AccessType.ADMIN },
     { resourceName: 'ANALYTICS', accessType: AccessType.ADMIN },
     { resourceName: 'USER-MANAGEMENT', accessType: AccessType.ADMIN },
     { resourceName: 'USERS', accessType: AccessType.ADMIN },
@@ -93,7 +90,6 @@ export const PERMISSION_MATRIX: Record<WorkspaceRole, readonly PermissionEntry[]
     { resourceName: 'MODELS', accessType: AccessType.ADMIN },
     { resourceName: 'TOOLS', accessType: AccessType.ADMIN },
     { resourceName: 'AGENT-TOOLS-MAPPINGS', accessType: AccessType.ADMIN },
-    { resourceName: 'EXTERNAL-STEP-RESPONSE', accessType: AccessType.ADMIN },
     { resourceName: 'ANALYTICS', accessType: AccessType.ADMIN },
     { resourceName: 'USER-MANAGEMENT', accessType: AccessType.ADMIN },
     { resourceName: 'USERS', accessType: AccessType.ADMIN },

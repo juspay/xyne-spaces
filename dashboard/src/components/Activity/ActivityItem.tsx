@@ -12,7 +12,6 @@ import { EtaActivity } from './EtaActivity';
 import { AssignmentPauseActivity } from './AssignmentPauseActivity';
 import { TicketAssignmentActivity } from './TicketAssignmentActivity';
 import { TicketUpdateActivity } from './TicketUpdateActivity';
-import { WorkflowQuestionActivity } from './WorkflowQuestionActivity';
 import { ScheduledCallActivity } from './ScheduledCallActivity';
 import { EmailFetchActivity } from './EmailFetchActivity';
 import { CanvasSharedActivity } from './CanvasSharedActivity';
@@ -99,9 +98,6 @@ export const ActivityItem = memo(function ActivityItem({
     case 'ticket_pr_reviewer_assigned':
     case 'ticket_qa_assigned':
       return <TicketUpdateActivity activity={activity} isExpanded={isExpanded} />;
-
-    case 'workflow_question':
-      return <WorkflowQuestionActivity activity={activity} isExpanded={isExpanded} />;
 
     case 'scheduled_call':
     case 'call_reminder':
