@@ -947,7 +947,7 @@ export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> =
               <CanvasRow
                 key={canvas.id}
                 canvas={canvas}
-                indentClassName='pl-3'
+                indentClassName='pl-6'
                 onSelect={onSelect}
                 selectedCanvasId={selectedCanvasId}
                 currentUserId={currentUserId}

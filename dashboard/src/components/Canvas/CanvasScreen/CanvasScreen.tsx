@@ -1471,6 +1471,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
         >
           <CanvasShareModal
             key={selectedCanvas.id}
+            onClose={() => setShowShareModal(false)}
             canvas={selectedCanvas}
             isOwner={
               selectedCanvas.createdBy === user?.id ||
