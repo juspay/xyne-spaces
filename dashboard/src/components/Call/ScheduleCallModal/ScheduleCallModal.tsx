@@ -1817,6 +1817,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                       }
                       {...(channelMembersOptions ? { channelMembersOptions } : {})}
                       excludedChannelMembers={excludedChannelMembers}
+                      hoistSelectedChannelMembers={isEditMode}
                       toggleExcludedChannelMember={toggleExcludedChannelMember}
                     />
                   )}
