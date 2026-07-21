@@ -142,10 +142,42 @@ export async function extractAuthDataFromRequest(request: Request): Promise<Auth
   return await extractAuthDataFromJWT(token);
 }
 
+function getMutationErrors(result: unknown): Record<string, unknown>[] {
+  if (!result || typeof result !== 'object' || !('mutations' in result)) {
+    return [];
+  }
+
+  const mutations = (result as { mutations?: unknown }).mutations;
+  if (!Array.isArray(mutations)) {
+    return [];
+  }
+
+  return mutations.flatMap((mutation) => {
+    if (!mutation || typeof mutation !== 'object' || !('result' in mutation)) {
+      return [];
+    }
+
+    const mutationResult = (mutation as { result?: unknown }).result;
+    if (
+      mutationResult &&
+      typeof mutationResult === 'object' &&
+      'error' in mutationResult
+    ) {
+      return [mutationResult as Record<string, unknown>];
+    }
+
+    return [];
+  });
+}
+
+function getMutationErrorMessage(errorObj: Record<string, unknown>): unknown {
+  return errorObj['message'] || errorObj['details'] || errorObj['error'];
+}
+
 export async function handleMutate(request: Request): Promise<unknown> {
   const startTime = Date.now();
   // Accumulators for post-processing
-  let asyncTasks: (() => Promise<void>)[] = [];
+  const asyncTasks: (() => Promise<void>)[] = [];
   let vespaJobs: VespaJobsAccumulator = [];
   let sideEffectJobs: SideEffectJobsAccumulator = [];
   let capturedMutatorName: string | null = null;
@@ -170,6 +202,12 @@ export async function handleMutate(request: Request): Promise<unknown> {
 
   const isAllowed = await checkRateLimit("mutate", authData.sub, batchSize);
   if (!isAllowed) {
+    logger.warn('zero_mutation_rate_limited', {
+      latency: Date.now() - startTime,
+      userId: authData.sub,
+      workspaceId: authData.workspaceId,
+      batchSize,
+    });
     throw new Error("Rate limit exceeded");
   }
 
@@ -177,46 +215,64 @@ export async function handleMutate(request: Request): Promise<unknown> {
   sideEffectJobs = createSideEffectJobsAccumulator();
 
   try {
-    const result = await handleMutateRequest(
+    const context = {
+      userID: authData.sub,
+      workspaceId: authData.workspaceId,
+      role: authData.role,
+      orgRole: authData.orgRole,
+      memberId: authData.memberId,
+    };
+    const result = await handleMutateRequest({
       dbProvider,
-      transact =>
-        transact((tx, mutatorName, args) => {
+      userID: authData.sub,
+      request,
+      handler: transact => {
+        const mutationAsyncTasks: (() => Promise<void>)[] = [];
+        const mutationVespaJobs = createVespaJobsAccumulator();
+        const mutationSideEffectJobs = createSideEffectJobsAccumulator();
+
+        return transact(async (tx, mutatorName, args) => {
           capturedMutatorName = mutatorName;
-          const mutators = createMutators(authData, asyncTasks);
-          const wrappedTx = wrapTransactionWithACL(tx, { userID: authData.sub, workspaceId: authData.workspaceId, role: authData.role, orgRole: authData.orgRole, memberId: authData.memberId}, vespaJobs, sideEffectJobs);
+          const mutators = createMutators(authData, mutationAsyncTasks);
+          const wrappedTx = wrapTransactionWithACL(tx, context, mutationVespaJobs, mutationSideEffectJobs);
           const mutator = mustGetMutator(mutators, mutatorName);
-          return mutator.fn({ tx: wrappedTx, args, ctx: { userID: authData.sub, workspaceId: authData.workspaceId, role: authData.role, orgRole: authData.orgRole, memberId: authData.memberId } });
-        }),
-      request
-    );
-    if (result && typeof result === 'object') {
-      if ('mutations' in result && Array.isArray(result.mutations)) {
-        for (const mutation of result.mutations) {
-          if (mutation.result && typeof mutation.result === 'object' && 'error' in mutation.result) {
-            const errorObj = mutation.result;
-            const latency = Date.now() - startTime;
-            const errorMsg = ('message' in errorObj && errorObj.message) || 
-                            ('details' in errorObj && errorObj.details) || 
-                            errorObj.error;
-    
-            logger.error('zero_mutation_error', {
-              latency,
-              mutation: capturedMutatorName,
-              error: errorMsg,
-            });
+          return mutator.fn({ tx: wrappedTx, args, ctx: context });
+        }).then((mutatorResult) => {
+          // Zero resolves application failures as mutation results after rolling
+          // back the transaction. Do not dispatch work staged by that rollback.
+          if (!('error' in mutatorResult.result)) {
+            asyncTasks.push(...mutationAsyncTasks);
+            vespaJobs.push(...mutationVespaJobs);
+            sideEffectJobs.push(...mutationSideEffectJobs);
           }
-        }
-      }
-    }
+
+          return mutatorResult;
+        });
+      },
+    });
 
     const latency = Date.now() - startTime;
+    const mutationErrors = getMutationErrors(result);
     getZeroMutationLatency().record(latency, { mutation: capturedMutatorName || 'unknown' });
-    getZeroMutationOperations().add(1, { mutation: capturedMutatorName || 'unknown', stage: 'success' });
 
-    logger.info('zero_mutation_success', {
-      latency,
-      mutation: capturedMutatorName,
-    });
+    if (mutationErrors.length > 0) {
+      getZeroMutationOperations().add(1, { mutation: capturedMutatorName || 'unknown', stage: 'error' });
+
+      for (const errorObj of mutationErrors) {
+        logger.error('zero_mutation_error', {
+          latency,
+          mutation: capturedMutatorName,
+          error: getMutationErrorMessage(errorObj),
+        });
+      }
+    } else {
+      getZeroMutationOperations().add(1, { mutation: capturedMutatorName || 'unknown', stage: 'success' });
+
+      logger.info('zero_mutation_success', {
+        latency,
+        mutation: capturedMutatorName,
+      });
+    }
 
     Promise.allSettled(asyncTasks.map((task) => task()));
 
@@ -261,7 +317,7 @@ export async function handleMutate(request: Request): Promise<unknown> {
     // async chain scheduled inside the callback.
     void runWithContext(
       { userId: authData.sub, workspaceId: authData.workspaceId },
-      () => processSideEffectJobs(sideEffectJobs, { userID: authData.sub, workspaceId: authData.workspaceId, role: authData.role, orgRole: authData.orgRole, memberId: authData.memberId }),
+      () => processSideEffectJobs(sideEffectJobs, context),
     );
 
     return result;
@@ -508,9 +564,9 @@ export async function handleMutateFallback(request: Request): Promise<unknown> {
     throw new Error("Unauthorized");
   }
 
-  let asyncTasks: (() => Promise<void>)[] = [];
-  let vespaJobs: VespaJobsAccumulator = createVespaJobsAccumulator();
-  let sideEffectJobs: SideEffectJobsAccumulator = createSideEffectJobsAccumulator();
+  const asyncTasks: (() => Promise<void>)[] = [];
+  const vespaJobs: VespaJobsAccumulator = createVespaJobsAccumulator();
+  const sideEffectJobs: SideEffectJobsAccumulator = createSideEffectJobsAccumulator();
 
   try {
     const mutation = await request.json() as {
