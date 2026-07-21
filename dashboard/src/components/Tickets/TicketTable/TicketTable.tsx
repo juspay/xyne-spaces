@@ -19,7 +19,7 @@ import { queries } from '../../../zero/queries';
 import { useUser, useUsers } from '../../../hooks/useUsers';
 import { useUserGroupById, useUserGroups } from '../../../hooks/useUserGroup';
 import { Calendar, Check, User } from 'lucide-react';
-import Tooltip from '../../ui/Tooltip';
+import Tooltip, { TruncatedTooltip } from '../../ui/Tooltip';
 import { formatStatusLabel, getPriorityIcon, isEtaUrgent } from '../TicketCard/TicketCard.utils';
 import { mutators } from '../../../zero/mutators';
 import {
@@ -347,7 +347,9 @@ export const TicketTable: React.FC<TicketTableProps> = ({
               >
                 {params.data.xyneId}
               </button>
-              <span className='truncate font-medium text-foreground'>{params.value}</span>
+              <TruncatedTooltip content={String(params.value ?? '')}>
+                <span className='truncate font-medium text-foreground'>{params.value}</span>
+              </TruncatedTooltip>
             </div>
           );
         },
@@ -510,7 +512,11 @@ export const TicketTable: React.FC<TicketTableProps> = ({
         },
         cellRenderer: (params: ICellRendererParams<Ticket>) => (
           <div className='flex items-center h-full'>
-            <span className='text-sm text-muted-foreground'>{params.value ?? '—'}</span>
+            {/* Stage names outgrow the 140px column; without `truncate` the cell
+                hard-clipped them with no ellipsis and no way to read the rest. */}
+            <TruncatedTooltip content={String(params.value ?? '—')}>
+              <span className='text-sm text-muted-foreground truncate'>{params.value ?? '—'}</span>
+            </TruncatedTooltip>
           </div>
         ),
       },

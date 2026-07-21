@@ -4,6 +4,7 @@ import { cn } from '../../../utils/classNames';
 import { findEmailAddress, parseFirstEmailAddress } from '../../../utils/emailAddress';
 import useMeasure from '../../../hooks/useMeasure';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
+import { TruncatedTooltip } from '../../ui/Tooltip/TruncatedTooltip';
 import { Checkbox } from '../../ui/Checkbox/Checkbox';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import type { TicketListItem } from './TicketListView.types';
@@ -115,8 +116,12 @@ export const TicketListRow = ({
   // Show the sender's display name when the email carries one (like Gmail),
   // otherwise fall back to the email address.
   const displaySender = senderName || displayEmail;
-  // Keep the full identity on hover even when only the name is shown.
-  const senderTitle = senderName && displayEmail ? `${senderName} <${displayEmail}>` : displayEmail;
+  // Keep the full identity on hover even when only the name is shown. Mirrors the
+  // rendered text exactly, so it is also what the truncation tooltip reveals.
+  const senderTitle =
+    senderName && displayEmail
+      ? `${senderName} <${displayEmail}>`
+      : (displayEmail ?? senderName ?? '');
   const statusLabel = isHumanInterventionTicket
     ? 'Human Intervention'
     : (ticket.stageName ?? formatStatusText(ticket.status));
@@ -207,14 +212,16 @@ export const TicketListRow = ({
         >
           {ticketIdValue}
         </span>
-        <span
-          className={cn(
-            'text-sm flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-foreground',
-            hasUnread ? 'font-semibold' : 'font-normal',
-          )}
-        >
-          {ticket.title}
-        </span>
+        <TruncatedTooltip content={ticket.title}>
+          <span
+            className={cn(
+              'text-sm flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-foreground',
+              hasUnread ? 'font-semibold' : 'font-normal',
+            )}
+          >
+            {ticket.title}
+          </span>
+        </TruncatedTooltip>
         {ticket.aiCategory && (
           <span
             className='inline-flex items-center justify-center h-[18px] px-2 rounded-sm bg-blue-100 dark:bg-blue-950/50 text-[10px] font-medium text-blue-700 dark:text-blue-300 whitespace-nowrap flex-shrink-0'
@@ -277,28 +284,29 @@ export const TicketListRow = ({
             {displaySender && (
               <>
                 <span className='size-1 rounded-full bg-muted flex-shrink-0' />
-                <span
-                  className={cn(
-                    'text-xs whitespace-nowrap overflow-hidden text-ellipsis',
-                    hasUnread
-                      ? 'text-foreground font-semibold'
-                      : 'text-muted-foreground font-normal',
-                  )}
-                  title={senderTitle ?? undefined}
-                >
-                  {senderName ? (
-                    <>
-                      {senderName}
-                      {displayEmail && (
-                        <span className='ml-1 font-normal text-muted-foreground'>
-                          {`<${displayEmail}>`}
-                        </span>
-                      )}
-                    </>
-                  ) : (
-                    displayEmail
-                  )}
-                </span>
+                <TruncatedTooltip content={senderTitle}>
+                  <span
+                    className={cn(
+                      'text-xs whitespace-nowrap overflow-hidden text-ellipsis',
+                      hasUnread
+                        ? 'text-foreground font-semibold'
+                        : 'text-muted-foreground font-normal',
+                    )}
+                  >
+                    {senderName ? (
+                      <>
+                        {senderName}
+                        {displayEmail && (
+                          <span className='ml-1 font-normal text-muted-foreground'>
+                            {`<${displayEmail}>`}
+                          </span>
+                        )}
+                      </>
+                    ) : (
+                      displayEmail
+                    )}
+                  </span>
+                </TruncatedTooltip>
               </>
             )}
           </div>
@@ -306,11 +314,10 @@ export const TicketListRow = ({
       </div>
       <div className='flex items-center justify-center gap-3 flex-shrink-0'>
         <div className='w-[100px] flex justify-start'>
-          <span
-            className='inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-muted text-muted-foreground truncate max-w-full'
-            title={ticket.stageName ?? undefined}
-          >
-            {statusLabel}
+          <span className='inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-muted text-muted-foreground max-w-full'>
+            <TruncatedTooltip content={statusLabel}>
+              <span className='min-w-0 truncate'>{statusLabel}</span>
+            </TruncatedTooltip>
           </span>
         </div>
         <AssigneePicker
@@ -318,7 +325,7 @@ export const TicketListRow = ({
           assignedTo={ticket.assignedTo}
           channelId={ticket.channelId ?? undefined}
         />
-        <Tooltip delayDuration={300} content={formatDateTime(dueDate)} side='top'>
+        <Tooltip delayDuration={500} content={formatDateTime(dueDate)} side='top'>
           <span
             className={cn(
               'text-xs whitespace-nowrap w-[44px] text-right tabular-nums',

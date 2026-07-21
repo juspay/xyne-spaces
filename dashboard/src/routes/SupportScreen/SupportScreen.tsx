@@ -65,7 +65,7 @@ import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels';
 import { useHasResourceAccess } from '../../hooks/usePermissions';
 import { cn } from '../../utils/classNames';
 import { logger, Event } from '../../utils/logger';
-import Tooltip from '../../components/ui/Tooltip';
+import Tooltip, { TruncatedTooltip } from '../../components/ui/Tooltip';
 import { useZero } from '../../hooks/useZero';
 import { queries } from '../../zero/queries';
 import { QueryResultType } from '@rocicorp/zero';
@@ -3644,7 +3644,7 @@ export const SupportTicketDetail = ({
         <Panel defaultSize={65} minSize={30} maxSize={70}>
           <div className='h-full flex flex-col overflow-hidden relative'>
             <div className='w-full px-6 py-4 flex flex-col gap-2.5 flex-shrink-0 sticky top-0 bg-background z-10 border-b border-border'>
-              <div className='flex items-center gap-2 min-w-0'>
+              <div className='flex flex-wrap items-center gap-2 min-w-0 overflow-hidden'>
                 <button
                   type='button'
                   onClick={() => {
@@ -3664,222 +3664,244 @@ export const SupportTicketDetail = ({
                 <span className='bg-border py-[3px] px-3 flex items-center justify-center text-xs text-foreground rounded-md font-mono shrink-0 whitespace-nowrap'>
                   {ticketIdParam}
                 </span>
-                <div className='flex items-center gap-2 min-w-0 flex-1'>
-                  <span
-                    className='font-medium text-foreground min-w-0 truncate'
-                    title={title || 'Untitled Ticket'}
-                  >
+                {channel?.type === ChannelType.EMAIL && mailboxTicketId && channelId && (
+                  <MailboxActions ticketId={mailboxTicketId} channelId={channelId} slot='star' />
+                )}
+                {/* `min-w-[8rem]` (rem, so it tracks font scaling) is what makes the
+                    row break its flex line instead of crushing the title to nothing. */}
+                <TruncatedTooltip content={title || 'Untitled Ticket'} side='bottom'>
+                  <span className='font-medium text-foreground flex-1 min-w-[8rem] truncate'>
                     {title || 'Untitled Ticket'}
                   </span>
+                </TruncatedTooltip>
 
-                  {conversationId && channelId && (
-                    <ConversationLabels conversationId={conversationId} channelId={channelId} />
+                {/* One cluster so the actions wrap as a block rather than dribbling
+                    onto the next line one icon at a time. `[&>*]:shrink-0` keeps the
+                    1px dividers alive — their min-content size is 0, so they are the
+                    first thing flexbox would collapse. */}
+                <div className='flex flex-wrap items-center gap-2 min-w-0 [&>*]:shrink-0'>
+                  {/* Same self-gating trick as the row-2 pill box: the trailing divider
+                      is an `after:` pseudo and `empty:hidden` drops the whole group, so a
+                      SPAM ticket with no conversation (picker absent, and the 'actions'
+                      slot renders nothing in that state) cannot strand a leading divider. */}
+                  <div className="flex items-center gap-2 empty:hidden after:w-px after:h-4 after:shrink-0 after:bg-border after:content-['']">
+                    {conversationId && channelId && (
+                      <ConversationLabels
+                        conversationId={conversationId}
+                        channelId={channelId}
+                        slot='picker'
+                      />
+                    )}
+                    {channel?.type === ChannelType.EMAIL && mailboxTicketId && channelId && (
+                      <MailboxActions
+                        ticketId={mailboxTicketId}
+                        channelId={channelId}
+                        slot='actions'
+                      />
+                    )}
+                  </div>
+                  {emailCollapseState.canToggleAll && (
+                    <>
+                      <Tooltip
+                        side='bottom'
+                        delayDuration={300}
+                        content={
+                          <span className='flex items-center gap-2'>
+                            {emailCollapseState.anyExpanded ? 'Collapse all' : 'Expand all'}
+                            <kbd className='px-1 py-px rounded bg-background/15 border border-background/20 text-[10px] font-mono uppercase'>
+                              E
+                            </kbd>
+                          </span>
+                        }
+                      >
+                        <button
+                          type='button'
+                          onClick={emailCollapseState.toggleAll}
+                          className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
+                          data-track-category='Support'
+                          data-track-name={
+                            emailCollapseState.anyExpanded ? 'CollapseAllEmails' : 'ExpandAllEmails'
+                          }
+                        >
+                          {emailCollapseState.anyExpanded ? (
+                            <ChevronsDownUp size={16} />
+                          ) : (
+                            <ChevronsUpDown size={16} />
+                          )}
+                        </button>
+                      </Tooltip>
+
+                      <div className='w-px h-4 bg-border' />
+                    </>
                   )}
 
-                  {channel?.type === ChannelType.EMAIL && mailboxTicketId && channelId && (
-                    <MailboxActions ticketId={mailboxTicketId} channelId={channelId} />
+                  {emails.length > 0 && (
+                    <>
+                      <Tooltip side='bottom' delayDuration={300} content='Summarize email thread'>
+                        <button
+                          type='button'
+                          onClick={() => {
+                            if (emailSummaryState === 'idle' || emailSummaryState === 'error') {
+                              setShowEmailSummary(true);
+                              scrollThreadToTop();
+                              void fetchEmailSummary();
+                            } else if (emailSummaryState === 'done') {
+                              setShowEmailSummary(prev => {
+                                const next = !prev;
+                                if (next) scrollThreadToTop();
+                                return next;
+                              });
+                            }
+                          }}
+                          disabled={emailSummaryState === 'loading'}
+                          className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 transition-colors'
+                          data-track-category='Support'
+                          data-track-name='SummarizeEmailThread'
+                        >
+                          {emailSummaryState === 'loading' ? (
+                            <Loader2 size={16} className='animate-spin' />
+                          ) : (
+                            <Wand2 size={16} />
+                          )}
+                        </button>
+                      </Tooltip>
+                      <div className='w-px h-4 bg-border' />
+                    </>
                   )}
-                </div>
 
-                {emailCollapseState.canToggleAll && (
-                  <>
+                  <Tooltip side='bottom' delayDuration={300} content='Copy link to ticket'>
+                    <button
+                      type='button'
+                      onClick={() => {
+                        if (!channelId || !ticketIdParam) {
+                          toast.error('Cannot copy link');
+                          return;
+                        }
+                        const url = `${SHAREABLE_ORIGIN}/support/${channelId}/${ticketIdParam}`;
+                        void navigator.clipboard
+                          .writeText(url)
+                          .then(() => toast.success('Link copied'))
+                          .catch(() => toast.error('Failed to copy link'));
+                      }}
+                      className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
+                      aria-label='Copy link to ticket'
+                      data-track-category='Support'
+                      data-track-name='CopyTicketLink'
+                    >
+                      <LinkIcon size={16} />
+                    </button>
+                  </Tooltip>
+                  <div className='w-px h-4 bg-border' />
+
+                  {channel?.type === ChannelType.CALL && (
+                    <CloudAgentDock buttonBehavior='floating' />
+                  )}
+
+                  <Tooltip
+                    side='bottom'
+                    delayDuration={300}
+                    content={ticket?.isArchived ? 'Already archived' : 'Archive ticket'}
+                  >
+                    <button
+                      type='button'
+                      onClick={() => setShowArchiveConfirmDialog(true)}
+                      disabled={!ticket || !!ticket.isArchived}
+                      className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors'
+                      aria-label='Archive ticket'
+                      data-track-category='Support'
+                      data-track-name='ArchiveTicket'
+                    >
+                      <Archive size={16} />
+                    </button>
+                  </Tooltip>
+                  {emails.length > 0 &&
+                    channel?.type !== ChannelType.SLACK &&
+                    channel?.type !== ChannelType.APP && (
+                      <>
+                        <div className='w-px h-4 bg-border' />
+                        <Tooltip side='bottom' delayDuration={300} content='Mark as unread'>
+                          <button
+                            type='button'
+                            onClick={() => {
+                              if (!ticket?.id) return;
+                              void zero.mutate(
+                                mutators.emailRead.bulkMarkAsUnread({ ticketIds: [ticket.id] }),
+                              );
+                              goBackToTicketList();
+                            }}
+                            className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
+                            aria-label='Mark as unread'
+                            data-track-category='Support'
+                            data-track-name='MarkTicketUnread'
+                          >
+                            <MailOpen size={16} />
+                          </button>
+                        </Tooltip>
+                      </>
+                    )}
+                  <div className='w-px h-4 bg-border' />
+
+                  <div className='flex items-center gap-1'>
                     <Tooltip
                       side='bottom'
                       delayDuration={300}
                       content={
                         <span className='flex items-center gap-2'>
-                          {emailCollapseState.anyExpanded ? 'Collapse all' : 'Expand all'}
+                          Previous ticket
                           <kbd className='px-1 py-px rounded bg-background/15 border border-background/20 text-[10px] font-mono uppercase'>
-                            E
+                            K
                           </kbd>
                         </span>
                       }
                     >
                       <button
                         type='button'
-                        onClick={emailCollapseState.toggleAll}
+                        onClick={() => void navigateAdjacent('backward')}
                         className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
                         data-track-category='Support'
-                        data-track-name={
-                          emailCollapseState.anyExpanded ? 'CollapseAllEmails' : 'ExpandAllEmails'
-                        }
+                        data-track-name='PrevTicket'
                       >
-                        {emailCollapseState.anyExpanded ? (
-                          <ChevronsDownUp size={16} />
-                        ) : (
-                          <ChevronsUpDown size={16} />
-                        )}
+                        <ChevronUp size={16} />
                       </button>
                     </Tooltip>
-
-                    <div className='w-px h-4 bg-border' />
-                  </>
-                )}
-
-                {emails.length > 0 && (
-                  <>
-                    <Tooltip side='bottom' delayDuration={300} content='Summarize email thread'>
+                    <Tooltip
+                      side='bottom'
+                      delayDuration={300}
+                      content={
+                        <span className='flex items-center gap-2'>
+                          Next ticket
+                          <kbd className='px-1 py-px rounded bg-background/15 border border-background/20 text-[10px] font-mono uppercase'>
+                            J
+                          </kbd>
+                        </span>
+                      }
+                    >
                       <button
                         type='button'
-                        onClick={() => {
-                          if (emailSummaryState === 'idle' || emailSummaryState === 'error') {
-                            setShowEmailSummary(true);
-                            scrollThreadToTop();
-                            void fetchEmailSummary();
-                          } else if (emailSummaryState === 'done') {
-                            setShowEmailSummary(prev => {
-                              const next = !prev;
-                              if (next) scrollThreadToTop();
-                              return next;
-                            });
-                          }
-                        }}
-                        disabled={emailSummaryState === 'loading'}
-                        className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 transition-colors'
+                        onClick={() => void navigateAdjacent('forward')}
+                        className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
                         data-track-category='Support'
-                        data-track-name='SummarizeEmailThread'
+                        data-track-name='NextTicket'
                       >
-                        {emailSummaryState === 'loading' ? (
-                          <Loader2 size={16} className='animate-spin' />
-                        ) : (
-                          <Wand2 size={16} />
-                        )}
+                        <ChevronDown size={16} />
                       </button>
                     </Tooltip>
-                    <div className='w-px h-4 bg-border' />
-                  </>
-                )}
-
-                <Tooltip side='bottom' delayDuration={300} content='Copy link to ticket'>
-                  <button
-                    type='button'
-                    onClick={() => {
-                      if (!channelId || !ticketIdParam) {
-                        toast.error('Cannot copy link');
-                        return;
-                      }
-                      const url = `${SHAREABLE_ORIGIN}/support/${channelId}/${ticketIdParam}`;
-                      void navigator.clipboard
-                        .writeText(url)
-                        .then(() => toast.success('Link copied'))
-                        .catch(() => toast.error('Failed to copy link'));
-                    }}
-                    className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
-                    aria-label='Copy link to ticket'
-                    data-track-category='Support'
-                    data-track-name='CopyTicketLink'
-                  >
-                    <LinkIcon size={16} />
-                  </button>
-                </Tooltip>
-                <div className='w-px h-4 bg-border' />
-
-                {channel?.type === ChannelType.CALL && <CloudAgentDock buttonBehavior='floating' />}
-
-                <Tooltip
-                  side='bottom'
-                  delayDuration={300}
-                  content={ticket?.isArchived ? 'Already archived' : 'Archive ticket'}
-                >
-                  <button
-                    type='button'
-                    onClick={() => setShowArchiveConfirmDialog(true)}
-                    disabled={!ticket || !!ticket.isArchived}
-                    className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors'
-                    aria-label='Archive ticket'
-                    data-track-category='Support'
-                    data-track-name='ArchiveTicket'
-                  >
-                    <Archive size={16} />
-                  </button>
-                </Tooltip>
-                {emails.length > 0 &&
-                  channel?.type !== ChannelType.SLACK &&
-                  channel?.type !== ChannelType.APP && (
+                  </div>
+                  {!isRightPanelOpen && (
                     <>
                       <div className='w-px h-4 bg-border' />
-                      <Tooltip side='bottom' delayDuration={300} content='Mark as unread'>
-                        <button
-                          type='button'
-                          onClick={() => {
-                            if (!ticket?.id) return;
-                            void zero.mutate(
-                              mutators.emailRead.bulkMarkAsUnread({ ticketIds: [ticket.id] }),
-                            );
-                            goBackToTicketList();
-                          }}
-                          className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
-                          aria-label='Mark as unread'
-                          data-track-category='Support'
-                          data-track-name='MarkTicketUnread'
-                        >
-                          <MailOpen size={16} />
-                        </button>
-                      </Tooltip>
+                      <Button
+                        size='sm'
+                        variant='ghost'
+                        onClick={() => setIsRightPanelOpen(true)}
+                        data-track-category='Support'
+                        data-track-name='OpenThreadPanel'
+                      >
+                        Open Thread
+                      </Button>
                     </>
                   )}
-                <div className='w-px h-4 bg-border' />
-
-                <div className='flex items-center gap-1'>
-                  <Tooltip
-                    side='bottom'
-                    delayDuration={300}
-                    content={
-                      <span className='flex items-center gap-2'>
-                        Previous ticket
-                        <kbd className='px-1 py-px rounded bg-background/15 border border-background/20 text-[10px] font-mono uppercase'>
-                          K
-                        </kbd>
-                      </span>
-                    }
-                  >
-                    <button
-                      type='button'
-                      onClick={() => void navigateAdjacent('backward')}
-                      className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
-                      data-track-category='Support'
-                      data-track-name='PrevTicket'
-                    >
-                      <ChevronUp size={16} />
-                    </button>
-                  </Tooltip>
-                  <Tooltip
-                    side='bottom'
-                    delayDuration={300}
-                    content={
-                      <span className='flex items-center gap-2'>
-                        Next ticket
-                        <kbd className='px-1 py-px rounded bg-background/15 border border-background/20 text-[10px] font-mono uppercase'>
-                          J
-                        </kbd>
-                      </span>
-                    }
-                  >
-                    <button
-                      type='button'
-                      onClick={() => void navigateAdjacent('forward')}
-                      className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
-                      data-track-category='Support'
-                      data-track-name='NextTicket'
-                    >
-                      <ChevronDown size={16} />
-                    </button>
-                  </Tooltip>
                 </div>
-                {!isRightPanelOpen && (
-                  <>
-                    <div className='w-px h-4 bg-border' />
-                    <Button
-                      size='sm'
-                      variant='ghost'
-                      onClick={() => setIsRightPanelOpen(true)}
-                      data-track-category='Support'
-                      data-track-name='OpenThreadPanel'
-                    >
-                      Open Thread
-                    </Button>
-                  </>
-                )}
               </div>
               <div className='flex flex-col gap-1 flex-shrink-0'>
                 <div className='pl-9 flex items-center gap-3 flex-wrap'>
@@ -3896,6 +3918,33 @@ export const SupportTicketDetail = ({
                     >
                       <Mail size={12} className='shrink-0 text-muted-foreground' />
                       <span className='truncate max-w-[160px]'>{initiator.name}</span>
+                    </div>
+                  )}
+
+                  {/* Pills only — the picker trigger and the move actions live in the
+                      row-1 icon cluster. This is the metadata strip, so what lands here
+                      is state you read (which labels, which mailbox), not buttons you
+                      hunt for. Both slots render null when they have nothing to show
+                      (archived has no chip, zero labels has no chips), so the leading
+                      divider is a `before:` pseudo on this box and `empty:hidden` drops
+                      the whole thing — a real sibling element would strand a divider
+                      with nothing after it. */}
+                  {channelId && (conversationId || mailboxTicketId) && (
+                    <div className="flex items-center gap-1.5 flex-wrap min-h-[24px] empty:hidden before:w-px before:h-4 before:shrink-0 before:bg-border before:content-['']">
+                      {channel?.type === ChannelType.EMAIL && mailboxTicketId && (
+                        <MailboxActions
+                          ticketId={mailboxTicketId}
+                          channelId={channelId}
+                          slot='chip'
+                        />
+                      )}
+                      {conversationId && (
+                        <ConversationLabels
+                          conversationId={conversationId}
+                          channelId={channelId}
+                          slot='chips'
+                        />
+                      )}
                     </div>
                   )}
                 </div>

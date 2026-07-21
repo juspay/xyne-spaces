@@ -12,7 +12,7 @@ import { getPriorityIcon, formatEta, isEtaUrgent, isStageEtaOverdue } from './Ti
 import { cn } from '../../../utils/classNames';
 import { useUser, useUsers } from '../../../hooks/useUsers';
 import { TicketStatusWithStages } from '../TicketStatus/TicketStatusIcon';
-import Tooltip from '../../ui/Tooltip';
+import Tooltip, { TruncatedTooltip } from '../../ui/Tooltip';
 import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
@@ -568,16 +568,18 @@ export const TicketCard: React.FC<TicketCardProps> = ({
               ticket.xyneId
             )}
           </span>
-          <h3
-            data-testid='ticket-card-title'
-            className='flex-1 min-w-0 truncate text-sm font-medium text-foreground'
-          >
-            {ticketHighlight?.titleHtml ? (
-              <RenderMessageWithHTML message={ticketHighlight.titleHtml} />
-            ) : (
-              ticket.title
-            )}
-          </h3>
+          <TruncatedTooltip content={ticket.title}>
+            <h3
+              data-testid='ticket-card-title'
+              className='flex-1 min-w-0 truncate text-sm font-medium text-foreground'
+            >
+              {ticketHighlight?.titleHtml ? (
+                <RenderMessageWithHTML message={ticketHighlight.titleHtml} />
+              ) : (
+                ticket.title
+              )}
+            </h3>
+          </TruncatedTooltip>
           <div className='flex items-center gap-2.5 shrink-0'>
             <TicketStatusWithStages
               currentStageName={ticket.stageName}
@@ -754,20 +756,22 @@ export const TicketCard: React.FC<TicketCardProps> = ({
           <div className={`${releaseBoardBgColor} rounded-b-xl`}>
             {/* Title */}
             {ticket.title && (
-              <h3
-                data-testid='ticket-card-title'
-                className={cn(
-                  'line-clamp-1 break-all mb-2',
-                  isCompact
-                    ? isEmailRead
-                      ? 'font-normal text-sm'
-                      : 'font-medium text-sm'
-                    : 'font-semibold text-[15px]',
-                  isCompact && isEmailRead ? 'text-muted-foreground' : 'text-foreground',
-                )}
-              >
-                {ticket.title}
-              </h3>
+              <TruncatedTooltip content={ticket.title}>
+                <h3
+                  data-testid='ticket-card-title'
+                  className={cn(
+                    'line-clamp-1 break-all mb-2',
+                    isCompact
+                      ? isEmailRead
+                        ? 'font-normal text-sm'
+                        : 'font-medium text-sm'
+                      : 'font-semibold text-[15px]',
+                    isCompact && isEmailRead ? 'text-muted-foreground' : 'text-foreground',
+                  )}
+                >
+                  {ticket.title}
+                </h3>
+              </TruncatedTooltip>
             )}
 
             {/* Description */}
@@ -945,9 +949,11 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                       {creator && (
                         <>
                           <Avatar userId={creator.id} showActiveStatus={false} className='size-3' />
-                          <span className='text-xs text-foreground'>
-                            {creator.name || creator.email || 'Unknown'}
-                          </span>
+                          <TruncatedTooltip content={creator.name || creator.email || 'Unknown'}>
+                            <span className='text-xs text-foreground truncate'>
+                              {creator.name || creator.email || 'Unknown'}
+                            </span>
+                          </TruncatedTooltip>
                         </>
                       )}
                       {!creator && (
