@@ -216,6 +216,15 @@ const AppSidebar = (): ReactElement => {
     return (): void => window.removeEventListener('xyne-open-preferences', handler);
   }, []);
 
+  useEffect(() => {
+    const handler = (): void => {
+      setIsSettingsPopoverOpen(false);
+      setIsStatusModalOpen(true);
+    };
+    window.addEventListener('xyne-open-status', handler);
+    return (): void => window.removeEventListener('xyne-open-status', handler);
+  }, []);
+
   // Check if user has a valid (non-expired) status
   const hasValidStatus =
     currentUser?.statusEmoji &&

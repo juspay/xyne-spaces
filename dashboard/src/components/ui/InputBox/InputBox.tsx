@@ -649,6 +649,16 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           // Check if screen width is below 500px
           const isMobile = window.innerWidth < 500;
 
+          // Cmd/Ctrl+Shift+Enter: toggle a code block (Slack "create snippet"
+          // parity). Handled here — ahead of the Enter send/newline branch and
+          // the TipTap keymap — because editorProps.handleKeyDown runs first, so
+          // the branch below would otherwise consume this combo as send/newline.
+          if (event.key === 'Enter' && event.shiftKey && (event.metaKey || event.ctrlKey)) {
+            event.preventDefault();
+            editor?.chain().focus().toggleCodeBlock().run();
+            return true;
+          }
+
           // Shift+Enter / Cmd+Enter: new line (default) OR send message (when enterSendsMessage is false)
           if (event.key === 'Enter' && (event.shiftKey || event.metaKey)) {
             if (!enterSendsMessage && !isMobile && !disableEnterToSend) {

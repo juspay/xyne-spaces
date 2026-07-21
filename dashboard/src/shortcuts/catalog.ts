@@ -74,6 +74,14 @@ export const shortcuts = {
     priority: 50,
     allowInInputs: true,
   },
+  'global.openThreads': {
+    keys: 'mod+shift+t',
+    scope: 'global',
+    description: 'Open the Threads view',
+    category: 'Navigation',
+    priority: 50,
+    allowInInputs: true,
+  },
   'global.openShortcutsHelp': {
     keys: 'mod+shift+/',
     scope: 'global',
@@ -101,6 +109,25 @@ export const shortcuts = {
     allowInInputs: true,
     preventDefault: true,
     useKey: true,
+  },
+
+  'global.openPreferences': {
+    keys: 'mod+comma',
+    scope: 'global',
+    description: 'Open preferences',
+    category: 'Navigation',
+    priority: 50,
+    allowInInputs: true,
+    preventDefault: true,
+  },
+  'global.setStatus': {
+    keys: 'mod+shift+y',
+    scope: 'global',
+    description: 'Set a status',
+    category: 'Navigation',
+    priority: 50,
+    allowInInputs: true,
+    preventDefault: true,
   },
 
   'composer.voiceInput': {
@@ -141,6 +168,43 @@ export const shortcuts = {
     useKey: true,
   },
 
+  'sidebar.nextConversation': {
+    keys: 'alt+down',
+    scope: 'global',
+    description: 'Go to next conversation in the sidebar',
+    category: 'Sidebar',
+    allowInInputs: true,
+    priority: 20,
+    preventDefault: true,
+  },
+  'sidebar.prevConversation': {
+    keys: 'alt+up',
+    scope: 'global',
+    description: 'Go to previous conversation in the sidebar',
+    category: 'Sidebar',
+    allowInInputs: true,
+    priority: 20,
+    preventDefault: true,
+  },
+  'sidebar.nextUnreadConversation': {
+    keys: 'alt+shift+down',
+    scope: 'global',
+    description: 'Go to next unread conversation in the sidebar',
+    category: 'Sidebar',
+    allowInInputs: true,
+    priority: 20,
+    preventDefault: true,
+  },
+  'sidebar.prevUnreadConversation': {
+    keys: 'alt+shift+up',
+    scope: 'global',
+    description: 'Go to previous unread conversation in the sidebar',
+    category: 'Sidebar',
+    allowInInputs: true,
+    priority: 20,
+    preventDefault: true,
+  },
+
   // ===== MESSAGE ACTIONS =====
   'message.edit': {
     keys: 'e',
@@ -167,7 +231,7 @@ export const shortcuts = {
     priority: 30,
   },
   'message.bookmark': {
-    keys: 'b',
+    keys: ['b', 'a'],
     scope: 'channel',
     description: 'Bookmark message',
     category: 'Messages',
