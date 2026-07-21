@@ -123,6 +123,7 @@ import { syncUserWorkload } from '@/utils/workloadUtils';
 import { ticketAssignmentService, primaryUserIdOf } from '@/services/ticketAssignmentService';
 import { calculateETADeadline, calculateWorkingDurationMs } from '@/utils/etaCalculation';
 import { DEFAULT_ROLE_NAME_TO_ENUM } from '@/utils/roleFrameworkUtils';
+import { grantPermissionsForRole, syncResourceAdminAccess, syncOrgResourceAdminAccess } from '@/services/permissionMatrix';
 import {
   deleteDraftEntityAttachments,
   deleteDelayedMessageEntityAttachments,
@@ -13151,13 +13152,35 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           }),
           timestamp: z.number(),
         }),
-        async ({ tx, args: { userId, updates, timestamp } }) => {
+        async ({ tx, args: { userId, workspaceId, updates, timestamp } }) => {
           // ACL check is handled by UsersACL
           await tx.mutate.users.update({
             id: userId,
             ...updates,
             updatedAt: timestamp,
           });
+
+          if (updates.role !== undefined) {
+            if (updates.role === WorkspaceRole.ADMIN) {
+              // Promote: grant the full ADMIN permission matrix, same as invite-accept
+              // (grantPermissionsForRole), so "becomes an admin" is consistent regardless
+              // of whether the user was invited straight in as ADMIN or promoted later.
+              const user = await tx.run(zql.users.where('id', userId).one());
+              if (user) {
+                const { email } = user;
+                asyncTasks.push(() =>
+                  grantPermissionsForRole(userId, email, WorkspaceRole.ADMIN, workspaceId),
+                );
+              }
+            } else {
+              // Demote: only revoke WORKSPACE. Deliberately not a full matrix revoke —
+              // avoids stripping resource access that may have been granted independently
+              // via the Roles screen (no provenance tracking exists to tell them apart).
+              asyncTasks.push(() =>
+                syncResourceAdminAccess(userId, 'WORKSPACE', false, authData.sub),
+              );
+            }
+          }
         }
       ),
 
@@ -13388,6 +13411,31 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               joinedAt: timestamp,
               userId: 'deprecated-placeholder', // Deprecated field, kept for backward compatibility
             });
+          }
+        },
+      ),
+      updateRole: defineMutator(
+        z.object({
+          memberId: z.string(),
+          updates: z.object({
+            role: z.enum([OrgRole.OWNER, OrgRole.ADMIN, OrgRole.MEMBER, OrgRole.VIEWER]).optional(),
+          }),
+        }),
+        async ({ tx, args: { memberId, updates } }) => {
+          await tx.mutate.org_members.update({
+            memberId,
+            ...updates,
+          });
+
+          if (updates.role !== undefined) {
+            const member = await tx.run(zql.org_members.where('memberId', memberId).one());
+            if (member) {
+              const shouldHaveAccess = updates.role === OrgRole.ADMIN || updates.role === OrgRole.OWNER;
+              const { orgId, email } = member;
+              asyncTasks.push(() =>
+                syncOrgResourceAdminAccess(orgId, email, shouldHaveAccess, authData.sub),
+              );
+            }
           }
         },
       ),

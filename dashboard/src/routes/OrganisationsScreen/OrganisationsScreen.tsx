@@ -10,6 +10,8 @@ import {
   UserPlus,
   CheckCircle,
   AlertTriangle,
+  Shield,
+  User,
 } from 'lucide-react';
 import { Button } from '../../components/ui/Button/Button';
 import Input from '../../components/ui/Input/Input';
@@ -19,6 +21,12 @@ import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { queries } from '../../zero/queries';
 import { mutators } from '../../zero/mutators';
 import Dialog from '../../components/ui/Dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '../../components/ui/dropdown-menu';
 import { toast } from 'sonner';
 import { cn } from '../../utils/classNames';
 import { v4 as uuidv4 } from 'uuid';
@@ -33,7 +41,7 @@ interface OrgMemberRow {
   memberId: string;
   orgId: string;
   email: string;
-  role: string;
+  role: OrgRole;
   joinedAt: number;
   leftAt?: number | null;
 }
@@ -57,12 +65,12 @@ const Card = ({
 
 // ─── Role badge ───────────────────────────────────────────────────────────────
 
-const RoleBadge = ({ role }: { role: string }): ReactElement => {
-  const styles: Record<string, string> = {
-    OWNER: 'bg-amber-500/10 text-amber-600',
-    ADMIN: 'bg-blue-500/10 text-blue-600',
-    MEMBER: 'bg-muted text-muted-foreground',
-    VIEWER: 'bg-muted text-muted-foreground',
+const RoleBadge = ({ role }: { role: OrgRole }): ReactElement => {
+  const styles: Record<OrgRole, string> = {
+    [OrgRole.OWNER]: 'bg-amber-500/10 text-amber-600',
+    [OrgRole.ADMIN]: 'bg-blue-500/10 text-blue-600',
+    [OrgRole.MEMBER]: 'bg-muted text-muted-foreground',
+    [OrgRole.VIEWER]: 'bg-muted text-muted-foreground',
   };
   return (
     <span
@@ -101,6 +109,7 @@ const OrgMembersSection = ({
   const [emailInput, setEmailInput] = useState('');
   const [isAdding, setIsAdding] = useState(false);
   const [removingId, setRemovingId] = useState<string | null>(null);
+  const [updatingRoleId, setUpdatingRoleId] = useState<string | null>(null);
   const emailInputRef = useRef<HTMLInputElement>(null);
   const { isMobile } = usePlatform();
 
@@ -115,6 +124,16 @@ const OrgMembersSection = ({
     selfMembership?.role === OrgRole.ADMIN ||
     isOrgCreator;
 
+  // Count admins/owners for the "last admin" guard, mirroring workspace member management.
+  const adminCount = ((members as OrgMemberRow[] | undefined) ?? []).filter(
+    m => m.role === OrgRole.ADMIN || m.role === OrgRole.OWNER,
+  ).length;
+
+  const canDemote = (member: OrgMemberRow): boolean => {
+    if (member.role !== OrgRole.ADMIN && member.role !== OrgRole.OWNER) return true;
+    return adminCount > 1;
+  };
+
   useEffect(() => {
     if (!canManage || isMobile) return;
     const rafId = requestAnimationFrame(() => {
@@ -123,7 +142,7 @@ const OrgMembersSection = ({
     return () => cancelAnimationFrame(rafId);
   }, [canManage, isMobile]);
 
-  const handleAdd = (): void => {
+  const handleAdd = async (): Promise<void> => {
     const email = emailInput.trim().toLowerCase();
     if (!email) {
       toast.error('Please enter an email address');
@@ -145,30 +164,75 @@ const OrgMembersSection = ({
     const role = isCreatorBootstrap ? OrgRole.OWNER : OrgRole.MEMBER;
 
     setIsAdding(true);
-    z.mutate(
-      mutators.orgMember.add({
-        memberId: uuidv4(),
-        orgId,
-        email,
-        role,
-        timestamp: Date.now(),
-      }),
-    );
-    setEmailInput('');
-    toast.success(`${email} added to organisation`);
-    setIsAdding(false);
+    try {
+      const result = z.mutate(
+        mutators.orgMember.add({
+          memberId: uuidv4(),
+          orgId,
+          email,
+          role,
+          timestamp: Date.now(),
+        }),
+      );
+      const res = await result.server;
+      if (res.type === 'error') {
+        toast.error(`Failed to add ${email}: ${res.error.message}`);
+        return;
+      }
+      setEmailInput('');
+      toast.success(`${email} added to organisation`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : `Failed to add ${email}`);
+    } finally {
+      setIsAdding(false);
+    }
   };
 
-  const handleRemove = (memberId: string, memberEmail: string): void => {
+  const handleUpdateRole = async (
+    memberId: string,
+    newRole: OrgRole.ADMIN | OrgRole.MEMBER,
+  ): Promise<void> => {
+    setUpdatingRoleId(memberId);
+    try {
+      const result = z.mutate(
+        mutators.orgMember.updateRole({
+          memberId,
+          updates: { role: newRole },
+        }),
+      );
+      const res = await result.server;
+      if (res.type === 'error') {
+        toast.error(`Failed to update role: ${res.error.message}`);
+        return;
+      }
+      toast.success(`Role updated to ${newRole.toLowerCase()}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to update role');
+    } finally {
+      setUpdatingRoleId(null);
+    }
+  };
+
+  const handleRemove = async (memberId: string, memberEmail: string): Promise<void> => {
     setRemovingId(memberId);
-    z.mutate(
-      mutators.orgMember.remove({
-        memberId,
-        timestamp: Date.now(),
-      }),
-    );
-    toast.success(`${memberEmail} removed from organisation`);
-    setRemovingId(null);
+    try {
+      const result = z.mutate(
+        mutators.orgMember.remove({
+          memberId,
+          timestamp: Date.now(),
+        }),
+      );
+      const res = await result.server;
+      if (res.type === 'error') {
+        toast.error(`Failed to remove ${memberEmail}: ${res.error.message}`);
+        return;
+      }
+      toast.success(`${memberEmail} removed from organisation`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : `Failed to remove ${memberEmail}`);
+    } finally {
+      setRemovingId(null);
+    }
   };
 
   return (
@@ -189,13 +253,13 @@ const OrgMembersSection = ({
               onChange={e => setEmailInput(e.target.value)}
               onKeyDown={e => {
                 if (e.key === 'Enter' && !isAdding) {
-                  handleAdd();
+                  void handleAdd();
                 }
               }}
               className='flex-1'
             />
             <Button
-              onClick={handleAdd}
+              onClick={() => void handleAdd()}
               disabled={isAdding || !emailInput.trim()}
               className='gap-2 bg-foreground text-background hover:bg-foreground/90'
               data-track-category='Organisations'
@@ -238,23 +302,73 @@ const OrgMembersSection = ({
                 <RoleBadge role={member.role} />
               </div>
 
-              {/* Remove button — admins/owners can remove anyone except themselves */}
+              {/* Actions — admins/owners can change roles / remove anyone except themselves */}
               {canManage && member.email.toLowerCase() !== (selfEmail ?? '').toLowerCase() && (
-                <Button
-                  variant='ghost'
-                  size='sm'
-                  onClick={() => handleRemove(member.memberId, member.email)}
-                  disabled={removingId === member.memberId}
-                  className='text-destructive hover:text-destructive hover:bg-destructive/10'
-                  data-track-category='Organisations'
-                  data-track-name='RemoveOrgMember'
-                >
-                  {removingId === member.memberId ? (
-                    <Loader2 className='w-4 h-4 animate-spin' />
-                  ) : (
-                    <X className='w-4 h-4' />
-                  )}
-                </Button>
+                <div className='flex items-center gap-2'>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant='outline'
+                        size='sm'
+                        disabled={updatingRoleId === member.memberId}
+                        className='gap-1'
+                        data-track-category='Organisations'
+                        data-track-name='OpenOrgMemberRoleMenu'
+                      >
+                        {updatingRoleId === member.memberId ? (
+                          <Loader2 className='w-3 h-3 animate-spin' />
+                        ) : (
+                          <>
+                            Change Role
+                            <Shield className='w-3 h-3 ml-1' />
+                          </>
+                        )}
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align='end'>
+                      {member.role !== OrgRole.ADMIN && (
+                        <DropdownMenuItem
+                          onClick={() => void handleUpdateRole(member.memberId, OrgRole.ADMIN)}
+                          data-track-category='Organisations'
+                          data-track-name='SetOrgMemberAdmin'
+                        >
+                          <Shield className='w-4 h-4 mr-2' />
+                          Admin
+                        </DropdownMenuItem>
+                      )}
+                      {member.role !== OrgRole.MEMBER && (
+                        <DropdownMenuItem
+                          onClick={() => void handleUpdateRole(member.memberId, OrgRole.MEMBER)}
+                          disabled={!canDemote(member)}
+                          data-track-category='Organisations'
+                          data-track-name='SetOrgMemberMember'
+                        >
+                          <User className='w-4 h-4 mr-2' />
+                          Member
+                          {!canDemote(member) && (
+                            <span className='ml-2 text-xs text-muted-foreground'>(Last admin)</span>
+                          )}
+                        </DropdownMenuItem>
+                      )}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+
+                  <Button
+                    variant='ghost'
+                    size='sm'
+                    onClick={() => void handleRemove(member.memberId, member.email)}
+                    disabled={removingId === member.memberId || !canDemote(member)}
+                    className='text-destructive hover:text-destructive hover:bg-destructive/10'
+                    data-track-category='Organisations'
+                    data-track-name='RemoveOrgMember'
+                  >
+                    {removingId === member.memberId ? (
+                      <Loader2 className='w-4 h-4 animate-spin' />
+                    ) : (
+                      <X className='w-4 h-4' />
+                    )}
+                  </Button>
+                </div>
               )}
             </div>
           ))}
