@@ -3,8 +3,10 @@ import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 
 const ProtectedRoute = (): ReactElement => {
-  const { isAuthenticated } = useAuth();
+  const { isLoading, isAuthenticated } = useAuth();
   const location = useLocation();
+
+  if (location.pathname === '/newWindow/claw' && (isLoading || !isAuthenticated)) return <></>;
 
   if (!isAuthenticated) {
     const searchParams = new URLSearchParams(location.search);

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   AnimatePresence,
   motion,
@@ -26,22 +26,14 @@ export function ClawOverlay(): React.ReactElement {
 
   const isOpenRef = useRef(isOpen);
   isOpenRef.current = isOpen;
-  const blurFrameRef = useRef<number | null>(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const root = document.documentElement;
     root.classList.add('claw-overlay-active');
     return () => {
       root.classList.remove('claw-overlay-active');
     };
   }, []);
-
-  useEffect(
-    () => () => {
-      if (blurFrameRef.current !== null) cancelAnimationFrame(blurFrameRef.current);
-    },
-    [],
-  );
 
   useEffect(() => {
     xyneAIStreamManager.setClawOverlayOpen(isOpen || isClosing);
@@ -55,8 +47,8 @@ export function ClawOverlay(): React.ReactElement {
   );
 
   useEffect(() => {
-    bridge.setExpanded(false);
     bridge.setIgnoreMouse(true);
+    bridge.setExpanded(false);
   }, [bridge]);
 
   useEffect(
@@ -71,10 +63,6 @@ export function ClawOverlay(): React.ReactElement {
   );
 
   const handleOpen = useCallback(() => {
-    if (blurFrameRef.current !== null) {
-      cancelAnimationFrame(blurFrameRef.current);
-      blurFrameRef.current = null;
-    }
     isOpenRef.current = true;
     setIsClosing(false);
     bridge.setExpanded(true);
@@ -88,12 +76,6 @@ export function ClawOverlay(): React.ReactElement {
     setIsClosing(true);
     setIsOpen(false);
     if (reduceMotion) bridge.setExpanded(false);
-
-    if (blurFrameRef.current !== null) cancelAnimationFrame(blurFrameRef.current);
-    blurFrameRef.current = requestAnimationFrame(() => {
-      blurFrameRef.current = null;
-      if (!isOpenRef.current) bridge.blur();
-    });
   }, [bridge, reduceMotion]);
 
   const handlePointerEnter = useCallback(() => {
@@ -182,6 +164,7 @@ export function ClawOverlay(): React.ReactElement {
               willChange: 'transform',
             }}
             className={cn('claw-shell pointer-events-auto relative', isOpen && 'claw-shell--open')}
+            data-popover-portal-container
             data-slot='claw-overlay'
             data-testid='claw-overlay'
           >
@@ -192,7 +175,7 @@ export function ClawOverlay(): React.ReactElement {
                 'shadow-[inset_0_0_0_1px_hsl(var(--border)/0.7)]',
               )}
             >
-              <ClawPill isOpen={isOpen || isClosing} onOpen={handleOpen} onClose={handleClose} />
+              <ClawPill isOpen={isOpen} onOpen={handleOpen} onClose={handleClose} />
               <AnimatePresence mode='popLayout'>
                 {isOpen && (
                   <motion.div

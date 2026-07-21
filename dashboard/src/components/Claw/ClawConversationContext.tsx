@@ -174,6 +174,7 @@ export function ClawConversationProvider({
 
   const loadConversation = useCallback(
     async (conversation: ConversationHistory): Promise<boolean> => {
+      if (conversation.sessionId !== conversationId) abortCurrentRequest();
       const requestId = ++loadRequestRef.current;
       setLoadingSessionId(conversation.sessionId);
       try {
@@ -211,7 +212,7 @@ export function ClawConversationProvider({
         if (loadRequestRef.current === requestId) setLoadingSessionId(null);
       }
     },
-    [historyAgentSlug],
+    [abortCurrentRequest, conversationId, historyAgentSlug],
   );
 
   const deleteConversation = useCallback(

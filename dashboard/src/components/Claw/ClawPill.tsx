@@ -73,6 +73,7 @@ export function ClawPill({ isOpen, onOpen, onClose }: ClawPillProps): React.Reac
         {isOpen ? (
           <motion.div
             key='claw-header'
+            layout='position'
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -95,6 +96,7 @@ export function ClawPill({ isOpen, onOpen, onClose }: ClawPillProps): React.Reac
         ) : (
           <motion.span
             key='claw-label'
+            layout='position'
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}

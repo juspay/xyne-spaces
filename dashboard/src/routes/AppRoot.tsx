@@ -791,6 +791,15 @@ const AppRoot = (): ReactElement => {
 
 export const router = createBrowserRouter([
   {
+    element: <ProtectedRoute />,
+    children: [
+      {
+        path: '/newWindow/claw',
+        element: <ClawOverlay />,
+      },
+    ],
+  },
+  {
     element: <SplashScreen />,
     errorElement: <RouterErrorFallback />,
     children: [
@@ -1492,15 +1501,6 @@ export const router = createBrowserRouter([
             </ZeroFallbackProvider>
           </ZeroProvider>
         ),
-      },
-      {
-        element: <ProtectedRoute />,
-        children: [
-          {
-            path: '/newWindow/claw',
-            element: <ClawOverlay />,
-          },
-        ],
       },
       {
         path: '/invite',
