@@ -112,7 +112,6 @@ const envSchema = Joi.object({
   SYNC_DM_CONCURRENCY: Joi.number().integer().min(1).default(3), // Max DMs/group-DMs migrated in parallel (/sync-dm)
   SYNC_DM_LOG_CHANNEL: Joi.string().allow('').default(''), // Default Slack channel for /sync-dm updates; per-workspace override via MIGRATION_SLACK_BOT_CONFIGS[].syncDmLogChannelId
   // Zoho Integration
-  ZOHO_AUTO_WORKFLOW_ENABLED: Joi.boolean().default(true),
   // SAM Service Configuration
   SAM_BASE_URL: Joi.string().uri().default(''),
   SAM_API_KEY: Joi.string().allow('').default(''),
@@ -550,9 +549,6 @@ export const config = {
   },
   slackMigrationNotificationsEnabled: envVars.SLACK_MIGRATION_NOTIFICATIONS_ENABLED,
   migrationSlackBotConfigs: envVars.MIGRATION_SLACK_BOT_CONFIGS as string,
-  zoho: {
-    autoWorkflowEnabled: envVars.ZOHO_AUTO_WORKFLOW_ENABLED,
-  },
   sam: {
     baseUrl: envVars.SAM_BASE_URL,
     apiKey: envVars.SAM_API_KEY,
