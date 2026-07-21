@@ -189,6 +189,11 @@ export const Popover = ({
   closeButtonClassName,
   focusRef,
 }: PopoverProps): React.ReactElement => {
+  const portalContainer =
+    container ??
+    (typeof document === 'undefined'
+      ? undefined
+      : (document.querySelector<HTMLElement>('[data-popover-portal-container]') ?? undefined));
   const handleOpenAutoFocus = React.useCallback(
     (event: Event) => {
       if (focusRef) {
@@ -213,7 +218,7 @@ export const Popover = ({
       </PopoverPrimitive.Trigger>
       <PopoverPrimitive.Portal
         data-slot='popover-portal'
-        {...(container !== undefined && { container })}
+        {...(portalContainer !== undefined && { container: portalContainer })}
       >
         <PopoverPrimitive.Content
           data-slot='popover-content'
