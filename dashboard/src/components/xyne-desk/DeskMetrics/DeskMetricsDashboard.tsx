@@ -9,10 +9,14 @@ import {
   AlertCircle,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   Download,
   Search,
   UserCircle2,
 } from 'lucide-react';
+import { Popover } from '../../ui/Popover';
+import { type DateRangeValue } from '../../ui/DateRangeFilter';
+import { DeskMetricsDateRangePicker } from './DeskMetricsDateRangePicker';
 import {
   Bar,
   BarChart,
@@ -61,12 +65,24 @@ const PRIORITY_BADGE: Record<string, string> = {
 };
 
 const PAGE_SIZE = 15;
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
 
-type TimeRange = '24h' | '7d';
-const TIME_RANGES: { label: string; value: TimeRange }[] = [
-  { label: 'Last 24 hrs', value: '24h' },
-  { label: 'Last 7 days', value: '7d' },
-];
+const dateTimeMs = (date: Date, time: string, isEnd: boolean): number => {
+  const [hour = 0, minute = 0] = time.split(':').map(Number);
+  const result = new Date(date);
+  result.setHours(hour, minute, isEnd ? 59 : 0, isEnd ? 999 : 0);
+  return result.getTime();
+};
+
+const defaultDateRange = (): DateRangeValue => {
+  const end = new Date();
+  const start = new Date();
+  start.setDate(start.getDate() - 6);
+  start.setHours(0, 0, 0, 0);
+  end.setHours(23, 59, 59, 999);
+  return { startDate: start, endDate: end };
+};
 
 export const formatDuration = (seconds: number | null): string => {
   if (seconds === null || !Number.isFinite(seconds)) return '—';
@@ -83,22 +99,32 @@ export const formatDuration = (seconds: number | null): string => {
 const priorityLabel = (p: string): string =>
   p.charAt(0) + p.slice(1).toLowerCase().replace(/_/g, ' ');
 
-const formatTrendLabel = (date: string, hourly: boolean): string => {
+const formatTrendLabel = (bucketStartMs: number, hourly: boolean): string => {
+  const date = new Date(bucketStartMs);
   if (hourly) {
-    // date is "YYYY-MM-DD HH:00"
-    const [_datePart, timePart] = date.split(' ');
-    const hour = parseInt(timePart ?? '0');
-    const suffix = hour < 12 ? 'am' : 'pm';
-    const h = hour % 12 || 12;
-    return `${h}${suffix}`;
+    return date.toLocaleTimeString('en-US', { hour: 'numeric' }).replace(/\s/g, '').toLowerCase();
   }
-  const d = new Date(`${date}T00:00:00`);
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 };
+
+const getCustomFieldKeys = (tickets: DeskMetricsTicketRow[]): string[] =>
+  [...new Set(tickets.flatMap(t => Object.keys(t.customFields ?? {})))].sort();
 
 const downloadCsv = (tickets: DeskMetricsTicketRow[]): string => {
   const filename = 'desk-metrics.csv';
-  const headers = ['ID', 'Title', 'Assignee', 'Priority', 'Stage', 'Status', 'FRT', 'RT', 'CSAT'];
+  const customKeys = getCustomFieldKeys(tickets);
+  const headers = [
+    'ID',
+    'Title',
+    'Assignee',
+    'Priority',
+    'Stage',
+    'Status',
+    'FRT',
+    'RT',
+    'CSAT',
+    ...customKeys,
+  ];
   const rows = tickets.map(t => [
     t.xyneId ?? t.ticketId.slice(0, 8),
     `"${(t.title ?? '').replace(/"/g, '""')}"`,
@@ -109,6 +135,7 @@ const downloadCsv = (tickets: DeskMetricsTicketRow[]): string => {
     formatDuration(t.frtSeconds),
     formatDuration(t.rtSeconds),
     t.csatScore !== null ? `${t.csatScore.toFixed(1)}/5` : (t.csatRating ?? '—'),
+    ...customKeys.map(k => `"${(t.customFields?.[k] ?? '').replace(/"/g, '""')}"`),
   ]);
   const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -131,6 +158,7 @@ const MetricsTicketTable = ({
   const [page, setPage] = useState(0);
   const totalPages = Math.ceil(tickets.length / PAGE_SIZE);
   const pageRows = tickets.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+  const customFieldKeys = useMemo(() => getCustomFieldKeys(tickets), [tickets]);
 
   return (
     <div className='rounded-[12px] border border-desk-border bg-background dark:border-border'>
@@ -204,6 +232,11 @@ const MetricsTicketTable = ({
               <th className='px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground'>
                 CSAT
               </th>
+              {customFieldKeys.length > 0 && (
+                <th className='px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground'>
+                  Custom Fields
+                </th>
+              )}
             </tr>
           </thead>
           <tbody>
@@ -242,6 +275,53 @@ const MetricsTicketTable = ({
                     ? `${row.csatScore.toFixed(1)}/5`
                     : (row.csatRating ?? '—')}
                 </td>
+                {customFieldKeys.length > 0 && (
+                  <td className='px-4 py-2'>
+                    {row.customFields && Object.keys(row.customFields).length > 0 ? (
+                      <Popover
+                        side='left'
+                        align='start'
+                        sideOffset={8}
+                        trigger={
+                          <button
+                            type='button'
+                            className='inline-flex items-center gap-1 rounded-[6px] border border-desk-border bg-muted/50 px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground dark:border-border'
+                          >
+                            {Object.keys(row.customFields).length} fields
+                            <ChevronDown size={10} />
+                          </button>
+                        }
+                        className='p-0'
+                      >
+                        <div className='min-w-[180px] max-w-[320px]'>
+                          <div className='border-b border-border px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground'>
+                            Custom Fields
+                          </div>
+                          <div
+                            className='max-h-48 overflow-y-auto'
+                            onWheel={e => e.stopPropagation()}
+                          >
+                            {Object.entries(row.customFields).map(([key, val]) => (
+                              <div
+                                key={key}
+                                className='flex items-start gap-2 px-3 py-1.5 text-xs odd:bg-muted/30'
+                              >
+                                <span className='w-24 shrink-0 font-medium text-foreground'>
+                                  {key}
+                                </span>
+                                <span className='min-w-0 break-words text-muted-foreground'>
+                                  {val || '—'}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </Popover>
+                    ) : (
+                      <span className='text-xs text-muted-foreground'>—</span>
+                    )}
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
@@ -277,8 +357,13 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
   channelId,
   channelName,
 }) => {
-  const [timeRange, setTimeRange] = useState<TimeRange>('7d');
-  const isHourly = timeRange === '24h';
+  const [dateRange, setDateRange] = useState<DateRangeValue>(defaultDateRange);
+  const [startTime, setStartTime] = useState('00:00');
+  const [endTime, setEndTime] = useState('23:59');
+  const rangeStartMs = dateTimeMs(dateRange.startDate, startTime, false);
+  const rangeEndMs = dateTimeMs(dateRange.endDate, endTime, true);
+  const timeRangeParam = `${rangeStartMs}_${rangeEndMs}`;
+  const isHourly = rangeEndMs - rangeStartMs <= DAY_MS;
   const [selectedAssigneeId, setSelectedAssigneeId] = useState<string | null>(null);
   const [ownerSearch, setOwnerSearch] = useState('');
   const ownerSearchInputRef = useRef<HTMLInputElement>(null);
@@ -290,7 +375,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
 
   const { data, isLoading, isFetching, isError, refetch } = useDeskMetrics(
     channelId,
-    timeRange,
+    timeRangeParam,
     open,
     selectedAssigneeId,
   );
@@ -315,8 +400,12 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
   }));
 
   const trendData = useMemo(
-    () => (data?.trend ?? []).map(d => ({ ...d, label: formatTrendLabel(d.date, isHourly) })),
-    [data?.trend, isHourly],
+    () =>
+      (data?.trend ?? []).map((d, index) => ({
+        ...d,
+        label: formatTrendLabel(rangeStartMs + index * (isHourly ? HOUR_MS : DAY_MS), isHourly),
+      })),
+    [data?.trend, isHourly, rangeStartMs],
   );
 
   const tickInterval = useMemo(() => {
@@ -413,27 +502,16 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                 </SelectContent>
               </Select>
 
-              {/* Time range pills */}
-              <div className='flex items-center gap-1 rounded-[10px] border border-desk-border bg-background p-0.5 dark:border-border'>
-                {TIME_RANGES.map(tr => (
-                  <button
-                    key={tr.value}
-                    type='button'
-                    onClick={() => setTimeRange(tr.value)}
-                    className={cn(
-                      'rounded-[8px] px-3 py-1 text-xs font-medium transition-colors',
-                      timeRange === tr.value
-                        ? 'bg-desk-accent text-white'
-                        : 'text-muted-foreground hover:bg-accent hover:text-foreground',
-                    )}
-                    data-track-category='DeskMetrics'
-                    data-track-name='TimeRange'
-                    data-track-metadata={JSON.stringify({ range: tr.value })}
-                  >
-                    {tr.label}
-                  </button>
-                ))}
-              </div>
+              <DeskMetricsDateRangePicker
+                dateRange={dateRange}
+                startTime={startTime}
+                endTime={endTime}
+                onChange={(dr, st, et) => {
+                  setDateRange(dr);
+                  setStartTime(st);
+                  setEndTime(et);
+                }}
+              />
 
               <button
                 type='button'
