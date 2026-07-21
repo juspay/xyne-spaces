@@ -123,4 +123,20 @@ export const useMessageHoverShortcuts = (): void => {
     entry => !entry.isMessageDeleted && entry.onCopyContent !== undefined,
     entry => entry.onCopyContent?.(),
   );
+
+  // Alt/Option + click on a message bubble marks it as unread.
+  useEffect(() => {
+    const handleClick = (e: MouseEvent): void => {
+      if (!e.altKey || e.metaKey || e.ctrlKey || e.shiftKey) return;
+      const hovered = hoveredMessage.current;
+      if (!hovered) return;
+      const entry = getMessageHoverActionsByMessageId(hovered.messageId);
+      if (!entry || entry.isMessageDeleted || entry.onMarkAsUnread === undefined) return;
+      e.preventDefault();
+      e.stopPropagation();
+      entry.onMarkAsUnread();
+    };
+    document.addEventListener('click', handleClick, true);
+    return (): void => document.removeEventListener('click', handleClick, true);
+  }, []);
 };
