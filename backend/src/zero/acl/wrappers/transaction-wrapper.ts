@@ -9,6 +9,7 @@ import {
 } from '../../vespa-injection';
 import {
   collectSideEffectJobs,
+  createSideEffectJobsAccumulator,
   type SideEffectJobsAccumulator,
   type SideEffectOperation,
 } from '../../side-effects';
@@ -126,16 +127,14 @@ function wrapMutateWithACL(
               await (operationMethod as any).call(acl, args, tx);
             }
 
-            // 2. Collect Vespa jobs after successful mutation
             const vespaOperation = operation as VespaOperation;
-            if (['insert', 'update', 'upsert', 'delete'].includes(vespaOperation)) {
-              collectVespaJobs(tableName as TableName, vespaOperation, args, tx, ctx, vespaJobs);
-            }
-
-            // 3. Collect side effect jobs after successful mutation
             const sideEffectOperation = operation as SideEffectOperation;
+            const stagedSideEffectJobs = createSideEffectJobsAccumulator();
+
+            // Capture side-effect previous state before the write, but only
+            // publish the job if the write succeeds.
             if (['insert', 'update', 'upsert', 'delete'].includes(sideEffectOperation)) {
-              await collectSideEffectJobs(tableName as TableName, sideEffectOperation, args, tx, sideEffectJobs);
+              await collectSideEffectJobs(tableName as TableName, sideEffectOperation, args, tx, stagedSideEffectJobs);
             }
 
             previousValue = await collectMutationSyncPreviousValue(
@@ -147,6 +146,12 @@ function wrapMutateWithACL(
 
             // 4. Execute original mutation (if ACL passes)
             const result = await (originalOp as (this: unknown, value: unknown) => Promise<unknown>).call(this, args);
+
+            // 5. Collect jobs only after the mutation succeeds.
+            if (['insert', 'update', 'upsert', 'delete'].includes(vespaOperation)) {
+              collectVespaJobs(tableName as TableName, vespaOperation, args, tx, ctx, vespaJobs);
+            }
+            sideEffectJobs.push(...stagedSideEffectJobs);
 
             await mutationSyncProcessor(
               tableName as TableName,
