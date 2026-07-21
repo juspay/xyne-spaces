@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Variable } from 'lucide-react';
 import type { Editor } from '@tiptap/react';
 import { cn } from '../../../../utils/classNames';
@@ -7,6 +7,9 @@ import { EmailEditor } from '../../../xyne-desk/EmailEditor/EmailEditor';
 import { MentionExtension } from '../../../ui/TipTapExtensions';
 import { MentionSelector } from '../../../ui/Selectors';
 import { useMentionSearch } from '../../../../hooks/useMentionSearch';
+import { useActiveUserSearch } from '../../../../hooks/useUsers';
+import { useAuth } from '../../../../hooks/useAuth';
+import { userToMentionResult } from '../../../../utils/userDisplayName';
 import { VariablePicker } from '../VariablePicker/VariablePicker';
 import type { VariablePickerSource } from '../VariablePicker/VariablePicker.types';
 import {
@@ -15,6 +18,8 @@ import {
   buildVariableLabelResolver,
   wrapVariableRefsForLoad,
 } from './VariableRefExtension';
+
+const MENTION_USER_LIMIT = 20;
 
 interface SendMessageRichTextFieldProps {
   value: string;
@@ -31,6 +36,7 @@ export function SendMessageRichTextField({
   placeholder,
   channelId,
 }: SendMessageRichTextFieldProps): React.ReactElement {
+  const { user } = useAuth();
   const [editor, setEditor] = useState<Editor | null>(null);
   const [varOpen, setVarOpen] = useState(false);
 
@@ -42,13 +48,33 @@ export function SendMessageRichTextField({
   );
 
   // Channel participants are only resolvable when the channel is a concrete id;
-  // for a {{variable}} channel we fall back to workspace-wide mention search.
+  // for a {{variable}} channel there's no membership to scope to, so we search the
+  // workspace directly (same pattern as QuickDmComposer) instead of the channel picker.
   const concreteChannelId = channelId && !channelId.includes('{{') ? channelId : undefined;
-  const { results: mentionItems, searchMentions } = useMentionSearch(
+  const { results: channelMentionItems, searchMentions: searchChannelMentions } = useMentionSearch(
     concreteChannelId,
     undefined,
     undefined,
     { includeSpecialMentions: true },
+  );
+
+  const [workspaceMentionQuery, setWorkspaceMentionQuery] = useState('');
+  const workspaceUsers = useActiveUserSearch(workspaceMentionQuery, MENTION_USER_LIMIT);
+  const workspaceMentionItems = useMemo(
+    () => workspaceUsers.map(u => userToMentionResult(u, u.id === user?.id)),
+    [workspaceUsers, user?.id],
+  );
+
+  const mentionItems = concreteChannelId ? channelMentionItems : workspaceMentionItems;
+  const searchMentions = useCallback(
+    (query: string) => {
+      if (concreteChannelId) {
+        searchChannelMentions(query);
+      } else {
+        setWorkspaceMentionQuery(query);
+      }
+    },
+    [concreteChannelId, searchChannelMentions],
   );
 
   const variableButton = (
