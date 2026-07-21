@@ -413,6 +413,8 @@ export const EmailComposer = ({
   // (localStorage / thread). Once hydrated, the user's recipient edits — including clearing
   // every field — are authoritative and must not be re-derived by a later draft re-emit.
   const recipientsHydratedRef = useRef<string | null>(null);
+  // replyMode recipients were last derived for; a change forces re-derivation.
+  const lastDerivedReplyModeRef = useRef<'reply' | 'replyAll' | null>(null);
 
   // Reset all composer state when switching conversations
   useEffect(() => {
@@ -421,6 +423,7 @@ export const EmailComposer = ({
     setIsPreviewOpen(false);
     restoredAttachmentsForDraftRef.current = null;
     recipientsHydratedRef.current = null;
+    lastDerivedReplyModeRef.current = null;
   }, [conversationId]);
 
   const lastLoadedContentRef = React.useRef<string>('');
@@ -1104,10 +1107,12 @@ export const EmailComposer = ({
     // In compose mode there's no thread to derive recipients from — start blank.
     if (isComposeMode) return;
     if (channelPreferenceDetails?.type !== 'complete') return;
+    const replyModeChanged =
+      lastDerivedReplyModeRef.current !== null && lastDerivedReplyModeRef.current !== replyMode;
     // Prefer recipients persisted on the draft in the DB (synced across devices). Fall
     // back to legacy localStorage (in-flight drafts saved before this change), then derive
     // from the thread.
-    if (ownDraft && Array.isArray(ownDraft.toRecipients)) {
+    if (!replyModeChanged && ownDraft && Array.isArray(ownDraft.toRecipients)) {
       // The draft carries explicitly-persisted recipients — the source of truth, even when the
       // lists are all empty (the user cleared them). Always re-sync from it: the saveRecipients
       // equality guard keeps this from looping, and respecting an empty list is what makes
@@ -1122,13 +1127,14 @@ export const EmailComposer = ({
       setShowCc(dbCc.length > 0);
       setShowBcc(dbBcc.length > 0);
       recipientsHydratedRef.current = conversationId ?? null;
+      lastDerivedReplyModeRef.current = replyMode;
       return;
     }
     // Defaults below (localStorage, then thread) are derived ONCE per conversation. After that,
     // the user's recipient edits are authoritative — a later thread update or draft re-emit must
     // not re-derive over them. (A draft with persisted recipients always wins, handled above.)
-    if (recipientsHydratedRef.current === conversationId) return;
-    if (recipientsStorageKey) {
+    if (!replyModeChanged && recipientsHydratedRef.current === conversationId) return;
+    if (!replyModeChanged && recipientsStorageKey) {
       try {
         const raw = localStorage.getItem(recipientsStorageKey);
         if (raw) {
@@ -1149,6 +1155,7 @@ export const EmailComposer = ({
             setShowCc((parsed.cc ?? []).filter(isEmailLike).length > 0);
             setShowBcc((parsed.bcc ?? []).filter(isEmailLike).length > 0);
             recipientsHydratedRef.current = conversationId ?? null;
+            lastDerivedReplyModeRef.current = replyMode;
             return;
           }
         }
@@ -1268,6 +1275,7 @@ export const EmailComposer = ({
         setShowCc(true);
         setShowBcc(nextBcc.length > 0);
         recipientsHydratedRef.current = conversationId ?? null;
+        lastDerivedReplyModeRef.current = replyMode;
       }
     }
   }, [
