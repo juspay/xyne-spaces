@@ -1,5 +1,6 @@
 import {
   FormFieldType,
+  orderFieldsWithBranchChildrenAfterParent,
   parseFieldOptions,
   type FieldEnumOption,
   type FormFields,
@@ -71,10 +72,12 @@ export const resolveDisplayFormFields = (
     ];
   });
 
-  return resolved.sort((a, b) => {
+  const bySequence = resolved.sort((a, b) => {
     if (a.sequenceNumber !== b.sequenceNumber) {
       return a.sequenceNumber - b.sequenceNumber;
     }
     return a.fieldName.toLowerCase().localeCompare(b.fieldName.toLowerCase());
   });
+
+  return orderFieldsWithBranchChildrenAfterParent(bySequence);
 };
