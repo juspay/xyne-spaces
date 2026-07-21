@@ -100,7 +100,7 @@ async function checkTicketMatch(
   const firstEmail = await repositories.emails.findFirstByConversationId(ticket.convId);
   if (!firstEmail) return false;
 
-  const storedEmail = extractEmailFromAddress(firstEmail.from);
+  const storedEmail = extractEmailFromAddress(firstEmail.replyTo?.[0] || firstEmail.from);
   const incomingEmail = extractEmailFromAddress(emailFrom);
 
   // Check email match from email table
@@ -181,7 +181,7 @@ export async function findDuplicateEmailConversation(
 
       if (isMatch) {
         const firstEmail = await repositories.emails.findFirstByConversationId(ticket.convId);
-        const firstEmailDomain = getEmailDomain(firstEmail?.from || '');
+        const firstEmailDomain = getEmailDomain(firstEmail?.replyTo?.[0] || firstEmail?.from || '');
 
         logger.info('[VESPA_DUPLICATE_MATCH] Found match', {
           ticketId: ticket.docId,
