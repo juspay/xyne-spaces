@@ -1,6 +1,7 @@
-import axios from 'axios';
+import axios, { AxiosResponse } from 'axios';
 import { parse } from 'node-html-parser';
 import {logger} from '@/utils/logger';
+import { assertHostIsExternal } from '@/utils/ssrfGuard';
 
 export interface ExternalLinkMetadata {
   type?: 'external';
@@ -75,17 +76,9 @@ export class LinkPreviewService {
       // Validate URL
       new URL(url);
 
-      // Fetch the page
-      const response = await axios.get(url, {
-        headers: {
-          'User-Agent': this.USER_AGENT,
-          Accept: 'text/html,application/xhtml+xml',
-        },
-        timeout: this.TIMEOUT,
-        maxContentLength: this.MAX_CONTENT_LENGTH,
-        maxRedirects: 5,
-        validateStatus: (status) => status >= 200 && status < 400,
-      });
+      // Fetch the page (SSRF-guarded — blocks internal/metadata targets and
+      // re-validates every redirect hop).
+      const response = await this.safeGet(url);
 
       const html = response.data;
       const root = parse(html);
@@ -111,6 +104,48 @@ export class LinkPreviewService {
         siteName: this.extractDomainName(url),
       };
     }
+  }
+
+  /**
+   * SSRF-safe GET. Validates the scheme and host of the initial URL and of
+   * every redirect target against the shared SSRF guard (blocks loopback,
+   * RFC1918, link-local/metadata 169.254.0.0/16, *.svc.cluster.local, etc.),
+   * following redirects manually so each hop is re-checked. Link previews have
+   * no legitimate internal target, so internal hosts are always refused.
+   */
+  private async safeGet(initialUrl: string): Promise<AxiosResponse> {
+    const MAX_REDIRECTS = 5;
+    let currentUrl = initialUrl;
+
+    for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+      const parsed = new URL(currentUrl);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        throw new Error(`Blocked non-http(s) scheme: ${parsed.protocol}`);
+      }
+      await assertHostIsExternal(parsed.hostname);
+
+      const response = await axios.get(currentUrl, {
+        headers: {
+          'User-Agent': this.USER_AGENT,
+          Accept: 'text/html,application/xhtml+xml',
+        },
+        timeout: this.TIMEOUT,
+        maxContentLength: this.MAX_CONTENT_LENGTH,
+        maxRedirects: 0, // follow manually so each hop is re-validated above
+        validateStatus: (status) => status >= 200 && status < 400,
+      });
+
+      // Not a redirect → this is the final response.
+      const location = response.headers['location'];
+      if (response.status < 300 || response.status >= 400 || !location) {
+        return response;
+      }
+
+      // Resolve the (possibly relative) redirect target and loop to re-check it.
+      currentUrl = new URL(location, currentUrl).toString();
+    }
+
+    throw new Error(`Too many redirects (> ${MAX_REDIRECTS})`);
   }
 
   /**
