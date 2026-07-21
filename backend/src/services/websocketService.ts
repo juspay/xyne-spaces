@@ -1,10 +1,9 @@
 import { Server as SocketIOServer, Socket } from 'socket.io';
 import { Server as HttpServer } from 'http';
 
-import { redisService, ChatMessage, WorkflowEvent, PresenceEvent, OrgMemberEvent } from './redisService';
+import { redisService, ChatMessage, PresenceEvent, OrgMemberEvent } from './redisService';
 import { typingService, TypingUser } from './typingService';
 import { userStatusService } from './userStatusService';
-import { workspaceEventService, WorkspaceEvent } from './workspaceEventService';
 import { ChannelRepository } from '../database/repositories/channelRepository';
 // import { ConversationRepository } from '../database/repositories/conversationRepository';
 import { logger } from '@/utils/logger';
@@ -62,9 +61,6 @@ class WebSocketService {
   private orgMemberEventSubscriptions = new Map<string, boolean>(); // orgMemberId -> hasSubscription
   private orgMemberSocketIds = new Map<string, Set<string>>(); // orgMemberId -> Set<socketId>
   private notificationHealthIntervals = new Map<string, ReturnType<typeof setInterval>>(); // socketId -> healthcheck interval
-
-  // Track workflow room membership for Redis subscription cleanup
-  private workflowRoomSubscribers = new Map<string, Set<string>>(); // executionId -> Set<socketId>
 
   constructor() {
     this.channelRepository = new ChannelRepository();
@@ -352,16 +348,6 @@ class WebSocketService {
 
     socket.on('sos_alerts_sync', async (data: { alertIds: string[] }) => {
       await this.handleSosAlertsSync(socket, data);
-    });
-
-    // Handle workflow subscription (room-based)
-    socket.on('subscribe_to_workflow', (data: { executionId: string }) => {
-      this.handleWorkflowSubscription(socket, data.executionId);
-    });
-
-    // Handle workflow unsubscription
-    socket.on('unsubscribe_from_workflow', (data: { executionId: string }) => {
-      this.handleWorkflowUnsubscription(socket, data.executionId);
     });
 
     // Handle ticket count room subscription
@@ -712,9 +698,6 @@ class WebSocketService {
       // Clean up channel subscriptions for this socket
       await this.clearSocketSubscriptions(socket.id);
       logger.info(`🧹 [DISCONNECT] Cleaned up subscriptions for socket ${socket.id}`);
-
-      // Clean up workflow room subscriptions for this socket
-      await this.cleanupWorkflowSubscriptions(socket.id);
 
       // Remove user connection from Redis
       await redisService.removeUserConnection(userId, socket.id);
@@ -1426,70 +1409,6 @@ class WebSocketService {
   }
 
   // Workflow subscription handlers (room-based with Redis pub/sub bridge)
-  private async handleWorkflowSubscription(socket: AuthenticatedSocket, executionId: string): Promise<void> {
-    const roomName = `workflow:${executionId}`;
-
-    // Join Socket.IO room
-    socket.join(roomName);
-
-    // Track socket in workflow room membership
-    if (!this.workflowRoomSubscribers.has(executionId)) {
-      this.workflowRoomSubscribers.set(executionId, new Set());
-    }
-    const subscribers = this.workflowRoomSubscribers.get(executionId)!;
-    const wasEmpty = subscribers.size === 0;
-    subscribers.add(socket.id);
-
-    logger.info(`📊 [WORKFLOW-SUB] Socket ${socket.id} joined workflow room: ${roomName} (${subscribers.size} subscribers)`);
-
-    // Subscribe to Redis only if this is the first socket for this execution
-    if (wasEmpty) {
-      logger.info(`📊 [WORKFLOW-SUB] First subscriber for ${executionId}, subscribing to Redis`);
-      try {
-        await redisService.subscribeToWorkflowEvents(executionId, (event: WorkflowEvent) => {
-          this.handleWorkflowRedisEvent(executionId, event);
-        });
-
-        // Also subscribe to workspace events for live code viewing
-        await workspaceEventService.subscribeToWorkspaceEvents(executionId, (event: WorkspaceEvent) => {
-          this.handleWorkspaceRedisEvent(executionId, event);
-        });
-      } catch (error) {
-        logger.error(`❌ [WORKFLOW-SUB] Failed to subscribe to Redis for ${executionId}:`, error);
-      }
-    }
-  }
-
-  private async handleWorkflowUnsubscription(socket: AuthenticatedSocket, executionId: string): Promise<void> {
-    const roomName = `workflow:${executionId}`;
-
-    // Leave Socket.IO room
-    socket.leave(roomName);
-
-    // Remove socket from workflow room membership
-    const subscribers = this.workflowRoomSubscribers.get(executionId);
-    if (subscribers) {
-      subscribers.delete(socket.id);
-
-      logger.info(`📊 [WORKFLOW-UNSUB] Socket ${socket.id} left workflow room: ${roomName} (${subscribers.size} subscribers remaining)`);
-
-      // Unsubscribe from Redis if no more sockets for this execution
-      if (subscribers.size === 0) {
-        this.workflowRoomSubscribers.delete(executionId);
-        logger.info(`📊 [WORKFLOW-UNSUB] No more subscribers for ${executionId}, unsubscribing from Redis`);
-        try {
-          await redisService.unsubscribeFromWorkflowEvents(executionId);
-          // Also unsubscribe from workspace events
-          await workspaceEventService.unsubscribeFromWorkspaceEvents(executionId);
-        } catch (error) {
-          logger.error(`❌ [WORKFLOW-UNSUB] Failed to unsubscribe from Redis for ${executionId}:`, error);
-        }
-      }
-    } else {
-      logger.info(`📊 [WORKFLOW-UNSUB] Socket ${socket.id} left workflow room: ${roomName} (no subscribers tracked)`);
-    }
-  }
-
   private getTicketCountsRoomName(type: TicketCountsRoomType, id: string): string {
     return `ticket-counts:${type}:${id}`;
   }
@@ -1535,76 +1454,6 @@ class WebSocketService {
     if (!room) return;
 
     socket.leave(room);
-  }
-
-  // Handle workflow events from Redis and broadcast to Socket.IO room
-  private handleWorkflowRedisEvent(executionId: string, event: WorkflowEvent): void {
-    if (!this.io) {
-      logger.info('❌ [WORKFLOW-REDIS-EVENT] WebSocket server not initialized');
-      return;
-    }
-
-    const roomName = `workflow:${executionId}`;
-
-    // Emit to all sockets in the workflow room
-    this.io.to(roomName).emit(event.type === 'step_added' ? 'workflow_step_added' : event.type, {
-      executionId,
-      ...event.data,
-      timestamp: event.timestamp
-    });
-
-    logger.info(`📊 [WORKFLOW-REDIS-EVENT] Forwarded ${event.type} from Redis to room ${roomName}`);
-  }
-
-  // Handle workspace events from Redis and broadcast to Socket.IO room
-  private handleWorkspaceRedisEvent(parentExecutionId: string, event: WorkspaceEvent): void {
-    if (!this.io) {
-      logger.info('❌ [WORKSPACE-REDIS-EVENT] WebSocket server not initialized');
-      return;
-    }
-
-    const roomName = `workflow:${parentExecutionId}`;
-
-    // Emit workspace event to all sockets in the workflow room
-    this.io.to(roomName).emit('workspace_event', {
-      executionId: parentExecutionId,
-      ...event,
-    });
-
-    logger.info(`📁 [WORKSPACE-REDIS-EVENT] Forwarded ${event.type} from Redis to room ${roomName}`);
-  }
-
-  // Clean up workflow subscriptions for a disconnecting socket
-  private async cleanupWorkflowSubscriptions(socketId: string): Promise<void> {
-    // Find all workflow rooms this socket is in and clean up
-    const executionIdsToCleanup: string[] = [];
-
-    for (const [executionId, subscribers] of this.workflowRoomSubscribers.entries()) {
-      if (subscribers.has(socketId)) {
-        subscribers.delete(socketId);
-
-        if (subscribers.size === 0) {
-          executionIdsToCleanup.push(executionId);
-        }
-      }
-    }
-
-    // Unsubscribe from Redis for workflow rooms with no more subscribers
-    for (const executionId of executionIdsToCleanup) {
-      this.workflowRoomSubscribers.delete(executionId);
-      logger.info(`📊 [WORKFLOW-CLEANUP] No more subscribers for ${executionId}, unsubscribing from Redis`);
-      try {
-        await redisService.unsubscribeFromWorkflowEvents(executionId);
-        // Also unsubscribe from workspace events
-        await workspaceEventService.unsubscribeFromWorkspaceEvents(executionId);
-      } catch (error) {
-        logger.error(`❌ [WORKFLOW-CLEANUP] Failed to unsubscribe from Redis for ${executionId}:`, error);
-      }
-    }
-
-    if (executionIdsToCleanup.length > 0) {
-      logger.info(`🧹 [WORKFLOW-CLEANUP] Cleaned up ${executionIdsToCleanup.length} workflow subscriptions for socket ${socketId}`);
-    }
   }
 
   // Debug method to get subscription stats

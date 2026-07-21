@@ -7,9 +7,7 @@ import AuthScreen from './AuthScreen/AuthScreen';
 import OnboardingScreen from './OnboardingScreen/OnboardingScreen';
 import ChatScreen from './ChatScreen/ChatScreen';
 import ThreadMessages from '../components/Chat/ThreadPannel';
-import TicketsScreen from './TicketsScreen/TicketScreen';
 import TicketView from '../components/Tickets/TicketView/TicketView';
-import WorkflowScreen from './WorkflowScreen/WorkflowScreen';
 import { BrowserTabsScreen } from './BrowserTabsScreen';
 import { getLastActiveWorkspaceId } from '../machines/authMachine';
 import AgentsScreen from './AgentsScreen/AgentScreen';
@@ -1028,14 +1026,6 @@ export const router = createBrowserRouter([
                 ],
               },
               {
-                path: 'tickets',
-                element: (
-                  <ResourceProtectedRoute resourceName='WORKFLOWS'>
-                    <TicketsScreen />
-                  </ResourceProtectedRoute>
-                ),
-              },
-              {
                 path: 'search-results',
                 element: <SearchResults />,
               },
@@ -1046,14 +1036,6 @@ export const router = createBrowserRouter([
                     <ProductInsightsScreen />
                   </ResourceProtectedRoute>
                 ),
-              },
-              {
-                path: 'tickets/:ticketId/workflow/:workflowId',
-                element: <WorkflowScreen />,
-              },
-              {
-                path: 'tickets/:ticketId/workflow',
-                element: <WorkflowScreen />,
               },
               {
                 path: 'agents',

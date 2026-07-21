@@ -1,7 +1,6 @@
 import { workflowRegistry } from '../registry/workflowRegistry'
 import { userOnboardingWorkflow } from './userOnboarding'
 import { queryWorkflow } from './query-workflow/queryWorkflow'
-import { geniusQueryWorkflow } from './genius-query-workflow/geniusQueryWorkflow'
 import { stageApprovalWorkflow } from './stageApprovalWorkflow'
 import { networkDocumentWorkflow } from './network-document-workflow/networkDocumentWorkflow'
 import { itSupportWorkflow } from './it-support-workflow/itSupportWorkflow'
@@ -12,7 +11,6 @@ import {logger} from '@/utils/logger';
 export const WORKFLOW_DEFINITIONS = {
   [WorkflowType.USER_ONBOARDING]: userOnboardingWorkflow,
   [WorkflowType.QUERY_WORKFLOW]: queryWorkflow,
-  [WorkflowType.GENIUS_QUERY_WORKFLOW]: geniusQueryWorkflow,
   [WorkflowType.STAGE_APPROVAL_WORKFLOW]: stageApprovalWorkflow,
   [WorkflowType.NETWORK_DOCUMENT_PROCESSING]: networkDocumentWorkflow,
   [WorkflowType.IT_SUPPORT_WORKFLOW]: itSupportWorkflow,
@@ -23,7 +21,6 @@ export function registerAllWorkflows(): void {
 
   workflowRegistry.register(WORKFLOW_DEFINITIONS[WorkflowType.USER_ONBOARDING])
   workflowRegistry.register(WORKFLOW_DEFINITIONS[WorkflowType.QUERY_WORKFLOW])
-  workflowRegistry.register(WORKFLOW_DEFINITIONS[WorkflowType.GENIUS_QUERY_WORKFLOW])
   workflowRegistry.register(WORKFLOW_DEFINITIONS[WorkflowType.STAGE_APPROVAL_WORKFLOW])
   workflowRegistry.register(WORKFLOW_DEFINITIONS[WorkflowType.NETWORK_DOCUMENT_PROCESSING])
   workflowRegistry.register(WORKFLOW_DEFINITIONS[WorkflowType.IT_SUPPORT_WORKFLOW])

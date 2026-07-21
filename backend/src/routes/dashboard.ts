@@ -24,8 +24,14 @@ const datasource = Router()
   .post('/:id/refresh',      writeDS, ctrl.dataSourcesRefresh)
   .delete('/:id',            writeDS, ctrl.dataSourcesRemove);
 
+// /preview runs a caller-supplied query plan (editor action), so it needs the
+// same DATA_SOURCES read grant as /datasource/* — otherwise any authenticated
+// user could execute arbitrary plans without authorization to read the sources.
+// /component/:id is the viewer path: it authorizes per-dashboard access inside
+// the controller (userCanReadDashboard), so it deliberately does NOT gate on the
+// DATA_SOURCES role — a dashboard viewer need not be a data-source editor.
 const query = Router()
-  .post('/preview',          ctrl.queryPreview)
+  .post('/preview',          readDS,  ctrl.queryPreview)
   .get('/component/:id',     ctrl.queryGetComponentData);
 
 const ai = Router()
