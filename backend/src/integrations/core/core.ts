@@ -623,9 +623,10 @@ export class ExternalSourceCore {
         emailSubject: normalizedData.emailData.subject,
       });
 
+      const duplicateCheckEmailFrom = normalizedData.emailData.replyTo?.[0] || normalizedData.emailData.from || "";
       const duplicateCheck = await findDuplicateEmailConversation(
         source.channelId,
-        normalizedData.emailData.from || "",
+        duplicateCheckEmailFrom,
         normalizedData.emailData.subject || ""
       );
 
