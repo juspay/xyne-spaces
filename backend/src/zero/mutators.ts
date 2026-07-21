@@ -7649,15 +7649,34 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
       delete: defineMutator(
         z.object({ tagId: z.string(), mappingId: z.string() }),
         async ({ tx, args: { tagId, mappingId } }) => {
-          // Dual-write: delete from ticket_tags (old model)
-          await tx.mutate.ticket_tags.delete({
-            id: tagId,
-          });
+          const mapping = await tx.run(zql.ticket_tag_mappings.where('id', mappingId).one());
+          if (mapping) {
+            // Dual-write: delete from ticket_tags (old model)
+            const legacyTag = await tx.run(
+              zql.ticket_tags
+                .where('ticketId', mapping.ticketId)
+                .where('name', mapping.tagName)
+                .one(),
+            );
+            if (legacyTag) {
+              await tx.mutate.ticket_tags.delete({
+                id: legacyTag.id,
+              });
+            }
 
-          // Delete from ticket_tag_mappings (new model)
-          await tx.mutate.ticket_tag_mappings.delete({
-            id: mappingId,
-          });
+            // Delete from ticket_tag_mappings (new model)
+            await tx.mutate.ticket_tag_mappings.delete({
+              id: mappingId,
+            });
+            return;
+          }
+
+          const legacyOnlyTag = await tx.run(zql.ticket_tags.where('id', tagId).one());
+          if (legacyOnlyTag) {
+            await tx.mutate.ticket_tags.delete({
+              id: tagId,
+            });
+          }
         },
       ),
     },

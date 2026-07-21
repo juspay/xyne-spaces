@@ -182,7 +182,7 @@ const VirtualizedStageList: React.FC<{
                 ticket={ticket}
                 tags={((ticket as TicketWithTags).tagMappings ?? []).map(m => ({
                   workspaceId: m.workspaceId,
-                  id: m.tagId,
+                  id: m.id,
                   name: m.tagName,
                   ticketId: m.ticketId,
                 }))}
