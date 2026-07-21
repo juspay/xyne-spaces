@@ -180,23 +180,21 @@ export const shouldReplaceWithSemanticLabel = (
 
 export const getInternalLinkLabel = (
   parsedLink: ParsedInternalXyneLink,
-  channelName: string | undefined,
+  channelLabel: string | undefined,
   ticketXyneId: string | undefined,
   canvasTitle: string | undefined,
 ): string => {
-  const channelLabel = channelName ? `#${channelName}` : 'channel';
-
   switch (parsedLink.kind) {
     case 'canvas':
       return canvasTitle ? `Canvas: ${canvasTitle}` : 'Open canvas';
     case 'ticket':
       return ticketXyneId ? `Ticket ${ticketXyneId}` : 'View ticket';
     case 'message':
-      return channelName ? `Message in ${channelLabel}` : 'View message';
+      return channelLabel ? `Message in ${channelLabel}` : 'View message';
     case 'thread':
-      return channelName ? `Thread in ${channelLabel}` : 'Open thread';
+      return channelLabel ? `Thread in ${channelLabel}` : 'Open thread';
     case 'channel':
-      return channelName ? `Open ${channelLabel}` : 'Open channel';
+      return channelLabel ? `Open ${channelLabel}` : 'Open channel';
     default:
       return 'Open link';
   }
