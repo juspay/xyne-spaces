@@ -1,0 +1,205 @@
+services:
+  # db:push + raw-SQL migration in a one-shot container so backend's healthcheck
+  # window doesn't include schema-apply work (which slows under CI CPU throttling).
+  backend-migrate:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile.test
+    container_name: ${COMPOSE_PROJECT_NAME:-xyne}-backend-migrate
+    env_file:
+      - ./backend/.env.test
+    restart: "no"
+    command: sh -c "npm run db:push && npx prisma db push --schema prisma-common/schema.prisma --accept-data-loss --skip-generate && npx prisma db execute --file prisma/migrations/20251127175400_add_ticket_xyne_id_sequence/migration.sql --schema prisma/schema.prisma"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      common-postgres:
+        condition: service_healthy
+
+  # Backend API for testing - builds from Dockerfile.test
+  # Loads .env.local as base, then .env.test overrides container-specific values
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile.test
+    container_name: ${COMPOSE_PROJECT_NAME:-xyne}-backend
+    ports:
+      - "${BACKEND_BIND_PORT:-0}:3001"
+    env_file:
+      - ./backend/.env.test   # Override with container hostnames
+    command: sh -c "/scripts/setup-fake-gcs-test.sh && npm run dev:test"
+    depends_on:
+      backend-migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      fake-gcs:
+        condition: service_healthy
+      zero-cache:
+        condition: service_healthy
+      livekit:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/api/health"]
+      interval: 5s
+      timeout: 10s
+      retries: 60
+      start_period: 240s  # Kept generous; backend boot is now just fake-gcs + tsx + listen.
+
+  # Dashboard (Frontend) for testing - builds from Dockerfile.test
+  # Loads .env.local as base, then .env.test overrides container-specific values
+  dashboard:
+    build:
+      context: .
+      dockerfile: dashboard/Dockerfile.test
+    container_name: ${COMPOSE_PROJECT_NAME:-xyne}-dashboard
+    env_file:
+      - ./dashboard/.env.test   # Override with container hostnames
+    ports:
+      - "${DASHBOARD_BIND_PORT:-0}:5173"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5173/"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 40s  # Phase 1: Consistent with backend approach
+
+  # # Backend (Runs from local source/build in Jenkins) - OLD SETUP
+  # backend:
+  #   image: node:22-slim
+  #   container_name: xyne-jenkins-backend
+  #   working_dir: /app/backend
+  #   command: npm run start
+  #   environment:
+  #     - NODE_ENV=production
+  #     - DATABASE_URL=postgresql://xyne:xyne123@postgres:5432/xyne_dev_db
+  #     - REDIS_URL=redis://redis:6379
+  #     - LIVEKIT_URL=ws://livekit:7880
+  #     - LIVEKIT_API_KEY=devkey
+  #     - LIVEKIT_API_SECRET=devsecret
+  #     - STORAGE_EMULATOR_HOST=http://fake-gcs:4443
+  #     - YSWEET_URL=http://ysweet:8085
+  #     - ZERO_CACHE_URL=http://zero-cache:4848
+  #   volumes:
+  #     - ./:/app
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+  #     fake-gcs:
+  #       condition: service_healthy
+  #     zero-cache:
+  #       condition: service_healthy
+  #     livekit:
+  #       condition: service_healthy
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "http://localhost:3001/api/health"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 15
+  #     start_period: 60s
+  #   networks:
+  #     - xyne-network
+
+  # # Dashboard (Frontend) - Runs from local source/build in Jenkins - OLD SETUP
+  # dashboard:
+  #   image: node:22-slim
+  #   container_name: xyne-jenkins-dashboard
+  #   working_dir: /app/dashboard
+  #   command: npm run preview -- --host --port 5173
+  #   environment:
+  #     - VITE_API_URL=http://backend:3001/api
+  #     - VITE_ZERO_SERVER=http://backend:3001/zero
+  #   volumes:
+  #     - ./:/app
+  #   depends_on:
+  #     backend:
+  #       condition: service_healthy
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "http://localhost:5173/"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 10
+  #     start_period: 30s
+  #   networks:
+  #     - xyne-network
+
+  # Automation Test Runner (Gauge). Gated behind `--profile gauge`
+  xyne-automation:
+    profiles: ["gauge"]
+    build:
+      context: ./xyne-automation
+      dockerfile: Dockerfile
+    container_name: ${COMPOSE_PROJECT_NAME:-xyne-test}-automation
+    shm_size: '2gb'
+    environment:
+      - TEST_ENV=test
+      - BACKEND_URL=http://backend:3001
+      - DASHBOARD_URL=http://dashboard:5173
+      - BROWSER=chromium
+    depends_on:
+      backend:
+        condition: service_healthy
+      dashboard:
+        condition: service_healthy
+
+  # Automation Test Runner (Legacy Cucumber). Default for Jenkins; 
+  xyne-automation-old:
+    profiles: ["cucumber"]
+    build:
+      context: ./xyne-automation-old
+      dockerfile: Dockerfile
+    container_name: ${COMPOSE_PROJECT_NAME:-xyne-test}-automation-old
+    shm_size: '2gb'
+    environment:
+      - TEST_ENV=test
+      - BACKEND_URL=http://backend:3001
+      - DASHBOARD_URL=http://dashboard:5173
+      - BROWSER=chromium
+    depends_on:
+      backend:
+        condition: service_healthy
+      dashboard:
+        condition: service_healthy
+  
+  # Override Zero Cache to use internal container networking for tests
+  zero-cache:
+    depends_on:
+      backend-migrate:
+        condition: service_completed_successfully
+    environment:
+      ZERO_MUTATE_URL: http://backend:3001/api/zero/push
+      ZERO_QUERY_URL: http://backend:3001/api/zero/query
+
+  # Override Transcription Agent to use test Dockerfile (minimal deps, no torch/pyannote)
+  # DISABLED: Tests only verify UI text, not actual transcription functionality
+  transcription-agent:
+    profiles: ["disabled"]
+
+  # DISABLED: Tests don't use MinIO (S3-compatible storage)
+  minio:
+    profiles: ["disabled"]
+
+  # DISABLED: Tests don't use call recording functionality
+  livekit-egress:
+    profiles: ["disabled"]
+
+  # Disable monitoring services in test environment
+  otel-collector:
+    profiles: ["disabled"]
+  
+  victoriametrics:
+    profiles: ["disabled"]
+
+  grafana:
+    profiles: ["disabled"]
+
+volumes:
+  transcription-agent-test-data:
+    driver: local
+  transcription-agent-app:
+    driver: local

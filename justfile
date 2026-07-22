@@ -28,10 +28,12 @@ dashboard:
 # Run database migrations
 migrate:
     cd backend && npx dotenv -e .env.local -- npx prisma db push
+    cd backend && npx dotenv -e .env.local -- npx prisma db push --schema prisma-common/schema.prisma
 
 # Generate Prisma client
 prisma-generate:
     cd backend && npx prisma generate
+    cd backend && npx prisma generate --schema prisma-common/schema.prisma
 
 # Deploy Zero permissions
 zero-permissions:

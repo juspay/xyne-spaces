@@ -1,0 +1,60 @@
+# syntax=docker/dockerfile:1
+FROM mirror.gcr.io/library/node:22.22.3-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y \
+    python3 \
+    make \
+    g++ \
+    git \
+    openssl \
+    libssl-dev \
+    ca-certificates \
+    curl \
+    libcairo2-dev \
+    libpango1.0-dev \
+    libjpeg-dev \
+    libgif-dev \
+    librsvg2-dev \
+    postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
+
+# --- shared: deps then source ---
+COPY shared/package*.json ../shared/
+RUN --mount=type=cache,target=/root/.npm cd ../shared && npm ci --ignore-scripts
+COPY shared ../shared
+RUN cd ../shared && npm run build
+
+# --- framework: deps then source ---
+COPY framework/package*.json ../framework/
+RUN --mount=type=cache,target=/root/.npm cd ../framework && npm ci --ignore-scripts
+COPY framework ../framework
+RUN cd ../framework && npm run build
+
+# --- backend: deps then source ---
+COPY backend/package*.json ./
+RUN --mount=type=cache,target=/root/.npm npm ci --ignore-scripts
+COPY backend .
+
+COPY package.json /package.json
+
+# Seed env files at BOTH locations from the tracked, non-secret backend/.env.test:
+# - .env: Required by Prisma for db:generate and db:push
+# - .env.local: Required by npm run dev:test (uses dotenv -e .env.local)
+# .env.test is committed (test creds + container hostnames only) and is the single
+# source of truth for the test image. docker-compose.test.yml also layers it at runtime.
+COPY backend/.env.test .env
+COPY backend/.env.test .env.local
+
+COPY scripts/setup-fake-gcs-test.sh /scripts/setup-fake-gcs-test.sh
+RUN chmod +x /scripts/setup-fake-gcs-test.sh
+
+RUN npm run db:generate
+RUN npm run db:common:generate
+
+CMD ["sh", "-c", "\
+  npm run db:push && \
+  npx prisma db execute --file prisma/migrations/20251127175400_add_ticket_xyne_id_sequence/migration.sql --schema prisma/schema.prisma && \
+  /scripts/setup-fake-gcs-test.sh && \
+  npm run dev:test"]

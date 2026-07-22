@@ -22,6 +22,10 @@ export interface HealthCheckResponse {
     status: string;
     connected: boolean;
   };
+  commonDatabase?: {
+    status: string;
+    connected: boolean;
+  };
 }
 
 export interface CustomRequest extends Request {

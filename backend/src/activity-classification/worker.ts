@@ -1,5 +1,6 @@
 import { config } from 'dotenv';
 import { DatabaseClient } from '../database/client';
+import { CommonDatabaseClient } from '../database/commonClient';
 import { activityClassificationWorkerService } from '../services/activity/activityClassificationWorkerService';
 import { logger } from '../utils/logger';
 
@@ -10,6 +11,7 @@ const shutdown = async (): Promise<void> => {
     logger.info('Shutting down activity classification worker...');
     await activityClassificationWorkerService.stop();
     await DatabaseClient.disconnect();
+    await CommonDatabaseClient.disconnect();
     logger.info('Activity classification worker shutdown complete');
     process.exit(0);
   } catch (error) {
@@ -21,7 +23,11 @@ const shutdown = async (): Promise<void> => {
 const startActivityClassificationWorker = async (): Promise<void> => {
   try {
     await DatabaseClient.connect();
-    logger.info('Activity classification worker database initialized successfully');
+    const isCommonDatabaseConnected = await CommonDatabaseClient.connect();
+    logger.info('Activity classification worker database initialization completed', {
+      mainDatabase: 'connected',
+      commonDatabase: isCommonDatabaseConnected ? 'connected' : 'unavailable',
+    });
 
     await activityClassificationWorkerService.start();
 

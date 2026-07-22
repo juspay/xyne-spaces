@@ -25,6 +25,11 @@ const envSchema = Joi.object({
   LOG_USER_SESSION_CHANGES: Joi.boolean().default(true),
   DATABASE_URL: Joi.string().required(),
   DATABASE_READ_REPLICA_POOL_URL: Joi.string().optional().default(''),
+  // Common DB (separate instance for cross-cutting shared state, e.g. entity sequences)
+  COMMON_DATABASE_URL: Joi.string().allow('').default(''),
+  COMMON_DATABASE_POOL_SIZE: Joi.number().default(2),
+  COMMON_DATABASE_POOL_TIMEOUT_SECONDS: Joi.number().default(10),
+  ENABLE_COMMON_DB_TICKET_SEQUENCE: Joi.boolean().default(false),
   WORKFLOW_LOCK_DURATION_MS: Joi.number().default(3600000), // 30 minutes in milliseconds
   API_KEYS_ENABLED: Joi.boolean().default(false),
   API_KEYS_CONFIG: Joi.string().default(''),
@@ -445,6 +450,12 @@ export const config = {
   database: {
     url: envVars.DATABASE_URL,
     readReplicaPoolUrl: envVars.DATABASE_READ_REPLICA_POOL_URL,
+  },
+  commonDatabase: {
+    url: envVars.COMMON_DATABASE_URL,
+    poolSize: envVars.COMMON_DATABASE_POOL_SIZE,
+    poolTimeoutSeconds: envVars.COMMON_DATABASE_POOL_TIMEOUT_SECONDS,
+    ticketSequenceEnabled: envVars.ENABLE_COMMON_DB_TICKET_SEQUENCE,
   },
   workflow: {
     lockDurationMs: envVars.WORKFLOW_LOCK_DURATION_MS,

@@ -1,12 +1,15 @@
 import { Request, Response } from 'express';
 import { ApiResponse, HealthCheckResponse } from '@/types/express';
 import { DatabaseClient } from '@/database/client';
+import { CommonDatabaseClient } from '@/database/commonClient';
 
 export class HealthController {
   public static async getHealth(_req: Request, res: Response): Promise<void> {
     try {
       const memoryUsage = process.memoryUsage();
       const isDatabaseHealthy = await DatabaseClient.healthCheck();
+      const isCommonDatabaseConfigured = CommonDatabaseClient.isConfigured();
+      const isCommonDatabaseHealthy = await CommonDatabaseClient.healthCheck();
 
       const healthData: HealthCheckResponse = {
         status: isDatabaseHealthy ? 'OK' : 'DEGRADED',
@@ -21,6 +24,14 @@ export class HealthController {
         database: {
           status: isDatabaseHealthy ? 'connected' : 'disconnected',
           connected: isDatabaseHealthy,
+        },
+        commonDatabase: {
+          status: !isCommonDatabaseConfigured
+            ? 'disabled'
+            : isCommonDatabaseHealthy
+              ? 'connected'
+              : 'unavailable',
+          connected: isCommonDatabaseHealthy,
         },
       };
 

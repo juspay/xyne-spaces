@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client';
+import { EntitySequenceService } from '@/services/entitySequenceService';
 
 // Type for Prisma transaction client
 type PrismaTransaction = Omit<
@@ -13,45 +14,28 @@ type PrismaTransaction = Omit<
 export class TicketIdService {
   /**
    * Generate a new ticket ID based on project
-   * Uses atomic increment on project.ticketSequence to avoid race conditions
+   * Uses exactly one sequence source, selected by configuration.
    */
   static async generateTicketId(
     tx: PrismaTransaction,
     projectId: string
   ): Promise<string> {
     const project = await tx.project.findUnique({
-      where: { id: projectId }
+      where: { id: projectId },
+      select: { code: true },
     });
 
     if (!project) {
       throw new Error(`Project not found: ${projectId}`);
     }
 
-    // Generate project-scoped ID using atomic increment
-    return this.generateProjectScopedId(tx, projectId, project.code);
+    const sequenceNumber = await EntitySequenceService.getNextProjectTicketSequence(tx, projectId);
+
+    return this.formatProjectScopedId(project.code, sequenceNumber);
   }
 
-  /**
-   * Generate project-scoped ID: {CODE}-{number}
-   * Uses atomic increment on project.ticketSequence to avoid race conditions
-   */
-  private static async generateProjectScopedId(
-    tx: PrismaTransaction,
-    projectId: string,
-    projectCode: string
-  ): Promise<string> {
-    // Atomic increment: UPDATE projects SET ticketSequence = ticketSequence + 1
-    const updatedProject = await tx.project.update({
-      where: { id: projectId },
-      data: {
-        ticketSequence: {
-          increment: 1
-        }
-      }
-    });
-
+  private static formatProjectScopedId(projectCode: string, sequenceNumber: number): string {
     // Format: CODE-0001 (zero-padded to 4 digits)
-    const sequenceNumber = updatedProject.ticketSequence;
     return `${projectCode.toUpperCase()}-${String(sequenceNumber).padStart(4, '0')}`;
   }
 }

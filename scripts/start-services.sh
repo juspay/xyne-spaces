@@ -93,7 +93,7 @@ fi
 
 # Start infrastructure services
 echo -e "${BLUE}🚢 Starting infrastructure services...${NC}"
-$COMPOSE_CMD -f docker-compose.dev.yml up -d postgres redis livekit fake-gcs minio ysweet transcription-agent victoriametrics grafana otel-collector superposition
+$COMPOSE_CMD -f docker-compose.dev.yml up -d postgres common-postgres redis livekit fake-gcs minio ysweet transcription-agent victoriametrics grafana otel-collector superposition
 
 # Wait for PostgreSQL
 echo -e "${BLUE}⏳ Waiting for PostgreSQL...${NC}"
@@ -104,6 +104,20 @@ for i in {1..30}; do
     fi
     if [ $i -eq 30 ]; then
         echo -e "${RED}❌ PostgreSQL failed to start${NC}"
+        exit 1
+    fi
+    sleep 1
+done
+
+# Wait for common PostgreSQL
+echo -e "${BLUE}⏳ Waiting for common PostgreSQL...${NC}"
+for i in {1..30}; do
+    if $COMPOSE_CMD -f docker-compose.dev.yml exec -T common-postgres pg_isready -U xyne -d xyne_common > /dev/null 2>&1; then
+        echo -e "${GREEN}✓ Common PostgreSQL is ready${NC}"
+        break
+    fi
+    if [ $i -eq 30 ]; then
+        echo -e "${RED}❌ Common PostgreSQL failed to start${NC}"
         exit 1
     fi
     sleep 1
@@ -214,9 +228,14 @@ else
     echo -e "${BLUE}Creating database schema...${NC}"
     npx dotenv -e .env.local -- npx prisma db push --force-reset --accept-data-loss --skip-generate
 
+    # Push common database schema (common DB lives in its own Postgres instance)
+    echo -e "${BLUE}Creating common database schema...${NC}"
+    npx dotenv -e .env.local -- npx prisma db push --schema prisma-common/schema.prisma --force-reset --accept-data-loss --skip-generate
+
     # Regenerate Prisma client to ensure it matches the current schema
     echo -e "${BLUE}Generating Prisma client...${NC}"
     npx prisma generate
+    npx prisma generate --schema prisma-common/schema.prisma
     echo -e "${GREEN}✓ Prisma client generated${NC}"
 
     # Seed ACL system
@@ -239,8 +258,13 @@ else
     # User table exists - just sync schema changes without dropping data
     echo -e "${BLUE}Syncing database schema...${NC}"
     npx dotenv -e .env.local -- npx prisma db push
+
+    # Sync common database schema (common DB lives in its own Postgres instance)
+    echo -e "${BLUE}Syncing common database schema...${NC}"
+    npx dotenv -e .env.local -- npx prisma db push --schema prisma-common/schema.prisma --accept-data-loss --skip-generate
+    npx prisma generate --schema prisma-common/schema.prisma
     echo -e "${GREEN}✓ Database schema is up to date${NC}"
-    
+
     # Check if default workspace exists, create if not
     echo -e "${BLUE}🔍 Checking for default workspace...${NC}"
     WORKSPACE_EXISTS=$($COMPOSE_CMD -f ../docker-compose.dev.yml exec -T postgres psql -U xyne -d xyne_dev_db -t -c "SELECT COUNT(*) FROM workspaces WHERE name = 'Default Workspace';" 2>&1 | xargs)

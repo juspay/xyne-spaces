@@ -5,6 +5,7 @@ const prisma = new PrismaClient();
 // Mock environment variables for testing
 process.env.NODE_ENV = 'test';
 process.env.DATABASE_URL = process.env.DATABASE_URL || 'postgresql://postgres:password@localhost:5432/xyne_spaces';
+process.env.COMMON_DATABASE_URL = process.env.COMMON_DATABASE_URL || 'postgresql://postgres:password@localhost:5434/xyne_common?schema=common';
 process.env.PORT = '3001';
 process.env.HOST = 'localhost';
 process.env.CORS_ORIGIN = 'http://localhost:3000';
