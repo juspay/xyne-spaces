@@ -1990,7 +1990,7 @@ model Project {
   id             String           @id @default(cuid())
   name           String
   code           String // Project shortcode for ticket IDs (e.g., EUL, INF)
-  ticketSequence Int              @default(0) // Atomic counter for project-scoped ticket numbering
+  ticketSequence Int              @default(0) // Used when ENABLE_COMMON_DB_TICKET_SEQUENCE is disabled
   description    String?
   workspaceId    String // Workspace this project belongs to
   type           ProjectType      @default(DEFAULT)

@@ -18,6 +18,7 @@ import { authMiddleware } from '@/middleware/auth';
 import { authenticateUserOrApp } from '@/middleware/authenticateUserOrApp';
 import { verifyTranscriptionAgent } from '@/middleware/transcriptionAgentAuth';
 import { DatabaseClient } from '@/database/client';
+import { CommonDatabaseClient } from '@/database/commonClient';
 import webhookRoutes from '@/routes/webhooks';
 import jiraCompatRoutes, { JIRA_COMPAT_MOUNT } from '@/routes/jiraCompat';
 import healthRoutes from '@/routes/health';
@@ -111,6 +112,7 @@ import onCallSetNumbersBackfillRoutes from '@/routes/onCallSetNumbersBackfill';
 import ticketDuplicateBackfillRoutes from '@/routes/ticketDuplicateBackfill';
 import conversationParticipantBackfillRoutes from '@/routes/conversationParticipantBackfill';
 import formFieldSequenceBackfillRoutes from '@/routes/formFieldSequenceBackfill';
+import dualWriteSequenceNumberBackfillRoutes from '@/routes/dualWriteSequenceNumberBackfill';
 import dmChannelProjectBackfillRoutes from '@/routes/dmChannelProjectBackfill';
 import workspaceIdBackfillRoutes from '@/routes/workspaceIdBackfill';
 import notificationSettingsBackfillRoutes from '@/routes/notificationSettingsBackfill';
@@ -437,6 +439,9 @@ export class App {
     this.app.use('/api/admin/conversation-participant-backfill', conversationParticipantBackfillRoutes);
     this.app.use('/migrate/api/admin/form-field-sequence-backfill', formFieldSequenceBackfillRoutes);
     this.app.use('/api/admin/form-field-sequence-backfill', formFieldSequenceBackfillRoutes);
+    // Dual-write sequence number backfill (same handler, new router)
+    this.app.use('/api/admin/dual-write-sequence-number-backfill', dualWriteSequenceNumberBackfillRoutes);
+    this.app.use('/migrate/api/admin/dual-write-sequence-number-backfill', dualWriteSequenceNumberBackfillRoutes);
     // Product insights recluster route (admin-only)
     this.app.use('/api/admin/product-insights-recluster', productInsightsReclusterRoutes);
     this.app.use('/api/admin/gmail-watch-renewal', gmailWatchRenewalRoutes);
@@ -704,7 +709,11 @@ export class App {
   public async initializeDatabase(): Promise<void> {
     try {
       await DatabaseClient.connect();
-      logger.info('Database initialized successfully');
+      const isCommonDatabaseConnected = await CommonDatabaseClient.connect();
+      logger.info('Database initialization completed', {
+        mainDatabase: 'connected',
+        commonDatabase: isCommonDatabaseConnected ? 'connected' : 'unavailable',
+      });
     } catch (error) {
       logger.error('Failed to initialize database:', error);
       throw error;
@@ -1005,6 +1014,7 @@ export class App {
       await bookmarkReminderService.shutdown();
 
       await DatabaseClient.disconnect();
+      await CommonDatabaseClient.disconnect();
       await redisService.disconnect();
 
       // Stop Slack migration nightly worker if running
