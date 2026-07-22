@@ -112,6 +112,7 @@ import { config } from '@/config/env';
 import { processMeetLinksFromChatMessage } from '@/services/meetLinkService';
 import { bookmarkReminderService } from '@/services/bookmarkReminderService';
 import { versionReleaseMappingService } from '@/services/release/versionReleaseMappingService';
+import { EntitySequenceService } from '@/services/entitySequenceService';
 import { syncToYSweet } from '@/utils/ysweetUtils';
 import type { BlockNoteBlock } from '@/types/blockNoteTypes';
 
@@ -6542,16 +6543,22 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           // data stays scoped to that script).
           const seedReleaseStages = async (newBoardId: string, ts: number): Promise<void> => {
             const stages = [
-              { name: 'BACKLOG', sequenceNumber: 1, defaultTicketStatusV2: TicketStatusV2.TODO },
-              { name: 'IN PROGRESS', sequenceNumber: 2, defaultTicketStatusV2: TicketStatusV2.STARTED },
-              { name: 'COMPLETED', sequenceNumber: 3, defaultTicketStatusV2: TicketStatusV2.COMPLETED },
-              { name: 'NOT REQUIRED', sequenceNumber: 4, defaultTicketStatusV2: TicketStatusV2.CANCELLED },
+              { name: 'BACKLOG', defaultTicketStatusV2: TicketStatusV2.TODO },
+              { name: 'IN PROGRESS', defaultTicketStatusV2: TicketStatusV2.STARTED },
+              { name: 'COMPLETED', defaultTicketStatusV2: TicketStatusV2.COMPLETED },
+              { name: 'NOT REQUIRED', defaultTicketStatusV2: TicketStatusV2.CANCELLED },
             ];
+            let currentMaxStageSequence = 0;
             for (const s of stages) {
+              const sequenceNumber = await EntitySequenceService.getNextBoardStageSequence(
+                newBoardId,
+                currentMaxStageSequence,
+              );
+              currentMaxStageSequence = Math.max(currentMaxStageSequence, sequenceNumber);
               await tx.mutate.stages.insert({
                 id: uuidv4(),
                 name: s.name,
-                sequenceNumber: s.sequenceNumber,
+                sequenceNumber,
                 defaultTicketStatusV2: s.defaultTicketStatusV2,
                 boardId: newBoardId,
                 createdBy: authData.sub,
@@ -7192,25 +7199,73 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
             // Create maps for efficient lookup
             const existingStageMap = new Map(existingStages.map(s => [s.id, s]));
-            const incomingStageIds = new Set(stages.filter(s => s.id).map(s => s.id!));
+            const resolvedStages = stages.map((stage, inputIndex) => {
+              const stageId = stage.id || stageIds[stage.sequenceNumber];
+              if (!stageId) {
+                throw new Error(`stageId is required for stage at sequence ${stage.sequenceNumber}`);
+              }
+              return { stage, stageId, inputIndex };
+            });
+            const incomingStageIds = new Set(resolvedStages.map(({ stageId }) => stageId));
+
+            // Reserve common-DB values for new stages before applying the
+            // requested order. Existing values form the remaining sequence
+            // pool, so reordering shifts those values instead of compacting
+            // them to 1..N and filling deleted gaps.
+            let currentMaxStageSequence = existingStages.reduce(
+              (max, stage) => Math.max(max, stage.sequenceNumber),
+              0,
+            );
+            const sequencePool = resolvedStages
+              .filter(({ stageId }) => existingStageMap.has(stageId))
+              .map(({ stageId }) => existingStageMap.get(stageId)!.sequenceNumber);
+
+            for (const { stageId } of resolvedStages) {
+              if (existingStageMap.has(stageId)) continue;
+
+              const allocatedSequenceNumber = await EntitySequenceService.getNextBoardStageSequence(
+                boardId,
+                currentMaxStageSequence,
+              );
+              currentMaxStageSequence = Math.max(
+                currentMaxStageSequence,
+                allocatedSequenceNumber,
+              );
+              sequencePool.push(allocatedSequenceNumber);
+            }
+
+            sequencePool.sort((left, right) => left - right);
+            const orderedStages = [...resolvedStages].sort(
+              (left, right) =>
+                left.stage.sequenceNumber - right.stage.sequenceNumber ||
+                left.inputIndex - right.inputIndex,
+            );
+            const assignedSequenceByStageId = new Map(
+              orderedStages.map(({ stageId }, index) => [stageId, sequencePool[index]!] as const),
+            );
 
             // 1. Update existing stages or insert new ones
-            for (const stage of stages) {
-              if (stage.id && existingStageMap.has(stage.id)) {
+            for (const { stage, stageId } of resolvedStages) {
+              const assignedSequenceNumber = assignedSequenceByStageId.get(stageId);
+              if (assignedSequenceNumber === undefined) {
+                throw new Error(`sequenceNumber allocation is missing for stage ${stageId}`);
+              }
+
+              if (existingStageMap.has(stageId)) {
                 // Update existing stage
-                const existing = existingStageMap.get(stage.id)!;
+                const existing = existingStageMap.get(stageId)!;
                 // Only update if something changed
                 if (
                   existing.name !== stage.name ||
                   existing.eta !== stage.eta ||
-                  existing.sequenceNumber !== stage.sequenceNumber ||
+                  existing.sequenceNumber !== assignedSequenceNumber ||
                   existing.defaultTicketStatusV2 !== stage.defaultTicketStatusV2
                 ) {
                   await tx.mutate.stages.update({
-                    id: stage.id,
+                    id: stageId,
                     name: stage.name,
                     eta: stage.eta !== undefined ? stage.eta : null,
-                    sequenceNumber: stage.sequenceNumber,
+                    sequenceNumber: assignedSequenceNumber,
                     defaultTicketStatusV2:
                       (stage.defaultTicketStatusV2 as TicketStatusV2) || undefined,
                     updatedBy: authData.sub,
@@ -7222,7 +7277,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 if (stage.prStatuses !== undefined) {
                   // Fetch existing mappings for this stage
                   const existingMappings = await tx.run(
-                    zql.stage_pr_status_mappings.where('stageId', stage.id)
+                    zql.stage_pr_status_mappings.where('stageId', stageId)
                   );
 
                   // Create sets for comparison
@@ -7251,7 +7306,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                     const mappingKey = `${stage.sequenceNumber}-${prStatus}`;
                     await tx.mutate.stage_pr_status_mappings.insert({
                       id: prStatusMappingIds[mappingKey] ?? uuidv4(),
-                      stageId: stage.id,
+                      stageId,
                       prStatus: prStatus,
                       createdAt: now,
                     });
@@ -7259,15 +7314,11 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 }
               } else {
                 // Insert new stage
-                const newStageId = stageIds[stage.sequenceNumber];
-                if (!newStageId) {
-                  throw new Error(`stageId is required for stage at sequence ${stage.sequenceNumber}`);
-                }
                 await tx.mutate.stages.insert({
-                  id: newStageId,
+                  id: stageId,
                   name: stage.name,
                   eta: stage.eta,
-                  sequenceNumber: stage.sequenceNumber,
+                  sequenceNumber: assignedSequenceNumber,
                   defaultTicketStatusV2:
                     (stage.defaultTicketStatusV2 as TicketStatusV2) || TicketStatusV2.STARTED,
                   boardId: boardId,
@@ -7283,7 +7334,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                     const mappingKey = `${stage.sequenceNumber}-${prStatus}`;
                     await tx.mutate.stage_pr_status_mappings.insert({
                       id: prStatusMappingIds[mappingKey] ?? uuidv4(),
-                      stageId: newStageId,
+                      stageId,
                       prStatus: prStatus,
                       createdAt: now,
                     });
@@ -7343,7 +7394,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
             for (const stage of stages) {
               // Resolve stageId
-              let stageId = stage.id;
+              let stageId: string | undefined = stage.id || stageIds[stage.sequenceNumber];
               if (!stageId && stage.sequenceNumber) {
                 stageId = sequenceToStageId.get(String(stage.sequenceNumber));
               }
@@ -9817,6 +9868,19 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 .map(row => [row.globalFieldId as string, row]),
             );
             const keptRowIds = new Set<string>();
+            // Never compact field sequences on update/delete. Gaps are expected.
+            let currentMaxFieldSequence = existingRows.reduce(
+              (max, row) => Math.max(max, row.sequenceNumber ?? 0),
+              0,
+            );
+            const allocateFieldSequence = async (): Promise<number> => {
+              const allocated = await EntitySequenceService.getNextFormFieldSequence(
+                formId,
+                currentMaxFieldSequence,
+              );
+              currentMaxFieldSequence = Math.max(currentMaxFieldSequence, allocated);
+              return allocated;
+            };
             const serializeGlobalFieldEnum = (value: string[] | null | undefined): string | null =>
               value && value.length > 0 ? JSON.stringify(value) : null;
             validateUniqueFieldNames(fields);
@@ -9905,7 +9969,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               fieldEnum: ReadonlyJSONValue | undefined,
               fieldOptions: string | null,
               isOptional: boolean,
-              sequenceNumber: number,
               parentOptionId: string | null,
             ): Promise<string> => {
               const found = await tx.run(
@@ -9923,12 +9986,12 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   fieldEnum: fieldEnum ?? null,
                   fieldOptions: fieldOptions ?? null,
                   isOptional,
-                  sequenceNumber,
                   parentOptionId,
                   updatedAt: now,
                 });
                 return found.id;
               }
+              const sequenceNumber = await allocateFieldSequence();
               await tx.mutate.form_fields.insert({
                 id: candidateId,
                 formId,
@@ -9947,7 +10010,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             };
 
             for (const [index, field] of fields.entries()) {
-              const sequenceNumber = index + 1;
               const isOptional = field.isOptional ?? false;
               const fieldName = field.fieldName.trim();
               const cleanedOptions = field.fieldOptions
@@ -9966,7 +10028,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               // Editing a legacy row in place (keeps its id + saved values stable).
               if (legacyFieldId) {
                 if (!field.membershipId) {
-                  await ensureLegacyFieldDefinition(
+                  const rowId = await ensureLegacyFieldDefinition(
                     legacyFieldId,
                     formId,
                     fieldName,
@@ -9974,10 +10036,9 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                     fieldEnum,
                     fieldOptions,
                     isOptional,
-                    sequenceNumber,
                     field.parentOptionId ?? null,
                   );
-                  keptRowIds.add(legacyFieldId);
+                  keptRowIds.add(rowId);
                   continue;
                 }
 
@@ -9990,7 +10051,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                     fieldEnum: fieldEnum ?? null,
                     fieldOptions: fieldOptions ?? null,
                     isOptional,
-                    sequenceNumber,
                     parentOptionId: field.parentOptionId ?? null,
                     updatedAt: now,
                   });
@@ -10042,7 +10102,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                     fieldEnum,
                     fieldOptions,
                     isOptional,
-                    sequenceNumber,
                     field.parentOptionId ?? null,
                   );
                   keptRowIds.add(definitionId);
@@ -10062,12 +10121,12 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   fieldEnum: null,
                   fieldOptions: null,
                   isOptional,
-                  sequenceNumber,
                   parentOptionId: field.parentOptionId ?? null,
                   updatedAt: now,
                 });
                 keptRowIds.add(existingMembership.id);
               } else if (field.membershipId) {
+                const sequenceNumber = await allocateFieldSequence();
                 await tx.mutate.form_fields.insert({
                   id: field.membershipId,
                   formId,

@@ -10,6 +10,7 @@ import {
 import { jiraMigrationProgressService } from '@/services/jiraMigrationProgressService';
 import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
+import { EntitySequenceService } from '@/services/entitySequenceService';
 import { config } from '@/config/env';
 import { getCachedJiraUserEmailMappings } from '@/services/jira/jiraUserMapCsv';
 import { getCanvasUrl } from '@/services/canvasService';
@@ -218,24 +219,36 @@ export class JiraMigrationController {
           return;
         }
 
-        const maxSequence = targetStages.reduce((max, stage) => Math.max(max, stage.sequenceNumber), 0);
-        let nextSequence = maxSequence + 1;
+        let currentMaxStageSequence = targetStages.reduce(
+          (max, stage) => Math.max(max, stage.sequenceNumber),
+          0,
+        );
+        const stagesToCreate = [];
+        for (const stageName of missingStages) {
+          const src = sourceStageByName.get(stageName)!;
+          const sequenceNumber = await EntitySequenceService.getNextBoardStageSequence(
+            targetBoardId,
+            currentMaxStageSequence,
+          );
+          currentMaxStageSequence = Math.max(currentMaxStageSequence, sequenceNumber);
+          stagesToCreate.push({ stageName, src, sequenceNumber });
+        }
         const created = await db.$transaction(
-          missingStages.map(stageName => {
-            const src = sourceStageByName.get(stageName)!;
-            return db.stage.create({
+          stagesToCreate.map(({ stageName, src, sequenceNumber }) =>
+            db.stage.create({
               data: {
                 name: stageName,
                 eta: src.eta ?? null,
                 boardId: targetBoardId,
-                // temporary; will resequence to match source board ordering below
-                sequenceNumber: nextSequence++,
+                // The shared counter is never lowered, even if the migration's
+                // ordering pass below rewrites display sequence values.
+                sequenceNumber,
                 createdBy: actorUserId,
                 defaultTicketStatusV2: src.defaultTicketStatusV2,
               },
               select: { id: true, name: true, eta: true, sequenceNumber: true },
-            });
-          }),
+            }),
+          ),
         );
         for (const stage of created) {
           targetStages.push(stage);
@@ -275,12 +288,22 @@ export class JiraMigrationController {
         desiredStageOrder.push({ id: stage.id, name: stage.name });
       }
 
+      // Reassign the existing sequence values in the desired order. This keeps
+      // deletion gaps intact; newly allocated common-counter values naturally
+      // extend the pool without resetting it to 1..N.
+      const stageSequencePool = targetStagesAll
+        .map(stage => stage.sequenceNumber)
+        .sort((left, right) => left - right);
       const now = new Date();
       await db.$transaction(
         desiredStageOrder.map((stage, index) =>
           db.stage.update({
             where: { id: stage.id },
-            data: { sequenceNumber: index + 1, updatedBy: actorUserId, updatedAt: now },
+            data: {
+              sequenceNumber: stageSequencePool[index]!,
+              updatedBy: actorUserId,
+              updatedAt: now,
+            },
           }),
         ),
       );

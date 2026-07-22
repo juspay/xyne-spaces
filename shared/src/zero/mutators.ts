@@ -7259,6 +7259,12 @@ export const mutators = defineMutators({
               .map(row => [row.globalFieldId as string, row]),
           );
           const keptRowIds = new Set<string>();
+          // Existing fields retain their number; deletes leave gaps.
+          let currentMaxFieldSequence = existingRows.reduce(
+            (max, row) => Math.max(max, row.sequenceNumber ?? 0),
+            0,
+          );
+          const allocateFieldSequence = (): number => ++currentMaxFieldSequence;
           const serializeGlobalFieldEnum = (value: string[] | null | undefined): string | null =>
             value && value.length > 0 ? JSON.stringify(value) : null;
 
@@ -7347,7 +7353,6 @@ export const mutators = defineMutators({
             fieldEnum: ReadonlyJSONValue | undefined,
             fieldOptions: string | null,
             isOptional: boolean,
-            sequenceNumber: number,
             parentOptionId: string | null,
           ): Promise<string> => {
             const found = await tx.run(
@@ -7365,12 +7370,12 @@ export const mutators = defineMutators({
                 fieldEnum: fieldEnum ?? null,
                 fieldOptions: fieldOptions ?? null,
                 isOptional,
-                sequenceNumber,
                 parentOptionId,
                 updatedAt: now,
               });
               return found.id;
             }
+            const sequenceNumber = allocateFieldSequence();
             await tx.mutate.form_fields.insert({
               id: candidateId,
               formId,
@@ -7389,7 +7394,6 @@ export const mutators = defineMutators({
           };
 
           for (const [index, field] of fields.entries()) {
-            const sequenceNumber = index + 1;
             const isOptional = field.isOptional ?? false;
             const fieldName = field.fieldName.trim();
             const cleanedOptions = field.fieldOptions
@@ -7408,7 +7412,7 @@ export const mutators = defineMutators({
             // Editing a legacy row in place (keeps its id + saved values stable).
             if (legacyFieldId) {
               if (!field.membershipId) {
-                await ensureLegacyFieldDefinition(
+                const rowId = await ensureLegacyFieldDefinition(
                   legacyFieldId,
                   formId,
                   fieldName,
@@ -7416,10 +7420,9 @@ export const mutators = defineMutators({
                   fieldEnum,
                   fieldOptions,
                   isOptional,
-                  sequenceNumber,
                   field.parentOptionId ?? null,
                 );
-                keptRowIds.add(legacyFieldId);
+                keptRowIds.add(rowId);
                 continue;
               }
 
@@ -7432,7 +7435,6 @@ export const mutators = defineMutators({
                   fieldEnum: fieldEnum ?? null,
                   fieldOptions: fieldOptions ?? null,
                   isOptional,
-                  sequenceNumber,
                   parentOptionId: field.parentOptionId ?? null,
                   updatedAt: now,
                 });
@@ -7484,7 +7486,6 @@ export const mutators = defineMutators({
                   fieldEnum,
                   fieldOptions,
                   isOptional,
-                  sequenceNumber,
                   field.parentOptionId ?? null,
                 );
                 keptRowIds.add(definitionId);
@@ -7504,12 +7505,12 @@ export const mutators = defineMutators({
                 fieldEnum: null,
                 fieldOptions: null,
                 isOptional,
-                sequenceNumber,
                 parentOptionId: field.parentOptionId ?? null,
                 updatedAt: now,
               });
               keptRowIds.add(existingMembership.id);
             } else if (field.membershipId) {
+              const sequenceNumber = allocateFieldSequence();
               await tx.mutate.form_fields.insert({
                 id: field.membershipId,
                 formId,

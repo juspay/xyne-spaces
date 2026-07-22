@@ -291,7 +291,10 @@ export const BoardForm = ({
   }, [selectedTemplate, isEdit]);
 
   const addStage = (): void => {
-    const nextSequenceNumber = stages.length + 1;
+    // This is only a provisional client value. The server allocates the
+    // persisted value from the common sequence counter.
+    const nextSequenceNumber =
+      stages.reduce((max, stage) => Math.max(max, Number(stage.sequenceNumber)), 0) + 1;
 
     setStages([
       ...stages,

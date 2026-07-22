@@ -13,6 +13,7 @@ import {
 } from '@/utils/formFieldResolution';
 import { resolveFieldDefinitionsByIds } from '@/utils/fieldDefinition';
 import { parseGlobalFieldEnum, serializeGlobalFieldEnum } from '@/utils/globalFieldEnum';
+import { EntitySequenceService } from '@/services/entitySequenceService';
 
 export interface UpsertTicketFormFieldsResult {
   updatedFields: string[];
@@ -386,9 +387,22 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
     }
 
     const keptRowIds = new Set<string>();
+    // Existing memberships keep their allocated number. Only newly inserted
+    // memberships advance the shared counter; deletes intentionally leave gaps.
+    let currentMaxSequence = existingRows.reduce(
+      (max, row) => Math.max(max, row.sequenceNumber),
+      0,
+    );
+    const allocateSequence = async (): Promise<number> => {
+      const allocated = await EntitySequenceService.getNextFormFieldSequence(
+        formId,
+        currentMaxSequence,
+      );
+      currentMaxSequence = Math.max(currentMaxSequence, allocated);
+      return allocated;
+    };
 
-    for (const [index, field] of fields.entries()) {
-      const sequenceNumber = index + 1;
+    for (const field of fields) {
       const isOptional = field.isOptional ?? false;
 
       if (field.fieldId) {
@@ -397,7 +411,7 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
           await this.updateGlobalFieldDefinition(tx, formId, field.fieldId, field);
           await tx.formFields.update({
             where: { id: existingGlobalRow.id },
-            data: { sequenceNumber, isOptional, parentOptionId: field.parentOptionId ?? null },
+            data: { isOptional, parentOptionId: field.parentOptionId ?? null },
           });
           keptRowIds.add(existingGlobalRow.id);
           continue;
@@ -413,7 +427,6 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
               fieldType: field.fieldType,
               fieldEnum: field.fieldEnum ?? Prisma.DbNull,
               fieldOptions: serializeFieldOptions(field.fieldOptions as FieldEnumOption[] | undefined),
-              sequenceNumber,
               isOptional,
               parentOptionId: field.parentOptionId ?? null,
             },
@@ -432,14 +445,15 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
             throw new Error(`Field ${field.fieldId} does not belong to this form`);
           }
           await this.updateGlobalFieldDefinition(tx, formId, reusableGlobal.id, field);
+          const existingMembership = existingByGlobalId.get(reusableGlobal.id);
           const rowId = await this.upsertGlobalMembershipRow(
             tx,
             formId,
             reusableGlobal.id,
-            sequenceNumber,
+            existingMembership?.sequenceNumber ?? (await allocateSequence()),
             isOptional,
             field.parentOptionId ?? null,
-            existingByGlobalId.get(reusableGlobal.id),
+            existingMembership,
           );
           keptRowIds.add(rowId);
           continue;
@@ -449,18 +463,25 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
       // New local field → find-or-create the global definition by (projectId, name + type).
       if(projectId) {
         const globalFieldId = await this.findOrCreateGlobalField(tx, projectId, field);
+        const existingMembership = existingByGlobalId.get(globalFieldId);
         const rowId = await this.upsertGlobalMembershipRow(
           tx,
           formId,
           globalFieldId,
-          sequenceNumber,
+          existingMembership?.sequenceNumber ?? (await allocateSequence()),
           isOptional,
           field.parentOptionId ?? null,
-          existingByGlobalId.get(globalFieldId),
+          existingMembership,
         );
         keptRowIds.add(rowId);
       } else {
-        const rowId = await this.findOrCreateLegacyField(tx, formId, field, isOptional, sequenceNumber);
+        const rowId = await this.findOrCreateLegacyField(
+          tx,
+          formId,
+          field,
+          isOptional,
+          allocateSequence,
+        );
         keptRowIds.add(rowId);
       }
     }
@@ -558,7 +579,7 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
     formId: string,
     def: LocalFieldDefinitionInput,
     isOptional: boolean,
-    sequenceNumber: number,
+    allocateSequence: () => Promise<number>,
   ): Promise<string> {
     const fieldName = def.fieldName.trim();
     const existing = await tx.formFields.findFirst({
@@ -579,7 +600,6 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
           fieldEnum: def.fieldEnum ?? Prisma.DbNull,
           fieldOptions: serializeFieldOptions(def.fieldOptions as FieldEnumOption[] | undefined),
           isOptional,
-          sequenceNumber,
           updatedAt: new Date(),
         },
       });
@@ -587,6 +607,7 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
     }
 
     const now = new Date();
+    const sequenceNumber = await allocateSequence();
     const created = await tx.formFields.create({
       data: {
         id: def.fieldId ?? randomUUID(),

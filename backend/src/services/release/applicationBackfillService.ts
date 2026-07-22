@@ -6,6 +6,7 @@ import { FormContextType, FormEntityType, LookupType, type FieldEnumOption } fro
 import { randomUUID } from 'crypto';
 import { XyneChangeType, XyneFormSchemaProvider } from './xyne/xyneReleaseForm';
 import { BaseTicketType } from '@xyne/shared';
+import { EntitySequenceService } from '@/services/entitySequenceService';
 
 interface ApplicationData {
   name: string;
@@ -39,18 +40,24 @@ export class ApplicationBackfillService {
 
   private async createDefaultStages(boardId: string, createdBy: string): Promise<void> {
     const defaultStages = [
-      { name: 'TODO', eta: 1, sequenceNumber: 1, defaultTicketStatusV2: 'TODO' as TicketStatusV2 },
-      { name: 'IN-PROGRESS', eta: 2, sequenceNumber: 2, defaultTicketStatusV2: 'STARTED' as TicketStatusV2 },
-      { name: 'COMPLETED', eta: 3, sequenceNumber: 3, defaultTicketStatusV2: 'COMPLETED' as TicketStatusV2 },
+      { name: 'TODO', eta: 1, defaultTicketStatusV2: 'TODO' as TicketStatusV2 },
+      { name: 'IN-PROGRESS', eta: 2, defaultTicketStatusV2: 'STARTED' as TicketStatusV2 },
+      { name: 'COMPLETED', eta: 3, defaultTicketStatusV2: 'COMPLETED' as TicketStatusV2 },
     ];
 
+    let currentMaxStageSequence = 0;
     for (const stage of defaultStages) {
+      const sequenceNumber = await EntitySequenceService.getNextBoardStageSequence(
+        boardId,
+        currentMaxStageSequence,
+      );
+      currentMaxStageSequence = Math.max(currentMaxStageSequence, sequenceNumber);
       await db.stage.create({
         data: {
           boardId,
           name: stage.name,
           eta: stage.eta,
-          sequenceNumber: stage.sequenceNumber,
+          sequenceNumber,
           defaultTicketStatusV2: stage.defaultTicketStatusV2,
           createdBy,
           createdAt: new Date(),

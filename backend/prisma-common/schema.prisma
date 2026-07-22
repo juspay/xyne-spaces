@@ -17,7 +17,8 @@ datasource db {
 }
 
 // Centralized per-entity sequence counters.
-// One row per (entityType, entityValue) scope, e.g. ("PROJECT_TICKET", <projectId>).
+// One row per (entityType, entityValue) scope, e.g. ("PROJECT_TICKET", <projectId>),
+// ("BOARD_STAGE", <boardId>), or ("FORM_FIELD", <formId>).
 // sequenceNumber holds the last allocated number; allocation is an atomic
 // upsert-increment (see entitySequenceService).
 model EntitySequence {

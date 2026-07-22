@@ -10,11 +10,11 @@ const dualWriteSequenceNumberBackfillAdminAuth = authorize('TICKET-MIGRATION', A
 
 /**
  * @route POST /api/admin/dual-write-sequence-number-backfill
- * @desc Move project ticket sequence state from the main DB into the common DB
- *       entity_sequences table in batches.
+ * @desc Move ticket, board-stage, or form-field sequence state from the main DB
+ *       into the common DB entity_sequences table in batches.
  *       Idempotent; never lowers an already-advanced counter.
  * @access TICKET-MIGRATION Admin only
- * @body { entityType: 'PROJECT_TICKET',
+ * @body { entityType: 'PROJECT_TICKET' | 'BOARD_STAGE' | 'FORM_FIELD',
  *         batchSize?: number, delayMs?: number, dryRun?: boolean }
  */
 router.post(

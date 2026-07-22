@@ -17,10 +17,12 @@ function isUniqueViolation(error: unknown): boolean {
 
 /**
  * Sequence scopes stored in the common DB entity_sequences table.
- * entityValue holds the scoping project id.
+ * entityValue holds the id of the entity that owns the counter.
  */
 export const SequenceEntityType = {
   PROJECT_TICKET: 'PROJECT_TICKET', // entityValue = projectId; ticket numbering (e.g. XYNE-0001)
+  BOARD_STAGE: 'BOARD_STAGE', // entityValue = boardId; monotonic stage sequence numbers
+  FORM_FIELD: 'FORM_FIELD', // entityValue = formId; monotonic field sequence numbers
 } as const;
 
 export type SequenceEntityType =
@@ -34,10 +36,14 @@ export type SequenceEntityType =
  * acceptable; uniqueness and monotonicity per scope are guaranteed.
  */
 export class EntitySequenceService {
-  static isCommonProjectTicketSequenceEnabled(): boolean {
+  static isCommonEntitySequenceEnabled(): boolean {
     return (
       config.commonDatabase.ticketSequenceEnabled && CommonDatabaseClient.isConfigured()
     );
+  }
+
+  static isCommonProjectTicketSequenceEnabled(): boolean {
+    return this.isCommonEntitySequenceEnabled();
   }
 
   static async getNextProjectTicketSequence(
@@ -62,6 +68,54 @@ export class EntitySequenceService {
     });
 
     return project.ticketSequence;
+  }
+
+  private static async getNextScopedSequence(
+    entityType: SequenceEntityType,
+    entityValue: string,
+    currentMaxSequence: number
+  ): Promise<number> {
+    if (this.isCommonEntitySequenceEnabled()) {
+      try {
+        // Once the common sequence is enabled it is the only allocator. Do not
+        // derive the next value from live rows: deletions and reordering can
+        // leave gaps there, and concurrent writers would otherwise collide.
+        return await this.getNextSequence(entityType, entityValue);
+      } catch (error) {
+        logger.error(
+          `[EntitySequenceService] Common DB ${entityType} allocation failed for ${entityValue}:`,
+          error
+        );
+        // These scopes do not have a durable fallback counter in the main DB.
+        // Failing the write is safer than recycling a number after a deletion.
+        throw error;
+      }
+    }
+
+    // Legacy fallback used only while the common sequence feature is disabled.
+    return Math.max(1, currentMaxSequence + 1);
+  }
+
+  static async getNextBoardStageSequence(
+    boardId: string,
+    currentMaxSequence: number
+  ): Promise<number> {
+    return this.getNextScopedSequence(
+      SequenceEntityType.BOARD_STAGE,
+      boardId,
+      currentMaxSequence
+    );
+  }
+
+  static async getNextFormFieldSequence(
+    formId: string,
+    currentMaxSequence: number
+  ): Promise<number> {
+    return this.getNextScopedSequence(
+      SequenceEntityType.FORM_FIELD,
+      formId,
+      currentMaxSequence
+    );
   }
 
   /**
