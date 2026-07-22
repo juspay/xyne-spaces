@@ -23,6 +23,7 @@ import type {
 } from '@blocknote/core';
 import '@blocknote/core/fonts/inter.css';
 import '@blocknote/mantine/style.css';
+import { en } from '@blocknote/core/locales';
 import { PresentationModal, usePresentation } from 'blocknote-layout-extensions';
 
 import {
@@ -63,6 +64,7 @@ import { RiGroupLine, RiUserLine } from 'react-icons/ri';
 import { TableOfContents, TocHeading } from '../TableOfContents';
 import { CanvasSearch } from '../CanvasSearch/CanvasSearch';
 import { SelectionAskAI } from '../SelectionAskAI';
+import { CanvasCodeCopyButton } from '../CanvasCodeCopyButton';
 import { useCanvasTableFilters } from '../useCanvasTableFilters';
 import { useScope, useShortcutById } from '../../../shortcuts';
 import { useTheme } from '../../../hooks/useTheme';
@@ -80,6 +82,15 @@ const schema = BlockNoteSchema.create({
     mention: mentionInlineContentSpec,
   },
 });
+
+const canvasDictionary = {
+  ...en,
+  placeholders: {
+    ...en.placeholders,
+    default: "Write something, or press '/' for commands",
+    emptyDocument: "Write something, or press '/' for commands",
+  },
+};
 
 interface CollaborativeCanvasEditorProps {
   canvasId: string;
@@ -178,6 +189,7 @@ export const CollaborativeCanvasEditor = forwardRef<
 
     const editorOptions = {
       schema,
+      dictionary: canvasDictionary,
       ...(onFileUpload ? { uploadFile: onFileUpload } : {}),
       resolveFileUrl,
       ...(shouldUseCollaboration
@@ -668,6 +680,9 @@ export const CollaborativeCanvasEditor = forwardRef<
           {...(canvasId && { canvasId })}
           containerRef={containerRef}
         />
+
+        {/* Copy button overlay for code blocks */}
+        <CanvasCodeCopyButton containerRef={containerRef} />
       </div>
     );
   },

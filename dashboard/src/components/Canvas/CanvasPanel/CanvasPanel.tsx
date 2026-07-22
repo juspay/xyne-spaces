@@ -194,8 +194,8 @@ const CanvasPanel = (): ReactElement => {
     <div className='flex-1 h-full flex flex-col bg-background border-r border-border'>
       {/* Header */}
       <div className='p-[18px] border-b border-border'>
-        <div className='flex items-center justify-between mb-3'>
-          <div className='flex items-center gap-2'>
+        <div className='flex items-center justify-between gap-3 mb-3'>
+          <div className='flex min-w-0 items-center gap-2'>
             {!isMobile && (
               <Link
                 to='/chat/dir'
@@ -205,9 +205,9 @@ const CanvasPanel = (): ReactElement => {
                 <ArrowLeft size={20} />
               </Link>
             )}
-            <h2 className='text-lg font-semibold text-foreground'>Canvases</h2>
+            <h2 className='truncate text-lg font-semibold text-foreground'>Canvases</h2>
           </div>
-          <div className='flex items-center gap-3'>
+          <div className='flex shrink-0 items-center gap-2'>
             <Tooltip
               content={showStarredOnly ? 'Show all items' : 'Show starred only'}
               side='bottom'
@@ -279,21 +279,23 @@ const CanvasPanel = (): ReactElement => {
                 <List size={16} />
               </button>
             </div>
-            <Button
-              variant='default'
-              size='sm'
-              onClick={() => void handleCreateCanvas()}
-              disabled={isCreatingCanvas}
-              data-track-category='CANVAS'
-              data-track-name='Create_Canvas'
-            >
-              {isCreatingCanvas ? (
-                <Loader2 size={16} className='mr-1 animate-spin' />
-              ) : (
-                <Plus size={16} className='mr-1' />
-              )}
-              {isCreatingCanvas ? 'Creating...' : 'New Canvas'}
-            </Button>
+            <Tooltip content='New Canvas' side='bottom' delayDuration={300}>
+              <Button
+                variant='default'
+                size='sm'
+                onClick={() => void handleCreateCanvas()}
+                disabled={isCreatingCanvas}
+                aria-label='New Canvas'
+                data-track-category='CANVAS'
+                data-track-name='Create_Canvas'
+              >
+                {isCreatingCanvas ? (
+                  <Loader2 size={16} className='animate-spin' />
+                ) : (
+                  <Plus size={16} />
+                )}
+              </Button>
+            </Tooltip>
           </div>
         </div>
         {viewMode === 'grouped' && (
