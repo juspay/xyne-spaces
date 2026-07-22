@@ -30,10 +30,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke('sync-xyne-cookies-to-browser-panel', url);
   },
 
-  setDynamicHeaders: (headers: Record<string, string>): Promise<void> => {
-    return ipcRenderer.invoke('set-dynamic-headers', headers);
-  },
-
   setBadgeCount: (count: number) => {
     ipcRenderer.send('set-badge-count', count);
   },

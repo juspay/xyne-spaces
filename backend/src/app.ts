@@ -507,7 +507,7 @@ export class App {
     this.app.use('/api/user-groups', authMiddleware.authenticate, userGroupRoutes); // User groups (teams)
     this.app.use('/api/forms', authMiddleware.authenticate, formsRoutes); // Forms routes
     this.app.use('/api/zero', zeroRoutes); // Zero sync routes (uses authenticateZero middleware in route file)
-    this.app.use('/api/user-header-overrides', userHeaderOverridesRoutes); // Dynamic per-user header overrides (auth in route file)
+    this.app.use('/api/client-events', userHeaderOverridesRoutes); // Common client-command events + header overrides (auth in route file)
 
     this.app.use('/api/messages', authMiddleware.authenticate, reactionRoutes);
 

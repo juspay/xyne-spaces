@@ -11,25 +11,6 @@ import Store from 'electron-store';
 let mainWindow: BrowserWindow | null = null;
 const store = new Store();
 
-export function setDynamicHeaders(headers: unknown): void {
-  const sanitized: Record<string, string> = {};
-  if (headers && typeof headers === 'object' && !Array.isArray(headers)) {
-    for (const [name, value] of Object.entries(headers as Record<string, unknown>)) {
-      if (typeof value === 'string') {
-        sanitized[name] = value;
-      }
-    }
-  }
-  store.set('dynamicHeaders', sanitized);
-}
-
-function getDynamicHeaders(): Record<string, string> {
-  const stored = store.get('dynamicHeaders');
-  return stored && typeof stored === 'object' && !Array.isArray(stored)
-    ? (stored as Record<string, string>)
-    : {};
-}
-
 export function setMainWindow(window: BrowserWindow | null): void {
   mainWindow = window;
 }
@@ -148,7 +129,6 @@ export function setupXyneSpacesInterceptor(): void {
       if (preProdEnabled === true) {
         headers['x-route-env'] = 'playground';
       }
-      Object.assign(headers, getDynamicHeaders());
 
       callback({ requestHeaders: headers });
     }
@@ -175,7 +155,6 @@ export function setupRequestInterceptor(): void {
       if (preProdEnabled === true) {
         details.requestHeaders['x-route-env'] = 'playground';
       }
-      Object.assign(details.requestHeaders, getDynamicHeaders());
       callback({ requestHeaders: details.requestHeaders });
     }
   );
