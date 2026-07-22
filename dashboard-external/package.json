@@ -41,5 +41,29 @@
     "tailwindcss-animate": "^1.0.7",
     "typescript": "^5.8.3",
     "vite": "^7.1.5"
+  },
+  "overrides": {
+    "@opentelemetry/auto-instrumentations-node": "0.78.0",
+    "@opentelemetry/exporter-prometheus": "0.220.0",
+    "protobufjs@7": "7.6.5",
+    "protobufjs@8": "8.7.1",
+    "ws@6": "6.2.6",
+    "ws@8": "8.21.1",
+    "ws@7": "7.5.13",
+    "fast-uri@3": "3.1.4",
+    "fastify@5": "5.10.0",
+    "brace-expansion@1": "1.1.16",
+    "brace-expansion@2": "2.1.2",
+    "js-yaml@3": "3.15.0",
+    "js-yaml@4": "4.3.0",
+    "minimatch@3": "3.1.5",
+    "minimatch@5": "5.1.9",
+    "minimatch@9": "9.0.9",
+    "minimatch@10": "10.2.5",
+    "picomatch@2": "2.3.2",
+    "picomatch@4": "4.0.5",
+    "@grpc/grpc-js": "1.14.4",
+    "defu": "6.1.7",
+    "@opentelemetry/core@2": "2.8.0"
   }
 }

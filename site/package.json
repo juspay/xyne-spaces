@@ -43,5 +43,12 @@
     "eslint-config-next": "16.1.6",
     "tailwindcss": "^4",
     "typescript": "^5"
+  },
+  "pnpm": {
+    "overrides": {
+      "shell-quote": "1.9.0",
+      "js-yaml@4": "4.3.0",
+      "postcss": "8.5.10"
+    }
   }
 }

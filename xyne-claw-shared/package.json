@@ -31,5 +31,13 @@
     "@types/pdf-parse": "^1.1.5",
     "@types/pdfkit": "^0.13.9",
     "typescript": "^5.7.0"
+  },
+  "overrides": {
+    "hono": "4.12.30",
+    "fast-uri@3": "3.1.4",
+    "fastify@5": "5.10.0",
+    "path-to-regexp@8": "8.4.2",
+    "qs": "6.15.2",
+    "ip-address": "10.1.1"
   }
 }
