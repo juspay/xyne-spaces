@@ -20,6 +20,7 @@ import { toast } from 'sonner';
 import { Tooltip } from '../ui/Tooltip';
 import GlobalCommandMenu from '../GlobalCommandMenu/GlobalCommandMenu';
 import type { MentionData } from '../Chat/ChatDirectory/ChannelCommandMenu.types';
+import { formatElapsedTime } from '../../utils/recordingUtils';
 
 interface GlobalTopBarProps {
   onOpenErrorReport?: () => void;
@@ -314,10 +315,7 @@ const GlobalTopBar = ({
                 data-track-name='StopRecordingTopBar'
               >
                 <Circle className='size-2.5 fill-current animate-pulse' />
-                <span className='font-mono'>
-                  {String(Math.floor(recordingSeconds / 60)).padStart(2, '0')}:
-                  {String(recordingSeconds % 60).padStart(2, '0')}
-                </span>
+                <span className='font-mono'>{formatElapsedTime(recordingSeconds * 1000)}</span>
                 <Square className='size-3 fill-current' />
               </button>
             </Tooltip>

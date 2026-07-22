@@ -35,13 +35,13 @@ export function EndCallModal({
       testId='end-call-modal'
       buttons={[
         {
-          label: 'Just leave the call',
-          onClick: onEndForSelf,
+          label: 'End for everyone',
+          onClick: onEndForAll,
           variant: 'outline',
         },
         {
-          label: 'End for everyone',
-          onClick: onEndForAll,
+          label: 'Just leave the call',
+          onClick: onEndForSelf,
           className: 'bg-action-primary hover:bg-action-primary/90 text-action-primary-foreground',
         },
       ]}

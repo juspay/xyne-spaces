@@ -6,6 +6,7 @@ import { queries } from '../zero/queries';
 import { InvitationResponse } from '@xyne/shared';
 import { useCachedQuery } from './useCachedQuery';
 import { htmlToPlainText } from '../utils/sanitizer';
+import { formatElapsedTime } from '../utils/recordingUtils';
 
 // Type for active call with relations
 type ActiveCallWithRelations = QueryResultType<typeof queries.userActiveCalls>[number];
@@ -226,8 +227,8 @@ export const useIsCallActive = (callId: string | undefined): boolean => {
  * Hook to track call duration with real-time updates
  * @param startedAt - The timestamp when the call started (in milliseconds)
  * @param isActive - Whether the call is currently active
- * @param format - Format type: 'detailed' (M:SS min, updates every second) or 'simple' (X min, updates every minute)
- * @returns Formatted duration string (e.g., "5:23 min" or "5 min") or empty string if not active
+ * @param format - Format type: 'detailed' (M:SS, then HH:MM:SS, updates every second) or 'simple' (X min / Xh Ym, updates every minute)
+ * @returns Formatted duration string (e.g., "5:23", "01:05:23", or "5 min") or empty string if not active
  */
 export const useCallDuration = (
   startedAt: number | undefined,
@@ -237,12 +238,26 @@ export const useCallDuration = (
   const [duration, setDuration] = useState('');
 
   const formatCallDuration = (durationMs: number): string => {
-    const minutes = Math.floor(durationMs / 60000);
+    const totalSeconds = Math.floor(durationMs / 1000);
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+
     if (format === 'simple') {
-      return minutes > 0 ? `${minutes} min` : '';
+      const totalMinutes = Math.floor(totalSeconds / 60);
+      const hoursLabel = Math.floor(totalMinutes / 60);
+      if (hoursLabel > 0) {
+        const remainingMinutes = totalMinutes % 60;
+        return remainingMinutes > 0 ? `${hoursLabel}h ${remainingMinutes}m` : `${hoursLabel}h`;
+      }
+      return totalMinutes > 0 ? `${totalMinutes} min` : '';
     }
-    const seconds = Math.floor((durationMs % 60000) / 1000);
-    return `${minutes}:${seconds.toString().padStart(2, '0')} min`;
+
+    if (hours > 0) {
+      return formatElapsedTime(durationMs);
+    }
+
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   };
 
   useEffect(() => {
