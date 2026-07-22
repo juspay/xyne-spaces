@@ -148,6 +148,10 @@ function workflowToSingleResult(workflow: Workflow, created: boolean): DeskLabel
   return { automations: [workflowToAutomation(workflow)], created };
 }
 
+function workflowStatusIn(statuses: AutomationStatus[]): Prisma.StringFilter | string {
+  return statuses.length === 1 ? statuses[0] : { in: statuses };
+}
+
 function isUniqueConflict(err: unknown): boolean {
   return err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002';
 }
@@ -213,6 +217,17 @@ function fingerprintEmailReceivedFilters(filters: Record<string, unknown>): stri
 }
 
 class DeskLabelRulesService {
+  private buildValidatedRuleConfig(params: {
+    channelId: string;
+    emailFilters: Record<string, unknown>;
+    label: ResolvedConversationLabel;
+    keepInInbox?: boolean | undefined;
+  }): AutomationConfig {
+    const config = buildRuleConfig(params);
+    ensureConfigValid(config);
+    return config;
+  }
+
   async create(
     payload: DeskLabelRulesPayload,
     auth: { userId: string; workspaceId: string },
@@ -230,25 +245,24 @@ class DeskLabelRulesService {
     try {
       return await db.$transaction(async tx => {
         const label = await this.resolveOrCreateLabel(tx, payload, auth);
-
-        const duplicate = await this.findExistingReferenceWorkflow(tx, {
-          workspaceId: auth.workspaceId,
-          ownerId: auth.userId,
-          channelId: payload.channelId,
-          labelId: label.id,
-          filterFingerprint,
-        });
-        if (duplicate) {
-          return workflowToSingleResult(duplicate, false);
-        }
-
-        const config = buildRuleConfig({
+        const config = this.buildValidatedRuleConfig({
           channelId: payload.channelId,
           emailFilters,
           label,
           keepInInbox: payload.keepInInbox,
         });
-        ensureConfigValid(config);
+
+        const existing = await this.findOrRestoreExistingDeskWorkflow(tx, {
+          auth,
+          channelId: payload.channelId,
+          label,
+          filterFingerprint,
+          name,
+          config,
+        });
+        if (existing) {
+          return workflowToSingleResult(existing, false);
+        }
 
         const id = uuidv4();
         const workflow = await tx.workflow.create({
@@ -260,22 +274,15 @@ class DeskLabelRulesService {
             status: AutomationStatus.ACTIVE,
             eventType: triggerTypeToEventType(config.trigger.type),
             automationSeriesId: id,
+            deskOwnerId: auth.userId,
+            deskChannelId: payload.channelId,
+            deskLabelId: label.id,
+            deskFilterFingerprint: filterFingerprint,
             context: JSON.stringify(config),
             metadata: buildAutomationMetadata({
               description: `Desk auto-label for incoming email -> ${label.name}`,
               createdById: auth.userId,
             }),
-          },
-        });
-
-        await tx.deskAutoLabelRuleReference.create({
-          data: {
-            workflowId: workflow.id,
-            labelId: label.id,
-            workspaceId: auth.workspaceId,
-            ownerId: auth.userId,
-            channelId: payload.channelId,
-            filterFingerprint,
           },
         });
 
@@ -289,22 +296,69 @@ class DeskLabelRulesService {
 
       const label = await this.findExistingLabelForDuplicate(payload, auth);
       if (label) {
-        const duplicate = await this.findExistingReferenceWorkflow(db, {
-          workspaceId: auth.workspaceId,
-          ownerId: auth.userId,
+        const config = this.buildValidatedRuleConfig({
           channelId: payload.channelId,
-          labelId: label.id,
-          filterFingerprint,
+          emailFilters,
+          label,
+          keepInInbox: payload.keepInInbox,
         });
-        if (duplicate) {
+        const existing = await db.$transaction(tx =>
+          this.findOrRestoreExistingDeskWorkflow(tx, {
+            auth,
+            channelId: payload.channelId,
+            label,
+            filterFingerprint,
+            name,
+            config,
+          }),
+        );
+        if (existing) {
           logger.info(
             `[automations] desk-label-rule duplicate user=${auth.userId} channel=${payload.channelId} label=${label.id}`,
           );
-          return workflowToSingleResult(duplicate, false);
+          return workflowToSingleResult(existing, false);
         }
       }
       throw err;
     }
+  }
+
+  private async findOrRestoreExistingDeskWorkflow(
+    tx: Prisma.TransactionClient,
+    params: {
+      auth: { userId: string; workspaceId: string };
+      channelId: string;
+      label: ResolvedConversationLabel;
+      filterFingerprint: string;
+      name: string;
+      config: AutomationConfig;
+    },
+  ): Promise<Workflow | null> {
+    const duplicate = await this.findExistingDeskWorkflow(tx, {
+      workspaceId: params.auth.workspaceId,
+      ownerId: params.auth.userId,
+      channelId: params.channelId,
+      labelId: params.label.id,
+      filterFingerprint: params.filterFingerprint,
+      statuses: [AutomationStatus.ACTIVE, AutomationStatus.DISABLED],
+    });
+    if (duplicate) {
+      return duplicate;
+    }
+
+    const archivedDuplicate = await this.findExistingDeskWorkflow(tx, {
+      workspaceId: params.auth.workspaceId,
+      ownerId: params.auth.userId,
+      channelId: params.channelId,
+      labelId: params.label.id,
+      filterFingerprint: params.filterFingerprint,
+      statuses: [AutomationStatus.ARCHIVED],
+    });
+    if (!archivedDuplicate) {
+      return null;
+    }
+
+    return this.restoreArchivedDeskWorkflow(tx, archivedDuplicate, params);
   }
 
   async listOwned(
@@ -314,17 +368,14 @@ class DeskLabelRulesService {
   ): Promise<DeskLabelRulesPage> {
     await this.requireDeskChannel(channelId, auth);
 
-    const baseWhere: Prisma.DeskAutoLabelRuleReferenceWhereInput = {
+    const baseWhere: Prisma.WorkflowWhereInput = {
       workspaceId: auth.workspaceId,
-      ownerId: auth.userId,
-      channelId,
-      workflow: {
-        workflowType: DESK_AUTOMATION_WORKFLOW_TYPE,
-        workspaceId: auth.workspaceId,
-        status: { in: [AutomationStatus.ACTIVE, AutomationStatus.DISABLED] },
-      },
+      workflowType: DESK_AUTOMATION_WORKFLOW_TYPE,
+      deskOwnerId: auth.userId,
+      deskChannelId: channelId,
+      status: { in: [AutomationStatus.ACTIVE, AutomationStatus.DISABLED] },
     };
-    const cursorWhere: Prisma.DeskAutoLabelRuleReferenceWhereInput =
+    const cursorWhere: Prisma.WorkflowWhereInput =
       opts.cursor
         ? {
             OR: [
@@ -335,21 +386,16 @@ class DeskLabelRulesService {
         : {};
 
     const [rows, total, active] = await Promise.all([
-      db.deskAutoLabelRuleReference.findMany({
+      db.workflow.findMany({
         where: { AND: [baseWhere, cursorWhere] },
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: opts.limit + 1,
-        include: { workflow: true },
       }),
-      db.deskAutoLabelRuleReference.count({ where: baseWhere }),
-      db.deskAutoLabelRuleReference.count({
+      db.workflow.count({ where: baseWhere }),
+      db.workflow.count({
         where: {
           ...baseWhere,
-          workflow: {
-            workflowType: DESK_AUTOMATION_WORKFLOW_TYPE,
-            workspaceId: auth.workspaceId,
-            status: AutomationStatus.ACTIVE,
-          },
+          status: AutomationStatus.ACTIVE,
         },
       }),
     ]);
@@ -359,7 +405,7 @@ class DeskLabelRulesService {
     const last = page[page.length - 1] ?? null;
 
     return {
-      automations: page.map(row => workflowToAutomation(row.workflow)),
+      automations: page.map(workflowToAutomation),
       counts: { total, active },
       pagination: {
         limit: opts.limit,
@@ -387,17 +433,15 @@ class DeskLabelRulesService {
     auth: { userId: string; workspaceId: string },
   ): Promise<AutomationView> {
     return db.$transaction(async tx => {
-      await this.requireOwnedDeskRule(tx, automationId, auth);
-      const updated = await tx.workflow.update({
-        where: { id: automationId },
-        data: { status: AutomationStatus.ARCHIVED, updatedAt: new Date() },
-      });
-      await tx.deskAutoLabelRuleReference.deleteMany({
-        where: {
-          workflowId: automationId,
+      const workflow = await this.requireOwnedDeskRule(tx, automationId, auth);
+      const archived = await tx.workflow.update({
+        where: { id: workflow.id },
+        data: {
+          status: AutomationStatus.ARCHIVED,
+          updatedAt: new Date(),
         },
       });
-      return workflowToAutomation(updated);
+      return workflowToAutomation(archived);
     });
   }
 
@@ -515,7 +559,7 @@ class DeskLabelRulesService {
     });
   }
 
-  private async findExistingReferenceWorkflow(
+  private async findExistingDeskWorkflow(
     client: DeskRulesDbClient,
     params: {
       workspaceId: string;
@@ -523,25 +567,79 @@ class DeskLabelRulesService {
       channelId: string;
       labelId: string;
       filterFingerprint: string;
+      statuses: AutomationStatus[];
     },
   ): Promise<Workflow | null> {
-    const ref = await client.deskAutoLabelRuleReference.findFirst({
+    return client.workflow.findFirst({
       where: {
         workspaceId: params.workspaceId,
-        ownerId: params.ownerId,
-        channelId: params.channelId,
-        labelId: params.labelId,
-        filterFingerprint: params.filterFingerprint,
-        workflow: {
-          workflowType: DESK_AUTOMATION_WORKFLOW_TYPE,
-          workspaceId: params.workspaceId,
-          status: { in: [AutomationStatus.ACTIVE, AutomationStatus.DISABLED] },
-        },
+        workflowType: DESK_AUTOMATION_WORKFLOW_TYPE,
+        deskOwnerId: params.ownerId,
+        deskChannelId: params.channelId,
+        deskLabelId: params.labelId,
+        deskFilterFingerprint: params.filterFingerprint,
+        status: workflowStatusIn(params.statuses),
       },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      include: { workflow: true },
     });
-    return ref?.workflow ?? null;
+  }
+
+  private async restoreArchivedDeskWorkflow(
+    tx: Prisma.TransactionClient,
+    workflow: Workflow,
+    params: {
+      name: string;
+      config: AutomationConfig;
+      auth: { userId: string; workspaceId: string };
+      label: ResolvedConversationLabel;
+      channelId: string;
+      filterFingerprint: string;
+    },
+  ): Promise<Workflow> {
+    try {
+      const restored = await tx.workflow.update({
+        where: {
+          id: workflow.id,
+          status: AutomationStatus.ARCHIVED,
+        },
+        data: {
+          workflowName: params.name,
+          status: AutomationStatus.ACTIVE,
+          eventType: triggerTypeToEventType(params.config.trigger.type),
+          deskOwnerId: params.auth.userId,
+          deskChannelId: params.channelId,
+          deskLabelId: params.label.id,
+          deskFilterFingerprint: params.filterFingerprint,
+          context: JSON.stringify(params.config),
+          metadata: buildAutomationMetadata({
+            description: `Desk auto-label for incoming email -> ${params.label.name}`,
+            createdById: params.auth.userId,
+          }),
+          updatedAt: new Date(),
+        },
+      });
+      logger.info(
+        `[automations] desk-label-rule restored user=${params.auth.userId} channel=${params.channelId} label=${params.label.id}`,
+      );
+      return restored;
+    } catch (err) {
+      if (!(err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2025')) {
+        throw err;
+      }
+    }
+
+    const activeDuplicate = await this.findExistingDeskWorkflow(tx, {
+      workspaceId: params.auth.workspaceId,
+      ownerId: params.auth.userId,
+      channelId: params.channelId,
+      labelId: params.label.id,
+      filterFingerprint: params.filterFingerprint,
+      statuses: [AutomationStatus.ACTIVE, AutomationStatus.DISABLED],
+    });
+    if (!activeDuplicate) {
+      throw serviceError('Automation not found', 'not-found');
+    }
+    return activeDuplicate;
   }
 
   private async requireOwnedDeskRule(
@@ -549,24 +647,19 @@ class DeskLabelRulesService {
     automationId: string,
     auth: { userId: string; workspaceId: string },
   ): Promise<Workflow> {
-    const ref = await client.deskAutoLabelRuleReference.findFirst({
+    const workflow = await client.workflow.findFirst({
       where: {
-        workflowId: automationId,
+        id: automationId,
         workspaceId: auth.workspaceId,
-        ownerId: auth.userId,
-        workflow: {
-          id: automationId,
-          workflowType: DESK_AUTOMATION_WORKFLOW_TYPE,
-          workspaceId: auth.workspaceId,
-          status: { not: AutomationStatus.ARCHIVED },
-        },
+        workflowType: DESK_AUTOMATION_WORKFLOW_TYPE,
+        deskOwnerId: auth.userId,
+        status: { not: AutomationStatus.ARCHIVED },
       },
-      include: { workflow: true },
     });
-    if (!ref) {
+    if (!workflow) {
       throw serviceError('Automation not found', 'not-found');
     }
-    return ref.workflow;
+    return workflow;
   }
 }
 

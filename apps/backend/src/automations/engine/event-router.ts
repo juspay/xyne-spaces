@@ -114,12 +114,7 @@ class EventRouter {
         where: {
           workflowType: DESK_AUTOMATION_WORKFLOW_TYPE,
           ...baseWhere,
-          deskAutoLabelRuleReferences: {
-            some: {
-              workspaceId,
-              channelId: event.payload.channelId,
-            },
-          },
+          deskChannelId: event.payload.channelId,
         },
       }),
     ]);

@@ -52,28 +52,11 @@ class ConversationLabelLifecycleService {
         const label = await this.requireOwnedLabel(tx, auth, labelId);
         const impact = await this.calculateImpact(tx, label);
 
-        await tx.workflow.updateMany({
-          where: {
-            workflowType: DESK_AUTOMATION_WORKFLOW_TYPE,
-            workspaceId: label.workspaceId,
-            status: { in: [AutomationStatus.ACTIVE, AutomationStatus.DISABLED] },
-            deskAutoLabelRuleReferences: {
-              some: {
-                workspaceId: label.workspaceId,
-                labelId: label.id,
-              },
-            },
-          },
+        const archiveResult = await tx.workflow.updateMany({
+          where: this.linkedDeskRuleWhere(label),
           data: {
             status: AutomationStatus.ARCHIVED,
             updatedAt: new Date(),
-          },
-        });
-
-        await tx.deskAutoLabelRuleReference.deleteMany({
-          where: {
-            workspaceId: label.workspaceId,
-            labelId: label.id,
           },
         });
 
@@ -89,7 +72,7 @@ class ConversationLabelLifecycleService {
 
         return {
           ...impact,
-          archivedDeskRuleCount: impact.linkedDeskRuleCount,
+          archivedDeskRuleCount: archiveResult.count,
           removedMappingCount: impact.mappingCount,
         };
       });
@@ -149,15 +132,8 @@ class ConversationLabelLifecycleService {
           createdBy: label.createdBy,
         },
       }),
-      client.deskAutoLabelRuleReference.count({
-        where: {
-          workspaceId: label.workspaceId,
-          labelId: label.id,
-          workflow: {
-            workflowType: DESK_AUTOMATION_WORKFLOW_TYPE,
-            status: { in: [AutomationStatus.ACTIVE, AutomationStatus.DISABLED] },
-          },
-        },
+      client.workflow.count({
+        where: this.linkedDeskRuleWhere(label),
       }),
     ]);
 
@@ -169,6 +145,15 @@ class ConversationLabelLifecycleService {
       },
       mappingCount,
       linkedDeskRuleCount,
+    };
+  }
+
+  private linkedDeskRuleWhere(label: ConversationLabel): Prisma.WorkflowWhereInput {
+    return {
+      workspaceId: label.workspaceId,
+      workflowType: DESK_AUTOMATION_WORKFLOW_TYPE,
+      deskLabelId: label.id,
+      status: { in: [AutomationStatus.ACTIVE, AutomationStatus.DISABLED] },
     };
   }
 }
