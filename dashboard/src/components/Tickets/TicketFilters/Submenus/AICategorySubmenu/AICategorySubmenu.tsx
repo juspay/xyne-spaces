@@ -1,22 +1,18 @@
 import { ReactElement, useState, useEffect, useMemo, useRef } from 'react';
 import { Search, Check } from 'lucide-react';
-import { queries } from '../../../../../zero/queries';
-import { useCachedQuery } from '../../../../../hooks/useCachedQuery';
 import { usePlatform } from '../../../../../hooks/usePlatform';
 import Input from '../../../../ui/Input/Input';
-
-const ALL_CHANNELS_ID = 'all';
 
 interface AICategorySubmenuProps {
   selectedCategories: string[];
   onChange: (categories: string[]) => void;
-  channelId: string | null;
+  availableCategories: string[];
 }
 
 export const AICategorySubmenu = ({
   selectedCategories,
   onChange,
-  channelId,
+  availableCategories,
 }: AICategorySubmenuProps): ReactElement => {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
@@ -35,26 +31,6 @@ export const AICategorySubmenu = ({
     const timer = setTimeout(() => setSearchTerm(searchQuery), 300);
     return () => clearTimeout(timer);
   }, [searchQuery]);
-
-  const [classificationMappings] = useCachedQuery(
-    queries.getClassificationMappings({ channelId: channelId ?? '' }),
-    {
-      enabled: !!channelId && channelId !== ALL_CHANNELS_ID,
-    },
-  );
-
-  const availableCategories = useMemo(() => {
-    const fromMappings = [
-      ...new Set(
-        (classificationMappings ?? []).map(m => m.category).filter((c): c is string => Boolean(c)),
-      ),
-    ];
-    if (fromMappings.length === 0) return [];
-    if (!fromMappings.includes('Other')) {
-      fromMappings.push('Other');
-    }
-    return fromMappings;
-  }, [classificationMappings]);
 
   const filteredCategories = useMemo(() => {
     if (!availableCategories || availableCategories.length === 0) return [];

@@ -89,6 +89,7 @@ import {
   UserSubmenu,
   AICategorySubmenu,
   UserGroupSubmenu,
+  StagesSubmenu,
 } from '../../components/Tickets/TicketFilters/Submenus';
 import {
   CalendarView,
@@ -103,7 +104,6 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
 } from '../../components/ui/dropdown-menu';
-import { StageFilterPopup } from '../../components/Tickets/TicketFilters/Submenus/StagesSubmenu/StageFilterPopup';
 import { useMachine } from '@xstate/react';
 import { ticketFiltersMachine, clearTicketFilterParams } from '../../machines/ticketFiltersMachine';
 import { useChannelSubscription } from '../../hooks/useChannelSubscription';
@@ -659,6 +659,44 @@ const SupportScreen = (): ReactElement => {
     }
   }, [moreFiltersOpen]);
 
+  const [filterOptionsEnabled, setFilterOptionsEnabled] = useState(false);
+  useEffect(() => {
+    if (moreFiltersOpen) {
+      setFilterOptionsEnabled(true);
+    }
+  }, [moreFiltersOpen]);
+
+  const [classificationMappings] = useCachedQuery(
+    queries.getClassificationMappings({ channelId: selectedChannelId ?? '' }),
+    {
+      enabled: filterOptionsEnabled && !!selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID,
+    },
+  );
+  const availableAiCategories = useMemo(() => {
+    const fromMappings = [
+      ...new Set(
+        (classificationMappings ?? []).map(m => m.category).filter((c): c is string => Boolean(c)),
+      ),
+    ];
+    if (fromMappings.length === 0) return [];
+    if (!fromMappings.includes('Other')) {
+      fromMappings.push('Other');
+    }
+    return fromMappings;
+  }, [classificationMappings]);
+
+  const [boardStages] = useCachedQuery(queries.stagesByBoard({ boardId: channelBoardId ?? '' }), {
+    enabled: filterOptionsEnabled && !!channelBoardId,
+  });
+  const availableStages = useMemo(
+    () =>
+      boardStages?.map(s => ({
+        name: s.name,
+        status: s.defaultTicketStatusV2,
+      })) ?? [],
+    [boardStages],
+  );
+
   const hasAssigneeFilter = !!(filters.assignee && filters.assignee.length > 0);
   const hasMoreFiltersActive = !!(
     filters.assigned ||
@@ -740,10 +778,10 @@ const SupportScreen = (): ReactElement => {
         );
       case 'stages':
         return (
-          <StageFilterPopup
-            boardId={channelBoardId}
+          <StagesSubmenu
             selectedStages={filters.stages || []}
             onChange={(stages: string[]) => handleFilterChange('stages', stages)}
+            availableStages={availableStages}
           />
         );
       case 'aiCategory':
@@ -751,7 +789,7 @@ const SupportScreen = (): ReactElement => {
           <AICategorySubmenu
             selectedCategories={filters.aiCategory || []}
             onChange={(categories: string[]) => handleFilterChange('aiCategory', categories)}
-            channelId={selectedChannelId}
+            availableCategories={availableAiCategories}
           />
         );
       case 'userGroups':
@@ -819,8 +857,8 @@ const SupportScreen = (): ReactElement => {
     handleFilterChange,
     handleDateRangeChange,
     availablePriorities,
-    channelBoardId,
-    selectedChannelId,
+    availableStages,
+    availableAiCategories,
   ]);
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(
