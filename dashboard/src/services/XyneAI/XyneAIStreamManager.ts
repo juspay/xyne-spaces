@@ -50,6 +50,11 @@ import { ASK_AI_VERSION_STORAGE_KEY } from '../../hooks/useAskAIVersion';
 import type { AskAIVersion } from '../../hooks/useAskAIVersion';
 import { resolveMessagePendingAction } from '../../components/Claw/claw.utils';
 
+// Prompt-only follow-ups run concurrently with the main answer and may finish
+// after its SSE has closed. Keep reconciliation bounded but long enough to
+// cover the generator's 60s timeout plus callback persistence latency.
+const FOLLOW_UP_RETRY_DELAYS_MS = [500, 1_000, 2_000, 4_000, 8_000, 16_000, 32_000] as const;
+
 function getStoredVersion(): AskAIVersion {
   const stored = localStorage.getItem(ASK_AI_VERSION_STORAGE_KEY);
   if (stored === 'v1' || stored === 'v2') return stored;
@@ -69,6 +74,7 @@ export interface StreamState {
   suppressCompletionToast?: boolean;
   debugEvents: DebugEventRecord[];
   debugArtifactsReadyVersion: number;
+  followUpsPending?: boolean;
   startedAt: number;
   version?: 'v1' | 'v2';
   agentSlug?: string;
@@ -914,7 +920,7 @@ class XyneAIStreamManager {
     const slotFromThread = getStreamSlotKeyFromThreadId(threadId) ?? '';
     const initialSessionId = trimmedConv || slotFromThread;
 
-    // Initialize stream state
+    // Initialize stream state. Debug events arrive from the server over SSE.
     const streamState: StreamState = {
       streamId,
       threadId,
@@ -1205,7 +1211,12 @@ class XyneAIStreamManager {
             }
           | undefined;
 
-        if (toolInvocation) {
+        const isInternalFollowUp =
+          toolInvocation?.toolName === 'internal-follow-up-diagnostics' ||
+          (toolInvocation?.toolName === 'ask-user-question' &&
+            toolInvocation.args?.['purpose'] === 'follow_up_suggestions');
+
+        if (toolInvocation && !isInternalFollowUp) {
           updateMessages(prev =>
             prev.map(msg => {
               if (msg.id !== botMessageId) return msg;
@@ -1249,6 +1260,7 @@ class XyneAIStreamManager {
 
       case 'complete':
       case 'done':
+        currentState.followUpsPending = data['followUpsPending'] === true;
         this.handleCompletionEvent(
           data,
           botMessageId,
@@ -1579,6 +1591,12 @@ class XyneAIStreamManager {
         }>
       | undefined;
 
+    const followUpSuggestions = Array.isArray(data['followUpSuggestions'])
+      ? data['followUpSuggestions'].filter(
+          (suggestion): suggestion is string =>
+            typeof suggestion === 'string' && suggestion.trim().length > 0,
+        )
+      : undefined;
     // Extract attachments from completion data (v2)
     const completionAttachments = data['attachments'] as
       | Array<{
@@ -1613,6 +1631,7 @@ class XyneAIStreamManager {
           ...(userTags && { userTags }),
           ...(participants && participants.length > 0 && { participants }),
           ...(pendingActions && pendingActions.length > 0 && { pendingActions }),
+          ...(followUpSuggestions && followUpSuggestions.length > 0 && { followUpSuggestions }),
           ...(messageAttachments &&
             messageAttachments.length > 0 && { attachments: messageAttachments }),
           ...(sources && sources.length > 0 && { sources }),
@@ -1666,7 +1685,11 @@ class XyneAIStreamManager {
     // Re-fetch messages from backend to get authoritative final state
     // This fixes rendering misalignment issues caused by partial/broken markdown
     // during streaming deltas (similar to refreshRuns pattern in claw chat)
-    void this.refreshMessagesFromBackend(streamId, threadId);
+    void this.refreshMessagesFromBackend(
+      streamId,
+      threadId,
+      currentState.followUpsPending === true,
+    );
     if (currentState.version === 'v1') {
       void queryClient.invalidateQueries({ queryKey: SESSIONS_KEY });
     }
@@ -1979,7 +2002,11 @@ class XyneAIStreamManager {
             }
             // Reconcile the now-finalized transcript (parity with the driver
             // path; internally streamId-guarded).
-            void this.refreshMessagesFromBackend(streamId, threadId);
+            void this.refreshMessagesFromBackend(
+              streamId,
+              threadId,
+              data['followUpsPending'] === true,
+            );
           }
           close();
           break;
@@ -2083,7 +2110,12 @@ class XyneAIStreamManager {
     return close;
   }
 
-  private async refreshMessagesFromBackend(streamId: string, threadId: string): Promise<void> {
+  private async refreshMessagesFromBackend(
+    streamId: string,
+    threadId: string,
+    followUpsPending = false,
+    followUpRetry = 0,
+  ): Promise<void> {
     const currentState = this.activeStreams.get(threadId);
     if (!currentState) return;
 
@@ -2099,9 +2131,30 @@ class XyneAIStreamManager {
         currentState.agentSlug ?? 'ask-ai',
       );
 
+      const latestRefreshedBot = [...refreshedMessages]
+        .reverse()
+        .find(message => message.type === 'bot');
       // Merge refreshed messages with current state, preserving streaming state
       // and ensuring we don't overwrite messages that are still being processed
       this.mergeRefreshedMessages(streamId, threadId, refreshedMessages);
+
+      // The stream's done frame and AgentRun persistence finish on adjacent
+      // async hops. A first history read can therefore see the assistant text
+      // before its internal follow-up recorder has been linked. Retry only
+      // while the authoritative latest bot still lacks suggestions.
+      if (
+        followUpsPending &&
+        !latestRefreshedBot?.followUpSuggestions?.length &&
+        followUpRetry < FOLLOW_UP_RETRY_DELAYS_MS.length
+      ) {
+        const delayMs = FOLLOW_UP_RETRY_DELAYS_MS[followUpRetry];
+        window.setTimeout(() => {
+          const latestState = this.activeStreams.get(threadId);
+          if (latestState?.streamId === streamId) {
+            void this.refreshMessagesFromBackend(streamId, threadId, true, followUpRetry + 1);
+          }
+        }, delayMs);
+      }
     } catch (error) {
       console.warn('[XyneAIStreamManager] Failed to refresh messages from backend:', error);
       // Don't throw - the stream already has the best-effort content from streaming

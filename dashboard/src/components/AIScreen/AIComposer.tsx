@@ -60,6 +60,7 @@ export interface AIComposerHandle {
   addFiles: (files: File[]) => void;
   clearContent: () => void;
   focus: () => void;
+  setPrompt: (value: string) => void;
 }
 
 interface AIComposerProps {
@@ -404,6 +405,10 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
       },
       focus: (): void => {
         textareaRef.current?.focus();
+      },
+      setPrompt: (nextValue: string): void => {
+        setValue(nextValue);
+        window.setTimeout(() => textareaRef.current?.focus(), 0);
       },
     }),
     [handleFilesAdded],

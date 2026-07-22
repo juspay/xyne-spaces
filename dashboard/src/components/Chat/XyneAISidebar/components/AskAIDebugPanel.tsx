@@ -31,7 +31,11 @@ import {
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { fetchV2DebugArtifacts } from '../../../../services/XyneAI/XyneAISessionsV2Service';
-import type { DebugArtifactBundle, DebugEventRecord } from '../utils/XyneAITypes';
+import type {
+  DebugArtifactBundle,
+  DebugEventRecord,
+  FollowUpDiagnostic,
+} from '../utils/XyneAITypes';
 
 /** Inlined from claw's `toolFormat`: deep-parse JSON-in-strings and unwrap MCP
  *  `[{type:"text",text}]` content blocks so the tree viewer expands nested
@@ -758,6 +762,9 @@ function eventTitle(kind: string, data: Record<string, unknown>): string {
   if (kind === 'compaction_start') return 'Context compaction started';
   if (kind === 'compaction_end') return 'Context compaction completed';
   if (kind === 'citation_reflection') return 'Citation check';
+  if (kind === 'follow_up_suggestions') return 'Follow-up suggestions';
+  if (kind === 'follow_up_generation_start') return 'Follow-up generation started';
+  if (kind === 'follow_up_generation_end') return 'Follow-up generation completed';
   return kind.replaceAll('_', ' ');
 }
 
@@ -845,6 +852,15 @@ function eventVisual(kind: string, isError: boolean): EventVisual {
         rail: 'border-cyan-500',
         chip: 'bg-cyan-500/10 text-cyan-700 dark:text-cyan-300',
       };
+    case 'follow_up_suggestions':
+    case 'follow_up_generation_start':
+    case 'follow_up_generation_end':
+      return {
+        Icon: MessagesSquare,
+        label: 'FOLLOW',
+        rail: 'border-violet-500',
+        chip: 'bg-violet-500/10 text-violet-700 dark:text-violet-300',
+      };
     default:
       return {
         Icon: CirclePlay,
@@ -854,6 +870,27 @@ function eventVisual(kind: string, isError: boolean): EventVisual {
         quiet: true,
       };
   }
+}
+
+function persistedFollowUpLifecycleEvents(diagnostic: FollowUpDiagnostic): unknown[] {
+  if (diagnostic.enabled === false || diagnostic.outcome === 'disabled') return [];
+  const startedAt = diagnostic.generationStartedAt ?? diagnostic.startedAt;
+  const start = {
+    kind: 'follow_up_generation_start',
+    seq: `follow-up-start-${diagnostic.sessionId}`,
+    at: startedAt,
+    data: diagnostic,
+  };
+  if (diagnostic.outcome === 'parallel_pending') return [start];
+  return [
+    start,
+    {
+      kind: 'follow_up_generation_end',
+      seq: `follow-up-end-${diagnostic.sessionId}`,
+      at: diagnostic.generationCompletedAt ?? diagnostic.completedAt ?? startedAt,
+      data: diagnostic,
+    },
+  ];
 }
 
 /** Δ-from-origin label for the trace time column, e.g. "+0.0s", "+5.1s", "+1m04s". */
@@ -873,6 +910,7 @@ function DebugTimelineSection({
   selectedEventKey,
   onSelectEvent,
   timeMode = 'delta',
+  followUpDiagnostic,
 }: {
   title: string;
   data: Record<string, unknown> | null;
@@ -881,13 +919,23 @@ function DebugTimelineSection({
   selectedEventKey?: string | null;
   onSelectEvent?: (key: string) => void;
   timeMode?: 'delta' | 'abs';
+  followUpDiagnostic?: FollowUpDiagnostic | null;
 }) {
   const events = useMemo<unknown[]>(() => {
     const raw = data?.['events'];
     return Array.isArray(raw) ? (raw as unknown[]) : [];
   }, [data]);
 
-  const visibleEvents = useMemo(() => compactTimeline(events), [events]);
+  const visibleEvents = useMemo(() => {
+    const compacted = compactTimeline(events);
+    if (!followUpDiagnostic) return compacted;
+    return [...compacted, ...persistedFollowUpLifecycleEvents(followUpDiagnostic)].sort((a, b) => {
+      const aAt = isRecord(a) ? new Date(asString(a['at'])).getTime() : Number.NaN;
+      const bAt = isRecord(b) ? new Date(asString(b['at'])).getTime() : Number.NaN;
+      if (!Number.isFinite(aAt) || !Number.isFinite(bAt)) return 0;
+      return aAt - bAt;
+    });
+  }, [events, followUpDiagnostic]);
 
   // Expand/collapse all timeline cards. The cards are native <details> elements
   // (no React state to lift), so we flip their `open` attribute through a ref.
@@ -905,7 +953,7 @@ function DebugTimelineSection({
     let min = Number.POSITIVE_INFINITY;
     for (const e of visibleEvents) {
       if (!isRecord(e)) continue;
-      const t = Date.parse(asString(e['at']) || asString(e.startedAt));
+      const t = Date.parse(asString(e['at']) || asString(e['startedAt']));
       if (Number.isFinite(t)) min = Math.min(min, t);
     }
     return Number.isFinite(min) ? min : undefined;
@@ -1104,7 +1152,7 @@ function DebugTimelineSection({
                     ekind === 'assistant_turn_end' ||
                     ekind.startsWith('tool_execution')) &&
                   idx !== lastAssistantIdx;
-                const ek = seqKey(event['seq']) || String(idx);
+                const ek = (isRecord(event) ? seqKey(event['seq']) : '') || String(idx);
                 return (
                   <DebugEventItem
                     key={ek}
@@ -1339,6 +1387,10 @@ function DebugEventItem({
       <div
         className={`pl-2 pr-2 pb-3 pt-1 space-y-1.5 ${selected ? 'bg-xyne-surface-subtle/60' : ''}`}
       >
+        {(kind === 'follow_up_suggestions' ||
+          (kind === 'follow_up_generation_end' && typeof data['outcome'] === 'string')) && (
+          <FollowUpDiagnosticsSection diagnostic={data as unknown as FollowUpDiagnostic} />
+        )}
         {kind === 'session_prompt' && (
           <div className='space-y-1.5'>
             {typeof data['systemPrompt'] === 'string' && data['systemPrompt'] && (
@@ -1718,6 +1770,30 @@ function eventSummary(kind: string, data: Record<string, unknown>): string {
       };
       return labels[outcome] ?? outcome.replaceAll('_', ' ');
     }
+    case 'follow_up_suggestions': {
+      const count = typeof data['suggestionCount'] === 'number' ? data['suggestionCount'] : 0;
+      const outcome = asString(data['outcome']).replaceAll('_', ' ');
+      const source = asString(data['generationSource']);
+      return `${outcome || 'unknown'} · ${count} suggestion${count === 1 ? '' : 's'}${source ? ` · ${source}` : ''}`;
+    }
+    case 'follow_up_generation_start': {
+      const input = asString(data['generationInput']).replaceAll('_', ' ');
+      const count =
+        typeof data['conversationMessageCount'] === 'number' ? data['conversationMessageCount'] : 0;
+      return `${input || 'prompt only'} · ${count} prior message${count === 1 ? '' : 's'}`;
+    }
+    case 'follow_up_generation_end': {
+      const count = typeof data['suggestionCount'] === 'number' ? data['suggestionCount'] : 0;
+      const source = asString(data['generationSource'] || data['source']);
+      const outcome = asString(data['outcome'] || data['status']).replaceAll('_', ' ');
+      const duration =
+        typeof data['generationDurationMs'] === 'number'
+          ? data['generationDurationMs']
+          : typeof data['durationMs'] === 'number'
+            ? data['durationMs']
+            : null;
+      return `${outcome || 'completed'} · ${count} suggestion${count === 1 ? '' : 's'}${source ? ` · ${source}` : ''}${duration !== null ? ` · ${duration} ms` : ''}`;
+    }
     default:
       return '';
   }
@@ -1860,6 +1936,140 @@ function persistedStreamStatus(
   return { rate, collected, live: false };
 }
 
+function FollowUpDiagnosticsSection({ diagnostic }: { diagnostic: FollowUpDiagnostic | null }) {
+  if (!diagnostic) return null;
+  const generated = diagnostic.persistedRecorder && diagnostic.suggestionCount === 3;
+  const pending = !generated && diagnostic.outcome === 'parallel_pending';
+  const intentionallyAbsent =
+    diagnostic.outcome === 'disabled' || diagnostic.outcome === 'empty_answer';
+  const failedToPersist = !generated && !pending && !intentionallyAbsent;
+  const usedFallback = diagnostic.generationSource === 'fallback';
+  return (
+    <div className='space-y-2 pl-[66px] pr-2'>
+      <div className='grid grid-cols-2 gap-x-4 gap-y-1 text-[11px] leading-relaxed'>
+        <span className='text-xyne-fg-muted'>V2 request flag</span>
+        <span className='text-xyne-fg-secondary'>
+          {diagnostic.enabledByV2Flag === undefined
+            ? 'Not captured'
+            : diagnostic.enabledByV2Flag
+              ? 'Enabled'
+              : 'Not set'}
+        </span>
+        <span className='text-xyne-fg-muted'>Generation outcome</span>
+        <span className='font-mono text-xyne-fg-secondary'>{diagnostic.outcome}</span>
+        <span className='text-xyne-fg-muted'>Generation source</span>
+        <span
+          className={
+            usedFallback
+              ? 'font-medium text-amber-700 dark:text-amber-300'
+              : 'text-xyne-fg-secondary'
+          }
+        >
+          {diagnostic.generationSource === undefined
+            ? pending
+              ? 'Pending'
+              : 'Not captured'
+            : usedFallback
+              ? 'Fallback templates'
+              : 'Fast model'}
+        </span>
+        <span className='text-xyne-fg-muted'>Generation input</span>
+        <span className='text-xyne-fg-secondary'>
+          {diagnostic.generationInput === 'prompt_only'
+            ? 'User prompt only · parallel'
+            : diagnostic.generationInput === 'conversation_history_and_prompt'
+              ? `${diagnostic.conversationMessageCount ?? 0} prior messages + current prompt · parallel`
+              : (diagnostic.generationInput ?? 'Not captured')}
+        </span>
+        <span className='text-xyne-fg-muted'>Agent grounding</span>
+        <span className='text-xyne-fg-secondary'>
+          {diagnostic.agentContextProvided === undefined
+            ? 'Not captured'
+            : diagnostic.agentContextProvided
+              ? `${diagnostic.agentContextName ?? 'Selected agent'} · name + description`
+              : 'Missing · domain-neutral mode'}
+        </span>
+        <span className='text-xyne-fg-muted'>Model</span>
+        <span className='font-mono text-xyne-fg-secondary'>
+          {diagnostic.generationModel ?? (pending ? 'Pending' : 'Not captured')}
+        </span>
+        <span className='text-xyne-fg-muted'>Generation time</span>
+        <span className='text-xyne-fg-secondary'>
+          {diagnostic.generationDurationMs === undefined
+            ? pending
+              ? 'Pending'
+              : 'Not captured'
+            : `${diagnostic.generationDurationMs} ms`}
+        </span>
+        <span className='text-xyne-fg-muted'>Answer length</span>
+        <span className='text-xyne-fg-secondary'>
+          {diagnostic.answerLength === undefined
+            ? 'Not captured'
+            : `${diagnostic.answerLength} chars`}
+        </span>
+        <span className='text-xyne-fg-muted'>Persisted recorder</span>
+        <span className='text-xyne-fg-secondary'>
+          {diagnostic.persistedRecorder ? 'Yes' : pending ? 'Pending' : 'No'}
+        </span>
+        <span className='text-xyne-fg-muted'>Suggestion count</span>
+        <span className='text-xyne-fg-secondary'>{diagnostic.suggestionCount}</span>
+      </div>
+      {pending && (
+        <p className='rounded bg-xyne-surface-subtle px-2 py-1.5 text-[11px] leading-relaxed text-xyne-fg-secondary'>
+          Follow-up generation is still completing. This panel refreshes automatically; use Refresh
+          if persistence is delayed.
+        </p>
+      )}
+      {failedToPersist && (
+        <p className='rounded bg-red-500/5 px-2 py-1.5 text-[11px] leading-relaxed text-red-700 dark:text-red-300'>
+          No follow-up recorder was persisted for this response. The chips could not reach the
+          completion event or conversation history.
+        </p>
+      )}
+      {usedFallback && (
+        <div className='rounded border border-amber-500/20 bg-amber-500/5 px-2 py-1.5 text-[11px] leading-relaxed text-amber-800 dark:text-amber-200'>
+          <div className='font-medium'>
+            Fast-model generation failed; fallback suggestions were used.
+          </div>
+          <div className='mt-1 font-mono'>
+            {diagnostic.failureCode ?? 'unknown_failure'}
+            {diagnostic.httpStatus !== undefined ? ` · HTTP ${diagnostic.httpStatus}` : ''}
+          </div>
+          {diagnostic.failureMessage && <div className='mt-1'>{diagnostic.failureMessage}</div>}
+        </div>
+      )}
+      {diagnostic.agentContextDescription && (
+        <p className='rounded bg-xyne-surface-subtle px-2 py-1.5 text-[11px] leading-relaxed text-xyne-fg-secondary'>
+          <span className='font-medium'>Agent description: </span>
+          {diagnostic.agentContextDescription}
+        </p>
+      )}
+      {diagnostic.suggestions.length > 0 && (
+        <ol className='list-decimal space-y-1 pl-4 text-[11px] leading-relaxed text-xyne-fg-secondary'>
+          {diagnostic.suggestions.map(suggestion => (
+            <li key={suggestion}>{suggestion}</li>
+          ))}
+        </ol>
+      )}
+    </div>
+  );
+}
+
+const FOLLOW_UP_DIAGNOSTIC_RETRY_DELAYS_MS = [
+  500, 1_000, 2_000, 4_000, 8_000, 16_000, 32_000,
+] as const;
+
+function hasPendingFollowUpDiagnostic(
+  bundle: DebugArtifactBundle | null,
+  selectedSessionId: string | null,
+): boolean {
+  const diagnostics = bundle?.followUpDiagnostics ?? [];
+  const diagnostic = selectedSessionId
+    ? diagnostics.find(item => item.sessionId === selectedSessionId)
+    : diagnostics[0];
+  return diagnostic?.outcome === 'parallel_pending' && !diagnostic.persistedRecorder;
+}
+
 function DebugSessionBody({
   bundle,
   selectedTurnIndex,
@@ -1985,6 +2195,10 @@ function DebugSessionBody({
             list.push(trace);
             subagentTracesByParentToolCallId.set(trace.parentToolCallId, list);
           }
+          const runSessionId = asString(run.data['sessionId']);
+          const followUpDiagnostic = (bundle.followUpDiagnostics ?? []).find(
+            diagnostic => diagnostic.sessionId === runSessionId,
+          );
           return (
             <DebugTimelineSection
               key={run.fileName}
@@ -1995,6 +2209,7 @@ function DebugSessionBody({
               selectedEventKey={selectedEventKey}
               onSelectEvent={setSelectedEventKey}
               timeMode={timeMode}
+              {...(followUpDiagnostic ? { followUpDiagnostic } : {})}
             />
           );
         })
@@ -2018,6 +2233,12 @@ function DebugSessionBody({
           selectedEventKey={selectedEventKey}
           onSelectEvent={setSelectedEventKey}
           timeMode={timeMode}
+          {...(() => {
+            const diagnostic = (bundle.followUpDiagnostics ?? []).find(
+              item => item.sessionId === asString(root?.['sessionId']),
+            );
+            return diagnostic ? { followUpDiagnostic: diagnostic } : {};
+          })()}
         />
       ) : null}
 
@@ -2063,6 +2284,7 @@ export function AskAIDebugPanel({
   const expectedRunRef = useRef<{ sessionId?: string; startedAt: number } | null>(null);
   const previousRunningRef = useRef(false);
   const previousArtifactsReadyVersionRef = useRef(artifactsReadyVersion);
+  const followUpRefreshAttemptRef = useRef(0);
   const currentLiveStream = useMemo(() => liveStreamStatus(liveEvents), [liveEvents]);
   const savedStream = useMemo(() => persistedStreamStatus(bundle), [bundle]);
   const streamStatus =
@@ -2106,6 +2328,7 @@ export function AskAIDebugPanel({
     setBundle(null);
     setBundleHasCurrentRun(true);
     setError(null);
+    followUpRefreshAttemptRef.current = 0;
     previousArtifactsReadyVersionRef.current = artifactsReadyVersion;
   }, [agentSlug, conversationId]);
 
@@ -2168,6 +2391,20 @@ export function AskAIDebugPanel({
       cancelled = true;
     };
   }, [open, agentSlug, conversationId, artifactsReadyVersion, refreshVersion]);
+
+  useEffect(() => {
+    if (!open || !hasPendingFollowUpDiagnostic(bundle, selectedSessionId)) {
+      followUpRefreshAttemptRef.current = 0;
+      return;
+    }
+    const attempt = followUpRefreshAttemptRef.current;
+    if (attempt >= FOLLOW_UP_DIAGNOSTIC_RETRY_DELAYS_MS.length) return;
+    const timer = window.setTimeout(() => {
+      followUpRefreshAttemptRef.current = attempt + 1;
+      setRefreshVersion(version => version + 1);
+    }, FOLLOW_UP_DIAGNOSTIC_RETRY_DELAYS_MS[attempt]);
+    return () => window.clearTimeout(timer);
+  }, [open, bundle, selectedSessionId]);
 
   // Focus a specific tool call: expand its event row (and every collapsed
   // <details> ancestor — turn, timeline) and scroll it into view. Driven by a
@@ -2272,8 +2509,8 @@ export function AskAIDebugPanel({
           <div className='space-y-3'>
             {conversationId &&
               (showLiveTrace || (running && liveEvents.length > 0)) &&
-              selectedSessionId === null &&
-              (selectedTurnIndex === null || selectedTurnLive) &&
+              ((running && liveEvents.length > 0) ||
+                (selectedSessionId === null && (selectedTurnIndex === null || selectedTurnLive))) &&
               (() => {
                 // Never let a stale prior-turn bundle hide an actively-streaming
                 // new run: while the current turn streams live events, force the

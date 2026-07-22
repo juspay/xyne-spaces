@@ -676,6 +676,7 @@ interface MessageItemProps {
   branchInfo?: { index: number; total: number } | undefined;
   onBranchNavigate?: ((direction: 'prev' | 'next') => void) | undefined;
   onDebug?: (() => void) | undefined;
+  onFollowUpSuggestionClick?: ((suggestion: string) => void) | undefined;
   /** Open the debug panel focused on a specific tool call — used by generic
    *  auto-citation chips (which have no link target). */
   onOpenToolDebug?: ((toolCallId: string) => void) | undefined;
@@ -1070,6 +1071,7 @@ export const MessageItem = React.memo(
     branchInfo,
     onBranchNavigate,
     onDebug,
+    onFollowUpSuggestionClick,
   }: MessageItemProps): ReactElement => {
     const [copied, setCopied] = useState(false);
     const [isEditing, setIsEditing] = useState(false);
@@ -1499,6 +1501,28 @@ export const MessageItem = React.memo(
               );
             })()}
 
+          {message.type === 'bot' &&
+          isLatestBotMessage &&
+          !message.isStreaming &&
+          onFollowUpSuggestionClick &&
+          message.followUpSuggestions?.length ? (
+            <div className='mt-3 flex flex-wrap gap-2' data-testid='ask-ai-follow-ups'>
+              {message.followUpSuggestions.map(suggestion => (
+                <button
+                  key={suggestion}
+                  type='button'
+                  onClick={() => onFollowUpSuggestionClick(suggestion)}
+                  className='rounded-full border border-border bg-card px-3 py-1.5 text-left text-xs font-medium leading-5 text-muted-foreground transition-colors hover:bg-accent'
+                  data-track-category='AskAI'
+                  data-track-name='FollowUpSuggestion'
+                  data-track-metadata={JSON.stringify({ suggestion })}
+                >
+                  {suggestion}
+                </button>
+              ))}
+            </div>
+          ) : null}
+
           {/* User timestamp — right-aligned below the user bubble. Shown
                   for all user messages (they're always "complete"), hidden
                   only while the bubble is in edit mode. */}
@@ -1518,12 +1542,21 @@ export const MessageItem = React.memo(
     );
   },
   (prev, next) => {
-    if (prev.message === next.message && prev.feedbackValue === next.feedbackValue) return true;
+    if (
+      prev.message === next.message &&
+      prev.feedbackValue === next.feedbackValue &&
+      prev.isLatestBotMessage === next.isLatestBotMessage &&
+      prev.onFollowUpSuggestionClick === next.onFollowUpSuggestionClick
+    )
+      return true;
     if (!next.message.isStreaming && !prev.message.isStreaming) {
       return (
         prev.message.id === next.message.id &&
         prev.message.content === next.message.content &&
         prev.message.errorInfo === next.message.errorInfo &&
+        prev.message.followUpSuggestions === next.message.followUpSuggestions &&
+        prev.isLatestBotMessage === next.isLatestBotMessage &&
+        prev.onFollowUpSuggestionClick === next.onFollowUpSuggestionClick &&
         prev.feedbackValue === next.feedbackValue
       );
     }
@@ -1538,6 +1571,9 @@ export const MessageItem = React.memo(
       prev.message.toolInvocations === next.message.toolInvocations &&
       prev.message.pendingActions === next.message.pendingActions &&
       prev.message.errorInfo === next.message.errorInfo &&
+      prev.message.followUpSuggestions === next.message.followUpSuggestions &&
+      prev.isLatestBotMessage === next.isLatestBotMessage &&
+      prev.onFollowUpSuggestionClick === next.onFollowUpSuggestionClick &&
       prev.feedbackValue === next.feedbackValue
     );
   },

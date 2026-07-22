@@ -671,6 +671,7 @@ function ChatMessageBubble({
   onOpenToolDebug,
   onEditSubmit,
   onRegenerate,
+  onFollowUpSuggestionClick,
   branchInfo,
   onBranchNavigate,
   isV2,
@@ -692,6 +693,7 @@ function ChatMessageBubble({
   onEditSubmit?: ((newContent: string) => void) | undefined;
   /** Re-run the last user query as a new bot sibling. Set only on the latest bot. */
   onRegenerate?: (() => void) | undefined;
+  onFollowUpSuggestionClick?: ((suggestion: string) => void) | undefined;
   /** Sibling position for the branch switcher; absent when there's only one version. */
   branchInfo?: { index: number; total: number } | undefined;
   onBranchNavigate?: ((direction: 'prev' | 'next') => void) | undefined;
@@ -1166,6 +1168,27 @@ function ChatMessageBubble({
           )}
 
           {inlineCitations.length > 0 && <InlineCitations citations={inlineCitations} />}
+
+          {!isUser &&
+          !message.isStreaming &&
+          onFollowUpSuggestionClick &&
+          message.followUpSuggestions?.length ? (
+            <div className='mt-1 flex flex-wrap gap-2' data-testid='ask-ai-follow-ups'>
+              {message.followUpSuggestions.map(suggestion => (
+                <button
+                  key={suggestion}
+                  type='button'
+                  onClick={() => onFollowUpSuggestionClick(suggestion)}
+                  className='rounded-full border border-border bg-card px-3 py-1.5 text-left text-xs font-medium leading-5 text-muted-foreground transition-colors hover:bg-accent'
+                  data-track-category='AskAI'
+                  data-track-name='FollowUpSuggestion'
+                  data-track-metadata={JSON.stringify({ suggestion })}
+                >
+                  {suggestion}
+                </button>
+              ))}
+            </div>
+          ) : null}
 
           {!isUser && onDebug && (
             <button
@@ -1932,6 +1955,10 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     abortCurrentRequest();
   }, [abortCurrentRequest]);
 
+  const handleFollowUpSuggestion = useCallback((suggestion: string): void => {
+    composerRef.current?.setPrompt(suggestion);
+  }, []);
+
   const handleFeedback = useCallback(
     async (messageId: string, feedbackType: 'LIKE' | 'DISLIKE'): Promise<void> => {
       let previousFeedback: 0 | 1 | 2 | undefined;
@@ -2012,7 +2039,10 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
   // while a turn is live; -1 when idle, leaving a manual older-turn selection
   // intact.
   useEffect(() => {
-    if (streamingBotTurnIndex >= 0) setDebugTurnIndex(streamingBotTurnIndex);
+    if (streamingBotTurnIndex >= 0) {
+      setDebugTurnIndex(streamingBotTurnIndex);
+      setDebugSessionId(null);
+    }
   }, [streamingBotTurnIndex]);
 
   // Flat union of every visible message's toolInvocations. Powers the
@@ -2131,6 +2161,11 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
                     onRegenerate={
                       branchEnabled && isLatestBotMessage && !message.isStreaming
                         ? () => void handleRegenerate()
+                        : undefined
+                    }
+                    onFollowUpSuggestionClick={
+                      isV2 && isLatestBotMessage && !message.isStreaming
+                        ? handleFollowUpSuggestion
                         : undefined
                     }
                     branchInfo={branchInfo}
