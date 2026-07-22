@@ -2261,6 +2261,11 @@ const XyneAISidebar = ({
                                       .slice(0, index + 1)
                                       .filter(item => item.type === 'bot').length - 1
                                   : -1;
+                              const showFollowUps =
+                                isV2 &&
+                                isLatestBotMessage &&
+                                !message.isStreaming &&
+                                !!message.followUpSuggestions?.length;
                               return (
                                 <MessageItem
                                   // Stable key so the bubble doesn't remount when
@@ -2326,6 +2331,9 @@ const XyneAISidebar = ({
                                           setShowDebugger(true);
                                         }
                                       : undefined
+                                  }
+                                  onFollowUpSuggestionClick={
+                                    showFollowUps ? handleSuggestionClick : undefined
                                   }
                                 />
                               );
