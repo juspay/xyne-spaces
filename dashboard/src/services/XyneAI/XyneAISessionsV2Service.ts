@@ -45,6 +45,7 @@ interface ClawChatMessage {
   parentId?: string | null;
   reasoning?: string;
   pendingActions?: PendingAction[];
+  followUpSuggestions?: string[];
   attachments?: Array<{
     id: string;
     mimeType: string;
@@ -250,6 +251,9 @@ export async function fetchV2ConversationMessages(
       toolOutputs: [],
       toolInvocations: msgToolInvocations,
       pendingActions,
+      ...(!isUser && msg.followUpSuggestions?.length
+        ? { followUpSuggestions: msg.followUpSuggestions }
+        : {}),
       ...(!isUser && runByMsgId?.[msg.id] ? { debugSessionId: runByMsgId[msg.id] } : {}),
       // Seed 👍/👎 thumb state from the run's persisted rating (up→1, down→2).
       ...(!isUser && ratingByMsgId?.[msg.id]?.rating

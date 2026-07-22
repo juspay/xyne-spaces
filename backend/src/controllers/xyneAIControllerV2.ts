@@ -407,6 +407,7 @@ export class XyneAIControllerV2 {
           deepResearchEnabled,
           researchContext: effectiveResearchContext,
           createCanvasEnabled,
+          generateFollowUpSuggestions: true,
           sessionId: effectiveSessionId,
           // Branching: forward intent + tree position to claw-auth. The
           // `parentMessageId` is the JAF/v1-shared name; here it doubles as

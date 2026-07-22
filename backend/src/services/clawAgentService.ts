@@ -69,6 +69,9 @@ export interface ClawRunRequest {
   dataSourceId?: string;
   draftId?: string;
   focusedComponentId?: string;
+  /** Generate contextual next-question chips for this response. Ask AI v2
+   *  enables this explicitly for every agent slug. */
+  generateFollowUpSuggestions?: boolean;
   // Per-run schema/draft context for dashboard-ai — goes out via
   // additionalInstructions so it is fresh each run instead of accumulating
   // in the conversation history.
@@ -163,6 +166,34 @@ export interface ClawDebugArtifactBundle {
   debugEvents: Record<string, unknown>[] | null;
   runs: Array<{ fileName: string; data: Record<string, unknown> }>;
   subagents: Array<{ fileName: string; data: Record<string, unknown> }>;
+  followUpDiagnostics?: FollowUpDiagnostic[];
+}
+
+export interface FollowUpDiagnostic {
+  sessionId: string;
+  startedAt: string;
+  completedAt?: string;
+  runStatus: string;
+  outcome: string;
+  enabled?: boolean;
+  enabledByV2Flag?: boolean;
+  answerLength?: number;
+  generationInput?: string;
+  conversationMessageCount?: number;
+  agentContextProvided?: boolean;
+  agentContextName?: string;
+  agentContextDescription?: string;
+  generationSource?: string;
+  generationModel?: string;
+  generationStartedAt?: string;
+  generationCompletedAt?: string;
+  generationDurationMs?: number;
+  failureCode?: string;
+  failureMessage?: string;
+  httpStatus?: number;
+  suggestionCount: number;
+  persistedRecorder: boolean;
+  suggestions: string[];
 }
 
 export interface ClawActionApprovalResult {
@@ -518,6 +549,7 @@ export async function runClawAgentStream(
       ...(request.focusedComponentId && { SPACES_FOCUSED_COMPONENT_ID: request.focusedComponentId }),
     },
     ...(additionalInstructions && { additionalInstructions }),
+    ...(request.generateFollowUpSuggestions === true && { generateFollowUpSuggestions: true }),
     ...(request.isRegenerate && { isRegenerate: true }),
     ...(request.isEditUserMessage && { isEditUserMessage: true }),
     ...(parentUserMessageId && { parentUserMessageId }),
@@ -526,6 +558,28 @@ export async function runClawAgentStream(
   };
 
   const cookieHeader = extractCookieHeader(req);
+  // The debugger must become visible when this request starts, not after
+  // claw-auth has created/restored the agent session. The later `run` event
+  // still supplies the trace id, and claw's duplicate session_start is ignored.
+  res.write(
+    `data: ${JSON.stringify({
+      type: 'debug_event',
+      debugEvent: {
+        seq: 1,
+        at: new Date().toISOString(),
+        kind: 'session_start',
+        data: {
+          conversationId: clawConversationId,
+          agentSlug: request.agentSlug,
+          userId: request.userId,
+          provider: request.provider,
+          task: request.query,
+        },
+      },
+    })}\n\n`
+  );
+  if (typeof (res as any).flush === 'function') (res as any).flush();
+
   const response = await fetch(clawAuthUrl, {
     method: 'POST',
     headers: {
@@ -625,12 +679,14 @@ export async function runClawAgentStream(
               );
               if (typeof (res as any).flush === 'function') (res as any).flush();
             } else if (eventType === 'debug') {
-              res.write(
-                `data: ${JSON.stringify({
-                  type: 'debug_event',
-                  debugEvent: parsed.debugEvent,
-                })}\n\n`
-              );
+              if (parsed.debugEvent?.kind !== 'session_start') {
+                res.write(
+                  `data: ${JSON.stringify({
+                    type: 'debug_event',
+                    debugEvent: parsed.debugEvent,
+                  })}\n\n`
+                );
+              }
               if (typeof (res as any).flush === 'function') (res as any).flush();
             } else if (eventType === 'debug_artifacts_ready') {
               res.write(
@@ -642,6 +698,12 @@ export async function runClawAgentStream(
               );
               if (typeof (res as any).flush === 'function') (res as any).flush();
             } else if (eventType === 'done') {
+              logger.info('[follow-ups] forwarding completion', {
+                conversationId: clawConversationId,
+                received: Array.isArray(parsed.followUpSuggestions)
+                  ? parsed.followUpSuggestions.length
+                  : 0,
+              });
               res.write(
                 `data: ${JSON.stringify({
                   type: 'complete',
@@ -657,6 +719,10 @@ export async function runClawAgentStream(
                   ...(parsed.parentId && { parentId: parsed.parentId }),
                   ...(parsed.attachments?.length && { attachments: parsed.attachments }),
                   ...(parsed.pendingActions?.length && { pendingActions: parsed.pendingActions }),
+                  ...(parsed.followUpSuggestions?.length && {
+                    followUpSuggestions: parsed.followUpSuggestions,
+                  }),
+                  ...(parsed.followUpsPending === true && { followUpsPending: true }),
                 })}\n\n`
               );
               if (typeof (res as any).flush === 'function') (res as any).flush();

@@ -223,6 +223,34 @@ export interface DebugArtifactBundle {
   debugEvents: Record<string, unknown>[] | null;
   runs: Array<{ fileName: string; data: Record<string, unknown> }>;
   subagents: Array<{ fileName: string; data: Record<string, unknown> }>;
+  followUpDiagnostics?: FollowUpDiagnostic[];
+}
+
+export interface FollowUpDiagnostic {
+  sessionId: string;
+  startedAt: string;
+  completedAt?: string;
+  runStatus: string;
+  outcome: string;
+  enabled?: boolean;
+  enabledByV2Flag?: boolean;
+  answerLength?: number;
+  generationInput?: string;
+  conversationMessageCount?: number;
+  agentContextProvided?: boolean;
+  agentContextName?: string;
+  agentContextDescription?: string;
+  generationSource?: string;
+  generationModel?: string;
+  generationStartedAt?: string;
+  generationCompletedAt?: string;
+  generationDurationMs?: number;
+  failureCode?: string;
+  failureMessage?: string;
+  httpStatus?: number;
+  suggestionCount: number;
+  persistedRecorder: boolean;
+  suggestions: string[];
 }
 
 export interface ConversationHistory {
@@ -434,6 +462,8 @@ export interface Message {
    * Pending actions requiring human approval (v2)
    */
   pendingActions?: PendingAction[];
+  /** Contextual next questions generated for this Ask AI v2 response. */
+  followUpSuggestions?: string[];
   errorInfo?: {
     code?: string;
     title: string;
