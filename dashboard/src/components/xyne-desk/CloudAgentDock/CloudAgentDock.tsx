@@ -10,7 +10,7 @@ import {
 import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Phone } from 'lucide-react';
-import { getOzonetelConfig } from '../../../services/clients/telephonyApi';
+import { getOzonetelToolbar } from '../../../services/clients/telephonyApi';
 import Tooltip from '../../ui/Tooltip';
 
 /**
@@ -130,18 +130,13 @@ function ToolbarButton({ onClick }: { onClick: () => void }): ReactElement {
     <Tooltip side='bottom' delayDuration={300} content='Open Ozonetel toolbar'>
       <button
         type='button'
-        className='relative flex items-center gap-2 rounded-full border border-emerald-200 bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 px-3 py-1.5 text-white shadow-md shadow-emerald-500/20 transition-all hover:-translate-y-0.5 hover:shadow-lg hover:shadow-emerald-500/30 focus:outline-none focus:ring-2 focus:ring-emerald-400/50'
+        className='flex h-8 w-8 items-center justify-center rounded-full border border-emerald-200 bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 text-white shadow-md shadow-emerald-500/20 transition-all hover:-translate-y-0.5 hover:shadow-lg hover:shadow-emerald-500/30 focus:outline-none focus:ring-2 focus:ring-emerald-400/50'
         aria-label='Open Ozonetel toolbar'
         data-track-category='Support'
         data-track-name='OpenOzonetelToolbar'
         onClick={onClick}
       >
-        <span className='absolute -right-0.5 -top-0.5 flex h-2.5 w-2.5'>
-          <span className='absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-200 opacity-75' />
-          <span className='relative inline-flex h-2.5 w-2.5 rounded-full bg-white' />
-        </span>
         <Phone size={16} className='shrink-0' />
-        <span className='text-xs font-semibold tracking-wide'>Ozonetel</span>
       </button>
     </Tooltip>
   );
@@ -276,8 +271,8 @@ export const CloudAgentDock = ({
   buttonBehavior: _buttonBehavior = 'floating',
 }: CloudAgentDockProps): ReactElement | null => {
   const { data } = useQuery({
-    queryKey: ['workspace-ozonetel-config'],
-    queryFn: () => getOzonetelConfig(),
+    queryKey: ['workspace-ozonetel-toolbar'],
+    queryFn: getOzonetelToolbar,
   });
 
   const url = data?.toolbarUrl ?? null;

@@ -31,6 +31,11 @@ export interface OzonetelConfigView {
   };
 }
 
+export interface OzonetelToolbarView {
+  configured: boolean;
+  toolbarUrl: string | null;
+}
+
 export interface SaveOzonetelConfigInput {
   channelId?: string;
   apiKey?: string;
@@ -57,6 +62,11 @@ export async function getOzonetelConfig(channelId?: string): Promise<OzonetelCon
   const res = await apiInstance.get<OzonetelConfigView>('/integrations/ozonetel/config', {
     params: channelId ? { channelId } : undefined,
   });
+  return res.data;
+}
+
+export async function getOzonetelToolbar(): Promise<OzonetelToolbarView> {
+  const res = await apiInstance.get<OzonetelToolbarView>('/integrations/ozonetel/toolbar');
   return res.data;
 }
 
