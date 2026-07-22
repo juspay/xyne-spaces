@@ -19,10 +19,10 @@ const DirectorySectionHeader = ({
   return (
     <div
       data-component='DirectorySectionHeader'
-      className='flex items-center justify-between w-full h-[29px] px-1 rounded-md group'
+      className='flex items-center justify-between w-full h-7 px-3 rounded-md group'
     >
       <div
-        className='flex items-center gap-1 cursor-pointer flex-1'
+        className='flex items-center gap-2 cursor-pointer flex-1 min-w-0 text-sidebar-foreground text-xs font-medium'
         onClick={onToggle}
         onKeyDown={e => {
           if (e.key === 'Enter' || e.key === ' ') {
@@ -38,14 +38,14 @@ const DirectorySectionHeader = ({
         data-track-name='Toggle_Section'
         data-track-metadata={JSON.stringify({ section: title, isExpanded })}
       >
-        <h3 className='text-[10px] font-medium text-muted-foreground select-none uppercase font-mono tracking-[0.8px]'>
-          {title}
-        </h3>
-        <div
-          className={`transition-transform duration-200 ${isExpanded ? 'rotate-90' : 'rotate-0'}`}
-        >
-          <ChevronRight size={12} className='text-muted-foreground' />
-        </div>
+        <span className='size-4 flex items-center justify-center shrink-0'>
+          <ChevronRight
+            size={12}
+            strokeWidth={2.33}
+            className={`transition-transform duration-200 ${isExpanded ? 'rotate-90' : 'rotate-0'}`}
+          />
+        </span>
+        <h3 className='text-left truncate select-none'>{title}</h3>
       </div>
 
       {renderAddButton ? (
@@ -53,12 +53,12 @@ const DirectorySectionHeader = ({
       ) : onAdd ? (
         <button
           onClick={onAdd}
-          className='text-muted-foreground hover:text-foreground p-1 rounded transition-colors'
+          className='text-sidebar-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent p-1 rounded transition-colors'
           data-track-category='CHAT_DIRECTORY'
           data-track-name='Add_Section'
           data-track-metadata={JSON.stringify({ section: title })}
         >
-          <Plus size={12} />
+          <Plus size={14} />
         </button>
       ) : null}
     </div>

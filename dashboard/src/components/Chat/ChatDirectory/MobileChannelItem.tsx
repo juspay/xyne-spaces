@@ -1,6 +1,6 @@
 import { ReactElement } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { Hash, Pencil, Headphones } from 'lucide-react';
+import { Hashtag, PencilEdit, Headphones } from '@xyne/icons';
 import { ChannelVisibility, NotificationLevel } from '@xyne/shared';
 import { isDMChannel, isGroupDMChannel, parseDMParticipantIds } from './ChatDirectory.utils';
 import { useDraft } from '../../../hooks/useDraft';
@@ -65,7 +65,7 @@ const MobileChannelItem = ({ channel, unreadCount = 0 }: MobileChannelItemProps)
     if (isGroupDMChannel(channel.scopeType)) {
       const participantCount = parseDMParticipantIds(channel).length;
       return (
-        <span className='flex items-center justify-center size-5 rounded-md bg-sidebar-item-hover text-sidebar-secondary-foreground text-[10px] font-medium'>
+        <span className='flex items-center justify-center size-5 rounded-md bg-sidebar-accent text-sidebar-foreground text-[10px] font-medium'>
           {participantCount}
         </span>
       );
@@ -82,7 +82,7 @@ const MobileChannelItem = ({ channel, unreadCount = 0 }: MobileChannelItemProps)
     return isPrivate ? (
       <ChatLock color={isActive ? 'hsl(var(--foreground))' : 'hsl(var(--muted-foreground))'} />
     ) : (
-      <Hash size={12} />
+      <Hashtag size={12} />
     );
   };
 
@@ -93,7 +93,7 @@ const MobileChannelItem = ({ channel, unreadCount = 0 }: MobileChannelItemProps)
           className={cn(
             'flex items-center group py-[6px]',
             isDM ? 'gap-[12px]' : 'gap-[8px]',
-            isActive && 'bg-sidebar-item-hover rounded-md px-2',
+            isActive && 'bg-sidebar-accent rounded-md px-2',
           )}
         >
           {/* Icon/Avatar with online status for DMs */}
@@ -130,12 +130,12 @@ const MobileChannelItem = ({ channel, unreadCount = 0 }: MobileChannelItemProps)
           )}
           {draftMessage && !isActive && (
             <Tooltip content={draftMessage} side='top' sideOffset={6}>
-              <Pencil size={14} className='shrink-0' />
+              <PencilEdit size={14} className='shrink-0' />
             </Tooltip>
           )}
           {unreadCount > 0 && (
-            <div className='bg-sidebar-badge-accent h-[18px] px-[6px] py-px rounded-full flex items-center justify-center'>
-              <span className='font-mono font-semibold text-[11px] text-sidebar-badge-accent-foreground leading-normal'>
+            <div className='bg-sidebar-primary border border-sidebar-accent-ring h-[18px] px-[6px] py-px rounded-full flex items-center justify-center'>
+              <span className='font-mono font-semibold text-[11px] text-sidebar-primary-foreground leading-normal'>
                 {unreadCount > 9 ? '9+' : unreadCount}
               </span>
             </div>

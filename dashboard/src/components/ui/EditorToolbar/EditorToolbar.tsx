@@ -2,20 +2,20 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Tooltip } from '../Tooltip';
 import {
   Bold,
-  CheckSquare,
+  CheckTickSquare,
   Italic,
   Underline as UnderlineIcon,
   Code,
   FileCode,
-  Image,
-  Link,
-  List,
-  ListOrdered,
-  RemoveFormatting,
-  Strikethrough,
+  PhotoImageDefault,
+  LinkSlant,
+  ListDefault,
+  ListNumber,
+  StrikeThrough,
+  TextClear,
   TextQuote,
-  X,
-} from 'lucide-react';
+  MultipleCrossCancelDefault,
+} from '@xyne/icons';
 import type { EditorToolbarProps } from './EditorToolbar.types';
 import Dialog from '../Dialog';
 import Button from '../Button';
@@ -275,12 +275,12 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
   return (
     <>
       {/* Link Hover Tooltip */}
-      <div className={variant === 'compact' ? 'border-border' : 'border-border p-1'}>
+      <div className='border-border'>
         <div
           className={
             variant === 'compact'
               ? 'flex items-center gap-[10px] px-3 py-2 rounded-xl'
-              : 'flex items-center gap-1 px-3 py-2 bg-muted rounded-xl'
+              : 'flex items-center gap-1 px-1.5 pt-2 rounded-t-xl'
           }
         >
           <Tooltip content='Bold (⌘B)' delayDuration={1000} skipDelayDuration={1000}>
@@ -328,7 +328,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
               aria-label='Strikethrough'
               aria-pressed={isActive.strike}
             >
-              <Strikethrough className='h-4 w-4' />
+              <StrikeThrough className='h-4 w-4' />
             </button>
           </Tooltip>
 
@@ -340,7 +340,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
               className={buttonClass(false)}
               aria-label='Clear formatting'
             >
-              <RemoveFormatting className='h-4 w-4' />
+              <TextClear className='h-4 w-4' />
             </button>
           </Tooltip>
 
@@ -387,7 +387,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
                   aria-label='Insert link'
                   aria-pressed={isActive.link}
                 >
-                  <Link className='h-4 w-4' />
+                  <LinkSlant className='h-4 w-4' />
                 </button>
               </Tooltip>
             }
@@ -403,7 +403,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
                   onClick={() => setOpen(false)}
                   className='p-1 hover:bg-accent rounded text-muted-foreground hover:text-muted-foreground'
                 >
-                  <X className='h-4 w-4' />
+                  <MultipleCrossCancelDefault className='h-4 w-4' />
                 </button>
               </div>
 
@@ -478,7 +478,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
                   className={buttonClass(imageOpen)}
                   aria-label='Insert image'
                 >
-                  <Image className='h-4 w-4' />
+                  <PhotoImageDefault className='h-4 w-4' />
                 </button>
               </Tooltip>
 
@@ -509,7 +509,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
                         onClick={() => fileInputRef.current?.click()}
                         className='w-full flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground hover:bg-accent rounded-lg transition-colors'
                       >
-                        <Image className='h-4 w-4 shrink-0' />
+                        <PhotoImageDefault className='h-4 w-4 shrink-0' />
                         Choose from device
                       </button>
                     ) : (
@@ -563,7 +563,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
               aria-label='Bullet list'
               aria-pressed={isActive.bulletList}
             >
-              <List className='h-4 w-4' />
+              <ListDefault className='h-4 w-4' />
             </button>
           </Tooltip>
 
@@ -575,7 +575,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
               aria-label='Numbered list'
               aria-pressed={isActive.orderedList}
             >
-              <ListOrdered className='h-4 w-4' />
+              <ListNumber className='h-4 w-4' />
             </button>
           </Tooltip>
 
@@ -595,7 +595,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
                 aria-label='Task list'
                 aria-pressed={isActive.taskList}
               >
-                <CheckSquare className='h-4 w-4' />
+                <CheckTickSquare className='h-4 w-4' />
               </button>
             </Tooltip>
           )}

@@ -27,7 +27,7 @@ export const DeskMailboxSidebar = ({
 }: DeskMailboxSidebarProps): ReactElement => {
   return (
     <div>
-      <div className='space-y-0.5'>
+      <div>
         {FOLDERS.map(({ key, label, icon: Icon }) => {
           const active = activeFolder === key;
           return (
@@ -36,16 +36,18 @@ export const DeskMailboxSidebar = ({
               type='button'
               onClick={() => onSelectFolder(key, label)}
               className={cn(
-                'flex items-center gap-1.5 w-full h-7 rounded-md px-1.5 text-left transition-colors',
+                'flex items-center gap-3 w-full h-9 rounded-[10px] px-3 border border-transparent text-left text-sm font-medium tracking-[-0.14px] transition-colors',
                 active
-                  ? 'text-sidebar-primary-foreground font-medium bg-sidebar-item-active'
-                  : 'text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground hover:bg-sidebar-item-hover',
+                  ? 'text-sidebar-accent-foreground bg-sidebar-accent border-sidebar-border'
+                  : 'text-sidebar-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent hover:border-sidebar-border',
               )}
               data-track-category='Support'
               data-track-name='SelectMailboxFolder'
             >
-              <Icon size={13} className='shrink-0' />
-              <span className='text-[13px] flex-1 truncate min-w-0'>{label}</span>
+              <span className='size-4 flex items-center justify-center shrink-0'>
+                <Icon size={14} />
+              </span>
+              <span className='flex-1 truncate min-w-0'>{label}</span>
             </button>
           );
         })}

@@ -150,7 +150,6 @@ import DmsPage from '../components/Chat/DirectMessages/DmsPage';
 import { KeyedComposeDmPanel } from '../components/Chat/AddDmForm/ComposeDmPanel';
 import ProfileSidebar from '../components/ProfileSidebar/ProfileSidebar';
 import UserGroupSidePanel from '../components/UserGroup/UserGroupSidePanel/UserGroupSidePanel';
-import GlobalTopBar from '../components/GlobalTopBar/GlobalTopBar';
 import GlobalCommandMenu from '../components/GlobalCommandMenu/GlobalCommandMenu';
 import ProductInsightsScreen from './ProductInsightsScreen/ProductInsightsScreen';
 import LaunchScreen from './LaunchScreen/LaunchScreen';
@@ -196,8 +195,6 @@ import { GlobalUploadProgress } from '../components/knowledgeBase/upload/GlobalU
 import JiraMigrationScreen from './JiraMigrationScreen/JiraMigrationScreen';
 import WhatsAppBulkMigrationScreen from './WhatsAppBulkMigrationScreen/WhatsAppBulkMigrationScreen';
 import { ErrorReportModal } from '../components/ErrorReportModal/ErrorReportModal';
-import { getTicketsPath } from '../components/ErrorReportModal/ErrorReportModal.utils';
-import { useCacConfig } from '@xyne/shared/hooks';
 import { useScreenRecorder } from '../hooks/useScreenRecorder';
 import type { ScreenSource } from '../types/electron';
 import ConfluenceMigrationScreen from './ConfluenceMigrationScreen/ConfluenceMigrationScreen';
@@ -293,11 +290,6 @@ const AppRoot = (): ReactElement => {
   const browserPanelRightRef = useRef<ImperativePanelHandle>(null);
 
   const navigate = useNavigate();
-  const { user } = useAuth();
-  const { config: errorReportCacConfig } = useCacConfig<{ channelId: string; boardId?: string }>({
-    key: 'error_report_channel_config',
-    fallbackConfig: { channelId: '' },
-  });
 
   // Shortcuts help modal state
   const [isShortcutsModalOpen, setIsShortcutsModalOpen] = useState(false);
@@ -309,13 +301,11 @@ const AppRoot = (): ReactElement => {
     xyneAIStreamManager.hasStreamingSidebarStreams(),
   );
 
-  const { recordingState, recordingSeconds, startRecording, stopRecording } = useScreenRecorder(
-    (file: File, filePath: string) => {
-      setPendingRecording(file);
-      setPendingRecordingFilePath(filePath);
-      setIsErrorReportOpen(true);
-    },
-  );
+  const { startRecording } = useScreenRecorder((file: File, filePath: string) => {
+    setPendingRecording(file);
+    setPendingRecordingFilePath(filePath);
+    setIsErrorReportOpen(true);
+  });
   useShortcutById('global.openShortcutsHelp', () => setIsShortcutsModalOpen(prev => !prev));
   useShortcutById(
     'global.composeMessage',
@@ -421,26 +411,6 @@ const AppRoot = (): ReactElement => {
   );
   const shouldShowMobileHeader =
     isMobile && isCallActive && machineViewMode === 'mini' && externalId && !isOnboarding;
-  const globalTopBarProps = {
-    onOpenErrorReport: (): void => setIsErrorReportOpen(true),
-    ...(errorReportCacConfig.channelId
-      ? {
-          onViewMyTickets: (): void => {
-            void navigate(
-              getTicketsPath(
-                errorReportCacConfig.channelId,
-                errorReportCacConfig.boardId,
-                user?.id,
-              ),
-            );
-          },
-        }
-      : {}),
-    isRecording: recordingState === 'recording',
-    recordingSeconds,
-    onStopRecording: stopRecording,
-  };
-
   // Enable swipe back gesture on mobile
   useSwipeBack();
 
@@ -578,10 +548,9 @@ const AppRoot = (): ReactElement => {
                 ) : isXyneAIDrawerOpen && !isMobile && !isOnAIPage ? (
                   // XyneAI is open on desktop - show panel layout with XyneAI
                   <div className='flex flex-col h-screen'>
-                    {!isMobile && <GlobalTopBar {...globalTopBarProps} />}
                     <PanelGroup
                       direction='horizontal'
-                      className='flex-1 no-scrollbar min-[500px]:p-2 overflow-auto'
+                      className='flex-1 no-scrollbar overflow-auto'
                       autoSaveId='app-root-xyneai'
                     >
                       <Panel ref={xyneAILeftPanelRef} defaultSize={65}>
@@ -627,10 +596,9 @@ const AppRoot = (): ReactElement => {
                   // remounting (and losing scroll position) when the browser panel
                   // opens or closes.
                   <div className='flex flex-col h-screen'>
-                    {!isMobile && <GlobalTopBar {...globalTopBarProps} />}
                     <PanelGroup
                       direction='horizontal'
-                      className='flex-1 no-scrollbar min-[500px]:p-2 overflow-auto'
+                      className='flex-1 no-scrollbar overflow-auto'
                       autoSaveId='app-root-browser'
                     >
                       <Panel
@@ -644,7 +612,7 @@ const AppRoot = (): ReactElement => {
                       >
                         <div className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}>
                           <AppSidebar />
-                          <main className='flex-1 no-scrollbar overflow-auto rounded-2xl'>
+                          <main className='flex-1 no-scrollbar overflow-auto'>
                             <EditWarningModal />
                             <Outlet />
                           </main>
@@ -667,7 +635,6 @@ const AppRoot = (): ReactElement => {
                 ) : (
                   // WebView is open - show panel layout with WebView
                   <div className='flex flex-col h-screen'>
-                    {!isMobile && <GlobalTopBar {...globalTopBarProps} />}
                     <PanelGroup
                       direction='horizontal'
                       className='flex-1 overflow-hidden'

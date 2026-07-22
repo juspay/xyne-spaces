@@ -1,6 +1,6 @@
 import { ChannelScopeType, ChannelVisibility, Channel } from '@xyne/shared';
 import { useAuthContextValues } from '../../../hooks/useAuth';
-import { Hash, Lock } from 'lucide-react';
+import { Hashtag, LockClose } from '@xyne/icons';
 import Avatar from '../../ui/Avatar/Avatar';
 import { getDMParticipantIdsToFetch } from '../ChatDirectory/ChatDirectory.utils';
 
@@ -16,9 +16,9 @@ const ChannelIcon = ({ channel }: ChannelIconProps): React.ReactNode | null => {
     channel.scopeType === ChannelScopeType.GROUP_DM
   ) {
     if (channel.visibility === ChannelVisibility.PUBLIC) {
-      return <Hash className='w-4 h-4 text-foreground' />;
+      return <Hashtag size={16} className='text-foreground' />;
     }
-    return <Lock className='w-4 h-4 text-foreground' />;
+    return <LockClose size={16} className='text-foreground' />;
   }
 
   if (channel.scopeType === ChannelScopeType.DM) {
@@ -27,7 +27,7 @@ const ChannelIcon = ({ channel }: ChannelIconProps): React.ReactNode | null => {
     return <Avatar userId={otherUserId || context.userID} size='sm' showActiveStatus={true} />;
   }
 
-  return <Hash className='w-4 h-4 text-foreground' />;
+  return <Hashtag size={16} className='text-foreground' />;
 };
 
 export default ChannelIcon;

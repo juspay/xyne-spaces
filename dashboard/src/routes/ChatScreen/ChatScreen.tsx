@@ -95,7 +95,7 @@ const ChatScreen = ({ shouldStackThread = false }: ChatScreenProps): ReactElemen
       <ConversationPrefetcher />
       <div
         ref={containerRef}
-        className='h-full relative md:rounded-2xl overflow-hidden shadow-md'
+        className='h-full relative overflow-hidden'
         data-component='ChatScreen'
       >
         {isWideScreen ? (
@@ -151,7 +151,15 @@ const ChatScreen = ({ shouldStackThread = false }: ChatScreenProps): ReactElemen
             <Panel defaultSize={80} minSize={30}>
               <main
                 data-id='conversation-view'
-                className='flex-1 h-full overflow-hidden bg-background relative flex flex-col'
+                className={cn(
+                  'flex-1 h-full overflow-hidden relative flex flex-col rounded-2xl',
+                  // DM + Bookmarks routes render their own transparent left sidebar + an
+                  // opaque detail panel; keep this wrapper transparent so the wallpaper
+                  // shows through those sidebars.
+                  !pathnameWithoutWorkspace.startsWith('/chat/dm') &&
+                    !pathnameWithoutWorkspace.startsWith('/chat/bookmarks') &&
+                    'border border-border bg-background',
+                )}
               >
                 <div className='flex-1 overflow-hidden relative'>
                   <Outlet context={{ shouldStackThread }} />

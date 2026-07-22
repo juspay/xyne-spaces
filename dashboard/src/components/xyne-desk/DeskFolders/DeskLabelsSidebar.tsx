@@ -102,17 +102,15 @@ export const DeskLabelsSidebar = ({
   return (
     <div>
       {/* Non-clickable heading + add button */}
-      <div className='flex items-center justify-between px-1.5 mb-1'>
-        <span className='text-[11px] font-medium uppercase tracking-wide text-muted-foreground'>
-          Labels
-        </span>
+      <div className='flex items-center justify-between h-7 px-3'>
+        <span className='text-xs font-medium text-sidebar-foreground'>Labels</span>
         <button
           type='button'
           onClick={() => {
             setNewName('');
             setCreateOpen(true);
           }}
-          className='p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
+          className='p-1 rounded text-sidebar-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent transition-colors'
           aria-label='Create new label'
           title='Create new label'
           data-track-category='Support'
@@ -122,9 +120,9 @@ export const DeskLabelsSidebar = ({
         </button>
       </div>
 
-      <div className='space-y-0.5'>
+      <div>
         {list.length === 0 ? (
-          <div className='px-1.5 py-1 text-[11px] text-muted-foreground/70'>No labels yet</div>
+          <div className='px-3 py-1 text-xs text-sidebar-foreground/60 italic'>No labels yet</div>
         ) : (
           list.map(label => {
             const color = label.color ?? colorForName(label.name);
@@ -133,26 +131,28 @@ export const DeskLabelsSidebar = ({
               <div
                 key={label.id}
                 className={cn(
-                  'group flex items-center h-7 rounded-md pr-1 transition-colors',
+                  'group flex items-center h-9 rounded-[10px] pr-2 border border-transparent text-sm font-medium tracking-[-0.14px] transition-colors',
                   active
-                    ? 'text-sidebar-primary-foreground font-medium bg-sidebar-item-active'
-                    : 'text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground hover:bg-sidebar-item-hover',
+                    ? 'text-sidebar-accent-foreground bg-sidebar-accent border-sidebar-border'
+                    : 'text-sidebar-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent hover:border-sidebar-border',
                 )}
               >
                 <button
                   type='button'
                   onClick={() => onSelectLabel(label.id, label.name)}
-                  className='flex items-center gap-1.5 flex-1 min-w-0 px-1.5 h-full text-left'
+                  className='flex items-center gap-3 flex-1 min-w-0 px-3 h-full text-left'
                   data-track-category='Support'
                   data-track-name='SelectSidebarLabel'
                 >
-                  <Tag size={13} className='shrink-0' style={{ color }} fill={color} />
-                  <span className='text-[13px] flex-1 truncate min-w-0'>{label.name}</span>
+                  <span className='size-4 flex items-center justify-center shrink-0'>
+                    <Tag size={14} style={{ color }} fill={color} />
+                  </span>
+                  <span className='flex-1 truncate min-w-0'>{label.name}</span>
                 </button>
                 <button
                   type='button'
                   onClick={e => void handleDelete(label.id, label.name, e)}
-                  className='p-0.5 rounded text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity shrink-0'
+                  className='hidden group-hover:flex items-center justify-center p-1 rounded text-sidebar-foreground hover:text-destructive transition-colors shrink-0'
                   aria-label={`Delete label ${label.name}`}
                   title='Delete label'
                   data-track-category='Support'

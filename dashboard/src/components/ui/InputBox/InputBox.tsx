@@ -26,19 +26,10 @@ import Placeholder from '@tiptap/extension-placeholder';
 import LinkExtension from '@tiptap/extension-link';
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
 import { all, createLowlight } from 'lowlight';
-import {
-  ArrowUp,
-  AtSign,
-  Plus,
-  Loader2,
-  X,
-  DotIcon,
-  ChevronDown,
-  Ticket,
-  FileText,
-  Clock,
-} from 'lucide-react';
+import { Plus, Loader2, X, Ticket, FileText, Clock } from 'lucide-react';
+import { ArrowUp, AtMark, ChevronBigDown, FontAa, Hashtag, PaperclipSlant } from '@xyne/icons';
 import Tooltip from '../Tooltip/Tooltip';
+import Avatar from '../Avatar/Avatar';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -170,6 +161,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       onTyping,
       typingUsers = [],
       showTypingIndicator = true,
+      agentSlot,
+      hasAgentActivity = false,
       placeholder = 'Type a message...',
       value,
       disabled = false,
@@ -210,6 +203,23 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     const [isPreferencesOpen, setIsPreferencesOpen] = useState(false);
     const [selectedFile, setSelectedFile] = useState<File | UploadedFile | null>(null);
     const [isViewerOpen, setIsViewerOpen] = useState(false);
+
+    // Activity bar rotation: the human typing indicator and the agent pill share ONE
+    // slot above the input. When both are active they can't fit together, so flip
+    // between them every 2s. When only one is active it simply stays shown.
+    const hasTypingActivity = showTypingIndicator && typingUsers.length > 0;
+    const bothActive = hasTypingActivity && hasAgentActivity;
+    const [showAgentTurn, setShowAgentTurn] = useState(false);
+    useEffect(() => {
+      if (!bothActive) {
+        setShowAgentTurn(false);
+        return;
+      }
+      const id = setInterval(() => setShowAgentTurn(v => !v), 2000);
+      return () => clearInterval(id);
+    }, [bothActive]);
+    const typingVisible = bothActive ? !showAgentTurn : hasTypingActivity;
+    const agentVisible = bothActive ? showAgentTurn : hasAgentActivity;
 
     // State for attachments map (async loaded) - supports both File and UploadedFile
     const [attachmentsMap, setAttachmentsMap] = useState<Map<string, File | UploadedFile>>(
@@ -284,6 +294,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     const [isScheduleDialogOpen, setIsScheduleDialogOpen] = useState(false);
     const openScheduleDialog = useCallback((): void => setIsScheduleDialogOpen(true), []);
     const [isPlusMenuOpen, setIsPlusMenuOpen] = useState(false);
+    const [showFormatToolbar, setShowFormatToolbar] = useState(false);
     const [isTranscriptSelectorOpen, setIsTranscriptSelectorOpen] = useState(false);
     const [emojiSizeClass, setEmojiSizeClass] = useState('text-sm');
     const [showMobileFormattingToolbar, setShowMobileFormattingToolbar] = useState(false);
@@ -1346,6 +1357,43 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           <EmojiSelector editor={editor} customEmojis={customEmojis ?? []} />
         )}
 
+        {/* Activity bar — absolutely positioned above the input box so showing/hiding
+            never shifts the chat layout. The typing indicator and the agent pill share
+            this single (left) slot; when both are active they alternate every 2s (see
+            the flip effect above). The bar is transparent and each chip carries its own
+            bg, so it's invisible when nothing is active. The agent slot stays mounted
+            (display-toggled) so its progress subscription isn't torn down on each flip. */}
+        <div className='absolute top-0 left-0 right-0 -translate-y-full flex items-center px-1.5'>
+          {hasTypingActivity && (
+            <div
+              className='flex items-center gap-1.5 h-5 bg-background w-full'
+              style={{ display: typingVisible ? 'flex' : 'none' }}
+            >
+              <div className='flex items-center -space-x-1'>
+                {typingUsers.slice(0, 4).map(u => (
+                  <Avatar
+                    key={u.userId}
+                    userId={u.userId}
+                    size='xs'
+                    rounded
+                    showActiveStatus={false}
+                    className='size-3 ring-2 ring-background'
+                  />
+                ))}
+              </div>
+              <small className='typing-shimmer text-[10px] tracking-tight'>
+                {`${formatTypingMessage(typingUsers)}...`}
+              </small>
+            </div>
+          )}
+          <div
+            className='flex items-center min-w-0'
+            style={{ display: agentVisible ? 'flex' : 'none' }}
+          >
+            {agentSlot}
+          </div>
+        </div>
+
         <div
           className={isVoiceRecording ? 'xyne-voice-border-wrap' : undefined}
           style={isVoiceRecording && isMobile ? { borderRadius: '28px' } : undefined}
@@ -1376,7 +1424,9 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             {features.richText && !isMobile && <div data-electron-update-nudge-slot />}
 
             {/* Desktop: Editor Toolbar */}
-            {features.richText && !isMobile && <EditorToolbar editor={editor} />}
+            {features.richText && !isMobile && showFormatToolbar && (
+              <EditorToolbar editor={editor} />
+            )}
 
             {/* Conditionally render mobile or desktop layout */}
             {isMobile ? (
@@ -1435,7 +1485,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             ) : (
               <div
                 className={`
-                relative py-2 px-3
+                relative pt-1 pb-1 px-3
                 ${isSending ? '[&_.ProseMirror]:caret-transparent' : ''}
               `}
               >
@@ -1550,18 +1600,18 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
 
             {/* Desktop Footer Actions */}
             {!isMobile && (
-              <div className='flex items-center justify-between p-2'>
+              <div className='flex items-center justify-between px-2 pb-2 pt-1'>
                 <div className='flex items-center gap-1'>
                   {features.fileAttachments && (
                     <DropdownMenu open={isPlusMenuOpen} onOpenChange={setIsPlusMenuOpen}>
                       <DropdownMenuTrigger asChild>
                         <button
                           type='button'
-                          className='p-1.5 bg-muted hover:bg-accent transition-all duration-200 ease-in-out rounded-full'
+                          className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
                           aria-label='Add content'
                           disabled={disabled || isSending}
                         >
-                          <Plus className='h-4 w-4 text-muted-foreground' />
+                          <PaperclipSlant className='h-4 w-4 text-muted-foreground' />
                         </button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent side='top' align='start'>
@@ -1616,8 +1666,6 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                     />
                   </Dialog>
 
-                  <div className='h-3 w-px bg-border mx-1' aria-hidden='true' />
-
                   {features.emojiPicker && (
                     // Inside InputBox.tsx -> EmojiPickerButton component
                     <EmojiPickerButton
@@ -1643,7 +1691,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                         data-testid='mention-user-btn'
                         disabled={disabled || isSending}
                       >
-                        <AtSign className='h-4 w-4 text-muted-foreground' />
+                        <AtMark className='h-4 w-4 text-muted-foreground' />
                       </button>
                     </Tooltip>
                   )}
@@ -1663,9 +1711,34 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                       aria-label='Mention channel'
                       disabled={disabled || isSending}
                     >
-                      <span className='text-muted-foreground font-semibold text-sm'>#</span>
+                      <Hashtag className='h-4 w-4 text-muted-foreground' />
                     </button>
                   </Tooltip>
+
+                  {features.richText && (
+                    <Tooltip
+                      content={showFormatToolbar ? 'Hide formatting' : 'Show formatting'}
+                      side='top'
+                      delayDuration={1000}
+                      skipDelayDuration={1000}
+                    >
+                      <button
+                        type='button'
+                        onClick={() => setShowFormatToolbar(prev => !prev)}
+                        className={`p-1.5 rounded transition-all duration-200 ease-in-out ${
+                          showFormatToolbar
+                            ? 'bg-accent text-foreground'
+                            : 'hover:bg-accent text-muted-foreground'
+                        }`}
+                        aria-label='Toggle formatting toolbar'
+                        aria-pressed={showFormatToolbar}
+                        data-testid='toggle-format-toolbar-btn'
+                        disabled={disabled || isSending}
+                      >
+                        <FontAa className='h-4 w-4' />
+                      </button>
+                    </Tooltip>
+                  )}
 
                   {bottomLeftSlot}
                 </div>
@@ -1776,7 +1849,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                                 className='p-1.5 hover:bg-black/10 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2'
                                 data-testid='send-options-menu'
                               >
-                                <ChevronDown className='h-3 w-3' />
+                                <ChevronBigDown className='h-3 w-3' />
                               </button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent side='top' align='end'>
@@ -1860,7 +1933,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                                 className='p-1.5 hover:bg-black/10 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2'
                                 data-testid='send-options-menu'
                               >
-                                <ChevronDown className='h-3 w-3' />
+                                <ChevronBigDown className='h-3 w-3' />
                               </button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent side='top' align='end'>
@@ -1926,26 +1999,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           </div>
         </div>
 
-        {/* Typing Indicator + Enter-behavior hint - Always reserve space to prevent layout shift */}
-        <div className='mt-1 h-4 flex items-baseline justify-between gap-2 px-1 mb-1 absolute -bottom-1 right-0 left-0 translate-y-full'>
-          <div className='flex items-baseline min-w-0'>
-            {showTypingIndicator && typingUsers.length > 0 && (
-              <small className='text-[10px] text-muted-foreground flex items-baseline'>
-                {formatTypingMessage(typingUsers)}
-                <span className='flex items-center ml-1'>
-                  <span className='animate-[loading-dots_1.4s_infinite_0.2s]'>
-                    <DotIcon className='size-2 text-muted-foreground' />
-                  </span>
-                  <span className='animate-[loading-dots_1.4s_infinite_0.4s]'>
-                    <DotIcon className='size-2 text-muted-foreground' />
-                  </span>
-                  <span className='animate-[loading-dots_1.4s_infinite_0.6s]'>
-                    <DotIcon className='size-2 text-muted-foreground' />
-                  </span>
-                </span>
-              </small>
-            )}
-          </div>
+        {/* Enter-behavior hint - Always reserve space to prevent layout shift */}
+        <div className='mt-1 h-4 flex items-baseline justify-end gap-2 px-1 mb-1 absolute -bottom-1 right-0 left-0 translate-y-full'>
           {!isMobile && !disableEnterToSend && hasSendableContent && (
             <button
               type='button'

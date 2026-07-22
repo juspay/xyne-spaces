@@ -1,7 +1,13 @@
 import { ReactElement, useMemo } from 'react';
 
-import MessagesIcon from '../../icons/MessagesIcon';
-import { PinIcon, NotebookText, FolderOpen, SquareKanban, Link } from 'lucide-react';
+import {
+  ChatDefault,
+  FolderDefault,
+  PinDefault,
+  FileText,
+  LinkChainSlant,
+  KanbanBoard,
+} from '@xyne/icons';
 import { useCanReadTicket } from '../../../hooks/usePermissions';
 import { ChannelScopeType } from '@xyne/shared';
 import { isDMChannel } from '../ChatDirectory/ChatDirectory.utils';
@@ -17,27 +23,27 @@ const STATIC_TABS: ConversationTabListType[] = [
   {
     label: 'Messages ',
     value: 'messages',
-    icon: <MessagesIcon />,
+    icon: <ChatDefault size={14} />,
   },
   {
     label: 'Files',
     value: 'files',
-    icon: <FolderOpen size={14} />,
+    icon: <FolderDefault size={14} />,
   },
   {
     label: 'Pins',
     value: 'pins',
-    icon: <PinIcon size={14} />,
+    icon: <PinDefault size={14} />,
   },
   {
     label: 'Canvas',
     value: 'canvas',
-    icon: <NotebookText size={14} />,
+    icon: <FileText size={14} />,
   },
   {
     label: 'Links',
     value: 'links',
-    icon: <Link size={14} />,
+    icon: <LinkChainSlant size={14} />,
   },
 ];
 
@@ -45,7 +51,7 @@ const STATIC_TABS: ConversationTabListType[] = [
 const TICKETS_TAB: ConversationTabListType = {
   label: 'Tickets',
   value: 'tickets',
-  icon: <SquareKanban size={14} />,
+  icon: <KanbanBoard size={14} />,
 };
 
 // Stable references — a fresh `[...STATIC_TABS, TICKETS_TAB]` and fresh

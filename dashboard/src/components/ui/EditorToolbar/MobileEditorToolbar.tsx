@@ -5,14 +5,14 @@ import {
   Italic,
   Code,
   FileCode,
-  Link,
-  List,
-  ListOrdered,
-  RemoveFormatting,
-  Strikethrough,
+  LinkSlant,
+  ListDefault,
+  ListNumber,
+  StrikeThrough,
+  TextClear,
   TextQuote,
-  X,
-} from 'lucide-react';
+  MultipleCrossCancelDefault,
+} from '@xyne/icons';
 import type { MobileEditorToolbarProps } from './EditorToolbar.types';
 
 /**
@@ -162,7 +162,7 @@ export const MobileEditorToolbar: React.FC<MobileEditorToolbarProps> = ({
         aria-label='Close formatting toolbar'
         onMouseDown={e => e.preventDefault()}
       >
-        <X className='h-5 w-5' />
+        <MultipleCrossCancelDefault className='h-5 w-5' />
       </button>
 
       {/* Scrollable toolbar icons */}
@@ -200,7 +200,7 @@ export const MobileEditorToolbar: React.FC<MobileEditorToolbarProps> = ({
           aria-pressed={isActive.strike}
           onMouseDown={e => e.preventDefault()}
         >
-          <Strikethrough className='h-4 w-4' />
+          <StrikeThrough className='h-4 w-4' />
         </button>
 
         {/* Clear Formatting */}
@@ -211,7 +211,7 @@ export const MobileEditorToolbar: React.FC<MobileEditorToolbarProps> = ({
           aria-label='Clear formatting'
           onMouseDown={e => e.preventDefault()}
         >
-          <RemoveFormatting className='h-4 w-4' />
+          <TextClear className='h-4 w-4' />
         </button>
 
         {/* Inline Code */}
@@ -250,7 +250,7 @@ export const MobileEditorToolbar: React.FC<MobileEditorToolbarProps> = ({
           aria-pressed={isActive.link}
           onMouseDown={e => e.preventDefault()}
         >
-          <Link className='h-4 w-4' />
+          <LinkSlant className='h-4 w-4' />
         </button>
 
         {/* Separator */}
@@ -277,7 +277,7 @@ export const MobileEditorToolbar: React.FC<MobileEditorToolbarProps> = ({
           aria-pressed={isActive.bulletList}
           onMouseDown={e => e.preventDefault()}
         >
-          <List className='h-4 w-4' />
+          <ListDefault className='h-4 w-4' />
         </button>
 
         {/* Ordered List */}
@@ -289,7 +289,7 @@ export const MobileEditorToolbar: React.FC<MobileEditorToolbarProps> = ({
           aria-pressed={isActive.orderedList}
           onMouseDown={e => e.preventDefault()}
         >
-          <ListOrdered className='h-4 w-4' />
+          <ListNumber className='h-4 w-4' />
         </button>
       </div>
 

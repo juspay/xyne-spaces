@@ -1,5 +1,4 @@
 import { ReactElement, useMemo, useState, useEffect, useRef, useCallback } from 'react';
-import useMeasure from '../../hooks/useMeasure';
 import { activitySkipMarkAsReadThreadRef } from '../Activity/activitySkipMarkAsRead';
 import {
   useParams,
@@ -15,23 +14,28 @@ import { useChannel, useGetChannelUserStatus } from '../../hooks/useChannels';
 import { useRouteContext } from '../../hooks/useRouteContext';
 import { usePlatform } from '../../hooks/usePlatform';
 import { useIsInPanelWebview } from '../../hooks/useIsInPanelWebview';
+import { X, FileText, ClipboardCheck, Hash } from 'lucide-react';
 import {
-  X,
-  FileText,
-  Ticket,
-  CornerDownRight,
-  MessageCircle,
-  File,
-  Maximize2,
-  LinkIcon,
-  ExternalLink,
   ArrowLeft,
-  ClipboardCheck,
-  Link2,
-  Hash,
-} from 'lucide-react';
+  ArrowTurnDownRight,
+  MaximizeTwoArrow,
+  LinkHorizontal,
+  ExternalLinkSquare,
+  LinkSlant,
+  MultipleCrossCancelDefault,
+  ChatDefault,
+  TicketToken,
+  FolderDefault,
+  ClipboardCheck as ClipboardCheckIcon,
+  ThreeDotsMenuVertical,
+} from '@xyne/icons';
 import { useChannelDisplayName } from '../../hooks/useChannelDisplayName';
-import CompactActionsMenu, { ActionMenuItem } from '../ui/CompactActionsMenu';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from '../ui/dropdown-menu';
 import { ChatInput } from './ChatInput';
 import ThreadList from './ThreadList/ThreadList';
 import { useDragAndDropAreaRef } from '../../hooks/useDragAndDropAreaRef';
@@ -129,7 +133,6 @@ export const ThreadMessages = ({
   const { isMobile } = usePlatform();
   const isInPanelWebview = useIsInPanelWebview();
   const { baseRoute, buildChannelRoute } = useRouteContext();
-  const isActivityRightPanel = baseRoute === '/chat/activity' && !isMobile;
 
   const currentUser = useSelf();
   const shareableOrigin = useShareableOrigin();
@@ -141,34 +144,6 @@ export const ThreadMessages = ({
   const conversationId = propConversationId || paramConversationId;
   const ticketId = propTicketId !== undefined ? propTicketId || undefined : paramTicketId;
   const messageLoadStartTimeRef = useRef<number | null>(null);
-
-  // Measure thread-panel header row, title, and actions to dynamically detect overflow
-  const headerRowRef = useRef<HTMLDivElement>(null);
-  const headerTitleRef = useRef<HTMLDivElement>(null);
-  const headerActionsRef = useRef<HTMLDivElement>(null);
-  const { width: headerRowWidth } = useMeasure({ ref: headerRowRef, observeResize: true });
-  const { width: headerTitleWidth } = useMeasure({ ref: headerTitleRef, observeResize: true });
-  const { width: headerActionsWidth } = useMeasure({ ref: headerActionsRef, observeResize: true });
-  const fullHeaderActionsWidthRef = useRef(0);
-  const prevActionsElementRef = useRef<HTMLElement | null>(null);
-
-  // Reset max when the underlying DOM element changes (view switch detected by useMeasure)
-  if (headerActionsRef.current !== prevActionsElementRef.current) {
-    prevActionsElementRef.current = headerActionsRef.current;
-    fullHeaderActionsWidthRef.current = 0;
-  }
-
-  if (headerActionsWidth > fullHeaderActionsWidthRef.current) {
-    fullHeaderActionsWidthRef.current = headerActionsWidth;
-  }
-
-  const headerPadding =
-    headerRowWidth > 0 ? headerRowWidth - headerTitleWidth - headerActionsWidth : 0;
-  const MIN_HEADER_TITLE_WIDTH = 150;
-  const isHeaderCompact =
-    headerRowWidth > 0 &&
-    headerPadding > 0 &&
-    headerRowWidth - fullHeaderActionsWidthRef.current - headerPadding < MIN_HEADER_TITLE_WIDTH;
 
   // Track derived values from ticket
   const [derivedConversationId, setDerivedConversationId] = useState(conversationId || '');
@@ -584,8 +559,6 @@ export const ThreadMessages = ({
       .filter(item => !!item.attachment);
   }, [messages, derivedTicketId, ticketAttachments]);
 
-  // Filter workflow messages
-
   // Build tabs array - exclude Details tab when ticketId is present
   const isFixTicket = ticket?.ticketType === BaseTicketType.Fix;
 
@@ -606,11 +579,16 @@ export const ThreadMessages = ({
 
   const tabs = useMemo(() => {
     const allTabs = [
-      { value: 'thread' as const, label: 'Messages', icon: <MessageCircle size={12} /> },
-      { value: 'details' as const, label: 'Details', icon: <Ticket size={12} /> },
-      { value: 'files' as const, label: 'Files', count: files.length, icon: <File size={12} /> },
+      { value: 'thread' as const, label: 'Messages', icon: <ChatDefault size={14} /> },
+      { value: 'details' as const, label: 'Details', icon: <TicketToken size={14} /> },
+      {
+        value: 'files' as const,
+        label: 'Files',
+        count: files.length,
+        icon: <FolderDefault size={14} />,
+      },
       ...(isFixTicket
-        ? [{ value: 'rca' as const, label: 'RCA', icon: <ClipboardCheck size={12} /> }]
+        ? [{ value: 'rca' as const, label: 'RCA', icon: <ClipboardCheckIcon size={14} /> }]
         : []),
     ];
 
@@ -734,6 +712,15 @@ export const ThreadMessages = ({
     }
   };
 
+  const handleCopyTicketId = () => {
+    if (!ticket?.xyneId) return;
+    void navigator.clipboard.writeText(ticket.xyneId);
+    toast.success('Copied', {
+      description: 'Ticket ID copied to clipboard',
+      duration: 2000,
+    });
+  };
+
   const handleCopyTicketViewLink = () => {
     if (!ticket) return;
 
@@ -764,34 +751,24 @@ export const ThreadMessages = ({
         >
           {/* Tab Header */}
           {!hideTabBar && (
-            <div className='w-full p-4 pb-0 bg-background'>
-              <div className='border-b border-border'>
+            <div className='w-full pl-2 pr-3 py-3 bg-background'>
+              <div>
                 <Tabs.List className='flex items-center justify-between'>
-                  <div className='flex items-center'>
+                  <div className='flex items-center gap-0.5 px-0.5'>
                     {/* Replies Tab */}
                     <Tabs.Trigger asChild value='replies'>
                       <button
                         className={cn(
-                          'px-3 py-2 flex items-center justify-start gap-2 transition-all duration-100 cursor-pointer',
+                          'flex items-center justify-center gap-2 px-2.5 py-1.5 rounded-lg whitespace-nowrap transition-colors duration-100 cursor-pointer',
                           underTicketActiveTab === 'replies'
-                            ? 'border-b-2 border-primary'
-                            : 'border-b-2 border-transparent',
+                            ? 'bg-muted text-foreground'
+                            : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
                         )}
                       >
-                        <span
-                          className={
-                            underTicketActiveTab === 'replies'
-                              ? 'text-primary'
-                              : 'text-muted-foreground'
-                          }
-                        >
-                          <CornerDownRight size={12} />
+                        <span className='shrink-0'>
+                          <ChatDefault size={14} />
                         </span>
-                        <span
-                          className={`text-sm font-medium ${underTicketActiveTab === 'replies' ? 'text-primary' : 'text-muted-foreground'}`}
-                        >
-                          Messages
-                        </span>
+                        <span className='text-sm font-medium tracking-[-0.28px]'>Messages</span>
                       </button>
                     </Tabs.Trigger>
 
@@ -800,26 +777,16 @@ export const ThreadMessages = ({
                       <Tabs.Trigger asChild value='rca'>
                         <button
                           className={cn(
-                            'px-3 py-2 flex items-center justify-start gap-2 transition-all duration-100 cursor-pointer',
+                            'flex items-center justify-center gap-2 px-2.5 py-1.5 rounded-lg whitespace-nowrap transition-colors duration-100 cursor-pointer',
                             underTicketActiveTab === 'rca'
-                              ? 'border-b-2 border-primary'
-                              : 'border-b-2 border-transparent',
+                              ? 'bg-muted text-foreground'
+                              : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
                           )}
                         >
-                          <span
-                            className={
-                              underTicketActiveTab === 'rca'
-                                ? 'text-primary'
-                                : 'text-muted-foreground'
-                            }
-                          >
-                            <ClipboardCheck size={12} />
+                          <span className='shrink-0'>
+                            <ClipboardCheckIcon size={14} />
                           </span>
-                          <span
-                            className={`text-sm font-medium ${underTicketActiveTab === 'rca' ? 'text-primary' : 'text-muted-foreground'}`}
-                          >
-                            RCA
-                          </span>
+                          <span className='text-sm font-medium tracking-[-0.28px]'>RCA</span>
                         </button>
                       </Tabs.Trigger>
                     )}
@@ -880,7 +847,7 @@ export const ThreadMessages = ({
 
             {/* ChatInput at the bottom - only show if user is a member */}
             {isUserMember || channel?.isArchived ? (
-              <div className='px-4 pb-4 bg-background'>
+              <div className='px-3 pb-3 bg-background'>
                 <ChatInput
                   ref={inputRef}
                   channelId={derivedChannelId}
@@ -928,72 +895,6 @@ export const ThreadMessages = ({
     );
   }
 
-  const sharedMenuItems: ActionMenuItem[] = [
-    {
-      customContent: (
-        <ConversationSubscription
-          conversationId={derivedConversationId}
-          {...(conversation && { conversation })}
-          variant='dropdown'
-          menuOpen
-          className='px-2 py-1.5'
-        />
-      ),
-      onSelect: () => {},
-      preventClose: true,
-      visible: !!derivedConversationId,
-    },
-    {
-      icon: <Link2 className='w-4 h-4' />,
-      label: 'Add context to thread',
-      onSelect: handleAddContextClick,
-      visible: !isMobile && !channel?.isArchived,
-    },
-    {
-      icon: <XyneAIStar />,
-      label: 'Ask AI',
-      onSelect: () =>
-        xyneAIActor.send({
-          type: 'OPEN',
-          channelId: derivedChannelId,
-          threadInfo,
-        }),
-      visible: !isStandaloneWindow(),
-    },
-    {
-      icon: <ExternalLink className='w-4 h-4' />,
-      label: 'Open in new window',
-      onSelect: openInNewWindow,
-      visible: isElectronApp() && !isStandaloneWindow(),
-    },
-  ];
-
-  const ticketCompactMenuItems: ActionMenuItem[] = [
-    {
-      icon: <Maximize2 className='w-4 h-4' />,
-      label: 'Expand view',
-      onSelect: openTicketDetailsExpandedView,
-      visible: !isMobile,
-    },
-    ...sharedMenuItems,
-    {
-      icon: <LinkIcon className='w-4 h-4' />,
-      label: 'Copy ticket link',
-      onSelect: handleCopyTicketViewLink,
-    },
-  ];
-
-  const regularCompactMenuItems: ActionMenuItem[] = [
-    ...sharedMenuItems,
-    {
-      icon: <Ticket className='w-4 h-4' />,
-      label: 'Create ticket',
-      onSelect: handleCreateTicket,
-      visible: !!channel?.projectId && !hasTicketInMessages && !channel?.isArchived,
-      testId: 'thread-create-ticket-button',
-    },
-  ];
-
   return (
     <ConversationTabContext.Provider value={conversationTabContextValue}>
       <div
@@ -1005,9 +906,9 @@ export const ThreadMessages = ({
         {/* Drag and Drop Overlay */}
         <DragAndDropOverlay isVisible={isDragging} />
         {showHeader && (
-          <div className='flex gap-2 items-center justify-between w-full pt-4 px-4'>
+          <div className='flex gap-2 items-center justify-between w-full pl-2 pr-3 pt-3'>
             <div className='flex gap-2 items-center min-w-0'>
-              <CornerDownRight className='size-4 flex-shrink-0' />
+              <ArrowTurnDownRight size={16} className='flex-shrink-0' />
               <h3 className='text-[17px] font-semibold whitespace-nowrap overflow-hidden text-ellipsis min-w-0'>
                 {isTicketThread && ticket ? ticket.title : 'Thread message'}
               </h3>
@@ -1015,80 +916,43 @@ export const ThreadMessages = ({
 
             {derivedConversationId && (
               <Tooltip content='Toggle notification subscription'>
-                <div className='p-2 border border-border rounded-lg h-8 w-8'>
-                  <ConversationSubscription
-                    conversationId={derivedConversationId}
-                    {...(conversation && { conversation })}
-                    variant='icon-only'
-                    className='flex items-center justify-center'
-                  />
-                </div>
+                <ConversationSubscription
+                  conversationId={derivedConversationId}
+                  {...(conversation && { conversation })}
+                  variant='icon-only'
+                  className='h-7 w-7 rounded-lg flex items-center justify-center transition-colors hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50'
+                />
               </Tooltip>
             )}
           </div>
         )}
         {derivedTicketId && ticket && !simpleView && (
-          <div
-            ref={headerRowRef}
-            className='flex justify-between items-center w-full px-4 py-2 gap-4'
-          >
-            <div ref={headerTitleRef} className='flex gap-2 items-center min-w-0 flex-1'>
-              <CornerDownRight className='size-4 flex-shrink-0' />
-              <span className='text-xs font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded flex-shrink-0'>
-                {ticket.xyneId}
-              </span>
+          <div className='flex justify-between items-center w-full pl-2 pr-3 pt-3 gap-4'>
+            <div className='flex gap-2 items-center min-w-0 flex-1'>
+              <Tooltip content='Copy ticket ID'>
+                <button
+                  type='button'
+                  onClick={handleCopyTicketId}
+                  aria-label={`Copy ticket ID ${ticket.xyneId}`}
+                  data-track-category='THREAD_PANEL'
+                  data-track-name='COPY_TICKET_ID'
+                  className='text-xs font-medium text-muted-foreground bg-muted hover:bg-muted/70 px-2 py-0.5 rounded flex-shrink-0 cursor-pointer select-text transition-colors'
+                >
+                  {ticket.xyneId}
+                </button>
+              </Tooltip>
               <h3 className='text-[17px] font-semibold whitespace-nowrap overflow-hidden text-ellipsis min-w-0 text-foreground'>
                 {ticket.title}
               </h3>
               {focusedChannelBreadcrumb}
             </div>
-            <div ref={headerActionsRef} className='flex gap-x-2 shrink-0'>
-              {!isHeaderCompact && derivedConversationId && (
-                <Tooltip content='Toggle notification subscription'>
-                  <div className='p-2 border border-border rounded-lg h-8 w-8'>
-                    <ConversationSubscription
-                      conversationId={derivedConversationId}
-                      {...(conversation && { conversation })}
-                      variant='icon-only'
-                      className='flex items-center justify-center'
-                    />
-                  </div>
-                </Tooltip>
-              )}
-              {!isHeaderCompact && !isMobile && (
-                <Tooltip content='Expand View'>
-                  <Button
-                    className='p-2 border border-border rounded-lg h-8 w-8'
-                    variant='ghost'
-                    size='sm'
-                    onClick={openTicketDetailsExpandedView}
-                    aria-label='Open Maximize View'
-                  >
-                    <Maximize2 size={20} />
-                  </Button>
-                </Tooltip>
-              )}
-              {!isHeaderCompact && !isMobile && !channel?.isArchived && (
-                <Tooltip content='Add context to thread'>
-                  <Button
-                    variant='ghost'
-                    size='sm'
-                    className='p-2 border border-border rounded-lg h-8 w-8'
-                    onClick={handleAddContextClick}
-                    aria-label='Add context to thread'
-                    data-track-category='THREAD_PANEL'
-                    data-track-name='OPEN_CONTEXT_MENU'
-                    data-track-metadata={JSON.stringify({ conversationId: derivedConversationId })}
-                  >
-                    <Link2 size={18} />
-                  </Button>
-                </Tooltip>
-              )}
-              {!isHeaderCompact && !isStandaloneWindow() && (
+            <div className='flex gap-x-2 shrink-0'>
+              {/* Ask AI */}
+              {!isStandaloneWindow() && (
                 <Tooltip content='Ask AI Conversation'>
                   <Button
                     size='sm'
-                    variant='outline'
+                    variant='ghost'
                     onClick={() => {
                       xyneAIActor.send({
                         type: 'OPEN',
@@ -1096,39 +960,12 @@ export const ThreadMessages = ({
                         threadInfo,
                       });
                     }}
-                    className='flex items-center justify-between gap-2 border rounded-lg !p-2 transition-all duration-100 text-foreground bg-background border-[border]'
+                    className='h-7 w-7 rounded-lg'
                   >
                     <XyneAIStar />
                   </Button>
                 </Tooltip>
               )}
-              {!isHeaderCompact && isElectronApp() && !isStandaloneWindow() && (
-                <Tooltip content='Open in new window'>
-                  <Button
-                    className='p-2 border border-border rounded-lg h-8 w-8'
-                    variant='ghost'
-                    size='sm'
-                    onClick={openInNewWindow}
-                    aria-label='Open in new window'
-                  >
-                    <ExternalLink size={20} />
-                  </Button>
-                </Tooltip>
-              )}
-              {!isHeaderCompact && (
-                <Tooltip content='Copy Ticket Link'>
-                  <Button
-                    className='p-2 border border-border rounded-lg h-8 w-8'
-                    variant='ghost'
-                    size='sm'
-                    onClick={handleCopyTicketViewLink}
-                    aria-label='Copy Ticket'
-                  >
-                    <LinkIcon size={20} />
-                  </Button>
-                </Tooltip>
-              )}
-              {isHeaderCompact && <CompactActionsMenu items={ticketCompactMenuItems} />}
               {/* Initiate Call Button */}
               {derivedConversationId && (
                 <ThreadCallButton
@@ -1140,16 +977,74 @@ export const ThreadMessages = ({
                   trackMetadata={{ channelId: channel?.id, conversationId: derivedConversationId }}
                 />
               )}
+              {/* Overflow menu */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    className='flex items-center justify-center p-[8px] rounded-[8px] size-[28px] hover:bg-accent transition-colors text-foreground shrink-0'
+                    title='More'
+                  >
+                    <ThreeDotsMenuVertical size={16} className='opacity-60' />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align='end'
+                  onCloseAutoFocus={e => e.preventDefault()}
+                  className='min-w-[180px]'
+                >
+                  {derivedConversationId && (
+                    <DropdownMenuItem className='p-0' onSelect={e => e.preventDefault()}>
+                      <ConversationSubscription
+                        conversationId={derivedConversationId}
+                        {...(conversation && { conversation })}
+                        variant='dropdown'
+                        menuOpen
+                        className='px-2 py-1.5'
+                      />
+                    </DropdownMenuItem>
+                  )}
+                  {!isMobile && (
+                    <DropdownMenuItem className='gap-2' onClick={openTicketDetailsExpandedView}>
+                      <MaximizeTwoArrow size={16} className='shrink-0' />
+                      <span className='flex-1'>Expand view</span>
+                    </DropdownMenuItem>
+                  )}
+                  {!isMobile && !channel?.isArchived && (
+                    <DropdownMenuItem
+                      className='gap-2'
+                      onClick={handleAddContextClick}
+                      data-track-category='THREAD_PANEL'
+                      data-track-name='OPEN_CONTEXT_MENU'
+                      data-track-metadata={JSON.stringify({
+                        conversationId: derivedConversationId,
+                      })}
+                    >
+                      <LinkHorizontal size={16} className='shrink-0' />
+                      <span className='flex-1'>Add context to thread</span>
+                    </DropdownMenuItem>
+                  )}
+                  {isElectronApp() && !isStandaloneWindow() && (
+                    <DropdownMenuItem className='gap-2' onClick={openInNewWindow}>
+                      <ExternalLinkSquare size={16} className='shrink-0' />
+                      <span className='flex-1'>Open in new window</span>
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuItem className='gap-2' onClick={handleCopyTicketViewLink}>
+                    <LinkSlant size={16} className='shrink-0' />
+                    <span className='flex-1'>Copy ticket link</span>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
               {!isThreadsRoute && (
                 <Tooltip content='Close'>
                   <Button
                     onClick={resolvedOnClose ?? handleCloseTicketDetailsThread}
-                    className='p-2 border border-border rounded-lg h-8 w-8'
+                    className='h-7 w-7 rounded-lg'
                     variant='ghost'
                     size='sm'
                     aria-label='Close Thread Panel'
                   >
-                    <X size={20} />
+                    <MultipleCrossCancelDefault size={16} />
                   </Button>
                 </Tooltip>
               )}
@@ -1165,31 +1060,23 @@ export const ThreadMessages = ({
             className='flex-1 flex flex-col h-full overflow-hidden'
           >
             {/* Header with title, close button, and tabs */}
-            <div className='w-full pb-0 '>
-              <div className='relative flex justify-between w-full border-b border-border'>
+            <div className='w-full pl-2 pr-3 pt-3 pb-3'>
+              <div className='relative flex justify-between w-full'>
                 {/* Tabs List */}
                 <div className='overflow-x-auto no-scrollbar'>
-                  <Tabs.List className='flex items-center justify-start'>
+                  <Tabs.List className='flex items-center justify-start gap-0.5 px-0.5'>
                     {tabs.map(tab => (
                       <Tabs.Trigger asChild key={tab.value} value={tab.value}>
                         <button
                           className={cn(
-                            'px-3 py-2 flex items-center justify-start gap-2 transition-all duration-100 cursor-pointer',
+                            'flex items-center justify-center gap-2 px-2.5 py-1.5 rounded-lg whitespace-nowrap transition-colors duration-100 cursor-pointer',
                             activeTab === tab.value
-                              ? 'border-b-2 border-primary'
-                              : 'border-b-2 border-transparent',
+                              ? 'bg-muted text-foreground'
+                              : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
                           )}
                         >
-                          {tab.icon && (
-                            <span
-                              className={`${activeTab === tab.value ? 'text-primary' : 'text-muted-foreground'}`}
-                            >
-                              {tab.icon}
-                            </span>
-                          )}
-                          <span
-                            className={`text-sm font-medium ${activeTab === tab.value ? 'text-primary' : 'text-muted-foreground'}`}
-                          >
+                          {tab.icon && <span className='shrink-0'>{tab.icon}</span>}
+                          <span className='text-sm font-medium tracking-[-0.28px]'>
                             {tab.label}
                           </span>
                           {tab.count !== undefined && tab.count > 0 && (
@@ -1239,7 +1126,7 @@ export const ThreadMessages = ({
             >
               {isMessagesLoaded && !conversation && !!derivedConversationId ? (
                 <div className='flex flex-col items-center justify-center flex-1 text-muted-foreground'>
-                  <MessageCircle size={48} className='mb-2 opacity-40' />
+                  <ChatDefault size={48} className='mb-2 opacity-40' />
                   <p className='text-sm'>No thread messages</p>
                 </div>
               ) : (
@@ -1262,7 +1149,7 @@ export const ThreadMessages = ({
 
                   {/* ChatInput at the bottom - only show if user is a member */}
                   {isUserMember || channel?.isArchived ? (
-                    <div className='px-4 pb-4 bg-background'>
+                    <div className='px-3 pb-3 bg-background'>
                       <ChatInput
                         ref={inputRef}
                         channelId={derivedChannelId}
@@ -1285,7 +1172,7 @@ export const ThreadMessages = ({
             {/* Details Tab Content */}
             <Tabs.Content
               value='details'
-              className='flex-1 bg-background overflow-auto data-[state=inactive]:hidden'
+              className='flex-1 min-h-0 bg-background overflow-hidden data-[state=inactive]:hidden'
             >
               <TicketDetails ticketId={derivedTicketId} onFillRCA={() => setActiveTab('rca')} />
             </Tabs.Content>
@@ -1329,324 +1216,162 @@ export const ThreadMessages = ({
           <>
             {/* Header with tabs for simpleView, or simple header for regular view */}
             {!hideHeader && (
-              <div
-                className={cn(
-                  'flex items-start self-stretch bg-background border-b border-border',
-                  isActivityRightPanel ? 'h-[107px]' : 'h-14',
-                )}
-              >
-                <div ref={headerRowRef} className='h-14 p-4 flex items-center gap-2 w-full'>
+              <div className='flex justify-between items-center w-full pl-2 pr-3 pt-3 gap-4'>
+                {/* Title */}
+                <div className='flex items-center gap-2 min-w-0 flex-1'>
                   {isStandaloneWindow() && (
                     <Tooltip content='Back to channel'>
                       <Button
                         variant='ghost'
                         size='sm'
-                        className='text-muted-foreground hover:text-foreground hover:bg-accent transition-all duration-100'
+                        className='h-7 w-7 rounded-lg text-muted-foreground shrink-0'
                         onClick={() => void navigate(`/newWindow/chat/dir/${derivedChannelId}`)}
                         aria-label='Back to channel'
                       >
-                        <ArrowLeft size={18} />
+                        <ArrowLeft size={16} />
                       </Button>
                     </Tooltip>
                   )}
                   {/* Thread indicator — shown when summarizing, or in focused mode so the
                       header reads like Slack's "↳ Thread #channel". */}
                   {!simpleView && (isThreadSummaryActive || isFocusedThread) && (
-                    <CornerDownRight className='w-4 h-4 text-muted-foreground' />
+                    <ArrowTurnDownRight size={16} className='text-muted-foreground shrink-0' />
+                  )}
+                  <h3 className='text-[17px] font-semibold whitespace-nowrap overflow-hidden text-ellipsis min-w-0 text-foreground'>
+                    {simpleView
+                      ? 'Thread'
+                      : isTicketThread && ticket
+                        ? ticket.title
+                        : 'Thread message'}
+                  </h3>
+                  {!simpleView && focusedChannelBreadcrumb}
+                </div>
+
+                {/* Actions */}
+                <div className='flex items-center gap-1 shrink-0'>
+                  {/* Ask AI */}
+                  {!isStandaloneWindow() && (
+                    <Tooltip content='Ask AI Conversation'>
+                      <Button
+                        size='sm'
+                        variant='ghost'
+                        onClick={() => {
+                          xyneAIActor.send({
+                            type: 'OPEN',
+                            channelId: derivedChannelId,
+                            threadInfo,
+                          });
+                        }}
+                        className='h-7 w-7 rounded-lg'
+                      >
+                        <XyneAIStar />
+                      </Button>
+                    </Tooltip>
                   )}
 
-                  {simpleView ? (
-                    /* Simple View: Header matching regular view style */
-                    <>
-                      <h3 className='flex-1 font-semibold text-foreground'>Thread</h3>
+                  {/* Initiate Call Button */}
+                  {derivedConversationId && !channel?.isArchived && (
+                    <ThreadCallButton
+                      onStartCall={handleInitiateCall}
+                      onScheduleCall={() => setIsScheduleCallModalOpen(true)}
+                      hasActiveCall={hasActiveCallForConversation}
+                      trackCategory='THREAD_PANEL'
+                      trackName='INITIATE_CALL_FROM_THREAD'
+                      trackMetadata={{
+                        channelId: channel?.id,
+                        conversationId: derivedConversationId,
+                      }}
+                    />
+                  )}
 
-                      {/* Action Buttons */}
-                      <div className='flex items-center gap-2'>
-                        {/* Subscription Button */}
-                        {derivedConversationId && (
-                          <Tooltip content='Toggle notification subscription'>
-                            <div className='p-2 border border-border rounded-lg h-8 w-8'>
-                              <ConversationSubscription
-                                conversationId={derivedConversationId}
-                                {...(conversation && { conversation })}
-                                variant='icon-only'
-                                className='flex items-center justify-center'
-                              />
-                            </div>
-                          </Tooltip>
-                        )}
-                        {/* Add Context Button */}
-                        {!isMobile && !channel?.isArchived && (
-                          <Tooltip content='Add context to thread'>
-                            <Button
-                              variant='ghost'
-                              size='sm'
-                              className='p-2 border border-border rounded-lg h-8 w-8'
-                              onClick={handleAddContextClick}
-                              aria-label='Add context to thread'
-                              data-track-category='THREAD_PANEL'
-                              data-track-name='OPEN_CONTEXT_MENU'
-                              data-track-metadata={JSON.stringify({
-                                conversationId: derivedConversationId,
-                              })}
-                            >
-                              <Link2 size={18} />
-                            </Button>
-                          </Tooltip>
-                        )}
-                        {/* Ask AI Button */}
-                        {!isStandaloneWindow() && (
-                          <Tooltip content='Ask AI Conversation'>
-                            <Button
-                              variant='outline'
-                              onClick={() => {
-                                xyneAIActor.send({
-                                  type: 'OPEN',
-                                  channelId: derivedChannelId,
-                                  threadInfo,
-                                });
-                              }}
-                              className='flex items-center justify-between gap-2 border rounded-lg !p-2 transition-all duration-100 text-primary bg-background border-border'
-                            >
-                              <XyneAIStar />
-                            </Button>
-                          </Tooltip>
-                        )}
-                        {isElectronApp() && !isStandaloneWindow() && (
-                          <Tooltip content='Open in new window'>
-                            <Button
-                              className='p-2 border border-border rounded-lg h-8 w-8'
-                              variant='ghost'
-                              size='sm'
-                              onClick={openInNewWindow}
-                              aria-label='Open in new window'
-                            >
-                              <ExternalLink size={20} />
-                            </Button>
-                          </Tooltip>
-                        )}
-
-                        {/* Initiate Call Button */}
-                        {derivedConversationId && !channel?.isArchived && (
-                          <ThreadCallButton
-                            onStartCall={handleInitiateCall}
-                            onScheduleCall={() => setIsScheduleCallModalOpen(true)}
-                            hasActiveCall={hasActiveCallForConversation}
-                            callTooltip='Start call'
-                            trackCategory='THREAD_PANEL'
-                            trackName='INITIATE_CALL_FROM_THREAD'
-                            trackMetadata={{
-                              channelId: channel?.id,
-                              conversationId: derivedConversationId,
-                            }}
+                  {/* Overflow menu */}
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        className='flex items-center justify-center p-[8px] rounded-[8px] size-[28px] hover:bg-accent transition-colors text-foreground shrink-0'
+                        title='More'
+                      >
+                        <ThreeDotsMenuVertical size={16} className='opacity-60' />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent
+                      align='end'
+                      onCloseAutoFocus={e => e.preventDefault()}
+                      className='min-w-[180px]'
+                    >
+                      {derivedConversationId && (
+                        <DropdownMenuItem className='p-0' onSelect={e => e.preventDefault()}>
+                          <ConversationSubscription
+                            conversationId={derivedConversationId}
+                            {...(conversation && { conversation })}
+                            variant='dropdown'
+                            menuOpen
+                            className='px-2 py-1.5'
                           />
-                        )}
+                        </DropdownMenuItem>
+                      )}
+                      {!isMobile && !channel?.isArchived && (
+                        <DropdownMenuItem
+                          className='gap-2'
+                          onClick={handleAddContextClick}
+                          data-track-category='THREAD_PANEL'
+                          data-track-name='OPEN_CONTEXT_MENU'
+                          data-track-metadata={JSON.stringify({
+                            conversationId: derivedConversationId,
+                          })}
+                        >
+                          <LinkHorizontal size={16} className='shrink-0' />
+                          <span className='flex-1'>Add context to thread</span>
+                        </DropdownMenuItem>
+                      )}
+                      {isElectronApp() && !isStandaloneWindow() && (
+                        <DropdownMenuItem className='gap-2' onClick={openInNewWindow}>
+                          <ExternalLinkSquare size={16} className='shrink-0' />
+                          <span className='flex-1'>Open in new window</span>
+                        </DropdownMenuItem>
+                      )}
+                      {channel?.projectId && !hasTicketInMessages && !channel?.isArchived && (
+                        <DropdownMenuItem
+                          className='gap-2'
+                          onClick={handleCreateTicket}
+                          data-testid='thread-create-ticket-button'
+                          data-track-category='THREAD_PANEL'
+                          data-track-name='CREATE_TICKET_FROM_THREAD'
+                          data-track-metadata={JSON.stringify({
+                            channelId: channel?.id,
+                            projectId: channel?.projectId,
+                          })}
+                        >
+                          <TicketToken size={16} className='shrink-0' />
+                          <span className='flex-1'>Create ticket</span>
+                        </DropdownMenuItem>
+                      )}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
 
-                        {/* Create Ticket Button */}
-                        {channel?.projectId &&
-                          !hasTicketInMessages &&
-                          !channel?.isArchived &&
-                          (() => {
-                            const buttonContent = (
-                              <Button
-                                variant='ghost'
-                                className={cn(
-                                  isMobile
-                                    ? 'p-2 border border-border rounded-lg h-8 w-8'
-                                    : 'px-3 py-1.5 text-foreground hover:text-foreground hover:bg-accent transition-colors duration-200 flex items-center gap-2 rounded-lg',
-                                )}
-                                size='sm'
-                                onClick={handleCreateTicket}
-                                data-testid='thread-create-ticket-button'
-                                data-track-category='THREAD_PANEL'
-                                data-track-name='CREATE_TICKET_FROM_THREAD'
-                                data-track-metadata={JSON.stringify({
-                                  channelId: channel?.id,
-                                  projectId: channel?.projectId,
-                                })}
-                              >
-                                <Ticket size={isMobile ? 20 : 18} />
-                                {!isMobile && (
-                                  <span className='text-sm font-medium'>Create Ticket</span>
-                                )}
-                              </Button>
-                            );
-
-                            return isMobile ? (
-                              <Tooltip content='Create ticket'>{buttonContent}</Tooltip>
-                            ) : (
-                              buttonContent
-                            );
-                          })()}
-                        {/* Close Button */}
-                        {resolvedOnClose && (
-                          <Button
-                            variant='ghost'
-                            size='sm'
-                            onClick={resolvedOnClose}
-                            aria-label='Close thread panel'
-                          >
-                            <X size={20} />
-                          </Button>
-                        )}
-                      </div>
-                    </>
-                  ) : (
-                    /* Regular View: Title and action buttons */
-                    <>
-                      <div ref={headerTitleRef} className='flex items-center gap-2 flex-1 min-w-0'>
-                        <h3 className='font-semibold text-foreground whitespace-nowrap shrink-0'>
-                          {isTicketThread && ticket ? ticket.title : 'Thread message'}
-                        </h3>
-                        {focusedChannelBreadcrumb}
-                      </div>
-                      <div ref={headerActionsRef} className='flex items-center gap-2 shrink-0'>
-                        {!isHeaderCompact && (
-                          <Tooltip content='Toggle notification subscription'>
-                            <div className='p-2 border border-[border] rounded-lg h-8 w-8'>
-                              <ConversationSubscription
-                                conversationId={derivedConversationId}
-                                {...(conversation && { conversation })}
-                                variant='icon-only'
-                                className='flex items-center justify-center'
-                              />
-                            </div>
-                          </Tooltip>
-                        )}
-
-                        {/* Action Buttons */}
-                        {!underTicketView && (
-                          <div className='flex items-center gap-2 shrink-0'>
-                            {/* Add Context Button */}
-                            {!isHeaderCompact && !isMobile && !channel?.isArchived && (
-                              <Tooltip content='Add context to thread'>
-                                <Button
-                                  variant='ghost'
-                                  size='sm'
-                                  className='p-2 border border-[border] rounded-lg h-8 w-8'
-                                  onClick={handleAddContextClick}
-                                  aria-label='Add context to thread'
-                                  data-track-category='THREAD_PANEL'
-                                  data-track-name='OPEN_CONTEXT_MENU'
-                                  data-track-metadata={JSON.stringify({
-                                    conversationId: derivedConversationId,
-                                  })}
-                                >
-                                  <Link2 size={18} />
-                                </Button>
-                              </Tooltip>
-                            )}
-                            {/* Ask AI Button */}
-                            {!isHeaderCompact && !isStandaloneWindow() && (
-                              <Tooltip content='Ask AI Conversation'>
-                                <Button
-                                  size='sm'
-                                  variant='outline'
-                                  onClick={(): void => {
-                                    xyneAIActor.send({
-                                      type: 'OPEN',
-                                      channelId: derivedChannelId,
-                                      threadInfo,
-                                    });
-                                  }}
-                                  className='flex items-center justify-between gap-2 border rounded-lg !p-2 transition-all duration-100 text-foreground bg-background border-[border]'
-                                >
-                                  <XyneAIStar />
-                                </Button>
-                              </Tooltip>
-                            )}
-                            {!isHeaderCompact && isElectronApp() && !isStandaloneWindow() && (
-                              <Tooltip content='Open in new window'>
-                                <Button
-                                  className='p-2 border border-[border] rounded-lg h-8 w-8'
-                                  variant='ghost'
-                                  size='sm'
-                                  onClick={openInNewWindow}
-                                  aria-label='Open in new window'
-                                >
-                                  <ExternalLink size={20} />
-                                </Button>
-                              </Tooltip>
-                            )}
-                            {isHeaderCompact && (
-                              <CompactActionsMenu items={regularCompactMenuItems} />
-                            )}
-
-                            {/* Initiate Call Button */}
-                            {derivedConversationId && !channel?.isArchived && (
-                              <ThreadCallButton
-                                onStartCall={handleInitiateCall}
-                                onScheduleCall={() => setIsScheduleCallModalOpen(true)}
-                                hasActiveCall={hasActiveCallForConversation}
-                                trackCategory='THREAD_PANEL'
-                                trackName='INITIATE_CALL_FROM_THREAD'
-                                trackMetadata={{
-                                  channelId: channel?.id,
-                                  conversationId: derivedConversationId,
-                                }}
-                              />
-                            )}
-
-                            {/* Create Ticket Button */}
-                            {!isHeaderCompact &&
-                              channel?.projectId &&
-                              !hasTicketInMessages &&
-                              !channel?.isArchived && (
-                                <Tooltip content='Create ticket'>
-                                  <Button
-                                    variant='ghost'
-                                    size='sm'
-                                    className='p-2 border border-[border] rounded-lg h-8 w-8'
-                                    onClick={handleCreateTicket}
-                                    data-testid='thread-create-ticket-button'
-                                    data-track-category='THREAD_PANEL'
-                                    data-track-name='CREATE_TICKET_FROM_THREAD'
-                                    data-track-metadata={JSON.stringify({
-                                      channelId: channel?.id,
-                                      projectId: channel?.projectId,
-                                    })}
-                                  >
-                                    <Ticket size={20} />
-                                  </Button>
-                                </Tooltip>
-                              )}
-
-                            {/* Close Button */}
-                            {resolvedOnClose ? (
-                              <Button
-                                variant='ghost'
-                                size='sm'
-                                className='p-2 border border-[border] rounded-lg h-8 w-8'
-                                onClick={resolvedOnClose}
-                                aria-label='Close thread panel'
-                              >
-                                <X size={20} />
-                              </Button>
-                            ) : (
-                              <Button
-                                variant='ghost'
-                                size='sm'
-                                className='p-2 border border-[border] rounded-lg h-8 w-8'
-                                onClick={handleCloseTicketDetailsThread}
-                                aria-label='Close thread panel'
-                                data-track-category='THREAD_PANEL'
-                                data-track-name='CLOSE_THREAD_PANEL'
-                                data-track-metadata={JSON.stringify({ conversationId })}
-                              >
-                                <X size={20} />
-                              </Button>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </>
+                  {/* Close Button */}
+                  {(!simpleView || resolvedOnClose) && (
+                    <Tooltip content='Close'>
+                      <Button
+                        variant='ghost'
+                        size='sm'
+                        className='h-7 w-7 rounded-lg'
+                        onClick={resolvedOnClose ?? handleCloseTicketDetailsThread}
+                        aria-label='Close thread panel'
+                        data-track-category='THREAD_PANEL'
+                        data-track-name='CLOSE_THREAD_PANEL'
+                        data-track-metadata={JSON.stringify({ conversationId })}
+                      >
+                        <MultipleCrossCancelDefault size={16} />
+                      </Button>
+                    </Tooltip>
                   )}
                 </div>
               </div>
             )}
             {isMessagesLoaded && !conversation && !!derivedConversationId ? (
               <div className='flex flex-col items-center justify-center flex-1 text-muted-foreground'>
-                <MessageCircle size={48} className='mb-2 opacity-40' />
+                <ChatDefault size={48} className='mb-2 opacity-40' />
                 <p className='text-sm'>No thread messages</p>
               </div>
             ) : (
@@ -1669,7 +1394,7 @@ export const ThreadMessages = ({
 
                 {/* ChatInput at the bottom - only show if user is a member */}
                 {isUserMember || channel?.isArchived ? (
-                  <div className='px-4 pb-4 bg-background'>
+                  <div className='px-3 pb-3 bg-background'>
                     <ChatInput
                       // eslint-disable-next-line jsx-a11y/no-autofocus
                       autoFocus={previewCardMode || skipInputAutoFocus ? null : 'end'}

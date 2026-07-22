@@ -4,17 +4,16 @@ import { useDroppable } from '@dnd-kit/core';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import {
-  ArrowUpDown,
-  Check,
+  ChevronSortVertical,
+  CheckTickSingle,
   ChevronRight,
   FolderPlus,
-  GripVertical,
-  ListChecks,
-  ListTree,
-  MoreVertical,
-  Pencil,
-  Trash2,
-} from 'lucide-react';
+  ListCheck,
+  ListDefault,
+  ThreeDotsMenuVertical,
+  PencilEdit,
+  DeleteDustbin02,
+} from '@xyne/icons';
 import { ChannelSortOrder, type ChannelSection } from '@xyne/shared';
 import type { VisibleChannel } from '../../../machines/stateMachine';
 import {
@@ -97,39 +96,30 @@ const SortableSection = ({
       value={section.id}
       className='group/item'
     >
-      {/* Only the label is the Accordion.Trigger; grip + menu are siblings (no nested button). */}
+      {/* The header itself is the drag handle: a click toggles the section, a
+          drag (>5px, per the PointerSensor constraint) reorders it. */}
       <div className='group relative flex items-center justify-between gap-2'>
-        <button
-          type='button'
-          {...attributes}
-          {...listeners}
-          aria-label='Drag to reorder section'
-          data-track-category='CHAT_SIDEBAR'
-          data-track-name='DRAG_SECTION'
-          className='absolute -left-3 top-1/2 -translate-y-1/2 shrink-0 flex items-center cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-100 transition-opacity text-sidebar-secondary-foreground'
-        >
-          <GripVertical className='size-3.5' />
-        </button>
         <Accordion.Trigger asChild>
-          <button className='group/trigger flex items-center justify-start gap-2 flex-1 min-w-0 h-8 text-sidebar-secondary-foreground text-xs font-semibold px-1'>
+          <button
+            {...attributes}
+            {...listeners}
+            className='group/trigger flex items-center justify-start gap-2 flex-1 min-w-0 h-7 text-sidebar-foreground text-xs font-semibold px-3 cursor-grab active:cursor-grabbing'
+          >
             <span className='size-4 flex items-center justify-center shrink-0'>
               <span className='group-hover:hidden'>
-                {section.emoji ? (
-                  renderEmoji(section.emoji, 'size-4')
-                ) : (
-                  <ListTree className='size-3.5' />
-                )}
+                {section.emoji ? renderEmoji(section.emoji, 'size-4') : <ListDefault size={14} />}
               </span>
               <ChevronRight
                 strokeWidth={2.33}
-                className='size-3 hidden group-hover:block transition-transform duration-200 group-data-[state=open]/trigger:rotate-90'
+                size={12}
+                className='hidden group-hover:block transition-transform duration-200 group-data-[state=open]/trigger:rotate-90'
               />
             </span>
             <span className='text-left truncate block'>{section.name}</span>
           </button>
         </Accordion.Trigger>
         {sectionUnreadCount > 0 && (
-          <Badge className='order-last mr-0.5 hidden group-data-[state=closed]/item:inline-flex font-mono h-[18px] shrink-0 bg-sidebar-badge-accent px-1.5 text-sidebar-badge-accent-foreground'>
+          <Badge className='order-last mr-0.5 hidden group-data-[state=closed]/item:inline-flex font-mono h-[18px] shrink-0 bg-sidebar-primary border border-sidebar-accent-ring px-1.5 text-sidebar-primary-foreground'>
             {sectionUnreadCount > 9 ? '9+' : sectionUnreadCount}
           </Badge>
         )}
@@ -137,14 +127,14 @@ const SortableSection = ({
           <DropdownMenuTrigger asChild>
             <button
               className={cn(
-                'flex items-center justify-center p-1 mr-0.5 rounded-md hover:bg-sidebar-item-hover shrink-0 text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground transition-opacity ease-in-out duration-300',
+                'flex items-center justify-center p-1 mr-0.5 rounded-md hover:bg-sidebar-accent shrink-0 text-sidebar-foreground hover:text-sidebar-accent-foreground transition-opacity ease-in-out duration-300',
                 menuOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
               )}
               aria-label='Section options'
               data-track-category='CHAT_SIDEBAR'
               data-track-name='SECTION_OPTIONS_MENU'
             >
-              <MoreVertical strokeWidth={2.33} className='size-3.5 shrink-0' />
+              <ThreeDotsMenuVertical strokeWidth={2.33} size={14} className='shrink-0' />
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent
@@ -152,7 +142,7 @@ const SortableSection = ({
             onCloseAutoFocus={e => e.preventDefault()}
             className='min-w-[180px]'
           >
-            <div className='flex items-center gap-1 px-2 py-1.5 text-xs font-semibold text-sidebar-secondary-foreground'>
+            <div className='flex items-center gap-1 px-2 py-1.5 text-xs font-semibold text-sidebar-foreground'>
               {section.emoji && renderEmoji(section.emoji, 'size-4')}
               <span className='truncate'>{section.name}</span>
             </div>
@@ -164,7 +154,7 @@ const SortableSection = ({
                 onRename(section);
               }}
             >
-              <Pencil className='size-3.5 shrink-0' />
+              <PencilEdit size={14} className='shrink-0' />
               <span className='flex-1'>Rename section</span>
             </DropdownMenuItem>
             <DropdownMenuItem
@@ -174,12 +164,12 @@ const SortableSection = ({
                 onManageChannels(section);
               }}
             >
-              <ListChecks className='size-3.5 shrink-0' />
+              <ListCheck size={14} className='shrink-0' />
               <span className='flex-1'>Manage channels</span>
             </DropdownMenuItem>
             <DropdownMenuSub>
               <DropdownMenuSubTrigger className='gap-2'>
-                <ArrowUpDown className='size-3.5 shrink-0' />
+                <ChevronSortVertical size={14} className='shrink-0' />
                 <span className='flex-1'>Sort channels</span>
               </DropdownMenuSubTrigger>
               <DropdownMenuSubContent>
@@ -193,22 +183,13 @@ const SortableSection = ({
                     }}
                   >
                     <span className='flex-1'>{opt.label}</span>
-                    {currentSortOrder === opt.value && <Check className='size-3.5 shrink-0' />}
+                    {currentSortOrder === opt.value && (
+                      <CheckTickSingle size={14} className='shrink-0' />
+                    )}
                   </DropdownMenuItem>
                 ))}
               </DropdownMenuSubContent>
             </DropdownMenuSub>
-            <DropdownMenuItem
-              className='gap-2 text-destructive focus:text-destructive'
-              onClick={e => {
-                e.stopPropagation();
-                onDelete(section);
-              }}
-            >
-              <Trash2 className='size-3.5 shrink-0' />
-              <span className='flex-1'>Delete section</span>
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
             <DropdownMenuItem
               className='gap-2'
               onClick={e => {
@@ -216,8 +197,19 @@ const SortableSection = ({
                 onCreateSection();
               }}
             >
-              <FolderPlus className='size-3.5 shrink-0' />
+              <FolderPlus size={14} className='shrink-0' />
               <span className='flex-1'>New section</span>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              className='gap-2 text-destructive focus:text-destructive'
+              onClick={e => {
+                e.stopPropagation();
+                onDelete(section);
+              }}
+            >
+              <DeleteDustbin02 size={14} className='shrink-0' />
+              <span className='flex-1'>Delete section</span>
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -225,9 +217,7 @@ const SortableSection = ({
       <Accordion.Content>
         <div className='min-h-[4px]'>
           {channels.length === 0 ? (
-            <div className='px-2 py-1 text-xs text-sidebar-secondary-foreground/60'>
-              No channels yet
-            </div>
+            <div className='px-2 py-1 text-xs text-sidebar-foreground/60'>No channels yet</div>
           ) : (
             channels.map(channel => (
               <SortableChannelItem

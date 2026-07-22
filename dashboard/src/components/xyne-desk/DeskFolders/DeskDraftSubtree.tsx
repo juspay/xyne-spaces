@@ -19,16 +19,16 @@ export const DeskDraftSubtree = ({
   onOpenUserSent,
 }: DeskDraftSubtreeProps): ReactElement => {
   return (
-    <div className='flex flex-col gap-0.5'>
+    <div className='flex flex-col'>
       <SubItem
-        icon={<Pencil size={12} className='text-muted-foreground' />}
+        icon={<Pencil size={14} />}
         label='Drafts'
         active={activeFolder === 'userDrafts'}
         onClick={onOpenUserDrafts}
         trackName='OpenDeskUserDrafts'
       />
       <SubItem
-        icon={<Send size={12} className='text-muted-foreground' />}
+        icon={<Send size={14} />}
         label='Sent'
         active={activeFolder === 'userSent'}
         onClick={onOpenUserSent}
@@ -51,15 +51,15 @@ const SubItem = ({ icon, label, active, onClick, trackName }: SubItemProps): Rea
     type='button'
     onClick={onClick}
     className={cn(
-      'flex items-center gap-1.5 h-7 rounded-md px-1.5 cursor-pointer transition-colors text-left w-full',
+      'flex items-center gap-3 h-9 rounded-[10px] px-3 border border-transparent cursor-pointer transition-colors text-left w-full text-sm font-medium tracking-[-0.14px]',
       active
-        ? 'text-sidebar-primary-foreground font-medium bg-sidebar-item-active'
-        : 'text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground hover:bg-sidebar-item-hover',
+        ? 'text-sidebar-accent-foreground bg-sidebar-accent border-sidebar-border'
+        : 'text-sidebar-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent hover:border-sidebar-border',
     )}
     data-track-category='Support'
     data-track-name={trackName}
   >
-    <span className='flex items-center flex-shrink-0'>{icon}</span>
-    <span className='text-[13px] flex-1 truncate min-w-0'>{label}</span>
+    <span className='size-4 flex items-center justify-center shrink-0'>{icon}</span>
+    <span className='flex-1 truncate min-w-0'>{label}</span>
   </button>
 );

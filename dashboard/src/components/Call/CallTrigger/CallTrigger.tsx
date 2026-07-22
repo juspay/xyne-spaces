@@ -1,8 +1,7 @@
 import React, { ReactElement } from 'react';
-import { PhoneOff } from 'lucide-react';
+import { PhoneDefault, PhoneCancel } from '@xyne/icons';
 import { useCallActions } from '../../../hooks/useCallActions';
 import { cn } from '../../../utils/classNames';
-import HuddleIcon from '../../icons/HuddleIcon';
 import Tooltip from '../../ui/Tooltip';
 import { ChannelScopeType } from '@xyne/shared';
 import { CallConfirmationModal } from '../CallConfirmationModal';
@@ -117,37 +116,38 @@ export const CallTrigger: React.FC<CallTriggerProps> = ({
             targetUserIds,
           })}
           className={cn(
-            'h-full w-8.5 p-2 flex items-center justify-center transition-colors',
-            usesCustomTriggerStyle && 'w-full',
-            'border ',
-            hasActiveCallInChannel && !isUserInCurrentChannelCall && !isMobile
-              ? 'bg-status-success text-background hover:opacity-90 border-status-success'
-              : '',
+            'flex items-center justify-center transition-colors',
+            // Desktop default: matches the other header action buttons (28px ghost)
+            !isMobile && !usesCustomTriggerStyle && 'h-7 w-7 rounded-lg hover:bg-muted',
+            // Desktop custom trigger: keep the bordered pill
+            !isMobile &&
+              usesCustomTriggerStyle &&
+              'h-full w-full p-2 border border-border rounded-lg bg-background hover:bg-muted',
+            // Mobile: floating rounded button
+            isMobile && 'h-full w-8.5 p-2 border',
+            isMobile &&
+              (usesCustomTriggerStyle
+                ? 'w-full rounded-full'
+                : 'p-3 rounded-full border-border bg-background shadow-sm hover:bg-accent'),
+            // Active call in channel (started by someone else): green filled
+            hasActiveCallInChannel &&
+              !isUserInCurrentChannelCall &&
+              !isMobile &&
+              'bg-status-success text-background hover:opacity-90 border border-status-success',
             isAlone || isNotMember ? 'opacity-50 cursor-not-allowed' : '',
-            isMobile
-              ? usesCustomTriggerStyle
-                ? 'rounded-full'
-                : 'p-3 rounded-full border-border bg-background shadow-sm hover:bg-accent'
-              : 'rounded-lg bg-background border-border hover:bg-muted',
             className,
           )}
         >
           {isUserInCurrentChannelCall ? (
-            <PhoneOff
+            <PhoneCancel
+              size={16}
               className={cn(
-                'h-4 w-4',
-                isMobile && 'w-6',
+                isMobile && '!h-6 !w-6',
                 !usesCustomTriggerStyle && isMobile ? 'text-foreground' : 'text-destructive',
               )}
             />
-          ) : hasActiveCallInChannel && !isUserInCurrentChannelCall ? (
-            <HuddleIcon
-              color={
-                !usesCustomTriggerStyle && isMobile ? 'currentColor' : 'hsl(var(--background))'
-              }
-            />
           ) : (
-            <HuddleIcon {...(usesCustomTriggerStyle ? { color: 'currentColor' } : {})} />
+            <PhoneDefault size={16} className={cn(isMobile && '!h-6 !w-6')} />
           )}
         </button>
       </Tooltip>
