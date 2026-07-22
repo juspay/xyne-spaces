@@ -16,6 +16,12 @@ import type { QueryResultType } from '@rocicorp/zero';
 import type { TicketListItem } from './TicketListView.types';
 import { TicketPriority, MailboxState } from '@xyne/shared';
 import type { MailboxFolder } from '../../xyne-desk/DeskFolders/DeskMailboxSidebar';
+import {
+  ticketMatchesDynamicFieldEntries,
+  type DynamicFieldFilterEntry,
+  type DynamicFieldQueryFilter,
+  type FormEntityValueLike,
+} from '../../../utils/board/dynamicFieldFilters';
 
 const PAGE_SIZE = 50;
 
@@ -36,7 +42,9 @@ interface TicketListViewProps {
     userGroups?: string[] | undefined;
     lastEmailAtStart?: number | undefined;
     lastEmailAtEnd?: number | undefined;
+    dynamicFieldFilters?: DynamicFieldQueryFilter[] | undefined;
   };
+  dynamicFieldEntries?: DynamicFieldFilterEntry[] | undefined;
   onTicketClick: (ticket: SupportTicketRow) => void;
   isMember: boolean;
   /**
@@ -73,6 +81,7 @@ export const TicketListView = function TicketListView({
   filter,
   isMember,
   mailboxFolder,
+  dynamicFieldEntries,
   onTicketClick,
   activeTicketId,
   showExtraFields = false,
@@ -99,6 +108,7 @@ export const TicketListView = function TicketListView({
     userGroups,
     lastEmailAtStart,
     lastEmailAtEnd,
+    dynamicFieldFilters,
   } = filter;
 
   const [pageCursors, setPageCursors] = useState<Array<PageCursor | null>>([null]);
@@ -124,6 +134,7 @@ export const TicketListView = function TicketListView({
       // meaningful; Inbox/All Mail are filtered client-side in `filteredAll` below, over an
       // adaptive fetch window so their pages fill correctly after filtering.
       ...(mailboxFolder ? { mailboxFolder } : {}),
+      dynamicFieldFilters,
       limit: fetchLimit,
       userGroups,
       start: pageStart,
@@ -147,6 +158,7 @@ export const TicketListView = function TicketListView({
         g: userGroups ?? null,
         ds: lastEmailAtStart ?? null,
         de: lastEmailAtEnd ?? null,
+        df: dynamicFieldEntries ?? null,
       }),
     [
       channelId,
@@ -159,6 +171,7 @@ export const TicketListView = function TicketListView({
       userGroups,
       lastEmailAtStart,
       lastEmailAtEnd,
+      dynamicFieldEntries,
     ],
   );
 
@@ -220,25 +233,37 @@ export const TicketListView = function TicketListView({
   // unsupported on the Zero client (bug 3438). Spam / Starred are already filtered
   // server-side, so this is a no-op for them.
   const filteredAll = useMemo<SupportTicketRow[]>(() => {
-    if (!mailboxFolder) return allRows;
-    return allRows.filter(t => {
-      const overlay = (t.userMailbox ?? [])[0];
-      const state = overlay?.state ?? MailboxState.INBOX;
-      switch (mailboxFolder) {
-        case 'all':
-          return state === MailboxState.INBOX || state === MailboxState.ARCHIVED;
-        case 'starred':
-          return (
-            !!overlay?.starred && (state === MailboxState.INBOX || state === MailboxState.ARCHIVED)
-          );
-        case 'spam':
-          return state === MailboxState.SPAM;
-        case 'inbox':
-        default:
-          return state === MailboxState.INBOX;
-      }
-    });
-  }, [allRows, mailboxFolder]);
+    let rows = allRows;
+    if (mailboxFolder) {
+      rows = rows.filter(t => {
+        const overlay = (t.userMailbox ?? [])[0];
+        const state = overlay?.state ?? MailboxState.INBOX;
+        switch (mailboxFolder) {
+          case 'all':
+            return state === MailboxState.INBOX || state === MailboxState.ARCHIVED;
+          case 'starred':
+            return (
+              !!overlay?.starred &&
+              (state === MailboxState.INBOX || state === MailboxState.ARCHIVED)
+            );
+          case 'spam':
+            return state === MailboxState.SPAM;
+          case 'inbox':
+          default:
+            return state === MailboxState.INBOX;
+        }
+      });
+    }
+    if (dynamicFieldEntries?.length) {
+      rows = rows.filter(t =>
+        ticketMatchesDynamicFieldEntries(
+          t.formEntityValues as FormEntityValueLike[] | undefined,
+          dynamicFieldEntries,
+        ),
+      );
+    }
+    return rows;
+  }, [allRows, mailboxFolder, dynamicFieldEntries]);
 
   // Paginate over the FILTERED rows: render one PAGE_SIZE window; a (PAGE_SIZE+1)th filtered
   // row is the "next page exists" sentinel (mirrors the server keyset paging, on filtered rows).
