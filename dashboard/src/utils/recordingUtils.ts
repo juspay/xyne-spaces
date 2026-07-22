@@ -6,24 +6,21 @@
 import { logger, Event } from './logger';
 
 /**
- * Format duration in milliseconds to MM:SS format
+ * Format duration in milliseconds to MM:SS or HH:MM:SS format
  * Used for recording duration display
  * @param ms - Duration in milliseconds or null
- * @returns Formatted string like "0:19" or "12:34"
+ * @returns Formatted string like "00:19", "12:34", or "01:12:34"
  */
 export const formatRecordingDuration = (ms: number | null): string => {
   if (!ms) return 'N/A';
-  const seconds = Math.floor(ms / 1000);
-  const minutes = Math.floor(seconds / 60);
-  const remainingSeconds = seconds % 60;
-  return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+  return formatElapsedTime(ms);
 };
 
 /**
  * Format elapsed time for recording timer (HH:MM:SS or MM:SS)
  * Used for live recording timer display
  * @param ms - Elapsed time in milliseconds
- * @returns Formatted string like "1:23:45" or "12:34"
+ * @returns Formatted string like "01:23:45" or "12:34"
  */
 export const formatElapsedTime = (ms: number): string => {
   const totalSeconds = Math.floor(ms / 1000);
@@ -32,7 +29,7 @@ export const formatElapsedTime = (ms: number): string => {
   const seconds = totalSeconds % 60;
 
   if (hours > 0) {
-    return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
   }
   return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
 };

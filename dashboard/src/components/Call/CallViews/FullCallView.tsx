@@ -39,6 +39,7 @@ import { CallWhiteboardView } from '../CallWhiteboard';
 import { useAuth } from '../../../hooks/useAuth';
 import { useTelepresenceEnabled } from '../useTelepresenceEnabled';
 import { PresentationModeOverlay } from '../PresentationMode/PresentationModeOverlay';
+import { formatElapsedTime } from '../../../utils/recordingUtils';
 
 const CALL_PRIVACY_DESCRIPTION = [
   'Xyne AI is active in this call. Active actions and saved artifacts are listed below.',
@@ -208,7 +209,7 @@ export function FullCallView({
     setOptimisticRecording(!!activeRecording);
   }, [activeRecording]);
 
-  // Elapsed recording timer (MM:SS) from the recording's start time.
+  // Elapsed recording timer (MM:SS, then HH:MM:SS after an hour) from the recording's start time.
   const recordingStartedAt = displayActiveRecording?.startedAt ?? null;
   const [recordingElapsed, setRecordingElapsed] = useState('00:00');
   useEffect(() => {
@@ -217,10 +218,7 @@ export function FullCallView({
       return;
     }
     const tick = (): void => {
-      const seconds = Math.max(0, Math.floor((Date.now() - recordingStartedAt) / 1000));
-      const mm = String(Math.floor(seconds / 60)).padStart(2, '0');
-      const ss = String(seconds % 60).padStart(2, '0');
-      setRecordingElapsed(`${mm}:${ss}`);
+      setRecordingElapsed(formatElapsedTime(Math.max(0, Date.now() - recordingStartedAt)));
     };
     tick();
     const interval = setInterval(tick, 1000);
