@@ -1,5 +1,7 @@
-import { Router, Request, Response, NextFunction } from 'express';
+import { Router, Request, Response } from 'express';
+import { AccessType } from '@prisma/client';
 import { authMiddleware } from '@/middleware/auth';
+import { authorize } from '@/middleware/authorize';
 import {
   appPermissionsBackfillService,
   type AppPermissionsBackfillConfig,
@@ -9,9 +11,7 @@ import { ApiResponse } from '@/types/express';
 
 const router = Router();
 
-const requireAuth = (req: Request, res: Response, next: NextFunction) => {
-  authMiddleware.authenticate(req, res, next);
-};
+const appPermissionsBackfillAdminAuth = authorize('XYNE-APPS', AccessType.ADMIN);
 
 /**
  * @route POST /api/admin/app-permissions-backfill
@@ -19,11 +19,12 @@ const requireAuth = (req: Request, res: Response, next: NextFunction) => {
  *        Processes apps in cursor-based batches with a sleep between each batch.
  *        Safe to re-run — skips permissions already present.
  * @body  { batchSize?: number, sleepMs?: number }  (optional, defaults: 50 / 2000)
- * @access Authenticated admin
+ * @access XYNE-APPS Admin only
  */
 router.post(
   '/',
-  requireAuth,
+  authMiddleware.authenticate,
+  appPermissionsBackfillAdminAuth,
   async (req: Request, res: Response): Promise<void> => {
     try {
       const { batchSize, sleepMs } = req.body as Partial<AppPermissionsBackfillConfig>;

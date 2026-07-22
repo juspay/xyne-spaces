@@ -46,9 +46,18 @@ export class UserActivationController {
         return;
       }
 
+      // Scope the operation to the caller's workspace so a USERS-admin cannot
+      // activate/deactivate users belonging to another workspace/tenant.
+      const workspaceId = req.user?.workspaceId;
+      if (!workspaceId) {
+        res.status(401).json({ error: 'Unauthorized', message: 'No workspace in session' });
+        return;
+      }
+
       const result = await userActivationService.bulkUpdateUserStatus(
         userIds,
-        status as UserStatus
+        status as UserStatus,
+        workspaceId
       );
 
       const totalRequested = userIds.length;

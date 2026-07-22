@@ -51,9 +51,11 @@ export class UserActivationService {
    * 1 minute delay between batches
    * @param userIds - Array of user IDs to update
    * @param status - Target status (ACTIVE or INACTIVE)
+   * @param workspaceId - Caller's workspace; all operations are scoped to it so a
+   *                      USERS-admin cannot touch users in other workspaces/tenants
    * @returns Result with successful updates and failures
    */
-  async bulkUpdateUserStatus(userIds: string[], status: UserStatus): Promise<BulkStatusUpdateResult> {
+  async bulkUpdateUserStatus(userIds: string[], status: UserStatus, workspaceId: string): Promise<BulkStatusUpdateResult> {
     const result: BulkStatusUpdateResult = {
       successful: [],
       failed: []
@@ -70,9 +72,12 @@ export class UserActivationService {
       logger.info(`[bulkUpdateUserStatus] Processing batch ${batchNumber}/${batches.length} with ${batch.length} users`);
 
       try {
-        // Step 1: Verify all users in batch exist
+        // Step 1: Verify all users in batch exist AND belong to the caller's
+        // workspace. Scoping the existence check here is the security gate: any id
+        // outside this workspace (or nonexistent) lands in missingUserIds and fails
+        // the batch, so no cross-tenant user is ever mutated below.
         const existingUsers = await this.prisma.user.findMany({
-          where: { id: { in: batch } },
+          where: { id: { in: batch }, workspaceId },
           select: { id: true }
         });
 
@@ -98,7 +103,7 @@ export class UserActivationService {
         // Step 2: All users exist, perform batch update in transaction
         await this.prisma.$transaction(async (tx) => {
           await tx.user.updateMany({
-            where: { id: { in: batch } },
+            where: { id: { in: batch }, workspaceId },
             data: {
               status,
               leftAt: status === UserStatus.INACTIVE ? new Date() : null

@@ -41,6 +41,15 @@ export class InvitationController {
         return;
       }
 
+      // Authorization: the inviter must be an OWNER/ADMIN of the target workspace.
+      // Prevents a plain MEMBER from minting invitations (incl. ADMIN roles) into a
+      // workspace they do not administer. Role/workspace come from the authenticated
+      // session (req.user), same as the admin gates in the auth middleware.
+      if (req.user?.workspaceId !== workspaceId || !['OWNER', 'ADMIN'].includes(req.user?.role as string)) {
+        res.status(403).json({ error: 'Access denied - insufficient permissions' });
+        return;
+      }
+
       // Create the invitation (includes workspace data)
       invitation = await invitationService.createInvitation({
         email: email.trim().toLowerCase(),
