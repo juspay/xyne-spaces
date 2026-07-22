@@ -2,17 +2,17 @@ import { ReactElement } from 'react';
 import { Link } from 'react-router-dom';
 import {
   ArrowLeft,
-  Bell,
-  Inbox,
-  Sparkles,
-  ChartScatter,
-  BookOpen,
-  Phone,
-  Zap,
-  type LucideIcon,
-} from 'lucide-react';
+  NotificationBellOn,
+  InboxDefault,
+  SparkleAi01,
+  BubbleChart,
+  Notebook,
+  PhoneDefault,
+  LightningThunderElectricOn,
+} from '@xyne/icons';
 import { Tooltip } from '../ui/Tooltip/Tooltip';
 import { cn } from '../../utils/classNames';
+import type { PikaIcon } from './navigationConfig';
 
 interface RailContext {
   activeRoute: string;
@@ -21,7 +21,7 @@ interface RailContext {
 interface SupportRailItem {
   key: string;
   label: string;
-  icon: LucideIcon;
+  icon: PikaIcon;
   path: string;
   gatedPath?: string;
   isActive: (ctx: RailContext) => boolean;
@@ -46,35 +46,35 @@ const SUPPORT_RAIL_ITEMS: SupportRailItem[] = [
   {
     key: 'inbox',
     label: 'Inbox',
-    icon: Inbox,
+    icon: InboxDefault,
     path: '/support/all',
     isActive: ctx => ctx.activeRoute === '/support',
   },
   {
     key: 'activity',
     label: 'Activity',
-    icon: Bell,
+    icon: NotificationBellOn,
     path: '/chat/activity',
     isActive: ctx => ctx.activeRoute === '/chat/activity',
   },
   {
     key: 'calls',
     label: 'Calls',
-    icon: Phone,
+    icon: PhoneDefault,
     path: '/calls',
     isActive: ctx => ctx.activeRoute === '/calls',
   },
   {
     key: 'ai-agent',
     label: 'AI Agent',
-    icon: Sparkles,
+    icon: SparkleAi01,
     path: '/ai',
     isActive: ctx => ctx.activeRoute === '/ai',
   },
   {
     key: 'automations',
     label: 'Automations',
-    icon: Zap,
+    icon: LightningThunderElectricOn,
     path: '/automations',
     gatedPath: '/automations',
     isActive: ctx => ctx.activeRoute === '/automations',
@@ -82,7 +82,7 @@ const SUPPORT_RAIL_ITEMS: SupportRailItem[] = [
   {
     key: 'dashboards',
     label: 'Dashboards',
-    icon: ChartScatter,
+    icon: BubbleChart,
     path: '/analytics-dashboard',
     gatedPath: '/analytics',
     isActive: ctx => ctx.activeRoute === '/analytics-dashboard',
@@ -90,7 +90,7 @@ const SUPPORT_RAIL_ITEMS: SupportRailItem[] = [
   {
     key: 'help-center',
     label: 'Help Center',
-    icon: BookOpen,
+    icon: Notebook,
     path: '/knowledge-base',
     gatedPath: '/knowledge-base',
     isActive: ctx => ctx.activeRoute === '/knowledge-base',
@@ -130,14 +130,14 @@ export const SupportRail = ({
           data-testid='support-rail-home'
           data-track-category='App_Sidebar'
           data-track-name='Support_Rail_Back'
-          className='size-8 flex items-center justify-center rounded-lg text-appSidebar-activeForeground transition-colors hover:bg-appSidebar-active/50'
+          className='size-8 flex items-center justify-center rounded-lg text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
         >
           <ArrowLeft size={16} />
         </Link>
       </Tooltip>
 
       {/* Divider between the brand and the sub-nav */}
-      <span aria-hidden='true' className='my-0.5 h-px w-5 bg-sidebar-divider' />
+      <span aria-hidden='true' className='my-0.5 h-px w-5 bg-sidebar-border' />
 
       {/* Support sub-navigation */}
       {items.map(item => {
@@ -157,11 +157,11 @@ export const SupportRail = ({
               className={cn(
                 'size-8 flex items-center justify-center rounded-lg transition-colors',
                 active
-                  ? 'bg-appSidebar-active text-appSidebar-activeIcon'
-                  : 'text-appSidebar-activeForeground hover:bg-appSidebar-active/50',
+                  ? 'bg-sidebar-accent text-sidebar-accent-foreground'
+                  : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
               )}
             >
-              <Icon size={16} />
+              <Icon size={16} variant={active ? 'Solid' : 'Stroke'} />
             </Link>
           </Tooltip>
         );

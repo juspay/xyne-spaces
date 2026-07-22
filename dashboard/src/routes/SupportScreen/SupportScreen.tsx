@@ -164,6 +164,7 @@ import {
   useComposeDraftOperations,
   type ComposeDraftRecord,
 } from '../../hooks/useComposeDraft';
+import AppNavigator from '../../components/AppNavigator/AppNavigator';
 import { DeskDraftSubtree } from '../../components/xyne-desk/DeskFolders/DeskDraftSubtree';
 import { UserDraftsView } from '../../components/xyne-desk/DeskFolders/UserDraftsView';
 import { UserSentView } from '../../components/xyne-desk/DeskFolders/UserSentView';
@@ -1757,13 +1758,13 @@ const SupportScreen = (): ReactElement => {
           role='button'
           tabIndex={0}
           className={cn(
-            'flex items-center gap-1 h-8 rounded-md px-1.5 cursor-pointer transition-colors hover:bg-sidebar-item-hover',
+            'flex items-center gap-3 h-9 group rounded-[10px] px-3 border border-transparent cursor-pointer transition-colors',
             // The active highlight lives on the selected mailbox folder (Inbox) in the
             // subtree below, not on the channel header — so the channel row only gets text
             // emphasis when active, not a background.
             isActive
-              ? 'text-sidebar-primary-foreground font-medium'
-              : 'text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground',
+              ? 'text-sidebar-accent-foreground font-medium'
+              : 'text-sidebar-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent hover:border-sidebar-border',
           )}
           onClick={() => selectDesk(c.id)}
           onKeyDown={e => {
@@ -1775,29 +1776,31 @@ const SupportScreen = (): ReactElement => {
           data-track-category='Support'
           data-track-name='SelectEmailChannel'
         >
-          {canExpandDesk ? (
-            <button
-              type='button'
-              onClick={e => {
-                e.stopPropagation();
-                toggleDeskExpanded(c.id);
-              }}
-              className='flex items-center justify-center w-4 h-4 flex-shrink-0 rounded text-muted-foreground hover:text-foreground'
-              aria-label={isExpanded ? 'Collapse desk' : 'Expand desk'}
-              data-track-category='Support'
-              data-track-name='ToggleDeskExpand'
-            >
-              {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-            </button>
-          ) : (
-            <span className='w-4 flex-shrink-0' />
-          )}
-          <span className='flex items-center flex-shrink-0'>
-            {isPrivate ? (
-              <Lock size={12} className={isActive ? 'text-[#1D1E1F]' : 'text-[#464C53]'} />
+          <span className='flex items-center gap-1 shrink-0'>
+            {canExpandDesk ? (
+              <button
+                type='button'
+                onClick={e => {
+                  e.stopPropagation();
+                  toggleDeskExpanded(c.id);
+                }}
+                className='size-4 flex items-center justify-center shrink-0 rounded'
+                aria-label={isExpanded ? 'Collapse desk' : 'Expand desk'}
+                data-track-category='Support'
+                data-track-name='ToggleDeskExpand'
+              >
+                {isExpanded ? (
+                  <ChevronDown size={12} strokeWidth={2.33} />
+                ) : (
+                  <ChevronRight size={12} strokeWidth={2.33} />
+                )}
+              </button>
             ) : (
-              <Hash size={12} className={isActive ? 'text-[#1D1E1F]' : 'text-[#464C53]'} />
+              <span className='size-4 shrink-0' />
             )}
+            <span className='size-4 flex items-center justify-center shrink-0'>
+              {isPrivate ? <Lock size={14} /> : <Hash size={14} />}
+            </span>
           </span>
           <span
             className={cn(
@@ -1853,10 +1856,7 @@ const SupportScreen = (): ReactElement => {
   };
 
   return (
-    <div
-      data-testid='support-page'
-      className='h-full flex flex-col relative bg-background md:rounded-2xl overflow-hidden shadow-md'
-    >
+    <div data-testid='support-page' className='h-full flex flex-col relative overflow-hidden'>
       <PanelGroup
         direction='horizontal'
         className='flex-1 overflow-hidden'
@@ -1865,23 +1865,28 @@ const SupportScreen = (): ReactElement => {
         {isSidebarOpen && !isSettingsOpen && !ticketId && (
           <>
             <Panel defaultSize={16} minSize={12} maxSize={25} id='sidebar' order={1}>
-              <div className='h-full flex flex-col bg-sidebar outline-none'>
-                {/* Header */}
-                <div className='flex-shrink-0 h-14 sticky top-0 z-50 bg-sidebar border-b border-border flex items-center'>
-                  <div className='px-4 flex items-center justify-between w-full'>
-                    <h2 className='text-foreground font-inter text-base font-semibold leading-normal'>
+              <div
+                className={cn('h-full w-full flex flex-col outline-none', isMobile && 'bg-sidebar')}
+              >
+                <div className='w-full h-[52px] shrink-0'>
+                  <AppNavigator />
+                </div>
+                <div className='flex-1 min-h-0 px-3 pt-3 pb-12 sm:pb-0 flex flex-col border-t border-border'>
+                  {/* Header */}
+                  <div className='flex pt-2 pb-3 px-2 h-10 items-center justify-between mb-2'>
+                    <h2 className='text-base font-semibold leading-normal text-sidebar-accent-foreground'>
                       Desks
                     </h2>
                     <div className='flex items-center gap-1'>
                       <button
                         onClick={() => setShowCreateChannelModal(true)}
-                        className='p-2 hover:bg-muted rounded-md transition-colors'
+                        className='p-1 rounded-md text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
                         aria-label='Create channel'
                         title='Create channel'
                         data-track-category='Support'
                         data-track-name='CreateChannelOpen'
                       >
-                        <Plus className='size-4 text-muted-foreground' />
+                        <Plus className='size-4' />
                       </button>
                       <button
                         onClick={() => setShowDeskIntegrationsModal(true)}
@@ -1895,85 +1900,82 @@ const SupportScreen = (): ReactElement => {
                       </button>
                       <button
                         onClick={() => setIsSidebarOpen(false)}
-                        className='p-2 hover:bg-muted rounded-md transition-colors'
+                        className='p-1 rounded-md text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
                         aria-label='Collapse sidebar'
                         title='Collapse sidebar'
                         data-track-category='Support'
                         data-track-name='CollapseChannelsSidebar'
                       >
-                        <ChevronLeft className='size-4 text-muted-foreground' />
+                        <ChevronLeft className='size-4' />
                       </button>
                     </div>
                   </div>
-                </div>
-                {/* Tickets shortcut — jumps to the Projects/Tickets board.
+                  {/* Tickets shortcut — jumps to the Projects/Tickets board.
                     Replaces the old rail icon; gated on PROJECTS access. */}
-                {canAccessProjects && (
-                  <div className='flex-shrink-0 px-3 pt-3'>
-                    <button
-                      onClick={() => void navigate('/projects')}
-                      className='w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
-                      aria-label='Go to Tickets'
-                      title='Tickets'
-                      data-track-category='Support'
-                      data-track-name='OpenTicketsFromSupport'
-                    >
-                      <TicketIcon className='size-4 shrink-0' />
-                      <span className='font-medium'>My Tickets</span>
-                    </button>
-                  </div>
-                )}
-                {/* Scrollable channel list */}
-                <div className='flex-1 overflow-y-auto px-3 py-4'>
-                  {sortedEmailChannels.length === 0 ? (
-                    <div className='flex flex-col items-center justify-center h-32 text-muted-foreground text-sm px-4 text-center'>
-                      No channels available
-                    </div>
-                  ) : (
-                    <div className='flex flex-col gap-4'>
-                      {starredEmailChannels.length > 0 && (
-                        <div>
-                          <div className='px-1.5 mb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground'>
-                            Starred
-                          </div>
-                          <div className='space-y-0.5'>
-                            {starredEmailChannels.map(c => renderChannelRow(c))}
-                          </div>
-                        </div>
-                      )}
-                      {joinedEmailChannels.length > 0 && (
-                        <div>
-                          <div className='px-1.5 mb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground'>
-                            Joined
-                          </div>
-                          <div className='space-y-0.5'>
-                            {joinedEmailChannels.map(c => renderChannelRow(c))}
-                          </div>
-                        </div>
-                      )}
-                      {notJoinedEmailChannels.length > 0 && (
-                        <div>
-                          <div className='px-1.5 mb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground'>
-                            Not joined
-                          </div>
-                          <div className='space-y-0.5'>
-                            {notJoinedEmailChannels.map(c => renderChannelRow(c))}
-                          </div>
-                        </div>
-                      )}
+                  {canAccessProjects && (
+                    <div className='shrink-0'>
+                      <button
+                        onClick={() => void navigate('/projects')}
+                        className='flex items-center justify-start gap-3 w-full px-3 py-2 text-sm font-medium tracking-[-0.14px] rounded-[10px] border border-transparent transition-colors text-sidebar-foreground hover:bg-sidebar-accent hover:border-sidebar-border hover:text-sidebar-accent-foreground'
+                        aria-label='Go to Tickets'
+                        title='Tickets'
+                        data-track-category='Support'
+                        data-track-name='OpenTicketsFromSupport'
+                      >
+                        <span className='size-4 flex items-center justify-center shrink-0'>
+                          <TicketIcon className='size-4' />
+                        </span>
+                        <span className='flex-1 min-w-0 text-left truncate block'>My Tickets</span>
+                      </button>
                     </div>
                   )}
+                  <div className='py-3 w-full' />
+                  {/* Scrollable channel list */}
+                  <div className='flex-1 min-h-0 overflow-y-scroll no-scrollbar pb-[calc(2.5rem+env(safe-area-inset-bottom))] px-0.5 pt-1 outline-none'>
+                    {sortedEmailChannels.length === 0 ? (
+                      <div className='flex flex-col items-center justify-center h-32 text-sidebar-foreground text-sm px-4 text-center'>
+                        No channels available
+                      </div>
+                    ) : (
+                      <div className='space-y-4'>
+                        {starredEmailChannels.length > 0 && (
+                          <div>
+                            <div className='flex items-center h-7 px-3 text-sidebar-foreground text-xs font-medium'>
+                              Starred
+                            </div>
+                            {starredEmailChannels.map(c => renderChannelRow(c))}
+                          </div>
+                        )}
+                        {joinedEmailChannels.length > 0 && (
+                          <div>
+                            <div className='flex items-center h-7 px-3 text-sidebar-foreground text-xs font-medium'>
+                              Joined
+                            </div>
+                            {joinedEmailChannels.map(c => renderChannelRow(c))}
+                          </div>
+                        )}
+                        {notJoinedEmailChannels.length > 0 && (
+                          <div>
+                            <div className='flex items-center h-7 px-3 text-sidebar-foreground text-xs font-medium'>
+                              Not joined
+                            </div>
+                            {notJoinedEmailChannels.map(c => renderChannelRow(c))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             </Panel>
-            <PanelResizeHandle className='w-1 hover:bg-blue-50 active:bg-blue-100 transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
-              <div className='w-[1px] h-full bg-border'></div>
+            <PanelResizeHandle className='w-[2px] transition-colors cursor-col-resize flex items-center justify-center group'>
+              <div className='w-[2px] h-full bg-sidebar-divider group-hover:bg-sidebar-badge-accent group-active:bg-sidebar-badge-accent'></div>
             </PanelResizeHandle>
           </>
         )}
         {!ticketId && (
           <Panel defaultSize={84} minSize={75} order={2}>
-            <div className='h-full flex flex-col relative'>
+            <div className='h-full flex flex-col relative bg-background'>
               {deskView !== 'tickets' && selectedChannelId && (
                 <div className='absolute inset-0 z-30 bg-background'>
                   {deskView === 'userDrafts' ? (
@@ -2733,7 +2735,7 @@ const SupportScreen = (): ReactElement => {
         )}
         {ticketId && (
           <Panel defaultSize={100} minSize={100} order={3}>
-            <div className='h-full overflow-hidden'>
+            <div className='h-full overflow-hidden bg-background'>
               <SupportTicketDetail
                 ticketFilter={ticketFilter}
                 isMember={isSelectedChannelJoined}

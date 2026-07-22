@@ -1,11 +1,10 @@
 import { ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, Outlet, useLocation, useParams } from 'react-router-dom';
+import { Outlet, useLocation, useParams } from 'react-router-dom';
 import { BookmarkEntityType, type Bookmark as BookmarkRow } from '@xyne/shared';
-import { Bookmark, ArrowLeft } from 'lucide-react';
+import { Bookmark } from 'lucide-react';
 import { useShortcut } from '../../../shortcuts';
 import { BookmarkItem } from '../BookmarkItem/BookmarkItem';
 import { useUserBookmarks } from '../../../hooks/useUserBookmarks';
-import { useLastVisitedChannel } from '../../../hooks/useLastVisitedChannel';
 import {
   getReminderFromMetadata,
   isBookmarkMarkedDone,
@@ -19,6 +18,7 @@ import {
   type ImperativePanelHandle,
 } from 'react-resizable-panels';
 import { usePlatform } from '../../../hooks/usePlatform';
+import AppNavigator from '../../AppNavigator/AppNavigator';
 
 type BookmarksTab = 'all' | 'reminder' | 'complete';
 
@@ -92,9 +92,6 @@ const BookmarksPanel = (): ReactElement => {
     : location.pathname;
 
   const isOnIndexRoute = pathWithoutWorkspace === '/chat/bookmarks';
-
-  const lastVisitedChannelId = useLastVisitedChannel(workspaceId ?? '');
-  const backPath = lastVisitedChannelId ? `/chat/dir/${lastVisitedChannelId}` : '/chat/dir';
 
   const bookmarksPanelRef = useRef<ImperativePanelHandle>(null);
   const bookmarkListRef = useRef<HTMLDivElement>(null);
@@ -261,111 +258,106 @@ const BookmarksPanel = (): ReactElement => {
 
   // Render the left panel content (exact same UI)
   const renderLeftPanel = (): ReactElement => (
-    <div className='flex-1 h-full flex flex-col overflow-hidden bg-background'>
-      {/* Header */}
-      <div className='relative p-4 bg-background'>
-        <div className='flex items-center gap-2 mb-3'>
-          {/* Back Button */}
-          {!isMobile && (
-            <Link
-              to={backPath}
-              className='p-1 rounded-md text-foreground hover:text-muted-foreground hover:bg-accent transition-colors duration-200'
-              aria-label='Go back'
-              data-testid='bookmarks-go-back-link'
-            >
-              <ArrowLeft size={20} />
-            </Link>
-          )}
-
-          <h3 className='font-semibold text-foreground'>Bookmarks</h3>
-        </div>
-
-        <div className='overflow-x-auto border-b border-border no-scrollbar -mx-4 px-4'>
-          <div className='flex items-center sm:justify-start min-w-max'>
-            {TAB_CONFIG.map(tab => {
-              const isCompleteFlashing =
-                tab.id === 'complete' && isCompleteTabFlashing && activeTab !== 'complete';
-
-              return (
-                <button
-                  key={tab.id}
-                  type='button'
-                  onClick={(): void => setActiveTab(tab.id)}
-                  className={cn(
-                    'relative overflow-hidden px-1 py-2 flex items-center transition-colors duration-250 cursor-pointer sm:px-4 justify-start border-b-2 text-muted-foreground',
-                    isCompleteFlashing
-                      ? 'border-transparent bg-blue-200/70 dark:bg-blue-500/25 rounded-md'
-                      : activeTab === tab.id
-                        ? 'text-primary border-primary'
-                        : 'text-muted-foreground border-transparent hover:text-foreground',
-                  )}
-                  data-testid={tab.testId}
-                  data-track-category='CHAT_BOOKMARK'
-                  data-track-name={tab.trackName}
-                >
-                  <span className='relative z-10 text-xs sm:text-sm font-medium truncate'>
-                    {tab.label}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
+    <div className={cn('h-full w-full flex flex-col', isMobile && 'bg-sidebar')}>
+      <div className='w-full h-[52px] shrink-0'>
+        <AppNavigator />
       </div>
+      <div className='flex-1 min-h-0 flex flex-col overflow-hidden border-t border-border'>
+        {/* Header */}
+        <div className='relative px-4 pt-3'>
+          <div className='flex items-center gap-2 mb-3 h-10'>
+            <h2 className='text-base font-semibold leading-normal text-sidebar-accent-foreground'>
+              Bookmarks
+            </h2>
+          </div>
 
-      {/* Bookmarks List */}
-      <div ref={bookmarkListRef} className='flex-1 overflow-y-auto'>
-        {visibleBookmarks.length === 0 ? (
-          <div className='flex flex-col items-center justify-center h-full p-8 text-center'>
-            <Bookmark className='text-muted-foreground mb-4' size={48} />
-            <p className='text-muted-foreground text-lg font-medium mb-2'>
-              {EMPTY_STATE_TEXT[activeTab].title}
-            </p>
-            <p className='text-muted-foreground text-sm max-w-md'>
-              {EMPTY_STATE_TEXT[activeTab].description}
-            </p>
+          <div className='overflow-x-auto border-b border-border no-scrollbar -mx-4 px-4'>
+            <div className='flex items-center sm:justify-start min-w-max'>
+              {TAB_CONFIG.map(tab => {
+                const isCompleteFlashing =
+                  tab.id === 'complete' && isCompleteTabFlashing && activeTab !== 'complete';
+
+                return (
+                  <button
+                    key={tab.id}
+                    type='button'
+                    onClick={(): void => setActiveTab(tab.id)}
+                    className={cn(
+                      'relative overflow-hidden px-1 py-2 flex items-center transition-colors duration-250 cursor-pointer sm:px-4 justify-start border-b-2 text-muted-foreground',
+                      isCompleteFlashing
+                        ? 'border-transparent bg-blue-200/70 dark:bg-blue-500/25 rounded-md'
+                        : activeTab === tab.id
+                          ? 'text-primary border-primary'
+                          : 'text-muted-foreground border-transparent hover:text-foreground',
+                    )}
+                    data-testid={tab.testId}
+                    data-track-category='CHAT_BOOKMARK'
+                    data-track-name={tab.trackName}
+                  >
+                    <span className='relative z-10 text-xs sm:text-sm font-medium truncate'>
+                      {tab.label}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
-        ) : (
-          <div>
-            {visibleBookmarks.map(bookmark => (
-              <div
-                key={bookmark.id}
-                className={cn(keyboardNavEntityId === bookmark.entityId && 'bg-accent')}
-              >
-                <BookmarkItem
-                  entityId={bookmark.entityId}
-                  entityType={bookmark.entityType}
-                  bookmarkMetadata={bookmark.metadata}
-                  showChannelName={true}
-                  enableReminder={!isMobile && activeTab !== 'complete'}
-                  isMobile={isMobile}
-                  showActions={activeTab !== 'complete'}
-                  nofocus={keyboardNavEntityId === bookmark.entityId}
-                  {...(activeTab === 'complete'
-                    ? {}
-                    : {
-                        onMarkedDone: (): void => {
-                          setOptimisticCompletedBookmarks(prev => {
-                            const completedBookmark: BookmarkRow = {
-                              ...bookmark,
-                              isDeleted: false,
-                              isCompleted: true,
-                              updatedAt: Date.now(),
-                              metadata: upsertBookmarkCompletionMetadata(
-                                bookmark.metadata,
-                              ) as BookmarkRow['metadata'],
-                            };
-                            const withoutDuplicate = prev.filter(item => item.id !== bookmark.id);
-                            return [completedBookmark, ...withoutDuplicate];
-                          });
-                          triggerCompleteTabFlash();
-                        },
-                      })}
-                />
-              </div>
-            ))}
-          </div>
-        )}
+        </div>
+
+        {/* Bookmarks List */}
+        <div ref={bookmarkListRef} className='flex-1 overflow-y-auto no-scrollbar'>
+          {visibleBookmarks.length === 0 ? (
+            <div className='flex flex-col items-center justify-center h-full p-8 text-center'>
+              <Bookmark className='text-muted-foreground mb-4' size={48} />
+              <p className='text-muted-foreground text-lg font-medium mb-2'>
+                {EMPTY_STATE_TEXT[activeTab].title}
+              </p>
+              <p className='text-muted-foreground text-sm max-w-md'>
+                {EMPTY_STATE_TEXT[activeTab].description}
+              </p>
+            </div>
+          ) : (
+            <div>
+              {visibleBookmarks.map(bookmark => (
+                <div
+                  key={bookmark.id}
+                  className={cn(keyboardNavEntityId === bookmark.entityId && 'bg-accent')}
+                >
+                  <BookmarkItem
+                    entityId={bookmark.entityId}
+                    entityType={bookmark.entityType}
+                    bookmarkMetadata={bookmark.metadata}
+                    showChannelName={true}
+                    enableReminder={!isMobile && activeTab !== 'complete'}
+                    isMobile={isMobile}
+                    showActions={activeTab !== 'complete'}
+                    nofocus={keyboardNavEntityId === bookmark.entityId}
+                    {...(activeTab === 'complete'
+                      ? {}
+                      : {
+                          onMarkedDone: (): void => {
+                            setOptimisticCompletedBookmarks(prev => {
+                              const completedBookmark: BookmarkRow = {
+                                ...bookmark,
+                                isDeleted: false,
+                                isCompleted: true,
+                                updatedAt: Date.now(),
+                                metadata: upsertBookmarkCompletionMetadata(
+                                  bookmark.metadata,
+                                ) as BookmarkRow['metadata'],
+                              };
+                              const withoutDuplicate = prev.filter(item => item.id !== bookmark.id);
+                              return [completedBookmark, ...withoutDuplicate];
+                            });
+                            triggerCompleteTabFlash();
+                          },
+                        })}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -387,14 +379,14 @@ const BookmarksPanel = (): ReactElement => {
 
   // Desktop view - two-panel layout with resizable panels
   return (
-    <div className='flex h-full w-full overflow-hidden shadow-md'>
+    <div className='flex h-full w-full overflow-hidden'>
       <PanelGroup
         direction='horizontal'
         className='flex align-top h-full'
         autoSaveId='bookmarks-screen-resize'
       >
         {/* LEFT PANEL - Bookmarks List */}
-        <Panel ref={bookmarksPanelRef} defaultSize={20} minSize={30} maxSize={40}>
+        <Panel ref={bookmarksPanelRef} defaultSize={20} minSize={15} maxSize={40}>
           {renderLeftPanel()}
         </Panel>
 

@@ -4,26 +4,27 @@ import { useLastVisitedChannel } from '../../../hooks/useLastVisitedChannel';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useShortcutById } from '../../../shortcuts';
 import {
-  Bookmark,
+  ChatPlus,
+  Subtask,
+  ChatTyping,
+  BookmarkDefault,
+  SendPlaneSlant,
+  ListAiGenerated,
   ChevronRight,
-  Plus,
+  PlusDefault,
   FolderPlus,
-  Search,
-  CornerDownRight,
-  Sparkles,
-  FileEdit,
-  Clock,
-  Pencil,
-  ArrowUpDown,
-  ArrowDownAZ,
-  Check,
-  BellDot,
-  X,
+  SearchDefault,
+  ClockDefault,
+  PencilEdit,
+  ChevronSortVertical,
+  ListSortAlphabetically,
+  CheckTickSingle,
+  NotificationBellOn,
+  MultipleCrossCancelDefault,
   Star,
-  Hash,
-  MessageCircle,
-  MessageSquareDot,
-} from 'lucide-react';
+  Hashtag,
+  ChatDefault,
+} from '@xyne/icons';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -77,6 +78,7 @@ import SortableChannelItem from './SortableChannelItem';
 import ChannelItemV2 from './ChannelItemV2';
 import Tooltip from '../../ui/Tooltip';
 import ChannelCommandMenu from './ChannelCommandMenu';
+import AppNavigator from '../../AppNavigator/AppNavigator';
 import { useUnreadThreadsCount } from '../../../hooks/useUnreadThreadsCount';
 import { useOverdueRemindersCount } from '../../../hooks/useOverdueRemindersCount';
 import { useRecapUnreadCount, usePrefetchRecap } from '../../../hooks/useRecapData';
@@ -473,723 +475,751 @@ const ChatDirectory = ({
   };
 
   return (
-    <div
-      className='h-full w-full px-2 pt-2 pb-12 flex flex-col bg-sidebar'
-      style={{
-        backdropFilter: 'blur(var(--sidebar-background-blur))',
-        // TODO: add blur to tailwind config
-        // intentionally done due to a bug in tailwind config
-        // - ref @fractal for issues
-      }}
-    >
-      <div className='block sm:hidden -mx-2 px-2 bg-background/70 backdrop-blur-md rounded-b-3xl border-b border-black/10'>
-        <div className='px-2 pt-2 pb-3 flex items-center justify-between'>
-          <div className='flex items-center gap-2'>
-            <img src='/svgs/xyne.svg' alt='Xyne Logo' className='h-3 w-auto' />
-          </div>
-          <div className='flex items-center gap-2'>
-            <button
-              onClick={() => setIsCommandMenuOpen(true)}
-              className='size-8 flex items-center justify-center rounded-md hover:bg-sidebar-item-hover transition-colors'
-              aria-label='Search'
-              data-track-category='CHAT_SIDEBAR'
-              data-track-name='OPEN_SEARCH'
-            >
-              <Search className='size-4 text-sidebar-secondary-foreground' />
-            </button>
-            <Avatar userId={context.userID} size='sm' />
+    <div className={cn('h-full w-full flex flex-col', isMobile && 'bg-sidebar')}>
+      <div className='w-full h-[52px] shrink-0'>
+        <AppNavigator />
+      </div>
+      <div className='flex-1 min-h-0 px-3 pt-3 pb-12 sm:pb-0 flex flex-col border-t border-border'>
+        <div className='block sm:hidden -mx-2 px-2 bg-background/70 backdrop-blur-md rounded-b-3xl border-b border-black/10'>
+          <div className='px-2 pt-2 pb-3 flex items-center justify-between'>
+            <div className='flex items-center gap-2'>
+              <img src='/svgs/xyne.svg' alt='Xyne Logo' className='h-3 w-auto' />
+            </div>
+            <div className='flex items-center gap-2'>
+              <button
+                onClick={() => setIsCommandMenuOpen(true)}
+                className='size-8 flex items-center justify-center rounded-md hover:bg-sidebar-accent transition-colors'
+                aria-label='Search'
+                data-track-category='CHAT_SIDEBAR'
+                data-track-name='OPEN_SEARCH'
+              >
+                <SearchDefault size={16} className='text-sidebar-foreground' />
+              </button>
+              <Avatar userId={context.userID} size='sm' />
+            </div>
           </div>
         </div>
-      </div>
-      <div className='hidden sm:flex pt-2 pb-3 px-2 h-10 items-center justify-between mb-2'>
-        <h2 className='text-base font-semibold leading-normal text-sidebar-primary-foreground'>
-          Chat
-        </h2>
-      </div>
+        <div className='hidden sm:flex pt-2 pb-3 px-2 h-10 items-center justify-between mb-2'>
+          <h2 className='text-base font-semibold leading-normal text-sidebar-accent-foreground'>
+            Inbox
+          </h2>
+        </div>
 
-      <div className='hidden md:block'>
-        <button
-          className={cn(
-            'flex items-center justify-start gap-3 w-full h-8 text-sm px-2 rounded-md transition-colors hover:bg-sidebar-item-hover',
-            threadCount > 0
-              ? 'text-sidebar-unread-foreground'
-              : 'text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground',
-          )}
-          onClick={() => {
-            void navigate('/chat/dir/threads');
-          }}
-          data-track-category='CHAT_SIDEBAR'
-          data-track-name='OPEN_THREADS'
-          data-track-metadata={JSON.stringify({ threadCount })}
-        >
-          <span className='size-5 flex items-center justify-center shrink-0'>
-            <CornerDownRight className='size-4' />
-          </span>
-          <span className='flex-1 min-w-0 text-left truncate block'>Threads</span>
-          {threadCount > 0 && (
-            <span className='size-5 flex items-center justify-center shrink-0'>
-              <Badge
-                variant='success'
-                className='text-xs h-[18px] px-[6px] py-[1px] bg-sidebar-badge-accent text-sidebar-badge-accent-foreground'
-              >
-                {threadCount > 10 ? '10+' : threadCount}
-              </Badge>
+        <div className='hidden md:block'>
+          <button
+            className={cn(
+              'flex items-center justify-start gap-3 w-full px-3 py-2 text-sm font-medium tracking-[-0.14px] rounded-[10px] border border-transparent transition-colors hover:bg-sidebar-accent hover:border-sidebar-border',
+              'text-sidebar-foreground hover:text-sidebar-accent-foreground',
+            )}
+            onClick={() => {
+              void navigate('/chat/search?mode=dm', { replace: true });
+            }}
+            data-track-category='CHAT_SIDEBAR'
+            data-track-name='NEW_MESSAGE'
+          >
+            <span className='size-4 flex items-center justify-center shrink-0'>
+              <ChatPlus className='size-4' />
             </span>
-          )}
-        </button>
-        <button
-          className={cn(
-            'flex items-center justify-start gap-3 w-full h-8 text-sm px-2 rounded-md transition-colors hover:bg-sidebar-item-hover',
-            location.pathname.includes('/chat/dir/unreads')
-              ? 'text-sidebar-primary-foreground font-medium bg-sidebar-item-active'
-              : unreadActivityStats.hasUnread
-                ? 'text-sidebar-unread-foreground font-semibold'
-                : 'text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground',
-          )}
-          onClick={() => {
-            void navigate('/chat/dir/unreads');
-          }}
-          data-track-category='CHAT_SIDEBAR'
-          data-track-name='OPEN_UNREADS'
-        >
-          <span className='size-5 flex items-center justify-center shrink-0'>
-            <MessageSquareDot className='size-4' />
-          </span>
-          <span className='flex-1 min-w-0 text-left truncate block'>Unreads</span>
-        </button>
-        <button
-          className={cn(
-            'flex items-center justify-start gap-3 w-full h-8 text-sm px-2 rounded-md transition-colors hover:bg-sidebar-item-hover',
-            overdueRemindersCount > 0
-              ? 'text-sidebar-unread-foreground'
-              : 'text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground',
-          )}
-          onClick={() => {
-            void navigate('/chat/bookmarks');
-          }}
-          data-testid='open-bookmarks-button'
-          data-track-category='CHAT_SIDEBAR'
-          data-track-name='OPEN_BOOKMARKS'
-          data-track-metadata={JSON.stringify({ overdueRemindersCount })}
-        >
-          <span className='size-5 flex items-center justify-center shrink-0'>
-            <Bookmark className='size-4' />
-          </span>
-          <span className='flex-1 min-w-0 text-left truncate block'>Bookmarks</span>
-          {overdueRemindersCount > 0 && (
-            <span className='size-5 flex items-center justify-center shrink-0'>
-              <Badge
-                variant='success'
-                className='text-xs h-[18px] px-[6px] py-[1px] bg-sidebar-badge-accent text-sidebar-badge-accent-foreground'
-              >
-                {overdueRemindersCount > 10 ? '10+' : overdueRemindersCount}
-              </Badge>
+            <span className='flex-1 min-w-0 text-left truncate block'>New Message</span>
+          </button>
+          <button
+            className={cn(
+              'flex items-center justify-start gap-3 w-full px-3 py-2 text-sm font-medium tracking-[-0.14px] rounded-[10px] border border-transparent transition-colors hover:bg-sidebar-accent hover:border-sidebar-border',
+              threadCount > 0
+                ? 'text-sidebar-accent-foreground font-semibold'
+                : 'text-sidebar-foreground hover:text-sidebar-accent-foreground',
+            )}
+            onClick={() => {
+              void navigate('/chat/dir/threads');
+            }}
+            data-track-category='CHAT_SIDEBAR'
+            data-track-name='OPEN_THREADS'
+            data-track-metadata={JSON.stringify({ threadCount })}
+          >
+            <span className='size-4 flex items-center justify-center shrink-0'>
+              <Subtask className='size-4' />
             </span>
-          )}
-        </button>
-        <button
-          className={cn(
-            'flex items-center justify-start gap-3 w-full h-8 text-sm px-2 rounded-md transition-colors hover:bg-sidebar-item-hover',
-            location.pathname.endsWith('/chat/drafts-sent')
-              ? 'text-sidebar-primary-foreground'
-              : 'text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground',
-          )}
-          onClick={() => {
-            void navigate('drafts-sent');
-          }}
-          data-testid='open-drafts-and-sent-button'
-          data-track-category='CHAT_SIDEBAR'
-          data-track-name='OPEN_DRAFTS_AND_SENT'
-        >
-          <span className='size-5 flex items-center justify-center shrink-0'>
-            <FileEdit className='size-4' />
-          </span>
-          <span className='flex-1 min-w-0 text-left truncate block'>Drafts &amp; Sent</span>
-          <span className='flex items-center gap-2 text-sidebar-secondary-foreground'>
-            {draftsCount > 0 && (
-              <span className='flex items-center gap-1 text-xs'>
-                <Pencil className='size-3' />
-                {draftsCount}
+            <span className='flex-1 min-w-0 text-left truncate block'>Threads</span>
+            {threadCount > 0 && (
+              <span className='size-5 flex items-center justify-center shrink-0'>
+                <Badge
+                  variant='success'
+                  className='text-xs h-[18px] px-[6px] py-[1px] bg-sidebar-primary border border-sidebar-accent-ring text-sidebar-primary-foreground'
+                >
+                  {threadCount > 10 ? '10+' : threadCount}
+                </Badge>
               </span>
             )}
-            {pendingScheduledCount > 0 && (
-              <span className='flex items-center gap-1 text-xs'>
-                <Clock className='size-3' />
-                {pendingScheduledCount}
+          </button>
+          <button
+            className={cn(
+              'flex items-center justify-start gap-3 w-full px-3 py-2 text-sm font-medium tracking-[-0.14px] rounded-[10px] border border-transparent transition-colors hover:bg-sidebar-accent hover:border-sidebar-border',
+              location.pathname.includes('/chat/dir/unreads')
+                ? 'text-sidebar-accent-foreground font-medium bg-sidebar-accent'
+                : unreadActivityStats.hasUnread
+                  ? 'text-sidebar-accent-foreground font-semibold'
+                  : 'text-sidebar-foreground hover:text-sidebar-accent-foreground',
+            )}
+            onClick={() => {
+              void navigate('/chat/dir/unreads');
+            }}
+            data-track-category='CHAT_SIDEBAR'
+            data-track-name='OPEN_UNREADS'
+          >
+            <span className='size-4 flex items-center justify-center shrink-0'>
+              <ChatTyping className='size-4' />
+            </span>
+            <span className='flex-1 min-w-0 text-left truncate block'>Unreads</span>
+          </button>
+          <button
+            className={cn(
+              'flex items-center justify-start gap-3 w-full px-3 py-2 text-sm font-medium tracking-[-0.14px] rounded-[10px] border border-transparent transition-colors hover:bg-sidebar-accent hover:border-sidebar-border',
+              overdueRemindersCount > 0
+                ? 'text-sidebar-accent-foreground font-semibold'
+                : 'text-sidebar-foreground hover:text-sidebar-accent-foreground',
+            )}
+            onClick={() => {
+              void navigate('/chat/bookmarks');
+            }}
+            data-testid='open-bookmarks-button'
+            data-track-category='CHAT_SIDEBAR'
+            data-track-name='OPEN_BOOKMARKS'
+            data-track-metadata={JSON.stringify({ overdueRemindersCount })}
+          >
+            <span className='size-4 flex items-center justify-center shrink-0'>
+              <BookmarkDefault className='size-4' />
+            </span>
+            <span className='flex-1 min-w-0 text-left truncate block'>Bookmarks</span>
+            {overdueRemindersCount > 0 && (
+              <span className='size-5 flex items-center justify-center shrink-0'>
+                <Badge
+                  variant='success'
+                  className='text-xs h-[18px] px-[6px] py-[1px] bg-sidebar-primary border border-sidebar-accent-ring text-sidebar-primary-foreground'
+                >
+                  {overdueRemindersCount > 10 ? '10+' : overdueRemindersCount}
+                </Badge>
               </span>
             )}
-          </span>
-        </button>
-        <button
-          className={cn(
-            'flex items-center justify-start gap-3 w-full h-8 text-sm px-2 rounded-md transition-colors hover:bg-sidebar-item-hover',
-            recapUnreadCount > 0
-              ? 'text-sidebar-unread-foreground'
-              : 'text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground',
-          )}
-          onMouseEnter={() => {
-            // Pre-fetch recap data on hover for instant load
-            prefetchRecap();
-          }}
-          onClick={() => {
-            // Always navigate to recap page first
-            void navigate('/chat/dir/recap');
-          }}
-          data-track-category='CHAT_SIDEBAR'
-          data-track-name='OPEN_RECAP'
-        >
-          <span className='size-5 flex items-center justify-center shrink-0'>
-            <Sparkles className='size-4' />
-          </span>
-          <span className='flex-1 min-w-0 text-left truncate block'>Recap</span>
-          {recapUnreadCount > 0 && (
-            <span className='size-5 flex items-center justify-center shrink-0'>
-              <Badge
-                variant='success'
-                className='text-xs h-[18px] px-[6px] py-[1px] bg-sidebar-badge-accent text-sidebar-badge-accent-foreground'
-              >
-                {recapUnreadCount > 10 ? '10+' : recapUnreadCount}
-              </Badge>
+          </button>
+          <button
+            className={cn(
+              'flex items-center justify-start gap-3 w-full px-3 py-2 text-sm font-medium tracking-[-0.14px] rounded-[10px] border border-transparent transition-colors hover:bg-sidebar-accent hover:border-sidebar-border',
+              location.pathname.endsWith('/chat/drafts-sent')
+                ? 'text-sidebar-accent-foreground'
+                : 'text-sidebar-foreground hover:text-sidebar-accent-foreground',
+            )}
+            onClick={() => {
+              void navigate('drafts-sent');
+            }}
+            data-testid='open-drafts-and-sent-button'
+            data-track-category='CHAT_SIDEBAR'
+            data-track-name='OPEN_DRAFTS_AND_SENT'
+          >
+            <span className='size-4 flex items-center justify-center shrink-0'>
+              <SendPlaneSlant className='size-4' />
             </span>
-          )}
-        </button>
-      </div>
-
-      <div className='py-3 w-full hidden md:block'>
-        <hr className='border-sidebar-divider h-[0.5px]' />
-      </div>
-
-      <div
-        ref={listContainerRef}
-        // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
-        tabIndex={0}
-        role='region'
-        aria-label='Channels and direct messages'
-        className=' flex-1 h-full overflow-y-scroll no-scrollbar pb-[calc(2.5rem+env(safe-area-inset-bottom))] px-0.5 pt-1 outline-none'
-      >
-        <Accordion.Root
-          type='multiple'
-          className='space-y-4'
-          value={openSidebarSections}
-          onValueChange={handleSectionsOpenChange}
-        >
-          <DndContext {...dndContextProps}>
-            <ContainerDropZone id={`section-drop-${STARRED_CONTAINER}`}>
-              {(starred.length > 0 || activeOverlayChannel !== null) && (
-                <Accordion.Item value={ChannelCategory.STARRED}>
-                  <Accordion.Trigger asChild>
-                    <button className='group flex items-center justify-start gap-2 w-full h-8 text-sidebar-secondary-foreground text-xs font-medium px-1'>
-                      <span className='size-4 flex items-center justify-center shrink-0'>
-                        <Star className='size-3.5 group-hover:hidden' />
-                        <ChevronRight
-                          strokeWidth={2.33}
-                          className='size-3 hidden group-hover:block transition-transform duration-200 group-data-[state=open]:rotate-90'
-                        />
-                      </span>
-                      <span className='text-left truncate block'>Starred</span>
-                      {starredUnreadCount > 0 && (
-                        <Badge className='ml-auto mr-0.5 hidden group-data-[state=closed]:inline-flex font-mono h-[18px] shrink-0 bg-sidebar-badge-accent px-1.5 text-sidebar-badge-accent-foreground'>
-                          {starredUnreadCount > 9 ? '9+' : starredUnreadCount}
-                        </Badge>
-                      )}
-                    </button>
-                  </Accordion.Trigger>
-                  <Accordion.Content>
-                    <div className='min-h-[4px]'>
-                      {starredDisplayChannels.length === 0 ? (
-                        <div className='px-2 py-1 text-xs text-sidebar-secondary-foreground/60 italic'>
-                          Drop here to star
-                        </div>
-                      ) : (
-                        starredDisplayChannels.map(channel => (
-                          <SortableChannelItem
-                            key={channel.id}
-                            channel={channel}
-                            unreadCount={unreadCounts[channel.id] ?? 0}
-                            isActive={activeChannelId === channel.id}
-                            sections={channelSections ?? []}
-                            onMoveToSection={moveChannelToSection}
-                          />
-                        ))
-                      )}
-                    </div>
-                  </Accordion.Content>
-                </Accordion.Item>
+            <span className='flex-1 min-w-0 text-left truncate block'>Drafts &amp; Sent</span>
+            <span className='flex items-center gap-2 text-sidebar-foreground'>
+              {draftsCount > 0 && (
+                <span className='flex items-center gap-1 text-xs'>
+                  <PencilEdit size={12} />
+                  {draftsCount}
+                </span>
               )}
-            </ContainerDropZone>
-
-            {/* Custom sections (per-user, drag to reorder) */}
-            <SortableContext
-              items={sectioned.map(b => b.section.id)}
-              strategy={verticalListSortingStrategy}
-            >
-              {displaySectioned.map(({ section, channels: sectionChannels }) => (
-                <SortableSection
-                  key={section.id}
-                  section={section}
-                  channels={sectionChannels}
-                  sections={channelSections ?? []}
-                  unreadCounts={unreadCounts}
-                  activeChannelId={activeChannelId}
-                  onRename={setSectionToRename}
-                  onDelete={setSectionToDelete}
-                  onManageChannels={setSectionToManage}
-                  onCreateSection={() => setShowAddSectionForm(true)}
-                  onMoveChannelToSection={moveChannelToSection}
-                  onSetSortOrder={(sectionId, order) => {
-                    void zero.mutate(
-                      mutators.channelSection.update({
-                        id: sectionId,
-                        sortOrder: order,
-                        timestamp: Date.now(),
-                      }),
-                    );
-                  }}
-                />
-              ))}
-            </SortableContext>
-            {/* Portaled to <body> so a transformed ancestor can't offset the overlay. */}
-            {createPortal(
-              <DragOverlay dropAnimation={null}>
-                {activeOverlayChannel ? (
-                  <div className='rounded-md bg-sidebar-item-hover shadow-lg cursor-grabbing'>
-                    <ChannelItemV2
-                      channel={activeOverlayChannel}
-                      unreadCount={unreadCounts[activeOverlayChannel.id] ?? 0}
-                    />
-                  </div>
-                ) : activeOverlaySection ? (
-                  <div className='flex items-center gap-1 h-8 px-2 rounded-md bg-sidebar-item-hover text-xs font-medium text-sidebar-secondary-foreground shadow-lg cursor-grabbing'>
-                    {activeOverlaySection.emoji &&
-                      renderEmoji(activeOverlaySection.emoji, 'size-4')}
-                    <span className='truncate'>{activeOverlaySection.name}</span>
-                  </div>
-                ) : null}
-              </DragOverlay>,
-              document.body,
+              {pendingScheduledCount > 0 && (
+                <span className='flex items-center gap-1 text-xs'>
+                  <ClockDefault size={12} />
+                  {pendingScheduledCount}
+                </span>
+              )}
+            </span>
+          </button>
+          <button
+            className={cn(
+              'flex items-center justify-start gap-3 w-full px-3 py-2 text-sm font-medium tracking-[-0.14px] rounded-[10px] border border-transparent transition-colors hover:bg-sidebar-accent hover:border-sidebar-border',
+              recapUnreadCount > 0
+                ? 'text-sidebar-accent-foreground font-semibold'
+                : 'text-sidebar-foreground hover:text-sidebar-accent-foreground',
             )}
+            onMouseEnter={() => {
+              // Pre-fetch recap data on hover for instant load
+              prefetchRecap();
+            }}
+            onClick={() => {
+              // Always navigate to recap page first
+              void navigate('/chat/dir/recap');
+            }}
+            data-track-category='CHAT_SIDEBAR'
+            data-track-name='OPEN_RECAP'
+          >
+            <span className='size-4 flex items-center justify-center shrink-0'>
+              <ListAiGenerated className='size-4' />
+            </span>
+            <span className='flex-1 min-w-0 text-left truncate block'>Recap</span>
+            {recapUnreadCount > 0 && (
+              <span className='size-5 flex items-center justify-center shrink-0'>
+                <Badge
+                  variant='success'
+                  className='text-xs h-[18px] px-[6px] py-[1px] bg-sidebar-primary border border-sidebar-accent-ring text-sidebar-primary-foreground'
+                >
+                  {recapUnreadCount > 10 ? '10+' : recapUnreadCount}
+                </Badge>
+              </span>
+            )}
+          </button>
+        </div>
 
-            {/* Channels  */}
-            <Accordion.Item value={ChannelCategory.CHANNELS}>
-              <Accordion.Header asChild>
-                <div className='group px-1 flex items-center justify-between gap-2 '>
-                  <Accordion.Trigger asChild>
-                    <button className=' flex items-center justify-start gap-2 w-full h-8 text-sidebar-secondary-foreground text-xs font-medium'>
-                      <span className='size-4 flex items-center justify-center shrink-0'>
-                        <Hash className='size-3.5 group-hover:hidden' />
-                        <ChevronRight
-                          strokeWidth={2.33}
-                          className='size-3 hidden group-hover:block transition-transform duration-200 group-data-[state=open]:rotate-90'
-                        />
-                      </span>
-                      <span className='text-left truncate block'>Channels</span>
-                    </button>
-                  </Accordion.Trigger>
-                  {channelsUnreadCount > 0 && (
-                    <Badge className='order-last hidden group-data-[state=closed]:inline-flex font-mono h-[18px] shrink-0 bg-sidebar-badge-accent px-1.5 text-sidebar-badge-accent-foreground'>
-                      {channelsUnreadCount > 9 ? '9+' : channelsUnreadCount}
-                    </Badge>
-                  )}
-                  <div
-                    className={`flex items-center gap-2 mr-0.5 transition-opacity ease-in-out duration-300 ${isSortDropdownOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+        <div className='py-3 w-full hidden md:block' />
+
+        <div
+          ref={listContainerRef}
+          // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
+          tabIndex={0}
+          role='region'
+          aria-label='Channels and direct messages'
+          className=' flex-1 h-full overflow-y-scroll no-scrollbar pb-[calc(2.5rem+env(safe-area-inset-bottom))] px-0.5 pt-1 outline-none'
+        >
+          <Accordion.Root
+            type='multiple'
+            className='space-y-4'
+            value={openSidebarSections}
+            onValueChange={handleSectionsOpenChange}
+          >
+            <DndContext {...dndContextProps}>
+              <ContainerDropZone id={`section-drop-${STARRED_CONTAINER}`}>
+                {(starred.length > 0 || activeOverlayChannel !== null) && (
+                  <Accordion.Item value={ChannelCategory.STARRED}>
+                    <Accordion.Trigger asChild>
+                      <button className='group flex items-center justify-start gap-2 w-full h-7 text-sidebar-foreground text-xs font-medium px-3'>
+                        <span className='size-4 flex items-center justify-center shrink-0'>
+                          <Star size={14} className='group-hover:hidden' />
+                          <ChevronRight
+                            strokeWidth={2.33}
+                            size={12}
+                            className='hidden group-hover:block transition-transform duration-200 group-data-[state=open]:rotate-90'
+                          />
+                        </span>
+                        <span className='text-left truncate block'>Starred</span>
+                        {starredUnreadCount > 0 && (
+                          <Badge className='ml-auto mr-0.5 hidden group-data-[state=closed]:inline-flex font-mono h-[18px] shrink-0 bg-sidebar-primary border border-sidebar-accent-ring px-1.5 text-sidebar-primary-foreground'>
+                            {starredUnreadCount > 9 ? '9+' : starredUnreadCount}
+                          </Badge>
+                        )}
+                      </button>
+                    </Accordion.Trigger>
+                    <Accordion.Content>
+                      <div className='min-h-[4px]'>
+                        {starredDisplayChannels.length === 0 ? (
+                          <div className='px-2 py-1 text-xs text-sidebar-foreground/60 italic'>
+                            Drop here to star
+                          </div>
+                        ) : (
+                          starredDisplayChannels.map(channel => (
+                            <SortableChannelItem
+                              key={channel.id}
+                              channel={channel}
+                              unreadCount={unreadCounts[channel.id] ?? 0}
+                              isActive={activeChannelId === channel.id}
+                              sections={channelSections ?? []}
+                              onMoveToSection={moveChannelToSection}
+                            />
+                          ))
+                        )}
+                      </div>
+                    </Accordion.Content>
+                  </Accordion.Item>
+                )}
+              </ContainerDropZone>
+
+              {/* Custom sections (per-user, drag to reorder) */}
+              <SortableContext
+                items={sectioned.map(b => b.section.id)}
+                strategy={verticalListSortingStrategy}
+              >
+                {displaySectioned.map(({ section, channels: sectionChannels }) => (
+                  <SortableSection
+                    key={section.id}
+                    section={section}
+                    channels={sectionChannels}
+                    sections={channelSections ?? []}
+                    unreadCounts={unreadCounts}
+                    activeChannelId={activeChannelId}
+                    onRename={setSectionToRename}
+                    onDelete={setSectionToDelete}
+                    onManageChannels={setSectionToManage}
+                    onCreateSection={() => setShowAddSectionForm(true)}
+                    onMoveChannelToSection={moveChannelToSection}
+                    onSetSortOrder={(sectionId, order) => {
+                      void zero.mutate(
+                        mutators.channelSection.update({
+                          id: sectionId,
+                          sortOrder: order,
+                          timestamp: Date.now(),
+                        }),
+                      );
+                    }}
+                  />
+                ))}
+              </SortableContext>
+              {/* Portaled to <body> so a transformed ancestor can't offset the overlay. */}
+              {createPortal(
+                <DragOverlay dropAnimation={null}>
+                  {activeOverlayChannel ? (
+                    <div className='rounded-md bg-sidebar-accent shadow-lg cursor-grabbing'>
+                      <ChannelItemV2
+                        channel={activeOverlayChannel}
+                        unreadCount={unreadCounts[activeOverlayChannel.id] ?? 0}
+                      />
+                    </div>
+                  ) : activeOverlaySection ? (
+                    <div className='flex items-center gap-1 h-8 px-2 rounded-md bg-sidebar-accent text-xs font-medium text-sidebar-foreground shadow-lg cursor-grabbing'>
+                      {activeOverlaySection.emoji &&
+                        renderEmoji(activeOverlaySection.emoji, 'size-4')}
+                      <span className='truncate'>{activeOverlaySection.name}</span>
+                    </div>
+                  ) : null}
+                </DragOverlay>,
+                document.body,
+              )}
+
+              {/* Channels  */}
+              <Accordion.Item value={ChannelCategory.CHANNELS}>
+                <Accordion.Header asChild>
+                  <div className='group px-3 flex items-center justify-between gap-2 '>
+                    <Accordion.Trigger asChild>
+                      <button className=' flex items-center justify-start gap-2 w-full h-7 text-sidebar-foreground text-xs font-medium'>
+                        <span className='size-4 flex items-center justify-center shrink-0'>
+                          <Hashtag size={14} className='group-hover:hidden' />
+                          <ChevronRight
+                            strokeWidth={2.33}
+                            size={12}
+                            className='hidden group-hover:block transition-transform duration-200 group-data-[state=open]:rotate-90'
+                          />
+                        </span>
+                        <span className='text-left truncate block'>Channels</span>
+                      </button>
+                    </Accordion.Trigger>
+                    {channelsUnreadCount > 0 && (
+                      <Badge className='order-last hidden group-data-[state=closed]:inline-flex font-mono h-[18px] shrink-0 bg-sidebar-primary border border-sidebar-accent-ring px-1.5 text-sidebar-primary-foreground'>
+                        {channelsUnreadCount > 9 ? '9+' : channelsUnreadCount}
+                      </Badge>
+                    )}
+                    <div
+                      className={`flex items-center gap-2 mr-0.5 transition-opacity ease-in-out duration-300 ${isSortDropdownOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+                    >
+                      <Tooltip
+                        content='Browse channels'
+                        side='top'
+                        sideOffset={0}
+                        delayDuration={500}
+                      >
+                        <button
+                          className='group/child text-sidebar-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent transition-colors rounded-md p-1'
+                          onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            void navigate('/chat/search?mode=channels');
+                          }}
+                          data-track-category='CHAT_SIDEBAR'
+                          data-track-name='BROWSE_CHANNELS'
+                        >
+                          <SearchDefault
+                            strokeWidth={2.33}
+                            size={14}
+                            className='text-sidebar-foreground group-hover/child:text-sidebar-primary transition-colors'
+                          />
+                        </button>
+                      </Tooltip>
+                      <Tooltip
+                        content='Create channel'
+                        side='top'
+                        sideOffset={0}
+                        delayDuration={500}
+                      >
+                        <button
+                          className='group/child text-sidebar-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent transition-colors rounded-md p-1'
+                          onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setShowAddChannelForm(true);
+                          }}
+                          data-testid='create-new-channel'
+                          data-track-event='BUTTON_CLICK'
+                          data-track-category='CHAT_SIDEBAR'
+                          data-track-name='CREATE_NEW_CHANNEL'
+                          data-track-metadata={JSON.stringify({ source: 'directory' })}
+                        >
+                          <PlusDefault
+                            strokeWidth={2.33}
+                            size={14}
+                            className='text-sidebar-foreground group-hover/child:text-sidebar-primary transition-colors'
+                          />
+                        </button>
+                      </Tooltip>
+                      <Tooltip content='New section' side='top' sideOffset={0} delayDuration={500}>
+                        <button
+                          className='group/child text-sidebar-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent transition-colors rounded-md p-1'
+                          onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setShowAddSectionForm(true);
+                          }}
+                          data-track-category='CHAT_SIDEBAR'
+                          data-track-name='CREATE_NEW_SECTION'
+                        >
+                          <FolderPlus
+                            strokeWidth={2.33}
+                            size={14}
+                            className='text-sidebar-foreground group-hover/child:text-sidebar-primary transition-colors'
+                          />
+                        </button>
+                      </Tooltip>
+                      <DropdownMenu onOpenChange={setIsSortDropdownOpen}>
+                        <Tooltip
+                          content='Sort channels'
+                          side='top'
+                          sideOffset={0}
+                          delayDuration={500}
+                        >
+                          <DropdownMenuTrigger asChild>
+                            <button
+                              className='group/child text-sidebar-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent transition-colors rounded-md p-1 focus:outline-none'
+                              onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                              }}
+                              data-track-category='CHAT_SIDEBAR'
+                              data-track-name='SORT_CHANNELS'
+                            >
+                              <ChevronSortVertical
+                                strokeWidth={2.33}
+                                size={14}
+                                className='text-sidebar-foreground group-hover/child:text-sidebar-primary transition-colors'
+                              />
+                            </button>
+                          </DropdownMenuTrigger>
+                        </Tooltip>
+                        <DropdownMenuContent
+                          align='end'
+                          className='min-w-[160px]'
+                          onCloseAutoFocus={e => e.preventDefault()}
+                        >
+                          <DropdownMenuItem
+                            onClick={e => {
+                              e.stopPropagation();
+                              setChannelSortOrder(ChannelSortOrder.UNREAD);
+                            }}
+                            className='gap-2'
+                          >
+                            <NotificationBellOn size={14} className='shrink-0' />
+                            <span className='flex-1'>Unread & Activity</span>
+                            {channelSortOrder === ChannelSortOrder.UNREAD && (
+                              <CheckTickSingle size={14} className='shrink-0' />
+                            )}
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={e => {
+                              e.stopPropagation();
+                              setChannelSortOrder(ChannelSortOrder.RECENCY);
+                            }}
+                            className='gap-2'
+                          >
+                            <ClockDefault size={14} className='shrink-0' />
+                            <span className='flex-1'>By recency</span>
+                            {channelSortOrder === ChannelSortOrder.RECENCY && (
+                              <CheckTickSingle size={14} className='shrink-0' />
+                            )}
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={e => {
+                              e.stopPropagation();
+                              setChannelSortOrder(ChannelSortOrder.ALPHABETICAL);
+                            }}
+                            className='gap-2'
+                          >
+                            <ListSortAlphabetically size={14} className='shrink-0' />
+                            <span className='flex-1'>Alphabetical A-Z</span>
+                            {channelSortOrder === ChannelSortOrder.ALPHABETICAL && (
+                              <CheckTickSingle size={14} className='shrink-0' />
+                            )}
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                  </div>
+                </Accordion.Header>
+                <Accordion.Content data-testid='channel-list'>
+                  <ContainerDropZone
+                    id={`section-drop-${DEFAULT_CONTAINER}`}
+                    className='min-h-[4px]'
                   >
+                    {defaultDisplayChannels.map(channel => (
+                      <SortableChannelItem
+                        key={channel.id}
+                        channel={channel}
+                        unreadCount={unreadCounts[channel.id] ?? 0}
+                        isActive={activeChannelId === channel.id}
+                        sections={channelSections ?? []}
+                        onMoveToSection={moveChannelToSection}
+                      />
+                    ))}
+                  </ContainerDropZone>
+                </Accordion.Content>
+              </Accordion.Item>
+              {/* DMS  */}
+              <Accordion.Item value={ChannelCategory.DIRECT_MESSAGES}>
+                <Accordion.Header asChild>
+                  <div className='group px-3 flex items-center justify-between gap-2 '>
+                    <Accordion.Trigger asChild>
+                      <button className='flex items-center justify-start gap-2 w-full h-7 text-sidebar-foreground text-xs font-medium'>
+                        <span className='size-4 flex items-center justify-center shrink-0'>
+                          <ChatDefault size={14} className='group-hover:hidden' />
+                          <ChevronRight
+                            strokeWidth={2.33}
+                            size={12}
+                            className='hidden group-hover:block transition-transform duration-200 group-data-[state=open]:rotate-90'
+                          />
+                        </span>
+                        <span className='text-left truncate block'>Direct Messages</span>
+                      </button>
+                    </Accordion.Trigger>
+                    {dmUnreadCount > 0 && (
+                      <Badge className='order-last hidden group-data-[state=closed]:inline-flex font-mono h-[18px] shrink-0 bg-sidebar-primary border border-sidebar-accent-ring px-1.5 text-sidebar-primary-foreground'>
+                        {dmUnreadCount > 9 ? '9+' : dmUnreadCount}
+                      </Badge>
+                    )}
                     <Tooltip
-                      content='Browse channels'
+                      content='Add direct message'
                       side='top'
                       sideOffset={0}
                       delayDuration={500}
                     >
                       <button
-                        className='group/child text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground hover:bg-sidebar-item-hover transition-colors rounded-md p-1'
+                        id='sidebar-add-dm-btn'
+                        className='group/child text-sidebar-foreground hover:text-sidebar-accent-foreground opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity ease-in-out duration-300 hover:bg-sidebar-accent rounded-md p-1 mr-0.5'
                         onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
                           e.preventDefault();
                           e.stopPropagation();
-                          void navigate('/chat/search?mode=channels');
+                          handleAddDirectMessage();
                         }}
-                        data-track-category='CHAT_SIDEBAR'
-                        data-track-name='BROWSE_CHANNELS'
-                      >
-                        <Search
-                          strokeWidth={2.33}
-                          className='size-3.5 text-sidebar-secondary-foreground group-hover/child:text-sidebar-badge-accent transition-colors'
-                        />
-                      </button>
-                    </Tooltip>
-                    <Tooltip content='Create channel' side='top' sideOffset={0} delayDuration={500}>
-                      <button
-                        className='group/child text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground hover:bg-sidebar-item-hover transition-colors rounded-md p-1'
-                        onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          setShowAddChannelForm(true);
-                        }}
-                        data-testid='create-new-channel'
+                        data-testid='create-new-dm'
                         data-track-event='BUTTON_CLICK'
                         data-track-category='CHAT_SIDEBAR'
-                        data-track-name='CREATE_NEW_CHANNEL'
+                        data-track-name='CREATE_DIRECT_MESSAGE'
                         data-track-metadata={JSON.stringify({ source: 'directory' })}
                       >
-                        <Plus
+                        <PlusDefault
                           strokeWidth={2.33}
-                          className='size-3.5 text-sidebar-secondary-foreground group-hover/child:text-sidebar-badge-accent transition-colors'
+                          size={14}
+                          className='text-sidebar-foreground group-hover/child:text-sidebar-primary transition-colors'
                         />
                       </button>
                     </Tooltip>
-                    <Tooltip content='New section' side='top' sideOffset={0} delayDuration={500}>
-                      <button
-                        className='group/child text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground hover:bg-sidebar-item-hover transition-colors rounded-md p-1'
-                        onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          setShowAddSectionForm(true);
-                        }}
-                        data-track-category='CHAT_SIDEBAR'
-                        data-track-name='CREATE_NEW_SECTION'
-                      >
-                        <FolderPlus
-                          strokeWidth={2.33}
-                          className='size-3.5 text-sidebar-secondary-foreground group-hover/child:text-sidebar-badge-accent transition-colors'
-                        />
-                      </button>
-                    </Tooltip>
-                    <DropdownMenu onOpenChange={setIsSortDropdownOpen}>
-                      <Tooltip
-                        content='Sort channels'
-                        side='top'
-                        sideOffset={0}
-                        delayDuration={500}
-                      >
-                        <DropdownMenuTrigger asChild>
-                          <button
-                            className='group/child text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground hover:bg-sidebar-item-hover transition-colors rounded-md p-1 focus:outline-none'
-                            onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                            }}
-                            data-track-category='CHAT_SIDEBAR'
-                            data-track-name='SORT_CHANNELS'
-                          >
-                            <ArrowUpDown
-                              strokeWidth={2.33}
-                              className='size-3.5 text-sidebar-secondary-foreground group-hover/child:text-sidebar-badge-accent transition-colors'
-                            />
-                          </button>
-                        </DropdownMenuTrigger>
-                      </Tooltip>
-                      <DropdownMenuContent
-                        align='end'
-                        className='min-w-[160px]'
-                        onCloseAutoFocus={e => e.preventDefault()}
-                      >
-                        <DropdownMenuItem
-                          onClick={e => {
-                            e.stopPropagation();
-                            setChannelSortOrder(ChannelSortOrder.UNREAD);
-                          }}
-                          className='gap-2'
-                        >
-                          <BellDot className='size-3.5 shrink-0' />
-                          <span className='flex-1'>Unread & Activity</span>
-                          {channelSortOrder === ChannelSortOrder.UNREAD && (
-                            <Check className='size-3.5 shrink-0' />
-                          )}
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={e => {
-                            e.stopPropagation();
-                            setChannelSortOrder(ChannelSortOrder.RECENCY);
-                          }}
-                          className='gap-2'
-                        >
-                          <Clock className='size-3.5 shrink-0' />
-                          <span className='flex-1'>By recency</span>
-                          {channelSortOrder === ChannelSortOrder.RECENCY && (
-                            <Check className='size-3.5 shrink-0' />
-                          )}
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={e => {
-                            e.stopPropagation();
-                            setChannelSortOrder(ChannelSortOrder.ALPHABETICAL);
-                          }}
-                          className='gap-2'
-                        >
-                          <ArrowDownAZ className='size-3.5 shrink-0' />
-                          <span className='flex-1'>Alphabetical A-Z</span>
-                          {channelSortOrder === ChannelSortOrder.ALPHABETICAL && (
-                            <Check className='size-3.5 shrink-0' />
-                          )}
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
                   </div>
-                </div>
-              </Accordion.Header>
-              <Accordion.Content data-testid='channel-list'>
-                <ContainerDropZone id={`section-drop-${DEFAULT_CONTAINER}`} className='min-h-[4px]'>
-                  {defaultDisplayChannels.map(channel => (
-                    <SortableChannelItem
-                      key={channel.id}
-                      channel={channel}
-                      unreadCount={unreadCounts[channel.id] ?? 0}
-                      isActive={activeChannelId === channel.id}
-                      sections={channelSections ?? []}
-                      onMoveToSection={moveChannelToSection}
-                    />
-                  ))}
-                </ContainerDropZone>
-              </Accordion.Content>
-            </Accordion.Item>
-            {/* DMS  */}
-            <Accordion.Item value={ChannelCategory.DIRECT_MESSAGES}>
-              <Accordion.Header asChild>
-                <div className='group px-1 flex items-center justify-between gap-2 '>
-                  <Accordion.Trigger asChild>
-                    <button className='flex items-center justify-start gap-2 w-full h-8 text-sidebar-secondary-foreground text-xs font-medium px-1'>
-                      <span className='size-4 flex items-center justify-center shrink-0'>
-                        <MessageCircle className='size-3.5 group-hover:hidden' />
-                        <ChevronRight
-                          strokeWidth={2.33}
-                          className='size-3 hidden group-hover:block transition-transform duration-200 group-data-[state=open]:rotate-90'
-                        />
-                      </span>
-                      <span className='text-left truncate block'>Direct Messages</span>
-                    </button>
-                  </Accordion.Trigger>
-                  {dmUnreadCount > 0 && (
-                    <Badge className='order-last hidden group-data-[state=closed]:inline-flex font-mono h-[18px] shrink-0 bg-sidebar-badge-accent px-1.5 text-sidebar-badge-accent-foreground'>
-                      {dmUnreadCount > 9 ? '9+' : dmUnreadCount}
-                    </Badge>
-                  )}
-                  <Tooltip
-                    content='Add direct message'
-                    side='top'
-                    sideOffset={0}
-                    delayDuration={500}
-                  >
-                    <button
-                      id='sidebar-add-dm-btn'
-                      className='group/child text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity ease-in-out duration-300 hover:bg-sidebar-item-hover rounded-md p-1 mr-0.5'
-                      onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        handleAddDirectMessage();
-                      }}
-                      data-testid='create-new-dm'
-                      data-track-event='BUTTON_CLICK'
-                      data-track-category='CHAT_SIDEBAR'
-                      data-track-name='CREATE_DIRECT_MESSAGE'
-                      data-track-metadata={JSON.stringify({ source: 'directory' })}
-                    >
-                      <Plus
-                        strokeWidth={2.33}
-                        className='size-3.5 text-sidebar-secondary-foreground group-hover/child:text-sidebar-badge-accent transition-colors'
+                </Accordion.Header>
+                <Accordion.Content data-testid='dm-list'>
+                  <ContainerDropZone id={`section-drop-${DM_CONTAINER}`} className='min-h-[4px]'>
+                    {dmDisplayChannels.map(channel => (
+                      <SortableChannelItem
+                        key={channel.id}
+                        channel={channel}
+                        unreadCount={unreadCounts[channel.id] ?? 0}
+                        isActive={activeChannelId === channel.id}
+                        sections={channelSections ?? []}
+                        onMoveToSection={moveChannelToSection}
                       />
-                    </button>
-                  </Tooltip>
-                </div>
-              </Accordion.Header>
-              <Accordion.Content data-testid='dm-list'>
-                <ContainerDropZone id={`section-drop-${DM_CONTAINER}`} className='min-h-[4px]'>
-                  {dmDisplayChannels.map(channel => (
-                    <SortableChannelItem
-                      key={channel.id}
-                      channel={channel}
-                      unreadCount={unreadCounts[channel.id] ?? 0}
-                      isActive={activeChannelId === channel.id}
-                      sections={channelSections ?? []}
-                      onMoveToSection={moveChannelToSection}
-                    />
-                  ))}
-                </ContainerDropZone>
-              </Accordion.Content>
-            </Accordion.Item>
-          </DndContext>
-        </Accordion.Root>
-      </div>
-
-      <Dialog
-        open={showAddChannelForm}
-        onOpenChange={setShowAddChannelForm}
-        testId='add-channel-dialog'
-      >
-        <div className='p-4'>
-          <AddChannelForm
-            loading={createChannelMutation.isPending}
-            onSubmit={handleAddChannelSubmit}
-            onCancel={() => setShowAddChannelForm(false)}
-          />
+                    ))}
+                  </ContainerDropZone>
+                </Accordion.Content>
+              </Accordion.Item>
+            </DndContext>
+          </Accordion.Root>
         </div>
-      </Dialog>
 
-      <Dialog open={showAddDmForm} onOpenChange={setShowAddDmForm}>
-        <div className='p-4'>
-          <AddDmForm
-            loading={createDmMutation.isPending}
-            onSubmit={handleAddDmSubmit}
-            onCancel={() => setShowAddDmForm(false)}
-          />
-        </div>
-      </Dialog>
-
-      {newlyCreatedChannelId && (
         <Dialog
-          open={showAddPeopleDialog}
-          onOpenChange={setShowAddPeopleDialog}
-          title='Add Members'
+          open={showAddChannelForm}
+          onOpenChange={setShowAddChannelForm}
+          testId='add-channel-dialog'
         >
-          <AddPeopleForm
-            channelId={newlyCreatedChannelId}
-            onSuccess={() => setShowAddPeopleDialog(false)}
-            onCancel={() => setShowAddPeopleDialog(false)}
-          />
-        </Dialog>
-      )}
-
-      <Dialog
-        open={showAddSectionForm}
-        onOpenChange={setShowAddSectionForm}
-        testId='add-section-dialog'
-      >
-        {showAddSectionForm && (
-          <CreateSectionDialog
-            channels={sectionableChannels}
-            existingNames={(channelSections ?? []).map(s => s.name)}
-            lastSectionPosition={lastSectionPosition}
-            onClose={() => setShowAddSectionForm(false)}
-          />
-        )}
-      </Dialog>
-
-      <Dialog
-        open={!!sectionToRename}
-        onOpenChange={open => {
-          if (!open) setSectionToRename(null);
-        }}
-        testId='rename-section-dialog'
-      >
-        {sectionToRename && (
           <div className='p-4'>
-            <AddSectionForm
-              initialName={sectionToRename.name}
-              initialEmoji={sectionToRename.emoji ?? ''}
-              existingNames={(channelSections ?? [])
-                .filter(s => s.id !== sectionToRename.id)
-                .map(s => s.name)}
-              submitLabel='Save'
-              title='Rename section'
-              onSubmit={handleRenameSection}
-              onCancel={() => setSectionToRename(null)}
+            <AddChannelForm
+              loading={createChannelMutation.isPending}
+              onSubmit={handleAddChannelSubmit}
+              onCancel={() => setShowAddChannelForm(false)}
             />
           </div>
+        </Dialog>
+
+        <Dialog open={showAddDmForm} onOpenChange={setShowAddDmForm}>
+          <div className='p-4'>
+            <AddDmForm
+              loading={createDmMutation.isPending}
+              onSubmit={handleAddDmSubmit}
+              onCancel={() => setShowAddDmForm(false)}
+            />
+          </div>
+        </Dialog>
+
+        {newlyCreatedChannelId && (
+          <Dialog
+            open={showAddPeopleDialog}
+            onOpenChange={setShowAddPeopleDialog}
+            title='Add Members'
+          >
+            <AddPeopleForm
+              channelId={newlyCreatedChannelId}
+              onSuccess={() => setShowAddPeopleDialog(false)}
+              onCancel={() => setShowAddPeopleDialog(false)}
+            />
+          </Dialog>
         )}
-      </Dialog>
 
-      <Dialog
-        open={!!sectionToDelete}
-        onOpenChange={open => {
-          if (!open) setSectionToDelete(null);
-        }}
-        testId='delete-section-dialog'
-      >
-        <div className='p-4 space-y-4'>
-          <div className='flex items-start justify-between gap-2'>
-            <div className='text-xl font-medium text-foreground'>Delete this section?</div>
-            <button
-              type='button'
-              onClick={() => setSectionToDelete(null)}
-              aria-label='Close'
-              data-track-category='CHAT_SIDEBAR'
-              data-track-name='CLOSE_DELETE_SECTION'
-              className='-mr-1 -mt-1 shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
-            >
-              <X className='size-5' />
-            </button>
-          </div>
-          <div className='space-y-3 text-sm text-foreground'>
-            <p>
-              Any channels you added to{' '}
-              <span className='font-semibold inline-flex items-center gap-1'>
-                {sectionToDelete?.emoji && renderEmoji(sectionToDelete.emoji, 'size-4')}
-                {sectionToDelete?.name}
-              </span>{' '}
-              will move back to the Channels list.
-            </p>
-            <p className='text-foreground'>
-              Don’t worry — deleting this section won’t remove you from any channels.
-            </p>
-          </div>
-          <div className='flex justify-end gap-3 pt-2'>
-            <button
-              onClick={() => setSectionToDelete(null)}
-              data-track-category='CHAT_SIDEBAR'
-              data-track-name='CANCEL_DELETE_SECTION'
-              className='inline-flex items-center justify-center rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors'
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleConfirmDeleteSection}
-              data-track-category='CHAT_SIDEBAR'
-              data-track-name='CONFIRM_DELETE_SECTION'
-              className='inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-medium bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-colors'
-            >
-              Delete
-            </button>
-          </div>
-        </div>
-      </Dialog>
+        <Dialog
+          open={showAddSectionForm}
+          onOpenChange={setShowAddSectionForm}
+          testId='add-section-dialog'
+        >
+          {showAddSectionForm && (
+            <CreateSectionDialog
+              channels={sectionableChannels}
+              existingNames={(channelSections ?? []).map(s => s.name)}
+              lastSectionPosition={lastSectionPosition}
+              onClose={() => setShowAddSectionForm(false)}
+            />
+          )}
+        </Dialog>
 
-      <Dialog
-        open={!!sectionToManage}
-        onOpenChange={open => {
-          if (!open) setSectionToManage(null);
-        }}
-        testId='manage-section-channels-dialog'
-      >
-        {sectionToManage && (
-          <ManageSectionChannelsDialog
-            section={sectionToManage}
-            channels={sectionableChannels}
-            currentChannelIds={allChannelsUserStatus
-              .filter(s => s.sectionId === sectionToManage.id)
-              .map(s => s.channelId)}
-            onSave={(toAdd, toRemove) => {
-              const timestamp = Date.now();
-              const existingPositions = allChannelsUserStatus
+        <Dialog
+          open={!!sectionToRename}
+          onOpenChange={open => {
+            if (!open) setSectionToRename(null);
+          }}
+          testId='rename-section-dialog'
+        >
+          {sectionToRename && (
+            <div className='p-4'>
+              <AddSectionForm
+                initialName={sectionToRename.name}
+                initialEmoji={sectionToRename.emoji ?? ''}
+                existingNames={(channelSections ?? [])
+                  .filter(s => s.id !== sectionToRename.id)
+                  .map(s => s.name)}
+                submitLabel='Save'
+                title='Rename section'
+                onSubmit={handleRenameSection}
+                onCancel={() => setSectionToRename(null)}
+              />
+            </div>
+          )}
+        </Dialog>
+
+        <Dialog
+          open={!!sectionToDelete}
+          onOpenChange={open => {
+            if (!open) setSectionToDelete(null);
+          }}
+          testId='delete-section-dialog'
+        >
+          <div className='p-4 space-y-4'>
+            <div className='flex items-start justify-between gap-2'>
+              <div className='text-xl font-medium text-foreground'>Delete this section?</div>
+              <button
+                type='button'
+                onClick={() => setSectionToDelete(null)}
+                aria-label='Close'
+                data-track-category='CHAT_SIDEBAR'
+                data-track-name='CLOSE_DELETE_SECTION'
+                className='-mr-1 -mt-1 shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
+              >
+                <MultipleCrossCancelDefault size={20} />
+              </button>
+            </div>
+            <div className='space-y-3 text-sm text-foreground'>
+              <p>
+                Any channels you added to{' '}
+                <span className='font-semibold inline-flex items-center gap-1'>
+                  {sectionToDelete?.emoji && renderEmoji(sectionToDelete.emoji, 'size-4')}
+                  {sectionToDelete?.name}
+                </span>{' '}
+                will move back to the Channels list.
+              </p>
+              <p className='text-foreground'>
+                Don’t worry — deleting this section won’t remove you from any channels.
+              </p>
+            </div>
+            <div className='flex justify-end gap-3 pt-2'>
+              <button
+                onClick={() => setSectionToDelete(null)}
+                data-track-category='CHAT_SIDEBAR'
+                data-track-name='CANCEL_DELETE_SECTION'
+                className='inline-flex items-center justify-center rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors'
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmDeleteSection}
+                data-track-category='CHAT_SIDEBAR'
+                data-track-name='CONFIRM_DELETE_SECTION'
+                className='inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-medium bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-colors'
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </Dialog>
+
+        <Dialog
+          open={!!sectionToManage}
+          onOpenChange={open => {
+            if (!open) setSectionToManage(null);
+          }}
+          testId='manage-section-channels-dialog'
+        >
+          {sectionToManage && (
+            <ManageSectionChannelsDialog
+              section={sectionToManage}
+              channels={sectionableChannels}
+              currentChannelIds={allChannelsUserStatus
                 .filter(s => s.sectionId === sectionToManage.id)
-                .map(s => s.sectionPosition ?? '')
-                .filter(p => p !== '')
-                .sort();
-              let prevKey: string | null = existingPositions[existingPositions.length - 1] ?? null;
-              for (const channelId of toAdd) {
-                const position = keyBetween(prevKey, null);
-                void zero.mutate(
-                  mutators.channel.moveToSection({
-                    channelId,
-                    sectionId: sectionToManage.id,
-                    position,
-                    timestamp,
-                  }),
-                );
-                prevKey = position;
-              }
-              for (const channelId of toRemove) {
-                void zero.mutate(
-                  mutators.channel.moveToSection({
-                    channelId,
-                    sectionId: null,
-                    position: keyBetween(null, null),
-                    timestamp,
-                  }),
-                );
-              }
-              setSectionToManage(null);
-            }}
-            onClose={() => setSectionToManage(null)}
-          />
-        )}
-      </Dialog>
+                .map(s => s.channelId)}
+              onSave={(toAdd, toRemove) => {
+                const timestamp = Date.now();
+                const existingPositions = allChannelsUserStatus
+                  .filter(s => s.sectionId === sectionToManage.id)
+                  .map(s => s.sectionPosition ?? '')
+                  .filter(p => p !== '')
+                  .sort();
+                let prevKey: string | null =
+                  existingPositions[existingPositions.length - 1] ?? null;
+                for (const channelId of toAdd) {
+                  const position = keyBetween(prevKey, null);
+                  void zero.mutate(
+                    mutators.channel.moveToSection({
+                      channelId,
+                      sectionId: sectionToManage.id,
+                      position,
+                      timestamp,
+                    }),
+                  );
+                  prevKey = position;
+                }
+                for (const channelId of toRemove) {
+                  void zero.mutate(
+                    mutators.channel.moveToSection({
+                      channelId,
+                      sectionId: null,
+                      position: keyBetween(null, null),
+                      timestamp,
+                    }),
+                  );
+                }
+                setSectionToManage(null);
+              }}
+              onClose={() => setSectionToManage(null)}
+            />
+          )}
+        </Dialog>
+      </div>
     </div>
   );
 
@@ -1211,7 +1241,7 @@ const ChatDirectory = ({
                 onClick={() => setIsCommandMenuOpen(true)}
                 className='h-8 px-2 flex items-center justify-center rounded-[999px] border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5] min-[500px]:hidden z-30'
               >
-                <Search className='size-4' />
+                <SearchDefault size={16} />
               </button>
             </div>
           </div>
@@ -1227,7 +1257,7 @@ const ChatDirectory = ({
               onClick={() => setIsCommandMenuOpen(true)}
               className='size-8 items-center justify-center hidden min-[500px]:flex cursor-pointer'
             >
-              <Search className='size-4' />
+              <SearchDefault size={16} />
             </button>
           </div>
           <ChatDirectoryButton

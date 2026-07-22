@@ -1,4 +1,4 @@
-import { type CSSProperties, type ReactElement, useCallback } from 'react';
+import { type CSSProperties, type ReactElement, useCallback, useEffect } from 'react';
 import { Square } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAgentProgress } from '../../../hooks/useAgentProgress';
@@ -24,12 +24,20 @@ const rowStyle: CSSProperties = {
 export function AgentProgressIndicator({
   sessionId,
   conversationId,
+  onActiveChange,
 }: {
   sessionId: string | undefined;
   conversationId: string | undefined;
+  /** Notifies the parent whether any agent is currently active (drives the input activity bar). */
+  onActiveChange?: (active: boolean) => void;
 }): ReactElement | null {
   const { user } = useAuth();
   const { agents, clearAll } = useAgentProgress(sessionId);
+
+  const isActive = agents.length > 0;
+  useEffect(() => {
+    onActiveChange?.(isActive);
+  }, [isActive, onActiveChange]);
 
   const currentUserId = user?.id;
   const myAgent = agents.find(
@@ -63,7 +71,7 @@ export function AgentProgressIndicator({
   if (agents.length === 0) return null;
 
   return (
-    <div className='flex items-center gap-2 px-1 py-0.5'>
+    <div className='flex items-center gap-2 h-5 bg-background'>
       <div className='flex flex-wrap gap-3 text-[11px] text-muted-foreground flex-1 min-w-0'>
         {agents.map(a => (
           <span key={a.agentUserId ?? a.agentSlug ?? 'agent'} style={rowStyle}>

@@ -30,5 +30,4 @@ export interface ProjectSidebarProps {
   projects?: readonly ProjectWithBoards[];
   userGroups?: readonly UserGroup[];
   persons?: readonly Person[];
-  onClose?: () => void;
 }

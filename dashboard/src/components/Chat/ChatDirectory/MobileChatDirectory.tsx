@@ -2,14 +2,14 @@ import { ReactElement, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ChevronRight,
-  Plus,
-  Search,
-  ArrowUpDown,
-  ArrowDownAZ,
-  BellDot,
-  Clock,
-  Check,
-} from 'lucide-react';
+  PlusDefault,
+  SearchDefault,
+  ChevronSortVertical,
+  ListSortAlphabetically,
+  NotificationBellOn,
+  ClockDefault,
+  CheckTickSingle,
+} from '@xyne/icons';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -144,7 +144,7 @@ const MobileChatDirectory = ({
           data-track-category='MOBILE_CHAT_DIRECTORY'
           data-track-name='OPEN_SEARCH_MOBILE'
         >
-          <Search className='size-5 text-muted-foreground shrink-0' />
+          <SearchDefault size={20} className='text-muted-foreground shrink-0' />
           <span className='text-sm text-muted-foreground'>Search...</span>
         </button>
       </div>
@@ -169,7 +169,8 @@ const MobileChatDirectory = ({
                     <span className='size-[20px] flex items-center justify-center shrink-0'>
                       <ChevronRight
                         strokeWidth={2.33}
-                        className='size-4 transition-transform duration-200 group-data-[state=open]:rotate-90'
+                        size={16}
+                        className='transition-transform duration-200 group-data-[state=open]:rotate-90'
                       />
                     </span>
                   </button>
@@ -196,7 +197,8 @@ const MobileChatDirectory = ({
                   <span className='size-[20px] flex items-center justify-center shrink-0'>
                     <ChevronRight
                       strokeWidth={2.33}
-                      className='size-4 transition-transform duration-200 group-data-[state=open]:rotate-90'
+                      size={16}
+                      className='transition-transform duration-200 group-data-[state=open]:rotate-90'
                     />
                   </span>
                 </button>
@@ -213,7 +215,7 @@ const MobileChatDirectory = ({
                           data-track-category='MOBILE_CHAT_DIRECTORY'
                           data-track-name='SORT_CHANNELS_MOBILE'
                         >
-                          <ArrowUpDown className='size-5' />
+                          <ChevronSortVertical size={20} />
                         </button>
                       </DropdownMenuTrigger>
                     </Tooltip>
@@ -229,10 +231,10 @@ const MobileChatDirectory = ({
                         }}
                         className='gap-2'
                       >
-                        <BellDot className='size-3.5 shrink-0' />
+                        <NotificationBellOn size={14} className='shrink-0' />
                         <span className='flex-1'>Unread & Activity</span>
                         {channelSortOrder === ChannelSortOrder.UNREAD && (
-                          <Check className='size-3.5 shrink-0' />
+                          <CheckTickSingle size={14} className='shrink-0' />
                         )}
                       </DropdownMenuItem>
                       <DropdownMenuItem
@@ -242,10 +244,10 @@ const MobileChatDirectory = ({
                         }}
                         className='gap-2'
                       >
-                        <Clock className='size-3.5 shrink-0' />
+                        <ClockDefault size={14} className='shrink-0' />
                         <span className='flex-1'>By recency</span>
                         {channelSortOrder === ChannelSortOrder.RECENCY && (
-                          <Check className='size-3.5 shrink-0' />
+                          <CheckTickSingle size={14} className='shrink-0' />
                         )}
                       </DropdownMenuItem>
                       <DropdownMenuItem
@@ -255,10 +257,10 @@ const MobileChatDirectory = ({
                         }}
                         className='gap-2'
                       >
-                        <ArrowDownAZ className='size-3.5 shrink-0' />
+                        <ListSortAlphabetically size={14} className='shrink-0' />
                         <span className='flex-1'>Alphabetical A-Z</span>
                         {channelSortOrder === ChannelSortOrder.ALPHABETICAL && (
-                          <Check className='size-3.5 shrink-0' />
+                          <CheckTickSingle size={14} className='shrink-0' />
                         )}
                       </DropdownMenuItem>
                     </DropdownMenuContent>
@@ -274,7 +276,7 @@ const MobileChatDirectory = ({
                       data-track-category='MOBILE_CHAT_DIRECTORY'
                       data-track-name='ADD_CHANNEL_MOBILE'
                     >
-                      <Plus className='size-5' />
+                      <PlusDefault size={20} />
                     </button>
                   </Tooltip>
                 </div>
@@ -300,7 +302,8 @@ const MobileChatDirectory = ({
                   <span className='size-[20px] flex items-center justify-center shrink-0'>
                     <ChevronRight
                       strokeWidth={2.33}
-                      className='size-4 transition-transform duration-200 group-data-[state=open]:rotate-90'
+                      size={16}
+                      className='transition-transform duration-200 group-data-[state=open]:rotate-90'
                     />
                   </span>
                 </button>
@@ -315,7 +318,7 @@ const MobileChatDirectory = ({
                     data-track-category='MOBILE_CHAT_DIRECTORY'
                     data-track-name='ADD_DM_MOBILE'
                   >
-                    <Plus className='size-5' />
+                    <PlusDefault size={20} />
                   </button>
                 </Tooltip>
               </div>

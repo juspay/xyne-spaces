@@ -130,13 +130,13 @@ export const ChatDir = ({
   ];
   return (
     <div className='w-[106px] shrink-0 bg-sidebar border-r border-sidebar-divider flex flex-col pt-1 pb-1 overflow-hidden'>
-      <p className='text-[11px] font-semibold text-sidebar-primary-foreground px-2 pb-1'>Chat</p>
+      <p className='text-[11px] font-semibold text-sidebar-accent-foreground px-2 pb-1'>Chat</p>
       {navItems.map(n => (
         <div
           key={n.key}
           className={`flex items-center gap-1.5 h-7 px-2 rounded-md mx-0.5 text-[10px] cursor-default ${
             activeItem === n.key
-              ? 'bg-sidebar-item-active text-sidebar-primary-foreground font-medium'
+              ? 'bg-sidebar-item-active text-sidebar-accent-foreground font-medium'
               : 'text-sidebar-secondary-foreground'
           }`}
         >
@@ -152,7 +152,7 @@ export const ChatDir = ({
           key={ch.name}
           className={`flex items-center gap-1 h-7 px-2 rounded-md mx-0.5 text-[10px] cursor-default ${
             activeItem === ch.name
-              ? 'bg-sidebar-item-active text-sidebar-primary-foreground font-medium'
+              ? 'bg-sidebar-item-active text-sidebar-accent-foreground font-medium'
               : 'text-sidebar-secondary-foreground'
           }`}
         >
@@ -804,7 +804,7 @@ export const FeatureMock = ({ visualKey, title }: FeatureMockProps): ReactElemen
                     key={v}
                     className={`text-[9px] px-2 py-1 rounded-md cursor-default ${
                       i === 0
-                        ? 'bg-sidebar-item-active text-sidebar-primary-foreground font-medium'
+                        ? 'bg-sidebar-item-active text-sidebar-accent-foreground font-medium'
                         : 'text-sidebar-secondary-foreground'
                     }`}
                   >
@@ -1679,7 +1679,7 @@ export const FeatureMock = ({ visualKey, title }: FeatureMockProps): ReactElemen
                   key={n.label}
                   className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-[9px] cursor-default ${
                     n.active
-                      ? 'bg-sidebar-item-active text-sidebar-primary-foreground font-medium'
+                      ? 'bg-sidebar-item-active text-sidebar-accent-foreground font-medium'
                       : 'text-sidebar-secondary-foreground'
                   }`}
                 >

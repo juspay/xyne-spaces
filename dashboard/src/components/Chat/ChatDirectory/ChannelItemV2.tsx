@@ -1,7 +1,16 @@
 import { memo, ReactElement, useState } from 'react';
 import { withProfiler } from '../../../utils/withProfiler';
 import { Link, useNavigate } from 'react-router-dom';
-import { Hash, Pencil, Headphones, X, MoreVertical, Check } from 'lucide-react';
+import {
+  Hashtag,
+  PencilEdit,
+  Headphones,
+  MultipleCrossCancelDefault,
+  ThreeDotsMenuVertical,
+  CheckTickSingle,
+  FolderArrowRight,
+  FolderRemove,
+} from '@xyne/icons';
 import {
   ChannelVisibility,
   ChannelScopeType,
@@ -24,6 +33,7 @@ import {
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubTrigger,
   DropdownMenuSubContent,
@@ -124,7 +134,7 @@ const ChannelItemV2 = memo(
       if (isGroupDMChannel(channel.scopeType)) {
         const participantCount = parseDMParticipantIds(channel).length;
         return (
-          <span className='flex items-center justify-center size-5 rounded-md bg-sidebar-item-hover text-sidebar-secondary-foreground text-[10px] font-medium'>
+          <span className='flex items-center justify-center size-5 rounded-md bg-sidebar-accent text-sidebar-foreground text-[10px] font-medium'>
             {participantCount}
           </span>
         );
@@ -138,11 +148,7 @@ const ChannelItemV2 = memo(
         );
       }
 
-      return isPrivate ? (
-        <ChatLock color={isActive ? 'hsl(var(--foreground))' : 'hsl(var(--muted-foreground))'} />
-      ) : (
-        <Hash size={12} />
-      );
+      return isPrivate ? <ChatLock /> : <Hashtag size={12} />;
     };
 
     const handleChannelClick = (e: React.MouseEvent<HTMLAnchorElement>): void => {
@@ -176,11 +182,11 @@ const ChannelItemV2 = memo(
       >
         <div
           className={cn(
-            'flex items-center gap-2 h-8 group rounded-md pl-5 pr-1.5 transition-colors',
+            'flex items-center gap-3 h-9 group rounded-[10px] px-3 border border-transparent transition-colors',
             isActive
-              ? 'text-sidebar-primary-foreground bg-sidebar-item-active'
-              : 'text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground hover:bg-sidebar-item-hover',
-            shouldShowBold && !isActive && '!font-semibold text-sidebar-unread-foreground',
+              ? 'text-sidebar-accent-foreground font-medium bg-sidebar-accent border-sidebar-border'
+              : 'text-sidebar-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent hover:border-sidebar-border',
+            shouldShowBold && !isActive && '!font-semibold text-sidebar-accent-foreground',
           )}
           style={shouldShowBold && !isActive ? { fontWeight: '700' } : undefined}
         >
@@ -205,11 +211,11 @@ const ChannelItemV2 = memo(
           )}
           {shouldShowDraft && !hideDraftIndicator && (
             <Tooltip content={draftTooltipContent} side='top' sideOffset={6}>
-              <Pencil size={14} className='shrink-0' />
+              <PencilEdit size={14} className='shrink-0' />
             </Tooltip>
           )}
           {unreadCount > 0 && !isActive && (
-            <Badge className='order-last font-mono h-[18px] bg-sidebar-badge-accent px-1.5 text-sidebar-badge-accent-foreground'>
+            <Badge className='order-last font-mono h-[18px] bg-sidebar-primary border border-sidebar-accent-ring px-1.5 text-sidebar-primary-foreground'>
               {unreadCount > 9 ? '9+' : unreadCount}
             </Badge>
           )}
@@ -219,8 +225,10 @@ const ChannelItemV2 = memo(
                 <button
                   type='button'
                   className={cn(
-                    'flex items-center justify-center p-1 rounded-md hover:bg-sidebar-item-hover shrink-0 transition-opacity',
-                    sectionMenuOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
+                    'items-center justify-center p-1 rounded-md hover:bg-sidebar-accent shrink-0',
+                    // Use display (not opacity) so the hidden trigger reserves no
+                    // width — otherwise it shrinks the name and truncates early.
+                    sectionMenuOpen ? 'flex' : 'hidden group-hover:flex',
                   )}
                   onClick={e => {
                     e.preventDefault();
@@ -231,7 +239,7 @@ const ChannelItemV2 = memo(
                   data-track-category='CHAT_SIDEBAR'
                   data-track-name='CHANNEL_SECTION_MENU'
                 >
-                  <MoreVertical size={14} className='shrink-0' />
+                  <ThreeDotsMenuVertical size={14} className='shrink-0' />
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent
@@ -240,7 +248,10 @@ const ChannelItemV2 = memo(
                 className='min-w-[180px]'
               >
                 <DropdownMenuSub>
-                  <DropdownMenuSubTrigger>Move to section</DropdownMenuSubTrigger>
+                  <DropdownMenuSubTrigger className='gap-2'>
+                    <FolderArrowRight size={14} className='shrink-0' />
+                    <span className='flex-1'>Move to section</span>
+                  </DropdownMenuSubTrigger>
                   <DropdownMenuSubContent>
                     {sections.length === 0 ? (
                       <DropdownMenuItem disabled>No sections yet</DropdownMenuItem>
@@ -260,7 +271,7 @@ const ChannelItemV2 = memo(
                           )}
                           <span className='flex-1 truncate'>{section.name}</span>
                           {currentSectionId === section.id && (
-                            <Check size={14} className='shrink-0' />
+                            <CheckTickSingle size={14} className='shrink-0' />
                           )}
                         </DropdownMenuItem>
                       ))
@@ -268,15 +279,20 @@ const ChannelItemV2 = memo(
                   </DropdownMenuSubContent>
                 </DropdownMenuSub>
                 {(currentSectionId || isStarred) && (
-                  <DropdownMenuItem
-                    onClick={e => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      onMoveToSection?.(channel.id, null);
-                    }}
-                  >
-                    Remove from section
-                  </DropdownMenuItem>
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      className='gap-2 text-destructive focus:text-destructive'
+                      onClick={e => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        onMoveToSection?.(channel.id, null);
+                      }}
+                    >
+                      <FolderRemove size={14} className='shrink-0' />
+                      <span className='flex-1'>Remove from section</span>
+                    </DropdownMenuItem>
+                  </>
                 )}
               </DropdownMenuContent>
             </DropdownMenu>
@@ -293,7 +309,7 @@ const ChannelItemV2 = memo(
                 channelName: displayName,
               })}
             >
-              <X size={14} className='shrink-0' />
+              <MultipleCrossCancelDefault size={14} className='shrink-0' />
             </button>
           )}
         </div>

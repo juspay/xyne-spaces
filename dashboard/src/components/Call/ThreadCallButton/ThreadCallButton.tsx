@@ -1,4 +1,4 @@
-import { Headphones, ChevronDown, Calendar } from 'lucide-react';
+import { PhoneDefault, CalendarDefault } from '@xyne/icons';
 import { Button } from '../../ui/Button';
 import Tooltip from '../../ui/Tooltip';
 import {
@@ -20,9 +20,9 @@ interface ThreadCallButtonProps {
 }
 
 /**
- * Split-button for thread/conversation headers.
- * Left side: instant call (headphone icon).
- * Right side: chevron dropdown → Schedule Call.
+ * Call button for thread/conversation headers.
+ * Matches the conversation-header action buttons (28px ghost, phone icon).
+ * Clicking opens a dropdown with call options (Start call / Schedule Call).
  */
 export const ThreadCallButton = ({
   onStartCall,
@@ -35,15 +35,13 @@ export const ThreadCallButton = ({
   trackMetadata,
 }: ThreadCallButtonProps) => {
   return (
-    <div className='flex items-center border border-border rounded-lg overflow-hidden h-8'>
+    <DropdownMenu>
       <Tooltip content={hasActiveCall ? 'Call already in progress' : callTooltip}>
-        <span className='inline-flex cursor-pointer'>
+        <DropdownMenuTrigger asChild>
           <Button
             variant='ghost'
-            className='p-2 rounded-none rounded-l-lg h-8 w-8 border-0 border-r border-border'
             size='sm'
-            onClick={onStartCall}
-            disabled={hasActiveCall}
+            className='h-7 w-7 rounded-lg'
             data-testid={testId}
             {...(trackCategory && { 'data-track-category': trackCategory })}
             {...(trackName && { 'data-track-name': trackName })}
@@ -51,26 +49,20 @@ export const ThreadCallButton = ({
               'data-track-metadata': JSON.stringify(trackMetadata),
             })}
           >
-            <Headphones size={20} />
+            <PhoneDefault size={16} />
           </Button>
-        </span>
-      </Tooltip>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button
-            className='flex items-center justify-center h-8 w-5 px-1 hover:bg-accent transition-colors'
-            aria-label='More call options'
-          >
-            <ChevronDown size={12} />
-          </button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align='end' side='bottom'>
-          <DropdownMenuItem onSelect={onScheduleCall}>
-            <Calendar size={14} className='mr-2' />
-            Schedule Call
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </div>
+      </Tooltip>
+      <DropdownMenuContent align='end' side='bottom'>
+        <DropdownMenuItem onSelect={onStartCall} disabled={hasActiveCall}>
+          <PhoneDefault size={14} className='mr-2' />
+          Start call
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={onScheduleCall}>
+          <CalendarDefault size={14} className='mr-2' />
+          Schedule Call
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 };

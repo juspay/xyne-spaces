@@ -62,8 +62,8 @@ import {
   trackCanvasModeQuery,
   trackAttachmentsAdded,
 } from '../../../services/otel/xyneAIMetrics';
-import { XyneAISuggestions } from './components/XyneAISuggestions';
 import { AILandingHero, AILandingHeroErrorBoundary } from './components/AILandingHero';
+import { XyneAIEmptyState } from './components/XyneAIEmptyState';
 import { cn } from '../../../utils/classNames';
 import { type Attachment } from './components/XyneAIInputBox';
 import { XyneAIInputSection } from './components/XyneAIInputSection';
@@ -644,11 +644,6 @@ const XyneAISidebar = ({
       setWebSearchEnabled(true);
     }
   }, [browserContext, webSearchAccessible, webSearchEnabled]);
-
-  // Suggestion queries - different based on context
-  const suggestionQueries = channelId
-    ? ['Summarize this channel', 'Notes shared last week', 'SR trend today']
-    : ['How can I help you?', 'Ask me anything', 'General assistance'];
 
   // Use the streaming hook with selected channel IDs, research context, and active thread info
   const { submitQuery, abortCurrentRequest } = useXyneAIStream({
@@ -1998,7 +1993,8 @@ const XyneAISidebar = ({
   return (
     <div
       className={cn(
-        'grid h-full min-h-0 w-full overflow-hidden border bg-background',
+        'grid h-full min-h-0 w-full overflow-hidden',
+        isMobile && 'border bg-background',
         isFullscreen
           ? isMobile
             ? 'min-h-full pb-[calc(6rem+env(safe-area-inset-bottom))]'
@@ -2022,7 +2018,8 @@ const XyneAISidebar = ({
       <div
         ref={dragAndDropAreaRef}
         className={cn(
-          'relative flex min-h-0 min-w-0 flex-1 flex-col bg-background',
+          'relative flex min-h-0 min-w-0 flex-1 flex-col',
+          isMobile && 'bg-background',
           showInlineDebugger && 'border-r border-border/70',
         )}
       >
@@ -2219,11 +2216,7 @@ const XyneAISidebar = ({
                       </div>
                     </div>
                   ) : (
-                    <XyneAISuggestions
-                      queries={suggestionQueries}
-                      onSuggestionClick={handleSuggestionClick}
-                      selectedAgentSlug={effectiveAgentSlug}
-                    />
+                    <XyneAIEmptyState />
                   )
                 ) : (
                   <div className={cn(isFullscreen ? 'flex justify-center' : '')}>

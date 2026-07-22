@@ -18,7 +18,8 @@
  */
 import { useState, useRef, useCallback, useEffect, forwardRef, useImperativeHandle } from 'react';
 import type { Editor } from '@tiptap/react';
-import { Mic, Loader2 } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
+import { MicOn } from '@xyne/icons';
 import { toast } from 'sonner';
 import Tooltip from '../Tooltip/Tooltip';
 import type { MentionResult } from '@xyne/shared';
@@ -694,7 +695,7 @@ export const VoiceInput = forwardRef<VoiceInputHandle, VoiceInputProps>(
           {isVoiceTranscribing ? (
             <Loader2 className='h-4 w-4 animate-spin' />
           ) : (
-            <Mic className='h-4 w-4' />
+            <MicOn className='h-4 w-4' />
           )}
         </button>
       </Tooltip>

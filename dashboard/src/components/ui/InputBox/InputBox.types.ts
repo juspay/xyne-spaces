@@ -45,6 +45,10 @@ export interface InputBoxProps {
   onTyping?: () => void;
   typingUsers?: TypingUser[];
   showTypingIndicator?: boolean;
+  /** Rendered in the activity bar above the input (e.g. agent-progress pill). */
+  agentSlot?: React.ReactNode;
+  /** Whether the agentSlot currently has active content — drives the typing↔agent flip. */
+  hasAgentActivity?: boolean;
   placeholder?: React.ReactNode;
   value?: string | undefined;
   disabled?: boolean;

@@ -122,20 +122,13 @@ export default {
         },
         sidebar: {
           DEFAULT: 'var(--sidebar)',
+          foreground: 'var(--sidebar-foreground)',
+          primary: 'var(--sidebar-primary)',
           'primary-foreground': 'var(--sidebar-primary-foreground)',
-          'unread-foreground':
-            'var(--sidebar-unread-foreground, var(--sidebar-primary-foreground))',
-          'secondary-foreground': 'var(--sidebar-secondary-foreground)',
-          'item-hover': 'var(--sidebar-item-hover)',
-          'item-active': 'var(--sidebar-item-active)',
-          'badge-accent': 'var(--sidebar-badge-accent)',
-          'badge-accent-foreground': 'var(--sidebar-badge-accent-foreground)',
-          divider: 'var(--sidebar-divider)',
-        },
-        appSidebar: {
-          active: 'var(--app-sidebar-active)',
-          activeForeground: 'var(--app-sidebar-active-foreground)',
-          activeIcon: 'var(--nav-active-icon)',
+          accent: 'var(--sidebar-accent)',
+          'accent-foreground': 'var(--sidebar-accent-foreground)',
+          border: 'var(--sidebar-border)',
+          'accent-ring': 'var(--sidebar-accent-ring)',
         },
         stage: {
           todo: {

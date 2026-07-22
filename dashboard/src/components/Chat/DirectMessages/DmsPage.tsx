@@ -1,8 +1,9 @@
 import { ReactElement, useState, useRef, useCallback, useEffect, useMemo } from 'react';
-import { Search, PenBox, ArrowLeft, X, HelpCircle } from 'lucide-react';
+import { Search, PenBox, X } from 'lucide-react';
+import { QuestionMarkCircle } from '@xyne/icons';
 import { useAllUnreadCount } from '../../../hooks/useUnreadCount';
 import { DmListItem } from './DmListItem';
-import { useNavigate, Outlet, useParams, Link } from 'react-router-dom';
+import { useNavigate, Outlet, useParams } from 'react-router-dom';
 import { useShortcut } from '../../../shortcuts';
 import { useMutation } from '@tanstack/react-query';
 import { channelService, CreateDmRequest } from '../../../services/Chat/channelService';
@@ -15,6 +16,7 @@ import { MobileProfileMenu } from '../../ui/MobileProfileMenu/MobileProfileMenu'
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { useWalkthrough } from '../../../hooks/useWalkthrough';
 import { DirectMessagesIcon } from '../../icons';
+import AppNavigator from '../../AppNavigator/AppNavigator';
 import {
   PanelGroup,
   Panel,
@@ -493,13 +495,13 @@ const DmsPage = (): ReactElement => {
             <div className='flex items-center gap-3'>
               <button
                 onClick={() => startWalkthrough(true)}
-                className='p-1.5 rounded-full text-muted-foreground hover:text-foreground hover:bg-accent transition-colors'
+                className='p-1.5 rounded-full text-muted-foreground/60 hover:text-foreground hover:bg-accent transition-colors'
                 aria-label='Replay Tour'
                 title='Replay Tour'
                 data-track-category='DM'
                 data-track-name='REPLAY_TOUR_MOBILE'
               >
-                <HelpCircle size={20} />
+                <QuestionMarkCircle size={20} />
               </button>
               <MobileProfileMenu userId={context.userID} />
             </div>
@@ -633,46 +635,43 @@ const DmsPage = (): ReactElement => {
         autoSaveId='dm-screen-resize'
       >
         {/* LEFT PANEL - DM List */}
-        <Panel ref={dmPanelRef} defaultSize={20} minSize={30} maxSize={40}>
-          <div className='flex flex-col bg-background text-foreground border-r border-border h-full'>
+        <Panel ref={dmPanelRef} defaultSize={20} minSize={15} maxSize={40}>
+          <div className='flex flex-col text-foreground border-r border-border h-full'>
+            {/* Top navigator spacer — matches ChatDirectory; keeps the panel transparent so the wallpaper shows through */}
+            <div className='w-full h-[52px] shrink-0'>
+              <AppNavigator />
+            </div>
             {/* Desktop search/header */}
-            <div className='p-4'>
+            <div className='p-4 border-t border-border'>
               <div className='flex items-center justify-between mb-3'>
                 <div className='flex items-center gap-2'>
-                  <Link
-                    to='/chat/dir'
-                    className='p-1 rounded-md text-foreground hover:text-muted-foreground hover:bg-accent transition-colors duration-200'
-                    aria-label='Go back'
-                    data-testid='dms-go-back-link'
+                  <h2
+                    className='text-base font-semibold leading-normal text-sidebar-accent-foreground'
+                    data-testid='dms-heading'
                   >
-                    <ArrowLeft size={20} />
-                  </Link>
-                  <div className='flex items-center gap-2'>
-                    <h2 className='text-lg font-semibold' data-testid='dms-heading'>
-                      Direct Messages
-                    </h2>
-                    <button
-                      onClick={() => startWalkthrough(true)}
-                      className='p-1 rounded-full text-muted-foreground hover:text-foreground hover:bg-accent transition-colors'
-                      aria-label='Replay Tour'
-                      title='Replay Tour'
-                      data-track-category='DM'
-                      data-track-name='REPLAY_TOUR_DESKTOP'
-                    >
-                      <HelpCircle size={18} />
-                    </button>
-                  </div>
+                    Direct Messages
+                  </h2>
+                  <button
+                    onClick={() => startWalkthrough(true)}
+                    className='p-1 rounded-full text-muted-foreground/60 hover:text-foreground hover:bg-accent transition-colors'
+                    aria-label='Replay Tour'
+                    title='Replay Tour'
+                    data-track-category='DM'
+                    data-track-name='REPLAY_TOUR_DESKTOP'
+                  >
+                    <QuestionMarkCircle size={18} />
+                  </button>
                 </div>
                 <button
                   id='dm-create-btn'
-                  className='flex items-center justify-center size-10 rounded-full bg-background border-[0.1px] backdrop-blur-[10px] shadow-md hover:bg-accent hover:border-primary transition-colors'
+                  className='size-8 flex items-center justify-center rounded-[10px] text-sidebar-secondary-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-item-hover transition-colors'
                   onClick={handleAddDirectMessage}
                   aria-label='Create new message'
                   data-testid='create-new-message-btn'
                   data-track-category='DM'
                   data-track-name='CREATE_DM_DESKTOP'
                 >
-                  <PenBox className='size-5 text-primary' />
+                  <PenBox className='size-4' />
                 </button>
               </div>
               <div className='relative dm-search-container'>
@@ -682,7 +681,7 @@ const DmsPage = (): ReactElement => {
                   ref={dmSearchInputRef}
                   type='text'
                   autoFocus
-                  className='w-full pl-9 pr-8 py-2 bg-muted rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-ring'
+                  className='w-full pl-9 pr-8 py-2 bg-muted rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-ring'
                   placeholder='Search DMs (Cmd+K)'
                   value={dmSearchQuery}
                   onChange={e => {
@@ -758,7 +757,7 @@ const DmsPage = (): ReactElement => {
                     if (activeTab === 'all') loadMore();
                   }}
                   itemContent={renderDmItem}
-                  className='h-full'
+                  className='h-full no-scrollbar'
                   data-testid='dm-list'
                 />
               )}

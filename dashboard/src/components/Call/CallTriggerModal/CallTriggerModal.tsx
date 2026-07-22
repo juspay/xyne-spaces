@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Headphones, ChevronDown } from 'lucide-react';
+import { Headphones, ChevronDown } from '@xyne/icons';
 import { Popover } from '../../ui/Popover/Popover';
 import { Drawer } from '../../ui/Drawer/Drawer';
 import { cn } from '../../../utils/classNames';
