@@ -85,6 +85,25 @@ export interface SearchContext {
   mimeType?: string;
   internalUrl?: string;
   originalUrl?: string;
+  // Call-specific fields returned by Vespa so call search can render without Zero hydration
+  callId?: string;
+  externalId?: string;
+  callType?: string;
+  title?: string;
+  createdByUserId?: string;
+  roomLink?: string;
+  callOrigin?: string;
+  status?: string;
+  startsAt?: number;
+  endsAt?: number;
+  startedAt?: number;
+  endedAt?: number;
+  recurringSeriesId?: string;
+  hasTranscript?: boolean;
+  userIds?: string[];
+  participantResponses?: string[];
+  participantNames?: string[];
+  participantEmails?: string[];
   // Knowledge base / collection specific fields
   collectionId?: string;
   docId?: string;
@@ -181,6 +200,9 @@ export interface VespaSearchFilters {
   dynamicFieldDateRanges?: Record<string, { start?: number; end?: number }>;
   subApp?: string; // Comma-separated sub-apps: 'canvas', 'transcript', 'RCA'
   callType?: string; // Comma-separated call types: 'HEADLESS'
+  callStatus?: string; // Comma-separated call statuses: 'SCHEDULED'
+  callStartsAt?: number; // Call visible range start timestamp
+  callEndsAt?: number; // Call visible range end timestamp
   presentationSummary?: string; // Vespa presentation.summary profile (e.g. 'lean')
 
   // Filter-only mode (no query text, just filters)
