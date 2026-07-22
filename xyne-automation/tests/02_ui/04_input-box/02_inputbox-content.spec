@@ -2,6 +2,7 @@
 > Verify mentions (@user, #channel) and emoji functionality.
 
 ## Mentions work for users and channels
+tags: quarantine
 * Using browser
 * Ensuring user "user-1" is logged in
 * Opening baseline DM for user "user-1"

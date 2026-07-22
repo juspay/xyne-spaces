@@ -135,7 +135,8 @@ services:
       context: ./xyne-automation
       dockerfile: Dockerfile
     container_name: ${COMPOSE_PROJECT_NAME:-xyne-test}-automation
-    shm_size: '2gb'
+    # Parallel Gauge workers each launch Chromium, all sharing this container's /dev/shm.
+    shm_size: '4gb'
     environment:
       - TEST_ENV=test
       - BACKEND_URL=http://backend:3001
@@ -174,6 +175,12 @@ services:
     environment:
       ZERO_MUTATE_URL: http://backend:3001/api/zero/push
       ZERO_QUERY_URL: http://backend:3001/api/zero/query
+      # Higher sync capacity for parallel automation runs (test-only; dev keeps 5/10/10).
+      # Parallel Gauge workers each open sync sessions, so the default worker/pool sizes
+      # starve and channel/message queries don't land in time.
+      ZERO_NUM_SYNC_WORKERS: "10"
+      ZERO_CVR_MAX_CONNS: "30"
+      ZERO_UPSTREAM_MAX_CONNS: "30"
 
   # Override Transcription Agent to use test Dockerfile (minimal deps, no torch/pyannote)
   # DISABLED: Tests only verify UI text, not actual transcription functionality
