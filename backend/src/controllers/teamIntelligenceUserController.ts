@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { z } from 'zod';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
+import { db } from '@/database/client';
 import { teamIntelligenceUserDashboardService } from '@/services/teamIntelligenceUserDashboardService';
 
 // Validation schema for user dashboard queries
@@ -19,6 +20,36 @@ const MettleExtendedEmployeeQuerySchema = z.object({
 
 export class TeamIntelligenceUserController {
   /**
+   * Ensures the requested email belongs to a user in the caller's workspace.
+   * The same person may exist in multiple workspaces; access is allowed only
+   * when the target email shares the caller's workspace. Writes a 403 and
+   * returns false otherwise.
+   */
+  private assertEmailInWorkspace = async (
+    email: string,
+    req: Request,
+    res: Response,
+  ): Promise<boolean> => {
+    const workspaceId = req.user?.workspaceId;
+    if (!workspaceId) {
+      res.status(403).json({ error: 'Access denied' });
+      return false;
+    }
+
+    const target = await db.user.findFirst({
+      where: { email: { equals: email, mode: 'insensitive' }, workspaceId },
+      select: { id: true },
+    });
+
+    if (!target) {
+      res.status(403).json({ error: 'Access denied' });
+      return false;
+    }
+
+    return true;
+  };
+
+  /**
    * GET /api/team-intelligence-dashboard/user/mettle-extended-info?email=user@example.com
    */
   getUserMettleExtendedInfo = async (req: Request, res: Response): Promise<void> => {
@@ -29,6 +60,10 @@ export class TeamIntelligenceUserController {
           error: 'Validation error',
           details: parseResult.error.errors.map(e => ({ path: e.path.join('.'), message: e.message })),
         });
+        return;
+      }
+
+      if (!(await this.assertEmailInWorkspace(parseResult.data.email, req, res))) {
         return;
       }
 
@@ -99,6 +134,10 @@ export class TeamIntelligenceUserController {
         return;
       }
 
+      if (!(await this.assertEmailInWorkspace(userEmail, req, res))) {
+        return;
+      }
+
       const clampedPage = Math.max(1, page);
       const clampedLimit = Math.min(200, Math.max(1, limit));
 
@@ -137,6 +176,10 @@ export class TeamIntelligenceUserController {
 
       if (fromDate > toDate) {
         res.status(400).json({ error: '"from" must be before or equal to "to"' });
+        return;
+      }
+
+      if (!(await this.assertEmailInWorkspace(userEmail, req, res))) {
         return;
       }
 
@@ -182,6 +225,10 @@ export class TeamIntelligenceUserController {
         return;
       }
 
+      if (!(await this.assertEmailInWorkspace(userEmail, req, res))) {
+        return;
+      }
+
       const result = await teamIntelligenceUserDashboardService.getUserOverview({
         from: fromDate,
         to: toDate,
@@ -215,6 +262,10 @@ export class TeamIntelligenceUserController {
 
       if (fromDate > toDate) {
         res.status(400).json({ error: '"from" must be before or equal to "to"' });
+        return;
+      }
+
+      if (!(await this.assertEmailInWorkspace(userEmail, req, res))) {
         return;
       }
 

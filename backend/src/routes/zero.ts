@@ -12,6 +12,7 @@ router.post('/query', authMiddleware.authenticateZero, handleGetQueries);
 router.post('/query-fallback', authMiddleware.authenticateZero, handleGetQueriesFallback);
 router.post('/push-fallback', authMiddleware.authenticateZero, handlePushFallback);
 router.get('/fallback-config', authMiddleware.authenticateZero, getZeroFallbackConfig);
-router.post('/fallback-config', authMiddleware.authenticateZero, setZeroFallbackConfig);
+// Writing the deployment-wide fallback config is an admin-only operation
+router.post('/fallback-config', authMiddleware.authenticateZero, authMiddleware.requireAdmin, setZeroFallbackConfig);
 
 export default router;
