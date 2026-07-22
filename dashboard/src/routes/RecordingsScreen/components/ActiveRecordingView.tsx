@@ -389,13 +389,15 @@ export function ActiveRecordingView({
                     >
                       {/* Time label */}
                       <motion.div
-                        className='flex-none w-11 text-right font-mono text-xs font-medium text-muted-foreground/60 tabular-nums leading-[25px]'
+                        className='flex-none w-11 flex justify-end font-mono text-xs font-medium text-muted-foreground/60 tabular-nums leading-[25px]'
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         transition={{ duration: 0.15, delay: 0.1 }}
                       >
-                        {startTime !== null &&
-                          formatElapsedTime(Math.max(0, entry.timestamp - startTime))}
+                        <span className='shrink-0 whitespace-nowrap text-right'>
+                          {startTime !== null &&
+                            formatElapsedTime(Math.max(0, entry.timestamp - startTime))}
+                        </span>
                       </motion.div>
 
                       {/* Timeline dot container - maintains vertical alignment */}
