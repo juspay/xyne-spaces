@@ -32,6 +32,7 @@ export * from './utils/channel';
 export * from './utils/csv';
 export * from './release/releaseReport';
 export * from './utils/notificationKeywords';
+export * from './utils/hostControls';
 export {
   parseTicketMd,
   serializeTicketMd,

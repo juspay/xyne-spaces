@@ -21,7 +21,7 @@ import {
   MoreVertical,
   PencilRuler,
   SmilePlus,
-  UserLock,
+  UserCog,
   ImagePlus,
 } from 'lucide-react';
 import { useMediaDeviceSelect } from '@livekit/components-react';
@@ -200,19 +200,29 @@ export function CallControls({
       0
     );
   }, [currentCall?.participants, isHost]);
-  const micLocked = !isHost && hostControls.lockMic;
-  const cameraLocked = !isHost && hostControls.lockCamera;
-  const screenShareLocked = !isHost && hostControls.lockScreenShare;
+  const audioTurnedOffByHost = !isHost && hostControls.turnOffAudio;
+  const cameraTurnedOffByHost = !isHost && hostControls.turnOffCamera;
+  const screenShareTurnedOffByHost = !isHost && hostControls.turnOffScreenShare;
   const screenShareBlockedByWhiteboard = isWhiteboardOpen;
+  const micTooltip = audioTurnedOffByHost
+    ? "The host turned off everyone's audio"
+    : isMicEnabled
+      ? `Mute microphone (${modKey}D)`
+      : `Unmute microphone (${modKey}D, or press spacebar to speak)`;
+  const cameraTooltip = cameraTurnedOffByHost
+    ? "The host turned off everyone's camera"
+    : isCameraEnabled
+      ? `Turn off camera (${modKey}E)`
+      : `Turn on camera (${modKey}E)`;
   const screenShareTooltip = screenShareBlockedByWhiteboard
     ? 'Close the shared whiteboard to start screen sharing.'
-    : screenShareLocked
-      ? 'The host has locked screen sharing'
+    : screenShareTurnedOffByHost
+      ? 'The host turned off screen sharing'
       : isScreenSharing
         ? 'Stop sharing'
         : 'Share screen';
   const handleScreenShareClick = (): void => {
-    if (screenShareLocked || screenShareBlockedByWhiteboard) return;
+    if (screenShareTurnedOffByHost || screenShareBlockedByWhiteboard) return;
     onToggleScreenShare();
   };
 
@@ -428,52 +438,59 @@ export function CallControls({
         {/* Microphone Toggle with Device Selector */}
         <div className='relative' ref={micMenuRef}>
           <div className={cn('flex items-center gap-0.5 rounded-full', midnightControlGroupClass)}>
-            <button
-              onClick={onToggleMic}
-              disabled={micLocked}
+            <Tooltip
+              content={micTooltip}
+              side='top'
+              sideOffset={8}
+              collisionPadding={8}
               className={cn(
-                'rounded-full transition-all duration-200 transform hover:scale-110 shadow-lg flex-shrink-0',
-                !hasCustomSizing && 'p-2.5 sm:p-4',
-                isPushToTalkActive
-                  ? 'bg-green-500 hover:bg-green-600 text-white shadow-green-500/50 ring-4 ring-green-500/30'
-                  : isMicEnabled
-                    ? midnightControlClass
-                    : 'bg-red-600 hover:bg-red-700 text-white shadow-red-900/40',
-                micLocked && 'opacity-50 cursor-not-allowed hover:scale-100',
+                'whitespace-normal text-center leading-snug',
+                viewMode === 'mini' ? 'max-w-44' : 'max-w-64',
               )}
-              style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
-              title={
-                micLocked
-                  ? 'The host has locked the microphone'
-                  : isMicEnabled
-                    ? `Mute microphone (${modKey}D)`
-                    : `Unmute microphone (${modKey}D, or press spacebar to speak)`
-              }
-              data-testid='mic-toggle-button'
-              data-track-category='CALLS'
-              data-track-name='MIC_TOGGLE'
-              data-track-metadata={JSON.stringify({ enabled: isMicEnabled, callId })}
             >
-              {isMicEnabled || isPushToTalkActive ? (
-                <Mic
-                  className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
-                  style={
-                    hasCustomSizing
-                      ? { width: `${iconSize}px`, height: `${iconSize}px` }
-                      : undefined
-                  }
-                />
-              ) : (
-                <MicOff
-                  className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
-                  style={
-                    hasCustomSizing
-                      ? { width: `${iconSize}px`, height: `${iconSize}px` }
-                      : undefined
-                  }
-                />
-              )}
-            </button>
+              <span className='inline-flex flex-shrink-0'>
+                <button
+                  onClick={onToggleMic}
+                  disabled={audioTurnedOffByHost}
+                  className={cn(
+                    'rounded-full transition-all duration-200 transform hover:scale-110 shadow-lg flex-shrink-0',
+                    !hasCustomSizing && 'p-2.5 sm:p-4',
+                    isPushToTalkActive
+                      ? 'bg-green-500 hover:bg-green-600 text-white shadow-green-500/50 ring-4 ring-green-500/30'
+                      : isMicEnabled
+                        ? midnightControlClass
+                        : 'bg-red-600 hover:bg-red-700 text-white shadow-red-900/40',
+                    audioTurnedOffByHost && 'opacity-50 cursor-not-allowed hover:scale-100',
+                  )}
+                  style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
+                  aria-label={micTooltip}
+                  data-testid='mic-toggle-button'
+                  data-track-category='CALLS'
+                  data-track-name='MIC_TOGGLE'
+                  data-track-metadata={JSON.stringify({ enabled: isMicEnabled, callId })}
+                >
+                  {isMicEnabled || isPushToTalkActive ? (
+                    <Mic
+                      className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
+                      style={
+                        hasCustomSizing
+                          ? { width: `${iconSize}px`, height: `${iconSize}px` }
+                          : undefined
+                      }
+                    />
+                  ) : (
+                    <MicOff
+                      className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
+                      style={
+                        hasCustomSizing
+                          ? { width: `${iconSize}px`, height: `${iconSize}px` }
+                          : undefined
+                      }
+                    />
+                  )}
+                </button>
+              </span>
+            </Tooltip>
             {viewMode === 'full' && (
               <button
                 onClick={() => setShowMicMenu(!showMicMenu)}
@@ -532,50 +549,57 @@ export function CallControls({
         {/* Camera Toggle with Device Selector */}
         <div className='relative' ref={cameraMenuRef}>
           <div className={cn('flex items-center gap-0.5 rounded-full', midnightControlGroupClass)}>
-            <button
-              onClick={onToggleCamera}
-              disabled={cameraLocked}
+            <Tooltip
+              content={cameraTooltip}
+              side='top'
+              sideOffset={8}
+              collisionPadding={8}
               className={cn(
-                'rounded-full transition-all duration-200 transform hover:scale-110 shadow-lg flex-shrink-0',
-                !hasCustomSizing && 'p-2.5 sm:p-4',
-                isCameraEnabled
-                  ? midnightControlClass
-                  : 'bg-red-600 hover:bg-red-700 text-white shadow-red-900/40',
-                cameraLocked && 'opacity-50 cursor-not-allowed hover:scale-100',
+                'whitespace-normal text-center leading-snug',
+                viewMode === 'mini' ? 'max-w-44' : 'max-w-64',
               )}
-              style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
-              title={
-                cameraLocked
-                  ? 'The host has locked the camera'
-                  : isCameraEnabled
-                    ? `Turn off camera (${modKey}E)`
-                    : `Turn on camera (${modKey}E)`
-              }
-              data-testid='camera-toggle-button'
-              data-track-category='CALLS'
-              data-track-name='CAMERA_TOGGLE'
-              data-track-metadata={JSON.stringify({ enabled: isCameraEnabled, callId })}
             >
-              {isCameraEnabled ? (
-                <Video
-                  className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
-                  style={
-                    hasCustomSizing
-                      ? { width: `${iconSize}px`, height: `${iconSize}px` }
-                      : undefined
-                  }
-                />
-              ) : (
-                <VideoOff
-                  className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
-                  style={
-                    hasCustomSizing
-                      ? { width: `${iconSize}px`, height: `${iconSize}px` }
-                      : undefined
-                  }
-                />
-              )}
-            </button>
+              <span className='inline-flex flex-shrink-0'>
+                <button
+                  onClick={onToggleCamera}
+                  disabled={cameraTurnedOffByHost}
+                  className={cn(
+                    'rounded-full transition-all duration-200 transform hover:scale-110 shadow-lg flex-shrink-0',
+                    !hasCustomSizing && 'p-2.5 sm:p-4',
+                    isCameraEnabled
+                      ? midnightControlClass
+                      : 'bg-red-600 hover:bg-red-700 text-white shadow-red-900/40',
+                    cameraTurnedOffByHost && 'opacity-50 cursor-not-allowed hover:scale-100',
+                  )}
+                  style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
+                  aria-label={cameraTooltip}
+                  data-testid='camera-toggle-button'
+                  data-track-category='CALLS'
+                  data-track-name='CAMERA_TOGGLE'
+                  data-track-metadata={JSON.stringify({ enabled: isCameraEnabled, callId })}
+                >
+                  {isCameraEnabled ? (
+                    <Video
+                      className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
+                      style={
+                        hasCustomSizing
+                          ? { width: `${iconSize}px`, height: `${iconSize}px` }
+                          : undefined
+                      }
+                    />
+                  ) : (
+                    <VideoOff
+                      className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
+                      style={
+                        hasCustomSizing
+                          ? { width: `${iconSize}px`, height: `${iconSize}px` }
+                          : undefined
+                      }
+                    />
+                  )}
+                </button>
+              </span>
+            </Tooltip>
             {viewMode === 'full' && (
               <button
                 onClick={() => {
@@ -660,14 +684,14 @@ export function CallControls({
           <span className='inline-flex flex-shrink-0'>
             <button
               onClick={handleScreenShareClick}
-              disabled={screenShareLocked && !screenShareBlockedByWhiteboard}
-              aria-disabled={screenShareLocked || screenShareBlockedByWhiteboard}
+              disabled={screenShareTurnedOffByHost && !screenShareBlockedByWhiteboard}
+              aria-disabled={screenShareTurnedOffByHost || screenShareBlockedByWhiteboard}
               className={cn(
                 buttonClasses,
                 isScreenSharing || screenShareBlockedByWhiteboard
                   ? 'bg-blue-500 hover:bg-blue-600 text-white shadow-blue-500/50'
                   : midnightControlClass,
-                screenShareLocked && 'opacity-50 cursor-not-allowed hover:scale-100',
+                screenShareTurnedOffByHost && 'opacity-50 cursor-not-allowed hover:scale-100',
                 screenShareBlockedByWhiteboard && 'cursor-not-allowed hover:scale-100',
               )}
               data-track-event='BUTTON_CLICK'
@@ -675,7 +699,7 @@ export function CallControls({
               data-track-name='TOGGLE_SCREEN_SHARE'
               data-track-metadata={JSON.stringify({ callId, enabled: isScreenSharing })}
               style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
-              title={screenShareTooltip}
+              aria-label={screenShareTooltip}
             >
               {isScreenSharing ? (
                 <Monitor
@@ -793,7 +817,7 @@ export function CallControls({
             data-track-name='TOGGLE_HOST_CONTROLS'
             data-track-metadata={JSON.stringify({ isOpen: isHostControlsOpen })}
           >
-            <UserLock
+            <UserCog
               className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
               style={
                 hasCustomSizing ? { width: `${iconSize}px`, height: `${iconSize}px` } : undefined

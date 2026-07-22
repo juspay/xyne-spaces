@@ -4,8 +4,8 @@ import { buildCallInviteUrl } from '@/utils/urlUtils';
 import { repositories } from '@/database/repositories';
 import {
   livekitService,
-  allowedSourcesFor,
-  hasActiveLock,
+  allowedSourcesForHostControls,
+  hasTurnedOffHostControl,
   getHostControls,
 } from '@/services/liveKitService';
 import { logger } from '@/utils/logger';
@@ -26,7 +26,8 @@ function hasRemovedByHost(metadata: unknown): boolean {
 
 function stripRemovedByHostFlag(metadata: unknown): Prisma.InputJsonValue {
   const meta = (metadata as CallParticipantMetadata | null) ?? {};
-  const { removedByHost: _removedByHost, ...rest } = meta;
+  const rest = { ...meta };
+  delete rest.removedByHost;
   return rest as Prisma.InputJsonValue;
 }
 
@@ -210,11 +211,11 @@ export const callLobbyController = {
 
       const callRecord = await repositories.calls.findById(call.callId);
       const hostControls = getHostControls(callRecord);
-      const lockedSources = hasActiveLock(hostControls)
-        ? allowedSourcesFor(hostControls)
+      const hostControlledSources = hasTurnedOffHostControl(hostControls)
+        ? allowedSourcesForHostControls(hostControls)
         : undefined;
 
-      if (hasActiveLock(hostControls)) {
+      if (hasTurnedOffHostControl(hostControls)) {
         try {
           await livekitService.setRoomHostControls(call.roomName, hostControls);
         } catch (err) {
@@ -229,7 +230,7 @@ export const callLobbyController = {
         roomName: call.roomName,
         userName: participant.displayName ?? 'Guest',
         metadata: JSON.stringify({ isExternal: true }),
-        canPublishSources: lockedSources,
+        canPublishSources: hostControlledSources,
       });
 
       // Refresh cookie on join

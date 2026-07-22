@@ -413,7 +413,7 @@ export class CallService {
     }
   }
 
-  /** Set host-control locks. */
+  /** Set host controls for turning participant media off or allowing it again. */
   async setHostControls(callId: string, controls: Partial<HostControls>): Promise<HostControls> {
     try {
       const response = await apiInstance.patch<{

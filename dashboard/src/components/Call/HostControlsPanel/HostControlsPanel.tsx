@@ -1,56 +1,57 @@
 import { useState, useCallback } from 'react';
 import { useSelector } from '@xstate/react';
-import { X, Mic, Video, MonitorUp, Lock, LockOpen, UserLock } from 'lucide-react';
+import { X, Mic, Video, MonitorUp, UserCog } from 'lucide-react';
 import { toast } from 'sonner';
 import { roomActor } from '../../../machines/roomMachine';
 import { callService } from '../../../services/Call/callService';
 import { getApiErrorMessage } from '../../../utils/apiError';
+import { Switch } from '../../ui/Switch';
 
 interface HostControlsPanelProps {
   callId: string;
   onClose: () => void;
 }
 
-type LockKey = 'lockMic' | 'lockCamera' | 'lockScreenShare';
+type HostControlKey = 'turnOffAudio' | 'turnOffCamera' | 'turnOffScreenShare';
 
-interface LockRow {
-  key: LockKey;
+interface HostControlRow {
+  key: HostControlKey;
   title: string;
   description: string;
   MediaIcon: typeof Mic;
   track: string;
 }
 
-const LOCK_ROWS: LockRow[] = [
+const HOST_CONTROL_ROWS: HostControlRow[] = [
   {
-    key: 'lockMic',
-    title: 'Microphone',
-    description: 'Participants cannot unmute themselves.',
+    key: 'turnOffAudio',
+    title: 'Prevent anyone from turning on their mic',
+    description: 'Applies to everyone except you.',
     MediaIcon: Mic,
-    track: 'LOCK_MIC',
+    track: 'TURN_OFF_EVERYONE_AUDIO',
   },
   {
-    key: 'lockCamera',
-    title: 'Camera',
-    description: 'Participants cannot turn on their camera.',
+    key: 'turnOffCamera',
+    title: 'Prevent anyone from turning on their camera',
+    description: 'Applies to everyone except you.',
     MediaIcon: Video,
-    track: 'LOCK_CAMERA',
+    track: 'TURN_OFF_EVERYONE_CAMERA',
   },
   {
-    key: 'lockScreenShare',
-    title: 'Screen share',
-    description: 'Participants cannot share their screen.',
+    key: 'turnOffScreenShare',
+    title: 'Prevent anyone from sharing their screen',
+    description: 'Applies to everyone except you.',
     MediaIcon: MonitorUp,
-    track: 'LOCK_SCREEN_SHARE',
+    track: 'TURN_OFF_EVERYONE_SCREEN_SHARE',
   },
 ];
 
 export function HostControlsPanel({ callId, onClose }: HostControlsPanelProps): React.ReactElement {
   const hostControls = useSelector(roomActor, state => state.context.hostControls);
-  const [updatingKey, setUpdatingKey] = useState<LockKey | null>(null);
+  const [updatingKey, setUpdatingKey] = useState<HostControlKey | null>(null);
 
   const handleToggle = useCallback(
-    async (key: LockKey, next: boolean) => {
+    async (key: HostControlKey, next: boolean) => {
       if (updatingKey) return;
       setUpdatingKey(key);
       try {
@@ -74,7 +75,7 @@ export function HostControlsPanel({ callId, onClose }: HostControlsPanelProps): 
     <div className='flex flex-col h-full bg-background text-foreground'>
       <div className='flex items-center justify-between px-4 py-3 border-b border-border'>
         <div className='flex items-center gap-2'>
-          <UserLock size={20} className='text-muted-foreground' />
+          <UserCog size={20} className='text-muted-foreground' />
           <h2 className='text-lg font-semibold'>Host controls</h2>
         </div>
         <button
@@ -90,11 +91,12 @@ export function HostControlsPanel({ callId, onClose }: HostControlsPanelProps): 
 
       <div className='flex-1 overflow-y-auto p-4 space-y-3'>
         <p className='text-xs text-muted-foreground'>
-          Locks apply to everyone except you. Locked participants cannot turn the control back on.
+          These controls apply to everyone except you.
         </p>
-        {LOCK_ROWS.map(({ key, title, description, MediaIcon, track }) => {
-          const locked = hostControls[key];
-          const LockIcon = locked ? Lock : LockOpen;
+        {HOST_CONTROL_ROWS.map(row => {
+          const { key, title, description, track } = row;
+          const MediaIcon = row.MediaIcon;
+          const turnedOff = hostControls[key];
           return (
             <div
               key={key}
@@ -108,23 +110,22 @@ export function HostControlsPanel({ callId, onClose }: HostControlsPanelProps): 
                   <p className='text-xs text-muted-foreground truncate'>{description}</p>
                 </div>
               </div>
-              <button
-                onClick={() => void handleToggle(key, !locked)}
-                disabled={updatingKey !== null}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0 ${
-                  locked
-                    ? 'bg-destructive/10 border-destructive/40 text-destructive'
-                    : 'bg-background border-border text-foreground hover:bg-accent'
-                }`}
-                title={locked ? `Unlock ${title.toLowerCase()}` : `Lock ${title.toLowerCase()}`}
+              <div
+                className='flex-shrink-0'
+                title={title}
                 data-testid={`host-control-toggle-${key}`}
                 data-track-category='CALLS'
                 data-track-name={track}
-                data-track-metadata={JSON.stringify({ callId, locked: !locked })}
+                data-track-metadata={JSON.stringify({ callId, turnedOff: !turnedOff })}
               >
-                <LockIcon size={14} />
-                <span>{locked ? 'Locked' : 'Unlocked'}</span>
-              </button>
+                <Switch
+                  checked={turnedOff}
+                  onCheckedChange={next => void handleToggle(key, next)}
+                  disabled={updatingKey !== null}
+                  aria-label={title}
+                  id={`host-control-${key}`}
+                />
+              </div>
             </div>
           );
         })}

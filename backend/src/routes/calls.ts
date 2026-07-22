@@ -100,7 +100,7 @@ router.post('/:callId/mute-participant', callController.muteParticipant);
 router.post('/:callId/recording/start', callController.startCallRecording);
 router.post('/:callId/recording/stop', callController.stopCallRecording);
 
-// Host controls: lock/unlock mic, camera, screen-share for all non-host participants (host only)
+// Host controls: turn off/allow audio, camera, screen-share for all non-host participants (host only)
 router.patch('/:callId/host-controls', callHostControlController.setHostControls);
 
 // Remove a participant from the call (host only); rejoin requires re-admission
