@@ -70,6 +70,39 @@ export class ApplicationBackfillController {
         }
       }
 
+      // Tenant isolation: ensure the target channel belongs to the caller's
+      // workspace before we create boards/forms/applications inside it.
+      const channel = await db.channel.findUnique({
+        where: { id: channelId },
+        select: { workspaceId: true },
+      });
+
+      if (!channel) {
+        res.status(404).json({
+          success: false,
+          error: 'Not found',
+          message: `Channel "${channelId}" not found`,
+          timestamp: new Date().toISOString(),
+        });
+        return;
+      }
+
+      if (channel.workspaceId !== req.user!.workspaceId) {
+        logger.warn('Backfill applications denied: cross-workspace channel access', {
+          channelId,
+          channelWorkspaceId: channel.workspaceId,
+          userWorkspaceId: req.user!.workspaceId,
+          userId: req.user?.id,
+        });
+        res.status(403).json({
+          success: false,
+          error: 'Forbidden',
+          message: 'You do not have access to the specified channel',
+          timestamp: new Date().toISOString(),
+        });
+        return;
+      }
+
       logger.info('Backfill applications request received', {
         channelId,
         applicationsCount: applications.length,
@@ -80,7 +113,8 @@ export class ApplicationBackfillController {
         applications,
         channelId,
         mainReleaseBoardId,
-        req.user!.id
+        req.user!.id,
+        req.user!.workspaceId
       );
 
       res.status(200).json({
@@ -116,8 +150,9 @@ export class ApplicationBackfillController {
     });
 
     try {
+      // Tenant isolation: only resolve projects within the caller's workspace.
       const project = await db.project.findFirst({
-        where: { name: projectName as string },
+        where: { name: projectName as string, workspaceId: req.user!.workspaceId },
       });
 
       if (!project) {
