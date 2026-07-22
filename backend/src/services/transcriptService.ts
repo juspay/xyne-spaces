@@ -3,7 +3,7 @@ import { getCanvasUrl } from '@/services/canvasService';
 import { logger } from '@/utils/logger';
 import { AttachmentEntityType, CallOrigin, CallType, Prisma } from '@prisma/client';
 import { config } from '@/config/env';
-import { Agent, createUserMessage, createSystemMessage } from '@framework';
+import { Agent, createUserMessage } from '@framework';
 import { extractAgentContent } from '@/utils/agentUtils';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { MessageType } from '@xyne/shared';
@@ -17,7 +17,7 @@ import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
 import { CacConfigService } from '@/services/cacConfigService';
 import { getCallTicketSuggestionsTotal } from '@/services/otel/suggestionMetrics';
-import { executeCallLlmWithRetry } from './callLlmRetry';
+import { executeStreamingLlmRequest } from './callLlmRetry';
 import { callRecordingService } from '@/services/callRecordingService';
 import { callDocumentService } from '@/services/callDocumentService';
 import { acquireLock, releaseLock } from '@/utils/distributedLock';
@@ -48,7 +48,7 @@ interface TranscriptAttachmentMetadata {
 const TRANSCRIPT_CONSOLIDATION_GAP_SECONDS = 30;
 
 // AI Summary prompt for call transcripts - Markdown format
-const CALL_SUMMARY_PROMPT = `
+const CALL_SUMMARY_SYSTEM_PROMPT = `
 You are generating a call summary for a professional collaboration product.
 
 CRITICAL RULES:
@@ -84,13 +84,10 @@ MARKDOWN TEMPLATE (FOLLOW EXACTLY):
 
 Only output the Markdown above.
 No extra text.
-
-TRANSCRIPT:
-{transcript}
 `;
 
 // AI Title prompt for call transcripts - Two lines, descriptive
-const CALL_TITLE_PROMPT = `
+const CALL_TITLE_SYSTEM_PROMPT = `
 You are summarizing the topic of a call in exactly 1 line.
 
 CRITICAL RULES:
@@ -104,8 +101,7 @@ BRAND NAME CORRECTION:
 - When any word that phonetically sounds like "Xyne" appears, replace it with "Xyne"
 - Only apply this correction when the word is clearly a reference to the brand (e.g. "Xyne Spaces", "Xyne Calls")
 
-Generate a 1-line description for this call:
-{transcript}
+Generate a 1-line description for the call supplied by the user.
 `;
 
 // AI Ticket Suggestions prompt - analyzes transcript for actionable work items
@@ -203,7 +199,6 @@ TRANSCRIPT:
 {transcript}
 `
 
-
 export interface TicketSuggestion {
   id: string;
   title: string;
@@ -212,6 +207,11 @@ export interface TicketSuggestion {
   suggestedAssignee: string;
   status: 'pending' | 'created' | 'dismissed';
   createdTicketId?: string;
+}
+
+interface TranscriptPostProcessOptions {
+  callId?: string;
+  abortSignal?: AbortSignal;
 }
 
 export class TranscriptService {
@@ -228,7 +228,7 @@ export class TranscriptService {
    * Create a fresh Agent instance for each request
    * This prevents state pollution and BUSY errors between concurrent requests
    */
-  private createAgent(): Agent | null {
+  private createAgent(callId?: string): Agent | null {
     try {
       const apiKey = config.llm.callLitellmApiKey;
       const baseUrl = config.llm.litellmBaseUrl;
@@ -269,11 +269,13 @@ export class TranscriptService {
         events: {
           logging: 'warn' as const,
         },
-      };
-
+      }
       return Agent.create(agentConfig);
     } catch (error) {
-      logger.error('Failed to create AI agent:', error);
+      logger.error('ticket_suggestions_agent_creation_failed', {
+        error: error instanceof Error ? error.message : String(error),
+        callId: callId || 'unknown',
+      });
       return null;
     }
   }
@@ -285,37 +287,38 @@ export class TranscriptService {
    */
   async postCallTranscript(callId: string, messageId: string): Promise<void> {
     try {
-      logger.info(`[${callId}] transcript_processing_started`, { message_id: messageId });
+      logger.info('transcript_processing_started', { callId, message_id: messageId });
 
       // 0. Check if transcript attachment already exists for this CALL (not just this message)
       // This handles cases where multiple messages might be created for the same call
-      let existingTranscriptAttachment =
+      const existingTranscriptAttachment =
         await repositories.messageAttachments.findTranscriptByCallId(callId);
 
       const isUpdate = !!existingTranscriptAttachment;
       if (isUpdate) {
-        logger.info(
-          `Transcript for call ${callId} already exists (attachment: ${existingTranscriptAttachment.id}). Will update with latest data.`
-        );
+        logger.info('transcript_attachment_exists', {
+          callId,
+          attachment_id: existingTranscriptAttachment.id,
+        });
       }
 
       // 1. Get call details
-      logger.info(`[${callId}] call_lookup_started`);
+      logger.info('call_lookup_started', { callId });
       const call = await repositories.calls.findByExternalId(callId);
       if (!call) {
-        logger.error(`[${callId}] call_not_found`);
+        logger.error('call_not_found', { callId });
         return;
       }
-      logger.info(`[${callId}] call_found`, { call_status: call.status, created_by: call.createdByUserId });
+      logger.info('call_found', { callId, call_status: call.status, created_by: call.createdByUserId });
 
       // Get channel for workspaceId
       if (!call.channelId) {
-        logger.error(`[${callId}] channel_id_missing`);
+        logger.error('channel_id_missing', { callId });
         return;
       }
       const channel = await repositories.channels.findById(call.channelId);
       if (!channel) {
-        logger.error(`[${callId}] channel_not_found`, { channel_id: call.channelId });
+        logger.error('channel_not_found', { callId, channel_id: call.channelId });
         return;
       }
 
@@ -323,36 +326,36 @@ export class TranscriptService {
       // which means all users have left (agent is always the last to leave)
 
       // 2. Get the call message to retrieve conversationId
-      logger.info(`[${callId}] message_lookup_started`, { message_id: messageId });
+      logger.info('message_lookup_started', { callId, message_id: messageId });
       const callMessage = await repositories.messages.findById(messageId);
       if (!callMessage) {
-        logger.warn(`[${callId}] message_not_found`, { message_id: messageId });
+        logger.warn('message_not_found', { callId, message_id: messageId });
         return;
       }
-      logger.info(`[${callId}] message_found`, { message_id: messageId, conversation_id: callMessage.conversationId });
+      logger.info('message_found', { callId, message_id: messageId, conversation_id: callMessage.conversationId });
 
       // 3. Retrieve transcript from GCS or local file
       const transcriptContent = await this.retrieveTranscript(callId);
 
       if (!transcriptContent) {
-        logger.error(`Transcript file not found for call: ${callId}`);
+        logger.error('transcript_file_not_found', { callId });
         throw new Error(`Transcript file not found for call: ${callId}`);
       }
 
       // 4. Parse JSONL entries
-      logger.info(`[${callId}] transcript_parsing_started`);
-      const entries = this.parseTranscriptEntries(transcriptContent);
+      logger.info('transcript_parsing_started', { callId });
+      const entries = this.parseTranscriptEntries(transcriptContent, callId);
       if (entries.length === 0) {
-        logger.error(`[${callId}] transcript_parsing_failed`, { entries_count: 0 });
+        logger.error('transcript_parsing_failed', { callId, entries_count: 0 });
         throw new Error(`No valid transcript entries found for call: ${callId}`);
       }
       const uniqueSpeakers = new Set(entries.map((e) => e.user)).size;
-      logger.info(`[${callId}] transcript_parsed`, { entries_count: entries.length, speakers_count: uniqueSpeakers });
+      logger.info('transcript_parsed', { callId, entries_count: entries.length, speakers_count: uniqueSpeakers });
 
       // 5. Format as plain text (usernames are already included in transcript entries)
-      logger.info(`[${callId}] transcript_formatting_started`, { format: 'plain_text' });
+      logger.info('transcript_formatting_started', { callId, format: 'plain_text' });
       const formattedTranscript = this.formatTranscript(entries, callId);
-      logger.info(`[${callId}] transcript_formatted`, { format: 'plain_text', characters_count: formattedTranscript.length });
+      logger.info('transcript_formatted', { callId, format: 'plain_text', characters_count: formattedTranscript.length });
 
       // 6. Upload raw formatted transcript immediately (no translation yet - non-blocking)
       const txtStoragePath = await this.uploadFormattedTranscript(callId, formattedTranscript);
@@ -390,9 +393,14 @@ export class TranscriptService {
             entryCount: entries.length,
           },
         });
-        logger.info(`Updated transcript attachment ${existingTranscriptAttachment.id} to version ${currentVersion + 1}, linked to message ${messageId}`);
+        logger.info('transcript_attachment_updated', {
+          callId,
+          attachment_id: existingTranscriptAttachment.id,
+          version: currentVersion + 1,
+          message_id: messageId,
+        });
       } else {
-        logger.info(`[${callId}] attachment_creation_started`, { message_id: messageId, attachment_type: 'transcript' });
+        logger.info('attachment_creation_started', { callId, message_id: messageId, attachment_type: 'transcript' });
         const attachment = await repositories.messageAttachments.create({
           entityId: messageId,
           entityType: AttachmentEntityType.CHAT,
@@ -415,26 +423,26 @@ export class TranscriptService {
             entryCount: entries.length,
           },
         });
-        logger.info(`[${callId}] attachment_created`, { attachment_id: attachment.id, path: storagePath });
+        logger.info('attachment_created', { callId, attachment_id: attachment.id, path: storagePath });
       }
 
       // 11. Save transcript URL to Call record for easier access (used by recordings feature)
       await repositories.calls.update(call.id, {
         transcript: storagePath,
       });
-      logger.info(`[${callId}] call_record_updated`, { fields_updated: 'transcript' });
+      logger.info('call_record_updated', { callId, fields_updated: 'transcript' });
 
       // 12. Update the call message to indicate it has an attachment
       await repositories.messages.update(messageId, {
         hasAttachment: true,
       });
 
-      logger.info(`[${callId}] transcript_processing_completed`, { message_id: messageId });
+      logger.info('transcript_processing_completed', { callId, message_id: messageId });
 
       // 13. Fire-and-forget: Translate transcript asynchronously in background
       // This updates the same GCS file without blocking the response
       this.translateTranscriptAsync(callId, txtStoragePath).catch((err) => {
-        logger.error(`[${callId}] background_translation_failed`, { error: err });
+        logger.error('background_translation_failed', { callId, error: err });
       });
 
       // 14. Attach identified transcript (real-name labelled) as a second attachment when available.
@@ -442,7 +450,7 @@ export class TranscriptService {
       // transcriptions/{callId}_identified.jsonl — may not exist if no voiceprints were enrolled.
       void this.attachIdentifiedTranscriptIfExists(callId, messageId, call.createdByUserId, callMessage.conversationId, channel.workspaceId);
     } catch (error) {
-      logger.error(`[${callId}] transcript_processing_failed`, { message_id: messageId, error: error, stack: error instanceof Error ? error.stack : undefined });
+      logger.error('transcript_processing_failed', { callId, message_id: messageId, error: error, stack: error instanceof Error ? error.stack : undefined });
       // Throw error to allow controller to return proper error response
       throw error;
     }
@@ -457,22 +465,22 @@ export class TranscriptService {
   private async retrieveTranscript(callId: string): Promise<string | null> {
     const storagePath = `transcriptions/${callId}.jsonl`;
     try {
-      logger.info(`[${callId}] transcript_fetch_started`, { path: storagePath });
+      logger.info('transcript_fetch_started', { callId, path: storagePath });
 
       const exists = await this.transcriptStorage.fileExists(storagePath);
 
       if (!exists) {
-        logger.error(`[${callId}] transcript_download_failed`, { error: 'file_not_found', path: storagePath });
+        logger.error('transcript_download_failed', { callId, error: 'file_not_found', path: storagePath });
         throw new Error(`Transcript file not found: ${storagePath}`);
       }
 
-      logger.info(`[${callId}] transcript_download_started`);
+      logger.info('transcript_download_started', { callId });
       const downloadStart = Date.now();
       const buffer = await this.transcriptStorage.getFileBuffer(storagePath);
-      logger.info(`[${callId}] transcript_download_completed`, { bytes_downloaded: buffer.length, duration_ms: Date.now() - downloadStart });
+      logger.info('transcript_download_completed', { callId, bytes_downloaded: buffer.length, duration_ms: Date.now() - downloadStart });
       return buffer.toString('utf-8');
     } catch (error) {
-      logger.error(`[${callId}] transcript_download_failed`, { error: error, path: storagePath, stack: error instanceof Error ? error.stack : undefined });
+      logger.error('transcript_download_failed', { callId, error: error, path: storagePath, stack: error instanceof Error ? error.stack : undefined });
       throw error;
     }
   }
@@ -480,7 +488,7 @@ export class TranscriptService {
   /**
    * Parse JSONL content into transcript entries
    */
-  private parseTranscriptEntries(jsonlContent: string): TranscriptEntry[] {
+  private parseTranscriptEntries(jsonlContent: string, callId?: string): TranscriptEntry[] {
     const lines = jsonlContent
       .trim()
       .split('\n')
@@ -492,7 +500,10 @@ export class TranscriptService {
         const entry = JSON.parse(line) as TranscriptEntry;
         entries.push(entry);
       } catch (error) {
-        logger.warn(`Skipping malformed JSONL line:`, error);
+        logger.warn('transcript_jsonl_line_malformed', {
+          callId: callId ?? 'unknown',
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
     }
 
@@ -532,7 +543,7 @@ export class TranscriptService {
     // Don't forget the last entry
     consolidated.push(currentEntry);
 
-    logger.info(`[${callId}] transcript_consolidated`, { original_entries: entries.length, consolidated_entries: consolidated.length });
+    logger.info('transcript_consolidated', { callId, original_entries: entries.length, consolidated_entries: consolidated.length });
     return consolidated;
   }
 
@@ -568,7 +579,7 @@ export class TranscriptService {
     const filepath = `attachments/${callId}_formatted.txt`;
     const buffer = Buffer.from(content, 'utf-8');
 
-    logger.info(`[${callId}] transcript_upload_started`, { type: 'formatted_transcript', path: filepath });
+    logger.info('transcript_upload_started', { callId, type: 'formatted_transcript', path: filepath });
 
     await this.transcriptStorage.uploadFileV2(buffer, {
       path: filepath,
@@ -576,7 +587,7 @@ export class TranscriptService {
       metadata: { callId, type: 'transcript' },
     });
 
-    logger.info(`[${callId}] transcript_upload_completed`, { type: 'formatted_transcript', path: filepath });
+    logger.info('transcript_upload_completed', { callId, type: 'formatted_transcript', path: filepath });
     return filepath;
   }
 
@@ -600,19 +611,19 @@ export class TranscriptService {
     try {
       const speakerIdentificationEnabled = await this.isSpeakerIdentificationEnabled();
       if (!speakerIdentificationEnabled) {
-        logger.info(`[${callId}] identified_transcript_skipped`, { reason: 'speaker_identification_disabled' });
+        logger.info('identified_transcript_skipped', { callId, reason: 'speaker_identification_disabled' });
         return;
       }
 
       const identifiedGcsPath = `transcriptions/${callId}_identified.jsonl`;
       const exists = await this.transcriptStorage.fileExists(identifiedGcsPath);
       if (!exists) {
-        logger.info(`[${callId}] identified_transcript_not_found`, { action: 'skip_attachment' });
+        logger.info('identified_transcript_not_found', { callId, action: 'skip_attachment' });
         return;
       }
 
       const buffer = await this.transcriptStorage.getFileBuffer(identifiedGcsPath);
-      const entries = this.parseTranscriptEntries(buffer.toString('utf-8'));
+      const entries = this.parseTranscriptEntries(buffer.toString('utf-8'), callId);
       if (entries.length === 0) return;
 
       const formatted = this.formatTranscript(entries, callId);
@@ -647,7 +658,7 @@ export class TranscriptService {
             entryCount: entries.length,
           },
         });
-        logger.info(`[${callId}] identified_transcript_attachment_updated`, { attachment_id: existing.id });
+        logger.info('identified_transcript_attachment_updated', { callId, attachment_id: existing.id });
       } else {
         const attachment = await repositories.messageAttachments.create({
           entityId: messageId,
@@ -671,15 +682,15 @@ export class TranscriptService {
             entryCount: entries.length,
           },
         });
-        logger.info(`[${callId}] identified_transcript_attachment_created`, { attachment_id: attachment.id });
+        logger.info('identified_transcript_attachment_created', { callId, attachment_id: attachment.id });
       }
 
       // Apply the same background translation as the plain transcript
       this.translateIdentifiedTranscriptAsync(callId, formattedPath).catch((err) => {
-        logger.error(`[${callId}] identified_background_translation_failed`, { error: err });
+        logger.error('identified_background_translation_failed', { callId, error: err });
       });
     } catch (err) {
-      logger.error(`[${callId}] identified_transcript_attach_failed`, { error: err });
+      logger.error('identified_transcript_attach_failed', { callId, error: err });
     }
   }
 
@@ -722,14 +733,17 @@ export class TranscriptService {
         return null;
       }
 
-      const entries = this.parseTranscriptEntries(rawContent);
+      const entries = this.parseTranscriptEntries(rawContent, callId);
       if (entries.length === 0) {
         return null;
       }
 
       return this.formatTranscript(entries, callId);
     } catch (error) {
-      logger.error(`Failed to get transcript content for ${callId}:`, error);
+      logger.error('transcript_content_get_failed', {
+        callId,
+        error: error instanceof Error ? error.message : String(error),
+      });
       return null;
     }
   }
@@ -755,11 +769,14 @@ export class TranscriptService {
       const exists = await this.transcriptStorage.fileExists(gcsPath);
       if (!exists) return null;
       const buffer = await this.transcriptStorage.getFileBuffer(gcsPath);
-      const entries = this.parseTranscriptEntries(buffer.toString('utf-8'));
+      const entries = this.parseTranscriptEntries(buffer.toString('utf-8'), callId);
       if (entries.length === 0) return null;
       return this.formatTranscript(entries, callId);
     } catch (error) {
-      logger.error(`Failed to get identified transcript content for ${callId}:`, error);
+      logger.error('identified_transcript_content_get_failed', {
+        callId,
+        error: error instanceof Error ? error.message : String(error),
+      });
       return null;
     }
   }
@@ -773,17 +790,21 @@ export class TranscriptService {
    */
   async downloadFormattedTranscript(callId: string, storagePath: string): Promise<Buffer | null> {
     try {
-      logger.info(
-        `[${callId}] formatted_transcript_download_started | path=${storagePath}, bucket=${config.gcs.transcriptionBucketName}`
-      );
+      logger.info('formatted_transcript_download_started', {
+        callId,
+        path: storagePath,
+        bucket: config.gcs.transcriptionBucketName,
+      });
 
       const buffer = await this.transcriptStorage.getFileBuffer(storagePath);
 
       return buffer;
     } catch (error) {
-      logger.error(
-        `[${callId}] formatted_transcript_download_failed | path=${storagePath}, error=${error}`
-      );
+      logger.error('formatted_transcript_download_failed', {
+        callId,
+        path: storagePath,
+        error: error instanceof Error ? error.message : String(error),
+      });
       return null;
     }
   }
@@ -796,14 +817,14 @@ export class TranscriptService {
    */
   private async translateTranscriptAsync(callId: string, storagePath: string): Promise<void> {
     try {
-      logger.info(`Starting background translation for call: ${callId}`);
+      logger.info('background_translation_started', { callId });
 
       // 1. Download raw transcript
       const buffer = await this.transcriptStorage.getFileBuffer(storagePath);
       const rawTranscript = buffer.toString('utf-8');
 
       // 2. Translate the transcript
-      const translatedTranscript = await this.postProcessTranscript(rawTranscript);
+      const translatedTranscript = await this.postProcessTranscript(rawTranscript, { callId });
 
       // 3. Re-upload translated version (overwrites the same file)
       await this.transcriptStorage.uploadFileV2(Buffer.from(translatedTranscript, 'utf-8'), {
@@ -823,14 +844,20 @@ export class TranscriptService {
         await repositories.messageAttachments.updateVersion(transcriptAttachment.id, {
           ...currentMetadata,
         });
-        logger.info(`Updated database attachment metadata for call: ${callId}`);
+        logger.info('transcript_attachment_metadata_updated', {
+          callId,
+          attachment_id: transcriptAttachment.id,
+        });
       } else {
-        logger.warn(`No attachment found in database for call: ${callId}`);
+        logger.warn('transcript_attachment_not_found', { callId });
       }
 
-      logger.info(`Successfully completed background translation for call: ${callId}`);
+      logger.info('background_translation_completed', { callId });
     } catch (error) {
-      logger.error(`Failed to translate transcript in background for call ${callId}:`, error);
+      logger.error('background_translation_failed', {
+        callId,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
@@ -840,12 +867,12 @@ export class TranscriptService {
    */
   private async translateIdentifiedTranscriptAsync(callId: string, gcsPath: string): Promise<void> {
     try {
-      logger.info(`[${callId}] identified_translation_started`);
+      logger.info('identified_translation_started', { callId });
 
       const buffer = await this.transcriptStorage.getFileBuffer(gcsPath);
       const rawTranscript = buffer.toString('utf-8');
 
-      const translatedTranscript = await this.postProcessTranscript(rawTranscript);
+      const translatedTranscript = await this.postProcessTranscript(rawTranscript, { callId });
 
       await this.transcriptStorage.uploadFileV2(Buffer.from(translatedTranscript, 'utf-8'), {
         path: gcsPath,
@@ -853,9 +880,9 @@ export class TranscriptService {
         metadata: { callId, type: 'identified_transcript', translated: 'true' },
       });
 
-      logger.info(`[${callId}] identified_translation_completed`);
+      logger.info('identified_translation_completed', { callId });
     } catch (error) {
-      logger.error(`[${callId}] identified_translation_failed`, { error: error });
+      logger.error('identified_translation_failed', { callId, error });
     }
   }
 
@@ -865,13 +892,10 @@ export class TranscriptService {
    * @param transcript - The formatted transcript text
    * @returns Post-processed transcript or original if processing fails
    */
-  async postProcessTranscript(transcript: string): Promise<string> {
-    const agent = this.createAgent();
-    if (!agent) {
-      logger.warn('Agent creation failed. Skipping transcript post-processing.');
-      return transcript;
-    }
-
+  async postProcessTranscript(
+    transcript: string,
+    options: TranscriptPostProcessOptions = {},
+  ): Promise<string> {
     const systemInstructions = `You are processing a call transcript. Your task is to translate any non-English text to English, and to fix one specific brand name spelling.
 
 IMPORTANT:
@@ -897,134 +921,164 @@ Output ONLY the processed transcript, nothing else.`;
       const MAX_LINES_PER_CHUNK = 100;
 
       if (lines.length <= MAX_LINES_PER_CHUNK) {
-        const result = await agent.execute({
-          messages: [createSystemMessage(systemInstructions), createUserMessage(transcript)],
+        const translated = await executeStreamingLlmRequest({
+          userPrompt: transcript,
+          systemPrompt: systemInstructions,
+          operation: 'transcript_translation',
+          callId: options.callId,
+          abortSignal: options.abortSignal,
         });
 
-        const extracted = extractAgentContent(result);
-        if (!extracted.ok) {
-          logger.warn(`post_process_transcript_failed | reason=${extracted.reason} | status=${extracted.status ?? ''} | using_original=true`);
+        if (!translated.ok) {
+          logger.warn('post_process_transcript_failed', {
+            callId: options.callId ?? 'unknown',
+            reason: translated.reason,
+            using_original: true,
+          });
           return transcript;
         }
 
-        logger.info('Successfully post-processed transcript (translation)');
-        return extracted.content;
+        logger.info('post_process_transcript_completed', {
+          callId: options.callId ?? 'unknown',
+        });
+        return translated.content;
       }
 
-      // For long transcripts, process in chunks CONCURRENTLY
-      logger.info(
-        `Transcript has ${lines.length} lines, processing in chunks of ${MAX_LINES_PER_CHUNK}`
-      );
+      // For long transcripts, process in chunks with LIMITED CONCURRENCY
+      const CHUNK_CONCURRENCY = 3;
+      const totalChunks = Math.ceil(lines.length / MAX_LINES_PER_CHUNK);
 
-      // Split into chunks
-      const chunkPromises: Array<Promise<string>> = [];
+      logger.info('transcript_chunking_started', {
+        callId: options.callId ?? 'unknown',
+        lines_count: lines.length,
+        max_lines_per_chunk: MAX_LINES_PER_CHUNK,
+        concurrency: CHUNK_CONCURRENCY,
+      });
+
+      // Build chunk metadata
+      const chunks: Array<{ chunkText: string; chunkIndex: number; startLine: number; endLine: number }> = [];
       for (let i = 0; i < lines.length; i += MAX_LINES_PER_CHUNK) {
         const chunkLines = lines.slice(i, i + MAX_LINES_PER_CHUNK);
-        const chunkText = chunkLines.join('\n');
-        const chunkIndex = Math.floor(i / MAX_LINES_PER_CHUNK) + 1;
-        const totalChunks = Math.ceil(lines.length / MAX_LINES_PER_CHUNK);
-
-        // Create a fresh agent for each chunk to avoid BUSY errors
-        const chunkPromise = (async () => {
-          const chunkAgent = this.createAgent();
-          if (!chunkAgent) {
-            logger.warn(`Agent creation failed for chunk ${chunkIndex}, using original`);
-            return chunkText;
-          }
-
-          logger.info(
-            `Processing chunk ${chunkIndex}/${totalChunks} (lines ${i + 1}-${i + chunkLines.length})`
-          );
-
-          try {
-            const result = await chunkAgent.execute({
-              messages: [createSystemMessage(systemInstructions), createUserMessage(chunkText)],
-            });
-
-            const extracted = extractAgentContent(result);
-            if (!extracted.ok) {
-              logger.warn(`post_process_chunk_failed | chunk=${chunkIndex}/${totalChunks} | reason=${extracted.reason} | status=${extracted.status ?? ''} | using_original=true`);
-              return chunkText;
-            }
-
-            logger.info(`Chunk ${chunkIndex}/${totalChunks} completed`);
-            return extracted.content;
-          } catch (error) {
-            logger.error(`Error processing chunk ${chunkIndex}:`, error);
-            return chunkText;
-          }
-        })();
-
-        chunkPromises.push(chunkPromise);
+        chunks.push({
+          chunkText: chunkLines.join('\n'),
+          chunkIndex: Math.floor(i / MAX_LINES_PER_CHUNK) + 1,
+          startLine: i + 1,
+          endLine: i + chunkLines.length,
+        });
       }
 
-      // Process all chunks in parallel
-      const processedChunks = await Promise.all(chunkPromises);
-      const processedTranscript = processedChunks.join('\n');
-      logger.info(
-        `Successfully post-processed transcript in ${processedChunks.length} chunks (parallel translation)`
+      // Process with concurrency limit using worker pool pattern
+      const results: string[] = new Array(chunks.length);
+      let nextIndex = 0;
+
+      const processChunk = async (chunk: typeof chunks[0], index: number): Promise<void> => {
+        logger.info('transcript_chunk_processing_started', {
+          callId: options.callId ?? 'unknown',
+          chunk: `${chunk.chunkIndex}/${totalChunks}`,
+          start_line: chunk.startLine,
+          end_line: chunk.endLine,
+        });
+
+        try {
+          const translated = await executeStreamingLlmRequest({
+            userPrompt: chunk.chunkText,
+            systemPrompt: systemInstructions,
+            operation: 'transcript_translation',
+            callId: options.callId,
+            abortSignal: options.abortSignal,
+          });
+
+          if (!translated.ok) {
+            logger.warn('post_process_chunk_failed', {
+              callId: options.callId ?? 'unknown',
+              chunk: `${chunk.chunkIndex}/${totalChunks}`,
+              reason: translated.reason,
+              using_original: true,
+            });
+            results[index] = chunk.chunkText;
+            return;
+          }
+
+          logger.info('transcript_chunk_processing_completed', {
+            callId: options.callId ?? 'unknown',
+            chunk: `${chunk.chunkIndex}/${totalChunks}`,
+          });
+          results[index] = translated.content;
+        } catch (error) {
+          logger.error('transcript_chunk_processing_error', {
+            callId: options.callId ?? 'unknown',
+            chunk: `${chunk.chunkIndex}/${totalChunks}`,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          results[index] = chunk.chunkText;
+        }
+      };
+
+      const workers = Array.from(
+        { length: Math.min(CHUNK_CONCURRENCY, chunks.length) },
+        async () => {
+          while (nextIndex < chunks.length) {
+            const currentIndex = nextIndex;
+            nextIndex += 1;
+            await processChunk(chunks[currentIndex], currentIndex);
+          }
+        }
       );
+
+      await Promise.all(workers);
+
+      const processedChunks = results;
+      const processedTranscript = processedChunks.join('\n');
+      logger.info('post_process_transcript_chunks_completed', {
+        callId: options.callId ?? 'unknown',
+        chunks_count: processedChunks.length,
+        mode: 'parallel_translation',
+        concurrency: CHUNK_CONCURRENCY,
+      });
       return processedTranscript;
     } catch (error) {
-      logger.error('Error during transcript post-processing:', error);
+      logger.error('post_process_transcript_error', {
+        callId: options.callId ?? 'unknown',
+        error: error instanceof Error ? error.message : String(error),
+      });
       return transcript; // Fallback to original if processing fails
     }
   }
 
-  /**
-   * Generate AI summary from the formatted transcript
-   * @param transcript - The formatted transcript text
-   * @param callId - The call ID for logging
-   * @returns AI-generated Markdown summary or null if generation fails
-   */
-  /**
-   * Generate AI summary from the formatted transcript with explicit retry loop.
-   * Framework retries are disabled (maxRetries: 0) so we control retry count,
-   * backoff, and logging with the full callId context.
-   */
-  /**
-   * Generate AI summary from the formatted transcript with explicit retry loop.
-   */
+  /** Generate an AI summary from the formatted transcript. */
   async generateCallSummary(transcript: string, callId?: string): Promise<string | null> {
-    const prompt = CALL_SUMMARY_PROMPT.replace('{transcript}', transcript);
+    const result = await executeStreamingLlmRequest({
+      userPrompt: transcript,
+      systemPrompt: CALL_SUMMARY_SYSTEM_PROMPT,
+      operation: 'call_summary',
+      callId,
+    });
 
-    const extracted = await executeCallLlmWithRetry(
-      () => this.createAgent(),
-      () => prompt,
-      'call_summary',
-      callId || 'unknown',
-    );
-
-    if (!extracted.ok) {
+    if (!result.ok) {
       return null;
     }
 
-    return extracted.content;
+    return result.content;
   }
 
   /**
-   * Generate a short AI title from transcript
+   * Generate a short AI title from transcript.
    * @param transcript - The formatted transcript text
    * @returns AI-generated title (max 100 chars) or null if generation fails
    */
-  /**
-   * Generate a short AI title from transcript with explicit retry loop.
-   */
   async generateCallTitle(transcript: string, callId?: string): Promise<string | null> {
-    const prompt = CALL_TITLE_PROMPT.replace('{transcript}', transcript);
+    const result = await executeStreamingLlmRequest({
+      userPrompt: transcript,
+      systemPrompt: CALL_TITLE_SYSTEM_PROMPT,
+      operation: 'call_title',
+      callId,
+    });
 
-    const extracted = await executeCallLlmWithRetry(
-      () => this.createAgent(),
-      () => prompt,
-      'call_title',
-      callId || 'unknown',
-    );
-
-    if (!extracted.ok) {
+    if (!result.ok) {
       return null;
     }
 
-    return extracted.content.substring(0, 100);
+    return result.content.substring(0, 100);
   }
 
   /**
@@ -1069,13 +1123,16 @@ Output ONLY the processed transcript, nothing else.`;
   /**
    * Generate ticket suggestions from call transcript and summary
    * @param transcript - The formatted transcript text
-   * @param summary - The AI-generated call summary
    * @returns Array of ticket suggestions or empty array if generation fails
    */
-  async generateTicketSuggestions(transcript: string): Promise<TicketSuggestion[]> {
-    const agent = this.createAgent();
+  async generateTicketSuggestions(transcript: string, callId?: string): Promise<TicketSuggestion[]> {
+    const logCallId = callId || 'unknown';
+    const agent = this.createAgent(logCallId);
     if (!agent) {
-      logger.warn('Agent creation failed. Skipping ticket suggestions generation.');
+      logger.error('ticket_suggestions_generation_failed', {
+        callId: logCallId,
+        reason: 'agent_creation_failed',
+      });
       return [];
     }
 
@@ -1085,15 +1142,31 @@ Output ONLY the processed transcript, nothing else.`;
     );
 
     try {
+      const startedAt = Date.now();
+      logger.info(`ticket_suggestions_started`, {
+        callId: logCallId,
+        input_length: prompt.length,
+        has_system_prompt: true,
+      });
+
       const result = await agent.execute({
         messages: [createUserMessage(prompt)],
       });
 
       const extracted = extractAgentContent(result);
       if (!extracted.ok) {
-        logger.error(`ticket_suggestions_generation_failed | reason=${extracted.reason} | status=${extracted.status ?? result.status}`);
+        logger.error('ticket_suggestions_generation_failed', {
+          callId: logCallId,
+          reason: extracted.reason,
+          status: extracted.status ?? result.status,
+        });
         return [];
       }
+
+      logger.info(`ticket_suggestions_success`, {
+        callId: logCallId,
+        duration_ms: Date.now() - startedAt,
+      });
 
       let jsonContent = extracted.content;
 
@@ -1107,7 +1180,11 @@ Output ONLY the processed transcript, nothing else.`;
       const parsed = JSON.parse(jsonContent);
 
       if (!parsed.suggestions || !Array.isArray(parsed.suggestions)) {
-        logger.error(`ticket_suggestions_generation_failed | error=invalid_format, parsed=${JSON.stringify(parsed)}`);
+        logger.error('ticket_suggestions_generation_failed', {
+          callId: logCallId,
+          reason: 'invalid_format',
+          parsed,
+        });
         return [];
       }
 
@@ -1125,10 +1202,16 @@ Output ONLY the processed transcript, nothing else.`;
           status: 'pending' as const,
         }));
 
-      logger.info(`Generated ${suggestions.length} ticket suggestions`);
+      logger.info('ticket_suggestions_generated', {
+        callId: logCallId,
+        suggestions_count: suggestions.length,
+      });
       return suggestions;
     } catch (error) {
-      logger.error(`ticket_suggestions_generation_failed | error=${error instanceof Error ? error.message : JSON.stringify(error)}`, error);
+      logger.error('ticket_suggestions_generation_failed', {
+        callId: logCallId,
+        error: error instanceof Error ? error.message : String(error),
+      });
       return [];
     }
   }
@@ -1143,13 +1226,18 @@ Output ONLY the processed transcript, nothing else.`;
    * Completely independent of Xyne ticket suggestions.
    */
   async generatePulseData(
-    transcript: string
+    transcript: string,
+    callId?: string,
   ): Promise<Array<{ merchantName: string; actionItems: PulseActionItem[] }>> {
     if (config.pulse.enabledChannels.length === 0) return [];
+    const logCallId = callId || 'unknown';
 
-    const agent = this.createAgent();
+    const agent = this.createAgent(logCallId);
     if (!agent) {
-      logger.warn('[Pulse] Agent creation failed — cannot generate Pulse data');
+      logger.error('pulse_data_generation_failed', {
+        callId: logCallId,
+        reason: 'agent_creation_failed',
+      });
       return [];
     }
 
@@ -1165,13 +1253,29 @@ Output ONLY the processed transcript, nothing else.`;
       .replace('{transcript}', transcript);
 
     try {
+      const startedAt = Date.now();
+      logger.info(`pulse_data_started`, {
+        callId: logCallId,
+        input_length: prompt.length,
+        has_system_prompt: true,
+      });
+
       const result = await agent.execute({ messages: [createUserMessage(prompt)] });
 
       const extracted = extractAgentContent(result);
       if (!extracted.ok) {
-        logger.error(`[Pulse] generatePulseData_failed`, { reason: extracted.reason, status: extracted.status ?? result.status });
+        logger.error('pulse_data_generation_failed', {
+          callId: logCallId,
+          reason: extracted.reason,
+          status: extracted.status ?? result.status,
+        });
         return [];
       }
+
+      logger.info(`pulse_data_success`, {
+        callId: logCallId,
+        duration_ms: Date.now() - startedAt,
+      });
 
       let jsonContent = extracted.content;
       const fence = jsonContent.match(/^```(?:json)?\s*\n([\s\S]*?)\n```$/);
@@ -1195,10 +1299,16 @@ Output ONLY the processed transcript, nothing else.`;
           .map((i) => ({ content: i.content, assignee: i.assignee || 'unassigned' })),
       }));
 
-      logger.info(`[Pulse] generatePulseData: extracted ${groups.length} merchants`);
+      logger.info('pulse_data_generated', {
+        callId: logCallId,
+        merchants_count: groups.length,
+      });
       return groups;
     } catch (error) {
-      logger.error('[Pulse] generatePulseData failed:', error);
+      logger.error('pulse_data_generation_failed', {
+        callId: logCallId,
+        error: error instanceof Error ? error.message : String(error),
+      });
       return [];
     }
   }
@@ -1218,9 +1328,10 @@ Output ONLY the processed transcript, nothing else.`;
     _createdByUserId: string,
     ticketSuggestions?: TicketSuggestion[]
   ) {
-    logger.info(
-      `[postSummaryAsReply] Starting for callId: ${callId}, conversationId: ${conversationId}`
-    );
+    logger.info('post_summary_reply_started', {
+      callId,
+      conversation_id: conversationId,
+    });
 
     const conversation = await repositories.conversations.findById(conversationId);
     if (!conversation) {
@@ -1239,18 +1350,20 @@ Output ONLY the processed transcript, nothing else.`;
     try {
       xyneAutomaticBot = await unifiedBotUserService.getBotByBotId('xyne-automatic', channel.workspaceId);
     } catch (error) {
-      logger.error('Failed to retrieve Xyne Automatic bot', { error: JSON.stringify(error) });
+      logger.error('xyne_automatic_bot_retrieval_failed', { callId, error: JSON.stringify(error) });
       throw new Error(`Failed to retrieve bot user: ${JSON.stringify(error)}`);
     }
 
     if (!xyneAutomaticBot) {
-      logger.error('Xyne Automatic bot not found - cannot post summary');
+      logger.error('xyne_automatic_bot_not_found', { callId });
       throw new Error('Xyne Automatic bot not found');
     }
 
-    logger.info(
-      `[postSummaryAsReply] Bot found: ${xyneAutomaticBot.id} (${xyneAutomaticBot.email})`
-    );
+    logger.info('post_summary_reply_bot_found', {
+      callId,
+      bot_id: xyneAutomaticBot.id,
+      bot_email: xyneAutomaticBot.email,
+    });
 
     // ── 1. Post / update the AI summary as its own standalone message ──────────
     const existingSummary = await repositories.messages.findSummaryByCallId(conversationId, callId);
@@ -1272,9 +1385,11 @@ Output ONLY the processed transcript, nothing else.`;
           lastUpdatedAt: new Date().toISOString(),
         },
       });
-      logger.info(
-        `[postSummaryAsReply] Updated existing summary message ${existingSummary.messageId} to version ${currentVersion + 1}`
-      );
+      logger.info('summary_message_updated', {
+        callId,
+        message_id: existingSummary.messageId,
+        version: currentVersion + 1,
+      });
     } else {
       const summaryMessage = await repositories.messages.create({
         conversationId,
@@ -1294,9 +1409,11 @@ Output ONLY the processed transcript, nothing else.`;
         },
       });
       await repositories.conversations.incrementReplyCount(conversationId);
-      logger.info(
-        `[postSummaryAsReply] Summary message created: ${summaryMessage.messageId} in conversation ${conversationId}`
-      );
+      logger.info('summary_message_created', {
+        callId,
+        message_id: summaryMessage.messageId,
+        conversation_id: conversationId,
+      });
     }
 
     // ── 3. Post ticket suggestions as batched separate messages ──────────────
@@ -1311,9 +1428,12 @@ Output ONLY the processed transcript, nothing else.`;
         batches.push(ticketSuggestions.slice(i, i + BATCH_SIZE));
       }
 
-      logger.info(
-        `[postSummaryAsReply] Posting ${ticketSuggestions.length} tickets in ${batches.length} batch(es) of up to ${BATCH_SIZE}`
-      );
+      logger.info('suggested_ticket_batches_posting_started', {
+        callId,
+        tickets_count: ticketSuggestions.length,
+        batches_count: batches.length,
+        batch_size: BATCH_SIZE,
+      });
 
       const existingTicketMessages = await repositories.messages.findTicketsByCallId(conversationId, callId);
 
@@ -1354,9 +1474,11 @@ Output ONLY the processed transcript, nothing else.`;
               lastUpdatedAt: new Date().toISOString(),
             },
           });
-          logger.info(
-            `[postSummaryAsReply] Updated ticket batch message ${existing.messageId} (batch ${batchIndex + 1}/${batches.length})`
-          );
+          logger.info('suggested_ticket_batch_message_updated', {
+            callId,
+            message_id: existing.messageId,
+            batch: `${batchIndex + 1}/${batches.length}`,
+          });
         } else {
           // More batches than before — create the new ones
           const batchMessage = await repositories.messages.create({
@@ -1379,9 +1501,11 @@ Output ONLY the processed transcript, nothing else.`;
             },
           });
           await repositories.conversations.incrementReplyCount(conversationId);
-          logger.info(
-            `[postSummaryAsReply] Ticket batch message created: ${batchMessage.messageId} (batch ${batchIndex + 1}/${batches.length})`
-          );
+          logger.info('suggested_ticket_batch_message_created', {
+            callId,
+            message_id: batchMessage.messageId,
+            batch: `${batchIndex + 1}/${batches.length}`,
+          });
         }
       }
 
@@ -1390,14 +1514,15 @@ Output ONLY the processed transcript, nothing else.`;
         const extras = existingTicketMessages.slice(batches.length);
         for (const extra of extras) {
           await repositories.messages.delete(extra.messageId);
-          logger.info(
-            `[postSummaryAsReply] Deleted surplus ticket batch message ${extra.messageId}`
-          );
+          logger.info('suggested_ticket_batch_message_deleted', {
+            callId,
+            message_id: extra.messageId,
+          });
         }
       }
     }
 
-    logger.info(`[postSummaryAsReply] Done for callId: ${callId}`);
+    logger.info('post_summary_reply_completed', { callId });
   }
 
   private async postNotesCanvasReplyIfPresent(conversationId: string, callId: string): Promise<void> {
@@ -1430,7 +1555,10 @@ Output ONLY the processed transcript, nothing else.`;
         channel.workspaceId,
       );
     } catch (notesError) {
-      logger.warn(`[postNotesCanvasReplyIfPresent] Failed to post notes canvas for callId: ${callId}`, notesError);
+      logger.warn('notes_canvas_post_failed', {
+        callId,
+        error: notesError instanceof Error ? notesError.message : String(notesError),
+      });
     }
   }
 
@@ -1461,7 +1589,7 @@ Output ONLY the processed transcript, nothing else.`;
       // Locate the call system message (same lookup the transcript-ready webhook uses).
       const callMessage = await repositories.messages.findHeadMessageByCallId(callId);
       if (!callMessage) {
-        logger.info(`[${callId}] transcript_reconcile_skipped`, { reason: 'no_call_message' });
+        logger.info('transcript_reconcile_skipped', { callId, reason: 'no_call_message' });
         return;
       }
 
@@ -1473,14 +1601,15 @@ Output ONLY the processed transcript, nothing else.`;
       } catch (retrieveError) {
         // A GCS fetch failure is not the same as "the agent never wrote a transcript":
         // log it so a transient storage error is distinguishable from an empty transcript.
-        logger.error(`[${callId}] transcript_reconcile_retrieve_failed`, {
+        logger.error('transcript_reconcile_retrieve_failed', {
+          callId,
           error: retrieveError,
           stack: retrieveError instanceof Error ? retrieveError.stack : undefined,
         });
         content = null;
       }
       if (!content) {
-        logger.info(`[${callId}] transcript_reconcile_skipped`, { reason: 'no_gcs_transcript' });
+        logger.info('transcript_reconcile_skipped', { callId, reason: 'no_gcs_transcript' });
         return;
       }
       const currentCount = this.parseTranscriptEntries(content).length;
@@ -1491,7 +1620,8 @@ Output ONLY the processed transcript, nothing else.`;
         (existing?.metadata as TranscriptAttachmentMetadata | null)?.entryCount ?? -1;
 
       if (currentCount <= storedCount) {
-        logger.info(`[${callId}] transcript_reconcile_skipped`, {
+        logger.info('transcript_reconcile_skipped', {
+          callId,
           reason: 'already_processed',
           gcs_entry_count: currentCount,
           stored_entry_count: storedCount,
@@ -1499,14 +1629,16 @@ Output ONLY the processed transcript, nothing else.`;
         return;
       }
 
-      logger.info(`[${callId}] transcript_reconcile_processing`, {
+      logger.info('transcript_reconcile_processing', {
+        callId,
         gcs_entry_count: currentCount,
         stored_entry_count: storedCount,
         message_id: callMessage.messageId,
       });
       await this.processCallWithSummary(callId, callMessage.messageId, true);
     } catch (error) {
-      logger.error(`[${callId}] transcript_reconcile_failed`, {
+      logger.error('transcript_reconcile_failed', {
+        callId,
         error: error,
         stack: error instanceof Error ? error.stack : undefined,
       });
@@ -1531,7 +1663,8 @@ Output ONLY the processed transcript, nothing else.`;
       retryDelayMs: 300,
     });
     if (!lockHandle) {
-      logger.warn(`[${callId}] process_call_with_summary_lock_timeout`, {
+      logger.warn('process_call_with_summary_lock_timeout', {
+        callId,
         message_id: messageId,
         reason: 'another worker held the processing lock beyond the wait window',
       });
@@ -1542,21 +1675,21 @@ Output ONLY the processed transcript, nothing else.`;
       // Get call details for summary generation and notes posting.
       const call = await repositories.calls.findByExternalId(callId);
       if (!call) {
-        logger.error(`[${callId}] call_not_found`, { context: 'summary_generation' });
+        logger.error('call_not_found', { callId, context: 'summary_generation' });
         return;
       }
 
       // Get the call message to retrieve conversationId for the reply
       const callMessage = await repositories.messages.findById(messageId);
       if (!callMessage) {
-        logger.error(`[${callId}] message_not_found`, { message_id: messageId, context: 'summary_generation' });
+        logger.error('message_not_found', { callId, message_id: messageId, context: 'summary_generation' });
         return;
       }
 
       await this.postNotesCanvasReplyIfPresent(callMessage.conversationId, callId);
 
       if (!hasTranscript) {
-        logger.warn('transcript_processing_skipped', { call_id: callId, reason: 'agent_reported_no_transcript' });
+        logger.warn('transcript_processing_skipped', { callId, reason: 'agent_reported_no_transcript' });
         return;
       }
 
@@ -1566,7 +1699,7 @@ Output ONLY the processed transcript, nothing else.`;
       try {
         await this.postCallTranscript(callId, messageId);
       } catch (transcriptError) {
-        logger.error(`[${callId}] post_transcript_failed`, { stage: 'post_call_transcript', error: transcriptError, stack: transcriptError instanceof Error ? transcriptError.stack : undefined });
+        logger.error('post_transcript_failed', { callId, stage: 'post_call_transcript', error: transcriptError, stack: transcriptError instanceof Error ? transcriptError.stack : undefined });
         // Don't rethrow — retrieveTranscript below fetches raw content from GCS directly and
         // may still succeed even if the DB-side attachment step inside postCallTranscript failed.
       }
@@ -1581,16 +1714,16 @@ Output ONLY the processed transcript, nothing else.`;
       if (speakerIdentificationEnabled && isHeadless) {
         transcriptContent = await this.getIdentifiedTranscriptContent(callId);
         if (transcriptContent) {
-          logger.info(`[${callId}] using_identified_transcript_for_summary`, { reason: 'headless_call' });
+          logger.info('using_identified_transcript_for_summary', { callId, reason: 'headless_call' });
         } else {
-          logger.warn(`[${callId}] identified_transcript_unavailable`, { action: 'fallback_to_plain' });
+          logger.warn('identified_transcript_unavailable', { callId, action: 'fallback_to_plain' });
         }
       }
       if (!transcriptContent) {
         transcriptContent = await this.retrieveTranscript(callId);
       }
       if (!transcriptContent) {
-        logger.warn(`[${callId}] ai_summary_skipped`, { reason: 'no_transcript_content' });
+        logger.warn('ai_summary_skipped', { callId, reason: 'no_transcript_content' });
         return;
       }
 
@@ -1601,9 +1734,9 @@ Output ONLY the processed transcript, nothing else.`;
         // Already formatted ("[MM:SS] Speaker: text" lines) — use directly
         formattedTranscript = transcriptContent;
       } else {
-        const entries = this.parseTranscriptEntries(transcriptContent);
+        const entries = this.parseTranscriptEntries(transcriptContent, callId);
         if (entries.length === 0) {
-          logger.warn(`[${callId}] ai_summary_skipped`, { reason: 'no_transcript_entries' });
+          logger.warn('ai_summary_skipped', { callId, reason: 'no_transcript_entries' });
           return;
         }
         formattedTranscript = this.formatTranscript(entries, callId);
@@ -1623,33 +1756,37 @@ Output ONLY the processed transcript, nothing else.`;
       // Skip title generation for HEADLESS recordings - users set title manually via recordings UI
       const skipTitleGeneration = call.callType === CallType.HEADLESS;
       if (skipTitleGeneration) {
-        logger.info(`[${callId}] title_generation_skipped`, { reason: 'headless_recording' });
+        logger.info('title_generation_skipped', { callId, reason: 'headless_recording' });
       }
       const [summary, title, ticketSuggestions] = await Promise.all([
         this.generateCallSummary(formattedTranscript, callId).catch((err) => {
-          logger.error(`[${callId}] generate_summary_threw`, { error: err, stack: err instanceof Error ? err.stack : undefined });
+          logger.error('generate_summary_threw', { callId, error: err, stack: err instanceof Error ? err.stack : undefined });
           return null;
         }),
         skipTitleGeneration ? Promise.resolve(null) : this.generateCallTitle(titleInput, callId).catch((err) => {
-          logger.error(`[${callId}] generate_title_threw`, { error: err, stack: err instanceof Error ? err.stack : undefined });
+          logger.error('generate_title_threw', { callId, error: err, stack: err instanceof Error ? err.stack : undefined });
           return null;
         }),
-        this.generateTicketSuggestions(formattedTranscript).catch((err) => {
-          logger.error(`[${callId}] generate_ticket_suggestions_threw`, { error: err, stack: err instanceof Error ? err.stack : undefined });
+        this.generateTicketSuggestions(formattedTranscript, callId).catch((err) => {
+          logger.error('generate_ticket_suggestions_threw', { callId, error: err, stack: err instanceof Error ? err.stack : undefined });
           return [];
         }),
       ]);
 
       const duration = Date.now() - startTime;
-      logger.info(
-        `AI generation completed in ${duration}ms. Summary: ${!!summary}, Title: ${!!title}, Tickets: ${ticketSuggestions.length}`
-      );
+      logger.info('ai_generation_completed', {
+        callId,
+        duration_ms: duration,
+        summary: !!summary,
+        title: !!title,
+        tickets_count: ticketSuggestions.length,
+      });
 
       // If ALL three AI calls failed, escalate from per-call warns to a single error so
       // an LLM outage affecting every call is immediately visible rather than buried in warns.
       const aiFullyFailed = !summary && !title && ticketSuggestions.length === 0;
       if (aiFullyFailed) {
-        logger.error(`[${callId}] ai_generation_all_failed`, { summary: false, title: false, tickets: 0 });
+        logger.error('ai_generation_all_failed', { callId, summary: false, title: false, tickets: 0 });
       }
 
       if (summary) {
@@ -1664,14 +1801,14 @@ Output ONLY the processed transcript, nothing else.`;
             aiSummary: summary,
             ...(title && !call.title ? { title } : {}),
           });
-          logger.info(`[${callId}] call_record_updated`, { fields_updated: 'aiSummary' });
+          logger.info('call_record_updated', { callId, fields_updated: 'aiSummary' });
         } catch (updateError) {
           // P2025: call was deleted while summary was being generated — ignore gracefully
           if (updateError instanceof Prisma.PrismaClientKnownRequestError && updateError.code === 'P2025') {
-            logger.warn(`[${callId}] call_deleted_before_summary_save | skipping update`);
+            logger.warn('call_deleted_before_summary_save', { callId, action: 'skip_update' });
             return;
           }
-          logger.error(`[${callId}] call_record_update_failed`, { stage: 'call_record_update', error: updateError, stack: updateError instanceof Error ? updateError.stack : undefined });
+          logger.error('call_record_update_failed', { callId, stage: 'call_record_update', error: updateError, stack: updateError instanceof Error ? updateError.stack : undefined });
         }
 
         // Update recording attachment filename to use call title
@@ -1703,13 +1840,17 @@ Output ONLY the processed transcript, nothing else.`;
                   },
                 });
 
-                logger.info(`Updated call message ${messageId} with AI description as content, original text stored in metadata`);
+                logger.info('call_message_title_updated', { callId, message_id: messageId });
               } else {
-                logger.warn(`Call message ${messageId} not found for title update`);
+                logger.warn('call_message_not_found_for_title_update', { callId, message_id: messageId });
               }
             });
           } catch (error) {
-            logger.error(`Failed to update call message with title:`, error);
+            logger.error('call_message_title_update_failed', {
+              callId,
+              message_id: messageId,
+              error: error instanceof Error ? error.message : String(error),
+            });
             // Don't fail the whole process if message update fails
           }
         }
@@ -1725,7 +1866,7 @@ Output ONLY the processed transcript, nothing else.`;
             ticketSuggestions
           );
         } catch (replyError) {
-          logger.error(`[${callId}] post_summary_reply_failed`, { stage: 'post_summary_reply', error: replyError, stack: replyError instanceof Error ? replyError.stack : undefined });
+          logger.error('post_summary_reply_failed', { callId, stage: 'post_summary_reply', error: replyError, stack: replyError instanceof Error ? replyError.stack : undefined });
         }
 
         // Pulse block — completely separate from Xyne tickets.
@@ -1736,8 +1877,8 @@ Output ONLY the processed transcript, nothing else.`;
             const isPulseChannel = config.pulse.enabledChannels.includes(call.channelId ?? '');
 
             if (isPulseChannel) {
-              logger.info(`[Pulse] Channel ${call.channelId} is in allowlist — generating Pulse data for call ${callId}`);
-              const pulseGroups = await this.generatePulseData(formattedTranscript);
+              logger.info('pulse_generation_started', { callId, channel_id: call.channelId });
+              const pulseGroups = await this.generatePulseData(formattedTranscript, callId);
               const validatedGroups: Array<{
                 merchantName: string;
                 actionItems: PulseActionItem[];
@@ -1759,7 +1900,7 @@ Output ONLY the processed transcript, nothing else.`;
                       orgContext,
                     });
                   } else {
-                    logger.warn(`[Pulse] Merchant "${group.merchantName}" not found in Pulse — skipping its action items`);
+                    logger.warn('pulse_merchant_not_found', { callId, merchant_name: group.merchantName });
                   }
                 }
               }
@@ -1771,13 +1912,16 @@ Output ONLY the processed transcript, nothing else.`;
                   validatedGroups,
                 );
               } else {
-                logger.info(`[Pulse] No valid merchant actionables for call ${callId}`);
+                logger.info('pulse_no_valid_merchant_actionables', { callId });
               }
             } else {
-              logger.info(`[Pulse] Channel ${call.channelId} not in allowlist — skipping Pulse for call ${callId}`);
+              logger.info('pulse_skipped_channel_not_allowlisted', { callId, channel_id: call.channelId });
             }
           } catch (err) {
-            logger.error(`[Pulse] Failed to post Pulse tickets message for call ${callId}:`, err);
+            logger.error('pulse_tickets_post_failed', {
+              callId,
+              error: err instanceof Error ? err.message : String(err),
+            });
           }
         }
 
@@ -1787,14 +1931,14 @@ Output ONLY the processed transcript, nothing else.`;
             formattedTranscript,
             callMessage.conversationId
           );
-          logger.info(`Auto-generated detailed summary for call: ${callId}`);
+          logger.info('detailed_summary_generated', { callId });
         } catch (error) {
           // Include stage label so LLM vs DB vs bot-message failures are distinguishable.
-          logger.error(`[${callId}] detailed_summary_failed`, { stage: 'detailed_summary_generation', error: error, stack: error instanceof Error ? error.stack : undefined });
+          logger.error('detailed_summary_failed', { callId, stage: 'detailed_summary_generation', error: error, stack: error instanceof Error ? error.stack : undefined });
         }
       } else {
         // Use error (not warn) so LLM-down conditions generate alertable signal.
-        logger.error(`[${callId}] ai_summary_skipped`, { reason: 'generation_failed' });
+        logger.error('ai_summary_skipped', { callId, reason: 'generation_failed' });
       }
     // Queue Vespa indexing for the transcript (using call.id as the identifier)
       try {
@@ -1809,13 +1953,17 @@ Output ONLY the processed transcript, nothing else.`;
           app: SubApp.TRANSCRIPT,
           ...(callChannel?.workspaceId ? { workspaceId: callChannel.workspaceId } : {}),
         });
-        logger.info(`[TranscriptService] Queued Vespa indexing for transcript ${call.id}`);
+        logger.info('transcript_vespa_indexing_queued', { callId, call_db_id: call.id });
       } catch (vespaError) {
-        logger.error(`[TranscriptService] Failed to queue Vespa job for transcript ${call.id}:`, vespaError);
+        logger.error('transcript_vespa_indexing_queue_failed', {
+          callId,
+          call_db_id: call.id,
+          error: vespaError instanceof Error ? vespaError.message : String(vespaError),
+        });
       }
 
     } catch (error) {
-      logger.error(`[${callId}] process_call_with_summary_failed`, { error: error, stack: error instanceof Error ? error.stack : undefined });
+      logger.error('process_call_with_summary_failed', { callId, error: error, stack: error instanceof Error ? error.stack : undefined });
       // Don't re-throw - the transcript was already processed successfully
     } finally {
       await releaseLock(lockHandle);
@@ -1847,7 +1995,7 @@ Output ONLY the processed transcript, nothing else.`;
     // Get conversation to retrieve workspaceId
     const conversation = await repositories.conversations.findById(conversationId);
     if (!conversation) {
-      logger.error('[Pulse] Conversation not found — cannot post Pulse tickets message');
+      logger.error('pulse_conversation_not_found', { callId, conversation_id: conversationId });
       return;
     }
 
@@ -1857,13 +2005,13 @@ Output ONLY the processed transcript, nothing else.`;
       select: { workspaceId: true }
     });
     if (!channel?.workspaceId) {
-      logger.error('[Pulse] Channel workspace not found — cannot post Pulse tickets message');
+      logger.error('pulse_channel_workspace_not_found', { callId, channel_id: conversation.channelId });
       return;
     }
 
     const xyneAutomaticBot = await unifiedBotUserService.getBotByBotId('xyne-automatic', channel.workspaceId);
     if (!xyneAutomaticBot) {
-      logger.error('[Pulse] xyne-automatic bot not found — cannot post Pulse tickets message');
+      logger.error('pulse_xyne_automatic_bot_not_found', { callId, workspace_id: channel.workspaceId });
       return;
     }
 
@@ -1908,9 +2056,11 @@ Output ONLY the processed transcript, nothing else.`;
     });
 
     await repositories.conversations.incrementReplyCount(conversationId);
-    logger.info(
-      `[Pulse] Posted consolidated Pulse actionables message for call ${callId} (${merchants.length} merchants)`
-    );
+    logger.info('pulse_actionables_message_posted', {
+      callId,
+      merchants_count: merchants.length,
+      pulse_items_count: pulseItems.length,
+    });
   }
 }
 

@@ -5,14 +5,11 @@
  */
 
 import { v4 as uuidv4 } from 'uuid';
-import { Agent, type AgentConfig } from '@framework';
-import { LogLevel } from '@framework';
 import { DatabaseClient } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { DEFAULT_SUMMARY_FIELDS, MessageType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
-import { config } from '@/config/env';
 import { formatToISTLocaleString } from '@/utils/dateUtils';
 import { CanvasRole } from '@prisma/client';
 import { ServerBlockNoteEditor } from '@blocknote/server-util';
@@ -56,7 +53,7 @@ interface ParticipantInfo {
   userPicture?: string;
 }
 
-import { executeCallLlmWithRetry } from './callLlmRetry';
+import { executeStreamingLlmRequest } from './callLlmRetry';
 import { initializeYSweetDoc, syncToYSweet } from '@/utils/ysweetUtils.js';
 
 /**
@@ -72,13 +69,6 @@ function sanitizeInput(input: string | null): string {
   // Limit length to prevent excessive token usage (adjust as needed)
   const maxLength = 100000; // ~100K chars
   return sanitized.length > maxLength ? sanitized.substring(0, maxLength) : sanitized;
-}
-
-function renderPromptTemplate(template: string, values: Record<string, string>): string {
-  const replacements = new Map(Object.entries(values));
-  return template.replace(/\{([a-zA-Z0-9_]+)\}/g, (match, key: string) =>
-    replacements.has(key) ? (replacements.get(key) ?? '') : match,
-  );
 }
 
 /**
@@ -183,7 +173,7 @@ async function buildParticipantMap(channelId: string): Promise<Map<string, Parti
 }
 
 // PRD Generation prompt
-const PRD_GENERATION_PROMPT = `You are a senior product manager creating a Product Requirements Document (PRD) from a call transcript.
+const PRD_GENERATION_SYSTEM_PROMPT = `You are a senior product manager creating a Product Requirements Document (PRD) from a call transcript.
 
 Analyze the conversation and extract product requirements discussed during the call.
 
@@ -212,15 +202,9 @@ IMPORTANT:
 - If a section has no relevant content, use an empty array []
 - Keep each item concise but specific
 - Return ONLY the JSON, no additional commentary
-
-CALL TRANSCRIPT:
-{transcript}
-
-CALL SUMMARY:
-{summary}
 `;
 
-const DETAILED_SUMMARY_PROMPT = `You are creating a comprehensive, phase-based meeting summary that captures the natural flow of conversation.
+const DETAILED_SUMMARY_SYSTEM_PROMPT = `You are creating a comprehensive, phase-based meeting summary that captures the natural flow of conversation.
 **LANGUAGE: Generate this entire summary in English, regardless of the transcript language.**
 
 BRAND NAME CORRECTION:
@@ -236,13 +220,7 @@ Analyze the transcript and divide it into distinct phases/segments based on topi
 - Medium calls (15-30 min): 3-5 phases
 - Long calls (30+ min): 5-7 phases
 
-MARKDOWN TEMPLATE:
-
-
-{fields}
-
-**CALL PARTICIPANTS (Correct Names):**
-{participants}
+The user message supplies the Markdown section template, correct participant names, and transcript.
 
 **IMPORTANT - NAME ACCURACY:**
 - The transcript may contain misspelled or incorrectly transcribed participant names
@@ -263,12 +241,9 @@ MARKDOWN TEMPLATE:
 
 Only output valid Markdown.
 No extra text.
-
-TRANSCRIPT:
-{transcript}
 `;
 
-const EDIT_SUMMARY_PROMPT = `You are an assistant that edits a MARKDOWN SECTION TEMPLATE used to generate call summaries. You will be given the CURRENT TEMPLATE and a USER INSTRUCTION, and you must return the UPDATED TEMPLATE.
+const EDIT_SUMMARY_SYSTEM_PROMPT = `You are an assistant that edits a MARKDOWN SECTION TEMPLATE used to generate call summaries. You will be given the CURRENT TEMPLATE and a USER INSTRUCTION, and you must return the UPDATED TEMPLATE.
 
 WHAT THIS TEMPLATE IS:
 - After every call ends, the system automatically generates a "Detailed Call Summary" from the call transcript.
@@ -295,12 +270,6 @@ RULES FOR YOUR EDIT:
 
 OUTPUT:
 - Return ONLY the updated Markdown template. No commentary, no explanation, no code fences.
-
-CURRENT TEMPLATE:
-{current}
-
-USER INSTRUCTION:
-{instruction}
 `;
 
 /**
@@ -567,63 +536,6 @@ export class CallDocumentService {
       logger.error(`[CallDocumentService] Failed to queue Vespa job for canvas ${canvasId}:`, error);
     }
   }
-
-  /**
-   * Create a fresh Agent instance for each request
-   * This prevents state pollution between concurrent requests
-   */
-  private createAgent(): Agent | null {
-    try {
-      const apiKey = config.llm.callLitellmApiKey;
-      const baseUrl = config.llm.litellmBaseUrl;
-
-      if (!apiKey || !baseUrl) {
-        logger.warn('[CallDocumentService] LiteLLM not configured. Document generation disabled.');
-        return null;
-      }
-
-      const agentConfig: AgentConfig = {
-        model: {
-          provider: {
-            type: 'litellm',
-            config: {
-              apiKey,
-              baseUrl,
-              timeout: 300000,
-            },
-          },
-          defaultModel: config.llm.callLitellmModel || 'glm-latest',
-        },
-        tools: {
-          enabled: [],
-          config: {},
-          execution: { timeout: 300000 },
-        },
-        execution: {
-          maxTurns: 1,
-          mode: 'single',
-          timeouts: { llm: 300000 },
-          limits: {},
-          errorHandling: {
-            maxRetries: 3,
-            retryDelay: 120000,
-            maxDelay: 960000,
-          },
-        },
-        events: {
-          logging: LogLevel.WARN,
-        },
-      };
-
-      const agent = Agent.create(agentConfig);
-      logger.info('[CallDocumentService] Agent created for document generation');
-      return agent;
-    } catch (error) {
-      logger.error('[CallDocumentService] Failed to create Agent:', error);
-      return null;
-    }
-  }
-
   /**
    * Generate a PRD from transcript and summary
    * @param transcript - The call transcript content
@@ -639,35 +551,31 @@ export class CallDocumentService {
   ): Promise<PRDDocument | null> {
     const logCallId = callId || 'unknown';
 
-    const buildPrompt = () => {
-      const sanitizedTranscript = sanitizeInput(transcript);
-      const sanitizedSummary = sanitizeInput(summary);
-      const sanitizedCustomPrompt = customPrompt ? sanitizeInput(customPrompt) : '';
+    const sanitizedTranscript = sanitizeInput(transcript);
+    const sanitizedSummary = sanitizeInput(summary);
+    const sanitizedCustomPrompt = customPrompt ? sanitizeInput(customPrompt) : '';
+    const userPrompt = [
+      `CALL TRANSCRIPT:\n${sanitizedTranscript}`,
+      `CALL SUMMARY:\n${sanitizedSummary || 'No summary available'}`,
+      sanitizedCustomPrompt
+        ? `ADDITIONAL USER INSTRUCTIONS:\n${sanitizedCustomPrompt}`
+        : '',
+    ].filter(Boolean).join('\n\n');
 
-      let prompt = PRD_GENERATION_PROMPT
-        .replace('{transcript}', sanitizedTranscript)
-        .replace('{summary}', sanitizedSummary || 'No summary available');
+    const result = await executeStreamingLlmRequest({
+      userPrompt,
+      systemPrompt: PRD_GENERATION_SYSTEM_PROMPT,
+      operation: 'prd_generation',
+      callId: logCallId,
+    });
 
-      if (sanitizedCustomPrompt) {
-        prompt += `\n\nADDITIONAL USER INSTRUCTIONS:\nThe user has provided specific instructions for this PRD. Please prioritize these instructions:\n"${sanitizedCustomPrompt}"\n`;
-      }
-      return prompt;
-    };
-
-    const extracted = await executeCallLlmWithRetry(
-      () => this.createAgent(),
-      buildPrompt,
-      'prd_generation',
-      logCallId,
-    );
-
-    if (!extracted.ok) {
-      logger.error(`[${logCallId}] prd_generation_failed`, { reason: extracted.reason, status: extracted.status });
+    if (!result.ok) {
+      logger.error(`[${logCallId}] prd_generation_failed`, { reason: result.reason });
       return null;
     }
 
     // Extract JSON from response
-    const jsonMatch = extracted.content.match(/\{[\s\S]*\}/);
+    const jsonMatch = result.content.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
       logger.error(`[${logCallId}] Could not find JSON in PRD response`);
       return null;
@@ -683,9 +591,7 @@ export class CallDocumentService {
     }
   }
 
-  /**
-   * Generate detailed summary from transcript with explicit retry loop.
-   */
+  /** Generate a detailed summary from a transcript. */
   async generateDetailedSummary(transcript: string, callId: string, customPrompt?: string, summaryFields?: string): Promise<string | null> {
     // Resolve channelId and build participant map once (expensive DB lookups)
     const call = await repositories.calls.findByExternalId(callId);
@@ -703,58 +609,49 @@ export class CallDocumentService {
     const sanitizedCustomPrompt = customPrompt ? sanitizeInput(customPrompt) : '';
     const sanitizedFields = summaryFields?.trim() ? sanitizeInput(summaryFields) : '';
 
-    const buildPrompt = () => {
-      let prompt = renderPromptTemplate(DETAILED_SUMMARY_PROMPT, {
-        fields: sanitizedFields || DEFAULT_SUMMARY_FIELDS,
-        participants: participantList || '- No participants found',
-        transcript: sanitizedTranscript,
-      });
+    const userPrompt = [
+      `MARKDOWN TEMPLATE:\n${sanitizedFields || DEFAULT_SUMMARY_FIELDS}`,
+      `CALL PARTICIPANTS (Correct Names):\n${participantList || '- No participants found'}`,
+      `TRANSCRIPT:\n${sanitizedTranscript}`,
+      sanitizedCustomPrompt
+        ? `ADDITIONAL USER INSTRUCTIONS:\n${sanitizedCustomPrompt}`
+        : '',
+    ].filter(Boolean).join('\n\n');
 
-      if (sanitizedCustomPrompt) {
-        prompt += `\n\nADDITIONAL USER INSTRUCTIONS:\nThe user has provided specific instructions for this summary. Please prioritize these instructions:\n"${sanitizedCustomPrompt}"\n`;
-      }
-      return prompt;
-    };
-
-    const extracted = await executeCallLlmWithRetry(
-      () => this.createAgent(),
-      buildPrompt,
-      'detailed_summary_generation',
+    const result = await executeStreamingLlmRequest({
+      userPrompt,
+      systemPrompt: DETAILED_SUMMARY_SYSTEM_PROMPT,
+      operation: 'detailed_summary_generation',
       callId,
-    );
+    });
 
-    if (!extracted.ok) {
-      logger.error(`[${callId}] detailed_summary_generation_failed`, { reason: extracted.reason, status: extracted.status });
+    if (!result.ok) {
+      logger.error(`[${callId}] detailed_summary_generation_failed`, { reason: result.reason });
       return null;
     }
 
     logger.info(`[${callId}] Successfully generated detailed summary`);
-    return extracted.content;
+    return result.content;
   }
 
-  async editSummaryStructureWithAI(currentFields: string, instruction: string): Promise<string | null> {
+  async editSummaryStructureWithAI(currentFields: string, instruction: string, callId?: string): Promise<string | null> {
+    const logCallId = callId || 'prompt-edit';
     const sanitizedCurrent = sanitizeInput(currentFields);
     const sanitizedInstruction = sanitizeInput(instruction);
 
-    const buildPrompt = (): string =>
-      renderPromptTemplate(EDIT_SUMMARY_PROMPT, {
-        current: sanitizedCurrent || DEFAULT_SUMMARY_FIELDS,
-        instruction: sanitizedInstruction,
-      });
+    const result = await executeStreamingLlmRequest({
+      userPrompt: `CURRENT TEMPLATE:\n${sanitizedCurrent || DEFAULT_SUMMARY_FIELDS}\n\nUSER INSTRUCTION:\n${sanitizedInstruction}`,
+      systemPrompt: EDIT_SUMMARY_SYSTEM_PROMPT,
+      operation: 'summary_prompt_edit',
+      callId: logCallId,
+    });
 
-    const extracted = await executeCallLlmWithRetry(
-      () => this.createAgent(),
-      buildPrompt,
-      'summary_prompt_edit',
-      'prompt-edit',
-    );
-
-    if (!extracted.ok) {
-      logger.error('[CallDocumentService] summary_prompt_edit_failed', { reason: extracted.reason, status: extracted.status });
+    if (!result.ok) {
+      logger.error(`[${logCallId}] summary_prompt_edit_failed`, { reason: result.reason });
       return null;
     }
 
-    return extracted.content.trim();
+    return result.content.trim();
   }
 
   /**
