@@ -2,7 +2,7 @@
  * IndexedDB storage for XyneAI streaming state persistence
  * Allows streams to continue across sidebar open/close cycles
  */
-import type { ToolOutput as GeniusToolOutput } from 'cosmic-ai-genius';
+import type { ToolOutput as GeniusToolOutput } from '../../types/toolOutput';
 import type {
   Message,
   MessageAttachment,

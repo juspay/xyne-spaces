@@ -24,7 +24,7 @@ import type {
   PendingActionResolution,
   ToolInvocation,
 } from '../../components/Chat/XyneAISidebar/utils/XyneAITypes';
-import type { ToolOutput as GeniusToolOutput } from 'cosmic-ai-genius';
+import type { ToolOutput as GeniusToolOutput } from '../../types/toolOutput';
 import type { ResearchContext } from '@xyne/shared';
 import type { AttachedContextItem } from '../../components/Chat/XyneAISidebar/components/ContextPickerPanel';
 import type { UserActivity } from '../../hooks/useUserActivity';
