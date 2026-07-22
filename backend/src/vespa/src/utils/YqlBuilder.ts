@@ -224,6 +224,7 @@ export class YqlBuilder {
       ${lexicalFieldClauses}
       or ({targetHits:${safeLimit}} nearestNeighbor(text_embeddings, e))
       or ({targetHits:${safeLimit}} nearestNeighbor(chunk_embeddings, e))
+      or ({targetHits:${safeLimit}, approximate:false} nearestNeighbor(combined_embeddings, e))
     )`);
         } else {
           // Lexical only: short query, skip semantic
@@ -244,10 +245,12 @@ export class YqlBuilder {
       } else {
         // Lexical only: short query
         if (useSemantic) {
+          // approximate:false — combined_embeddings' HNSW returns 0 hits under any filter; drop after index rebuild.
           whereConditions.push(`(
           ${userInputClause()}
         or ({targetHits:${safeLimit}} nearestNeighbor(text_embeddings, e))
         or ({targetHits:${safeLimit}} nearestNeighbor(chunk_embeddings, e))
+        or ({targetHits:${safeLimit}, approximate:false} nearestNeighbor(combined_embeddings, e))
         )`);
         } else {
           whereConditions.push(userInputClause());
@@ -477,6 +480,7 @@ export class YqlBuilder {
       return fields ? pick(fields) : false;
     });
   }
+
 
   /**
    * Build the non-bypassable permission guard for a guarded app.

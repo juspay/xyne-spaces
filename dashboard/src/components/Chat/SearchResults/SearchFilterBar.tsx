@@ -104,6 +104,7 @@ const RANK_PROFILE_OPTIONS_BY_TYPE: Partial<
   all: [
     { value: '', label: 'default_native' },
     { value: 'default_fuzzy', label: 'default_fuzzy' },
+    { value: 'unified', label: 'unified' },
   ],
   messages: [
     { value: '', label: 'default_native' },
