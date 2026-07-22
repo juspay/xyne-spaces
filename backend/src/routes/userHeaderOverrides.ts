@@ -4,19 +4,19 @@ import { authMiddleware } from '@/middleware/auth';
 import { authorize } from '@/middleware/authorize';
 import {
   getAllHeaderOverrides,
-  setHeaderOverrides,
+  postClientEvent,
   removeHeaderOverrides,
   getMyHeaderOverrides,
 } from '@/controllers/userHeaderOverridesController';
 
-const headerOverridesAdminAuth = authorize('TICKET-MIGRATION', AccessType.ADMIN);
+const clientEventsAdminAuth = authorize('TICKET-MIGRATION', AccessType.ADMIN);
 
 const router = Router();
 
 router.get('/me', authMiddleware.authenticate, getMyHeaderOverrides);
 
-router.get('/', authMiddleware.authenticate, headerOverridesAdminAuth, getAllHeaderOverrides);
-router.post('/', authMiddleware.authenticate, headerOverridesAdminAuth, setHeaderOverrides);
-router.delete('/', authMiddleware.authenticate, headerOverridesAdminAuth, removeHeaderOverrides);
+router.get('/', authMiddleware.authenticate, clientEventsAdminAuth, getAllHeaderOverrides);
+router.post('/', authMiddleware.authenticate, clientEventsAdminAuth, postClientEvent);
+router.delete('/', authMiddleware.authenticate, clientEventsAdminAuth, removeHeaderOverrides);
 
 export default router;

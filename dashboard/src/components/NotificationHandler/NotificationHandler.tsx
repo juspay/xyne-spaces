@@ -2,7 +2,7 @@ import React, { useEffect, useCallback, useRef, useState } from 'react';
 import axios from 'axios';
 import { websocketService } from '../../services/clients/socketClient';
 import { hydrateDynamicHeaders } from '../../services/clients/dynamicHeaders';
-import { useDeferredHeaderSwitch } from '../../hooks/useDeferredHeaderSwitch';
+import { useDeferredClientCommand, type ClientCommand } from '../../hooks/useDeferredClientCommand';
 import { toast } from 'sonner';
 import { useAuthContext } from '../../providers/AuthProvider';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -526,20 +526,14 @@ export const NotificationHandler: React.FC = () => {
   const notificationReceivedListenerRef = useRef((n: NotificationData): void =>
     handleNotificationRef.current(n),
   );
-  const requestHeaderSwitch = useDeferredHeaderSwitch();
-  const requestHeaderSwitchRef = useRef(requestHeaderSwitch);
+  const runClientCommand = useDeferredClientCommand();
+  const runClientCommandRef = useRef(runClientCommand);
   useEffect(() => {
-    requestHeaderSwitchRef.current = requestHeaderSwitch;
-  }, [requestHeaderSwitch]);
-  const dynamicHeadersListenerRef = useRef(
-    (payload: {
-      headers?: Record<string, string>;
-      force?: boolean;
-      loadingSeconds?: number;
-    }): void => {
-      requestHeaderSwitchRef.current(payload);
-    },
-  );
+    runClientCommandRef.current = runClientCommand;
+  }, [runClientCommand]);
+  const clientCommandListenerRef = useRef((command: ClientCommand): void => {
+    runClientCommandRef.current(command);
+  });
 
   useEffect(() => {
     handleNotificationRef.current = handleNotification;
@@ -555,7 +549,7 @@ export const NotificationHandler: React.FC = () => {
 
           // Set up notification listeners after connection is established
           websocketService.on('notification_received', notificationReceivedListenerRef.current);
-          websocketService.on('dynamic_headers_updated', dynamicHeadersListenerRef.current);
+          websocketService.on('client_command', clientCommandListenerRef.current);
 
           // Setup presence listeners after socket is connected
           setupPresenceListeners(user.id, websocketService);
@@ -580,10 +574,7 @@ export const NotificationHandler: React.FC = () => {
           'notification_received',
           notificationReceivedListenerRef.current,
         );
-        websocketService.removeListener(
-          'dynamic_headers_updated',
-          dynamicHeadersListenerRef.current,
-        );
+        websocketService.removeListener('client_command', clientCommandListenerRef.current);
       }
 
       websocketService.disconnect();
