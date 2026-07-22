@@ -263,6 +263,10 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
       }
       return [...allUsers, ...additionalUsers];
     }, [allUsers, mentionResults]);
+
+    // Whether the agent-progress pill currently has content — lets InputBox flip
+    // between the typing indicator and the agent pill when both are active.
+    const [agentActive, setAgentActive] = useState(false);
     // UPDATED: Handle post-ticket creation logic (Workflows & Cleanup only)
     const handleTicketCreated = (ticket: {
       id: string;
@@ -408,12 +412,18 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
     const hasValidStatus =
       dmUser?.statusEmoji && (!dmUser.statusExpiryAt || !isStatusExpired(dmUser.statusExpiryAt));
 
+    const dynamicName = isTestEnv ? '' : channelName;
+    const defaultPlaceholder = !channelName
+      ? 'Type a message...'
+      : !dynamicName
+        ? 'Send a message'
+        : isDM
+          ? `Send a message to ${dynamicName}`
+          : `Send a message in #${dynamicName}`;
+
     const placeholderText = (
       <span className='flex items-center gap-1.5 whitespace-nowrap overflow-hidden'>
-        <span>
-          {placeholder ||
-            (channelName ? `Message ${isTestEnv ? '' : channelName}`.trim() : 'Type a message...')}
-        </span>
+        <span>{placeholder || defaultPlaceholder}</span>
         {isDM && hasValidStatus && dmUser?.statusEmoji && (
           <span className='inline-flex items-center gap-1 min-w-0'>
             <span className='shrink-0'>{renderEmoji(dmUser.statusEmoji)}</span>
@@ -856,12 +866,6 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
           </div>
         ) : (
           <>
-            <div className='mb-2'>
-              <AgentProgressIndicator
-                sessionId={agentProgressConversationId ?? currentSessionId}
-                conversationId={agentProgressConversationId}
-              />
-            </div>
             {showOfflineBanner && (
               <div className='px-3 py-1.5 bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 rounded text-xs text-amber-700 dark:text-amber-300 flex items-center justify-between mx-3 mb-1'>
                 <div className='flex items-center gap-1.5'>
@@ -929,6 +933,14 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               placeholder={placeholderText}
               typingUsers={typingUsers}
               showTypingIndicator={showTypingIndicator}
+              hasAgentActivity={agentActive}
+              agentSlot={
+                <AgentProgressIndicator
+                  sessionId={agentProgressConversationId ?? currentSessionId}
+                  conversationId={agentProgressConversationId}
+                  onActiveChange={setAgentActive}
+                />
+              }
               commandItems={channelCommands}
               onCommandSelect={handleCommandSelect}
               {...(editorValue !== undefined && { value: editorValue })}

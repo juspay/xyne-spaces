@@ -2694,11 +2694,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                     type='submit'
                     loading={form.state.isSubmitting}
                     disabled={form.state.isSubmitting || !isFormReadyForSubmit}
-                    className={cn(
-                      'px-3 rounded-lg h-8',
-                      'text-gray-50 text-sm font-medium bg-sidebar-badge-accent hover:bg-sidebar-badge-accent/80',
-                      'pointer-events-none',
-                    )}
+                    className='pointer-events-none'
                     data-testid='ticket-submit-button'
                     data-track-category='TICKETS'
                     data-track-name='SUBMIT_CREATE_TICKET_MODAL'
@@ -2718,10 +2714,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                 type='submit'
                 loading={form.state.isSubmitting}
                 disabled={form.state.isSubmitting || !isFormReadyForSubmit}
-                className={cn(
-                  'px-3 rounded-lg h-8',
-                  'text-gray-50 text-sm font-medium bg-sidebar-badge-accent hover:bg-sidebar-badge-accent/80',
-                )}
                 data-testid='ticket-submit-button'
                 data-track-category='TICKETS'
                 data-track-name='SUBMIT_CREATE_TICKET_MODAL'

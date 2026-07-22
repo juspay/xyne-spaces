@@ -10,7 +10,7 @@ import {
 } from 'react';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { ChannelScopeType, ChannelUserStatus } from '@xyne/shared';
-import { ChevronRight, Search, Settings, Star, UserRoundPlus, Users } from 'lucide-react';
+import { ChevronRight, SearchDefault, Settings01, Star, UserPlus, UserTwo } from '@xyne/icons';
 import { ConversationTabListType } from '../ConversationPannel/ConversationPannel.utils';
 import { useClickOutside } from '../../../hooks/useClickOutside';
 import { ConversationTabContext } from '../ConversationTabContext';
@@ -185,7 +185,7 @@ const ConversationHeaderMobile = ({
                 data-track-name='ADD_PEOPLE_MOBILE'
                 data-track-metadata={JSON.stringify({ channelId: channel.id })}
               >
-                <UserRoundPlus className='size-4' />
+                <UserPlus size={16} />
                 <span className='text-sm font-medium text-foreground'>Add</span>
               </button>
               <button
@@ -202,11 +202,9 @@ const ConversationHeaderMobile = ({
                 })}
               >
                 <Star
-                  className={cn(
-                    'size-4',
-                    isStarred ? 'text-status-pending' : 'text-muted-foreground',
-                  )}
-                  fill={isStarred ? 'currentColor' : 'none'}
+                  size={16}
+                  variant={isStarred ? 'Solid' : 'Stroke'}
+                  className={isStarred ? 'text-status-pending' : 'text-muted-foreground'}
                 />
                 <span className='text-sm font-medium text-foreground'>
                   {isStarred ? 'Unstar' : 'Star'}
@@ -220,7 +218,7 @@ const ConversationHeaderMobile = ({
                 data-track-name='SEARCH_MOBILE'
                 data-track-metadata={JSON.stringify({ channelId: channel.id })}
               >
-                <Search className='size-4' />
+                <SearchDefault size={16} />
                 <span className='text-sm font-medium text-foreground'>Search</span>
               </button>
             </div>
@@ -257,7 +255,7 @@ const ConversationHeaderMobile = ({
                 data-track-metadata={JSON.stringify({ channelId: channel.id })}
               >
                 <span className='size-4 flex items-center justify-center shrink-0'>
-                  <Users className='size-4' />
+                  <UserTwo size={16} />
                 </span>
                 <span className='text-sm font-medium text-foreground'>
                   {channelScopeType === ChannelScopeType.DM ? 'Profile' : 'Members'}
@@ -266,7 +264,7 @@ const ConversationHeaderMobile = ({
                   {channel.channelStats?.participantCount}
                 </span>
                 <span>
-                  <ChevronRight className='size-4' />
+                  <ChevronRight size={16} />
                 </span>
               </button>
               <button
@@ -280,7 +278,7 @@ const ConversationHeaderMobile = ({
                 data-track-metadata={JSON.stringify({ channelId: channel.id })}
               >
                 <span className='size-4 flex items-center justify-center shrink-0'>
-                  <Settings className='size-4' />
+                  <Settings01 size={16} />
                 </span>
                 <span className='text-sm font-medium text-foreground'>Settings</span>
               </button>

@@ -23,7 +23,7 @@ const ProjectsScreen = (): ReactElement => {
     <div
       ref={containerRef}
       data-testid='list-projects-page'
-      className='h-full relative bg-background md:rounded-2xl overflow-hidden shadow-md'
+      className='h-full relative overflow-hidden'
       data-component='ProjectsScreen'
     >
       {isWideScreen ? (
@@ -33,26 +33,29 @@ const ProjectsScreen = (): ReactElement => {
           autoSaveId='projects-screen-resize'
         >
           {/* LEFT PANEL (Sidebar) */}
-          <Panel defaultSize={20} minSize={15} maxSize={30}>
+          <Panel defaultSize={20} minSize={15} maxSize={40}>
             <aside className='w-full h-full'>
-              <ProjectSidebar
-                projects={projects}
-                persons={users}
-                userGroups={userGroups}
-                onClose={() => {}}
-              />
+              <ProjectSidebar projects={projects} persons={users} userGroups={userGroups} />
             </aside>
           </Panel>
 
           {/* RESIZE HANDLE */}
-          <PanelResizeHandle className='w-1 hover:bg-blue-50 active:bg-blue-100 transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
-            <div id='panel-resize-divider' className='w-[1px] h-full bg-border'></div>
+          <PanelResizeHandle className='w-[2px] transition-colors cursor-col-resize flex items-center justify-center group'>
+            <div
+              id='panel-resize-divider'
+              className='w-[2px] h-full bg-sidebar-divider group-hover:bg-sidebar-badge-accent group-active:bg-sidebar-badge-accent'
+            ></div>
           </PanelResizeHandle>
 
           {/* RIGHT PANEL (Content View) */}
           <Panel>
-            <main data-id='projects-content-view' className='flex-1 h-full overflow-hidden'>
-              <Outlet />
+            <main
+              data-id='projects-content-view'
+              className='flex-1 h-full overflow-hidden relative flex flex-col rounded-2xl border border-border bg-background'
+            >
+              <div className='flex-1 overflow-hidden relative'>
+                <Outlet />
+              </div>
             </main>
           </Panel>
         </PanelGroup>

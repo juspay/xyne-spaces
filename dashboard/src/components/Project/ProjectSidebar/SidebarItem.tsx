@@ -1,6 +1,7 @@
 import { ReactElement, ReactNode } from 'react';
 import { ChevronRight } from 'lucide-react';
 import { cn } from '../../../utils/classNames';
+import Badge from '../../ui/Badge';
 
 interface SidebarItemProps {
   // Required props
@@ -78,10 +79,11 @@ const SidebarItem = ({
       onClick={onClick}
       data-testid={dataTestId}
       className={cn(
-        'w-full flex items-center gap-2 px-2 py-1.5 rounded-md transition-colors group',
-        'hover:bg-muted',
-
-        isActive ? 'bg-sidebar-item-active' : 'bg-transparent',
+        'w-full flex items-center gap-3 px-3 py-2 rounded-[10px] border border-transparent transition-colors group',
+        'text-sm font-medium tracking-[-0.14px]',
+        isActive
+          ? 'bg-sidebar-accent'
+          : 'bg-transparent hover:bg-sidebar-accent hover:border-sidebar-border',
       )}
       data-track-category='Projects'
       data-track-name='SelectSidebarItem'
@@ -95,9 +97,9 @@ const SidebarItem = ({
 
       <span
         className={cn(
-          'text-[13px] flex-1 text-left truncate',
-          isActive ? 'text-sidebar-primary-foreground font-semibold' : textColor,
-          !isActive && 'group-hover:text-foreground',
+          'flex-1 min-w-0 text-left truncate block',
+          isActive ? 'text-sidebar-accent-foreground' : textColor,
+          !isActive && 'group-hover:text-sidebar-accent-foreground',
         )}
       >
         {label}
@@ -105,9 +107,9 @@ const SidebarItem = ({
 
       {/* Badge */}
       {badge && (
-        <span className='text-[11px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded'>
+        <Badge className='order-last font-mono h-[18px] bg-sidebar-primary border border-sidebar-accent-ring px-1.5 text-sidebar-primary-foreground'>
           {badge}
-        </span>
+        </Badge>
       )}
     </button>
   );

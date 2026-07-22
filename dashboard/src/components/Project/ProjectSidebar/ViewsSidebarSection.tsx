@@ -80,20 +80,22 @@ function ViewRow({
         }
       }}
       className={cn(
-        'group/viewrow relative w-full flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer',
-        'transition-colors hover:bg-muted',
+        'group/viewrow relative w-full flex items-center gap-3 px-3 py-2 rounded-[10px] border border-transparent cursor-pointer',
+        'text-sm font-medium tracking-[-0.14px] transition-colors',
         'focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50',
-        isActive ? 'bg-sidebar-item-active' : 'bg-transparent',
+        isActive
+          ? 'bg-sidebar-accent'
+          : 'bg-transparent hover:bg-sidebar-accent hover:border-sidebar-border',
       )}
       data-track-category='Projects'
       data-track-name='OpenView'
     >
       <span
         className={cn(
-          'text-[13px] flex-1 text-left truncate',
+          'flex-1 min-w-0 text-left truncate block',
           isActive
-            ? 'text-sidebar-primary-foreground font-semibold'
-            : 'text-foreground group-hover/viewrow:text-foreground',
+            ? 'text-sidebar-accent-foreground'
+            : 'text-foreground group-hover/viewrow:text-sidebar-accent-foreground',
         )}
       >
         {view.name}
@@ -296,7 +298,7 @@ const ViewsSidebarSection = (): ReactElement => {
             {hiddenCount > 0 && (
               <button
                 onClick={() => setVisibleCount(c => c + PAGE_SIZE)}
-                className='w-full flex items-center gap-2 px-2 py-1.5 rounded-md transition-colors hover:bg-muted group'
+                className='w-full flex items-center gap-2 px-3 py-1.5 rounded-[10px] transition-colors hover:bg-sidebar-accent group'
                 data-track-category='Projects'
                 data-track-name='ShowMoreViews'
               >
@@ -310,11 +312,11 @@ const ViewsSidebarSection = (): ReactElement => {
             <button
               onClick={() => void navigate('/projects/views/new')}
               className={cn(
-                'mt-1.5 w-full flex items-center gap-2 px-2 py-1.5 rounded-md border border-dashed',
-                'text-[13px] transition-[transform,color,border-color,background-color] active:scale-[0.96]',
+                'mt-1.5 w-full flex items-center gap-3 px-3 py-2 rounded-[10px] border border-dashed',
+                'text-sm font-medium tracking-[-0.14px] transition-[transform,color,border-color,background-color] active:scale-[0.96]',
                 isCreateActive
-                  ? 'border-border bg-muted text-foreground'
-                  : 'border-border/70 text-muted-foreground hover:text-foreground hover:border-border hover:bg-muted/60',
+                  ? 'border-border bg-sidebar-accent text-foreground'
+                  : 'border-border/70 text-muted-foreground hover:text-sidebar-accent-foreground hover:border-border hover:bg-sidebar-accent',
               )}
               data-track-category='Projects'
               data-track-name='CreateNewView'

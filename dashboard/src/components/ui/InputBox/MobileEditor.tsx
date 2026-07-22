@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { EditorContent } from '@tiptap/react';
 import type { Editor } from '@tiptap/react';
-import { ArrowUp, AtSign, Paperclip, Mic, Loader2 } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
+import { ArrowUp, AtMark, PaperclipSlant, MicOn, Hashtag } from '@xyne/icons';
 import { MobileEditorToolbar } from '../EditorToolbar/MobileEditorToolbar';
 import { EmojiPickerButton } from '../EditorToolbar';
 import type { EmojiClickData } from 'emoji-picker-react';
@@ -206,7 +207,7 @@ export const MobileEditor: React.FC<MobileEditorProps> = ({
             aria-label='Attach files'
             onMouseDown={e => e.preventDefault()}
           >
-            <Paperclip className='h-5 w-5' />
+            <PaperclipSlant className='h-5 w-5' />
           </button>
 
           {isVoiceRecording ? (
@@ -246,7 +247,7 @@ export const MobileEditor: React.FC<MobileEditorProps> = ({
               {isVoiceTranscribing ? (
                 <Loader2 className='h-5 w-5 animate-spin' />
               ) : (
-                <Mic className='h-5 w-5' />
+                <MicOn className='h-5 w-5' />
               )}
             </button>
           )}
@@ -277,7 +278,7 @@ export const MobileEditor: React.FC<MobileEditorProps> = ({
                   aria-label='Attach files'
                   onMouseDown={e => e.preventDefault()}
                 >
-                  <Paperclip className='h-5 w-5' />
+                  <PaperclipSlant className='h-5 w-5' />
                 </button>
               )}
 
@@ -330,7 +331,7 @@ export const MobileEditor: React.FC<MobileEditorProps> = ({
                   aria-label='Mention user'
                   onMouseDown={e => e.preventDefault()}
                 >
-                  <AtSign className='h-5 w-5 text-muted-foreground' />
+                  <AtMark className='h-5 w-5 text-muted-foreground' />
                 </button>
               )}
 
@@ -346,7 +347,7 @@ export const MobileEditor: React.FC<MobileEditorProps> = ({
                   aria-label='Mention channel'
                   onMouseDown={e => e.preventDefault()}
                 >
-                  <span className='text-muted-foreground font-semibold text-xl'>#</span>
+                  <Hashtag className='h-5 w-5 text-muted-foreground' />
                 </button>
               )}
 
@@ -365,7 +366,7 @@ export const MobileEditor: React.FC<MobileEditorProps> = ({
                   {isVoiceTranscribing ? (
                     <Loader2 className='h-5 w-5 animate-spin' />
                   ) : (
-                    <Mic className='h-5 w-5' />
+                    <MicOn className='h-5 w-5' />
                   )}
                 </button>
               )}

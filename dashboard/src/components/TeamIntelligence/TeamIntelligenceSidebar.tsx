@@ -55,7 +55,7 @@ const SidebarItems = ({
   const labelClasses = cn(
     'text-sm flex-1 text-left truncate',
     isActive
-      ? 'text-sidebar-primary-foreground font-semibold'
+      ? 'text-sidebar-accent-foreground font-semibold'
       : 'text-foreground group-hover:text-foreground',
   );
 

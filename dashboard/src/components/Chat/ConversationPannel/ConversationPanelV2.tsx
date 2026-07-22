@@ -267,7 +267,7 @@ const ConversationPanelV2 = ({
               ) : isDeactivatedDmArchive ? (
                 <DeactivatedDmArchiveBanner />
               ) : (
-                <div className='px-4 pt-4 pb-4 bg-background'>
+                <div className='px-3 pb-3 bg-background'>
                   <ChatInput
                     // eslint-disable-next-line jsx-a11y/no-autofocus
                     autoFocus={skipInputAutoFocus ? null : 'end'}

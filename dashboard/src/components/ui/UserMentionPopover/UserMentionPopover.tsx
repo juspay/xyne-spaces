@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Headphones, MessageSquare } from 'lucide-react';
+import { Headphones, ChatDefault } from '@xyne/icons';
 import { HoverCard } from '../HoverCard/HoverCard';
 import Avatar from '../Avatar/Avatar';
 import { Button } from '../Button/Button';
@@ -218,7 +218,7 @@ const UserHoverWrapperInner: React.FC<UserHoverWrapperProps> = ({ userId, childr
               onClick={handleSendMessage}
               className='flex items-center gap-2'
             >
-              <MessageSquare className='size-4' />
+              <ChatDefault className='size-4' />
               <span>Message</span>
             </Button>
             <Button

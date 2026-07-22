@@ -5,24 +5,34 @@ import ClawAgentsSidebar from '@/components/ClawAgents/ClawAgentsSidebar';
 
 const ClawAgentsScreen = (): ReactElement => {
   return (
-    <div className='flex h-full flex-col md:rounded-2xl overflow-hidden'>
+    <div className='h-full relative overflow-hidden' data-component='ClawAgentsScreen'>
       <PanelGroup
         direction='horizontal'
-        className='flex-1 overflow-hidden'
+        className='flex align-top h-full'
         autoSaveId='claw-agents-panel-layout'
       >
-        <Panel defaultSize={20} minSize={16} maxSize={25} id='sidebar' order={1}>
-          <ClawAgentsSidebar />
+        <Panel defaultSize={20} minSize={15} maxSize={30} id='sidebar' order={1}>
+          <aside className='w-full h-full'>
+            <ClawAgentsSidebar />
+          </aside>
         </Panel>
 
         <PanelResizeHandle className='w-[2px] transition-colors cursor-col-resize flex items-center justify-center group'>
-          <div className='w-[2px] h-full bg-sidebar-divider group-hover:bg-sidebar-badge-accent group-active:bg-sidebar-badge-accent' />
+          <div
+            id='panel-resize-divider'
+            className='w-[2px] h-full bg-sidebar-divider group-hover:bg-sidebar-badge-accent group-active:bg-sidebar-badge-accent'
+          />
         </PanelResizeHandle>
 
-        <Panel defaultSize={80} minSize={75} maxSize={84} id='main' order={2}>
-          <div className='h-full flex flex-col overflow-auto no-scrollbar bg-background'>
-            <Outlet />
-          </div>
+        <Panel defaultSize={80} minSize={30} id='main' order={2}>
+          <main
+            data-id='claw-agents-view'
+            className='flex-1 h-full overflow-hidden relative flex flex-col rounded-2xl border border-border bg-background'
+          >
+            <div className='flex-1 overflow-auto no-scrollbar relative'>
+              <Outlet />
+            </div>
+          </main>
         </Panel>
       </PanelGroup>
     </div>

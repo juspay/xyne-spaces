@@ -321,7 +321,6 @@ export const ICON_META: IconMeta[] = [
   { component: "Exchange01", name: "exchange-01", section: "Arrows & chevrons", category: "arrows-chevrons" },
   { component: "Exchange02", name: "exchange-02", section: "Arrows & chevrons", category: "arrows-chevrons" },
   { component: "ExclamationMark", name: "exclamation-mark", section: "Alerts", category: "alerts" },
-  { component: "ExternalLink", name: "external-link", section: "Arrows & chevrons", category: "arrows-chevrons" },
   { component: "ExternalLinkCircle", name: "external-link-circle", section: "Arrows & chevrons", category: "arrows-chevrons" },
   { component: "ExternalLinkSquare", name: "external-link-square", section: "Arrows & chevrons", category: "arrows-chevrons" },
   { component: "Eye02Off", name: "eye-02-off", section: "Security", category: "security" },
@@ -879,8 +878,10 @@ export const ICON_META: IconMeta[] = [
   { component: "TerminalConsoleCircle", name: "terminal-console-circle", section: "Development", category: "development" },
   { component: "TerminalConsoleSquare", name: "terminal-console-square", section: "Development", category: "development" },
   { component: "Text", name: "text", section: "Editing", category: "editing" },
+  { component: "TextClear", name: "text-clear", section: "Editing", category: "editing" },
   { component: "TextCursor", name: "text-cursor", section: "Editing", category: "editing" },
   { component: "TextCursorAlphabet", name: "text-cursor-alphabet", section: "Editing", category: "editing" },
+  { component: "TextQuote", name: "text-quote", section: "Editing", category: "editing" },
   { component: "Threads", name: "threads", section: "Apps & Social", category: "apps-social" },
   { component: "ThreadsInstagram", name: "threads-instagram", section: "Apps & Social", category: "apps-social" },
   { component: "ThreeDotsMenuHorizontal", name: "three-dots-menu-horizontal", section: "General", category: "general" },
@@ -995,4 +996,4 @@ export const ICON_META: IconMeta[] = [
 ];
 
 /** Section names, ordered by icon count (desc). */
-export const ICON_SECTIONS: string[] = ["General","Files & Folders","Arrows & chevrons","Apps & Social","Development","Media","Devices","Communication","Editing","Web3 & Crypto","Chart & Graph","Time","Users","Security","Appliances","Money & Payments","Maths","Ai","Food","Medical","Alerts","Navigation","Weather","Building","Automotive","Sports","AR & VR"];
+export const ICON_SECTIONS: string[] = ["General","Files & Folders","Arrows & chevrons","Apps & Social","Development","Media","Devices","Editing","Communication","Web3 & Crypto","Chart & Graph","Time","Users","Security","Appliances","Money & Payments","Maths","Ai","Food","Medical","Alerts","Navigation","Weather","Building","Automotive","Sports","AR & VR"];

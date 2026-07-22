@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { Popover } from '@juspay/blend-design-system';
 import Tooltip from '../Tooltip/Tooltip';
 import EmojiPicker, { EmojiStyle, Theme } from 'emoji-picker-react';
-import { Smile, X, Image as ImageIcon } from 'lucide-react';
+import { X, Image as ImageIcon } from 'lucide-react';
+import { FaceSmile } from '@xyne/icons';
 import type { EmojiPickerButtonProps } from './EditorToolbar.types';
 import { emojiService } from '../../../services/Emoji/emojiService';
 import { useCustomEmojis } from '../../../hooks/useCustomEmojis';
@@ -176,7 +177,7 @@ export const EmojiPickerButton: React.FC<EmojiPickerButtonProps> = ({
       aria-label='Insert emoji'
       data-testid='insert-emoji-btn'
     >
-      <Smile className='w-5 h-5 text-muted-foreground' />
+      <FaceSmile className='h-4 w-4 text-muted-foreground' />
     </button>
   );
 

@@ -7,28 +7,30 @@ import {
   useRef,
   useState,
 } from 'react';
-import { Link, useLocation, useParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Tooltip } from '../ui/Tooltip/Tooltip';
 import { useAuth } from '../../hooks/useAuth';
 import { mixpanelService, EVENTS } from '../../services/Analytics/mixpanelService';
 import { useCanViewAnalytics } from '../../hooks/usePermissions';
 import {
-  ChartSpline,
-  Settings,
-  Phone,
-  Home,
-  Bell,
-  MessageCircle,
+  GraphTrendLine,
+  Settings01,
+  PhoneDefault,
+  HomeDefault,
+  NotificationBellOn,
+  ChatDefault,
   ClipboardCheck,
   FileText,
-  Mic,
-  Ellipsis,
-  Bookmark,
-  Sparkles,
-  LayoutDashboard,
-  CircleHelp,
+  MicMicrophone,
+  ThreeDotsMenuHorizontal,
+  BookmarkDefault,
+  SparkleAi01,
+  GridDashboard01,
+  QuestionMarkCircle,
   AlertCircle,
-} from 'lucide-react';
+  Headphones,
+  TicketToken,
+} from '@xyne/icons';
 
 import Avatar from '../ui/Avatar/Avatar';
 import { Popover } from '../ui/Popover/Popover';
@@ -61,27 +63,27 @@ const mobileNavigationItems = [
   {
     path: '/chat/dir',
     label: 'Home',
-    icon: Home,
+    icon: HomeDefault,
   },
   {
     path: '/chat/dm',
     label: 'DMs',
-    icon: MessageCircle,
+    icon: ChatDefault,
   },
   {
     path: '/calls',
     label: 'Calls',
-    icon: Phone,
+    icon: PhoneDefault,
   },
   {
     path: '/chat/activity',
     label: 'Activity',
-    icon: Bell,
+    icon: NotificationBellOn,
   },
   {
     path: '/analytics',
     label: 'Analytics',
-    icon: ChartSpline,
+    icon: GraphTrendLine,
   },
   {
     path: '/chat/canvas',
@@ -91,17 +93,17 @@ const mobileNavigationItems = [
   {
     path: '/dashboards',
     label: 'Dashboards',
-    icon: LayoutDashboard,
+    icon: GridDashboard01,
   },
   {
     path: '/recorder',
     label: 'Record',
-    icon: Mic,
+    icon: MicMicrophone,
   },
   {
     path: '/chat/bookmarks',
     label: 'Bookmarks',
-    icon: Bookmark,
+    icon: BookmarkDefault,
   },
   {
     path: '/rca',
@@ -111,12 +113,12 @@ const mobileNavigationItems = [
   {
     path: '/chat/threads',
     label: 'Threads',
-    icon: MessageCircle,
+    icon: ChatDefault,
   },
   {
     path: '/chat/recap',
     label: 'Recap',
-    icon: Sparkles,
+    icon: SparkleAi01,
   },
   {
     path: '/error-report',
@@ -126,7 +128,7 @@ const mobileNavigationItems = [
   {
     path: '/guide',
     label: 'Guide',
-    icon: CircleHelp,
+    icon: QuestionMarkCircle,
   },
 ];
 
@@ -142,6 +144,7 @@ const SUPPORT_REUSED_ROUTES = [
 
 const AppSidebar = (): ReactElement => {
   const location = useLocation();
+  const navigate = useNavigate();
   const { workspaceId } = useParams<{ workspaceId?: string }>();
   const prefixWs = (path: string): string => (workspaceId ? `/${workspaceId}${path}` : path);
   const { user } = useAuth();
@@ -193,6 +196,8 @@ const AppSidebar = (): ReactElement => {
 
   const [isStatusModalOpen, setIsStatusModalOpen] = useState(false);
   const [isSettingsPopoverOpen, setIsSettingsPopoverOpen] = useState(false);
+  const [isSupportOpen, setIsSupportOpen] = useState(false);
+  const [isErrorReportOpen, setIsErrorReportOpen] = useState(false);
   const [isMoreOpen, setIsMoreOpen] = useState(false);
   const [isPreferencesOpen, setIsPreferencesOpen] = useState(false);
   const [preferencesInitialSection, setPreferencesInitialSection] = useState<
@@ -348,242 +353,294 @@ const AppSidebar = (): ReactElement => {
   }
 
   return (
-    <aside className='h-full pl-1 pr-3 pt-5 pb-6 flex flex-col items-center justify-between'>
-      <WorkspaceSwitcher />
-      <div className='flex-1 mt-5 space-y-8 overflow-y-auto scrollbar-none min-h-0 pr-2 -mr-2'>
-        {isSupportContext ? (
-          <SupportRail
-            prefixWs={prefixWs}
-            onNavigationClick={handleNavigationClick}
-            permittedGlobalPaths={permittedGlobalPaths}
-            activeRoute={activeRoute}
-          />
-        ) : (
-          <nav>
-            <ul ref={navListRef} className='relative flex flex-col gap-4'>
-              {activeMarkerY !== null && (
-                <div
-                  aria-hidden='true'
-                  className='absolute left-0 z-0 h-8 w-8 rounded-lg bg-appSidebar-active transition-transform duration-200 ease-out pointer-events-none'
-                  style={{ transform: `translate3d(0px, ${activeMarkerY}px, 0)` }}
-                />
-              )}
-              {/* Xyne AI nav item — only visible when "Open AI on launch" is enabled */}
-              {aiLandingDefault && (
-                <li
-                  key='/ai'
-                  ref={el => {
-                    navItemRefs.current['/ai'] = el;
-                  }}
-                  className='relative z-10'
-                >
-                  <Tooltip content='Xyne AI' side='right' delayDuration={0}>
-                    <Link
-                      to={prefixWs('/ai')}
-                      onClick={() => handleNavigationClick('Xyne AI')}
-                      data-testid='nav-xyne-ai'
-                      data-track-category='App_Sidebar'
-                      data-track-name='Sidebar_Nav_Item'
-                      data-track-metadata={JSON.stringify({ path: '/ai', label: 'Xyne AI' })}
-                      className={cn(
-                        'size-8 flex items-center justify-center rounded-lg cursor-pointer transition-colors',
-                        activeRoute === '/ai'
-                          ? 'text-appSidebar-activeIcon'
-                          : 'bg-transparent text-appSidebar-activeForeground',
-                      )}
-                    >
-                      <XyneAISidebarIcon size={16} />
-                    </Link>
-                  </Tooltip>
-                </li>
-              )}
-
-              {toolbarItems.map(item => {
-                const isActive = activeRoute === item.path;
-                const showMissedCallBadge = item.path === '/calls' && missedCallCount > 0;
-                const showPendingDmDot = item.path === '/chat/dm' && hasPendingDirectMessages;
-                const showActivityBadge = item.path === '/chat/activity' && unreadActivityCount > 0;
-                const Icon = item.icon;
-
-                const testId = `nav-${item.label.toLowerCase().replace(/\s+/g, '-')}`;
-
-                return (
+    <aside className='h-full w-[60px] flex flex-col bg-sidebar'>
+      <div className='w-full h-[52px] shrink-0' />
+      <div className='flex-1 min-h-0 p-3 flex flex-col items-center justify-between border-t border-r border-border'>
+        <WorkspaceSwitcher />
+        <div className='flex-1 mt-5 space-y-8 overflow-y-auto scrollbar-none min-h-0 pr-2 -mr-2'>
+          {isSupportContext ? (
+            <SupportRail
+              prefixWs={prefixWs}
+              onNavigationClick={handleNavigationClick}
+              permittedGlobalPaths={permittedGlobalPaths}
+              activeRoute={activeRoute}
+            />
+          ) : (
+            <nav>
+              <ul ref={navListRef} className='relative flex flex-col gap-4'>
+                {activeMarkerY !== null && (
+                  <div
+                    aria-hidden='true'
+                    className='absolute left-0 z-0 h-8 w-8 rounded-lg border border-sidebar-border bg-sidebar-accent transition-transform duration-200 ease-out pointer-events-none'
+                    style={{ transform: `translate3d(0px, ${activeMarkerY}px, 0)` }}
+                  />
+                )}
+                {/* Xyne AI nav item — only visible when "Open AI on launch" is enabled */}
+                {aiLandingDefault && (
                   <li
-                    key={item.path}
+                    key='/ai'
                     ref={el => {
-                      navItemRefs.current[item.path] = el;
+                      navItemRefs.current['/ai'] = el;
                     }}
                     className='relative z-10'
                   >
-                    <Tooltip content={item.label} side='right' delayDuration={0}>
+                    <Tooltip content='Xyne AI' side='right' delayDuration={0}>
                       <Link
-                        to={prefixWs(item.path)}
-                        onClick={() => handleNavigationClick(item.label)}
-                        aria-label={showPendingDmDot ? 'DMs unread' : item.label}
-                        data-testid={testId}
+                        to={prefixWs('/ai')}
+                        onClick={() => handleNavigationClick('Xyne AI')}
+                        data-testid='nav-xyne-ai'
                         data-track-category='App_Sidebar'
                         data-track-name='Sidebar_Nav_Item'
-                        data-track-metadata={JSON.stringify({ path: item.path, label: item.label })}
+                        data-track-metadata={JSON.stringify({ path: '/ai', label: 'Xyne AI' })}
                         className={cn(
-                          'relative size-8 flex items-center justify-center rounded-lg cursor-pointer transition-colors',
-                          isActive
-                            ? 'text-appSidebar-activeIcon'
-                            : 'bg-transparent text-appSidebar-activeForeground',
+                          'size-8 flex items-center justify-center rounded-lg cursor-pointer transition-colors',
+                          activeRoute === '/ai'
+                            ? 'text-sidebar-accent-foreground'
+                            : 'bg-transparent text-sidebar-foreground',
                         )}
                       >
-                        <Icon size={item.iconSize ?? 16} />
-                        {showPendingDmDot && (
-                          <span
-                            aria-hidden='true'
-                            className='absolute top-1 right-1 size-[9px] rounded-full bg-[var(--sidebar-dm-dot-bg)]'
-                            style={{ boxShadow: 'var(--sidebar-dm-dot-shadow)' }}
-                          />
-                        )}
-                        {showMissedCallBadge && (
-                          <span className='absolute -top-1 -right-1 flex items-center justify-center min-w-[18px] h-[18px] px-[4px] rounded-full bg-destructive text-destructive-foreground text-[11px] font-semibold'>
-                            {missedCallCount > 99 ? '99+' : missedCallCount}
-                          </span>
-                        )}
-                        {showActivityBadge && (
-                          <span className='absolute -top-1 -right-1 flex items-center justify-center min-w-[18px] h-[18px] px-[4px] rounded-full bg-destructive text-destructive-foreground text-[11px] font-semibold'>
-                            {unreadActivityCount > 99 ? '99+' : unreadActivityCount}
-                          </span>
-                        )}
+                        <XyneAISidebarIcon size={16} />
                       </Link>
                     </Tooltip>
                   </li>
-                );
-              })}
+                )}
 
-              {/* More menu — overflow items + customize toolbar (Slack-style) */}
-              <li className='relative z-10'>
-                <Popover
-                  open={isMoreOpen}
-                  onOpenChange={setIsMoreOpen}
-                  side='right'
-                  align='start'
-                  sideOffset={8}
-                  collisionPadding={12}
-                  onOpenAutoFocus={handleMorePopoverAutoFocus}
-                  className='p-1.5 w-64 max-h-[80vh] overflow-y-auto rounded-xl'
-                  trigger={
-                    <button
-                      type='button'
-                      aria-label='More'
-                      data-testid='nav-more'
-                      data-track-category='App_Sidebar'
-                      data-track-name='Sidebar_More_Toggle'
-                      className={cn(
-                        'size-8 flex items-center justify-center rounded-lg cursor-pointer transition-colors',
-                        isMoreActive || isMoreOpen
-                          ? 'bg-appSidebar-active text-appSidebar-activeIcon'
-                          : 'bg-transparent text-appSidebar-activeForeground',
-                      )}
+                {toolbarItems.map(item => {
+                  const isActive = activeRoute === item.path;
+                  const showMissedCallBadge = item.path === '/calls' && missedCallCount > 0;
+                  const showPendingDmDot = item.path === '/chat/dm' && hasPendingDirectMessages;
+                  const showActivityBadge =
+                    item.path === '/chat/activity' && unreadActivityCount > 0;
+                  const Icon = item.icon;
+
+                  const testId = `nav-${item.label.toLowerCase().replace(/\s+/g, '-')}`;
+
+                  return (
+                    <li
+                      key={item.path}
+                      ref={el => {
+                        navItemRefs.current[item.path] = el;
+                      }}
+                      className='relative z-10'
                     >
-                      <Ellipsis size={16} />
-                    </button>
-                  }
+                      <Tooltip content={item.label} side='right' delayDuration={0}>
+                        <Link
+                          to={prefixWs(item.path)}
+                          onClick={() => handleNavigationClick(item.label)}
+                          aria-label={showPendingDmDot ? 'DMs unread' : item.label}
+                          data-testid={testId}
+                          data-track-category='App_Sidebar'
+                          data-track-name='Sidebar_Nav_Item'
+                          data-track-metadata={JSON.stringify({
+                            path: item.path,
+                            label: item.label,
+                          })}
+                          className={cn(
+                            'relative size-8 flex items-center justify-center rounded-lg cursor-pointer transition-colors',
+                            isActive
+                              ? 'text-sidebar-accent-foreground'
+                              : 'bg-transparent text-sidebar-foreground',
+                          )}
+                        >
+                          <Icon
+                            size={item.iconSize ?? 16}
+                            variant={isActive ? 'Solid' : 'Stroke'}
+                          />
+                          {showPendingDmDot && (
+                            <span
+                              aria-hidden='true'
+                              className='absolute top-1 right-1 size-[9px] rounded-full bg-sidebar-primary border border-sidebar-accent-ring'
+                            />
+                          )}
+                          {showMissedCallBadge && (
+                            <span className='absolute -top-1 -right-1 flex items-center justify-center min-w-[18px] h-[18px] px-[4px] rounded-full bg-sidebar-primary border border-sidebar-accent-ring text-sidebar-primary-foreground text-[11px] font-semibold'>
+                              {missedCallCount > 99 ? '99+' : missedCallCount}
+                            </span>
+                          )}
+                          {showActivityBadge && (
+                            <span className='absolute -top-1 -right-1 flex items-center justify-center min-w-[18px] h-[18px] px-[4px] rounded-full bg-sidebar-primary border border-sidebar-accent-ring text-sidebar-primary-foreground text-[11px] font-semibold'>
+                              {unreadActivityCount > 99 ? '99+' : unreadActivityCount}
+                            </span>
+                          )}
+                        </Link>
+                      </Tooltip>
+                    </li>
+                  );
+                })}
+
+                {/* More menu — overflow items + customize toolbar (Slack-style) */}
+                <li className='relative z-10'>
+                  <Popover
+                    open={isMoreOpen}
+                    onOpenChange={setIsMoreOpen}
+                    side='right'
+                    align='start'
+                    sideOffset={8}
+                    collisionPadding={12}
+                    onOpenAutoFocus={handleMorePopoverAutoFocus}
+                    className='p-1.5 w-64 max-h-[80vh] overflow-y-auto rounded-xl'
+                    trigger={
+                      <button
+                        type='button'
+                        aria-label='More'
+                        data-testid='nav-more'
+                        data-track-category='App_Sidebar'
+                        data-track-name='Sidebar_More_Toggle'
+                        className={cn(
+                          'size-8 flex items-center justify-center rounded-lg cursor-pointer transition-colors',
+                          isMoreActive || isMoreOpen
+                            ? 'bg-sidebar-accent text-sidebar-accent-foreground'
+                            : 'bg-transparent text-sidebar-foreground',
+                        )}
+                      >
+                        <ThreeDotsMenuHorizontal size={16} />
+                      </button>
+                    }
+                  >
+                    <SidebarMoreMenu
+                      items={moreItems}
+                      activeRoute={activeRoute}
+                      prefixWs={prefixWs}
+                      onNavigate={handleMoreNavigate}
+                      onCustomize={handleCustomizeToolbar}
+                    />
+                  </Popover>
+                </li>
+              </ul>
+            </nav>
+          )}
+        </div>
+
+        <div className='flex flex-col items-center justify-center'>
+          <Popover
+            open={isSupportOpen}
+            onOpenChange={setIsSupportOpen}
+            side='right'
+            align='end'
+            sideOffset={8}
+            collisionPadding={12}
+            onOpenAutoFocus={e => e.preventDefault()}
+            className='p-1.5 w-56 rounded-xl'
+            trigger={
+              <button
+                type='button'
+                aria-label='Support'
+                title='Support'
+                data-testid='nav-support'
+                data-track-category='App_Sidebar'
+                data-track-name='Sidebar_Support_Toggle'
+                className={cn(
+                  'size-8 mb-2 flex items-center justify-center rounded-lg cursor-pointer transition-colors',
+                  isSupportOpen
+                    ? 'bg-sidebar-accent text-sidebar-accent-foreground'
+                    : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+                )}
+              >
+                <Headphones size={16} />
+              </button>
+            }
+          >
+            <SidebarSupportMenu
+              onReportIssue={() => {
+                setIsSupportOpen(false);
+                setIsErrorReportOpen(true);
+              }}
+              onViewMyTickets={() => {
+                setIsSupportOpen(false);
+                void navigate(prefixWs('/chat/my-tickets'));
+              }}
+            />
+          </Popover>
+
+          <Popover
+            trigger={
+              hasValidStatus ? (
+                <div
+                  className='relative w-[32px] h-14 rounded-lg flex flex-col items-center justify-end transition-opacity hover:opacity-90 cursor-pointer [--avatar-ring:var(--sidebar-avatar-ring)]'
+                  style={{ backgroundColor: 'var(--sidebar-border)' }}
+                  data-testid='profile-icon'
                 >
-                  <SidebarMoreMenu
-                    items={moreItems}
-                    activeRoute={activeRoute}
-                    prefixWs={prefixWs}
-                    onNavigate={handleMoreNavigate}
-                    onCustomize={handleCustomizeToolbar}
-                  />
-                </Popover>
-              </li>
-            </ul>
-          </nav>
-        )}
-      </div>
+                  {/* Status Emoji at Top Center */}
+                  <div className='absolute top-1 left-1/2 -translate-x-1/2'>
+                    <StatusIndicator
+                      statusEmoji={currentUser?.statusEmoji}
+                      statusContent={currentUser?.statusContent}
+                      statusExpiryAt={currentUser?.statusExpiryAt}
+                      size='lg'
+                      showOnHover={true}
+                    />
+                  </div>
 
-      <div className='flex flex-col items-center justify-center pb-4'>
-        <Popover
-          trigger={
-            hasValidStatus ? (
-              <div
-                className='relative w-[32px] h-14 rounded-lg flex flex-col items-center justify-end transition-opacity hover:opacity-90 cursor-pointer [--avatar-ring:var(--sidebar-avatar-ring)]'
-                style={{ backgroundColor: 'var(--sidebar-divider)' }}
-                data-testid='profile-icon'
-              >
-                {/* Status Emoji at Top Center */}
-                <div className='absolute top-1 left-1/2 -translate-x-1/2'>
-                  <StatusIndicator
-                    statusEmoji={currentUser?.statusEmoji}
-                    statusContent={currentUser?.statusContent}
-                    statusExpiryAt={currentUser?.statusExpiryAt}
-                    size='lg'
-                    showOnHover={true}
-                  />
+                  {/* Avatar at Bottom - overlaps container slightly */}
+                  <div className='relative -mb-1.5'>
+                    {user ? (
+                      <Avatar userId={user.id} size='md' className='rounded-lg' />
+                    ) : (
+                      <div className='size-9 rounded-xl flex items-center justify-center bg-border'>
+                        <Settings01 size={14} className='text-sidebar-foreground' />
+                      </div>
+                    )}
+                  </div>
                 </div>
+              ) : (
+                <div
+                  className='relative w-[32px] flex flex-col items-center justify-end transition-opacity hover:opacity-90 cursor-pointer [--avatar-ring:var(--sidebar-avatar-ring)]'
+                  data-testid='profile-icon'
+                >
+                  {/* Avatar at Bottom - overlaps container slightly to match with-status state */}
+                  <div className='relative -mb-1.5'>
+                    {user ? (
+                      <Avatar userId={user.id} size='md' className='rounded-md' />
+                    ) : (
+                      <div className='size-9 rounded-xl flex items-center justify-center bg-border'>
+                        <Settings01 size={14} className='text-sidebar-foreground' />
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )
+            }
+            open={isSettingsPopoverOpen}
+            onOpenChange={setIsSettingsPopoverOpen}
+            onOpenAutoFocus={e => e.preventDefault()}
+            side='right'
+            sideOffset={8}
+            align='end'
+            collisionPadding={12}
+            className='max-h-[calc(100vh-24px)] overflow-y-auto overscroll-contain no-scrollbar'
+          >
+            <SettingsContent
+              onClose={() => setIsSettingsPopoverOpen(false)}
+              onOpenPreferences={handleOpenPreferences}
+              onOpenStatusModal={handleStatusClick}
+            />
+          </Popover>
 
-                {/* Avatar at Bottom - overlaps container slightly */}
-                <div className='relative -mb-1.5'>
-                  {user ? (
-                    <Avatar userId={user.id} size='md' className='rounded-lg' />
-                  ) : (
-                    <div className='size-9 rounded-xl flex items-center justify-center bg-border'>
-                      <Settings size={14} className='text-appSidebar-activeForeground' />
-                    </div>
-                  )}
-                </div>
-              </div>
-            ) : (
-              <div
-                className='relative w-[32px] flex flex-col items-center justify-end transition-opacity hover:opacity-90 cursor-pointer [--avatar-ring:var(--sidebar-avatar-ring)]'
-                data-testid='profile-icon'
-              >
-                {/* Avatar at Bottom - overlaps container slightly to match with-status state */}
-                <div className='relative -mb-1.5'>
-                  {user ? (
-                    <Avatar userId={user.id} size='md' className='rounded-md' />
-                  ) : (
-                    <div className='size-9 rounded-xl flex items-center justify-center bg-border'>
-                      <Settings size={14} className='text-appSidebar-activeForeground' />
-                    </div>
-                  )}
-                </div>
-              </div>
-            )
-          }
-          open={isSettingsPopoverOpen}
-          onOpenChange={setIsSettingsPopoverOpen}
-          onOpenAutoFocus={e => e.preventDefault()}
-          side='right'
-          sideOffset={8}
-          align='end'
-          collisionPadding={12}
-          className='max-h-[calc(100vh-24px)] overflow-y-auto overscroll-contain no-scrollbar'
-        >
-          <SettingsContent
-            onClose={() => setIsSettingsPopoverOpen(false)}
-            onOpenPreferences={handleOpenPreferences}
-            onOpenStatusModal={handleStatusClick}
+          <Preferences
+            open={isPreferencesOpen}
+            onClose={() => setIsPreferencesOpen(false)}
+            {...(preferencesInitialSection && { initialSection: preferencesInitialSection })}
           />
-        </Popover>
+        </div>
 
-        <Preferences
-          open={isPreferencesOpen}
-          onClose={() => setIsPreferencesOpen(false)}
-          {...(preferencesInitialSection && { initialSection: preferencesInitialSection })}
+        {/* Error Report Modal — opened from the Support rail button */}
+        <ErrorReportModal isOpen={isErrorReportOpen} onClose={() => setIsErrorReportOpen(false)} />
+
+        {/* Status Update Modal */}
+        <UpdateStatusModal
+          isOpen={isStatusModalOpen}
+          onClose={handleStatusModalClose}
+          currentStatus={
+            hasValidStatus
+              ? {
+                  emoji: currentUser?.statusEmoji || '',
+                  content: currentUser?.statusContent || '',
+                  expiryAt: currentUser?.statusExpiryAt || null,
+                }
+              : null
+          }
         />
       </div>
-
-      {/* Status Update Modal */}
-      <UpdateStatusModal
-        isOpen={isStatusModalOpen}
-        onClose={handleStatusModalClose}
-        currentStatus={
-          hasValidStatus
-            ? {
-                emoji: currentUser?.statusEmoji || '',
-                content: currentUser?.statusContent || '',
-                expiryAt: currentUser?.statusExpiryAt || null,
-              }
-            : null
-        }
-      />
     </aside>
   );
 };
@@ -626,7 +683,7 @@ const SidebarMoreMenu = ({
                   )}
                 >
                   <span className='flex size-5 shrink-0 items-center justify-center'>
-                    <Icon size={16} />
+                    <Icon size={16} variant={isActive ? 'Solid' : 'Stroke'} />
                   </span>
                   <span className='truncate'>{item.label}</span>
                 </Link>
@@ -650,6 +707,52 @@ const SidebarMoreMenu = ({
       >
         Customize toolbar
       </button>
+    </div>
+  );
+};
+
+const SidebarSupportMenu = ({
+  onReportIssue,
+  onViewMyTickets,
+}: {
+  onReportIssue: () => void;
+  onViewMyTickets: () => void;
+}): ReactElement => {
+  return (
+    <div className='flex flex-col'>
+      <p className='px-2.5 pt-1 pb-1.5 text-sm font-semibold text-popover-foreground'>Support</p>
+      <ul className='flex flex-col'>
+        <li>
+          <button
+            type='button'
+            onClick={onReportIssue}
+            data-testid='support-report-issue'
+            data-track-category='App_Sidebar'
+            data-track-name='Sidebar_Support_ReportIssue'
+            className='flex w-full items-center gap-3 rounded-md px-2.5 py-2 text-sm text-popover-foreground transition-colors hover:bg-accent hover:text-accent-foreground'
+          >
+            <span className='flex size-5 shrink-0 items-center justify-center'>
+              <AlertCircle size={16} />
+            </span>
+            <span className='flex-1 truncate text-left'>Report issue</span>
+          </button>
+        </li>
+        <li>
+          <button
+            type='button'
+            onClick={onViewMyTickets}
+            data-testid='support-view-my-tickets'
+            data-track-category='App_Sidebar'
+            data-track-name='Sidebar_Support_ViewMyTickets'
+            className='flex w-full items-center gap-3 rounded-md px-2.5 py-2 text-sm text-popover-foreground transition-colors hover:bg-accent hover:text-accent-foreground'
+          >
+            <span className='flex size-5 shrink-0 items-center justify-center'>
+              <TicketToken size={16} />
+            </span>
+            <span className='flex-1 truncate text-left'>View my tickets</span>
+          </button>
+        </li>
+      </ul>
     </div>
   );
 };
@@ -766,15 +869,16 @@ const MobileNavbar = ({
                   <div className='size-[24px] flex items-center justify-center relative'>
                     <Icon
                       size={20}
+                      variant={isActive ? 'Solid' : 'Stroke'}
                       className={isActive ? 'text-foreground' : 'text-muted-foreground'}
                     />
                     {showMissedCallBadge && (
-                      <span className='absolute -top-1 -right-2 flex items-center justify-center min-w-[18px] h-[18px] px-[4px] rounded-full bg-destructive text-destructive-foreground text-[11px] font-semibold'>
+                      <span className='absolute -top-1 -right-2 flex items-center justify-center min-w-[18px] h-[18px] px-[4px] rounded-full bg-sidebar-primary border border-sidebar-accent-ring text-sidebar-primary-foreground text-[11px] font-semibold'>
                         {missedCallCount > 99 ? '99+' : missedCallCount}
                       </span>
                     )}
                     {showActivityBadge && (
-                      <span className='absolute -top-1 -right-2 flex items-center justify-center min-w-[18px] h-[18px] px-[4px] rounded-full bg-destructive text-destructive-foreground text-[11px] font-semibold'>
+                      <span className='absolute -top-1 -right-2 flex items-center justify-center min-w-[18px] h-[18px] px-[4px] rounded-full bg-sidebar-primary border border-sidebar-accent-ring text-sidebar-primary-foreground text-[11px] font-semibold'>
                         {unreadActivityCount > 99 ? '99+' : unreadActivityCount}
                       </span>
                     )}
@@ -808,7 +912,7 @@ const MobileNavbar = ({
               className='flex flex-col gap-[3px] h-[44px] items-center justify-center p-[2px] cursor-pointer relative'
             >
               <div className='size-[24px] flex items-center justify-center'>
-                <Ellipsis
+                <ThreeDotsMenuHorizontal
                   size={20}
                   className={isMoreActive ? 'text-foreground' : 'text-muted-foreground'}
                 />
@@ -866,6 +970,7 @@ const MobileNavbar = ({
                         >
                           <Icon
                             size={20}
+                            variant={isActive ? 'Solid' : 'Stroke'}
                             className={isActive ? 'text-foreground' : 'text-muted-foreground'}
                           />
                           <span
@@ -899,10 +1004,11 @@ const MobileNavbar = ({
                         <div className='relative'>
                           <Icon
                             size={20}
+                            variant={isActive ? 'Solid' : 'Stroke'}
                             className={isActive ? 'text-foreground' : 'text-muted-foreground'}
                           />
                           {showRecapBadge && (
-                            <span className='absolute -top-1 -right-1 flex items-center justify-center min-w-[14px] h-[14px] px-[3px] rounded-full bg-sidebar-badge-accent text-sidebar-badge-accent-foreground text-[9px] font-semibold'>
+                            <span className='absolute -top-1 -right-1 flex items-center justify-center min-w-[14px] h-[14px] px-[3px] rounded-full bg-sidebar-primary border border-sidebar-accent-ring text-sidebar-primary-foreground text-[9px] font-semibold'>
                               {recapUnreadCount > 9 ? '9+' : recapUnreadCount}
                             </span>
                           )}
