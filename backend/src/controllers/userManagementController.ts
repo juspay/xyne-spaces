@@ -185,9 +185,9 @@ export class UserManagementController {
         return;
       }
 
-      // Check if user exists
+      // Check if user exists and belongs to the caller's workspace
       const user = await userManagementService.getUser(id);
-      if (!user) {
+      if (!user || user.workspaceId !== req.user!.workspaceId) {
         res.status(404).json({ error: 'User not found' });
         return;
       }
@@ -300,6 +300,13 @@ export class UserManagementController {
 
       if (!status || !['ACTIVE', 'INACTIVE'].includes(status)) {
         res.status(400).json({ error: 'Invalid status. Must be ACTIVE or INACTIVE' });
+        return;
+      }
+
+      // Ensure the target user belongs to the caller's workspace
+      const targetUser = await userManagementService.getUser(id);
+      if (!targetUser || targetUser.workspaceId !== req.user!.workspaceId) {
+        res.status(404).json({ error: 'User not found' });
         return;
       }
 
@@ -577,6 +584,13 @@ export class UserManagementController {
         return;
       }
 
+      // Ensure the target group belongs to the caller's workspace
+      const existingGroup = await userManagementService.getUserGroup(id);
+      if (!existingGroup || existingGroup.workspaceId !== req.user!.workspaceId) {
+        res.status(404).json({ error: 'Group not found' });
+        return;
+      }
+
       const updateData: { name?: string; alias?: string | null; description?: string | null } = {};
       if (name !== undefined) updateData.name = name.trim();
       if (alias !== undefined) updateData.alias = alias?.trim() || null;
@@ -614,6 +628,13 @@ export class UserManagementController {
   deleteGroup = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
+
+      // Ensure the target group belongs to the caller's workspace
+      const existingGroup = await userManagementService.getUserGroup(id);
+      if (!existingGroup || existingGroup.workspaceId !== req.user!.workspaceId) {
+        res.status(404).json({ error: 'Group not found' });
+        return;
+      }
 
       await userManagementService.deleteUserGroup(id);
 
@@ -689,6 +710,20 @@ export class UserManagementController {
     try {
       const { groupId, userId } = req.params;
 
+      // Ensure both the target user and group belong to the caller's workspace
+      const [targetUser, targetGroup] = await Promise.all([
+        userManagementService.getUser(userId),
+        userManagementService.getUserGroup(groupId),
+      ]);
+      if (!targetUser || targetUser.workspaceId !== req.user!.workspaceId) {
+        res.status(404).json({ error: 'User not found' });
+        return;
+      }
+      if (!targetGroup || targetGroup.workspaceId !== req.user!.workspaceId) {
+        res.status(404).json({ error: 'Group not found' });
+        return;
+      }
+
       const result = await userManagementService.assignUserToGroup(userId, groupId);
 
       if (!result.success) {
@@ -713,6 +748,20 @@ export class UserManagementController {
   removeUserFromGroup = async (req: Request, res: Response): Promise<void> => {
     try {
       const { groupId, userId } = req.params;
+
+      // Ensure both the target user and group belong to the caller's workspace
+      const [targetUser, targetGroup] = await Promise.all([
+        userManagementService.getUser(userId),
+        userManagementService.getUserGroup(groupId),
+      ]);
+      if (!targetUser || targetUser.workspaceId !== req.user!.workspaceId) {
+        res.status(404).json({ error: 'User not found' });
+        return;
+      }
+      if (!targetGroup || targetGroup.workspaceId !== req.user!.workspaceId) {
+        res.status(404).json({ error: 'Group not found' });
+        return;
+      }
 
       const result = await userManagementService.removeUserFromGroup(userId, groupId);
 
@@ -785,9 +834,9 @@ export class UserManagementController {
         return;
       }
 
-      // Check if group exists
+      // Check if group exists and belongs to the caller's workspace
       const group = await userManagementService.getUserGroup(id);
-      if (!group) {
+      if (!group || group.workspaceId !== req.user!.workspaceId) {
         res.status(404).json({ error: 'Group not found' });
         return;
       }
