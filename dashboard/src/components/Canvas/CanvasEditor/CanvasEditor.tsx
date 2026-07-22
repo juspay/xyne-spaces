@@ -28,6 +28,7 @@ import {
 import { filterSuggestionItems } from '@blocknote/core/extensions';
 import '@blocknote/core/fonts/inter.css';
 import '@blocknote/mantine/style.css';
+import { en } from '@blocknote/core/locales';
 import { PresentationModal, usePresentation } from 'blocknote-layout-extensions';
 import { whiteboardBlockSpecs, getWhiteboardSlashMenuItems } from 'blocknote-layout-extensions';
 import { getMentionSuggestionMenuItems, insertGroupMention } from 'blocknote-layout-extensions';
@@ -56,6 +57,7 @@ import { toast } from 'sonner';
 import { TableOfContents, TocHeading } from '../TableOfContents';
 import { CanvasSearch } from '../CanvasSearch/CanvasSearch';
 import { SelectionAskAI } from '../SelectionAskAI';
+import { CanvasCodeCopyButton } from '../CanvasCodeCopyButton';
 import { useCanvasTableFilters } from '../useCanvasTableFilters';
 import { useScope, useShortcutById } from '../../../shortcuts';
 import { useAuth } from '../../../hooks/useAuth';
@@ -84,6 +86,15 @@ function createCanvasSchema() {
   });
 }
 const schema = createCanvasSchema();
+
+const canvasDictionary = {
+  ...en,
+  placeholders: {
+    ...en.placeholders,
+    default: "Write something, or press '/' for commands",
+    emptyDocument: "Write something, or press '/' for commands",
+  },
+};
 const knownBlockTypes = knownBlockTypesOf(schema);
 
 // Content size limit in bytes
@@ -163,6 +174,7 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
         : {}),
       ...(onFileUpload ? { uploadFile: onFileUpload } : {}),
       resolveFileUrl,
+      dictionary: canvasDictionary,
     });
 
     // Auto-focus the editor on mount if requested (fire only once, cursor at end)
@@ -560,6 +572,9 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
           {...(canvasId && { canvasId })}
           containerRef={containerRef}
         />
+
+        {/* Copy button overlay for code blocks */}
+        <CanvasCodeCopyButton containerRef={containerRef} />
       </div>
     );
   },
