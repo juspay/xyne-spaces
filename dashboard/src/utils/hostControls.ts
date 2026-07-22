@@ -1,6 +1,6 @@
-import { DEFAULT_HOST_CONTROLS, type HostControls } from '@xyne/shared';
+import { normalizeHostControls, type HostControls } from '@xyne/shared';
 
-export type HostControlLockKey = keyof HostControls;
+export type HostControlTurnOffKey = keyof HostControls;
 
 interface HostControlParticipantLike {
   identity: string;
@@ -32,23 +32,6 @@ interface HostControlContextLike {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
-}
-
-export function normalizeHostControls(value: unknown): HostControls | null {
-  if (!isRecord(value)) return null;
-
-  return {
-    lockMic:
-      typeof value['lockMic'] === 'boolean' ? value['lockMic'] : DEFAULT_HOST_CONTROLS.lockMic,
-    lockCamera:
-      typeof value['lockCamera'] === 'boolean'
-        ? value['lockCamera']
-        : DEFAULT_HOST_CONTROLS.lockCamera,
-    lockScreenShare:
-      typeof value['lockScreenShare'] === 'boolean'
-        ? value['lockScreenShare']
-        : DEFAULT_HOST_CONTROLS.lockScreenShare,
-  };
 }
 
 export function parseHostControlsFromMetadata(metadata: string): HostControls | null {
@@ -106,12 +89,12 @@ function isLocalExternalParticipant(context: HostControlContextLike): boolean {
   return getLocalParticipantMetadata(context)?.['isExternal'] === true;
 }
 
-export function isHostControlLockedForLocalWithControls(
+export function isHostControlTurnedOffForLocalWithControls(
   context: HostControlContextLike,
   hostControls: HostControls,
-  lockKey: HostControlLockKey,
+  controlKey: HostControlTurnOffKey,
 ): boolean {
-  if (!hostControls[lockKey]) return false;
+  if (!hostControls[controlKey]) return false;
 
   const localIdentity = getLocalParticipantIdentity(context);
   const currentCall = getActiveCallForContext(context);
@@ -121,9 +104,9 @@ export function isHostControlLockedForLocalWithControls(
   return currentCall.createdByUserId !== localIdentity;
 }
 
-export function isHostControlLockedForLocal(
+export function isHostControlTurnedOffForLocal(
   context: HostControlContextLike,
-  lockKey: HostControlLockKey,
+  controlKey: HostControlTurnOffKey,
 ): boolean {
-  return isHostControlLockedForLocalWithControls(context, context.hostControls, lockKey);
+  return isHostControlTurnedOffForLocalWithControls(context, context.hostControls, controlKey);
 }

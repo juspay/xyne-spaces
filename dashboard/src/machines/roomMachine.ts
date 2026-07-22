@@ -53,8 +53,8 @@ import {
 import { logger, Event } from '../utils/logger';
 import { getCallJoinSettings } from '../hooks/useCallJoinSettings';
 import {
-  isHostControlLockedForLocal,
-  isHostControlLockedForLocalWithControls,
+  isHostControlTurnedOffForLocal,
+  isHostControlTurnedOffForLocalWithControls,
   parseHostControlsFromMetadata,
 } from '../utils/hostControls';
 
@@ -1231,24 +1231,24 @@ export const roomMachine = setup({
 
             const alreadyJoinedCount = context.room!.remoteParticipants.size;
             const shouldMuteByDefault = alreadyJoinedCount > DEFAULT_MUTE_THRESHOLD;
-            const micLocked = isHostControlLockedForLocalWithControls(
+            const audioTurnedOffByHost = isHostControlTurnedOffForLocalWithControls(
               context,
               effectiveHostControls,
-              'lockMic',
+              'turnOffAudio',
             );
-            const cameraLocked = isHostControlLockedForLocalWithControls(
+            const cameraTurnedOffByHost = isHostControlTurnedOffForLocalWithControls(
               context,
               effectiveHostControls,
-              'lockCamera',
+              'turnOffCamera',
             );
 
             // Respect user preference: if joinMuted is true, always mute
             // If joinMuted is false, use the existing threshold logic
-            const enableMic = !micLocked && !joinMuted && !shouldMuteByDefault;
+            const enableMic = !audioTurnedOffByHost && !joinMuted && !shouldMuteByDefault;
             await context.room!.localParticipant.setMicrophoneEnabled(enableMic);
 
             // For video: respect user preference
-            const enableCamera = !cameraLocked && !joinWithoutVideo;
+            const enableCamera = !cameraTurnedOffByHost && !joinWithoutVideo;
 
             await context.room!.localParticipant.setCameraEnabled(enableCamera);
 
@@ -1282,32 +1282,35 @@ export const roomMachine = setup({
       });
     },
     enforceHostControls: ({ context }) => {
-      const micLocked = isHostControlLockedForLocal(context, 'lockMic');
-      const cameraLocked = isHostControlLockedForLocal(context, 'lockCamera');
-      const screenShareLocked = isHostControlLockedForLocal(context, 'lockScreenShare');
+      const audioTurnedOffByHost = isHostControlTurnedOffForLocal(context, 'turnOffAudio');
+      const cameraTurnedOffByHost = isHostControlTurnedOffForLocal(context, 'turnOffCamera');
+      const screenShareTurnedOffByHost = isHostControlTurnedOffForLocal(
+        context,
+        'turnOffScreenShare',
+      );
 
       if (!context.isNativeMode) {
         const localParticipant = context.room?.localParticipant;
-        if (micLocked && localParticipant?.isMicrophoneEnabled) {
+        if (audioTurnedOffByHost && localParticipant?.isMicrophoneEnabled) {
           void localParticipant.setMicrophoneEnabled(false);
         }
-        if (cameraLocked && localParticipant?.isCameraEnabled) {
+        if (cameraTurnedOffByHost && localParticipant?.isCameraEnabled) {
           void localParticipant.setCameraEnabled(false);
         }
-        if (screenShareLocked && localParticipant?.isScreenShareEnabled) {
+        if (screenShareTurnedOffByHost && localParticipant?.isScreenShareEnabled) {
           void localParticipant?.setScreenShareEnabled(false);
         }
         return;
       }
 
       const localParticipant = context.participants.find(p => p.isLocal);
-      if (micLocked && localParticipant?.isMicrophoneEnabled) {
+      if (audioTurnedOffByHost && localParticipant?.isMicrophoneEnabled) {
         reactNativeBridge.livekitToggleMic(false);
       }
-      if (cameraLocked && localParticipant?.isCameraEnabled) {
+      if (cameraTurnedOffByHost && localParticipant?.isCameraEnabled) {
         reactNativeBridge.livekitToggleCamera(false);
       }
-      if (screenShareLocked && localParticipant?.isScreenShareEnabled) {
+      if (screenShareTurnedOffByHost && localParticipant?.isScreenShareEnabled) {
         reactNativeBridge.livekitToggleScreenShare(false);
       }
     },
@@ -1720,7 +1723,7 @@ export const roomMachine = setup({
         },
         TOGGLE_MIC: {
           actions: ({ context }) => {
-            if (isHostControlLockedForLocal(context, 'lockMic')) return;
+            if (isHostControlTurnedOffForLocal(context, 'turnOffAudio')) return;
 
             if (context.isNativeMode) {
               // Get current state from participants
@@ -1737,7 +1740,7 @@ export const roomMachine = setup({
           actions: [
             assign({
               pushToTalkState: ({ context }) => {
-                if (isHostControlLockedForLocal(context, 'lockMic')) return 'idle';
+                if (isHostControlTurnedOffForLocal(context, 'turnOffAudio')) return 'idle';
 
                 // Only activate push-to-talk if currently muted
                 const isCurrentlyMuted = context.isNativeMode
@@ -1747,7 +1750,7 @@ export const roomMachine = setup({
               },
             }),
             ({ context }) => {
-              if (isHostControlLockedForLocal(context, 'lockMic')) return;
+              if (isHostControlTurnedOffForLocal(context, 'turnOffAudio')) return;
 
               // Only unmute if currently muted
               const isCurrentlyMuted = context.isNativeMode
@@ -1781,7 +1784,7 @@ export const roomMachine = setup({
         },
         TOGGLE_CAMERA: {
           actions: ({ context }) => {
-            if (isHostControlLockedForLocal(context, 'lockCamera')) return;
+            if (isHostControlTurnedOffForLocal(context, 'turnOffCamera')) return;
 
             if (context.isNativeMode) {
               const localParticipant = context.participants.find(p => p.isLocal);
@@ -1812,7 +1815,7 @@ export const roomMachine = setup({
         },
         TOGGLE_SCREEN_SHARE: {
           actions: ({ context }): void => {
-            if (isHostControlLockedForLocal(context, 'lockScreenShare')) return;
+            if (isHostControlTurnedOffForLocal(context, 'turnOffScreenShare')) return;
 
             if (context.isNativeMode) {
               // Get current state from participants

@@ -3,13 +3,13 @@ export type CallParticipantMetadata = Record<string, unknown> & {
 }
 
 export type HostControls = {
-    lockMic: boolean;
-    lockCamera: boolean;
-    lockScreenShare: boolean;
+    turnOffAudio: boolean;
+    turnOffCamera: boolean;
+    turnOffScreenShare: boolean;
 }
 
 export const DEFAULT_HOST_CONTROLS: HostControls = {
-    lockMic: false,
-    lockCamera: false,
-    lockScreenShare: false,
+    turnOffAudio: false,
+    turnOffCamera: false,
+    turnOffScreenShare: false,
 }

@@ -7,7 +7,7 @@ import {
 } from 'livekit-server-sdk';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
-import { DEFAULT_HOST_CONTROLS, type HostControls } from '@xyne/shared';
+import { DEFAULT_HOST_CONTROLS, normalizeHostControls, type HostControls } from '@xyne/shared';
 
 export interface LiveKitRoomOptions {
   name: string;
@@ -26,18 +26,18 @@ export interface LiveKitTokenOptions {
   canPublishSources?: TrackSource[];
 }
 
-export function allowedSourcesFor(hostControls: HostControls): TrackSource[] {
+export function allowedSourcesForHostControls(hostControls: HostControls): TrackSource[] {
   const allowed: TrackSource[] = [];
-  if (!hostControls.lockMic) allowed.push(TrackSource.MICROPHONE);
-  if (!hostControls.lockCamera) allowed.push(TrackSource.CAMERA);
-  if (!hostControls.lockScreenShare) {
+  if (!hostControls.turnOffAudio) allowed.push(TrackSource.MICROPHONE);
+  if (!hostControls.turnOffCamera) allowed.push(TrackSource.CAMERA);
+  if (!hostControls.turnOffScreenShare) {
     allowed.push(TrackSource.SCREEN_SHARE, TrackSource.SCREEN_SHARE_AUDIO);
   }
   return allowed;
 }
 
-export function hasActiveLock(hostControls: HostControls): boolean {
-  return hostControls.lockMic || hostControls.lockCamera || hostControls.lockScreenShare;
+export function hasTurnedOffHostControl(hostControls: HostControls): boolean {
+  return hostControls.turnOffAudio || hostControls.turnOffCamera || hostControls.turnOffScreenShare;
 }
 
 export function isLiveKitNotFoundError(error: unknown): boolean {
@@ -58,23 +58,7 @@ export function getHostControls(call: { metadata: unknown } | null): HostControl
       ? (metadata as { hostControls?: unknown }).hostControls
       : undefined;
 
-  if (!stored || typeof stored !== 'object' || Array.isArray(stored)) {
-    return DEFAULT_HOST_CONTROLS;
-  }
-
-  const controls = stored as Partial<Record<keyof HostControls, unknown>>;
-  return {
-    lockMic:
-      typeof controls.lockMic === 'boolean' ? controls.lockMic : DEFAULT_HOST_CONTROLS.lockMic,
-    lockCamera:
-      typeof controls.lockCamera === 'boolean'
-        ? controls.lockCamera
-        : DEFAULT_HOST_CONTROLS.lockCamera,
-    lockScreenShare:
-      typeof controls.lockScreenShare === 'boolean'
-        ? controls.lockScreenShare
-        : DEFAULT_HOST_CONTROLS.lockScreenShare,
-  };
+  return normalizeHostControls(stored) ?? DEFAULT_HOST_CONTROLS;
 }
 
 function parseRoomMetadata(
@@ -332,7 +316,7 @@ export class LiveKitService {
     }
   }
 
-  /** Persist host-control locks into LiveKit room metadata. */
+  /** Persist host controls into LiveKit room metadata. */
   async setRoomHostControls(roomName: string, hostControls: HostControls): Promise<boolean> {
     try {
       const rooms = await this.roomService.listRooms([roomName]);
