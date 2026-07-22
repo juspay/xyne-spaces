@@ -821,6 +821,39 @@ export const mapCollection = async (
   };
 }
 
+/**
+ * Compute the flattened `permissions` (user IDs) for a canvas: the direct-user shares
+ * plus the expanded members of every channel and user-group the canvas is shared to.
+ *
+ * This denormalizes the canvas ACL into the Vespa `permissions` field so cmdK matches
+ * it with a single `permissions contains <userId>` — no query-time join. It mirrors the
+ * DB-side `applyCanvasVisibilityQueryFilter` (owner/public are handled separately via
+ * ownerId/isPrivate). Kept fresh by re-feeding on share changes and by field-scoped
+ * updates when channel/group membership changes (see the side-effect fan-out).
+ */
+export const computeCanvasPermissions = async (canvasId: string): Promise<string[]> => {
+  const participants = await db.canvasParticipant.findMany({ where: { canvasId } });
+
+  const directUserIds = participants.map(p => p.userId).filter((id): id is string => Boolean(id));
+  const channelIds = participants.map(p => p.channelId).filter((id): id is string => Boolean(id));
+  const groupIds = participants.map(p => p.userGroupId).filter((id): id is string => Boolean(id));
+
+  const [channelMembers, groupMembers] = await Promise.all([
+    channelIds.length
+      ? db.channelParticipant.findMany({ where: { channelId: { in: channelIds } }, select: { userId: true } })
+      : Promise.resolve([] as { userId: string }[]),
+    groupIds.length
+      ? db.userGroupMapping.findMany({ where: { userGroupId: { in: groupIds } }, select: { userId: true } })
+      : Promise.resolve([] as { userId: string }[]),
+  ]);
+
+  return Array.from(new Set([
+    ...directUserIds,
+    ...channelMembers.map(m => m.userId),
+    ...groupMembers.map(m => m.userId),
+  ].filter((id): id is string => Boolean(id))));
+};
+
 export const mapCanvas = async (args: InsertValue<CanvasesSchema>, workspaceId?: string, orgId?: string): Promise<VespaFileDocument> => {
   // Get channel info if channelId exists
   let channelRef: string | undefined;
@@ -848,13 +881,8 @@ export const mapCanvas = async (args: InsertValue<CanvasesSchema>, workspaceId?:
     logger.error(`[Mapper] Failed to extract text from canvas ${args.id}:`, error);
   }
 
-  // Get canvas participants for permissions
-  const canvasParticipants = await db.canvasParticipant.findMany({
-    where: { canvasId: args.id }
-  });
-  const permissions = canvasParticipants
-    .map(p => p.userId)
-    .filter((userId): userId is string => Boolean(userId));
+  // Denormalized ACL: direct users + members of every channel/group the canvas is shared to.
+  const permissions = await computeCanvasPermissions(args.id);
 
   const channel = args.channelId ? (await db.channel.findUnique({
     where: { id: args.channelId }

@@ -6,6 +6,7 @@ import { notificationService } from '@/services/notificationService';
 import { activityService } from '@/services/activity/activityService';
 import { ActivityClassification } from '@prisma/client';
 import { logger } from '@/utils/logger';
+import { enqueueCanvasPermissionRefresh } from '@/services/canvasPermissionSync';
 
 export class CanvasParticipantsSideEffectHandler extends BaseSideEffectHandler {
   private async resolveRecipientUserIds(participant: {
@@ -118,6 +119,10 @@ export class CanvasParticipantsSideEffectHandler extends BaseSideEffectHandler {
 
       const { canvasId, userId, role, channelId } = participant;
 
+      // Share added → refresh the canvas's denormalized ACL (direct/channel/group members).
+      await enqueueCanvasPermissionRefresh(canvasId).catch(err =>
+        logger.warn(`[CanvasParticipantsHandler] ACL refresh enqueue failed for canvas ${canvasId}: ${err}`));
+
       if (userId && this.ctx.userID === userId) {
         logger.info(`[CanvasParticipantsHandler] User ${userId} added themselves to canvas ${canvasId} - skipping notification`);
         return;
@@ -183,6 +188,10 @@ export class CanvasParticipantsSideEffectHandler extends BaseSideEffectHandler {
       }
 
       const { canvasId, userId, role, userGroupId, channelId } = previousValue;
+
+      // Share revoked → refresh the canvas's denormalized ACL so the removed grant drops out.
+      await enqueueCanvasPermissionRefresh(canvasId).catch(err =>
+        logger.warn(`[CanvasParticipantsHandler] ACL refresh enqueue failed for canvas ${canvasId}: ${err}`));
 
       if (userId && this.ctx.userID === userId) {
         logger.info(`[CanvasParticipantsHandler] User ${userId} removed themselves from canvas ${canvasId} - skipping notification`);
