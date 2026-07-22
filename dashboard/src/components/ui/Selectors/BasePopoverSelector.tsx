@@ -66,6 +66,12 @@ export function BasePopoverSelector<T extends BaseSelectorItem>({
     if (!editor) return;
 
     const handleUpdate = (): void => {
+      if (!editor.isFocused) {
+        setIsOpen(false);
+        setQueryLength(0);
+        return;
+      }
+
       const trigger = detectTrigger(editor);
 
       if (trigger && trigger.query.length >= 0) {
