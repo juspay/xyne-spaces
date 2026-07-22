@@ -16,6 +16,9 @@ import {
   LayoutGrid,
   List,
   Table2,
+  Columns3,
+  Check,
+  Tag,
   Split,
   Paperclip,
   Link as LinkIcon,
@@ -90,7 +93,20 @@ import {
   AICategorySubmenu,
   UserGroupSubmenu,
   StagesSubmenu,
+  DynamicFieldSubmenu,
 } from '../../components/Tickets/TicketFilters/Submenus';
+import { getIconForFieldType } from '../../components/Tickets/TicketFilters/fieldTypeIcons';
+import {
+  resolveDisplayFormFields,
+  type ResolvedDisplayFormField,
+} from '../../utils/board/resolveDisplayFormFields';
+import {
+  buildDynamicFieldFilterEntries,
+  toDynamicFieldQueryFilters,
+  type DynamicFieldQueryFilter,
+} from '../../utils/board/dynamicFieldFilters';
+import { dynamicColumnKey } from '../../components/Tickets/TicketTable/dynamicFieldColumns';
+import { useDeskTableColumns, DESK_TABLE_BUILTIN_COLUMNS } from './useDeskTableColumns';
 import {
   CalendarView,
   PRESETS,
@@ -121,8 +137,8 @@ import { TicketListView } from '../../components/Tickets/TicketListView';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { SupportKanbanBoard } from './SupportKanbanBoard';
 import { SupportTicketTable } from './SupportTicketTable';
-import { TicketPriority } from '@xyne/shared';
-import type { Ticket } from '@xyne/shared';
+import { TicketPriority, parseFieldOptionValues } from '@xyne/shared';
+import type { Ticket, FormFields } from '@xyne/shared';
 import { getDraft } from '../../hooks/useDraft';
 import { useShortcut, invokeShortcut } from '../../shortcuts';
 import { v4 as uuidv4 } from 'uuid';
@@ -623,6 +639,49 @@ const SupportScreen = (): ReactElement => {
     key: MailboxFolder;
     label: string;
   }>({ key: 'inbox', label: 'Inbox' });
+
+  const channelPreference = useEmailChannelPreference(selectedChannelId);
+  const deskBoardId = channelPreference?.boardId || channelBoardId;
+  const [channelBoardDetail] = useCachedQuery(
+    queries.boardDetailById({ boardId: deskBoardId || '' }),
+    { enabled: !!deskBoardId },
+  );
+  const deskDynamicFields = useMemo<ResolvedDisplayFormField[]>(() => {
+    const fieldsMap = new Map<string, ResolvedDisplayFormField>();
+    (channelBoardDetail?.formContextMappings ?? []).forEach(mapping => {
+      const mappingWithFields = mapping as unknown as {
+        formId?: string;
+        formFields?: FormFields[];
+      };
+      const fields = mappingWithFields.formId
+        ? resolveDisplayFormFields(mappingWithFields.formId, mappingWithFields.formFields ?? [])
+        : [];
+      fields.forEach(field => {
+        if (!fieldsMap.has(field.id)) fieldsMap.set(field.id, field);
+      });
+    });
+    return Array.from(fieldsMap.values());
+  }, [channelBoardDetail]);
+
+  const dynamicFieldTypesById = useMemo(
+    () => new Map(deskDynamicFields.map(field => [field.id, field.fieldType])),
+    [deskDynamicFields],
+  );
+  const dynamicFieldEntries = useMemo(
+    () => buildDynamicFieldFilterEntries(filters.dynamicFields, dynamicFieldTypesById),
+    [filters.dynamicFields, dynamicFieldTypesById],
+  );
+
+  const { selectedColumnKeys, toggleColumn } = useDeskTableColumns(selectedChannelId);
+  const tableVisibleColumns = useMemo(
+    () => new Set([...selectedColumnKeys].filter(key => !key.startsWith('df:'))),
+    [selectedColumnKeys],
+  );
+  const tableDynamicFieldColumns = useMemo(
+    () => deskDynamicFields.filter(field => selectedColumnKeys.has(dynamicColumnKey(field.id))),
+    [deskDynamicFields, selectedColumnKeys],
+  );
+
   // Build the filter args once — reused by both the kanban query and the list view.
   // "My Tickets" toggle is the assignee fallback when the explicit assignee filter is empty.
   const ticketFilter = useMemo(
@@ -642,14 +701,18 @@ const SupportScreen = (): ReactElement => {
         filters.userGroups && filters.userGroups.length > 0 ? filters.userGroups : undefined,
       lastEmailAtStart: filters.lastEmailAtStart,
       lastEmailAtEnd: filters.lastEmailAtEnd,
+      dynamicFieldFilters: toDynamicFieldQueryFilters(dynamicFieldEntries),
     }),
-    [filters, userID],
+    [filters, userID, dynamicFieldEntries],
   );
 
   const availablePriorities = useMemo(() => Object.values(TicketPriority), []);
 
   const [assigneeOpen, setAssigneeOpen] = useState(false);
+  const [priorityOpen, setPriorityOpen] = useState(false);
+  const [stagesOpen, setStagesOpen] = useState(false);
   const [moreFiltersOpen, setMoreFiltersOpen] = useState(false);
+  const [columnsOpen, setColumnsOpen] = useState(false);
   const [activeSubmenu, setActiveSubmenu] = useState<string | null>(null);
   const submenuRef = useRef<HTMLDivElement>(null);
   const menuItemRefs = useRef<Record<string, HTMLButtonElement | null>>({});
@@ -686,8 +749,10 @@ const SupportScreen = (): ReactElement => {
     return fromMappings;
   }, [classificationMappings]);
 
-  const [boardStages] = useCachedQuery(queries.stagesByBoard({ boardId: channelBoardId ?? '' }), {
-    enabled: filterOptionsEnabled && !!channelBoardId,
+  // deskBoardId (channel preference first) rather than the row-derived
+  // channelBoardId, so stage options load on first visit before any ticket row.
+  const [boardStages] = useCachedQuery(queries.stagesByBoard({ boardId: deskBoardId ?? '' }), {
+    enabled: filterOptionsEnabled && !!deskBoardId,
   });
   const availableStages = useMemo(
     () =>
@@ -699,17 +764,19 @@ const SupportScreen = (): ReactElement => {
   );
 
   const hasAssigneeFilter = !!(filters.assignee && filters.assignee.length > 0);
+  const hasPriorityFilter = !!(filters.priority && filters.priority.length > 0);
+  const hasStagesFilter = !!(filters.stages && filters.stages.length > 0);
   const hasMoreFiltersActive = !!(
     filters.assigned ||
     filters.hasAiDraft === true ||
-    (filters.priority && filters.priority.length > 0) ||
-    (filters.stages && filters.stages.length > 0) ||
     (filters.aiCategory && filters.aiCategory.length > 0) ||
     (filters.userGroups && filters.userGroups.length > 0) ||
     filters.lastEmailAtStart !== undefined ||
-    filters.lastEmailAtEnd !== undefined
+    filters.lastEmailAtEnd !== undefined ||
+    (filters.dynamicFields && Object.keys(filters.dynamicFields).length > 0)
   );
-  const hasAnyFilterActive = hasAssigneeFilter || hasMoreFiltersActive;
+  const hasAnyFilterActive =
+    hasAssigneeFilter || hasPriorityFilter || hasStagesFilter || hasMoreFiltersActive;
 
   const handleFilterChange = useCallback(
     (key: keyof TicketFilters, value: unknown): void => {
@@ -758,33 +825,59 @@ const SupportScreen = (): ReactElement => {
     setActiveSubmenu(prev => (prev === category ? null : category));
   }, []);
 
-  const filterMenuItems = [
-    { id: 'priority', label: 'Priority', icon: BarChart4Icon },
-    { id: 'stages', label: 'Stages', icon: Circle },
-    { id: 'aiCategory', label: 'AI Category', icon: Sparkles },
-    { id: 'userGroups', label: 'User Groups', icon: Users },
-    { id: 'date', label: 'Date', icon: CalendarDays },
-  ] as const;
+  const handleDynamicFieldChange = useCallback(
+    (fieldId: string, value: string[] | { start?: number; end?: number }): void => {
+      const newFilters = { ...filters };
+      const dynamicFields = { ...newFilters.dynamicFields };
+      const isEmpty = Array.isArray(value) ? value.length === 0 : !value.start && !value.end;
+      if (isEmpty) {
+        delete dynamicFields[fieldId];
+      } else {
+        dynamicFields[fieldId] = value;
+      }
+      if (Object.keys(dynamicFields).length === 0) {
+        delete newFilters.dynamicFields;
+      } else {
+        newFilters.dynamicFields = dynamicFields;
+      }
+      setFilters(newFilters);
+    },
+    [filters, setFilters],
+  );
+
+  const filterMenuItems = useMemo(
+    () => [
+      { id: 'aiCategory', label: 'AI Category', icon: Sparkles },
+      { id: 'userGroups', label: 'User Groups', icon: Users },
+      { id: 'date', label: 'Date', icon: CalendarDays },
+      ...deskDynamicFields.map(field => ({
+        id: `dynamic-${field.id}`,
+        label: field.fieldName,
+        icon: getIconForFieldType(field.fieldType),
+        dynamicFieldId: field.id,
+      })),
+    ],
+    [deskDynamicFields],
+  );
 
   const renderSubmenu = useCallback((): ReactElement | null => {
     if (!activeSubmenu) return null;
+    if (activeSubmenu.startsWith('dynamic-')) {
+      const field = deskDynamicFields.find(f => `dynamic-${f.id}` === activeSubmenu);
+      if (!field) return null;
+      return (
+        <DynamicFieldSubmenu
+          fieldId={field.id}
+          fieldName={field.fieldName}
+          fieldType={field.fieldType}
+          fieldEnum={parseFieldOptionValues(field.fieldEnum)}
+          selectedValue={filters.dynamicFields?.[field.id]}
+          onChange={value => handleDynamicFieldChange(field.id, value)}
+          onClose={() => setActiveSubmenu(null)}
+        />
+      );
+    }
     switch (activeSubmenu) {
-      case 'priority':
-        return (
-          <PrioritySubmenu
-            selectedPriorities={filters.priority || []}
-            onChange={(priorities: TicketPriority[]) => handleFilterChange('priority', priorities)}
-            availablePriorities={availablePriorities}
-          />
-        );
-      case 'stages':
-        return (
-          <StagesSubmenu
-            selectedStages={filters.stages || []}
-            onChange={(stages: string[]) => handleFilterChange('stages', stages)}
-            availableStages={availableStages}
-          />
-        );
       case 'aiCategory':
         return (
           <AICategorySubmenu
@@ -857,9 +950,9 @@ const SupportScreen = (): ReactElement => {
     filters,
     handleFilterChange,
     handleDateRangeChange,
-    availablePriorities,
-    availableStages,
+    handleDynamicFieldChange,
     availableAiCategories,
+    deskDynamicFields,
   ]);
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(
@@ -2266,6 +2359,82 @@ const SupportScreen = (): ReactElement => {
                             </Popover.Content>
                           </Popover.Root>
 
+                          <Popover.Root open={priorityOpen} onOpenChange={setPriorityOpen}>
+                            <Popover.Trigger asChild>
+                              <Button
+                                variant='outline'
+                                size='sm'
+                                className='rounded-[10px] border-border hover:bg-muted text-muted-foreground'
+                              >
+                                <div className='flex items-center gap-1.5'>
+                                  <BarChart4Icon className='w-3 h-3 p-px font-medium' />
+                                  <span className='font-medium'>Priority</span>
+                                  {hasPriorityFilter && (
+                                    <span className='w-1.5 h-1.5 rounded-full bg-blue-500' />
+                                  )}
+                                  <ChevronDown
+                                    className={cn(
+                                      'w-3 h-3 ml-1 transition-transform',
+                                      priorityOpen && 'rotate-180',
+                                    )}
+                                  />
+                                </div>
+                              </Button>
+                            </Popover.Trigger>
+                            <Popover.Content
+                              side='bottom'
+                              align='start'
+                              sideOffset={6}
+                              className='z-[60]'
+                            >
+                              <PrioritySubmenu
+                                selectedPriorities={filters.priority || []}
+                                onChange={(priorities: TicketPriority[]) =>
+                                  handleFilterChange('priority', priorities)
+                                }
+                                availablePriorities={availablePriorities}
+                              />
+                            </Popover.Content>
+                          </Popover.Root>
+
+                          <Popover.Root open={stagesOpen} onOpenChange={setStagesOpen}>
+                            <Popover.Trigger asChild>
+                              <Button
+                                variant='outline'
+                                size='sm'
+                                className='rounded-[10px] border-border hover:bg-muted text-muted-foreground'
+                              >
+                                <div className='flex items-center gap-1.5'>
+                                  <Circle className='w-3 h-3 p-px font-medium' />
+                                  <span className='font-medium'>Stages</span>
+                                  {hasStagesFilter && (
+                                    <span className='w-1.5 h-1.5 rounded-full bg-blue-500' />
+                                  )}
+                                  <ChevronDown
+                                    className={cn(
+                                      'w-3 h-3 ml-1 transition-transform',
+                                      stagesOpen && 'rotate-180',
+                                    )}
+                                  />
+                                </div>
+                              </Button>
+                            </Popover.Trigger>
+                            <Popover.Content
+                              side='bottom'
+                              align='start'
+                              sideOffset={6}
+                              className='z-[60]'
+                            >
+                              <StagesSubmenu
+                                selectedStages={filters.stages || []}
+                                onChange={(stages: string[]) =>
+                                  handleFilterChange('stages', stages)
+                                }
+                                availableStages={availableStages}
+                              />
+                            </Popover.Content>
+                          </Popover.Root>
+
                           <Popover.Root open={moreFiltersOpen} onOpenChange={setMoreFiltersOpen}>
                             <Popover.Trigger asChild>
                               <Button
@@ -2342,14 +2511,12 @@ const SupportScreen = (): ReactElement => {
                                   const Icon = item.icon;
                                   const isActive = activeSubmenu === item.id;
                                   const isFilterActive =
-                                    (item.id === 'priority' &&
-                                      !!(filters.priority && filters.priority.length > 0)) ||
-                                    (item.id === 'stages' &&
-                                      !!(filters.stages && filters.stages.length > 0)) ||
                                     (item.id === 'aiCategory' &&
                                       !!(filters.aiCategory && filters.aiCategory.length > 0)) ||
                                     (item.id === 'userGroups' &&
-                                      !!(filters.userGroups && filters.userGroups.length > 0));
+                                      !!(filters.userGroups && filters.userGroups.length > 0)) ||
+                                    ('dynamicFieldId' in item &&
+                                      !!filters.dynamicFields?.[item.dynamicFieldId]);
                                   const menuButton = (
                                     <button
                                       ref={el => {
@@ -2422,6 +2589,99 @@ const SupportScreen = (): ReactElement => {
                       )}
                     </div>
                     <div className='flex items-center gap-2 shrink-0'>
+                      {/* Table column picker — built-in columns + the board's custom fields */}
+                      {viewMode === 'table' && (
+                        <Popover.Root open={columnsOpen} onOpenChange={setColumnsOpen}>
+                          <Popover.Trigger asChild>
+                            <Button
+                              variant='outline'
+                              size='sm'
+                              className='rounded-[10px] border-border hover:bg-muted text-muted-foreground'
+                            >
+                              <div className='flex items-center gap-1.5'>
+                                <Columns3 className='w-3.5 h-3.5' />
+                                <span className='font-medium'>Columns</span>
+                              </div>
+                            </Button>
+                          </Popover.Trigger>
+                          <Popover.Content
+                            side='bottom'
+                            align='end'
+                            sideOffset={6}
+                            className='z-[60] w-56 bg-background border border-border rounded-lg shadow-lg py-1 max-h-[400px] overflow-y-auto'
+                          >
+                            {DESK_TABLE_BUILTIN_COLUMNS.map(column => {
+                              const Icon =
+                                column.key === 'assignee'
+                                  ? User
+                                  : column.key === 'dueDate'
+                                    ? CalendarDays
+                                    : column.key === 'priority'
+                                      ? BarChart4Icon
+                                      : column.key === 'tags'
+                                        ? Tag
+                                        : Circle;
+                              const isSelected = selectedColumnKeys.has(column.key);
+                              return (
+                                <button
+                                  key={column.key}
+                                  type='button'
+                                  onClick={() => toggleColumn(column.key, !isSelected)}
+                                  className='w-full flex items-center justify-between px-4 py-2 text-sm hover:bg-muted'
+                                  data-track-category='Support'
+                                  data-track-name='ToggleTableColumn'
+                                  data-track-metadata={JSON.stringify({
+                                    column: column.key,
+                                    visible: !isSelected,
+                                  })}
+                                >
+                                  <div className='flex items-center gap-3'>
+                                    <Icon className='w-4 h-4' />
+                                    <span>{column.label}</span>
+                                  </div>
+                                  {isSelected && <Check className='w-4 h-4 text-primary' />}
+                                </button>
+                              );
+                            })}
+                            {deskDynamicFields.length > 0 && (
+                              <>
+                                <div className='my-1 border-t border-border' />
+                                <div className='px-4 py-1 text-xs font-medium text-muted-foreground'>
+                                  Custom fields
+                                </div>
+                                {deskDynamicFields.map(field => {
+                                  const key = dynamicColumnKey(field.id);
+                                  const Icon = getIconForFieldType(field.fieldType);
+                                  const isSelected = selectedColumnKeys.has(key);
+                                  return (
+                                    <button
+                                      key={key}
+                                      type='button'
+                                      onClick={() => toggleColumn(key, !isSelected)}
+                                      className='w-full flex items-center justify-between px-4 py-2 text-sm hover:bg-muted'
+                                      data-track-category='Support'
+                                      data-track-name='ToggleTableColumn'
+                                      data-track-metadata={JSON.stringify({
+                                        column: key,
+                                        fieldName: field.fieldName,
+                                        visible: !isSelected,
+                                      })}
+                                    >
+                                      <div className='flex items-center gap-3'>
+                                        <Icon className='w-4 h-4' />
+                                        <span className='truncate'>{field.fieldName}</span>
+                                      </div>
+                                      {isSelected && (
+                                        <Check className='w-4 h-4 text-primary shrink-0' />
+                                      )}
+                                    </button>
+                                  );
+                                })}
+                              </>
+                            )}
+                          </Popover.Content>
+                        </Popover.Root>
+                      )}
                       {/* View Toggle */}
                       <div className='flex items-center border border-border rounded-lg overflow-hidden'>
                         <button
@@ -2682,6 +2942,7 @@ const SupportScreen = (): ReactElement => {
                         boardId={channelBoardId}
                         onBoardIdResolved={setChannelBoardId}
                         ticketFilter={ticketFilter}
+                        dynamicFieldEntries={dynamicFieldEntries}
                         onTicketClick={handleTicketClick}
                         onTicketsLoaded={setKanbanTickets}
                         {...(ticketId !== undefined && { activeTicketId: ticketId })}
@@ -2690,6 +2951,9 @@ const SupportScreen = (): ReactElement => {
                       <SupportTicketTable
                         channelId={selectedChannelId}
                         ticketFilter={ticketFilter}
+                        dynamicFieldEntries={dynamicFieldEntries}
+                        visibleColumns={tableVisibleColumns}
+                        dynamicFieldColumns={tableDynamicFieldColumns}
                         onBoardIdResolved={setChannelBoardId}
                         onTicketsLoaded={setKanbanTickets}
                         onTicketClick={ticket => {
@@ -2709,6 +2973,7 @@ const SupportScreen = (): ReactElement => {
                           channelId: selectedChannelId,
                           ...ticketFilter,
                         }}
+                        dynamicFieldEntries={dynamicFieldEntries}
                         showExtraFields={true}
                         activeTicketId={ticketId}
                         selectedIds={selectedTicketIds}
@@ -2956,6 +3221,7 @@ type SupportTicketDetailProps = {
     userGroups: string[] | undefined;
     lastEmailAtStart: number | undefined;
     lastEmailAtEnd: number | undefined;
+    dynamicFieldFilters?: DynamicFieldQueryFilter[] | undefined;
   };
   isMember: boolean;
   onMailtoClick: (email: string) => void;

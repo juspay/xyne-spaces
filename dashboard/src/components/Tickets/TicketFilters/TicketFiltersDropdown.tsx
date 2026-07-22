@@ -23,9 +23,7 @@ import {
   BarChart4Icon,
   Search,
   Tag,
-  FileText,
   Hash,
-  ToggleLeft,
   X,
   Circle,
   Loader2,
@@ -48,6 +46,7 @@ import {
   SourceChannelsSubmenu,
 } from './Submenus';
 import { TicketFiltersProps, DateRange, BoardOption } from './types';
+import { getIconForFieldType } from './fieldTypeIcons';
 import type { TicketFilters } from './types';
 import { FormFieldType, parseFieldOptionValues } from '@xyne/shared';
 import type { TicketPriority, FormFields } from '@xyne/shared';
@@ -271,26 +270,6 @@ export const TicketFiltersDropdown = ({
         : selectedBoards.length === 1
           ? (selectedBoard?.name ?? selectedBoardName ?? 'Board')
           : `${selectedBoards.length} Boards`;
-
-  // Helper to get icon for field type
-  const getIconForFieldType = (fieldType: FormFieldType): typeof BarChart3 => {
-    switch (fieldType) {
-      case FormFieldType.STRING:
-      case FormFieldType.NUMBER:
-        return FileText;
-      case FormFieldType.DATE:
-        return Calendar;
-      case FormFieldType.BOOLEAN:
-        return ToggleLeft;
-      case FormFieldType.SINGLE_SELECT:
-      case FormFieldType.MULTI_SELECT:
-        return BarChart3;
-      case FormFieldType.USER:
-        return User;
-      default:
-        return Hash;
-    }
-  };
 
   // Generate dynamic filter menu items from form fields
   // Aggregate all form fields from selected boards, deduplicating by field ID
