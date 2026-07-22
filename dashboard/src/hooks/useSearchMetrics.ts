@@ -122,6 +122,7 @@ interface UseSearchMetricsOptions {
   // When true, the ALL-tab Vespa query uses groupBy:'docType' so the backend
   // returns results bucketed by document type (≤10 per category) instead of a
   // flat ranked list — lets the ALL tab show a few of each type at once.
+  // Ignored when the `unified` rank profile is selected, which needs a flat list.
   groupByDocType?: boolean;
 }
 
@@ -1132,7 +1133,14 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
               const currentSessionId = searchSessionId || '';
               const vespaResponse = await searchService.vespaSearch({
                 ...searchFilters,
-                ...(options.groupByDocType && { groupBy: 'docType' }),
+                // The `unified` profile normalizes every schema's score into the same
+                // 0-1 range, so its hits are directly comparable across doc types.
+                // Grouping would bucket that single global ranking back into per-type
+                // lists (<=10 each), so opt out with an explicit empty groupBy — the
+                // backend falls back to 'docType' when the param is absent entirely.
+                ...(rankProfile === 'unified'
+                  ? { groupBy: '' }
+                  : options.groupByDocType && { groupBy: 'docType' }),
                 searchId: currentSessionId,
                 presentationSummary: 'lean',
               });
