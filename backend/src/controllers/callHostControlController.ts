@@ -1,10 +1,10 @@
 import { Request, Response } from 'express';
 import { Prisma } from '@prisma/client';
 import { ParticipantInfo_Kind } from '@livekit/protocol';
-import type { HostControls } from '@xyne/shared';
+import { normalizeHostControls, type HostControls } from '@xyne/shared';
 import { repositories } from '@/database/repositories';
 import {
-  allowedSourcesFor,
+  allowedSourcesForHostControls,
   getHostControls,
   isLiveKitNotFoundError,
   livekitService,
@@ -17,7 +17,7 @@ class CallHostControlController {
   setHostControls = async (req: Request, res: Response): Promise<void> => {
     const userId = req.user?.id;
     const { callId } = req.params;
-    const { lockMic, lockCamera, lockScreenShare } = req.body as Partial<HostControls>;
+    const requestControls = req.body as Partial<HostControls> & Record<string, unknown>;
 
     if (!userId) {
       res.status(401).json({ success: false, error: 'Unauthorized' });
@@ -38,17 +38,13 @@ class CallHostControlController {
       }
 
       const current = getHostControls(call);
-      const hostControls: HostControls = {
-        lockMic: typeof lockMic === 'boolean' ? lockMic : current.lockMic,
-        lockCamera: typeof lockCamera === 'boolean' ? lockCamera : current.lockCamera,
-        lockScreenShare: typeof lockScreenShare === 'boolean' ? lockScreenShare : current.lockScreenShare,
-      };
+      const hostControls = normalizeHostControls(requestControls, current) ?? current;
 
-      const allowedSources = allowedSourcesFor(hostControls);
-      const rollbackAllowedSources = allowedSourcesFor(current);
+      const allowedSources = allowedSourcesForHostControls(hostControls);
+      const rollbackAllowedSources = allowedSourcesForHostControls(current);
       const roomExists = (await livekitService.listRooms([callId])).length > 0;
       let appliedTo = 0;
-      let mutedLockedTrackCount = 0;
+      let mutedTurnedOffTrackCount = 0;
       let failedParticipantCount = 0;
       let targetIdentities: string[] = [];
 
@@ -94,7 +90,7 @@ class CallHostControlController {
           }
 
           appliedTo = targets.length;
-          mutedLockedTrackCount = await callHostControlService.muteLockedHostControlTracks(
+          mutedTurnedOffTrackCount = await callHostControlService.muteTurnedOffHostControlTracks(
             callId,
             targetIdentities,
             hostControls,
@@ -144,7 +140,7 @@ class CallHostControlController {
         return;
       }
 
-      logger.info(`[CallHostControlController] host-controls updated | callId=${callId}, ${JSON.stringify(hostControls)}, appliedTo=${appliedTo}, failedParticipantCount=${failedParticipantCount}, mutedLockedTrackCount=${mutedLockedTrackCount}`);
+      logger.info(`[CallHostControlController] host-controls updated | callId=${callId}, ${JSON.stringify(hostControls)}, appliedTo=${appliedTo}, failedParticipantCount=${failedParticipantCount}, mutedTurnedOffTrackCount=${mutedTurnedOffTrackCount}`);
       res.json({ success: true, hostControls, failedParticipantCount });
     } catch (error) {
       logger.error(`[CallHostControlController] host-controls failed | callId=${callId}, error=`, error);

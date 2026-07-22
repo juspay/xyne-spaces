@@ -1,14 +1,14 @@
 import { TrackSource } from 'livekit-server-sdk';
 import type { HostControls } from '@xyne/shared';
 
-export function isTrackLockedByHostControls(
+export function isTrackTurnedOffByHostControls(
   source: TrackSource | undefined,
   hostControls: HostControls,
 ): boolean {
   return (
-    (hostControls.lockMic && source === TrackSource.MICROPHONE) ||
-    (hostControls.lockCamera && source === TrackSource.CAMERA) ||
-    (hostControls.lockScreenShare &&
+    (hostControls.turnOffAudio && source === TrackSource.MICROPHONE) ||
+    (hostControls.turnOffCamera && source === TrackSource.CAMERA) ||
+    (hostControls.turnOffScreenShare &&
       (source === TrackSource.SCREEN_SHARE || source === TrackSource.SCREEN_SHARE_AUDIO))
   );
 }

@@ -67,6 +67,7 @@ export {
 export type { CanvasDestinationAccessErrorCode } from './canvasDestinationAccess.js';
 export { escapeCsvCell, serializeCsv } from './csv.js';
 export type { CsvCell } from './csv.js';
+export { normalizeHostControls } from './hostControls.js';
 export {
   getCanvasFolderNameConflictMessage,
   isCanvasFolderNameConflictError,

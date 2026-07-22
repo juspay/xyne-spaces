@@ -2,8 +2,8 @@ import { Request, Response } from 'express';
 import { ChannelRole } from '@prisma/client';
 import {
   livekitService,
-  allowedSourcesFor,
-  hasActiveLock,
+  allowedSourcesForHostControls,
+  hasTurnedOffHostControl,
   getHostControls,
 } from '@/services/liveKitService';
 import { repositories } from '@/database/repositories';
@@ -471,7 +471,8 @@ export class CallController {
           }
 
           if (participant && pMeta?.removedByHost && participant.response === InvitationResponse.ACCEPTED) {
-            const { removedByHost: _removed, ...restMeta } = pMeta;
+            const restMeta = { ...pMeta };
+            delete restMeta.removedByHost;
             await db.callParticipant.update({
               where: { id: participant.id },
               data: { metadata: restMeta as Prisma.InputJsonValue },
@@ -485,9 +486,9 @@ export class CallController {
           stage = 'token_generation_existing_call';
 
           const existingHostControls = getHostControls(existingCall);
-          const lockedSources =
-            existingCall.createdByUserId !== userId && hasActiveLock(existingHostControls)
-              ? allowedSourcesFor(existingHostControls)
+          const hostControlledSources =
+            existingCall.createdByUserId !== userId && hasTurnedOffHostControl(existingHostControls)
+              ? allowedSourcesForHostControls(existingHostControls)
               : undefined;
 
           const token = await livekitService.generateAccessToken({
@@ -495,7 +496,7 @@ export class CallController {
             roomName: existingCall.externalId,
             userName: userName || userEmail || 'Unknown',
             metadata: JSON.stringify({ picture: user?.picture || null }),
-            canPublishSources: lockedSources,
+            canPublishSources: hostControlledSources,
           });
 
           logger.info(`[${existingCall.externalId}] joining_existing_call | user_id=${userId}, channel_id=${finalChannelId}, correlation_id=${correlationId}`);
@@ -754,7 +755,8 @@ export class CallController {
         }
 
         if (participant && pMeta?.removedByHost && participant.response === InvitationResponse.ACCEPTED) {
-          const { removedByHost: _removed, ...restMeta } = pMeta;
+          const restMeta = { ...pMeta };
+          delete restMeta.removedByHost;
           await db.callParticipant.update({
             where: { id: participant.id },
             data: { metadata: restMeta as Prisma.InputJsonValue },
@@ -770,9 +772,9 @@ export class CallController {
 
       const hostControls = getHostControls(call);
       const isHostJoining = call?.createdByUserId === user.id;
-      const lockedSources =
-        !isHostJoining && hasActiveLock(hostControls)
-          ? allowedSourcesFor(hostControls)
+      const hostControlledSources =
+        !isHostJoining && hasTurnedOffHostControl(hostControls)
+          ? allowedSourcesForHostControls(hostControls)
           : undefined;
 
       const token = await livekitService.generateAccessToken({
@@ -780,7 +782,7 @@ export class CallController {
         roomName: callId,
         userName: user.displayName || user.name || user.email || 'Unknown',
         metadata: JSON.stringify({ picture: joiner?.picture || null }),
-        canPublishSources: lockedSources,
+        canPublishSources: hostControlledSources,
       });
 
       logger.info(`LiveKit credentials generated for user ${user.id} to join call ${callId}`);

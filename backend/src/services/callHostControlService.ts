@@ -2,12 +2,12 @@ import type { HostControls } from '@xyne/shared';
 import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';
 import {
-  allowedSourcesFor,
+  allowedSourcesForHostControls,
   getHostControls,
-  hasActiveLock,
+  hasTurnedOffHostControl,
   livekitService,
 } from '@/services/liveKitService';
-import { isTrackLockedByHostControls } from '@/services/callHostControlUtils';
+import { isTrackTurnedOffByHostControls } from '@/services/callHostControlUtils';
 
 class CallHostControlService {
   async applyHostControlsToParticipant(
@@ -22,12 +22,12 @@ class CallHostControlService {
       if (!call || call.createdByUserId === participantIdentity) return;
 
       const hostControls = getHostControls(call);
-      if (!hasActiveLock(hostControls)) return;
+      if (!hasTurnedOffHostControl(hostControls)) return;
 
       await livekitService.updateParticipantPublishSources(
         roomName,
         participantIdentity,
-        allowedSourcesFor(hostControls),
+        allowedSourcesForHostControls(hostControls),
       );
 
       logger.info(
@@ -40,12 +40,12 @@ class CallHostControlService {
     }
   }
 
-  async muteLockedHostControlTracks(
+  async muteTurnedOffHostControlTracks(
     roomName: string,
     targetIdentities: string[],
     hostControls: HostControls,
   ): Promise<number> {
-    if (!hasActiveLock(hostControls)) return 0;
+    if (!hasTurnedOffHostControl(hostControls)) return 0;
 
     const participants = await livekitService.listParticipantsOrThrow(roomName);
     const identitySet = new Set(targetIdentities);
@@ -57,12 +57,12 @@ class CallHostControlService {
       }
 
       for (const track of participant.tracks || []) {
-        if (!track.sid || track.muted || !isTrackLockedByHostControls(track.source, hostControls)) {
+        if (!track.sid || track.muted || !isTrackTurnedOffByHostControls(track.source, hostControls)) {
           continue;
         }
 
         logger.info(
-          `[CallHostControlService] muting locked track | roomName=${roomName}, identity=${participant.identity}, source=${track.source}, trackSid=${track.sid}`,
+          `[CallHostControlService] muting turned-off track | roomName=${roomName}, identity=${participant.identity}, source=${track.source}, trackSid=${track.sid}`,
         );
         muteRequests.push(livekitService.muteTrack(roomName, participant.identity, track.sid, true));
       }
@@ -80,10 +80,10 @@ class CallHostControlService {
         }
       }
       logger.error(
-        `[CallHostControlService] locked-track mute partial failure | roomName=${roomName}, failedCount=${failedCount}, attempted=${muteRequests.length}`,
+        `[CallHostControlService] turned-off-track mute partial failure | roomName=${roomName}, failedCount=${failedCount}, attempted=${muteRequests.length}`,
         firstFailure,
       );
-      throw new Error(`Failed to mute ${failedCount} locked host-control track(s)`);
+      throw new Error(`Failed to mute ${failedCount} turned-off host-control track(s)`);
     }
 
     return mutedCount;

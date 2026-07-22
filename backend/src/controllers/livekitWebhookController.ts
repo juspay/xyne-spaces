@@ -12,10 +12,10 @@ import { transcriptService } from '@/services/transcriptService';
 import {
   livekitService,
   getHostControls,
-  hasActiveLock,
+  hasTurnedOffHostControl,
 } from '@/services/liveKitService';
 import { callHostControlService } from '@/services/callHostControlService';
-import { isTrackLockedByHostControls } from '@/services/callHostControlUtils';
+import { isTrackTurnedOffByHostControls } from '@/services/callHostControlUtils';
 import { callRecordingService } from '@/services/callRecordingService';
 import { EgressStatus } from 'livekit-server-sdk';
 import { ParticipantInfo_Kind } from '@livekit/protocol';
@@ -181,7 +181,7 @@ class LiveKitWebhookController {
       if (!call || call.createdByUserId === participant.identity) return;
 
       const hostControls = getHostControls(call);
-      if (!hasActiveLock(hostControls)) return;
+      if (!hasTurnedOffHostControl(hostControls)) return;
 
       await callHostControlService.applyHostControlsToParticipant(
         roomName,
@@ -189,10 +189,10 @@ class LiveKitWebhookController {
         'track_published',
       );
 
-      if (!track.muted && isTrackLockedByHostControls(track.source, hostControls)) {
+      if (!track.muted && isTrackTurnedOffByHostControls(track.source, hostControls)) {
         await livekitService.muteTrack(roomName, participant.identity, track.sid, true);
         logger.info(
-          `[LiveKit Webhook] Muted locked published track | room=${roomName}, participant=${participant.identity}, source=${track.source}, trackSid=${track.sid}`,
+          `[LiveKit Webhook] Muted turned-off published track | room=${roomName}, participant=${participant.identity}, source=${track.source}, trackSid=${track.sid}`,
         );
       }
     } catch (error) {
