@@ -2465,12 +2465,13 @@ const SupportScreen = (): ReactElement => {
                           <Table2 size={16} />
                         </button>
                       </div>
-                      {/* Call desks use Ozonetel here; email desks keep Compose. */}
+                      {/* Keep desk-specific actions and expose the shared Ozonetel toolbar. */}
+                      {isSelectedChannelJoined && selectedChannelFull && (
+                        <CloudAgentDock buttonBehavior='floating' />
+                      )}
                       {isSelectedChannelJoined &&
                         selectedChannelId &&
-                        (selectedChannelFull?.type === ChannelType.CALL ? (
-                          <CloudAgentDock buttonBehavior='floating' />
-                        ) : (
+                        selectedChannelFull?.type !== ChannelType.CALL && (
                           <Tooltip content='Compose new email' side='bottom'>
                             <Button
                               variant='default'
@@ -2485,7 +2486,7 @@ const SupportScreen = (): ReactElement => {
                               <span>Compose</span>
                             </Button>
                           </Tooltip>
-                        ))}
+                        )}
                       {ticketId && (
                         <Button
                           size='sm'
@@ -3831,9 +3832,7 @@ export const SupportTicketDetail = ({
                   </Tooltip>
                   <div className='w-px h-4 bg-border' />
 
-                  {channel?.type === ChannelType.CALL && (
-                    <CloudAgentDock buttonBehavior='floating' />
-                  )}
+                  {channel && <CloudAgentDock buttonBehavior='floating' />}
 
                   <Tooltip
                     side='bottom'
