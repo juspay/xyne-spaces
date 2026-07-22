@@ -238,22 +238,43 @@ export interface DeskLabelRulesPayload {
   keepInInbox?: boolean;
 }
 
+export interface DeskLabelRulesPage {
+  automations: Automation[];
+  counts: {
+    total: number;
+    active: number;
+  };
+  pagination: {
+    limit: number;
+    nextCursor: string | null;
+    hasMore: boolean;
+  };
+}
+
 export function createDeskLabelRules(
   payload: DeskLabelRulesPayload,
-): Promise<{ automations: Automation[] }> {
+): Promise<{ automations: Automation[]; created: boolean }> {
   return unwrap(
-    apiInstance.post<SuccessEnvelope<{ automations: Automation[] }>>(
+    apiInstance.post<SuccessEnvelope<{ automations: Automation[]; created: boolean }>>(
       '/automations/desk-label-rules',
       payload,
     ),
   );
 }
 
-export function fetchDeskLabelRules(channelId?: string): Promise<{ automations: Automation[] }> {
-  const qs = channelId ? `?channelId=${encodeURIComponent(channelId)}` : '';
+export function fetchDeskLabelRules(opts: {
+  channelId: string;
+  cursor?: string | null;
+  limit?: number;
+}): Promise<DeskLabelRulesPage> {
+  const params = new URLSearchParams();
+  params.set('channelId', opts.channelId);
+  if (opts.cursor) params.set('cursor', opts.cursor);
+  if (opts.limit !== undefined) params.set('limit', String(opts.limit));
+  const qs = params.toString();
   return unwrap(
-    apiInstance.get<SuccessEnvelope<{ automations: Automation[] }>>(
-      `/automations/desk-label-rules${qs}`,
+    apiInstance.get<SuccessEnvelope<DeskLabelRulesPage>>(
+      `/automations/desk-label-rules${qs ? `?${qs}` : ''}`,
     ),
   );
 }

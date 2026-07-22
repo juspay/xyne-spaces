@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, ListChecks, Loader2, Plus, Tag } from 'lucide-react';
 import { toast } from 'sonner';
 import { Dialog } from '../../ui/Dialog/Dialog';
@@ -83,9 +83,12 @@ export function AutoLabelWizard({
     enabled: open,
   });
 
-  const rulesQuery = useQuery({
+  const rulesQuery = useInfiniteQuery({
     queryKey: deskLabelRulesQueryKey(channelId),
-    queryFn: () => fetchDeskLabelRules(channelId),
+    queryFn: ({ pageParam }) => fetchDeskLabelRules({ channelId, cursor: pageParam, limit: 50 }),
+    initialPageParam: null as string | null,
+    getNextPageParam: lastPage =>
+      lastPage.pagination.hasMore ? lastPage.pagination.nextCursor : undefined,
     enabled: open && !!channelId,
   });
 
@@ -133,7 +136,11 @@ export function AutoLabelWizard({
   const canProceedFilters =
     !!emailSchema && !triggerSchemaQuery.isLoading && hasConfiguredEmailFilter;
   const canSave = labelName.trim().length > 0;
-  const existingRules = rulesQuery.data?.automations ?? [];
+  const existingRules = rulesQuery.data?.pages.flatMap(page => page.automations) ?? [];
+  const ruleCounts = rulesQuery.data?.pages[0]?.counts ?? {
+    total: existingRules.length,
+    active: existingRules.filter(item => item.status === 'ACTIVE').length,
+  };
 
   const saveMutation = useMutation({
     mutationFn: () =>
@@ -147,11 +154,15 @@ export function AutoLabelWizard({
       }),
     onSuccess: data => {
       const count = data.automations.length;
-      toast.success(
-        count === 1
-          ? 'Auto-label rule created and active'
-          : `${count} auto-label rules created and active`,
-      );
+      if (!data.created) {
+        toast.info('A matching auto-label rule already exists');
+      } else {
+        toast.success(
+          count === 1
+            ? 'Auto-label rule created and active'
+            : `${count} auto-label rules created and active`,
+        );
+      }
       void queryClient.invalidateQueries({
         queryKey: deskLabelRulesQueryKey(channelId),
       });
@@ -230,9 +241,9 @@ export function AutoLabelWizard({
             >
               <ListChecks className='size-4' />
               Rules
-              {!rulesQuery.isLoading && existingRules.length > 0 && (
+              {!rulesQuery.isLoading && ruleCounts.total > 0 && (
                 <span className='min-w-5 rounded-full bg-muted px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground'>
-                  {existingRules.length}
+                  {ruleCounts.total}
                 </span>
               )}
             </Button>
@@ -267,9 +278,14 @@ export function AutoLabelWizard({
           <MyAutoLabelRules
             channelId={channelId}
             automations={existingRules}
+            totalCount={ruleCounts.total}
+            activeCount={ruleCounts.active}
             isLoading={rulesQuery.isLoading}
             isError={rulesQuery.isError}
             onRetry={() => void rulesQuery.refetch()}
+            hasMore={rulesQuery.hasNextPage}
+            isFetchingMore={rulesQuery.isFetchingNextPage}
+            onLoadMore={() => void rulesQuery.fetchNextPage()}
           />
         )}
 

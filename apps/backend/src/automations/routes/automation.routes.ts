@@ -282,10 +282,10 @@ router.post('/desk-label-rules', async (req: Request, res: Response) => {
       return;
     }
 
-    const automations = await deskLabelRulesService.create(parsed.data, auth);
-    res.status(201).json({
+    const result = await deskLabelRulesService.create(parsed.data, auth);
+    res.status(result.created ? 201 : 200).json({
       success: true,
-      data: { automations },
+      data: result,
       timestamp: new Date().toISOString(),
     });
   } catch (err) {
@@ -311,7 +311,7 @@ router.post('/desk-label-rules', async (req: Request, res: Response) => {
   }
 });
 
-// GET /desk-label-rules — owner-scoped list (never syncs via Zero automationsList)
+// GET /desk-label-rules — owner + desk scoped list (never syncs via Zero automationsList)
 router.get('/desk-label-rules', async (req: Request, res: Response) => {
   try {
     const auth = getAuthContext(req);
@@ -323,13 +323,38 @@ router.get('/desk-label-rules', async (req: Request, res: Response) => {
       typeof req.query.channelId === 'string' && req.query.channelId.length > 0
         ? req.query.channelId
         : undefined;
-    const automations = await deskLabelRulesService.listOwned(auth, channelId);
+    if (!channelId) {
+      res.status(400).json({ success: false, error: 'channelId is required' });
+      return;
+    }
+    const limit = parseListLimit(req.query.limit);
+    const cursor = decodeAutomationListCursor(req.query.cursor);
+    const page = await deskLabelRulesService.listOwned(auth, channelId, { limit, cursor });
     res.json({
       success: true,
-      data: { automations },
+      data: {
+        automations: page.automations,
+        counts: page.counts,
+        pagination: {
+          limit: page.pagination.limit,
+          nextCursor: page.pagination.nextCursor
+            ? encodeAutomationListCursor(page.pagination.nextCursor)
+            : null,
+          hasMore: page.pagination.hasMore,
+        },
+      },
       timestamp: new Date().toISOString(),
     });
   } catch (err) {
+    const code = (err as { code?: string } | null)?.code;
+    if (code === 'not-found') {
+      res.status(404).json({ success: false, error: (err as Error).message });
+      return;
+    }
+    if (code === 'forbidden') {
+      res.status(403).json({ success: false, error: (err as Error).message });
+      return;
+    }
     logger.error('[automations] desk-label-rules list failed:', err);
     res.status(500).json({ success: false, error: 'Failed to list desk label rules' });
   }

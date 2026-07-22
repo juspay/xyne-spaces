@@ -1,8 +1,11 @@
+import type { Workflow } from '@prisma/client';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { runAsServiceActor } from '@/database/tenant/context';
 import { currentUpstreamChain } from './automation-context-storage';
 import {
+  AUTOMATION_WORKFLOW_TYPE,
+  DESK_AUTOMATION_WORKFLOW_TYPE,
   EXECUTABLE_AUTOMATION_WORKFLOW_TYPES,
   parseAutomationMetadata,
   triggerTypeToEventType,
@@ -10,21 +13,14 @@ import {
 import { AutomationStatus, AutomationRunStatus } from '../types/status';
 import { automationQueue } from '../queue/automation.queue';
 import type { AutomationEvent } from '../types/automation-events';
+import { EMAIL_RECEIVED_EVENT } from '../triggers/email-received.trigger';
 
 class EventRouter {
   async emit(event: AutomationEvent, workspaceId: string): Promise<void> {
     const { type: eventType, payload } = event;
     const chain = currentUpstreamChain();
-    const mappedEventType = triggerTypeToEventType(eventType);
 
-    const candidates = await db.workflow.findMany({
-      where: {
-        workflowType: { in: [...EXECUTABLE_AUTOMATION_WORKFLOW_TYPES] },
-        eventType: mappedEventType,
-        status: AutomationStatus.ACTIVE,
-        workspaceId,
-      },
-    });
+    const candidates = await this.findCandidates(event, workspaceId);
 
     if (candidates.length === 0) {
       logger.debug?.(
@@ -85,6 +81,50 @@ class EventRouter {
     logger.info(
       `[EVENT-ROUTER] event=${eventType} workspaceId=${workspaceId} candidates=${candidates.length} enqueued=${enqueued} chain=${chain.join(' → ') || '∅'}`,
     );
+  }
+
+  private async findCandidates(
+    event: AutomationEvent,
+    workspaceId: string,
+  ): Promise<Workflow[]> {
+    const mappedEventType = triggerTypeToEventType(event.type);
+    const baseWhere = {
+      eventType: mappedEventType,
+      status: AutomationStatus.ACTIVE,
+      workspaceId,
+    };
+
+    if (event.type !== EMAIL_RECEIVED_EVENT || typeof event.payload.channelId !== 'string') {
+      return db.workflow.findMany({
+        where: {
+          workflowType: { in: [...EXECUTABLE_AUTOMATION_WORKFLOW_TYPES] },
+          ...baseWhere,
+        },
+      });
+    }
+
+    const [generalAutomations, deskRules] = await Promise.all([
+      db.workflow.findMany({
+        where: {
+          workflowType: AUTOMATION_WORKFLOW_TYPE,
+          ...baseWhere,
+        },
+      }),
+      db.workflow.findMany({
+        where: {
+          workflowType: DESK_AUTOMATION_WORKFLOW_TYPE,
+          ...baseWhere,
+          deskAutoLabelRuleReferences: {
+            some: {
+              workspaceId,
+              channelId: event.payload.channelId,
+            },
+          },
+        },
+      }),
+    ]);
+
+    return [...generalAutomations, ...deskRules];
   }
 }
 

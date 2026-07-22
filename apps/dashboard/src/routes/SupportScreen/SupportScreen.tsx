@@ -2083,6 +2083,16 @@ const SupportScreen = (): ReactElement => {
     [setSelectedChannelId, filters.conversationLabelId, handleFilterChange],
   );
 
+  const handleDeletedLabel = useCallback(
+    (labelId: string): void => {
+      if (selectedLabel?.id !== labelId) return;
+      setSelectedLabel(null);
+      setDeskView('tickets');
+      setViewMode('list');
+    },
+    [selectedLabel?.id],
+  );
+
   const openMailbox = useCallback(
     (channelId: string, folder: MailboxFolder, label: string): void => {
       setSelectedChannelId(channelId);
@@ -2235,6 +2245,7 @@ const SupportScreen = (): ReactElement => {
               channelId={c.id}
               activeLabelId={selectedChannelId === c.id && selectedLabel ? selectedLabel.id : null}
               onSelectLabel={(labelId, labelName) => openLabel(c.id, labelId, labelName)}
+              onDeletedLabel={handleDeletedLabel}
             />
           </div>
         )}

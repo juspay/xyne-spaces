@@ -23,7 +23,7 @@ const ApplyConversationLabelConfigSchema = z.object({
   labelId: z
     .string()
     .optional()
-    .describe('Optional existing label id; ignored if a label with this name already exists.'),
+    .describe('Optional existing label id. Missing labels are skipped instead of recreated.'),
   keepInInbox: z
     .boolean()
     .optional()
@@ -128,6 +128,8 @@ export class ApplyConversationLabelStep extends BaseActionStep<
     } catch (err) {
       const code = (err as { code?: string } | null)?.code;
       if (code === 'channel_not_found') return skipped('channel_not_found');
+      if (code === 'label_not_found') return skipped('label_not_found');
+      if (code === 'label_id_mismatch') return skipped('label_id_mismatch');
       if (code === 'conversation_not_found') return skipped('conversation_not_found');
       if (code === 'conversation_channel_mismatch') return skipped('conversation_channel_mismatch');
       if (code === 'conversation_workspace_mismatch') {

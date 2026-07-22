@@ -301,7 +301,10 @@ export async function emitEmailReceived(emailId: string): Promise<void> {
       return;
     }
 
-    await eventRouter.emit({ type: EMAIL_RECEIVED_EVENT, payload: { emailId } }, workspaceId);
+    await eventRouter.emit(
+      { type: EMAIL_RECEIVED_EVENT, payload: { emailId, channelId: email.channelId } },
+      workspaceId,
+    );
   } catch (err) {
     logger.error('[automations] emitEmailReceived failed', {
       emailId,

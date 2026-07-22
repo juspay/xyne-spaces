@@ -14,9 +14,14 @@ import { cn } from '../../../utils/classNames';
 interface MyAutoLabelRulesProps {
   channelId: string;
   automations: Automation[];
+  totalCount: number;
+  activeCount: number;
   isLoading: boolean;
   isError: boolean;
   onRetry: () => void;
+  hasMore: boolean;
+  isFetchingMore: boolean;
+  onLoadMore: () => void;
 }
 
 export const deskLabelRulesQueryKey = (channelId: string) =>
@@ -25,9 +30,14 @@ export const deskLabelRulesQueryKey = (channelId: string) =>
 export function MyAutoLabelRules({
   channelId,
   automations,
+  totalCount,
+  activeCount,
   isLoading,
   isError,
   onRetry,
+  hasMore,
+  isFetchingMore,
+  onLoadMore,
 }: MyAutoLabelRulesProps): React.ReactElement {
   const queryClient = useQueryClient();
   const queryKey = deskLabelRulesQueryKey(channelId);
@@ -96,11 +106,9 @@ export function MyAutoLabelRules({
     <section>
       <div className='mb-2 flex items-center justify-between text-xs text-muted-foreground'>
         <span>
-          {automations.length} {automations.length === 1 ? 'rule' : 'rules'}
+          {totalCount} {totalCount === 1 ? 'rule' : 'rules'}
         </span>
-        <span>
-          {automations.filter(item => item.status === AutomationStatusValues.ACTIVE).length} active
-        </span>
+        <span>{activeCount} active</span>
       </div>
       <ul className='divide-y divide-border border-y border-border'>
         {automations.map(item => {
@@ -185,6 +193,28 @@ export function MyAutoLabelRules({
           );
         })}
       </ul>
+      {hasMore && (
+        <div className='mt-3 flex justify-center'>
+          <Button
+            type='button'
+            variant='outline'
+            size='sm'
+            disabled={isFetchingMore}
+            onClick={onLoadMore}
+            data-track-category='xyne-desk'
+            data-track-name='auto-label-load-more-rules'
+          >
+            {isFetchingMore ? (
+              <>
+                <Loader2 className='size-4 animate-spin' />
+                Loading…
+              </>
+            ) : (
+              'Load more'
+            )}
+          </Button>
+        </div>
+      )}
     </section>
   );
 }
