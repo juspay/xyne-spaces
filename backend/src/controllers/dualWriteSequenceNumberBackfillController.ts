@@ -17,7 +17,6 @@ type BackfillSummary = {
   batches: number;
   scopesProcessed: number;
   countersWritten: number;
-  skipped: number;
 };
 
 const PROJECT_TICKET_SEQUENCE_BACKFILL_OFFSET = 5_000;
@@ -30,15 +29,17 @@ export function getProjectTicketSequenceBackfillTarget(currentSequence: number):
 }
 
 /**
- * Moves project ticket sequence state from the main DB into the common DB
+ * Moves entity sequence state from the main DB into the common DB
  * entity_sequences table:
  *
  * - PROJECT_TICKET: counter = max(project.ticketSequence * 3,
  *   project.ticketSequence + 5,000)
+ * - BOARD_STAGE: counter = the board's highest existing stage sequence
+ * - FORM_FIELD: counter = the form's highest existing field sequence
  *
- * Reads are keyset-paginated (batchSize per page, optional delayMs between
- * pages) and every write goes through setSequenceAtLeast, so re-runs are
- * idempotent and can never lower a counter that live traffic has advanced.
+ * Scope values are read once and written in bounded batches (with an optional
+ * delayMs between batches). Every write goes through setSequenceAtLeast, so
+ * re-runs are idempotent and can never lower a live counter.
  */
 export class DualWriteSequenceNumberBackfillController {
   private static sleep(ms: number): Promise<void> {
@@ -73,15 +74,37 @@ export class DualWriteSequenceNumberBackfillController {
     counters: Array<{ entityValue: string; sequenceNumber: number }>
   ): Promise<void> {
     if (!options.dryRun) {
-      for (const counter of counters) {
-        await EntitySequenceService.setSequenceAtLeast(
-          options.entityType,
-          counter.entityValue,
-          counter.sequenceNumber
-        );
-      }
+      await Promise.all(
+        counters.map(counter =>
+          EntitySequenceService.setSequenceAtLeast(
+            options.entityType,
+            counter.entityValue,
+            counter.sequenceNumber
+          )
+        )
+      );
     }
     summary.countersWritten += counters.length;
+  }
+
+  private static async writeCounters(
+    options: BackfillOptions,
+    summary: BackfillSummary,
+    counters: Array<{ entityValue: string; sequenceNumber: number }>
+  ): Promise<void> {
+    for (let start = 0; start < counters.length; start += options.batchSize) {
+      const batch = counters.slice(start, start + options.batchSize);
+      await this.writeBatch(options, summary, batch);
+
+      summary.scopesProcessed += batch.length;
+      summary.batches += 1;
+      this.logBatch(options, summary);
+
+      const hasAnotherBatch = start + options.batchSize < counters.length;
+      if (hasAnotherBatch && options.delayMs > 0) {
+        await this.sleep(options.delayMs);
+      }
+    }
   }
 
   private static logBatch(options: BackfillOptions, summary: BackfillSummary): void {
@@ -89,7 +112,6 @@ export class DualWriteSequenceNumberBackfillController {
       entityType: options.entityType,
       scopesProcessed: summary.scopesProcessed,
       countersWritten: summary.countersWritten,
-      skipped: summary.skipped,
       dryRun: options.dryRun,
     });
   }
@@ -98,35 +120,76 @@ export class DualWriteSequenceNumberBackfillController {
     options: BackfillOptions,
     summary: BackfillSummary
   ): Promise<void> {
-    let cursor: string | null = null;
-    // eslint-disable-next-line no-constant-condition
-    while (true) {
-      const projects: Array<{ id: string; ticketSequence: number }> = await db.project.findMany({
-        where: { ticketSequence: { gt: 0 } },
-        select: { id: true, ticketSequence: true },
+    const projects: Array<{ id: string; ticketSequence: number }> = await db.project.findMany({
+      where: { ticketSequence: { gt: 0 } },
+      select: { id: true, ticketSequence: true },
+      orderBy: { id: 'asc' },
+    });
+
+    await this.writeCounters(
+      options,
+      summary,
+      projects.map(project => ({
+        entityValue: project.id,
+        sequenceNumber: getProjectTicketSequenceBackfillTarget(project.ticketSequence),
+      }))
+    );
+  }
+
+  private static async backfillBoardStages(
+    options: BackfillOptions,
+    summary: BackfillSummary
+  ): Promise<void> {
+    const boards: Array<{ id: string; stages: Array<{ sequenceNumber: number }> }> =
+      await db.board.findMany({
+        where: { stages: { some: {} } },
+        select: {
+          id: true,
+          stages: {
+            select: { sequenceNumber: true },
+            orderBy: { sequenceNumber: 'desc' },
+            take: 1,
+          },
+        },
         orderBy: { id: 'asc' },
-        take: options.batchSize,
-        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
       });
-      if (projects.length === 0) break;
 
-      await this.writeBatch(
-        options,
-        summary,
-        projects.map(project => ({
-          entityValue: project.id,
-          sequenceNumber: getProjectTicketSequenceBackfillTarget(project.ticketSequence),
-        }))
-      );
+    await this.writeCounters(
+      options,
+      summary,
+      boards.map(board => ({
+        entityValue: board.id,
+        sequenceNumber: board.stages[0].sequenceNumber,
+      }))
+    );
+  }
 
-      summary.scopesProcessed += projects.length;
-      summary.batches += 1;
-      cursor = projects[projects.length - 1].id;
-      this.logBatch(options, summary);
+  private static async backfillFormFields(
+    options: BackfillOptions,
+    summary: BackfillSummary
+  ): Promise<void> {
+    const forms: Array<{ id: string; fields: Array<{ sequenceNumber: number }> }> =
+      await db.form.findMany({
+        where: { fields: { some: {} } },
+        select: {
+          id: true,
+          fields: {
+            select: { sequenceNumber: true },
+            orderBy: { sequenceNumber: 'desc' },
+            take: 1,
+          },
+        },
+        orderBy: { id: 'asc' },
+      });
 
-      if (projects.length < options.batchSize) break;
-      if (options.delayMs > 0) await this.sleep(options.delayMs);
-    }
+    await this.writeCounters(
+      options,
+      summary,
+      forms.map(form => ({
+        entityValue: form.id,
+        sequenceNumber: form.fields[0].sequenceNumber,
+      }))
+    );
   }
 
   private static async runBackfill(options: BackfillOptions): Promise<BackfillSummary> {
@@ -135,10 +198,19 @@ export class DualWriteSequenceNumberBackfillController {
       batches: 0,
       scopesProcessed: 0,
       countersWritten: 0,
-      skipped: 0,
     };
 
-    await this.backfillProjectTickets(options, summary);
+    switch (options.entityType) {
+      case SequenceEntityType.PROJECT_TICKET:
+        await this.backfillProjectTickets(options, summary);
+        break;
+      case SequenceEntityType.BOARD_STAGE:
+        await this.backfillBoardStages(options, summary);
+        break;
+      case SequenceEntityType.FORM_FIELD:
+        await this.backfillFormFields(options, summary);
+        break;
+    }
 
     return summary;
   }

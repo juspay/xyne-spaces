@@ -1,6 +1,7 @@
 import {Prisma, PrismaClient, PRStatusEvent, BoardType } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
 import { Board, Stage } from '@prisma/client';
+import { EntitySequenceService } from '@/services/entitySequenceService';
 
 
 export interface CreateStageInput {
@@ -86,14 +87,25 @@ export class BoardRepository {
 
       let stages: Array<Stage & { prStatuses?: PRStatusEvent[] }> = [];
       if (data.stages && data.stages.length > 0) {
-        await tx.stage.createMany({
-          data: data.stages.map(stage => ({
+        let currentMaxSequence = 0;
+        const stagesToCreate = [];
+        for (const stage of data.stages) {
+          const sequenceNumber = await EntitySequenceService.getNextBoardStageSequence(
+            board.id,
+            currentMaxSequence,
+          );
+          currentMaxSequence = Math.max(currentMaxSequence, sequenceNumber);
+          stagesToCreate.push({
             name: stage.name,
             eta: stage.eta,
-            sequenceNumber: stage.sequenceNumber,
+            sequenceNumber,
             boardId: board.id,
             createdBy: data.createdBy,
-          })),
+          });
+        }
+
+        await tx.stage.createMany({
+          data: stagesToCreate,
         });
 
         const rawStages = await tx.stage.findMany({

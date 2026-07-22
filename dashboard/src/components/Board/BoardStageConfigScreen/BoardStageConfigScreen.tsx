@@ -1019,12 +1019,17 @@ const BoardStageConfigScreen = ({
       // Get the previous stage's status, or default to TODO if adding at the beginning
       const previousStage = stages[insertIndex - 1];
       const defaultStatus = previousStage?.defaultTicketStatusV2 ?? TicketStatusV2.TODO;
+      // The server replaces this provisional tail value with an allocation
+      // from the common sequence. Keeping it above the current table maximum
+      // avoids filling a deleted sequence gap in the optimistic state.
+      const provisionalSequenceNumber =
+        stages.reduce((max, stage) => Math.max(max, stage.sequenceNumber), 0) + 1;
 
       const newStage: Stage = {
         tempId: nextTempId,
         name: '',
         eta: 0,
-        sequenceNumber: insertIndex + 1,
+        sequenceNumber: provisionalSequenceNumber,
         defaultTicketStatusV2: defaultStatus,
         prStatuses: [],
         approvers: [],
@@ -1035,8 +1040,16 @@ const BoardStageConfigScreen = ({
       setStages(prev => {
         const newStages = [...prev];
         newStages.splice(insertIndex, 0, newStage);
-        // Update sequence numbers
-        return newStages.map((s, idx) => ({ ...s, sequenceNumber: idx + 1 }));
+        // Reuse only the existing sequence slots and the provisional new tail
+        // slot. This shifts stages into the requested order without compacting
+        // gaps; the server performs the same shift with the common allocation.
+        const sequencePool = newStages
+          .map(stage => stage.sequenceNumber)
+          .sort((left, right) => left - right);
+        return newStages.map((stage, index) => ({
+          ...stage,
+          sequenceNumber: sequencePool[index]!,
+        }));
       });
       setNextTempId(id => id + 1);
     },
@@ -1044,11 +1057,9 @@ const BoardStageConfigScreen = ({
   );
 
   const handleDeleteStage = useCallback((tempId: number) => {
-    setStages(prev => {
-      const filtered = prev.filter(s => s.tempId !== tempId);
-      // Update sequence numbers
-      return filtered.map((s, idx) => ({ ...s, sequenceNumber: idx + 1 }));
-    });
+    // Preserve every remaining sequence number. Deleted values stay as gaps,
+    // and the common counter is not changed.
+    setStages(prev => prev.filter(stage => stage.tempId !== tempId));
   }, []);
 
   const handleUpdateStage = useCallback((tempId: number, updates: Partial<Stage>) => {
