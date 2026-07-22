@@ -19,7 +19,7 @@ import { getFileCategory, getFilesDimensions, validateFile } from '../ui/utils/f
 import { usePlatform } from '../../hooks/usePlatform';
 import { useZero } from '../../hooks/useZero';
 import { useAuth } from '../../hooks/useAuth';
-import { useCacConfig } from '../../hooks/useCacConfig';
+import { useCacConfig } from '@xyne/shared/hooks';
 import { useNavigate } from 'react-router-dom';
 import { mutators } from '../../zero/mutators';
 import {

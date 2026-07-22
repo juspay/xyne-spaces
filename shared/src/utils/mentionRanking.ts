@@ -6,7 +6,8 @@
  * tuned via Superposition without a code release.
  */
 
-import type { MentionRankingCacConfig } from '../hooks/mentionRankingCacConfig';
+import type { MentionRankingCacConfig } from '../config/mentionRankingCacConfig.js';
+import type { MentionResult } from '../types/mention.js';
 
 export type MatchKind = 'prefix' | 'substring' | 'fuzzy' | 'none';
 
@@ -125,14 +126,14 @@ export function eligibleSpecials(opts: EligibleSpecialsOpts): SpecialMentionDesc
 
 export interface ScoredCandidate {
   score: number;
-  result: import('../components/ui/Selectors').MentionResult;
+  result: MentionResult;
   tieKey: string;
 }
 
 export interface RankableCandidate {
   matchFields: Array<string | null | undefined>;
   scoreInputs: Omit<ScoreInputs, 'matchQuality'>;
-  result: import('../components/ui/Selectors').MentionResult;
+  result: MentionResult;
   tieKey: string;
 }
 
@@ -141,7 +142,7 @@ export function rankCandidates(
   query: string,
   cap: number,
   config: MentionRankingCacConfig,
-): import('../components/ui/Selectors').MentionResult[] {
+): MentionResult[] {
   const shouldSearch = query.trim().length > 0;
   const scored: ScoredCandidate[] = [];
   for (const c of candidates) {

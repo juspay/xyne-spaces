@@ -23,7 +23,7 @@ import ProjectRecapPanel from './ProjectRecapPanel';
 import { useZero } from '../../hooks/useZero';
 import { mutators } from '../../zero/mutators';
 import { usePlatform } from '../../hooks/usePlatform';
-import { useCacConfig } from '../../hooks/useCacConfig';
+import { useCacConfig } from '@xyne/shared/hooks';
 
 type RecapTab = 'channel' | 'project';
 

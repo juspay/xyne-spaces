@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { useCacConfig } from '../../hooks/useCacConfig';
+import { useCacConfig } from '@xyne/shared/hooks';
 import {
   SCREEN_PICKER_CAC_KEY,
   DEFAULT_SCREEN_PICKER_CAC_CONFIG,

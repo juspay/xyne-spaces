@@ -197,7 +197,7 @@ import JiraMigrationScreen from './JiraMigrationScreen/JiraMigrationScreen';
 import WhatsAppBulkMigrationScreen from './WhatsAppBulkMigrationScreen/WhatsAppBulkMigrationScreen';
 import { ErrorReportModal } from '../components/ErrorReportModal/ErrorReportModal';
 import { getTicketsPath } from '../components/ErrorReportModal/ErrorReportModal.utils';
-import { useCacConfig } from '../hooks/useCacConfig';
+import { useCacConfig } from '@xyne/shared/hooks';
 import { useScreenRecorder } from '../hooks/useScreenRecorder';
 import type { ScreenSource } from '../types/electron';
 import ConfluenceMigrationScreen from './ConfluenceMigrationScreen/ConfluenceMigrationScreen';

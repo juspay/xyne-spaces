@@ -7,6 +7,8 @@ export * from './types/activity';
 export * from './forwardedMessage';
 export * from './activity';
 export * from './types/index';
+export * from './config/index';
+export * from './utils/mentionRanking';
 export * from './tags';
 export * from './board-types';
 export * from './types/workflowApproval';

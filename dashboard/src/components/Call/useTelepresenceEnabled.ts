@@ -1,4 +1,4 @@
-import { useCacConfig } from '../../hooks/useCacConfig';
+import { useCacConfig } from '@xyne/shared/hooks';
 import {
   TELEPRESENCE_CAC_KEY,
   DEFAULT_TELEPRESENCE_CAC_CONFIG,

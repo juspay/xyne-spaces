@@ -22,7 +22,7 @@ import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useRCALookups } from '../../../hooks/useRCALookups';
 import { useRCASubmissions } from '../../../hooks/useRCASubmissions';
 import { useAuth } from '../../../hooks/useAuth';
-import { useCacConfig } from '../../../hooks/useCacConfig';
+import { useCacConfig } from '@xyne/shared/hooks';
 import { DEFAULT_RCA_CAC_CONFIG, type RcaCacConfig } from '../../../routes/RCAScreen/rcaCacConfig';
 import type { FormControllerRef } from '../../../routes/RCAScreen/RCAScreen.types';
 interface RCAPanelViewProps {

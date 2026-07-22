@@ -4,7 +4,7 @@ import * as Popover from '@radix-ui/react-popover';
 import Input from '../Input/Input';
 import { Badge } from '../Badge';
 import { cn } from '../../../utils/classNames';
-import { useUserGroupSearch } from '../../../hooks/useUserGroupSearch';
+import { useUserGroupSearch } from '@xyne/shared/hooks';
 
 export type SearchUserGroupItem = {
   id: string;
