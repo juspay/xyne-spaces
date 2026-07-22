@@ -228,7 +228,8 @@ export class ApplicationBackfillService {
     applications: ApplicationData[],
     channelId: string,
     mainReleaseBoardId: string,
-    createdBy: string
+    createdBy: string,
+    callerWorkspaceId: string
   ) {
     logger.info('Starting application backfill...');
 
@@ -242,6 +243,15 @@ export class ApplicationBackfillService {
         }
       } else {
         throw new Error('No channelId provided. Applications will be created without a channel.');
+      }
+
+      // Tenant isolation: the channel resolves the target workspace/project, so it
+      // must belong to the caller's workspace. Guards against a caller in workspace
+      // A injecting records into workspace B by supplying B's channelId.
+      if (validChannel.workspaceId !== callerWorkspaceId) {
+        throw new Error(
+          `Channel "${channelId}" does not belong to the caller's workspace.`
+        );
       }
 
       // Setup ReleaseChangeType, forms, and lookup values first
