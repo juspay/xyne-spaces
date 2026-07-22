@@ -78,6 +78,16 @@ export interface CanvasParticipantPreviousValue {
   role: string;
 }
 
+export interface UserGroupMappingPreviousValue {
+  userGroupId: string;
+  userId: string;
+}
+
+export interface ChannelParticipantPreviousValue {
+  channelId: string;
+  userId: string;
+}
+
 export interface ChannelUserStatusPreviousValue {
   lastViewedAt: number | null;
   unreadCount: number;
@@ -104,6 +114,8 @@ export type PreviousValue =
   | ChannelPreviousValue
   | EmailReadPreviousValue
   | CanvasParticipantPreviousValue
+  | UserGroupMappingPreviousValue
+  | ChannelParticipantPreviousValue
   | ChannelUserStatusPreviousValue
   | ConversationParticipantPreviousValue
   | TicketStageRequestPreviousValue;
@@ -135,8 +147,9 @@ export const SIDE_EFFECT_OPERATION_CONFIG: SideEffectOperationConfigMap = {
   ticket_tags: ['insert', 'update', 'delete'],
   ticket_tag_mappings: ['insert', 'update', 'delete'],
   call_participants: ["insert", "update"],
-  channel_participants: ['insert'],
+  channel_participants: ['insert', 'delete'],
   canvas_participants: ['insert', 'update', 'delete'],
+  user_group_mappings: ['insert', 'delete'],
   conversations: ['insert', 'delete'],
   calls: ['update'],
   tickets: ['update'],

@@ -118,6 +118,23 @@ export async function collectSideEffectJobs(
     }
   }
 
+  // Capture the group of a membership row before it is deleted, so the canvas ACL
+  // fan-out (refreshCanvasPermissionsForGroup) can find the canvases shared to it.
+  if (operation === 'delete' && table === 'user_group_mappings') {
+    const mapping = await tx.run(zql.user_group_mappings.where('id', entityId).one());
+    if (mapping) {
+      previousValue = { userGroupId: mapping.userGroupId, userId: mapping.userId };
+    }
+  }
+
+  // Same, for a channel membership row (leave) — recover channelId for the canvas fan-out.
+  if (operation === 'delete' && table === 'channel_participants') {
+    const participant = await tx.run(zql.channel_participants.where('id', entityId).one());
+    if (participant) {
+      previousValue = { channelId: participant.channelId, userId: participant.userId };
+    }
+  }
+
   if ((operation === 'update' || operation === 'delete') && table === 'form_entity_values') {
     const entity = await tx.run(zql.form_entity_values.where('id', entityId).one());
     if (entity) {

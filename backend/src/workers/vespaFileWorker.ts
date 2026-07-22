@@ -5,7 +5,7 @@ import { InsertDocument, fileSchema, VespaSchema } from '@/vespa/src/types';
 import { VespaJob, VespaJobType } from '@/zero/vespa-injection/core/types';
 import { db } from '@/database/client';
 import { NAMESPACE } from '@/vespa/vespaConfig';
-import { fetchAndMapBySchema, VespaOperationType } from '@/zero/vespa-injection/core/mapper';
+import { fetchAndMapBySchema, fetchDataBySchema, mapBySchema, computeCanvasPermissions, VespaOperationType } from '@/zero/vespa-injection/core/mapper';
 import { vespaPostIngestHooks } from './vespaPostIngestHooks';
 import { superpositionClient } from '@/services/superpositionClient';
 import { routePdfToScheduler } from '@/services/ingestion/docling/scheduler/intake';
@@ -242,6 +242,27 @@ export class VespaFileWorker {
 				// Use pre-transformed data if available (e.g., from SAM transcripts)
 				logger.info(`[VESPA_FILE_WORKER] Using pre-transformed data for ${docId}`);
 				mappedData = preTransformedData as InsertDocument;
+			} else if (jobType === 'update' && job.data.fields?.length) {
+				// Field-scoped partial update: send only the requested fields. Because
+				// `chunks` isn't sent, Vespa does not re-embed — this is what keeps the
+				// membership fan-out (re-computing canvas ACLs) cheap.
+				const fields = job.data.fields;
+				if (app === SubApp.CANVAS && fields.length === 1 && fields[0] === 'permissions') {
+					// Fast path: canvas ACL refresh — recompute just permissions, skip the
+					// content extraction/embedding a full mapCanvas would do.
+					mappedData = { permissions: await computeCanvasPermissions(docId) } as Partial<InsertDocument>;
+				} else {
+					const rawData = await fetchDataBySchema(schema, docId, app);
+					if (!rawData) {
+						throw new Error(`Data not found for ${schema}/${docId}`);
+					}
+					const fullDoc = await mapBySchema(schema, rawData, 'feed', app, job.data.workspaceId, job.data.orgId);
+					mappedData = Object.fromEntries(
+						fields
+							.filter((field) => field in fullDoc)
+							.map((field) => [field, (fullDoc as Record<string, unknown>)[field]])
+					) as Partial<InsertDocument>;
+				}
 			} else {
 				logger.info(`[VESPA_FILE_WORKER] Fetching data from database for ${schema}/${docId}`);
 				mappedData = await fetchAndMapBySchema(schema, docId, jobType, app, job.data.workspaceId, job.data.orgId);
