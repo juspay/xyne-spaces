@@ -117,6 +117,7 @@ import notificationSettingsBackfillRoutes from '@/routes/notificationSettingsBac
 import appSigningSecretBackfillRoutes from '@/routes/appSigningSecretBackfill';
 import installedAppCommandsBackfillRoutes from '@/routes/installedAppCommandsBackfill';
 import productInsightsReclusterRoutes from '@/routes/productInsightsRecluster';
+import gmailWatchRenewalRoutes from '@/routes/gmailWatchRenewal';
 import aiRoutes from '@/routes/aiRoutes';
 import productInsightsRoutes from '@/routes/productInsights';
 // import adminBackfillRoutes from '@/routes/adminBackfill';
@@ -438,6 +439,7 @@ export class App {
     this.app.use('/api/admin/form-field-sequence-backfill', formFieldSequenceBackfillRoutes);
     // Product insights recluster route (admin-only)
     this.app.use('/api/admin/product-insights-recluster', productInsightsReclusterRoutes);
+    this.app.use('/api/admin/gmail-watch-renewal', gmailWatchRenewalRoutes);
     this.app.use('/migrate/api/admin/on-call-set-numbers-backfill', onCallSetNumbersBackfillRoutes);
     this.app.use('/migrate/api/admin/dm-channel-project-backfill', dmChannelProjectBackfillRoutes);
     this.app.use('/api/admin/dm-channel-project-backfill', dmChannelProjectBackfillRoutes);
