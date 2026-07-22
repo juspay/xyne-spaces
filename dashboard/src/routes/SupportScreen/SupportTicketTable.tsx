@@ -7,8 +7,14 @@ import { useGetChannelUserStatus } from '../../hooks/useChannels';
 import { dataLoadDuration, safeRecordMetric } from '../../services/otel';
 import { logger, Event } from '../../utils/logger';
 import { TicketTable } from '../../components/Tickets/TicketTable/TicketTable';
-
-const VISIBLE_COLUMNS = new Set(['assignee', 'dueDate', 'priority', 'stage', 'tags']);
+import { buildDynamicFieldColumns } from '../../components/Tickets/TicketTable/dynamicFieldColumns';
+import {
+  ticketMatchesDynamicFieldEntries,
+  type DynamicFieldFilterEntry,
+  type DynamicFieldQueryFilter,
+  type FormEntityValueLike,
+} from '../../utils/board/dynamicFieldFilters';
+import type { ResolvedDisplayFormField } from '../../utils/board/resolveDisplayFormFields';
 
 export interface SupportTicketTableProps {
   channelId: string;
@@ -19,7 +25,11 @@ export interface SupportTicketTableProps {
     userGroups: string[] | undefined;
     lastEmailAtStart: number | undefined;
     lastEmailAtEnd: number | undefined;
+    dynamicFieldFilters?: DynamicFieldQueryFilter[] | undefined;
   };
+  dynamicFieldEntries?: DynamicFieldFilterEntry[];
+  visibleColumns?: Set<string>;
+  dynamicFieldColumns?: ResolvedDisplayFormField[];
   onBoardIdResolved: (boardId: string) => void;
   onTicketClick: (ticket: Ticket) => void;
   onTicketsLoaded?: (tickets: Ticket[]) => void;
@@ -33,6 +43,9 @@ export interface SupportTicketTableProps {
 export const SupportTicketTable = ({
   channelId,
   ticketFilter,
+  dynamicFieldEntries,
+  visibleColumns,
+  dynamicFieldColumns,
   onBoardIdResolved,
   onTicketClick,
   onTicketsLoaded,
@@ -40,11 +53,20 @@ export const SupportTicketTable = ({
   const channelUserStatus = useGetChannelUserStatus(channelId);
   const isMember = !!channelUserStatus;
 
+  const displayFieldIds = useMemo(
+    () =>
+      dynamicFieldColumns && dynamicFieldColumns.length > 0
+        ? dynamicFieldColumns.map(field => field.id)
+        : undefined,
+    [dynamicFieldColumns],
+  );
+
   const [supportTickets, supportTicketsDetails] = useCachedQuery(
     queries.supportTicketsFilteredV3({
       channelId,
       isMember,
       ...ticketFilter,
+      formEntityValueFieldIds: displayFieldIds,
     }),
     { enabled: !!channelId },
   );
@@ -61,6 +83,8 @@ export const SupportTicketTable = ({
         g: ticketFilter.userGroups ?? null,
         ds: ticketFilter.lastEmailAtStart ?? null,
         de: ticketFilter.lastEmailAtEnd ?? null,
+        df: dynamicFieldEntries ?? null,
+        cols: displayFieldIds ?? null,
       }),
     [
       channelId,
@@ -70,6 +94,8 @@ export const SupportTicketTable = ({
       ticketFilter.userGroups,
       ticketFilter.lastEmailAtStart,
       ticketFilter.lastEmailAtEnd,
+      dynamicFieldEntries,
+      displayFieldIds,
     ],
   );
   const loadStartTimeRef = useRef<number | null>(Date.now());
@@ -104,16 +130,26 @@ export const SupportTicketTable = ({
     if (firstRowBoardId) onBoardIdResolved(firstRowBoardId);
   }, [firstRowBoardId, onBoardIdResolved]);
 
+  const dynamicallyFilteredTickets = useMemo(() => {
+    if (!supportTickets || !dynamicFieldEntries?.length) return supportTickets;
+    return supportTickets.filter(ticket =>
+      ticketMatchesDynamicFieldEntries(
+        (ticket as { formEntityValues?: FormEntityValueLike[] }).formEntityValues,
+        dynamicFieldEntries,
+      ),
+    );
+  }, [supportTickets, dynamicFieldEntries]);
+
   // Report loaded tickets up so the parent can source the merge dialog.
   useEffect(() => {
-    if (supportTickets) onTicketsLoaded?.(supportTickets as Ticket[]);
-  }, [supportTickets, onTicketsLoaded]);
+    if (dynamicallyFilteredTickets) onTicketsLoaded?.(dynamicallyFilteredTickets as Ticket[]);
+  }, [dynamicallyFilteredTickets, onTicketsLoaded]);
 
   // supportTicketsFilteredV3 already relates tagMappings on every row, so unlike
   // Board's ticketsQueryV2 there's no fallback path needed here.
   const tagsByTicketId = useMemo(() => {
     const map = new Map<string, TicketTag[]>();
-    for (const ticket of supportTickets ?? []) {
+    for (const ticket of dynamicallyFilteredTickets ?? []) {
       const tags = (ticket.tagMappings ?? []).map(m => ({
         id: m.id,
         name: m.tagName,
@@ -122,7 +158,7 @@ export const SupportTicketTable = ({
       if (tags.length > 0) map.set(ticket.id, tags as TicketTag[]);
     }
     return map;
-  }, [supportTickets]);
+  }, [dynamicallyFilteredTickets]);
 
   const projectId = supportTickets?.[0]?.projectId ?? undefined;
   const [projectTags] = useCachedQuery(
@@ -134,13 +170,19 @@ export const SupportTicketTable = ({
     return Array.from(new Set(projectTags.map(tag => tag.name))).sort();
   }, [projectTags]);
 
+  const extraColumns = useMemo(
+    () => buildDynamicFieldColumns(dynamicFieldColumns ?? []),
+    [dynamicFieldColumns],
+  );
+
   return (
     <TicketTable
-      tickets={(supportTickets ?? []) as Ticket[]}
+      tickets={(dynamicallyFilteredTickets ?? []) as Ticket[]}
       ticketTags={tagsByTicketId}
       availableTags={availableTags}
       onTitleClick={onTicketClick}
-      visibleColumns={VISIBLE_COLUMNS}
+      {...(visibleColumns ? { visibleColumns } : {})}
+      extraColumns={extraColumns}
     />
   );
 };

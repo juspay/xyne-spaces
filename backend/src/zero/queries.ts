@@ -124,6 +124,57 @@ const toActualFieldValueQueryValue = (
 ): string | number | boolean =>
   typeof value === 'string' ? JSON.stringify(value) : value;
 
+const supportDynamicFieldFiltersSchema = z
+  .array(
+    z.object({
+      fieldId: z.string(),
+      values: z.array(z.union([z.string(), z.number(), z.boolean()])).optional(),
+    })
+  )
+  .optional();
+
+type SupportDynamicFieldFilters = z.infer<typeof supportDynamicFieldFiltersSchema>;
+
+const applySupportDynamicFieldFilters = (
+  query: any,
+  dynamicFieldFilters: SupportDynamicFieldFilters,
+) => {
+  if (!dynamicFieldFilters?.length) return query;
+  for (const fieldFilter of dynamicFieldFilters) {
+    const { fieldId, values } = fieldFilter;
+    query = query.whereExists('formEntityValues', (formEntityValue: any) => {
+      let fevQuery = formEntityValue.where('entityType', 'TICKET').where('fieldId', fieldId);
+      if (values && values.length > 0) {
+        fevQuery = fevQuery.where((helpers: any) =>
+          helpers.or(
+            ...values.map((value: string | number | boolean) =>
+              helpers.cmp('actualFieldValue', '=', toActualFieldValueQueryValue(value)),
+            ),
+          ),
+        );
+      }
+      return fevQuery;
+    });
+  }
+  return query;
+};
+
+const relateSupportDynamicFieldValues = (
+  fev: any,
+  dynamicFieldFilters: SupportDynamicFieldFilters,
+  formEntityValueFieldIds?: string[],
+) => {
+  const fieldIds = [
+    ...new Set([
+      ...(dynamicFieldFilters ?? []).map((fieldFilter) => fieldFilter.fieldId),
+      ...(formEntityValueFieldIds ?? []),
+    ]),
+  ];
+  return fieldIds.length > 0
+    ? fev.where('entityType', 'TICKET').where('fieldId', 'IN', fieldIds)
+    : fev.where('fieldId', '__no_dynamic_field_filters__');
+};
+
 const applyKanbanTicketPageConditions = (
   query: any,
   ctx: { userID: string },
@@ -1033,8 +1084,10 @@ export const queries = defineQueries({
       userGroups: z.array(z.string()).optional(),
       lastEmailAtStart: z.number().optional(),
       lastEmailAtEnd: z.number().optional(),
+      dynamicFieldFilters: supportDynamicFieldFiltersSchema,
+      formEntityValueFieldIds: z.array(z.string()).optional(),
     }),
-    ({ ctx, args: { channelId, merchantMid, assignedTo, priority, stageName, aiCategory, hasAiDraft, userGroups, lastEmailAtStart, lastEmailAtEnd } }) => {
+    ({ ctx, args: { channelId, merchantMid, assignedTo, priority, stageName, aiCategory, hasAiDraft, userGroups, lastEmailAtStart, lastEmailAtEnd, dynamicFieldFilters, formEntityValueFieldIds } }) => {
       let query = zql.tickets.where('channelId', channelId);
 
       if (merchantMid) {
@@ -1075,13 +1128,18 @@ export const queries = defineQueries({
         query = query.where('lastEmailAt', '<=', lastEmailAtEnd);
       }
 
+      query = applySupportDynamicFieldFilters(query, dynamicFieldFilters);
+
       return query
         .orderBy('createdAt', 'desc')
         .related('project')
         .related('tagMappings')
         .related('entity')
         .related('conversation', (c) => c.related('channel'))
-        .related('emailReads', (q) => q.where('userId', ctx.userID));
+        .related('emailReads', (q) => q.where('userId', ctx.userID))
+        .related('formEntityValues', (fev) =>
+          relateSupportDynamicFieldValues(fev, dynamicFieldFilters, formEntityValueFieldIds),
+        );
     }
   ),
 
@@ -1350,24 +1408,12 @@ export const queries = defineQueries({
       userGroups: z.array(z.string()).optional(),
       lastEmailAtStart: z.number().optional(),
       lastEmailAtEnd: z.number().optional(),
+      dynamicFieldFilters: supportDynamicFieldFiltersSchema,
       limit: z.number(),
       start: z.object({ id: z.string(), lastEmailAt: z.number() }).nullable(),
       dir: z.literal('forward').or(z.literal('backward')),
     }),
-    ({
-      ctx,
-      args: {
-        channelId,
-        assignedTo,
-        priority,
-        stageName,
-        aiCategory,
-        hasAiDraft,
-        mailboxFolder, userGroups, lastEmailAtStart, lastEmailAtEnd, limit,
-        start,
-        dir,
-      },
-    }) => {
+    ({ ctx, args: { channelId, assignedTo, priority, stageName, aiCategory, hasAiDraft, mailboxFolder, userGroups, lastEmailAtStart, lastEmailAtEnd, dynamicFieldFilters, limit, start, dir } }) => {
       let query = zql.tickets.where('channelId', channelId);
       query = query.where('isArchived', false);
 
@@ -1426,6 +1472,8 @@ export const queries = defineQueries({
         query = query.where('lastEmailAt', '<=', lastEmailAtEnd);
       }
 
+      query = applySupportDynamicFieldFilters(query, dynamicFieldFilters);
+
       const orderDirection = dir === 'forward' ? 'desc' : 'asc';
       query = query.orderBy('lastEmailAt', orderDirection);
       // id tiebreak keeps the (lastEmailAt, id) keyset cursor deterministic on ties.
@@ -1449,7 +1497,10 @@ export const queries = defineQueries({
         // Caller's per-user mailbox overlay so the list can be filtered into mailbox
         // folders (Inbox / All Mail / Starred / Spam) client-side. A ticket with no
         // overlay row defaults to Inbox.
-        .related('userMailbox', q => q.where('userId', ctx.userID));
+        .related('userMailbox', q => q.where('userId', ctx.userID))
+        .related('formEntityValues', (fev) =>
+          relateSupportDynamicFieldValues(fev, dynamicFieldFilters),
+        );
     }
   ),
   supportTicketsPageV4: defineQuery(

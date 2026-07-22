@@ -13,6 +13,7 @@ import type { Stage } from './KanbanBoardScreen.types';
 import type { TicketFilters } from '../../components/Tickets/TicketFilters/types';
 import { FormFieldType, type FieldEnumOption, type FormFields } from '@xyne/shared';
 import { resolveDisplayFormFields } from '../../utils/board/resolveDisplayFormFields';
+import { matchesDynamicFieldValue } from '../../utils/board/dynamicFieldFilters';
 
 /**
  * Returns the color for a given stage name
@@ -88,22 +89,6 @@ export const getStatusColumns = (): Stage[] => {
       defaultTicketStatusV2: TicketStatusV2.CANCELLED,
     },
   ];
-};
-
-const getTimestampValue = (value: unknown): number | null => {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value !== 'string') return null;
-
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-
-  if (/^-?\d+(?:\.\d+)?$/.test(trimmed)) {
-    const numericValue = Number(trimmed);
-    return Number.isFinite(numericValue) ? numericValue : null;
-  }
-
-  const parsed = Date.parse(trimmed);
-  return Number.isNaN(parsed) ? null : parsed;
 };
 
 /**
@@ -505,74 +490,12 @@ export const applyTicketFilters = (
           return false;
         }
 
-        const fieldType = fieldInfo.fieldType;
-
-        // Handle different field types
-        if (Array.isArray(filterValue)) {
-          // SELECT, STRING, NUMBER, BOOLEAN, USER fields
-          if (fieldType === FormFieldType.MULTI_SELECT) {
-            // Multi-select: check if any ticket value matches filter values
-            const ticketValues = (fieldValue.actualFieldValue as string[]) || [];
-            const hasMatch = ticketValues.some(v => filterValue.includes(v));
-            if (!hasMatch) return false;
-          } else if (fieldType === FormFieldType.STRING) {
-            // String: case-insensitive substring search (use actualFieldValue since fieldValue is empty)
-            const rawValue = fieldValue.actualFieldValue;
-            let ticketValue = '';
-            if (typeof rawValue === 'string') {
-              ticketValue = rawValue;
-            } else if (typeof rawValue === 'number' || typeof rawValue === 'boolean') {
-              ticketValue = String(rawValue);
-            }
-            ticketValue = ticketValue.toLowerCase();
-            const searchTerm = (filterValue[0] || '').toLowerCase();
-            if (!ticketValue.includes(searchTerm)) {
-              return false;
-            }
-          } else if (fieldType === FormFieldType.NUMBER) {
-            // Number: convert both to string and compare (use actualFieldValue)
-            const rawValue = fieldValue.actualFieldValue;
-            const ticketValue =
-              typeof rawValue === 'number' || typeof rawValue === 'string' ? String(rawValue) : '';
-            const filterNumber = String(filterValue[0] || '');
-            if (ticketValue !== filterNumber) {
-              return false;
-            }
-          } else if (fieldType === FormFieldType.USER) {
-            // User field: actualFieldValue is an array of user IDs
-            const userIds = Array.isArray(fieldValue.actualFieldValue)
-              ? fieldValue.actualFieldValue
-              : [];
-            // Check if any user ID in the ticket matches any in the filter
-            const hasMatch = userIds.some(
-              userId => typeof userId === 'string' && filterValue.includes(userId),
-            );
-            if (!hasMatch) {
-              return false;
-            }
-          } else {
-            // Single select, boolean: exact match (use actualFieldValue)
-            const rawValue = fieldValue.actualFieldValue;
-            const ticketValue =
-              typeof rawValue === 'string' ||
-              typeof rawValue === 'number' ||
-              typeof rawValue === 'boolean'
-                ? String(rawValue)
-                : '';
-
-            if (!filterValue.includes(ticketValue)) {
-              return false;
-            }
-          }
-        } else if (
-          typeof filterValue === 'object' &&
-          ('start' in filterValue || 'end' in filterValue)
+        // Per-type value matching lives in the shared matcher (also used by the
+        // Support desk's client-side refinement) so the semantics stay identical.
+        if (
+          !matchesDynamicFieldValue(fieldInfo.fieldType, filterValue, fieldValue.actualFieldValue)
         ) {
-          // DATE field - range check
-          const ticketDate = getTimestampValue(fieldValue.actualFieldValue);
-          if (ticketDate === null) return false;
-          if (filterValue.start !== undefined && ticketDate < filterValue.start) return false;
-          if (filterValue.end !== undefined && ticketDate > filterValue.end) return false;
+          return false;
         }
       }
     }

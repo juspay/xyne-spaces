@@ -35,6 +35,12 @@ import { Button } from '../../components/ui/Button/Button';
 import Dialog from '../../components/ui/Dialog';
 import { getStageColor, groupTicketsByStage } from '../KanbanBoardScreen/KanbanBoardScreen.utils';
 import type { Stage } from '../KanbanBoardScreen/KanbanBoardScreen.types';
+import {
+  ticketMatchesDynamicFieldEntries,
+  type DynamicFieldFilterEntry,
+  type DynamicFieldQueryFilter,
+  type FormEntityValueLike,
+} from '../../utils/board/dynamicFieldFilters';
 
 const toStageColumn = (stage: { id: string; name: string; sequenceNumber?: number }) => ({
   id: stage.id,
@@ -56,7 +62,9 @@ export interface SupportKanbanBoardProps {
     userGroups: string[] | undefined;
     lastEmailAtStart: number | undefined;
     lastEmailAtEnd: number | undefined;
+    dynamicFieldFilters?: DynamicFieldQueryFilter[] | undefined;
   };
+  dynamicFieldEntries?: DynamicFieldFilterEntry[];
   onTicketClick: (e: React.MouseEvent | KeyboardEvent, ticket: Ticket) => void;
   onTicketsLoaded?: (tickets: Ticket[]) => void;
   activeTicketId?: string;
@@ -76,6 +84,7 @@ export const SupportKanbanBoard = ({
   boardId,
   onBoardIdResolved,
   ticketFilter,
+  dynamicFieldEntries,
   onTicketClick,
   onTicketsLoaded,
   activeTicketId,
@@ -112,6 +121,7 @@ export const SupportKanbanBoard = ({
         g: ticketFilter.userGroups ?? null,
         ds: ticketFilter.lastEmailAtStart ?? null,
         de: ticketFilter.lastEmailAtEnd ?? null,
+        df: dynamicFieldEntries ?? null,
       }),
     [
       channelId,
@@ -123,6 +133,7 @@ export const SupportKanbanBoard = ({
       ticketFilter.userGroups,
       ticketFilter.lastEmailAtStart,
       ticketFilter.lastEmailAtEnd,
+      dynamicFieldEntries,
     ],
   );
   const loadStartTimeRef = useRef<number | null>(Date.now());
@@ -159,10 +170,22 @@ export const SupportKanbanBoard = ({
     if (firstRowBoardId) onBoardIdResolved(firstRowBoardId);
   }, [firstRowBoardId, onBoardIdResolved]);
 
+  const dynamicallyFilteredTickets = useMemo<Ticket[] | undefined>(() => {
+    if (!supportTickets) return undefined;
+    const rows = supportTickets as Ticket[];
+    if (!dynamicFieldEntries?.length) return rows;
+    return rows.filter(ticket =>
+      ticketMatchesDynamicFieldEntries(
+        (ticket as Ticket & { formEntityValues?: FormEntityValueLike[] }).formEntityValues,
+        dynamicFieldEntries,
+      ),
+    );
+  }, [supportTickets, dynamicFieldEntries]);
+
   // Report loaded tickets up so the parent can source the merge dialog.
   useEffect(() => {
-    if (supportTickets) onTicketsLoaded?.(supportTickets as Ticket[]);
-  }, [supportTickets, onTicketsLoaded]);
+    if (dynamicallyFilteredTickets) onTicketsLoaded?.(dynamicallyFilteredTickets);
+  }, [dynamicallyFilteredTickets, onTicketsLoaded]);
 
   const effectiveBoardId = boardId ?? firstRowBoardId ?? undefined;
 
@@ -189,10 +212,10 @@ export const SupportKanbanBoard = ({
 
   const [localTickets, setLocalTickets] = useState<Ticket[]>([]);
   useEffect(() => {
-    if (supportTickets) {
-      setLocalTickets(supportTickets as Ticket[]);
+    if (dynamicallyFilteredTickets) {
+      setLocalTickets(dynamicallyFilteredTickets);
     }
-  }, [supportTickets]);
+  }, [dynamicallyFilteredTickets]);
 
   // Stages fetched dynamically from the board configured in EmailChannelPreference.
   // Empty if no board is configured — kanban will show no stages.
