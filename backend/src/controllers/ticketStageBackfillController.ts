@@ -14,7 +14,7 @@ const DELAY_MS = 1000;
 const requestSchema = z
   .object({
     channelId: z.string().trim().min(1, 'channelId is required'),
-    targetStage: z.string().trim().min(1, 'targetStage is required'),
+    targetStage: z.string().trim().min(1).optional(),
     destinationStage: z.string().trim().min(1).optional(),
     status: z.nativeEnum(TicketStatusV2).optional(),
     boardId: z.string().trim().min(1).optional(),
@@ -39,7 +39,7 @@ const requestSchema = z
       });
     }
 
-    if (hasDestinationStage && data.targetStage === data.destinationStage) {
+    if (hasDestinationStage && data.targetStage && data.targetStage === data.destinationStage) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         message: 'targetStage and destinationStage must be different',
@@ -70,6 +70,7 @@ type StageDetails = {
 type TicketForBackfill = {
   id: string;
   boardId: string;
+  stageName: string;
 };
 
 type BackfillScope = {
@@ -292,15 +293,15 @@ export class TicketStageBackfillController {
       const ticketWhere = {
         channelId: options.channelId,
         workspaceId,
-        stageName: options.targetStage,
+        ...(options.targetStage ? { stageName: options.targetStage } : {}),
         ...(options.boardId ? { boardId: options.boardId } : {}),
         ...(options.createdAfter ? { createdAt: { gt: options.createdAfter } } : {}),
         ...(externalTicketIds ? { id: { in: externalTicketIds } } : {}),
       };
 
-      const boardRows: TicketForBackfill[] = await db.ticket.findMany({
+      const boardRows = await db.ticket.findMany({
         where: ticketWhere,
-        select: { id: true, boardId: true },
+        select: { boardId: true },
         distinct: ['boardId'],
       });
       const boardIds = boardRows.map(ticket => ticket.boardId);
@@ -329,11 +330,15 @@ export class TicketStageBackfillController {
       const stages = await db.stage.findMany({
         where: {
           boardId: { in: boardIds },
-          OR: [
-            { name: options.targetStage },
-            ...(options.destinationStage ? [{ name: options.destinationStage }] : []),
-            ...(options.status ? [{ defaultTicketStatusV2: options.status }] : []),
-          ],
+          ...(options.targetStage
+            ? {
+                OR: [
+                  { name: options.targetStage },
+                  ...(options.destinationStage ? [{ name: options.destinationStage }] : []),
+                  ...(options.status ? [{ defaultTicketStatusV2: options.status }] : []),
+                ],
+              }
+            : {}),
         },
         select: {
           id: true,
@@ -361,7 +366,8 @@ export class TicketStageBackfillController {
       const destinationStagesByBoard = new Map<string, StageDetails>();
       const invalidBoards = boardIds.filter(boardId => {
         const boardStages = stagesByBoard.get(boardId);
-        if (!boardStages?.has(options.targetStage)) return true;
+        if (!boardStages) return true;
+        if (options.targetStage && !boardStages.has(options.targetStage)) return true;
 
         if (options.destinationStage) {
           const destinationStage = boardStages.get(options.destinationStage);
@@ -414,6 +420,20 @@ export class TicketStageBackfillController {
         ]),
       );
 
+      const candidateTicketWhere = options.targetStage
+        ? ticketWhere
+        : {
+            AND: [
+              ticketWhere,
+              {
+                OR: Array.from(destinationStagesByBoard.entries()).map(([boardId, stage]) => ({
+                  boardId,
+                  stageName: { not: stage.name },
+                })),
+              },
+            ],
+          };
+
       const summary: BackfillSummary = {
         batches: 0,
         processed: 0,
@@ -436,8 +456,10 @@ export class TicketStageBackfillController {
           // Use an explicit keyset predicate because updated tickets no longer
           // match ticketWhere; cursor + skip: 1 could skip the next row after
           // the cursor has been moved out of the source stage.
-          where: cursor ? { AND: [ticketWhere, { id: { gt: cursor } }] } : ticketWhere,
-          select: { id: true, boardId: true },
+          where: cursor
+            ? { AND: [candidateTicketWhere, { id: { gt: cursor } }] }
+            : candidateTicketWhere,
+          select: { id: true, boardId: true, stageName: true },
           orderBy: { id: 'asc' },
           take: BATCH_SIZE,
         });
@@ -452,14 +474,14 @@ export class TicketStageBackfillController {
           summary.processed += 1;
 
           const boardStages = stagesByBoard.get(ticket.boardId);
-          const sourceStage = boardStages?.get(options.targetStage);
+          const sourceStage = boardStages?.get(options.targetStage ?? ticket.stageName);
           const destinationStage = destinationStagesByBoard.get(ticket.boardId);
           if (!sourceStage || !destinationStage) {
             summary.errors += 1;
             logger.warn(`${TAG} Missing stage metadata while processing ticket`, {
               ticketId: ticket.id,
               boardId: ticket.boardId,
-              targetStage: options.targetStage,
+              targetStage: options.targetStage ?? ticket.stageName,
               destinationStage: options.destinationStage,
               status: options.status,
             });

@@ -9,11 +9,12 @@ const adminAuth = authorize('TICKET-MIGRATION', AccessType.ADMIN);
 
 /**
  * @route POST /api/admin/ticket-stage-backfill
- * @desc Move tickets in targetStage to an explicit destinationStage or to a
- *       stage whose default status matches status for one desk channel.
+ * @desc Move tickets in targetStage, or all stages when targetStage is omitted,
+ *       to an explicit destinationStage or to a stage whose default status
+ *       matches status for one desk channel.
  *       Body: {
  *         channelId: string,
- *         targetStage: string,
+ *         targetStage?: string,
  *         destinationStage?: string,
  *         status?: TicketStatusV2,
  *         boardId?: string,
