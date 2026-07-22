@@ -107,6 +107,7 @@ import ticketEmailCountBackfillRoutes from '@/routes/ticketEmailCountBackfill';
 import emailReadAtBackfillRoutes from '@/routes/emailReadAtBackfill';
 import setUpdatedAtTimeRoutes from '@/routes/setUpdatedAtTime';
 import ticketMetadataBackfillRoutes from '@/routes/ticketMetadataBackfill';
+import ticketStageBackfillRoutes from '@/routes/ticketStageBackfill';
 import queriesEntityTypeBackfillRoutes from '@/routes/queriesEntityTypeBackfill';
 import onCallSetNumbersBackfillRoutes from '@/routes/onCallSetNumbersBackfill';
 import ticketDuplicateBackfillRoutes from '@/routes/ticketDuplicateBackfill';
@@ -431,6 +432,8 @@ export class App {
     this.app.use('/api/admin/automation-series-id-backfill', automationSeriesIdBackfillRoutes);
     this.app.use('/api/admin/set-updated-at-time', setUpdatedAtTimeRoutes);
     this.app.use('/api/admin/ticket-metadata-backfill', ticketMetadataBackfillRoutes);
+    this.app.use('/api/admin/ticket-stage-backfill', ticketStageBackfillRoutes);
+    this.app.use('/migrate/api/admin/ticket-stage-backfill', ticketStageBackfillRoutes);
     this.app.use('/migrate/api/admin/queries-entity-type-backfill', queriesEntityTypeBackfillRoutes);
     // Ticket duplicate backfill route (always available, no vespa flag)
     this.app.use('/api/admin/ticket-duplicate-backfill', ticketDuplicateBackfillRoutes);
