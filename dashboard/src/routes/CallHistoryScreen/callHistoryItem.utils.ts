@@ -128,6 +128,28 @@ export function getCallStatus(
   };
 }
 
+export function isMissedCallForUser(call: Call, userId: string | undefined): boolean {
+  if (!userId) return false;
+  if (call.status === CallStatus.SCHEDULED || call.status === CallStatus.ACTIVE) {
+    return false;
+  }
+
+  const isOutgoingCall = call.createdByUserId === userId;
+  const currentUserParticipant = call.participants?.find(p => p.userId === userId);
+  if (!currentUserParticipant) {
+    return false;
+  }
+
+  const hasCurrentUserJoined = currentUserParticipant.response === InvitationResponse.ACCEPTED;
+  const userJoinedandLeft = currentUserParticipant.response === InvitationResponse.LEFT;
+  const anyoneJoined = (call.participants || []).some(
+    p => p.response === InvitationResponse.ACCEPTED || p.response === InvitationResponse.LEFT,
+  );
+
+  return getCallStatus(call, isOutgoingCall, hasCurrentUserJoined, userJoinedandLeft, anyoneJoined)
+    .isMissedCall;
+}
+
 // Get status text based on call state
 export function getStatusText(
   isMissedCall: boolean,
