@@ -16,15 +16,18 @@ export class SubTicketsACL extends BaseACL<'sub_tickets'> {
   }
 
   async canUpdate(args: UpdateValue<TableSchema<'sub_tickets'>>, tx: Transaction<Schema>): Promise<void> {
-    // Get existing subTicket to verify workspace
     const subTicket = await tx.run(zql.sub_tickets.where('id', args.id).one());
     if (!subTicket || subTicket.workspaceId !== this.ctx.workspaceId) {
       throw new MutationACLError('Sub-ticket not found in this workspace', 'sub_tickets');
     }
 
-    const hasAccess = await tx.run(zql.ticket_sub_ticket_mappings
-      .where('subTicketId', args.id)
-      .whereExists('ticket', (ticket) => {
+    if (!subTicket.mappedTicketId) {
+      return;
+    }
+
+    const mappedTicket = await tx.run(zql.sub_tickets
+      .where('id', args.id)
+      .whereExists('mappedTicket', (ticket) => {
         return ticket.whereExists('conversation', (conversation) => {
           return conversation.whereExists('channel', (channel) => {
             return channel.where(({ cmp, or, exists, and }) => {
@@ -54,8 +57,8 @@ export class SubTicketsACL extends BaseACL<'sub_tickets'> {
       })
       .one());
 
-    if (!hasAccess) {
-      throw new MutationACLError('Sub-ticket update failed: you do not have access to the parent ticket', 'sub_tickets');
+    if (!mappedTicket) {
+      throw new MutationACLError('Sub-ticket update failed: you do not have access to the sub-ticket channel', 'sub_tickets');
     }
   }
 
