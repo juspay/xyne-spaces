@@ -1,4 +1,4 @@
-import { useCacConfig } from '../../hooks/useCacConfig';
+import { useCacConfig } from '@xyne/shared/hooks';
 import {
   SPEAKER_IDENTIFICATION_CAC_KEY,
   DEFAULT_SPEAKER_IDENTIFICATION_CAC_CONFIG,

@@ -19,7 +19,7 @@ import type { FormControllerRef, Phase, RCAFormValues } from './RCAScreen.types'
 import { useRCALookups } from '../../hooks/useRCALookups';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { useAuth } from '../../hooks/useAuth';
-import { useCacConfig } from '../../hooks/useCacConfig';
+import { useCacConfig } from '@xyne/shared/hooks';
 import { DEFAULT_RCA_CAC_CONFIG, type RcaCacConfig } from './rcaCacConfig';
 import { Dialog } from '../../components/ui/Dialog';
 import { Button } from '../../components/ui/Button';

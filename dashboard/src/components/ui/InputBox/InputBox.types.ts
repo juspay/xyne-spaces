@@ -1,4 +1,5 @@
-export type { MentionResult, CommandItem, ChannelResult } from '../Selectors/Selectors.types';
+export type { MentionResult } from '@xyne/shared';
+export type { CommandItem, ChannelResult } from '../Selectors/Selectors.types';
 import type { FocusPosition } from '@tiptap/react';
 
 export interface TypingUser {
@@ -28,10 +29,10 @@ export interface InputBoxProps {
   ) => void | Promise<void>;
   onContentChange?: (html: string, text: string) => void;
   onCancel?: () => void;
-  mentionItems?: import('../Selectors/Selectors.types').MentionResult[];
-  voiceMentionItems?: import('../Selectors/Selectors.types').MentionResult[];
+  mentionItems?: import('@xyne/shared').MentionResult[];
+  voiceMentionItems?: import('@xyne/shared').MentionResult[];
   onMentionSearch?: (query: string) => void;
-  onMentionSelect?: (mention: import('../Selectors/Selectors.types').MentionResult) => void;
+  onMentionSelect?: (mention: import('@xyne/shared').MentionResult) => void;
   channelItems?: import('../Selectors/Selectors.types').ChannelResult[];
   onChannelSearch?: (query: string) => void;
   onChannelSelect?: (channel: import('../Selectors/Selectors.types').ChannelResult) => void;

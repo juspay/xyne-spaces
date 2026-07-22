@@ -1,6 +1,33 @@
 export { SharedAuthProvider, useSharedAuthContext } from './context.js';
 export type { SharedAuthContext } from './context.js';
 
+export { HttpClientProvider, useHttpClient, useOptionalHttpClient } from './HttpClientContext.js';
+export type { HttpClient } from './HttpClientContext.js';
+
+export { useAffinityService } from './useAffinityService.js';
+export { AffinityService } from '../services/affinityService.js';
+export type { AffinityWeights } from '../services/affinityService.js';
+
+export { useCacConfig } from './useCacConfig.js';
+
+export { useChannelRecentSenders } from './useChannelRecentSenders.js';
+export { useDmAffinityRank } from './useDmAffinityRank.js';
+export {
+  useVespaChannelParticipants,
+  ChannelServiceProvider,
+} from './useVespaChannelParticipants.js';
+export type { FetchVespaChannelParticipants } from './useVespaChannelParticipants.js';
+
+export { useUserGroupSearch } from './useUserGroupSearch.js';
+export type { UserGroupLike } from './useUserGroupSearch.js';
+
+export { useMentionSearch } from './useMentionSearch.js';
+export type {
+  UseMentionSearchResult,
+  UseMentionSearchOptions,
+} from './useMentionSearch.js';
+export type { MentionResult } from '../types/mention.js';
+
 export {
   searchUsers,
   useUsers,

@@ -10,7 +10,7 @@ import {
   UserMentionActionType,
   GroupMentionActionType,
 } from '../MentionText';
-import type { MentionResult } from '../Selectors/Selectors.types';
+import type { MentionResult } from '@xyne/shared';
 import type { BaseSelectorPluginState } from '../Selectors';
 import { createSelectorPlugin } from '../Selectors';
 

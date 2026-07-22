@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useMemo, useCallback, useState } from 'react';
 import { apiInstance } from '../services/clients/apiClient';
-import type { MentionResult } from '../components/ui/Selectors/Selectors.types';
+import type { MentionResult } from '@xyne/shared';
 
 interface SlackUserItem {
   id: string;

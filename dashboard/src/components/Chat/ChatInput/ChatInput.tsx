@@ -40,7 +40,7 @@ import {
 } from '../../../services/Analytics/mixpanelService';
 import type { FocusPosition } from '@tiptap/react';
 import { createWorkflow, CreateWorkflowRequest } from '../../../services/Workflow/workflowService';
-import { MentionResult } from '../../ui/Selectors/Selectors.types';
+import type { MentionResult } from '@xyne/shared';
 import { useCanCreateTicket } from '../../../hooks/usePermissions';
 import { mutators } from '../../../zero/mutators';
 import { useShortcutById } from '../../../shortcuts';

@@ -19,6 +19,29 @@ export {
   extractAllMentions,
 } from './mentionParser.js';
 export {
+  matchKind,
+  matchQuality,
+  isPrefixMatch,
+  normalizeAffinity,
+  scoreCandidate,
+  eligibleSpecials,
+  rankCandidates,
+} from './mentionRanking.js';
+export {
+  getMentionDisplayName,
+  getUserPicture,
+  userToMentionResult,
+} from './mentionUser.js';
+export type {
+  MatchKind,
+  SpecialMentionKind,
+  SpecialMentionDescriptor,
+  ScoreInputs,
+  EligibleSpecialsOpts,
+  ScoredCandidate,
+  RankableCandidate,
+} from './mentionRanking.js';
+export {
   PAGE_BREAK_MARKER,
   isPageBreak,
   getId,

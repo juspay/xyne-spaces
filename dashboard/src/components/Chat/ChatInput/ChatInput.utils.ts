@@ -1,4 +1,4 @@
-import type { MentionResult } from '../../ui/Selectors/Selectors.types';
+import type { MentionResult } from '@xyne/shared';
 import { convertCustomEmojiUrls } from '../../../utils/customEmojiUtils';
 import { convertTrailingEmoticonsInHtml } from '../../../utils/emojiLookup';
 /**

@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
-import { ChannelScopeType } from '@xyne/shared';
-import { useAllVisibleChannels } from './useChannels';
+import { ChannelScopeType } from '../zero/schema.js';
+import { useAllVisibleChannels } from './useChannels.js';
 
 const DM_RANK_CAP = 10;
 

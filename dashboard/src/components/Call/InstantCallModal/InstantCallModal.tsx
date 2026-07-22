@@ -2,7 +2,7 @@ import { ChannelScopeType, ChannelVisibility } from '@xyne/shared';
 import { Hash, Lock, Users, X } from 'lucide-react';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useAllVisibleChannels } from '../../../hooks/useChannels';
-import { useUserGroupSearch } from '../../../hooks/useUserGroupSearch';
+import { useUserGroupSearch } from '@xyne/shared/hooks';
 import { useSelf, useActiveUsers, useUsers } from '../../../hooks/useUsers';
 import { useZero } from '../../../hooks/useZero';
 import { queries } from '../../../zero/queries';

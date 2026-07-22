@@ -55,7 +55,7 @@ import { EmojiSelector } from '../Selectors';
 import { AttachmentPreview } from '../files';
 import type { UploadedFile } from '../files/Files.types';
 import { FilePreviewModal } from '../../FileViewer/FileViewerModal';
-import type { MentionResult } from '../Selectors/Selectors.types';
+import type { MentionResult } from '@xyne/shared';
 import { MentionExtension, mentionPluginKey } from '../TipTapExtensions';
 import { CommandsExtension, commandPluginKey } from '../TipTapExtensions';
 import { EmojiSelectorExtension, emojiSelectorPluginKey } from '../TipTapExtensions';
