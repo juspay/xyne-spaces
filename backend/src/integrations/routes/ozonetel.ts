@@ -11,6 +11,7 @@ const router = Router();
 router.use(express.json());
 
 const supportAdminAuth = authorize('SUPPORT', AccessType.ADMIN);
+const supportReadAuth = authorize('SUPPORT', AccessType.READ);
 
 const agentMappingSchema = z.record(
   z.string(),
@@ -169,6 +170,17 @@ function respondConfigValidationError(res: Response, error: unknown): boolean {
   }
   return false;
 }
+
+router.get('/toolbar', supportReadAuth, async (req: Request, res: Response): Promise<void> => {
+  const workspaceId = ensureWorkspaceId(req, res);
+  if (!workspaceId) return;
+
+  const cfg = await ozonetelConfigService.getConfig(workspaceId);
+  res.json({
+    configured: !!cfg,
+    toolbarUrl: cfg?.toolbarUrl ?? null,
+  });
+});
 
 router.get('/config', supportAdminAuth, async (req: Request, res: Response): Promise<void> => {
   const workspaceId = ensureWorkspaceId(req, res);
