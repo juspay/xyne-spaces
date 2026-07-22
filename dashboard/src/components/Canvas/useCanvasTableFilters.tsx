@@ -587,12 +587,12 @@ const CanvasTableFilterWidget: FC<TableFilterWidgetProps> = ({ blockContent, tab
       setOpenColumnFilterId(null);
       setFocusedFilterId(null);
     }
-    wrapper.classList.toggle(TABLE_FILTER_READY_PADDING_CLASS, !isOpen);
-    wrapper.classList.toggle(TABLE_FILTER_OPEN_PADDING_CLASS, isOpen);
+    wrapper.classList.remove(TABLE_FILTER_READY_PADDING_CLASS);
+    wrapper.classList.remove(TABLE_FILTER_OPEN_PADDING_CLASS);
 
     return () => {
       wrapper.classList.remove(TABLE_FILTER_OPEN_PADDING_CLASS);
-      wrapper.classList.add(TABLE_FILTER_READY_PADDING_CLASS);
+      wrapper.classList.remove(TABLE_FILTER_READY_PADDING_CLASS);
     };
   }, [isOpen, wrapper]);
 
@@ -1017,7 +1017,6 @@ export const useCanvasTableFilters = (containerRef: RefObject<HTMLElement | null
       const mount = document.createElement('div');
       mount.className = TABLE_FILTER_MOUNT_CLASS;
       wrapper.appendChild(mount);
-      wrapper.classList.add(TABLE_FILTER_READY_PADDING_CLASS);
 
       const reactRoot = createRoot(mount);
       reactRoot.render(

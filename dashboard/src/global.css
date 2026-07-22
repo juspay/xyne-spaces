@@ -2044,6 +2044,150 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   vertical-align: middle;
 }
 
+/* ============================================================
+   Canvas editor — Notion-style page
+   Scoped to the two canvas editor roots so it never touches the
+   chat/email ProseMirror editors. Colours use theme tokens so the
+   light and midnight themes both work automatically.
+   ============================================================ */
+.canvas-editor-container,
+.collaborative-canvas-editor {
+  --canvas-content-width: 720px;
+  /* Matches BlockNote's default .bn-editor padding-inline — the drag-handle / "+" gutter. */
+  --canvas-gutter: 54px;
+}
+
+/* Centered reading column. .bn-editor keeps its inline padding as the
+   hover-handle gutter, so the drag-handle / "+" stay in the margin. */
+.canvas-editor-container .bn-editor,
+.collaborative-canvas-editor .bn-editor {
+  box-sizing: border-box;
+  max-width: calc(var(--canvas-content-width) + 2 * var(--canvas-gutter));
+  margin-inline: auto;
+  background-color: transparent;
+  font-size: 16px;
+  line-height: 1.6;
+  color: hsl(var(--foreground));
+}
+
+.canvas-editor-container .bn-side-menu .mantine-UnstyledButton-root:not(.mantine-Menu-item),
+.collaborative-canvas-editor .bn-side-menu .mantine-UnstyledButton-root:not(.mantine-Menu-item) {
+  background-color: transparent;
+}
+
+.canvas-editor-container .bn-side-menu .mantine-UnstyledButton-root:not(.mantine-Menu-item):hover,
+.collaborative-canvas-editor
+  .bn-side-menu
+  .mantine-UnstyledButton-root:not(.mantine-Menu-item):hover {
+  background-color: hsl(var(--accent));
+}
+
+.canvas-editor-container .bn-editor .bn-block-content[data-content-type="heading"][data-level="1"],
+.collaborative-canvas-editor
+  .bn-editor
+  .bn-block-content[data-content-type="heading"][data-level="1"] {
+  font-size: 1.875rem; /* 30px */
+  line-height: 1.3;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.canvas-editor-container .bn-editor .bn-block-content[data-content-type="heading"][data-level="2"],
+.collaborative-canvas-editor
+  .bn-editor
+  .bn-block-content[data-content-type="heading"][data-level="2"] {
+  font-size: 1.5rem; /* 24px */
+  line-height: 1.3;
+  font-weight: 600;
+}
+.canvas-editor-container .bn-editor .bn-block-content[data-content-type="heading"][data-level="3"],
+.collaborative-canvas-editor
+  .bn-editor
+  .bn-block-content[data-content-type="heading"][data-level="3"] {
+  font-size: 1.25rem; /* 20px */
+  line-height: 1.35;
+  font-weight: 600;
+}
+
+.canvas-editor-container .bn-side-menu[data-block-type="heading"][data-level="1"],
+.collaborative-canvas-editor .bn-side-menu[data-block-type="heading"][data-level="1"] {
+  height: 75px;
+}
+.canvas-editor-container .bn-side-menu[data-block-type="heading"][data-level="2"],
+.collaborative-canvas-editor .bn-side-menu[data-block-type="heading"][data-level="2"] {
+  height: 67px;
+}
+.canvas-editor-container .bn-side-menu[data-block-type="heading"][data-level="3"],
+.collaborative-canvas-editor .bn-side-menu[data-block-type="heading"][data-level="3"] {
+  height: 63px;
+}
+
+.canvas-editor-container .bn-editor .bn-block-group .bn-block-group > .bn-block-outer::before,
+.collaborative-canvas-editor .bn-editor .bn-block-group .bn-block-group > .bn-block-outer::before {
+  display: none;
+}
+
+/* Quote block — subtle left rule + muted text (token-based). */
+.canvas-editor-container .bn-editor [data-content-type="quote"] blockquote,
+.collaborative-canvas-editor .bn-editor [data-content-type="quote"] blockquote {
+  border-left: 3px solid hsl(var(--border));
+  color: hsl(var(--muted-foreground));
+  padding-left: 0.85em;
+  font-style: normal;
+}
+
+/* Code block — theme-adaptive (BlockNote hardcodes a #161616 dark box that
+   blends into the midnight page and is heavy in light). Uses tokens so it
+   stays a subtle, bordered surface in both themes, with a monospace font. */
+.canvas-editor-container .bn-editor [data-content-type="codeBlock"],
+.collaborative-canvas-editor .bn-editor [data-content-type="codeBlock"] {
+  background-color: hsl(var(--muted));
+  color: hsl(var(--foreground));
+  border: 1px solid hsl(var(--border));
+}
+.canvas-editor-container .bn-editor [data-content-type="codeBlock"] > pre,
+.collaborative-canvas-editor .bn-editor [data-content-type="codeBlock"] > pre {
+  font-family:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 0.875em;
+  padding: 16px 18px;
+}
+/* Language dropdown (revealed on hover) picks up the theme text colour. */
+.canvas-editor-container .bn-editor [data-content-type="codeBlock"] > div > select,
+.collaborative-canvas-editor .bn-editor [data-content-type="codeBlock"] > div > select {
+  color: hsl(var(--muted-foreground));
+}
+
+/* Table — token-based borders + subtle header row (BlockNote hardcodes #ddd). */
+.canvas-editor-container .bn-editor [data-content-type="table"] td,
+.canvas-editor-container .bn-editor [data-content-type="table"] th,
+.collaborative-canvas-editor .bn-editor [data-content-type="table"] td,
+.collaborative-canvas-editor .bn-editor [data-content-type="table"] th {
+  border-color: hsl(var(--border));
+}
+.canvas-editor-container .bn-editor [data-content-type="table"] th,
+.collaborative-canvas-editor .bn-editor [data-content-type="table"] th {
+  background-color: hsl(var(--muted));
+}
+/* Table cell selection fill — themed (BlockNote hardcodes a periwinkle #c8c8ff). */
+.canvas-editor-container .bn-editor .selectedCell:after,
+.collaborative-canvas-editor .bn-editor .selectedCell:after {
+  background: hsl(var(--ring) / 0.2);
+}
+/* Align the table grid's left edge with paragraphs/code blocks — BlockNote reserves a 9px
+   left inset on .tableWrapper for the row handles; drop it so all blocks start at the same X. */
+.canvas-editor-container .bn-editor [data-content-type="table"] .tableWrapper,
+.collaborative-canvas-editor .bn-editor [data-content-type="table"] .tableWrapper {
+  padding-left: 0;
+}
+/* Breathing room between the hover + / drag handles and block content. Applied at the
+   .bn-block level (border-box) so the whole block — including boxed blocks like code —
+   shifts uniformly and every block stays aligned, just a few px off the handles. */
+.canvas-editor-container .bn-editor .bn-block,
+.collaborative-canvas-editor .bn-editor .bn-block {
+  box-sizing: border-box;
+  padding-left: 14px;
+}
+
 /* Call summary card */
 .call-summary-card {
   background: var(--surface);
