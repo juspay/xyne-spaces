@@ -98,13 +98,6 @@ export async function applyDynamicHeaders(
   localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
   syncAxiosDefaults(previous, next);
   syncCookies(previous, next);
-  if (window.electronAPI?.setDynamicHeaders) {
-    try {
-      await window.electronAPI.setDynamicHeaders(next);
-    } catch {
-      // web-side routing still applies
-    }
-  }
 
   // dynamic imports: socketClient statically imports this module
   const [{ websocketService }, { stateMachineActor }] = await Promise.all([
@@ -118,14 +111,33 @@ export async function applyDynamicHeaders(
 
 export async function hydrateDynamicHeaders(): Promise<void> {
   try {
-    const { data } = await axios.get<Record<string, string>>(
-      `${API_BASE_URL}/user-header-overrides/me`,
-      { withCredentials: true },
-    );
+    const { data } = await axios.get<Record<string, string>>(`${API_BASE_URL}/client-events/me`, {
+      withCredentials: true,
+    });
     await applyDynamicHeaders(data ?? {});
   } catch {
     // keep the stored value when the fetch fails
   }
+}
+
+export async function performHardReload(): Promise<void> {
+  if (window.electronAPI?.applyAppUpdate) {
+    window.electronAPI.applyAppUpdate();
+    return;
+  }
+  try {
+    if ('caches' in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map(key => caches.delete(key)));
+    }
+    if ('serviceWorker' in navigator) {
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(registrations.map(registration => registration.unregister()));
+    }
+  } catch {
+    // best-effort cache clear; reload regardless
+  }
+  window.location.reload();
 }
 
 syncAxiosDefaults({}, getDynamicHeaders());

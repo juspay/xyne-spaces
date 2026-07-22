@@ -1,21 +1,25 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { getPendingMutationCount, subscribePendingMutations } from '@xyne/shared/hooks';
-import { applyDynamicHeaders } from '../services/clients/dynamicHeaders';
+import { applyDynamicHeaders, performHardReload } from '../services/clients/dynamicHeaders';
 import { showSwitchOverlay } from '../stores/switchOverlayStore';
 
-export interface HeaderSwitchPayload {
-  headers?: Record<string, string>;
+export type ClientCommandEvent = 'header_update' | 'reload';
+
+export interface ClientCommand {
+  event: ClientCommandEvent;
+  payload?: Record<string, unknown>;
   force?: boolean;
   loadingSeconds?: number;
 }
 
-interface PendingSwitch {
-  headers: Record<string, string>;
+interface PendingCommand {
+  event: ClientCommandEvent;
+  payload: Record<string, unknown>;
   loadingSeconds: number;
 }
 
-export function useDeferredHeaderSwitch(): (payload: HeaderSwitchPayload) => void {
-  const pendingRef = useRef<PendingSwitch | null>(null);
+export function useDeferredClientCommand(): (command: ClientCommand) => void {
+  const pendingRef = useRef<PendingCommand | null>(null);
   const unsubscribeRef = useRef<(() => void) | null>(null);
 
   const stopWaiting = useCallback((): void => {
@@ -25,9 +29,14 @@ export function useDeferredHeaderSwitch(): (payload: HeaderSwitchPayload) => voi
 
   useEffect(() => stopWaiting, [stopWaiting]);
 
-  const apply = useCallback((pending: PendingSwitch): void => {
+  const apply = useCallback((pending: PendingCommand): void => {
     showSwitchOverlay(pending.loadingSeconds * 1000);
-    void applyDynamicHeaders(pending.headers);
+    if (pending.event === 'reload') {
+      void performHardReload();
+      return;
+    }
+    const headers = pending.payload['headers'] as Record<string, string> | undefined;
+    void applyDynamicHeaders(headers ?? {});
   }, []);
 
   const tryApply = useCallback((): void => {
@@ -40,13 +49,14 @@ export function useDeferredHeaderSwitch(): (payload: HeaderSwitchPayload) => voi
   }, [apply, stopWaiting]);
 
   return useCallback(
-    (payload: HeaderSwitchPayload): void => {
-      const pending: PendingSwitch = {
-        headers: payload?.headers ?? {},
-        loadingSeconds: payload?.loadingSeconds ?? 0,
+    (command: ClientCommand): void => {
+      const pending: PendingCommand = {
+        event: command.event,
+        payload: command.payload ?? {},
+        loadingSeconds: command.loadingSeconds ?? 0,
       };
 
-      if (payload?.force) {
+      if (command.force) {
         pendingRef.current = null;
         stopWaiting();
         apply(pending);
