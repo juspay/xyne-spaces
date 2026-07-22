@@ -56,6 +56,7 @@ type BackfillSummary = {
   updated: number;
   skipped: number;
   errors: number;
+  failedTicketIds: string[];
 };
 
 type StageDetails = {
@@ -319,6 +320,7 @@ export class TicketStageBackfillController {
               updated: 0,
               skipped: 0,
               errors: 0,
+              failedTicketIds: [],
             } satisfies BackfillSummary,
           },
           timestamp: new Date().toISOString(),
@@ -440,6 +442,7 @@ export class TicketStageBackfillController {
         updated: 0,
         skipped: 0,
         errors: 0,
+        failedTicketIds: [],
       };
 
       logger.info(`${TAG} Starting`, {
@@ -478,6 +481,7 @@ export class TicketStageBackfillController {
           const destinationStage = destinationStagesByBoard.get(ticket.boardId);
           if (!sourceStage || !destinationStage) {
             summary.errors += 1;
+            summary.failedTicketIds.push(ticket.id);
             logger.warn(`${TAG} Missing stage metadata while processing ticket`, {
               ticketId: ticket.id,
               boardId: ticket.boardId,
@@ -510,6 +514,7 @@ export class TicketStageBackfillController {
             else summary.skipped += 1;
           } catch (error) {
             summary.errors += 1;
+            summary.failedTicketIds.push(ticket.id);
             logger.warn(`${TAG} Failed to update ticket`, {
               ticketId: ticket.id,
               error: error instanceof Error ? error.message : String(error),
@@ -527,9 +532,15 @@ export class TicketStageBackfillController {
         if (DELAY_MS > 0) await TicketStageBackfillController.sleep(DELAY_MS);
       }
 
-      res.status(200).json({
-        success: true,
-        message: options.dryRun ? 'Dry run completed' : 'Ticket stage backfill completed',
+      const hasErrors = summary.errors > 0;
+      res.status(hasErrors ? 207 : 200).json({
+        success: !hasErrors,
+        message: hasErrors
+          ? 'Ticket stage backfill completed with errors'
+          : options.dryRun
+            ? 'Dry run completed'
+            : 'Ticket stage backfill completed',
+        ...(hasErrors ? { error: 'Some tickets could not be updated' } : {}),
         data: {
           options,
           ...(options.status ? { resolvedDestinationStages } : {}),
