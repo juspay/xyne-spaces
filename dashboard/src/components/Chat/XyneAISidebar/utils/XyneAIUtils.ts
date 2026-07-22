@@ -1,4 +1,8 @@
-import type { ToolOutput as GeniusToolOutput, MetricConfig, GroupbyConfig } from 'cosmic-ai-genius';
+import type {
+  ToolOutput as GeniusToolOutput,
+  MetricConfig,
+  GroupbyConfig,
+} from '../../../../types/toolOutput';
 import type { Message, StoredMessage, StreamingParsedContent } from './XyneAITypes';
 
 export function normalizeLoadedMessagesForDisplay(

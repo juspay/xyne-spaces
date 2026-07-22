@@ -51,12 +51,12 @@ import { genericInstance } from '../../../../services/clients/genericClient';
 import type { Components } from 'react-markdown';
 import {
   SingleStat,
-  Table,
-  Highchart,
-  HighBarChart1D,
-  VolumeChartRenderer,
-  type ToolOutput as GeniusToolOutput,
-} from 'cosmic-ai-genius';
+  SimpleTable as Table,
+  TimeSeriesChart as Highchart,
+  BarChart1D as HighBarChart1D,
+  VolumeChart as VolumeChartRenderer,
+} from '../../../../components/Charts';
+import type { ToolOutput as GeniusToolOutput } from '../../../../types/toolOutput';
 import { PptSlideViewer } from '../../../PptSlideViewer';
 import type { PptSlide } from '../../../PptSlideViewer';
 import { PdfPageViewer } from '../../../PdfPageViewer';
@@ -1847,7 +1847,6 @@ const ToolOutputsSection = ({ toolOutputs }: { toolOutputs: GeniusToolOutput[] }
         {toolOutput.rawChartData && toolOutput.groupbyConfig && toolOutput.selectedMetrics && (
           <div className='w-full max-w-full overflow-hidden'>
             <Highchart
-              options={{}}
               enableGroupby={true}
               rawChartData={toolOutput.rawChartData}
               groupbyConfig={toolOutput.groupbyConfig}
@@ -1857,7 +1856,6 @@ const ToolOutputsSection = ({ toolOutputs }: { toolOutputs: GeniusToolOutput[] }
                 label.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
               }
               isMobile={true}
-              isExpanded={false}
             />
           </div>
         )}
@@ -1892,7 +1890,16 @@ const ToolOutputsSection = ({ toolOutputs }: { toolOutputs: GeniusToolOutput[] }
 
         {/* Single Stat */}
 
-        {toolOutput.singleStat && <SingleStatSection singleStat={toolOutput.singleStat} />}
+        {toolOutput.singleStat && (
+          <SingleStatSection
+            singleStat={
+              toolOutput.singleStat as
+                | SingleStatObject
+                | SingleStatObject[]
+                | Record<string, string | number>[]
+            }
+          />
+        )}
 
         {/* Table Data */}
 
