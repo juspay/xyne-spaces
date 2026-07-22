@@ -1,4 +1,4 @@
-import { TicketStatusV2 } from '@prisma/client';
+import { ExternalEntityType, TicketStatusV2 } from '@prisma/client';
 import { Request, Response } from 'express';
 import { z } from 'zod';
 import { db } from '@/database/client';
@@ -6,7 +6,6 @@ import { ApiResponse } from '@/types/express';
 import { calculateETADeadline } from '@/utils/etaCalculation';
 import { logger } from '@/utils/logger';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
-import { isDeskChannelType } from '@xyne/shared';
 
 const TAG = '[TicketStageBackfill]';
 const BATCH_SIZE = 50;
@@ -16,13 +15,37 @@ const requestSchema = z
   .object({
     channelId: z.string().trim().min(1, 'channelId is required'),
     targetStage: z.string().trim().min(1, 'targetStage is required'),
-    destinationStage: z.string().trim().min(1, 'destinationStage is required'),
+    destinationStage: z.string().trim().min(1).optional(),
+    status: z.nativeEnum(TicketStatusV2).optional(),
+    boardId: z.string().trim().min(1).optional(),
+    externalSourceType: z.string().trim().min(1).optional(),
+    createdAfter: z
+      .string()
+      .datetime({ offset: true })
+      .transform(value => new Date(value))
+      .optional(),
     dryRun: z.boolean().optional().default(false),
   })
   .strict()
-  .refine(data => data.targetStage !== data.destinationStage, {
-    message: 'targetStage and destinationStage must be different',
-    path: ['destinationStage'],
+  .superRefine((data, context) => {
+    const hasDestinationStage = data.destinationStage !== undefined;
+    const hasStatus = data.status !== undefined;
+
+    if (hasDestinationStage === hasStatus) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Exactly one of destinationStage or status is required',
+        path: ['destinationStage'],
+      });
+    }
+
+    if (hasDestinationStage && data.targetStage === data.destinationStage) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'targetStage and destinationStage must be different',
+        path: ['destinationStage'],
+      });
+    }
   });
 
 type BackfillOptions = z.infer<typeof requestSchema>;
@@ -38,6 +61,8 @@ type BackfillSummary = {
 type StageDetails = {
   id: string;
   name: string;
+  boardId: string;
+  sequenceNumber: number;
   eta: number | null;
   defaultTicketStatusV2: TicketStatusV2;
 };
@@ -47,6 +72,22 @@ type TicketForBackfill = {
   boardId: string;
 };
 
+type BackfillScope = {
+  channelId: string;
+  workspaceId: string;
+  boardId: string;
+  createdAfter?: Date;
+};
+
+type ResolvedDestinationStages = Record<
+  string,
+  {
+    id: string;
+    name: string;
+    defaultTicketStatusV2: TicketStatusV2;
+  }
+>;
+
 export class TicketStageBackfillController {
   private static sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
@@ -54,7 +95,7 @@ export class TicketStageBackfillController {
 
   private static async applyStageChange(
     ticketId: string,
-    channelId: string,
+    scope: BackfillScope,
     sourceStage: StageDetails,
     destinationStage: StageDetails,
     actorUserId: string,
@@ -63,7 +104,10 @@ export class TicketStageBackfillController {
       const ticket = await tx.ticket.findFirst({
         where: {
           id: ticketId,
-          channelId,
+          channelId: scope.channelId,
+          workspaceId: scope.workspaceId,
+          boardId: scope.boardId,
+          ...(scope.createdAfter ? { createdAt: { gt: scope.createdAfter } } : {}),
           stageName: sourceStage.name,
         },
         select: {
@@ -147,6 +191,38 @@ export class TicketStageBackfillController {
     });
   }
 
+  private static async findExternalTicketIds(
+    workspaceId: string,
+    sourceType: string,
+  ): Promise<string[]> {
+    const sources = await db.externalSource.findMany({
+      where: {
+        workspaceId,
+        sourceType,
+      },
+      select: { id: true },
+    });
+
+    if (sources.length === 0) return [];
+
+    const mappings = await db.externalMessage.findMany({
+      where: {
+        externalSourceId: { in: sources.map(source => source.id) },
+        entityType: ExternalEntityType.TICKET,
+        entityId: { not: null },
+      },
+      select: { entityId: true },
+    });
+
+    return Array.from(
+      new Set(
+        mappings
+          .map(mapping => mapping.entityId)
+          .filter((entityId): entityId is string => entityId !== null),
+      ),
+    );
+  }
+
   static async triggerBackfill(req: Request, res: Response<ApiResponse>): Promise<void> {
     const parsedBody = requestSchema.safeParse(req.body);
     if (!parsedBody.success) {
@@ -174,7 +250,7 @@ export class TicketStageBackfillController {
     try {
       const channel = await db.channel.findFirst({
         where: { id: options.channelId, workspaceId },
-        select: { id: true, type: true },
+        select: { id: true, type: true, projectId: true },
       });
 
       if (!channel) {
@@ -186,19 +262,40 @@ export class TicketStageBackfillController {
         return;
       }
 
-      if (!isDeskChannelType(channel.type)) {
-        res.status(400).json({
-          success: false,
-          error: `Channel ${options.channelId} is not a desk channel`,
-          timestamp: new Date().toISOString(),
+      if (options.boardId) {
+        const board = await db.board.findFirst({
+          where: {
+            id: options.boardId,
+            workspaceId,
+            projectId: channel.projectId,
+          },
+          select: { id: true },
         });
-        return;
+
+        if (!board) {
+          res.status(404).json({
+            success: false,
+            error: 'Board not found for this workspace and channel project',
+            timestamp: new Date().toISOString(),
+          });
+          return;
+        }
       }
+
+      const externalTicketIds = options.externalSourceType
+        ? await TicketStageBackfillController.findExternalTicketIds(
+            workspaceId,
+            options.externalSourceType,
+          )
+        : undefined;
 
       const ticketWhere = {
         channelId: options.channelId,
         workspaceId,
         stageName: options.targetStage,
+        ...(options.boardId ? { boardId: options.boardId } : {}),
+        ...(options.createdAfter ? { createdAt: { gt: options.createdAfter } } : {}),
+        ...(externalTicketIds ? { id: { in: externalTicketIds } } : {}),
       };
 
       const boardRows: TicketForBackfill[] = await db.ticket.findMany({
@@ -208,52 +305,114 @@ export class TicketStageBackfillController {
       });
       const boardIds = boardRows.map(ticket => ticket.boardId);
 
-      const stagesByBoard = new Map<string, Map<string, StageDetails>>();
-      if (boardIds.length > 0) {
-        const stages = await db.stage.findMany({
-          where: {
-            boardId: { in: boardIds },
-            name: { in: [options.targetStage, options.destinationStage] },
+      if (boardIds.length === 0) {
+        res.status(200).json({
+          success: true,
+          message: options.dryRun ? 'Dry run completed' : 'Ticket stage backfill completed',
+          data: {
+            options,
+            ...(options.status ? { resolvedDestinationStages: {} } : {}),
+            summary: {
+              batches: 0,
+              processed: 0,
+              updated: 0,
+              skipped: 0,
+              errors: 0,
+            } satisfies BackfillSummary,
           },
-          select: {
-            id: true,
-            name: true,
-            boardId: true,
-            eta: true,
-            defaultTicketStatusV2: true,
-          },
+          timestamp: new Date().toISOString(),
         });
+        return;
+      }
 
-        for (const stage of stages) {
-          const boardStages = stagesByBoard.get(stage.boardId) ?? new Map<string, StageDetails>();
-          boardStages.set(stage.name, {
+      const stagesByBoard = new Map<string, Map<string, StageDetails>>();
+      const stages = await db.stage.findMany({
+        where: {
+          boardId: { in: boardIds },
+          OR: [
+            { name: options.targetStage },
+            ...(options.destinationStage ? [{ name: options.destinationStage }] : []),
+            ...(options.status ? [{ defaultTicketStatusV2: options.status }] : []),
+          ],
+        },
+        select: {
+          id: true,
+          name: true,
+          boardId: true,
+          sequenceNumber: true,
+          eta: true,
+          defaultTicketStatusV2: true,
+        },
+      });
+
+      for (const stage of stages) {
+        const boardStages = stagesByBoard.get(stage.boardId) ?? new Map<string, StageDetails>();
+        boardStages.set(stage.name, {
+          id: stage.id,
+          name: stage.name,
+          boardId: stage.boardId,
+          sequenceNumber: stage.sequenceNumber,
+          eta: stage.eta,
+          defaultTicketStatusV2: stage.defaultTicketStatusV2,
+        });
+        stagesByBoard.set(stage.boardId, boardStages);
+      }
+
+      const destinationStagesByBoard = new Map<string, StageDetails>();
+      const invalidBoards = boardIds.filter(boardId => {
+        const boardStages = stagesByBoard.get(boardId);
+        if (!boardStages?.has(options.targetStage)) return true;
+
+        if (options.destinationStage) {
+          const destinationStage = boardStages.get(options.destinationStage);
+          if (!destinationStage) return true;
+          destinationStagesByBoard.set(boardId, destinationStage);
+          return false;
+        }
+
+        const destinationStage = Array.from(boardStages.values())
+          .filter(
+            stage =>
+              stage.name !== options.targetStage &&
+              stage.defaultTicketStatusV2 === options.status,
+          )
+          .sort(
+            (left, right) =>
+              left.sequenceNumber - right.sequenceNumber || left.id.localeCompare(right.id),
+          )[0];
+
+        if (!destinationStage) return true;
+        destinationStagesByBoard.set(boardId, destinationStage);
+        return false;
+      });
+
+      if (invalidBoards.length > 0) {
+        res.status(400).json({
+          success: false,
+          error: options.destinationStage
+            ? 'Both stages must exist on every board containing matching tickets'
+            : 'A distinct stage with the requested status must exist on every board containing matching tickets',
+          data: {
+            targetStage: options.targetStage,
+            destinationStage: options.destinationStage,
+            status: options.status,
+            boardIds: invalidBoards,
+          },
+          timestamp: new Date().toISOString(),
+        });
+        return;
+      }
+
+      const resolvedDestinationStages: ResolvedDestinationStages = Object.fromEntries(
+        Array.from(destinationStagesByBoard.entries()).map(([boardId, stage]) => [
+          boardId,
+          {
             id: stage.id,
             name: stage.name,
-            eta: stage.eta,
             defaultTicketStatusV2: stage.defaultTicketStatusV2,
-          });
-          stagesByBoard.set(stage.boardId, boardStages);
-        }
-
-        const invalidBoards = boardIds.filter(boardId => {
-          const boardStages = stagesByBoard.get(boardId);
-          return !boardStages?.has(options.targetStage) || !boardStages.has(options.destinationStage);
-        });
-
-        if (invalidBoards.length > 0) {
-          res.status(400).json({
-            success: false,
-            error: 'Both stages must exist on every board containing matching tickets',
-            data: {
-              targetStage: options.targetStage,
-              destinationStage: options.destinationStage,
-              boardIds: invalidBoards,
-            },
-            timestamp: new Date().toISOString(),
-          });
-          return;
-        }
-      }
+          },
+        ]),
+      );
 
       const summary: BackfillSummary = {
         batches: 0,
@@ -267,24 +426,26 @@ export class TicketStageBackfillController {
         ...options,
         workspaceId,
         actorUserId,
+        resolvedDestinationStages,
       });
 
       let cursor: string | null = null;
-      while (true) {
+      let hasMoreTickets = true;
+      while (hasMoreTickets) {
         const tickets: TicketForBackfill[] = await db.ticket.findMany({
           // Use an explicit keyset predicate because updated tickets no longer
           // match ticketWhere; cursor + skip: 1 could skip the next row after
           // the cursor has been moved out of the source stage.
-          where: {
-            ...ticketWhere,
-            ...(cursor ? { id: { gt: cursor } } : {}),
-          },
+          where: cursor ? { AND: [ticketWhere, { id: { gt: cursor } }] } : ticketWhere,
           select: { id: true, boardId: true },
           orderBy: { id: 'asc' },
           take: BATCH_SIZE,
         });
 
-        if (tickets.length === 0) break;
+        if (tickets.length === 0) {
+          hasMoreTickets = false;
+          continue;
+        }
         summary.batches += 1;
 
         for (const ticket of tickets) {
@@ -292,7 +453,7 @@ export class TicketStageBackfillController {
 
           const boardStages = stagesByBoard.get(ticket.boardId);
           const sourceStage = boardStages?.get(options.targetStage);
-          const destinationStage = boardStages?.get(options.destinationStage);
+          const destinationStage = destinationStagesByBoard.get(ticket.boardId);
           if (!sourceStage || !destinationStage) {
             summary.errors += 1;
             logger.warn(`${TAG} Missing stage metadata while processing ticket`, {
@@ -300,6 +461,7 @@ export class TicketStageBackfillController {
               boardId: ticket.boardId,
               targetStage: options.targetStage,
               destinationStage: options.destinationStage,
+              status: options.status,
             });
             continue;
           }
@@ -312,7 +474,12 @@ export class TicketStageBackfillController {
           try {
             const updated = await TicketStageBackfillController.applyStageChange(
               ticket.id,
-              options.channelId,
+              {
+                channelId: options.channelId,
+                workspaceId,
+                boardId: ticket.boardId,
+                ...(options.createdAfter ? { createdAfter: options.createdAfter } : {}),
+              },
               sourceStage,
               destinationStage,
               actorUserId,
@@ -343,6 +510,7 @@ export class TicketStageBackfillController {
         message: options.dryRun ? 'Dry run completed' : 'Ticket stage backfill completed',
         data: {
           options,
+          ...(options.status ? { resolvedDestinationStages } : {}),
           summary,
         },
         timestamp: new Date().toISOString(),
