@@ -12,12 +12,7 @@ export { MentionSelector } from './MentionSelector';
 export { CommandSelector } from './CommandSelector';
 export { EmojiSelector } from './EmojiSelector';
 
-export type {
-  MentionResult,
-  MentionSelectorProps,
-  CommandItem,
-  CommandSelectorProps,
-} from './Selectors.types';
+export type { MentionSelectorProps, CommandItem, CommandSelectorProps } from './Selectors.types';
 
 export {
   detectTrigger,

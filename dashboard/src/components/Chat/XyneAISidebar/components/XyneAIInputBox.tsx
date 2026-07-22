@@ -60,7 +60,7 @@ import {
   mentionPluginKey,
 } from '../../../ui/TipTapExtensions';
 import { MentionSelector } from '../../../ui/Selectors';
-import type { MentionResult } from '../../../ui/Selectors/Selectors.types';
+import type { MentionResult } from '@xyne/shared';
 import { usePlatform } from '../../../../hooks/usePlatform';
 import { useResearchOptions, type ResearchContext } from '../../../../hooks/useResearchAgent';
 import type { CollectionSummary } from '../../../../services/Knowledge/collectionService';

@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { useSelector } from '@xstate/react';
-import { queryCacheActor } from '../machines/queryCacheMachine';
+import { queryCacheActor } from '../machines/queryCacheMachine.js';
+
 export function useChannelRecentSenders(
   channelId: string | undefined,
   windowDays = 30,

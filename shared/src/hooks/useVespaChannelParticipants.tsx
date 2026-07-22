@@ -1,5 +1,19 @@
-import { useEffect, useState } from 'react';
-import { channelService } from '../services/Chat/channelService';
+import React, { createContext, useContext, useEffect, useState } from 'react';
+
+export type FetchVespaChannelParticipants = (channelId: string) => Promise<string[]>;
+
+const ChannelServiceContext = createContext<{
+  getVespaParticipants: FetchVespaChannelParticipants;
+} | null>(null);
+
+export const ChannelServiceProvider: React.FC<{
+  getVespaParticipants: FetchVespaChannelParticipants;
+  children: React.ReactNode;
+}> = ({ getVespaParticipants, children }) => (
+  <ChannelServiceContext.Provider value={{ getVespaParticipants }}>
+    {children}
+  </ChannelServiceContext.Provider>
+);
 
 const cache = new Map<string, string[]>();
 const inflight = new Map<string, Promise<string[]>>();
@@ -14,6 +28,13 @@ export const useVespaChannelParticipants = (
   channelId: string | undefined,
   enabled: boolean,
 ): string[] | null => {
+  const ctx = useContext(ChannelServiceContext);
+  if (!ctx) {
+    throw new Error(
+      'useVespaChannelParticipants must be used within a ChannelServiceProvider',
+    );
+  }
+  const { getVespaParticipants } = ctx;
   const [userIds, setUserIds] = useState<string[] | null>(() =>
     channelId ? (cache.get(channelId) ?? null) : null,
   );
@@ -28,8 +49,7 @@ export const useVespaChannelParticipants = (
 
     const promise =
       inflight.get(channelId) ??
-      channelService
-        .getVespaParticipants(channelId)
+      getVespaParticipants(channelId)
         .then(ids => {
           cache.set(channelId, ids);
           return ids;
@@ -46,7 +66,7 @@ export const useVespaChannelParticipants = (
     return (): void => {
       cancelled = true;
     };
-  }, [channelId, enabled]);
+  }, [channelId, enabled, getVespaParticipants]);
 
   return userIds;
 };

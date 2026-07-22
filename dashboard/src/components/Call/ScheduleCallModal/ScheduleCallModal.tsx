@@ -8,7 +8,7 @@ import { useSelf, useActiveUsers, useUsers } from '../../../hooks/useUsers';
 import { useZero } from '../../../hooks/useZero';
 import { isUserDeactivated } from '../../../utils/userDisplayName';
 import { useAllVisibleChannels, useChannel } from '../../../hooks/useChannels';
-import { useUserGroupSearch } from '../../../hooks/useUserGroupSearch';
+import { useUserGroupSearch } from '@xyne/shared/hooks';
 import { callService, type ScheduleCallRequest } from '../../../services/Call/callService';
 import DOMPurify from 'dompurify';
 import { queries } from '../../../zero/queries';

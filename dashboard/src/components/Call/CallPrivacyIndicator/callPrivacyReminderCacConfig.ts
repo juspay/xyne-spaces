@@ -1,4 +1,4 @@
-import { useCacConfig } from '../../../hooks/useCacConfig';
+import { useCacConfig } from '@xyne/shared/hooks';
 
 /**
  * CAC key: "call_privacy_reminder_config"

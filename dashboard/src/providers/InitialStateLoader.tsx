@@ -29,7 +29,9 @@ import { logger, Event as LoggerEvent } from '../utils/logger';
 import { useZeroConnectionLogger } from '../services/zeroConnectionLogger';
 import { useCachedQuery } from '../hooks/useCachedQuery';
 import { authRefreshDuration, authRefreshTotal, safeRecordMetric } from '../services/otel';
-import { SharedAuthProvider } from '@xyne/shared/hooks';
+import { SharedAuthProvider, HttpClientProvider, ChannelServiceProvider } from '@xyne/shared/hooks';
+import { axiosHttpClient } from '../services/affinityService';
+import { channelService } from '../services/Chat/channelService';
 
 interface InitialStateLoaderProps {
   children: ReactNode;
@@ -501,9 +503,17 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
   if (areAllQueriesCompleted) {
     return (
       <SharedAuthProvider value={context}>
-        {showModal && <ZeroConnectionFailureModal onClose={() => setShowModal(false)} />}
-        <DeferredLoader />
-        {children}
+        <HttpClientProvider client={axiosHttpClient}>
+          <ChannelServiceProvider
+            getVespaParticipants={(id): Promise<string[]> =>
+              channelService.getVespaParticipants(id)
+            }
+          >
+            {showModal && <ZeroConnectionFailureModal onClose={() => setShowModal(false)} />}
+            <DeferredLoader />
+            {children}
+          </ChannelServiceProvider>
+        </HttpClientProvider>
       </SharedAuthProvider>
     );
   }

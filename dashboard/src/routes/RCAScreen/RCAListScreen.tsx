@@ -4,7 +4,7 @@ import { useUsers } from '../../hooks/useUsers';
 import { queries } from '../../zero/queries';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { RCASidebar } from './components';
-import { useCacConfig } from '../../hooks/useCacConfig';
+import { useCacConfig } from '@xyne/shared/hooks';
 import { DEFAULT_RCA_CAC_CONFIG, type RcaCacConfig } from './rcaCacConfig';
 import type { RCARecord } from './RCAScreen.types';
 import { getUserLabel } from '../../utils/userDisplayName';

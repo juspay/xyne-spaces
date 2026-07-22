@@ -21,7 +21,7 @@ import type { Editor } from '@tiptap/react';
 import { Mic, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import Tooltip from '../Tooltip/Tooltip';
-import type { MentionResult } from '../Selectors/Selectors.types';
+import type { MentionResult } from '@xyne/shared';
 import { voiceInputService } from '../../../services/VoiceInput/voiceInputService';
 import type { VoiceStreamSession } from '../../../services/VoiceInput/voiceInputService';
 

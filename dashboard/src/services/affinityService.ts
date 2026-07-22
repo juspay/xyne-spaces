@@ -1,56 +1,31 @@
+import { AffinityService, type HttpClient } from '@xyne/shared/hooks';
 import { apiInstance } from './clients/apiClient';
 
-interface AffinityWeights {
-  channelWeights: Record<string, number>;
-  userWeights: Record<string, number>;
-}
+export const axiosHttpClient: HttpClient = {
+  async get<T>(path: string, options?: { signal?: AbortSignal; timeout?: number }): Promise<T> {
+    const config: {
+      signal?: AbortSignal;
+      timeout?: number;
+    } = {};
+    if (options?.signal) config.signal = options.signal;
+    if (options?.timeout !== undefined) config.timeout = options.timeout;
+    const response = await apiInstance.get<T>(path, config);
+    return response.data;
+  },
+  async post<T>(
+    path: string,
+    body?: unknown,
+    options?: { signal?: AbortSignal; timeout?: number },
+  ): Promise<T> {
+    const config: {
+      signal?: AbortSignal;
+      timeout?: number;
+    } = {};
+    if (options?.signal) config.signal = options.signal;
+    if (options?.timeout !== undefined) config.timeout = options.timeout;
+    const response = await apiInstance.post<T>(path, body, config);
+    return response.data;
+  },
+};
 
-// 1h5m: slightly longer than the 1h backend sync so weights are always fresh on read.
-// The 5-minute buffer prevents a thundering herd if the sync job completes just before TTL expires.
-const CACHE_TTL_MS = 1 * 60 * 60 * 1000 + 5 * 60 * 1000;
-const FETCH_TIMEOUT_MS = 5000;
-
-class AffinityService {
-  private weights: AffinityWeights = { channelWeights: {}, userWeights: {} };
-  private lastFetchedAt = 0;
-  private inflight: Promise<void> | null = null;
-
-  private async fetch(): Promise<void> {
-    try {
-      const { data } = await apiInstance.get<AffinityWeights>('/users/me/affinity', {
-        timeout: FETCH_TIMEOUT_MS,
-      });
-      this.weights = data;
-    } catch (error) {
-      // Graceful degradation — keep empty weights, Cmd+K falls back to text match
-      console.warn('[AFFINITY] Failed to fetch weights:', error);
-    } finally {
-      // Always update lastFetchedAt so a Vespa outage doesn't cause a retry
-      // storm on every keystroke — wait the full TTL before trying again.
-      this.lastFetchedAt = Date.now();
-      this.inflight = null;
-    }
-  }
-
-  prefetch(): Promise<void> {
-    const stale = Date.now() - this.lastFetchedAt > CACHE_TTL_MS;
-    if (!stale) return Promise.resolve();
-    if (this.inflight) return this.inflight;
-    this.inflight = this.fetch();
-    return this.inflight;
-  }
-
-  getChannelWeight(channelId: string): number {
-    const stale = Date.now() - this.lastFetchedAt > CACHE_TTL_MS;
-    if (stale && !this.inflight) {
-      this.inflight = this.fetch();
-    }
-    return this.weights.channelWeights[channelId] ?? 0;
-  }
-
-  getUserWeight(userId: string): number {
-    return this.weights.userWeights[userId] ?? 0;
-  }
-}
-
-export const affinityService = new AffinityService();
+export const affinityService = new AffinityService(axiosHttpClient);

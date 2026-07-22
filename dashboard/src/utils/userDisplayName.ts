@@ -1,7 +1,7 @@
 import { isStatusExpired } from './statusUtils';
 import { UserStatus } from '@xyne/shared';
 import type { User } from '../machines/stateMachine';
-import type { MentionResult } from '../components/ui/Selectors';
+import type { MentionResult } from '@xyne/shared';
 
 /**
  * Check if a user is deactivated (status is INACTIVE)
