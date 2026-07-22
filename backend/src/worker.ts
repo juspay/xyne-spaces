@@ -3,6 +3,7 @@ import { config as appConfig } from '@/config/env'
 import { startDoclingSchedulerRole } from '@/services/ingestion/docling/workers/scheduler'
 import { startRuntimeConfigPolling } from '@/services/ingestion/docling/runtime/config'
 import { DatabaseClient } from '@/database/client'
+import { CommonDatabaseClient } from '@/database/commonClient'
 import { logger } from '@/utils/logger'
 import { pollingService } from './workflows/services/polling-service'
 import { eventPollingService } from './workflows/services/event-polling-service'
@@ -48,7 +49,11 @@ class WorkerService {
       initializeOpenTelemetry();
 
       await DatabaseClient.connect()
-      logger.info('Worker database initialized successfully')
+      const isCommonDatabaseConnected = await CommonDatabaseClient.connect()
+      logger.info('Worker database initialization completed', {
+        mainDatabase: 'connected',
+        commonDatabase: isCommonDatabaseConnected ? 'connected' : 'unavailable',
+      })
 
       // Register workflow definitions
       logger.info('Registering workflow definitions in worker...')
@@ -398,6 +403,7 @@ class WorkerService {
       }
 
       await DatabaseClient.disconnect()
+      await CommonDatabaseClient.disconnect()
 
       await shutdownOpenTelemetry();
 

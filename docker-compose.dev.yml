@@ -1,0 +1,345 @@
+include:
+  - ./ysweet/docker-compose.yml
+
+services:
+  # PostgreSQL Database
+  postgres:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.postgres
+    container_name: ${COMPOSE_PROJECT_NAME:-xyne}-postgres
+    shm_size: '512mb'
+    environment:
+      POSTGRES_USER: xyne
+      POSTGRES_PASSWORD: xyne123
+      POSTGRES_DB: xyne_dev_db
+    ports:
+      - "${POSTGRES_BIND_PORT:-5433}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U xyne -d xyne_dev_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Redis
+  redis:
+    image: public.ecr.aws/docker/library/redis:7-alpine
+    container_name: ${COMPOSE_PROJECT_NAME:-xyne}-redis
+    ports:
+      - "${REDIS_BIND_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # LiveKit Server
+  livekit:
+    build:
+      context: ./docker
+      dockerfile: Dockerfile.livekit
+    container_name: ${COMPOSE_PROJECT_NAME:-xyne}-livekit
+    command: --config /etc/livekit.yaml --dev
+    ports:
+      - "${LIVEKIT_HTTP_BIND_PORT:-7880}:7880"
+      - "${LIVEKIT_HTTPS_BIND_PORT:-7881}:7881"
+      - "${LIVEKIT_UDP_BIND_PORT:-7882}:7882/udp"
+    environment:
+      - LIVEKIT_API_KEY=devkey
+      - LIVEKIT_API_SECRET=devsecret
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:7880/"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # LiveKit Egress Service (audio recording)
+  livekit-egress:
+    image: livekit/egress:latest
+    container_name: ${COMPOSE_PROJECT_NAME:-xyne}-livekit-egress
+    environment:
+      - EGRESS_CONFIG_FILE=/etc/egress.yaml
+      - STORAGE_EMULATOR_HOST=http://fake-gcs:4443
+    volumes:
+      - ./docker/egress.yaml:/etc/egress.yaml
+    depends_on:
+      livekit:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      fake-gcs:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Fake GCS Server (local GCS emulator for testing)
+  fake-gcs:
+    image: mirror.gcr.io/fsouza/fake-gcs-server:latest
+    container_name: ${COMPOSE_PROJECT_NAME:-xyne}-fake-gcs
+    ports:
+      - "${FAKE_GCS_BIND_PORT:-4443}:4443"
+    command:
+      - "-scheme"
+      - "http"
+      - "-port"
+      - "4443"
+      - "-external-url"
+      - "http://localhost:4443"
+    volumes:
+      - fake_gcs_data:/data
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4443/storage/v1/b"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # MinIO (local S3-compatible storage for testing)
+  minio:
+    image: minio/minio:latest
+    container_name: ${COMPOSE_PROJECT_NAME:-xyne}-minio
+    ports:
+      - "${MINIO_API_BIND_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_BIND_PORT:-9001}:9001"
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # Zero Cache Server
+  zero-cache:
+    image: mirror.gcr.io/rocicorp/zero:1.6.0
+    container_name: ${COMPOSE_PROJECT_NAME:-xyne}-zero-cache
+    # ZERO_AUTH_SECRET is injected from backend/.env.local (gitignored) so the
+    # backend and zero-cache always share the same secret; never hardcode it here.
+    env_file:
+      # Optional: loaded locally (dev has .env.local); absent in CI, where
+      # .env.test provides the values via docker-compose.test.yml.
+      - path: ./backend/.env.local
+        required: false
+    environment:
+      - ZERO_UPSTREAM_DB=postgresql://xyne:xyne123@postgres:5432/xyne_dev_db
+      - ZERO_CVR_DB=postgresql://xyne:xyne123@postgres:5432/xyne_dev_db
+      - ZERO_CHANGE_DB=postgresql://xyne:xyne123@postgres:5432/xyne_dev_db
+      - ZERO_REPLICA_FILE=/var/zero/replica.db
+      - ZERO_LOG_LEVEL=info
+      - ZERO_ADMIN_PASSWORD=dev-admin-password
+      - ZERO_MUTATE_URL=http://host.containers.internal:3001/api/zero/push
+      - ZERO_QUERY_URL=http://host.containers.internal:3001/api/zero/query
+      - ZERO_QUERY_FORWARD_COOKIES=true
+      - ZERO_MUTATE_FORWARD_COOKIES=true
+      - ZERO_CVR_MAX_CONNS=10
+      - ZERO_UPSTREAM_MAX_CONNS=10
+      - ZERO_NUM_SYNC_WORKERS=5
+      - NODE_ENV=development
+      - ZERO_PORT=4848
+      # OTEL metrics export
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - OTEL_RESOURCE_ATTRIBUTES=service.name=zero-cache,service.version=1.6.0
+      - OTEL_NODE_RESOURCE_DETECTORS=env,host,os
+    ports:
+      - "${ZERO_BIND_PORT_1:-4848}:4848"
+      - "${ZERO_BIND_PORT_2:-4849}:4849"
+    volumes:
+      - zero_cache_data:/var/zero
+    depends_on:
+      postgres:
+        condition: service_healthy
+    extra_hosts:
+      - "host.containers.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4848/"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Python Transcription Agent
+  transcription-agent:
+    build:
+      context: ./backend/python-agent
+      dockerfile: Dockerfile
+    container_name: ${COMPOSE_PROJECT_NAME:-xyne}-transcription-agent
+    shm_size: '512mb'
+    env_file:
+      # Optional: loaded locally (dev has .env.local); absent in CI, where
+      # .env.test provides the values via docker-compose.test.yml.
+      - path: ./backend/.env.local
+        required: false
+    environment:
+      # Override LIVEKIT_URL to use container hostname instead of localhost
+      # The python agent will use AGENT_LIVEKIT_URL from .env.local (ws://livekit:7880)
+      - LIVEKIT_URL=ws://livekit:7880
+      - LIVEKIT_API_KEY=devkey
+      - LIVEKIT_API_SECRET=devsecret
+      - BACKEND_URL=http://host.containers.internal:3001
+      - REDIS_URL=redis://redis:6379
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - STORAGE_EMULATOR_HOST=http://fake-gcs:4443
+    ports:
+      - "${TRANSCRIPTION_AGENT_BIND_PORT:-8001}:8080"
+    volumes:
+      - ./backend/python-agent/transcriptions:/app/transcriptions
+      # Mount source code for live development (no rebuild needed)
+      - ./backend/python-agent:/app
+      # Persist HuggingFace model cache across container restarts
+      - transcription-agent-cache:/app/.cache/huggingface
+    depends_on:
+      - livekit
+      - redis
+    extra_hosts:
+      - "host.containers.internal:host-gateway"
+    restart: unless-stopped
+
+  # --- OpenTelemetry Collector ---
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: ${COMPOSE_PROJECT_NAME:-xyne}-otel-collector
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./otelCollector/otel-collector-config.yaml:/etc/otel-collector-config.yaml
+    ports:
+      - "${OTEL_HTTP_BIND_PORT:-4318}:4318" # OTLP HTTP receiver (Browser sends here)
+      - "${OTEL_GRPC_BIND_PORT:-4317}:4317" # OTLP gRPC receiver
+      - "${OTEL_METRICS_BIND_PORT:-8888}:8888" # Collector metrics
+    depends_on:
+      - victoriametrics
+    restart: unless-stopped
+
+  # Victoria Metrics - Metrics Collection
+  victoriametrics:
+    image: victoriametrics/victoria-metrics:latest
+    container_name: ${COMPOSE_PROJECT_NAME:-xyne}-victoriametrics
+    ports:
+      - "${VICTORIAMETRICS_BIND_PORT:-8428}:8428"
+    command:
+      - '--storageDataPath=/storage'
+      - '--httpListenAddr=:8428'
+      - '--retentionPeriod=12' # Months
+      - '--promscrape.config=/etc/victoriametrics/scrape.yml'  
+    volumes:
+      - victoriametrics_data:/storage
+      - ./scrape.yml:/etc/victoriametrics/scrape.yml
+    restart: unless-stopped
+
+  # Grafana - Metrics Visualization & Dashboards
+  grafana:
+    image: grafana/grafana:latest
+    container_name: ${COMPOSE_PROJECT_NAME:-xyne}-grafana
+    ports:
+      - "${GRAFANA_BIND_PORT:-3333}:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://localhost:3333
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning
+    depends_on:
+      - victoriametrics
+    restart: unless-stopped
+
+  # Superposition - Feature Flag & Configuration Management
+  superposition:
+    image: ghcr.io/juspay/superposition-demo:latest
+    container_name: ${COMPOSE_PROJECT_NAME:-xyne}-superposition
+    ports:
+      - "${SUPERPOSITION_BIND_PORT:-9999}:8080"
+    environment:
+      - SUPERPOSITION_TOKEN=123456
+      - SUPERPOSITION_ORG_ID=localorg
+      - SUPERPOSITION_WORKSPACE_ID=test
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  # Backend API - NOW RUNS LOCALLY (see backend/.env.local)
+  # Uncomment if you want to run backend in Docker instead of locally
+  # backend:
+  #   build:
+  #     context: .
+  #     dockerfile: ./docker/Dockerfile.backend.dev
+  #   container_name: xyne-backend
+  #   ... (rest of config omitted)
+
+  # Dashboard (Frontend) - NOW RUNS LOCALLY (see dashboard/.env.local)
+  # Uncomment if you want to run dashboard in Docker instead of locally
+  # dashboard:
+  #   build:
+  #     context: .
+  #     dockerfile: ./docker/Dockerfile.dashboard.dev
+  #   container_name: xyne-dashboard
+  #   ... (rest of config omitted)
+
+  common-postgres:
+    image: public.ecr.aws/docker/library/postgres:16-alpine
+    container_name: ${COMPOSE_PROJECT_NAME:-xyne}-common-postgres
+    environment:
+      POSTGRES_USER: xyne
+      POSTGRES_PASSWORD: xyne123
+      POSTGRES_DB: xyne_common
+    ports:
+      - "${COMMON_POSTGRES_BIND_PORT:-5434}:5432"
+    volumes:
+      - common_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U xyne -d xyne_common"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  claw-auth-postgres:
+    image: public.ecr.aws/docker/library/postgres:16-alpine
+    container_name: ${COMPOSE_PROJECT_NAME:-xyne}-claw-auth-postgres
+    environment:
+      POSTGRES_USER: claw
+      POSTGRES_PASSWORD: claw123
+      POSTGRES_DB: claw_auth_db
+    ports:
+      - "${CLAW_AUTH_POSTGRES_BIND_PORT:-5435}:5432"
+    volumes:
+      - claw_auth_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U claw -d claw_auth_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  zero_cache_data:
+    driver: local
+  fake_gcs_data:
+    driver: local
+  victoriametrics_data:
+    driver: local
+  grafana_data:
+    driver: local
+  minio_data:
+    driver: local
+  transcription-agent-cache:
+    driver: local
+  common_postgres_data:
+    driver: local
+  claw_auth_postgres_data:
+    driver: local

@@ -26,6 +26,11 @@ clean-backend:
 	docker rmi $(BACKEND_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) || true
 	docker rmi $(NS)/$(BACKEND_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) || true
 
+prisma-generate:
+	$(info Generating backend Prisma clients)
+	cd backend && npm run db:generate
+	cd backend && npm run db:common:generate
+
 # Runner targets
 build-runner:
 	$(info Building $(RUNNER_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) / git-head: $(SOURCE_COMMIT))
@@ -137,4 +142,4 @@ configure-docker:
 revoke-sa:
 	gcloud auth revoke $(SERVICE_ACCOUNT) -q || true
 
-.PHONY: build-backend push-backend clean-backend build-runner push-runner clean-runner build-dashboard push-dashboard clean-dashboard build-external-dashboard push-external-dashboard clean-external-dashboard lint-dashboard typecheck run-pr-police build-all push-all clean-all test configure-docker revoke-sa
+.PHONY: build-backend push-backend clean-backend prisma-generate build-runner push-runner clean-runner build-dashboard push-dashboard clean-dashboard build-external-dashboard push-external-dashboard clean-external-dashboard lint-dashboard typecheck run-pr-police build-all push-all clean-all test configure-docker revoke-sa

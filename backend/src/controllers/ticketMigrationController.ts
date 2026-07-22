@@ -4,6 +4,7 @@ import { vespaBackfillQueue } from '@/queues/vespaQueue';
 import { ticketSchema } from '@/vespa/src/types';
 import { logger } from '@/utils/logger';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
+import { EntitySequenceService, SequenceEntityType } from '@/services/entitySequenceService';
 
 interface ProjectCodeMapping {
   [projectName: string]: string;
@@ -72,11 +73,25 @@ export class TicketMigrationController {
         }
 
         if (!dryRun) {
-          // 1. Update Project Metadata
+          const useCommonSequence = EntitySequenceService.isCommonProjectTicketSequenceEnabled();
+
+          // 1. Update Project Metadata and reset the configured ticket counter
           await db.project.update({
             where: { id: project.id },
-            data: { code: projectCode, ticketSequence: tickets.length }
+            data: {
+              code: projectCode,
+              ...(!useCommonSequence && {
+                ticketSequence: tickets.length,
+              }),
+            }
           });
+          if (useCommonSequence) {
+            await EntitySequenceService.setSequence(
+              SequenceEntityType.PROJECT_TICKET,
+              project.id,
+              tickets.length
+            );
+          }
 
           // 2. Update Individual Tickets
           for (let i = 0; i < tickets.length; i++) {

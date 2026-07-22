@@ -1,0 +1,62 @@
+# Development Dockerfile for sandbox backend (hot-reload via volume mount)
+# Used by sandbox system for per-agent isolated backend instances
+
+FROM mirror.gcr.io/library/node:22.22.3-slim
+
+WORKDIR /app
+
+# Install build dependencies and tools needed for native modules, Prisma, and health checks
+RUN apt-get update && apt-get install -y \
+    python3 \
+    make \
+    g++ \
+    git \
+    openssl \
+    libssl-dev \
+    ca-certificates \
+    curl \
+    libcairo2-dev \
+    libpango1.0-dev \
+    libjpeg-dev \
+    libgif-dev \
+    librsvg2-dev \
+    postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy shared module and build
+COPY shared ../shared
+RUN cd ../shared && npm ci && npm run build
+
+# Copy framework and build
+COPY framework ../framework
+RUN cd ../framework && npm ci && npm run build
+
+# Copy backend and install deps
+COPY backend .
+RUN npm ci
+
+# Copy root package.json to / so logger.ts can import version (../../../package.json)
+COPY package.json /package.json
+
+# Generate Prisma client
+RUN npm run db:generate
+RUN npm run db:common:generate
+
+# Expose dev server port
+EXPOSE 3001
+
+# Create entrypoint script
+# shared/framework are pre-built on host before containers start (see sandbox.sh cmd_create)
+# We just need to push prisma schema and start the dev server
+RUN cat > /entrypoint.sh << 'ENTRY'
+#!/bin/sh
+set -e
+echo "[sandbox] Running prisma db push..."
+cd /app && npm run db:push
+echo "[sandbox] Starting backend dev server..."
+cd /app && exec npx tsx watch --ignore ../shared/node_modules --ignore ../framework/node_modules src/index.ts
+ENTRY
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]
+CMD []

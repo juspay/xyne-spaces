@@ -1,0 +1,34 @@
+// Prisma schema for the "common" database — a separate Postgres instance that
+// holds cross-cutting shared state (currently entity sequence counters).
+// Intentionally minimal: no zero generator; all tables live in the "common"
+// Postgres schema (not "public").
+
+generator client {
+  provider        = "prisma-client-js"
+  output          = "./generated/client"
+  binaryTargets   = ["native", "debian-openssl-3.0.x", "darwin"]
+  previewFeatures = ["multiSchema"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("COMMON_DATABASE_URL")
+  schemas  = ["common"]
+}
+
+// Centralized per-entity sequence counters.
+// One row per (entityType, entityValue) scope, e.g. ("PROJECT_TICKET", <projectId>).
+// sequenceNumber holds the last allocated number; allocation is an atomic
+// upsert-increment (see entitySequenceService).
+model EntitySequence {
+  id             String   @id @default(cuid())
+  entityType     String
+  entityValue    String
+  sequenceNumber Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([entityType, entityValue])
+  @@map("entity_sequences")
+  @@schema("common")
+}

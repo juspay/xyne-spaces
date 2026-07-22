@@ -65,3 +65,6 @@ package-lock.json
 package.json
 
 *.rdb
+
+# Generated Prisma client for common DB
+prisma-common/generated/
