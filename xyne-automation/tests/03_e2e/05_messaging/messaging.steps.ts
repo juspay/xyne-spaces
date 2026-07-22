@@ -50,14 +50,23 @@ async function clickHoverActionOnMessage(
 ): Promise<void> {
   const page = testContext.activePage;
   const message = page.locator(`[data-testid^="chat-message-"]:has-text("${messageText}")`).last();
-
   await message.waitFor({ state: 'visible' });
-  await message.scrollIntoViewIfNeeded();
-  await message.hover({ force: true });
 
   const actionButton = page.locator(hoverActionSelector).first();
-  await actionButton.waitFor({ state: 'visible', timeout: 10000 });
-  await actionButton.click({ force: true });
+  // Hover actions vanish if the message re-renders under load — re-hover per attempt.
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    await message.scrollIntoViewIfNeeded();
+    await message.hover({ force: true });
+    try {
+      await actionButton.waitFor({ state: 'visible', timeout: 5000 });
+      await actionButton.click({ force: true, timeout: 5000 });
+      return;
+    } catch (error) {
+      if (attempt === 3) {
+        throw error;
+      }
+    }
+  }
 }
 
 export default class MessagingSteps {
@@ -73,7 +82,6 @@ export default class MessagingSteps {
     assert.ok(dm?.url, `Baseline DM URL not found for user "${userAlias}".`);
     const page = testContext.activePage;
     await page.goto(dm.url);
-    await page.waitForLoadState('networkidle');
     await page.locator("[data-testid='message-input']").first().waitFor({ state: 'visible' });
     await page
       .locator("[data-testid='chat-list-loading']")

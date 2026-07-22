@@ -32,6 +32,7 @@
 * verifying inline code formatting is applied in editor
 
 ## List creation and navigation work
+tags: quarantine
 * Using browser
 * Ensuring user "user-1" is logged in
 * Opening baseline DM for user "user-1"

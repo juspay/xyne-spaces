@@ -362,7 +362,110 @@ async function addMemberToChannel(_adminUser: StoredUser, user: StoredUser): Pro
   }
   await page.locator("[data-testid='message-input']").first().waitFor({ state: 'visible' });
 
-  baselineLogger.info(`[5/5] Member ${user.alias} added to baseline channel`);
+  // "submitted", not "added": the modal closes on submit regardless of the
+  // mutation's outcome. Membership is verified in ensureBaselineChannelMembership.
+  baselineLogger.info(`[5/5] Add-people submitted for ${user.alias} on baseline channel`);
+}
+
+// Whether the channel is in this member's sidebar. Must be checked from the
+// member's own session -- the owner's view looks fine either way.
+async function isBaselineChannelVisibleToMember(
+  channelName: string,
+  timeoutMs: number
+): Promise<boolean> {
+  const page = testContext.activePage;
+
+  await page.locator("[data-testid='nav-chat']").first().click();
+  const channelList = page.locator("[data-testid='channel-list']").first();
+  await channelList.waitFor({ state: 'visible' });
+
+  try {
+    await channelList
+      .getByText(channelName, { exact: false })
+      .first()
+      .waitFor({ state: 'visible', timeout: timeoutMs });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function addChannelParticipantsViaApi(channelId: string, emails: string[]): Promise<void> {
+  const url = `${config.backend.baseUrl}/api/test/fixtures/channel-participants`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ channelId, emails }),
+  });
+
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '<unreadable body>');
+    throw new Error(
+      `Fixture API failed to add participants (${response.status}) at ${url}: ${detail}`
+    );
+  }
+}
+
+// Log in as each member and report those who cannot see the channel.
+async function findMembersMissingChannel(
+  channelName: string,
+  members: StoredUser[],
+  timeoutMs: number
+): Promise<StoredUser[]> {
+  const missing: StoredUser[] = [];
+  for (const member of members) {
+    await loginAsUser(member.alias);
+    if (!(await isBaselineChannelVisibleToMember(channelName, timeoutMs))) {
+      missing.push(member);
+    }
+  }
+  return missing;
+}
+
+// AddPeopleForm fires `void zero.mutate(channel.addParticipants(...))` without
+// awaiting, so a dropped mutation is indistinguishable from success and leaves
+// the channel private to its owner. Verify every intended member from their own
+// session and repair via the test-only API if the UI add did not take. The
+// error-level log is deliberate: a silent fallback would bury the regression.
+async function ensureBaselineChannelMembership(
+  channelId: string,
+  channelName: string,
+  members: StoredUser[]
+): Promise<void> {
+  let missing = await findMembersMissingChannel(channelName, members, 15000);
+
+  if (missing.length > 0) {
+    baselineLogger.error(
+      `UI add-people did not take for baseline channel "${channelName}" -- not visible to ` +
+        `${missing.map((m) => m.alias).join(', ')}. Repairing via the fixture API: ` +
+        'channel.addParticipants was dropped, investigate rather than treating this as noise.'
+    );
+
+    await addChannelParticipantsViaApi(
+      channelId,
+      members.map((member) => member.email)
+    );
+
+    missing = await findMembersMissingChannel(channelName, members, 30000);
+    if (missing.length > 0) {
+      throw new Error(
+        `Baseline channel "${channelName}" is still not visible to ` +
+          `${missing.map((m) => `${m.alias} (${m.email})`).join(', ')} after the fixture API ` +
+          'added the participants. The channel is unusable by those members.'
+      );
+    }
+
+    baselineLogger.info(
+      `Baseline channel membership repaired via fixture API for "${channelName}"`
+    );
+  }
+
+  // findMembersMissingChannel leaves the last-checked member logged in; restore
+  // the primary member so the caller creates the DM from the right session.
+  const primary = members[0];
+  if (primary) {
+    await loginAsUser(primary.alias);
+  }
 }
 
 async function createProject(adminUser: StoredUser): Promise<BaselineProject> {
@@ -648,6 +751,8 @@ export async function bootstrapBaselineFixture(): Promise<void> {
 
     await loginAsUser(BASELINE_USER_ALIAS);
     baselineLogger.info('[7/8] Re-logged in as baseline user to create DM');
+    assert.ok(channel.id, 'Expected baseline channel to have an id.');
+    await ensureBaselineChannelMembership(channel.id, channel.name, [user, partnerUser]);
     const dm = await createBaselineDmWithSeedMessage(user, partnerUser);
 
     const runId = process.env.XYNE_RUN_ID ?? 'unknown-run';

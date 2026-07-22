@@ -11,6 +11,18 @@ passed=0
 failed=0
 skipped=0
 
+# reports/ accumulates one dir per run, so read only the newest gauge-status.json
+# rather than summing every historical run into the current one.
+latest_gauge_status=$(find "$REPORT_DIR" -name "gauge-status.json" -type f -exec ls -t {} + 2>/dev/null | head -1)
+if [ -n "$latest_gauge_status" ]; then
+  passed=$(jq '.passed // 0' "$latest_gauge_status" 2>/dev/null || echo 0)
+  failed=$(jq '.failed // 0' "$latest_gauge_status" 2>/dev/null || echo 0)
+  skipped=$(jq '.skipped // 0' "$latest_gauge_status" 2>/dev/null || echo 0)
+  total=$((passed + failed + skipped))
+  echo "passed:$passed failed:$failed skipped:$skipped total:$total"
+  exit 0
+fi
+
 # Find all JSON report files and process them
 while IFS= read -r -d '' file; do
   # Use jq to properly parse Cucumber structure:
