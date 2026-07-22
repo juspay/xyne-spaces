@@ -6,6 +6,7 @@ import { encrypt } from '@/services/encryptionService';
 import { dualWriteTicketTags } from '@/services/ticketTagDualWriteService';
 import { logger } from '@/utils/logger';
 import { resolveFormFieldDefinitionsForForm } from '@/utils/fieldDefinition';
+import { EntitySequenceService } from '@/services/entitySequenceService';
 import {
   ActivityType,
   AttachmentEntityType,
@@ -1137,13 +1138,28 @@ export class JiraMigrationImportService {
     }
 
     if (fieldsToCreate.length > 0) {
-      await db.formFields.createMany({
-        data: fieldsToCreate.map(field => ({
+      let currentMaxFieldSequence = existingFields.reduce(
+        (max, field) => Math.max(max, field.sequenceNumber),
+        0,
+      );
+      const formFieldsToCreate = [];
+      for (const field of fieldsToCreate) {
+        const sequenceNumber = await EntitySequenceService.getNextFormFieldSequence(
+          formId,
+          currentMaxFieldSequence,
+        );
+        currentMaxFieldSequence = Math.max(currentMaxFieldSequence, sequenceNumber);
+        formFieldsToCreate.push({
           formId,
           fieldName: field.fieldName,
           fieldType: field.fieldType,
           isOptional: true,
-        })),
+          sequenceNumber,
+        });
+      }
+
+      await db.formFields.createMany({
+        data: formFieldsToCreate,
         skipDuplicates: true,
       });
 
@@ -1205,8 +1221,10 @@ export class JiraMigrationImportService {
       stages.map(stage => [normalize(stage.name), stage] as const),
     );
 
-    let nextSequenceNumber =
-      stages.reduce((maxValue, stage) => Math.max(maxValue, stage.sequenceNumber), 0) + 1;
+    let currentMaxStageSequence = stages.reduce(
+      (maxValue, stage) => Math.max(maxValue, stage.sequenceNumber),
+      0,
+    );
 
     for (const issue of issues) {
       const statusName = issue.fields.status?.name?.trim();
@@ -1225,11 +1243,16 @@ export class JiraMigrationImportService {
       const existingStage = stageByNormalizedName.get(normalizedStatusName);
 
       if (!existingStage) {
+        const sequenceNumber = await EntitySequenceService.getNextBoardStageSequence(
+          boardId,
+          currentMaxStageSequence,
+        );
+        currentMaxStageSequence = Math.max(currentMaxStageSequence, sequenceNumber);
         const createdStage = await db.stage.create({
           data: {
             name: statusName,
             boardId,
-            sequenceNumber: nextSequenceNumber,
+            sequenceNumber,
             createdBy: actorUserId,
             defaultTicketStatusV2: mappedStatusV2,
           },
@@ -1244,7 +1267,6 @@ export class JiraMigrationImportService {
 
         stages.push(createdStageSummary);
         stageByNormalizedName.set(normalizedStatusName, createdStageSummary);
-        nextSequenceNumber += 1;
         continue;
       }
 
@@ -1289,11 +1311,16 @@ export class JiraMigrationImportService {
         desiredStages.some((stage, index) => stages[index]?.id !== stage.id);
 
       if (orderChanged) {
+        // Preserve the allocated sequence set (and any deletion gaps) while
+        // moving those values across stages to match the requested order.
+        const stageSequencePool = stages
+          .map(stage => stage.sequenceNumber)
+          .sort((left, right) => left - right);
         const resequenced = await db.$transaction(
           desiredStages.map((stage, index) =>
             db.stage.update({
               where: { id: stage.id },
-              data: { sequenceNumber: index + 1 },
+              data: { sequenceNumber: stageSequencePool[index]! },
               select: {
                 id: true,
                 name: true,

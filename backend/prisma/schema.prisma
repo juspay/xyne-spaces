@@ -3764,7 +3764,7 @@ model FormFields {
   fieldEnum      Json?          // DEPRECATED: legacy definition only; string[] projection kept for backward compat
   fieldOptions   String?        // Canonical {id,value}[] options, JSON-stringified; new clients read this, old clients never receive it
   isOptional     Boolean        @default(false) // Per-form optional
-  sequenceNumber Int            @default(0)      // Per-form display/submission order
+  sequenceNumber Int            @default(0)      // Monotonic per-form order; gaps remain after deletes
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
   parentOptionId String?
