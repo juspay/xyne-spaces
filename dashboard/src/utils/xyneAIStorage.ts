@@ -1,7 +1,7 @@
 /**
  * IndexedDB storage for Genius AI conversation history
  */
-import type { ToolOutput as GeniusToolOutput } from 'cosmic-ai-genius';
+import type { ToolOutput as GeniusToolOutput } from '../types/toolOutput';
 import type {
   MessageAttachment,
   SummarizerOutput,

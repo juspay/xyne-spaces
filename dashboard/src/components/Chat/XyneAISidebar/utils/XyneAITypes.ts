@@ -1,4 +1,4 @@
-import type { ToolOutput as GeniusToolOutput } from 'cosmic-ai-genius';
+import type { ToolOutput as GeniusToolOutput } from '../../../../types/toolOutput';
 
 // ============================================================================
 // Input context snapshot

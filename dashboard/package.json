@@ -126,12 +126,13 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
-    "cosmic-ai-genius": "0.3.102",
     "date-fns": "^4.1.0",
     "diff": "^8.0.2",
     "docx-preview": "^0.3.7",
     "dompurify": "^3.3.1",
     "driver.js": "^1.4.0",
+    "echarts": "^6.1.0",
+    "echarts-for-react": "^3.0.6",
     "emoji-datasource": "^16.0.0",
     "emoji-picker-react": "^4.15.0",
     "fractional-indexing": "^3.2.0",
@@ -238,10 +239,6 @@
     "npm": ">=8.0.0"
   },
   "overrides": {
-    "cosmic-ai-genius": {
-      "react": "^19.2.1",
-      "react-dom": "^19.2.1"
-    },
     "@excalidraw/excalidraw": {
       "react": "^19.2.1",
       "react-dom": "^19.2.1"

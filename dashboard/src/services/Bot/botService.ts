@@ -1,8 +1,7 @@
 import axios from 'axios';
 import { apiInstance } from '../clients/apiClient';
-import { type ToolOutput } from 'cosmic-ai-genius';
+import type { ToolOutput } from '../../types/toolOutput';
 
-// Re-export ToolOutput type from cosmic-ai-genius for consumers
 export type { ToolOutput };
 
 // ============================================================================
