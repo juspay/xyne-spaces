@@ -1495,7 +1495,7 @@ export class TicketController {
 
   /**
    * GET /api/tickets/:ticketId/latest-email-tags
-   * Returns the active tags on the ticket's most recent email reply,
+   * Returns the active tags on the ticket's most recent email that has tags assigned,
    * grouped by category with the channel's configured color (if any).
    */
   getLatestEmailTags = async (req: Request, res: Response): Promise<void> => {
@@ -1528,13 +1528,31 @@ export class TicketController {
 
       const emailRepository = new EmailRepository();
       const emails = await emailRepository.findByConversationIdOrdered(ticket.conversationId);
-      const lastEmail = emails[emails.length - 1];
-      if (!lastEmail) {
+      if (emails.length === 0) {
         res.json({ groups: [] });
         return;
       }
 
-      const groups = await getGroupedTagsWithConfig(lastEmail.id, DESK_EMAIL_SOURCE_TYPE, deskEmailConfigKey(ticket.channelId));
+      // Find which emails have active tags
+      const taggedEmailIds = await prisma.tag.findMany({
+        where: {
+          sourceType: DESK_EMAIL_SOURCE_TYPE,
+          sourceId: { in: emails.map(e => e.id) },
+          isDeleted: false,
+        },
+        select: { sourceId: true },
+        distinct: ['sourceId'],
+      });
+      const taggedIdSet = new Set(taggedEmailIds.map(t => t.sourceId));
+
+      // Pick the latest email (emails are ordered asc) that has tags
+      const latestTaggedEmail = [...emails].reverse().find(e => taggedIdSet.has(e.id));
+      if (!latestTaggedEmail) {
+        res.json({ groups: [] });
+        return;
+      }
+
+      const groups = await getGroupedTagsWithConfig(latestTaggedEmail.id, DESK_EMAIL_SOURCE_TYPE, deskEmailConfigKey(ticket.channelId));
       res.json({ groups });
     } catch (error) {
       logger.error('[TicketController] getLatestEmailTags failed:', error);
