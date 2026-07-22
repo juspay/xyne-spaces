@@ -8,8 +8,10 @@ import { MentionExtension } from '../../../ui/TipTapExtensions';
 import { MentionSelector } from '../../../ui/Selectors';
 import { useMentionSearch } from '../../../../hooks/useMentionSearch';
 import { useActiveUserSearch } from '../../../../hooks/useUsers';
+import { useUserGroupSearch } from '../../../../hooks/useUserGroupSearch';
 import { useAuth } from '../../../../hooks/useAuth';
 import { userToMentionResult } from '../../../../utils/userDisplayName';
+import type { MentionResult } from '../../../ui/Selectors';
 import { VariablePicker } from '../VariablePicker/VariablePicker';
 import type { VariablePickerSource } from '../VariablePicker/VariablePicker.types';
 import {
@@ -20,6 +22,7 @@ import {
 } from './VariableRefExtension';
 
 const MENTION_USER_LIMIT = 20;
+const MENTION_GROUP_LIMIT = 10;
 
 interface SendMessageRichTextFieldProps {
   value: string;
@@ -60,9 +63,23 @@ export function SendMessageRichTextField({
 
   const [workspaceMentionQuery, setWorkspaceMentionQuery] = useState('');
   const workspaceUsers = useActiveUserSearch(workspaceMentionQuery, MENTION_USER_LIMIT);
-  const workspaceMentionItems = useMemo(
-    () => workspaceUsers.map(u => userToMentionResult(u, u.id === user?.id)),
-    [workspaceUsers, user?.id],
+  const workspaceGroups = useUserGroupSearch(workspaceMentionQuery, MENTION_GROUP_LIMIT);
+  const workspaceMentionItems = useMemo<MentionResult[]>(
+    () => [
+      ...workspaceUsers.map(u => userToMentionResult(u, u.id === user?.id)),
+      ...workspaceGroups.map(
+        (g): MentionResult => ({
+          id: g.id,
+          name: g.name,
+          type: 'group',
+          ...(g.alias && { alias: g.alias }),
+          ...(g.description && { description: g.description }),
+          memberCount: 0,
+          isDeactivated: g.isActive === false,
+        }),
+      ),
+    ],
+    [workspaceUsers, workspaceGroups, user?.id],
   );
 
   const mentionItems = concreteChannelId ? channelMentionItems : workspaceMentionItems;
