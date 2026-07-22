@@ -171,15 +171,19 @@ class WatchRenewalQueue {
         );
       }
 
-      // Delayed first run so we don't race with boot.
-      await queue.add(
-        'renew-provider',
-        { providerType },
-        {
-          delay: 30_000,
-          jobId: `watch-renewal-${providerType}-initial`,
-        },
-      );
+      // Delayed first run so we don't race with boot. Skipped for gmail:
+      // renewal should only run on its cron schedule or via the manual
+      // trigger endpoint, not on every deploy/restart.
+      if (providerType !== 'gmail') {
+        await queue.add(
+          'renew-provider',
+          { providerType },
+          {
+            delay: 30_000,
+            jobId: `watch-renewal-${providerType}-initial`,
+          },
+        );
+      }
     }
 
     this.workerInitialized = true;
@@ -188,6 +192,15 @@ class WatchRenewalQueue {
         .getRegisteredTypes()
         .join(', ')}]`
     );
+  }
+
+  /** Manually enqueue an immediate renewal run for a provider (e.g. via an admin-triggered API call). */
+  async triggerRenewalNow(providerType: string): Promise<void> {
+    if (!RENEWAL_CONFIGS[providerType]) {
+      throw new Error(`No renewal config for provider: ${providerType}`);
+    }
+    const queue = await this.ensureQueue();
+    await queue.add('renew-provider', { providerType } satisfies RenewalJobData);
   }
 
   async close(): Promise<void> {
