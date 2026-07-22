@@ -1,11 +1,29 @@
 import { BaseSideEffectHandler } from '../base-handler';
-import type { SideEffectJobConfig } from '../types';
+import type { SideEffectJobConfig, ChannelParticipantPreviousValue } from '../types';
 import { db } from '@/database/client';
 import { notificationService } from '@/services/notificationService';
 import { logger } from '@/utils/logger';
 import { ChannelScopeType } from '@xyne/shared';
+import { refreshCanvasPermissionsForChannel } from '@/services/canvasPermissionSync';
 
 export class ChannelParticipantsSideEffectHandler extends BaseSideEffectHandler {
+
+  /**
+   * A member joined/left this channel → refresh the denormalized ACL of every canvas
+   * shared to it. This is the precise membership signal (unlike a chat_container
+   * re-feed, which also fires on message activity), so canvases aren't recomputed on
+   * every message.
+   */
+  async onDelete(job: SideEffectJobConfig): Promise<void> {
+    const previousValue = job.previousValue as ChannelParticipantPreviousValue | undefined;
+    if (!previousValue) {
+      logger.warn(`[ChannelParticipantsHandler] No previousValue for deleted participant ID: ${job.entityId}`);
+      return;
+    }
+    await refreshCanvasPermissionsForChannel(previousValue.channelId).catch(err =>
+      logger.error(`[ChannelParticipantsHandler] canvas ACL refresh failed for channel ${previousValue.channelId}: ${err}`),
+    );
+  }
 
   async onInsert(job: SideEffectJobConfig): Promise<void> {
     logger.info(`[ChannelParticipantsHandler] onInsert called for entity: ${job.entityId}`);
@@ -26,7 +44,12 @@ export class ChannelParticipantsSideEffectHandler extends BaseSideEffectHandler 
       }
 
       const { channelId, userId } = participant;
-      
+
+      // Member joined → refresh canvases shared to this channel (regardless of notification).
+      await refreshCanvasPermissionsForChannel(channelId).catch(err =>
+        logger.error(`[ChannelParticipantsHandler] canvas ACL refresh failed for channel ${channelId}: ${err}`));
+
+
       if (this.ctx.userID === userId) {
         logger.info(`[ChannelParticipantsHandler] User ${userId} joined channel ${channelId} themselves - skipping notification`);
         return; // Don't notify user when they join themselves

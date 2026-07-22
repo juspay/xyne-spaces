@@ -20,6 +20,7 @@ export interface VespaJobConfig<S extends keyof SchemaDataMap> {
   orgId?: string;
   app?: SubApp; // when schema can belong to multiple sub-applications
   data?: SchemaDataMap[S] | Partial<SchemaDataMap[S]>;
+  fields?: string[]; // when jobType is 'update', restrict the Vespa write to just these document fields
 }
 
 export type VespaQueueHandler = VespaJobConfig<keyof SchemaDataMap>
