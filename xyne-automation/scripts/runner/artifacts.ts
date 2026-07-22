@@ -48,6 +48,9 @@ export function findLatestReport(reportDir: string): string | null {
 export function parseGaugeReport(reportDir: string): TestStats | null {
   if (!fs.existsSync(reportDir)) return null;
 
+  const statusStats = parseGaugeStatusFile(reportDir);
+  if (statusStats) return statusStats;
+
   const directResultPath = path.join(reportDir, 'html-report', 'result.js');
   if (fs.existsSync(directResultPath)) return parseResultJs(directResultPath);
 
@@ -61,6 +64,37 @@ export function parseGaugeReport(reportDir: string): TestStats | null {
   for (const dir of dirs) {
     const resultPath = path.join(reportDir, dir, 'html-report', 'result.js');
     if (fs.existsSync(resultPath)) return parseResultJs(resultPath);
+  }
+
+  return null;
+}
+
+function readGaugeStatus(filePath: string): TestStats | null {
+  try {
+    const data = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as Partial<TestStats>;
+    const passed = data.passed ?? 0;
+    const failed = data.failed ?? 0;
+    const skipped = data.skipped ?? 0;
+    return { passed, failed, skipped, total: passed + failed + skipped };
+  } catch {
+    return null;
+  }
+}
+
+function parseGaugeStatusFile(reportDir: string): TestStats | null {
+  const direct = path.join(reportDir, 'gauge-status.json');
+  if (fs.existsSync(direct)) return readGaugeStatus(direct);
+
+  const dirs = fs
+    .readdirSync(reportDir, { withFileTypes: true })
+    .filter((e) => e.isDirectory())
+    .map((e) => e.name)
+    .sort()
+    .reverse();
+
+  for (const dir of dirs) {
+    const candidate = path.join(reportDir, dir, 'gauge-status.json');
+    if (fs.existsSync(candidate)) return readGaugeStatus(candidate);
   }
 
   return null;

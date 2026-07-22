@@ -95,7 +95,7 @@ export default class BrowserSteps {
     const page = testContext.activePage;
     const targetUrl = `${config.dashboard.baseUrl}${urlPath}`;
     await page.goto(targetUrl);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
   }
 
   @Step('opening stored path <storedPath>')
@@ -106,7 +106,7 @@ export default class BrowserSteps {
       ? resolvedPath
       : `${config.dashboard.baseUrl}${resolvedPath}`;
     await page.goto(targetUrl);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
   }
 
   @Step('opening Xyne-Space at <urlPath>')
@@ -209,24 +209,38 @@ export default class BrowserSteps {
     // Wait for the sidebar to be mounted before deciding toolbar vs overflow.
     await page.locator("[data-testid='nav-more']").first().waitFor({ state: 'visible' });
 
-    const toolbarItem = page.locator(`[data-testid='nav-${itemId}']`).first();
-    if (await toolbarItem.isVisible()) {
-      await toolbarItem.click();
-      return;
-    }
+    const clickNavItem = async (): Promise<void> => {
+      const toolbarItem = page.locator(`[data-testid='nav-${itemId}']`).first();
+      if (await toolbarItem.isVisible()) {
+        await toolbarItem.click();
+        return;
+      }
 
-    // Item is not in the toolbar — open the "More" overflow menu and click it there.
-    await page.locator("[data-testid='nav-more']").first().click();
-    const moreItem = page.locator(`[data-testid='more-${itemId}']`).first();
-    await moreItem.waitFor({ state: 'visible' });
-    try {
-      await moreItem.click({ timeout: 5000 });
-    } catch (_error) {
-      // Two flake modes: the popover's entry animation keeps the item
-      // "unstable" past the deadline, or the click actually landed and the
-      // popover already closed. Only retry if the item is still visible.
-      if (await moreItem.isVisible()) {
-        await moreItem.click({ force: true, timeout: 5000 });
+      // Item is not in the toolbar — open the "More" overflow menu and click it there.
+      await page.locator("[data-testid='nav-more']").first().click();
+      const moreItem = page.locator(`[data-testid='more-${itemId}']`).first();
+      await moreItem.waitFor({ state: 'visible' });
+      try {
+        await moreItem.click({ timeout: 5000 });
+      } catch (_error) {
+        // Only retry if the item is still visible — the first click may have
+        // landed and closed the popover already.
+        if (await moreItem.isVisible()) {
+          await moreItem.click({ force: true, timeout: 5000 });
+        }
+      }
+    };
+
+    // Retry the click until the route changes (recovers a silently-missed click); an
+    // unchanged URL means we're already on the target page, so don't fail.
+    const urlBefore = page.url();
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      await clickNavItem();
+      try {
+        await page.waitForURL((url) => url.href !== urlBefore, { timeout: 2000 });
+        return;
+      } catch (_error) {
+        // already there or missed click — retry
       }
     }
   }
@@ -454,14 +468,14 @@ export default class BrowserSteps {
 
   @Step('waiting for network to be idle')
   public async waitForNetworkIdle(): Promise<void> {
-    // Longer timeout for parallel test execution under resource contention
-    await testContext.activePage.waitForLoadState('networkidle', { timeout: 60000 });
+    // 'load' not 'networkidle' — the real-time app never goes idle (would time out).
+    await testContext.activePage.waitForLoadState('load', { timeout: 60000 });
   }
 
   @Step('waiting for network to be idle fast')
   public async waitForNetworkIdleFast(): Promise<void> {
-    // Fast variant: 30s timeout for messaging flows where full 60s is overkill
-    await testContext.activePage.waitForLoadState('networkidle', { timeout: 30000 });
+    // 'load' not 'networkidle' — see waitForNetworkIdle.
+    await testContext.activePage.waitForLoadState('load', { timeout: 30000 });
   }
 
   @Step('waiting for zero sync to settle')
