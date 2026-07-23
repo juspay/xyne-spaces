@@ -61,7 +61,7 @@ export class UpdateTicketStep extends BaseActionStep<typeof UpdateTicketConfigSc
           ticketId,
           updatedBy,
           newStageName,
-          { isAutomation: true },
+          { isAutomation: true, activitySource: ActivitySource.AUTOMATION },
         );
         if (!result.success) {
           throw new Error(result.message ?? 'Stage transition failed');
@@ -75,7 +75,12 @@ export class UpdateTicketStep extends BaseActionStep<typeof UpdateTicketConfigSc
           },
         }).catch(err => logger.warn(`[automations] UPDATE_TICKET stage audit write failed ticketId=${ticketId}:`, err));
       } else {
-        await repositories.tickets.updateTicketStage(ticketId, config.stageName as string, updatedBy, ActivitySource.AUTOMATION);
+        await repositories.tickets.updateTicketStage(
+          ticketId,
+          config.stageName as string,
+          updatedBy,
+          ActivitySource.AUTOMATION,
+        );
       }
     }
 
