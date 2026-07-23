@@ -7,6 +7,7 @@ import {
   TicketStageRequestStatus,
   Prisma,
 } from '@prisma/client';
+import { ActivitySource } from '@/types/ticket';
 import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { calculateETADeadline } from '@/utils/etaCalculation';
@@ -20,6 +21,9 @@ const prisma = DatabaseClient.getInstance();
 interface TransitionOptions {
   formValues?: Record<string, any>;
   isAutomation?: boolean;
+  // Provenance tag accepted from callers (e.g. automation steps). The stage move is recorded to
+  // the activity timeline / thread by the caller, so this service does not consume it here.
+  activitySource?: ActivitySource;
 }
 
 interface TransitionResult {

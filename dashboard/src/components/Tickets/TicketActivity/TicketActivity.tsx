@@ -8,8 +8,7 @@ import {
   Tag,
   Archive,
   GitMerge,
-  ChevronDown,
-  ChevronRight,
+  Mail,
 } from 'lucide-react';
 import {
   ActivityType,
@@ -23,7 +22,8 @@ import {
   type BaseActivityValue,
 } from '@xyne/shared';
 import { formatReferenceLabel } from '../../../hooks/useTicketReferences';
-import { formatDistanceToNow } from 'date-fns';
+import { formatDistanceToNow, format } from 'date-fns';
+import { Tooltip } from '../../ui/Tooltip/Tooltip';
 import { TicketPriorityIcon } from '../../../assets/icons';
 import { TicketStatusIcon } from '../../../assets/icons';
 import SmallUserAvatar from '../../UserAvatar/SmallUserAvatar';
@@ -31,23 +31,7 @@ import { formatPRActivityParts } from '../../../utils/activityFormatter';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
-
-type FormValueEntry = {
-  id: string;
-  fieldId: string;
-  fieldValue?: unknown;
-  actualFieldValue?: unknown;
-  formField?: { fieldName?: string | null } | null;
-  globalField?: { fieldName?: string | null } | null;
-};
-
-type StageVisitFormValues = {
-  stageName: string;
-  stageId: string;
-  version: number;
-  enteredAt: number;
-  formValues: FormValueEntry[];
-};
+import { FormSubmissionBlock, matchFormVisit, type StageVisitFormValues } from './formSubmission';
 
 interface TicketActivityProps {
   activities: TicketActivityType[] | undefined;
@@ -91,6 +75,16 @@ const formatTimestamp = (timestamp: number | Date): string => {
     return formatDistanceToNow(date, { addSuffix: true });
   } catch {
     return 'Unknown time';
+  }
+};
+
+// Full, exact timestamp shown in the hover tooltip (the row itself shows the relative time).
+const formatExactTimestamp = (timestamp: number | Date): string => {
+  try {
+    const date = typeof timestamp === 'number' ? new Date(timestamp) : timestamp;
+    return format(date, "MMM d, yyyy 'at' h:mm:ss a");
+  } catch {
+    return '';
   }
 };
 
@@ -300,6 +294,13 @@ const getActivityDescription = (
     }
 
     case ActivityType.METADATA:
+      if (value?.field === 'emailReply') {
+        return {
+          description: 'replied to the email',
+          details: '',
+        };
+      }
+
       if (value?.field === 'stageFormFile') {
         const fieldLabel = value.fieldName || 'file';
         const filename = value.newFilename || value.oldFilename || 'file';
@@ -586,6 +587,9 @@ const getActivityDescription = (
 
 export const getActivityIcon = (activity: TicketActivityType): ReactElement => {
   const value = activity.value as ActivityValue | null;
+  if (activity.activityType === ActivityType.METADATA && value?.field === 'emailReply') {
+    return <Mail size={12} className='text-blue-600' />;
+  }
   if (activity.activityType === ActivityType.METADATA && value?.field === 'stageFormFile') {
     return <FileText size={12} className='text-blue-600' />;
   }
@@ -716,13 +720,6 @@ export const TicketActivity = ({
   );
 };
 
-const renderFormFieldValue = (fv: FormValueEntry): string => {
-  const raw = fv.actualFieldValue ?? fv.fieldValue;
-  if (raw === null || raw === undefined) return '—';
-  if (typeof raw === 'object') return JSON.stringify(raw);
-  return String(raw as string | number | boolean);
-};
-
 export const ActivityComponent = ({
   activity,
   index,
@@ -742,7 +739,6 @@ export const ActivityComponent = ({
   stageVisitFormValues?: StageVisitFormValues[];
   customFieldAttachmentFilenameById?: ReadonlyMap<string, string>;
 }) => {
-  const [formExpanded, setFormExpanded] = useState(true);
   const activityUser = users?.find(u => u.id === activity.updatedBy);
   const isAutomationActivity = (activity.value as ActivityValue | null)?.isAutomation === true;
   const { description, details, hideActorName } = getActivityDescription(
@@ -762,10 +758,7 @@ export const ActivityComponent = ({
     activityValue?.field === 'stageName';
 
   const matchedFormVisit = isStageMove
-    ? stageVisitFormValues
-        .filter(sv => sv.stageName === activityValue?.newValue)
-        .filter(sv => sv.enteredAt <= new Date(activity.timestamp).getTime() + 60_000)
-        .sort((a, b) => b.enteredAt - a.enteredAt)[0]
+    ? matchFormVisit(stageVisitFormValues, activityValue?.newValue, activity.timestamp)
     : undefined;
 
   return (
@@ -792,46 +785,19 @@ export const ActivityComponent = ({
             {description}
             {details && <span className='text-muted-foreground'> {details}</span>}
           </p>
-          <span className='text-xs text-muted-foreground whitespace-nowrap flex-shrink-0'>
-            {formatTimestamp(activity.timestamp)}
-          </span>
+          <Tooltip content={formatExactTimestamp(activity.timestamp)}>
+            <span className='text-xs text-muted-foreground whitespace-nowrap flex-shrink-0 cursor-default'>
+              {formatTimestamp(activity.timestamp)}
+            </span>
+          </Tooltip>
         </div>
 
-        {/* Inline form submission viewer */}
-        {matchedFormVisit && matchedFormVisit.formValues.length > 0 && (
-          <div className='mt-2'>
-            <button
-              type='button'
-              onClick={() => setFormExpanded(prev => !prev)}
-              data-track-category='ticket_activity'
-              data-track-name='toggle_form_submission'
-              className='inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors'
-            >
-              {formExpanded ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
-              <FileText size={11} />
-              <span>
-                Form submission
-                {matchedFormVisit.version > 1 && ` (visit #${matchedFormVisit.version})`}
-                {' · '}
-                {matchedFormVisit.formValues.length} field
-                {matchedFormVisit.formValues.length !== 1 ? 's' : ''}
-              </span>
-            </button>
-            {formExpanded && (
-              <div className='mt-1.5 rounded-md border border-border bg-muted/30 divide-y divide-border overflow-hidden'>
-                {matchedFormVisit.formValues.map(fv => (
-                  <div key={fv.id} className='px-3 py-2 flex items-start justify-between gap-4'>
-                    <span className='text-[11px] text-muted-foreground shrink-0'>
-                      {fv.globalField?.fieldName ?? fv.formField?.fieldName ?? fv.fieldId}
-                    </span>
-                    <span className='text-[11px] text-foreground text-right break-words min-w-0'>
-                      {renderFormFieldValue(fv)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+        {/* Inline form submission viewer (shared with the Messages thread) */}
+        {matchedFormVisit && (
+          <FormSubmissionBlock
+            formValues={matchedFormVisit.formValues}
+            version={matchedFormVisit.version}
+          />
         )}
       </div>
     </div>

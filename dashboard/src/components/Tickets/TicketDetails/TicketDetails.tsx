@@ -53,6 +53,7 @@ import { usePlatform } from '../../../hooks/usePlatform';
 import { useCurrentUserRoleIds } from '../../../hooks/useRoles';
 import { useRouteContext } from '../../../hooks/useRouteContext';
 import { TicketActivity } from '../TicketActivity';
+import { buildStageVisitFormValues } from '../TicketActivity/formSubmission';
 import { UserSelector } from '../CreateTicketModal/UserSelector';
 import { UserGroupSelector } from '../CreateTicketModal/UserGroupSelector';
 import { SubTicketModal } from '../SubTicketModal/SubTicketModal';
@@ -1232,38 +1233,16 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     });
   }, [formMapping, formEntityValues, ticketId, ticket?.boardId, ticket?.workspaceId]);
 
-  // Group form values by stage+version — no ETA join needed
-  const stageVisitFormValues = useMemo(() => {
-    const rawFormValues = (formEntityValues as FormEntityValueWithField[] | undefined) ?? [];
-    const stageIds = new Set((stagesWithFormInfo ?? []).map(stage => stage.id));
-    const withStage = rawFormValues.filter(
-      fv => typeof fv.contextId === 'string' && stageIds.has(fv.contextId),
-    );
-
-    const groups = new Map<string, FormEntityValueWithField[]>();
-    for (const fv of withStage) {
-      const key = `${fv.contextId}:${fv.version ?? 1}`;
-      const bucket = groups.get(key) ?? [];
-      bucket.push(fv);
-      groups.set(key, bucket);
-    }
-
-    return Array.from(groups.entries())
-      .map(([key, fvs]) => {
-        const stageId = key.split(':')[0] ?? '';
-        const version = fvs[0]?.version ?? 1;
-        const stage = stagesWithFormInfo?.find(s => s.id === stageId);
-        const enteredAt = Math.min(...fvs.map(fv => new Date(fv.createdAt).getTime()));
-        return {
-          stageName: stage?.name ?? stageId,
-          stageId,
-          version,
-          enteredAt,
-          formValues: fvs,
-        };
-      })
-      .sort((a, b) => a.enteredAt - b.enteredAt);
-  }, [formEntityValues, stagesWithFormInfo]);
+  // Group form values by stage+version — shared with the Messages thread (StageMoveFormBlock)
+  // so both surfaces render the exact same "Form submission" block.
+  const stageVisitFormValues = useMemo(
+    () =>
+      buildStageVisitFormValues(
+        formEntityValues as FormEntityValueWithField[] | undefined,
+        stagesWithFormInfo,
+      ),
+    [formEntityValues, stagesWithFormInfo],
+  );
 
   type FormsToShowItem = {
     type: 'request' | 'form';
@@ -1334,6 +1313,19 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         // Find which stage this contextId belongs to
         const stage = stagesWithFormInfo.find(s => s.id === contextId);
         if (stage && stage.formId) {
+          // "Status Change Requests" is for transitions awaiting approval. Only surface a
+          // submitted form here when the transition into this stage actually requires an
+          // approver. No-approval form submissions are shown in the activity timeline (and,
+          // on NON_LINEAR boards, the Stage Form Submissions panel), so listing them here too
+          // is redundant and misreads as a pending request.
+          const stageHasApprovers = isNonLinearBoard
+            ? stageTransitions.some(
+                t => t.toStageId === stage.id && (t.transitionApprovers?.length ?? 0) > 0,
+              )
+            : (stage.approvers?.length ?? 0) > 0;
+          if (!stageHasApprovers) {
+            return;
+          }
           // On linear boards, hide form data from "future" stages (stale data from backward moves).
           // On non-linear boards stage order has no meaning, so always show all form data.
           if (
@@ -4227,12 +4219,16 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             On linear boards the single board-level form lives in the form panel above,
             so hide this panel entirely rather than rendering an empty state. */}
         {isNonLinearBoard && <StageFormSubmissions stageVisitFormValues={stageVisitFormValues} />}
+        {/* Stage-transition form submissions belong in the activity timeline on every board
+            type (linear boards support per-transition forms too — e.g. In Progress → Review).
+            ActivityComponent matches a submission to a move by stage name, so board-level
+            custom-field values (contextId = boardId, never a stage name) can't leak in. */}
         <TicketActivity
           activities={activities}
           users={users}
           userGroups={userGroups}
           boards={boards}
-          stageVisitFormValues={isNonLinearBoard ? stageVisitFormValues : []}
+          stageVisitFormValues={stageVisitFormValues}
         />
       </div>
       {/* SubTicket Modal */}

@@ -1,9 +1,9 @@
-import { v4 as uuidv4 } from 'uuid';
 import { ActivityType } from '@prisma/client';
 import { BaseSideEffectHandler } from '../base-handler';
 import type { SideEffectJobConfig } from '../types';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
+import { recordTicketTimelineEvent } from '@/services/ticketTimelineEventService';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { ticketSchema } from '@/vespa/src/types';
 
@@ -102,44 +102,29 @@ export class TicketTagMappingsSideEffectHandler extends BaseSideEffectHandler {
           ? { action: 'added', newValue: tagName }
           : { action: 'removed', oldValue: tagName };
 
-      await db.ticketActivity.create({
-        data: {
-          id: uuidv4(),
-          ticketId,
-          updatedBy: this.ctx.userID,
-          timestamp: now,
-          activityType: ActivityType.TAGS,
-          value: activityValue,
-        },
-      });
-
-      if (!ticket?.conversationId || !user?.name) {
-        return;
-      }
-
+      const hasThread = Boolean(ticket?.conversationId && user?.name);
       const content =
         action === 'added'
-          ? `${user.name} added a label: ${tagName}`
-          : `${user.name} removed a label: ${tagName}`;
+          ? `${user?.name} added a label: ${tagName}`
+          : `${user?.name} removed a label: ${tagName}`;
 
-      await db.message.create({
-        data: {
-          messageId: uuidv4(),
-          conversationId: ticket.conversationId,
-          senderId: this.ctx.userID,
-          content,
-          msgType: 'SYSTEM',
-          hasAttachment: false,
-          edited: false,
-          isDeleted: false,
-          isSent: true,
-          showInChannel: false,
-          createdAt: now,
-          metadata: {
-            activityType: 'TAGS',
-            isTicketActivity: true,
-          },
+      await recordTicketTimelineEvent({
+        activity: {
+          ticketId,
+          updatedBy: this.ctx.userID,
+          activityType: ActivityType.TAGS,
+          value: activityValue,
+          timestamp: now,
         },
+        message: hasThread
+          ? {
+              conversationId: ticket!.conversationId!,
+              senderId: this.ctx.userID,
+              content,
+              activityType: 'TAGS',
+              createdAt: now,
+            }
+          : undefined,
       });
     } catch (error) {
       logger.error('[TicketTagMappingsSideEffectHandler] Failed to handle tag activity:', {
