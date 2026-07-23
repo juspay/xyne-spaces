@@ -1,4 +1,4 @@
-import { ActivityClassification, ActivityType, MessageType } from '@prisma/client';
+import { ActivityClassification, ActivityType } from '@prisma/client';
 import { BaseSideEffectHandler } from '../base-handler';
 import type { SideEffectJobConfig } from '../types';
 import { db } from '@/database/client';
@@ -6,7 +6,7 @@ import { activityService } from '@/services/activity/activityService';
 import { notificationService } from '@/services/notificationService';
 import { logger } from '@/utils/logger';
 import { getFormFieldUserActors } from '@/utils/ticketActorUtils';
-import { v4 as uuidv4 } from 'uuid';
+import { recordTicketTimelineEvent } from '@/services/ticketTimelineEventService';
 
 async function fetchTicketActors(ticketId: string): Promise<string[]> {
   const [roleAssignments, formFieldUserActors] = await Promise.all([
@@ -79,17 +79,12 @@ export class RcasSideEffectHandler extends BaseSideEffectHandler {
 
     // Create ticket activities for timeline
     try {
-      await db.ticketActivity.create({
-        data: {
-          id: uuidv4(),
+      await recordTicketTimelineEvent({
+        activity: {
           ticketId: rca.ticketId,
           updatedBy: actorId,
-          timestamp: new Date(),
           activityType: ActivityType.RCA_CREATED,
-          value: {
-            rcaId,
-            rcaTitle: rca.title,
-          },
+          value: { rcaId, rcaTitle: rca.title },
         },
       });
     } catch (error) {
@@ -99,23 +94,12 @@ export class RcasSideEffectHandler extends BaseSideEffectHandler {
     // Create system message in conversation
     if (ticket.conversationId) {
       try {
-        await db.message.create({
-          data: {
-            messageId: uuidv4(),
+        await recordTicketTimelineEvent({
+          message: {
             conversationId: ticket.conversationId,
             senderId: actorId,
             content: `RCA created: ${rca.title}`,
-            msgType: MessageType.SYSTEM,
-            hasAttachment: false,
-            edited: false,
-            isDeleted: false,
-            isSent: true,
-            showInChannel: false,
-            createdAt: new Date(),
-            metadata: {
-              activityType: ActivityType.RCA_CREATED,
-              isTicketActivity: true,
-            },
+            activityType: ActivityType.RCA_CREATED,
           },
         });
       } catch (error) {
@@ -171,17 +155,12 @@ export class RcasSideEffectHandler extends BaseSideEffectHandler {
 
     // Create ticket activities for timeline
     try {
-      await db.ticketActivity.create({
-        data: {
-          id: uuidv4(),
+      await recordTicketTimelineEvent({
+        activity: {
           ticketId: rca.ticketId,
           updatedBy: actorId,
-          timestamp: new Date(),
           activityType: ActivityType.RCA_UPDATED,
-          value: {
-            rcaId,
-            rcaTitle: rca.title,
-          },
+          value: { rcaId, rcaTitle: rca.title },
         },
       });
     } catch (error) {
@@ -191,23 +170,12 @@ export class RcasSideEffectHandler extends BaseSideEffectHandler {
     // Create system message in conversation
     if (ticket.conversationId) {
       try {
-        await db.message.create({
-          data: {
-            messageId: uuidv4(),
+        await recordTicketTimelineEvent({
+          message: {
             conversationId: ticket.conversationId,
             senderId: actorId,
             content: `RCA updated: ${rca.title}`,
-            msgType: MessageType.SYSTEM,
-            hasAttachment: false,
-            edited: false,
-            isDeleted: false,
-            isSent: true,
-            showInChannel: false,
-            createdAt: new Date(),
-            metadata: {
-              activityType: ActivityType.RCA_UPDATED,
-              isTicketActivity: true,
-            },
+            activityType: ActivityType.RCA_UPDATED,
           },
         });
       } catch (error) {

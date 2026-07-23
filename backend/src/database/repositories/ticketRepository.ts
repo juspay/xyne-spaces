@@ -3,6 +3,7 @@ import { extractEmailAddress } from '@/utils/email';
 import { CreateTicketRequest, ActivitySource } from '../../types/ticket';
 import { websocketService } from '@/services/websocketService';
 import { buildKanbanCountsSnapshot } from '@/services/tickets/kanbanCountsSnapshotService';
+import { recordTicketTimelineEvent } from '@/services/ticketTimelineEventService';
 import { logger } from '@/utils/logger';
 import { DatabaseClient } from '@/database/client';
 import { calculateETADeadline } from '@/utils/etaCalculation';
@@ -542,8 +543,8 @@ export class TicketRepository {
 
     // Create STATUS activity if status changed (for both WEBHOOK and INTERNAL sources)
     if (statusChanged) {
-      await prisma.ticketActivity.create({
-        data: {
+      await recordTicketTimelineEvent({
+        activity: {
           ticketId: ticketId,
           updatedBy: updatedBy,
           activityType: ActivityType.STATUS,
@@ -551,10 +552,11 @@ export class TicketRepository {
             field: 'statusV2',
             oldValue: oldStatusV2,
             newValue: newStatusV2,
-            source: source
+            source: source,
+            ...(source === ActivitySource.AUTOMATION ? { isAutomation: true } : {}),
           } as Prisma.InputJsonValue,
-          channelId: currentTicket.channelId
-        }
+          channelId: currentTicket.channelId,
+        },
       });
 
       logger.info(
@@ -570,25 +572,18 @@ export class TicketRepository {
         });
 
         const userName = user?.name || 'System';
-        const statusMessage = `${userName} changed status from ${oldStatusV2} to ${newStatusV2}`;
+        const actorLabel = `${userName}${source === ActivitySource.AUTOMATION ? ' (Automation)' : ''}`;
+        const statusMessage = `${actorLabel} changed status from ${oldStatusV2} to ${newStatusV2}`;
 
-        await prisma.message.create({
-          data: {
+        await recordTicketTimelineEvent({
+          message: {
             conversationId: currentTicket.conversationId,
-            ...(currentTicket.workspaceId ? { workspaceId: currentTicket.workspaceId } : {}),
             senderId: updatedBy,
             content: statusMessage,
-            msgType: 'SYSTEM',
-            hasAttachment: false,
-            edited: false,
-            isDeleted: false,
-            isSent: true,
-            showInChannel: false,
-            metadata: {
-              activityType: 'STATUS',
-              isTicketActivity: true
-            } as Prisma.InputJsonValue
-          }
+            activityType: 'STATUS',
+            workspaceId: currentTicket.workspaceId,
+            isAutomation: source === ActivitySource.AUTOMATION,
+          },
         });
 
         logger.info(

@@ -1,7 +1,7 @@
 // PR to Ticket Status Sync Service
 // Handles mapping PR status changes to ticket stage updates based on configurable PR status mappings
 
-import { PRStatus, TicketStatusV2, PRStatusEvent, MessageType, ActivityType } from '@prisma/client';
+import { PRStatus, TicketStatusV2, PRStatusEvent, ActivityType } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
 import { ticketService } from '@/services/ticketService';
 import { ActivitySource } from '@/types/ticket';
@@ -11,10 +11,10 @@ import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-
 import { evaluateAssignmentRule, evaluateRoleSlots, AssignmentType } from '@/utils/assignmentEngine';
 import { syncUserWorkload } from '@/utils/workloadUtils';
 import { userResponsibilityFromRoleId, roleIdFromEnum } from '@/utils/roleFrameworkUtils';
-import { v4 as uuidv4 } from 'uuid';
 import { PullRequestActivityHandler } from '@/zero/side-effects/tables/pull-requests-handler';
 import { TicketAssignmentsSideEffectHandler } from '@/zero/side-effects/tables/ticket-assignments-handler';
 import { db } from '@/database/client';
+import { recordTicketTimelineEvent } from '@/services/ticketTimelineEventService';
 import type { BoardMetadata } from '@xyne/shared';
 
 const prisma = DatabaseClient.getInstance();
@@ -529,28 +529,16 @@ export class PRTicketStatusSyncService {
     }
 
     try {
-      const { v4: uuidv4 } = await import('uuid');
-      const { MessageType } = await import('@prisma/client');
-
       const message = this.formatPRMessage(pr, params, stageChange, remainingOpenPRs);
 
-      await prisma.message.create({
-        data: {
-          messageId: uuidv4(),
+      await recordTicketTimelineEvent({
+        message: {
           conversationId: ticket.conversationId,
-          ...(ticket.workspaceId ? { workspaceId: ticket.workspaceId } : {}),
           senderId,
           content: message,
-          msgType: MessageType.SYSTEM,
-          hasAttachment: false,
-          edited: false,
-          isDeleted: false,
-          isSent: true,
-          showInChannel: false,
-          createdAt: new Date(),
-          metadata: {
-            activityType: 'PR',
-            isTicketActivity: true,
+          activityType: 'PR',
+          workspaceId: ticket.workspaceId,
+          extraMetadata: {
             prWebhook: true,
             prUrl: pr.prUrl,
             prId: pr.prId,
@@ -719,8 +707,8 @@ export class PRTicketStatusSyncService {
       `[PR-Ticket-Sync] Successfully assigned ${assignedUserId} to ticket ${ticket.xyneId} as ${roleName}`
     );
 
-    await prisma.ticketActivity.create({
-      data: {
+    await recordTicketTimelineEvent({
+      activity: {
         ticketId: ticket.id,
         updatedBy,
         activityType: 'ASSIGNED_TO',
@@ -766,24 +754,13 @@ export class PRTicketStatusSyncService {
 
     const activityMessage = `${updatedByUser?.name || 'Bitbucket Bot'} assigned ${roleName} ${assignedUser?.name || assignedUserId}`;
 
-    await prisma.message.create({
-      data: {
-        messageId: uuidv4(),
+    await recordTicketTimelineEvent({
+      message: {
         conversationId: ticket.conversationId,
-        ...(ticket.workspaceId ? { workspaceId: ticket.workspaceId } : {}),
         senderId: updatedBy,
         content: activityMessage,
-        msgType: MessageType.SYSTEM,
-        hasAttachment: false,
-        edited: false,
-        isDeleted: false,
-        isSent: true,
-        showInChannel: false,
-        createdAt: new Date(),
-        metadata: {
-          activityType: ActivityType.ASSIGNED_TO,
-          isTicketActivity: true,
-        },
+        activityType: ActivityType.ASSIGNED_TO,
+        workspaceId: ticket.workspaceId,
       },
     });
 

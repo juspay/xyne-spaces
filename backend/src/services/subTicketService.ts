@@ -1,7 +1,8 @@
-import { ActivityType, MessageType, Prisma } from '@prisma/client';
+import { ActivityType, Prisma } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
+import { recordTicketTimelineEvent } from '@/services/ticketTimelineEventService';
 
 export interface CreateSubTicketInput {
   parentTicketId: string;
@@ -70,44 +71,33 @@ export async function createSubTicket(
       data: { id: mappingId, ticketId: parent.id, subTicketId },
     });
 
-    await tx.ticketActivity.create({
-      data: {
-        id: uuidv4(),
-        ticketId: parent.id,
-        activityType: ActivityType.SUBTICKET_CREATED,
-        updatedBy: input.createdBy,
-        timestamp: now,
-        value: {
-          subTicketId,
-          subTicketTitle: input.title,
-          subTicketXyneId: input.subTicketXyneId ?? null,
-        },
-      },
-    });
-
-    if (parent.conversationId) {
-      const displayId = input.subTicketXyneId ?? subTicketId.slice(0, 8).toUpperCase();
-      await tx.message.create({
-        data: {
-          messageId: uuidv4(),
-          conversationId: parent.conversationId,
-          ...(parent.workspaceId ? { workspaceId: parent.workspaceId } : {}),
-          senderId: input.createdBy,
-          content: `Subticket ${displayId} created: ${input.title}`,
-          msgType: MessageType.SYSTEM,
-          hasAttachment: false,
-          edited: false,
-          isDeleted: false,
-          isSent: true,
-          showInChannel: false,
-          createdAt: now,
-          metadata: {
-            activityType: ActivityType.SUBTICKET_CREATED,
-            isTicketActivity: true,
+    const displayId = input.subTicketXyneId ?? subTicketId.slice(0, 8).toUpperCase();
+    await recordTicketTimelineEvent(
+      {
+        activity: {
+          ticketId: parent.id,
+          updatedBy: input.createdBy,
+          activityType: ActivityType.SUBTICKET_CREATED,
+          value: {
+            subTicketId,
+            subTicketTitle: input.title,
+            subTicketXyneId: input.subTicketXyneId ?? null,
           },
+          timestamp: now,
         },
-      });
-    }
+        message: parent.conversationId
+          ? {
+              conversationId: parent.conversationId,
+              senderId: input.createdBy,
+              content: `Subticket ${displayId} created: ${input.title}`,
+              activityType: ActivityType.SUBTICKET_CREATED,
+              workspaceId: parent.workspaceId,
+              createdAt: now,
+            }
+          : undefined,
+      },
+      tx,
+    );
   });
 
   logger.info(

@@ -15,7 +15,7 @@ import { EmailChannelPreferenceRepository } from '@/database/repositories/emailC
 import { UserRepository } from '@/database/repositories/users';
 import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';
-import { EmailType, MessageDirection, ExternalEntityType, AttachmentEntityType, Prisma } from '@prisma/client';
+import { EmailType, MessageDirection, ExternalEntityType, AttachmentEntityType, ActivityType, Prisma } from '@prisma/client';
 import { db } from '@/database/client';
 import { listS2SClawAgents, getConversationInsight } from '@/services/clawAgentService';
 import { vespaClient } from '@/services/vespaSearch';
@@ -36,6 +36,7 @@ import { config as appConfig } from '@/config/env';
 import { tagGenerationPipeline } from '@/tags/pipeline';
 import { DESK_EMAIL_SOURCE_TYPE, deskEmailConfigKey } from '@/tags';
 import { ChannelExternalSourceResolver } from '@/services/channelExternalSourceResolver';
+import { recordTicketTimelineEvent } from '@/services/ticketTimelineEventService';
 
 interface ReplyEmailRequest {
   body: string;
@@ -381,6 +382,48 @@ export class EmailController {
         where: { conversationId },
         data: { lastEmailAt: newEmail.createdAt },
       });
+
+      // 6a. Record the reply as a ticket event, mirroring how stage changes surface: a
+      // ticket_activities row for the Details → Activity timeline, plus a SYSTEM message for the
+      // Messages thread. Non-blocking — the email is already sent, so a failure here must never
+      // fail the reply. Uses ActivityType.METADATA with a `field: 'emailReply'` discriminator so
+      // no new enum value / migration is needed (see also 'stageFormFile' / 'customField').
+      try {
+        const replyingUser = await this.userRepo.findById(userId);
+        const replierName = replyingUser?.name || req.user?.name || 'Someone';
+
+        const ticketForActivity = await db.ticket.findFirst({
+          where: { conversationId },
+          select: { id: true },
+        });
+
+        await recordTicketTimelineEvent({
+          activity: ticketForActivity
+            ? {
+                ticketId: ticketForActivity.id,
+                updatedBy: userId,
+                activityType: ActivityType.METADATA,
+                value: {
+                  field: 'emailReply',
+                  type: emailType,
+                  to: toRecipients,
+                } as Prisma.InputJsonValue,
+              }
+            : undefined,
+          message: {
+            conversationId,
+            senderId: userId,
+            content: `${replierName} replied to the email`,
+            activityType: 'EMAIL_REPLY',
+            workspaceId: channel.workspaceId,
+          },
+        });
+      } catch (activityError) {
+        logger.warn('[EmailController] Failed to record reply activity/message', {
+          conversationId,
+          error: activityError instanceof Error ? activityError.message : String(activityError),
+        });
+      }
 
       // Record the first response time for SLA tracking.
       // Uses newEmail.createdAt so the timestamp matches the persisted email record.
