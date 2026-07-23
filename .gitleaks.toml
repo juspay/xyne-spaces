@@ -76,4 +76,6 @@ regexes = [
   # Keyboard-shortcut chords in the shortcuts catalog — `keys: '<chord>'` trips generic-api-key
   # (dashboard/src/shortcuts/catalog.ts). Anchored: the whole value must be a modifier+key chord.
   '''^(mod|cmd|ctrl|alt|shift|meta)\+[a-z0-9+]+$''',
+  # UI local-storage key, not a credential (ErrorPipelinePageV3.tsx).
+  '''^errpipe-detail-width-v2$''',
 ]
