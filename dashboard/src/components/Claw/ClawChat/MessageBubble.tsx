@@ -40,7 +40,7 @@ export function MessageBubble({ message, onRetry }: MessageBubbleProps): ReactEl
             ? 'bg-primary text-primary-foreground'
             : message.errorInfo
               ? 'bg-destructive/10 border border-destructive/30 text-destructive'
-              : 'bg-muted text-foreground',
+              : 'bg-muted text-foreground border border-border/60',
         )}
       >
         {message.errorInfo ? (

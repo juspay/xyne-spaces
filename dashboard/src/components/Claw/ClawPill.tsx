@@ -2,7 +2,6 @@ import { useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AlertCircle, Minus } from 'lucide-react';
 import { cn } from '../../utils/classNames';
-import { CLOSE_SPRING, OPEN_SPRING } from './claw.motion';
 import { ClawMark } from './ClawMark';
 import { useClawTabStatus } from './ClawConversationContext';
 
@@ -49,25 +48,16 @@ export function ClawPill({ isOpen, onOpen, onClose }: ClawPillProps): React.Reac
           ? 'h-14 justify-between border-b border-border/50 px-4'
           : cn(
               'h-full w-full cursor-pointer justify-center focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50',
-              isThinking ? 'px-3' : 'px-4',
+              isThinking ? 'px-2' : 'px-4',
             ),
       )}
     >
-      <AnimatePresence initial={false} mode='popLayout'>
-        {!isThinking && (
-          <motion.div
-            key='claw-mark'
-            layout='position'
-            initial={{ opacity: 0, scale: 0.25, filter: 'blur(4px)' }}
-            animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
-            exit={{ opacity: 0, scale: 0.25, filter: 'blur(4px)' }}
-            transition={isOpen ? OPEN_SPRING : CLOSE_SPRING}
-            className='relative z-10 flex shrink-0 items-center justify-center'
-          >
-            <ClawMark size={22} />
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <motion.div
+        layout='position'
+        className='relative z-10 flex shrink-0 items-center justify-center'
+      >
+        <ClawMark size={28} />
+      </motion.div>
 
       <AnimatePresence mode='popLayout' initial={false}>
         {isOpen ? (
