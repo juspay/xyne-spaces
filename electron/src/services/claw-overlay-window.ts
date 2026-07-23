@@ -8,9 +8,15 @@ import { getMainWindow } from "../window/manager";
 
 const clawStore = new Store({ name: "claw-overlay" });
 const ENABLED_KEY = "clawOverlayEnabled";
+const PANEL_HEIGHT_KEY = "clawPanelHeight";
 
 let clawWindow: BrowserWindow | null = null;
 let clawRendererReady = false;
+let clawExpanded = false;
+
+let panelHeightPersistTimer: ReturnType<typeof setTimeout> | null = null;
+let pendingPanelHeight: number | null = null;
+let resizableLatchTimer: ReturnType<typeof setTimeout> | null = null;
 
 let setIgnoreMouseHandler:
   | ((event: Electron.IpcMainEvent, ignore: boolean) => void)
@@ -22,6 +28,9 @@ let focusHandler: ((event: Electron.IpcMainEvent) => void) | null = null;
 let blurHandler: ((event: Electron.IpcMainEvent) => void) | null = null;
 let openInMainHandler:
   | ((event: Electron.IpcMainEvent, pathname: string) => void)
+  | null = null;
+let setPanelHeightHandler:
+  | ((event: Electron.IpcMainEvent, height: number) => void)
   | null = null;
 
 let displayMetricsHandler:
@@ -40,6 +49,10 @@ const SHADOW_GUTTER = 32;
 
 const PILL = { width: 120, height: 44 };
 const PANEL = { width: 420, height: 600 };
+
+const DEFAULT_PANEL_HEIGHT = PANEL.height;
+const MIN_PANEL_HEIGHT = 400;
+const PANEL_TOP_MARGIN = 8;
 
 function getWindowSize(
   contentWidth: number,
@@ -69,23 +82,70 @@ function getDockedBounds(
   };
 }
 
+function getMaxPanelHeight(workArea: Electron.Rectangle): number {
+  return Math.max(
+    MIN_PANEL_HEIGHT,
+    workArea.height - SHADOW_GUTTER - PANEL_TOP_MARGIN,
+  );
+}
+
+function clampPanelHeight(height: number, workArea: Electron.Rectangle): number {
+  const safe = Number.isFinite(height) ? height : DEFAULT_PANEL_HEIGHT;
+  const max = getMaxPanelHeight(workArea);
+  return Math.round(Math.min(Math.max(safe, MIN_PANEL_HEIGHT), max));
+}
+
+function getStoredPanelHeight(workArea: Electron.Rectangle): number {
+  const raw = Number(clawStore.get(PANEL_HEIGHT_KEY, DEFAULT_PANEL_HEIGHT));
+  return clampPanelHeight(raw, workArea);
+}
+
+function persistPanelHeightDebounced(height: number): void {
+  pendingPanelHeight = height;
+  if (panelHeightPersistTimer) return;
+  panelHeightPersistTimer = setTimeout(() => {
+    panelHeightPersistTimer = null;
+    if (pendingPanelHeight !== null) {
+      clawStore.set(PANEL_HEIGHT_KEY, pendingPanelHeight);
+      pendingPanelHeight = null;
+    }
+  }, 250);
+}
+
 function computeInitialBounds(): Electron.Rectangle {
-  return getDockedBounds(PANEL.width, PANEL.height, getNearestWorkArea());
+  const workArea = getNearestWorkArea();
+  return getDockedBounds(PANEL.width, getStoredPanelHeight(workArea), workArea);
+}
+
+function applyWindowBounds(bounds: Electron.Rectangle): void {
+  if (!clawWindow || clawWindow.isDestroyed()) return;
+  if (resizableLatchTimer) {
+    clearTimeout(resizableLatchTimer);
+  } else {
+    clawWindow.setResizable(true);
+  }
+  clawWindow.setBounds(bounds);
+  resizableLatchTimer = setTimeout(() => {
+    resizableLatchTimer = null;
+    if (clawWindow && !clawWindow.isDestroyed()) clawWindow.setResizable(false);
+  }, 300);
 }
 
 function redockToCorner(): void {
   if (!clawWindow || clawWindow.isDestroyed()) return;
   const workArea = screen.getDisplayMatching(clawWindow.getBounds()).workArea;
-  const bounds = getDockedBounds(
-    PANEL.width,
-    PANEL.height,
-    workArea,
-  );
-  clawWindow.setPosition(bounds.x, bounds.y);
+  const currentHeight = clawWindow.getBounds().height - SHADOW_GUTTER;
+  const panelHeight = clampPanelHeight(currentHeight, workArea);
+  const bounds = getDockedBounds(PANEL.width, panelHeight, workArea);
+  applyWindowBounds(bounds);
+  applyLinuxContentShape(clawExpanded, panelHeight);
+  clawWindow.webContents.send("claw:panel-height", panelHeight);
   log.info("[ClawOverlay] Re-docked to corner after display change");
 }
 
 function registerDisplayListeners(): void {
+  unregisterDisplayListeners();
+
   displayMetricsHandler = (_event, _display, changedMetrics) => {
     if (
       !changedMetrics.includes("workArea") &&
@@ -128,11 +188,13 @@ function applyIgnoreMouseEvents(ignore: boolean): void {
   clawWindow.setIgnoreMouseEvents(ignore, { forward: true });
 }
 
-function applyLinuxContentShape(expanded: boolean): void {
+function applyLinuxContentShape(expanded: boolean, liveHeight?: number): void {
   if (process.platform !== "linux" || !clawWindow || clawWindow.isDestroyed())
     return;
-  const content = expanded ? PANEL : PILL;
-  const windowSize = getWindowSize(PANEL.width, PANEL.height);
+  const workArea = screen.getDisplayMatching(clawWindow.getBounds()).workArea;
+  const panelHeight = liveHeight ?? getStoredPanelHeight(workArea);
+  const content = expanded ? { width: PANEL.width, height: panelHeight } : PILL;
+  const windowSize = getWindowSize(PANEL.width, panelHeight);
   const width = content.width;
   const height = content.height;
   clawWindow.setShape([
@@ -145,7 +207,9 @@ function applyLinuxContentShape(expanded: boolean): void {
   ]);
 }
 
-function isClawOverlaySender(event: Electron.IpcMainEvent): boolean {
+function isClawOverlaySender(
+  event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent,
+): boolean {
   return (
     !!clawWindow &&
     !clawWindow.isDestroyed() &&
@@ -155,6 +219,8 @@ function isClawOverlaySender(event: Electron.IpcMainEvent): boolean {
 }
 
 function registerIpcHandlers(): void {
+  cleanupIpcHandlers();
+
   setIgnoreMouseHandler = (event, ignore) => {
     if (!isClawOverlaySender(event)) return;
     applyIgnoreMouseEvents(ignore);
@@ -163,16 +229,37 @@ function registerIpcHandlers(): void {
 
   setExpandedHandler = (event, expanded) => {
     if (!isClawOverlaySender(event)) return;
+    clawExpanded = expanded;
     const firstReady = !clawRendererReady;
     clawRendererReady = true;
     applyLinuxContentShape(expanded);
     if (firstReady && clawWindow && !clawWindow.isDestroyed()) {
       clawWindow.showInactive();
       clawWindow.webContents.send("claw:visibility", true);
+      const workArea = screen.getDisplayMatching(
+        clawWindow.getBounds(),
+      ).workArea;
+      clawWindow.webContents.send(
+        "claw:panel-height",
+        getStoredPanelHeight(workArea),
+      );
       log.info("[ClawOverlay] Showing overlay");
     }
   };
   ipcMain.on("claw:set-expanded", setExpandedHandler);
+
+  setPanelHeightHandler = (event, height) => {
+    if (!isClawOverlaySender(event)) return;
+    if (!clawWindow || clawWindow.isDestroyed()) return;
+    const workArea = screen.getDisplayMatching(clawWindow.getBounds()).workArea;
+    const clamped = clampPanelHeight(Number(height), workArea);
+    persistPanelHeightDebounced(clamped);
+    const bounds = getDockedBounds(PANEL.width, clamped, workArea);
+    applyWindowBounds(bounds);
+    applyLinuxContentShape(clawExpanded, clamped);
+    clawWindow.webContents.send("claw:panel-height", clamped);
+  };
+  ipcMain.on("claw:set-panel-height", setPanelHeightHandler);
 
   focusHandler = (event) => {
     if (!isClawOverlaySender(event)) return;
@@ -193,6 +280,29 @@ function registerIpcHandlers(): void {
     forwardToMainWindow(pathname);
   };
   ipcMain.on("claw:open-in-main", openInMainHandler);
+
+  ipcMain.removeHandler("claw:reconcile");
+  ipcMain.handle(
+    "claw:reconcile",
+    (event, rect: { x: number; y: number; width: number; height: number }) => {
+      if (!isClawOverlaySender(event)) return null;
+      if (!clawWindow || clawWindow.isDestroyed()) return null;
+      if (
+        !rect ||
+        ![rect.x, rect.y, rect.width, rect.height].every(Number.isFinite)
+      ) {
+        return null;
+      }
+      const cursor = screen.getCursorScreenPoint();
+      const wb = clawWindow.getBounds();
+      return (
+        cursor.x >= wb.x + rect.x &&
+        cursor.x <= wb.x + rect.x + rect.width &&
+        cursor.y >= wb.y + rect.y &&
+        cursor.y <= wb.y + rect.y + rect.height
+      );
+    },
+  );
 }
 
 function cleanupIpcHandlers(): void {
@@ -216,6 +326,28 @@ function cleanupIpcHandlers(): void {
     ipcMain.removeListener("claw:open-in-main", openInMainHandler);
     openInMainHandler = null;
   }
+  if (setPanelHeightHandler) {
+    ipcMain.removeListener("claw:set-panel-height", setPanelHeightHandler);
+    setPanelHeightHandler = null;
+  }
+  ipcMain.removeHandler("claw:reconcile");
+}
+
+export function forwardAuthEventToClawOverlay(
+  channel: "auth:success" | "auth:mtls-success",
+  payload?: unknown,
+): void {
+  const send = (): void => {
+    if (!clawWindow || clawWindow.isDestroyed()) return;
+    if (payload === undefined) {
+      clawWindow.webContents.send(channel);
+    } else {
+      clawWindow.webContents.send(channel, payload);
+    }
+  };
+  send();
+  setTimeout(send, 2500);
+  setTimeout(send, 6000);
 }
 
 export function forwardToMainWindow(pathname: string): void {
@@ -237,6 +369,7 @@ function createClawOverlay(): BrowserWindow {
 
   const bounds = computeInitialBounds();
   clawRendererReady = false;
+  clawExpanded = false;
 
   clawWindow = new BrowserWindow({
     x: bounds.x,
@@ -269,11 +402,26 @@ function createClawOverlay(): BrowserWindow {
     visibleOnFullScreen: true,
     skipTransformProcessType: true,
   });
+  clawWindow.setMinimumSize(
+    PANEL.width + SHADOW_GUTTER,
+    MIN_PANEL_HEIGHT + SHADOW_GUTTER,
+  );
 
   const targetUrl = config.useBundledUI
     ? `${getBundledUIUrl()}newWindow/claw`
     : new URL("/newWindow/claw", config.FRONTEND_URL).toString();
   void clawWindow.loadURL(targetUrl);
+
+  clawWindow.webContents.on("dom-ready", () => {
+    if (!clawWindow || clawWindow.isDestroyed()) return;
+    void clawWindow.webContents
+      .insertCSS(
+        "html, body, #root, main { background: transparent !important; background-color: transparent !important; } .app-wallpaper-image, .app-wallpaper-overlay, [data-slot='switch-loading-overlay'] { display: none !important; } [data-id='error-fallback'] { background: transparent !important; }",
+      )
+      .catch((error) => {
+        log.warn("[ClawOverlay] Failed to inject transparency CSS", error);
+      });
+  });
 
   const isOwnRoute = (navUrl: string): boolean => {
     try {
@@ -358,6 +506,7 @@ function createClawOverlay(): BrowserWindow {
   clawWindow.webContents.on("render-process-gone", (_event, details) => {
     log.error(`[ClawOverlay] Renderer gone: ${details.reason}`);
     clawRendererReady = false;
+    clawExpanded = false;
     applyLinuxContentShape(false);
     applyIgnoreMouseEvents(true);
     if (clawWindow && !clawWindow.isDestroyed()) {
@@ -369,11 +518,26 @@ function createClawOverlay(): BrowserWindow {
   registerIpcHandlers();
   registerDisplayListeners();
 
+  const createdWindow = clawWindow;
   clawWindow.on("closed", () => {
+    if (clawWindow !== null && clawWindow !== createdWindow) return;
     cleanupIpcHandlers();
     unregisterDisplayListeners();
+    if (panelHeightPersistTimer) {
+      clearTimeout(panelHeightPersistTimer);
+      panelHeightPersistTimer = null;
+    }
+    if (pendingPanelHeight !== null) {
+      clawStore.set(PANEL_HEIGHT_KEY, pendingPanelHeight);
+      pendingPanelHeight = null;
+    }
+    if (resizableLatchTimer) {
+      clearTimeout(resizableLatchTimer);
+      resizableLatchTimer = null;
+    }
     clawWindow = null;
     clawRendererReady = false;
+    clawExpanded = false;
   });
 
   log.info("[ClawOverlay] Window created");
@@ -405,7 +569,7 @@ export function hideClawOverlay(): void {
 }
 
 export function isClawOverlayEnabled(): boolean {
-  return clawStore.get(ENABLED_KEY, false) as boolean;
+  return clawStore.get(ENABLED_KEY, true) as boolean;
 }
 
 function destroyClawOverlay(): void {

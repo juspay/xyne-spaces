@@ -147,6 +147,14 @@ export interface ElectronAPI {
     blur: () => void;
     openInMain: (pathname: string) => void;
     onVisibility: (callback: (visible: boolean) => void) => () => void;
+    setPanelHeight: (height: number) => void;
+    onPanelHeight: (callback: (height: number) => void) => () => void;
+    reconcile: (rect: {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+    }) => Promise<boolean | null>;
     getEnabled: () => Promise<boolean>;
     setEnabled: (enabled: boolean) => void;
     onEnabledChanged: (callback: (enabled: boolean) => void) => () => void;

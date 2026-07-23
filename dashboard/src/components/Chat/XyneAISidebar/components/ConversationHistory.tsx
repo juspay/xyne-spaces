@@ -26,6 +26,7 @@ interface ConversationHistoryProps {
   selectedAgentColor?: string | null;
   isLoading?: boolean;
   onClose?: () => void;
+  agentSelectorDisabled?: boolean;
 }
 
 // Helper function to group conversations by date
@@ -84,6 +85,7 @@ export const ConversationHistory = ({
   onSelectAgent,
   selectedAgentColor,
   isLoading = false,
+  agentSelectorDisabled = false,
 }: ConversationHistoryProps): ReactElement => {
   const { isMobile } = usePlatform();
   const [searchQuery, setSearchQuery] = useState('');
@@ -190,6 +192,7 @@ export const ConversationHistory = ({
                   selectedAgentSlug={selectedAgentSlug ?? null}
                   agents={agents}
                   onSelect={onSelectAgent}
+                  disabled={agentSelectorDisabled}
                   compact={true}
                 />
               )}

@@ -8,24 +8,61 @@ import {
   type Variants,
 } from 'framer-motion';
 import { cn } from '../../utils/classNames';
-import { CORNER_RADII, PANEL, PILL } from './claw.constants';
+import {
+  CORNER_RADII,
+  DEFAULT_PANEL_HEIGHT,
+  MIN_PANEL_HEIGHT,
+  PANEL,
+  PANEL_TOP_MARGIN,
+  PILL,
+  PILL_THINKING,
+  SHADOW_GUTTER,
+} from './claw.constants';
 import { isExternalHttpHref } from './claw.utils';
 import { CLOSE_SPRING, OPEN_SPRING } from './claw.motion';
 import { useClawOverlayBridge } from './useClawOverlayBridge';
-import { ClawConversationProvider } from './ClawConversationContext';
+import { ClawConversationProvider, useClawTabStatus } from './ClawConversationContext';
 import { ClawPill } from './ClawPill';
+import { ClawPeekBubble } from './ClawPeekBubble';
 import { ClawChat } from './ClawChat/ClawChat';
 import { xyneAIStreamManager } from '../../services/XyneAI';
 import './claw.css';
+
+function ClawThinkingProbe({ onChange }: { onChange: (thinking: boolean) => void }): null {
+  const { isStreaming } = useClawTabStatus();
+  useEffect(() => {
+    onChange(isStreaming);
+  }, [isStreaming, onChange]);
+  return null;
+}
+
+function clampPanelHeight(height: number): number {
+  const availHeight =
+    typeof window !== 'undefined' && window.screen ? window.screen.availHeight : 900;
+  const max = Math.max(MIN_PANEL_HEIGHT, availHeight - SHADOW_GUTTER - PANEL_TOP_MARGIN);
+  return Math.min(Math.max(Math.round(height), MIN_PANEL_HEIGHT), max);
+}
 
 export function ClawOverlay(): React.ReactElement {
   const bridge = useClawOverlayBridge();
   const reduceMotion = useReducedMotion();
   const [isOpen, setIsOpen] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
+  const [panelHeight, setPanelHeight] = useState<number>(DEFAULT_PANEL_HEIGHT);
+  const [isResizing, setIsResizing] = useState(false);
+  const [isThinking, setIsThinking] = useState(false);
 
   const isOpenRef = useRef(isOpen);
   isOpenRef.current = isOpen;
+  const panelHeightRef = useRef(panelHeight);
+  panelHeightRef.current = panelHeight;
+  const isResizingRef = useRef(isResizing);
+  isResizingRef.current = isResizing;
+  const resizeStartRef = useRef<{ screenY: number; height: number } | null>(null);
+  const resizeRafRef = useRef<number | null>(null);
+  const pendingHeightRef = useRef<number | null>(null);
+  const shellRef = useRef<HTMLDivElement>(null);
+  const pointerEpochRef = useRef(0);
 
   useLayoutEffect(() => {
     const root = document.documentElement;
@@ -47,19 +84,73 @@ export function ClawOverlay(): React.ReactElement {
   );
 
   useEffect(() => {
+    xyneAIStreamManager.setHasClawOverlay(true);
+    return () => xyneAIStreamManager.setHasClawOverlay(false);
+  }, []);
+
+  useEffect(() => {
     bridge.setIgnoreMouse(true);
-    bridge.setExpanded(false);
+    let raf2: number | null = null;
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => {
+        bridge.setExpanded(false);
+      });
+    });
+    return () => {
+      cancelAnimationFrame(raf1);
+      if (raf2 !== null) cancelAnimationFrame(raf2);
+    };
+  }, [bridge]);
+
+  const cancelResize = useCallback(() => {
+    if (!resizeStartRef.current) return;
+    resizeStartRef.current = null;
+    if (resizeRafRef.current !== null) {
+      cancelAnimationFrame(resizeRafRef.current);
+      resizeRafRef.current = null;
+    }
+    pendingHeightRef.current = null;
+    setIsResizing(false);
+    bridge.setPanelHeight(panelHeightRef.current);
   }, [bridge]);
 
   useEffect(
     () =>
       bridge.onVisibility(visible => {
         if (!visible) {
+          cancelResize();
           bridge.setExpanded(false);
           setIsOpen(false);
         }
       }),
+    [bridge, cancelResize],
+  );
+
+  useEffect(() => {
+    if (!isResizing) return;
+    const endResize = (): void => cancelResize();
+    window.addEventListener('pointerup', endResize);
+    window.addEventListener('pointercancel', endResize);
+    return () => {
+      window.removeEventListener('pointerup', endResize);
+      window.removeEventListener('pointercancel', endResize);
+    };
+  }, [isResizing, cancelResize]);
+
+  useEffect(
+    () =>
+      bridge.onPanelHeight(height => {
+        if (isResizingRef.current) return;
+        setPanelHeight(clampPanelHeight(height));
+      }),
     [bridge],
+  );
+
+  useEffect(
+    () => () => {
+      if (resizeRafRef.current !== null) cancelAnimationFrame(resizeRafRef.current);
+    },
+    [],
   );
 
   const handleOpen = useCallback(() => {
@@ -72,19 +163,89 @@ export function ClawOverlay(): React.ReactElement {
   }, [bridge]);
 
   const handleClose = useCallback(() => {
+    cancelResize();
     isOpenRef.current = false;
     setIsClosing(true);
     setIsOpen(false);
     if (reduceMotion) bridge.setExpanded(false);
-  }, [bridge, reduceMotion]);
+  }, [bridge, reduceMotion, cancelResize]);
 
   const handlePointerEnter = useCallback(() => {
+    pointerEpochRef.current += 1;
     bridge.setIgnoreMouse(false);
   }, [bridge]);
 
   const handlePointerLeave = useCallback(() => {
+    if (isResizingRef.current) return;
+    pointerEpochRef.current += 1;
     bridge.setIgnoreMouse(true);
   }, [bridge]);
+
+  const reconcilePassthrough = useCallback(() => {
+    if (isResizingRef.current) return;
+    const el = shellRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const epoch = pointerEpochRef.current;
+    void bridge
+      .reconcile({ x: rect.left, y: rect.top, width: rect.width, height: rect.height })
+      .then(inside => {
+        if (inside === null || isResizingRef.current) return;
+        if (pointerEpochRef.current !== epoch) return;
+        bridge.setIgnoreMouse(!inside);
+      });
+  }, [bridge]);
+
+  const flushPanelHeight = useCallback(() => {
+    resizeRafRef.current = null;
+    if (pendingHeightRef.current === null) return;
+    bridge.setPanelHeight(pendingHeightRef.current);
+    pendingHeightRef.current = null;
+  }, [bridge]);
+
+  const handleResizePointerDown = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (!isOpenRef.current) return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.currentTarget.setPointerCapture(event.pointerId);
+      resizeStartRef.current = { screenY: event.screenY, height: panelHeightRef.current };
+      setIsResizing(true);
+      bridge.setIgnoreMouse(false);
+    },
+    [bridge],
+  );
+
+  const handleResizePointerMove = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      const start = resizeStartRef.current;
+      if (!start) return;
+      const next = clampPanelHeight(start.height + (start.screenY - event.screenY));
+      setPanelHeight(next);
+      pendingHeightRef.current = next;
+      if (resizeRafRef.current === null) {
+        resizeRafRef.current = requestAnimationFrame(flushPanelHeight);
+      }
+    },
+    [flushPanelHeight],
+  );
+
+  const handleResizePointerUp = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (!resizeStartRef.current) return;
+      resizeStartRef.current = null;
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+      if (resizeRafRef.current !== null) {
+        cancelAnimationFrame(resizeRafRef.current);
+        resizeRafRef.current = null;
+      }
+      setIsResizing(false);
+      bridge.setPanelHeight(panelHeightRef.current);
+    },
+    [bridge],
+  );
 
   const handleClickCapture = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
@@ -104,12 +265,18 @@ export function ClawOverlay(): React.ReactElement {
     [bridge],
   );
 
-  const dims = isOpen ? PANEL : PILL;
+  const dims = isOpen
+    ? { width: PANEL.width, height: panelHeight }
+    : isThinking
+      ? PILL_THINKING
+      : PILL;
   const layoutTransition: Transition = reduceMotion
     ? { duration: 0 }
-    : isOpen
-      ? OPEN_SPRING
-      : CLOSE_SPRING;
+    : isResizing
+      ? { duration: 0 }
+      : isOpen
+        ? OPEN_SPRING
+        : CLOSE_SPRING;
 
   const panelContentVariants: Variants = {
     hidden: { opacity: 0, y: 8 },
@@ -138,14 +305,18 @@ export function ClawOverlay(): React.ReactElement {
   return (
     <MotionConfig reducedMotion='user'>
       <ClawConversationProvider isOpen={isOpen}>
+        <ClawThinkingProbe onChange={setIsThinking} />
         <div className='pointer-events-none fixed inset-0 flex items-end justify-end pl-8 pt-8'>
+          <ClawPeekBubble isOpen={isOpen} />
           <motion.div
+            ref={shellRef}
             layout
             onLayoutAnimationComplete={() => {
               if (!isOpenRef.current) {
                 bridge.setExpanded(false);
                 setIsClosing(false);
               }
+              reconcilePassthrough();
             }}
             onClickCapture={handleClickCapture}
             onPointerEnter={handlePointerEnter}
@@ -168,10 +339,25 @@ export function ClawOverlay(): React.ReactElement {
             data-slot='claw-overlay'
             data-testid='claw-overlay'
           >
+            {isOpen && (
+              <div
+                role='separator'
+                aria-orientation='horizontal'
+                aria-label='Resize Claw'
+                onPointerDown={handleResizePointerDown}
+                onPointerMove={handleResizePointerMove}
+                onPointerUp={handleResizePointerUp}
+                onPointerCancel={handleResizePointerUp}
+                data-track-category='CLAW_OVERLAY'
+                data-track-name='RESIZE_PANEL'
+                className='absolute inset-x-0 top-0 z-30 h-2 cursor-ns-resize'
+                style={{ touchAction: 'none' }}
+              />
+            )}
             <div
               className={cn(
                 'flex h-full w-full flex-col overflow-hidden rounded-[inherit]',
-                'bg-popover/80 text-popover-foreground dark:bg-popover/70',
+                'bg-popover text-popover-foreground',
                 'shadow-[inset_0_0_0_1px_hsl(var(--border)/0.7)]',
               )}
             >

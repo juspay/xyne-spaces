@@ -200,6 +200,8 @@ class XyneAIStreamManager {
 
   private isClawOverlayOpen: boolean = false;
 
+  private hasClawOverlay: boolean = false;
+
   /** Whether the user is currently viewing the /ai page */
   private isOnAIPage: boolean = false;
 
@@ -695,6 +697,10 @@ class XyneAIStreamManager {
 
   public setClawOverlayOpen(isOpen: boolean): void {
     this.isClawOverlayOpen = isOpen;
+  }
+
+  public setHasClawOverlay(hasClawOverlay: boolean): void {
+    this.hasClawOverlay = hasClawOverlay;
   }
 
   /**
@@ -1703,6 +1709,7 @@ class XyneAIStreamManager {
       !currentState.suppressCompletionToast &&
       (!this.isSidebarOpen || !viewingThis) &&
       !this.isClawOverlayOpen &&
+      !this.hasClawOverlay &&
       !this.isOnAIPage;
 
     if (shouldNotify) {
