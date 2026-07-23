@@ -73,4 +73,7 @@ regexes = [
   '''envVars\.(XYNE_CLAW_S2S_KEY|INTERNAL_S2S_KEY)''',
   # False positives: test-fixture labels (testAuthSeeder.ts)
   '''(dm-fixtures-v1|thread-fixtures-v2)''',
+  # Keyboard-shortcut chords in the shortcuts catalog — `keys: '<chord>'` trips generic-api-key
+  # (dashboard/src/shortcuts/catalog.ts). Anchored: the whole value must be a modifier+key chord.
+  '''^(mod|cmd|ctrl|alt|shift|meta)\+[a-z0-9+]+$''',
 ]
