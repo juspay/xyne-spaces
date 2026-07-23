@@ -58,7 +58,7 @@ export function SendMessageRichTextField({
     concreteChannelId,
     undefined,
     undefined,
-    { includeSpecialMentions: true },
+    { includeSpecialMentions: true, excludeSelf: false },
   );
 
   const [workspaceMentionQuery, setWorkspaceMentionQuery] = useState('');
