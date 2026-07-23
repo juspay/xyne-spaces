@@ -215,7 +215,13 @@ export interface WorkflowStorage {
   // Markdown summary management
   saveStepMarkdownSummary(workflowExecutionId: string, stepName: string, markdownSummary: string): Promise<void>
   // Get agent config from database with version support
-  getAgentConfigFromDb(name: string, agentConfigVersions?: AgentConfigVersions, maxTurns?: number, modelName?: string): Promise<Agent>
+  getAgentConfigFromDb(
+    name: string,
+    agentConfigVersions?: AgentConfigVersions,
+    maxTurns?: number,
+    modelName?: string,
+    context?: BaseWorkflowContext,
+  ): Promise<Agent>
 
   // Knowledge base storage
   saveWorkflowKnowledge(workflowExecutionId: string, checkpointId: string, learnings: KnowledgeLearning[]): Promise<void>

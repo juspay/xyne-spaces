@@ -12,7 +12,7 @@ export class TextStrategy extends BaseStrategy {
         }
     }
 
-    async parse(buffer: Buffer, _vespaDocId: string): Promise<ProcessingResult> {
+    async parse(buffer: Buffer, vespaDocId: string): Promise<ProcessingResult> {
         try {
             // Convert Buffer to string (UTF-8)
             const text = buffer.toString("utf-8")
@@ -35,7 +35,7 @@ export class TextStrategy extends BaseStrategy {
                 block_labels: [] as string[],
             }))
 
-            const documentOutline = await this.buildDocumentOutline(chunks, chunks_map)
+            const documentOutline = await this.buildDocumentOutline(chunks, chunks_map, vespaDocId)
 
             return {
                 chunks,

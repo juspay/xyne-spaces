@@ -92,7 +92,7 @@ async function waitBeforeRetry(
 }
 
 export async function executeCallLlmWithRetry(
-  createAgent: () => Agent | null,
+  createAgent: () => Agent | null | Promise<Agent | null>,
   buildPrompt: () => string,
   operation: string,
   callId: string,
@@ -110,7 +110,7 @@ export async function executeCallLlmWithRetry(
     });
 
     try {
-      const agent = createAgent();
+      const agent = await createAgent();
 
       if (!agent) {
         logger.error(`[${logCallId}] ${operation}_failed`, {

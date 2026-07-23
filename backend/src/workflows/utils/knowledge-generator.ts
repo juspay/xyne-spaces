@@ -5,6 +5,9 @@ import { LogLevel } from '@framework'
 import type { GitInfo, GitDiffFile } from '../workflow-types'
 import {logger} from '@/utils/logger';
 import { config } from '@/config/env';
+import type { BaseWorkflowContext } from '../workflow-types';
+import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
+import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
 
 // Learning types for categorizing captured knowledge
 export type LearningType = 'file_purpose' | 'implementation_pattern' | 'gotcha' | 'debugging_tip'
@@ -131,7 +134,8 @@ function formatConsolidatedCheckpointSummary(inputs: ConsolidatedKnowledgeInput[
  * @returns Array of knowledge learnings extracted from all checkpoints combined
  */
 export async function generateConsolidatedKnowledgeLearnings(
-  inputs: ConsolidatedKnowledgeInput[]
+  inputs: ConsolidatedKnowledgeInput[],
+  context: BaseWorkflowContext,
 ): Promise<KnowledgeLearning[]> {
   if (inputs.length === 0) {
     logger.info('[KnowledgeGenerator] No checkpoint data provided for consolidated learning generation')
@@ -141,14 +145,28 @@ export async function generateConsolidatedKnowledgeLearnings(
   logger.info(`💡 [KnowledgeGenerator] Generating consolidated learnings from ${inputs.length} checkpoints`)
 
   try {
+    const credential = context.ticketId
+      ? await orgLLMCredentialService.getCredentialByTicketId(
+        context.ticketId,
+        OrgLLMServiceAccountPurpose.DEFAULT,
+      )
+      : await orgLLMCredentialService.getCredentialByUserId(
+        context.userId,
+        OrgLLMServiceAccountPurpose.DEFAULT,
+      );
+
+    if (!credential) {
+      throw new Error('No active DEFAULT LiteLLM service account credential for knowledge generation');
+    }
+
     // Create agent configuration for knowledge extraction
     const agentConfig: AgentConfig = {
       model: {
         provider: {
           type: 'litellm',
           config: {
-            apiKey: process.env.LITELLM_API_KEY || '',
-            baseUrl: process.env.LITELLM_BASE_URL || '',
+            apiKey: credential.apiKey,
+            baseUrl: credential.baseUrl,
             timeout: 600000, // 10 minutes
             retries: 3
           }

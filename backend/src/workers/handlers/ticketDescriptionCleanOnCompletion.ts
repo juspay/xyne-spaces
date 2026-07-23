@@ -1,4 +1,3 @@
-import { config } from '@/config/env';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import vespaClient from '@/vespa/client';
@@ -49,6 +48,22 @@ async function resolveChannelType(mapped: Record<string, unknown>): Promise<Chan
   });
 
   return channel?.type ?? null;
+}
+
+async function resolveTicketProjectId(
+  ticketId: string,
+  mapped: Record<string, unknown>,
+): Promise<string | null> {
+  if (typeof mapped.projectId === 'string' && mapped.projectId.trim()) {
+    return mapped.projectId;
+  }
+
+  const ticket = await db.ticket.findUnique({
+    where: { id: ticketId },
+    select: { projectId: true },
+  });
+
+  return ticket?.projectId ?? null;
 }
 
 async function upsertTicketCleanupFailure(
@@ -145,6 +160,7 @@ export async function runTicketDescriptionCleanOnCompletion(
 
   const channelType = await resolveChannelType(mapped);
   const isEmailTicket = channelType === ChannelType.EMAIL;
+  const projectId = isEmailTicket ? await resolveTicketProjectId(ctx.docId, mapped) : null;
 
   let descriptionClean = cleaned;
   let usedLlm = false;
@@ -152,7 +168,7 @@ export async function runTicketDescriptionCleanOnCompletion(
   let lastError: string | undefined;
   let llmAttempted = false;
 
-  if (config.litellm.apiKey && isEmailTicket) {
+  if (isEmailTicket && projectId) {
     logger.info('[TicketDescCleanOnCompletion] Email ticket detected', {
       ticketId: ctx.docId,
       channelType,
@@ -167,7 +183,7 @@ export async function runTicketDescriptionCleanOnCompletion(
       attempts = attempt;
       const attemptStart = Date.now();
       try {
-        const result = await cleanTicketDescriptionWithLlm(input);
+        const result = await cleanTicketDescriptionWithLlm(input, { projectId });
         descriptionClean = result.description || cleaned;
         usedLlm = true;
         break;

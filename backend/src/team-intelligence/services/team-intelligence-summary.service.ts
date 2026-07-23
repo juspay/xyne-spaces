@@ -3,6 +3,8 @@ import { LLMClient } from '@framework';
 import { createUserMessage } from '@framework';
 import { config as appConfig } from '../../config/env.js';
 import { logger } from '@/utils/logger';
+import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
+import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
 import type {
   TeamIntelligenceAiUsageInput,
   TeamIntelligenceCommitInput,
@@ -358,23 +360,26 @@ async function llmRewriteEmployeeSummary(
 }
 
 class TeamIntelligenceSummaryService {
-  private readonly llmClient: LLMClient | null;
+  private async getDefaultWorkspaceLlmClient(): Promise<LLMClient | null> {
+    const credential = await orgLLMCredentialService.getCredentialByWorkspaceId(
+      appConfig.defaultWorkspaceId,
+      OrgLLMServiceAccountPurpose.DEFAULT,
+    );
+    if (!credential) {
+      return null;
+    }
 
-  constructor() {
-    const apiKey = appConfig.llm.litellmApiKey;
-    this.llmClient = apiKey
-      ? new LLMClient({
-          provider: {
-            type: 'litellm',
-            config: {
-              apiKey,
-              baseUrl: appConfig.llm.litellmBaseUrl,
-              timeout: 60000,
-            },
-          },
-          defaultModel: appConfig.workflow.defaultModelName,
-        })
-      : null;
+    return new LLMClient({
+      provider: {
+        type: 'litellm',
+        config: {
+          apiKey: credential.apiKey,
+          baseUrl: credential.baseUrl,
+          timeout: 60000,
+        },
+      },
+      defaultModel: appConfig.workflow.defaultModelName,
+    });
   }
 
   async generate(input: {
@@ -385,7 +390,7 @@ class TeamIntelligenceSummaryService {
     teamName: string | null;
     reportDate: Date;
   }): Promise<TeamIntelligenceGeneratedSummary> {
-    const llmClient = this.llmClient;
+    const llmClient = await this.getDefaultWorkspaceLlmClient();
 
     const rawPullRequests = asArray<TeamIntelligencePullRequestInput>(input.pullRequests);
     const rawSoloCommits = asArray<TeamIntelligenceCommitInput>(input.soloCommits);

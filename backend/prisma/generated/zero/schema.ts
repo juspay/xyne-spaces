@@ -68,6 +68,12 @@ export enum TicketStatusV2 {
   COMPLETED = "COMPLETED",
 }
 
+export enum MailboxState {
+  INBOX = "INBOX",
+  ARCHIVED = "ARCHIVED",
+  SPAM = "SPAM",
+}
+
 export enum TicketPriority {
   LOW = "LOW",
   MEDIUM = "MEDIUM",
@@ -259,6 +265,7 @@ export enum OrgRole {
   ADMIN = "ADMIN",
   MEMBER = "MEMBER",
   VIEWER = "VIEWER",
+  COMMUNITY_MEMBER = "COMMUNITY_MEMBER",
 }
 
 export enum RecordingType {
@@ -407,6 +414,7 @@ export enum WorkspaceRole {
   ADMIN = "ADMIN",
   MEMBER = "MEMBER",
   GUEST = "GUEST",
+  COMMUNITY_MEMBER = "COMMUNITY_MEMBER",
 }
 
 export enum ACLAuditEventType {
@@ -1336,7 +1344,7 @@ export const userPreferenceTable = table("user_preferences")
     globalMobileNotificationLevel: enumeration<NotificationLevel>().optional(),
     threadReplyNotificationsEnabled: boolean(),
     channelWideMentionsEnabled: boolean(),
-    notificationKeywords: json().optional(),
+    notificationKeywords: string().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -1687,6 +1695,24 @@ export const workspaceTable = table("workspaces")
     createdBy: string(),
     status: enumeration<Status>(),
     metadata: json().optional(),
+    workspaceType: string().optional(),
+    joinPolicy: string().optional(),
+    landingChannelId: string().optional(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
+export const aiProvisioningStatusTable = table("ai_provisioning_status")
+  .columns({
+    id: string(),
+    subjectType: string(),
+    subjectId: string(),
+    provider: string(),
+    status: string(),
+    attempts: number(),
+    lastError: string().optional(),
+    lastAttemptedAt: number().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -1937,11 +1963,16 @@ export const emailTable = table("emails")
 export const emailDraftTable = table("email_drafts")
   .columns({
     id: string(),
-    conversationId: string(),
+    conversationId: string().optional(),
     userId: string().optional(),
     channelId: string(),
     draftContent: string(),
+    subject: string().optional(),
+    fromAddress: string().optional(),
     attachmentIds: json().optional(),
+    toRecipients: string().optional(),
+    ccRecipients: string().optional(),
+    bccRecipients: string().optional(),
     autoDraftStatus: enumeration<AutoDraftStatus>().optional(),
     createdAt: number(),
     updatedAt: number(),
@@ -1955,6 +1986,47 @@ export const emailReadTable = table("email_reads")
     userId: string(),
     lastReadEmailId: string(),
     lastReadEmailAt: number(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
+export const conversationLabelTable = table("conversation_labels")
+  .columns({
+    id: string(),
+    name: string(),
+    color: string().optional(),
+    channelId: string(),
+    projectId: string(),
+    workspaceId: string(),
+    createdBy: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
+export const conversationLabelMappingTable = table("conversation_label_mappings")
+  .columns({
+    id: string(),
+    labelId: string(),
+    labelName: string(),
+    conversationId: string(),
+    channelId: string(),
+    workspaceId: string(),
+    createdBy: string(),
+    createdAt: number(),
+  })
+  .primaryKey("id");
+
+export const ticketUserMailboxTable = table("ticket_user_mailbox")
+  .columns({
+    id: string(),
+    ticketId: string(),
+    userId: string(),
+    channelId: string(),
+    workspaceId: string(),
+    state: enumeration<MailboxState>().optional(),
+    starred: boolean(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -2578,12 +2650,25 @@ export const formContextMappingTable = table("forms_context_mapping")
   })
   .primaryKey("id");
 
+export const globalFieldTable = table("global_fields")
+  .columns({
+    id: string(),
+    projectId: string(),
+    fieldName: string(),
+    fieldType: enumeration<FormFieldType>(),
+    fieldEnum: json().optional(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
 export const formFieldsTable = table("form_fields")
   .columns({
     id: string(),
     formId: string(),
-    fieldName: string(),
-    fieldType: enumeration<FormFieldType>(),
+    globalFieldId: string().optional(),
+    fieldName: string().optional(),
+    fieldType: enumeration<FormFieldType>().optional(),
     fieldEnum: json().optional(),
     isOptional: boolean(),
     sequenceNumber: number(),
@@ -4258,6 +4343,11 @@ export const projectTableRelationships = relationships(projectTable, ({ one, man
     destField: ["projectId"],
     destSchema: boardTable,
   }),
+  globalFields: many({
+    sourceField: ["id"],
+    destField: ["projectId"],
+    destSchema: globalFieldTable,
+  }),
   canvasFolders: many({
     sourceField: ["id"],
     destField: ["projectId"],
@@ -4719,11 +4809,29 @@ export const formTableRelationships = relationships(formTable, ({ many }) => ({
   })
 }));
 
+export const globalFieldTableRelationships = relationships(globalFieldTable, ({ one, many }) => ({
+  project: one({
+    sourceField: ["projectId"],
+    destField: ["id"],
+    destSchema: projectTable,
+  }),
+  formFields: many({
+    sourceField: ["id"],
+    destField: ["globalFieldId"],
+    destSchema: formFieldsTable,
+  })
+}));
+
 export const formFieldsTableRelationships = relationships(formFieldsTable, ({ one }) => ({
   form: one({
     sourceField: ["formId"],
     destField: ["id"],
     destSchema: formTable,
+  }),
+  globalField: one({
+    sourceField: ["globalFieldId"],
+    destField: ["id"],
+    destSchema: globalFieldTable,
   })
 }));
 
@@ -5127,6 +5235,7 @@ export const schema = createSchema(
       orgMemberTable,
       workspaceOrganizationTable,
       workspaceTable,
+      aiProvisioningStatusTable,
       invitationTable,
       projectTable,
       boardTable,
@@ -5143,6 +5252,9 @@ export const schema = createSchema(
       emailTable,
       emailDraftTable,
       emailReadTable,
+      conversationLabelTable,
+      conversationLabelMappingTable,
+      ticketUserMailboxTable,
       emailSignatureTable,
       emailChannelPreferenceTable,
       classificationMappingTable,
@@ -5181,6 +5293,7 @@ export const schema = createSchema(
       lookupValueTable,
       formTable,
       formContextMappingTable,
+      globalFieldTable,
       formFieldsTable,
       formEntityValuesTable,
       dashboardTable,
@@ -5308,6 +5421,7 @@ export const schema = createSchema(
       canvasParticipantTableRelationships,
       canvasUserStatusTableRelationships,
       formTableRelationships,
+      globalFieldTableRelationships,
       formFieldsTableRelationships,
       collectionTableRelationships,
       collectionItemTableRelationships,
@@ -5395,6 +5509,7 @@ export type Organization = Row<typeof schema.tables.organizations>;
 export type OrgMember = Row<typeof schema.tables.org_members>;
 export type WorkspaceOrganization = Row<typeof schema.tables.workspace_organizations>;
 export type Workspace = Row<typeof schema.tables.workspaces>;
+export type AiProvisioningStatus = Row<typeof schema.tables.ai_provisioning_status>;
 export type Invitation = Row<typeof schema.tables.invitations>;
 export type Project = Row<typeof schema.tables.projects>;
 export type Board = Row<typeof schema.tables.boards>;
@@ -5411,6 +5526,9 @@ export type ConversationParticipant = Row<typeof schema.tables.conversation_part
 export type Email = Row<typeof schema.tables.emails>;
 export type EmailDraft = Row<typeof schema.tables.email_drafts>;
 export type EmailRead = Row<typeof schema.tables.email_reads>;
+export type ConversationLabel = Row<typeof schema.tables.conversation_labels>;
+export type ConversationLabelMapping = Row<typeof schema.tables.conversation_label_mappings>;
+export type TicketUserMailbox = Row<typeof schema.tables.ticket_user_mailbox>;
 export type EmailSignature = Row<typeof schema.tables.email_signatures>;
 export type EmailChannelPreference = Row<typeof schema.tables.email_channel_preferences>;
 export type ClassificationMapping = Row<typeof schema.tables.classification_mappings>;
@@ -5449,6 +5567,7 @@ export type Repo = Row<typeof schema.tables.repos>;
 export type LookupValue = Row<typeof schema.tables.lookup_values>;
 export type Form = Row<typeof schema.tables.forms>;
 export type FormContextMapping = Row<typeof schema.tables.forms_context_mapping>;
+export type GlobalField = Row<typeof schema.tables.global_fields>;
 export type FormFields = Row<typeof schema.tables.form_fields>;
 export type FormEntityValues = Row<typeof schema.tables.form_entity_values>;
 export type Dashboard = Row<typeof schema.tables.dashboards>;

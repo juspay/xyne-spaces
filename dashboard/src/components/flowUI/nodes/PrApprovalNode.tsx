@@ -210,19 +210,24 @@ const Actions: React.FC = () => {
 
 const OUTCOME_META: Record<
   PrApprovalOutcome,
-  { label: string; bgVar: string; fgVar: string; Icon: typeof CheckTickSingle }
+  {
+    label: string;
+    bgVar: string;
+    fgVar: string;
+    Icon: React.ComponentType<{ size?: number; className?: string }>;
+  }
 > = {
   approved: {
     label: 'Approved',
     bgVar: 'var(--pr-badge-created-bg)',
     fgVar: 'var(--pr-badge-created-fg)',
-    Icon: CheckTickSingle,
+    Icon: CheckTickSingle as React.ComponentType<{ size?: number; className?: string }>,
   },
   denied: {
     label: 'Denied',
     bgVar: 'var(--pr-badge-danger-bg)',
     fgVar: 'var(--pr-badge-danger-fg)',
-    Icon: MultipleCrossCancelDefault,
+    Icon: MultipleCrossCancelDefault as React.ComponentType<{ size?: number; className?: string }>,
   },
 };
 

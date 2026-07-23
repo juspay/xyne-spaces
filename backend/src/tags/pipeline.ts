@@ -404,7 +404,7 @@ export class TagGenerationPipeline extends EventEmitter {
         continue;
       }
 
-      generated.push(...(await generator(context, group)));
+      generated.push(...(await generator(context, group, workspaceId)));
     }
 
     // If an LLM generator returned a tag outside `tags` for a category with

@@ -1,18 +1,25 @@
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { config } from '@/config/env';
+import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
+import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
 
 const EXCLUDED_MODEL_PATTERNS = /^(claude|gemini)/i;
 
 class ModelSyncService {
   async syncWithLiteLLM(): Promise<void> {
     try {
-      const baseUrl = config.litellm.baseUrl;
-      const apiKey = config.litellm.apiKey;
+      const credential = await orgLLMCredentialService.getCredentialByWorkspaceId(
+        config.defaultWorkspaceId,
+        OrgLLMServiceAccountPurpose.DEFAULT,
+      );
+      if (!credential) {
+        throw new Error(`No active DEFAULT LiteLLM service account credential for default workspace ${config.defaultWorkspaceId}`);
+      }
 
       logger.info('Fetching models from LiteLLM...');
-      const response = await fetch(`${baseUrl}/models`, {
-        headers: apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {},
+      const response = await fetch(`${credential.baseUrl}/models`, {
+        headers: { 'Authorization': `Bearer ${credential.apiKey}` },
         signal: AbortSignal.timeout(10000)
       });
 

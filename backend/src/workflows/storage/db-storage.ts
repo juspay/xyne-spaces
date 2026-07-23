@@ -37,6 +37,8 @@ import { v4 as uuidv4 } from 'uuid';
 import { buildWorkflowStepKey, WORKFLOW_KEYS_SET } from '@/workflows/utils/workflowStepKeys';
 import { getStorageService } from '@/services/storage';
 import { config } from '@/config/env';
+import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
+import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
 
 const prisma = DatabaseClient.getInstance()
 function normalizeToolName(toolName: string): string {
@@ -2759,7 +2761,13 @@ export class DBWorkflowStorage implements WorkflowStorage {
 
   // Agent creation methods
 
-  async getAgentConfigFromDb(name: string, agentConfigVersions?: AgentConfigVersions, maxTurns?: number, modelName?: string): Promise<Agent> {
+  async getAgentConfigFromDb(
+    name: string,
+    agentConfigVersions?: AgentConfigVersions,
+    maxTurns?: number,
+    modelName?: string,
+    context?: BaseWorkflowContext,
+  ): Promise<Agent> {
     let preferredVersion: number | undefined;
     if (agentConfigVersions && agentConfigVersions[name]) {
       preferredVersion = agentConfigVersions[name];
@@ -2792,7 +2800,7 @@ export class DBWorkflowStorage implements WorkflowStorage {
       throw new Error(`Agent with name '${name}' not found`);
     }
 
-    let agentConfig = this.convertDbToAgentConfig(fullAgent, maxTurns);
+    let agentConfig = await this.convertDbToAgentConfig(fullAgent, maxTurns, context);
 
     // If modelName is provided, override the defaultModel
     if (modelName) {
@@ -2816,16 +2824,36 @@ export class DBWorkflowStorage implements WorkflowStorage {
   /**
    * Private: Apply provider-specific configuration settings
    */
-  private applyProviderConfiguration(
+  private async applyProviderConfiguration(
     providerType: string,
-    originalConfig: LiteLLMConfig | VertexConfig
-  ): LiteLLMConfig | VertexConfig {
+    originalConfig: LiteLLMConfig | VertexConfig,
+    context?: BaseWorkflowContext,
+  ): Promise<LiteLLMConfig | VertexConfig> {
     if (providerType === 'litellm') {
+      const credential = context?.ticketId
+        ? await orgLLMCredentialService.getCredentialByTicketId(
+          context.ticketId,
+          OrgLLMServiceAccountPurpose.DEFAULT,
+        )
+        : context?.userId
+          ? await orgLLMCredentialService.getCredentialByUserId(
+            context.userId,
+            OrgLLMServiceAccountPurpose.DEFAULT,
+          )
+          : await orgLLMCredentialService.getCredentialByWorkspaceId(
+            appConfig.defaultWorkspaceId,
+            OrgLLMServiceAccountPurpose.DEFAULT,
+          );
+
+      if (!credential) {
+        throw new Error('No active DEFAULT LiteLLM service account credential for workflow agent execution');
+      }
+
       // For LiteLLM provider, create new config with API key and base URL
       return {
         ...originalConfig,
-        ...(process.env.LITELLM_API_KEY && { apiKey: process.env.LITELLM_API_KEY }),
-        ...(process.env.LITELLM_BASE_URL && { baseUrl: process.env.LITELLM_BASE_URL })
+        apiKey: credential.apiKey,
+        baseUrl: credential.baseUrl,
       };
     } else if (providerType === 'vertex') {
       throw new Error('Vertex provider is not supported. Only LiteLLM provider is supported.');
@@ -2838,7 +2866,11 @@ export class DBWorkflowStorage implements WorkflowStorage {
   /**
    * Private: Convert DB agent to framework AgentConfig
    */
-  private convertDbToAgentConfig(dbAgent: FullAgent, maxTurns?: number): AgentConfig {
+  private async convertDbToAgentConfig(
+    dbAgent: FullAgent,
+    maxTurns?: number,
+    context?: BaseWorkflowContext,
+  ): Promise<AgentConfig> {
     // Start with framework defaults
     const defaultConfig = createDefaultAgentConfig();
 
@@ -2851,9 +2883,10 @@ export class DBWorkflowStorage implements WorkflowStorage {
     }
 
     // Apply provider-specific configuration
-    const modifiedProviderConfig = this.applyProviderConfiguration(
+    const modifiedProviderConfig = await this.applyProviderConfiguration(
       dbAgent.model.provider,
-      modelCredentials
+      modelCredentials,
+      context,
     );
 
     // Build provider configuration according to framework types
@@ -3322,7 +3355,6 @@ export class DBWorkflowStorage implements WorkflowStorage {
     }
   }
 }
-
 
 
 

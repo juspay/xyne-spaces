@@ -12,6 +12,7 @@
 
 import { PrismaClient, AccessType, AuthProvider, UserStatus, SessionStatus, WorkspaceRole, ProjectType } from '@prisma/client';
 import { repositories } from '../src/database/repositories/index';
+import { WorkspaceJoinPolicy, WorkspaceType } from '@xyne/shared';
 
 const prisma = new PrismaClient();
 
@@ -189,6 +190,8 @@ async function main() {
             name: DEFAULT_WORKSPACE.name,
             orgId: defaultOrg.orgId,
             createdBy: DEFAULT_WORKSPACE.createdBy,
+            workspaceType: WorkspaceType.ENTERPRISE,
+            joinPolicy: WorkspaceJoinPolicy.INVITE_ONLY,
           }
         });
         console.log('  ✅ Created default workspace');
@@ -331,6 +334,8 @@ async function main() {
             name: DEFAULT_WORKSPACE.name,
             orgId: defaultOrg.orgId,
             createdBy: DEFAULT_WORKSPACE.createdBy,
+            workspaceType: WorkspaceType.ENTERPRISE,
+            joinPolicy: WorkspaceJoinPolicy.INVITE_ONLY,
           }
         });
         console.log('  ✅ Created default workspace');

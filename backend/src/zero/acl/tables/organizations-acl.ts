@@ -1,5 +1,5 @@
 import type { DeleteID, InsertValue, Transaction, UpdateValue } from '@rocicorp/zero';
-import { OrgRole, Schema } from '@xyne/shared';
+import { OrgRole, Schema, WorkspaceRole } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, TableSchema } from '../core/types';
 import { zql } from '../../queries';
@@ -20,10 +20,15 @@ export class OrganizationsACL extends BaseACL<'organizations'> {
   }
 
   async canInsert(_args: InsertValue<TableSchema<'organizations'>>, _tx: Transaction<Schema>): Promise<void> {
-    // Any user can create an organization
+    if (this.ctx.role === WorkspaceRole.COMMUNITY_MEMBER) {
+      throw new MutationACLError('Organization insert failed: community members cannot create organizations', 'organizations');
+    }
   }
 
   async canUpdate(args: UpdateValue<TableSchema<'organizations'>>, tx: Transaction<Schema>): Promise<void> {
+    if (this.ctx.role === WorkspaceRole.COMMUNITY_MEMBER) {
+      throw new MutationACLError('Organization update failed: community members cannot modify organizations', 'organizations');
+    }
     const org = await tx.run(zql.organizations.where('orgId', args.orgId).one());
     if (org && org.createdBy === this.ctx.userID) {
       return;
@@ -35,6 +40,9 @@ export class OrganizationsACL extends BaseACL<'organizations'> {
   }
 
   async canDelete(args: DeleteID<TableSchema<'organizations'>>, tx: Transaction<Schema>): Promise<void> {
+    if (this.ctx.role === WorkspaceRole.COMMUNITY_MEMBER) {
+      throw new MutationACLError('Organization delete failed: community members cannot delete organizations', 'organizations');
+    }
     const org = await tx.run(zql.organizations.where('orgId', args.orgId).one());
     if (org && org.createdBy === this.ctx.userID) {
       return;

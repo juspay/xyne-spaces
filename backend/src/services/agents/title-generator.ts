@@ -7,9 +7,6 @@
 import { z } from 'zod';
 import { LLMClient, createUserMessage } from '@framework';
 
-// Import config for environment variables
-import { config } from '../../config/env.js';
-
 // Import prompts
 import { getTitleGeneratorSystemPrompt, buildTitleGeneratorUserPrompt } from './prompts.js';
 
@@ -24,16 +21,8 @@ import { AgentsConfig } from '../../agents/config.js';
 
 // Import logger
 import { logLLMCallStart, logLLMSuccess, logLLMError } from '../../agents/agentLogger.js';
-
-// ============================================================================
-// Configuration - Loaded from environment variables
-// ============================================================================
-
-// LiteLLM proxy URL from environment
-const LITELLM_BASE_URL = config.litellm.baseUrl;
-
-// LiteLLM API key from environment
-const LITELLM_API_KEY = config.litellm.apiKey;
+import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
+import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
 
 const AGENT_NAME = 'TitleGenerator';
 
@@ -119,13 +108,20 @@ function parseTitleGeneratorOutput(content: string): TitleGeneratorOutput {
  */
 export async function generateTitle(
   input: TitleGeneratorInput,
-  _context: TitleGeneratorContext,
+  context: TitleGeneratorContext,
   _onEvent?: unknown, // Kept for API compatibility, not used with direct calls
   agentsConfig?: AgentsConfig
 ): Promise<TitleGeneratorOutput> {
   // Use model name from CAC config if provided, otherwise fetch or use default
   const cacConfig = agentsConfig ?? await AgentsConfig.fetch();
   const modelName = cacConfig.titleGeneratorModelName;
+  const credential = await orgLLMCredentialService.getCredentialByUserId(
+    context.userId,
+    OrgLLMServiceAccountPurpose.DEFAULT,
+  );
+  if (!credential) {
+    throw new Error('LiteLLM credentials are not configured for this organization');
+  }
 
   // Format description for the agent using prompt template
   const formattedPrompt = buildTitleGeneratorUserPrompt(input.description, input.maxLength);
@@ -135,15 +131,15 @@ export async function generateTitle(
     provider: {
       type: 'litellm',
       config: {
-        apiKey: LITELLM_API_KEY,
-        baseUrl: LITELLM_BASE_URL,
+        apiKey: credential.apiKey,
+        baseUrl: credential.baseUrl,
       },
     },
     defaultModel: modelName,
   });
 
   // Log LLM call start
-  logLLMCallStart(AGENT_NAME, modelName, 'LITELLM_API_KEY');
+  logLLMCallStart(AGENT_NAME, modelName, 'ORG_LITELLM_SERVICE_ACCOUNT');
 
   try {
     // Generate response using framework LLM client

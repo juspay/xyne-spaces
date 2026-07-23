@@ -23,7 +23,7 @@ export class PdfJsStrategy extends BaseStrategy {
     /**
      * Parse PDF and extract text chunks using pdfjs-dist with spatial awareness
      */
-    async parse(buffer: Buffer, _vespaDocId: string): Promise<ProcessingResult> {
+    async parse(buffer: Buffer, vespaDocId: string): Promise<ProcessingResult> {
         try {
             // Convert Buffer to Uint8Array for pdfjs-dist
             const data = new Uint8Array(buffer)
@@ -128,7 +128,7 @@ export class PdfJsStrategy extends BaseStrategy {
             // Chunk based on paragraphs, tracking which pages each chunk covers
             const { chunks, chunks_map } = this.chunkByParagraphsWithMeta(allParagraphs, paragraphPages)
 
-            const documentOutline = await this.buildDocumentOutline(chunks, chunks_map)
+            const documentOutline = await this.buildDocumentOutline(chunks, chunks_map, vespaDocId)
 
             return {
                 chunks,

@@ -5,6 +5,7 @@ import {
   UpdateWorkspaceInput,
   QueryOptions,
 } from '@/types/database';
+import { WorkspaceJoinPolicy, WorkspaceType } from '@xyne/shared';
 
 export class WorkspaceRepository extends BaseRepository<Workspace, CreateWorkspaceInput, UpdateWorkspaceInput> {
   constructor() {
@@ -13,7 +14,11 @@ export class WorkspaceRepository extends BaseRepository<Workspace, CreateWorkspa
 
   async create(data: CreateWorkspaceInput): Promise<Workspace> {
     return await this.db.workspace.create({
-      data,
+      data: {
+        ...data,
+        workspaceType: (data as any).workspaceType ?? WorkspaceType.ENTERPRISE,
+        joinPolicy: (data as any).joinPolicy ?? WorkspaceJoinPolicy.INVITE_ONLY,
+      },
     });
   }
 

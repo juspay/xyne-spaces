@@ -4,13 +4,12 @@
 
 import { z } from 'zod';
 import { LLMClient, createUserMessage } from '@framework';
-import { config } from '../../config/env.js';
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
 import { AgentsConfig } from '../config.js';
 import { logLLMCallStart, logLLMSuccess, logLLMError } from '../agentLogger.js';
+import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
+import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
 
-const LITELLM_BASE_URL = config.litellm.baseUrl;
-const LITELLM_API_KEY = config.litellm.apiKey;
 const MAX_TITLE_LENGTH = 500;
 const MAX_DESCRIPTION_LENGTH = 4000;
 
@@ -159,7 +158,7 @@ function parseAgentOutput(content: string): TicketDuplicateOutput {
 
 export async function analyzeTicketDuplicates(
   input: TicketDuplicateInput,
-  _context: TicketDuplicateContext,
+  context: TicketDuplicateContext,
   _onEvent?: unknown, // Kept for API compatibility, not used with direct calls
   agentsConfig?: AgentsConfig,
 ): Promise<TicketDuplicateOutput> {
@@ -175,14 +174,27 @@ export async function analyzeTicketDuplicates(
   // Use model name from CAC config if provided, otherwise fetch or use default
   const cacConfig = agentsConfig ?? await AgentsConfig.fetch();
   const modelName = cacConfig.ticketDuplicateModelName;
+  const credential =
+    await orgLLMCredentialService.getCredentialByProjectId(
+      context.projectId,
+      OrgLLMServiceAccountPurpose.DEFAULT,
+    ) ??
+    await orgLLMCredentialService.getCredentialByUserId(
+      context.userId,
+      OrgLLMServiceAccountPurpose.DEFAULT,
+    );
+
+  if (!credential) {
+    throw new Error('LiteLLM credentials are not configured for this organization');
+  }
 
   // Initialize LLM client
   const llmClient = new LLMClient({
     provider: {
       type: 'litellm',
       config: {
-        apiKey: LITELLM_API_KEY,
-        baseUrl: LITELLM_BASE_URL,
+        apiKey: credential.apiKey,
+        baseUrl: credential.baseUrl,
       },
     },
     defaultModel: modelName,
@@ -191,7 +203,7 @@ export async function analyzeTicketDuplicates(
   const prompt = buildPrompt(input);
 
   // Log LLM call start
-  logLLMCallStart(AGENT_NAME, modelName, 'LITELLM_API_KEY');
+  logLLMCallStart(AGENT_NAME, modelName, 'ORG_LITELLM_SERVICE_ACCOUNT');
 
   try {
     // Generate response using framework LLM client

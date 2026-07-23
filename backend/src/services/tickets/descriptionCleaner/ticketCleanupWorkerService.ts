@@ -52,11 +52,6 @@ class TicketCleanupWorkerService {
   }
 
   private async pollAndProcess(): Promise<void> {
-    if (!config.litellm.apiKey) {
-      this.currentInterval = MAX_INTERVAL_MS;
-      return;
-    }
-
     await this.markMaxRetryFailures();
 
     const logs = await this.claimFailedCleanupLogs();
@@ -155,7 +150,7 @@ class TicketCleanupWorkerService {
 
       const ticket = await db.ticket.findUnique({
         where: { id: log.entityId },
-        select: { id: true, title: true, description: true },
+        select: { id: true, title: true, description: true, projectId: true },
       });
 
       if (!ticket) {
@@ -167,7 +162,7 @@ class TicketCleanupWorkerService {
         return;
       }
 
-      const cleaned = await descCleaner(ticket.description, ticket.title, ChannelType.EMAIL);
+      const cleaned = await descCleaner(ticket.description, ticket.title, ChannelType.EMAIL, ticket.projectId);
       if (!cleaned.usedLlm) {
         const errorMessage = cleaned.llmError || 'llm_cleanup_failed';
         logger.warn('[TicketCleanupWorker] LLM cleanup failed', {

@@ -85,7 +85,7 @@ export class DocumentAnalysisService {
     logger.info(`[DocumentAnalysisService] Starting analysis for file=${filename} sessionId=${sessionId}`);
 
     const { config: agentConfig, systemPrompt: rawSystemPrompt } =
-      await agentService.getAgentConfigWithSystemPrompt(DOCUMENT_ANALYST_AGENT);
+      await agentService.getAgentConfigWithSystemPrompt(DOCUMENT_ANALYST_AGENT, { userId });
 
     const systemPrompt = `${rawSystemPrompt}\n\n${OUTPUT_FORMAT_INSTRUCTION}`;
 

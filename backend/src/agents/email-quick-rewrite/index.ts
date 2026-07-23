@@ -6,16 +6,15 @@
  */
 
 import { LLMClient, createUserMessage } from '@framework';
-import { config } from '../../config/env.js';
 import { AgentsConfig } from '../config.js';
 import { logLLMCallStart, logLLMSuccess, logLLMError } from '../agentLogger.js';
+import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
+import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
 
 // ============================================================================
 // Configuration
 // ============================================================================
 
-const LITELLM_BASE_URL = config.litellm.baseUrl;
-const LITELLM_API_KEY = config.litellm.apiKey;
 const AGENT_NAME = 'EmailQuickRewrite';
 
 // ============================================================================
@@ -49,7 +48,7 @@ export interface EmailQuickRewriteOutput {
  */
 export async function rewriteEmailText(
   input: EmailQuickRewriteInput,
-  _context: EmailQuickRewriteContext,
+  context: EmailQuickRewriteContext,
   _onEvent?: unknown,
   agentsConfig?: AgentsConfig,
 ): Promise<EmailQuickRewriteOutput> {
@@ -61,21 +60,28 @@ export async function rewriteEmailText(
   // Use model name from CAC config if provided, otherwise fetch or use default
   const cacConfig = agentsConfig ?? await AgentsConfig.fetch();
   const modelName = cacConfig.emailQuickRewriteModelName;
+  const credential = await orgLLMCredentialService.getCredentialByUserId(
+    context.userId,
+    OrgLLMServiceAccountPurpose.DEFAULT,
+  );
+  if (!credential) {
+    throw new Error('LiteLLM credentials are not configured for this organization');
+  }
 
   // Initialize LLM client
   const llmClient = new LLMClient({
     provider: {
       type: 'litellm',
       config: {
-        apiKey: LITELLM_API_KEY,
-        baseUrl: LITELLM_BASE_URL,
+        apiKey: credential.apiKey,
+        baseUrl: credential.baseUrl,
       },
     },
     defaultModel: modelName,
   });
 
   // Log LLM call start
-  logLLMCallStart(AGENT_NAME, modelName, 'LITELLM_API_KEY');
+  logLLMCallStart(AGENT_NAME, modelName, 'ORG_LITELLM_SERVICE_ACCOUNT');
 
   try {
     // Generate response using framework LLM client

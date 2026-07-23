@@ -9,7 +9,8 @@ generator client {
 }
 
 generator zero {
-  provider       = "prisma-generator-zero"
+  provider      = "prisma-generator-zero"
+  excludeTables = ["WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain"]
 }
 
 datasource db {
@@ -311,6 +312,7 @@ enum OrgRole {
   ADMIN
   MEMBER
   VIEWER
+  COMMUNITY_MEMBER
   @@schema("public")
 }
 
@@ -1209,6 +1211,7 @@ enum WorkspaceRole {
   ADMIN
   MEMBER
   GUEST
+  COMMUNITY_MEMBER
   @@schema("public")
 } 
 
@@ -1886,6 +1889,23 @@ model Organization {
   @@schema("public")
 }
 
+model OrganizationDomain {
+  id                 String   @id
+  orgId              String
+  domain             String
+  verificationStatus String
+  verifiedAt         DateTime?
+  verifiedByUserId   String?
+  createdAt          DateTime
+  updatedAt          DateTime
+
+  @@unique([orgId, domain])
+  @@index([orgId])
+  @@index([domain, verificationStatus])
+  @@map("organization_domains")
+  @@schema("non_zero")
+}
+
 model OrgMember {
   memberId    String   @id @default(cuid())
   orgId       String   // Organization ID (no FK constraint)
@@ -1936,6 +1956,9 @@ model Workspace {
   createdBy   String
   status      Status   @default(ACTIVE)
   metadata    Json?
+  workspaceType String?
+  joinPolicy    String?
+  landingChannelId String?
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt
 
@@ -1955,6 +1978,59 @@ model Workspace {
   @@index([orgId])
   @@map("workspaces")
   @@schema("public")
+}
+
+model WorkspaceJoinRequest {
+  id               String   @id @default(cuid())
+  workspaceId      String
+  email            String
+  status           String   @default("PENDING")
+  reviewedByUserId String?
+  reviewedAt       DateTime?
+  reviewNote       String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([workspaceId, email, updatedAt(sort: Desc)])
+  @@index([email, status, updatedAt(sort: Desc)])
+  @@index([workspaceId, status, createdAt(sort: Desc)])
+  @@map("workspace_join_requests")
+  @@schema("non_zero")
+}
+
+model AiProvisioningStatus {
+  id              String   @id @default(cuid())
+  subjectType     String
+  subjectId       String
+  provider        String
+  status          String
+  attempts        Int
+  lastError       String?
+  lastAttemptedAt DateTime?
+  createdAt       DateTime
+  updatedAt       DateTime
+
+  @@unique([subjectType, subjectId, provider])
+  @@index([status, updatedAt])
+  @@map("ai_provisioning_status")
+  @@schema("non_zero")
+}
+
+model OrgLLMServiceAccountCredential {
+  id                String    @id @default(cuid())
+  orgId             String
+  provider          String
+  purpose           String
+  credentials       String    @db.Text
+  status            String
+  lastProvisionedAt DateTime?
+  createdAt         DateTime
+  updatedAt         DateTime
+
+  @@unique([orgId, provider, purpose])
+  @@index([orgId, status])
+  @@map("org_llm_service_account_credentials")
+  @@schema("non_zero")
 }
 
 

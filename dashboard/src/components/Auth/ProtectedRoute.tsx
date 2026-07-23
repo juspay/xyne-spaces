@@ -10,6 +10,7 @@ const ProtectedRoute = (): ReactElement => {
 
   if (!isAuthenticated) {
     const searchParams = new URLSearchParams(location.search);
+
     const authParams = new URLSearchParams();
     if (searchParams.has('enrollment_success')) {
       authParams.set('enrollment_success', searchParams.get('enrollment_success') || '');

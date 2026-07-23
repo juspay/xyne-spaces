@@ -4,7 +4,6 @@
  */
 
 import { randomUUID } from 'crypto';
-import { config as envConfig } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 import { resolveFormFieldDefinitionsForForm } from '../utils/fieldDefinition.js';
 import { EmailClassificationRepository } from '../database/repositories/emailClassificationRepository.js';
@@ -21,6 +20,8 @@ import type {
   PriorityClassificationResult,
 } from '../types/classification.js';
 import { TicketPriority } from '@prisma/client';
+import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
+import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
 
 const AGENT_NAME = 'EmailClassification';
 const PRIORITY_AGENT_NAME = 'EmailPriorityClassification';
@@ -103,7 +104,8 @@ export class EmailClassificationService {
       const categoryPromise = this.runClassificationAgent(
         config.classificationPrompt,
         userMessage,
-        modelName
+        modelName,
+        config.ownerUserId,
       );
 
       const priorityPromise = config.priorityClassificationEnabled
@@ -112,7 +114,8 @@ export class EmailClassificationService {
             emailSubject,
             emailBody,
             config.priorityClassificationPrompt,
-            modelName
+            modelName,
+            config.ownerUserId,
           )
         : Promise.resolve(null);
 
@@ -155,7 +158,8 @@ export class EmailClassificationService {
     emailSubject: string,
     emailBody: string,
     customPrompt: string | null | undefined,
-    modelName: string
+    modelName: string,
+    ownerUserId?: string | null,
   ): Promise<PriorityClassificationResult | null> {
     logger.info('[PriorityClassification] classifyPriority STARTED', {
       channelId,
@@ -174,7 +178,7 @@ export class EmailClassificationService {
     });
 
     try {
-      const rawOutput = await this.runPriorityClassificationAgent(prompt, modelName);
+      const rawOutput = await this.runPriorityClassificationAgent(prompt, modelName, ownerUserId);
       const result = this.parsePriorityOutput(rawOutput);
       logger.info('[PriorityClassification] parsePriorityOutput completed', {
         hasResult: !!result,
@@ -439,15 +443,24 @@ export class EmailClassificationService {
   private async runClassificationAgent(
     systemPrompt: string,
     userMessage: string,
-    modelName: string
+    modelName: string,
+    ownerUserId?: string | null,
   ): Promise<ClassificationRawOutput> {
+    const credential = await orgLLMCredentialService.getCredentialByUserId(
+      ownerUserId,
+      OrgLLMServiceAccountPurpose.DEFAULT,
+    );
+    if (!credential) {
+      throw new Error('LiteLLM credentials are not configured for this organization');
+    }
+
     // Create fresh LLM client (following codebase pattern - no caching)
     const llmClient = new LLMClient({
       provider: {
         type: 'litellm',
         config: {
-          apiKey: envConfig.litellm.apiKey,
-          baseUrl: envConfig.litellm.baseUrl,
+          apiKey: credential.apiKey,
+          baseUrl: credential.baseUrl,
           timeout: 120000,
           retries: 1,
         },
@@ -456,7 +469,7 @@ export class EmailClassificationService {
       temperature: 0.1,
     });
 
-    logLLMCallStart(AGENT_NAME, modelName, 'LITELLM_API_KEY');
+    logLLMCallStart(AGENT_NAME, modelName, 'ORG_LITELLM_SERVICE_ACCOUNT');
     try {
       const response = await llmClient.generate({
         messages: [createUserMessage(userMessage)],
@@ -513,17 +526,16 @@ export class EmailClassificationService {
 
   private async runPriorityClassificationAgent(
     systemPrompt: string,
-    modelName: string
+    modelName: string,
+    ownerUserId?: string | null,
   ): Promise<ClassificationRawOutput> {
-    // Validate configuration
-    if (!envConfig.litellm.apiKey) {
-      logger.error('[PriorityClassification] LiteLLM API key is not configured');
-      throw new Error('LiteLLM API key not configured');
-    }
-    
-    if (!envConfig.litellm.baseUrl) {
-      logger.error('[PriorityClassification] LiteLLM base URL is not configured');
-      throw new Error('LiteLLM base URL not configured');
+    const credential = await orgLLMCredentialService.getCredentialByUserId(
+      ownerUserId,
+      OrgLLMServiceAccountPurpose.DEFAULT,
+    );
+    if (!credential) {
+      logger.error('[PriorityClassification] Org LiteLLM credentials are not configured');
+      throw new Error('LiteLLM credentials not configured');
     }
 
     logger.info('[PriorityClassification] Starting LLM call', {
@@ -535,8 +547,8 @@ export class EmailClassificationService {
       provider: {
         type: 'litellm',
         config: {
-          apiKey: envConfig.litellm.apiKey,
-          baseUrl: envConfig.litellm.baseUrl,
+          apiKey: credential.apiKey,
+          baseUrl: credential.baseUrl,
           timeout: 120000,
           retries: 1,
         },
@@ -545,7 +557,7 @@ export class EmailClassificationService {
       temperature: 0.1,
     });
 
-    logLLMCallStart(PRIORITY_AGENT_NAME, modelName, 'LITELLM_API_KEY');
+    logLLMCallStart(PRIORITY_AGENT_NAME, modelName, 'ORG_LITELLM_SERVICE_ACCOUNT');
     try {
       const response = await llmClient.generate({
         messages: [createUserMessage('Analyze email and determine priority.')],

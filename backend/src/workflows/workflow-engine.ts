@@ -156,7 +156,13 @@ export class WorkflowEngineImpl<
 
   async createAgenticCheckpoint(id: TEnum[keyof TEnum], name: string, config: AgenticCheckpointConfig, parentStepId?: string): Promise<AgenticCheckpointResult> {
     // Get agent from database using db-storage and create agentConfig
-    const agent = await this.storage.getAgentConfigFromDb(name, config.agentConfigVersions, config.maxTurns, this.currentState.context.modelName)
+    const agent = await this.storage.getAgentConfigFromDb(
+      name,
+      config.agentConfigVersions,
+      config.maxTurns,
+      this.currentState.context.modelName,
+      this.currentState.context,
+    )
     const agentConfig = agent.getConfig()
 
     // Create the full config with agentConfig for AgentExecutor
@@ -686,7 +692,8 @@ export class WorkflowEngineImpl<
       const markdown = await generateMarkdownSummary(
         stepId,
         { input },
-        { output }
+        { output },
+        this.currentState.context,
       )
       await this.storage.saveStepMarkdownSummary(
         this.currentState.workflowExecutionId,
