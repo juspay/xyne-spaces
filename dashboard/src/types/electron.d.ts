@@ -157,9 +157,9 @@ export interface ElectronAPI {
     sourcePath: string | null,
   ): Promise<{ saved: boolean }>;
   startErrorReportRecording?(sourceId: string, withMic: boolean): Promise<void>;
-  stopErrorReportRecording?(): Promise<{ filePath: string }>;
+  stopErrorReportRecording?(): Promise<{ filePath: string; recordingToken: string }>;
   getErrorReportRecordingState?(): Promise<ErrorReportRecordingInfo>;
-  readErrorReportRecordingFile?(filePath: string): Promise<ArrayBuffer>;
+  readErrorReportRecordingFile?(recordingToken: string): Promise<ArrayBuffer>;
   cleanupErrorReportRecording?(filePath: string): Promise<void>;
   onErrorReportRecordingProgress?(callback: (data: { elapsedSeconds: number }) => void): () => void;
 }

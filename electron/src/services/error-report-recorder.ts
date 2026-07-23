@@ -27,6 +27,8 @@ type RecordingState =
       window: BrowserWindow;
     };
 
+const READ_TOKEN_TTL_MS = 5 * 60 * 1000;
+
 class ErrorReportRecorder {
   private state: RecordingState = { state: 'idle' };
   private writeStream: fs.WriteStream | null = null;
@@ -36,6 +38,7 @@ class ErrorReportRecorder {
   private errorHandler: ((event: Electron.IpcMainEvent, error: string) => void) | null = null;
   private crashHandler: ((event: Electron.Event, killed: boolean) => void) | null = null;
   private readonly tempDir = path.resolve(os.tmpdir());
+  private readonly pendingReadTokens = new Map<string, { filePath: string; expiresAt: number }>();
 
   constructor() {
     // Register app quit handler to cleanup
@@ -111,20 +114,24 @@ class ErrorReportRecorder {
         reject(new Error('Timeout waiting for recording to start'));
       }, 10000);
 
-      const onStarted = (): void => {
+      const onStarted = (event: Electron.IpcMainEvent): void => {
+        if (!this.isFromRecorderWindow(event)) return;
         clearTimeout(timeout);
+        ipcMain.removeListener(RECORDER_IPC.STARTED, onStarted);
         ipcMain.removeListener(RECORDER_IPC.ERROR, onStartError);
         resolve();
       };
 
-      const onStartError = (_event: Electron.IpcMainEvent, error: string): void => {
+      const onStartError = (event: Electron.IpcMainEvent, error: string): void => {
+        if (!this.isFromRecorderWindow(event)) return;
         clearTimeout(timeout);
         ipcMain.removeListener(RECORDER_IPC.STARTED, onStarted);
+        ipcMain.removeListener(RECORDER_IPC.ERROR, onStartError);
         reject(new Error(error));
       };
 
-      ipcMain.once(RECORDER_IPC.STARTED, onStarted);
-      ipcMain.once(RECORDER_IPC.ERROR, onStartError);
+      ipcMain.on(RECORDER_IPC.STARTED, onStarted);
+      ipcMain.on(RECORDER_IPC.ERROR, onStartError);
     });
 
     // Notify renderer to start recording
@@ -140,9 +147,10 @@ class ErrorReportRecorder {
   }
 
   /**
-   * Stop the current recording and return the file path
+   * Stop the current recording and return the file path plus a single-use
+   * capability token the renderer must present to read the bytes.
    */
-  async stopRecording(): Promise<{ filePath: string }> {
+  async stopRecording(): Promise<{ filePath: string; recordingToken: string }> {
     if (this.state.state !== 'recording') {
       throw new Error('No active recording');
     }
@@ -161,14 +169,21 @@ class ErrorReportRecorder {
         reject(new Error('Timeout waiting for recording to stop'));
       }, 10000);
 
-      const onStopped = (_event: Electron.IpcMainEvent): void => {
+      // XYNE-16859 Issue 274: sender check so a rogue renderer cannot forge a
+      // premature "stopped" signal to truncate the recording. Use .on + manual
+      // removal so a spoofed send doesn't consume the listener before the
+      // legitimate one from the trusted recorder window.
+      const onStopped = (event: Electron.IpcMainEvent): void => {
+        if (!this.isFromRecorderWindow(event)) return;
         clearTimeout(timeout);
+        ipcMain.removeListener(RECORDER_IPC.STOPPED, onStopped);
         // Drain the write stream before resolving so the file is fully flushed
         const ws = this.writeStream;
         this.writeStream = null;
         const finish = (): void => {
           void this.cleanup();
-          resolve({ filePath: tempFilePath });
+          const recordingToken = this.issueReadToken(tempFilePath);
+          resolve({ filePath: tempFilePath, recordingToken });
         };
         if (ws) {
           ws.end(finish);
@@ -179,8 +194,40 @@ class ErrorReportRecorder {
 
       // Store reference for cleanup
       this.stoppedHandler = onStopped;
-      ipcMain.once(RECORDER_IPC.STOPPED, onStopped);
+      ipcMain.on(RECORDER_IPC.STOPPED, onStopped);
     });
+  }
+
+  private issueReadToken(filePath: string): string {
+    // Prune expired tokens so the map cannot grow unbounded across sessions.
+    const now = Date.now();
+    for (const [token, entry] of this.pendingReadTokens) {
+      if (entry.expiresAt <= now) {
+        this.pendingReadTokens.delete(token);
+      }
+    }
+    const token = crypto.randomUUID();
+    this.pendingReadTokens.set(token, {
+      filePath,
+      expiresAt: now + READ_TOKEN_TTL_MS,
+    });
+    return token;
+  }
+
+  /**
+   * Consume a read-token and return the recording bytes. The token is deleted
+   * on success or on any failure so it cannot be reused, even for retry.
+   */
+  async readRecordingByToken(recordingToken: string): Promise<Buffer> {
+    const entry = this.pendingReadTokens.get(recordingToken);
+    this.pendingReadTokens.delete(recordingToken);
+    if (!entry) {
+      throw new Error('Invalid or already-consumed recording token');
+    }
+    if (entry.expiresAt <= Date.now()) {
+      throw new Error('Recording token expired');
+    }
+    return this.readRecordingFile(entry.filePath);
   }
 
   /**
@@ -243,11 +290,29 @@ class ErrorReportRecorder {
   }
 
   /**
+   * XYNE-16859 Issue 274: the recorder lifecycle channels
+   * (chunk/stopped/error/started) must only be honored when sent by the
+   * trusted hidden recorder BrowserWindow this recording session spawned.
+   * Any other renderer (main app, popup, etc.) forging a message on these
+   * channels would otherwise be able to poison the on-disk recording, force
+   * a fake stop, or truncate/DoS the capture.
+   */
+  private isFromRecorderWindow(event: Electron.IpcMainEvent): boolean {
+    if (this.state.state !== 'recording') return false;
+    const recorderWc = this.state.window.webContents;
+    return !recorderWc.isDestroyed() && event.sender === recorderWc;
+  }
+
+  /**
    * Set up IPC handlers for recording session
    */
   private setupIpcHandlers(): void {
     // Handle incoming chunks
-    this.chunkHandler = (_event: Electron.IpcMainEvent, chunk: ArrayBuffer): void => {
+    this.chunkHandler = (event: Electron.IpcMainEvent, chunk: ArrayBuffer): void => {
+      if (!this.isFromRecorderWindow(event)) {
+        log.warn('[ErrorReportRecorder] Rejected chunk from untrusted sender');
+        return;
+      }
       if (this.writeStream && this.state.state === 'recording') {
         const buffer = Buffer.from(chunk);
         this.writeStream.write(buffer);
@@ -256,7 +321,11 @@ class ErrorReportRecorder {
     ipcMain.on(RECORDER_IPC.CHUNK, this.chunkHandler);
 
     // Handle errors from recorder
-    this.errorHandler = (_event: Electron.IpcMainEvent, error: string): void => {
+    this.errorHandler = (event: Electron.IpcMainEvent, error: string): void => {
+      if (!this.isFromRecorderWindow(event)) {
+        log.warn('[ErrorReportRecorder] Rejected error message from untrusted sender');
+        return;
+      }
       log.error('[ErrorReportRecorder] Recorder error:', error);
       if (this.stoppedHandler) {
         return;
