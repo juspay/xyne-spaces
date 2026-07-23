@@ -250,12 +250,11 @@ export const TicketFiltersDropdown = ({
   const inputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
   const canViewAnalytics = useCanViewAnalytics();
-  const { setActiveTab, setUseVespaSearch } = useSearchMetrics({ allChannels: [] });
+  const { setActiveTab } = useSearchMetrics({ allChannels: [] });
 
   useEffect(() => {
     setActiveTab(TabType.TICKETS);
-    setUseVespaSearch(false);
-  }, [setActiveTab, setUseVespaSearch]);
+  }, [setActiveTab]);
 
   const totalBoardCount = allBoardsList?.length || 0;
   // In my-tickets mode, totalBoardCount reflects only boards for which the user has tickets.
