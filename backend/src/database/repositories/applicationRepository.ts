@@ -1,4 +1,5 @@
 import { DatabaseClient } from '@/database/client';
+import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import { logger } from '@framework';
 import { TicketIdService } from '@/services/ticketIdService';
 
@@ -54,10 +55,15 @@ export class ApplicationRepository {
   }>): Promise<{ count: number }> {
     if (records.length === 0) return { count: 0 };
 
+    // All ART rows for a release share the release's workspace; the dev ticket
+    // carries the denormalized tenant key, so resolve it once and stamp it.
+    const artWorkspaceId = await resolveWorkspaceIdFromModel(prisma, 'ticket', { id: records[0].devTicketId });
+
     const data = records.map(r => ({
       applicationReleaseId: r.applicationReleaseId,
       releaseId: r.releaseId,
       ticketId: r.devTicketId,
+      workspaceId: artWorkspaceId,
     }));
 
     const result = await prisma.applicationReleaseTicket.createMany({
@@ -121,11 +127,7 @@ export class ApplicationRepository {
     logger.info(`Creating sub-tickets for ${affectedApplications.length} affected applications`);
 
     // Project workspace doesn't change per-app; resolve once outside the loop.
-    const project = await prisma.project.findUnique({
-      where: { id: projectId },
-      select: { workspaceId: true },
-    });
-    const ticketWorkspaceId = project?.workspaceId ?? '';
+    const ticketWorkspaceId = await resolveWorkspaceIdFromModel(prisma, 'project', { id: projectId });
 
     const result = new Map<string, { subTicketId: string; mappedTicketId: string; xyneId: string }>();
 
@@ -178,6 +180,7 @@ export class ApplicationRepository {
               data: {
                 ticketId: ticket.id,
                 name: 'HotFix',
+                workspaceId: ticketWorkspaceId,
               }
             })
             await dualWriteTicketTag(ticket.id, 'HotFix', tx);
@@ -197,12 +200,13 @@ export class ApplicationRepository {
           });
 
           await tx.ticketSubTicketMapping.create({
-            data: { ticketId: parentTicketId, subTicketId: subTicket.id },
+            data: { ticketId: parentTicketId, subTicketId: subTicket.id, workspaceId: ticketWorkspaceId },
           });
 
           await tx.ticketActivity.create({
             data: {
               ticketId: parentTicketId,
+              workspaceId: ticketWorkspaceId,
               updatedBy: createdBy,
               activityType: ActivityType.SUBTICKET_CREATED,
               value: {

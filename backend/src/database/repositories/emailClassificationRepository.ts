@@ -4,6 +4,7 @@
  */
 
 import { DatabaseClient } from '../client';
+import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import type { 
   SaveClassificationConfigBody, 
   SaveMappingBody, 
@@ -59,10 +60,12 @@ export class EmailClassificationRepository {
   }
 
   async upsertConfig(channelId: string, data: SaveClassificationConfigBody) {
+    const workspaceId = await resolveWorkspaceIdFromModel(this.db, 'channel', { id: channelId });
     await this.db.emailChannelPreference.upsert({
       where: { channelId },
       create: {
         channelId,
+        workspaceId,
         classificationEnabled: data.enabled,
         classificationPrompt: data.classificationPrompt,
         categoryField: data.categoryField.trim(),
@@ -82,9 +85,11 @@ export class EmailClassificationRepository {
   // ─── Mappings ─────────────────────────────────────────────────────────────
 
   async createMapping(channelId: string, data: SaveMappingBody) {
+    const workspaceId = await resolveWorkspaceIdFromModel(this.db, 'channel', { id: channelId });
     return this.db.classificationMapping.create({
       data: {
         channelId,
+        workspaceId,
         category: data.category,
         subCategory: data.subCategory ?? null,
         userGroupId: data.userGroupId,

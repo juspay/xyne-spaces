@@ -300,6 +300,7 @@ export async function handleMutate(request: Request): Promise<unknown> {
                 errorMessage: `Failed to enqueue a job ${JSON.stringify(err)}`,
                 errorDetails: JSON.stringify(err),
                 userId: authData!.sub,
+                workspaceId: authData!.workspaceId,
                 createdAt: new Date(),
               },
             });
@@ -615,6 +616,7 @@ export async function handleMutateFallback(request: Request): Promise<unknown> {
                 errorMessage: `Failed to enqueue a job ${JSON.stringify(err)}`,
                 errorDetails: JSON.stringify(err),
                 userId: authData.sub,
+                workspaceId: authData.workspaceId,
                 createdAt: new Date(),
               },
             });

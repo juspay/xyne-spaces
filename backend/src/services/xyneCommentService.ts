@@ -256,11 +256,12 @@ export class XyneCommentService {
   ): Promise<void> {
     const ticket = await this.db.ticket.findUnique({
       where: { id: ticketId },
-      select: { 
-        conversationId: true, 
+      select: {
+        conversationId: true,
         createdBy: true,
         title: true,
         description: true,
+        workspaceId: true,
       },
     });
 
@@ -369,6 +370,7 @@ export class XyneCommentService {
         data: {
           prId: prId,
           prUrl: prUrl,
+          workspaceId: ticket.workspaceId,
           workflowExecutionId: result.executionId,
           repoName: pr.repoName || '',
           sourceBranchName: pr.sourceBranchName || workflowBranch,
@@ -400,6 +402,7 @@ export class XyneCommentService {
           data: {
             messageId: randomUUID(),
             conversationId: ticket.conversationId,
+            workspaceId: ticket.workspaceId,
             senderId: ticket.createdBy || 'system',
             content: ``,
             msgType: 'SYSTEM',

@@ -67,6 +67,32 @@ export class PRMetricsRepository {
     }
   }
 
+  /**
+   * Resolve the workspaceId to denormalize onto a PullRequests row from its
+   * linked ticket, or (failing that) from its workflow execution. Throws when
+   * neither can supply one so we never persist a PR without a real tenant key.
+   */
+  private async resolvePrWorkspaceId(opts: {
+    ticketId?: string | null;
+    workflowExecutionId?: string | null;
+  }): Promise<string | null> {
+    if (opts.ticketId) {
+      const ticket = await this.prisma.ticket.findUnique({
+        where: { id: opts.ticketId },
+        select: { workspaceId: true },
+      });
+      if (ticket) return ticket.workspaceId;
+    }
+    if (opts.workflowExecutionId) {
+      const execution = await this.prisma.workflowExecution.findUnique({
+        where: { id: opts.workflowExecutionId },
+        select: { workspaceId: true },
+      });
+      if (execution) return execution.workspaceId;
+    }
+    throw new Error('workspaceId required: cannot resolve from ticket or workflow execution');
+  }
+
   async insertPRIfNotPresent({
     prUrl,
     prId,
@@ -104,6 +130,7 @@ export class PRMetricsRepository {
     }
 
     // Create new PR
+    const workspaceId = await this.resolvePrWorkspaceId({ ticketId, workflowExecutionId: childExecutionId });
     return await this.prisma.pullRequests.create({
       data: {
         date: today,
@@ -115,7 +142,8 @@ export class PRMetricsRepository {
         repositoryUrl,
         repoName,
         workflowExecutionId: childExecutionId,
-        ticketId
+        ticketId,
+        workspaceId
       }
     });
   }
@@ -193,6 +221,7 @@ export class PRMetricsRepository {
         previousStatus
       };
     } else {
+      const workspaceId = await this.resolvePrWorkspaceId({ ticketId });
       await this.prisma.pullRequests.create({
         data: {
           date: today,
@@ -204,7 +233,8 @@ export class PRMetricsRepository {
           prId,
           repositoryUrl: repoUrl,
           numberOfComments,
-          ticketId
+          ticketId,
+          workspaceId
         }
       });
       return { isNew, statusChanged, previousStatus };
@@ -397,6 +427,7 @@ export class PRMetricsRepository {
       return;
     }
 
+    const workspaceId = await this.resolvePrWorkspaceId({ ticketId });
     await this.prisma.pullRequests.create({
       data: {
         date: today,
@@ -408,7 +439,8 @@ export class PRMetricsRepository {
         repositoryUrl,
         repoName,
         numberOfComments,
-        ticketId
+        ticketId,
+        workspaceId
       }
     });
   }

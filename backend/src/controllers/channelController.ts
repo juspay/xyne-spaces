@@ -649,7 +649,7 @@ export class ChannelController {
         await tx.channelStats.upsert({
           where: { channelId },
           update: { lastActivityAt: new Date() },
-          create: { channelId, lastActivityAt: new Date() },
+          create: { channelId, lastActivityAt: new Date(), workspaceId: channelWorkspaceId },
         });
 
         // Reopen DM for all participants so they can see the message
@@ -1184,6 +1184,7 @@ export class ChannelController {
                 channelId: channel.id,
                 credentials,
                 isActive: true,
+                workspaceId: req.user!.workspaceId!,
               },
             });
           }
@@ -1258,6 +1259,7 @@ export class ChannelController {
                 channelId: channel.id,
                 credentials: appCredentials,
                 isActive: true,
+                workspaceId: req.user!.workspaceId!,
               },
             });
           }
@@ -1355,6 +1357,7 @@ export class ChannelController {
                 errorDetails: JSON.stringify(error),
                 userId: userId,
                 createdAt: new Date(),
+                workspaceId: req.user!.workspaceId!,
               },
             });
           }

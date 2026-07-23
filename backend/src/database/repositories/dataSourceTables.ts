@@ -23,6 +23,13 @@ export class DataSourceTableRepository extends BaseRepository<
     dataSourceId: string,
     rows: Array<{ schemaName: string; tableName: string; rowCountEstimate: bigint | null }>
   ): Promise<DataSourceTable[]> {
+    const dataSource = await this.db.dataSource.findUnique({
+      where: { id: dataSourceId },
+      select: { workspaceId: true },
+    });
+    if (!dataSource) {
+      throw new Error(`workspaceId required: dataSource ${dataSourceId} not found`);
+    }
     const existing = await this.db.dataSourceTable.findMany({
       where: { dataSourceId },
       select: { id: true, schemaName: true, tableName: true },
@@ -46,6 +53,7 @@ export class DataSourceTableRepository extends BaseRepository<
           },
           create: {
             dataSourceId,
+            workspaceId: dataSource.workspaceId,
             schemaName: r.schemaName,
             tableName: r.tableName,
             rowCountEstimate: r.rowCountEstimate ?? undefined,

@@ -667,6 +667,7 @@ export class PRTicketStatusSyncService {
     } else {
       let createData: {
         ticketId: string;
+        workspaceId: string;
         userId: string;
         createdBy: string;
         roleId?: string;
@@ -676,6 +677,7 @@ export class PRTicketStatusSyncService {
         const userResponsibility = await userResponsibilityFromRoleId(assignmentKey.roleId);
         createData = {
           ticketId: ticket.id,
+          workspaceId: ticket.workspaceId,
           userId: assignedUserId,
           roleId: assignmentKey.roleId,
           createdBy: updatedBy,
@@ -685,6 +687,7 @@ export class PRTicketStatusSyncService {
         const roleId = await roleIdFromEnum(assignmentKey.responsibility as any, ticket.workspaceId);
         createData = {
           ticketId: ticket.id,
+          workspaceId: ticket.workspaceId,
           userId: assignedUserId,
           userResponsibility: assignmentKey.responsibility,
           createdBy: updatedBy,
@@ -710,6 +713,7 @@ export class PRTicketStatusSyncService {
     await recordTicketTimelineEvent({
       activity: {
         ticketId: ticket.id,
+        workspaceId: ticket.workspaceId,
         updatedBy,
         activityType: 'ASSIGNED_TO',
         value: {

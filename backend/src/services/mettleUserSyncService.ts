@@ -256,6 +256,7 @@ export class MettleUserSyncService {
           where: { userId: ensuredUser.id },
           create: {
             userId: ensuredUser.id,
+            workspaceId,
             ...userProfileData,
           },
           update: userProfileData,
@@ -288,6 +289,7 @@ export class MettleUserSyncService {
           where: { userId: user.id },
           create: {
             userId: user.id,
+            workspaceId,
             ...userProfileData,
           },
           update: userProfileData,

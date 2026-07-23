@@ -6,9 +6,16 @@ export class CallMessageRepository {
     participantId: string;
     message: string;
   }) {
-    return DatabaseClient.getInstance().callMessage.create({
+    const db = DatabaseClient.getInstance();
+    const call = await db.call.findUniqueOrThrow({
+      where: { id: data.callId },
+      select: { workspaceId: true },
+    });
+
+    return db.callMessage.create({
       data: {
         callId: data.callId,
+        workspaceId: call.workspaceId,
         participantId: data.participantId,
         message: data.message,
       },

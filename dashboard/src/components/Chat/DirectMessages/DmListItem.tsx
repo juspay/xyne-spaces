@@ -27,7 +27,9 @@ interface DmListItemProps {
   channel: Channel;
   unreadCount?: number;
   isSelected?: boolean;
-  latestConversation?: { initial_message_md?: string | null } | undefined;
+  latestConversation?:
+    | { initial_message_md?: string | null; workspaceId: string | null }
+    | undefined;
 }
 
 const getSenderLabel = (isCurrentUser: boolean, isDM: boolean, senderName?: string): string => {

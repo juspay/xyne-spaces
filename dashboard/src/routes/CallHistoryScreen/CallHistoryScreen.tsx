@@ -112,7 +112,7 @@ function timestampOrUndefined(value: number | undefined): number | undefined {
   return value && value > 0 ? value : undefined;
 }
 
-function mapVespaCallResultToCall(result: DisplaySearchResult): Call {
+function mapVespaCallResultToCall(result: DisplaySearchResult, workspaceId: string): Call {
   const context = result.searchContext;
   const callId = context?.callId || result.id;
   const startedAt =
@@ -132,7 +132,7 @@ function mapVespaCallResultToCall(result: DisplaySearchResult): Call {
   );
 
   return {
-    workspaceId: null,
+    workspaceId,
     id: callId,
     externalId: context?.externalId || callId,
     title: stripSearchHighlight(context?.title || result.title) || null,
@@ -170,7 +170,7 @@ function mapVespaCallResultToCall(result: DisplaySearchResult): Call {
       const isExternal = !userId;
 
       return {
-        workspaceId: null,
+        workspaceId,
         id: `${callId}:${userId || `external-${index}`}`,
         callId,
         userId,
@@ -481,10 +481,11 @@ const CallHistoryScreen = (): ReactElement => {
     setCallSearchActiveTab(TabType.CALL);
   }, [setCallSearchActiveTab]);
 
-  const vespaCallSearchRows = useMemo(
-    () => vespaCallSearchResults.map(mapVespaCallResultToCall),
-    [vespaCallSearchResults],
-  );
+  const vespaCallSearchRows = useMemo(() => {
+    const wsId = user?.workspaceId;
+    if (!wsId) return [];
+    return vespaCallSearchResults.map(r => mapVespaCallResultToCall(r, wsId));
+  }, [vespaCallSearchResults, user?.workspaceId]);
 
   const {
     selectedUsers: meetWithUsers,

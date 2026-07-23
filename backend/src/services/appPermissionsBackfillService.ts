@@ -66,7 +66,7 @@ export class AppPermissionsBackfillService {
       const batch = await db.installedApps.findMany({
         take: batchSize,
         ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
-        select: { id: true, appId: true },
+        select: { id: true, appId: true, workspaceId: true },
         orderBy: { id: 'asc' },
       });
 
@@ -81,7 +81,7 @@ export class AppPermissionsBackfillService {
 
       // Process all apps in this batch concurrently
       await Promise.all(
-        batch.map(async (installation: { id: string; appId: string }) => {
+        batch.map(async (installation: { id: string; appId: string; workspaceId: string | null }) => {
           const existing = await db.installedAppPermission.findMany({
             where: { installedAppId: installation.id },
             select: { permissionId: true },
@@ -94,6 +94,7 @@ export class AppPermissionsBackfillService {
             await db.installedAppPermission.createMany({
               data: toInsert.map((p) => ({
                 installedAppId: installation.id,
+                workspaceId: installation.workspaceId,
                 permissionId: p.id,
                 status: 'APPROVED',
               })),

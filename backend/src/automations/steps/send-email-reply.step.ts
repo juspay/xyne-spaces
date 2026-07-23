@@ -65,6 +65,7 @@ export class SendEmailReplyStep extends BaseActionStep<
         data: {
           ticketId: ticket.id,
           updatedBy: context.automation.createdById,
+          workspaceId: context.automation.workspaceId,
           activityType: ActivityType.METADATA,
           value: { field: 'emailReply', emailId: result.emailId, isAutomation: true },
         },

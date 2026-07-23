@@ -41,9 +41,14 @@ export class ReleaseRepository {
 		commitId?: string | null;
 		filePath?: string | null;
 	}): Promise<ReleaseChangeType> {
+		const application = await prisma.application.findUniqueOrThrow({
+			where: { id: input.applicationId },
+			select: { workspaceId: true },
+		});
 		return await prisma.releaseChangeType.create({
 			data: {
 				applicationId: input.applicationId,
+				workspaceId: application.workspaceId,
 				changeType: input.changeType,
 				releaseId: input.releaseId ?? null,
 				applicationReleaseId: input.applicationReleaseId ?? null,
@@ -56,14 +61,19 @@ export class ReleaseRepository {
 	}
 
 	async createReleaseEvent(
-		input: Omit<Prisma.ReleaseEventCreateInput, 'id' | 'createdAt'>,
+		input: Omit<Prisma.ReleaseEventCreateInput, 'id' | 'createdAt' | 'workspaceId'>,
 		tx?: Prisma.TransactionClient,
 	): Promise<ReleaseEvent> {
 		const client = tx || prisma;
+		const channel = await client.channel.findUniqueOrThrow({
+			where: { id: input.channelId },
+			select: { workspaceId: true },
+		});
 		return await client.releaseEvent.create({
 			data: {
 				releaseId: input.releaseId,
 				applicationReleaseId: input.applicationReleaseId,
+				workspaceId: channel.workspaceId,
 				eventType: input.eventType,
 				eventName: input.eventName,
 				message: input.message,

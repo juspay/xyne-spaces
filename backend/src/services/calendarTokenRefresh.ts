@@ -202,6 +202,11 @@ async function persistCalendarCredentials(
     return sourceId;
   }
 
+  const owner = await db.user.findUniqueOrThrow({
+    where: { id: params.ownerUserId },
+    select: { workspaceId: true },
+  });
+
   const created = await db.externalSource.create({
     data: {
       name: calendarSourceName(params.ownerUserId, params.provider),
@@ -210,6 +215,7 @@ async function persistCalendarCredentials(
       credentials: serializeCalendarCredentials(buildCredentials(params, null)),
       ownerUserId: params.ownerUserId,
       isActive: true,
+      workspaceId: owner.workspaceId,
     },
   });
 

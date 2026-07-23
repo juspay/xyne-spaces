@@ -1,8 +1,25 @@
 import { DatabaseClient } from '../client';
+import { getContextOrNull } from '@/database/tenant/context';
 import { EmailDraft } from '@prisma/client';
 
 export class EmailDraftRepository {
   private db = DatabaseClient.getInstance();
+
+  // Resolve the denormalized tenant key for a draft from its channel, falling
+  // back to the ambient tenant context.
+  private async resolveWorkspaceId(channelId: string): Promise<string> {
+    const channel = await this.db.channel.findUnique({
+      where: { id: channelId },
+      select: { workspaceId: true },
+    });
+    const workspaceId = channel?.workspaceId ?? getContextOrNull()?.workspaceId;
+    if (!workspaceId) {
+      throw new Error(
+        `workspaceId required: channel ${channelId} not found and no tenant context`,
+      );
+    }
+    return workspaceId;
+  }
 
   async create(data: {
     conversationId: string;
@@ -23,8 +40,11 @@ export class EmailDraftRepository {
       throw new Error('userId is required');
     }
 
+    const workspaceId = await this.resolveWorkspaceId(data.channelId);
+
     return await this.db.emailDraft.create({
       data: {
+        workspaceId,
         conversationId: data.conversationId,
         channelId: data.channelId,
         draftContent: data.draftContent,
@@ -59,8 +79,10 @@ export class EmailDraftRepository {
         data: { draftContent: data.draftContent },
       });
     }
+    const workspaceId = await this.resolveWorkspaceId(data.channelId);
     return await this.db.emailDraft.create({
       data: {
+        workspaceId,
         channelId: data.channelId,
         conversationId: data.conversationId,
         draftContent: data.draftContent,

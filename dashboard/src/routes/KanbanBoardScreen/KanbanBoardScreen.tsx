@@ -1468,7 +1468,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const tagsByTicketId = useMemo(() => {
     const map = new Map<
       string,
-      { workspaceId: string | null; id: string; name: string; ticketId: string }[]
+      { workspaceId: string; id: string; name: string; ticketId: string }[]
     >();
     if (!kanbanSourceTickets) return map;
     for (const ticket of kanbanSourceTickets as KanbanLocalTicket[]) {
@@ -1483,7 +1483,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           : Array.isArray(ticket.tags)
             ? ticket.tags
                 .map((tag: { id: string; name: string; ticketId?: string }) => ({
-                  workspaceId: ticket.workspaceId ?? null,
+                  workspaceId: ticket.workspaceId,
                   id: tag.id,
                   name: tag.name,
                   ticketId: ticket.id,

@@ -185,6 +185,7 @@ export class TicketRepository {
       await db.ticketStageEta.create({
         data: {
           ticketId: ticket.id,
+          workspaceId: ticket.workspaceId,
           stageId: selectedStage.id,
           stageEnteredAt: stageEnteredAt,
           stageLeftAt: null,
@@ -200,6 +201,7 @@ export class TicketRepository {
       await db.ticketTag.create({
         data: {
           ticketId: ticket.id,
+          workspaceId: ticket.workspaceId,
           name: 'hotfix'
         }
       })
@@ -347,6 +349,7 @@ export class TicketRepository {
           await prisma.ticketStageEta.create({
             data: {
               ticketId: ticketId,
+              workspaceId: currentTicket.workspaceId,
               stageId: targetStage.id,
               stageEnteredAt: now,
               stageLeftAt: null,
@@ -406,6 +409,7 @@ export class TicketRepository {
           await prisma.ticketStageEta.create({
             data: {
               ticketId: ticketId,
+              workspaceId: currentTicket.workspaceId,
               stageId: targetStage.id,
               stageEnteredAt: now,
               stageLeftAt: null,
@@ -507,6 +511,7 @@ export class TicketRepository {
       await prisma.ticketActivity.create({
         data: {
           ticketId: ticketId,
+          workspaceId: currentTicket.workspaceId,
           updatedBy: updatedBy,
           activityType: ActivityType.PR,
           value: activityValue as Prisma.InputJsonValue,
@@ -523,6 +528,7 @@ export class TicketRepository {
       await prisma.ticketActivity.create({
         data: {
           ticketId: ticketId,
+          workspaceId: currentTicket.workspaceId,
           updatedBy: updatedBy,
           activityType: ActivityType.STAGE_NAME,
           value: {
@@ -546,6 +552,7 @@ export class TicketRepository {
       await recordTicketTimelineEvent({
         activity: {
           ticketId: ticketId,
+          workspaceId: currentTicket.workspaceId,
           updatedBy: updatedBy,
           activityType: ActivityType.STATUS,
           value: {
@@ -1025,6 +1032,7 @@ export class TicketRepository {
         await prisma.ticketActivity.createMany({
           data: activities.map(activity => ({
             ticketId,
+            workspaceId: updatedTicket.workspaceId,
             updatedBy,
             activityType: activity.activityType,
             value: activity.value,
@@ -1070,8 +1078,13 @@ export class TicketRepository {
     const toAdd = requested.filter(t => !alreadyPresent.includes(t));
     if (toAdd.length === 0) return { added: [], alreadyPresent };
 
+    const ticket = await prisma.ticket.findUniqueOrThrow({
+      where: { id: ticketId },
+      select: { workspaceId: true },
+    });
+
     await prisma.ticketTag.createMany({
-      data: toAdd.map(name => ({ ticketId, name })),
+      data: toAdd.map(name => ({ ticketId, workspaceId: ticket.workspaceId, name })),
       skipDuplicates: true,
     });
     await dualWriteTicketTags(ticketId, toAdd, prisma);

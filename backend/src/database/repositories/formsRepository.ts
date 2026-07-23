@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import { FormContextType, FormEntityType, FormFieldType, parseFieldOptions, resolveParentOption, serializeFieldOptions, type FieldEnumOption } from '@xyne/shared';
 import { BaseRepository } from './base';
 import { Form, FormFields, Prisma, PrismaClient, FormFieldType as PrismaFormFieldType } from '@prisma/client';
@@ -516,6 +517,7 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
       return existing.id;
     }
 
+    const workspaceId = await resolveWorkspaceIdFromModel(tx, 'form', { id: formId });
     const created = await tx.formFields.create({
       data: {
         id: randomUUID(),
@@ -524,6 +526,7 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
         sequenceNumber,
         isOptional,
         parentOptionId,
+        workspaceId,
       },
     });
     return created.id;
@@ -557,10 +560,12 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
     }
 
     const now = new Date();
+    const workspaceId = await resolveWorkspaceIdFromModel(tx, 'project', { id: projectId });
     const created = await tx.globalField.create({
       data: {
         id: def.fieldId ?? randomUUID(),
         projectId,
+        workspaceId,
         fieldName,
         fieldType: def.fieldType,
         ...(def.fieldEnum !== undefined ? { fieldEnum: serializeGlobalFieldEnum(def.fieldEnum) } : {}),
@@ -608,10 +613,12 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
 
     const now = new Date();
     const sequenceNumber = await allocateSequence();
+    const legacyWorkspaceId = await resolveWorkspaceIdFromModel(tx, 'form', { id: formId });
     const created = await tx.formFields.create({
       data: {
         id: def.fieldId ?? randomUUID(),
         formId,
+        workspaceId: legacyWorkspaceId,
         globalFieldId: null,
         fieldName,
         fieldType: def.fieldType,
@@ -781,10 +788,12 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
     }
 
     const now = new Date();
+    const globalWorkspaceId = await resolveWorkspaceIdFromModel(tx, 'project', { id: projectId });
     const created = await tx.globalField.create({
       data: {
         id: row.id,
         projectId,
+        workspaceId: globalWorkspaceId,
         fieldName: row.fieldName,
         fieldType: row.fieldType,
         ...(row.fieldEnum !== null ? { fieldEnum: serializeGlobalFieldEnum(row.fieldEnum) } : {}),
@@ -821,12 +830,15 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
     tx?: Prisma.TransactionClient
   ): Promise<{ count: number }> {
     const client = tx || this.db;
+    if (data.length === 0) return { count: 0 };
+    const workspaceId = await resolveWorkspaceIdFromModel(client, 'form', { id: data[0].formId });
     return await client.formEntityValues.createMany({
       data: data.map((item) => ({
         formId: item.formId,
         entityId: item.entityId,
         entityType: item.entityType,
         fieldId: item.fieldId,
+        workspaceId,
         // Release-scoped writes (entityType=RELEASE_ENV_FORM/RELEASE_MIGRATION_FORM)
         // pass contextId=releaseTicketId so the same change-type row can hold
         // values across multiple releases without colliding on the
@@ -847,6 +859,7 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
     const formMapping = await this.db.formContextMapping.findFirst({
       where: { contextId: boardId, contextType: 'BOARD', entityType: 'TICKET' },
     });
+    const ticketWorkspaceId = await resolveWorkspaceIdFromModel(this.db, 'ticket', { id: ticketId });
 
     if (!formMapping) {
       logger.warn('[FormsRepository] upsertTicketFormFields — no form mapped to board', {
@@ -907,6 +920,7 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
         create: {
           id: randomUUID(),
           formId: formMapping.formId,
+          workspaceId: ticketWorkspaceId,
           entityId: ticketId,
           entityType: 'TICKET',
           fieldId: field.id,

@@ -230,6 +230,7 @@ export class TicketStageTransitionService {
           create: {
             ticketId,
             stageId: targetStage.id,
+            workspaceId: ticket.workspaceId,
             formId: transition.formId ?? null,
             status: TicketStageRequestStatus.APPROVED,
             submittedBy: userId,
@@ -269,6 +270,7 @@ export class TicketStageTransitionService {
             data: {
               ticketId,
               stageId: targetStage.id,
+              workspaceId: ticket.workspaceId,
               formId: transition.formId ?? null,
               status: TicketStageRequestStatus.SUBMITTED,
               submittedBy: userId,
@@ -415,6 +417,7 @@ export class TicketStageTransitionService {
           data: {
             ticketId,
             stageId: targetStage.id,
+            workspaceId: ticket.workspaceId,
             version: newVisitIndex,
             stageEnteredAt: now,
             stageLeftAt: null,
@@ -443,6 +446,7 @@ export class TicketStageTransitionService {
           targetStage.id,
           newVisitIndex,
           formValues,
+          ticket.workspaceId,
         );
       }
 
@@ -508,6 +512,7 @@ export class TicketStageTransitionService {
     stageId: string,
     version: number,
     formValues: Record<string, any>,
+    workspaceId: string,
   ): Promise<void> {
     const resolvedFields = await formService.resolveFormFieldsForFormId(formId);
 
@@ -529,6 +534,7 @@ export class TicketStageTransitionService {
         entityType: FormEntityType.TICKET,
         fieldId: field.id,
         contextId: stageId,
+        workspaceId,
         version,
         fieldValue: '',
         actualFieldValue: value as Prisma.InputJsonValue,

@@ -350,6 +350,7 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
       data: {
         ticketId,
         updatedBy: this.ctx.userID,
+        workspaceId: this.ctx.workspaceId,
         activityType: ActivityType.METADATA,
         value: {
           field: 'stageFormFile',

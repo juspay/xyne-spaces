@@ -122,10 +122,11 @@ export async function createDashboardComponent(
         position,
         config: input.config ?? '{}',
         createdBy: ctx.userId,
+        workspaceId: ctx.workspaceId,
       },
     });
     const mapping = await tx.dynamicDashboardQueryMapping.create({
-      data: { dashboardId, queryId: query.id, sequence: input.sequence ?? 0 },
+      data: { dashboardId, queryId: query.id, sequence: input.sequence ?? 0, workspaceId: ctx.workspaceId },
     });
     return { query, mapping };
   });

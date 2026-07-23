@@ -167,6 +167,7 @@ export class MeetCallbackController {
         const createdMessage = await tx.message.create({
           data: {
             conversationId: targetConversationId,
+            workspaceId: targetWorkspaceId,
             senderId,
             content: messageContent,
             msgType: MessageType.BOT,

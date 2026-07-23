@@ -28,6 +28,7 @@ export class TestAuthSeeder {
   }
 
   private async seedChannelConversations(
+    workspaceId: string,
     channelId: string,
     userId: string,
     requestId: string,
@@ -54,6 +55,7 @@ export class TestAuthSeeder {
 
       const conversation = await db.conversation.create({
         data: {
+          workspaceId,
           channelId,
           createdBy: userId,
           initialMessageId: 'pending',
@@ -65,6 +67,7 @@ export class TestAuthSeeder {
 
       const initialMessage = await db.message.create({
         data: {
+          workspaceId,
           conversationId: conversation.conversationId,
           senderId: userId,
           content: `<p>Seeded thread ${t} — opening message</p>`,
@@ -78,6 +81,7 @@ export class TestAuthSeeder {
         lastReplyAt = new Date(threadStart.getTime() + m * 1_000);
         await db.message.create({
           data: {
+            workspaceId,
             conversationId: conversation.conversationId,
             senderId: userId,
             content: `<p>Seeded thread ${t} reply ${m}</p>`,
@@ -98,6 +102,7 @@ export class TestAuthSeeder {
 
       await db.conversationParticipant.create({
         data: {
+          workspaceId,
           conversationId: conversation.conversationId,
           userId,
           participationType: ConversationParticipation.AUTHOR,
@@ -233,6 +238,7 @@ export class TestAuthSeeder {
 
       const call = await db.call.create({
         data: {
+          workspaceId,
           externalId,
           title: s.title,
           createdByUserId: userId,
@@ -255,6 +261,7 @@ export class TestAuthSeeder {
 
       await db.callParticipant.create({
         data: {
+          workspaceId,
           callId: call.id,
           userId,
           invitedBy: userId,
@@ -370,12 +377,13 @@ export class TestAuthSeeder {
         await db.channelParticipant.upsert({
           where: { channelId_userId: { channelId: channel.id, userId: uid } },
           update: {},
-          create: { channelId: channel.id, userId: uid, role: ChannelRole.MEMBER },
+          create: { workspaceId, channelId: channel.id, userId: uid, role: ChannelRole.MEMBER },
         });
         await db.channelUserStatus.upsert({
           where: { channelId_userId: { channelId: channel.id, userId: uid } },
           update: { isClosed: false, isDeleted: false, updatedAt: channelTouchAt },
           create: {
+            workspaceId,
             channelId: channel.id,
             userId: uid,
             isClosed: false,
@@ -400,6 +408,7 @@ export class TestAuthSeeder {
 
       const conversation = await db.conversation.create({
         data: {
+          workspaceId,
           channelId: channel.id,
           createdBy: userId,
           initialMessageId: 'pending',
@@ -415,6 +424,7 @@ export class TestAuthSeeder {
         const ts = new Date(baseTime + i * 60_000);
         const msg = await db.message.create({
           data: {
+            workspaceId,
             conversationId: conversation.conversationId,
             senderId: messages[i]!.sender,
             content: messages[i]!.content,
@@ -438,6 +448,7 @@ export class TestAuthSeeder {
       for (const uid of [userId, buddy.id]) {
         await db.conversationParticipant.create({
           data: {
+            workspaceId,
             conversationId: conversation.conversationId,
             userId: uid,
             participationType: ConversationParticipation.AUTHOR,
@@ -452,6 +463,7 @@ export class TestAuthSeeder {
   }
 
   private async seedActivities(
+    workspaceId: string,
     userId: string,
     channelId: string,
     buddies: Array<{ id: string; name: string }>,
@@ -505,6 +517,7 @@ export class TestAuthSeeder {
 
       await db.activity.create({
         data: {
+          workspaceId,
           userId,
           actorId: actor.id,
           actorAction: s.action,
@@ -527,6 +540,7 @@ export class TestAuthSeeder {
   }
 
   private async seedBookmarks(
+    workspaceId: string,
     userId: string,
     channelId: string,
     requestId: string,
@@ -554,6 +568,7 @@ export class TestAuthSeeder {
         },
         update: {},
         create: {
+          workspaceId,
           userId,
           entityId: conv.conversationId,
           entityType: BookmarkEntityType.CONVERSATION,
@@ -573,6 +588,7 @@ export class TestAuthSeeder {
           },
           update: {},
           create: {
+            workspaceId,
             userId,
             entityId: conv.initialMessageId,
             entityType: BookmarkEntityType.MESSAGE,
@@ -629,13 +645,14 @@ export class TestAuthSeeder {
       seededChannelIds.push(channel.id);
 
       if (channelName === 'general') {
-        await this.seedChannelConversations(channel.id, userId, requestId);
+        await this.seedChannelConversations(workspaceId, channel.id, userId, requestId);
       }
 
       await db.channelParticipant.upsert({
         where: { channelId_userId: { channelId: channel.id, userId } },
         update: { role: ChannelRole.ADMIN },
         create: {
+          workspaceId,
           channelId: channel.id,
           userId,
           role: ChannelRole.ADMIN,
@@ -650,6 +667,7 @@ export class TestAuthSeeder {
           updatedAt: now,
         },
         create: {
+          workspaceId,
           channelId: channel.id,
           userId,
           isClosed: false,
@@ -665,6 +683,7 @@ export class TestAuthSeeder {
       if (!existingCall) {
         await db.call.create({
           data: {
+            workspaceId,
             externalId,
             title: `Seeded Recording ${suffix.toUpperCase()}`,
             createdByUserId: userId,
@@ -692,12 +711,13 @@ export class TestAuthSeeder {
           await db.channelParticipant.upsert({
             where: { channelId_userId: { channelId, userId: buddy.id } },
             update: {},
-            create: { channelId, userId: buddy.id, role: ChannelRole.MEMBER },
+            create: { workspaceId, channelId, userId: buddy.id, role: ChannelRole.MEMBER },
           });
           await db.channelUserStatus.upsert({
             where: { channelId_userId: { channelId, userId: buddy.id } },
             update: {},
             create: {
+              workspaceId,
               channelId,
               userId: buddy.id,
               isClosed: false,
@@ -709,11 +729,11 @@ export class TestAuthSeeder {
       }
       await this.seedDmChannels(workspaceId, userId, buddies, requestId);
       if (seededChannelIds[0]) {
-        await this.seedActivities(userId, seededChannelIds[0], buddies, requestId);
+        await this.seedActivities(workspaceId, userId, seededChannelIds[0], buddies, requestId);
       }
     }
     if (seededChannelIds[0]) {
-      await this.seedBookmarks(userId, seededChannelIds[0], requestId);
+      await this.seedBookmarks(workspaceId, userId, seededChannelIds[0], requestId);
     }
 
     const workflowName = 'seeded-test-workflow';
@@ -733,6 +753,7 @@ export class TestAuthSeeder {
 
       const execution = await db.workflowExecution.create({
         data: {
+          workspaceId,
           workflowId: workflow.id,
           workflowType: 'seeded',
           status: 'SUCCESS',
@@ -743,6 +764,7 @@ export class TestAuthSeeder {
 
       await db.workflowStep.create({
         data: {
+          workspaceId,
           workflowExecutionId: execution.id,
           stepExecutorType: 'deterministic',
           stepName: 'seeded-step',

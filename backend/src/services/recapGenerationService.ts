@@ -461,8 +461,19 @@ export class RecapGenerationService {
         data: { summary: summaryData },
       });
     } else {
+      const channel = await db.channel.findUniqueOrThrow({
+        where: { id: channelId },
+        select: { workspaceId: true },
+      });
       await db.recap.create({
-        data: { entityType: 'CHANNEL', entityId: channelId, recapDate: normalizedDate, summary: summaryData, userId },
+        data: {
+          entityType: 'CHANNEL',
+          entityId: channelId,
+          recapDate: normalizedDate,
+          summary: summaryData,
+          userId,
+          workspaceId: channel.workspaceId,
+        },
       });
     }
 

@@ -475,12 +475,17 @@ export class WorkflowController {
             createdBy: req.user?.name || req.user?.id || 'system',
           };
 
+          const conversation = await prisma.conversation.findUniqueOrThrow({
+            where: { conversationId },
+            select: { workspaceId: true },
+          });
+
           await prisma.message.create({
             data: {
               messageId: botMessageId,
               conversationId,
               senderId: req.user?.id || 'system',
-              ...(req.user?.workspaceId ? { workspaceId: req.user.workspaceId } : {}),
+              workspaceId: conversation.workspaceId,
               content: ``,
               msgType: 'SYSTEM',
               metadata: messageMetadata,

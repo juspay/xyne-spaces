@@ -627,13 +627,21 @@ export class ProjectRecapGenerationService {
         data: { summary: JSON.stringify(summary) }
       });
     } else {
+      const project = await db.project.findUnique({
+        where: { id: projectId },
+        select: { workspaceId: true },
+      });
+      if (!project) {
+        throw new Error(`workspaceId required: project ${projectId} not found`);
+      }
       await db.recap.create({
-        data: { 
-          entityType: 'PROJECT', 
-          entityId: projectId, 
-          userId, 
-          recapDate: normalizedDate, 
-          summary: JSON.stringify(summary) 
+        data: {
+          entityType: 'PROJECT',
+          entityId: projectId,
+          userId,
+          workspaceId: project.workspaceId,
+          recapDate: normalizedDate,
+          summary: JSON.stringify(summary)
         }
       });
     }

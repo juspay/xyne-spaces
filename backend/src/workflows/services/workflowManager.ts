@@ -54,6 +54,7 @@ export class WorkflowManager {
       // 2. Create WorkflowExecution record
       const execution = await repositories.workflowExecutions.create({
         workflow: { connect: { id: workflow.id } },
+        workspaceId: ticket.workspaceId,
         context: request.context ? JSON.stringify(request.context) : null,
         workflowType: request.workflowType,
         status: WorkflowExecutionStatus.PENDING,

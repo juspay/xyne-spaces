@@ -664,6 +664,7 @@ router.get('/callback', async (req: Request, res: Response) => {
           sourceType: 'microsoft',
           displayName: email,
           channelId: channelData.channelId,
+          workspaceId: channelData.workspaceId,
           credentials: encryptedCredentials,
           isActive: true,
         },

@@ -88,13 +88,28 @@ export class ReactionRepository extends BaseRepository<Reaction, CreateReactionI
     await this.validateString(data.userId, 'userId');
     await this.validateString(data.emojiName, 'emojiName');
 
+    const workspaceId = await this.getMessageWorkspaceId(data.messageId);
+
     return await this.db.reaction.create({
       data: {
         messageId: data.messageId,
+        workspaceId,
         userId: data.userId,
         emojiName: data.emojiName,
       }
     });
+  }
+
+  /** Resolve the denormalized workspaceId of the message a reaction targets. */
+  private async getMessageWorkspaceId(messageId: string): Promise<string> {
+    const message = await this.db.message.findUnique({
+      where: { messageId },
+      select: { workspaceId: true },
+    });
+    if (!message?.workspaceId) {
+      throw new Error(`Could not find workspaceId for message ${messageId}`);
+    }
+    return message.workspaceId;
   }
 
   async findById(id: string): Promise<Reaction | null> {
@@ -124,11 +139,13 @@ export class ReactionRepository extends BaseRepository<Reaction, CreateReactionI
    * Add a reaction to a message
    */
   async addReaction(data: ReactionData): Promise<void> {
+    const workspaceId = await this.getMessageWorkspaceId(data.messageId);
     await this.db.$transaction(async (tx) => {
       // Insert the reaction (will fail if already exists due to unique constraint)
       await tx.reaction.create({
         data: {
           messageId: data.messageId,
+          workspaceId,
           userId: data.userId,
           emojiName: data.emojiName,
         },
@@ -149,6 +166,7 @@ export class ReactionRepository extends BaseRepository<Reaction, CreateReactionI
         },
         create: {
           messageId: data.messageId,
+          workspaceId,
           emojiName: data.emojiName,
           count: 1,
         },

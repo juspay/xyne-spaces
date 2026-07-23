@@ -46,7 +46,7 @@ async function postOrUpdateApprovalButton(params: ApprovalButtonParams): Promise
   // 2. Find ticket → get channelId, conversationId
   const ticket = await db.ticket.findUnique({
     where: { id: ticketId },
-    select: { channelId: true, conversationId: true },
+    select: { channelId: true, conversationId: true, workspaceId: true },
   });
   if (!ticket?.conversationId || !ticket?.channelId) {
     logger.debug(`[PR-Check-Approval] Ticket ${ticketId} not found or has no conversation`);
@@ -127,6 +127,7 @@ Click **Run PR Check** to trigger Bit-Bot analysis.`;
     await db.message.create({
       data: {
         messageId,
+        workspaceId: ticket.workspaceId,
         conversationId: ticket.conversationId,
         senderId: botUser.id,
         content,

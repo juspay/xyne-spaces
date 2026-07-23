@@ -1,6 +1,7 @@
 import { BaseRepository } from './base';
 import { ChannelParticipant, ChannelRole, UserStatus, UserType } from '@prisma/client';
 import { QueryOptions } from '@/types/database';
+import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 
 export interface CreateChannelParticipantInput {
   channelId: string;
@@ -57,9 +58,12 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
         now,
       );
 
+      const workspaceId = await resolveWorkspaceIdFromModel(tx, 'channel', { id: data.channelId });
+
       const participant = await tx.channelParticipant.create({
         data: {
           channelId: data.channelId,
+          workspaceId,
           userId: data.userId,
           role: data.role || 'MEMBER',
         }
@@ -75,6 +79,7 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
         update: {},
         create: {
           channelId: data.channelId,
+          workspaceId,
           userId: data.userId,
           isClosed: false,
           isStarred: false,
@@ -87,7 +92,7 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
       await tx.channelStats.upsert({
         where: { channelId: data.channelId },
         update: { participantCount: { increment: 1 } },
-        create: { channelId: data.channelId, participantCount: 1, lastActivityAt: new Date()},
+        create: { channelId: data.channelId, workspaceId, participantCount: 1, lastActivityAt: new Date()},
       });
 
       return participant;
@@ -161,10 +166,13 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
         return existing;
       }
 
+      const workspaceId = await resolveWorkspaceIdFromModel(tx, 'channel', { id: channelId });
+
       // Create participant
       const participant = await tx.channelParticipant.create({
         data: {
           channelId,
+          workspaceId,
           userId,
           role: role || 'MEMBER',
         }
@@ -180,6 +188,7 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
         update: {},
         create: {
           channelId,
+          workspaceId,
           userId,
           isClosed,
           isStarred: false,
@@ -192,7 +201,7 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
       await tx.channelStats.upsert({
         where: { channelId },
         update: { participantCount: { increment: 1 } },
-        create: { channelId, participantCount: 1, lastActivityAt: new Date() },
+        create: { channelId, workspaceId, participantCount: 1, lastActivityAt: new Date() },
       });
 
       return participant;
@@ -362,9 +371,12 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
         return { addedCount: 0, existingCount: existingUserIds.size };
       }
 
+      const workspaceId = await resolveWorkspaceIdFromModel(tx, 'channel', { id: channelId });
+
       await tx.channelParticipant.createMany({
         data: newUserIds.map((userId) => ({
           channelId,
+          workspaceId,
           userId,
           role: role || 'MEMBER',
         })),
@@ -374,6 +386,7 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
       await tx.channelUserStatus.createMany({
         data: newUserIds.map((userId) => ({
           channelId,
+          workspaceId,
           userId,
           isClosed,
           isStarred: false,
@@ -386,7 +399,7 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
       await tx.channelStats.upsert({
         where: { channelId },
         update: { participantCount: { increment: newUserIds.length } },
-        create: { channelId, participantCount: newUserIds.length, lastActivityAt: new Date() },
+        create: { channelId, workspaceId, participantCount: newUserIds.length, lastActivityAt: new Date() },
       });
 
       return { addedCount: newUserIds.length, existingCount: existingUserIds.size };

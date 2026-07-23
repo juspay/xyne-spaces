@@ -1,8 +1,6 @@
 import { BaseRepository } from './base';
 import { Conversation } from '@prisma/client';
 import { QueryOptions } from '@/types/database';
-import { getContextOrNull, runWithContext } from '@/database/tenant/context';
-import { logger } from '@/utils/logger';
 
 export interface CreateConversationInput {
   conversationId?: string; // Optional - for custom IDs (e.g., showInChannel child conversations)
@@ -45,10 +43,20 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
     await this.validateString(data.createdBy, 'createdBy');
     await this.validateString(data.initialMessageId, 'initialMessageId');
 
-    const doCreate = (): Promise<Conversation> => this.db.conversation.create({
+    // Stamp the denormalized tenant key from the owning channel.
+    const channel = await this.db.channel.findUnique({
+      where: { id: data.channelId },
+      select: { workspaceId: true },
+    });
+    if (!channel) {
+      throw new Error(`Channel not found: ${data.channelId}`);
+    }
+
+    return await this.db.conversation.create({
       data: {
         ...(data.conversationId && { conversationId: data.conversationId }),
         channelId: data.channelId,
+        workspaceId: channel.workspaceId,
         createdBy: data.createdBy,
         initialMessageId: data.initialMessageId,
         parentMessageId: data.parentMessageId,
@@ -60,24 +68,6 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
         ...(data.createdAt && { createdAt: data.createdAt }),
       }
     });
-
-    const ctx = getContextOrNull();
-    if (ctx && !ctx.system && ctx.workspaceId) {
-      return doCreate();
-    }
-    const channel = await this.db.channel.findUnique({
-      where: { id: data.channelId },
-      select: { workspaceId: true },
-    });
-    if (!channel?.workspaceId) {
-      logger.error('[ConversationRepo] cannot resolve workspaceId — channel missing or untenanted', {
-        channelId: data.channelId,
-        channelFound: !!channel,
-        createdBy: data.createdBy,
-      });
-      throw new Error(`ConversationRepository.create: channel ${data.channelId} not found or has no workspaceId`);
-    }
-    return runWithContext({ userId: 'conversation-repo', workspaceId: channel.workspaceId }, doCreate);
   }
 
   async findById(id: string): Promise<Conversation | null> {

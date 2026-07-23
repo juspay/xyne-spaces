@@ -42,9 +42,19 @@ export async function createTicketCustomFieldActivity(params: {
     return;
   }
 
+  // Stamp the denormalized tenant key from the owning ticket.
+  const ticket = await prisma.ticket.findUnique({
+    where: { id: ticketId },
+    select: { workspaceId: true },
+  });
+  if (!ticket) {
+    throw new Error(`Ticket not found for custom field activity: ${ticketId}`);
+  }
+
   await prisma.ticketActivity.create({
     data: {
       ticketId,
+      workspaceId: ticket.workspaceId,
       updatedBy,
       timestamp,
       activityType: ActivityType.METADATA,

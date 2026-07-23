@@ -377,6 +377,7 @@ export const mutators = defineMutators({
 
         // Add user as a participant
         await tx.mutate.channel_participants.insert({
+          workspaceId: _ctx.workspaceId,
           id: channelParticipantId,
           channelId: channelId,
           joinedAt: timestamp,
@@ -415,6 +416,7 @@ export const mutators = defineMutators({
           });
         } else {
           await tx.mutate.channel_user_status.insert({
+            workspaceId: _ctx.workspaceId,
             id: channelUserStatusId,
             channelId: channelId,
             lastViewedAt: timestamp,
@@ -518,6 +520,7 @@ export const mutators = defineMutators({
             throw new Error(`userStatusId is required for user ${user.id}`);
           }
           await tx.mutate.channel_participants.insert({
+            workspaceId: ctx.workspaceId,
             id: participantId,
             channelId: channelId,
             joinedAt: timestamp,
@@ -530,6 +533,7 @@ export const mutators = defineMutators({
           });
 
           await tx.mutate.channel_user_status.insert({
+            workspaceId: ctx.workspaceId,
             id: statusId,
             channelId: channelId,
             lastViewedAt: timestamp,
@@ -828,6 +832,7 @@ export const mutators = defineMutators({
           await tx.mutate.draft_messages.delete({ id: draft.id });
         } else if (draftMessage.trim() !== '') {
           await tx.mutate.draft_messages.upsert({
+            workspaceId: ctx.workspaceId,
             id: draft?.id || draftMessageId,
             conversationId: null,
             channelId,
@@ -1279,6 +1284,7 @@ export const mutators = defineMutators({
 
         // Add creator as conversation participant
         await tx.mutate.conversation_participants.insert({
+          workspaceId: ctx.workspaceId,
           id: conversationParticipantId,
           conversationId,
           userId: ctx.userID,
@@ -1425,6 +1431,7 @@ export const mutators = defineMutators({
 
         // Add creator as conversation participant
         await tx.mutate.conversation_participants.insert({
+          workspaceId: ctx.workspaceId,
           id: conversationParticipantId,
           conversationId,
           userId: ctx.userID,
@@ -1942,6 +1949,7 @@ export const mutators = defineMutators({
 
         // Add creator as conversation participant
         await tx.mutate.conversation_participants.insert({
+          workspaceId: ctx.workspaceId,
           id: conversationParticipantId,
           conversationId,
           userId: ctx.userID,
@@ -2003,6 +2011,7 @@ export const mutators = defineMutators({
 
         // Create new manual subscription entry with null participationType
         await tx.mutate.conversation_participants.insert({
+          workspaceId: ctx.workspaceId,
           id: participantId,
           conversationId,
           userId: ctx.userID,
@@ -2402,6 +2411,7 @@ export const mutators = defineMutators({
             throw new Error('countId is required when creating a new reaction count');
           }
           await tx.mutate.reactions.insert({
+            workspaceId: ctx.workspaceId,
             reactionId: reactionIdToUse,
             messageId,
             userId: ctx.userID,
@@ -2416,6 +2426,7 @@ export const mutators = defineMutators({
             });
           } else {
             await tx.mutate.reaction_counts.insert({
+              workspaceId: ctx.workspaceId,
               countId: countIdToUse,
               count: 1,
               messageId,
@@ -2854,6 +2865,7 @@ export const mutators = defineMutators({
         // 2. If no draft exists, create one with the provided ID
         if (!existingDraft) {
           await tx.mutate.draft_messages.insert({
+            workspaceId: ctx.workspaceId,
             id: draftMessageId,
             channelId,
             conversationId: conversationId || null,
@@ -3051,6 +3063,7 @@ export const mutators = defineMutators({
               throw new Error(`participantId is required for user ${userId}`);
             }
             await tx.mutate.call_participants.insert({
+              workspaceId: ctx.workspaceId,
               id: newParticipantId,
               callId: call.id,
               userId: userId,
@@ -3132,6 +3145,7 @@ export const mutators = defineMutators({
         } else {
           // Create new request
           await tx.mutate.call_participants.insert({
+            workspaceId: ctx.workspaceId,
             id: participantId,
             callId: call.id,
             userId: ctx.userID,
@@ -3373,6 +3387,7 @@ export const mutators = defineMutators({
           await tx.mutate.draft_messages.delete({ id: draft.id });
         } else if (draftMessage.trim() !== '') {
           await tx.mutate.draft_messages.upsert({
+            workspaceId: ctx.workspaceId,
             id: draft?.id || draftMessageId,
             conversationId,
             channelId,
@@ -3414,6 +3429,7 @@ export const mutators = defineMutators({
             }
 
             await tx.mutate.conversation_participants.insert({
+              workspaceId: ctx.workspaceId,
               id: participantId,
               conversationId,
               userId: ctx.userID,
@@ -3717,6 +3733,7 @@ export const mutators = defineMutators({
 
         if (!existingParticipant) {
           await tx.mutate.conversation_participants.insert({
+            workspaceId: ctx.workspaceId,
             id: participantId,
             conversationId,
             userId: ctx.userID,
@@ -3973,6 +3990,7 @@ export const mutators = defineMutators({
 
         // Create the mapping
         await tx.mutate.ticket_sub_ticket_mappings.insert({
+          workspaceId: ctx.workspaceId,
           id: mappingId,
           ticketId,
           subTicketId,
@@ -4266,6 +4284,7 @@ export const mutators = defineMutators({
           const role = roleId ? roles.find(r => r.id === roleId) : undefined;
           const responsibility = role ? DEFAULT_ROLE_NAME_TO_ENUM[role.name] : undefined;
           await tx.mutate.user_group_mappings.insert({
+            workspaceId: ctx.workspaceId,
             id: mappingId,
             userGroupId,
             userId,
@@ -4417,6 +4436,7 @@ export const mutators = defineMutators({
 
             // Upsert the stage
             await tx.mutate.stages.upsert({
+              workspaceId: ctx.workspaceId,
               id: stageId,
               name: stage.name,
               ...(stage.eta !== undefined && { eta: stage.eta }),
@@ -4468,6 +4488,7 @@ export const mutators = defineMutators({
                   );
                 }
                 await tx.mutate.stage_pr_status_mappings.insert({
+                  workspaceId: ctx.workspaceId,
                   id: mappingId,
                   stageId: stageId,
                   prStatus: prStatus,
@@ -4543,6 +4564,7 @@ export const mutators = defineMutators({
             // Handle stage form (optional)
             if (stage.formId) {
               await tx.mutate.forms_context_mapping.insert({
+                workspaceId: ctx.workspaceId,
                 id: `${stageId}-form-mapping`,
                 contextId: stageId,
                 contextType: FormContextType.STAGE,
@@ -4573,6 +4595,7 @@ export const mutators = defineMutators({
 
               for (const entry of normalizedApprovers) {
                 await tx.mutate.stage_approvers.insert({
+                  workspaceId: ctx.workspaceId,
                   id: `${stageId}-${entry.approverType}-${entry.approverId}`,
                   ...(entry.approverType === ApproverType.ROLE
                     ? { roleId: entry.approverId }
@@ -4693,7 +4716,7 @@ export const mutators = defineMutators({
   ticketTag: {
     create: defineMutator(
       z.object({ ticketId: z.string(), tagName: z.string(), tagId: z.string() }),
-      async ({ tx, args: { ticketId, tagName, tagId } }) => {
+      async ({ tx, ctx, args: { ticketId, tagName, tagId } }) => {
         // Validate tag name
         if (!tagName || !tagName.trim()) {
           throw new Error('Tag name cannot be empty');
@@ -4712,6 +4735,7 @@ export const mutators = defineMutators({
 
         // Create new tag
         await tx.mutate.ticket_tags.insert({
+          workspaceId: ctx.workspaceId,
           id: tagId,
           name: trimmedTagName,
           ticketId,
@@ -4741,7 +4765,7 @@ export const mutators = defineMutators({
         mappingId: z.string(),
         projectId: z.string(),
       }),
-      async ({ tx, args: { ticketId, tagName, tagId, projectTagId, mappingId, projectId } }) => {
+      async ({ tx, ctx, args: { ticketId, tagName, tagId, projectTagId, mappingId, projectId } }) => {
         if (!tagName || !tagName.trim()) {
           throw new Error('Tag name cannot be empty');
         }
@@ -4758,6 +4782,7 @@ export const mutators = defineMutators({
 
         if (!existingTag) {
           await tx.mutate.ticket_tags.insert({
+            workspaceId: ctx.workspaceId,
             id: tagId,
             name: trimmedTagName,
             ticketId,
@@ -4771,6 +4796,7 @@ export const mutators = defineMutators({
           const resolvedProjectTagId = existingProjectTag?.id || projectTagId;
           if (!existingProjectTag) {
             await tx.mutate.project_tags.insert({
+              workspaceId: ctx.workspaceId,
               id: resolvedProjectTagId,
               name: trimmedTagName,
               projectId,
@@ -4778,6 +4804,7 @@ export const mutators = defineMutators({
             });
           }
           await tx.mutate.ticket_tag_mappings.insert({
+            workspaceId: ctx.workspaceId,
             id: mappingId,
             ticketId,
             tagId: resolvedProjectTagId,
@@ -4906,7 +4933,7 @@ export const mutators = defineMutators({
         };
 
         // Upsert ticket stage request
-        await tx.mutate.ticket_stage_requests.upsert(payload);
+        await tx.mutate.ticket_stage_requests.upsert({ ...payload, workspaceId: ctx.workspaceId });
 
         // Handle activities based on whether this is create or update
         const isNewRequest = !existingApproval; // true only when no prior record existed (checked after fallback lookup)
@@ -4917,6 +4944,7 @@ export const mutators = defineMutators({
           const actionText = hasForm ? 'submitted the form for' : 'requested approval for';
 
           await tx.mutate.messages.insert({
+            workspaceId: ctx.workspaceId,
             messageId: requestActivityId,
             conversationId: ticket.conversationId,
             ...(ctx.workspaceId ? { workspaceId: ctx.workspaceId } : {}),
@@ -4947,6 +4975,7 @@ export const mutators = defineMutators({
           const actionText = hasForm ? 'submitted the form for' : 'requested approval for';
 
           await tx.mutate.messages.insert({
+            workspaceId: ctx.workspaceId,
             messageId: requestActivityId,
             conversationId: ticket.conversationId,
             ...(ctx.workspaceId ? { workspaceId: ctx.workspaceId } : {}),
@@ -4978,6 +5007,7 @@ export const mutators = defineMutators({
           const actionText = hasForm ? 'submitted the form for' : 'requested approval for';
 
           await tx.mutate.messages.insert({
+            workspaceId: ctx.workspaceId,
             messageId: requestActivityId,
             conversationId: ticket.conversationId,
             senderId: updatedBy,
@@ -5007,6 +5037,7 @@ export const mutators = defineMutators({
             : 'resubmitted the approval request for';
 
           await tx.mutate.messages.insert({
+            workspaceId: ctx.workspaceId,
             messageId: requestActivityId,
             conversationId: ticket.conversationId,
             senderId: updatedBy,
@@ -5182,6 +5213,7 @@ export const mutators = defineMutators({
         }
 
         await tx.mutate.ticket_reference_mappings.insert({
+          workspaceId: ctx.workspaceId,
           id: referenceId,
           sourceTicketId,
           targetTicketId,
@@ -5270,6 +5302,7 @@ export const mutators = defineMutators({
         await assertCanvasChannelNotArchived(tx, resolvedChannelId);
 
         await tx.mutate.canvases.insert({
+          workspaceId: ctx.workspaceId,
           id,
           title,
           // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
@@ -5291,6 +5324,7 @@ export const mutators = defineMutators({
 
         // Add creator as participant with OWNER role
         await tx.mutate.canvas_participants.insert({
+          workspaceId: ctx.workspaceId,
           id: participantId,
           canvasId: id,
           userId: ctx.userID,
@@ -5480,6 +5514,7 @@ export const mutators = defineMutators({
             throw new Error(`participantId is required for user ${userId}`);
           }
           await tx.mutate.canvas_participants.insert({
+            workspaceId: ctx.workspaceId,
             id: participantId,
             canvasId,
             userId,
@@ -5517,6 +5552,7 @@ export const mutators = defineMutators({
         );
         if (existing) return;
         await tx.mutate.canvas_participants.insert({
+          workspaceId: ctx.workspaceId,
           id: participantId,
           canvasId,
           userId: null,
@@ -5567,6 +5603,7 @@ export const mutators = defineMutators({
         if (existing) return;
 
         await tx.mutate.canvas_participants.insert({
+          workspaceId: ctx.workspaceId,
           id: participantId,
           canvasId,
           userId: null,
@@ -5861,6 +5898,7 @@ export const mutators = defineMutators({
         }
 
         await tx.mutate.canvas_user_status.insert({
+          workspaceId: ctx.workspaceId,
           id,
           canvasId,
           userId: ctx.userID,
@@ -5906,6 +5944,7 @@ export const mutators = defineMutators({
         }
 
         await tx.mutate.canvas_versions.insert({
+          workspaceId: ctx.workspaceId,
           id,
           canvasId,
           name: name.trim(),
@@ -6046,6 +6085,7 @@ export const mutators = defineMutators({
 
         try {
           await tx.mutate.canvas_folders.insert({
+            workspaceId: ctx.workspaceId,
             id,
             ...(projectId ? { projectId } : {}),
             ...(channelId ? { channelId } : {}),
@@ -6214,6 +6254,7 @@ export const mutators = defineMutators({
         }
 
         await tx.mutate.bookmarks.insert({
+          workspaceId: ctx.workspaceId,
           id: bookmarkId,
           userId: ctx.userID,
           entityId,
@@ -6421,6 +6462,7 @@ export const mutators = defineMutators({
         }
 
         await tx.mutate.links.insert({
+          workspaceId: ctx.workspaceId,
           id,
           url,
           title,
@@ -6523,6 +6565,7 @@ export const mutators = defineMutators({
           }
 
           await tx.mutate.link_access.insert({
+            workspaceId: ctx.workspaceId,
             id: accessId,
             linkId,
             userId,
@@ -6687,6 +6730,7 @@ export const mutators = defineMutators({
               if (entityId) {
                 const linkId = `sl_${nudgeId}_${timestamp}`;
                 await tx.mutate.surface_links.insert({
+                  workspaceId: ctx.workspaceId,
                   id: linkId,
                   sourceType: direction.from,
                   sourceId: nudge.sourceId,
@@ -6762,7 +6806,7 @@ export const mutators = defineMutators({
           createdAt: existingProfile ? existingProfile.createdAt || timestamp : timestamp,
         };
 
-        await tx.mutate.user_profiles.upsert(profileData);
+        await tx.mutate.user_profiles.upsert({ ...profileData, workspaceId: ctx.workspaceId });
 
         // Update displayName on User table if provided
         if (displayName !== undefined) {
@@ -6841,7 +6885,7 @@ export const mutators = defineMutators({
           createdAt: existingPresence ? existingPresence.createdAt || now : now,
         };
 
-        await tx.mutate.user_presence.upsert(presenceData);
+        await tx.mutate.user_presence.upsert({ ...presenceData, workspaceId: ctx.workspaceId });
 
         // Dual-write presence display fields to users table for faster getUsers query
         await tx.mutate.users.update({
@@ -6951,7 +6995,7 @@ export const mutators = defineMutators({
             createdAt: existingState?.createdAt ?? now,
           };
 
-          await tx.mutate.user_assignment_states.upsert(stateData);
+          await tx.mutate.user_assignment_states.upsert({ ...stateData, workspaceId: ctx.workspaceId });
         }
 
         // Update user group mappings (set numbers) if provided
@@ -7002,6 +7046,7 @@ export const mutators = defineMutators({
               );
             }
             await tx.mutate.board_complexity_scores.insert({
+              workspaceId: ctx.workspaceId,
               id: scoreId,
               userGroupId,
               boardId: boardWeight.boardId,
@@ -7049,7 +7094,7 @@ export const mutators = defineMutators({
                 createdAt: existingMapping?.createdAt ?? now,
               };
 
-              await tx.mutate.user_expertise_mappings.upsert(mappingData);
+              await tx.mutate.user_expertise_mappings.upsert({ ...mappingData, workspaceId: ctx.workspaceId });
             } else if (existingMapping) {
               // Remove mapping if no special configuration
               await tx.mutate.user_expertise_mappings.delete({
@@ -7113,6 +7158,7 @@ export const mutators = defineMutators({
         }
 
         await tx.mutate.repos.insert({
+          workspaceId: ctx.workspaceId,
           id,
           name,
           url,
@@ -7198,6 +7244,7 @@ export const mutators = defineMutators({
       }),
       async ({
         tx,
+        ctx,
         args: { formId, projectId, formDescription, fields, timestamp, fieldIds = {} },
       }) => {
         // Validate form exists
@@ -7294,6 +7341,7 @@ export const mutators = defineMutators({
             }
 
             await tx.mutate.global_fields.insert({
+              workspaceId: ctx.workspaceId,
               id: row.id,
               projectId,
               fieldName: row.fieldName,
@@ -7333,6 +7381,7 @@ export const mutators = defineMutators({
               return found.id;
             }
             await tx.mutate.global_fields.insert({
+              workspaceId: ctx.workspaceId,
               id: candidateId,
               projectId,
               fieldName,
@@ -7377,6 +7426,7 @@ export const mutators = defineMutators({
             }
             const sequenceNumber = allocateFieldSequence();
             await tx.mutate.form_fields.insert({
+              workspaceId: ctx.workspaceId,
               id: candidateId,
               formId,
               globalFieldId: null,
@@ -7512,6 +7562,7 @@ export const mutators = defineMutators({
             } else if (field.membershipId) {
               const sequenceNumber = allocateFieldSequence();
               await tx.mutate.form_fields.insert({
+                workspaceId: ctx.workspaceId,
                 id: field.membershipId,
                 formId,
                 globalFieldId: definitionId,
@@ -7575,7 +7626,7 @@ export const mutators = defineMutators({
         formId: z.string(),
         mappingId: z.string(),
       }),
-      async ({ tx, args: { contextId, contextType, entityType, formId, mappingId } }) => {
+      async ({ tx, ctx, args: { contextId, contextType, entityType, formId, mappingId } }) => {
         // Check if a mapping already exists for this context
         const existingMapping = await tx.run(
           zql.forms_context_mapping
@@ -7593,6 +7644,7 @@ export const mutators = defineMutators({
           });
         } else {
           await tx.mutate.forms_context_mapping.insert({
+            workspaceId: ctx.workspaceId,
             id: mappingId,
             contextId,
             contextType,
@@ -7640,6 +7692,7 @@ export const mutators = defineMutators({
       }),
       async ({
         tx,
+        ctx,
         args: {
           id,
           entityId,
@@ -7683,6 +7736,7 @@ export const mutators = defineMutators({
 
         // Upsert the form entity value
         await tx.mutate.form_entity_values.insert({
+          workspaceId: ctx.workspaceId,
           id,
           entityId,
           entityType,
@@ -7724,6 +7778,7 @@ export const mutators = defineMutators({
       }),
       async ({
         tx,
+        ctx,
         args: {
           id,
           entityId,
@@ -7786,6 +7841,7 @@ export const mutators = defineMutators({
 
         // Upsert the form entity value
         await tx.mutate.form_entity_values.insert({
+          workspaceId: ctx.workspaceId,
           id,
           entityId,
           entityType,
@@ -7923,12 +7979,13 @@ export const mutators = defineMutators({
         createdBy: z.string(),
         timestamp: z.number(),
       }),
-      async ({ tx, args: { id, name, description, createdBy, timestamp } }) => {
+      async ({ tx, ctx, args: { id, name, description, createdBy, timestamp } }) => {
         const now = timestamp;
 
         const existingDashboard = await tx.run(zql.dashboards.where('id', id).one());
 
         await tx.mutate.dashboards.upsert({
+          workspaceId: ctx.workspaceId,
           id: id,
           name: name.trim(),
           description: description?.trim(),
@@ -7969,6 +8026,7 @@ export const mutators = defineMutators({
       }),
       async ({
         tx,
+        ctx,
         args: { id, title, queryJson, entityType, targetEntity, visualType, position, dashboardId, createdBy, timestamp, mappingId },
       }) => {
         const now = timestamp;
@@ -7976,6 +8034,7 @@ export const mutators = defineMutators({
         const existingQuery = await tx.run(zql.queries.where('id', id).one());
 
         await tx.mutate.queries.upsert({
+          workspaceId: ctx.workspaceId,
           id: id,
           title: title.trim(),
           queryJson: queryJson as ReadonlyJSONValue,
@@ -8006,6 +8065,7 @@ export const mutators = defineMutators({
               zql.dashboard_queries_mapping.where('dashboardId', dashboardId),
             );
             await tx.mutate.dashboard_queries_mapping.insert({
+              workspaceId: ctx.workspaceId,
               id: newMappingId,
               dashboardId,
               queryId: id,
@@ -8114,6 +8174,7 @@ export const mutators = defineMutators({
           });
         } else {
           await tx.mutate.email_drafts.insert({
+            workspaceId: ctx.workspaceId,
             id,
             conversationId,
             channelId,
@@ -8187,6 +8248,7 @@ export const mutators = defineMutators({
           });
         } else {
           await tx.mutate.email_drafts.insert({
+            workspaceId: ctx.workspaceId,
             id: args.id,
             channelId: args.channelId,
             userId: ctx.userID,
@@ -8467,6 +8529,7 @@ export const mutators = defineMutators({
           });
         } else {
           await tx.mutate.user_preferences.insert({
+            workspaceId: ctx.workspaceId,
             id,
             userId: ctx.userID,
             channelSortOrder,
@@ -8501,6 +8564,7 @@ export const mutators = defineMutators({
           });
         } else {
           await tx.mutate.user_preferences.insert({
+            workspaceId: ctx.workspaceId,
             id,
             userId: ctx.userID,
             channelSortOrder: ChannelSortOrder.RECENCY,
@@ -8535,6 +8599,7 @@ export const mutators = defineMutators({
           });
         } else {
           await tx.mutate.user_preferences.insert({
+            workspaceId: ctx.workspaceId,
             id,
             userId: ctx.userID,
             channelSortOrder: ChannelSortOrder.RECENCY,
@@ -8586,6 +8651,7 @@ export const mutators = defineMutators({
           });
         } else {
           await tx.mutate.user_preferences.insert({
+            workspaceId: ctx.workspaceId,
             id,
             userId: ctx.userID,
             channelSortOrder: ChannelSortOrder.RECENCY,
@@ -8621,6 +8687,7 @@ export const mutators = defineMutators({
           });
         } else {
           await tx.mutate.user_preferences.insert({
+            workspaceId: ctx.workspaceId,
             id,
             userId: ctx.userID,
             channelSortOrder: ChannelSortOrder.RECENCY,
@@ -8691,6 +8758,7 @@ export const mutators = defineMutators({
         } else {
           const channel = await tx.run(zql.channels.where('id', channelId).one());
           await tx.mutate.email_channel_preferences.insert({
+            workspaceId: ctx.workspaceId,
             channelId,
             ownerUserId: ownerUserId ?? ctx.userID,
             assigneeUserGroupId: assigneeUserGroupId ?? null,
@@ -8739,6 +8807,7 @@ export const mutators = defineMutators({
         } else {
           const channel = await tx.run(zql.channels.where('id', channelId).one());
           await tx.mutate.email_channel_preferences.insert({
+            workspaceId: ctx.workspaceId,
             channelId,
             ownerUserId: ctx.userID,
             assigneeUserGroupId: null,
@@ -8780,6 +8849,7 @@ export const mutators = defineMutators({
         } else {
           const channel = await tx.run(zql.channels.where('id', channelId).one());
           await tx.mutate.email_channel_preferences.insert({
+            workspaceId: ctx.workspaceId,
             channelId,
             ownerUserId: ctx.userID,
             assigneeUserGroupId: null,
@@ -8811,8 +8881,8 @@ export const mutators = defineMutators({
         userGroupId: z.string(),
         createdAt: z.number(),
       }),
-      async ({ tx, args }) => {
-        await tx.mutate.classification_mappings.insert(args);
+      async ({ tx, ctx, args }) => {
+        await tx.mutate.classification_mappings.insert({ ...args, workspaceId: ctx.workspaceId });
       },
     ),
     update: defineMutator(
@@ -8850,6 +8920,7 @@ export const mutators = defineMutators({
       }),
       async ({
         tx,
+        ctx,
         args: { id, boardId, priority, responseHours, resolutionHours, businessHoursOnly, timezone, workdayStart, workdayEnd, isActive },
       }) => {
         const now = Date.now();
@@ -8873,6 +8944,7 @@ export const mutators = defineMutators({
           });
         } else {
           await tx.mutate.board_sla_policies.insert({
+            workspaceId: ctx.workspaceId,
             id,
             boardId,
             priority: priority as TicketPriority,
@@ -8926,6 +8998,7 @@ export const mutators = defineMutators({
           }
         } else {
           await tx.mutate.email_reads.insert({
+            workspaceId: ctx.workspaceId,
             id,
             ticketId,
             userId: ctx.userID,
@@ -8993,6 +9066,7 @@ export const mutators = defineMutators({
               });
             }
             return tx.mutate.email_reads.insert({
+              workspaceId: ctx.workspaceId,
               id: item.id,
               ticketId: item.ticketId,
               userId: ctx.userID,
@@ -9070,9 +9144,10 @@ export const mutators = defineMutators({
         ),
         timestamp: z.number(),
       }),
-      async ({ tx, args: { grants, timestamp } }) => {
+      async ({ tx, ctx, args: { grants, timestamp } }) => {
         for (const grant of grants) {
           await tx.mutate.resource_access.insert({
+            workspaceId: ctx.workspaceId,
             id: grant.id,
             userId: grant.userId,
             resourceId: grant.resourceId,
@@ -9154,6 +9229,7 @@ export const mutators = defineMutators({
         const resolvedOwnerId = ownerId || ctx.userID;
 
         await tx.mutate.rcas.insert({
+          workspaceId: ctx.workspaceId,
           id,
           ticketId,
           ownerId: resolvedOwnerId,
@@ -9374,6 +9450,7 @@ export const mutators = defineMutators({
       }),
       async ({
         tx,
+        ctx,
         args: {
           id,
           ticketId,
@@ -9385,6 +9462,7 @@ export const mutators = defineMutators({
         },
       }) => {
         await tx.mutate.release_attributions.insert({
+          workspaceId: ctx.workspaceId,
           id,
           ticketId,
           releaseId,
@@ -9510,12 +9588,13 @@ export const mutators = defineMutators({
         rcaId: z.string(),
         timestamp: z.number(),
       }),
-      async ({ tx, args: { id, ticketId, impactTypeId, impact, rcaId, timestamp } }) => {
+      async ({ tx, ctx, args: { id, ticketId, impactTypeId, impact, rcaId, timestamp } }) => {
         if (!rcaId) {
           throw new Error('RCA ID is required for creating an impact');
         }
 
         await tx.mutate.impacts.insert({
+          workspaceId: ctx.workspaceId,
           id,
           ticketId,
           impactTypeId,
@@ -9562,9 +9641,11 @@ export const mutators = defineMutators({
       }),
       async ({
         tx,
+        ctx,
         args: { id, rcaId, ownerId, actionTypeId, action, status, dueDate, timestamp },
       }) => {
         await tx.mutate.coes.insert({
+          workspaceId: ctx.workspaceId,
           id,
           rcaId,
           ownerId,
@@ -9640,6 +9721,7 @@ export const mutators = defineMutators({
         }
 
         await tx.mutate.saved_user_configurations.insert({
+          workspaceId: ctx.workspaceId,
           id,
           userId: ctx.userID,
           name,
@@ -9652,6 +9734,7 @@ export const mutators = defineMutators({
 
         for (const value of values) {
           await tx.mutate.saved_user_configuration_values.insert({
+            workspaceId: ctx.workspaceId,
             id: value.id,
             configId: id,
             entityName: value.entityName,
@@ -9722,6 +9805,7 @@ export const mutators = defineMutators({
           }
           for (const value of values) {
             await tx.mutate.saved_user_configuration_values.insert({
+              workspaceId: ctx.workspaceId,
               id: value.id,
               configId,
               entityName: value.entityName,
@@ -9826,6 +9910,7 @@ export const mutators = defineMutators({
         }
 
         await tx.mutate.email_signatures.insert({
+          workspaceId: ctx.workspaceId,
           id,
           userId: ctx.userID,
           name,
@@ -10205,6 +10290,7 @@ export const mutators = defineMutators({
         const scheduleId = existingDraft?.id ?? id;
 
         await tx.mutate.delayed_messages.insert({
+          workspaceId: ctx.workspaceId,
           id: scheduleId,
           channelId,
           conversationId: conversationId ?? null,
@@ -10389,6 +10475,7 @@ export const mutators = defineMutators({
         await tx.mutate.delayed_messages.delete({ id });
 
         await tx.mutate.draft_messages.insert({
+          workspaceId: ctx.workspaceId,
           id,
           channelId: scheduled.channelId,
           conversationId: scheduled.conversationId,
@@ -10764,6 +10851,7 @@ export const mutators = defineMutators({
         }
 
         await tx.mutate.collections.insert({
+          workspaceId: ctx.workspaceId,
           id,
           scopeType,
           scopeId,
@@ -10778,6 +10866,7 @@ export const mutators = defineMutators({
 
         // Add creator as OWNER in collection_permissions
         await tx.mutate.collection_permissions.insert({
+          workspaceId: ctx.workspaceId,
           id: permissionId,
           collectionId: id,
           userId: ctx.userID,
@@ -10902,6 +10991,7 @@ export const mutators = defineMutators({
         }
 
         await tx.mutate.collections.insert({
+          workspaceId: ctx.workspaceId,
           id,
           parentId,
           ownerId: ctx.userID,
@@ -11039,6 +11129,7 @@ export const mutators = defineMutators({
           });
         } else {
           await tx.mutate.collection_permissions.insert({
+            workspaceId: ctx.workspaceId,
             id,
             collectionId,
             userId,
@@ -11136,7 +11227,7 @@ export const mutators = defineMutators({
         // Caller-supplied timestamp — see nonLinear.transition. Keeps client/server runs aligned.
         now: z.number(),
       }),
-      async ({ tx, args: { boardId, transitions, now } }) => {
+      async ({ tx, ctx, args: { boardId, transitions, now } }) => {
 
         // Optimistically replace local Zero cache: delete existing then insert new.
         const existing = await tx.run(zql.stage_transitions.where('boardId', boardId));
@@ -11152,6 +11243,7 @@ export const mutators = defineMutators({
 
         for (const t of transitions) {
           await tx.mutate.stage_transitions.insert({
+            workspaceId: ctx.workspaceId,
             id: t.id,
             boardId,
             ...(t.fromStageId != null && { fromStageId: t.fromStageId }),
@@ -11168,6 +11260,7 @@ export const mutators = defineMutators({
           for (const a of t.approvers ?? []) {
             const approverType = (a.approverType as ApproverType) ?? ApproverType.USER;
             await tx.mutate.stage_approvers.insert({
+              workspaceId: ctx.workspaceId,
               id: a.id,
               transitionId: t.id,
               // roleId holds the identifier for ROLE approvers, userId for USER approvers
@@ -11275,6 +11368,7 @@ export const mutators = defineMutators({
               throw new Error(`mappingId is required for user ${userId}`);
             }
             return tx.mutate.user_role_mappings.insert({
+              workspaceId: ctx.workspaceId,
               id: mappingId,
               roleId,
               userId,

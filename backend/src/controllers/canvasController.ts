@@ -55,6 +55,7 @@ export class CanvasController {
             id: canvasId,
             title,
             content: [],
+            workspaceId: req.user!.workspaceId!,
             createdBy: creatorId,  // <-- AUTHENTICATED USER
             channelId: channelId || null,  // <-- ASSOCIATE WITH CHANNEL IF PROVIDED
             visibility: visibility === 'PUBLIC' ? 'PUBLIC' : 'PRIVATE',
@@ -70,6 +71,7 @@ export class CanvasController {
           data: {
             id: participantId,
             canvasId,
+            workspaceId: req.user!.workspaceId!,
             userId: creatorId,  // <-- AUTHENTICATED USER IS OWNER
             role: 'OWNER',
             joinedAt: now,

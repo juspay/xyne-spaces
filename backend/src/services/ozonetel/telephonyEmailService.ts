@@ -333,6 +333,7 @@ async function ensureTelephonyFormFields(boardId: string, workspaceId: string, c
         contextType: FormContextType.BOARD,
         entityType: FormEntityType.TICKET,
         formId: form.id,
+        workspaceId,
       },
     });
   };

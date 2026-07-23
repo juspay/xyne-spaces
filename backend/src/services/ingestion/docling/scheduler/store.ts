@@ -12,8 +12,10 @@
  * `isLatest` and set `ingestionStatus` (xyne-spaces lacks uploadStatus/etc.).
  */
 import { randomUUID } from 'node:crypto';
+import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import { db } from '@/database/client';
 import { config } from '@/config/env';
+import { getContextOrNull } from '@/database/tenant/context';
 import { IngestionStatus, Prisma } from '@prisma/client';
 import {
   DOCLING_FILE_STATUS,
@@ -117,10 +119,15 @@ export const upsertDoclingAsyncFileForSplit = async (
   input: QueueFileForSplitInput,
 ): Promise<DoclingFile | null> => {
   const basePriority = input.basePriority ?? 0;
+  const ws = getContextOrNull()?.workspaceId;
+  if (!ws) {
+    throw new Error('workspaceId required: no tenant context');
+  }
   try {
     const row = await db.doclingAsyncFile.create({
       data: {
         fileId: input.fileId,
+        workspaceId: ws,
         collectionId: input.collectionId,
         sourcePath: input.sourcePath,
         sourceStorageKey: input.sourceStorageKey ?? null,
@@ -199,10 +206,13 @@ export const markDoclingFileSplitComplete = async (
       return false;
     }
 
+    const workspaceId = await resolveWorkspaceIdFromModel(tx, 'doclingAsyncFile', { fileId: file.fileId });
+
     await tx.doclingAsyncPart.deleteMany({ where: { fileId: file.fileId } });
     await tx.doclingAsyncPart.createMany({
       data: stagedParts.parts.map((part) => ({
         fileId: file.fileId,
+        workspaceId,
         partIndex: part.partIndex,
         docId: part.partDocId,
         partPath: part.partPath,

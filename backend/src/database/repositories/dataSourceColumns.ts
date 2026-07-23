@@ -1,4 +1,5 @@
 import { BaseRepository } from './base';
+import { getContextOrNull } from '@/database/tenant/context';
 import type {
   DataSourceColumn,
   CreateDataSourceColumnInput,
@@ -30,6 +31,11 @@ export class DataSourceColumnRepository extends BaseRepository<
       isPrimaryKey: boolean;
     }>
   ): Promise<DataSourceColumn[]> {
+    // Denormalized tenant key for newly-created column rows.
+    const ws = getContextOrNull()?.workspaceId;
+    if (!ws) {
+      throw new Error('workspaceId required: no tenant context');
+    }
     await this.db.dataSourceColumn.deleteMany({
       where: { tableId, columnName: { notIn: cols.map((c) => c.columnName) } },
     });
@@ -37,7 +43,7 @@ export class DataSourceColumnRepository extends BaseRepository<
       cols.map((c) =>
         this.db.dataSourceColumn.upsert({
           where: { tableId_columnName: { tableId, columnName: c.columnName } },
-          create: { ...c, tableId, pkPosition: c.pkPosition ?? undefined },
+          create: { ...c, tableId, workspaceId: ws, pkPosition: c.pkPosition ?? undefined },
           update: {
             pkPosition: c.pkPosition,
             dataTypeNative: c.dataTypeNative,

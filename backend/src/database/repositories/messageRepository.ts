@@ -3,8 +3,6 @@ import { Message, MessageType } from '@prisma/client';
 import { PaginationOptions, PaginatedResult, QueryOptions } from '@/types/database';
 import { sanitizeMessageContent } from '@/utils/contentUtils';
 import { getMessageContentLength, MAX_MESSAGE_CONTENT_LENGTH } from '@xyne/shared';
-import { getContextOrNull, runWithContext } from '@/database/tenant/context';
-import { logger } from '@/utils/logger';
 //import { queueMessageIngestion } from '@/queues/vespaQueue';
 
 //import { extractAllMentions } from '@/utils/mentionParser';
@@ -18,6 +16,7 @@ export interface CreateMessageInput {
   showInChannel?: boolean;
   visibleTo?: string | null; // null = public, userId = visible only to that user
   metadata?: Record<string, any>;
+  workspaceId?: string; // denormalized tenant key; resolved from the conversation when omitted
   createdAt?: Date; // Optional custom timestamp for migrations
 }
 
@@ -131,40 +130,19 @@ export class MessageRepository extends BaseRepository<Message, CreateMessageInpu
   }
 
   /**
-   * Run a message insert under a tenant context so the workspaceId stamp fires. HTTP requests open
-   * a context via middleware; background writers (crons, webhooks, automations, Slack ingestion,
-   * alerts) do not — so their messages would insert with workspaceId = NULL. When no context is
-   * armed, open one from the parent conversation's workspace (Message.workspaceId denormalizes from
-   * Conversation.workspaceId). No explicit workspaceId field — the stamp does the fill.
+   * Resolve the workspaceId to denormalize onto a message row: caller-supplied
+   * value, or (default) the owning conversation's workspaceId.
    */
-  private async withMessageWorkspaceContext<T>(conversationId: string, create: () => Promise<T>): Promise<T> {
-    const ctx = getContextOrNull();
-    if (ctx && !ctx.system && ctx.workspaceId) return create();
+  private async resolveMessageWorkspaceId(data: CreateMessageInput): Promise<string | null> {
+    if (data.workspaceId) return data.workspaceId;
     const conversation = await this.db.conversation.findUnique({
-      where: { conversationId },
-      select: { workspaceId: true, channelId: true },
+      where: { conversationId: data.conversationId },
+      select: { workspaceId: true },
     });
     if (!conversation) {
-      // Message for a non-existent conversation — a real bug. Fail loud (alertable).
-      logger.error('[MessageRepo] parent conversation not found — cannot resolve workspaceId', { conversationId });
-      throw new Error(`MessageRepository: conversation ${conversationId} not found`);
+      throw new Error(`workspaceId required: conversation ${data.conversationId} not found`);
     }
-    let workspaceId = conversation.workspaceId;
-    if (!workspaceId) {
-      const channel = await this.db.channel.findUnique({
-        where: { id: conversation.channelId },
-        select: { workspaceId: true },
-      });
-      workspaceId = channel?.workspaceId ?? null;
-    }
-    if (!workspaceId) {
-      logger.error('[MessageRepo] cannot resolve workspaceId (conversation + channel both untenanted)', {
-        conversationId,
-        channelId: conversation.channelId,
-      });
-      throw new Error(`MessageRepository: cannot resolve workspaceId for conversation ${conversationId}`);
-    }
-    return runWithContext({ userId: 'message-repo', workspaceId }, create);
+    return conversation.workspaceId;
   }
 
   async create(data: CreateMessageInput): Promise<Message> {
@@ -190,10 +168,12 @@ export class MessageRepository extends BaseRepository<Message, CreateMessageInpu
 
     this.sanitizeMarkdownContent(data);
 
-     return this.withMessageWorkspaceContext(data.conversationId, () => this.db.message.create({
+     const workspaceId = await this.resolveMessageWorkspaceId(data);
+     const result = await this.db.message.create({
         data: {
           conversationId: data.conversationId,
           senderId: data.senderId,
+          workspaceId,
           content: data.content,
           msgType: data.msgType || 'USER',
           hasAttachment: data.hasAttachment || false,
@@ -203,7 +183,9 @@ export class MessageRepository extends BaseRepository<Message, CreateMessageInpu
           metadata: data.metadata,
           ...(data.createdAt && { createdAt: data.createdAt }),
         }
-      }));
+      });
+
+      return result;
   }
 
   async findById(id: string): Promise<Message | null> {
@@ -490,11 +472,13 @@ export class MessageRepository extends BaseRepository<Message, CreateMessageInpu
 
     this.sanitizeMarkdownContent(data);
 
-    return this.withMessageWorkspaceContext(data.conversationId, () => this.db.message.create({
+    const workspaceId = await this.resolveMessageWorkspaceId(data);
+    const result = await this.db.message.create({
       data: {
         messageId: executionId,
         conversationId: data.conversationId,
         senderId: data.senderId,
+        workspaceId,
         content: data.content || '',
         msgType: data.msgType || 'USER',
         hasAttachment: data.hasAttachment || false,
@@ -502,7 +486,9 @@ export class MessageRepository extends BaseRepository<Message, CreateMessageInpu
         visibleTo: data.visibleTo ?? null,
         metadata: data.metadata,
       }
-    }));
+    });
+
+    return result;
   }
 
   /**

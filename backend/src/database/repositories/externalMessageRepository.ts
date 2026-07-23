@@ -5,6 +5,7 @@
 
 import { DatabaseClient } from '../client';
 import { MessageDirection, ExternalEntityType, Prisma } from '@prisma/client';
+import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 
 export class ExternalMessageRepository {
   private db = DatabaseClient.getInstance();
@@ -80,12 +81,20 @@ export class ExternalMessageRepository {
     }
 
     try {
+      // entityId references either a Message (default/MESSAGE) or an Email
+      // (EMAIL) row depending on entityType; both carry a denormalized
+      // workspaceId we can source from.
+      const workspaceId = data.entityType === ExternalEntityType.EMAIL
+        ? await resolveWorkspaceIdFromModel(this.db, 'email', { id: data.entityId })
+        : await resolveWorkspaceIdFromModel(this.db, 'message', { messageId: data.entityId });
+
       return await this.db.externalMessage.create({
         data: {
           externalSourceId: data.externalSourceId,
           externalId: data.externalId,
           externalThreadId: data.externalThreadId,
           messageId: data.entityId,
+          workspaceId,
           direction: data.direction,
           entityId: data.entityId,
           ...(data.entityType && { entityType: data.entityType }),

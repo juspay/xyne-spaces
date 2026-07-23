@@ -311,7 +311,8 @@ export class TestAuthController {
                 data: {
                   userId: user.id,
                   resourceId: resource.id,
-                  accessType: AccessType.ADMIN,                
+                  workspaceId: user.workspaceId,
+                  accessType: AccessType.ADMIN,
                 },
               });
               logger.info(`[${requestId}] Granted ADMIN access to resource ${resource.name} for user ${user.email}`);

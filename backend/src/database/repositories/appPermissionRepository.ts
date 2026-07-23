@@ -1,4 +1,5 @@
 import { BaseRepository } from './base';
+import { getContextOrNull } from '@/database/tenant/context';
 import {
   type Prisma,
   type AvailableAppPermission,
@@ -128,8 +129,10 @@ export class AppPermissionRepository extends BaseRepository<
       const unknown = scopes.filter((s) => !foundScopes.has(s));
       if (unknown.length > 0) throw new Error(`Unknown permissions: ${unknown.join(', ')}`);
 
+      const workspaceId = getContextOrNull()?.workspaceId;
+      if (!workspaceId) throw new Error('workspaceId required: no tenant context');
       await tx.appPermission.createMany({
-        data: permissions.map((p) => ({ appId, permissionId: p.id })),
+        data: permissions.map((p) => ({ appId, permissionId: p.id, workspaceId })),
         skipDuplicates: true,
       });
     });
@@ -237,10 +240,13 @@ export class AppPermissionRepository extends BaseRepository<
       // Insert brand-new entries
       const toInsert = permissions.filter((p) => !existingMap.has(p.id));
       if (toInsert.length > 0) {
+        const workspaceId = getContextOrNull()?.workspaceId;
+        if (!workspaceId) throw new Error('workspaceId required: no tenant context');
         await tx.installedAppPermission.createMany({
           data: toInsert.map((p) => ({
             installedAppId,
             permissionId: p.id,
+            workspaceId,
             status: AppPermissionStatus.UNAPPROVED,
           })),
           skipDuplicates: true,
@@ -276,10 +282,13 @@ export class AppPermissionRepository extends BaseRepository<
     });
     if (grants.length === 0) return;
 
+    const workspaceId = getContextOrNull()?.workspaceId;
+    if (!workspaceId) throw new Error('workspaceId required: no tenant context');
     await this.db.installedAppPermission.createMany({
       data: grants.map((g) => ({
         installedAppId,
         permissionId: g.permissionId,
+        workspaceId,
         status: AppPermissionStatus.APPROVED,
       })),
       skipDuplicates: true,
@@ -316,10 +325,13 @@ export class AppPermissionRepository extends BaseRepository<
       // Add template permissions missing from the install, as APPROVED.
       const toAdd = wantedIds.filter((id) => !existingSet.has(id));
       if (toAdd.length > 0) {
+        const workspaceId = getContextOrNull()?.workspaceId;
+        if (!workspaceId) throw new Error('workspaceId required: no tenant context');
         await tx.installedAppPermission.createMany({
           data: toAdd.map((permissionId) => ({
             installedAppId,
             permissionId,
+            workspaceId,
             status: AppPermissionStatus.APPROVED,
           })),
           skipDuplicates: true,

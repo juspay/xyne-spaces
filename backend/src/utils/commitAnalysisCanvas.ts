@@ -102,12 +102,22 @@ export async function createCommitAnalysisCanvas(
       finalTitle
     );
 
+    // Fetch complete context for the user to pass to side-effect handler
+    const user = await db.user.findUnique({
+      where: { id: createdByUserId },
+      select: { id: true, email: true, workspaceId: true, role: true },
+    });
+    if (!user || !user.workspaceId) {
+      throw new Error(`User ${createdByUserId} not found or has no workspace assigned`);
+    }
+
     // Create the canvas with PUBLIC visibility (read-only)
     await prisma.canvas.create({
       data: {
         id: canvasId,
         title: finalTitle,
         content: content as any,
+        workspaceId: user.workspaceId,
         createdBy: createdByUserId,
         visibility: 'PUBLIC',
         isTemplate: false,
@@ -139,6 +149,7 @@ export async function createCommitAnalysisCanvas(
       data: {
         id: participantId,
         canvasId,
+        workspaceId: user.workspaceId,
         userId: createdByUserId,
         role: 'VIEWER',
         joinedAt: now,
@@ -150,14 +161,6 @@ export async function createCommitAnalysisCanvas(
       `[CanvasService] Created commit analysis canvas ${canvasId} with ${results.length} commits for ${metadata.workspace}/${metadata.repoSlug}`
     );
 
-    // Fetch complete context for the user to pass to side-effect handler
-    const user = await db.user.findUnique({
-      where: { id: createdByUserId },
-      select: { id: true, email: true, workspaceId: true, role: true },
-    });
-    if (!user || !user.workspaceId) {
-      throw new Error(`User ${createdByUserId} not found or has no workspace assigned`);
-    }
     // Email is globally unique in orgMember, single lookup is sufficient
     const orgMember = await db.orgMember.findUnique({
       where: { email: user.email },

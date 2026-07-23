@@ -356,6 +356,7 @@ async function resolveMentionParticipantUserIds(
 
 async function addMentionedConversationParticipants(
   tx: Transaction<Schema>,
+  workspaceId: string,
   conversationId: string,
   channelId: string | null | undefined,
   userIds: string[],
@@ -387,6 +388,7 @@ async function addMentionedConversationParticipants(
     } else {
       await tx.mutate.conversation_participants.insert({
         id: uuidv4(),
+        workspaceId,
         conversationId,
         userId,
         participationType: ConversationParticipation.MENTIONED,
@@ -513,7 +515,7 @@ async function assignFullRoles(
     messageId?: string;
     timestamp: number;
     projectId?: string;
-    workspaceId?: string;
+    workspaceId: string;
     channelId?: string | null;
   }
 ): Promise<void> {
@@ -539,6 +541,7 @@ async function assignFullRoles(
     if (activityId) {
       await tx.mutate.ticket_activities.insert({
         id: activityId,
+        workspaceId,
         ticketId,
         updatedBy: createdBy,
         timestamp,
@@ -555,7 +558,7 @@ async function assignFullRoles(
           messageId,
           conversationId,
           senderId: createdBy,
-          ...(workspaceId ? { workspaceId } : {}),
+          workspaceId,
           content: `${creatorName} auto-assigned ticket to ${assignedUser.name} (full role assignment)`,
           msgType: MessageType.SYSTEM,
           hasAttachment: false,
@@ -604,7 +607,7 @@ async function createNonParticipantSystemMessages(
   senderId: string,
   isThreadReply: boolean,
   scopeType: string,
-  workspaceId?: string,
+  workspaceId: string,
 ): Promise<void> {
   try {
     if (mentionedUserIds.length === 0 && mentionedGroupIds.length === 0) {
@@ -693,7 +696,7 @@ async function createNonParticipantSystemMessages(
         messageId: systemMessageId,
         conversationId: conversationId,
         senderId: 'user',
-        ...(workspaceId ? { workspaceId } : {}),
+        workspaceId,
         content: htmlContent,
         msgType: MessageType.SYSTEM,
         hasAttachment: false,
@@ -725,7 +728,7 @@ async function createNonParticipantSystemMessages(
       await tx.mutate.conversations.insert({
         conversationId: newConversationId,
         channelId,
-        ...(workspaceId ? { workspaceId } : {}),
+        workspaceId,
         createdBy: 'user',
         initialMessageId: systemMessageId,
         lastActivityAt: now,
@@ -740,7 +743,7 @@ async function createNonParticipantSystemMessages(
         messageId: systemMessageId,
         conversationId: newConversationId,
         senderId: 'user',
-        ...(workspaceId ? { workspaceId } : {}),
+        workspaceId,
         content: htmlContent,
         msgType: MessageType.SYSTEM,
         hasAttachment: false,
@@ -763,6 +766,7 @@ async function createNonParticipantSystemMessages(
       // Add creator as conversation participant
       await tx.mutate.conversation_participants.insert({
         id: uuidv4(),
+        workspaceId,
         conversationId: newConversationId,
         userId: senderId,
         participationType: ConversationParticipation.AUTHOR,
@@ -1051,6 +1055,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           });
 
           await tx.mutate.conversation_participants.insert({
+            workspaceId: authData.workspaceId,
             id: uuidv4(),
             conversationId: conversationId,
             userId: authData.sub,
@@ -1400,6 +1405,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             await tx.mutate.draft_messages.delete({ id: draft.id });
           } else if (draftMessage.trim() !== '') {
             await tx.mutate.draft_messages.upsert({
+              workspaceId: authData.workspaceId,
               id: draft?.id || draftMessageId,
               conversationId: null,
               channelId,
@@ -1733,6 +1739,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           // Add creator as conversation participant
           await tx.mutate.conversation_participants.insert({
+            workspaceId: authData.workspaceId,
             id: conversationParticipantId,
             conversationId,
             userId: authData.sub,
@@ -1938,6 +1945,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           // Add creator as conversation participant
           await tx.mutate.conversation_participants.insert({
+            workspaceId: authData.workspaceId,
             id: conversationParticipantId,
             conversationId,
             userId: authData.sub,
@@ -2375,6 +2383,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           // Add conversation creator as MENTIONED participant
           await tx.mutate.conversation_participants.insert({
+            workspaceId: authData.workspaceId,
             id: uuidv4(),
             conversationId,
             userId: authData.sub,
@@ -2395,6 +2404,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           const mentionRecipients = mentionParticipantUserIds.filter(userId => userId !== authData.sub);
           await addMentionedConversationParticipants(
             tx,
+            authData.workspaceId,
             conversationId,
             channelId,
             mentionRecipients,
@@ -2411,6 +2421,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             authData.sub,
             false, // isThreadReply = false for initial channel messages
             channel.scopeType,
+            authData.workspaceId,
           );
 
           asyncTasks.push(async () => {
@@ -2421,7 +2432,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             try {
               await repositories.messageSearch.upsert(
                 message.messageId,
-                plainTextContent
+                plainTextContent,
+                authData.workspaceId
               );
             } catch (error) {
               logger.error('Failed to create message search index:', error);
@@ -2790,6 +2802,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           // Add creator as conversation participant
           await tx.mutate.conversation_participants.insert({
+            workspaceId: authData.workspaceId,
             id: conversationParticipantId,
             conversationId,
             userId: authData.sub,
@@ -2855,6 +2868,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           // Create new manual subscription entry with null participationType
           await tx.mutate.conversation_participants.insert({
+            workspaceId: authData.workspaceId,
             id: participantId,
             conversationId,
             userId: authData.sub,
@@ -3134,6 +3148,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             // Add as new AUTHOR participant (lastReadAt set here since the early block
             // only updates existing participants)
             await tx.mutate.conversation_participants.insert({
+              workspaceId: authData.workspaceId,
               id: uuidv4(),
               conversationId,
               userId: authData.sub,
@@ -3165,6 +3180,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               // Only add if not already a participant
               if (!existingConvParticipant) {
                 await tx.mutate.conversation_participants.insert({
+                  workspaceId: authData.workspaceId,
                   id: uuidv4(),
                   conversationId,
                   userId: dmParticipant.userId,
@@ -3189,6 +3205,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           );
           await addMentionedConversationParticipants(
             tx,
+            authData.workspaceId,
             conversationId,
             conversation.channelId,
             mentionParticipantUserIds,
@@ -3206,6 +3223,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             authData.sub,
             true, // isThreadReply = true for thread messages
             channel.scopeType,
+            authData.workspaceId,
           );
 
           asyncTasks.push(async () => {
@@ -3217,7 +3235,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             try {
               await repositories.messageSearch.upsert(
                 message.messageId,
-                plainTextContent
+                plainTextContent,
+                authData.workspaceId
               );
             } catch (error) {
               logger.error('Failed to create message search index:', error);
@@ -3377,6 +3396,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
             await addMentionedConversationParticipants(
               tx,
+              authData.workspaceId,
               message.conversationId,
               mentionConversation?.channelId,
               mentionParticipantUserIds,
@@ -3454,7 +3474,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 }
                 await repositories.messageSearch.upsert(
                   messageId,
-                  generatePlainTextContent(contentToIndex)
+                  generatePlainTextContent(contentToIndex),
+                  authData.workspaceId
                 );
               } catch (error) {
                 logger.error('Failed to update message search index:', error);
@@ -3519,6 +3540,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               throw new Error('countId is required when creating a new reaction count');
             }
             await tx.mutate.reactions.insert({
+              workspaceId: authData.workspaceId,
               reactionId: reactionIdToUse,
               messageId,
               userId: authData.sub,
@@ -3533,6 +3555,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               });
             } else {
               await tx.mutate.reaction_counts.insert({
+                workspaceId: authData.workspaceId,
                 countId: countIdToUse,
                 count: 1,
                 messageId,
@@ -4165,6 +4188,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           });
 
           await tx.mutate.calls.insert({
+            workspaceId: authData.workspaceId,
             id: callId,
             externalId,
             createdByUserId: authData.sub,
@@ -4188,6 +4212,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           // Creator joins immediately
           await tx.mutate.call_participants.insert({
+            workspaceId: authData.workspaceId,
             id: creatorParticipantId,
             callId: callId,
             userId: authData.sub,
@@ -4211,6 +4236,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   throw new Error(`participantId is required for user ${userId}`);
                 }
                 await tx.mutate.call_participants.insert({
+                  workspaceId: authData.workspaceId,
                   id: participantId,
                   callId: callId,
                   userId,
@@ -4234,6 +4260,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               if (participant.userId !== authData.sub) {
 
                 await tx.mutate.call_participants.insert({
+                  workspaceId: authData.workspaceId,
                   id: uuidv4(),
                   callId,
                   userId: participant.userId,
@@ -4324,6 +4351,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               throw new Error('participantId is required when joining a call');
             }
             await tx.mutate.call_participants.insert({
+              workspaceId: authData.workspaceId,
               id: newParticipantId,
               callId: call.id,
               userId: authData.sub,
@@ -4501,6 +4529,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 throw new Error(`participantId is required for user ${userId}`);
               }
               await tx.mutate.call_participants.insert({
+                workspaceId: authData.workspaceId,
                 id: newParticipantId,
                 callId: call.id,
                 userId,
@@ -4643,6 +4672,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           } else {
             // Create new request
             await tx.mutate.call_participants.insert({
+              workspaceId: authData.workspaceId,
               id: participantId,
               callId: call.id,
               userId: authData.sub,
@@ -4836,6 +4866,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             await tx.mutate.draft_messages.delete({ id: draft.id });
           } else if (draftMessage.trim() !== '') {
             await tx.mutate.draft_messages.upsert({
+              workspaceId: authData.workspaceId,
               id: draft?.id || draftMessageId,
               conversationId,
               channelId,
@@ -4909,6 +4940,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             await tx.mutate.draft_messages.delete({ id: draft.id });
           } else if (draftMessage.trim() !== '') {
             await tx.mutate.draft_messages.upsert({
+              workspaceId: authData.workspaceId,
               id: draft?.id || draftMessageId,
               conversationId,
               channelId,
@@ -4944,6 +4976,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             }
 
             await tx.mutate.conversation_participants.insert({
+              workspaceId: authData.workspaceId,
               id: participantId,
               conversationId,
               userId: authData.sub,
@@ -5252,6 +5285,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           if (!existingParticipant) {
             await tx.mutate.conversation_participants.insert({
+              workspaceId: authData.workspaceId,
               id: participantId,
               conversationId,
               userId: authData.sub,
@@ -5464,6 +5498,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               const newEntryId = uuidv4();
 
               await tx.mutate.ticket_stage_eta.insert({
+                workspaceId: authData.workspaceId,
                 id: newEntryId,
                 ticketId: params.id,
                 stageId: firstStage.id,
@@ -5683,6 +5718,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                     const newEntryId = uuidv4();
                     const stageEtaDeadline = calculateETADeadline(new Date(now), newStage.eta).getTime();
                     await tx.mutate.ticket_stage_eta.insert({
+                      workspaceId: authData.workspaceId,
                       id: newEntryId,
                       ticketId: params.id,
                       stageId: newStage.id,
@@ -5743,6 +5779,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                     const stageEtaDeadline = calculateETADeadline(new Date(now), newStage.eta).getTime();
                     const newEntryId = uuidv4();
                     await tx.mutate.ticket_stage_eta.insert({
+                      workspaceId: authData.workspaceId,
                       id: newEntryId,
                       ticketId: params.id,
                       stageId: newStage.id,
@@ -5868,6 +5905,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
                     // Add to activities for tracking
                     await tx.mutate.ticket_activities.insert({
+                      workspaceId: authData.workspaceId,
                       id: activityId,
                       ticketId: params.id,
                       updatedBy: authData.sub,
@@ -5917,6 +5955,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           }
           for (const activity of activities) {
             await tx.mutate.ticket_activities.insert({
+              workspaceId: authData.workspaceId,
               id: uuidv4(),
               ticketId: params.id,
               updatedBy: authData.sub,
@@ -6035,6 +6074,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           });
 
           await tx.mutate.ticket_activities.insert({
+            workspaceId: authData.workspaceId,
             id: uuidv4(),
             ticketId: id,
             updatedBy: authData.sub,
@@ -6149,6 +6189,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           // 2. Upsert the current stage ETA entry (will create if not exists, update if exists)
           await tx.mutate.ticket_stage_eta.upsert({
+            workspaceId: authData.workspaceId,
             id,
             ticketId: oldTicketStageEtaEntry?.ticketId ?? ticketId!,
             stageId: oldTicketStageEtaEntry?.stageId ?? stageId!,
@@ -6235,6 +6276,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           const newStageEta = stageEta;
 
           await tx.mutate.ticket_activities.insert({
+            workspaceId: authData.workspaceId,
             id: uuidv4(),
             ticketId: ticket.id,
             updatedBy: authData.sub,
@@ -6324,6 +6366,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           // Create the mapping
           await tx.mutate.ticket_sub_ticket_mappings.insert({
+            workspaceId: authData.workspaceId,
             id: mappingId,
             ticketId,
             subTicketId,
@@ -6333,6 +6376,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           const activityId = uuidv4();
           const parentTicket = await tx.run(zql.tickets.where('id', ticketId).one());
           await tx.mutate.ticket_activities.insert({
+            workspaceId: authData.workspaceId,
             id: activityId,
             ticketId,
             activityType: ActivityType.SUBTICKET_CREATED,
@@ -6557,6 +6601,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               );
               currentMaxStageSequence = Math.max(currentMaxStageSequence, sequenceNumber);
               await tx.mutate.stages.insert({
+                workspaceId: authData.workspaceId,
                 id: uuidv4(),
                 name: s.name,
                 sequenceNumber,
@@ -6622,6 +6667,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             }
 
             await tx.mutate.forms_context_mapping.insert({
+              workspaceId: authData.workspaceId,
               id: uuidv4(),
               formId: targetReleaseFormId,
               contextId: boardId,
@@ -6808,6 +6854,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             // only ever created on the main release board.
 
             await tx.mutate.applications.insert({
+              workspaceId: authData.workspaceId,
               id: applicationId,
               name: appConfig.name.trim(),
               projectId,
@@ -7035,6 +7082,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             const role = roleId ? roles.find(r => r.id === roleId) : undefined;
             const responsibility = role ? DEFAULT_ROLE_NAME_TO_ENUM[role.name] : undefined;
             await tx.mutate.user_group_mappings.insert({
+              workspaceId: authData.workspaceId,
               id: uuidv4(),
               userGroupId,
               userId,
@@ -7306,6 +7354,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   for (const prStatus of prStatusesToAdd) {
                     const mappingKey = `${stage.sequenceNumber}-${prStatus}`;
                     await tx.mutate.stage_pr_status_mappings.insert({
+                      workspaceId: authData.workspaceId,
                       id: prStatusMappingIds[mappingKey] ?? uuidv4(),
                       stageId,
                       prStatus: prStatus,
@@ -7316,6 +7365,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               } else {
                 // Insert new stage
                 await tx.mutate.stages.insert({
+                  workspaceId: authData.workspaceId,
                   id: stageId,
                   name: stage.name,
                   eta: stage.eta,
@@ -7334,6 +7384,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   for (const prStatus of stage.prStatuses) {
                     const mappingKey = `${stage.sequenceNumber}-${prStatus}`;
                     await tx.mutate.stage_pr_status_mappings.insert({
+                      workspaceId: authData.workspaceId,
                       id: prStatusMappingIds[mappingKey] ?? uuidv4(),
                       stageId,
                       prStatus: prStatus,
@@ -7407,6 +7458,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               // Create form mapping if formId is provided
               if (stage.formId) {
                 await tx.mutate.forms_context_mapping.insert({
+                  workspaceId: authData.workspaceId,
                   id: `${stageId}-form-mapping`,
                   contextId: stageId,
                   contextType: FormContextType.STAGE,
@@ -7441,6 +7493,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               if (normalizedApprovers.length > 0) {
                 for (const entry of normalizedApprovers) {
                   await tx.mutate.stage_approvers.insert({
+                    workspaceId: authData.workspaceId,
                     id: `${stageId}-${entry.approverType}-${entry.approverId}`,
                     ...(entry.approverType === ApproverType.ROLE
                       ? { roleId: entry.approverId }
@@ -7582,6 +7635,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           // Create new tag
           await tx.mutate.ticket_tags.insert({
+            workspaceId: authData.workspaceId,
             id: tagId,
             name: trimmedTagName,
             ticketId,
@@ -7599,6 +7653,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             const projectTagId = existingProjectTag?.id || uuidv4();
             if (!existingProjectTag) {
               await tx.mutate.project_tags.insert({
+                workspaceId: authData.workspaceId,
                 id: projectTagId,
                 name: trimmedTagName,
                 projectId: ticket.projectId,
@@ -7606,6 +7661,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               });
             }
             await tx.mutate.ticket_tag_mappings.insert({
+              workspaceId: authData.workspaceId,
               id: uuidv4(),
               ticketId,
               tagId: projectTagId,
@@ -7669,6 +7725,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           if (!existingTag) {
             await tx.mutate.ticket_tags.insert({
+              workspaceId: authData.workspaceId,
               id: tagId,
               name: trimmedTagName,
               ticketId,
@@ -7682,6 +7739,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             const resolvedProjectTagId = existingProjectTag?.id || projectTagId;
             if (!existingProjectTag) {
               await tx.mutate.project_tags.insert({
+                workspaceId: authData.workspaceId,
                 id: resolvedProjectTagId,
                 name: trimmedTagName,
                 projectId,
@@ -7689,6 +7747,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               });
             }
             await tx.mutate.ticket_tag_mappings.insert({
+              workspaceId: authData.workspaceId,
               id: mappingId,
               ticketId,
               tagId: resolvedProjectTagId,
@@ -7755,6 +7814,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           const now = timestamp;
 
           await tx.mutate.ticket_reference_mappings.insert({
+            workspaceId: authData.workspaceId,
             id: referenceId,
             sourceTicketId,
             targetTicketId,
@@ -7768,6 +7828,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           const sourceTicket = await tx.run(zql.tickets.where('id', sourceTicketId).one());
 
           await tx.mutate.ticket_activities.insert({
+            workspaceId: authData.workspaceId,
             id: uuidv4(),
             ticketId: sourceTicketId,
             updatedBy: ctx.userID,
@@ -7794,6 +7855,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           if (activityMessage && sourceTicket?.conversationId) {
             await tx.mutate.messages.insert({
+              workspaceId: authData.workspaceId,
               messageId: uuidv4(),
               conversationId: sourceTicket.conversationId,
               senderId: ctx.userID,
@@ -7840,6 +7902,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           );
 
           await tx.mutate.ticket_activities.insert({
+            workspaceId: authData.workspaceId,
             id: uuidv4(),
             ticketId: reference.sourceTicketId,
             updatedBy: authData.sub,
@@ -7908,6 +7971,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           );
 
           await tx.mutate.ticket_activities.insert({
+            workspaceId: authData.workspaceId,
             id: uuidv4(),
             ticketId: reference.sourceTicketId,
             updatedBy: authData.sub,
@@ -7989,6 +8053,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           await assertCanvasChannelNotArchived(tx, resolvedChannelId);
 
           await tx.mutate.canvases.insert({
+            workspaceId: authData.workspaceId,
             id,
             title,
             content: content || [],
@@ -8009,6 +8074,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           // Add creator as participant with OWNER role
           await tx.mutate.canvas_participants.insert({
+            workspaceId: authData.workspaceId,
             id: participantId,
             canvasId: id,
             userId: authData.sub,
@@ -8093,6 +8159,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               throw new Error(`participantId is required for user ${userId}`);
             }
             await tx.mutate.canvas_participants.insert({
+              workspaceId: authData.workspaceId,
               id: canvasParticipantId,
               canvasId: canvasId,
               userId: userId,
@@ -8150,6 +8217,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           }
 
           await tx.mutate.canvas_participants.insert({
+            workspaceId: authData.workspaceId,
             id: participantId,
             canvasId,
             userId: null,
@@ -8215,6 +8283,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           }
 
           await tx.mutate.canvas_participants.insert({
+            workspaceId: authData.workspaceId,
             id: participantId,
             canvasId,
             userId: null,
@@ -8746,6 +8815,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           }
 
           await tx.mutate.canvas_user_status.insert({
+            workspaceId: authData.workspaceId,
             id,
             canvasId,
             userId: authData.sub,
@@ -8794,6 +8864,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           }
 
           await tx.mutate.canvas_versions.insert({
+            workspaceId: authData.workspaceId,
             id,
             canvasId,
             name: name.trim(),
@@ -8944,6 +9015,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           try {
             await tx.mutate.canvas_folders.insert({
+              workspaceId: authData.workspaceId,
               id,
               ...(projectId ? { projectId } : {}),
               ...(channelId ? { channelId } : {}),
@@ -9125,6 +9197,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           }
 
           await tx.mutate.bookmarks.insert({
+            workspaceId: authData.workspaceId,
             id: bookmarkId,
             userId: authData.sub,
             entityId,
@@ -9236,6 +9309,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             await db.userActivityEvent.create({
               data: {
                 userId: ctx.userID,
+                workspaceId: ctx.workspaceId,
                 sessionId: 'system',
                 eventCategory: 'NUDGE',
                 eventName: 'NUDGE_DISMISSED',
@@ -9331,6 +9405,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 if (entityId) {
                   const linkId = `sl_${nudgeId}_${timestamp}`;
                   await tx.mutate.surface_links.insert({
+                    workspaceId: authData.workspaceId,
                     id: linkId,
                     sourceType: definition.direction.from as SurfaceAreaType,
                     sourceId: nudge.sourceId,
@@ -9396,7 +9471,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             createdAt: existingProfile ? existingProfile.createdAt || now : now,
           };
 
-          await tx.mutate.user_profiles.upsert(profileData);
+          await tx.mutate.user_profiles.upsert({ ...profileData, workspaceId: authData.workspaceId });
 
           // Update displayName on User table if provided
           if (params.displayName !== undefined) {
@@ -9465,7 +9540,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             createdAt: existingPresence ? existingPresence.createdAt || now : now,
           };
 
-          await tx.mutate.user_presence.upsert(presenceData);
+          await tx.mutate.user_presence.upsert({ ...presenceData, workspaceId: authData.workspaceId });
 
           // Dual-write presence display fields to users table for faster getUsers query
           await tx.mutate.users.update({
@@ -9554,7 +9629,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               createdAt: existingState?.createdAt ?? now,
             };
 
-            await tx.mutate.user_assignment_states.upsert(stateData);
+            await tx.mutate.user_assignment_states.upsert({ ...stateData, workspaceId: authData.workspaceId });
           }
 
           // Update user group mappings (set numbers) if provided
@@ -9602,6 +9677,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 throw new Error('complexityScoreId is required when creating a new board complexity score');
               }
               await tx.mutate.board_complexity_scores.insert({
+                workspaceId: authData.workspaceId,
                 id: complexityScoreId,
                 userGroupId,
                 boardId: boardWeight.boardId,
@@ -9649,7 +9725,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   createdAt: existingMapping?.createdAt ?? now,
                 };
 
-                await tx.mutate.user_expertise_mappings.upsert(mappingData);
+                await tx.mutate.user_expertise_mappings.upsert({ ...mappingData, workspaceId: authData.workspaceId });
               } else if (existingMapping) {
                 // Remove mapping if no special configuration
                 await tx.mutate.user_expertise_mappings.delete({
@@ -9724,6 +9800,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         }),
         async ({ tx, args: { id, name, url, baseBranch, prefix } }) => {
           await tx.mutate.repos.insert({
+            workspaceId: authData.workspaceId,
             id,
             name,
             url,
@@ -9911,6 +9988,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               }
 
               await tx.mutate.global_fields.insert({
+                workspaceId: authData.workspaceId,
                 id: row.id,
                 projectId,
                 fieldName: row.fieldName,
@@ -9950,6 +10028,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 return found.id;
               }
               await tx.mutate.global_fields.insert({
+                workspaceId: authData.workspaceId,
                 id: candidateId,
                 projectId,
                 fieldName,
@@ -9994,6 +10073,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               }
               const sequenceNumber = await allocateFieldSequence();
               await tx.mutate.form_fields.insert({
+                workspaceId: authData.workspaceId,
                 id: candidateId,
                 formId,
                 globalFieldId: null,
@@ -10129,6 +10209,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               } else if (field.membershipId) {
                 const sequenceNumber = await allocateFieldSequence();
                 await tx.mutate.form_fields.insert({
+                  workspaceId: authData.workspaceId,
                   id: field.membershipId,
                   formId,
                   globalFieldId: definitionId,
@@ -10210,6 +10291,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           } else {
 
             await tx.mutate.forms_context_mapping.insert({
+              workspaceId: authData.workspaceId,
               id: mappingId,
               contextId,
               contextType,
@@ -10306,6 +10388,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           // Upsert the form entity value
           await tx.mutate.form_entity_values.insert({
+            workspaceId: authData.workspaceId,
             id,
             formId,
             entityId,
@@ -10424,6 +10507,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           // Upsert the form entity value
           await tx.mutate.form_entity_values.insert({
+            workspaceId: authData.workspaceId,
             id,
             formId,
             entityId,
@@ -10589,6 +10673,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           const existingDashboard = await tx.run(zql.dashboards.where('id', id).one())
 
           await tx.mutate.dashboards.upsert({
+            workspaceId: authData.workspaceId,
             id: id,
             name: name.trim(),
             description: description?.trim(),
@@ -10626,6 +10711,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         async ({ tx, args: { grants, timestamp } }) => {
           for (const grant of grants) {
             await tx.mutate.resource_access.insert({
+              workspaceId: authData.workspaceId,
               id: grant.id,
               userId: grant.userId,
               resourceId: grant.resourceId,
@@ -10716,6 +10802,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             });
           } else {
             await tx.mutate.email_drafts.insert({
+              workspaceId: authData.workspaceId,
               id,
               conversationId,
               channelId,
@@ -10789,6 +10876,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             });
           } else {
             await tx.mutate.email_drafts.insert({
+              workspaceId: authData.workspaceId,
               id: args.id,
               channelId: args.channelId,
               userId: ctx.userID,
@@ -11073,6 +11161,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             }
           } else {
             await tx.mutate.email_reads.insert({
+              workspaceId: authData.workspaceId,
               id,
               ticketId,
               userId: ctx.userID,
@@ -11140,6 +11229,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 });
               }
               return tx.mutate.email_reads.insert({
+                workspaceId: authData.workspaceId,
                 id: item.id,
                 ticketId: item.ticketId,
                 userId: ctx.userID,
@@ -11219,6 +11309,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           // 2. If no draft exists, upsert one atomically
           if (!existingDraft) {
             await tx.mutate.draft_messages.upsert({
+              workspaceId: authData.workspaceId,
               id: draftMessageId,
               channelId,
               conversationId: conversationId || null,
@@ -11362,6 +11453,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           const existingQuery = await tx.run(zql.queries.where('id', id).one())
 
           await tx.mutate.queries.upsert({
+            workspaceId: authData.workspaceId,
             id: id,
             title: title.trim(),
             queryJson,
@@ -11391,6 +11483,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 zql.dashboard_queries_mapping.where('dashboardId', dashboardId),
               );
               await tx.mutate.dashboard_queries_mapping.insert({
+                workspaceId: authData.workspaceId,
                 id: newMappingId,
                 dashboardId,
                 queryId: id,
@@ -11546,7 +11639,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           };
 
           // Upsert ticket stage request
-          await tx.mutate.ticket_stage_requests.upsert(payload);
+          await tx.mutate.ticket_stage_requests.upsert({ ...payload, workspaceId: authData.workspaceId });
 
           // Handle activities based on whether this is create or update
           const isNewRequest = !existingApproval; // true only when no prior record existed (checked after fallback lookup)
@@ -11557,6 +11650,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             const actionText = hasForm ? 'submitted the form for' : 'requested approval for';
 
             await tx.mutate.messages.insert({
+              workspaceId: authData.workspaceId,
               messageId: requestActivityId,
               conversationId: ticket.conversationId,
               senderId: updatedBy,
@@ -11587,6 +11681,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             const actionText = hasForm ? 'submitted the form for' : 'requested approval for';
 
             await tx.mutate.messages.insert({
+              workspaceId: authData.workspaceId,
               messageId: requestActivityId,
               conversationId: ticket.conversationId,
               senderId: updatedBy,
@@ -11618,6 +11713,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             const actionText = hasForm ? 'submitted the form for' : 'requested approval for';
 
             await tx.mutate.messages.insert({
+              workspaceId: authData.workspaceId,
               messageId: requestActivityId,
               conversationId: ticket.conversationId,
               senderId: updatedBy,
@@ -11645,6 +11741,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             const actionText = hasForm ? 'resubmitted the form for' : 'resubmitted the approval request for';
 
             await tx.mutate.messages.insert({
+              workspaceId: authData.workspaceId,
               messageId: requestActivityId,
               conversationId: ticket.conversationId,
               senderId: updatedBy,
@@ -11824,6 +11921,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 // NEW visit version (first visit, or form changed): insert a fresh ETA row at
                 // newVisitIndex with a clock started from now.
                 await tx.mutate.ticket_stage_eta.insert({
+                  workspaceId: authData.workspaceId,
                   id: uuidv4(),
                   ticketId: ticket.id,
                   stageId: stage.id,
@@ -11915,6 +12013,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             const actionText = hasForm ? 'approved the form for' : 'approved the stage change to';
 
             await tx.mutate.messages.insert({
+              workspaceId: authData.workspaceId,
               messageId: approvedActivityId,
               conversationId: ticket.conversationId,
               senderId: updatedBy,
@@ -11945,6 +12044,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             const actionText = hasForm ? 'rejected the form for' : 'rejected the stage change to';
 
             await tx.mutate.messages.insert({
+              workspaceId: authData.workspaceId,
               messageId: rejectedActivityId,
               conversationId: ticket.conversationId,
               senderId: updatedBy,
@@ -11987,6 +12087,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 ? 'Rejection comment'
                 : 'Approval comment';
             await tx.mutate.messages.insert({
+              workspaceId: authData.workspaceId,
               messageId: commentMessageId,
               conversationId: ticket.conversationId,
               senderId: updatedBy,
@@ -12111,6 +12212,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           }
 
           await tx.mutate.rcas.insert({
+            workspaceId: authData.workspaceId,
             id,
             ticketId,
             ownerId: resolvedOwnerId,
@@ -12251,6 +12353,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           }
 
           await tx.mutate.release_attributions.insert({
+            workspaceId: authData.workspaceId,
             id,
             ticketId,
             releaseId,
@@ -12454,6 +12557,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           }
 
           await tx.mutate.impacts.insert({
+            workspaceId: authData.workspaceId,
             id,
             ticketId,
             impactTypeId,
@@ -12534,6 +12638,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           }
 
           await tx.mutate.coes.insert({
+            workspaceId: authData.workspaceId,
             id,
             rcaId,
             ownerId,
@@ -12775,6 +12880,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           }
 
           await tx.mutate.links.insert({
+            workspaceId: authData.workspaceId,
             id,
             url,
             title,
@@ -12879,6 +12985,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
             if (!existing) {
               await tx.mutate.link_access.insert({
+                workspaceId: authData.workspaceId,
                 id: accessId,
                 linkId,
                 userId: targetUserId,
@@ -12954,6 +13061,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           }
 
           await tx.mutate.saved_user_configurations.insert({
+            workspaceId: authData.workspaceId,
             id,
             userId: authData.sub,
             name,
@@ -12966,6 +13074,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           for (const value of values) {
             await tx.mutate.saved_user_configuration_values.insert({
+              workspaceId: authData.workspaceId,
               id: value.id,
               configId: id,
               entityName: value.entityName,
@@ -13034,6 +13143,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             }
             for (const value of values) {
               await tx.mutate.saved_user_configuration_values.insert({
+                workspaceId: authData.workspaceId,
                 id: value.id,
                 configId,
                 entityName: value.entityName,
@@ -13139,6 +13249,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         }),
         async ({ tx, args: { id, name, content, timestamp } }) => {
           await tx.mutate.email_signatures.insert({
+            workspaceId: authData.workspaceId,
             id,
             userId: authData.sub,
             name,
@@ -13555,6 +13666,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             });
           } else {
             await tx.mutate.user_preferences.insert({
+              workspaceId: authData.workspaceId,
               id,
               userId: authData.sub,
               channelSortOrder,
@@ -13589,6 +13701,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             });
           } else {
             await tx.mutate.user_preferences.insert({
+              workspaceId: authData.workspaceId,
               id,
               userId: authData.sub,
               channelSortOrder: ChannelSortOrder.RECENCY,
@@ -13623,6 +13736,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             });
           } else {
             await tx.mutate.user_preferences.insert({
+              workspaceId: authData.workspaceId,
               id,
               userId: authData.sub,
               channelSortOrder: ChannelSortOrder.RECENCY,
@@ -13673,6 +13787,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             });
           } else {
             await tx.mutate.user_preferences.insert({
+              workspaceId: authData.workspaceId,
               id,
               userId: authData.sub,
               channelSortOrder: ChannelSortOrder.RECENCY,
@@ -13708,6 +13823,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             });
           } else {
             await tx.mutate.user_preferences.insert({
+              workspaceId: authData.workspaceId,
               id,
               userId: authData.sub,
               channelSortOrder: ChannelSortOrder.RECENCY,
@@ -13778,6 +13894,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             const channel = await tx.run(zql.channels.where('id', channelId).one());
             const deskType = deskTypeForChannelType(channel?.type);
             await tx.mutate.email_channel_preferences.insert({
+              workspaceId: authData.workspaceId,
               channelId,
               ownerUserId: ownerUserId ?? authData.sub,
               assigneeUserGroupId: assigneeUserGroupId ?? null,
@@ -13826,6 +13943,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           } else {
             const channel = await tx.run(zql.channels.where('id', channelId).one());
             await tx.mutate.email_channel_preferences.insert({
+              workspaceId: authData.workspaceId,
               channelId,
               ownerUserId: ctx.userID,
               assigneeUserGroupId: null,
@@ -13867,6 +13985,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           } else {
             const channel = await tx.run(zql.channels.where('id', channelId).one());
             await tx.mutate.email_channel_preferences.insert({
+              workspaceId: authData.workspaceId,
               channelId,
               ownerUserId: ctx.userID,
               assigneeUserGroupId: null,
@@ -13898,7 +14017,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           createdAt: z.number(),
         }),
         async ({ tx, args }) => {
-          await tx.mutate.classification_mappings.insert(args);
+          await tx.mutate.classification_mappings.insert({ ...args, workspaceId: authData.workspaceId });
         },
       ),
       update: defineMutator(
@@ -13959,6 +14078,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             });
           } else {
             await tx.mutate.board_sla_policies.insert({
+              workspaceId: authData.workspaceId,
               id,
               boardId,
               priority: priority as TicketPriority,
@@ -14018,6 +14138,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           }
 
           await tx.mutate.collections.insert({
+            workspaceId: authData.workspaceId,
             id,
             scopeType,
             scopeId,
@@ -14032,6 +14153,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           // Add creator as OWNER in collection_permissions
           await tx.mutate.collection_permissions.insert({
+            workspaceId: authData.workspaceId,
             id: permissionId,
             collectionId: id,
             userId: authData.sub,
@@ -14176,6 +14298,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           }
 
           await tx.mutate.collections.insert({
+            workspaceId: authData.workspaceId,
             id,
             parentId,
             ownerId: authData.sub,
@@ -14362,6 +14485,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             });
           } else {
             await tx.mutate.collection_permissions.insert({
+              workspaceId: authData.workspaceId,
               id,
               collectionId,
               userId,
@@ -14545,6 +14669,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           const scheduleId = existingDraft?.id ?? id;
 
           await tx.mutate.delayed_messages.insert({
+            workspaceId: authData.workspaceId,
             id: scheduleId,
             channelId,
             conversationId: conversationId ?? null,
@@ -14706,6 +14831,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           // Reuse scheduled id as draft id so message_attachments.entityId stays valid.
           await tx.mutate.draft_messages.insert({
+            workspaceId: authData.workspaceId,
             id,
             channelId: scheduled.channelId,
             conversationId: scheduled.conversationId,
@@ -15240,6 +15366,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           for (const t of transitions) {
             await tx.mutate.stage_transitions.insert({
+              workspaceId: authData.workspaceId,
               id: t.id,
               boardId,
               ...(t.fromStageId != null && { fromStageId: t.fromStageId }),
@@ -15256,6 +15383,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             for (const a of t.approvers ?? []) {
               const approverType = (a.approverType as ApproverType) ?? ApproverType.USER;
               await tx.mutate.stage_approvers.insert({
+                workspaceId: authData.workspaceId,
                 id: a.id,
                 transitionId: t.id,
                 // roleId holds the identifier for ROLE approvers, userId for USER approvers
@@ -15491,6 +15619,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             // NEW visit version (first visit, or form changed): insert a fresh ETA row at
             // newVisitIndex with a clock started from now.
             await tx.mutate.ticket_stage_eta.insert({
+              workspaceId: authData.workspaceId,
               id: uuidv4(),
               ticketId,
               stageId: targetStage.id,
@@ -15557,6 +15686,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             }
 
             await tx.mutate.ticket_activities.insert({
+              workspaceId: authData.workspaceId,
               id: uuidv4(),
               ticketId,
               updatedBy: authData.sub,
@@ -15712,6 +15842,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 throw new Error(`mappingId is required for user ${userId}`);
               }
               return tx.mutate.user_role_mappings.insert({
+                workspaceId: authData.workspaceId,
                 id: mappingId,
                 roleId,
                 userId,

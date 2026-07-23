@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { Ticket, TicketStatusV2, TicketPriority, AttachmentEntityType, MessageAttachment, ChannelType, ActivityType, TicketReferenceRelation } from '@prisma/client';
+import { getContextOrNull } from '@/database/tenant/context';
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
 import { TicketRepository } from '../database/repositories/ticketRepository';
 import { ConversationRepository } from '../database/repositories/conversationRepository';
@@ -123,6 +124,8 @@ export class TicketController {
         logger.error(`[TicketController] Error queuing Vespa job for attachment ${attachment.id}:`, error);
         // Log failed insertion to Postgres
         try {
+          const logWorkspaceId = workspaceId ?? getContextOrNull()?.workspaceId;
+          if (!logWorkspaceId) throw new Error('workspaceId required: no tenant context');
           if (db.vespaInsertionLogs) {
             await db.vespaInsertionLogs.create({
               data: {
@@ -134,6 +137,7 @@ export class TicketController {
                 errorMessage: `Failed to enqueue Vespa job: ${error instanceof Error ? error.message : String(error)}`,
                 errorDetails: JSON.stringify(error),
                 userId: userId,
+                workspaceId: logWorkspaceId,
                 createdAt: new Date(),
               },
             });
@@ -159,6 +163,8 @@ export class TicketController {
     }).catch(async (error) => {
       logger.error(`[TicketController] Error queuing Vespa job for ticket ${ticketId}:`, error);
       try {
+        const logWorkspaceId = workspaceId ?? getContextOrNull()?.workspaceId;
+        if (!logWorkspaceId) throw new Error('workspaceId required: no tenant context');
         const vespaLogs = db.vespaInsertionLogs;
         if (vespaLogs) {
           await vespaLogs.create({
@@ -171,6 +177,7 @@ export class TicketController {
               errorMessage: `Failed to enqueue Vespa job: ${error instanceof Error ? error.message : String(error)}`,
               errorDetails: JSON.stringify(error),
               userId,
+              workspaceId: logWorkspaceId,
               createdAt: new Date(),
             },
           });
@@ -256,6 +263,7 @@ export class TicketController {
           messageId: randomUUID(),
           conversationId,
           senderId: createdBy,
+          workspaceId: channelWorkspaceId,
           content: messageContent || `Ticket created: ${title}`,
           msgType: 'SYSTEM',
           showInChannel: false,
@@ -297,6 +305,7 @@ export class TicketController {
           id: randomUUID(),
           conversationId,
           userId: createdBy,
+          workspaceId: channelWorkspaceId,
           participationType: 'MENTIONED',
           isSubscribed: true,
           joinedAt: now,
@@ -739,6 +748,7 @@ export class TicketController {
               id: randomUUID(),
               conversationId,
               userId,
+              workspaceId: existingConversationWorkspaceId,
               participationType: 'MENTIONED',
               isSubscribed: true,
               joinedAt: new Date(),
@@ -880,6 +890,7 @@ export class TicketController {
               id: randomUUID(),
               conversationId,
               userId: userId,
+              workspaceId: newConversationWorkspaceId,
               participationType: 'MENTIONED',
               isSubscribed: true,
               joinedAt: new Date(),
@@ -1016,6 +1027,7 @@ export class TicketController {
             data: tags.map(tagName => ({
               name: tagName.trim(),
               ticketId: ticket.id,
+              workspaceId: ticket.workspaceId,
             })),
           });
           await dualWriteTicketTags(ticket.id, tags.map(t => t.trim()), prisma);
@@ -1059,6 +1071,7 @@ export class TicketController {
                   entityType: FormEntityType.TICKET,
                   fieldId: field.id,
                   contextId: boardId,
+                  workspaceId: ticket.workspaceId,
                   fieldValue: '', // Empty string for backward compatibility (not used anymore)
                   actualFieldValue: value, // Actual value stored in JSON field
                 };
@@ -1841,15 +1854,15 @@ export class TicketController {
 
       const mapping = await prisma.$transaction(async (tx) => {
         const created = await tx.ticketReferenceMapping.create({
-          data: { sourceTicketId: ticketId, targetTicketId, relationType: TicketReferenceRelation.MERGED_INTO, createdBy: userId },
+          data: { sourceTicketId: ticketId, targetTicketId, relationType: TicketReferenceRelation.MERGED_INTO, createdBy: userId, workspaceId: source.workspaceId },
         });
         await tx.ticket.update({ where: { id: ticketId }, data: { isArchived: true, updatedBy: userId } });
 
         await tx.ticketActivity.create({
-          data: { ticketId, updatedBy: userId, activityType: ActivityType.MERGED, value: { targetTicketId: target.id, targetTicketXyneId: target.xyneId, targetTicketTitle: target.title } },
+          data: { ticketId, updatedBy: userId, workspaceId: source.workspaceId, activityType: ActivityType.MERGED, value: { targetTicketId: target.id, targetTicketXyneId: target.xyneId, targetTicketTitle: target.title } },
         });
         await tx.ticketActivity.create({
-          data: { ticketId: targetTicketId, updatedBy: userId, activityType: ActivityType.MERGED, value: { sourceTicketId: ticketId, sourceTicketXyneId: source.xyneId, sourceTicketTitle: source.title } },
+          data: { ticketId: targetTicketId, updatedBy: userId, workspaceId: target.workspaceId, activityType: ActivityType.MERGED, value: { sourceTicketId: ticketId, sourceTicketXyneId: source.xyneId, sourceTicketTitle: source.title } },
         });
 
         return created;
@@ -1897,10 +1910,10 @@ export class TicketController {
         await tx.ticket.update({ where: { id: ticketId }, data: { isArchived: false, updatedBy: userId } });
 
         await tx.ticketActivity.create({
-          data: { ticketId, updatedBy: userId, activityType: ActivityType.UNMERGED, value: { targetTicketId: mapping.targetTicketId, targetTicketXyneId: mapping.targetTicket.xyneId, targetTicketTitle: mapping.targetTicket.title } },
+          data: { ticketId, updatedBy: userId, workspaceId: ticket.workspaceId, activityType: ActivityType.UNMERGED, value: { targetTicketId: mapping.targetTicketId, targetTicketXyneId: mapping.targetTicket.xyneId, targetTicketTitle: mapping.targetTicket.title } },
         });
         await tx.ticketActivity.create({
-          data: { ticketId: mapping.targetTicketId, updatedBy: userId, activityType: ActivityType.UNMERGED, value: { sourceTicketId: ticketId, sourceTicketXyneId: ticket.xyneId, sourceTicketTitle: ticket.title } },
+          data: { ticketId: mapping.targetTicketId, updatedBy: userId, workspaceId: mapping.targetTicket.workspaceId, activityType: ActivityType.UNMERGED, value: { sourceTicketId: ticketId, sourceTicketXyneId: ticket.xyneId, sourceTicketTitle: ticket.title } },
         });
       });
 

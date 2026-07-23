@@ -348,7 +348,7 @@ export class EmailClassificationService {
     // Get ticket's boardId
     const ticket = await db.ticket.findUnique({
       where: { id: ticketId },
-      select: { boardId: true },
+      select: { boardId: true, workspaceId: true },
     });
     if (!ticket?.boardId) return;
 
@@ -404,6 +404,7 @@ export class EmailClassificationService {
           create: {
             id: randomUUID(),
             formId: formMapping.formId,
+            workspaceId: ticket.workspaceId,
             entityId: ticketId,
             entityType: 'TICKET',
             version: currentVersion,

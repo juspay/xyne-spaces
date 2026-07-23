@@ -726,6 +726,7 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
           channelId: stateData.channelId,
           credentials: encryptedCredentials,
           isActive: true,
+          workspaceId: stateData.workspaceId,
         },
       });
 
@@ -913,7 +914,7 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
           seenConversations[seenConversations.length - 1]?.createdAt ?? now;
 
         await tx.channelParticipant.create({
-          data: { channelId: ch.id, userId: cd.userId, role: 'ADMIN' },
+          data: { channelId: ch.id, userId: cd.userId, role: 'ADMIN', workspaceId: cd.workspaceId },
         });
 
         await tx.channelUserStatus.create({
@@ -923,14 +924,16 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
             lastViewedAt: now,
             conversationSeenCutoffAt,
             updatedAt: now,
+            workspaceId: cd.workspaceId,
           },
         });
-        
+
         await tx.channelStats.create({
           data: {
             channelId: ch.id,
             lastActivityAt: now,
             participantCount: 1,
+            workspaceId: cd.workspaceId,
           },
         });
 
@@ -945,6 +948,7 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
             ...(cd.boardId && { boardId: cd.boardId }),
             emailMergeMode: appConfig.emailMergeModeDefault as EmailMergeMode,
             deskType: DeskType.EMAIL,
+            workspaceId: cd.workspaceId,
           },
         });
 
@@ -963,6 +967,7 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
             credentials: network.encryptedCredentials,
             ownerUserId: cd.userId,
             isActive: true,
+            workspaceId: cd.workspaceId,
           },
         });
 

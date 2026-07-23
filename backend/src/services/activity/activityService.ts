@@ -1,5 +1,7 @@
 import { ActivityClassification, ActivityClassificationJobType, PrismaClient } from '@prisma/client';
 import { db } from '@/database/client';
+import { repositories } from '@/database/repositories';
+import { getContextOrNull } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 
 export interface CreateActivityParams {
@@ -31,6 +33,26 @@ export interface CreateActivityParams {
 
 export class ActivityService {
   constructor(private prisma: PrismaClient) {}
+
+  /**
+   * Resolve the workspaceId for an activity row (denormalized tenant key).
+   * Prefers an explicitly-supplied workspaceId, then derives it from the
+   * activity's channel, and finally falls back to the ambient tenant context.
+   */
+  private async resolveWorkspaceId(params: {
+    workspaceId?: string;
+    channelId?: string;
+  }): Promise<string> {
+    if (params.workspaceId) return params.workspaceId;
+    if (params.channelId) {
+      return repositories.channels.getWorkspaceId(params.channelId);
+    }
+    const ctxWorkspaceId = getContextOrNull()?.workspaceId;
+    if (ctxWorkspaceId) return ctxWorkspaceId;
+    throw new Error(
+      '[ActivityService] workspaceId required: no explicit workspaceId, channelId, or tenant context',
+    );
+  }
 
   private getActivityMessageId(params: CreateActivityParams): string | null {
     return params.messageId ?? (params.actionSource === 'message' ? params.actionSourceId : null);
@@ -234,11 +256,12 @@ export class ActivityService {
       actorId: activity.actorId,
       classification: activity.classification,
     });
+    const workspaceId = await this.resolveWorkspaceId(activity);
     const result = await this.prisma.activity.create({
       data: {
         ...(activity.id ? { id: activity.id } : {}),
         userId: activity.userId,
-        ...(activity.workspaceId ? { workspaceId: activity.workspaceId } : {}),
+        workspaceId,
         actorAction: activity.actorAction,
         actionSource: activity.actionSource,
         actionSourceId: activity.actionSourceId,
@@ -302,11 +325,14 @@ export class ActivityService {
       ],
     });
 
+    const workspaceIds = await Promise.all(
+      enrichedActivities.map(a => this.resolveWorkspaceId(a)),
+    );
     await this.prisma.activity.createMany({
-      data: enrichedActivities.map(a => ({
+      data: enrichedActivities.map((a, i) => ({
         ...(a.id ? { id: a.id } : {}),
         userId: a.userId,
-        ...(a.workspaceId ? { workspaceId: a.workspaceId } : {}),
+        workspaceId: workspaceIds[i],
         actorAction: a.actorAction,
         actionSource: a.actionSource,
         actionSourceId: a.actionSourceId,
@@ -433,10 +459,14 @@ export class ActivityService {
       isThreadActivity,
     });
 
+    const resolvedWorkspaceId = await this.resolveWorkspaceId({
+      workspaceId: activity.workspaceId,
+      channelId: activity.channelId ?? channelId,
+    });
     await this.prisma.activity.create({
       data: {
         userId: activity.userId,
-        ...(activity.workspaceId ? { workspaceId: activity.workspaceId } : {}),
+        workspaceId: resolvedWorkspaceId,
         actorAction: activity.actorAction,
         actionSource: activity.actionSource,
         actionSourceId: activity.actionSourceId,
@@ -555,10 +585,11 @@ export class ActivityService {
       channelId,
     );
 
+    const resolvedWorkspaceId = await this.resolveWorkspaceId({ workspaceId, channelId });
     await this.prisma.activity.create({
       data: {
         userId: recipientUserId,
-        ...(workspaceId ? { workspaceId } : {}),
+        workspaceId: resolvedWorkspaceId,
         actorAction: 'replied_v2',
         actionSource: 'message',
         actionSourceId: latestReplyMessageId,

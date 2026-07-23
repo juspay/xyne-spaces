@@ -51,11 +51,19 @@ export class AppsRepository extends BaseRepository<
     // Create the app. scope defaults to ORG and version to 1 via the schema. An app-level signing
     // secret is generated up front (encrypted at rest) — it signs the per-install JWT + webhook HMAC.
     const now = new Date();
+    const creator = await this.db.user.findUnique({
+      where: { id: data.createdBy },
+      select: { workspaceId: true },
+    });
+    if (!creator) {
+      throw new Error(`workspaceId required: creator ${data.createdBy} not found`);
+    }
     const appData: Prisma.AppsUncheckedCreateInput = {
       name: data.name.trim(),
       description: data.description?.trim() || null,
       createdBy: data.createdBy,
       orgId: data.orgId,
+      workspaceId: creator.workspaceId,
       scope: "ORG",
       version: 1,
       signingSecret: await encrypt(crypto.randomBytes(32).toString('hex')),

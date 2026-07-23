@@ -1,5 +1,6 @@
 import { CommandType, CommandAccessibility, Prisma } from '@prisma/client';
 import { db } from '@/database/client';
+import { getContextOrNull } from '@/database/tenant/context';
 
 export { CommandType, CommandAccessibility };
 
@@ -206,9 +207,16 @@ export class AppCommandRepository {
       throw this.nameConflict(existing.commandType, input.commandName);
     }
 
+    // Denormalized tenant key sourced from the ambient tenant context.
+    const ws = getContextOrNull()?.workspaceId;
+    if (!ws) {
+      throw new Error('workspaceId required: no tenant context');
+    }
+
     try {
       return await db.appCommand.create({
         data: {
+          workspaceId: ws,
           appId,
           commandName: input.commandName,
           description: input.description,
