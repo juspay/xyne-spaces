@@ -1,16 +1,5 @@
 // Frontend search types that mirror the backend search types
 
-// Entity types from backend (plural form) - using const object due to erasableSyntaxOnly
-export const SearchableEntityType = {
-  USERS: 'users',
-  MESSAGES: 'messages',
-  CHANNELS: 'channels',
-  TICKETS: 'tickets',
-  ATTACHMENTS: 'attachments',
-} as const;
-
-export type SearchableEntityType = (typeof SearchableEntityType)[keyof typeof SearchableEntityType];
-
 // Display types for frontend UI (some singular, conversation instead of messages)
 export type DisplayEntityType =
   | 'user'
@@ -19,34 +8,6 @@ export type DisplayEntityType =
   | 'ticket'
   | 'attachment'
   | 'collection';
-
-export interface GlobalSearchFilters {
-  query: string;
-  entityTypes?: SearchableEntityType[];
-  orgName?: string;
-  channelIds?: string[];
-  userIds?: string[];
-  dateRange?: {
-    from?: string;
-    to?: string;
-  };
-  page?: number;
-  limit?: number;
-  searchType?: 'trigram' | 'fts' | 'both';
-  sort?: 'relevance' | 'newest' | 'oldest';
-}
-
-export interface SearchResult {
-  id: string;
-  type: SearchableEntityType;
-  title: string;
-  subtitle?: string;
-  content: string;
-  relevanceScore: number;
-  createdAt: string;
-  avatar?: string;
-  context?: SearchContext;
-}
 
 export interface SearchContext {
   channelId?: string;
@@ -111,28 +72,6 @@ export interface SearchContext {
   subApp?: string;
 }
 
-export interface PaginatedSearchResults {
-  results: SearchResult[];
-  pagination: {
-    page: number;
-    limit: number;
-    total: number;
-    hasMore: boolean;
-  };
-  aggregations: {
-    userCount: number;
-    messageCount: number;
-    channelCount: number;
-    ticketCount: number;
-    attachmentCount: number;
-  };
-  meta: {
-    query: string;
-    searchTime: string;
-    searchType: string;
-  };
-}
-
 // Frontend display types for the UI components
 export interface DisplaySearchResult {
   type: DisplayEntityType;
@@ -155,12 +94,6 @@ export interface DisplaySearchResult {
     matchfeatures?: Record<string, string | number>;
     rankfeatures?: Record<string, string | number>;
   };
-}
-
-export interface SearchApiResponse {
-  success: boolean;
-  data?: PaginatedSearchResults;
-  error?: string;
 }
 
 // Vespa-specific types

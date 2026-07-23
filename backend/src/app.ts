@@ -85,7 +85,6 @@ import linkPreviewRoutes from '@/routes/linkPreview';
 import bundleRoutes from '@/routes/bundles';
 import projectRoutes from '@/routes/projects';
 import boardRoutes from '@/routes/boards';
-import searchRoutes from '@/routes/search';
 import searchMetricsRoutes from '@/routes/searchMetrics';
 import knowledgeRoutes from '@/routes/knowledge';
 import vespaSearchRoutes from '@/routes/vespaSearch';
@@ -569,7 +568,6 @@ export class App {
     this.app.use('/api', authMiddleware.authenticate, attachmentRoutes); // Attachment routes (file streaming)
     this.app.use('/api', authMiddleware.authenticate, draftAttachmentRoutes); // Draft attachment upload routes
     this.app.use('/api/link-preview', authMiddleware.authenticate, linkPreviewRoutes); // Link preview routes
-    this.app.use('/api/search', authMiddleware.authenticate, searchRoutes); // Global search routes (GET /api/search)
     this.app.use('/api/search-metrics', authMiddleware.authenticate, searchMetricsRoutes); // Search metrics routes (POST /api/search-metrics/...)
 
     // API Key management routes (admin only, no ACL needed as it has requireAdmin middleware)

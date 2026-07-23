@@ -8,9 +8,9 @@ const router = Router();
 router.get('/:id/verify', invitationController.verifyInvitation);
 
 // Protected routes - require authentication
-router.post('/', authMiddleware.authenticate, invitationController.createInvitation);
+router.post('/', authMiddleware.authenticate, authMiddleware.requireAdminOrOwner, invitationController.createInvitation);
 // Admin: provision a new org + workspace + owner invitation in one shot
-router.post('/provision-org', authMiddleware.authenticate, invitationController.provisionOrg);
+router.post('/provision-org', authMiddleware.authenticate, authMiddleware.requireAdminOrOwner, invitationController.provisionOrg,);
 // Unified accept — handles OAuth or email+password
 router.post('/:id/accept', invitationController.acceptInvitation);
 

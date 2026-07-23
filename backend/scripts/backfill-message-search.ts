@@ -151,10 +151,9 @@ function printFinalStats(stats: BackfillStats) {
   }
   
   console.log('\n🔍 Next steps:');
-  console.log('1. Test global search with: GET /api/search?query=test');
-  console.log('2. Verify search results are accurate');
-  console.log('3. Monitor search performance');
-  console.log('4. Run this script again if you add more messages');
+  console.log('1. Verify the message_search table is populated');
+  console.log('2. Monitor indexing performance');
+  console.log('3. Run this script again if you add more messages');
 }
 
 // Handle graceful shutdown

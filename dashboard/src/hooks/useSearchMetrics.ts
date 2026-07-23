@@ -3,13 +3,7 @@ import Fuse from 'fuse.js';
 import { searchMetricsService } from '../services/searchMetricsService';
 import { useAuthContextValues } from './useAuth';
 import { searchService } from '../services/searchService';
-import { mixpanelService, EVENTS, EVENT_PROPERTIES } from '../services/Analytics/mixpanelService';
-import {
-  DisplaySearchResult,
-  GlobalSearchFilters,
-  SearchableEntityType,
-  VespaSearchFilters,
-} from '../types/search';
+import { DisplaySearchResult, VespaSearchFilters } from '../types/search';
 import {
   TabType,
   MentionType,
@@ -306,7 +300,6 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
   const [selectedMentions, setSelectedMentions] = useState<
     Array<{ id: string; type: MentionType; prefix?: string; name?: string }>
   >([]);
-  const [useVespaSearch, setUseVespaSearch] = useState(true);
   // Cmd-K "Include bot messages" toggle. Default OFF → backend excludes BOT messages.
   const [includeBotMessages, setIncludeBotMessages] = useState(false);
   // Cmd-K "Include my channels" toggle. Modal opts in via `defaultOnlyMyChannels`;
@@ -829,7 +822,6 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       query: string,
       activeTab: TabType,
       selectedMentions: Array<{ id: string; type: MentionType; prefix?: string; name?: string }>,
-      useVespaSearch: boolean,
       filteredLocalUsers: User[],
       filteredLocalChannels: Array<{
         channel: Channel;
@@ -958,11 +950,10 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         setSearchError(null);
         markSearchStart();
 
-        const shouldUseVespa = useVespaSearch;
         pendingSearchCountRef.current += 1;
 
         try {
-          if (shouldUseVespa) {
+          {
             const limit = BACKEND_RESULTS_LIMIT;
             const apps = `${VespaApps.CHAT},${VespaApps.TICKET},${VespaApps.FILE},${VespaApps.MAIL}`;
             const searchFilters: VespaSearchFilters = {
@@ -1202,84 +1193,6 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
                 cumulativeCount: mergedResults.length,
               },
             }));
-          } else {
-            // PG Search (Fallback)
-            const entityTypes: SearchableEntityType[] = [];
-
-            if (activeTab === TabType.ALL) {
-              entityTypes.push(
-                SearchableEntityType.MESSAGES,
-                SearchableEntityType.TICKETS,
-                SearchableEntityType.ATTACHMENTS,
-              );
-            } else if (activeTab === TabType.MESSAGES) {
-              entityTypes.push(SearchableEntityType.MESSAGES);
-            } else if (activeTab === TabType.TICKETS) {
-              entityTypes.push(SearchableEntityType.TICKETS);
-            } else if (activeTab === TabType.ATTACHMENTS) {
-              entityTypes.push(SearchableEntityType.ATTACHMENTS);
-            }
-
-            if (entityTypes.length > 0) {
-              const limit = BACKEND_RESULTS_LIMIT;
-              const searchFilters: GlobalSearchFilters = {
-                query: searchText,
-                entityTypes,
-                page: 1,
-                limit,
-              };
-
-              const userMentions = selectedMentions.filter(m => m.type === MentionType.USER);
-              if (userMentions.length > 0) {
-                searchFilters.userIds = userMentions.map(user => user.id);
-              }
-
-              const channelMentions = selectedMentions.filter(m => m.type === MentionType.CHANNEL);
-              if (channelMentions.length > 0) {
-                searchFilters.channelIds = channelMentions.map(m => m.id);
-              }
-
-              const searchResults = await searchService.globalSearch(searchFilters);
-              const displayResults = searchService.transformToDisplayResults(searchResults.results);
-
-              let finalResults = [];
-              if (activeTab === TabType.ALL) {
-                finalResults = [
-                  ...filteredLocalUsers.map((user: User) => ({
-                    id: user.id,
-                    type: 'user' as const,
-                    title: user.name,
-                    subtitle: user.email || '',
-                    relevanceScore: 1,
-                    metadata: {},
-                  })),
-                  ...displayResults,
-                ];
-              } else {
-                finalResults = displayResults;
-              }
-
-              setSearchResults(finalResults);
-
-              mixpanelService.track(EVENTS.SEARCH_PERFORMED, {
-                searchType: EVENT_PROPERTIES.SEARCH_TYPES.COMMAND_MENU,
-                searchCategory: activeTab,
-                resultsCount: displayResults.length,
-              });
-
-              setPaginationState(prev => ({
-                ...prev,
-                [activeTab]: {
-                  page: 1,
-                  hasMore: activeTab === TabType.ALL ? false : searchResults.pagination.hasMore,
-                  total: searchResults.pagination.total,
-                  offset: 0,
-                  cumulativeCount: finalResults.length,
-                },
-              }));
-            } else {
-              setSearchResults([]);
-            }
           }
         } catch (searchError) {
           setSearchError(searchError instanceof Error ? searchError.message : 'Search failed');
@@ -1375,7 +1288,6 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         text,
         activeTab,
         selectedMentions,
-        useVespaSearch,
         filteredLocalUsers,
         filteredLocalChannels,
         options.onSearchComplete,
@@ -1387,7 +1299,6 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     text,
     activeTab,
     selectedMentions,
-    useVespaSearch,
     filteredLocalUsers,
     filteredLocalChannels.length,
     options.onSearchComplete,
@@ -1441,11 +1352,11 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     const currentPagination = paginationState[activeTab];
     if (!currentPagination.hasMore) return;
 
-    const shouldUseVespa = useVespaSearch && activeTab !== 'users';
+    if (activeTab === TabType.USERS) return;
     setIsLoadingMore(true);
 
     try {
-      if (shouldUseVespa) {
+      {
         const currentOffset = currentPagination.offset;
         const pageSize = BACKEND_RESULTS_LIMIT;
 
@@ -1588,57 +1499,6 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
             cumulativeCount: prev[activeTab].cumulativeCount + results.results.length,
           },
         }));
-      } else {
-        // PG Load More
-        const entityTypes: SearchableEntityType[] = [];
-        if (activeTab === TabType.ALL) {
-          entityTypes.push(
-            SearchableEntityType.MESSAGES,
-            SearchableEntityType.TICKETS,
-            SearchableEntityType.ATTACHMENTS,
-          );
-        } else if (activeTab === TabType.MESSAGES) {
-          entityTypes.push(SearchableEntityType.MESSAGES);
-        } else if (activeTab === TabType.TICKETS) {
-          entityTypes.push(SearchableEntityType.TICKETS);
-        } else if (activeTab === TabType.ATTACHMENTS) {
-          entityTypes.push(SearchableEntityType.ATTACHMENTS);
-        }
-
-        if (entityTypes.length > 0) {
-          const nextPage = currentPagination.page + 1;
-          const searchFilters: GlobalSearchFilters = {
-            query: searchText || text.trim(),
-            entityTypes,
-            page: nextPage,
-            limit: BACKEND_RESULTS_LIMIT,
-          };
-
-          const userMentions = selectedMentions.filter(m => m.type === MentionType.USER);
-          if (userMentions.length > 0) {
-            searchFilters.userIds = userMentions.map(m => m.id);
-          }
-
-          const channelMentions = selectedMentions.filter(m => m.type === MentionType.CHANNEL);
-          if (channelMentions.length > 0) {
-            searchFilters.channelIds = channelMentions.map(m => m.id);
-          }
-
-          const searchResults = await searchService.globalSearch(searchFilters);
-          const displayResults = searchService.transformToDisplayResults(searchResults.results);
-          setSearchResults(prev => [...prev, ...displayResults]);
-
-          setPaginationState(prev => ({
-            ...prev,
-            [activeTab]: {
-              page: nextPage,
-              hasMore: searchResults.pagination.hasMore,
-              total: searchResults.pagination.total,
-              offset: 0,
-              cumulativeCount: prev[activeTab].cumulativeCount + displayResults.length,
-            },
-          }));
-        }
       }
     } catch (searchError) {
       console.error('Failed to load more results:', searchError);
@@ -1652,7 +1512,6 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     text,
     activeTab,
     selectedMentions,
-    useVespaSearch,
     includeBotMessages,
     onlyMyChannels,
     rankProfile,
@@ -1743,8 +1602,6 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     setActiveTab,
     selectedMentions,
     setSelectedMentions,
-    useVespaSearch,
-    setUseVespaSearch,
     includeBotMessages,
     setIncludeBotMessages,
     onlyMyChannels,

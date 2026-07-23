@@ -399,8 +399,6 @@ const ChannelCommandMenu = ({
 
     selectedMentions,
     setSelectedMentions,
-    useVespaSearch,
-    // setUseVespaSearch,
     includeBotMessages,
     setIncludeBotMessages,
     onlyMyChannels,
@@ -1906,9 +1904,7 @@ const ChannelCommandMenu = ({
           if (!items || items.length === 0) return null;
 
           const displayCount =
-            useVespaSearch && activeTab !== TabType.ALL
-              ? paginationState[activeTab].cumulativeCount
-              : items.length;
+            activeTab !== TabType.ALL ? paginationState[activeTab].cumulativeCount : items.length;
 
           const isScreenAll = searchMode === 'screen' && activeTab === TabType.ALL;
           const displayItems = isScreenAll ? items.slice(0, 2) : items;
@@ -1996,14 +1992,8 @@ const ChannelCommandMenu = ({
           return 0;
         })
         .map(([type, items]) => {
-          let displayCount: number;
-          if (activeTab === TabType.ALL) {
-            displayCount = items.length;
-          } else if (useVespaSearch) {
-            displayCount = paginationState[activeTab].cumulativeCount;
-          } else {
-            displayCount = items.length;
-          }
+          const displayCount =
+            activeTab === TabType.ALL ? items.length : paginationState[activeTab].cumulativeCount;
           const isUserType = type === 'user';
           const isExpanded = expandedCategories.has(type);
           const hasMore = items.length > DISPLAY_LIMIT;
@@ -3960,21 +3950,6 @@ const ChannelCommandMenu = ({
       {/* Footer - outside body flex so TicketPreviewPanel only spans results area */}
       {!inline && !isMobile && (
         <div className='px-4 py-2 border-t border-border/40 text-sm text-muted-foreground flex items-center justify-end shrink-0 bg-muted/30 rounded-b-2xl'>
-          {/* Vespa Search toggle - commented out, using Vespa as default
-          <div className='flex items-center gap-2'>
-            <label htmlFor='vespa-toggle' className='text-xs text-muted-foreground cursor-pointer'>
-              Vespa Search
-            </label>
-            <Switch.Root
-              id='vespa-toggle'
-              checked={useVespaSearch}
-              onCheckedChange={setUseVespaSearch}
-              className='w-9 h-5 bg-muted-foreground/40 rounded-full relative data-[state=checked]:bg-blue-500 transition-colors'
-            >
-              <Switch.Thumb className='block w-4 h-4 bg-background rounded-full transition-transform duration-100 translate-x-0.5 will-change-transform data-[state=checked]:translate-x-5' />
-            </Switch.Root>
-          </div>
-          */}
           <div className='flex items-center gap-6'>
             {deskMergeEnabled &&
               activeTab === TabType.DESK &&

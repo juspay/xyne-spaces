@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import { OrgRole, WorkspaceRole } from '@prisma/client';
 // import { OAuth2Client } from 'google-auth-library';
 import { logger } from '../utils/logger';
 import { loggerContext, LogContext } from '@/utils/logger';
@@ -717,6 +718,35 @@ export class AuthMiddleware {
       res.status(403).json({
         error: 'Admin access required',
         message: 'This endpoint requires admin privileges',
+      });
+      return;
+    }
+
+    next();
+  };
+
+  /**
+   * Middleware to require workspace or organization admin/owner access.
+   */
+  requireAdminOrOwner = (req: Request, res: Response, next: NextFunction): void => {
+    if (!req.user) {
+      res.status(401).json({
+        error: 'Authentication required',
+        message: 'Please authenticate to access this resource',
+      });
+      return;
+    }
+
+    const isPrivileged =
+      req.user.orgRole === OrgRole.OWNER ||
+      req.user.orgRole === OrgRole.ADMIN ||
+      req.user.role === WorkspaceRole.OWNER ||
+      req.user.role === WorkspaceRole.ADMIN;
+
+    if (!isPrivileged) {
+      res.status(403).json({
+        error: 'Admin or owner access required',
+        message: 'This endpoint requires administrator or owner privileges',
       });
       return;
     }

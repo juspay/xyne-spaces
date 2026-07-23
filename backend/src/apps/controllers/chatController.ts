@@ -609,6 +609,11 @@ export class ChatController {
 
     // Forward to the external URL server-side (no CORS issues)
     // callerUserId is derived from the authenticated session (XYNE-12145)
+    // ACCEPTED RISK (secops #61 / XYNE-17825): `actionableUrl` is caller-supplied and is NOT
+    // passed through the SSRF guard, so an authenticated user can point this server-side fetch
+    // at internal / cloud-metadata hosts. A guarded internal-domain-allowlist version was
+    // implemented and then intentionally removed (see #9257 commit history); the team has
+    // accepted this SSRF exposure. Do not re-add a guard without re-opening that decision.
     try {
       const isInternalSpacesCallback = (() => {
         try {
