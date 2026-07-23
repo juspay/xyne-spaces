@@ -4,11 +4,30 @@ import { getRequesterId, getOrgId, getAgentEditAccess, isClawAdmin } from "../mi
 import { requireS2S } from "../middleware/require-auth.js";
 import { renderClaudeCodeJsonl, renderMarkdown, renderClaudeProjectZip, type SessionExportRun } from "../lib/session-export.js";
 import { prisma } from "../db.js";
+import { CONFIG } from "../config.js";
+import { decrypt } from "../crypto.js";
+import { spacesAppFetch } from "../lib/spaces-api.js";
+import { getDmChannelForUserAndApp } from "../lib/spaces-db.js";
+import { gcsService } from "../services/gcsService.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("runs");
 
 const router = Router();
+
+function decryptStoredToken(stored: string): string | null {
+  const [ciphertext, iv, authTag] = stored.split(":");
+  if (!ciphertext || !iv || !authTag) return null;
+  return decrypt(ciphertext, iv, authTag, CONFIG.encryptionKey);
+}
+
+function truncateForShare(value: string, maxChars: number, note: string): string {
+  return value.length <= maxChars ? value : `${value.slice(0, maxChars)}\n\n_${note}_`;
+}
+
+function quoteMarkdown(value: string): string {
+  return value.split(/\r?\n/).map((line) => `> ${line}`).join("\n");
+}
 
 // GET /runs — list runs for the requesting user
 router.get("/", async (req: Request, res: Response) => {
@@ -101,15 +120,70 @@ router.get("/light", async (req: Request, res: Response) => {
       : 500;
     const status = typeof req.query["status"] === "string" ? req.query["status"] : undefined;
     const agentSlug = typeof req.query["agentSlug"] === "string" ? req.query["agentSlug"] : undefined;
+    const conversationId = typeof req.query["conversationId"] === "string" ? req.query["conversationId"] : undefined;
     const runs = await agentRunRepository.listByUserLight(userId, {
       since,
       limit,
       ...(status ? { status } : {}),
       ...(agentSlug ? { agentSlug } : {}),
+      ...(conversationId ? { conversationId } : {}),
     });
     res.json({ success: true, data: runs });
   } catch (err) {
     log.error("[runs] /light error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+// GET /runs/search — content search over the requester's OWN runs.
+//
+// Case-insensitive substring match on the task text ("find the session where
+// I asked the architect to create memory" → one call instead of paging
+// /runs/light and grepping spill files). Scoped hard to the authenticated
+// user — searching other users' runs is deliberately not offered here.
+//
+// Query params:
+//   - q: required search text (min 2 chars)
+//   - agentSlug: optional agent filter
+//   - limit: 1-50, defaults 20
+//
+// Each row is the light projection plus a `snippet`: ±120 chars of task text
+// around the first match, so the client can show WHY it matched without
+// shipping multi-KB task bodies.
+//
+// Must be declared BEFORE /:sessionId so the literal path takes precedence.
+router.get("/search", async (req: Request, res: Response) => {
+  try {
+    const userId = getRequesterId(req);
+    if (!userId) {
+      res.status(401).json({ success: false, error: "Unauthorized" });
+      return;
+    }
+    const q = typeof req.query["q"] === "string" ? req.query["q"].trim() : "";
+    if (q.length < 2) {
+      res.status(400).json({ success: false, error: "q (min 2 chars) is required" });
+      return;
+    }
+    const agentSlug = typeof req.query["agentSlug"] === "string" ? req.query["agentSlug"] : undefined;
+    const limit = typeof req.query["limit"] === "string"
+      ? Math.min(Math.max(parseInt(req.query["limit"], 10) || 20, 1), 50)
+      : 20;
+    const rows = await agentRunRepository.searchByUser(userId, q, {
+      ...(agentSlug ? { agentSlug } : {}),
+      limit,
+    });
+    const data = rows.map(({ task, ...rest }) => {
+      const at = task.toLowerCase().indexOf(q.toLowerCase());
+      const start = Math.max(0, at - 120);
+      const end = Math.min(task.length, at + q.length + 120);
+      return {
+        ...rest,
+        snippet: `${start > 0 ? "…" : ""}${task.slice(start, end)}${end < task.length ? "…" : ""}`,
+      };
+    });
+    res.json({ success: true, data });
+  } catch (err) {
+    log.error("[runs] /search error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -263,6 +337,21 @@ router.get("/session/export", async (req: Request, res: Response) => {
         name: as.skill.name,
         description: as.skill.description ?? "",
         content: as.skill.content ?? "",
+        // Ship the skill's bundled files (scripts/, assets, …) too. Without
+        // this the SKILL.md loaded but its `scripts/` folder was silently
+        // dropped on the top-level /run path — only the subagent/callable
+        // resolvers included files — so a skill that shells out to its own
+        // scripts appeared "loaded" but its scripts never materialized in the
+        // session. Mirrors subagent-resolver.ts.
+        ...((as.skill.files?.length ?? 0) > 0
+          ? {
+              files: as.skill.files.map((f) => ({
+                relativePath: f.relativePath,
+                content: f.content,
+                contentType: f.contentType ?? undefined,
+              })),
+            }
+          : {}),
       }));
       const zipBuffer = await renderClaudeProjectZip({
         agent: {
@@ -315,6 +404,184 @@ router.get("/:sessionId", async (req: Request<{ sessionId: string }>, res: Respo
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
+
+// POST /runs/:sessionId/share — promote an offline CLI session into Spaces.
+router.post("/:sessionId/share", async (req: Request<{ sessionId: string }>, res: Response) => {
+  const { sessionId } = req.params;
+  try {
+    const requesterId = getRequesterId(req);
+    if (!requesterId) {
+      res.status(401).json({ success: false, error: "Unauthorized" });
+      return;
+    }
+
+    const run = await prisma.agentRun.findUnique({ where: { sessionId } });
+    if (!run) {
+      res.status(404).json({ success: false, error: "Run not found" });
+      return;
+    }
+    if (run.userId !== requesterId) {
+      res.status(403).json({ success: false, error: "Forbidden" });
+      return;
+    }
+
+    const body = (req.body ?? {}) as { channelId?: unknown; deliverTo?: unknown };
+    const channelId = typeof body.channelId === "string" && body.channelId.trim()
+      ? body.channelId.trim()
+      : undefined;
+    const deliverTo = body.deliverTo;
+    if (!channelId && deliverTo !== "dm") {
+      res.status(400).json({ success: false, error: "channelId or deliverTo='dm' is required" });
+      return;
+    }
+    if (deliverTo !== undefined && deliverTo !== "dm") {
+      res.status(400).json({ success: false, error: "deliverTo must be 'dm'" });
+      return;
+    }
+
+    const agent = await prisma.agent.findUnique({
+      where: { orgId_slug: { orgId: run.orgId, slug: run.agentSlug } },
+      select: {
+        name: true,
+        spacesAppToken: true,
+        spacesAppUserId: true,
+        spacesAppId: true,
+      },
+    });
+    if (!agent?.spacesAppToken || !agent.spacesAppUserId || !agent.spacesAppId) {
+      res.status(409).json({
+        success: false,
+        error: `Agent "${run.agentSlug}" has no Xyne Spaces app identity`,
+      });
+      return;
+    }
+
+    const appToken = decryptStoredToken(agent.spacesAppToken);
+    if (!appToken) {
+      res.status(409).json({
+        success: false,
+        error: `Agent "${run.agentSlug}" has an invalid Xyne Spaces app identity`,
+      });
+      return;
+    }
+
+    let targetChannelId = channelId;
+    if (!targetChannelId && deliverTo === "dm") {
+      targetChannelId = await getDmChannelForUserAndApp(requesterId, agent.spacesAppId) ?? undefined;
+      if (!targetChannelId) {
+        res.status(409).json({
+          success: false,
+          error: `Could not resolve an existing Xyne Spaces DM with agent "${run.agentSlug}"`,
+        });
+        return;
+      }
+    }
+
+    const result = truncateForShare(run.result ?? "(Session completed with no result.)", 4_000, "Result truncated for sharing");
+    const originalTask = truncateForShare(run.task, 500, "Original task truncated");
+    const markdownText = [
+      `↪️ Continuing a session started offline with ${agent.name}`,
+      result,
+      quoteMarkdown(`Original task\n${originalTask}`),
+    ].join("\n\n");
+
+    const postResult = (await spacesAppFetch("/chat/postMessage", {
+      channelId: targetChannelId,
+      markdownText,
+      userId: agent.spacesAppUserId,
+      metadata: { contentFormat: "markdown" },
+    }, appToken)) as { conversationId?: string; messageId?: string };
+    const newConversationId = postResult.conversationId;
+    const messageId = postResult.messageId;
+    if (!newConversationId || !messageId) {
+      throw new Error("Spaces postMessage response did not include conversationId and messageId");
+    }
+
+    let continuity = false;
+    if (!run.conversationId) {
+      log.warn(`[runs/share] no source conversation sessionId=${sessionId} agent=${run.agentSlug}`);
+    } else {
+      const sourcePrefix = `claw-sessions/${run.conversationId}_${run.agentSlug}/`;
+      const destinationPrefix = `claw-sessions/${newConversationId}_${run.agentSlug}/`;
+      try {
+        const sourceObjects = (await gcsService.listFiles(sourcePrefix)).filter((name) => {
+          const relativePath = name.slice(sourcePrefix.length);
+          return relativePath.length > 0 && !relativePath.startsWith("debug/");
+        });
+        if (sourceObjects.length === 0) {
+          log.warn(`[runs/share] session archive missing sessionId=${sessionId} source=${sourcePrefix}`);
+        } else {
+          for (const sourceObject of sourceObjects) {
+            const relativePath = sourceObject.slice(sourcePrefix.length);
+            const content = await gcsService.getFileBuffer(sourceObject);
+            const metadata = await gcsService.getMetadata(sourceObject);
+            await gcsService.uploadFile(
+              content,
+              `${destinationPrefix}${relativePath}`,
+              metadata.contentType ?? "application/octet-stream",
+            );
+          }
+          continuity = true;
+        }
+      } catch (err) {
+        log.warn(
+          `[runs/share] continuity copy failed sessionId=${sessionId} agent=${run.agentSlug}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
+    log.info(
+      `[runs/share] shared sessionId=${sessionId} agent=${run.agentSlug} target=${deliverTo === "dm" && !channelId ? "dm:" : "channel:"}${targetChannelId} by-user=${requesterId} continuity=${continuity}`,
+    );
+    res.json({
+      success: true,
+      data: {
+        channelId: targetChannelId,
+        conversationId: newConversationId,
+        messageId,
+        continuity,
+      },
+    });
+  } catch (err) {
+    log.error(`[runs/share] error sessionId=${sessionId}:`, err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+// POST /runs/by-message/:chatMessageId/rate — thumbs up/down + optional comment,
+// keyed by the assistant ChatMessage id (available to the client the instant a
+// turn completes, unlike the run sessionId which lags behind a /messages fetch).
+router.post(
+  "/by-message/:chatMessageId/rate",
+  async (req: Request<{ chatMessageId: string }>, res: Response) => {
+    try {
+      const userId = getRequesterId(req);
+      if (!userId) {
+        res.status(401).json({ success: false, error: "Unauthorized" });
+        return;
+      }
+      const { rating, comment } = req.body as { rating?: string; comment?: string | null };
+      if (rating !== "up" && rating !== "down") {
+        res.status(400).json({ success: false, error: "rating must be 'up' or 'down'" });
+        return;
+      }
+      const result = await agentRunRepository.rateByChatMessageId(
+        req.params.chatMessageId,
+        userId,
+        rating,
+        comment ?? null,
+      );
+      if (result.count === 0) {
+        res.status(404).json({ success: false, error: "Run not found for message" });
+        return;
+      }
+      res.json({ success: true });
+    } catch (err) {
+      log.error("[runs] rate-by-message error:", err);
+      res.status(500).json({ success: false, error: "Internal server error" });
+    }
+  },
+);
 
 // POST /runs/:sessionId/rate — thumbs up/down + optional comment
 router.post("/:sessionId/rate", async (req: Request<{ sessionId: string }>, res: Response) => {

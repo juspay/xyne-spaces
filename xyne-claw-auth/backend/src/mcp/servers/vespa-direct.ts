@@ -61,7 +61,7 @@ function rankInputKey(k: string): string | null {
 }
 
 /** Standard input set for the default_native relevance profile. */
-function defaultNativeInputs(query: string): Record<string, unknown> {
+export function defaultNativeInputs(query: string): Record<string, unknown> {
   const text = query.trim();
   return {
     "input.query(alpha)": 0.5,
@@ -150,7 +150,7 @@ export const ACL = {
 
 // ── Result transformer ────────────────────────────────────────────────────────
 
-interface SearchResult {
+export interface SearchResult {
   id: string;
   type: string;
   title: string;
@@ -160,6 +160,11 @@ interface SearchResult {
   metadata?: Record<string, unknown>;
   searchContext?: Record<string, unknown>;
   rawFields?: Record<string, unknown>;
+  /** Per-hit rank feature breakdown (bm25(text), vector_score, combined_nativeRank,
+   *  etc.) — whatever the active rank profile's `match-features {}` block declares.
+   *  Vespa attaches these to `fields.matchfeatures`/`rankfeatures` automatically
+   *  whenever the profile declares them; mirrors resultTransform.ts's debugInfo. */
+  debugInfo?: { matchfeatures?: Record<string, unknown>; rankfeatures?: Record<string, unknown> };
 }
 
 /**
@@ -394,6 +399,14 @@ export function transformHit(
       ...(folderId ? { folderId } : {}),
       ...(projectId ? { projectId } : {}),
     },
+    ...("matchfeatures" in f || "rankfeatures" in f
+      ? {
+          debugInfo: {
+            ...("matchfeatures" in f ? { matchfeatures: f["matchfeatures"] as Record<string, unknown> } : {}),
+            ...("rankfeatures" in f ? { rankfeatures: f["rankfeatures"] as Record<string, unknown> } : {}),
+          },
+        }
+      : {}),
     ...(includeRawFields ? { rawFields: f } : {}),
   };
 }
@@ -454,7 +467,9 @@ function extractGroups(
 
 // ── Vespa HTTP client ─────────────────────────────────────────────────────────
 
-async function callVespa(payload: Record<string, unknown>, endpoint: string): Promise<Record<string, unknown>> {
+/** Raw Vespa /search/ POST — no ACL/workspace logic of its own; callers (queryDirect,
+ *  and the ACL-bypassing search-eval-vespa.ts) are responsible for what's in `payload.yql`. */
+export async function callVespa(payload: Record<string, unknown>, endpoint: string): Promise<Record<string, unknown>> {
   const url = `${endpoint}/search/`;
   const response = await fetch(url, {
     method: "POST",
@@ -525,6 +540,41 @@ export function aclConditionForSchema(schema: string, userId: string, _yql: stri
     default:
       // Fail closed: unknown source still gets a membership guard.
       return ACL.simple(userId);
+  }
+}
+
+/**
+ * Public-only visibility condition for a schema — matches content anyone
+ * could see, no channel membership required. Used by search-eval-vespa.ts's
+ * "without permission" mode: that path has no real authenticated user to
+ * check `permissions` against, so it must never fall back to "no restriction
+ * at all" (that was the prior, unsafe behavior — it exposed private channels
+ * and DMs). This is the honest alternative: public content only.
+ *
+ * - message/channel/ticket/file: each carries (or imports from its channel) an
+ *   `isPrivate` bool — public == `isPrivate contains "false"` (same field
+ *   ACL.channel/ACL.filePerm OR into their real per-user guard).
+ * - mail: there is no public/private concept for email — every message has a
+ *   fixed recipient set, so nothing can ever legitimately be "public mail".
+ *   Returns a condition that's always false (checked against the real `docType`
+ *   field so Vespa doesn't hard-error like it would on a genuinely missing
+ *   field) rather than throwing, so an "All types" run still returns the
+ *   other schemas' public results instead of aborting entirely.
+ */
+export function publicOnlyConditionForSchema(schema: string): string {
+  switch (schema.toLowerCase()) {
+    case "message":
+    case "chat_message":
+    case "channel":
+    case "chat_container":
+    case "ticket":
+    case "file":
+      return `isPrivate contains "false"`;
+    case "mail":
+    case "mail_attachment":
+      return `docType contains "__no_public_mail__"`;
+    default:
+      throw new Error(`publicOnlyConditionForSchema: no public/private policy defined for schema "${schema}".`);
   }
 }
 

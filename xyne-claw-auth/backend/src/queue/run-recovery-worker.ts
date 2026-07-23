@@ -1,6 +1,8 @@
 import { Queue, Worker, type Job } from "bullmq";
+import { Redis } from "ioredis";
 import { CONFIG } from "../config.js";
 import { redisService } from "../redis.js";
+import { prisma } from "../db.js";
 import { spacesAppFetch } from "../lib/spaces-api.js";
 import { enqueueMessage, type QueuedMessage } from "../lib/message-queue.js";
 
@@ -9,7 +11,10 @@ const log = createLogger("run-recovery-worker");
 
 const RECOVERY_PREFIX = "run-recovery:";
 const SESSION_TO_ROOT_PREFIX = "run-recovery-session:";
+const HANDOFF_DEDUPE_PREFIX = "run-recovery-handoff-dedupe:";
 const RECOVERY_TTL_SECONDS = 24 * 60 * 60;
+const HANDOFF_DEDUPE_TTL_SECONDS = 10 * 60;
+const MAX_HANDOFFS_PER_RUN = 3;
 const QUEUE_NAME = "agent-run-recovery";
 
 interface RecoveryDispatchPayload {
@@ -30,11 +35,15 @@ interface RecoveryDispatchPayload {
   context?: string;
   detached?: boolean;
   agentConfig?: Record<string, unknown>;
+  fastMode?: boolean;
+  resumedFromHandoff?: boolean;
   __persistedByCaller?: boolean;
   skills?: Array<{ name: string; content: string }>;
   provider?: string;
+  providerOrder?: string[];
   subagentProviders?: Record<string, string>;
   providerConfigs?: Record<string, { apiKey: string; model: string; baseUrl?: string; authType?: string }>;
+  sessionToken?: string;
   attachments?: Array<{ fileName: string; mimeType: string; data: string }>;
   workspaceId?: string;
   resultForwardUrl?: string;
@@ -83,6 +92,8 @@ interface RunRecoveryState {
   lastError: string | null;
   /** Count of session_locked deferrals (see deferLockContentionRetry). */
   lockDeferrals?: number;
+  /** Count of explicit drain handoffs for this root run. Caps deploy crash-loop ping-pong. */
+  handoffsUsed?: number;
   dispatchPayload: RecoveryDispatchPayload;
   sessionContext: RecoverySessionContext;
   sessionHistory: string[];
@@ -168,10 +179,10 @@ async function deferLockContentionRetry(state: RunRecoveryState): Promise<boolea
   return true;
 }
 
-async function enqueueLockContentionRun(state: RunRecoveryState): Promise<void> {
+async function enqueueLockContentionRun(state: RunRecoveryState): Promise<boolean> {
   const { dispatchPayload, sessionContext } = state;
-  if (sessionContext.responseMode !== "conversation") return;
-  if (!dispatchPayload.conversationId || !dispatchPayload.agentSlug || !dispatchPayload.task) return;
+  if (sessionContext.responseMode !== "conversation") return false;
+  if (!dispatchPayload.conversationId || !dispatchPayload.agentSlug || !dispatchPayload.task) return false;
   const workspaceId = dispatchPayload.workspaceId ?? sessionContext.workspaceId;
   const queuedMsg: QueuedMessage = {
     eventId: `lock:${state.rootSessionId}`,
@@ -192,6 +203,7 @@ async function enqueueLockContentionRun(state: RunRecoveryState): Promise<void> 
   };
   const enq = await enqueueMessage(queuedMsg);
   log.info(`[run-recovery] lock contention queued root=${state.rootSessionId} conv=${queuedMsg.conversationId} agent=${queuedMsg.agentSlug} enqueued=${enq.enqueued} deduped=${enq.deduped} full=${enq.full} pos=${enq.position}`);
+  return enq.enqueued || enq.deduped;
 }
 
 function getQueue(): Queue<RunRecoveryJobData> {
@@ -228,11 +240,40 @@ export async function getRecoveryRootSessionId(sessionId: string): Promise<strin
   return fallback ? sessionId : null;
 }
 
+/**
+ * The session a run is CURRENTLY executing under, given the session it was
+ * originally dispatched as. A run that exceeds claw's turn limit doesn't end —
+ * it checkpoints and is re-dispatched under a fresh sessionId (see
+ * handleRunHandoff), and the chain is recorded in `sessionHistory`. Callers
+ * that poll a dispatched run (the error-pipeline runner) must follow that
+ * chain, or they read the ORIGINAL row — finalized empty at the handoff — and
+ * report "no response" while the real answer lands on the continuation.
+ *
+ * Returns null when the session isn't tracked, or the newest session when it
+ * is (== the argument itself if there was no handoff), so it's authoritative
+ * identity rather than a guess based on timing.
+ */
+export async function getLatestSessionForRun(sessionId: string): Promise<string | null> {
+  const rootSessionId = await getRecoveryRootSessionId(sessionId);
+  if (!rootSessionId) return null;
+  const state = await loadState(rootSessionId);
+  if (!state) return null;
+  return state.sessionHistory[state.sessionHistory.length - 1] ?? rootSessionId;
+}
+
 export async function getRecoveryContextForSession(sessionId: string): Promise<RecoverySessionContext | null> {
   const rootSessionId = await getRecoveryRootSessionId(sessionId);
   if (!rootSessionId) return null;
   const state = await loadState(rootSessionId);
   return state?.sessionContext ?? null;
+}
+
+/** True while a handoff continuation or its scheduled retry can still produce a result. */
+export async function hasActiveRunRecovery(sessionId: string): Promise<boolean> {
+  const rootSessionId = await getRecoveryRootSessionId(sessionId);
+  if (!rootSessionId) return false;
+  const state = await loadState(rootSessionId);
+  return state?.status === "running";
 }
 
 /**
@@ -379,6 +420,11 @@ async function dispatchRetry(rootSessionId: string, reason: string): Promise<voi
       if (isSessionLockedFailure(err)) {
         state.retriesUsed = Math.max(0, state.retriesUsed - 1);
         state.lastError = err;
+        if (state.dispatchPayload.resumedFromHandoff === true) {
+          if (await deferLockContentionRetry(state)) return;
+          await markExhausted(state, "session_locked after handoff (lock never released)");
+          return;
+        }
         if (isOneShotScheduledConversation(state.dispatchPayload.conversationId)) {
           // Scheduled run colliding with its own still-running original:
           // defer a re-dispatch (the FIFO for this one-shot conversationId
@@ -599,7 +645,67 @@ export function initRunRecoveryWorker(): void {
     void rearmRunningRecoveries();
   }
 
+  startHandoffSignalConsumer();
+
   log.info("[run-recovery] Worker started");
+}
+
+// ── Redis handoff-signal consumer ────────────────────────────────────────────
+// Drain-time handoff signals arrive as LPUSHed records on this list (see
+// xyne-claw/src/handoff-redis.ts — key strings must match). This replaced the
+// HTTP callback as the PRIMARY channel after the HTTP hop failed three
+// different ways in two days (zero-endpoint rollout window, purge-on-boot, and
+// a version-skew 401 on 2026-07-16 that silently dropped ~50 handoffs — the
+// /sessions/:id/result fallback route was shadowed by the mcp router's Bearer
+// middleware and had never actually worked). The record carries only
+// sessionId — handleRunHandoff loads everything else from the recovery
+// registration and is idempotent (NX dedupe), so consuming a duplicate or
+// stale signal is harmless.
+
+const HANDOFF_SIGNAL_QUEUE_KEY = "claw:handoff:signals";
+
+let handoffConsumerStarted = false;
+
+export function startHandoffSignalConsumer(): void {
+  if (handoffConsumerStarted) return;
+  handoffConsumerStarted = true;
+  // Dedicated connection: BRPOP blocks, so it must never share the BullMQ /
+  // general-purpose connection.
+  const conn = new Redis(redisService.getRedisConfig());
+  conn.on("error", (err: Error) => {
+    log.warn(`[handoff-signal] redis error: ${err.message}`);
+  });
+  void (async () => {
+    log.info("[handoff-signal] consumer started");
+    for (;;) {
+      try {
+        const popped = await conn.brpop(HANDOFF_SIGNAL_QUEUE_KEY, 5);
+        if (!popped) continue;
+        let sessionId: string | undefined;
+        let lastTurn: number | undefined;
+        try {
+          const parsed = JSON.parse(popped[1]) as { sessionId?: string; lastTurn?: number };
+          sessionId = typeof parsed.sessionId === "string" ? parsed.sessionId : undefined;
+          lastTurn = typeof parsed.lastTurn === "number" ? parsed.lastTurn : undefined;
+        } catch {
+          log.warn(`[handoff-signal] dropping malformed record: ${popped[1].slice(0, 200)}`);
+          continue;
+        }
+        if (!sessionId) continue;
+        const outcome = await handleRunHandoff(sessionId);
+        if (outcome) {
+          log.info(
+            `[handoff-signal] consumed session=${sessionId} lastTurn=${lastTurn ?? "?"} → re-dispatched root=${outcome.rootSessionId} newSession=${outcome.newSessionId}`,
+          );
+        } else {
+          log.info(`[handoff-signal] consumed session=${sessionId} — no re-dispatch (stale/duplicate/no recovery state)`);
+        }
+      } catch (err) {
+        log.error(`[handoff-signal] consume loop error: ${err instanceof Error ? err.message : String(err)}`);
+        await new Promise((resolve) => setTimeout(resolve, 2_000));
+      }
+    }
+  })();
 }
 
 export async function closeRunRecoveryWorker(): Promise<void> {
@@ -654,7 +760,117 @@ export async function touchRunRecovery(sessionId: string): Promise<void> {
   await saveState(state);
 }
 
-export async function handleRunCompletion(sessionId: string, status: "completed" | "failed", error?: string): Promise<{ retried: boolean; exhausted: boolean; rootSessionId: string; retriesUsed: number; maxRetries: number } | null> {
+export async function handleRunHandoff(sessionId: string): Promise<{ rootSessionId: string; newSessionId: string; retriesUsed: number; maxRetries: number } | null> {
+  const rootSessionId = await getRecoveryRootSessionId(sessionId);
+  if (!rootSessionId) return null;
+
+  const state = await loadState(rootSessionId);
+  if (!state || state.status !== "running") return null;
+  if (state.activeSessionId !== sessionId) {
+    log.info(`[run-recovery] stale handoff ignored root=${rootSessionId} callbackSession=${sessionId} activeSession=${state.activeSessionId}`);
+    return null;
+  }
+  const deduped = await redisService.getConnection().set(
+    `${HANDOFF_DEDUPE_PREFIX}${sessionId}`,
+    "1",
+    "EX",
+    HANDOFF_DEDUPE_TTL_SECONDS,
+    "NX",
+  );
+  if (deduped !== "OK") {
+    log.info(`[run-recovery] duplicate handoff ignored root=${rootSessionId} session=${sessionId}`);
+    return null;
+  }
+
+  // Duplicate-echo guard (2026-07-17): a run can COMPLETE normally after its
+  // drain-time handoff signal was emitted but before it is consumed — session
+  // b315a804 completed and was re-dispatched in the SAME second, fully
+  // re-running an 11-minute task (the claw-side idempotency-marker pre-check
+  // lost the same race). The recovery state can still read "running" while
+  // the completion handler is mid-flight, so consult the run row itself: any
+  // terminal status means the work already finished and this signal is an
+  // echo — drop it and let the completion path own cleanup.
+  const runRow = await prisma.agentRun
+    .findUnique({ where: { sessionId }, select: { status: true } })
+    .catch(() => null);
+  if (runRow && runRow.status !== "running") {
+    log.info(
+      `[run-recovery] handoff ignored — run already terminal root=${rootSessionId} session=${sessionId} status=${runRow.status}`,
+    );
+    return null;
+  }
+  // Second layer: the GCS result marker (written by claw BEFORE its completion
+  // callback) — catches the case where the run-row update itself is what's
+  // racing us.
+  if (await runAlreadyCompleted(recoveryIdempotencyKey(state))) {
+    log.info(`[run-recovery] handoff ignored — result marker exists root=${rootSessionId} session=${sessionId}`);
+    return null;
+  }
+
+  state.handoffsUsed = (state.handoffsUsed ?? 0) + 1;
+  if (state.handoffsUsed > MAX_HANDOFFS_PER_RUN) {
+    await markExhausted(state, `handoff cap exceeded (${state.handoffsUsed}/${MAX_HANDOFFS_PER_RUN})`);
+    return null;
+  }
+
+  await removeWatchdog(state.rootSessionId, state.activeSessionId).catch(() => {});
+  await getQueue().getJob(dispatchJobId(state.rootSessionId)).then((job) => (job ? job.remove() : undefined)).catch(() => {});
+  state.retryScheduled = false;
+  state.lastError = "handoff";
+  state.lastHeartbeatAt = Date.now();
+  state.dispatchPayload = {
+    ...state.dispatchPayload,
+    resumedFromHandoff: true,
+    idempotencyKey: recoveryIdempotencyKey(state),
+  };
+  await saveState(state);
+
+  if (typeof state.dispatchPayload.orgId !== "string" || !state.dispatchPayload.orgId) {
+    await markExhausted(state, "handoff dispatch missing orgId");
+    return null;
+  }
+
+  let body: { success?: boolean; sessionId?: string; error?: string };
+  try {
+    const runRes = await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+      },
+      body: JSON.stringify(state.dispatchPayload),
+      signal: AbortSignal.timeout(30_000),
+    });
+    body = (await runRes.json().catch(() => ({}))) as { success?: boolean; sessionId?: string; error?: string };
+    if (!runRes.ok || body.success !== true || !body.sessionId) {
+      throw new Error(body.error ?? `HTTP ${runRes.status}`);
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const errMsg = msg ? `handoff dispatch failed: ${msg}` : "handoff dispatch failed";
+    state.lastError = errMsg;
+    state.retryScheduled = true;
+    state.lastHeartbeatAt = Date.now();
+    await saveState(state);
+    await scheduleDispatch(state.rootSessionId, errMsg, state.retryBackoffMs);
+    return null;
+  }
+
+  const newSessionId = body.sessionId!;
+  state.activeSessionId = newSessionId;
+  state.lastHeartbeatAt = Date.now();
+  state.retryScheduled = false;
+  state.lastError = null;
+  state.lockDeferrals = 0;
+  state.sessionHistory.push(newSessionId);
+  await saveState(state);
+  await mapSessionToRoot(newSessionId, state.rootSessionId);
+  await scheduleWatchdog(state.rootSessionId, newSessionId, state.timeoutMs);
+  log.info(`[run-recovery] handoff re-dispatched root=${state.rootSessionId} oldSession=${sessionId} newSession=${newSessionId} idempotencyKey=${recoveryIdempotencyKey(state)}`);
+  return { rootSessionId, newSessionId, retriesUsed: state.retriesUsed, maxRetries: state.maxRetries };
+}
+
+export async function handleRunCompletion(sessionId: string, status: "completed" | "failed", error?: string): Promise<{ retried: boolean; exhausted: boolean; rootSessionId: string; retriesUsed: number; maxRetries: number; terminalDrop?: boolean } | null> {
   const rootSessionId = await getRecoveryRootSessionId(sessionId);
   if (!rootSessionId) return null;
 
@@ -677,6 +893,14 @@ export async function handleRunCompletion(sessionId: string, status: "completed"
 
   if (status === "failed" && isSessionLockedFailure(error)) {
     state.lastError = error ?? null;
+    if (state.dispatchPayload.resumedFromHandoff === true) {
+      await removeWatchdog(state.rootSessionId, state.activeSessionId).catch(() => {});
+      if (await deferLockContentionRetry(state)) {
+        return { retried: true, exhausted: false, rootSessionId, retriesUsed: state.retriesUsed, maxRetries: state.maxRetries };
+      }
+      await markExhausted(state, "session_locked after handoff (lock never released)");
+      return { retried: false, exhausted: true, rootSessionId, retriesUsed: state.retriesUsed, maxRetries: state.maxRetries, terminalDrop: true };
+    }
     if (isOneShotScheduledConversation(state.dispatchPayload.conversationId)) {
       // Scheduled run: defer a re-dispatch instead of queueing into a FIFO
       // nobody drains (one-shot conversationId). Report retried:true so the
@@ -686,17 +910,25 @@ export async function handleRunCompletion(sessionId: string, status: "completed"
         return { retried: true, exhausted: false, rootSessionId, retriesUsed: state.retriesUsed, maxRetries: state.maxRetries };
       }
       await markExhausted(state, "session_locked (lock never released)");
-      return { retried: false, exhausted: true, rootSessionId, retriesUsed: state.retriesUsed, maxRetries: state.maxRetries };
+      return { retried: false, exhausted: true, rootSessionId, retriesUsed: state.retriesUsed, maxRetries: state.maxRetries, terminalDrop: true };
     }
     state.status = "completed";
     state.retryScheduled = false;
     state.lastHeartbeatAt = Date.now();
-    await enqueueLockContentionRun(state).catch((err) => {
+    const recovered = await enqueueLockContentionRun(state).catch((err) => {
       log.warn(`[run-recovery] lock contention enqueue failed root=${state.rootSessionId}: ${err instanceof Error ? err.message : String(err)}`);
+      return false;
     });
     await saveState(state);
     await removeWatchdog(state.rootSessionId, state.activeSessionId).catch(() => {});
-    return { retried: false, exhausted: false, rootSessionId, retriesUsed: state.retriesUsed, maxRetries: state.maxRetries };
+    return {
+      retried: false,
+      exhausted: false,
+      rootSessionId,
+      retriesUsed: state.retriesUsed,
+      maxRetries: state.maxRetries,
+      ...(!recovered ? { terminalDrop: true } : {}),
+    };
   }
 
   state.lastError = error ?? null;

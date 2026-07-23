@@ -641,7 +641,15 @@ export function verifyActionSignature(action: Record<string, unknown>, signature
 
 const router = Router();
 
-router.use("/:sessionId", requireStrictS2S, requireSessionToken);
+// Scope the Bearer gate to the subpaths this router actually serves
+// (/:sessionId/mcp/* and /:sessionId/actions/*). A bare "/:sessionId" prefix
+// SHADOWED every other route under /sessions/:id — most damagingly
+// POST /sessions/:id/result in run.ts (the handoff/result callback fallback),
+// which 401'd "Bearer token required" on every delivery: claw callbacks send
+// x-s2s-key + x-session-token, never a Bearer. Found 2026-07-16 when a drain
+// dropped ~50 handoff callbacks; the route had never worked.
+router.use("/:sessionId/mcp", requireStrictS2S, requireSessionToken);
+router.use("/:sessionId/actions", requireStrictS2S, requireSessionToken);
 
 router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, res: Response) => {
   try {
@@ -1077,7 +1085,8 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
     if (serverType === WEBFETCH_SERVER_TYPE) {
       const isIntrospect = (AGENT_INTROSPECT_TOOL_NAMES as readonly string[]).includes(tool);
       const isOrchestrator = (ORCHESTRATOR_TOOL_NAMES as readonly string[]).includes(tool);
-      if (tool !== "webfetch" && !isIntrospect && !isOrchestrator) {
+      const isWebfetch = tool === "webfetch" || tool === "webfetch_high_limit";
+      if (!isWebfetch && !isIntrospect && !isOrchestrator) {
         res.status(400).json({ success: false, error: `Unknown built-in tool: ${tool}` });
         return;
       }
@@ -1092,7 +1101,7 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
                 ...(spacesAppId ? { spacesAppId } : {}),
                 ...(sessionAgentOrgId ? { orgId: sessionAgentOrgId } : {}),
               })
-            : await handleWebfetch(params ?? {});
+            : await handleWebfetch(params ?? {}, { highLimit: tool === "webfetch_high_limit" });
         res.json({ success: true, data: { content } });
       } catch (err) {
         log.error(`[mcp/call] built-in tool error (${tool}):`, err);
@@ -1529,7 +1538,7 @@ router.post("/:sessionId/actions/sign", async (req: Request<{ sessionId: string 
     const agentSlug = req.session?.agentSlug;
     const spacesAppId = req.session?.spacesAppId;
     const sessionAgentOrgId = await resolveSessionAgentOrgId(userId, spacesAppId);
-    const { pendingAction } = req.body as {
+    const body = req.body as {
       pendingAction?: {
         serverType?: string;
         tool?: string;
@@ -1537,28 +1546,50 @@ router.post("/:sessionId/actions/sign", async (req: Request<{ sessionId: string 
         userId?: string;
         signature?: string;
       };
+      // Initial-signing shape (2026-07-15): claw's custom-tool write wrapper
+      // (custom-tools.ts signWriteAction) sends the bare action — it CANNOT
+      // pre-sign because the HMAC key lives only here. The session token +
+      // S2S key on this route already authenticate the caller as the run
+      // itself, which is exactly the authority the /mcp/call path uses when
+      // it mints signatures for MCP-server write tools inline. Without this
+      // branch, claw-side custom write tools (create-skill was the first)
+      // 400'd with "pendingAction is required" — the signed-pendingAction
+      // shape below only served re-sign/param-edit flows.
+      serverType?: string;
+      tool?: string;
+      params?: Record<string, unknown>;
     };
 
-    if (!pendingAction || typeof pendingAction !== "object") {
+    let serverType: string | undefined;
+    let tool: string | undefined;
+    let actionParams: Record<string, unknown>;
+
+    if (body.pendingAction && typeof body.pendingAction === "object") {
+      // Re-sign shape: verify the existing signature before re-issuing.
+      const { serverType: st, tool: t, params, userId: pendingUserId, signature } = body.pendingAction;
+      if (!st || !t || !pendingUserId || !signature) {
+        res.status(400).json({ success: false, error: "pendingAction must include serverType, tool, userId, signature" });
+        return;
+      }
+      if (pendingUserId !== userId) {
+        res.status(403).json({ success: false, error: "pendingAction user does not match session user" });
+        return;
+      }
+      actionParams = params ?? {};
+      const action = { serverType: st, tool: t, params: actionParams, userId: pendingUserId };
+      if (!verifyActionSignature(action, signature)) {
+        res.status(400).json({ success: false, error: "Invalid pendingAction signature" });
+        return;
+      }
+      serverType = st;
+      tool = t;
+    } else if (typeof body.serverType === "string" && typeof body.tool === "string") {
+      // Initial-signing shape from the run itself (see note above).
+      serverType = body.serverType;
+      tool = body.tool;
+      actionParams = (body.params && typeof body.params === "object" ? body.params : {}) as Record<string, unknown>;
+    } else {
       res.status(400).json({ success: false, error: "pendingAction is required" });
-      return;
-    }
-
-    const { serverType, tool, params, userId: pendingUserId, signature } = pendingAction;
-    if (!serverType || !tool || !pendingUserId || !signature) {
-      res.status(400).json({ success: false, error: "pendingAction must include serverType, tool, userId, signature" });
-      return;
-    }
-
-    if (pendingUserId !== userId) {
-      res.status(403).json({ success: false, error: "pendingAction user does not match session user" });
-      return;
-    }
-
-    const actionParams = params ?? {};
-    const action = { serverType, tool, params: actionParams, userId: pendingUserId };
-    if (!verifyActionSignature(action, signature)) {
-      res.status(400).json({ success: false, error: "Invalid pendingAction signature" });
       return;
     }
 
@@ -1615,6 +1646,19 @@ router.post("/:sessionId/actions/sign", async (req: Request<{ sessionId: string 
         return;
       }
     } else {
+      // Custom in-claw write tools (source `custom:<serverType>` in the
+      // shared registry, e.g. create-skill → serverType "skill") have no
+      // connector definition or credentials — validate against the registry
+      // instead: the tool must exist under that source AND be a write tool.
+      // Their execution side is a dedicated flow-action branch (e.g.
+      // serverType==="skill"), not the MCP runner.
+      const { getAllCustomTools } = await import("xyne-claw-shared");
+      const customWriteTool = getAllCustomTools().find(
+        (ct) => ct.source === `custom:${serverType}` && ct.slug === tool && ct.isWriteTool === true,
+      );
+      if (customWriteTool) {
+        // Registry match is the validation; fall through to signing.
+      } else {
       // Revalidate non-gateway actions before issuing a signature.
       if (!(await hasConnectorDefinition(serverType))) {
         res.status(400).json({ success: false, error: `No adapter for server type: ${serverType}` });
@@ -1639,6 +1683,7 @@ router.post("/:sessionId/actions/sign", async (req: Request<{ sessionId: string 
       if (validationError) {
         res.status(400).json({ success: false, error: validationError });
         return;
+      }
       }
     }
 

@@ -345,7 +345,7 @@ export function MetricsPageV3({ userId }: MetricsPageV3Props) {
             </h1>
             <p className="text-[13px] text-xyne-fg-muted mt-1">
               {selectedAgent
-                ? `Latency, throughput, and tool-by-tool breakdown for ${selectedAgent}.`
+                ? `Latency, throughput, tokens, users, and tool-by-tool breakdown for ${selectedAgent}.`
                 : "Latency, throughput, and error trends across all agents and users."}
             </p>
           </div>
@@ -473,9 +473,69 @@ function TotalsStrip({ data }: { data: GlobalMetrics | AgentMetrics }) {
           value={`${data.totals.completed}✓`}
           sub={`${data.totals.failed}✗ · ${data.totals.cancelled}⊘`}
         />
+        {"uniqueUsers" in data.totals && data.totals.uniqueUsers != null && (
+          <Tile
+            label="Unique users"
+            value={String(data.totals.uniqueUsers)}
+            sub="distinct users in this window"
+          />
+        )}
+        {/* The managed number for memory: % of runs that actually recalled
+            from the bank. A growing bank with a flat rate here = dead weight. */}
+        {"memoryRecall" in data.totals && data.totals.memoryRecall != null && (
+          <Tile
+            label="Memory usage"
+            value={`${Math.round(data.totals.memoryRecall.rate * 100)}%`}
+            sub={`${data.totals.memoryRecall.runsWithRecall} runs recalled memory`}
+          />
+        )}
       </div>
+
+      {/* Token consumption for the window. IN counts fresh + cached input —
+          cached context is replayed on every turn and dominates real volume
+          on agentic loops; fresh-only "in" understates usage ~10x. Only the
+          per-agent endpoint reports tokens, hence the narrowing guard. */}
+      {"tokens" in data.totals && data.totals.tokens && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <Tile
+            label="Tokens in"
+            value={fmtTokens(data.totals.tokens.in + data.totals.tokens.cacheRead + data.totals.tokens.cacheWrite)}
+            sub={`${fmtTokens(data.totals.tokens.in)} fresh · ${fmtTokens(data.totals.tokens.cacheRead + data.totals.tokens.cacheWrite)} cached`}
+          />
+          <Tile
+            label="Tokens out"
+            value={fmtTokens(data.totals.tokens.out)}
+          />
+          <Tile
+            label="Cache hit ratio"
+            value={
+              data.totals.tokens.in + data.totals.tokens.cacheRead > 0
+                ? `${Math.round((data.totals.tokens.cacheRead / (data.totals.tokens.in + data.totals.tokens.cacheRead)) * 100)}%`
+                : "—"
+            }
+            sub="of input context served from cache"
+          />
+          <Tile
+            label="Tokens / run"
+            value={
+              data.totals.runs > 0
+                ? fmtTokens(Math.round((data.totals.tokens.in + data.totals.tokens.cacheRead + data.totals.tokens.cacheWrite + data.totals.tokens.out) / data.totals.runs))
+                : "—"
+            }
+            sub="total processed, avg per run"
+          />
+        </div>
+      )}
     </div>
   );
+}
+
+/** 1234567 → "1.2M", 45600 → "45.6K" — token counts read better compact. */
+function fmtTokens(n: number): string {
+  if (n >= 1e9) return `${(n / 1e9).toFixed(1)}B`;
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+  if (n >= 1e3) return `${(n / 1e3).toFixed(1)}K`;
+  return String(n);
 }
 
 function Hero({ label, help, value, delta }: { label: string; help: string; value: string; delta: { label: string; tone: "good" | "bad" | "flat" } }) {

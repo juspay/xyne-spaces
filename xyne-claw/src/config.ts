@@ -37,14 +37,17 @@ export const PATHS = {
   agentDir: process.env["XYNE_CLAW_AGENT_DIR"] ?? "",
 } as const;
 
+const litellmModel = process.env["LITELLM_MODEL"]?.trim() || "claude-sonnet-4-20250514";
+const litellmFastModel = process.env["LITELLM_FAST_MODEL"]?.trim() || litellmModel;
+
 export const LITELLM = {
   url: process.env["LITELLM_URL"] ?? "http://localhost:4000",
   apiKey: process.env["LITELLM_API_KEY"] ?? "",
-  model: process.env["LITELLM_MODEL"] ?? "claude-sonnet-4-20250514",
+  model: litellmModel,
   // Cheap-and-fast model used by judge/boss roles (chain-judge, goal-judge).
   // Boss decisions are short structured calls; running them on the same big
   // model as the worker would double the per-turn cost for marginal quality.
-  fastModel: process.env["LITELLM_FAST_MODEL"] ?? "open-large",
+  fastModel: litellmFastModel,
 } as const;
 
 export const AGENT = {

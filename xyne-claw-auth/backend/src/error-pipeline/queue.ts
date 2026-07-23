@@ -139,11 +139,25 @@ class ErrorQueue {
     return { bucket, id, item, deliveries };
   }
 
-  async ack(claimed: ClaimedItem): Promise<void> {
+  /**
+   * Remove an item from the stream. By default the dedup marker is DELETED so a
+   * later occurrence of the same error re-enqueues. Pass `keepDedupForSeconds`
+   * to instead HOLD the marker for that long — used after a successful fix so
+   * Grafana's re-fires of the now-worked error are dropped at INGEST (the SETNX
+   * in enqueue) for the cooldown window, instead of re-enqueuing every time just
+   * to be cooldown-skipped (that churn inflated "In queue" and spammed
+   * "completed recently — ack, skip").
+   */
+  async ack(claimed: ClaimedItem, opts?: { keepDedupForSeconds?: number }): Promise<void> {
     const stream = STREAM(claimed.bucket);
     await this.redis.xack(stream, GROUP, claimed.id);
     await this.redis.xdel(stream, claimed.id);
-    await this.redis.del(SEEN(claimed.item.errorKey));
+    const keep = opts?.keepDedupForSeconds;
+    if (keep && keep > 0) {
+      await this.redis.set(SEEN(claimed.item.errorKey), claimed.bucket, "EX", Math.ceil(keep));
+    } else {
+      await this.redis.del(SEEN(claimed.item.errorKey));
+    }
   }
 
   async deadLetter(claimed: ClaimedItem, reason: string): Promise<void> {

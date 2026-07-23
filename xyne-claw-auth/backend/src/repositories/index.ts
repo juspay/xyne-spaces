@@ -19,3 +19,5 @@ export { subagentShareRepository } from "./subagentShareRepository.js";
 export { activeGoalRepository } from "./activeGoalRepository.js";
 export { evalRepository } from "./evalRepository.js";
 export type { EvalTurnInput, ImportConversationInput } from "./evalRepository.js";
+export { searchEvalRepository, computeSearchEvalSummary, toMetricsSummary } from "./searchEvalRepository.js";
+export type { SearchEvalQueryInput, SearchEvalTopResult, SearchEvalRunSummary } from "./searchEvalRepository.js";

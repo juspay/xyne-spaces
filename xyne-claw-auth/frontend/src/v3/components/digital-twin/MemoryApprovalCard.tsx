@@ -67,7 +67,7 @@ export function MemoryApprovalCard({
   }
 
   return (
-    <div className="rounded-xl border border-xyne-border bg-xyne-surface-sunken p-[14px]">
+    <div className="rounded-xl border border-xyne-border bg-xyne-surface p-[14px]">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-[6px]">

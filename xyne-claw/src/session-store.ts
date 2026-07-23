@@ -766,7 +766,11 @@ export async function flushAllActiveSessions(budgetMs: number): Promise<void> {
  *
  * Returns true on success. Lazy-restores the source from GCS if archived.
  */
-export type BranchSessionMode = "lastUser" | "beforeLastUser";
+/** "lastUser"/"beforeLastUser" branch AT a user message (regenerate / edit).
+ *  "full" copies the ENTIRE session — used to fork a finished run into a
+ *  per-user thread, where the run's final assistant turn (e.g. the RCA the
+ *  user is reading) must stay in context. */
+export type BranchSessionMode = "lastUser" | "beforeLastUser" | "full";
 
 export async function branchSession(
   sourceConversationId: string,
@@ -787,6 +791,23 @@ export async function branchSession(
   if (!existsSync(sourceDir)) {
     log.warn(`[session-store] Cannot branch: source session not found ${sourceConversationId}`);
     return false;
+  }
+
+  // Full clone: copy the session verbatim (no branch point) so the fork keeps
+  // every turn, including the last assistant reply.
+  if (mode === "full") {
+    if (existsSync(targetDir)) {
+      log.info(`[session-store] Full clone skipped — target already exists ${targetConversationId}`);
+      return true;
+    }
+    try {
+      await cp(sourceDir, targetDir, { recursive: true });
+      log.info(`[session-store] Full clone ${sourceConversationId} → ${targetConversationId}`);
+      return true;
+    } catch (err) {
+      log.warn(`[session-store] Full clone failed ${sourceConversationId} → ${targetConversationId}: ${err instanceof Error ? err.message : String(err)}`);
+      return false;
+    }
   }
 
   let files: string[];

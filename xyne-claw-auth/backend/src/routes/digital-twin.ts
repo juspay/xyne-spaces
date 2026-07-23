@@ -33,12 +33,39 @@ import { prisma } from "../db.js";
 import { createLogger, createTraceId } from "../logger.js";
 import { requireUserAuth } from "../middleware/require-auth.js";
 import { countUserRecords } from "../services/userMemoryFetcher.js";
-import { curateAndPersistBatch } from "../services/userMemoryCuratorClient.js";
+import {
+  curateAndPersistBatch,
+  ensureTwinBank,
+  pickEventTimestamp,
+  twinObservationScopes,
+} from "../services/userMemoryCuratorClient.js";
+import {
+  TWIN_AGENT_SLUG,
+  MAX_FILE_CHARS,
+  MAX_LOADED_FILES,
+  ensureDefaultFiles,
+  listFiles,
+  upsertFile,
+  setLoadInPrompt,
+  deleteFile,
+  MaxLoadedFilesError,
+} from "../services/agentMemoryFiles.js";
+import { synthesizeSoulFilesForUser } from "../services/twinSoulSynthesizer.js";
 import {
   cancelDigitalTwinBackfill,
   enqueueDigitalTwinBackfill,
+  getBackfillQueue,
+  backfillJobIsLive,
   type BackfillSource,
 } from "../queue/digital-twin-backfill-queue.js";
+import {
+  summarizeBackfillState,
+  applyBackfillPause,
+  collectAndClearResumable,
+  type BackfillState,
+  type BackfillJobProbe,
+} from "../services/backfillStatus.js";
+import type { UserMemoryCuratorTrace } from "xyne-claw-shared";
 
 const logger = createLogger("digital-twin", createTraceId());
 const memory = getMemoryProvider();
@@ -76,12 +103,118 @@ const inFlightClusterApprovals = new Set<string>();
  *  background. This Set dedupes a double-click. */
 const inFlightDisables = new Set<string>();
 
+/** Dedupe concurrent soul-synthesis rebuilds per user (N LLM calls, ~30-60s). */
+const inFlightSynth = new Set<string>();
+
+/** Per-user in-flight flag for a manual memory-delete (all / range). Surfaced in
+ *  /status as memoryDeleteInProgress so the UI can show a live indicator. */
+const inFlightMemDelete = new Set<string>();
+
+/** Bounded-concurrency map — invalidate N memories without firing N parallel
+ *  Hindsight calls at once. */
+async function mapPool<T>(items: T[], concurrency: number, fn: (item: T) => Promise<void>): Promise<void> {
+  let cursor = 0;
+  const workers = Array.from({ length: Math.max(1, Math.min(concurrency, items.length || 1)) }, async () => {
+    for (;;) {
+      const i = cursor++;
+      if (i >= items.length) return;
+      await fn(items[i] as T);
+    }
+  });
+  await Promise.all(workers);
+}
+
 export const digitalTwinRouter = Router();
 
 function getUserId(req: Request): string | null {
   const v = req.headers["x-user-id"];
   if (typeof v !== "string" || v.length === 0) return null;
   return v;
+}
+
+// ── Backfill status normalization ──────────────────────────────────────────
+
+/** How long without a progress heartbeat before a running backfill is stalled. */
+const BACKFILL_STALL_MS = 120_000;
+
+/** Best-effort BullMQ probe. Any error (queue down, missing job) → null. */
+async function probeBackfillJob(userId: string, source: BackfillSource): Promise<BackfillJobProbe | null> {
+  try {
+    const job = await getBackfillQueue().getJob(`dt-backfill:${userId}:${source}`);
+    if (!job) return null;
+    const state = await job.getState();
+    return {
+      state,
+      attemptsMade: job.attemptsMade,
+      maxAttempts: (job.opts?.attempts as number | undefined) ?? 5,
+      failedReason: job.failedReason ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Build the normalized `data.backfill` block from raw backfillState. Returns
+ *  null when there's no state at all. Existing backfillState is left untouched
+ *  by callers — this is purely additive. The running/paused/stalled math lives
+ *  in the pure, unit-tested `summarizeBackfillState`. */
+async function buildBackfillBlock(userId: string, raw: unknown): Promise<unknown> {
+  if (!raw || typeof raw !== "object") return null;
+  const state = raw as BackfillState;
+  const probeEntries = await Promise.all(
+    BACKFILL_SOURCES.map(async (s) => [s, state[s] ? await probeBackfillJob(userId, s) : null] as const),
+  );
+  const probes = Object.fromEntries(probeEntries) as Partial<Record<BackfillSource, BackfillJobProbe | null>>;
+  return summarizeBackfillState(state, probes, { nowMs: Date.now(), stallMs: BACKFILL_STALL_MS });
+}
+
+// ── Pipeline events normalization ──────────────────────────────────────────
+
+const PIPELINE_EVENTS_DEFAULT_LIMIT = 50;
+const PIPELINE_EVENTS_MAX_LIMIT = 200;
+
+interface PipelineEventRow {
+  id: string;
+  createdAt: Date;
+  runType: string;
+  source: string;
+  sourceKind: string | null;
+  windowFrom: Date;
+  windowTo: Date;
+  status: string;
+  recordCount: number;
+  existingMemoryCount: number;
+  emittedCount: number;
+  keptCount: number;
+  candidatesCreated: number;
+  autoApproved: number;
+  durationMs: number;
+  error: string | null;
+  trace: unknown;
+  records?: unknown;
+}
+
+/** Shape used by both the list and detail endpoints (detail adds records+trace). */
+function toEventSummary(row: PipelineEventRow) {
+  return {
+    id: row.id,
+    createdAt: row.createdAt,
+    runType: row.runType,
+    source: row.source,
+    sourceKind: row.sourceKind,
+    windowFrom: row.windowFrom,
+    windowTo: row.windowTo,
+    status: row.status,
+    recordCount: row.recordCount,
+    existingMemoryCount: row.existingMemoryCount,
+    emittedCount: row.emittedCount,
+    keptCount: row.keptCount,
+    candidatesCreated: row.candidatesCreated,
+    autoApproved: row.autoApproved,
+    durationMs: row.durationMs,
+    error: row.error,
+    hasTrace: row.trace != null,
+  };
 }
 
 // ── 1. Status ──────────────────────────────────────────────────────────────
@@ -102,6 +235,7 @@ digitalTwinRouter.get("/status", requireUserAuth, async (req, res) => {
         digitalTwinResponseSuffix: true,
         digitalTwinMemoryApprovalMode: true,
         digitalTwinMemoryAutoApproveMinScore: true,
+        digitalTwinRespondPolicy: true,
       },
     });
     if (!user) {
@@ -116,17 +250,42 @@ digitalTwinRouter.get("/status", requireUserAuth, async (req, res) => {
         where: { userId, source: { startsWith: "upload:" } },
       }),
     ]);
+    const backfill = await buildBackfillBlock(userId, user.digitalTwinBackfillState);
+
+    // Real memory count — the number of the user's memories actually live in
+    // Hindsight, matching what the memories tab shows. This differs from
+    // approvedCandidates (which counts approved candidate ROWS and inflates:
+    // Hindsight dedupes on retain, and re-backfills re-propose the same facts).
+    // MUST use the SAME wide fetch as the memories list route (memory.ts) — the
+    // twin bank is shared across users and Hindsight can't tag-filter server-side,
+    // so we over-fetch then filter in JS. A smaller limit here caps the count and
+    // makes the banner ("from N memories") DISAGREE with the tab ("N memories").
+    let memoryCount = 0;
+    if (user.digitalTwinEnabled) {
+      try {
+        const wide = Number(process.env["TWIN_MEMORIES_WIDE_FETCH"] ?? 2000);
+        const page = await memory.listMemories(TWIN_BANK_ID, { tags: [`user:${userId}`], limit: wide });
+        memoryCount = page.memories.filter((m) => (m.tags ?? []).includes(`user:${userId}`)).length;
+      } catch (err) {
+        logger.warn("[digital-twin] status memoryCount failed", { userId, err: err instanceof Error ? err.message : String(err) });
+      }
+    }
+
     res.json({
       success: true,
       data: {
         enabled: user.digitalTwinEnabled,
         enabledAt: user.digitalTwinEnabledAt,
         backfillState: user.digitalTwinBackfillState ?? null,
+        backfill,
         pendingCandidates: pending,
         totalCandidates: total,
         approvedCandidates: approved,
+        memoryCount,
+        memoryDeleteInProgress: inFlightMemDelete.has(userId),
         mdFileCount: mdFiles,
         responseSuffix: user.digitalTwinResponseSuffix ?? "",
+        respondPolicy: user.digitalTwinRespondPolicy ?? "always",
         memoryApprovalMode: user.digitalTwinMemoryApprovalMode,
         memoryAutoApproveMinScore: user.digitalTwinMemoryAutoApproveMinScore,
       },
@@ -205,8 +364,31 @@ digitalTwinRouter.post("/enable", requireUserAuth, async (req, res) => {
         return;
       }
       backfillState = {};
+      // ceil((to-from)/30d), min 1 — mirrors the worker's windowsTotalFor so
+      // the UI's total agrees with the number of windows the walk will run.
+      const spanMs = to.getTime() - from.getTime();
+      const windowsTotal = Math.max(1, Math.ceil(spanMs / (30 * 24 * 3600 * 1000)));
+      const nowIso = now.toISOString();
       for (const s of BACKFILL_SOURCES) {
-        backfillState[s] = { from: from.toISOString(), to: to.toISOString(), cursor: to.toISOString(), complete: false };
+        backfillState[s] = {
+          from: from.toISOString(),
+          to: to.toISOString(),
+          // Chronological walk (oldest → newest): cursor is the LOWER bound of
+          // the next chunk, seeded at `from`. See the backfill worker.
+          cursor: from.toISOString(),
+          complete: false,
+          // Fresh progress on every (re-)enable so old counts never carry over.
+          progress: {
+            windowsTotal,
+            windowsDone: 0,
+            recordsSeen: 0,
+            candidatesMade: 0,
+            currentWindow: null,
+            lastError: null,
+            startedAt: nowIso,
+            updatedAt: nowIso,
+          },
+        };
       }
     }
 
@@ -223,6 +405,20 @@ digitalTwinRouter.post("/enable", requireUserAuth, async (req, res) => {
           ? (backfillState as unknown as Prisma.InputJsonValue)
           : (Prisma.JsonNull as unknown as Prisma.NullableJsonNullValueInput),
       },
+    });
+
+    // Enable Hindsight's observation/temporal layer on the twin bank (per-user
+    // scoped) so evolution ("stopped A, now on B") and temporal queries work.
+    await ensureTwinBank();
+
+    // Seed the default file-memory structure (soul.md, people.md, …) so the
+    // twin has a consistent, always-loaded persona from day one. Idempotent —
+    // never clobbers existing/edited files. Non-fatal on error.
+    await ensureDefaultFiles(TWIN_AGENT_SLUG, userId).catch((err) => {
+      logger.warn("[digital-twin] ensureDefaultFiles failed", {
+        userId,
+        err: err instanceof Error ? err.message : String(err),
+      });
     });
 
     const backfillJobIds: string[] = [];
@@ -247,7 +443,310 @@ digitalTwinRouter.post("/enable", requireUserAuth, async (req, res) => {
   }
 });
 
+// ── 3b. Pause / Resume backfill ─────────────────────────────────────────────
+// Stop the in-flight backfill walk WITHOUT losing progress, and resume it later
+// from the exact cursor. Distinct from /disable (which turns the Twin off and
+// clears state): pause keeps the Twin enabled and the state intact.
+
+digitalTwinRouter.post("/backfill/pause", requireUserAuth, async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) {
+      res.status(401).json({ success: false, error: "Unauthenticated" });
+      return;
+    }
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { digitalTwinBackfillState: true },
+    });
+    const raw = user?.digitalTwinBackfillState as unknown;
+    if (!raw || typeof raw !== "object") {
+      res.json({ success: true, data: { paused: false, pausedSources: 0, cancelledJobs: 0, message: "No backfill in progress" } });
+      return;
+    }
+    // Remove the in-flight BullMQ jobs so the worker stops walking. The cursor
+    // already persisted on the state is the resume point.
+    const cancelledJobs = await cancelDigitalTwinBackfill(userId);
+    const state = raw as BackfillState;
+    const pausedSources = applyBackfillPause(state, new Date().toISOString());
+    await prisma.user.update({
+      where: { id: userId },
+      data: { digitalTwinBackfillState: state as unknown as Prisma.InputJsonValue },
+    });
+    logger.info("[digital-twin] backfill paused", { userId, pausedSources, cancelledJobs });
+    res.json({ success: true, data: { paused: pausedSources > 0, pausedSources, cancelledJobs } });
+  } catch (err) {
+    logger.error("[digital-twin] /backfill/pause failed", { err: err instanceof Error ? err.message : String(err) });
+    res.status(500).json({ success: false, error: "Internal error" });
+  }
+});
+
+digitalTwinRouter.post("/backfill/resume", requireUserAuth, async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) {
+      res.status(401).json({ success: false, error: "Unauthenticated" });
+      return;
+    }
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { digitalTwinEnabled: true, digitalTwinBackfillState: true },
+    });
+    if (!user?.digitalTwinEnabled) {
+      res.status(400).json({ success: false, error: "Digital Twin is not enabled" });
+      return;
+    }
+    const raw = user.digitalTwinBackfillState as unknown;
+    if (!raw || typeof raw !== "object") {
+      res.json({ success: true, data: { resumed: 0, jobIds: [], message: "No backfill to resume" } });
+      return;
+    }
+    const state = raw as BackfillState;
+    // Clear pausedAt on incomplete sources FIRST and persist, so any job still
+    // finishing its current window (BullMQ can't stop an active job — it stops
+    // itself at the next window check) sees the un-pause and simply continues.
+    const resumable = collectAndClearResumable(state);
+    await prisma.user.update({
+      where: { id: userId },
+      data: { digitalTwinBackfillState: state as unknown as Prisma.InputJsonValue },
+    });
+    // Then, for each incomplete source with NO live job (it already stopped, or
+    // was wedged/failed), enqueue a fresh one from the persisted cursor. Sources
+    // whose job is still active are left alone — they resume on their own now
+    // that pausedAt is cleared (and a locked job can't be removed anyway).
+    const jobIds: string[] = [];
+    for (const source of resumable) {
+      if (await backfillJobIsLive(userId, source)) continue;
+      const entry = state[source]!;
+      const jobId = await enqueueDigitalTwinBackfill({
+        userId,
+        source,
+        from: new Date(entry.from!),
+        to: new Date(entry.to!),
+      });
+      jobIds.push(jobId);
+    }
+    logger.info("[digital-twin] backfill resumed", { userId, resumed: jobIds.length, cleared: resumable.length });
+    res.json({ success: true, data: { resumed: jobIds.length, jobIds, sources: resumable.length } });
+  } catch (err) {
+    logger.error("[digital-twin] /backfill/resume failed", { err: err instanceof Error ? err.message : String(err) });
+    res.status(500).json({ success: false, error: "Internal error" });
+  }
+});
+
 // ── 4. Disable ─────────────────────────────────────────────────────────────
+
+// ─── Memory files (Memory v2 — deterministic, file-based persona) ─────────
+// Named documents (soul.md, people.md, …) the twin always loads. Up to
+// MAX_LOADED_FILES are injected into the system prompt, each ≤ MAX_FILE_CHARS.
+
+const MEMORY_FILE_NAME_RE = /^[a-zA-Z0-9._-]{1,64}$/;
+
+digitalTwinRouter.get("/memory-files", requireUserAuth, async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) {
+      res.status(401).json({ success: false, error: "Unauthenticated" });
+      return;
+    }
+    // Make sure a returning user who enabled before this feature still gets the
+    // default structure.
+    await ensureDefaultFiles(TWIN_AGENT_SLUG, userId).catch(() => {});
+    const files = await listFiles(TWIN_AGENT_SLUG, userId);
+    res.json({
+      success: true,
+      data: { files, maxLoaded: MAX_LOADED_FILES, maxChars: MAX_FILE_CHARS },
+    });
+  } catch (err) {
+    logger.error("[digital-twin] list memory-files failed", { err: err instanceof Error ? err.message : String(err) });
+    res.status(500).json({ success: false, error: "Internal error" });
+  }
+});
+
+digitalTwinRouter.put("/memory-files/:name", requireUserAuth, async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) {
+      res.status(401).json({ success: false, error: "Unauthenticated" });
+      return;
+    }
+    const name = String(req.params.name ?? "");
+    if (!MEMORY_FILE_NAME_RE.test(name)) {
+      res.status(400).json({ success: false, error: "Invalid file name" });
+      return;
+    }
+    const body = (req.body ?? {}) as { content?: unknown };
+    if (typeof body.content !== "string") {
+      res.status(400).json({ success: false, error: "content (string) is required" });
+      return;
+    }
+    const overCap = body.content.length > MAX_FILE_CHARS;
+    const file = await upsertFile({
+      agentSlug: TWIN_AGENT_SLUG,
+      userId,
+      name,
+      content: body.content,
+      updatedBy: "user",
+    });
+    res.json({ success: true, data: { file, truncated: overCap, maxChars: MAX_FILE_CHARS } });
+  } catch (err) {
+    logger.error("[digital-twin] put memory-file failed", { err: err instanceof Error ? err.message : String(err) });
+    res.status(500).json({ success: false, error: "Internal error" });
+  }
+});
+
+digitalTwinRouter.post("/memory-files/:name/load", requireUserAuth, async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) {
+      res.status(401).json({ success: false, error: "Unauthenticated" });
+      return;
+    }
+    const name = String(req.params.name ?? "");
+    const body = (req.body ?? {}) as { load?: unknown };
+    if (typeof body.load !== "boolean") {
+      res.status(400).json({ success: false, error: "load (boolean) is required" });
+      return;
+    }
+    const file = await setLoadInPrompt(TWIN_AGENT_SLUG, userId, name, body.load);
+    res.json({ success: true, data: { file } });
+  } catch (err) {
+    if (err instanceof MaxLoadedFilesError) {
+      res.status(400).json({ success: false, error: err.message });
+      return;
+    }
+    if (err instanceof Error && err.message === "not-found") {
+      res.status(404).json({ success: false, error: "File not found" });
+      return;
+    }
+    logger.error("[digital-twin] toggle memory-file load failed", { err: err instanceof Error ? err.message : String(err) });
+    res.status(500).json({ success: false, error: "Internal error" });
+  }
+});
+
+digitalTwinRouter.delete("/memory-files/:name", requireUserAuth, async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) {
+      res.status(401).json({ success: false, error: "Unauthenticated" });
+      return;
+    }
+    const name = String(req.params.name ?? "");
+    const deleted = await deleteFile(TWIN_AGENT_SLUG, userId, name);
+    res.json({ success: true, data: { deleted } });
+  } catch (err) {
+    logger.error("[digital-twin] delete memory-file failed", { err: err instanceof Error ? err.message : String(err) });
+    res.status(500).json({ success: false, error: "Internal error" });
+  }
+});
+
+// Rebuild the persona files from approved memories (soul synthesizer, Phase 4).
+// N LLM calls (~30-60s) → runs in the background, returns 202. The client
+// re-fetches /memory-files after a short delay to see the result.
+digitalTwinRouter.post("/synthesize", requireUserAuth, async (req, res) => {
+  const userId = getUserId(req);
+  if (!userId) {
+    res.status(401).json({ success: false, error: "Unauthenticated" });
+    return;
+  }
+  if (inFlightSynth.has(userId)) {
+    res.status(202).json({ success: true, data: { status: "already-running" } });
+    return;
+  }
+  inFlightSynth.add(userId);
+  res.status(202).json({ success: true, data: { status: "started" } });
+  setImmediate(async () => {
+    try {
+      await synthesizeSoulFilesForUser(userId, "manual");
+    } catch (err) {
+      logger.warn("[digital-twin] synthesize failed", { userId, err: err instanceof Error ? err.message : String(err) });
+    } finally {
+      inFlightSynth.delete(userId);
+    }
+  });
+});
+
+// Manually delete the user's stored twin memories — ALL, or a created-date
+// RANGE. Runs in the background (Hindsight invalidations are slow HTTP calls);
+// responds 202 and the client polls /status (memoryDeleteInProgress + the
+// dropping memoryCount) for a live indicator. Used to wipe + re-backfill clean.
+digitalTwinRouter.post("/memories/delete", requireUserAuth, async (req, res) => {
+  const userId = getUserId(req);
+  if (!userId) {
+    res.status(401).json({ success: false, error: "Unauthenticated" });
+    return;
+  }
+  const body = (req.body ?? {}) as { mode?: string; from?: string; to?: string };
+  const mode = body.mode === "range" ? "range" : "all";
+
+  let fromMs = 0;
+  let toMs = 0;
+  if (mode === "range") {
+    fromMs = Date.parse(body.from ?? "");
+    toMs = Date.parse(body.to ?? "");
+    if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || fromMs > toMs) {
+      res.status(400).json({ success: false, error: "range requires valid from ≤ to (ISO dates)" });
+      return;
+    }
+  }
+
+  if (inFlightMemDelete.has(userId)) {
+    res.status(202).json({ success: true, data: { deleting: true, message: "Delete already running" } });
+    return;
+  }
+  inFlightMemDelete.add(userId);
+  res.status(202).json({ success: true, data: { deleting: true, mode } });
+
+  setImmediate(async () => {
+    const userTag = `user:${userId}`;
+    let deleted = 0;
+    let candidatesDeleted = 0;
+    try {
+      if (mode === "all") {
+        deleted = (await memory.deleteByTag?.(TWIN_BANK_ID, userTag)) ?? 0;
+        candidatesDeleted = (await prisma.userMemoryCandidate.deleteMany({ where: { userId } })).count;
+      } else {
+        // Range: list the user's memories, keep those whose createdAt is in
+        // [from,to], invalidate each. Re-filter by the user tag (Hindsight
+        // over-matches tag queries — authoritative gate).
+        const page = await memory.listMemories(TWIN_BANK_ID, { tags: [userTag], limit: 1000 });
+        const targets = page.memories
+          .filter((m) => (m.tags ?? []).includes(userTag))
+          .filter((m) => {
+            const t = Date.parse(m.createdAt ?? "");
+            return Number.isFinite(t) && t >= fromMs && t <= toMs;
+          });
+        await mapPool(targets, 8, async (m) => {
+          if (!m.id) return;
+          try {
+            await memory.deleteMemory(TWIN_BANK_ID, m.id);
+            deleted += 1;
+          } catch (err) {
+            logger.warn("[digital-twin] range delete: invalidate failed", {
+              userId,
+              id: m.id,
+              err: err instanceof Error ? err.message : String(err),
+            });
+          }
+        });
+        candidatesDeleted = (
+          await prisma.userMemoryCandidate.deleteMany({
+            where: { userId, createdAt: { gte: new Date(fromMs), lte: new Date(toMs) } },
+          })
+        ).count;
+      }
+      logger.info("[digital-twin] memory delete complete", { userId, mode, deleted, candidatesDeleted });
+    } catch (err) {
+      logger.error("[digital-twin] memory delete crashed", {
+        userId,
+        mode,
+        err: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      inFlightMemDelete.delete(userId);
+    }
+  });
+});
 
 digitalTwinRouter.post("/disable", requireUserAuth, async (req, res) => {
   try {
@@ -336,6 +835,57 @@ digitalTwinRouter.post("/disable", requireUserAuth, async (req, res) => {
     });
   } catch (err) {
     logger.error("[digital-twin] /disable failed", { err: err instanceof Error ? err.message : String(err) });
+    res.status(500).json({ success: false, error: "Internal error" });
+  }
+});
+
+// ── Memory graph (constellation edges + entities, from Hindsight) ──────────
+
+/**
+ * GET /graph — the constellation's REAL relationships from Hindsight's memory-graph
+ * API: nodes = memories, edges = `semantic` (embedding) / `temporal` / `entity`
+ * (shared entities) links, plus per-memory extracted entities. Scoped to the
+ * requesting user's own memories — Hindsight tag-filters SQL-side, and we
+ * additionally drop any edge whose endpoint isn't in this user's node set
+ * (defense-in-depth on a shared bank). The frontend joins these onto its own
+ * memory list (node id === memory id). Returns an empty graph if the provider
+ * lacks the API.
+ */
+digitalTwinRouter.get("/graph", requireUserAuth, async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) {
+      res.status(401).json({ success: false, error: "Unauthenticated" });
+      return;
+    }
+    if (typeof memory.getMemoryGraph !== "function") {
+      res.json({ success: true, data: { nodes: [], edges: [] } });
+      return;
+    }
+    const userTag = `user:${userId}`;
+    const graph = await memory.getMemoryGraph(TWIN_BANK_ID, { tags: [userTag], limit: 2000 });
+    const nodeIds = new Set<string>();
+    const nodes = graph.nodes
+      .filter((n) => !n.tags || n.tags.includes(userTag))
+      .map((n) => {
+        nodeIds.add(n.id);
+        return {
+          id: n.id,
+          ...(n.entities?.length ? { entities: n.entities } : {}),
+          ...(n.factType ? { factType: n.factType } : {}),
+        };
+      });
+    const edges = graph.edges
+      .filter((e) => nodeIds.has(e.source) && nodeIds.has(e.target))
+      .map((e) => ({
+        source: e.source,
+        target: e.target,
+        linkType: e.linkType,
+        ...(e.weight != null ? { weight: e.weight } : {}),
+      }));
+    res.json({ success: true, data: { nodes, edges } });
+  } catch (err) {
+    logger.error("[digital-twin] /graph failed", { err: err instanceof Error ? err.message : String(err) });
     res.status(500).json({ success: false, error: "Internal error" });
   }
 });
@@ -441,13 +991,28 @@ digitalTwinRouter.post("/clusters/:subsystem/approve", requireUserAuth, async (r
 
     // Background: retain each candidate to Hindsight, update row status.
     setImmediate(async () => {
+      await ensureTwinBank();
       let retained = 0;
       let failed = 0;
       for (const c of candidates) {
         const content = (c.editedText ?? c.text).slice(0, 1500);
-        const tags = [`user:${userId}`, `subsystem:${subsystem}`, "scope:user"];
+        const tags = [
+          `user:${userId}`,
+          `subsystem:${subsystem}`,
+          "scope:user",
+          // Trace link — see memories list. Hindsight's retain returns no id, so
+          // we tag the memory with its pipeline event instead of relying on the
+          // (always-null) candidate.hindsightMemoryId.
+          ...(c.pipelineEventId ? [`pipeline:${c.pipelineEventId}`] : []),
+        ];
+        const eventTs = pickEventTimestamp(c.sourceRefs);
         try {
-          const out = await memory.retain(TWIN_BANK_ID, [{ content, tags }]);
+          const out = await memory.retain(TWIN_BANK_ID, [{
+            content,
+            tags,
+            ...(eventTs ? { timestamp: eventTs } : {}),
+            observationScopes: twinObservationScopes(userId),
+          }]);
           const memoryId = out?.[0]?.id;
           await prisma.userMemoryCandidate.update({
             where: { id: c.id },
@@ -512,9 +1077,23 @@ digitalTwinRouter.patch("/candidates/:id", requireUserAuth, async (req, res) => 
     let hindsightMemoryId: string | null = candidate.hindsightMemoryId ?? null;
     if (body.status === "approved" && candidate.status === "pending") {
       const content = (typeof body.editedText === "string" ? body.editedText : candidate.text).slice(0, 1500);
-      const tags = [`user:${userId}`, `subsystem:${candidate.subsystem}`, "scope:user"];
+      const tags = [
+        `user:${userId}`,
+        `subsystem:${candidate.subsystem}`,
+        "scope:user",
+        // Trace link — tag the memory with its pipeline event (candidate
+        // hindsightMemoryId is unreliable; see memories list).
+        ...(candidate.pipelineEventId ? [`pipeline:${candidate.pipelineEventId}`] : []),
+      ];
+      const eventTs = pickEventTimestamp(candidate.sourceRefs);
       try {
-        const out = await memory.retain(TWIN_BANK_ID, [{ content, tags }]);
+        await ensureTwinBank();
+        const out = await memory.retain(TWIN_BANK_ID, [{
+          content,
+          tags,
+          ...(eventTs ? { timestamp: eventTs } : {}),
+          observationScopes: twinObservationScopes(userId),
+        }]);
         hindsightMemoryId = out?.[0]?.id ?? null;
       } catch (err) {
         logger.warn("[digital-twin] retain failed on patch-approve", {
@@ -727,9 +1306,15 @@ digitalTwinRouter.patch("/settings", requireUserAuth, async (req, res) => {
       responseSuffix?: string | null;
       memoryApprovalMode?: string;
       memoryAutoApproveMinScore?: number | string | null;
+      respondPolicy?: string;
     };
 
-    if (!("responseSuffix" in body) && !("memoryApprovalMode" in body) && !("memoryAutoApproveMinScore" in body)) {
+    if (
+      !("responseSuffix" in body) &&
+      !("memoryApprovalMode" in body) &&
+      !("memoryAutoApproveMinScore" in body) &&
+      !("respondPolicy" in body)
+    ) {
       res.status(400).json({ success: false, error: "At least one setting is required" });
       return;
     }
@@ -772,6 +1357,15 @@ digitalTwinRouter.patch("/settings", requireUserAuth, async (req, res) => {
       data.digitalTwinMemoryAutoApproveMinScore = score;
     }
 
+    if ("respondPolicy" in body) {
+      const policy = String(body.respondPolicy ?? "").trim().toLowerCase();
+      if (policy !== "always" && policy !== "learned") {
+        res.status(400).json({ success: false, error: "respondPolicy must be always or learned" });
+        return;
+      }
+      data.digitalTwinRespondPolicy = policy;
+    }
+
     const updated = await (prisma.user.update as any)({
       where: { id: userId },
       data,
@@ -779,6 +1373,7 @@ digitalTwinRouter.patch("/settings", requireUserAuth, async (req, res) => {
         digitalTwinResponseSuffix: true,
         digitalTwinMemoryApprovalMode: true,
         digitalTwinMemoryAutoApproveMinScore: true,
+        digitalTwinRespondPolicy: true,
       },
     });
 
@@ -788,6 +1383,7 @@ digitalTwinRouter.patch("/settings", requireUserAuth, async (req, res) => {
         responseSuffix: updated.digitalTwinResponseSuffix ?? "",
         memoryApprovalMode: updated.digitalTwinMemoryApprovalMode,
         memoryAutoApproveMinScore: updated.digitalTwinMemoryAutoApproveMinScore,
+        respondPolicy: updated.digitalTwinRespondPolicy,
       },
     });
   } catch (err) {
@@ -839,6 +1435,135 @@ digitalTwinRouter.post("/upload-md", requireUserAuth, async (req, res) => {
     res.json({ success: true, data: { filename, candidatesCreated: inserted } });
   } catch (err) {
     logger.error("[digital-twin] /upload-md failed", { err: err instanceof Error ? err.message : String(err) });
+    res.status(500).json({ success: false, error: "Internal error" });
+  }
+});
+
+// ── 10. Pipeline observability feed ────────────────────────────────────────
+//
+// Per-user event feed for the pipeline viewer. Every curator invocation writes
+// one DigitalTwinPipelineEvent; these two endpoints page the feed and expose
+// the fed records + full LLM trace on demand. Scoped to the requesting user —
+// the detail route 404s when the row belongs to another user.
+
+digitalTwinRouter.get("/pipeline/events", requireUserAuth, async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) {
+      res.status(401).json({ success: false, error: "Unauthenticated" });
+      return;
+    }
+
+    const rawLimit = Number(req.query["limit"]);
+    const limit = Number.isFinite(rawLimit) && rawLimit > 0
+      ? Math.min(Math.floor(rawLimit), PIPELINE_EVENTS_MAX_LIMIT)
+      : PIPELINE_EVENTS_DEFAULT_LIMIT;
+
+    const where: Record<string, unknown> = { userId };
+
+    // Cursor: ISO createdAt of the last event on the previous page.
+    const beforeStr = typeof req.query["before"] === "string" ? req.query["before"] : "";
+    if (beforeStr) {
+      const before = new Date(beforeStr);
+      if (!Number.isNaN(before.getTime())) where["createdAt"] = { lt: before };
+    }
+
+    const runType = typeof req.query["runType"] === "string" ? req.query["runType"] : "";
+    if (["backfill", "daily", "upload", "twin-approval", "synthesize", "gate"].includes(runType)) {
+      where["runType"] = runType;
+    }
+    const status = typeof req.query["status"] === "string" ? req.query["status"] : "";
+    if (["ok", "empty", "error", "running", "retry"].includes(status)) {
+      where["status"] = status;
+    }
+    const sourceKind = typeof req.query["sourceKind"] === "string" ? req.query["sourceKind"] : "";
+    if (["messages", "calls", "canvases"].includes(sourceKind)) {
+      where["sourceKind"] = sourceKind;
+    }
+
+    const rows = await (prisma.digitalTwinPipelineEvent.findMany as any)({
+      where,
+      orderBy: { createdAt: "desc" },
+      take: limit,
+      select: {
+        id: true, createdAt: true, runType: true, source: true, sourceKind: true,
+        windowFrom: true, windowTo: true, status: true, recordCount: true,
+        existingMemoryCount: true, emittedCount: true, keptCount: true,
+        candidatesCreated: true, autoApproved: true, durationMs: true,
+        error: true, trace: true,
+      },
+    });
+
+    // Live per-event approval outcome. Candidates link to their event via
+    // pipelineEventId, so "accepted" (approved now) changes as the user
+    // approves/rejects — unlike the static emittedCount / candidatesCreated.
+    const eventIds = (rows as PipelineEventRow[]).map((r) => r.id);
+    const statusGroups = eventIds.length === 0 ? [] : await (prisma.userMemoryCandidate.groupBy as any)({
+      by: ["pipelineEventId", "status"],
+      where: { pipelineEventId: { in: eventIds } },
+      _count: { _all: true },
+    });
+    const outcomeByEvent = new Map<string, { approved: number; pending: number; rejected: number }>();
+    for (const g of statusGroups as Array<{ pipelineEventId: string | null; status: string; _count: { _all: number } }>) {
+      if (!g.pipelineEventId) continue;
+      const o = outcomeByEvent.get(g.pipelineEventId) ?? { approved: 0, pending: 0, rejected: 0 };
+      if (g.status === "approved") o.approved += g._count._all;
+      else if (g.status === "pending") o.pending += g._count._all;
+      else if (g.status === "rejected") o.rejected += g._count._all;
+      outcomeByEvent.set(g.pipelineEventId, o);
+    }
+
+    const events = (rows as PipelineEventRow[]).map((r) => {
+      const o = outcomeByEvent.get(r.id);
+      return {
+        ...toEventSummary(r),
+        approvedCount: o?.approved ?? 0,
+        pendingCount: o?.pending ?? 0,
+        rejectedCount: o?.rejected ?? 0,
+      };
+    });
+    const nextBefore =
+      events.length === limit
+        ? (rows[rows.length - 1].createdAt as Date).toISOString()
+        : null;
+
+    res.json({ success: true, data: { events, nextBefore } });
+  } catch (err) {
+    logger.error("[digital-twin] GET /pipeline/events failed", { err: err instanceof Error ? err.message : String(err) });
+    res.status(500).json({ success: false, error: "Internal error" });
+  }
+});
+
+digitalTwinRouter.get("/pipeline/events/:id", requireUserAuth, async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) {
+      res.status(401).json({ success: false, error: "Unauthenticated" });
+      return;
+    }
+    const id = String(req.params["id"]);
+
+    const row = (await (prisma.digitalTwinPipelineEvent.findUnique as any)({
+      where: { id },
+    })) as (PipelineEventRow & { userId: string }) | null;
+
+    // 404 when missing OR owned by another user (same privacy gate as the
+    // per-candidate routes — never leak another user's pipeline data).
+    if (!row || row.userId !== userId) {
+      res.status(404).json({ success: false, error: "Event not found" });
+      return;
+    }
+
+    res.json({
+      success: true,
+      data: {
+        ...toEventSummary(row),
+        records: (row.records ?? null) as unknown,
+        trace: (row.trace ?? null) as UserMemoryCuratorTrace | null,
+      },
+    });
+  } catch (err) {
+    logger.error("[digital-twin] GET /pipeline/events/:id failed", { err: err instanceof Error ? err.message : String(err) });
     res.status(500).json({ success: false, error: "Internal error" });
   }
 });

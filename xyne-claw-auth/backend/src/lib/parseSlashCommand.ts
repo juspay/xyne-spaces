@@ -29,7 +29,10 @@ export type SlashCommand =
   // stop the current run — that's `/stop`). Short-circuits.
   | { kind: "queueClear" }
   // `/help` — list the available slash commands.
-  | { kind: "help" };
+  | { kind: "help" }
+  // `/fast` / `/fast off` — thread-scoped fast-mode toggle. Start-anchored only.
+  | { kind: "fastMode"; enabled: boolean }
+  | { kind: "fastModeUsage" };
 
 // Strip a sequence of leading `@<token>` mentions so /goal works even when
 // the message addresses an agent first (e.g. `@Xyne Doctor /goal count to 10`).
@@ -78,6 +81,23 @@ function parseFromSlash(trimmed: string): SlashCommand | null {
 
   if (lower === "/help") {
     return { kind: "help" };
+  }
+  if (lower === "/fast" || lower === "/fast on") {
+    return { kind: "fastMode", enabled: true };
+  }
+  if (lower === "/fast off") {
+    return { kind: "fastMode", enabled: false };
+  }
+  if (lower.startsWith("/fast ")) {
+    const rest = trimmed.slice("/fast ".length).trim();
+    // Obvious on/off typos get the usage hint; anything else is
+    // "/fast <task>" — enable fast mode AND run the task in one message
+    // (mirrors `/upgrade [task]`). Handled by the webhook's FAST_RE block,
+    // so fall through as a normal message here.
+    if (/^o(n+|f+)$/i.test(rest)) {
+      return { kind: "fastModeUsage" };
+    }
+    return null;
   }
   // `/clear` — exact match only (so "/clearfoo" or "/clear the air" fall
   // through to a normal message). `/goal clear` stays goal-specific below.

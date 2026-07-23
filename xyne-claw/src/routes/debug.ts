@@ -40,8 +40,10 @@ async function readJsonIfExists<T>(filePath: string): Promise<T | null> {
 /**
  * Resolve all on-disk session dirs for a RAW conversationId. The dir name is
  * the storeKey, which depending on the caller is `<convId>`,
- * `<convId>_<agentSlug>`, or `<userId>_<convId>_<agentSlug>` (agent-chat
- * threads prefix the owner's userId). Match the convId as an exact name, a
+ * `<convId>_<agentSlug>`, `<userId>_<convId>_<agentSlug>` (agent-chat
+ * threads prefix the owner's userId), or the per-user Digital Twin form
+ * `<convId>-<userId>_<agentSlug>` (buildSandboxStoreKey hyphen-folds the
+ * userId into the conv segment). Match the convId as an exact name, a
  * prefix segment, or an embedded `_`-delimited segment — prefix-only matching
  * 404'd every userId-prefixed thread (prod, 2026-06-12).
  *
@@ -67,6 +69,13 @@ function resolveSessionDirs(convId: string): string[] {
       if (
         name === convId ||
         name.startsWith(`${convId}_`) ||
+        // Per-user Digital Twin fold: buildSandboxStoreKey joins the userId to
+        // the conv segment with a HYPHEN (`<convId>-<userId>_<slug>`), so the
+        // char after convId is `-` not `_` and none of the other patterns hit.
+        // Without this clause every twin session 404'd here even though the
+        // dir sat on the PVC (the GCS-restore fallback below already knew the
+        // form, but it re-resolves through this matcher and inherited the miss).
+        name.startsWith(`${convId}-`) ||
         name.includes(`_${convId}_`) ||
         name.endsWith(`_${convId}`)
       ) {

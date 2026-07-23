@@ -4,11 +4,17 @@ import {
   GearSixIcon,
   PowerIcon,
   ChartLineUpIcon,
+  FunnelIcon,
+  ArrowsClockwiseIcon,
+  FileTextIcon,
 } from "@phosphor-icons/react";
 import { useDigitalTwin } from "../../hooks/useDigitalTwin";
 import { DigitalTwinBanner } from "./DigitalTwinBanner";
+import { DigitalTwinLanding } from "./DigitalTwinLanding";
 import { DigitalTwinMemoriesTab } from "./DigitalTwinMemoriesTab";
+import { DigitalTwinFilesTab } from "./DigitalTwinFilesTab";
 import { DigitalTwinMetricsPageV3 } from "./DigitalTwinMetricsPageV3";
+import { DigitalTwinPipelinePageV3 } from "./DigitalTwinPipelinePageV3";
 import { ReviewPanel } from "./ReviewPanel";
 import { EnableModal } from "./EnableModal";
 import { DisableModal } from "./DisableModal";
@@ -16,6 +22,7 @@ import { SettingsModal } from "./SettingsModal";
 import { MemoryApprovalCard } from "./MemoryApprovalCard";
 import { UploadModal } from "./UploadModal";
 import { Tooltip } from "../ui/Tooltip";
+import { pauseDigitalTwinBackfill, resumeDigitalTwinBackfill } from "../../../lib/api";
 
 interface DigitalTwinPageV3Props {
   userId: string;
@@ -25,6 +32,11 @@ export function DigitalTwinPageV3({ userId }: DigitalTwinPageV3Props) {
   const { status, loading, error, reload, backfillStalled } = useDigitalTwin(userId);
 
   const [showMetrics,       setShowMetrics]       = useState(false);
+  const [showPersona,       setShowPersona]       = useState(false);
+  const [showPipeline,      setShowPipeline]      = useState(false);
+  /** Event to auto-expand when opening the pipeline (deep-link from a memory's
+   *  "View reasoning"). Null = open the pipeline at the top. */
+  const [pipelineTargetEvent, setPipelineTargetEvent] = useState<string | null>(null);
   const [showEnable,        setShowEnable]        = useState(false);
   const [enableMode,        setEnableMode]        = useState<"enable" | "backfill">("enable");
   const [showDisable,       setShowDisable]       = useState(false);
@@ -61,10 +73,37 @@ export function DigitalTwinPageV3({ userId }: DigitalTwinPageV3Props) {
   const reloadAll = useCallback(() => {
     reload();
     setReviewRefreshKey((k) => k + 1);
+    // Cluster-approve returns 202 (candidate status flips a moment later) and
+    // Hindsight retain is async, so an immediate refetch can race the settle —
+    // leaving the right-panel review list / counts stale until a manual
+    // close-reopen. Re-sync once more shortly after so both panels reflect the
+    // settled state live (covers approve AND reject).
+    window.setTimeout(() => {
+      reload();
+      setReviewRefreshKey((k) => k + 1);
+    }, 1800);
   }, [reload]);
 
   const handleEnable   = () => { setEnableMode("enable");   setShowEnable(true); };
   const handleBackfill = () => { setEnableMode("backfill"); setShowEnable(true); };
+
+  // Pause / resume the running backfill. Both keep the Twin enabled and preserve
+  // the cursor; we reload status right after so the banner flips state.
+  const [backfillActionBusy, setBackfillActionBusy] = useState(false);
+  const handlePauseBackfill = useCallback(async () => {
+    if (!userId || backfillActionBusy) return;
+    setBackfillActionBusy(true);
+    try { await pauseDigitalTwinBackfill(userId); } catch { /* status reload surfaces any error */ }
+    finally { setBackfillActionBusy(false); reloadAll(); }
+  }, [userId, backfillActionBusy, reloadAll]);
+  const handleResumeBackfill = useCallback(async () => {
+    if (!userId || backfillActionBusy) return;
+    setBackfillActionBusy(true);
+    try { await resumeDigitalTwinBackfill(userId); } catch { /* status reload surfaces any error */ }
+    finally { setBackfillActionBusy(false); reloadAll(); }
+  }, [userId, backfillActionBusy, reloadAll]);
+  const openPipeline   = (eventId?: string) => { setPipelineTargetEvent(eventId ?? null); setShowPipeline(true); };
+  const closePipeline  = () => { setShowPipeline(false); setPipelineTargetEvent(null); };
 
   const backfillRunning = !!(
     status?.enabled &&
@@ -72,74 +111,134 @@ export function DigitalTwinPageV3({ userId }: DigitalTwinPageV3Props) {
     Object.values(status.backfillState).some((s) => !s.complete)
   );
 
-  // Banner only needs enable + disable (for stalled CTA)
+  // Banner needs enable + disable (stalled CTA) + a way to open Activity while
+  // a backfill is running (the Activity button moves into the banner then).
   const bannerProps = {
     status,
     loading,
     backfillStalled,
     onEnable:  handleEnable,
     onDisable: () => setShowDisable(true),
+    onViewActivity: () => openPipeline(),
+    onPause:  handlePauseBackfill,
+    onResume: handleResumeBackfill,
+    backfillActionBusy,
   };
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
 
-      {/* ── Page header — hidden when metrics view is active ── */}
-      <div className={`shrink-0 border-b border-xyne-border bg-xyne-surface ${showMetrics ? "hidden" : ""}`}>
+      {/* ── Page header — hidden when a full-page overlay is active ── */}
+      <div className={`shrink-0 border-b border-xyne-border bg-xyne-surface ${showMetrics || showPipeline || showPersona ? "hidden" : ""}`}>
         <div className="flex items-center gap-[12px] px-[24px] py-[14px]">
           <BrainIcon size={22} className="text-xyne-brand" />
           <div>
-            <h1 className="text-[16px] font-semibold text-xyne-fg-primary">Digital Twin</h1>
+            <h1 className="text-[18px] font-semibold text-xyne-fg-primary" style={{ fontFamily: "var(--comp-font-serif)" }}>Digital Twin</h1>
             <p className="text-[12px] text-xyne-fg-secondary">
               Learns from your work, speaks in your voice — every memory approved by you
             </p>
           </div>
 
-          <div className="ml-auto flex items-center gap-[8px]">
-            {/* Metrics button — always visible */}
-            <Tooltip content="View approval metrics" side="bottom">
-              <button
-                onClick={() => setShowMetrics(true)}
-                className={`flex items-center gap-[6px] rounded-lg border px-[10px] py-[6px] text-[12px] font-medium transition ${
-                  showMetrics
-                    ? "border-xyne-brand bg-xyne-brand/8 text-xyne-brand"
-                    : "border-xyne-border bg-xyne-surface text-xyne-fg-secondary shadow-sm hover:bg-xyne-surface-sunken hover:text-xyne-fg-primary"
-                }`}
-                aria-label="Approval Metrics"
-              >
-                <ChartLineUpIcon size={14} />
-                <span>Metrics</span>
-              </button>
-            </Tooltip>
-
-            {/* Settings + Disable — shown when Twin is on */}
-            {status?.enabled && (
-              <>
-                <Tooltip content="Configure Twin behavior — response suffix, preferences" side="bottom">
-                  <button
-                    onClick={() => setShowSettings(true)}
-                    className="flex h-[32px] w-[32px] items-center justify-center rounded-lg border border-xyne-border bg-xyne-surface text-xyne-fg-secondary shadow-sm transition hover:bg-xyne-surface-sunken hover:text-xyne-fg-primary"
-                    aria-label="Settings"
-                  >
-                    <GearSixIcon size={15} weight="duotone" />
-                  </button>
-                </Tooltip>
+          {/* Actions — only meaningful once the Twin is on. When off, the
+              full-width landing carries the single Enable call-to-action. */}
+          {status?.enabled && (
+            <div className="ml-auto flex items-center gap-[8px]">
+              <Tooltip content="View approval metrics" side="bottom">
                 <button
-                  onClick={() => setShowDisable(true)}
-                  className="flex items-center gap-[6px] rounded-lg border border-xyne-error-fg/30 bg-xyne-error-fg/8 px-[10px] py-[6px] text-xyne-error-fg transition hover:bg-xyne-error-fg/15"
-                  aria-label="Disable Twin"
+                  onClick={() => setShowMetrics(true)}
+                  className={`flex items-center gap-[6px] rounded-lg border px-[10px] py-[6px] text-[12px] font-medium transition ${
+                    showMetrics
+                      ? "border-xyne-brand bg-xyne-brand/8 text-xyne-brand"
+                      : "border-xyne-border bg-xyne-surface text-xyne-fg-secondary shadow-sm hover:bg-xyne-surface-sunken hover:text-xyne-fg-primary"
+                  }`}
+                  aria-label="Approval Metrics"
                 >
-                  <PowerIcon size={14} weight="duotone" />
-                  <span className="text-[12px] font-medium">Disable</span>
+                  <ChartLineUpIcon size={14} />
+                  <span>Metrics</span>
                 </button>
-              </>
-            )}
-          </div>
+              </Tooltip>
+
+              <Tooltip content="Your persona files — soul.md and more. Edit them and choose which load into your Twin's prompt." side="bottom">
+                <button
+                  onClick={() => setShowPersona(true)}
+                  className="flex items-center gap-[6px] rounded-lg border border-xyne-border bg-xyne-surface px-[10px] py-[6px] text-[12px] font-medium text-xyne-fg-secondary shadow-sm transition hover:bg-xyne-surface-sunken hover:text-xyne-fg-primary"
+                  aria-label="Persona files"
+                >
+                  <FileTextIcon size={14} weight="duotone" />
+                  <span>Persona</span>
+                </button>
+              </Tooltip>
+
+              {/* Activity + Backfill — the curation actions, grouped together.
+                  While a backfill runs, the Activity entry lives inside the
+                  backfilling banner instead (clearer link to the progress). */}
+              {!backfillRunning && (
+                <div className="flex items-center gap-[8px] border-r border-xyne-border pr-[8px]">
+                  <Tooltip content="Memory activity — every curator run: what it read, proposed, and what you've accepted" side="bottom">
+                    <button
+                      onClick={() => openPipeline()}
+                      className="flex items-center gap-[6px] rounded-lg border border-xyne-border bg-xyne-surface px-[10px] py-[6px] text-[12px] font-medium text-xyne-fg-secondary shadow-sm transition hover:bg-xyne-surface-sunken hover:text-xyne-fg-primary"
+                      aria-label="Memory activity"
+                    >
+                      <FunnelIcon size={14} weight="duotone" />
+                      <span>Activity</span>
+                    </button>
+                  </Tooltip>
+
+                  <Tooltip content="Scan your Spaces history and propose new memories" side="bottom">
+                    <button
+                      onClick={handleBackfill}
+                      className="flex items-center gap-[6px] rounded-lg border border-xyne-border bg-xyne-surface px-[10px] py-[6px] text-[12px] font-medium text-xyne-fg-secondary shadow-sm transition hover:bg-xyne-surface-sunken hover:text-xyne-fg-primary"
+                      aria-label="Backfill history"
+                    >
+                      <ArrowsClockwiseIcon size={14} />
+                      <span>Backfill</span>
+                    </button>
+                  </Tooltip>
+                </div>
+              )}
+
+              <Tooltip content="Configure Twin behavior — response suffix, preferences" side="bottom">
+                <button
+                  onClick={() => setShowSettings(true)}
+                  className="flex h-[32px] w-[32px] items-center justify-center rounded-lg border border-xyne-border bg-xyne-surface text-xyne-fg-secondary shadow-sm transition hover:bg-xyne-surface-sunken hover:text-xyne-fg-primary"
+                  aria-label="Settings"
+                >
+                  <GearSixIcon size={15} weight="duotone" />
+                </button>
+              </Tooltip>
+              <button
+                onClick={() => setShowDisable(true)}
+                className="flex items-center gap-[6px] rounded-lg border border-xyne-error-fg/30 bg-xyne-error-fg/8 px-[10px] py-[6px] text-xyne-error-fg transition hover:bg-xyne-error-fg/15"
+                aria-label="Disable Twin"
+              >
+                <PowerIcon size={14} weight="duotone" />
+                <span className="text-[12px] font-medium">Disable</span>
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
       {/* ── Body ── */}
-      {!showMetrics ? (
+      {showPipeline ? (
+        <div className="min-h-0 flex-1 overflow-hidden">
+          <DigitalTwinPipelinePageV3
+            userId={userId}
+            live={backfillRunning}
+            initialEventId={pipelineTargetEvent}
+            onBack={closePipeline}
+          />
+        </div>
+      ) : showPersona ? (
+        <div className="min-h-0 flex-1 overflow-hidden">
+          <DigitalTwinFilesTab userId={userId} onBack={() => setShowPersona(false)} />
+        </div>
+      ) : !loading && status && !status.enabled ? (
+        <div className="min-h-0 flex-1 overflow-hidden">
+          <DigitalTwinLanding onEnable={handleEnable} />
+        </div>
+      ) : !showMetrics ? (
         <div className="flex min-h-0 flex-1 overflow-hidden">
           <div className="flex min-h-0 flex-1 justify-center overflow-hidden">
             <div
@@ -150,7 +249,7 @@ export function DigitalTwinPageV3({ userId }: DigitalTwinPageV3Props) {
 
               {/* LEFT: Memories */}
               <div className="min-h-0 overflow-hidden">
-                <DigitalTwinMemoriesTab userId={userId} onCandidateApproved={reloadAll} />
+                <DigitalTwinMemoriesTab userId={userId} onCandidateApproved={reloadAll} onViewReasoning={openPipeline} />
               </div>
 
               {/* DIVIDER — drag to resize */}
@@ -239,6 +338,7 @@ export function DigitalTwinPageV3({ userId }: DigitalTwinPageV3Props) {
         userId={userId}
         open={showSettings}
         initialSuffix={status?.responseSuffix ?? ""}
+        initialRespondPolicy={status?.respondPolicy ?? "always"}
         onClose={() => setShowSettings(false)}
         onSaved={() => { setShowSettings(false); reloadAll(); }}
       />

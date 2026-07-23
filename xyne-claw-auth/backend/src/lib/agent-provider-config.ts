@@ -49,17 +49,23 @@ export const KNOWN_PROVIDERS = new Set(["codex", "claude", "copilot", "openroute
  *  - `"parent"`: subagents inherit the parent agent's resolved provider (e.g. the
  *    parent on Claude Opus → subagents on Claude Opus). On paid/premium plans this
  *    consumes noticeably more tokens/credits.
+ *  - `"fast-model"` (opt-in, 2026-07-15): subagents run on `LITELLM_FAST_MODEL`.
+ *    NOT the default — no faster grid model exists yet, so flipping the default
+ *    would only change behavior without a win. Revisit when one is provisioned
+ *    (fast-mode-plan.md Slice A).
  *
  * An explicit `subagentProviders[name]` override ALWAYS wins over this default.
  * Stored on the agent's JSONB config as `subagentProviderMode`, alongside the
  * existing `provider` / `providerOrder` / `providerAlwaysOn` settings. Undefined ⇒
  * "spaces".
  */
-export type SubagentProviderMode = "parent" | "spaces";
+export type SubagentProviderMode = "parent" | "spaces" | "fast-model";
 
 export function resolveSubagentProviderMode(config?: unknown): SubagentProviderMode {
   const cfg = (config as Record<string, unknown> | null) ?? null;
-  return cfg?.["subagentProviderMode"] === "parent" ? "parent" : "spaces";
+  if (cfg?.["subagentProviderMode"] === "parent") return "parent";
+  if (cfg?.["subagentProviderMode"] === "fast-model") return "fast-model";
+  return "spaces";
 }
 
 export type CredRow = {
@@ -186,8 +192,36 @@ export function buildProviderConfig(provider: string, row: CredRow): ProviderCon
  */
 export async function resolveAgentProviderConfigs(
   agent: { id: string; config?: unknown },
+  opts: { headlessBulk?: boolean } = {},
 ): Promise<ResolvedAgentProviders> {
   const cfg = (agent.config as Record<string, unknown> | null) ?? null;
+
+  // Per-agent model downgrade for headless bulk traffic (automations, the
+  // error pipeline, scheduled jobs). These paths fire on every PR / message /
+  // cron tick and were observed burning ~88% of an agent's premium-provider
+  // quota (doctor-agent: 3,063 of 3,499 daily LLM turns from automations).
+  // `automationProvider` in agent config redirects ONLY these dispatches:
+  //   "platform"        → platform default model (kimi) — creds resolved but
+  //                        no premium order, mirroring the kimi-first mode
+  //   any known provider → force that provider as the sole parent
+  // Human-facing paths (chat, mentions, a2a) are untouched.
+  const rawAutomationProvider = cfg?.["automationProvider"];
+  const automationProvider = typeof rawAutomationProvider === "string" ? rawAutomationProvider : undefined;
+  if (opts.headlessBulk && automationProvider) {
+    if (automationProvider === "platform") {
+      log.info(`Provider resolution (headless-bulk): agent=${agent.id} automationProvider=platform → platform default`);
+      return { providerConfigs: {}, providerOrder: [] };
+    }
+    if (KNOWN_PROVIDERS.has(automationProvider)) {
+      const bulkAgent = {
+        id: agent.id,
+        config: { ...(cfg ?? {}), provider: automationProvider, providerOrder: [automationProvider], providerAlwaysOn: true },
+      };
+      log.info(`Provider resolution (headless-bulk): agent=${agent.id} automationProvider=${automationProvider} → forced parent`);
+      return resolveAgentProviderConfigs(bulkAgent);
+    }
+    log.warn(`Provider resolution (headless-bulk): agent=${agent.id} unknown automationProvider="${automationProvider}" — ignoring`);
+  }
 
   const rawOrder = cfg?.["providerOrder"];
   const agentProviderOrder: string[] = Array.isArray(rawOrder)

@@ -74,7 +74,7 @@ const COLORS = [
 ];
 const SUBAGENT_EMOJI: Record<string, string> = {
   spaces: "🔍", bitbucket: "🔀", grafana: "📊", deepwiki: "📚",
-  context7: "📖", pgm: "📋", git: "🔧",
+  context7: "📖", git: "🔧",
 };
 
 function slugify(name: string): string {
@@ -106,7 +106,7 @@ interface State {
       user can type "I also need X" and get a new (additive) suggestion
       using the same backend endpoint with a free-form intent. */
   refineIntent: string;
-  /** "all" | "subagents" | "direct" | <mcp-source-key e.g. "github"> | <custom-source e.g. "custom:pgm"> */
+  /** "all" | "subagents" | "direct" | <mcp-source-key e.g. "github"> | <custom-source e.g. "custom:sandbox"> */
   toolTab: string;
   nameError: string | null; slugError: string | null; checking: boolean; nameValid: boolean;
   creating: boolean; error: string | null;

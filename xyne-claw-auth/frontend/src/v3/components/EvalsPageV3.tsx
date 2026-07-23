@@ -10,7 +10,7 @@
  * sendChatMessage() once per turn with a shared `eval-<runId>-<convId>` claw
  * conversationId, streams reasoning/text/tool events in, and persists each turn.
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { useSearchParams } from "react-router-dom";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -19,6 +19,7 @@ import {
   FolderOpenIcon,
   CaretDownIcon,
   CaretRightIcon,
+  CaretLeftIcon,
   PlusIcon,
   TrashIcon,
   PencilSimpleIcon,
@@ -34,6 +35,7 @@ import {
   CheckSquareIcon,
   SquareIcon,
   ScalesIcon,
+  ClockCounterClockwiseIcon,
   ChartBarIcon,
   InfoIcon,
   ArrowUpRightIcon,
@@ -90,6 +92,7 @@ import {
   type EvalConversation,
   type EvalTurn,
   type EvalGeneration,
+  type EvalTurnResult,
   type ToolInvocation,
 } from "../../lib/api";
 import type { AgentLight } from "../../lib/types";
@@ -374,6 +377,9 @@ export function EvalsPageV3({ userId }: { userId: string }) {
   const [reportFolderId, setReportFolderId] = useState<string | null>(null);
   // When set, the detail pane shows the run-comparison view for a folder.
   const [compareFolderId, setCompareFolderId] = useState<string | null>(null);
+  // When set, the detail pane shows the run-history view for a folder (every past
+  // run, each individually scorable — not just the latest).
+  const [historyFolderId, setHistoryFolderId] = useState<string | null>(null);
 
   const [agents, setAgents] = useState<AgentLight[]>([]);
   const [agentSlug, setAgentSlug] = useState("");
@@ -1108,8 +1114,15 @@ export function EvalsPageV3({ userId }: { userId: string }) {
    *  loads the model list + global defaults, and prefills the prompt with the
    *  per-folder override if one is set, else the global default. */
   const openJudge = useCallback(
-    async (opts: { folderId: string; conversationId?: string; label: string }) => {
-      const comp = compareByFolder[opts.folderId];
+    async (opts: {
+      folderId: string;
+      conversationId?: string;
+      label: string;
+      /** Score a SPECIFIC run/comparison (e.g. a past run from History) instead of
+       *  the folder's latest. Falls back to the latest overlay when omitted. */
+      target?: { comparisonId: string | null; agents: AgentRun[] };
+    }) => {
+      const comp = opts.target ?? compareByFolder[opts.folderId];
       if (!comp || comp.agents.length === 0) {
         setInfo("Run this eval first — there are no generated answers to score yet.");
         return;
@@ -1141,6 +1154,25 @@ export function EvalsPageV3({ userId }: { userId: string }) {
       });
     },
     [compareByFolder, judges, activeJudgeId, models.length],
+  );
+
+  // Score a SPECIFIC past run (from the History view). If the run belongs to a
+  // comparison, resolve every sibling agent so it's judged apples-to-apples;
+  // otherwise score it on its own. Reuses the same judge dialog/flow as the latest.
+  const scoreHistoricalRun = useCallback(
+    async (folderId: string, run: GenerationMeta) => {
+      const genLabel = run.genModel ? `${run.genProvider ? `${run.genProvider} · ` : ""}${run.genModel}` : "";
+      const solo: AgentRun = { slug: run.agentSlug, name: agentNameBySlug.get(run.agentSlug) ?? run.agentSlug, runId: run.id, genLabel };
+      let target: { comparisonId: string | null; agents: AgentRun[] } = { comparisonId: null, agents: [solo] };
+      if (run.comparisonId) {
+        const comp = await getComparison(run.comparisonId).catch(() => null);
+        const agents = (comp?.agents ?? []).map((c) => toAgentRun(c.run));
+        if (agents.length) target = { comparisonId: run.comparisonId, agents };
+      }
+      const when = new Date(run.startedAt).toLocaleString([], { dateStyle: "short", timeStyle: "short" });
+      await openJudge({ folderId, label: `run · ${run.agentSlug} · ${when}`, target });
+    },
+    [openJudge, toAgentRun, agentNameBySlug],
   );
 
   const runJudge = useCallback(async () => {
@@ -1299,6 +1331,7 @@ export function EvalsPageV3({ userId }: { userId: string }) {
     setShowJudges(false);
     setReportFolderId(null);
     setCompareFolderId(null);
+    setHistoryFolderId(null);
     setOpenConvId(id);
   }, []);
 
@@ -1308,6 +1341,7 @@ export function EvalsPageV3({ userId }: { userId: string }) {
       setShowJudges(false);
       setOpenConvId(null);
       setCompareFolderId(null);
+      setHistoryFolderId(null);
       setReportFolderId(folderId);
       if (!folderConvs[folderId]) void loadFolderConvs(folderId);
     },
@@ -1319,7 +1353,22 @@ export function EvalsPageV3({ userId }: { userId: string }) {
       setShowJudges(false);
       setOpenConvId(null);
       setReportFolderId(null);
+      setHistoryFolderId(null);
       setCompareFolderId(folderId);
+      if (!folderConvs[folderId]) void loadFolderConvs(folderId);
+    },
+    [folderConvs, loadFolderConvs],
+  );
+
+  // Open a project's run history (all past runs). Conversations are loaded so the
+  // Score-a-past-run flow can resolve the folder's comparison group if needed.
+  const openHistory = useCallback(
+    (folderId: string) => {
+      setShowJudges(false);
+      setOpenConvId(null);
+      setReportFolderId(null);
+      setCompareFolderId(null);
+      setHistoryFolderId(folderId);
       if (!folderConvs[folderId]) void loadFolderConvs(folderId);
     },
     [folderConvs, loadFolderConvs],
@@ -1334,6 +1383,7 @@ export function EvalsPageV3({ userId }: { userId: string }) {
     if (judge) setActiveJudgeId(judge);
     if (searchParams.get("judges") === "1") setShowJudges(true);
     else if (searchParams.get("compare")) openCompare(searchParams.get("compare")!);
+    else if (searchParams.get("history")) openHistory(searchParams.get("history")!);
     else if (searchParams.get("report")) openReport(searchParams.get("report")!);
     else if (searchParams.get("conv")) setOpenConvId(searchParams.get("conv"));
     // Restore which sidebar folders were expanded (+ load their conversations).
@@ -1365,11 +1415,12 @@ export function EvalsPageV3({ userId }: { userId: string }) {
     const next = new URLSearchParams();
     if (showJudges) next.set("judges", "1");
     else if (compareFolderId) next.set("compare", compareFolderId);
+    else if (historyFolderId) next.set("history", historyFolderId);
     else if (reportFolderId) next.set("report", reportFolderId);
     else if (openConvId) next.set("conv", openConvId);
     if (activeJudgeId) next.set("judge", activeJudgeId);
     setSearchParams(next, { replace: true });
-  }, [showJudges, compareFolderId, reportFolderId, openConvId, activeJudgeId, setSearchParams]);
+  }, [showJudges, compareFolderId, historyFolderId, reportFolderId, openConvId, activeJudgeId, setSearchParams]);
 
   // ── Import from Spaces ──
   const openSpacesImport = useCallback(
@@ -1588,6 +1639,7 @@ export function EvalsPageV3({ userId }: { userId: string }) {
     onOpenReport: openReport,
     onImportFromSpaces: (id) => void openSpacesImport(id),
     onCompareRuns: openCompare,
+    onOpenHistory: openHistory,
     reportFolderId,
     runningFolders,
     submittingRun,
@@ -1904,6 +1956,15 @@ export function EvalsPageV3({ userId }: { userId: string }) {
             convItems={folderConvs[compareFolderId]?.items ?? []}
             onOpenConv={selectConversation}
             onClose={() => setCompareFolderId(null)}
+          />
+        ) : historyFolderId ? (
+          <HistoryView
+            folderName={foldersById.get(historyFolderId)?.name ?? "Project"}
+            folderId={historyFolderId}
+            convItems={folderConvs[historyFolderId]?.items ?? []}
+            scoringRunId={judgeJob.active?.folderId === historyFolderId ? (judgeJob.active?.runId ?? null) : null}
+            onScoreRun={(run) => void scoreHistoricalRun(historyFolderId, run)}
+            onClose={() => setHistoryFolderId(null)}
           />
         ) : reportFolderId ? (
           <ProjectReport
@@ -2762,70 +2823,72 @@ function CompareView({
   onClose: () => void;
 }) {
   const [runs, setRuns] = useState<GenerationMeta[]>([]);
-  const [aId, setAId] = useState("");
-  const [bId, setBId] = useState("");
-  const [a, setA] = useState<EvalGeneration | null>(null);
-  const [b, setB] = useState<EvalGeneration | null>(null);
+  // Ordered list of run ids under comparison; index 0 is the baseline. Supports
+  // N runs (not just A/B) — each non-baseline column shows its Δ vs the baseline.
+  const [selIds, setSelIds] = useState<string[]>([]);
+  // Full generations (with turnResults) fetched once and cached by run id.
+  const [gens, setGens] = useState<Record<string, EvalGeneration | null>>({});
 
   useEffect(() => {
     listGenerationsForFolder(folderId)
       .then((rs) => {
         setRuns(rs);
-        if (rs.length >= 2) {
-          setBId(rs[0]!.id);
-          setAId(rs[1]!.id);
-        } else if (rs.length === 1) setBId(rs[0]!.id);
+        // Default: baseline = second-newest, compared against the newest (matches
+        // the old A/B default); a single run just shows itself.
+        if (rs.length >= 2) setSelIds([rs[1]!.id, rs[0]!.id]);
+        else if (rs.length === 1) setSelIds([rs[0]!.id]);
       })
       .catch(() => {});
   }, [folderId]);
+  // Fetch any newly-selected run's full generation once; cache in `gens`.
   useEffect(() => {
-    if (aId) getGeneration(aId).then(setA).catch(() => setA(null));
-    else setA(null);
-  }, [aId]);
-  useEffect(() => {
-    if (bId) getGeneration(bId).then(setB).catch(() => setB(null));
-    else setB(null);
-  }, [bId]);
+    for (const id of selIds) {
+      if (id && !(id in gens)) {
+        getGeneration(id)
+          .then((g) => setGens((m) => ({ ...m, [id]: g })))
+          .catch(() => setGens((m) => ({ ...m, [id]: null })));
+      }
+    }
+  }, [selIds, gens]);
 
   const titleById = useMemo(() => new Map(convItems.map((c) => [c.id, c.title])), [convItems]);
   const runLabel = (r: GenerationMeta) =>
     `${r.agentSlug}${r.genModel ? ` · ${r.genModel}` : ""} · ${new Date(r.startedAt).toLocaleDateString()} ${new Date(r.startedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+  /** Column letter for a run position: A, B, C, … */
+  const colLetter = (i: number) => String.fromCharCode(65 + i);
 
-  const { rows, summary } = useMemo(() => {
+  const { rows, perRun, n } = useMemo(() => {
     const scoreMap = (run: EvalGeneration | null) => {
       const m = new Map<string, number | null>();
       for (const t of run?.turnResults ?? []) m.set(`${t.conversationId}::${t.turnIndex}`, t.matchScore ?? null);
       return m;
     };
-    const ma = scoreMap(a);
-    const mb = scoreMap(b);
-    const keys = [...new Set([...ma.keys(), ...mb.keys()])];
-    const byConv = new Map<string, Array<{ idx: number; a: number | null; b: number | null }>>();
+    const maps = selIds.map((id) => ({ id, scores: scoreMap(gens[id] ?? null) }));
+    const keys = [...new Set(maps.flatMap((mp) => [...mp.scores.keys()]))];
+    const byConv = new Map<string, Array<{ idx: number; scores: Array<number | null> }>>();
     for (const k of keys) {
       const [cid, idxs] = k.split("::");
       const arr = byConv.get(cid!) ?? [];
-      arr.push({ idx: Number(idxs), a: ma.get(k) ?? null, b: mb.get(k) ?? null });
+      arr.push({ idx: Number(idxs), scores: maps.map((mp) => mp.scores.get(k) ?? null) });
       byConv.set(cid!, arr);
     }
     const rows = [...byConv.entries()]
       .map(([cid, turns]) => ({ cid, title: titleById.get(cid) ?? cid, turns: turns.sort((x, y) => x.idx - y.idx) }))
       .sort((x, y) => x.title.localeCompare(y.title));
-    let sa = 0;
-    let sb = 0;
+    // Per-run average over turns where EVERY selected run scored — keeps the
+    // column averages (and the Δs between them) apples-to-apples.
+    const sums = maps.map(() => 0);
     let n = 0;
     for (const k of keys) {
-      const av = ma.get(k);
-      const bv = mb.get(k);
-      if (typeof av === "number" && typeof bv === "number") {
-        sa += av;
-        sb += bv;
+      const vals = maps.map((mp) => mp.scores.get(k));
+      if (vals.every((v) => typeof v === "number")) {
+        vals.forEach((v, i) => (sums[i]! += v as number));
         n++;
       }
     }
-    const avgA = n ? Math.round(sa / n) : null;
-    const avgB = n ? Math.round(sb / n) : null;
-    return { rows, summary: { avgA, avgB, n, delta: avgA != null && avgB != null ? avgB - avgA : null } };
-  }, [a, b, titleById]);
+    const perRun = maps.map((mp, i) => ({ id: mp.id, avg: n ? Math.round(sums[i]! / n) : null }));
+    return { rows, perRun, n };
+  }, [selIds, gens, titleById]);
 
   return (
     <>
@@ -2840,83 +2903,360 @@ function CompareView({
         </button>
       </div>
       <div className="flex-1 overflow-y-auto px-5 py-5">
-        <div className="mx-auto max-w-2xl">
+        <div className="mx-auto max-w-4xl">
           {runs.length < 2 ? (
             <div className="py-10 text-center text-[12px] text-xyne-fg-tertiary">Need at least two runs to compare. Run this project again.</div>
           ) : (
             <>
-              {/* Run pickers */}
-              <div className="mb-4 grid grid-cols-2 gap-3">
-                <SelectField
-                  label="Baseline (A)"
-                  placeholder="Search runs…"
-                  value={aId}
-                  onValueChange={(v) => setAId(v ?? "")}
-                  options={runs.map((r) => ({ value: r.id, label: runLabel(r) }))}
-                />
-                <SelectField
-                  label="New (B)"
-                  placeholder="Search runs…"
-                  value={bId}
-                  onValueChange={(v) => setBId(v ?? "")}
-                  options={runs.map((r) => ({ value: r.id, label: runLabel(r) }))}
-                />
-              </div>
-
-              {/* Summary */}
-              <div className="mb-4 flex items-center justify-center gap-4 rounded-xl border border-xyne-border-subtle bg-xyne-surface-subtle px-5 py-4">
-                <ScoreBar score={summary.avgA} />
-                <span className="text-xyne-fg-tertiary">→</span>
-                <ScoreBar score={summary.avgB} />
-                {summary.delta != null && (
-                  <span
-                    className={`rounded px-2 py-0.5 text-[13px] font-bold ${
-                      summary.delta > 0 ? "bg-xyne-success/15 text-xyne-success" : summary.delta < 0 ? "bg-xyne-error/15 text-xyne-error" : "text-xyne-fg-tertiary"
-                    }`}
-                  >
-                    {summary.delta > 0 ? "+" : ""}
-                    {summary.delta}
-                  </span>
-                )}
-                <span className="text-[11px] text-xyne-fg-tertiary">avg over {summary.n} turn{summary.n === 1 ? "" : "s"}</span>
-              </div>
-
-              {/* Per-conversation/turn deltas */}
-              <div className="mb-2 flex items-center gap-2 px-3 text-[10px] font-medium uppercase tracking-wide text-xyne-fg-tertiary">
-                <span className="flex-1">Conversation / turn</span>
-                <span className="w-[88px] text-right">A</span>
-                <span className="w-[88px] text-right">B</span>
-                <span className="w-12 text-right">Δ</span>
-                <span className="w-4" />
-              </div>
-              <div className="flex flex-col gap-2">
-                {rows.map((row) => (
-                  <div key={row.cid} className="rounded-lg border border-xyne-border-subtle">
-                    <div className="flex items-center gap-2 px-3 py-2">
-                      <span className="flex-1 truncate text-[12.5px] text-xyne-fg-primary">{row.title}</span>
-                      <button
-                        onClick={() => onOpenConv(row.cid)}
-                        title="Open conversation"
-                        className="shrink-0 text-xyne-fg-tertiary hover:text-xyne-fg-primary"
-                      >
-                        <ArrowUpRightIcon size={13} />
-                      </button>
+              {/* Run pickers — baseline (A) plus any number of comparison runs */}
+              <div className="mb-4 flex flex-wrap items-end gap-3">
+                {selIds.map((id, idx) => {
+                  const taken = new Set(selIds.filter((_, i) => i !== idx));
+                  return (
+                    <div key={idx} className="flex min-w-[240px] flex-1 items-end gap-1.5">
+                      <div className="min-w-0 flex-1">
+                        <SelectField
+                          label={idx === 0 ? "Baseline (A)" : `Run ${colLetter(idx)}`}
+                          placeholder="Search runs…"
+                          value={id}
+                          onValueChange={(v) => setSelIds((l) => l.map((x, i) => (i === idx ? (v ?? "") : x)))}
+                          options={runs.filter((r) => r.id === id || !taken.has(r.id)).map((r) => ({ value: r.id, label: runLabel(r) }))}
+                        />
+                      </div>
+                      {selIds.length > 2 && (
+                        <button
+                          onClick={() => setSelIds((l) => l.filter((_, i) => i !== idx))}
+                          title="Remove run"
+                          className="mb-1.5 shrink-0 text-[12px] text-xyne-fg-tertiary hover:text-xyne-error"
+                        >
+                          ✕
+                        </button>
+                      )}
                     </div>
-                    <div className="flex flex-col gap-1 border-t border-xyne-border-subtle px-3 py-2">
+                  );
+                })}
+                {selIds.length < runs.length && (
+                  <button
+                    onClick={() => {
+                      const next = runs.find((r) => !selIds.includes(r.id));
+                      if (next) setSelIds((l) => [...l, next.id]);
+                    }}
+                    className="mb-1.5 flex shrink-0 items-center gap-1.5 self-end text-[12px] text-xyne-brand hover:underline"
+                  >
+                    <PlusIcon size={13} /> Add run
+                  </button>
+                )}
+              </div>
+
+              {/* Summary — baseline avg, then each run's avg + Δ vs baseline */}
+              <div className="mb-4 flex flex-wrap items-center justify-center gap-x-4 gap-y-2 rounded-xl border border-xyne-border-subtle bg-xyne-surface-subtle px-5 py-4">
+                {perRun.map((r, i) => {
+                  const base = perRun[0]?.avg ?? null;
+                  const delta = i > 0 && r.avg != null && base != null ? r.avg - base : null;
+                  return (
+                    <div key={r.id} className="flex items-center gap-2">
+                      {i > 0 && <span className="text-xyne-fg-tertiary">→</span>}
+                      <span className="text-[10px] font-semibold uppercase tracking-wide text-xyne-fg-tertiary">{colLetter(i)}</span>
+                      <ScoreBar score={r.avg} />
+                      {delta != null && (
+                        <span
+                          className={`rounded px-2 py-0.5 text-[13px] font-bold ${
+                            delta > 0 ? "bg-xyne-success/15 text-xyne-success" : delta < 0 ? "bg-xyne-error/15 text-xyne-error" : "text-xyne-fg-tertiary"
+                          }`}
+                        >
+                          {delta > 0 ? "+" : ""}
+                          {delta}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+                <span className="text-[11px] text-xyne-fg-tertiary">avg over {n} turn{n === 1 ? "" : "s"}</span>
+              </div>
+
+              {/* Per-conversation/turn deltas — one score column per run + Δ vs A */}
+              <div className="overflow-x-auto">
+                <div className="min-w-max">
+                  <div className="mb-2 flex items-center gap-2 px-3 text-[10px] font-medium uppercase tracking-wide text-xyne-fg-tertiary">
+                    <span className="min-w-[200px] flex-1">Conversation / turn</span>
+                    {selIds.map((id, i) => (
+                      <Fragment key={id}>
+                        <span className="w-[88px] text-right">{colLetter(i)}</span>
+                        {i > 0 && <span className="w-12 text-right">Δ</span>}
+                      </Fragment>
+                    ))}
+                    <span className="w-4" />
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    {rows.map((row) => (
+                      <div key={row.cid} className="rounded-lg border border-xyne-border-subtle">
+                        <div className="flex items-center gap-2 px-3 py-2">
+                          <span className="min-w-[200px] flex-1 truncate text-[12.5px] text-xyne-fg-primary">{row.title}</span>
+                          <button
+                            onClick={() => onOpenConv(row.cid)}
+                            title="Open conversation"
+                            className="shrink-0 text-xyne-fg-tertiary hover:text-xyne-fg-primary"
+                          >
+                            <ArrowUpRightIcon size={13} />
+                          </button>
+                        </div>
+                        <div className="flex flex-col gap-1 border-t border-xyne-border-subtle px-3 py-2">
+                          {row.turns.map((t) => (
+                            <div key={t.idx} className="flex items-center gap-2">
+                              <span className="min-w-[200px] flex-1 text-[11px] text-xyne-fg-tertiary">Message {t.idx + 1}</span>
+                              {t.scores.map((s, i) => (
+                                <Fragment key={i}>
+                                  <ScoreBar score={s} />
+                                  {i > 0 && <Delta a={t.scores[0] ?? null} b={s} />}
+                                </Fragment>
+                              ))}
+                              <span className="w-4" />
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
+/* ── Run history (all past runs, each individually scorable) ── */
+function HistoryView({
+  folderName,
+  folderId,
+  convItems,
+  scoringRunId,
+  onScoreRun,
+  onClose,
+}: {
+  folderName: string;
+  folderId: string;
+  convItems: EvalConversationListItem[];
+  /** Run id currently being scored (any run in a comparison group counts), or null. */
+  scoringRunId: string | null;
+  onScoreRun: (run: GenerationMeta) => void;
+  onClose: () => void;
+}) {
+  const [runs, setRuns] = useState<GenerationMeta[]>([]);
+  const [loading, setLoading] = useState(true);
+  // The run whose Q&A is open (drill-in); null = show the list.
+  const [openRun, setOpenRun] = useState<GenerationMeta | null>(null);
+  const [detail, setDetail] = useState<EvalGeneration | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+
+  useEffect(() => {
+    setLoading(true);
+    listGenerationsForFolder(folderId)
+      .then((rs) => setRuns(rs))
+      .catch(() => setRuns([]))
+      .finally(() => setLoading(false));
+  }, [folderId]);
+
+  // Fetch the opened run's full turn results (question / expected / answer / score).
+  useEffect(() => {
+    if (!openRun) {
+      setDetail(null);
+      return;
+    }
+    setDetailLoading(true);
+    getGeneration(openRun.id)
+      .then((g) => setDetail(g))
+      .catch(() => setDetail(null))
+      .finally(() => setDetailLoading(false));
+  }, [openRun]);
+
+  const titleById = useMemo(() => new Map(convItems.map((c) => [c.id, c.title])), [convItems]);
+
+  // Collapse a multi-agent comparison (same comparisonId) into one entry —
+  // scoring any run in it fans across all siblings. Standalone runs stand alone.
+  // The API returns runs newest-first, so groups keep that order.
+  const groups = useMemo(() => {
+    const out: Array<{ key: string; lead: GenerationMeta; members: GenerationMeta[] }> = [];
+    const byKey = new Map<string, { key: string; lead: GenerationMeta; members: GenerationMeta[] }>();
+    for (const r of runs) {
+      const gid = r.comparisonId ?? `solo:${r.id}`;
+      const existing = byKey.get(gid);
+      if (existing) existing.members.push(r);
+      else {
+        const g = { key: gid, lead: r, members: [r] };
+        byKey.set(gid, g);
+        out.push(g);
+      }
+    }
+    return out;
+  }, [runs]);
+
+  // The opened run's turns grouped by conversation (titled + ordered).
+  const detailRows = useMemo(() => {
+    const byConv = new Map<string, EvalTurnResult[]>();
+    for (const t of detail?.turnResults ?? []) {
+      const arr = byConv.get(t.conversationId) ?? [];
+      arr.push(t);
+      byConv.set(t.conversationId, arr);
+    }
+    return [...byConv.entries()]
+      .map(([cid, ts]) => ({ cid, title: titleById.get(cid) ?? cid, turns: ts.sort((a, b) => a.turnIndex - b.turnIndex) }))
+      .sort((a, b) => a.title.localeCompare(b.title));
+  }, [detail, titleById]);
+
+  const fmtWhen = (iso: string) =>
+    `${new Date(iso).toLocaleDateString()} ${new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+  const statusClass = (s: string) =>
+    s === "completed"
+      ? "text-xyne-success"
+      : s === "failed" || s === "cancelled"
+        ? "text-xyne-error"
+        : "text-amber-600 dark:text-amber-400";
+
+  return (
+    <>
+      <div className="flex h-[52px] shrink-0 items-center justify-between border-b border-xyne-border-subtle px-5">
+        <div className="flex min-w-0 items-center gap-2">
+          {openRun ? (
+            <button onClick={() => setOpenRun(null)} title="Back to history" className="shrink-0 text-xyne-fg-tertiary hover:text-xyne-fg-primary">
+              <CaretLeftIcon size={15} />
+            </button>
+          ) : (
+            <ClockCounterClockwiseIcon size={15} weight="fill" className="shrink-0 text-xyne-brand" />
+          )}
+          <h2 className="truncate text-[14px] font-semibold text-xyne-fg-primary">{folderName}</h2>
+          <span className="truncate text-[11px] text-xyne-fg-tertiary">
+            · {openRun ? `${openRun.agentSlug} · ${fmtWhen(openRun.startedAt)}` : "Run history"}
+          </span>
+        </div>
+        <button onClick={onClose} title="Close" className="text-xyne-fg-tertiary hover:text-xyne-fg-primary">
+          ✕
+        </button>
+      </div>
+      <div className="flex-1 overflow-y-auto px-5 py-5">
+        <div className="mx-auto max-w-3xl">
+          {openRun ? (
+            // ── Run detail: questions + answers for the selected run ──
+            detailLoading ? (
+              <div className="py-10 text-center text-[12px] text-xyne-fg-tertiary">Loading answers…</div>
+            ) : detailRows.length === 0 ? (
+              <div className="py-10 text-center text-[12px] text-xyne-fg-tertiary">No answers recorded for this run.</div>
+            ) : (
+              <div className="flex flex-col gap-4">
+                <div className="flex items-center justify-end">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={openRun.id === scoringRunId}
+                    leadingIcon={<ScalesIcon size={12} />}
+                    onClick={() => onScoreRun(openRun)}
+                  >
+                    {openRun.id === scoringRunId ? "Scoring…" : "Score this run"}
+                  </Button>
+                </div>
+                {detailRows.map((row) => (
+                  <div key={row.cid} className="rounded-lg border border-xyne-border-subtle">
+                    <div className="border-b border-xyne-border-subtle px-3 py-2 text-[12.5px] font-medium text-xyne-fg-primary">{row.title}</div>
+                    <div className="flex flex-col gap-4 px-3 py-3">
                       {row.turns.map((t) => (
-                        <div key={t.idx} className="flex items-center gap-2">
-                          <span className="flex-1 text-[11px] text-xyne-fg-tertiary">Message {t.idx + 1}</span>
-                          <ScoreBar score={t.a} />
-                          <ScoreBar score={t.b} />
-                          <Delta a={t.a} b={t.b} />
-                          <span className="w-4" />
+                        <div key={t.id} className="flex flex-col gap-2">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-semibold uppercase tracking-wide text-xyne-fg-tertiary">Message {t.turnIndex + 1}</span>
+                            {typeof t.matchScore === "number" && <ScoreBar score={t.matchScore} />}
+                          </div>
+                          <div className="rounded-md bg-xyne-surface-subtle px-3 py-2 text-[12.5px] text-xyne-fg-primary">{t.inputMessage}</div>
+                          {t.expectedResponse && (
+                            <div>
+                              <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-xyne-fg-tertiary">Expected</div>
+                              <div className="rounded-md border border-xyne-border-subtle px-3 py-2">
+                                <EvalMarkdown tone="secondary">{t.expectedResponse}</EvalMarkdown>
+                              </div>
+                            </div>
+                          )}
+                          <div>
+                            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-xyne-fg-tertiary">Answer</div>
+                            <div className="rounded-md border border-xyne-border-subtle px-3 py-2">
+                              {t.clawAnswer ? (
+                                <EvalMarkdown tone="primary" invocations={t.toolInvocations ?? undefined}>
+                                  {t.clawAnswer}
+                                </EvalMarkdown>
+                              ) : (
+                                <span className="text-[12px] text-xyne-fg-tertiary">{t.status === "failed" ? "Run failed for this turn." : "No answer."}</span>
+                              )}
+                            </div>
+                          </div>
+                          {t.judgeReasoning && t.judgeReasoning !== "judge_unavailable" && (
+                            <div className="text-[11px] text-xyne-fg-tertiary">
+                              <span className="font-medium">Judge:</span> {t.judgeReasoning}
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
                   </div>
                 ))}
               </div>
-            </>
+            )
+          ) : loading ? (
+            <div className="py-10 text-center text-[12px] text-xyne-fg-tertiary">Loading runs…</div>
+          ) : runs.length === 0 ? (
+            <div className="py-10 text-center text-[12px] text-xyne-fg-tertiary">No runs yet. Run this project to create one.</div>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {groups.map((g) => {
+                const isComparison = !!g.lead.comparisonId && g.members.length > 1;
+                const beingScored = g.members.some((m) => m.id === scoringRunId);
+                return (
+                  <div
+                    key={g.key}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setOpenRun(g.lead)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        setOpenRun(g.lead);
+                      }
+                    }}
+                    title="View questions & answers"
+                    className="flex cursor-pointer items-center gap-3 rounded-lg border border-xyne-border-subtle px-3 py-2.5 text-left transition hover:border-xyne-border hover:bg-xyne-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-xyne-border-focus"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="truncate text-[12.5px] font-medium text-xyne-fg-primary">
+                          {g.members.map((m) => m.agentSlug).join(" · ")}
+                        </span>
+                        {isComparison && (
+                          <span className="shrink-0 rounded bg-xyne-surface-sunken px-1.5 py-0.5 text-[10px] text-xyne-fg-tertiary">
+                            comparison · {g.members.length}
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-xyne-fg-tertiary">
+                        <span>{fmtWhen(g.lead.startedAt)}</span>
+                        {g.lead.genModel && <span>· {g.lead.genModel}</span>}
+                        <span className={statusClass(g.lead.status)}>· {g.lead.status}</span>
+                      </div>
+                    </div>
+                    <ArrowUpRightIcon size={13} className="shrink-0 text-xyne-fg-tertiary" />
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      disabled={beingScored}
+                      leadingIcon={<ScalesIcon size={12} />}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onScoreRun(g.lead);
+                      }}
+                    >
+                      {beingScored ? "Scoring…" : "Score"}
+                    </Button>
+                  </div>
+                );
+              })}
+            </div>
           )}
         </div>
       </div>
@@ -2949,6 +3289,7 @@ interface TreeCtx {
   onOpenReport: (id: string) => void;
   onImportFromSpaces: (id: string) => void;
   onCompareRuns: (id: string) => void;
+  onOpenHistory: (id: string) => void;
   reportFolderId: string | null;
   runningFolders: Set<string>;
   submittingRun: boolean;
@@ -3090,6 +3431,7 @@ function FolderNode({ folderId, ctx }: { folderId: string; ctx: TreeCtx }) {
             <KebabMenu
               items={[
                 ...(canJudge ? [{ label: "Compare runs", onClick: () => ctx.onCompareRuns(folderId) }] : []),
+                ...(canJudge ? [{ label: "Run history", onClick: () => ctx.onOpenHistory(folderId) }] : []),
                 { label: "Delete folder", onClick: () => ctx.onDeleteFolder(folderId) },
               ]}
             />

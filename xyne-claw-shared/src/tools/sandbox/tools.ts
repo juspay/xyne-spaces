@@ -2,6 +2,7 @@ import { KataClient } from "@xyne/kata-sdk";
 import type { Session } from "@xyne/kata-sdk";
 import type { ToolDefinition, ToolExecutionContext } from "../types.js";
 import { redactSecrets, redactAndStringify } from "./redact.js";
+import { rotateTemplate, isSameTemplateFamily } from "./template-rotation.js";
 
 // Build a redacted `Error: ...` string from a caught error. Several tool
 // catch blocks interpolate err.message straight into tool output, which can
@@ -1158,8 +1159,12 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
           // substring check.
           const cachedTemplate =
             SESSION_TEMPLATE.get(storeKey) ?? SESSION_TEMPLATE.get(cached.id);
+          // isSameTemplateFamily (not ===): a live session may have been
+          // created on a ROTATED variant of config.template (e.g.
+          // `agent-workspace-gvisor-template-c`), and a plain equality check
+          // would treat it as the "wrong template" and needlessly recreate.
           const isRepoTemplate = cachedTemplate
-            ? cachedTemplate === config.template
+            ? isSameTemplateFamily(cachedTemplate, config.template)
             : cached.id.includes("agent-workspace") || cached.id.includes("docker-dev");
           if (isRepoTemplate && await probeSession(cached, storeKey)) {
             log.push(`Reusing existing sandbox session ${cached.id}`);
@@ -1214,14 +1219,20 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
       }
 
       log.push("Creating sandbox session...");
-      const client = makeClient(context.config);
+      // Round-robin across the golden's N snapshot-backed template variants so
+      // concurrent claims/warm-pool refills spread over N GCP snapshots instead
+      // of hammering one past its per-source op-rate limit. Non-rotated
+      // templates pass through unchanged. Remember the ACTUAL variant so reuse
+      // (isSameTemplateFamily) and resume find the same pod.
+      const claimTemplate = rotateTemplate(config.template);
+      const client = makeClient(context.config, claimTemplate);
       const session = await client.createSession({
         timeoutMs: sessionDurationMs,
         idleTimeoutMs: config.idleTimeoutMs || 60 * 60 * 1000,
-        template: config.template,
+        template: claimTemplate,
         readyTimeoutMs: config.readyTimeoutMs || 10 * 60 * 1000,
       });
-      rememberSession(storeKey, session, config.template, ownerFromContext(context));
+      rememberSession(storeKey, session, claimTemplate, ownerFromContext(context));
       log.push(`Session created: ${session.id}`);
 
       const pollUntilDone = async (jobId: string, label: string, timeoutMs: number) => {

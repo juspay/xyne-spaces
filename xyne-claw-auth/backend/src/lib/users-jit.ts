@@ -56,12 +56,15 @@ export async function ensureOrgMembership(userId: string, orgId: string): Promis
 /**
  * Resolve which claw org a NEWLY-mirrored Spaces user belongs to (§13.2).
  * Order:
- *   1. `orgHint` — an explicit org (e.g. the invoked agent's org, passed by the
- *      webhook path). Most robust: a second-tenant agent's callers land in that
- *      tenant even before a mapping row exists. Ignored if the org doesn't exist.
- *   2. `ConnectedSurface` — map the user's Spaces `workspaceId` → claw org.
+ *   1. `ConnectedSurface` — map the user's Spaces `workspaceId` → claw org.
  *      Falls back to legacy `SurfaceTenantLink` during the Slice 0 transition.
- *      Serves the browser/requireAuth path (no agent in hand).
+ *      AUTHORITATIVE when present (2026-07-15): the workspace defines the
+ *      user's permanent org identity.
+ *   2. `orgHint` — the invoked agent's org (webhook path). Only consulted for
+ *      UNMAPPED workspaces / callers with no workspace context. Must never
+ *      beat the mapping — the digital-twin webhook serves every workspace and
+ *      hinted its own (Juspay) org, minting wrong-org users on plain people-
+ *      mentions in the nammayatri workspace.
  *   3. Fallback — the default org (Juspay). Once a second tenant is live, set
  *      `JIT_UNMAPPED_WORKSPACE_POLICY=reject` to FAIL CLOSED for unmapped
  *      workspaces so a new Spaces tenant can't silently pollute the default org.
@@ -73,15 +76,14 @@ async function resolveOrgForNewUser(
   spacesUser: SpacesUserProfile,
   orgHint?: string,
 ): Promise<string | null> {
-  // 1. Explicit hint.
-  const hint = (orgHint ?? "").trim();
-  if (hint) {
-    const org = await prisma.organization.findUnique({ where: { id: hint }, select: { id: true } });
-    if (org) return org.id;
-    log.warn(`[users-jit] orgHint "${hint}" not found — falling through to workspace mapping`);
-  }
-
-  // 2. Spaces workspace → org mapping.
+  // 1. Spaces workspace → org mapping FIRST (2026-07-15). The hint used to
+  //    win, which minted wrong-org users: the digital-twin webhook handles
+  //    USER_MENTIONED for every workspace and passes ITS agent's org (Juspay)
+  //    as the hint — so a nammayatri-workspace user tagging a colleague got
+  //    permanently created in the Juspay org (ramesh.c/sanjna.sharma,
+  //    2026-07-15 09:41/09:53 UTC). The user's workspace is the authoritative
+  //    signal for their PERMANENT org identity; the hint is only a fallback
+  //    for callers with no workspace context (e.g. agent-scoped S2S paths).
   if (spacesUser.workspaceId) {
     const connected = await prisma.connectedSurface.findFirst({
       where: {
@@ -90,7 +92,10 @@ async function resolveOrgForNewUser(
       },
       select: { orgId: true },
     });
-    if (connected) return connected.orgId;
+    if (connected) {
+      log.info(`[users-jit] org resolved via workspace mapping (ConnectedSurface): workspace=${spacesUser.workspaceId} → org=${connected.orgId}`);
+      return connected.orgId;
+    }
 
     const link = await prisma.surfaceTenantLink.findUnique({
       where: {
@@ -101,7 +106,23 @@ async function resolveOrgForNewUser(
       },
       select: { orgId: true },
     });
-    if (link) return link.orgId;
+    if (link) {
+      log.info(`[users-jit] org resolved via workspace mapping (SurfaceTenantLink): workspace=${spacesUser.workspaceId} → org=${link.orgId}`);
+      return link.orgId;
+    }
+  }
+
+  // 2. Explicit hint (the invoked agent's org) — only when the workspace has
+  //    no mapping. Right for agent-scoped S2S callers with no workspace
+  //    context; must never override a mapped workspace (see note above).
+  const hint = (orgHint ?? "").trim();
+  if (hint) {
+    const org = await prisma.organization.findUnique({ where: { id: hint }, select: { id: true } });
+    if (org) {
+      log.info(`[users-jit] org resolved via orgHint: workspace=${spacesUser.workspaceId ?? "(none)"} (unmapped) → org=${org.id}`);
+      return org.id;
+    }
+    log.warn(`[users-jit] orgHint "${hint}" not found — falling through to fallback policy`);
   }
 
   // 3. Fallback (policy-gated).
@@ -113,6 +134,11 @@ async function resolveOrgForNewUser(
     );
     return null;
   }
+  log.warn(
+    `[users-jit] org resolved via DEFAULT-ORG FALLBACK for user ${spacesUser.id} ` +
+      `(workspace=${spacesUser.workspaceId ?? "(none)"} unmapped, no valid hint) — ` +
+      `set JIT_UNMAPPED_WORKSPACE_POLICY=reject to fail closed instead`,
+  );
   return getDefaultOrgId();
 }
 

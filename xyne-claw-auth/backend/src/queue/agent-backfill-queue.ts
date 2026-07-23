@@ -47,7 +47,11 @@ export function getAgentBackfillQueue(): Queue<AgentBackfillJobData> {
 }
 
 function jobIdFor(agentSlug: string, from: string, to: string): string {
-  return `agent-backfill:${agentSlug}:${from}:${to}`;
+  // BullMQ rejects custom job ids containing ":" ("Custom Id cannot contain :")
+  // — colons are its own key delimiter. This id used colons since day one, so
+  // every UI backfill 500'd with "Internal error" (found 2026-07-17). Dashes
+  // keep the same (agent, range) dedupe semantics.
+  return `agent-backfill_${agentSlug}_${from}_${to}`;
 }
 
 /**

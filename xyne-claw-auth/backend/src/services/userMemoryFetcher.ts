@@ -76,7 +76,7 @@ interface VespaSearchResponse {
 
 // ─── Helpers ────────────────────────────────────────────────────────────
 
-async function resolveAuthForUser(userId: string): Promise<SpacesAuthContext | null> {
+export async function resolveAuthForUser(userId: string): Promise<SpacesAuthContext | null> {
   const eff = await loadEffectiveCredentials(userId, "xyne-spaces");
   if (!eff) {
     logger.warn("[user-memory-fetcher] no spaces creds for user", { userId });

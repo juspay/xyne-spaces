@@ -263,7 +263,11 @@ export function DigitalTwinReviewTab({ userId, onApproved }: DigitalTwinReviewTa
 
   const handleRejected = useCallback((candidateId: string) => {
     removeCandidate(candidateId);
-  }, [removeCandidate]);
+    // Reject must also re-sync sibling panels (Review/All-caught-up, status
+    // counts) — same as approve. Without this the rejected row lingers there
+    // until a manual reload.
+    onApproved?.();
+  }, [removeCandidate, onApproved]);
 
   const totalPending = groups.reduce((sum, g) => sum + g.candidates.length, 0);
 
@@ -373,7 +377,7 @@ export function DigitalTwinReviewTab({ userId, onApproved }: DigitalTwinReviewTa
         return (
           <div key={group.subsystem} className="overflow-hidden rounded-xl border border-xyne-border bg-xyne-surface">
             {/* Subsystem header */}
-            <div className="flex items-center gap-[10px] border-b border-xyne-border bg-xyne-surface-sunken px-[14px] py-[10px]">
+            <div className="flex items-center gap-[10px] border-b border-xyne-border-subtle bg-xyne-surface px-[14px] py-[10px]">
               <div className="flex h-[28px] w-[28px] shrink-0 items-center justify-center rounded-full border border-xyne-border bg-xyne-surface text-xyne-fg-secondary">
                 {info.icon}
               </div>
@@ -397,7 +401,7 @@ export function DigitalTwinReviewTab({ userId, onApproved }: DigitalTwinReviewTa
             </div>
 
             {/* Candidate rows — inline approve/reject */}
-            <div className="divide-y divide-xyne-border">
+            <div className="divide-y divide-xyne-border-subtle">
               {group.candidates.map((candidate) => (
                 <CandidateRow
                   key={candidate.id}

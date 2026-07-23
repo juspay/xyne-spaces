@@ -10,6 +10,8 @@ export interface IncomingError {
   message: string;
   normMessage?: string;
   sampleRequestId?: string;
+  count?: number;
+  occurredAt?: number;
 }
 
 export type ClassifySignal = "rule" | "default";

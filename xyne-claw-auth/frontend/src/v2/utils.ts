@@ -10,7 +10,6 @@ export const ICON_COLORS: Record<string, string> = {
   deepwiki: "#7c3aed",
   context7: "#059669",
   sandbox: "#6366f1",
-  pgm: "#db2777",
 };
 
 export function toolColor(name: string): string {

@@ -19,7 +19,9 @@ export type ChatTreeMessage = {
   createdAt: Date;
 };
 
-export type BranchMode = "lastUser" | "beforeLastUser";
+/** "full" clones the whole session (no branch point) — used to fork a finished
+ *  run into a per-user thread that must keep the run's final reply in context. */
+export type BranchMode = "lastUser" | "beforeLastUser" | "full";
 
 /** PI session JSONL id for the branch that hangs off `assistantMessageId`. */
 export function branchPiConversationId(conversationId: string, assistantMessageId: string): string {

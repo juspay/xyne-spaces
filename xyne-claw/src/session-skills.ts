@@ -159,8 +159,9 @@ export interface SkillFileInput {
   relativePath: string;
   /** UTF-8 (or base64-encoded for binaries) text content. */
   content: string;
-  /** Optional MIME hint — currently unused at the runtime layer. */
-  contentType?: string | undefined;
+  /** Optional MIME hint — currently unused at the runtime layer. Nullable to
+   *  match the DB's `SkillFile.contentType` column flowing through unchanged. */
+  contentType?: string | null | undefined;
 }
 
 export interface SkillInput {

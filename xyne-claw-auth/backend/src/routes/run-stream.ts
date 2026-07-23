@@ -8,6 +8,7 @@ import { chatMessageRepository, agentRunRepository, chatAttachmentRepository } f
 import { gcsService } from "../services/gcsService.js";
 import { appendCitations, hydrateInvocationIcons } from "../lib/citations.js";
 import { resolveAgentProviderConfigs } from "../lib/agent-provider-config.js";
+import { resolveFastMode } from "../lib/fast-mode.js";
 import { consumeClawStream } from "../lib/consume-claw-stream.js";
 import { publishLiveEvent } from "../lib/live-conversation-bus.js";
 import { pushDelta, endDeltaCoalescer } from "../lib/live-delta-coalescer.js";
@@ -197,7 +198,7 @@ function publishStreamEvent(event: StreamBusEvent): void {
  * Returns null when another retry/pod already persisted; the persisted rows
  * when this call won the guard.
  */
-async function persistRunStreamResult(args: {
+export async function persistRunStreamResult(args: {
   conversationId: string;
   agentSlug: string;
   userId: string;
@@ -248,6 +249,9 @@ async function persistRunStreamResult(args: {
         content: args.content,
         status: args.status,
         orgId: args.orgId,
+        ...(await chatMessageRepository.latestMessageId(args.conversationId, args.agentSlug)
+          .then((id) => (id ? { parentId: id } : {}))
+          .catch(() => ({}))),
       });
 
   const persistedAttachments: PersistedAttachment[] = [];
@@ -309,6 +313,13 @@ publicRouter.post("/", requireAuth, async (req: Request, res: Response) => {
       task,
       agentSlug,
       provider,
+      /** Per-run provider/model pin from the Ask AI composer's model picker.
+       *  Forwarded verbatim to /internal/run, which validates it (unknown
+       *  provider / missing personal cred → 400) and applies it. Deliberately
+       *  NOT folded into `resolvedProvider` below: agent-level resolution wins
+       *  over a body `provider`, whereas an explicit pin must win over the
+       *  agent default — /run draws that distinction. */
+      providerOverride,
       conversationId,
       callbackUrl: _originalCallbackUrl,
       progressUrl: _originalProgressUrl,
@@ -788,6 +799,11 @@ publicRouter.post("/", requireAuth, async (req: Request, res: Response) => {
     const internalCallbackUrl = `${CONFIG.internalUrl}/claw/api/v1/internal/run-stream/${streamId}/callback` +
       (assistantMsg ? `?assistantMessageId=${encodeURIComponent(assistantMsg.id)}` : "");
     const internalProgressUrl = `${CONFIG.internalUrl}/claw/api/v1/internal/run-stream/${streamId}/progress`;
+    const fastModeEnabled = await resolveFastMode(
+      convId,
+      slug,
+      agentConfig as Record<string, unknown> | undefined,
+    );
 
     const runRequestBody: Record<string, unknown> = {
       userId,
@@ -797,6 +813,7 @@ publicRouter.post("/", requireAuth, async (req: Request, res: Response) => {
       agentSlug: slug,
       orgId,
       ...(resolvedProvider ? { provider: resolvedProvider } : {}),
+      ...(providerOverride ? { providerOverride } : {}),
       conversationId: convId,
       ...(piConversationId !== convId ? { piSessionConversationId: piConversationId } : {}),
       ...(isRegenerateFlag ? { isRegenerate: true } : {}),
@@ -818,6 +835,7 @@ publicRouter.post("/", requireAuth, async (req: Request, res: Response) => {
       agentConfig,
       additionalInstructions,
       __persistedByCaller: true,
+      fastMode: fastModeEnabled,
     };
 
     // Register req-close cleanup unconditionally — both transports need it so a
@@ -951,6 +969,7 @@ publicRouter.post("/", requireAuth, async (req: Request, res: Response) => {
         triggerSource: "chat",
         task: task.trim(),
         conversationId: convId,
+        fastMode: fastModeEnabled,
       }).catch((e: unknown) => log.warn("[run-stream] AgentRun.start failed:", e instanceof Error ? e.message : String(e)));
     }
 
@@ -1246,6 +1265,7 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
           // message has multiple assistant siblings).
           ...(assistantMessageId ? { chatMessageId: assistantMessageId } : {}),
           ...(toolInvocations ? { toolInvocations } : {}),
+          ...(typeof body["fastMode"] === "boolean" ? { fastMode: body["fastMode"] as boolean } : {}),
         });
       } catch (finalizeErr) {
         log.warn(`[run-stream] Failed to finalize agent run:`, finalizeErr instanceof Error ? finalizeErr.message : String(finalizeErr));
@@ -1354,6 +1374,7 @@ async function runViaSseTransport(opts: RunViaSseOpts): Promise<void> {
       triggerSource: "chat",
       task: task.trim(),
       conversationId: convId,
+      fastMode: runRequestBody["fastMode"] === true,
     }).catch((e: unknown) => log.warn("[run-stream/sse] AgentRun.start failed:", e instanceof Error ? e.message : String(e)));
   };
 

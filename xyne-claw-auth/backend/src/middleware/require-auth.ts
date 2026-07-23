@@ -130,7 +130,8 @@ function bearerToken(req: Request): string | undefined {
  *
  * Accepts auth via (in priority order):
  * 1. Spaces backend auth middleware via /api/auth/me (cookie-based)
- * 2. CLI PAT via `Authorization: Bearer xyne_cli_...` when CLI_TOKENS_ENABLED is on
+ * 2. CLI/service access token via `Authorization: Bearer xyne_cli_...` or
+ *    `xyne_svc_...` when CLI_TOKENS_ENABLED is on
  * 3. `x-s2s-key` header — service-to-service calls (must match CONFIG.xyneClawS2sKey)
  *
  * On success, ensures `req.headers["x-user-id"]` is set so downstream code works unchanged.
@@ -158,7 +159,7 @@ export async function requireAuth(
     return;
   }
 
-  // 2. CLI bearer token. Identity is derived only from the hashed token row;
+  // 2. CLI/service bearer token. Identity is derived only from the hashed token row;
   // any inbound x-user-id is overwritten here.
   if (CONFIG.cliTokensEnabled) {
     const token = await verifyCliToken(bearerToken(req)).catch((err) => {

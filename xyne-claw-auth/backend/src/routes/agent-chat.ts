@@ -10,6 +10,7 @@ import { prisma } from "../db.js";
 import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { KNOWN_PROVIDERS, buildProviderConfig, agentCredRefreshTarget, userCredRefreshTarget } from "../lib/agent-provider-config.js";
+import { resolveFastMode } from "../lib/fast-mode.js";
 import { getRequesterId, getOrgId, getAgentEditAccess, isClawAdmin } from "../middleware/agent-acl.js";
 import { uploadChatAttachments } from "../services/chatAttachmentService.js";
 import { gcsService } from "../services/gcsService.js";
@@ -612,6 +613,18 @@ router.get("/attachments/:id/download", async (req: Request<{ id: string }>, res
     res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(att.originalFilename)}"`);
     if (att.size) res.setHeader("Content-Length", String(att.size));
     res.setHeader("Cache-Control", "private, max-age=3600");
+    // Attachments are untrusted (agent- or user-authored). Served inline from
+    // OUR origin, an HTML file's scripts would otherwise run with the app's
+    // cookies/session — classic stored XSS. `CSP: sandbox` makes the browser
+    // treat the document as a unique origin with scripts disabled wherever
+    // it's viewed (new tab included), matching the in-page sandboxed iframe.
+    // Scoped to HTML/SVG/XML — the script-capable types; images/PDFs keep
+    // native rendering.
+    // `allow-same-origin` (WITHOUT allow-scripts) keeps the document readable
+    // for the in-page themed preview; script execution stays fully blocked.
+    if (/html|svg|xml/i.test(att.mimeType)) {
+      res.setHeader("Content-Security-Policy", "sandbox allow-same-origin");
+    }
 
     const stream = gcsService.createReadStream(att.url);
     stream.on("error", (err) => {
@@ -1244,6 +1257,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
           toolPermissions: {},
         }
       : runAgentConfig;
+    const fastModeEnabled = await resolveFastMode(conversationId, slug, effectiveAgentConfig);
 
     const forwardBody: Record<string, unknown> = {
       userId,
@@ -1275,6 +1289,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       // Without this, those features silently default to "off" on V2
       // dashboard chat (same bug existed for webhook + scheduled jobs).
       ...(effectiveAgentConfig ? { agentConfig: effectiveAgentConfig } : {}),
+      fastMode: fastModeEnabled,
     };
 
     // SSE consumer path. We send Accept: text/event-stream so the /run proxy
@@ -1321,6 +1336,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
         triggerSource: "chat",
         task: message.trim(),
         conversationId,
+        fastMode: fastModeEnabled,
       }).catch((e) => log.warn("[agent-chat] AgentRun.start failed:", e instanceof Error ? e.message : e));
       redisService.getConnection()
         .publish("cc:events", JSON.stringify({ type: "agent_start", sessionId: runBody.sessionId, agentSlug: slug }))
@@ -1617,7 +1633,7 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
   // from query because the callback may land on a different pod than the SSE
   // owner, so pendingStreams may not have it locally.
   const queryAssistantMessageId = req.query["assistantMessageId"] as string | undefined;
-  const { result: rawResult, status, error, pendingActions, pendingResponses, sessionId, userId, toolsUsed, toolInvocations, tokenUsage, attachments, llmCitations, provider, model } = req.body as {
+  const { result: rawResult, status, error, pendingActions, pendingResponses, sessionId, userId, toolsUsed, toolInvocations, tokenUsage, attachments, llmCitations, provider, model, fastMode } = req.body as {
     result?: string;
     status?: string;
     error?: string;
@@ -1632,6 +1648,7 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
     llmCitations?: unknown;
     provider?: string;
     model?: string;
+    fastMode?: boolean;
   };
   // Terminal event — stop this session's delta coalescer FIRST so a late
   // debounced partial write can't clobber the final content persisted below.
@@ -1691,6 +1708,7 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
         ...(chatMessageId ? { chatMessageId } : {}),
         ...(toolInvocations !== undefined ? { toolInvocations } : {}),
         ...(tokenUsage ? { tokenUsage } : {}),
+        ...(fastMode !== undefined ? { fastMode } : {}),
       });
     } catch (err) {
       log.warn("[agent-chat] finalize failed:", err instanceof Error ? err.message : err);
@@ -1867,11 +1885,17 @@ router.get("/:slug/chat/:convId/messages", async (req: Request<{ slug: string; c
     // already pairs tool invocations, with the same chronological fallback
     // for legacy rows.
     const runByMsgId: Record<string, string> = {};
+    // assistantMsgId → { rating, comment } for the run that produced it. Lets
+    // the ask-ai v2 surfaces seed 👍/👎 thumb state on reload (ratings persist
+    // to agent_runs via POST /runs/:sessionId/rate). Built off the same
+    // chatMessageId linkage as runByMsgId, with the same legacy fallback.
+    const ratingByMsgId: Record<string, { rating: "up" | "down" | null; comment: string | null }> = {};
     const linkedAssistantIds = new Set<string>();
     for (const run of agentRuns) {
       const linkedId = (run as { chatMessageId?: string | null }).chatMessageId;
       if (!linkedId) continue;
       if (run.sessionId) runByMsgId[linkedId] = run.sessionId;
+      if (run.rating) ratingByMsgId[linkedId] = { rating: run.rating as "up" | "down", comment: run.ratingComment ?? null };
       const invocations = run.toolInvocations;
       if (Array.isArray(invocations) && (invocations as unknown[]).length > 0) {
         invocationsByMsgId[linkedId] =
@@ -1899,6 +1923,7 @@ router.get("/:slug/chat/:convId/messages", async (req: Request<{ slug: string; c
       const msg = unlinkedAssistantMsgs[i]!;
       const run = unlinkedCompletedRuns[i]!;
       if (run.sessionId) runByMsgId[msg.id] = run.sessionId;
+      if (run.rating) ratingByMsgId[msg.id] = { rating: run.rating as "up" | "down", comment: run.ratingComment ?? null };
       const invocations = run.toolInvocations;
       if (Array.isArray(invocations) && (invocations as unknown[]).length > 0) {
         // Citations carry only their tiny `iconKey` on the wire — the heavy SVG
@@ -1925,6 +1950,7 @@ router.get("/:slug/chat/:convId/messages", async (req: Request<{ slug: string; c
       ...(Object.keys(invocationsByMsgId).length > 0 && { invocationsByMsgId }),
       ...(Object.keys(icons).length > 0 && { icons }),
       ...(Object.keys(runByMsgId).length > 0 && { runByMsgId }),
+      ...(Object.keys(ratingByMsgId).length > 0 && { ratingByMsgId }),
     });
   } catch (err) {
     log.error("[agent-chat] messages error:", err);

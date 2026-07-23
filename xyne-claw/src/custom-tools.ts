@@ -160,7 +160,6 @@ export function loadCustomTools(
   const hasResearchAgentSelected = [...selectedCustom].some((s) =>
     s === "query-codebase" || s === "review-pull-request" || s.startsWith("research-agent-"),
   );
-  const hasWorkloadSelected = [...selectedCustom].some((s) => s.startsWith("workload-"));
   // Sandbox tools (sandbox-create / sandbox-run / sandbox-write-file /
   // sandbox-pw-* / etc.) mount directly on the parent. The sandbox subagent
   // was removed (2026-06-14) and every agent that used it was migrated to list
@@ -169,16 +168,14 @@ export function loadCustomTools(
   // is gone; nothing writes that anymore.)
   const hasSandboxSelected = [...selectedCustom].some((s) => s.startsWith("sandbox-"));
 
-  // Filter tools by agent — pgm stays slug-locked because it assumes a
-  // specific agent environment; google/microsoft/research-agent are allowed
+  // Filter tools by agent — google/microsoft/research-agent are allowed
   // for any agent whose config selects at least one of those tools (or the
   // built-in agent slugs for backward compat).
   const customTools = allCustomTools.filter((ct) => {
     let allowed = true;
-    if (ct.source === "custom:pgm") allowed = agentSlug === "pgm-agent";
     // Google + Microsoft migrated to claw-auth stdio MCP connectors — never
     // load them as in-process custom tools anymore.
-    else if (ct.source === "custom:google" || ct.source === "custom:microsoft") allowed = false;
+    if (ct.source === "custom:google" || ct.source === "custom:microsoft") allowed = false;
     // Auth-executed System Tools are surfaced via /mcp/tools with selectionKey
     // gating; loading them in-process would create duplicate tool names.
     else if (ct.source === "custom:orchestrator" || ct.source === "custom:agent-introspect" || ct.source === "custom:webfetch") allowed = false;
@@ -186,7 +183,6 @@ export function loadCustomTools(
     // web-search / deep-research are unrestricted — any agent gets them.
     // Removed the prior agentSlug + config-flag gate per request.
     else if (ct.source === "custom:generate-image") allowed = agentSlug === "ask-ai";
-    else if (ct.source === "custom:workload") allowed = hasWorkloadSelected || agentSlug === "workload-agent";
     else if (ct.source === "custom:sandbox") allowed = hasSandboxSelected;
 
     return allowed;

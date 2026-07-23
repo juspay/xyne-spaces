@@ -34,7 +34,6 @@ const icon = new URL(`../assets/mcp/${server.type}.svg`, import.meta.url).href;
 | File | Agent | Color |
 |------|-------|-------|
 | `assistant.svg` | Assistant (Digital Twin) | `#6366f1` |
-| `pgm-agent.svg` | Program Manager | `#8b5cf6` |
 | `grafana-agent.svg` | Grafana Agent | `#f97316` |
 | `rca-agent.svg` | RCA / Genius RCA | `#ef4444` |
 | `google-agent.svg` | Google Agent | `#4285f4` |

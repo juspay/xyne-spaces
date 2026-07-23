@@ -32,6 +32,15 @@
     background-color: var(--color-xyne-surface-subtle);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    /* Without this, native form controls (date/time picker text + icon,
+       scrollbars, etc.) always render with light-mode UA chrome — near-black
+       text/icons that go nearly invisible against a dark app background,
+       since `color`/Tailwind utilities don't reach that native UI. */
+    color-scheme: light;
+  }
+
+  html.dark {
+    color-scheme: dark;
   }
 
   body {

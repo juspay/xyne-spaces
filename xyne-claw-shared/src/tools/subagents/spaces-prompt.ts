@@ -51,7 +51,7 @@ Sync conversations — Google Meet, Zoom, in-person.
 
 ## Canvases
 
-Rich collaborative docs inside Spaces — design docs, runbooks, decks (Quarto), reports.
+Rich collaborative docs inside Spaces — design docs, runbooks, decks, reports.
 
 - Each has a \`viewAccessId\`. \`spaces-canvases\` finds them, \`spaces-read-canvas\` reads one.
 - When a user asks "is there a doc about X?", canvases are usually the answer.

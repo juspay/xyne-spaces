@@ -1,10 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { Router, type Response } from "express";
+import { publishHandoffSignal } from "../handoff-redis.js";
 import {
   runTask,
   pushAttachment,
   applyCopilotProxyIfNeeded,
+  RunHandoffError,
   RunCancelledError,
   QuotaExhaustedError,
   isProviderAuthError,
@@ -54,6 +56,14 @@ import {
   type SkillTrigger,
 } from "../subagent-tools.js";
 import {
+  buildFastModeDirectTools,
+  buildFastModeMetaTools,
+  buildToolCatalog,
+  renderToolCatalogForPrompt,
+  type FastToolRuntimeController,
+  type ToolCatalogItem,
+} from "../tool-catalog.js";
+import {
   AgentDelegationGovernor,
   buildCallableAgentTools,
   buildOrchestratorCallableAgentTool,
@@ -78,8 +88,11 @@ import {
 } from "xyne-claw-shared";
 import { SERVER, PATHS, LITELLM, isAllowedCallbackUrl } from "../config.js";
 import { judgeChainContinuation } from "../chain-judge.js";
-import { isDigitalTwinAgent, listSubsystemTaxonomy } from "../memory.js";
+import { isDigitalTwinAgent, listSubsystemTaxonomy, fetchAgentPromptFiles } from "../memory.js";
 import { buildMemorySearchTool } from "../memory-search.js";
+import { buildMemoryWriteTool } from "../memory-write.js";
+import { buildMemoryFileTools } from "../memory-file-tools.js";
+import { buildTwinDeliverTool, buildTwinDeliverMandate, type TwinDeliverRef } from "../twin-deliver.js";
 import {
   buildSuggestGoalTool,
   type PendingGoalSuggestion,
@@ -120,6 +133,10 @@ interface ActiveRunControl {
   sseClientAttached?: boolean;
   sseReconnectGraceTimer?: ReturnType<typeof setTimeout>;
   sseEmitter?: SseProgressEmitter;
+  handoffRequested?: boolean;
+  handoffCapFired?: boolean;
+  handoffLastTurn?: number;
+  handoffCapTimer?: ReturnType<typeof setTimeout>;
 }
 
 const activeRuns = new Map<string, ActiveRunControl>();
@@ -127,6 +144,32 @@ const configuredSseReconnectGraceMs = Number(process.env["SSE_RECONNECT_GRACE_MS
 const SSE_RECONNECT_GRACE_MS = Number.isFinite(configuredSseReconnectGraceMs) && configuredSseReconnectGraceMs >= 0
   ? configuredSseReconnectGraceMs
   : 180_000;
+
+function providerToolRequestCap(provider: string | undefined): number {
+  const envKey = provider ? `XYNE_TOOL_REQUEST_CAP_${provider.toUpperCase()}` : "";
+  const raw = (envKey ? process.env[envKey] : undefined) ?? process.env["XYNE_TOOL_REQUEST_CAP"] ?? "128";
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 128;
+}
+
+function configFastModeEnabled(agentConfig: Record<string, unknown> | undefined): boolean {
+  return agentConfig?.["fastMode"] === true || agentConfig?.["fastMode"] === "true";
+}
+
+function effectiveFastMode(fastMode: boolean | undefined, agentConfig: Record<string, unknown> | undefined): boolean {
+  return typeof fastMode === "boolean" ? fastMode : configFastModeEnabled(agentConfig);
+}
+
+function dedupeToolsByName(tools: ToolDefinition[]): ToolDefinition[] {
+  const seen = new Set<string>();
+  const out: ToolDefinition[] = [];
+  for (const tool of tools) {
+    if (seen.has(tool.name)) continue;
+    seen.add(tool.name);
+    out.push(tool);
+  }
+  return out;
+}
 
 /** Snapshot for shutdown/drain forensics — one line per still-active run. */
 export function describeActiveRuns(): Array<{ sessionId: string; agentSlug: string; userId: string; ageS: number }> {
@@ -154,6 +197,33 @@ export function cancelActiveRunsForDrain(reason = "server draining"): number {
     cancelled++;
   }
   return cancelled;
+}
+
+export function requestActiveRunHandoffs(capMs: number): number {
+  let requested = 0;
+  const boundedCapMs = Number.isFinite(capMs) && capMs > 0 ? Math.floor(capMs) : 120_000;
+  for (const [sessionId, active] of activeRuns.entries()) {
+    if (active.handoffRequested) continue;
+    if (!active.hasCallbackUrl) {
+      clog.warn(`[run] handoff skipped for active run without callback/recovery path sessionId=${sessionId} agent=${active.agentSlug ?? "unknown"} user=${active.userId}`);
+      continue;
+    }
+    active.handoffRequested = true;
+    active.handoffLastTurn ??= 0;
+    requested++;
+    const ageS = active.startedAtMs ? Math.round((Date.now() - active.startedAtMs) / 1000) : -1;
+    clog.warn(`[run] handoff requested for active run sessionId=${sessionId} agent=${active.agentSlug ?? "unknown"} user=${active.userId} ageS=${ageS} capMs=${boundedCapMs}`);
+    active.handoffCapTimer = setTimeout(() => {
+      const current = activeRuns.get(sessionId);
+      if (current !== active || !current.handoffRequested || current.abortController.signal.aborted) return;
+      current.handoffCapFired = true;
+      clog.warn(`[run] handoff cap fired — aborting in-flight turn sessionId=${sessionId} agent=${current.agentSlug ?? "unknown"} user=${current.userId} capMs=${boundedCapMs}`);
+      metric.count("handoff_turn_aborted", { agent: current.agentSlug ?? "unknown", session: sessionId });
+      current.abortController.abort();
+    }, boundedCapMs);
+    active.handoffCapTimer.unref?.();
+  }
+  return requested;
 }
 
 // Appended to the agent's systemPrompt at runTime when channelId is present
@@ -274,6 +344,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     provider,
     providerOrder,
     subagentProviders,
+    subagentProviderMode,
     providerConfigs,
     progressUrl,
     attachments,
@@ -292,6 +363,12 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     compactBeforeRun,
     isRegenerate,
     detached,
+    fastMode,
+    resumedFromHandoff,
+    memoryBankId,
+    twinDestinations,
+    senderName,
+    channelName,
   } = req.body as {
     userId?: string;
     userName?: string;
@@ -326,6 +403,10 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
       name: string;
       description?: string;
       content: string;
+      // Bundled skill files (scripts/, assets, …) materialized alongside
+      // SKILL.md by writeSessionSkills. Omitting this here silently dropped a
+      // skill's script folder on the top-level run path.
+      files?: { relativePath: string; content: string; contentType?: string | null }[];
     }[];
     provider?: string;
     // Ordered fallback chain set by the agent owner via the Provider tab.
@@ -333,6 +414,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     // quota exhaustion before dropping to "spaces" (LiteLLM/Kimi).
     providerOrder?: string[];
     subagentProviders?: Record<string, string>;
+    subagentProviderMode?: "parent" | "spaces" | "fast-model";
     providerConfigs?: Record<
       string,
       {
@@ -378,6 +460,20 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
      *  entry so the new assistant turn becomes a sibling of the previous one. */
     isRegenerate?: boolean;
     detached?: boolean;
+    fastMode?: boolean;
+    resumedFromHandoff?: boolean;
+    memoryBankId?: string;
+    /** Digital Twin mention flow: real reply destinations the user can post in
+     *  (their accessible channels/threads), built by claw-auth from Spaces
+     *  memberships. Injected into the mandatory twin_deliver tool as a
+     *  provider-constrained enum so the model can't invent a channel id. */
+    twinDestinations?: import("xyne-claw-shared").TwinDestinationCandidate[];
+    /** Digital Twin mention flow: who @mentioned the user, and the channel name.
+     *  Fed into the twin_deliver mandate's who/where line in the SYSTEM prompt so
+     *  the model knows who's asking and where — the thread history only carries a
+     *  raw sender id. Set by claw-auth webhook.ts on USER_MENTIONED dispatches. */
+    senderName?: string;
+    channelName?: string;
   };
 
   // [AUTODBG] claw-side receipt of every /run forward (esp. automations). Confirms
@@ -597,6 +693,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
       provider,
       providerOrder,
       subagentProviders,
+      subagentProviderMode,
       providerConfigs,
       progressUrl,
       attachments,
@@ -614,7 +711,14 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
       abortController.signal,
       () => abortController.abort(),
       compactBeforeRun,
+      fastMode,
+      resumedFromHandoff,
+      memoryBankId,
+      twinDestinations,
+      senderName,
+      channelName,
     ).finally(() => {
+      if (activeRun.handoffCapTimer) clearTimeout(activeRun.handoffCapTimer);
       activeRuns.delete(sessionId);
     });
     return;
@@ -705,6 +809,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
         provider,
         providerOrder,
         subagentProviders,
+        subagentProviderMode,
         providerConfigs,
         emitter,
         attachments,
@@ -722,6 +827,15 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
         abortController.signal,
         () => abortController.abort(),
         compactBeforeRun,
+        // fastMode was silently dropped on THIS branch only (detached + legacy
+        // JSON forwarded it) — Spaces mentions ride the SSE pass-through, so
+        // /fast acked but never applied to mention threads (2026-07-15).
+        fastMode,
+        resumedFromHandoff,
+        memoryBankId,
+        twinDestinations,
+        senderName,
+        channelName,
       );
     } catch (err) {
       processTaskError = err;
@@ -730,6 +844,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
       if (activeRun.sseReconnectGraceTimer) {
         clearTimeout(activeRun.sseReconnectGraceTimer);
       }
+      if (activeRun.handoffCapTimer) clearTimeout(activeRun.handoffCapTimer);
       activeRuns.delete(sessionId);
       // Backstop: processTask has several silent-return paths (most notably
       // SessionLockedError — another pod owns this run and suppresses the
@@ -793,6 +908,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     provider,
     providerOrder,
     subagentProviders,
+    subagentProviderMode,
     providerConfigs,
     progressUrl,
     attachments,
@@ -810,7 +926,14 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     abortController.signal,
     () => abortController.abort(),
     compactBeforeRun,
+    fastMode,
+    resumedFromHandoff,
+    memoryBankId,
+    twinDestinations,
+    senderName,
+    channelName,
   ).finally(() => {
+    if (activeRun.handoffCapTimer) clearTimeout(activeRun.handoffCapTimer);
     activeRuns.delete(sessionId);
   });
 });
@@ -1049,9 +1172,9 @@ router.post("/clone-session", validateS2SKey, async (req, res: Response) => {
   const { sourceConversationId, targetConversationId } = req.body as {
     sourceConversationId?: string;
     targetConversationId?: string;
-    branchMode?: "lastUser" | "beforeLastUser";
+    branchMode?: "lastUser" | "beforeLastUser" | "full";
   };
-  const branchMode = (req.body as { branchMode?: "lastUser" | "beforeLastUser" }).branchMode ?? "lastUser";
+  const branchMode = (req.body as { branchMode?: "lastUser" | "beforeLastUser" | "full" }).branchMode ?? "lastUser";
 
   if (!sourceConversationId || typeof sourceConversationId !== "string") {
     res.status(400).json({ success: false, error: "sourceConversationId is required" });
@@ -1107,6 +1230,7 @@ async function processTask(
   provider: string | undefined,
   providerOrder: string[] | undefined,
   subagentProviders: Record<string, string> | undefined,
+  subagentProviderMode: "parent" | "spaces" | "fast-model" | undefined,
   providerConfigs:
     | Record<
         string,
@@ -1147,12 +1271,79 @@ async function processTask(
   abortSignal?: AbortSignal,
   abortRun?: () => void,
   compactBeforeRun?: boolean,
+  fastMode?: boolean,
+  resumedFromHandoff?: boolean,
+  memoryBankId?: string,
+  twinDestinations?: import("xyne-claw-shared").TwinDestinationCandidate[],
+  senderName?: string,
+  channelName?: string,
 ): Promise<void> {
   let mcpCleanup: (() => Promise<void>) | undefined;
   const tid = traceId ?? sessionId.slice(0, 8);
   const log = (msg: string) => clog.info(`[run] [${tid}] ${msg}`);
   const logErr = (msg: string, err?: unknown) =>
     clog.error(`[run] [${tid}] ${msg}`, err ?? "");
+  const fastModeForCallback = effectiveFastMode(fastMode, agentConfig);
+  const handoffControl = {
+    isRequested: () => activeRuns.get(sessionId)?.handoffRequested === true,
+    isCapAborted: () => activeRuns.get(sessionId)?.handoffCapFired === true,
+    isUserCancelled: () => activeRuns.get(sessionId)?.userCancelled === true,
+    onTurnBoundary: (lastTurn: number) => {
+      const active = activeRuns.get(sessionId);
+      if (active) active.handoffLastTurn = Math.max(active.handoffLastTurn ?? 0, lastTurn);
+    },
+  };
+  const sendHandoffCallback = async (lastTurn?: number): Promise<void> => {
+    const active = activeRuns.get(sessionId);
+    const resolvedLastTurn = Math.max(0, lastTurn ?? active?.handoffLastTurn ?? 0);
+    log(`Session handoff checkpointed: ${sessionId} lastTurn=${resolvedLastTurn} aborted=${active?.handoffCapFired === true}`);
+    // NEVER deliver handoff over an in-process SSE emitter: during a drain the
+    // bridge is dead (or dying) almost by definition — the first live drill
+    // (2026-07-15, session c304df10) lost the handoff exactly this way. Force
+    // the HTTP /sessions/:id/result fallback (sendCallback builds it when
+    // callbackUrl is null), whose claw-auth handler owns the handoff branch.
+    // Real string callback URLs (scheduled-jobs result etc.) stay as-is —
+    // their handlers have handoff branches too.
+    // PRIMARY channel: Redis. The recovery worker only needs the sessionId —
+    // all run state lives in its Redis registration — and the HTTP hop to
+    // claw-auth failed three different ways in two days (zero-endpoint window,
+    // purge-on-boot, and a version-skew 401 on 2026-07-16 that dropped ~50
+    // handoffs in one drain). One LPUSH has no endpoint, no auth contract,
+    // and no rollout-timing dependency. See handoff-redis.ts.
+    const viaRedis = await publishHandoffSignal(sessionId, resolvedLastTurn);
+    if (viaRedis) {
+      log(`Handoff signal published to Redis for ${sessionId} (lastTurn=${resolvedLastTurn})`);
+      metric.count("handoff_ok", { agent: agentSlug ?? "unknown", session: sessionId, channel: "redis" });
+      return;
+    }
+    const handoffDest = typeof callbackUrl === "string" ? callbackUrl : undefined;
+    // HTTP FALLBACK (Redis unreachable/unconfigured only). Long retry schedule
+    // (~90s total): when claw and claw-auth roll in the same window, the auth
+    // Service can briefly have ZERO ready endpoints (old pod Terminating, new
+    // pod Pending on node scale-up) and the default ~4s budget drops the
+    // callback — round-6 drill (2026-07-15) lost 3 handoffs exactly this way.
+    // The draining pod has DRAIN_TIMEOUT (900s) / grace (1000s) to live, so
+    // waiting out the endpoint gap is free.
+    const delivered = await sendCallback(
+      handoffDest,
+      sessionToken,
+      {
+        sessionId,
+        userId,
+        conversationId: conversationId ?? null,
+        agentSlug: agentSlug ?? null,
+        fastMode: fastModeForCallback,
+        status: "handoff",
+        lastTurn: resolvedLastTurn,
+      },
+      { backoffsMs: [1_000, 2_000, 5_000, 10_000, 15_000, 15_000, 15_000, 15_000, 15_000] },
+    );
+    if (delivered) {
+      metric.count("handoff_ok", { agent: agentSlug ?? "unknown", session: sessionId });
+    } else {
+      metric.count("handoff_callback_lost", { agent: agentSlug ?? "unknown", session: sessionId });
+    }
+  };
 
   // Idempotency backstop: only re-dispatches carry idempotencyKey (the recovery
   // rootSessionId). If a terminal-result marker for it already exists in GCS,
@@ -1177,6 +1368,7 @@ async function processTask(
           userId,
           conversationId: conversationId ?? null,
           agentSlug: agentSlug ?? null,
+          fastMode: fastModeForCallback,
           status: marker.status === "failed" ? "failed" : "completed",
           ...(marker.result !== undefined ? { result: marker.result } : {}),
           ...(marker.toolsUsed ? { toolsUsed: marker.toolsUsed } : {}),
@@ -1467,6 +1659,11 @@ async function processTask(
         content: p.content,
       }));
 
+    // Digital Twin persona files — folded into the ACTUAL system prompt (via
+    // runTask's twinPersona) rather than a per-turn reminder, so they read as
+    // identity and are visible in the debug panel's LLM → system prompt.
+    let twinPersonaBlock = "";
+
     // Memory — opt-in per agent via agentConfig.memoryEnabled=true.
     // No more inject-all-recalled-facts. Instead: inject a tiny taxonomy hint
     // and let the agent search on demand via the memory-search tool.
@@ -1484,6 +1681,7 @@ async function processTask(
       const taxonomy = await listSubsystemTaxonomy(
         agentSlug,
         isDigitalTwin ? { userTag: `user:${userId}` } : undefined,
+        memoryBankId,
       ).catch(() => []);
       if (taxonomy.length > 0) {
         const lines = taxonomy
@@ -1516,11 +1714,42 @@ async function processTask(
                 "",
                 lines,
                 "",
-                "When a user question overlaps any subsystem, call the `memory-search`",
-                "tool FIRST with a specific natural-language query. Do not invent facts",
-                "from memory — only use what the tool returns.",
+                "RULE: before starting any non-trivial task, make ONE `memory-search`",
+                "call — pick the closest subsystem above (unscoped only if none fits).",
+                "This bank holds hard-won specifics from past sessions: root causes,",
+                "gotchas, exact configs, decisions that never made it into code or",
+                "docs. Skipping the search repeats old mistakes; one call is cheap.",
+                "",
+                "Apply what comes back (you may say it came from memory). If it is",
+                "empty or irrelevant, proceed — do not retry the same query. Do not",
+                "invent facts from memory — only use what the tool returns.",
               ].join("\n"),
         });
+      }
+
+      // Digital Twin: inject the always-loaded persona files (soul.md, …) so the
+      // twin speaks AS the user with ZERO tool calls. Injected via
+      // activeInjections (not systemPrompt) so it applies on BOTH the @mention
+      // flow (which sends no systemPrompt) and interactive chat. Files are the
+      // user's own, ≤3, each ≤10k chars — enforced in claw-auth.
+      if (isDigitalTwin) {
+        const promptFiles = await fetchAgentPromptFiles(agentSlug, userId).catch(() => []);
+        if (promptFiles.length > 0) {
+          const body = promptFiles
+            .map((f) => `=== ${f.name} ===\n${f.content.trim()}`)
+            .join("\n\n");
+          // Folded into the system prompt inside runTask (both the override and
+          // the buildSystemPrompt-fallback paths), so it shows under LLM →
+          // system prompt in the debug panel.
+          twinPersonaBlock = [
+            "# Speaking as you",
+            "This is your persona — who you are and how you sound — drawn from the user's own",
+            "approved memory files. Speak AS this person by default; you do not need to call any",
+            "tool to use what's below. Prefer this voice over generic phrasing.",
+            "",
+            body,
+          ].join("\n");
+        }
       }
     }
 
@@ -1585,15 +1814,16 @@ async function processTask(
     const mcpGroupsWithoutKb = kbGroup ? mcpGroups.filter((g) => g !== kbGroup) : mcpGroups;
     const kbHoistedTools = kbGroup ? kbGroup.tools : [];
 
-    // Combine all MCP groups and build subagent wrappers (also wraps matching custom tools like pgm)
+    // Combine all MCP groups and build subagent wrappers (also wraps matching custom tools like sandbox)
     const allGroups = [
       ...mcpGroupsWithoutKb,
       ...(deepwikiGroup ? [deepwikiGroup] : []),
       ...(context7Group ? [context7Group] : []),
     ];
     // Parent agent's provider — used as default for subagents that don't have an override
+    const subagentsFollowParent = subagentProviderMode === "parent";
     const parentProvider =
-      provider && (["copilot", "claude", "codex"] as readonly string[]).includes(provider)
+      subagentsFollowParent && provider && (["copilot", "claude", "codex"] as readonly string[]).includes(provider)
         ? provider
         : "spaces";
     // Shared ref: subagents append their inner MCP tool names here so chain
@@ -1622,40 +1852,63 @@ async function processTask(
     // is drained by runTask after the model loop settles. See agent.ts.
     const backgroundSubagentRegistry: import("../subagent-tools.js").BackgroundSubagentRegistry = new Map();
 
-    const { subagentTools, directTools, remainingCustomTools } =
-      buildSubagentTools(
-        allGroups,
-        customToolDefs,
-        resolvedTriggers.length > 0 ? resolvedTriggers : undefined,
-        resolvedSubagentSkills,
-        { parentProvider, subagentProviders, providerConfigs },
-        {
-          ...(progressUrl ? { progressUrl } : {}),
-          parentSessionId: sessionId,
-          ...(conversationId
-            ? {
-                parentDebugSessionId:
-                  buildSandboxStoreKey(userId, conversationId, agentSlug) ??
-                  conversationId,
-              }
-            : {}),
-          parentToolsUsed: subagentInnerTools,
-          parentMeta: {
-            ...(conversationId ? { conversationId } : {}),
-            ...(agentSlug ? { agentSlug } : {}),
-            ...(userId ? { userId } : {}),
+    const fastModeEnabled = effectiveFastMode(fastMode, agentConfig);
+    const fastToolController: FastToolRuntimeController = {};
+    const fastCatalogCandidateItems = fastModeEnabled
+      ? buildToolCatalog({
+          groups: allGroups,
+          customTools: customToolDefs,
+          ...(customSubagents ? { customSubagents } : {}),
+        })
+      : [];
+    const fastCatalogCandidateByName = new Map(fastCatalogCandidateItems.map((item) => [item.entry.name, item]));
+    let fastCatalogItems: ToolCatalogItem[] = [];
+    let fastCatalogNames: string[] = [];
+
+    const { subagentTools, directTools, remainingCustomTools } = fastModeEnabled
+      ? {
+          subagentTools: [] as ToolDefinition[],
+          ...buildFastModeDirectTools({
+            groups: allGroups,
+            customTools: customToolDefs,
+            directPickSuffixes,
+          }),
+        }
+      : buildSubagentTools(
+          allGroups,
+          customToolDefs,
+          resolvedTriggers.length > 0 ? resolvedTriggers : undefined,
+          resolvedSubagentSkills,
+          { parentProvider, subagentProviderMode, subagentProviders, providerConfigs },
+          {
+            ...(progressUrl ? { progressUrl } : {}),
+            parentSessionId: sessionId,
+            ...(conversationId
+              ? {
+                  parentDebugSessionId:
+                    buildSandboxStoreKey(userId, conversationId, agentSlug) ??
+                    conversationId,
+                }
+              : {}),
+            parentToolsUsed: subagentInnerTools,
+            parentMeta: {
+              ...(conversationId ? { conversationId } : {}),
+              ...(agentSlug ? { agentSlug } : {}),
+              ...(userId ? { userId } : {}),
+            },
+            // Propagate the cancel signal so any in-flight subagent session
+            // (sandbox, spaces, bitbucket, ...) disposes itself when the user
+            // hits Stop, instead of running for its full duration and orphaning
+            // the result back to a parent that's already thrown RunCancelledError.
+            ...(abortSignal ? { abortSignal } : {}),
+            backgroundRegistry: backgroundSubagentRegistry,
           },
-          // Propagate the cancel signal so any in-flight subagent session
-          // (sandbox, spaces, bitbucket, ...) disposes itself when the user
-          // hits Stop, instead of running for its full duration and orphaning
-          // the result back to a parent that's already thrown RunCancelledError.
-          ...(abortSignal ? { abortSignal } : {}),
-          backgroundRegistry: backgroundSubagentRegistry,
-        },
-        undefined, // bonusToolsBySubagent — removed with the sandbox subagent
-        customSubagents,
-        directPickSuffixes,
-      );
+          undefined, // bonusToolsBySubagent — removed with the sandbox subagent
+          customSubagents,
+          directPickSuffixes,
+        );
+
+    let fastMetaTools: ToolDefinition[] = [];
 
     // Parent-direct mount for ALL sandbox tools (source = "custom:sandbox",
     // covers compute/file tools in xyne-claw-shared/src/tools/sandbox/ and
@@ -1958,8 +2211,19 @@ async function processTask(
           ) as unknown as ToolDefinition[]
       : [];
 
+    const fastAlwaysActiveToolNames = new Set([
+      ...directTools,
+      ...remainingCustomTools,
+      ...parentHoistedTools,
+      ...playwrightHoistedTools,
+      ...kbHoistedTools,
+      ...callableAgentTools,
+    ].map((tool) => tool.name));
+
     let allTools = [
-      ...subagentTools, // spaces, bitbucket, grafana, deepwiki, context7, pgm
+      ...subagentTools, // spaces, bitbucket, grafana, deepwiki, context7
+      ...fastMetaTools, // search-tools/load-tools in fast mode only
+      ...fastCatalogCandidateItems.map((item) => item.tool), // narrowed after all standard filters, dormant until load-tools activates them
       ...callableAgentTools, // A2A governed full-agent delegation tools
       ...directTools, // write tools (create-ticket, send-message)
       ...remainingCustomTools, // custom tools not wrapped in a subagent
@@ -1969,7 +2233,7 @@ async function processTask(
     ];
 
     log(
-      `Tools: ${subagentTools.length} subagents, ${directTools.length} direct, ${customToolDefs.length} custom, ${parentHoistedTools.length} parent-hoisted, ${kbHoistedTools.length} kb-hoisted`,
+      `Tools: ${subagentTools.length} subagents, ${directTools.length} direct, ${customToolDefs.length} custom, ${parentHoistedTools.length} parent-hoisted, ${kbHoistedTools.length} kb-hoisted${fastModeEnabled ? `, [fast] catalogCandidates=${fastCatalogCandidateItems.length}` : ""}`,
     );
 
     // Apply agent-level tool config from DB (agent.config.tools). Reuses the
@@ -2020,8 +2284,30 @@ async function processTask(
           const isCustomPick = toolSelectionKey ? allowedCustom.has(toolSelectionKey) : false;
           return isDirectPick || isGatewayPick || isCustomPick;
         }
-        if (customToolDefs.some((c) => c.name === t.name))
-          return allowedCustom.has(t.name);
+        if (customToolDefs.some((c) => c.name === t.name)) {
+          const toolSelectionKey = (t as { selectionKey?: string }).selectionKey;
+          const isAllowedCustom = allowedCustom.has(t.name) || (toolSelectionKey ? allowedCustom.has(toolSelectionKey) : false);
+          if (isAllowedCustom) return true;
+          const fastCatalogItem = fastCatalogCandidateByName.get(t.name);
+          if (fastCatalogItem?.entry.source.startsWith("subagent:")) {
+            return allowedSubagents.has(fastCatalogItem.entry.source.slice("subagent:".length));
+          }
+          if (fastCatalogItem?.entry.source.startsWith("custom-subagent:")) {
+            return allowedSubagents.has(fastCatalogItem.entry.source.slice("custom-subagent:".length));
+          }
+          return false;
+        }
+        const fastCatalogItem = fastCatalogCandidateByName.get(t.name);
+        if (fastCatalogItem) {
+          const source = fastCatalogItem.entry.source;
+          if (source.startsWith("subagent:")) {
+            return allowedSubagents.has(source.slice("subagent:".length));
+          }
+          if (source.startsWith("custom-subagent:")) {
+            return allowedSubagents.has(source.slice("custom-subagent:".length));
+          }
+          return false;
+        }
         return true;
       });
 
@@ -2041,9 +2327,18 @@ async function processTask(
     // (already ctx-threaded by loadCustomTools). Mirrors the isScheduledRun /
     // isReadOnlyJob logic computed later — inlined here because tool assembly
     // runs before it.
+    // Digital Twin mention/approval flow: it delivers ONLY via the mandatory
+    // twin_deliver tool and NEVER posts to the thread, so the plan tools + primer
+    // (which post todo cards to the thread and instruct "write your final answer
+    // as plain text with NO trailing tool call") are both inapplicable AND
+    // actively conflict with twin_deliver — the model followed the primer and
+    // never called the delivery tool, fail-closing to silence. Exclude the twin
+    // mention flow from plan tools/primer entirely.
+    const isTwinMentionFlow = !!agentSlug && isDigitalTwinAgent(agentSlug) && eventType === "USER_MENTIONED";
     const planToolsDefaultOn =
       (!!channelId || (progressUrl && typeof progressUrl !== "string")) &&
-      !isScheduledOrAutomationRun(eventType, conversationId);
+      !isScheduledOrAutomationRun(eventType, conversationId) &&
+      !isTwinMentionFlow;
     const planTools = remainingCustomTools.filter((t) => isPlanToolSlug(t.name));
     allTools = allTools.filter((t) => !isPlanToolSlug(t.name));
     if (planToolsDefaultOn) allTools.push(...planTools);
@@ -2067,8 +2362,15 @@ async function processTask(
     }
 
     if (agentSlug && memoryEnabled) {
-      allTools.push(buildMemorySearchTool(agentSlug, userId, sessionId));
+      allTools.push(buildMemorySearchTool(agentSlug, userId, sessionId, memoryBankId));
       log("Memory enabled — injected memory-search tool");
+      // Deterministic file-memory tools (read/write named files) — twin only,
+      // since the file store is per-user (agentSlug + userId).
+      if (isDigitalTwinAgent(agentSlug)) {
+        for (const t of buildMemoryFileTools(agentSlug, userId, sessionId)) allTools.push(t);
+        allTools.push(buildMemoryWriteTool(agentSlug, userId, sessionId));
+        log("Digital Twin — injected read/write memory-file tools + memory-write");
+      }
     }
 
     // verifyResponses: opt-in per agent. The agent delivers its final answer
@@ -2115,9 +2417,27 @@ async function processTask(
       (process.env["RESPONSE_VERIFY_ALL"] ?? "off").toLowerCase() === "on";
     const verifyCfg = agentConfig?.["verifyResponses"] as boolean | undefined;
     const isTwinAgent = agentSlug ? isDigitalTwinAgent(agentSlug) : false;
+
+    // Digital Twin mention/approval flow: the twin_deliver tool is the single,
+    // MANDATORY delivery channel (react and/or reply, and where). It replaces the
+    // old "post the raw last-assistant text" path, so process narration can never
+    // leak. Scoped to USER_MENTIONED — the ask-ai / DM twin surfaces answer
+    // normally and are untouched. verifyResponses is forced off here so we never
+    // stack two terminal delivery tools. (isTwinMentionFlow is computed with the
+    // plan-tools gate above.)
+    const twinDeliverRef: TwinDeliverRef = {};
+    if (isTwinMentionFlow && agentSlug) {
+      // No candidate list injected: the Twin discovers channel/thread/user ids
+      // itself via its Spaces tools (Vespa search + psql) and passes them to
+      // twin_deliver's explicit id fields.
+      allTools.push(buildTwinDeliverTool(agentSlug, twinDeliverRef));
+      log(`Digital Twin mention flow — injected MANDATORY twin_deliver tool`);
+    }
+
     const verifyResponses =
       (verifyCfg ?? (verifyAllDefault && !isTwinAgent)) &&
-      !structuredOutputActive;
+      !structuredOutputActive &&
+      !isTwinMentionFlow;
     const evidenceRef: EvidenceRef = {};
     if (verifyResponses && !isCopilot) {
       const rawCriteria = agentConfig?.["verifyResponseCriteria"];
@@ -2216,6 +2536,40 @@ async function processTask(
       if (allTools.length !== before) {
         log(`Read-only ${eventType ?? "scheduled"} run — stripped ${before - allTools.length} mutating sandbox tool(s) (sbx-git read-only)`);
       }
+    }
+
+    allTools = dedupeToolsByName(allTools);
+    if (fastModeEnabled) {
+      const registeredToolNames = new Set(allTools.map((tool) => tool.name));
+      fastCatalogItems = fastCatalogCandidateItems.filter((item) =>
+        registeredToolNames.has(item.entry.name) &&
+        !fastAlwaysActiveToolNames.has(item.entry.name),
+      );
+      fastCatalogNames = fastCatalogItems.map((item) => item.entry.name);
+      const finalFastCatalogNameSet = new Set(fastCatalogNames);
+      allTools = dedupeToolsByName([
+        ...buildFastModeMetaTools({
+          catalog: fastCatalogItems.map((item) => item.entry),
+          controller: fastToolController,
+        }),
+        ...allTools.filter((tool) => {
+          if (!fastCatalogCandidateByName.has(tool.name)) return true;
+          return finalFastCatalogNameSet.has(tool.name) || fastAlwaysActiveToolNames.has(tool.name);
+        }),
+      ]);
+      fastMetaTools = allTools.filter((tool) => tool.name === "search-tools" || tool.name === "load-tools");
+    }
+
+    const fastModeLoadedToolBudget = fastModeEnabled
+      ? Math.max(
+          0,
+          providerToolRequestCap(provider) -
+            5 - // scoped read/write/grep/find/ls built-ins registered in runTask
+            allTools.filter((tool) => !fastCatalogNames.includes(tool.name)).length,
+        )
+      : undefined;
+    if (fastModeEnabled) {
+      log(`[fast] catalog=${fastCatalogItems.length} active=0 budget=${fastModeLoadedToolBudget ?? 0} totalCap=${providerToolRequestCap(provider)}`);
     }
 
     const tools = allTools.length > 0 ? allTools : undefined;
@@ -2546,9 +2900,72 @@ async function processTask(
       agentSlug && CITATION_GUIDE_AGENT_SLUGS.has(agentSlug)
         ? CITATION_GUIDE
         : "";
-    const effectiveSystemPrompt = channelId
+    // Digital Twin mention flow runs with the agent's CONFIGURED system prompt
+    // (systemPromptOverride), so the twin_deliver mandate baked into
+    // buildSystemPrompt's fallback never reaches it — the model was never told
+    // the tool is its only output channel and just answered in text. Append the
+    // mandate to the ACTUAL system prompt here so the model always sees it.
+    const twinMandate = isTwinMentionFlow
+      ? buildTwinDeliverMandate({
+          ...(userName ? { userName } : {}),
+          ...(senderName ? { senderName } : {}),
+          ...(channelName ? { channelName } : {}),
+        })
+      : "";
+    const effectiveSystemPrompt = (channelId
       ? `${basePrompt}${citationGuide}${SPACES_MENTION_GUIDE}`
-      : `${basePrompt}${citationGuide}`;
+      : `${basePrompt}${citationGuide}`) + twinMandate;
+    // Proof (twin mention flow only) that BOTH prompt changes actually reach the
+    // model: the twin_deliver mandate + its who/where line in the SYSTEM prompt,
+    // and the "@mentioned by" note in the USER-prompt context. Grep the run logs
+    // for `[run] TWIN prompt proof` to confirm on any given run.
+    if (isTwinMentionFlow) {
+      log(
+        `[run] TWIN prompt proof — SYSTEM: mandate=${effectiveSystemPrompt.includes("Delivering your response — REQUIRED")} whoWhere=${effectiveSystemPrompt.includes("You were mentioned by")} | ` +
+          `CONTEXT: mentionNote=${(context ?? "").includes("You were @mentioned")} | sender=${senderName ?? "(none)"} channel=${channelName ?? "(none)"}`,
+      );
+    }
+    const fastModeCatalogPrompt = fastModeEnabled
+      ? renderToolCatalogForPrompt(fastCatalogItems.map((item) => item.entry))
+      : "";
+    if (fastModeCatalogPrompt) {
+      fullContext = fullContext
+        ? `${fullContext}\n\n${fastModeCatalogPrompt}`
+        : fastModeCatalogPrompt;
+    }
+    const fastModeSubagentSkills =
+      fastModeEnabled && customSubagents && customSubagents.length > 0
+        ? customSubagents.map((spec) => ({
+            slug: `fast-${spec.name}`,
+            name: `fast-${spec.name}`,
+            description: `Fast-mode guidance for ${spec.name}; read before using its referenced tools.`,
+            content: [
+              `# ${spec.name}`,
+              "",
+              `Trigger: read before using tools from custom subagent ${spec.name}.`,
+              "",
+              "## System Prompt",
+              spec.systemPrompt,
+              ...(spec.skills.length > 0
+                ? [
+                    "",
+                    "## Skills",
+                    ...spec.skills.map((skill) =>
+                      [
+                        `### ${skill.name}`,
+                        skill.description ? `Description: ${skill.description}` : "",
+                        skill.content,
+                      ].filter(Boolean).join("\n"),
+                    ),
+                  ]
+                : []),
+            ].join("\n"),
+          }))
+        : [];
+    const effectiveSkills =
+      fastModeSubagentSkills.length > 0
+        ? [...(skills ?? []), ...fastModeSubagentSkills]
+        : skills;
 
     // Quota fallback wrapper: walks the agent owner's `providerOrder` on
     // 429 / insufficient_quota / out-of-credits, then drops to "spaces" (Kimi
@@ -2597,6 +3014,7 @@ async function processTask(
         // configured on their credential.
         modelSettings,
         ...(structuredOutputActive ? { structuredOutputRef } : {}),
+        ...(isTwinMentionFlow ? { twinDeliverRef } : {}),
         userId,
         task,
         context: fullContext,
@@ -2613,11 +3031,12 @@ async function processTask(
         images: imageContents?.length ? imageContents : undefined,
         fileAttachments:
           fileAttachments.length > 0 ? fileAttachments : undefined,
-        skills,
+        skills: effectiveSkills,
         skillTriggers:
           resolvedTriggers.length > 0 ? resolvedTriggers : undefined,
         promptInjections:
           activeInjections.length > 0 ? activeInjections : undefined,
+        ...(twinPersonaBlock ? { twinPersona: twinPersonaBlock } : {}),
         abortSignal,
         // Raw Spaces identity for progress callbacks → lets /webhook/progress fall
         // back to claw-auth's conv-keyed session index (mirrors the /result body).
@@ -2633,8 +3052,18 @@ async function processTask(
           : {}),
         citationReflection,
         autoToolCitations,
+        // Thread invocations (Spaces/Slack replies — channelId present) keep a
+        // clean posted reply = the last 2 assistant turns; ask-ai and every other
+        // surface keep ALL turns so the stored answer matches the streamed one.
+        finalAnswerMaxTurns: channelId ? 2 : undefined,
         ...(isRegenerate ? { isRegenerate: true } : {}),
         backgroundRegistry: backgroundSubagentRegistry,
+        fastMode: fastModeEnabled,
+        ...(fastModeEnabled ? { fastToolCatalogNames: fastCatalogNames } : {}),
+        ...(fastModeEnabled ? { fastToolController } : {}),
+        ...(fastModeEnabled ? { fastMaxActiveTools: fastModeLoadedToolBudget } : {}),
+        ...(resumedFromHandoff === true ? { resumedFromHandoff: true } : {}),
+        handoff: handoffControl,
       });
 
     // Capture provider-fallback context so an empty FINAL result can tell the
@@ -2862,10 +3291,18 @@ async function processTask(
     // and label/ordinal [Image #1] — to valid [clf-…] tokens when a matching
     // citation actually exists. Skipped for structured JSON output (that text IS
     // the machine payload, not chat markdown).
-    const callbackResultText =
+    const rawCallbackText =
       structuredOutputPayload !== undefined
         ? finalResultText
         : sanitizeCitations(finalResultText, result.toolInvocations, result.sessionClfTokens);
+    // Digital Twin mention flow: the ONLY user-visible reply is the structured
+    // twin_deliver message (clean, first-person) — the raw assistant transcript
+    // (with any process narration) never travels as `result`. A react-only or a
+    // fail-closed no-delivery carries no message, so the text is empty and
+    // claw-auth posts only the reaction / stays silent. The full structured
+    // delivery (action, emoji, destination) rides on the `twinDelivery` field.
+    const twinDelivery = isTwinMentionFlow ? result.twinDelivery : undefined;
+    const callbackResultText = isTwinMentionFlow ? (twinDelivery?.message ?? "") : rawCallbackText;
 
     // Honor an explicit user stop even when generation FINISHED before the abort
     // could interrupt it. Non-copilot agents (codex/spaces) deliver their final
@@ -2881,6 +3318,7 @@ async function processTask(
         userId,
         conversationId: conversationId ?? null,
         agentSlug: agentSlug ?? null,
+        fastMode: fastModeForCallback,
         status: "cancelled",
       });
       return;
@@ -2945,6 +3383,7 @@ async function processTask(
       userId,
       conversationId: conversationId ?? null,
       agentSlug: agentSlug ?? null,
+      fastMode: fastModeForCallback,
       status: "completed",
       result: callbackResultText,
       ...(emptyReason ? { emptyReason } : {}),
@@ -2958,6 +3397,9 @@ async function processTask(
       ...(automationStructuredResult !== undefined
         ? { automationResult: automationStructuredResult }
         : {}),
+      // Digital Twin mention flow: the structured delivery claw-auth executes
+      // (react and/or reply, and where) on approve. Absent ⇒ fail-closed silence.
+      ...(twinDelivery !== undefined ? { twinDelivery } : {}),
       toolsUsed: combinedToolsUsed,
       tokenUsage: result.tokenUsage,
       ...(result.reasoning && result.reasoning.trim()
@@ -2979,6 +3421,10 @@ async function processTask(
       model: completedModel,
     });
   } catch (err) {
+    if (err instanceof RunHandoffError) {
+      await sendHandoffCallback(err.lastTurn);
+      return;
+    }
     // HA: another pod already owns this conversation's lock. In callback mode
     // /run has already replied success, so claw-auth must receive a terminal
     // callback to release its busy slot and drain any queued messages.
@@ -2991,6 +3437,7 @@ async function processTask(
         userId,
         conversationId: conversationId ?? null,
         agentSlug: agentSlug ?? null,
+        fastMode: fastModeForCallback,
         status: "failed",
         error: "session_locked",
         provider: callbackProvider,
@@ -3081,6 +3528,7 @@ async function processTask(
         userId,
         conversationId: conversationId ?? null,
         agentSlug: agentSlug ?? null,
+        fastMode: fastModeForCallback,
         status: "completed",
         result: recoveredResultText,
         ...(automationResultAtError !== undefined
@@ -3104,6 +3552,7 @@ async function processTask(
         userId,
         conversationId: conversationId ?? null,
         agentSlug: agentSlug ?? null,
+        fastMode: fastModeForCallback,
         status: "cancelled",
         ...(err instanceof RunCancelledError && err.partialText
           ? { result: err.partialText }
@@ -3134,6 +3583,7 @@ async function processTask(
         userId,
         conversationId: conversationId ?? null,
         agentSlug: agentSlug ?? null,
+        fastMode: fastModeForCallback,
         status: "completed",
         result:
           "⚠️ The model provider was temporarily unavailable and your request couldn't be completed. Please try again in a moment.",
@@ -3150,6 +3600,7 @@ async function processTask(
         userId,
         conversationId: conversationId ?? null,
         agentSlug: agentSlug ?? null,
+        fastMode: fastModeForCallback,
         status: "failed",
         error: err instanceof Error ? err.message : "Internal error",
         provider: callbackProvider,
@@ -3179,17 +3630,19 @@ async function sendCallback(
   callbackUrl: ProgressDest,
   sessionToken: string,
   payload: Record<string, unknown>,
-): Promise<void> {
+  opts?: { backoffsMs?: number[] },
+): Promise<boolean> {
   // SSE mode: the final result is a `done` frame on the in-process emitter, not a POST.
   // The route handler closes the response after this returns.
   if (callbackUrl && typeof callbackUrl !== "string") {
     const sidSse = (payload["sessionId"] as string | undefined) ?? "?";
     try {
       await callbackUrl.done(sidSse, payload);
+      return true;
     } catch (err) {
       clog.error(`[run] In-process done emit failed (session=${sidSse}): ${err instanceof Error ? err.message : String(err)}`);
+      return false;
     }
-    return;
   }
   const url =
     callbackUrl ??
@@ -3201,16 +3654,18 @@ async function sendCallback(
     clog.error(
       `[run] Refusing callback to non-allowlisted URL (session=${sid}): ${url}`,
     );
-    return;
+    return false;
   }
   const body = JSON.stringify(payload);
-  // Up to 3 attempts on transient failures (network throw OR 5xx OR 408/429).
+  // Retries on transient failures (network throw OR 5xx OR 408/429).
   // We never retry 4xx other than 408/429 — those are caller-shape errors and
   // re-sending won't help. Each attempt is logged so a silent drop becomes
-  // impossible. Backoff: 1s, 3s.
-  const BACKOFFS_MS = [1000, 3000];
+  // impossible. Default backoff 1s, 3s (3 attempts); callers with a longer
+  // time budget (handoff during drain) pass a longer schedule.
+  const backoffsMs = opts?.backoffsMs ?? [1000, 3000];
+  const maxAttempts = backoffsMs.length + 1;
   let lastErr: unknown = null;
-  for (let attempt = 1; attempt <= 3; attempt++) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       const res = await fetch(url, {
         method: "POST",
@@ -3230,7 +3685,7 @@ async function sendCallback(
             `[run] Callback to ${url} succeeded on attempt ${attempt} (session=${sid})`,
           );
         }
-        return;
+        return true;
       }
       // Non-2xx: read a snippet of the body so the failure mode is visible.
       const text = await res.text().catch(() => "");
@@ -3239,16 +3694,16 @@ async function sendCallback(
       clog.error(
         `[run] Callback ${res.status} from ${url} (session=${sid}, attempt=${attempt}, bytes=${body.length}, retryable=${retryable}): ${text.slice(0, 300)}`,
       );
-      if (!retryable || attempt === 3) return;
+      if (!retryable || attempt === maxAttempts) return false;
       lastErr = new Error(`HTTP ${res.status}`);
     } catch (err) {
       lastErr = err;
       clog.error(
         `[run] Callback to ${url} threw (session=${sid}, attempt=${attempt}, bytes=${body.length}): ${err instanceof Error ? err.message : String(err)}`,
       );
-      if (attempt === 3) return;
+      if (attempt === maxAttempts) return false;
     }
-    const wait = BACKOFFS_MS[attempt - 1] ?? 3000;
+    const wait = backoffsMs[attempt - 1] ?? 3000;
     await new Promise((resolve) => setTimeout(resolve, wait));
   }
   if (lastErr) {
@@ -3256,6 +3711,7 @@ async function sendCallback(
       `[run] Callback exhausted retries to ${url} (session=${sid}): ${lastErr instanceof Error ? lastErr.message : String(lastErr)}`,
     );
   }
+  return false;
 }
 
 // ── Chain judge endpoint (called by xyne-claw-auth webhook) ──────────────

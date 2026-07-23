@@ -62,7 +62,7 @@ export interface ToolExecutionContext {
    * Per-run HMAC bearer token for authenticating with claw-auth's
    * /sessions/:sessionId/mcp/* endpoints. Minted by claw-auth at /run
    * dispatch time and forwarded into the run context. Required by any tool
-   * that calls claw-auth's MCP route directly (currently: pgm). Other tools
+   * that calls claw-auth's MCP route directly. Other tools
    * call MCP via xyne-claw's mcp.ts wrapper which threads this through
    * internally — they don't need to read it from the context.
    */
@@ -79,13 +79,13 @@ export interface ToolExecutionContext {
 }
 
 export interface ToolDefinition {
-  /** Unique slug, e.g. "pgm-list-programs" */
+  /** Unique slug, e.g. "sandbox-run-command" */
   slug: string;
   /** Display name */
   name: string;
   /** What the tool does */
   description: string;
-  /** Where it runs: "custom:pgm", "mcp:xyne-spaces", "builtin" */
+  /** Where it runs: "custom:sandbox", "mcp:xyne-spaces", "builtin" */
   source: string;
   /** JSON Schema for parameters */
   inputSchema: ToolInputSchema;

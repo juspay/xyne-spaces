@@ -18,6 +18,20 @@ export async function isClawAdmin(userId: string): Promise<boolean> {
 }
 
 /**
+ * Check whether a user can use Search Evals — a narrower grant than full
+ * CLAW_ADMIN, since the feature's "without permission" mode runs an
+ * ACL-bypassing search. CLAW_ADMINs always qualify (they can already grant
+ * themselves this role); SEARCH_EVAL_ACCESS lets an admin extend access to
+ * specific individuals without making them a full CLAW_ADMIN.
+ */
+export async function hasSearchEvalAccess(userId: string): Promise<boolean> {
+  if (!userId) return false;
+  if (await isClawAdmin(userId)) return true;
+  const role = await userRoleRepository.findByUserAndRole(userId, "SEARCH_EVAL_ACCESS");
+  return Boolean(role);
+}
+
+/**
  * Resolve the requesting user ID from the request.
  * Reads `x-user-id` header (set by the caller — Spaces backend or internal service).
  */
@@ -115,6 +129,30 @@ export async function requireClawAdmin(
   const admin = await isClawAdmin(requesterId);
   if (!admin) {
     res.status(403).json({ success: false, error: "CLAW_ADMIN role required" });
+    return;
+  }
+
+  next();
+}
+
+/**
+ * Require the requester to have Search Eval access (CLAW_ADMIN or the
+ * narrower SEARCH_EVAL_ACCESS role — see hasSearchEvalAccess()).
+ */
+export async function requireSearchEvalAccess(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  const requesterId = getRequesterId(req);
+  if (!requesterId) {
+    res.status(401).json({ success: false, error: "x-user-id header is required" });
+    return;
+  }
+
+  const allowed = await hasSearchEvalAccess(requesterId);
+  if (!allowed) {
+    res.status(403).json({ success: false, error: "Search Eval access required" });
     return;
   }
 

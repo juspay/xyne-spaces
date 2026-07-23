@@ -7,6 +7,7 @@ interface SettingsModalProps {
   userId: string;
   open: boolean;
   initialSuffix: string;
+  initialRespondPolicy?: string;
   onClose: () => void;
   onSaved: () => void;
 }
@@ -19,23 +20,27 @@ export function SettingsModal({
   userId,
   open,
   initialSuffix,
+  initialRespondPolicy,
   onClose,
   onSaved,
 }: SettingsModalProps) {
+  const normPolicy = (p?: string): "always" | "learned" => (p === "learned" ? "learned" : "always");
   const [suffix, setSuffix] = useState(initialSuffix);
+  const [respondPolicy, setRespondPolicy] = useState<"always" | "learned">(normPolicy(initialRespondPolicy));
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
     setSuffix(initialSuffix);
-  }, [initialSuffix, open]);
+    setRespondPolicy(normPolicy(initialRespondPolicy));
+  }, [initialSuffix, initialRespondPolicy, open]);
 
   async function submit() {
     setSaving(true);
     setErr(null);
     try {
       // Empty string clears the suffix server-side (route normalizes to null).
-      await updateDigitalTwinSettings(userId, { responseSuffix: suffix || null });
+      await updateDigitalTwinSettings(userId, { responseSuffix: suffix || null, respondPolicy });
       onSaved();
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
@@ -47,7 +52,7 @@ export function SettingsModal({
   const charCount = suffix.length;
   // Compare trimmed values so adding/removing trailing whitespace doesn't
   // count as a meaningful change (matches V1 behavior).
-  const dirty = suffix.trim() !== initialSuffix.trim();
+  const dirty = suffix.trim() !== initialSuffix.trim() || respondPolicy !== normPolicy(initialRespondPolicy);
 
   return (
     <Dialog
@@ -93,6 +98,29 @@ export function SettingsModal({
           >
             {charCount} / {MAX_SUFFIX_LEN}
           </span>
+        </div>
+      </div>
+
+      {/* When to reply — respond/ignore policy */}
+      <div className="mt-[16px]">
+        <label className="mb-[6px] block text-[10px] font-medium uppercase tracking-[0.06em] text-xyne-fg-tertiary">
+          When to reply to a mention
+        </label>
+        <div className="flex flex-col gap-[6px]">
+          <label className={`flex cursor-pointer items-start gap-[8px] rounded-lg border p-[10px] transition ${respondPolicy === "always" ? "border-xyne-fg-primary bg-xyne-surface-sunken" : "border-xyne-border hover:bg-xyne-surface-sunken/60"}`}>
+            <input type="radio" name="respond-policy" checked={respondPolicy === "always"} onChange={() => setRespondPolicy("always")} className="mt-[2px]" />
+            <span>
+              <span className="block text-[12px] font-medium text-xyne-fg-primary">Always reply</span>
+              <span className="block text-[11px] text-xyne-fg-tertiary">The Twin drafts a reply to every mention (default).</span>
+            </span>
+          </label>
+          <label className={`flex cursor-pointer items-start gap-[8px] rounded-lg border p-[10px] transition ${respondPolicy === "learned" ? "border-xyne-fg-primary bg-xyne-surface-sunken" : "border-xyne-border hover:bg-xyne-surface-sunken/60"}`}>
+            <input type="radio" name="respond-policy" checked={respondPolicy === "learned"} onChange={() => setRespondPolicy("learned")} className="mt-[2px]" />
+            <span>
+              <span className="block text-[12px] font-medium text-xyne-fg-primary">Learned — respect my patterns</span>
+              <span className="block text-[11px] text-xyne-fg-tertiary">Consults your captured respond/ignore patterns and stays silent when you'd likely ignore. Fails open — replies when unsure.</span>
+            </span>
+          </label>
         </div>
       </div>
 

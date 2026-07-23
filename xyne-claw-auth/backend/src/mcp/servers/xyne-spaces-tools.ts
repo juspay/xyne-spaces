@@ -1078,6 +1078,8 @@ const spacesTickets: ToolDef = {
   inputSchema: {
     type: "object",
     properties: {
+      ticketId: { type: "string", description: "Fetch ONE specific ticket directly. Accepts EITHER the internal DB id (cm…, shown as 'id:' in results) OR the human ticket key (xyneId, e.g. 'XYNE-1234') — whichever you have. When set, all other filters are ignored and only that single ticket is returned." },
+      xyneId: { type: "string", description: "Fetch ONE ticket by its human ticket key (xyneId, e.g. 'XYNE-1234'). Same direct single-ticket fetch as `ticketId`; provided for clarity when you specifically have the human key." },
       status: { type: "string", enum: ["TODO", "STARTED", "PAUSED", "CANCELLED", "COMPLETED"], description: "Filter by status" },
       priority: { type: "string", enum: ["LOW", "MEDIUM", "HIGH", "CRITICAL"], description: "Filter by priority" },
       assignedTo: { type: "string", description: "Filter by assigned user — accepts either the user's ID (cm…) or their email address. Email is resolved to userId server-side before the ticket query." },
@@ -1138,6 +1140,36 @@ const spacesTickets: ToolDef = {
   },
   async handler(args) {
     try {
+      const include = {
+        assignedToUser: { select: { name: true, email: true } },
+        createdByUser: { select: { name: true, email: true } },
+        board: { select: { name: true } },
+        project: { select: { name: true } },
+        tags: { select: { name: true } },
+      };
+
+      // Direct single-ticket fetch. When the caller passes `ticketId` (or
+      // `xyneId`) we short-circuit every filter below and return just that
+      // ticket. The value may be the internal DB id (cm…) OR the human ticket
+      // key (xyneId, e.g. XYNE-1234) — the model often only has one — so we try
+      // `id` first and fall back to `xyneId`. Two plain `equals` queries, not an
+      // OR clause: the gateway validator rejects OR arrays-of-objects.
+      const directRef = String(args["ticketId"] ?? args["xyneId"] ?? "").trim();
+      if (directRef) {
+        let hit = (await interact({ model: "ticket", operation: "findMany", where: { id: { equals: directRef } }, take: 1, include })) as TicketRow[];
+        if (!hit?.length) {
+          hit = (await interact({ model: "ticket", operation: "findMany", where: { xyneId: { equals: directRef } }, take: 1, include })) as TicketRow[];
+        }
+        if (!hit?.length) return ok(`No ticket found for '${directRef}' (looked up by internal id and xyneId).`);
+        return await formatTickets(hit, {
+          classifyActionable: args["classifyActionable"] === true,
+          summary: args["summary"] === true,
+          expectedUserGroup: Array.isArray(args["expectedUserGroup"])
+            ? (args["expectedUserGroup"] as unknown[]).map((v) => String(v))
+            : [],
+        });
+      }
+
       const baseWhere: Record<string, unknown> = {};
       if (args["status"]) baseWhere["statusV2"] = { equals: args["status"] };
       if (args["priority"]) baseWhere["priority"] = { equals: args["priority"] };
@@ -1200,13 +1232,6 @@ const spacesTickets: ToolDef = {
       const sortField = args["orderBy"] === "createdAt" ? "createdAt" : "updatedAt";
       const sortDir: "asc" | "desc" = args["sortOrder"] === "asc" ? "asc" : "desc";
       const orderByClause: Array<Record<string, "asc" | "desc">> = [{ [sortField]: sortDir }];
-      const include = {
-        assignedToUser: { select: { name: true, email: true } },
-        createdByUser: { select: { name: true, email: true } },
-        board: { select: { name: true } },
-        project: { select: { name: true } },
-        tags: { select: { name: true } },
-      };
 
       // Resolve email-form values for assignedTo / createdBy → userId via one
       // lookup. Saves the caller a round-trip to spaces-users when they only
@@ -2953,7 +2978,7 @@ function isCallGeneratedCanvas(metadata: unknown): boolean {
 const spacesCanvases: ToolDef = {
   name: "spaces-canvases",
   description:
-    "Search and list Canvas documents in Spaces (collaborative docs, Quarto bundles, slides). " +
+    "Search and list Canvas documents in Spaces (collaborative docs, slides). " +
     "Filter by title, channel, project, folder, visibility, doc type, creator, or starred-only; " +
     "set excludeCallGenerated=true to hide auto-generated RCA/PRD/summary docs (as the dashboard does by default). " +
     "Returns canvas IDs, titles, channel, creator, and last-edited time.",
@@ -2965,7 +2990,6 @@ const spacesCanvases: ToolDef = {
       projectId: { type: "string", description: "Filter to canvases in this project" },
       folderId: { type: "string", description: "Filter to canvases in this folder. Pass the literal 'none' to list ungrouped/personal canvases (folderId is null)." },
       visibility: { type: "string", enum: ["PUBLIC", "PRIVATE"], description: "Filter by visibility (canvases are PUBLIC or PRIVATE)." },
-      docType: { type: "string", enum: ["Canvas", "Quarto"], description: "Filter by document type" },
       createdBy: { type: "string", description: "Filter by creator user ID" },
       starredOnly: { type: "boolean", description: "Only canvases you have starred." },
       excludeCallGenerated: { type: "boolean", description: "Hide auto-generated call/RCA/PRD/summary/migration canvases (matches the dashboard's default view). Default false (returns everything)." },
@@ -2981,7 +3005,6 @@ const spacesCanvases: ToolDef = {
       if (args["projectId"]) where["projectId"] = { equals: args["projectId"] };
       if (args["folderId"]) where["folderId"] = String(args["folderId"]) === "none" ? null : { equals: args["folderId"] };
       if (args["visibility"]) where["visibility"] = { equals: args["visibility"] };
-      if (args["docType"]) where["docType"] = { equals: args["docType"] };
       if (args["createdBy"]) where["createdBy"] = { equals: args["createdBy"] };
       // Single relation-'some' object — gateway-legal. Scopes to canvases the
       // caller has starred (CanvasUserStatus is per-user).
@@ -3584,95 +3607,6 @@ const spacesWhoami: ToolDef = {
   },
 };
 
-// ── spaces-publish-docs ─────────────────────────────────────────────
-
-const spacesPublishDocs: ToolDef = {
-  name: "spaces-publish-docs",
-  description:
-    "Publish a Quarto book or documentation to Xyne Spaces. " +
-    "Accepts a base64-encoded zip of the rendered HTML output and uploads it. " +
-    "Returns the published docs URL on success.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      zipBase64: { type: "string", description: "Base64-encoded zip file containing the rendered HTML output" },
-      userRepo: { type: "string", description: "Unique identifier in org/repo/branch format (e.g. 'pgm-agent/my-program/main')" },
-      title: { type: "string", description: "Display title for the published docs" },
-      entryFile: { type: "string", description: "Entry HTML file name (default: index.html)" },
-      channelId: { type: "string", description: "Channel ID to publish to, or omit for personal/private docs" },
-      docType: { type: "string", enum: ["book", "docs", "website", "slides"], description: "Document type (default: book)" },
-    },
-    required: ["zipBase64", "userRepo", "title"],
-  },
-  async handler(params) {
-    try {
-      const zipBase64 = params["zipBase64"] as string;
-      const userRepo = params["userRepo"] as string;
-      const title = params["title"] as string;
-      const entryFile = (params["entryFile"] as string) || "index.html";
-      const channelId = params["channelId"] as string | undefined;
-      const docType = (params["docType"] as string) || "book";
-
-      if (!zipBase64 || !userRepo || !title) {
-        return err("zipBase64, userRepo, and title are required");
-      }
-
-      const zipBuffer = Buffer.from(zipBase64, "base64");
-      console.error(`[spaces-publish-docs] Publishing ${title} (${(zipBuffer.length / 1024).toFixed(0)} KB) as ${userRepo}`);
-
-      const formData = new FormData();
-      formData.append("docs", new Blob([zipBuffer], { type: "application/zip" }), "docs.zip");
-      formData.append("userRepo", userRepo);
-      formData.append("title", title);
-      formData.append("entryFile", entryFile);
-      formData.append("docType", docType);
-      if (channelId) formData.append("channelId", channelId);
-
-      const baseUrl = (process.env["XYNE_SPACES_URL"] ?? "").replace(/\/+$/, "");
-      const token = process.env["XYNE_SPACES_TOKEN"] ?? "";
-      const sessionId = process.env["XYNE_SPACES_SESSION_ID"] ?? "";
-      const workspaceId = process.env["XYNE_SPACES_WORKSPACE_ID"] ?? "";
-      const cookieParts: string[] = [];
-      if (sessionId) cookieParts.push(`xyne_session=${sessionId}`);
-      if (workspaceId) cookieParts.push(`xyne_last_workspace=${workspaceId}`);
-      const cookieHeader = cookieParts.join("; ");
-      const url = `${baseUrl}/api/docs/claw/publish`;
-      const response = await fetch(url, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          ...(sessionId ? { "x-session-id": sessionId } : {}),
-          ...(workspaceId ? { "x-workspace-id": workspaceId } : {}),
-          ...(cookieHeader ? { Cookie: cookieHeader } : {}),
-        },
-        body: formData,
-        signal: AbortSignal.timeout(120_000),
-      });
-
-      const result = (await response.json()) as Record<string, unknown>;
-
-      if (response.ok && result["success"]) {
-        const docsUrl = typeof result["docsUrl"] === "string" ? (result["docsUrl"] as string) : "";
-        const citations: Citation[] = docsUrl
-          ? [{ kind: "external", url: docsUrl, chunkIndex: 1, label: title }]
-          : [];
-        return okCited(
-          prefixChunk(1, "Published successfully!", [
-            `URL: ${docsUrl}`,
-            `Title: ${title}`,
-            `UserRepo: ${userRepo}`,
-          ]),
-          citations,
-        );
-      } else {
-        return err(`Publish failed (${response.status}): ${result["error"] || "Unknown error"}`);
-      }
-    } catch (e) {
-      return err(`Publish error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
-};
-
 // ── spaces-read-canvas ──────────────────────────────────────────────
 
 const spacesReadCanvas: ToolDef = {
@@ -3794,7 +3728,7 @@ const spacesTriggerAgent: ToolDef = {
   inputSchema: {
     type: "object",
     properties: {
-      targetAgent: { type: "string", description: "Slug of the agent to trigger (e.g. 'doctor-agent', 'pgm-agent')" },
+      targetAgent: { type: "string", description: "Slug of the agent to trigger (e.g. 'doctor-agent')" },
       task: { type: "string", description: "Task description for the target agent" },
       conversationId: { type: "string", description: "Conversation thread to continue in (from Session Metadata)" },
       channelId: { type: "string", description: "Channel where the conversation is happening (from Session Metadata)" },
@@ -4416,7 +4350,7 @@ const spacesUploadToKb: ToolDef = {
 
       // 2) Build the shared auth/request context ONCE — identical for every file
       //    in the batch. spacesFetch forces a JSON Content-Type, so build the
-      //    request directly (mirroring spaces-publish-docs) and let FormData set
+      //    request directly and let FormData set
       //    its own multipart boundary. Auth is replicated from the client:
       //    bearer + session/workspace via both header AND cookie (the refresh
       //    middleware reads user_session_id).
@@ -5765,7 +5699,6 @@ export const tools: ToolDef[] = [
   spacesCreateTicket,
   spacesUpdateTicket,
   spacesScheduleCall,
-  spacesPublishDocs,
   spacesReadCanvas,
   spacesEditCanvas,
   spacesTriggerAgent,

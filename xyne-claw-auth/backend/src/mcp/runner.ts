@@ -177,14 +177,24 @@ async function getOrCreateSession(
   }
 
   // For xyne-spaces the rotating credential is `token`; for OAuth-based HTTP
-  // adapters (customerio, honeycomb, egnyte, …) it is `accessToken`. Track
-  // whichever is present so stale HTTP sessions are evicted after a refresh.
+  // adapters (customerio, honeycomb, egnyte, …) it is `accessToken`; for
+  // header/apiKey adapters (e.g. expense-prod's `Authorization: Basic
+  // {{apiKey}}`) it is `apiKey`. Track whichever is present so stale HTTP
+  // sessions are evicted after the credential changes.
+  //
+  // BUG THIS FIXES: apiKey was NOT considered here, so when a user swapped an
+  // apiKey-based connector's token, `incomingToken` stayed undefined, the
+  // eviction check below was skipped, and the runner reused a session pinned to
+  // the OLD key forever → every call through it timed out (-32001) even though
+  // creds-loader had already resolved the new key. Seen on expense-prod.
   const incomingToken =
     typeof credentials["token"] === "string"
       ? (credentials["token"] as string)
       : typeof credentials["accessToken"] === "string"
         ? (credentials["accessToken"] as string)
-        : undefined;
+        : typeof credentials["apiKey"] === "string"
+          ? (credentials["apiKey"] as string)
+          : undefined;
 
   const existing = sessions.get(key);
   if (existing) {
@@ -376,6 +386,42 @@ function extForMime(mime: string): string {
 }
 
 /**
+ * Many file-fetching MCP tools (e.g. bitbucket-mcp-server's get_file_content)
+ * return the fetched file as a STRING field nested inside a JSON envelope —
+ * `{"file_path":...,"branch":...,"content":"<file>"}` — via JSON.stringify,
+ * because MCP's wire format only allows a tool to return one text string, and
+ * this is the only way to pack file text plus metadata (path/branch/line
+ * info) into that single string. But JSON strings can't contain literal
+ * newlines, so every "\n" in the source file gets escaped to the two
+ * characters \ + n, collapsing a multi-thousand-line file into ONE physical
+ * line. Downstream, both promoteIfOversized's spill-to-file (tool-output.ts)
+ * and pi's line-based `read` tool (truncate.js) choke on that single
+ * oversized line. This isn't specific to any one tool — any MCP tool that
+ * wraps file text this way hits the same failure, so we detect the SHAPE
+ * (a `file_path` string alongside a `content` string) rather than an
+ * allowlist of tool names, so every such tool benefits automatically.
+ *
+ * Gating on `file_path` + `content` together (not `content` alone) avoids
+ * misfiring on unrelated tools that legitimately return a short `content`
+ * string alongside other fields the model needs (e.g. a "ticket created"
+ * confirmation) — those aren't file-fetch responses and must pass through
+ * untouched.
+ */
+function unwrapFileContentEnvelope(text: string): string {
+  try {
+    const parsed = JSON.parse(text) as Record<string, unknown>;
+    const body = parsed["content"];
+    if (typeof parsed["file_path"] !== "string" || typeof body !== "string") return text;
+    const header = [`File: ${parsed["file_path"]}${typeof parsed["branch"] === "string" ? ` (branch: ${parsed["branch"]})` : ""}`];
+    const lineInfo = parsed["line_info"] as { message?: string } | undefined;
+    if (lineInfo?.message) header.push(`[${lineInfo.message}]`);
+    return `${header.join("\n")}\n\n${body}`;
+  } catch {
+    return text; // not JSON, or not the file-fetch shape — pass through untouched
+  }
+}
+
+/**
  * Pull binary files out of an MCP result's content array:
  *   • EmbeddedResource ({type:"resource", resource:{blob, mimeType}}) → file
  *   • ImageContent / AudioContent ({type:"image"|"audio", data, mimeType}) → file
@@ -428,7 +474,9 @@ export async function callTool(
     // File forwarding: for allowlisted tools, lift binary content (EmbeddedResource
     // blobs / image / audio) into `attachments` so it reaches the user as a real
     // file instead of being dropped. The default path below keeps only text.
-    const attachments = (await shouldForwardFiles(serverType)) ? extractAttachments(items, tool) : undefined;
+    const forwardEnabled = await shouldForwardFiles(serverType);
+    const binaryItems = extractAttachments(items, tool);
+    const attachments = forwardEnabled ? binaryItems : undefined;
 
     const text = items
       .filter((c): c is { type: "text"; text: string } => c["type"] === "text" && typeof c["text"] === "string")
@@ -452,9 +500,23 @@ export async function callTool(
 
     // When we forwarded file(s), suppress the (often huge, base64-chunked) text
     // body — the file goes to the user; the model only needs a short confirmation.
-    const content = attachments && attachments.length > 0
+    let content = attachments && attachments.length > 0
       ? `Generated and forwarded ${attachments.length} file(s) to the user: ${attachments.map((a) => a.fileName).join(", ")}.`
-      : text;
+      : unwrapFileContentEnvelope(text);
+
+    // Binary returned but forwarding is OFF: before 2026-07-16 this dropped the
+    // file SILENTLY — the model saw empty text and confidently told the user
+    // "the file should be attached" (credit-data-doctor / TestCreditDataGenie
+    // Excel export). Tell the model the truth so it reports the real state, and
+    // log it so the failure is findable.
+    if (!forwardEnabled && binaryItems.length > 0) {
+      log.warn(
+        `[mcp/runner] dropped ${binaryItems.length} binary file(s) from ${serverType}/${tool} — forwardFiles is disabled for this server (user=${userId} agent=${agentSlug ?? "-"})`,
+      );
+      content =
+        (content ? `${content}\n\n` : "") +
+        `[NOTE: this tool returned ${binaryItems.length} binary file(s) (${binaryItems.map((a) => a.fileName).join(", ")}) but file-forwarding is DISABLED for the "${serverType}" connector, so the file was NOT delivered to the user. Do NOT tell the user a file is attached. Ask an admin to enable file-forwarding (forwardFiles) for this connector, or use a tool that returns the data as text.]`;
+    }
 
     return {
       content,
