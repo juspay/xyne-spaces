@@ -24,18 +24,18 @@ export const vespaSearchQuerySchema = Joi.object({
     }),
 
   // Pagination
-  offset: Joi.number().integer().min(0).max(10000).default(0).messages({
+  offset: Joi.number().integer().min(0).max(1000).default(0).messages({
     'number.base': 'Offset must be a number',
     'number.integer': 'Offset must be an integer',
     'number.min': 'Offset cannot be negative',
-    'number.max': 'Offset cannot exceed 10000',
+    'number.max': 'Offset cannot exceed 1000',
   }),
 
   limit: Joi.number().integer().min(1).max(200).default(20).messages({
     'number.base': 'Limit must be a number',
     'number.integer': 'Limit must be an integer',
     'number.min': 'Limit must be at least 1',
-    'number.max': 'Limit cannot exceed 100'
+    'number.max': 'Limit cannot exceed 200'
   }),
 
   // Rank profile

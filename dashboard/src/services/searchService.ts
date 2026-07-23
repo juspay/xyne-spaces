@@ -25,6 +25,7 @@ export class SearchService {
     totalCount: number;
     offset: number;
     limit: number;
+    grouped: boolean;
   }> {
     try {
       // Sanitize the query
@@ -57,6 +58,7 @@ export class SearchService {
           totalCount: data.totalCount,
           offset: data.offset,
           limit: data.limit,
+          grouped: true,
         };
       }
       // Handle flat results (backward compatible)
@@ -65,6 +67,7 @@ export class SearchService {
         totalCount: data.totalCount,
         offset: data.offset,
         limit: data.limit,
+        grouped: false,
       };
     } catch (error) {
       if (error instanceof Error) {

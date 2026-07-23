@@ -290,6 +290,7 @@ const SearchResults = (): ReactElement => {
   // Use the exact same hook as the popup modal — no separate search infrastructure
   const {
     searchResults: backendResults,
+    isGrouped,
     isSearching: isLoading,
     searchError: error,
     setText,
@@ -789,6 +790,7 @@ const SearchResults = (): ReactElement => {
             channelData={allChannelsForNav}
             searchableChannels={allChannelsWithCategory}
             compareMode={compareMode}
+            isGrouped={isGrouped}
             selectedIds={selectedIds}
             relevantIds={relevantIds}
             onToggleSelect={toggleSelect}
@@ -892,6 +894,7 @@ interface ResultsBodyProps {
     searchableNames?: string[];
   }>;
   compareMode: boolean;
+  isGrouped: boolean;
   selectedIds: Set<string>;
   relevantIds: Set<string>;
   onToggleSelect: (result: DisplaySearchResult) => void;
@@ -1029,6 +1032,7 @@ function ResultsBody({
   channelData,
   searchableChannels,
   compareMode,
+  isGrouped,
   selectedIds,
   relevantIds,
   onToggleSelect,
@@ -1437,15 +1441,21 @@ function ResultsBody({
             {renderLocalChannelSection(ChannelCategory.CHANNELS, regularItems)}
           </>
         )}
-        {/* Backend result sections */}
-        {BACKEND_GROUP_ORDER.filter(gk => grouped.has(gk)).map(gk => (
-          <div key={gk} className='mb-6'>
-            <p className='px-1 pb-2 text-xs font-medium text-muted-foreground uppercase tracking-wide font-mono'>
-              {GROUP_LABELS[gk]} ({grouped.get(gk)!.length})
-            </p>
-            <div className='space-y-2'>{grouped.get(gk)!.map(result => renderCard(result))}</div>
-          </div>
-        ))}
+        {/* Backend results: grouped into per-docType sections when the backend
+            grouped the response, otherwise a single flat (e.g. time-sorted) list.
+            Local users/channels above stay categorized regardless. */}
+        {isGrouped ? (
+          BACKEND_GROUP_ORDER.filter(gk => grouped.has(gk)).map(gk => (
+            <div key={gk} className='mb-6'>
+              <p className='px-1 pb-2 text-xs font-medium text-muted-foreground uppercase tracking-wide font-mono'>
+                {GROUP_LABELS[gk]} ({grouped.get(gk)!.length})
+              </p>
+              <div className='space-y-2'>{grouped.get(gk)!.map(result => renderCard(result))}</div>
+            </div>
+          ))
+        ) : (
+          <div className='space-y-2'>{backendOnly.map(result => renderCard(result))}</div>
+        )}
         {footer}
       </div>
     );
