@@ -55,6 +55,10 @@ export interface TransitionMeta {
   id?: string; // persisted DB id — populated after first save, undefined for new transitions
   formId?: string | null;
   requiresApproval: boolean;
+  // When true, the approval request is auto-created (and the approver notified)
+  // the moment a ticket enters the source stage — no manual move needed. Only
+  // honored at runtime when the source stage has a single outgoing transition.
+  requestApprovalOnEntry?: boolean;
   approvers?: Array<{ approverId: string; approverType: 'USER' | 'ROLE' }>;
   visitSlaMode: string;
   fixedEtaHours?: number | null;
@@ -300,6 +304,7 @@ function normalizeMetaForComparison(meta: TransitionMeta | undefined): string {
   return JSON.stringify({
     formId: meta?.formId ?? null,
     requiresApproval: meta?.requiresApproval ?? false,
+    requestApprovalOnEntry: meta?.requestApprovalOnEntry ?? false,
     approvers,
     visitSlaMode: meta?.visitSlaMode ?? 'STAGE_DEFAULT',
     fixedEtaHours: meta?.fixedEtaHours ?? null,
@@ -866,6 +871,9 @@ const EdgeSettingsPanel: React.FC<EdgeSettingsPanelProps> = props => {
                       onUpdateMeta({
                         requiresApproval: !meta.requiresApproval,
                         approvers: !meta.requiresApproval ? (meta.approvers ?? []) : [],
+                        // Turning approval off hides (and must clear) the on-entry flag —
+                        // it's only meaningful for an approval-gated transition.
+                        ...(meta.requiresApproval && { requestApprovalOnEntry: false }),
                       })
                     }
                     data-track-category='transition_config'
@@ -884,6 +892,53 @@ const EdgeSettingsPanel: React.FC<EdgeSettingsPanelProps> = props => {
                       selectedApprovers={meta.approvers ?? []}
                       onApproversChange={approvers => onUpdateMeta({ approvers })}
                     />
+                    {(() => {
+                      // A form must be filled manually, so on-entry auto-approval never
+                      // fires for an edge with a form attached (see stageEntryApproval.ts).
+                      // Disable the toggle and show it as off rather than let users enable
+                      // a setting that will silently never run.
+                      const formAttached = !!meta.formId;
+                      const entryOn = !formAttached && !!meta.requestApprovalOnEntry;
+                      return (
+                        <div className='flex items-start gap-2.5 select-none mt-3'>
+                          <button
+                            type='button'
+                            role='switch'
+                            aria-checked={entryOn}
+                            disabled={formAttached}
+                            onClick={() =>
+                              onUpdateMeta({
+                                requestApprovalOnEntry: !meta.requestApprovalOnEntry,
+                              })
+                            }
+                            data-track-category='transition_config'
+                            data-track-name='toggle_request_approval_on_entry'
+                            title={
+                              formAttached
+                                ? 'Not available when a form is attached — the form must be filled manually.'
+                                : undefined
+                            }
+                            className={`relative w-8 h-4 rounded-full transition-colors border-none p-0 shrink-0 mt-0.5 ${formAttached ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'} ${entryOn ? 'bg-[#6276be]' : 'bg-muted-foreground/30'}`}
+                          >
+                            <div
+                              className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow transition-transform ${entryOn ? 'translate-x-4' : 'translate-x-0.5'}`}
+                            />
+                          </button>
+                          <div>
+                            <span
+                              className={`text-[12px] ${formAttached ? 'text-muted-foreground' : 'text-foreground'}`}
+                            >
+                              Request approval on stage entry
+                            </span>
+                            <p className='text-[10px] text-muted-foreground mt-0.5 leading-snug'>
+                              {formAttached
+                                ? 'Unavailable while a form is attached — the form must be filled manually.'
+                                : 'Notify the approver as soon as a ticket enters this stage. Only applies when this stage has a single outgoing transition.'}
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
               </div>

@@ -17,6 +17,9 @@ export interface StageCondition {
   thenValue: string;
   approverIds?: string[];
   approvers?: ApproverEntry[];
+  // When true (approver conditions only), auto-request approval the moment a
+  // ticket enters the PREVIOUS stage, instead of waiting for a manual move.
+  requestApprovalOnEntry?: boolean;
 }
 
 export interface StageNode {
@@ -29,6 +32,9 @@ export interface StageNode {
   prStatuses: string[];
   approvers: ApproverEntry[];
   formId?: string;
+  // NULL/undefined treated as false in code; auto-create the approval request
+  // when a ticket enters the PREVIOUS stage (linear boards only).
+  requestApprovalOnEntry?: boolean;
   conditions: StageCondition[];
   // Visual properties
   position: { x: number; y: number };

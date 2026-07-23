@@ -7,6 +7,7 @@ import { activityService } from '@/services/activity/activityService';
 import { notificationService } from '@/services/notificationService';
 import { userActivityTrackingService } from '@/services/userActivityTrackingService';
 import { websocketService } from '@/services/websocketService';
+import { maybeCreateEntryApprovalRequest } from '@/services/stageTransition/stageEntryApproval';
 import { getFormFieldUserActors } from '@/utils/ticketActorUtils';
 
 import {
@@ -165,6 +166,18 @@ export class TicketsSideEffectHandler extends BaseSideEffectHandler {
     const descriptionChanged = args.description !== undefined && args.description !== prev.description;
 
     const hasNotifiableChange = assignedToChanged || stageNameChanged || priorityChanged || etaChanged || userGroupChanged || titleChanged || descriptionChanged;
+
+    // On-entry auto-approval: when a ticket enters a new stage via a Zero mutation
+    // (drag/move, or an approval completing and advancing the ticket to the next
+    // stage), auto-create the approval request for that stage's single outgoing
+    // transition if it's configured for on-entry approval. Runs purely on the
+    // stage change — independent of notification recipients below. Side effects
+    // execute post-commit, so the ticket's new stageName is already persisted.
+    // Fire-and-forget: best-effort and self-contained (swallows its own errors),
+    // so awaiting would only delay the side-effect worker.
+    if (stageNameChanged && args.stageName) {
+      void maybeCreateEntryApprovalRequest(ticketId, actorId, args.stageName);
+    }
 
     // Fetch ticket details for notifications and activities
     const ticket = await db.ticket.findUnique({

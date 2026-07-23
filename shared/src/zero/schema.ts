@@ -1239,6 +1239,7 @@ export const stageTable = table('stages')
     updatedAt: number().optional(),
     defaultTicketStatus: enumeration<TicketStatus>().optional(),  // Deprecated - use defaultTicketStatusV2
     defaultTicketStatusV2: enumeration<TicketStatusV2>(),
+    requestApprovalOnEntry: boolean().optional(), // NULL treated as false in code
   })
   .primaryKey('id');
 
@@ -2467,6 +2468,7 @@ export const stageTransitionTable = table('stage_transitions') // Prisma: StageT
     formId: string().optional(),
     requiresApproval: boolean().optional(), // NULL treated as false in code
     bypassApprovalForAutomation: boolean().optional(), // NULL treated as false in code
+    requestApprovalOnEntry: boolean().optional(), // NULL treated as false in code
     visitSlaMode: enumeration<VisitSlaMode>().optional(), // NULL treated as STAGE_DEFAULT in code
     fixedEtaHours: number().optional(),
     onReenter: enumeration<ReenterMode>().optional(), // NULL treated as RESET in code

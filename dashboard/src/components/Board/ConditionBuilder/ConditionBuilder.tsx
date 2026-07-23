@@ -134,6 +134,7 @@ export const ConditionBuilder = ({
   const [thenCondition, setThenCondition] = useState('');
   const [thenValue, setThenValue] = useState('');
   const [selectedApprovers, setSelectedApprovers] = useState<ApproverEntry[]>([]);
+  const [requestApprovalOnEntry, setRequestApprovalOnEntry] = useState(false);
 
   // Fetch forms for name lookup - only STAGE context forms
   const [allForms] = useCachedQuery(
@@ -177,6 +178,7 @@ export const ConditionBuilder = ({
       setThenCondition(condition.thenCondition || '');
       setThenValue(condition.thenValue || '');
       setSelectedApprovers([]);
+      setRequestApprovalOnEntry(condition.requestApprovalOnEntry ?? false);
     } else if (isOpen) {
       // New condition - set defaults
       setWhenField('');
@@ -186,6 +188,7 @@ export const ConditionBuilder = ({
       setThenCondition('');
       setThenValue('');
       setSelectedApprovers([]);
+      setRequestApprovalOnEntry(false);
     }
   }, [isOpen, condition]);
 
@@ -310,6 +313,10 @@ export const ConditionBuilder = ({
       thenValue,
       ...(thenField === 'approver' && {
         approvers: selectedApprovers,
+        // Only meaningful with approvers configured, and never for a
+        // form-chained approver condition (the form must be filled manually).
+        requestApprovalOnEntry:
+          whenField !== 'form' && selectedApprovers.length > 0 && requestApprovalOnEntry,
       }),
     };
     onSave(newCondition);
@@ -324,6 +331,7 @@ export const ConditionBuilder = ({
     thenCondition,
     thenValue,
     selectedApprovers,
+    requestApprovalOnEntry,
     onSave,
     onClose,
     allStages,
@@ -473,6 +481,57 @@ export const ConditionBuilder = ({
               </div>
             )}
           </div>
+
+          {/* Request approval on stage entry — approver conditions only. Hidden
+              for form-chained approver conditions (whenField === 'form'), since
+              those are definitionally gated behind a form that must be filled
+              manually. */}
+          {thenField === 'approver' &&
+            whenField !== 'form' &&
+            (() => {
+              const targetStage = allStages.find(s => s.name === whenValue);
+              const formAttached = !!targetStage?.formId;
+              const entryOn =
+                !formAttached && selectedApprovers.length > 0 && requestApprovalOnEntry;
+              const disabled = formAttached || selectedApprovers.length === 0;
+              return (
+                <div className='flex items-start gap-2.5 select-none pl-[16px] mt-1'>
+                  <button
+                    type='button'
+                    role='switch'
+                    aria-checked={entryOn}
+                    disabled={disabled}
+                    onClick={() => setRequestApprovalOnEntry(prev => !prev)}
+                    data-track-category='board_config'
+                    data-track-name='toggle_request_approval_on_entry'
+                    title={
+                      formAttached
+                        ? 'Not available when a form is attached — the form must be filled manually.'
+                        : selectedApprovers.length === 0
+                          ? 'Select at least one approver first.'
+                          : undefined
+                    }
+                    className={`relative w-8 h-4 rounded-full transition-colors border-none p-0 shrink-0 mt-0.5 ${disabled ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'} ${entryOn ? 'bg-[#6276be]' : 'bg-muted-foreground/30'}`}
+                  >
+                    <div
+                      className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow transition-transform ${entryOn ? 'translate-x-4' : 'translate-x-0.5'}`}
+                    />
+                  </button>
+                  <div>
+                    <span
+                      className={`text-[12px] ${disabled ? 'text-muted-foreground' : 'text-foreground'}`}
+                    >
+                      Request approval on stage entry
+                    </span>
+                    <p className='text-[10px] text-muted-foreground mt-0.5 leading-snug'>
+                      {formAttached
+                        ? 'Unavailable while a form is attached — the form must be filled manually.'
+                        : 'Notify the approver as soon as a ticket enters the previous stage.'}
+                    </p>
+                  </div>
+                </div>
+              );
+            })()}
         </div>
       </div>
 
