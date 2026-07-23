@@ -83,6 +83,7 @@ function ClawChat({ onRequestClose }: ClawChatProps = {}): ReactElement {
             selectedAgentSlug={selectedAgentSlug}
             agents={agents}
             onSelect={selectAgent}
+            disabled={isStreaming}
             compact
           />
           <div className='flex shrink-0 items-center gap-1'>
@@ -150,6 +151,7 @@ function ClawChat({ onRequestClose }: ClawChatProps = {}): ReactElement {
             selectedAgentSlug={selectedAgentSlug}
             agents={agents}
             onSelectAgent={selectAgent}
+            agentSelectorDisabled={isStreaming}
           />
         ) : (
           <MessageList messages={messages} onRetry={handleRetry} />

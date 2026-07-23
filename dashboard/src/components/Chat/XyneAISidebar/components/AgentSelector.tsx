@@ -1,4 +1,4 @@
-import { ReactElement, useMemo, useState } from 'react';
+import { ReactElement, useEffect, useMemo, useState } from 'react';
 import { ChevronDown, Bot, Search } from 'lucide-react';
 import { Popover } from '../../../ui/Popover';
 import { cn } from '../../../../utils/classNames';
@@ -52,6 +52,13 @@ export const AgentSelector = ({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const { isMobile } = usePlatform();
+
+  useEffect(() => {
+    if (disabled) {
+      setOpen(false);
+      setQuery('');
+    }
+  }, [disabled]);
 
   const filteredAgents = useMemo(() => {
     const withoutAskAI = agents.filter(a => a.slug !== 'ask-ai');
@@ -156,6 +163,7 @@ export const AgentSelector = ({
           {/* Ask AI option */}
           <button
             onClick={() => {
+              if (disabled) return;
               onSelect(null);
               setOpen(false);
             }}
@@ -186,6 +194,7 @@ export const AgentSelector = ({
               <button
                 key={agent.slug}
                 onClick={() => {
+                  if (disabled) return;
                   onSelect(agent.slug);
                   setOpen(false);
                 }}

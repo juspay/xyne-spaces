@@ -2,6 +2,7 @@ import { app, net, session, BrowserWindow, IncomingMessage } from 'electron';
 import path from 'path';
 import { config } from '../app/config';
 import { setCookiesFromHeaders } from './cookies';
+import { forwardAuthEventToClawOverlay } from './claw-overlay-window';
 import log from 'electron-log/main';
 import { Logger } from './logger/Logger';
 import { EnrollmentEvent } from './logger/enrollment-events';
@@ -458,6 +459,7 @@ function exchangeAuthCode(code: string, state: string, invitationId: string | nu
                 picture: responseBody.picture,
                 userExistsButRemoved: responseBody.userExistsButRemoved || false,
               });
+              forwardAuthEventToClawOverlay('auth:success');
               mainWindow?.show();
               resolve();
             }, 500);
@@ -466,6 +468,7 @@ function exchangeAuthCode(code: string, state: string, invitationId: string | nu
             Logger.info(EnrollmentEvent.AUTH_EXCHANGE_SUCCESS);
             setTimeout(() => {
               mainWindow?.webContents.send('auth:success');
+              forwardAuthEventToClawOverlay('auth:success');
               mainWindow?.show();
               resolve();
             }, 500);
@@ -551,6 +554,7 @@ function exchangeMTLSAuthCode(code: string, state: string, invitationId: string 
               picture: responseBody.picture,
               userExistsButRemoved: responseBody.userExistsButRemoved || false,
             });
+            forwardAuthEventToClawOverlay('auth:mtls-success');
             mainWindow?.show();
             resolve();
           }, 500);
@@ -561,6 +565,7 @@ function exchangeMTLSAuthCode(code: string, state: string, invitationId: string 
           });
           setTimeout(() => {
             mainWindow?.webContents.send('auth:mtls-success');
+            forwardAuthEventToClawOverlay('auth:mtls-success');
             mainWindow?.show();
             resolve();
           }, 500);

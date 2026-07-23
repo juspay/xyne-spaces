@@ -139,6 +139,12 @@ export const useXyneAIStream = ({
   const streamSessionKeyRef = useRef(streamSessionKey);
   streamSessionKeyRef.current = streamSessionKey;
 
+  const prevStreamSessionKeyRef = useRef(streamSessionKey);
+  if (prevStreamSessionKeyRef.current !== streamSessionKey) {
+    prevStreamSessionKeyRef.current = streamSessionKey;
+    currentStreamIdRef.current = null;
+  }
+
   // Subscribe by streamSlotKey (matches streamSessionKey). During draft→server migration,
   // React may still have the draft key in refs while the manager already updated streamSlotKey;
   // fall back to streamId (one POST == one streamId) so chunks are not dropped.

@@ -341,6 +341,18 @@ const electronAPI = {
       return () => ipcRenderer.removeListener('claw:visibility', listener);
     },
     openInMain: (pathname: string) => ipcRenderer.send('claw:open-in-main', pathname),
+    setPanelHeight: (height: number) => ipcRenderer.send('claw:set-panel-height', height),
+    reconcile: (rect: {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+    }): Promise<boolean | null> => ipcRenderer.invoke('claw:reconcile', rect),
+    onPanelHeight: (callback: (height: number) => void) => {
+      const listener = (_event: unknown, height: number) => callback(height);
+      ipcRenderer.on('claw:panel-height', listener);
+      return () => ipcRenderer.removeListener('claw:panel-height', listener);
+    },
 
     getEnabled: (): Promise<boolean> => ipcRenderer.invoke('claw:get-enabled'),
     setEnabled: (enabled: boolean) => ipcRenderer.send('claw:set-enabled', enabled),

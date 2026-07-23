@@ -165,16 +165,16 @@ export function ClawConversationProvider({
   const selectAgent = useCallback(
     (slug: string | null) => {
       if (slug === selectedAgentSlug) return;
+      if (isStreaming) return;
 
       resetConversation();
       setSelectedAgentSlug(slug);
     },
-    [selectedAgentSlug, resetConversation],
+    [selectedAgentSlug, isStreaming, resetConversation],
   );
 
   const loadConversation = useCallback(
     async (conversation: ConversationHistory): Promise<boolean> => {
-      if (conversation.sessionId !== conversationId) abortCurrentRequest();
       const requestId = ++loadRequestRef.current;
       setLoadingSessionId(conversation.sessionId);
       try {
@@ -212,7 +212,7 @@ export function ClawConversationProvider({
         if (loadRequestRef.current === requestId) setLoadingSessionId(null);
       }
     },
-    [abortCurrentRequest, conversationId, historyAgentSlug],
+    [historyAgentSlug],
   );
 
   const deleteConversation = useCallback(
