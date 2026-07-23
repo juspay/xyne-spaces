@@ -49,6 +49,7 @@ import { getRuntimeConfig } from '../runtime/config';
 import {
   listActiveDoclingSchedulerPermitIds as listActivePermitIds,
   releaseDoclingSchedulerPermit as releasePermit,
+  releaseDoclingOcrSubmitPermit,
   tryAcquireDoclingSchedulerPermit as tryAcquirePermit,
   tryAcquireDoclingSchedulerWeightedPermit as tryAcquireWeightedPermit,
   type DoclingSchedulerPermit,
@@ -302,7 +303,7 @@ const releaseOcrPermitsForFile = async (fileId: string) => {
     parts.map((p) => p.submitPermitId).filter((id): id is string => Boolean(id)),
   );
   for (const permitId of permitIds) {
-    await releasePermit({ kind: 'ocr-submit', permitId });
+    await releaseDoclingOcrSubmitPermit({ permitId });
   }
 };
 
@@ -507,7 +508,7 @@ const getSubmitterLocalCapacity = (desired: number) =>
   desired + getSubmitterPrefetchCapacity(desired);
 
 const releaseQueuedSubmitWork = async (work: ClaimedSubmitWork, errorMessage: string) => {
-  await releasePermit(work.requestPermit);
+  await releaseDoclingOcrSubmitPermit(work.requestPermit);
   if (!work.part.currentJobId) {
     await failSchedulerFile(work.part.fileId, 'Queued claimed OCR part lost current job id');
     return;
@@ -686,7 +687,7 @@ const runSubmitterClaimer = async (
         const currentDesired = getSubmitterDesiredConcurrency();
         const currentCapacity = getSubmitterLocalCapacity(currentDesired);
         if (state.activeProcessing + state.queue.size() >= currentCapacity) {
-          await releasePermit(requestPermit);
+          await releaseDoclingOcrSubmitPermit(requestPermit);
           await releaseClaimedDoclingPartForSubmitCapacity({
             fileId: part.fileId,
             partIndex: part.partIndex,
@@ -772,7 +773,7 @@ const runSubmitterProcessor = async (
         readPartMs: readMs, submitMs, markSubmittedMs: markMs,
       });
     } catch (error) {
-      await releasePermit(work.requestPermit);
+      await releaseDoclingOcrSubmitPermit(work.requestPermit);
       const message = errMsg(error);
       logger.error('[DOCLING_SCHEDULER][submitter] processor failed', {
         workerId: id, fileId: work.part.fileId, partIndex: work.part.partIndex, jobId, error: message,
@@ -1056,7 +1057,7 @@ const reconcileOcrSubmitPermits = async (): Promise<number> => {
   const liveIds = await listLiveDoclingSubmitPermitIds(allIds);
   const orphans = allIds.filter((id) => !liveIds.has(id));
   for (const id of orphans) {
-    await releasePermit({ kind: 'ocr-submit', permitId: id });
+    await releaseDoclingOcrSubmitPermit({ permitId: id });
   }
   if (orphans.length > 0) {
     logger.warn('[DOCLING_SCHEDULER][reaper] released orphaned OCR submit permits', {
@@ -1112,13 +1113,13 @@ export const startReaper = async () => {
       }
 
       for (const part of await listExpiredSubmittingDoclingParts(50)) {
-        if (part.submitPermitId) await releasePermit({ kind: 'ocr-submit', permitId: part.submitPermitId });
+        if (part.submitPermitId) await releaseDoclingOcrSubmitPermit({ permitId: part.submitPermitId });
       }
       await requeueExpiredDoclingLeases();
 
       const timedOut = await listTimedOutSubmittedDoclingParts(submittedPartTimeoutMs(), 50);
       for (const part of timedOut) {
-        if (part.submitPermitId) await releasePermit({ kind: 'ocr-submit', permitId: part.submitPermitId });
+        if (part.submitPermitId) await releaseDoclingOcrSubmitPermit({ permitId: part.submitPermitId });
         if (part.currentJobId && part.attemptCount >= sched().maxPartAttempts) {
           await failSchedulerFile(
             part.fileId,
