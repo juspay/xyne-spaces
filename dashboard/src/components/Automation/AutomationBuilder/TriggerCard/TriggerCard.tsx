@@ -95,6 +95,7 @@ export function TriggerCard({
   onConfigChange,
   issues,
   view = 'event',
+  onFormFieldNamesResolved,
 }: TriggerCardProps): React.ReactElement | null {
   const [pickerOpen, setPickerOpen] = useState(false);
   const selected = catalog.find(c => c.type === trigger.type);
@@ -156,6 +157,9 @@ export function TriggerCard({
               boardIds={(trigger.config?.['boardIds'] as string[] | undefined) ?? []}
               formFieldIds={(trigger.config?.['formFieldIds'] as string[] | undefined) ?? []}
               onChange={ids => onConfigChange({ ...trigger.config, formFieldIds: ids })}
+              {...(onFormFieldNamesResolved
+                ? { onFieldNamesResolved: onFormFieldNamesResolved }
+                : {})}
             />
           </>
         ) : (

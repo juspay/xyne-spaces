@@ -13,6 +13,7 @@ interface TicketUpdatedFormFieldsSectionProps {
   boardIds: string[];
   formFieldIds: string[];
   onChange: (ids: string[]) => void;
+  onFieldNamesResolved?: (map: Map<string, string>) => void;
 }
 
 interface BoardGroup {
@@ -25,6 +26,7 @@ export function TicketUpdatedFormFieldsSection({
   boardIds,
   formFieldIds,
   onChange,
+  onFieldNamesResolved,
 }: TicketUpdatedFormFieldsSectionProps): React.ReactElement {
   // Scoped to selected boardIds — avoids fetching all board forms
   const [boardMappings] = useCachedQuery(queries.getFormMappingsByBoardIds({ boardIds }), {
@@ -84,6 +86,8 @@ export function TicketUpdatedFormFieldsSection({
   formFieldIdsRef.current = formFieldIds;
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  const onFieldNamesResolvedRef = useRef(onFieldNamesResolved);
+  onFieldNamesResolvedRef.current = onFieldNamesResolved;
 
   useEffect(() => {
     if (!boardMappings || !stageTransitions) return;
@@ -93,6 +97,27 @@ export function TicketUpdatedFormFieldsSection({
       onChangeRef.current(pruned);
     }
   }, [boardGroups, boardMappings, stageTransitions, boardIds]);
+
+  const prevFieldNamesKeyRef = useRef<string>('');
+
+  useEffect(() => {
+    if (!onFieldNamesResolvedRef.current) return;
+    if (!boardMappings) return;
+    const map = new Map<string, string>();
+    for (const group of boardGroups) {
+      for (const field of group.fields) {
+        map.set(field.id, field.fieldName);
+      }
+    }
+    if (map.size === 0) return;
+    const key = [...map.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([id, name]) => `${id}:${name}`)
+      .join(',');
+    if (key === prevFieldNamesKeyRef.current) return;
+    prevFieldNamesKeyRef.current = key;
+    onFieldNamesResolvedRef.current(map);
+  }, [boardGroups, boardMappings]);
 
   const handleToggle = (fieldId: string, checked: boolean) => {
     if (checked) {
