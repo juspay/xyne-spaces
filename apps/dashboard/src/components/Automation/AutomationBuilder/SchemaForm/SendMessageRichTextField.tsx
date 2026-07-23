@@ -9,7 +9,6 @@ import { EmailEditor } from '../../../xyne-desk/EmailEditor/EmailEditor';
 import { MentionExtension } from '../../../ui/TipTapExtensions';
 import { MentionSelector } from '../../../ui/Selectors';
 import { useMentionSearch } from '../../../../hooks/useMentionSearch';
-import { MentionResult, useUserGroupSearch } from '@xyne/shared/hooks';
 import { useActiveUserSearch } from '../../../../hooks/useUsers';
 import { useAuth } from '../../../../hooks/useAuth';
 import { userToMentionResult } from '../../../../utils/userDisplayName';
