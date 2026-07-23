@@ -289,6 +289,15 @@ export const TicketTable: React.FC<TicketTableProps> = ({
           const handleTicketClick = () => {
             if (!params.data) return;
 
+            // Desk tickets open in the Support screen, not the chat ticket panel.
+            const ticketChannel = allChannels.find(c => c.id === params.data!.channelId);
+            if (isDeskChannelType(ticketChannel?.type) && params.data.xyneId) {
+              void navigate(`/support/${params.data.channelId}/${params.data.xyneId}`, {
+                state: { conversationId: params.data.conversationId, ticketId: params.data.id },
+              });
+              return;
+            }
+
             if (onTitleClick) {
               onTitleClick(params.data);
               return;
