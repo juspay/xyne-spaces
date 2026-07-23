@@ -38,6 +38,7 @@ import { emailClassificationWorker } from '@/workers/emailClassificationWorker';
 import { autoDraftWorker } from '@/workers/autoDraftWorker';
 import { tagGenerationPipeline, registerDeskEmailTags, DESK_EMAIL_SOURCE_TYPE, enqueueTagVespaRefeed } from '@/tags';
 import { recoveryService } from './workflows/services/recovery-service'
+import { aiProvisioningWorker } from '@/workers/aiProvisioningWorker';
 config()
 
 class WorkerService {
@@ -237,6 +238,11 @@ class WorkerService {
         await emailClassificationWorker.start();
       }
 
+      if (appConfig.enableAiProvisioningWorker) {
+        logger.info('Starting AI provisioning worker...');
+        await aiProvisioningWorker.start();
+      }
+
       logger.info('Starting auto draft worker...');
       await autoDraftWorker.start();
 
@@ -381,6 +387,11 @@ class WorkerService {
       if (appConfig.enableEmailClassificationWorker) {
         await emailClassificationWorker.shutdown();
       }
+
+      if (appConfig.enableAiProvisioningWorker) {
+        await aiProvisioningWorker.shutdown();
+      }
+
       await autoDraftWorker.shutdown();
 
       if (appConfig.enableTagGenerationPipeline) {

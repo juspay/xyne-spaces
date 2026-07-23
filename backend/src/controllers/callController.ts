@@ -1537,6 +1537,7 @@ export class CallController {
       const prompt = await callDocumentService.editSummaryStructureWithAI(
         parsed.data.currentPrompt,
         parsed.data.instruction,
+        req.user?.workspaceId,
       );
       if (!prompt) {
         res.status(500).json({ success: false, error: 'Failed to edit summary template' });

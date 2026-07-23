@@ -6,7 +6,6 @@ import type { Message, Attachment } from '@juspay-jaf/jaf';
 import { Streaming } from '@juspay-jaf/jaf';
 
 import { logger } from '../../utils/logger.js';
-import { config } from '../../config/env.js';
 import { db } from '../../database/client.js';
 
 import {
@@ -23,6 +22,7 @@ import { AgentsConfig } from '../config.js';
 import { convertAttachmentsToJAF } from './utils/attachmentConverter.js';
 import { compactHistoryIfNeeded } from './utils/historyCompaction.js';
 import { getAskAIToolUsedTotal } from '@/services/otel';
+import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
 
 import type {
   XyneAIRequest,
@@ -35,7 +35,7 @@ import type {
 } from './types.js';
 import { fetchProvidedContexts, type ProvidedContexts } from './utils/contextFetcher.js';
 import { getChannelInfo } from './utils/channelResolver.js';
-import { buildCitationUrl } from '@xyne/shared';
+import { buildCitationUrl, OrgLLMServiceAccountPurpose } from '@xyne/shared';
 
 type InMemoryStreamProvider = ReturnType<typeof Streaming.createInMemoryStreamProvider>;
 
@@ -755,10 +755,22 @@ const {
 
   // Use model names from CAC config
   const modelName = hasImageAttachment ? cacConfig.xyneAiVisionModelName : cacConfig.xyneAiModelName;
-  const apiKey = config.litellm.askAiApiKey;
+  const credential = await orgLLMCredentialService.getCredentialByUserId(
+    userId,
+    OrgLLMServiceAccountPurpose.ASK_AI,
+  );
+
+  if (!credential) {
+    logger.error(`[AskAI] Org LiteLLM credentials are not configured for user ${userId}`);
+    yield {
+      type: 'error',
+      error: 'LiteLLM credentials are not configured for this organization',
+    };
+    return;
+  }
 
   logger.info(`[XyneAI] [${session.sessionId}] Using model: ${modelName} (hasImageAttachment: ${hasImageAttachment}, tracingEnabled: ${cacConfig.xyneAiTracingEnabled}, maskingEnabled: ${cacConfig.xyneAiMaskingEnabled})`);
-  logger.info(`[AskAI] Calling "${modelName}" with "LITELLM_API_KEY"`);
+  logger.info(`[AskAI] Calling "${modelName}" with "ORG_LITELLM_SERVICE_ACCOUNT"`);
 
   const langfuseHandler = createOnEventHandler(cacConfig);
   const onEventHandler = (event: Parameters<typeof langfuseHandler>[0]): unknown => {
@@ -774,7 +786,16 @@ const {
     }
     return langfuseHandler(event);
   };
-  const runStream = await createAgentRunner(source, agentContext, messages, modelName, apiKey, onEventHandler, providedContexts);
+  const runStream = await createAgentRunner(
+    source,
+    agentContext,
+    messages,
+    modelName,
+    credential.baseUrl,
+    credential.apiKey,
+    onEventHandler,
+    providedContexts,
+  );
   
   let accumulatedContent = '';
   let currentTraceId: string | undefined;
@@ -807,7 +828,7 @@ const {
         
         case 'llm_call_start': {
           const callModel = (event.data as { model?: string }).model ?? modelName;
-          logger.info(`[AskAI] Calling "${callModel}" with "LITELLM_API_KEY"`);
+          logger.info(`[AskAI] Calling "${callModel}" with "ORG_LITELLM_SERVICE_ACCOUNT"`);
           break;
         }
 

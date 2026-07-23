@@ -21,8 +21,6 @@ import {
 } from '@juspay-jaf/jaf';
 
 // Import config for environment variables
-import { config } from '../../config/env.js';
-
 // Import prompts
 import {
   getDescriptionGeneratorSystemPrompt,
@@ -35,13 +33,8 @@ import { parseAgentOutput } from './utils.js';
 // Import agents config
 import { AgentsConfig } from '../../agents/config.js';
 import { createAgentEventLogger, composeEventHandlers } from '../../agents/agentLogger.js';
-
-// ============================================================================
-// Configuration - Loaded from environment variables
-// ============================================================================
-
-const LITELLM_BASE_URL = config.litellm.baseUrl;
-const LITELLM_API_KEY = config.litellm.apiKey;
+import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
+import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
 
 // ============================================================================
 // Types
@@ -109,8 +102,15 @@ function parseDescriptionGeneratorOutput(
 // Model Provider
 // ============================================================================
 
-export function createModelProvider() {
-  return makeLiteLLMProvider(LITELLM_BASE_URL, LITELLM_API_KEY);
+export async function createModelProvider(context: DescriptionGeneratorContext) {
+  const credential = await orgLLMCredentialService.getCredentialByUserId(
+    context.userId,
+    OrgLLMServiceAccountPurpose.DEFAULT,
+  );
+  if (!credential) {
+    throw new Error('LiteLLM credentials are not configured for this organization');
+  }
+  return makeLiteLLMProvider(credential.baseUrl, credential.apiKey);
 }
 
 // ============================================================================
@@ -148,7 +148,7 @@ export async function generateDescription(
   const cacConfig = agentsConfig ?? (await AgentsConfig.fetch());
   const modelName = cacConfig.titleGeneratorModelName;
 
-  const modelProvider = createModelProvider();
+  const modelProvider = await createModelProvider(context);
 
   const formattedPrompt = buildDescriptionGeneratorUserPrompt(
     input.rawContext,
@@ -156,7 +156,7 @@ export async function generateDescription(
     maxLength,
   );
 
-  const agentLogger = createAgentEventLogger('DescriptionGenerator', 'LITELLM_API_KEY');
+  const agentLogger = createAgentEventLogger('DescriptionGenerator', 'ORG_LITELLM_SERVICE_ACCOUNT');
   const composedOnEvent = onEvent ? composeEventHandlers(agentLogger, onEvent) : agentLogger;
 
   const runConfig: RunConfig<DescriptionGeneratorContext> = {

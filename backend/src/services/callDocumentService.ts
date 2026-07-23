@@ -536,6 +536,7 @@ export class CallDocumentService {
       logger.error(`[CallDocumentService] Failed to queue Vespa job for canvas ${canvasId}:`, error);
     }
   }
+
   /**
    * Generate a PRD from transcript and summary
    * @param transcript - The call transcript content

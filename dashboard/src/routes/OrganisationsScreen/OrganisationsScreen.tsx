@@ -12,6 +12,9 @@ import {
   AlertTriangle,
   Shield,
   User,
+  Globe2,
+  LockKeyhole,
+  UserCheck,
 } from 'lucide-react';
 import { Button } from '../../components/ui/Button/Button';
 import Input from '../../components/ui/Input/Input';
@@ -30,10 +33,12 @@ import {
 import { toast } from 'sonner';
 import { cn } from '../../utils/classNames';
 import { v4 as uuidv4 } from 'uuid';
-import { OrgRole } from '@xyne/shared';
+import { OrgRole, WorkspaceJoinPolicy, WorkspaceType } from '@xyne/shared';
 import axios from 'axios';
 import { API_BASE_URL } from '../../config';
 import { usePlatform } from '../../hooks/usePlatform';
+import { setLastActiveWorkspaceId, setLastActiveWorkspaceName } from '../../machines/authMachine';
+import { JoinRequestsSection } from './JoinRequestsSection';
 
 // ─── types ───────────────────────────────────────────────────────────────────
 
@@ -44,6 +49,10 @@ interface OrgMemberRow {
   role: OrgRole;
   joinedAt: number;
   leftAt?: number | null;
+}
+
+interface CreateWorkspaceResponse {
+  user: { id: string; email: string; workspaceId: string };
 }
 
 // Zero instance type (return type of useZero)
@@ -63,6 +72,27 @@ const Card = ({
   </div>
 );
 
+const COMMUNITY_JOIN_POLICY_OPTIONS = [
+  {
+    value: WorkspaceJoinPolicy.OPEN,
+    label: 'Open',
+    description: 'Anyone with the community entry point can join.',
+    icon: Globe2,
+  },
+  {
+    value: WorkspaceJoinPolicy.REQUEST_TO_JOIN,
+    label: 'Request to join',
+    description: 'Applicants must be approved by a workspace admin.',
+    icon: UserCheck,
+  },
+  {
+    value: WorkspaceJoinPolicy.INVITE_ONLY,
+    label: 'Invite only',
+    description: 'Only invited users can access this community.',
+    icon: LockKeyhole,
+  },
+] as const;
+
 // ─── Role badge ───────────────────────────────────────────────────────────────
 
 const RoleBadge = ({ role }: { role: OrgRole }): ReactElement => {
@@ -71,6 +101,7 @@ const RoleBadge = ({ role }: { role: OrgRole }): ReactElement => {
     [OrgRole.ADMIN]: 'bg-blue-500/10 text-blue-600',
     [OrgRole.MEMBER]: 'bg-muted text-muted-foreground',
     [OrgRole.VIEWER]: 'bg-muted text-muted-foreground',
+    [OrgRole.COMMUNITY_MEMBER]: 'bg-muted text-muted-foreground',
   };
   return (
     <span
@@ -411,8 +442,17 @@ export const OrganisationsScreen = (): ReactElement => {
   const [newWorkspaceName, setNewWorkspaceName] = useState('');
   const [newOwnerEmail, setNewOwnerEmail] = useState('');
   const [isCreatingOrg, setIsCreatingOrg] = useState(false);
+  const [communityWorkspaceName, setCommunityWorkspaceName] = useState('');
+  const [communityJoinPolicy, setCommunityJoinPolicy] = useState<
+    (typeof WorkspaceJoinPolicy)[keyof typeof WorkspaceJoinPolicy]
+  >(WorkspaceJoinPolicy.OPEN);
+  const [isCreatingCommunityWorkspace, setIsCreatingCommunityWorkspace] = useState(false);
   const orgNameInputRef = useRef<HTMLInputElement>(null);
   const { isMobile } = usePlatform();
+
+  const selfOrgRole = (selfOrgMember as unknown as { role?: string } | undefined)?.role;
+  const canCreateCommunityWorkspace =
+    selfOrgRole === OrgRole.OWNER || selfOrgRole === OrgRole.ADMIN;
 
   const handleToggleExpand = (orgId: string): void => {
     setExpandedOrgId(prev => (prev === orgId ? null : orgId));
@@ -456,6 +496,47 @@ export const OrganisationsScreen = (): ReactElement => {
       }
     } finally {
       setIsCreatingOrg(false);
+    }
+  };
+
+  const handleCreateCommunityWorkspace = async (event: React.FormEvent): Promise<void> => {
+    event.preventDefault();
+
+    if (!communityWorkspaceName.trim()) {
+      toast.error('Community workspace name is required');
+      return;
+    }
+
+    setIsCreatingCommunityWorkspace(true);
+    try {
+      const response = await axios.post<CreateWorkspaceResponse>(
+        `${API_BASE_URL}/auth/create-workspace`,
+        {
+          workspaceName: communityWorkspaceName.trim(),
+          workspaceType: WorkspaceType.COMMUNITY,
+          joinPolicy: communityJoinPolicy,
+        },
+        { withCredentials: true },
+      );
+
+      const email = response.data.user.email;
+      const newWorkspaceId = response.data.user.workspaceId;
+      if (email) {
+        setLastActiveWorkspaceId(email, newWorkspaceId);
+        setLastActiveWorkspaceName(email, communityWorkspaceName.trim());
+      }
+      localStorage.setItem('user_id', response.data.user.id);
+      toast.success('Community workspace created');
+      window.location.href = `/${newWorkspaceId}/chat/dir`;
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        const message = (error.response?.data as { message?: string } | undefined)?.message;
+        toast.error(message ?? 'Failed to create community workspace');
+        return;
+      }
+      toast.error('Failed to create community workspace');
+    } finally {
+      setIsCreatingCommunityWorkspace(false);
     }
   };
 
@@ -503,6 +584,110 @@ export const OrganisationsScreen = (): ReactElement => {
                   Create New Org
                 </Button>
               </div>
+
+              {canCreateCommunityWorkspace ? (
+                <Card className='p-6'>
+                  <div className='mb-5 flex items-start gap-3'>
+                    <div className='flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-50'>
+                      <Globe2 className='h-5 w-5 text-emerald-700' />
+                    </div>
+                    <div>
+                      <h2 className='text-sm font-medium text-foreground'>
+                        Create Community Workspace
+                      </h2>
+                      <p className='mt-1 text-sm text-muted-foreground'>
+                        Community workspaces are created under your organisation.
+                      </p>
+                    </div>
+                  </div>
+
+                  <form
+                    className='space-y-5'
+                    onSubmit={event => void handleCreateCommunityWorkspace(event)}
+                  >
+                    <div className='space-y-2'>
+                      <label
+                        htmlFor='community-workspace-name'
+                        className='text-sm font-medium text-foreground'
+                      >
+                        Workspace Name <span className='text-destructive'>*</span>
+                      </label>
+                      <Input
+                        id='community-workspace-name'
+                        value={communityWorkspaceName}
+                        onChange={event => setCommunityWorkspaceName(event.target.value)}
+                        placeholder='Enter community workspace name...'
+                        disabled={isCreatingCommunityWorkspace}
+                      />
+                    </div>
+
+                    <div className='space-y-3'>
+                      <p className='text-sm font-medium text-foreground'>Joining Policy</p>
+                      <div className='grid gap-3 md:grid-cols-3'>
+                        {COMMUNITY_JOIN_POLICY_OPTIONS.map(option => {
+                          const Icon = option.icon;
+                          const isSelected = communityJoinPolicy === option.value;
+
+                          return (
+                            <button
+                              key={option.value}
+                              type='button'
+                              disabled={isCreatingCommunityWorkspace}
+                              onClick={() => setCommunityJoinPolicy(option.value)}
+                              className={cn(
+                                'flex min-h-[112px] flex-col items-start gap-2 rounded-lg border p-4 text-left transition',
+                                isSelected
+                                  ? 'border-primary bg-primary/5 text-foreground'
+                                  : 'border-border bg-background hover:border-primary/50 hover:bg-muted/50',
+                                'disabled:cursor-not-allowed disabled:opacity-60',
+                              )}
+                              data-track-category='Organisations'
+                              data-track-name='SelectCommunityJoinPolicy'
+                              data-track-metadata={JSON.stringify({ joinPolicy: option.value })}
+                            >
+                              <span
+                                className={cn(
+                                  'flex h-8 w-8 items-center justify-center rounded-md',
+                                  isSelected
+                                    ? 'bg-primary text-primary-foreground'
+                                    : 'bg-muted text-muted-foreground',
+                                )}
+                              >
+                                <Icon className='h-4 w-4' />
+                              </span>
+                              <span className='text-sm font-semibold'>{option.label}</span>
+                              <span className='text-xs leading-5 text-muted-foreground'>
+                                {option.description}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div className='flex justify-end'>
+                      <Button
+                        type='submit'
+                        disabled={!communityWorkspaceName.trim() || isCreatingCommunityWorkspace}
+                        className='gap-2'
+                        data-track-category='Organisations'
+                        data-track-name='CreateCommunityWorkspace'
+                      >
+                        {isCreatingCommunityWorkspace ? (
+                          <Loader2 className='h-4 w-4 animate-spin' />
+                        ) : (
+                          <Plus className='h-4 w-4' />
+                        )}
+                        {isCreatingCommunityWorkspace
+                          ? 'Creating...'
+                          : 'Create Community Workspace'}
+                      </Button>
+                    </div>
+                  </form>
+                </Card>
+              ) : null}
+
+              {canCreateCommunityWorkspace ? <JoinRequestsSection orgId={workspaceOrgId} /> : null}
 
               {/* ── Linked orgs accordion list ── */}
               <Card>

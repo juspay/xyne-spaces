@@ -1,6 +1,8 @@
 import type { ProcessingResult, ChunkMetadata } from "../types"
 import { config } from '../../../config/env.js'
 import { logger } from '../../../utils/logger.js'
+import { orgLLMCredentialService } from '@/services/orgLLMCredentialService'
+import { OrgLLMServiceAccountPurpose } from '@xyne/shared'
 
 const OUTLINE_MAX_INPUT_CHARS = 40000
 const OUTLINE_MAX_CHUNKS = 40
@@ -35,6 +37,7 @@ export abstract class BaseStrategy {
     protected async buildDocumentOutline(
         chunks: string[],
         _chunks_map: ChunkMetadata[],
+        vespaDocId: string,
     ): Promise<string | undefined> {
         if (chunks.length === 0) return undefined
 
@@ -43,19 +46,13 @@ export abstract class BaseStrategy {
             return undefined
         }
 
-        // Resolve base URL and API key — config takes priority, then env aliases
-        const baseUrl =
-            config.litellm.baseUrl ||
-            process.env.LITELLM_BASE_URL ||
-            process.env.OPENAI_API_BASE
+        const credential = await orgLLMCredentialService.getCredentialByVespaDocId(
+            vespaDocId,
+            OrgLLMServiceAccountPurpose.DEFAULT,
+        )
 
-        const apiKey =
-            config.litellm.apiKey ||
-            process.env.LITELLM_API_KEY ||
-            process.env.OPENAI_API_KEY
-
-        if (!baseUrl || !apiKey) {
-            logger.debug('[BaseStrategy] No LLM configured, skipping outline generation')
+        if (!credential) {
+            logger.debug('[BaseStrategy] No org LiteLLM credential configured, skipping outline generation')
             return undefined
         }
 
@@ -64,9 +61,9 @@ export abstract class BaseStrategy {
             process.env.LITELLM_BEST_MODEL ||
             'glm-flash-experimental'
 
-        const endpoint = baseUrl.endsWith('/v1')
-            ? `${baseUrl}/chat/completions`
-            : `${baseUrl}/v1/chat/completions`
+        const endpoint = credential.baseUrl.endsWith('/v1')
+            ? `${credential.baseUrl}/chat/completions`
+            : `${credential.baseUrl}/v1/chat/completions`
 
         // Take first N chunks and cap total input size
         const sampled = chunks.slice(0, OUTLINE_MAX_CHUNKS).join('\n\n')
@@ -79,7 +76,7 @@ export abstract class BaseStrategy {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    Authorization: `Bearer ${apiKey}`,
+                    Authorization: `Bearer ${credential.apiKey}`,
                 },
                 body: JSON.stringify({
                     model,

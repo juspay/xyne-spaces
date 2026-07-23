@@ -10,8 +10,8 @@ import {
   type RunState,
   type Tool,
 } from '@juspay-jaf/jaf';
-import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
+import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
 import { getPromptFromLangfuse } from '@/agents/xyne-ai/langfuse/index.js';
 import { createAgentEventLogger } from '@/agents/agentLogger';
 import { vespaService } from '@/services/vespaSearch';
@@ -29,6 +29,7 @@ import {
   buildMessageNudgeContext,
   resolveChannelIdForMessage,
 } from './helpers';
+import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
 
 const VESPA_MESSAGE_LIMIT = 10;
 const RELATED_MESSAGE_PROMPT_NAME = 'nudge_find_related_message_from_message_agentic';
@@ -214,7 +215,14 @@ async function runRelatedMessageAgent(
   context: MessageNudgeEvaluationContext,
 ): Promise<RelatedMessageResultOutput> {
   const systemPrompt = await resolveRelatedMessagePrompt();
-  const provider = makeLiteLLMProvider(config.litellm.baseUrl, config.litellm.apiKey);
+  const credential = await orgLLMCredentialService.getCredentialByProjectId(
+    context.message.projectId,
+    OrgLLMServiceAccountPurpose.DEFAULT,
+  );
+  if (!credential) {
+    throw new Error('LiteLLM credentials are not configured for this organization');
+  }
+  const provider = makeLiteLLMProvider(credential.baseUrl, credential.apiKey);
 
   const userInput = {
     message: {
@@ -254,7 +262,7 @@ async function runRelatedMessageAgent(
     modelProvider: provider as RunConfig<NudgeToolContext>['modelProvider'],
     maxTurns: 6,
     modelOverride: context.modelName ?? 'glm-flash-experimental',
-    onEvent: createAgentEventLogger('FindRelatedMessageNudge', 'LITELLM_API_KEY'),
+    onEvent: createAgentEventLogger('FindRelatedMessageNudge', 'ORG_LITELLM_SERVICE_ACCOUNT'),
   };
 
   const result = await run(initialState, runConfig);

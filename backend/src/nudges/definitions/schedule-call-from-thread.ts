@@ -204,6 +204,7 @@ export const scheduleCallFromThread: NudgeDefinition<
       const systemPrompt = await resolveScheduleCallPrompt();
       result = await runNudgeAgent<z.infer<typeof ScheduleCallResultSchema>>({
         agentName: 'ScheduleCallFromThreadAgent',
+        projectId: context.message.projectId,
         systemPrompt,
         input: {
           thread_messages: allMessages,

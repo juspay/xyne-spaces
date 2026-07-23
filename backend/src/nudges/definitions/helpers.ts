@@ -11,8 +11,8 @@ import {
   type RunState,
 } from '@juspay-jaf/jaf';
 import { db } from '@/database/client';
-import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
+import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
 import { parseAgentOutput } from '@/services/agents/utils';
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
 import { extractUrls } from '@/utils/urlUtils';
@@ -23,6 +23,7 @@ import type {
   ActivityContextOutput,
   NudgeBuildContextRuntime,
 } from '../types';
+import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
 
 const DEFAULT_MAX_PROJECT_TAGS = 40;
 const THREAD_MESSAGE_LIMIT = 15;
@@ -178,6 +179,8 @@ export interface RunNudgeAgentOptions {
   maxRetries?: number;
   /** Temperature for generation (default: 0.1). */
   temperature?: number;
+  /** Project whose organization owns the LiteLLM service-account credential. */
+  projectId: string;
 }
 
 function extractLastAssistantMessage(finalState: RunState<unknown>): string | null {
@@ -207,9 +210,17 @@ export async function runNudgeAgent<T>(opts: RunNudgeAgentOptions): Promise<T> {
     model = DEFAULT_MODEL,
     maxRetries = DEFAULT_MAX_RETRIES,
     temperature = 0.1,
+    projectId,
   } = opts;
 
-  const provider = makeLiteLLMProvider(config.litellm.baseUrl, config.litellm.apiKey);
+  const credential = await orgLLMCredentialService.getCredentialByProjectId(
+    projectId,
+    OrgLLMServiceAccountPurpose.DEFAULT,
+  );
+  if (!credential) {
+    throw new Error('LiteLLM credentials are not configured for this organization');
+  }
+  const provider = makeLiteLLMProvider(credential.baseUrl, credential.apiKey);
 
   const messages: Array<{ role: 'user' | 'assistant'; content: string }> = [
     { role: 'user', content: JSON.stringify(input, null, 2) },

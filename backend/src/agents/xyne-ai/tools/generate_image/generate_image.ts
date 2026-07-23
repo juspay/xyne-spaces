@@ -10,6 +10,8 @@ import { MessageAttachmentRepository } from '../../../../database/repositories/m
 import { ChannelRepository } from '../../../../database/repositories/channelRepository.js';
 import { config } from '../../../../config/env.js';
 import { logLLMCallStart, logLLMSuccess, logLLMError } from '../../../agentLogger.js';
+import { orgLLMCredentialService } from '../../../../services/orgLLMCredentialService.js';
+import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
 
 const storageService = getStorageService();
 
@@ -48,13 +50,20 @@ export function createGenerateImageTool(): Tool<
       const { prompt, height = 1024, width = 1024 } = args;
       const imageModel = config.litellm.imageGenerationModel;
       const imageEndpoint = config.litellm.imageGenerationEndpoint;
-      const apiKey = config.litellm.askAiApiKey;
       
       logger.info(
         `[Tool] [${context.sessionId}] generate_image: model=${imageModel}, ${width}x${height}, prompt="${prompt.slice(0, 80)}"`
       );
 
       try {
+        const credential = await orgLLMCredentialService.getCredentialByUserId(
+          context.userId,
+          OrgLLMServiceAccountPurpose.ASK_AI,
+        );
+        if (!credential) {
+          throw new Error('LiteLLM credentials are not configured for this organization');
+        }
+
         // Log LLM call start
         logLLMCallStart(AGENT_NAME, imageModel, 'ASK_AI_API_KEY');
 
@@ -62,7 +71,7 @@ export function createGenerateImageTool(): Tool<
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`,
+            'Authorization': `Bearer ${credential.apiKey}`,
           },
           body: JSON.stringify({ model: imageModel, prompt, height, width }),
         });

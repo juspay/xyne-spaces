@@ -14,7 +14,6 @@ import {
   type TraceEvent,
 } from '@juspay-jaf/jaf';
 
-import { config } from '../../config/env.js';
 import { db } from '../../database/client.js';
 
 import { getXyneAITools, type XyneAIAgentContext, type UserInfo, type ResearchContext } from './tools/index.js';
@@ -35,14 +34,12 @@ import {logger} from '@/utils/logger';
 // Configuration
 // ============================================================================
 
-const LITELLM_BASE_URL = config.litellm.baseUrl;
-
 // ============================================================================
 // Model Provider
 // ============================================================================
 
-function createModelProvider(apiKey: string) {
-  return makeLiteLLMProvider(LITELLM_BASE_URL, apiKey);
+function createModelProvider(baseUrl: string, apiKey: string) {
+  return makeLiteLLMProvider(baseUrl, apiKey);
 }
 
 // ============================================================================
@@ -190,12 +187,13 @@ function createAgentRegistry(agent: Agent<XyneAIAgentContext, unknown>) {
 function createRunConfig(
   agentRegistry: Map<string, Agent<XyneAIAgentContext, unknown>>,
   modelName: string,
+  baseUrl: string,
   apiKey: string,
   onEvent?: (event: TraceEvent) => void
 ): RunConfig<XyneAIAgentContext> {
   return {
     agentRegistry,
-    modelProvider: createModelProvider(apiKey) as RunConfig<XyneAIAgentContext>['modelProvider'],
+    modelProvider: createModelProvider(baseUrl, apiKey) as RunConfig<XyneAIAgentContext>['modelProvider'],
     maxTurns: 50,
     modelOverride: modelName,
     onEvent,
@@ -257,6 +255,7 @@ export async function createAgentRunner(
   context: XyneAIAgentContext,
   messages: Message[],
   modelName: string,
+  baseUrl: string,
   apiKey: string,
   onEvent?: (event: TraceEvent) => void,
   providedContexts?: ProvidedContexts
@@ -322,7 +321,7 @@ export async function createAgentRunner(
 
   const agent = createXyneAIAgent(systemPrompt, context.webSearchEnabled, context.deepResearchEnabled, hasThreadContext, context.memoryEnabled, context.disableTools);
   const agentRegistry = createAgentRegistry(agent);
-  const runConfig = createRunConfig(agentRegistry, modelName, apiKey, onEvent);
+  const runConfig = createRunConfig(agentRegistry, modelName, baseUrl, apiKey, onEvent);
   const initialState = createInitialState(enrichedContext, messages);
 
   return runStream(initialState, runConfig);

@@ -3,6 +3,14 @@ import type { ProviderConfiguration } from 'agentic-framework';
 import { repositories } from '../database/repositories/index.js';
 import type { FullAgent } from '../types/database.js';
 import { config as appConfig } from '@/config/env'
+import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
+import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
+
+export interface AgentCredentialSource {
+  userId?: string | null;
+  ticketId?: string | null;
+  workspaceId?: string | null;
+}
 /**
  * Agent Service - Bridge between Database and Framework
  *
@@ -25,10 +33,11 @@ export class AgentService {
   /**
    * Create agent by name - main entry point
    */
-  async createAgentByName(agentName: string): Promise<Agent> {
+  async createAgentByName(agentName: string, credentialSource?: AgentCredentialSource): Promise<Agent> {
     // Check cache first
-    if (this.agentCache.has(agentName)) {
-      return this.agentCache.get(agentName)!;
+    const cacheKey = this.agentCacheKey(agentName, credentialSource);
+    if (this.agentCache.has(cacheKey)) {
+      return this.agentCache.get(cacheKey)!;
     }
 
     // Get agent from database
@@ -38,18 +47,21 @@ export class AgentService {
     }
 
     // Convert to AgentConfig and create agent using static factory
-    const agentConfig = this.convertDbToAgentConfig(dbAgent);
+    const agentConfig = await this.convertDbToAgentConfig(dbAgent, undefined, credentialSource);
     const agent = Agent.create(agentConfig);
 
     // Cache and return
-    this.agentCache.set(agentName, agent);
+    this.agentCache.set(cacheKey, agent);
     return agent;
   }
 
   /**
    * Create agent by userDefinedId
    */
-  async createAgentByUserDefinedId(userDefinedId: string): Promise<Agent> {
+  async createAgentByUserDefinedId(
+    userDefinedId: string,
+    credentialSource?: AgentCredentialSource,
+  ): Promise<Agent> {
     const dbAgent = await repositories.agents.findByUserDefinedId(userDefinedId);
     if (!dbAgent) {
       throw new Error(`Agent with userDefinedId '${userDefinedId}' not found`);
@@ -60,30 +72,31 @@ export class AgentService {
       throw new Error(`Failed to load full agent data for '${userDefinedId}'`);
     }
 
-    const agentConfig = this.convertDbToAgentConfig(fullAgent);
+    const agentConfig = await this.convertDbToAgentConfig(fullAgent, undefined, credentialSource);
     return Agent.create(agentConfig);
   }
 
   /**
    * Get agent configuration without creating instance
    */
-  async getAgentConfig(agentName: string): Promise<AgentConfig> {
+  async getAgentConfig(agentName: string, credentialSource?: AgentCredentialSource): Promise<AgentConfig> {
     const dbAgent = await this.getAgentFromDatabase(agentName);
     if (!dbAgent) {
       throw new Error(`Agent '${agentName}' not found in database`);
     }
-    return this.convertDbToAgentConfig(dbAgent);
+    return this.convertDbToAgentConfig(dbAgent, undefined, credentialSource);
   }
 
   async getAgentConfigWithSystemPrompt(
     agentName: string,
+    credentialSource?: AgentCredentialSource,
   ): Promise<{ config: AgentConfig; systemPrompt: string }> {
     const dbAgent = await this.getAgentFromDatabase(agentName);
     if (!dbAgent) {
       throw new Error(`Agent '${agentName}' not found in database`);
     }
     return {
-      config: this.convertDbToAgentConfig(dbAgent, 300000),
+      config: await this.convertDbToAgentConfig(dbAgent, 300000, credentialSource),
       systemPrompt: dbAgent.systemPrompt ?? '',
     };
   }
@@ -127,16 +140,22 @@ export class AgentService {
   /**
    * Private: Convert DB agent to framework AgentConfig
    */
-  private convertDbToAgentConfig(dbAgent: FullAgent, timeout?: number): AgentConfig {
+  private async convertDbToAgentConfig(
+    dbAgent: FullAgent,
+    timeout?: number,
+    credentialSource?: AgentCredentialSource,
+  ): Promise<AgentConfig> {
     // Start with framework defaults
     const defaultConfig = createDefaultAgentConfig();
+
+    const credential = await this.resolveLiteLLMCredential(credentialSource);
 
     // Build AgentConfig using defaults + DB overrides
     const provider: ProviderConfiguration = {
       type: 'litellm' as const,
       config: {
-        baseUrl: appConfig.litellm.baseUrl,
-        apiKey: appConfig.litellm.apiKey ?? '',
+        baseUrl: credential.baseUrl,
+        apiKey: credential.apiKey,
         ...(timeout !== undefined && { timeout }),
       },
     };
@@ -177,6 +196,43 @@ export class AgentService {
     // Validate and return
     return validateAndThrow(agentConfig);
   }
+
+  private async resolveLiteLLMCredential(credentialSource?: AgentCredentialSource) {
+    const credential = credentialSource?.ticketId
+      ? await orgLLMCredentialService.getCredentialByTicketId(
+        credentialSource.ticketId,
+        OrgLLMServiceAccountPurpose.DEFAULT,
+      )
+      : credentialSource?.userId
+        ? await orgLLMCredentialService.getCredentialByUserId(
+          credentialSource.userId,
+          OrgLLMServiceAccountPurpose.DEFAULT,
+        )
+        : credentialSource?.workspaceId
+          ? await orgLLMCredentialService.getCredentialByWorkspaceId(
+            credentialSource.workspaceId,
+            OrgLLMServiceAccountPurpose.DEFAULT,
+          )
+          : await orgLLMCredentialService.getCredentialByWorkspaceId(
+            appConfig.defaultWorkspaceId,
+            OrgLLMServiceAccountPurpose.DEFAULT,
+          );
+
+    if (!credential) {
+      throw new Error('No active DEFAULT LiteLLM service account credential for agent execution');
+    }
+
+    return credential;
+  }
+
+  private agentCacheKey(agentName: string, credentialSource?: AgentCredentialSource): string {
+    return [
+      agentName,
+      credentialSource?.ticketId ?? '',
+      credentialSource?.userId ?? '',
+      credentialSource?.workspaceId ?? '',
+    ].join(':');
+  }
 }
 
 // Convenience functions
@@ -185,22 +241,31 @@ export const agentService = AgentService.getInstance();
 /**
  * Create agent by name - convenience function
  */
-export async function createAgentByName(agentName: string): Promise<Agent> {
-  return agentService.createAgentByName(agentName);
+export async function createAgentByName(
+  agentName: string,
+  credentialSource?: AgentCredentialSource,
+): Promise<Agent> {
+  return agentService.createAgentByName(agentName, credentialSource);
 }
 
 /**
  * Create agent by userDefinedId - convenience function
  */
-export async function createAgentByUserDefinedId(userDefinedId: string): Promise<Agent> {
-  return agentService.createAgentByUserDefinedId(userDefinedId);
+export async function createAgentByUserDefinedId(
+  userDefinedId: string,
+  credentialSource?: AgentCredentialSource,
+): Promise<Agent> {
+  return agentService.createAgentByUserDefinedId(userDefinedId, credentialSource);
 }
 
 /**
  * Get agent configuration - convenience function
  */
-export async function getAgentConfig(agentName: string): Promise<AgentConfig> {
-  return agentService.getAgentConfig(agentName);
+export async function getAgentConfig(
+  agentName: string,
+  credentialSource?: AgentCredentialSource,
+): Promise<AgentConfig> {
+  return agentService.getAgentConfig(agentName, credentialSource);
 }
 
 /**

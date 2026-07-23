@@ -6,6 +6,9 @@ import { DatabaseClient } from '../database/client';
 import { logger } from '@/utils/logger';
 import { invitationService } from '@/services/invitationService';
 import { config } from '@/config/env';
+import { WorkspaceJoinPolicy, WorkspaceType } from '@xyne/shared';
+import { aiProvisioningService } from '@/services/aiProvisioningService';
+import { isOrganizationPolicyError, organizationDomainService } from '@/services/organizationDomainService';
 
 // Create OrgMemberRepository interface since we don't have the full file yet
 interface OrgMember {
@@ -141,6 +144,8 @@ export class OrganizationController {
         return;
       }
 
+      await organizationDomainService.assertCanCreateOrgForEmail(ownerEmail.trim());
+
       // Check if organization name already exists
       const existingOrg = await this.organizationRepository.findByName(name.trim());
       if (existingOrg) {
@@ -163,6 +168,8 @@ export class OrganizationController {
           name: workspaceName.trim(),
           createdBy: userId,
           status: 'ACTIVE',
+          workspaceType: WorkspaceType.ENTERPRISE,
+          joinPolicy: WorkspaceJoinPolicy.INVITE_ONLY,
         },
       });
 
@@ -197,10 +204,16 @@ export class OrganizationController {
         },
       });
 
+      await organizationDomainService.createDomainMappingForOrg({
+        orgId: organization.orgId,
+        email: ownerEmail.trim(),
+        verifiedByUserId: userId,
+      });
+
       // 6. Create and send invitation to the workspace
       const invitation = await invitationService.createInvitation({
         email: ownerEmail.trim().toLowerCase(),
-        role: 'MEMBER',
+        role: 'OWNER',
         workspaceId: workspace.id,
         invitedBy: userId,
         orgId: organization.orgId,
@@ -214,6 +227,17 @@ export class OrganizationController {
         invitationId: invitation.invitationId || invitation.id,
       });
 
+      try {
+        await aiProvisioningService.enqueueOrgSync(organization.orgId);
+        await aiProvisioningService.enqueueWorkspaceSync(workspace.id);
+      } catch (error) {
+        logger.error('[OrganizationController] Failed to enqueue AI provisioning jobs', {
+          orgId: organization.orgId,
+          workspaceId: workspace.id,
+          error,
+        });
+      }
+
       res.status(201).json({
         orgId: organization.orgId,
         name: organization.name,
@@ -225,6 +249,16 @@ export class OrganizationController {
       });
     } catch (error) {
       logger.error('Error creating organization:', error);
+      if (isOrganizationPolicyError(error)) {
+        res.status(error.statusCode).json({
+          error: error.message,
+          code: error.code,
+          ...(error instanceof Error && 'domain' in error ? { domain: error.domain } : {}),
+          ...(error instanceof Error && 'existingOrg' in error ? { existingOrg: error.existingOrg } : {}),
+        });
+        return;
+      }
+
       if (error instanceof Error && error.message.includes('already exists')) {
         res.status(409).json({ error: error.message });
         return;

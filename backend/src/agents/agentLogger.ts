@@ -3,12 +3,12 @@
  *
  * Usage:
  *   // For JAF agents:
- *   const agentLogger = createAgentEventLogger('TicketDuplicate', 'LITELLM_API_KEY');
+ *   const agentLogger = createAgentEventLogger('TicketDuplicate', 'ORG_LITELLM_SERVICE_ACCOUNT');
  *   // Pass as onEvent to run() / runStream(), or compose with an existing handler:
  *   const composed = composeEventHandlers(agentLogger, existingOnEvent);
  *
  *   // For direct LLM calls (framework):
- *   logLLMCallStart('TitleGenerator', modelName, 'LITELLM_API_KEY');
+ *   logLLMCallStart('TitleGenerator', modelName, 'ORG_LITELLM_SERVICE_ACCOUNT');
  *   logLLMSuccess('TitleGenerator', responseContent);
  *   logLLMError('TitleGenerator', error);
  */
@@ -27,7 +27,7 @@ const MAX_OUTPUT_LOG_LENGTH = 1000;
  *   [AgentName] Error: <code>: <tag>: <detail>        — on run_end (error)
  *
  * @param agentName - Short label shown in brackets, e.g. 'AskAI', 'TicketDuplicate'
- * @param keyName   - Env-var name of the API key in use, e.g. 'LITELLM_API_KEY'
+ * @param keyName   - Env-var name of the API key in use, e.g. 'ORG_LITELLM_SERVICE_ACCOUNT'
  */
 export function createAgentEventLogger(
   agentName: string,

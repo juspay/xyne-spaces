@@ -8,13 +8,11 @@ import {
   type RunConfig,
   type TraceEvent,
 } from '@juspay-jaf/jaf';
-import { config } from '@/config/env';
 import { getReleaseNotesSystemPrompt, buildReleaseNotesUserPrompt } from './prompts';
 import { AgentsConfig } from '@/agents/config';
 import { createAgentEventLogger, composeEventHandlers } from '@/agents/agentLogger';
-
-const LITELLM_BASE_URL = config.litellm.baseUrl;
-const LITELLM_API_KEY = config.litellm.apiKey;
+import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
+import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
 
 export interface ReleaseNotesGeneratorContext {
   readonly userId?: string;
@@ -65,8 +63,16 @@ export const releaseNotesGeneratorAgent: Agent<ReleaseNotesGeneratorContext, str
   },
 };
 
-export function createModelProvider() {
-  return makeLiteLLMProvider(LITELLM_BASE_URL, LITELLM_API_KEY);
+export async function createModelProvider(context: ReleaseNotesGeneratorContext) {
+  const credential = context.userId
+    ? await orgLLMCredentialService.getCredentialByUserId(context.userId, OrgLLMServiceAccountPurpose.DEFAULT)
+    : await orgLLMCredentialService.getCredentialByChannelId(context.channelId, OrgLLMServiceAccountPurpose.DEFAULT);
+
+  if (!credential) {
+    throw new Error('No active DEFAULT LiteLLM service account credential for release notes generation');
+  }
+
+  return makeLiteLLMProvider(credential.baseUrl, credential.apiKey);
 }
 
 export const agentRegistry = new Map<string, Agent<ReleaseNotesGeneratorContext, any>>([
@@ -82,10 +88,10 @@ export async function generateReleaseNotesContent(
   const cacConfig = agentsConfig ?? await AgentsConfig.fetch();
   const modelName = cacConfig.releaseNotesGeneratorModelName || 'glm-latest';
 
-  const modelProvider = createModelProvider();
+  const modelProvider = await createModelProvider(context);
   const formattedPrompt = buildReleaseNotesUserPrompt(input);
 
-  const agentLogger = createAgentEventLogger('ReleaseNotes', 'LITELLM_API_KEY');
+  const agentLogger = createAgentEventLogger('ReleaseNotes', 'ORG_LITELLM_SERVICE_ACCOUNT');
   const composedOnEvent = onEvent ? composeEventHandlers(agentLogger, onEvent) : agentLogger;
 
   const runConfig: RunConfig<ReleaseNotesGeneratorContext> = {

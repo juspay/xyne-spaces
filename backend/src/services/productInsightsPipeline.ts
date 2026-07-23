@@ -176,7 +176,10 @@ function buildImpactedClusterThemes(
   });
 }
 
-async function generateClusterThemesStage(clusterDetails: RawClusterInput): Promise<Record<string, ClusterTheme>> {
+async function generateClusterThemesStage(
+  projectId: string,
+  clusterDetails: RawClusterInput,
+): Promise<Record<string, ClusterTheme>> {
   const clusterIds = Object.keys(clusterDetails);
 
   logger.info('[ProductInsightsPipeline] Generating cluster themes', {
@@ -197,7 +200,7 @@ async function generateClusterThemesStage(clusterDetails: RawClusterInput): Prom
             generateSingleClusterThemeWithLlm({
               cluster_id: clusterId,
               tickets,
-            }),
+            }, projectId),
             THEME_GENERATION_TIMEOUT_MS,
             `cluster-theme:${clusterId}`,
           ),
@@ -236,6 +239,7 @@ async function generateClusterThemesStage(clusterDetails: RawClusterInput): Prom
 }
 
 async function generateMetaThemesStage(
+  projectId: string,
   groups: Array<{ impacted_clusters: string[] }>,
   clusterThemes: Record<string, ClusterTheme>,
 ): Promise<MetaTheme[]> {
@@ -271,7 +275,7 @@ async function generateMetaThemesStage(
             generateSingleMetaThemeWithLlm({
               impacted_clusters: impactedClusters,
               impacted_cluster_themes: impactedClusterThemes,
-            }),
+            }, projectId),
             THEME_GENERATION_TIMEOUT_MS,
             `meta-theme:${index}`,
           ),
@@ -346,8 +350,8 @@ export async function runReclusteringFlow(
       return null;
     }
 
-    const clusterThemes = await generateClusterThemesStage(reclustered.cluster_details);
-    const metaThemes = await generateMetaThemesStage(reclustered.meta_themes, clusterThemes);
+    const clusterThemes = await generateClusterThemesStage(params.projectId, reclustered.cluster_details);
+    const metaThemes = await generateMetaThemesStage(params.projectId, reclustered.meta_themes, clusterThemes);
 
     const finalInsights: ProductInsightsData = {
       cluster_details: reclustered.cluster_details,

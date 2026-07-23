@@ -141,13 +141,15 @@ interface CombinedAnalysisResult {
 
 async function classifyQueryWithAI(
   queryText: string,
-  supportedQueries: Query[]
+  supportedQueries: Query[],
+  ticketId: string,
 ): Promise<CombinedAnalysisResult> {
   logger.info(`[SupportWorkflow] Processing query with AI: "${queryText.substring(0, 100)}..."`)
 
   try {
     const { config: agentConfig, systemPrompt } = await agentService.getAgentConfigWithSystemPrompt(
       'support-query-processor',
+      { ticketId },
     );
 
     const agent = Agent.create(agentConfig);
@@ -346,7 +348,8 @@ export const itSupportWorkflow: WorkflowDefinition<
       SupportQuerySteps.ANALYZE_QUERY,
       classifyQueryWithAI,
       queryText,
-      supportedQueries
+      supportedQueries,
+      ticketId
     )
 
     logger.info(`Step 1 Complete: Classification`)

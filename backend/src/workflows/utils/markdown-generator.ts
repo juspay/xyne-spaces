@@ -4,6 +4,9 @@ import { Agent, type AgentConfig, createUserMessage, type Message } from '@frame
 import { LogLevel } from '@framework'
 import {logger} from '@/utils/logger';
 import { config } from '@/config/env';
+import type { BaseWorkflowContext } from '../workflow-types';
+import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
+import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
 
 type CheckpointData = Record<string, unknown>
 
@@ -17,17 +20,32 @@ type CheckpointData = Record<string, unknown>
 export async function generateMarkdownSummary(
   checkpointName: string,
   input: CheckpointData,
-  output: CheckpointData
+  output: CheckpointData,
+  context: BaseWorkflowContext,
 ): Promise<string> {
   try {
+    const credential = context.ticketId
+      ? await orgLLMCredentialService.getCredentialByTicketId(
+        context.ticketId,
+        OrgLLMServiceAccountPurpose.DEFAULT,
+      )
+      : await orgLLMCredentialService.getCredentialByUserId(
+        context.userId,
+        OrgLLMServiceAccountPurpose.DEFAULT,
+      );
+
+    if (!credential) {
+      throw new Error('No active DEFAULT LiteLLM service account credential for markdown generation');
+    }
+
     // Create agent configuration for markdown generation
     const agentConfig: AgentConfig = {
       model: {
         provider: {
           type: 'litellm',
           config: {
-            apiKey: process.env.LITELLM_API_KEY || '',
-            baseUrl: process.env.LITELLM_BASE_URL || '', 
+            apiKey: credential.apiKey,
+            baseUrl: credential.baseUrl,
             timeout: 600000, // 10 minutes
             retries: 5
           }

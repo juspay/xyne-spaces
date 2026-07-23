@@ -230,6 +230,7 @@ export class ConversationAnalysisService {
 
     const { config: agentConfig, systemPrompt: rawSystemPrompt } = await agentService.getAgentConfigWithSystemPrompt(
       CONVERSATION_ANALYST_AGENT,
+      { userId: ctx.userId, ticketId: ctx.ticketId },
     );
 
     const systemPrompt = `${rawSystemPrompt}\n\n${OUTPUT_FORMAT_INSTRUCTION}`;

@@ -10,6 +10,7 @@ import { emailService } from './email/factory';
 import { grantPermissionsForRole } from './permissionMatrix';
 import crypto from 'crypto';
 import { hashPassword } from '../utils/passwordUtils';
+import { organizationDomainService } from './organizationDomainService';
 
 export interface CreateInvitationParams {
   email: string;
@@ -35,6 +36,12 @@ export class InvitationService {
 
   constructor() {
     this.prisma = DatabaseClient.getInstance();
+  }
+
+  private toEnterpriseOrgRole(role: WorkspaceRole): 'OWNER' | 'ADMIN' | 'MEMBER' {
+    if (role === WorkspaceRole.OWNER) return 'OWNER';
+    if (role === WorkspaceRole.ADMIN) return 'ADMIN';
+    return 'MEMBER';
   }
 
   /**
@@ -92,6 +99,8 @@ export class InvitationService {
     if (!selectedOrg) {
       throw new Error('Selected organization not found');
     }
+
+    await organizationDomainService.assertOrgMemberLimit(orgId, email);
 
     const existingUser = await this.prisma.user.findFirst({
       where: {
@@ -295,6 +304,17 @@ export class InvitationService {
 
     logger.info(`[DEBUG] [acceptInvitation] Invitation valid. workspaceId=${invitation.workspaceId} orgId=${invitation.orgId ?? 'null'} role=${invitation.role}`);
 
+    // Resolve orgId before user creation so a COMMUNITY_MEMBER org row can be
+    // moved/upgraded into the enterprise org when the invite is accepted.
+    const resolvedOrgId = invitation.orgId ?? (
+      await this.prisma.workspace.findUnique({
+        where: { id: invitation.workspaceId! },
+        select: { orgId: true },
+      })
+    )?.orgId ?? null;
+
+    logger.info(`[DEBUG] [acceptInvitation] resolvedOrgId=${resolvedOrgId ?? 'null'} (from invitation.orgId=${invitation.orgId ?? 'null'})`);
+
     // Check if user already exists in this workspace (duplicate accept guard)
     const existingWorkspaceUser = await this.prisma.user.findUnique({
       where: {
@@ -320,14 +340,39 @@ export class InvitationService {
       });
       logger.info(`[DEBUG] [acceptInvitation] Reactivated existing user id=${newWorkspaceUser.id}`);
     } else {
+      if (resolvedOrgId) {
+        await organizationDomainService.assertOrgMemberLimit(resolvedOrgId, userData.email);
+      }
+
       // Fetch existing orgMember by email
-      const orgMember = await this.prisma.orgMember.findUnique({
+      let orgMember = await this.prisma.orgMember.findUnique({
         where: { email: userData.email.toLowerCase() },
         select: { memberId: true }
       });
 
       if (!orgMember) {
-        throw new Error(`orgMember not found for email ${userData.email}. User must be invited to the organization first.`);
+        if (!resolvedOrgId) {
+          throw new Error(`orgMember not found for email ${userData.email}. User must be invited to the organization first.`);
+        }
+
+        orgMember = await this.prisma.orgMember.create({
+          data: {
+            orgId: resolvedOrgId,
+            email: userData.email.toLowerCase(),
+            role: this.toEnterpriseOrgRole(invitation.role),
+          },
+          select: { memberId: true },
+        });
+      } else if (resolvedOrgId) {
+        orgMember = await this.prisma.orgMember.update({
+          where: { memberId: orgMember.memberId },
+          data: {
+            leftAt: null,
+            orgId: resolvedOrgId,
+            role: this.toEnterpriseOrgRole(invitation.role),
+          },
+          select: { memberId: true },
+        });
       }
 
       // Create new user in the workspace
@@ -346,22 +391,20 @@ export class InvitationService {
       logger.info(`[DEBUG] [acceptInvitation] Created new workspace user id=${newWorkspaceUser.id}`);
     }
 
-    // Resolve orgId — use the one on the invitation, or look it up from the workspace
-    const resolvedOrgId = invitation.orgId ?? (
-      await this.prisma.workspace.findUnique({
-        where: { id: invitation.workspaceId! },
-        select: { orgId: true },
-      })
-    )?.orgId ?? null;
-
-    logger.info(`[DEBUG] [acceptInvitation] resolvedOrgId=${resolvedOrgId ?? 'null'} (from invitation.orgId=${invitation.orgId ?? 'null'})`);
-
     // Ensure an OrgMember entry exists for this email (upsert by email - now globally unique)
     if (resolvedOrgId) {
       await this.prisma.orgMember.upsert({
         where: { email: userData.email.toLowerCase() },
-        create: { orgId: resolvedOrgId, email: userData.email.toLowerCase(), role: 'MEMBER' },
-        update: { leftAt: null, orgId: resolvedOrgId }, // reactivate and update orgId if needed
+        create: {
+          orgId: resolvedOrgId,
+          email: userData.email.toLowerCase(),
+          role: this.toEnterpriseOrgRole(invitation.role),
+        },
+        update: {
+          leftAt: null,
+          orgId: resolvedOrgId,
+          role: this.toEnterpriseOrgRole(invitation.role),
+        }, // reactivate and update orgId/role if needed
       });
       logger.info(`[DEBUG] [acceptInvitation] OrgMember upserted for email=${userData.email} orgId=${resolvedOrgId}`);
     } else {
