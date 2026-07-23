@@ -274,15 +274,23 @@ class DeskLabelRulesService {
             status: AutomationStatus.ACTIVE,
             eventType: triggerTypeToEventType(config.trigger.type),
             automationSeriesId: id,
-            deskOwnerId: auth.userId,
-            deskChannelId: payload.channelId,
-            deskLabelId: label.id,
-            deskFilterFingerprint: filterFingerprint,
             context: JSON.stringify(config),
             metadata: buildAutomationMetadata({
               description: `Desk auto-label for incoming email -> ${label.name}`,
               createdById: auth.userId,
             }),
+          },
+        });
+
+        await tx.deskAutoLabelRuleReference.create({
+          data: {
+            workflowId: workflow.id,
+            labelId: label.id,
+            workspaceId: auth.workspaceId,
+            ownerId: auth.userId,
+            channelId: payload.channelId,
+            filterFingerprint,
+            createdAt: new Date(),
           },
         });
 
@@ -368,14 +376,17 @@ class DeskLabelRulesService {
   ): Promise<DeskLabelRulesPage> {
     await this.requireDeskChannel(channelId, auth);
 
-    const baseWhere: Prisma.WorkflowWhereInput = {
+    const baseWhere: Prisma.DeskAutoLabelRuleReferenceWhereInput = {
       workspaceId: auth.workspaceId,
-      workflowType: DESK_AUTOMATION_WORKFLOW_TYPE,
-      deskOwnerId: auth.userId,
-      deskChannelId: channelId,
-      status: { in: [AutomationStatus.ACTIVE, AutomationStatus.DISABLED] },
+      ownerId: auth.userId,
+      channelId,
+      workflow: {
+        workspaceId: auth.workspaceId,
+        workflowType: DESK_AUTOMATION_WORKFLOW_TYPE,
+        status: { in: [AutomationStatus.ACTIVE, AutomationStatus.DISABLED] },
+      },
     };
-    const cursorWhere: Prisma.WorkflowWhereInput =
+    const cursorWhere: Prisma.DeskAutoLabelRuleReferenceWhereInput =
       opts.cursor
         ? {
             OR: [
@@ -386,16 +397,21 @@ class DeskLabelRulesService {
         : {};
 
     const [rows, total, active] = await Promise.all([
-      db.workflow.findMany({
+      db.deskAutoLabelRuleReference.findMany({
         where: { AND: [baseWhere, cursorWhere] },
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: opts.limit + 1,
+        include: { workflow: true },
       }),
-      db.workflow.count({ where: baseWhere }),
-      db.workflow.count({
+      db.deskAutoLabelRuleReference.count({ where: baseWhere }),
+      db.deskAutoLabelRuleReference.count({
         where: {
           ...baseWhere,
-          status: AutomationStatus.ACTIVE,
+          workflow: {
+            workspaceId: auth.workspaceId,
+            workflowType: DESK_AUTOMATION_WORKFLOW_TYPE,
+            status: AutomationStatus.ACTIVE,
+          },
         },
       }),
     ]);
@@ -405,7 +421,7 @@ class DeskLabelRulesService {
     const last = page[page.length - 1] ?? null;
 
     return {
-      automations: page.map(workflowToAutomation),
+      automations: page.map(row => workflowToAutomation(row.workflow)),
       counts: { total, active },
       pagination: {
         limit: opts.limit,
@@ -570,18 +586,23 @@ class DeskLabelRulesService {
       statuses: AutomationStatus[];
     },
   ): Promise<Workflow | null> {
-    return client.workflow.findFirst({
+    const ref = await client.deskAutoLabelRuleReference.findFirst({
       where: {
         workspaceId: params.workspaceId,
-        workflowType: DESK_AUTOMATION_WORKFLOW_TYPE,
-        deskOwnerId: params.ownerId,
-        deskChannelId: params.channelId,
-        deskLabelId: params.labelId,
-        deskFilterFingerprint: params.filterFingerprint,
-        status: workflowStatusIn(params.statuses),
+        ownerId: params.ownerId,
+        channelId: params.channelId,
+        labelId: params.labelId,
+        filterFingerprint: params.filterFingerprint,
+        workflow: {
+          workspaceId: params.workspaceId,
+          workflowType: DESK_AUTOMATION_WORKFLOW_TYPE,
+          status: workflowStatusIn(params.statuses),
+        },
       },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      include: { workflow: true },
     });
+    return ref?.workflow ?? null;
   }
 
   private async restoreArchivedDeskWorkflow(
@@ -606,10 +627,6 @@ class DeskLabelRulesService {
           workflowName: params.name,
           status: AutomationStatus.ACTIVE,
           eventType: triggerTypeToEventType(params.config.trigger.type),
-          deskOwnerId: params.auth.userId,
-          deskChannelId: params.channelId,
-          deskLabelId: params.label.id,
-          deskFilterFingerprint: params.filterFingerprint,
           context: JSON.stringify(params.config),
           metadata: buildAutomationMetadata({
             description: `Desk auto-label for incoming email -> ${params.label.name}`,
@@ -647,19 +664,24 @@ class DeskLabelRulesService {
     automationId: string,
     auth: { userId: string; workspaceId: string },
   ): Promise<Workflow> {
-    const workflow = await client.workflow.findFirst({
+    const ref = await client.deskAutoLabelRuleReference.findFirst({
       where: {
-        id: automationId,
+        workflowId: automationId,
         workspaceId: auth.workspaceId,
-        workflowType: DESK_AUTOMATION_WORKFLOW_TYPE,
-        deskOwnerId: auth.userId,
-        status: { not: AutomationStatus.ARCHIVED },
+        ownerId: auth.userId,
+        workflow: {
+          id: automationId,
+          workspaceId: auth.workspaceId,
+          workflowType: DESK_AUTOMATION_WORKFLOW_TYPE,
+          status: { not: AutomationStatus.ARCHIVED },
+        },
       },
+      include: { workflow: true },
     });
-    if (!workflow) {
+    if (!ref) {
       throw serviceError('Automation not found', 'not-found');
     }
-    return workflow;
+    return ref.workflow;
   }
 }
 

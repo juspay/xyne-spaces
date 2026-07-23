@@ -110,16 +110,20 @@ class EventRouter {
           ...baseWhere,
         },
       }),
-      db.workflow.findMany({
+      db.deskAutoLabelRuleReference.findMany({
         where: {
-          workflowType: DESK_AUTOMATION_WORKFLOW_TYPE,
-          ...baseWhere,
-          deskChannelId: event.payload.channelId,
+          workspaceId,
+          channelId: event.payload.channelId,
+          workflow: {
+            workflowType: DESK_AUTOMATION_WORKFLOW_TYPE,
+            ...baseWhere,
+          },
         },
+        include: { workflow: true },
       }),
     ]);
 
-    return [...generalAutomations, ...deskRules];
+    return [...generalAutomations, ...deskRules.map(rule => rule.workflow)];
   }
 }
 

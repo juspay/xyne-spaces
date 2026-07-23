@@ -431,10 +431,6 @@ model Workflow {
   /// workflows for event X" lookups.
   eventType        String            @default("NO_OP")
   automationSeriesId String?
-  deskOwnerId      String?           // DeskAutomations only: private rule owner (no FK constraint)
-  deskChannelId    String?           // DeskAutomations only: desk channel scope (no FK constraint)
-  deskLabelId      String?           // DeskAutomations only: private conversation label id (no FK constraint)
-  deskFilterFingerprint String?      // DeskAutomations only: canonical EMAIL_RECEIVED filter fingerprint
   scheduledAt      DateTime? // Do the deployment only after 12 AM
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
@@ -442,6 +438,7 @@ model Workflow {
   // Relations
   workflowExecutions WorkflowExecution[]
   ticket             Ticket?             @relation(fields: [ticketId], references: [id])
+  deskAutoLabelRuleReferences DeskAutoLabelRuleReference[]
 
   @@index([ticketId])
   @@index([ticketId, createdAt, id])
@@ -451,10 +448,6 @@ model Workflow {
   @@index([automationSeriesId])
   @@index([workspaceId, eventType, status])
   @@index([workspaceId, workflowType, createdAt(sort: Desc)])
-  @@unique([workspaceId, workflowType, deskOwnerId, deskChannelId, deskLabelId, deskFilterFingerprint], map: "workflows_desk_auto_label_dedupe_key")
-  @@index([workspaceId, workflowType, deskOwnerId, deskChannelId, createdAt(sort: Desc), id(sort: Desc)], map: "workflows_desk_owner_channel_idx")
-  @@index([workspaceId, workflowType, deskChannelId, eventType, status], map: "workflows_desk_event_channel_idx")
-  @@index([workspaceId, deskLabelId], map: "workflows_desk_label_idx")
   @@map("workflows")
   @@schema("public")
 }
@@ -2092,6 +2085,7 @@ model ConversationLabel {
   createdBy   String   // Owner — labels are private to this user (no FK constraint)
   createdAt   DateTime @default(now())
   updatedAt   DateTime // Set manually in code — written only by Zero mutators, never Prisma Client
+  deskAutoLabelRuleReferences DeskAutoLabelRuleReference[]
 
   // Also serves per-user catalog reads + ACL via its (channelId, createdBy) prefix,
   // with the trailing "name" matching the catalog query's orderBy('name').
@@ -2115,6 +2109,30 @@ model ConversationLabelMapping {
   @@index([labelId]) // label-panel read, label→mappings correlation, deleteLabel cascade
   @@map("conversation_label_mappings")
   @@schema("public")
+}
+
+// Server-only index of personal Desk auto-label rules targeting private conversation labels.
+// The datasource uses relationMode = "prisma", so migrations do not create database FKs.
+model DeskAutoLabelRuleReference {
+  id                String   @id @default(cuid())
+  workflowId        String
+  labelId           String
+  workspaceId       String
+  ownerId           String
+  channelId         String
+  filterFingerprint String
+  createdAt         DateTime
+
+  workflow Workflow          @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  label    ConversationLabel @relation(fields: [labelId], references: [id], onDelete: Restrict)
+
+  @@unique([workflowId, labelId])
+  @@unique([workspaceId, ownerId, channelId, labelId, filterFingerprint], map: "desk_auto_label_rule_refs_filter_key")
+  @@index([workspaceId, ownerId, channelId, createdAt(sort: Desc), id(sort: Desc)], map: "desk_auto_label_rule_refs_owner_channel_idx")
+  @@index([workspaceId, channelId], map: "desk_auto_label_rule_refs_channel_idx")
+  @@index([workspaceId, labelId], map: "desk_auto_label_rule_refs_label_idx")
+  @@map("desk_auto_label_rule_references")
+  @@schema("non_zero")
 }
 
 // Gmail-style mailbox overlay: a per-user, per-desk filing of a shared ticket

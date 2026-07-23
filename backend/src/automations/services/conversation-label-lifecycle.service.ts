@@ -52,11 +52,27 @@ class ConversationLabelLifecycleService {
         const label = await this.requireOwnedLabel(tx, auth, labelId);
         const impact = await this.calculateImpact(tx, label);
 
+        const linkedRules = await tx.deskAutoLabelRuleReference.findMany({
+          where: this.linkedDeskRuleReferenceWhere(label),
+          select: { workflowId: true },
+        });
         const archiveResult = await tx.workflow.updateMany({
-          where: this.linkedDeskRuleWhere(label),
+          where: {
+            id: { in: linkedRules.map(rule => rule.workflowId) },
+            workspaceId: label.workspaceId,
+            workflowType: DESK_AUTOMATION_WORKFLOW_TYPE,
+            status: { in: [AutomationStatus.ACTIVE, AutomationStatus.DISABLED] },
+          },
           data: {
             status: AutomationStatus.ARCHIVED,
             updatedAt: new Date(),
+          },
+        });
+
+        await tx.deskAutoLabelRuleReference.deleteMany({
+          where: {
+            workspaceId: label.workspaceId,
+            labelId: label.id,
           },
         });
 
@@ -132,8 +148,8 @@ class ConversationLabelLifecycleService {
           createdBy: label.createdBy,
         },
       }),
-      client.workflow.count({
-        where: this.linkedDeskRuleWhere(label),
+      client.deskAutoLabelRuleReference.count({
+        where: this.linkedDeskRuleReferenceWhere(label),
       }),
     ]);
 
@@ -148,12 +164,17 @@ class ConversationLabelLifecycleService {
     };
   }
 
-  private linkedDeskRuleWhere(label: ConversationLabel): Prisma.WorkflowWhereInput {
+  private linkedDeskRuleReferenceWhere(
+    label: ConversationLabel,
+  ): Prisma.DeskAutoLabelRuleReferenceWhereInput {
     return {
       workspaceId: label.workspaceId,
-      workflowType: DESK_AUTOMATION_WORKFLOW_TYPE,
-      deskLabelId: label.id,
-      status: { in: [AutomationStatus.ACTIVE, AutomationStatus.DISABLED] },
+      labelId: label.id,
+      workflow: {
+        workspaceId: label.workspaceId,
+        workflowType: DESK_AUTOMATION_WORKFLOW_TYPE,
+        status: { in: [AutomationStatus.ACTIVE, AutomationStatus.DISABLED] },
+      },
     };
   }
 }
