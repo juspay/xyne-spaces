@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 import { viteStaticCopy } from 'vite-plugin-static-copy';
 import packageJson from './package.json';
-import { readFileSync, writeFileSync } from 'fs';
+import { readFileSync } from 'fs';
 
 const pkg = JSON.parse(
   readFileSync(path.resolve(__dirname, 'package.json'), 'utf-8')
@@ -14,23 +14,17 @@ export default defineConfig({
     react(),
     {
       name: 'version-file',
-      closeBundle() {
-        try {
-          writeFileSync(
-            'dist/version.json',
-            JSON.stringify(
-              {
-                version: pkg.version
-              },
-              null,
-              2
-            )
-          );
-          console.log('✓ version.json created successfully');
-        } catch (error) {
-          console.error('✗ Failed to create version.json:', error);
-          throw new Error(`Build failed: Unable to create version.json - ${error}`);
-        }
+      // Emit version.json through Rollup so Vite writes it into the build's outDir itself.
+      // The previous approach used writeFileSync('dist/version.json') in closeBundle, which
+      // assumed dist/ already existed — that fails on a CLEAN build (fresh CI workspace) with
+      // ENOENT, and only "worked" when a prior build left dist/ behind. emitFile has no such
+      // assumption and is the environment-safe way to add an asset to the bundle.
+      generateBundle() {
+        this.emitFile({
+          type: 'asset',
+          fileName: 'version.json',
+          source: JSON.stringify({ version: pkg.version }, null, 2),
+        });
       }
     },
     viteStaticCopy({
