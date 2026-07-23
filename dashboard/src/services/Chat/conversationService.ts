@@ -93,6 +93,20 @@ export interface MarkTicketSuggestionAsCreatedResponse {
   conversationId: string;
 }
 
+export type ThreadListSection = 'unread' | 'read';
+
+export interface ThreadListEntry {
+  conversationId: string;
+  channelId: string;
+  sectionAtLoad: ThreadListSection;
+}
+
+export interface ThreadListResponse {
+  threads: ThreadListEntry[];
+  nextCursor: string | null;
+  hasMore: boolean;
+}
+
 // ============================================================================
 // CUSTOM ERROR CLASS
 // ============================================================================
@@ -131,6 +145,22 @@ function isApiErrorResponse(data: unknown): data is ApiErrorResponse {
 // ============================================================================
 
 export class ConversationService {
+  async getUserThreads(
+    cursor: string | null,
+    limit: number,
+    signal?: AbortSignal,
+  ): Promise<ThreadListResponse> {
+    const response = await apiInstance.get<ThreadListResponse>('/conversations/threads', {
+      params: {
+        limit,
+        ...(cursor ? { cursor } : {}),
+      },
+      ...(signal ? { signal } : {}),
+    });
+
+    return response.data;
+  }
+
   /**
    * Private helper to track file upload analytics (no sensitive data)
    */

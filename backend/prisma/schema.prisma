@@ -2344,6 +2344,7 @@ model ConversationParticipant {
   @@index ([conversationId,participationType,joinedAt,id])
   @@index([userId]) // Fast user conversation lookup
   @@index([userId, lastReplyAt(sort: Desc), id]) // For userConversationsPaginatedV2
+  @@index([userId, isSubscribed, lastReplyAt(sort: Desc), id(sort: Desc)], map: "conversation_participants_thread_list_idx")
 
   @@index([userId, id])
   @@map("conversation_participants")
