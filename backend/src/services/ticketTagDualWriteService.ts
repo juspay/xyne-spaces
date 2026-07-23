@@ -20,7 +20,7 @@ export async function dualWriteTicketTag(
 ): Promise<void> {
   const ticket = await (prisma as PrismaClient).ticket.findUnique({
     where: { id: ticketId },
-    select: { projectId: true },
+    select: { projectId: true, workspaceId: true },
   });
 
   if (!ticket?.projectId) {
@@ -32,14 +32,14 @@ export async function dualWriteTicketTag(
     // Upsert project_tags (idempotent by unique projectId+name)
     const projectTag = await (prisma as PrismaClient).projectTag.upsert({
       where: { projectId_name: { projectId: ticket.projectId, name: tagName } },
-      create: { name: tagName, projectId: ticket.projectId },
+      create: { name: tagName, projectId: ticket.projectId, workspaceId: ticket.workspaceId },
       update: {},
       select: { id: true },
     });
 
     // Insert ticket_tag_mapping (skip if already exists)
     await (prisma as PrismaClient).ticketTagMapping.createMany({
-      data: [{ ticketId, tagId: projectTag.id, tagName }],
+      data: [{ ticketId, tagId: projectTag.id, tagName, workspaceId: ticket.workspaceId }],
       skipDuplicates: true,
     });
   } catch (error) {
@@ -59,7 +59,7 @@ export async function dualWriteTicketTags(
 ): Promise<void> {
   const ticket = await (prisma as PrismaClient).ticket.findUnique({
     where: { id: ticketId },
-    select: { projectId: true },
+    select: { projectId: true, workspaceId: true },
   });
 
   if (!ticket?.projectId) {
@@ -70,7 +70,7 @@ export async function dualWriteTicketTags(
   try {
     // Batch create project_tags
     await (prisma as PrismaClient).projectTag.createMany({
-      data: tagNames.map(name => ({ name, projectId: ticket.projectId })),
+      data: tagNames.map(name => ({ name, projectId: ticket.projectId, workspaceId: ticket.workspaceId })),
       skipDuplicates: true,
     });
 
@@ -86,7 +86,7 @@ export async function dualWriteTicketTags(
       .map(name => {
         const tagId = tagIdMap.get(name);
         if (!tagId) return null;
-        return { ticketId, tagId, tagName: name };
+        return { ticketId, tagId, tagName: name, workspaceId: ticket.workspaceId };
       })
       .filter((m): m is NonNullable<typeof m> => m !== null);
 

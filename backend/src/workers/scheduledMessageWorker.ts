@@ -1,6 +1,7 @@
 import Bull from 'bull';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
+import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import { conversationService } from '@/services/conversationService';
 import { MessageType, AuthProvider, UserStatus, UserType } from '@prisma/client';
 import { MessagesSideEffectHandler } from '@/zero/side-effects/tables/messages-handler';
@@ -57,11 +58,7 @@ class ScheduledMessageWorker {
     );
 
     // Get or create the scheduler bot user
-    const channelForBot = await db.channel.findUnique({
-      where: { id: channelId },
-      select: { workspaceId: true },
-    });
-    const channelWorkspaceId = channelForBot?.workspaceId ?? '';
+    const channelWorkspaceId = await resolveWorkspaceIdFromModel(db, 'channel', { id: channelId });
 
     const botEmail = 'scheduler-bot@bot.xyne.ai';
     let botUser = await db.user.findFirst({ where: { email: botEmail, workspaceId: channelWorkspaceId } });

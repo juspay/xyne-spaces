@@ -42,9 +42,14 @@ export class CallRecordingRepository {
     try {
       // startedAt/createdAt have no DB default (team convention) — set them here.
       const now = new Date();
+      const call = await this.db.call.findUniqueOrThrow({
+        where: { id: input.callId },
+        select: { workspaceId: true },
+      });
       const recording = await this.db.callRecording.create({
         data: {
           callId: input.callId,
+          workspaceId: call.workspaceId,
           recordingType: input.recordingType,
           status: RecordingStatus.RECORDING_ACTIVE,
           startedBy: input.startedBy,

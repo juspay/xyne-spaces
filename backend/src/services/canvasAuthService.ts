@@ -271,11 +271,21 @@ class CanvasAuthService {
         }
       }
 
+      const creator = await db.user.findUnique({
+        where: { id: userId },
+        select: { workspaceId: true },
+      });
+      if (!creator?.workspaceId) {
+        throw new Error(`Could not find workspaceId for user ${userId}`);
+      }
+      const workspaceId = creator.workspaceId;
+
       await db.$transaction([
         db.canvas.create({
           data: {
             id: canvasId,
             createdBy: userId,
+            workspaceId,
             visibility: 'PRIVATE',
             title: options?.title || 'Untitled Canvas',
             content: [],
@@ -289,6 +299,7 @@ class CanvasAuthService {
           data: {
             canvasId,
             userId,
+            workspaceId,
             role: 'OWNER',
           },
         }),

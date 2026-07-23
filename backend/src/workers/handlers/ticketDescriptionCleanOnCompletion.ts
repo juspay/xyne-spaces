@@ -1,4 +1,5 @@
 import { db } from '@/database/client';
+import { getContextOrNull } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import vespaClient from '@/vespa/client';
 import { ticketSchema } from '@/vespa/src/types';
@@ -104,8 +105,20 @@ async function upsertTicketCleanupFailure(
       return;
     }
 
+    const ticket = await db.ticket.findUnique({
+      where: { id: ticketId },
+      select: { workspaceId: true },
+    });
+    const workspaceId = ticket?.workspaceId ?? getContextOrNull()?.workspaceId;
+    if (!workspaceId) {
+      throw new Error(
+        `workspaceId required: ticket ${ticketId} not found and no tenant context`,
+      );
+    }
+
     await db.vespaInsertionLogs.create({
       data: {
+        workspaceId,
         entityId: ticketId,
         entityType: ticketSchema,
         type: VespaOperationType.POST_INGEST_CLEAN,

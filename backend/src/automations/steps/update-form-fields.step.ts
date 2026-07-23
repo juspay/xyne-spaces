@@ -73,6 +73,7 @@ export class UpdateFormFieldsStep extends BaseActionStep<
         data: updatedFields.map(fieldName => ({
           ticketId,
           updatedBy: context.automation.createdById,
+          workspaceId: context.automation.workspaceId,
           activityType: ActivityType.METADATA,
           value: {
             field: 'customField',

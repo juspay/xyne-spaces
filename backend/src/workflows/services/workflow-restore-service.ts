@@ -144,6 +144,7 @@ export class WorkflowRestoreService {
     // Create the rerun execution
     const rerunExecution = await repositories.workflowExecutions.create({
       workflow: { connect: { id: sourceExecution.workflowId } },
+      workspaceId: sourceExecution.workspaceId,
       workflowType: sourceExecution.workflowType,
       context: sourceExecution.context,
       status: WorkflowExecutionStatus.PENDING,

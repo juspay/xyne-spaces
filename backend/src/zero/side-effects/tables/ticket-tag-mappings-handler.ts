@@ -114,6 +114,7 @@ export class TicketTagMappingsSideEffectHandler extends BaseSideEffectHandler {
           updatedBy: this.ctx.userID,
           activityType: ActivityType.TAGS,
           value: activityValue,
+          workspaceId: this.ctx.workspaceId,
           timestamp: now,
         },
         message: hasThread
@@ -122,6 +123,7 @@ export class TicketTagMappingsSideEffectHandler extends BaseSideEffectHandler {
               senderId: this.ctx.userID,
               content,
               activityType: 'TAGS',
+              workspaceId: this.ctx.workspaceId,
               createdAt: now,
             }
           : undefined,

@@ -57,6 +57,7 @@ export interface StageReconstructionResult {
 interface TicketSnapshot {
   id: string;
   xyneId: string;
+  workspaceId: string;
   stageName: string;
   statusV2: TicketStatusV2;
   boardId: string;
@@ -142,6 +143,7 @@ export class StageReconstructionService {
       select: {
         id: true,
         xyneId: true,
+        workspaceId: true,
         stageName: true,
         statusV2: true,
         boardId: true,
@@ -470,6 +472,7 @@ export class StageReconstructionService {
           } else if (!existingEntry && targetStage.eta !== null && targetStage.eta > 0) {
             await tx.ticketStageEta.create({
               data: {
+                workspaceId: ticket.workspaceId,
                 ticketId: ticket.id,
                 stageId: targetStage.id,
                 stageEnteredAt: now,
@@ -483,6 +486,7 @@ export class StageReconstructionService {
 
         await tx.ticketActivity.create({
           data: {
+            workspaceId: ticket.workspaceId,
             ticketId: ticket.id,
             updatedBy: actorUserId,
             timestamp: now,
@@ -500,6 +504,7 @@ export class StageReconstructionService {
       if (statusChanged) {
         await tx.ticketActivity.create({
           data: {
+            workspaceId: ticket.workspaceId,
             ticketId: ticket.id,
             updatedBy: actorUserId,
             timestamp: now,

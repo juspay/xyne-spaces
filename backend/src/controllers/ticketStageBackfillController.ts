@@ -167,6 +167,7 @@ export class TicketStageBackfillController {
         await tx.ticketStageEta.create({
           data: {
             ticketId: ticket.id,
+            workspaceId: scope.workspaceId,
             stageId: destinationStage.id,
             stageEnteredAt: now,
             stageLeftAt: null,

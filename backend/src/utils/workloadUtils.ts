@@ -72,7 +72,7 @@ export async function syncUserWorkload(
 ): Promise<void> {
   const board = await db.board.findUnique({
     where: { id: boardId },
-    select: { projectId: true },
+    select: { projectId: true, workspaceId: true },
   });
   if (!board) {
     logger.warn(`[Workload Sync] Board ${boardId} not found; skipping workload sync`);
@@ -122,6 +122,7 @@ export async function syncUserWorkload(
       userId,
       userGroupId,
       boardId,
+      workspaceId: board.workspaceId,
       activeTasks,
       totalTasks,
       createdBy,

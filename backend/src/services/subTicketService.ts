@@ -68,7 +68,7 @@ export async function createSubTicket(
     });
 
     await tx.ticketSubTicketMapping.create({
-      data: { id: mappingId, ticketId: parent.id, subTicketId },
+      data: { id: mappingId, ticketId: parent.id, subTicketId, workspaceId: parent.workspaceId },
     });
 
     const displayId = input.subTicketXyneId ?? subTicketId.slice(0, 8).toUpperCase();
@@ -78,6 +78,7 @@ export async function createSubTicket(
           ticketId: parent.id,
           updatedBy: input.createdBy,
           activityType: ActivityType.SUBTICKET_CREATED,
+          workspaceId: parent.workspaceId,
           value: {
             subTicketId,
             subTicketTitle: input.title,

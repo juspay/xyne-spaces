@@ -22,6 +22,7 @@ import { vespaBackfillQueue } from '@/queues/vespaQueue';
 import { channelSchema } from '@/vespa/src/types';
 import { db } from '@/database/client';
 import { NAMESPACE } from '@/vespa/vespaConfig';
+import { getContextOrNull } from '@/database/tenant/context';
 
 async function pushVespaJobForChannel(channelId: string, userId: string, workspaceId?: string): Promise<void> {
   vespaBackfillQueue.addJob({
@@ -33,6 +34,8 @@ async function pushVespaJobForChannel(channelId: string, userId: string, workspa
     logger.error(`[SlackMigration] Error queuing Vespa job for channel ${channelId}:`, error);
     // Log failed insertion to Postgres for later retry
     try {
+      const logWorkspaceId = workspaceId ?? getContextOrNull()?.workspaceId;
+      if (!logWorkspaceId) throw new Error('workspaceId required: no tenant context');
       if (db.vespaInsertionLogs) {
         await db.vespaInsertionLogs.create({
           data: {
@@ -45,6 +48,7 @@ async function pushVespaJobForChannel(channelId: string, userId: string, workspa
             errorDetails: JSON.stringify(error),
             userId,
             createdAt: new Date(),
+            workspaceId: logWorkspaceId,
           },
         });
       }

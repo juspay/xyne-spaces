@@ -357,6 +357,7 @@ export class ApiKeyService {
           description: request.description,
           keyHash,
           userId: apiKeyUser.id,
+          workspaceId,
           scopes: JSON.stringify(request.scopes),
           expiresAt,
           isActive: true,
@@ -364,7 +365,7 @@ export class ApiKeyService {
       });
 
       // Grant resource permissions based on scopes
-      await this.grantScopePermissions(apiKeyUser.id, request.scopes);
+      await this.grantScopePermissions(apiKeyUser.id, request.scopes, workspaceId);
 
       logger.info(`API key created: ${request.name} for user ${apiKeyUser.id} by ${createdByUserId}`);
 
@@ -386,7 +387,7 @@ export class ApiKeyService {
   /**
    * Grant ResourceAccess permissions based on scopes
    */
-  private async grantScopePermissions(userId: string, scopes: string[]): Promise<void> {
+  private async grantScopePermissions(userId: string, scopes: string[], workspaceId: string): Promise<void> {
     const scopeToPermission: Record<string, { resource: string; access: AccessType }[]> = {
       'tickets:read': [{ resource: 'tickets', access: AccessType.READ }],
       'tickets:write': [
@@ -459,7 +460,8 @@ export class ApiKeyService {
           create: {
             userId,
             resourceId: resource.id,
-            accessType
+            accessType,
+            workspaceId
           }
         });
       }

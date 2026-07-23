@@ -88,6 +88,7 @@ export class IngestionService {
         entityId: ds.id,
         eventType: 'connected',
         actorUserId: ds.createdBy,
+        workspaceId: ds.workspaceId,
       });
       const ctx: RunContext = {
         dataSourceId,
@@ -145,6 +146,7 @@ export class IngestionService {
           eventType: 'error',
           actorUserId: ds.createdBy,
           details: JSON.stringify({ message }),
+          workspaceId: ds.workspaceId,
         })
         .catch((e) =>
           logger.error(`[Ingestion] failed to write error activity for ${dataSourceId}:`, e)
@@ -209,6 +211,7 @@ export class IngestionService {
       eventType: 'schema_refreshed',
       actorUserId: ds.createdBy,
       details: JSON.stringify({ tableCount: tableRows.length }),
+      workspaceId: ds.workspaceId,
     });
 
     const columnIdByKey = new Map<string, string>();
@@ -338,7 +341,7 @@ export class IngestionService {
     discoveredRelationships: DiscoveredRelationship[],
     columnIdByKey: Map<string, string>
   ): Promise<void> {
-    const { dataSourceId } = ctx;
+    const { dataSourceId, ds } = ctx;
 
     const relationshipRows = discoveredRelationships
       .map((rel) => {
@@ -347,7 +350,7 @@ export class IngestionService {
         );
         const toColumnId = columnIdByKey.get(columnKey(rel.toSchema, rel.toTable, rel.toColumn));
         if (!fromColumnId || !toColumnId) return null;
-        return { dataSourceId, fromColumnId, toColumnId, cardinality: rel.cardinality };
+        return { dataSourceId, workspaceId: ds.workspaceId, fromColumnId, toColumnId, cardinality: rel.cardinality };
       })
       .filter((r): r is NonNullable<typeof r> => r !== null);
 
@@ -382,6 +385,7 @@ export class IngestionService {
       eventType: 'stats_refreshed',
       actorUserId: ds.createdBy,
       details: JSON.stringify({ durationMs, tables: total, profiled, failed: failedCount, status }),
+      workspaceId: ds.workspaceId,
     });
 
     await repositories.dataSources.updateIngestionStatus(dataSourceId, 'complete');

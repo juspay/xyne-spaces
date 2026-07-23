@@ -7,6 +7,7 @@
 import { z } from 'zod';
 import { type Tool } from '@juspay-jaf/jaf';
 import { db } from '../../../database/client.js';
+import { getContextOrNull } from '../../../database/tenant/context.js';
 import { logger } from '../../../utils/logger.js';
 import type { XyneAIAgentContext } from './types.js';
 import { getDescription } from './helpers.js';
@@ -250,9 +251,16 @@ export function createManageUserSkillTool(): Tool<
             return `Error: Maximum limit of ${MAX_SKILLS_PER_USER} skills reached. Please delete an existing skill first.`;
           }
 
+          // Denormalized tenant key sourced from the ambient tenant context.
+          const ws = getContextOrNull()?.workspaceId;
+          if (!ws) {
+            throw new Error('workspaceId required: no tenant context');
+          }
+
           // Create the skill
           const skill = await db.userSkill.create({
             data: {
+              workspaceId: ws,
               userId: context.userId,
               name: sanitizedName,
               description: skillDescription.trim(),

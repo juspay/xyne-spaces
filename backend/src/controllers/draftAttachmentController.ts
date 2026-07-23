@@ -127,6 +127,7 @@ export class DraftAttachmentController {
               channelId,
               conversationId: conversationId || null,
               userId,
+              workspaceId: req.user!.workspaceId!,
               content: '',
               hasAttachment: true,
               createdAt: now,

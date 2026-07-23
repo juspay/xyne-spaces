@@ -62,6 +62,7 @@ export class ChangeStageStep extends BaseActionStep<typeof ChangeStageConfigSche
         data: {
           ticketId,
           updatedBy,
+          workspaceId: context.automation.workspaceId,
           activityType: ActivityType.STAGE_NAME,
           value: { field: 'stageName', oldValue: ticket.stageName ?? null, newValue: stageName, source: ActivitySource.AUTOMATION, isAutomation: true },
         },

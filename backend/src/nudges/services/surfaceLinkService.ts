@@ -17,6 +17,15 @@ class SurfaceLinkService {
     const { sourceType, sourceId, targetType, targetId, linkKind, createdBy, projectId } = input;
 
     try {
+      // Stamp the denormalized tenant key from the owning project.
+      const project = await db.project.findUnique({
+        where: { id: projectId },
+        select: { workspaceId: true },
+      });
+      if (!project) {
+        throw new Error(`Project not found for surface link: ${projectId}`);
+      }
+
       await db.surfaceLink.upsert({
         where: {
           sourceType_sourceId_targetType_targetId_linkKind: {
@@ -35,6 +44,7 @@ class SurfaceLinkService {
           linkKind,
           createdBy,
           projectId,
+          workspaceId: project.workspaceId,
         },
         update: {},
       });

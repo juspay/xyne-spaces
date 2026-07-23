@@ -227,6 +227,7 @@ export class DataSourceService {
       });
       await tx.dashboardActivity.create({
         data: {
+          workspaceId: input.workspaceId,
           entityType: 'data_source',
           entityId: created.id,
           eventType: 'created',
@@ -276,6 +277,7 @@ export class DataSourceService {
       db.dataSource.delete({ where: { id } }),
       db.dashboardActivity.create({
         data: {
+          workspaceId,
           entityType: 'data_source',
           entityId: id,
           eventType: 'deleted',
@@ -308,6 +310,7 @@ export class DataSourceService {
       });
       await tx.dashboardActivity.create({
         data: {
+          workspaceId,
           entityType: 'data_source',
           entityId: id,
           eventType: 'refresh_requested',

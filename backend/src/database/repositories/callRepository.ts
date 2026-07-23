@@ -1,4 +1,5 @@
 import { DatabaseClient } from '../client';
+import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import { v4 as uuidv4 } from 'uuid';
 import {
   CallOrigin,
@@ -307,9 +308,11 @@ export class CallRepository {
 
 
   async createParticipant(data: CreateCallParticipantInput): Promise<CallParticipant> {
+    const workspaceId = await this.getCallWorkspaceId(data.callId);
     const result = await DatabaseClient.getInstance().callParticipant.create({
       data: {
         ...data,
+        workspaceId,
         meetingStatus: data.meetingStatus ?? MeetingStatus.PENDING,
       },
     });
@@ -393,6 +396,8 @@ export class CallRepository {
     params: CreateCallWithParticipantsInput,
     tx: Prisma.TransactionClient,
   ): Promise<{ callId: string; participantUserIds: string[] }> {
+    const workspaceId = await repositories.channels.getWorkspaceId(params.channelId);
+
     const baseParticipantUserIds = params.targetUserIds?.length
       ? params.targetUserIds
       : (await repositories.channelParticipants.getChannelParticipants(params.channelId)).map(p => p.userId);
@@ -407,6 +412,7 @@ export class CallRepository {
         id: params.callId,
         externalId: params.externalId,
         title: params.title,
+        workspaceId,
         createdByUserId: params.createdByUserId,
         ...(params.workspaceId && { workspaceId: params.workspaceId }),
         channelId: params.channelId,
@@ -432,6 +438,7 @@ export class CallRepository {
       data: participantUserIds.map((userId) => ({
         id: uuidv4(),
         callId: params.callId,
+        workspaceId,
         userId,
         invitedBy: params.createdByUserId,
         invitedAt: new Date(),
@@ -451,6 +458,7 @@ export class CallRepository {
           return {
             id: participantId,
             callId: params.callId,
+            workspaceId,
             userId: participantId,
             email,
             invitedBy: params.createdByUserId,
@@ -905,6 +913,19 @@ export class CallRepository {
   // ─────────────────────────────────────────────────────────────────────────
 
   /**
+   * Resolve the denormalized workspaceId for a call from its internal id.
+   * Used when only a callId is in scope (participant/lobby creates) so the new
+   * row inherits the workspace of the parent call.
+   */
+  private async getCallWorkspaceId(
+    callId: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<string> {
+    const client = tx ?? DatabaseClient.getInstance();
+    return resolveWorkspaceIdFromModel(client, 'call', { id: callId });
+  }
+
+  /**
    * Shared utility: create a conversation + system message inside an existing transaction.
    * Used by both `createCallWithParticipantsAndMessage` (new call) and
    * `activateScheduledCall` (SCHEDULED → ACTIVE transition).
@@ -915,7 +936,7 @@ export class CallRepository {
       conversationId: string;
       messageId: string;
       channelId: string;
-      workspaceId?: string;
+      workspaceId: string | null;
       callId: string;        // room externalId / roomName
       callType?: CallType;   // undefined ⇒ regular call
       initiatorName: string;
@@ -929,7 +950,7 @@ export class CallRepository {
       data: {
         conversationId,
         channelId,
-        ...(workspaceId ? { workspaceId } : {}),
+        workspaceId,
         createdBy: 'system',
         initialMessageId: messageId,
         ...(conversationMetadata ? { metadata: conversationMetadata } : {}),
@@ -940,7 +961,7 @@ export class CallRepository {
           data: {
             messageId,
             conversationId,
-            ...(workspaceId ? { workspaceId } : {}),
+            workspaceId,
             senderId: 'system',
         content: isHeadless ? 'Recording started' : `${initiatorName} started a call`,
         msgType: 'SYSTEM',
@@ -987,6 +1008,9 @@ export class CallRepository {
         throw new Error(`Call ${callParam.id} not found`);
       }
 
+      // Prefer the caller-supplied workspaceId, else inherit from the loaded call.
+      const resolvedWorkspaceId = workspaceId ?? call.workspaceId;
+
       const callMetadata = call.metadata as {
         systemMessageId?: string;
         conversationId?: string;
@@ -1000,7 +1024,7 @@ export class CallRepository {
         await this.createConversationAndSystemMessage(tx, {
           conversationId,
           messageId,
-          workspaceId,
+          workspaceId: resolvedWorkspaceId,
           channelId: call.callUpdatesChannel ?? call.channelId ?? '',
           callId: call.externalId,
           initiatorName,
@@ -1026,6 +1050,7 @@ export class CallRepository {
           data: {
             messageId,
             conversationId,
+            workspaceId: resolvedWorkspaceId,
             senderId: 'system',
             content: `${initiatorName} started a call`,
             msgType: 'SYSTEM',
@@ -1150,12 +1175,16 @@ export class CallRepository {
 
     const isHeadless = callType === CallType.HEADLESS;
 
+    // Prefer the caller-supplied workspaceId, else derive from the call's channel.
+    const wsId = workspaceId ?? await repositories.channels.getWorkspaceId(channelId);
+
     const result = await DatabaseClient.getInstance().$transaction(async (tx) => {
       // Create the call record with ACTIVE status
       const call = await tx.call.create({
         data: {
           id: callId,
           externalId: roomName,
+          workspaceId: wsId,
           createdByUserId: createdBy,
           channelId,
           ...(workspaceId && { workspaceId }),
@@ -1186,6 +1215,7 @@ export class CallRepository {
           data: {
             id: participantId,
             callId: call.id,
+            workspaceId: wsId,
             userId: channelParticipant.userId,
             invitedBy: createdBy,
             invitedAt: now,
@@ -1232,7 +1262,7 @@ export class CallRepository {
           data: {
             messageId,
             conversationId,
-            ...(workspaceId ? { workspaceId } : {}),
+            workspaceId: wsId,
             senderId: 'system',
             content: `${user?.displayName || user?.name || 'Someone'} started a call`,
             msgType: 'SYSTEM',
@@ -1251,7 +1281,7 @@ export class CallRepository {
           conversationId,
           messageId,
           channelId,
-          workspaceId,
+          workspaceId: wsId,
           callId: roomName,
           callType,
           initiatorName: user?.displayName || user?.name || 'Someone',
@@ -1265,7 +1295,7 @@ export class CallRepository {
       await tx.channelStats.upsert({
         where: { channelId },
         update: { lastActivityAt: now },
-        create: { channelId, lastActivityAt: now },
+        create: { channelId, workspaceId: wsId, lastActivityAt: now },
       });
 
       return { call, invitedParticipantIds };
@@ -1440,6 +1470,7 @@ export class CallRepository {
           data: addUserIds.map((userId) => ({
             id: uuidv4(),
             callId,
+            workspaceId: updatedCall.workspaceId,
             userId,
             invitedBy: updatedCall.createdByUserId,
             invitedAt: new Date(),
@@ -1479,6 +1510,7 @@ export class CallRepository {
               return {
                 id: participantId,
                 callId,
+                workspaceId: updatedCall.workspaceId,
                 userId: participantId,
                 email,
                 invitedBy: updatedCall.createdByUserId,
@@ -1549,10 +1581,12 @@ export class CallRepository {
   }): Promise<CallParticipant> {
     const { callId, displayName } = params;
     const id = uuidv4();
+    const workspaceId = await this.getCallWorkspaceId(callId);
     const participant = await DatabaseClient.getInstance().callParticipant.create({
       data: {
         id,
         callId,
+        workspaceId,
         userId: id, // Use same value so LiveKit identity (= id) always matches userId
         invitedBy: 'external_request',
         invitedAt: new Date(),
@@ -1877,7 +1911,10 @@ export class CallRepository {
     });
 
     if (!existing) {
-      await DatabaseClient.getInstance().call.create({ data });
+      // No channel to denormalize from (external calendar calls have channelId=null),
+      // so inherit the workspace of the organizer who owns the calendar sync.
+      const workspaceId = await resolveWorkspaceIdFromModel(DatabaseClient.getInstance(), 'user', { id: data.createdByUserId });
+      await DatabaseClient.getInstance().call.create({ data: { ...data, workspaceId } });
       queueCallVespaFeed(data.id, { source: CallVespaFeedSource.CallRepositoryUpsertExternalCalendarCallCreate });
       return;
     }

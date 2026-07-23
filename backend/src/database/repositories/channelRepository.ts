@@ -183,10 +183,11 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
 
   // Channel-specific methods
   async updateLastActivity(id: string): Promise<void> {
+    const workspaceId = await this.getWorkspaceId(id);
     await this.db.channelStats.upsert({
       where: { channelId: id },
       update: { lastActivityAt: new Date() },
-      create: { channelId: id, lastActivityAt: new Date() },
+      create: { channelId: id, workspaceId, lastActivityAt: new Date() },
     });
   }
 
@@ -199,10 +200,11 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
     });
     if (!latest) return;
 
+    const workspaceId = await this.getWorkspaceId(channelId);
     await this.db.channelStats.upsert({
       where: { channelId },
       update: { lastActivityAt: latest.createdAt },
-      create: { channelId, lastActivityAt: latest.createdAt },
+      create: { channelId, workspaceId, lastActivityAt: latest.createdAt },
     });
   }
 

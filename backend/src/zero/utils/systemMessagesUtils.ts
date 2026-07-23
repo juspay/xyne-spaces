@@ -132,6 +132,7 @@ export async function sendAddAndRemoveParticipantsSystemMessage(
       await tx.mutate.conversations.insert({
         conversationId,
         channelId,
+        workspaceId: channel.workspaceId,
         createdBy: 'system',
         initialMessageId: messageId,
         lastActivityAt: now,
@@ -145,6 +146,7 @@ export async function sendAddAndRemoveParticipantsSystemMessage(
       await tx.mutate.messages.insert({
         messageId,
         conversationId,
+        workspaceId: channel.workspaceId,
         senderId: newParticipants[0].userId,
         content: systemContent,
         msgType: MessageType.SYSTEM,
@@ -230,6 +232,14 @@ export async function sendCallSystemMessage(
   const conversationId = uuidv4();
   const messageId = uuidv4();
 
+  // Resolve the channel's workspace to stamp the denormalized tenant key onto
+  // the conversation/message rows.
+  const channels = await tx.run(zql.channels.where('id', channelId).limit(1));
+  const workspaceId = channels[0]?.workspaceId;
+  if (!workspaceId) {
+    throw new Error(`Channel not found for call system message: ${channelId}`);
+  }
+
   // Create message metadata for UI to detect this is a call message
   const messageMetadata = {
     isCallMessage: true,
@@ -241,6 +251,7 @@ export async function sendCallSystemMessage(
   await tx.mutate.conversations.insert({
     conversationId,
     channelId,
+    workspaceId,
     createdBy: 'system',
     initialMessageId: messageId,
     lastActivityAt: now,
@@ -256,6 +267,7 @@ export async function sendCallSystemMessage(
   await tx.mutate.messages.insert({
     messageId,
     conversationId,
+    workspaceId,
     senderId: 'system',
     content: `${initiatorUserName} started a call`, // Placeholder, will be updated on end
     msgType: MessageType.SYSTEM,

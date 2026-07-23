@@ -100,6 +100,7 @@ export class BoardRepository {
             eta: stage.eta,
             sequenceNumber,
             boardId: board.id,
+            workspaceId: data.workspaceId,
             createdBy: data.createdBy,
           });
         }

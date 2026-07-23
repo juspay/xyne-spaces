@@ -55,7 +55,9 @@ export class WorkspaceIdBackfillController {
     do {
       batchNumber += 1;
       const conversations: { conversationId: string; channelId: string }[] = await db.conversation.findMany({
-        where: { workspaceId: null },
+        // Backfill target: rows whose denormalized workspaceId is still NULL in the DB.
+        // Prisma types the column as non-null String, so coerce the null literal's type.
+        where: { workspaceId: null as unknown as string },
         select: { conversationId: true, channelId: true },
         orderBy: { conversationId: 'asc' },
         take: options.batchSize,
@@ -127,7 +129,9 @@ export class WorkspaceIdBackfillController {
     do {
       batchNumber += 1;
       const messages: { messageId: string; conversationId: string }[] = await db.message.findMany({
-        where: { workspaceId: null },
+        // Backfill target: rows whose denormalized workspaceId is still NULL in the DB.
+        // Prisma types the column as non-null String, so coerce the null literal's type.
+        where: { workspaceId: null as unknown as string },
         select: { messageId: true, conversationId: true },
         orderBy: { messageId: 'asc' },
         take: options.batchSize,
@@ -199,7 +203,9 @@ export class WorkspaceIdBackfillController {
     do {
       batchNumber += 1;
       const activities: { id: string; userId: string }[] = await db.activity.findMany({
-        where: { workspaceId: null },
+        // Backfill target: rows whose denormalized workspaceId is still NULL in the DB.
+        // Prisma types the column as non-null String, so coerce the null literal's type.
+        where: { workspaceId: null as unknown as string },
         select: { id: true, userId: true },
         orderBy: { id: 'asc' },
         take: options.batchSize,

@@ -133,10 +133,13 @@ export class WorkflowStepGcsSyncService {
     try {
       const execution = await db.workflowExecution.findUnique({
         where: { id: workflowExecutionId },
-        select: { createdBy: true },
+        select: { createdBy: true, workspaceId: true },
       });
       const userId = execution?.createdBy ?? '';
       const prisma = DatabaseClient.getInstance();
+      if (!execution) {
+        throw new Error(`WorkflowExecution not found for id=${workflowExecutionId}, cannot resolve workspaceId`);
+      }
       await prisma.sessionRecordingFile.upsert({
         where: { sessionId: sourceId },
         create: {
@@ -144,6 +147,7 @@ export class WorkflowStepGcsSyncService {
           userId,
           url: gcsUri,
           status: SessionRecordingProcessStatus.PENDING,
+          workspaceId: execution.workspaceId,
         },
         update: {
           status: SessionRecordingProcessStatus.PENDING,

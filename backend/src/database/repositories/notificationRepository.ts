@@ -1,4 +1,5 @@
 import { BaseRepository } from './base';
+import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import { Notification, NotificationPreference, BrowserNotificationSubscription, NotificationType, NotificationStatus, NotificationDeliveryMethod } from '@prisma/client';
 
 // Define create/update input types
@@ -24,7 +25,8 @@ export class NotificationRepository extends BaseRepository<Notification, Notific
   }
 
   async create(data: NotificationCreateInput): Promise<Notification> {
-    return this.db.notification.create({ data: data as any });
+    const workspaceId = await resolveWorkspaceIdFromModel(this.db, 'user', { id: data.userId });
+    return this.db.notification.create({ data: { ...data, workspaceId } as any });
   }
 
   async findById(id: string): Promise<Notification | null> {
@@ -155,7 +157,8 @@ export class NotificationPreferenceRepository extends BaseRepository<Notificatio
   }
 
   async create(data: NotificationPreferenceCreateInput): Promise<NotificationPreference> {
-    return this.db.notificationPreference.create({ data: data as any });
+    const workspaceId = await resolveWorkspaceIdFromModel(this.db, 'user', { id: data.userId });
+    return this.db.notificationPreference.create({ data: { ...data, workspaceId } as any });
   }
 
   async findById(id: string): Promise<NotificationPreference | null> {
@@ -189,6 +192,7 @@ export class NotificationPreferenceRepository extends BaseRepository<Notificatio
       slackEnabled: boolean;
     }
   ): Promise<NotificationPreference> {
+    const workspaceId = await resolveWorkspaceIdFromModel(this.db, 'user', { id: userId });
     return this.db.notificationPreference.upsert({
       where: {
         userId_notificationType: {
@@ -199,6 +203,7 @@ export class NotificationPreferenceRepository extends BaseRepository<Notificatio
       update: preferences,
       create: {
         userId,
+        workspaceId,
         notificationType: notificationType as any,
         ...preferences
       }
@@ -225,7 +230,8 @@ export class BrowserNotificationSubscriptionRepository extends BaseRepository<Br
   }
 
   async create(data: BrowserNotificationSubscriptionCreateInput): Promise<BrowserNotificationSubscription> {
-    return this.db.browserNotificationSubscription.create({ data: data as any });
+    const workspaceId = await resolveWorkspaceIdFromModel(this.db, 'user', { id: data.userId });
+    return this.db.browserNotificationSubscription.create({ data: { ...data, workspaceId } as any });
   }
 
   async findById(id: string): Promise<BrowserNotificationSubscription | null> {
@@ -270,6 +276,7 @@ export class BrowserNotificationSubscriptionRepository extends BaseRepository<Br
     auth: string;
     userAgent?: string;
   }): Promise<BrowserNotificationSubscription> {
+    const workspaceId = await resolveWorkspaceIdFromModel(this.db, 'user', { id: data.userId });
     return this.db.browserNotificationSubscription.upsert({
       where: { endpoint: data.endpoint },
       update: {
@@ -282,6 +289,7 @@ export class BrowserNotificationSubscriptionRepository extends BaseRepository<Br
       },
       create: {
         ...data,
+        workspaceId,
         isActive: true,
         lastUsedAt: new Date()
       }

@@ -53,13 +53,13 @@ export class ProjectTagsBackfillController {
         id: string;
         name: string;
         ticketId: string;
-        ticket: { projectId: string };
+        ticket: { projectId: string; workspaceId: string };
       }> = await db.ticketTag.findMany({
         select: {
           id: true,
           name: true,
           ticketId: true,
-          ticket: { select: { projectId: true } },
+          ticket: { select: { projectId: true, workspaceId: true } },
         },
         orderBy: { id: 'asc' },
         take: options.batchSize,
@@ -72,8 +72,8 @@ export class ProjectTagsBackfillController {
       cursor = ticketTags[ticketTags.length - 1]?.id ?? null;
 
       // Collect unique (projectId, name) pairs
-      const uniqueProjectTags = new Map<string, { name: string; projectId: string }>();
-      const validTags: Array<{ name: string; ticketId: string; projectId: string }> = [];
+      const uniqueProjectTags = new Map<string, { name: string; projectId: string; workspaceId: string }>();
+      const validTags: Array<{ name: string; ticketId: string; projectId: string; workspaceId: string }> = [];
 
       for (const tag of ticketTags) {
         summary.processed += 1;
@@ -83,9 +83,9 @@ export class ProjectTagsBackfillController {
         }
         const key = `${tag.ticket.projectId}::${tag.name}`;
         if (!uniqueProjectTags.has(key)) {
-          uniqueProjectTags.set(key, { name: tag.name, projectId: tag.ticket.projectId });
+          uniqueProjectTags.set(key, { name: tag.name, projectId: tag.ticket.projectId, workspaceId: tag.ticket.workspaceId });
         }
-        validTags.push({ name: tag.name, ticketId: tag.ticketId, projectId: tag.ticket.projectId });
+        validTags.push({ name: tag.name, ticketId: tag.ticketId, projectId: tag.ticket.projectId, workspaceId: tag.ticket.workspaceId });
       }
 
       if (options.dryRun) {
@@ -97,7 +97,7 @@ export class ProjectTagsBackfillController {
         if (ptValues.length > 0) {
           try {
             const result = await db.projectTag.createMany({
-              data: ptValues.map(v => ({ name: v.name, projectId: v.projectId })),
+              data: ptValues.map(v => ({ name: v.name, projectId: v.projectId, workspaceId: v.workspaceId })),
               skipDuplicates: true,
             });
             summary.projectTagsCreated += result.count;
@@ -120,14 +120,14 @@ export class ProjectTagsBackfillController {
         const ptLookup = new Map(projectTagRows.map(pt => [`${pt.projectId}::${pt.name}`, pt.id]));
 
         // Batch create ticket_tag_mappings
-        const mappingData: Array<{ ticketId: string; tagId: string; tagName: string }> = [];
+        const mappingData: Array<{ ticketId: string; tagId: string; tagName: string; workspaceId: string }> = [];
         for (const tag of validTags) {
           const tagId = ptLookup.get(`${tag.projectId}::${tag.name}`);
           if (!tagId) {
             summary.skipped += 1;
             continue;
           }
-          mappingData.push({ ticketId: tag.ticketId, tagId, tagName: tag.name });
+          mappingData.push({ ticketId: tag.ticketId, tagId, tagName: tag.name, workspaceId: tag.workspaceId });
         }
 
         if (mappingData.length > 0) {

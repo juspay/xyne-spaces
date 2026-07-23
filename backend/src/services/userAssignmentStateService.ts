@@ -1,4 +1,5 @@
 import { DatabaseClient } from '@/database/client';
+import { getContextOrNull } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import { assignmentReactivationQueue } from '@/queues/assignmentReactivationQueue';
 import { redisService } from './redisService';
@@ -136,6 +137,12 @@ export class UserAssignmentStateService {
         currentStates.map(s => [s.userGroupId, { onCall: s.onCall, isActiveForAssignment: s.isActiveForAssignment }])
       );
 
+      // Denormalized tenant key for any newly-created state rows.
+      const ws = getContextOrNull()?.workspaceId;
+      if (!ws) {
+        throw new Error('workspaceId required: no tenant context');
+      }
+
       // Restore states from Redis backup.
       // - Only groups with active state (onCall or isActiveForAssignment) are stored in backup.
       // - If current state is active (manual override), keep it and skip backup restoration.
@@ -173,6 +180,7 @@ export class UserAssignmentStateService {
           } else {
             return this.prisma.userAssignmentState.create({
               data: {
+                workspaceId: ws,
                 userId,
                 userGroupId,
                 onCall: restoredOnCall,

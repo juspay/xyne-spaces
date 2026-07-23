@@ -250,6 +250,7 @@ export class DashboardController {
       });
       await tx.dashboardParticipant.create({
         data: {
+          workspaceId: ctx.workspaceId,
           dashboardId: created.id,
           userId: ctx.userId,
           role: DashboardRole.OWNER,
@@ -259,6 +260,7 @@ export class DashboardController {
         const c = components[i]!;
         const query = await tx.dynamicDashboardQuery.create({
           data: {
+            workspaceId: ctx.workspaceId,
             title: c.title ?? null,
             queryType: 'external',
             queryJson: c.queryJson,
@@ -269,7 +271,7 @@ export class DashboardController {
           },
         });
         await tx.dynamicDashboardQueryMapping.create({
-          data: { dashboardId: created.id, queryId: query.id, sequence: i },
+          data: { workspaceId: ctx.workspaceId, dashboardId: created.id, queryId: query.id, sequence: i },
         });
       }
       return created;
@@ -501,7 +503,7 @@ export class DashboardController {
           });
           if (existing) continue;
           await tx.dashboardParticipant.create({
-            data: { dashboardId, userId: p.userId, role: p.role },
+            data: { workspaceId: ctx.workspaceId, dashboardId, userId: p.userId, role: p.role },
           });
         }
       });

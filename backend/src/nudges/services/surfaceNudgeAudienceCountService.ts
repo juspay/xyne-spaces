@@ -1,4 +1,5 @@
 import { db } from '@/database/client';
+import { getContextOrNull } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import {
   buildSurfaceNudgeCountRowId,
@@ -116,6 +117,24 @@ export async function rebuildSurfaceNudgeAudienceCounts(params: {
   }
 
   const publicChannelId = await resolveChannelIdForSurface(tx, sourceType, sourceId);
+
+  // All rows for a single surface belong to the same workspace. Derive it from
+  // the surface's channel, falling back to the ambient tenant context.
+  let workspaceId: string | undefined;
+  if (publicChannelId) {
+    const channel = await tx.channel.findUnique({
+      where: { id: publicChannelId },
+      select: { workspaceId: true },
+    });
+    workspaceId = channel?.workspaceId ?? undefined;
+  }
+  workspaceId ??= getContextOrNull()?.workspaceId;
+  if (!workspaceId) {
+    throw new Error(
+      '[SurfaceNudgeAudienceCount] workspaceId required: no channel or tenant context',
+    );
+  }
+
   const now = new Date();
   const audienceBuckets = new Map<
     string,
@@ -136,6 +155,7 @@ export async function rebuildSurfaceNudgeAudienceCounts(params: {
       } else {
         audienceBuckets.set(rowId, {
           id: rowId,
+          workspaceId,
           nudgeCount: 1,
           userId: nudge.visibleTo,
           channelId: null,
@@ -166,6 +186,7 @@ export async function rebuildSurfaceNudgeAudienceCounts(params: {
     } else {
       audienceBuckets.set(rowId, {
         id: rowId,
+        workspaceId,
         nudgeCount: 1,
         userId: null,
         channelId: publicChannelId,

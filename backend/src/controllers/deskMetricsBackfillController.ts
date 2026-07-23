@@ -86,7 +86,7 @@ export class DeskMetricsBackfillController {
       try {
         const inserted = await db.$executeRaw`
           WITH batch AS (
-            SELECT t.id, t."createdBy", t."createdAt", t."channelId", t."priority", t."stageName", t."statusV2"
+            SELECT t.id, t."createdBy", t."createdAt", t."channelId", t."workspaceId", t."priority", t."stageName", t."statusV2"
             FROM "public"."tickets" t
             WHERE t."channelId" IN (
                 SELECT "channelId" FROM "public"."email_channel_preferences"
@@ -98,7 +98,7 @@ export class DeskMetricsBackfillController {
               )
             LIMIT ${batchSize}
           )
-          INSERT INTO "public"."ticket_activities" (id, "ticketId", "updatedBy", timestamp, "activityType", "channelId", value)
+          INSERT INTO "public"."ticket_activities" (id, "ticketId", "updatedBy", timestamp, "activityType", "channelId", "workspaceId", value)
           SELECT
             gen_random_uuid()::text,
             b.id,
@@ -106,6 +106,7 @@ export class DeskMetricsBackfillController {
             b."createdAt",
             'TICKET_CREATED',
             b."channelId",
+            b."workspaceId",
             jsonb_build_object('field', 'ticketCreated', 'priority', b."priority"::text, 'stageName', b."stageName", 'statusV2', b."statusV2"::text)
           FROM batch b
         `;

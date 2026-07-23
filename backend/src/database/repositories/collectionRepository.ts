@@ -180,8 +180,12 @@ export class CollectionRepository {
     }): Promise<Collection> {
         const parent = await this.db.collection.findUnique({
             where: { id: data.parentFolderId },
-            select: { parentId: true, rootCollectionId: true },
+            select: { parentId: true, rootCollectionId: true, workspaceId: true },
         });
+
+        if (!parent?.workspaceId) {
+            throw new Error(`Could not find workspaceId for parent collection ${data.parentFolderId}`);
+        }
 
         // If parent is a root collection (parentId = null), rootCollectionId = parentFolderId
         // Otherwise inherit parent's rootCollectionId
@@ -198,6 +202,7 @@ export class CollectionRepository {
             data: {
                 parentId: data.parentFolderId,
                 ownerId: data.ownerId,
+                workspaceId: parent.workspaceId,
                 scopeType: data.scopeType,
                 scopeId: data.scopeId,
                 name: data.name,
@@ -228,6 +233,7 @@ export class CollectionRepository {
             data: {
                 rootCollectionId: data.rootCollectionId,
                 collectionId: data.collectionId,
+                workspaceId: data.workspaceId,
                 fileId: uuidv4(),
                 ownerId: data.ownerId,
                 name: data.name,
@@ -334,9 +340,14 @@ export class CollectionRepository {
                 await tx.collectionPermission.deleteMany({ where: { collectionId } });
                 if (data.permissions && data.permissions.length > 0) {
                     const now = new Date();
+                    const collection = await tx.collection.findUniqueOrThrow({
+                        where: { id: collectionId },
+                        select: { workspaceId: true },
+                    });
                     await tx.collectionPermission.createMany({
                         data: data.permissions.map(p => ({
                             collectionId,
+                            workspaceId: collection.workspaceId,
                             userId: p.userId,
                             userGroupId: p.userGroupId,
                             role: p.role,
@@ -517,6 +528,7 @@ export class CollectionRepository {
                 data: {
                     rootCollectionId: current.rootCollectionId,
                     collectionId: current.collectionId,
+                    workspaceId: data.workspaceId,
                     fileId: current.fileId,
                     ownerId: current.ownerId,
                     name: current.name,

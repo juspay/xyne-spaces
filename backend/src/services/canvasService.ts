@@ -206,6 +206,17 @@ export async function createKnowledgeCanvas(
     const prisma = DatabaseClient.getInstance();
     const now = new Date();
 
+    // Resolve the creator's workspace to stamp the denormalized tenant key.
+    const creator = await prisma.user.findUnique({
+      where: { id: createdByUserId },
+      select: { workspaceId: true },
+    });
+    if (!creator?.workspaceId) {
+      logger.error('[CanvasService] Creator workspace not found - cannot create canvas');
+      return null;
+    }
+    const workspaceId = creator.workspaceId;
+
     // Generate IDs
     const canvasId = uuidv4();
     const participantId = uuidv4();
@@ -221,6 +232,7 @@ export async function createKnowledgeCanvas(
       data: {
         id: canvasId,
         title: finalTitle,
+        workspaceId,
         content: content as any, // BlockNote JSON array
         createdBy: createdByUserId,
         visibility: 'PUBLIC',
@@ -247,6 +259,7 @@ export async function createKnowledgeCanvas(
       data: {
         id: participantId,
         canvasId,
+        workspaceId,
         userId: createdByUserId,
         role: 'OWNER',
         joinedAt: now,
@@ -414,6 +427,15 @@ export async function approveKnowledgeCanvas(
       return { success: false, error: 'Canvas missing projectId in metadata' };
     }
 
+    // Resolve the project's workspace to stamp the denormalized tenant key.
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: { workspaceId: true },
+    });
+    if (!project) {
+      return { success: false, error: 'Project not found for canvas' };
+    }
+
     const workflowExecutionId = metadata.workflowExecutionId as string | undefined;
     const conversationId = metadata.conversationId as string | undefined;
     const repositoryUrl = metadata.repositoryUrl as string | null | undefined;
@@ -443,6 +465,7 @@ export async function approveKnowledgeCanvas(
     const document = await prisma.knowledgeDocument.create({
       data: {
         projectId,
+        workspaceId: project.workspaceId,
         repositoryUrl: repositoryUrl || null,
         title: canvas.title,
         content: markdownContent,

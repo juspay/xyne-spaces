@@ -449,12 +449,20 @@ export class AutomationExecutor {
     const data = payload === null ? null : JSON.stringify(payload);
     const executorType =
       CONTROL_FLOW_STEP_TYPES.has(step.type) ? 'conditional' : 'deterministic';
+    const execution = await this.prisma.workflowExecution.findUnique({
+      where: { id: runId },
+      select: { workspaceId: true },
+    });
+    if (!execution?.workspaceId) {
+      throw new Error(`Could not find workspaceId for workflow execution ${runId}`);
+    }
     await this.prisma.workflowStep.upsert({
       where: {
         workflowExecutionId_stepName: { workflowExecutionId: runId, stepName },
       },
       create: {
         workflowExecutionId: runId,
+        workspaceId: execution.workspaceId,
         stepName,
         stepExecutorType: executorType,
         status,

@@ -125,6 +125,7 @@ export class SendCsatRequestStep extends BaseActionStep<
       data: {
         ticketId,
         updatedBy: context.automation.createdById,
+        workspaceId: context.automation.workspaceId,
         activityType: ActivityType.METADATA,
         value: { field: 'csatRequest', emailId, isAutomation: true },
       },

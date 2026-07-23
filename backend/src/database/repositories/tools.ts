@@ -1,4 +1,5 @@
 import { BaseRepository } from './base';
+import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import {
   Tool,
   CreateToolInput,
@@ -178,9 +179,12 @@ export class AgentToolsMappingRepository extends BaseRepository<AgentToolsMappin
       return this.update(existing.id, { status: 'Enabled' });
     }
 
+    const workspaceId = await resolveWorkspaceIdFromModel(this.db, 'agent', { id: agentId });
+
     return this.create({
       agent: { connect: { id: agentId } },
       tool: { connect: { id: toolId } },
+      workspaceId,
       status: 'Enabled',
     });
   }

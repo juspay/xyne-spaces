@@ -206,6 +206,12 @@ export class ConversationService {
         try {
           const vespaLogs = db.vespaInsertionLogs;
           if (vespaLogs) {
+            const resolvedWorkspaceId = workspaceId
+              ?? (await db.message.findUnique({ where: { messageId: messageID }, select: { workspaceId: true } }))?.workspaceId;
+            if (!resolvedWorkspaceId) {
+              logger.error(`[ConversationService] Cannot log Vespa insertion error: no workspaceId for message ${messageID}`);
+              return;
+            }
             await vespaLogs.create({
               data: {
                 status: 'FAILED',
@@ -216,6 +222,7 @@ export class ConversationService {
                 errorMessage: `Failed to enqueue Vespa job: ${error instanceof Error ? error.message : String(error)}`,
                 errorDetails: JSON.stringify(error),
                 userId: userId,
+                workspaceId: resolvedWorkspaceId,
                 createdAt: new Date(),
               },
             });
@@ -241,6 +248,12 @@ export class ConversationService {
       // Log failed insertion to Postgres for later retry
       try {
         if (db.vespaInsertionLogs) {
+          const resolvedWorkspaceId = workspaceId
+            ?? (await db.channel.findUnique({ where: { id: channelId }, select: { workspaceId: true } }))?.workspaceId;
+          if (!resolvedWorkspaceId) {
+            logger.error(`[ConversationService] Cannot log Vespa insertion error: no workspaceId for channel ${channelId}`);
+            return;
+          }
           await db.vespaInsertionLogs.create({
             data: {
               status: 'FAILED',
@@ -251,6 +264,7 @@ export class ConversationService {
               errorMessage: `Failed to enqueue Vespa job: ${error instanceof Error ? error.message : String(error)}`,
               errorDetails: JSON.stringify(error),
               userId,
+              workspaceId: resolvedWorkspaceId,
               createdAt: new Date(),
             },
           });
@@ -285,6 +299,12 @@ export class ConversationService {
         // Log failed insertion to Postgres
         try {
           if (db.vespaInsertionLogs) {
+            const resolvedWorkspaceId = workspaceId
+              ?? (await db.messageAttachment.findUnique({ where: { id: attachment.id }, select: { workspaceId: true } }))?.workspaceId;
+            if (!resolvedWorkspaceId) {
+              logger.error(`[ConversationService] Cannot log Vespa insertion error: no workspaceId for attachment ${attachment.id}`);
+              return;
+            }
             await db.vespaInsertionLogs.create({
               data: {
                 status: "FAILED",
@@ -295,6 +315,7 @@ export class ConversationService {
                 errorMessage: `Failed to enqueue Vespa job: ${error instanceof Error ? error.message : String(error)}`,
                 errorDetails: JSON.stringify(error),
                 userId: userId,
+                workspaceId: resolvedWorkspaceId,
                 createdAt: new Date(),
               },
             });

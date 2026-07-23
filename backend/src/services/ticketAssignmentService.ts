@@ -236,6 +236,9 @@ export class TicketAssignmentService {
       ? (metadata.assignmentRoles as AssignmentRoleSlot[])
       : [];
     const workspaceId = board?.workspaceId;
+    if (!workspaceId) {
+      throw new Error(`workspaceId required: board ${boardId} not found`);
+    }
 
     if (assignmentRoles.length > 0) {
       return this.assignRoleDrivenSlots({
@@ -246,6 +249,7 @@ export class TicketAssignmentService {
         projectId,
         channelId,
         assignmentRoles,
+        workspaceId,
       });
     }
 
@@ -271,8 +275,9 @@ export class TicketAssignmentService {
     projectId?: string;
     channelId?: string;
     assignmentRoles: AssignmentRoleSlot[];
+    workspaceId: string;
   }): Promise<RoleDrivenAssignmentResult> {
-    const { ticketId, userGroupId, boardId, createdBy, projectId, channelId, assignmentRoles } = params;
+    const { ticketId, userGroupId, boardId, createdBy, projectId, channelId, assignmentRoles, workspaceId } = params;
 
     const roleIds = assignmentRoles.map(s => s.roleId);
     const slots = await evaluateRoleSlots(userGroupId, boardId, roleIds, projectId, channelId);
@@ -312,6 +317,7 @@ export class TicketAssignmentService {
         userId,
         roleId,
         createdBy,
+        workspaceId,
         ...(userResponsibility ? { userResponsibility } : {}),
       };
       const assignment = existingAssignment
@@ -374,7 +380,7 @@ export class TicketAssignmentService {
     createdBy: string;
     projectId?: string;
     channelId?: string;
-    workspaceId?: string;
+    workspaceId: string;
   }): Promise<FullRoleAssignmentResult> {
     const { ticketId, userGroupId, boardId, createdBy, projectId, channelId, workspaceId } = params;
 
@@ -385,11 +391,12 @@ export class TicketAssignmentService {
       responsibility: UserResponsibility,
     ): Promise<RoleAssignment> => {
       const roleId = workspaceId ? await roleIdFromEnum(responsibility, workspaceId) : null;
-      const createData: { ticketId: string; userId: string; userResponsibility: UserResponsibility; createdBy: string; roleId?: string } = {
+      const createData: { ticketId: string; userId: string; userResponsibility: UserResponsibility; createdBy: string; workspaceId: string; roleId?: string } = {
         ticketId,
         userId,
         userResponsibility: responsibility,
         createdBy,
+        workspaceId,
       };
       if (roleId) createData.roleId = roleId;
       const assignment = await prisma.ticketAssignment.upsert({

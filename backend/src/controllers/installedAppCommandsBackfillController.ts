@@ -41,6 +41,7 @@ export class InstalledAppCommandsBackfillController {
   private static async syncInstall(
     installedAppId: string,
     appId: string,
+    workspaceId: string | null,
     dryRun: boolean,
     summary: BackfillSummary,
   ): Promise<void> {
@@ -80,6 +81,7 @@ export class InstalledAppCommandsBackfillController {
               commandAccessibility: c.commandAccessibility,
               createdAt: now,
               updatedAt: now,
+              workspaceId,
             },
           });
         }
@@ -104,8 +106,8 @@ export class InstalledAppCommandsBackfillController {
 
     do {
       batchNumber += 1;
-      const installs: Array<{ id: string; appId: string }> = await db.installedApps.findMany({
-        select: { id: true, appId: true },
+      const installs: Array<{ id: string; appId: string; workspaceId: string | null }> = await db.installedApps.findMany({
+        select: { id: true, appId: true, workspaceId: true },
         orderBy: { id: 'asc' },
         take: options.batchSize,
         ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
@@ -116,7 +118,7 @@ export class InstalledAppCommandsBackfillController {
       for (const inst of installs) {
         summary.processedInstalls += 1;
         try {
-          await InstalledAppCommandsBackfillController.syncInstall(inst.id, inst.appId, options.dryRun, summary);
+          await InstalledAppCommandsBackfillController.syncInstall(inst.id, inst.appId, inst.workspaceId, options.dryRun, summary);
         } catch (error) {
           summary.errors += 1;
           logger.warn(`${TAG} Failed to backfill install`, {

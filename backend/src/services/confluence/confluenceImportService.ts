@@ -631,6 +631,7 @@ export class ConfluenceImportService {
         boardId: null,
         credentials,
         isActive: true,
+        workspaceId: target.workspaceId,
       },
       select: { id: true },
     });
@@ -817,6 +818,10 @@ export class ConfluenceImportService {
     if (!input.projectId) {
       throw new Error('Target project was not resolved for Confluence destination');
     }
+    const workspaceId = input.workspaceId;
+    if (!workspaceId) {
+      throw new Error('workspaceId required: Confluence import target not resolved');
+    }
 
     if (mapping.type === 'channel') {
       const channelId = mapping.channelId || (await this.findOrCreateProjectChannel({
@@ -847,6 +852,7 @@ export class ConfluenceImportService {
       const folderId = await this.findOrCreateCanvasFolder({
         projectId: input.projectId,
         channelId,
+        workspaceId,
         actorUserId: input.actorUserId,
         sectionTitle,
         folderIdBySection,
@@ -887,6 +893,7 @@ export class ConfluenceImportService {
             channelId: null,
             name: folderName,
             createdBy: input.actorUserId,
+            workspaceId,
           },
           select: { id: true },
         });
@@ -909,6 +916,7 @@ export class ConfluenceImportService {
   private async findOrCreateCanvasFolder(input: {
     projectId: string;
     channelId: string | null;
+    workspaceId: string;
     actorUserId: string;
     sectionTitle: string;
     folderIdBySection: Map<string, string>;
@@ -940,6 +948,7 @@ export class ConfluenceImportService {
         channelId: input.channelId,
         name: input.sectionTitle,
         createdBy: input.actorUserId,
+        workspaceId: input.workspaceId,
       },
       select: { id: true },
     });
@@ -1020,6 +1029,10 @@ export class ConfluenceImportService {
       if (!input.projectId) {
         throw new Error('Target project was not resolved for Confluence page import');
       }
+      const workspaceId = input.workspaceId;
+      if (!workspaceId) {
+        throw new Error('workspaceId required: Confluence import config missing workspaceId');
+      }
 
       const existingCanvas = await this.findExistingCanvas(page.id, input.projectId, input.externalSourceId);
       const canvasId = existingCanvas?.id || uuidv4();
@@ -1045,7 +1058,7 @@ export class ConfluenceImportService {
             prepared.topLevelPageId,
             canvasId,
             input.actorUserId,
-            input.workspaceId || '',
+            workspaceId,
             input.externalSourceId,
             summary.warnings,
           );
@@ -1072,7 +1085,7 @@ export class ConfluenceImportService {
 
       if (existingCanvas) {
         await this.updateCanvasRecord(existingCanvas.id, title, content, input.actorUserId, creatorUserId, lastEditorUserId, prepared, input, visibilityDecision, checksum, sourceUrl, existingCanvas.metadata);
-        await this.ensureCanvasExternalMapping(input.externalSourceId, page.id, prepared.topLevelPageId, existingCanvas.id);
+        await this.ensureCanvasExternalMapping(input.externalSourceId, page.id, prepared.topLevelPageId, existingCanvas.id, workspaceId);
         summary.updatedCanvases += 1;
         if (prepared.isContainerPage) summary.containerCanvasesUpdated += 1;
         summary.pageResults.push({
@@ -1092,7 +1105,7 @@ export class ConfluenceImportService {
         });
       } else {
         await this.createCanvasRecord(canvasId, title, content, input.actorUserId, creatorUserId, lastEditorUserId, prepared, input, visibilityDecision, checksum, sourceUrl);
-        await this.ensureCanvasExternalMapping(input.externalSourceId, page.id, prepared.topLevelPageId, canvasId);
+        await this.ensureCanvasExternalMapping(input.externalSourceId, page.id, prepared.topLevelPageId, canvasId, workspaceId);
         summary.createdCanvases += 1;
         if (prepared.isContainerPage) summary.containerCanvasesCreated += 1;
         summary.pageResults.push({
@@ -1189,6 +1202,7 @@ export class ConfluenceImportService {
     confluencePageId: string,
     topLevelPageId: string,
     canvasId: string,
+    workspaceId: string,
   ): Promise<void> {
     if (!externalSourceId) return;
 
@@ -1207,6 +1221,7 @@ export class ConfluenceImportService {
         entityId: canvasId,
         messageId: canvasId,
         direction: MessageDirection.INCOMING,
+        workspaceId,
       },
       update: {
         externalThreadId: topLevelPageId || confluencePageId,
@@ -1232,6 +1247,10 @@ export class ConfluenceImportService {
     sourceUrl?: string,
   ): Promise<void> {
     const safeContent = sanitizeForJson(content) as Prisma.InputJsonValue;
+    const workspaceId = input.workspaceId;
+    if (!workspaceId) {
+      throw new Error('workspaceId required: Confluence import config missing workspaceId');
+    }
     const ownerUserIds = uniqueIds([creatorUserId, lastEditorUserId, actorUserId]);
     await db.$transaction([
       db.canvas.create({
@@ -1246,6 +1265,7 @@ export class ConfluenceImportService {
           isTemplate: false,
           isCollaborative: true,
           docType: DocType.Canvas,
+          workspaceId,
           projectId: prepared.destination.projectId,
           ...(prepared.destination.type === 'channel' || prepared.destination.type === 'channelFolder'
             ? { channelId: prepared.destination.channelId }
@@ -1264,6 +1284,7 @@ export class ConfluenceImportService {
           role: CanvasRole.OWNER,
           joinedAt: new Date(),
           updatedAt: new Date(),
+          workspaceId,
         })),
         skipDuplicates: true,
       }),
@@ -1307,11 +1328,15 @@ export class ConfluenceImportService {
       },
     });
 
-    await this.ensureCanvasOwners(canvasId, [creatorUserId, lastEditorUserId, actorUserId]);
+    const ownersWorkspaceId = input.workspaceId;
+    if (!ownersWorkspaceId) {
+      throw new Error('workspaceId required: Confluence import config missing workspaceId');
+    }
+    await this.ensureCanvasOwners(canvasId, [creatorUserId, lastEditorUserId, actorUserId], ownersWorkspaceId);
     await syncToYSweet(canvasId, safeContent as unknown as BlockNoteBlock[]);
   }
 
-  private async ensureCanvasOwners(canvasId: string, userIds: string[]): Promise<void> {
+  private async ensureCanvasOwners(canvasId: string, userIds: string[], workspaceId: string): Promise<void> {
     const ownerUserIds = uniqueIds(userIds);
     if (ownerUserIds.length === 0) return;
 
@@ -1323,6 +1348,7 @@ export class ConfluenceImportService {
         role: CanvasRole.OWNER,
         joinedAt: new Date(),
         updatedAt: new Date(),
+        workspaceId,
       })),
       skipDuplicates: true,
     });
@@ -1499,6 +1525,7 @@ export class ConfluenceImportService {
             topLevelPageId,
             attachment.id,
             existing.id,
+            workspaceId,
           );
           result.urlByFileName.set(attachment.title, existing.id);
           result.reusedCount += 1;
@@ -1549,6 +1576,7 @@ export class ConfluenceImportService {
           topLevelPageId,
           attachment.id,
           attachmentRecord.id,
+          workspaceId,
         );
         result.migratedCount += 1;
       } catch (error) {
@@ -1580,6 +1608,7 @@ export class ConfluenceImportService {
     topLevelPageId: string,
     confluenceAttachmentId: string,
     attachmentRowId: string,
+    workspaceId: string,
   ): Promise<void> {
     if (!externalSourceId) return;
 
@@ -1598,6 +1627,7 @@ export class ConfluenceImportService {
         entityId: attachmentRowId,
         messageId: attachmentRowId,
         direction: MessageDirection.INCOMING,
+        workspaceId,
       },
       update: {
         externalThreadId: topLevelPageId || confluencePageId,

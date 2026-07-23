@@ -483,6 +483,7 @@ class IncomingWebhookController {
       const webhook = await repositories.incomingWebhooks.create({
         installedAppId,
         channelId,
+        workspaceId,
         ...(effectiveBoardId ? { boardId: effectiveBoardId } : {}),
         name,
         type,

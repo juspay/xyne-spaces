@@ -115,7 +115,7 @@ export class JiraMigrationController {
 
       const [sourceBoard, targetBoard, channel] = await Promise.all([
         db.board.findUnique({ where: { id: sourceBoardId }, select: { id: true, projectId: true, name: true } }),
-        db.board.findUnique({ where: { id: targetBoardId }, select: { id: true, projectId: true, name: true } }),
+        db.board.findUnique({ where: { id: targetBoardId }, select: { id: true, projectId: true, name: true, workspaceId: true } }),
         db.channel.findUnique({ where: { id: channelId }, select: { id: true, projectId: true, name: true } }),
       ]);
 
@@ -237,6 +237,7 @@ export class JiraMigrationController {
           stagesToCreate.map(({ stageName, src, sequenceNumber }) =>
             db.stage.create({
               data: {
+                workspaceId: targetBoard.workspaceId,
                 name: stageName,
                 eta: src.eta ?? null,
                 boardId: targetBoardId,
@@ -599,7 +600,7 @@ export class JiraMigrationController {
             ? (
                 await tx.conversation.updateMany({
                   where: { conversationId: { in: conversationIds }, channelId: sourceChannelId },
-                  data: { channelId: targetChannelId, workspaceId: targetChannel.workspaceId ?? null },
+                  data: { channelId: targetChannelId, workspaceId: targetChannel.workspaceId },
                 })
               ).count
             : 0;
@@ -1974,11 +1975,16 @@ export class JiraMigrationController {
     const now = new Date();
     const canvasId = randomUUID();
     const participantId = randomUUID();
+    const canvasChannel = await db.channel.findUniqueOrThrow({
+      where: { id: channelId },
+      select: { workspaceId: true },
+    });
     try {
       await db.$transaction(async tx => {
         await tx.canvas.create({
           data: {
             id: canvasId,
+            workspaceId: canvasChannel.workspaceId,
             title: `Jira Migration Report: ${result.jiraProjectKey}`,
             content: this.buildMigrationReportCanvasBlocks(result) as any,
             channelId,
@@ -2009,6 +2015,7 @@ export class JiraMigrationController {
         await tx.canvasParticipant.create({
           data: {
             id: participantId,
+            workspaceId: canvasChannel.workspaceId,
             canvasId,
             userId: actorUserId,
             role: 'OWNER',
@@ -2084,7 +2091,7 @@ export class JiraMigrationController {
       ...(canvasUrl ? ['', `View full report: ${canvasUrl}`] : []),
     ].join('\n');
 
-    const migrationReportChannel = await db.channel.findUnique({
+    const migrationReportChannel = await db.channel.findUniqueOrThrow({
       where: { id: channelId },
       select: { workspaceId: true },
     });
@@ -2096,7 +2103,7 @@ export class JiraMigrationController {
           channelId,
           createdBy: actorUserId,
           initialMessageId: messageId,
-          ...(migrationReportChannel?.workspaceId ? { workspaceId: migrationReportChannel.workspaceId } : {}),
+          workspaceId: migrationReportChannel.workspaceId,
           createdAt: now,
           lastActivityAt: now,
           metadata: {
@@ -2115,7 +2122,7 @@ export class JiraMigrationController {
           messageId,
           conversationId,
           senderId: actorUserId,
-          ...(migrationReportChannel?.workspaceId ? { workspaceId: migrationReportChannel.workspaceId } : {}),
+          workspaceId: migrationReportChannel.workspaceId,
           content: messageContent,
           msgType: 'SYSTEM',
           hasAttachment: false,
@@ -2155,6 +2162,7 @@ export class JiraMigrationController {
           isSubscribed: true,
           joinedAt: now,
           channelId,
+          workspaceId: migrationReportChannel.workspaceId,
         },
         update: {
           participationType: 'AUTHOR',

@@ -72,6 +72,7 @@ export class ChannelRecapToRecapBackfillController {
                 data: {
                   entityType: RecapEntityType.CHANNEL,
                   entityId: record.channelId,
+                  workspaceId: record.workspaceId,
                   recapDate: record.recapDate,
                   summary: record.summary,
                   userId: record.userId,

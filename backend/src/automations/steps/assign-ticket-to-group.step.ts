@@ -55,6 +55,7 @@ export class AssignTicketToGroupStep extends BaseActionStep<
       data: {
         ticketId,
         updatedBy: context.automation.createdById,
+        workspaceId: context.automation.workspaceId,
         activityType: ActivityType.USER_GROUP_ID,
         value: { field: 'userGroupId', oldValue: prev?.userGroupId ?? null, newValue: groupId, isAutomation: true },
       },

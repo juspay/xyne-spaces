@@ -69,6 +69,7 @@ export class ChannelRecapBackfillController {
               await db.channelRecap.create({
                 data: {
                   channelId: record.channelId,
+                  workspaceId: record.workspaceId,
                   recapDate: record.recapDate,
                   summary: record.summary,
                   userId: record.userId,

@@ -189,7 +189,7 @@ const installAppForWorkspace = async (
   const encryptedSecret = encrypt(signingSecret);
   const now = new Date();
   await db.installedApps.create({
-    data: { appId, userId: appUser.id, signingSecret: encryptedSecret, version: 1, createdAt: now, updatedAt: now },
+    data: { appId, workspaceId, userId: appUser.id, signingSecret: encryptedSecret, version: 1, createdAt: now, updatedAt: now },
   });
 
   logger.info('[installAppForWorkspace] Created app user', { appId, workspaceId, botId, userId: appUser.id, email });
@@ -269,6 +269,7 @@ export const findOrCreateApp = async (
   const app = await db.apps.create({
     data: {
       name: uniqueBotName,
+      workspaceId: targetWorkspaceId,
       createdBy: creatorUser.id,
       orgId: targetWorkspace.orgId,
       scope: 'ORG',

@@ -1,4 +1,5 @@
 import { BaseRepository } from './base';
+import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import { UserActivityEvent } from '@prisma/client';
 import { QueryOptions } from '@/types/database';
 import { CreateActivityEventInput } from '@xyne/shared';
@@ -50,9 +51,12 @@ export class ActivityEventRepository extends BaseRepository<
     await this.validateString(data.eventName, 'eventName');
     await this.validateString(data.url, 'url');
 
+    const workspaceId = await resolveWorkspaceIdFromModel(this.db, 'user', { id: data.userId });
+
     return await this.db.userActivityEvent.create({
       data: {
         userId: data.userId,
+        workspaceId,
         sessionId: data.sessionId,
         eventCategory: data.eventCategory,
         eventName: data.eventName,

@@ -18,21 +18,23 @@ export class CustomEmojiRepository {
   private db = DatabaseClient.getInstance();
 
   async create(data: CreateCustomEmojiInput): Promise<CustomEmojiWithRelations> {
+    // Fetch creator (also source of the denormalized workspaceId) before insert.
+    const creator = await this.db.user.findUniqueOrThrow({
+      where: { id: data.createdBy },
+      select: { id: true, name: true, email: true, picture: true, workspaceId: true },
+    });
+
     const emoji = await this.db.customEmoji.create({
       data: {
         name: data.name,
         url: data.url,
+        workspaceId: creator.workspaceId,
         createdBy: data.createdBy,
       },
     });
 
-    // Manually fetch creator data
-    const creator = await this.db.user.findUnique({
-      where: { id: data.createdBy },
-      select: { id: true, name: true, email: true, picture: true },
-    });
-
-    return { ...emoji, creator };
+    const { workspaceId: _workspaceId, ...creatorPublic } = creator;
+    return { ...emoji, creator: creatorPublic };
   }
 
   async findAll(): Promise<CustomEmojiWithRelations[]> {

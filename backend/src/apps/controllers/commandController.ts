@@ -27,8 +27,9 @@ async function sendErrorNotice(opts: {
   commandType: CommandType;
   identifier: string;   // commandName for COMMAND, callbackId for SHORTCUT
   reason: string;
+  workspaceId: string;
 }): Promise<void> {
-  const { channelId, userId, appUserId, commandType, identifier, reason } = opts;
+  const { channelId, userId, appUserId, commandType, identifier, reason, workspaceId } = opts;
   const { conversationId } = opts;
   const now = Date.now();
 
@@ -51,6 +52,7 @@ async function sendErrorNotice(opts: {
           isSent: true,
           visibleTo: userId,
           metadata: { messageSubtype: metadataSubtype, identifier },
+          workspaceId,
         },
       });
     } else {
@@ -68,6 +70,7 @@ async function sendErrorNotice(opts: {
           replyCount: 0,
           pinned: false,
           createdAt: new Date(now),
+          workspaceId,
         },
       });
 
@@ -86,6 +89,7 @@ async function sendErrorNotice(opts: {
           createdAt: new Date(now),
           visibleTo: userId,
           metadata: { messageSubtype: metadataSubtype, identifier },
+          workspaceId,
         },
       });
 
@@ -99,6 +103,7 @@ async function sendErrorNotice(opts: {
           isSubscribed: true,
           joinedAt: new Date(now),
           channelId,
+          workspaceId,
         },
       });
     }
@@ -515,6 +520,7 @@ export class CommandController {
             commandType,
             identifier: commandName,
             reason: `${commandType === CommandType.COMMAND ? 'command' : 'shortcut'} not found in this channel`,
+            workspaceId: req.user!.workspaceId,
           });
         }
         res.status(404).json({
@@ -534,6 +540,7 @@ export class CommandController {
             commandType,
             identifier: commandName,
             reason: 'app is not configured (no webhook URL set)',
+            workspaceId: req.user!.workspaceId,
           });
         }
         res.status(400).json({
@@ -640,6 +647,7 @@ export class CommandController {
             commandType,
             identifier: commandName,
             reason: `the app returned an error (HTTP ${appResponse.status})`,
+            workspaceId: req.user!.workspaceId,
           });
         }
         res.status(502).json({ error: `App backend error ${appResponse.status}` });
@@ -660,6 +668,7 @@ export class CommandController {
             commandType,
             identifier: commandName,
             reason: 'the app took too long to respond',
+            workspaceId: req.user!.workspaceId,
           });
         }
         res.status(504).json({ error: 'App backend timed out' });

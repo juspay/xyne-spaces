@@ -51,6 +51,7 @@ import { ticketSchema, mailSchema } from '@/vespa/src/types';
 import { logger } from '@/utils/logger';
 import { messageMetadataService } from '@/services/messageMetadataService';
 import { db } from '@/database/client';
+import { getContextOrNull } from '@/database/tenant/context';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import { processMeetLinksFromEmail } from './meetLinkService';
 import { repositories } from '@/database/repositories';
@@ -339,6 +340,8 @@ export class EmailService {
       try {
         const vespaLogs = db.vespaInsertionLogs;
         if (vespaLogs) {
+          const ws = workspaceId ?? getContextOrNull()?.workspaceId;
+          if (!ws) throw new Error('workspaceId required: no tenant context');
           await vespaLogs.create({
             data: {
               status: VespaInsertionStatus.FAILED,
@@ -346,6 +349,7 @@ export class EmailService {
               entityId: emailId,
               entityType: mailSchema,
               namespace: NAMESPACE,
+              workspaceId: ws,
               errorMessage: `Failed to enqueue Vespa mail job: ${error instanceof Error ? error.message : String(error)}`,
               errorDetails: JSON.stringify(error),
               userId: userId,
@@ -374,6 +378,8 @@ export class EmailService {
       try {
         const vespaLogs = db.vespaInsertionLogs;
         if (vespaLogs) {
+          const ws = workspaceId ?? getContextOrNull()?.workspaceId;
+          if (!ws) throw new Error('workspaceId required: no tenant context');
           await vespaLogs.create({
             data: {
               status: VespaInsertionStatus.FAILED,
@@ -381,6 +387,7 @@ export class EmailService {
               entityId: ticketId,
               entityType: ticketSchema,
               namespace: NAMESPACE,
+              workspaceId: ws,
               errorMessage: `Failed to enqueue Vespa job: ${error instanceof Error ? error.message : String(error)}`,
               errorDetails: JSON.stringify(error),
               userId: userId,
@@ -696,10 +703,12 @@ export class EmailService {
           data: { autoDraftStatus: 'GENERATING', updatedAt: new Date() },
         });
       } else {
+        const workspaceId = await this.channelRepository.getWorkspaceId(channelId);
         await this.prisma.emailDraft.create({
           data: {
             conversationId,
             channelId,
+            workspaceId,
             userId: null,
             draftContent: '',
             autoDraftStatus: 'GENERATING',
@@ -780,10 +789,12 @@ export class EmailService {
           data: { draftContent: html, channelId, autoDraftStatus: 'READY', updatedAt: now },
         });
       } else {
+        const workspaceId = await this.channelRepository.getWorkspaceId(channelId);
         await this.prisma.emailDraft.create({
           data: {
             conversationId,
             channelId,
+            workspaceId,
             userId: null,
             draftContent: html,
             autoDraftStatus: 'READY',
@@ -1039,7 +1050,7 @@ export class EmailService {
           channelId,
           createdBy: userId,
           initialMessageId: 'temp',
-          ...(channel.workspaceId ? { workspaceId: channel.workspaceId } : {}),
+          workspaceId: channel.workspaceId,
           ...(receivedAt && { createdAt: receivedAt, lastActivityAt: receivedAt }),
         },
       });
@@ -1056,6 +1067,7 @@ export class EmailService {
           cc: emailCc || [],
           bcc: emailBcc || [],
           replyTo: emailReplyTo || [],
+          workspaceId: channel.workspaceId,
           conversationId: conv.conversationId,
           channelId,
           externalThreadId,
@@ -1688,7 +1700,7 @@ export class EmailService {
     try {
       const tickets = await this.prisma.ticket.findMany({
         where: { conversationId },
-        select: { id: true, channelId: true },
+        select: { id: true, channelId: true, workspaceId: true },
       });
       await this.prisma.ticketActivity.createMany({
         data: tickets.map(ticket => ({
@@ -1697,6 +1709,7 @@ export class EmailService {
           timestamp: sentAt,
           activityType: ActivityType.EMAIL_SENT,
           channelId: ticket.channelId,
+          workspaceId: ticket.workspaceId,
           value: {
             field: 'emailSent',
             emailId,
@@ -1807,6 +1820,7 @@ export class EmailService {
         from: fromEmailAddress,
         cc,
         bcc,
+        workspaceId: conversation.workspaceId,
         conversationId: params.conversationId,
         channelId: conversation.channelId,
         externalThreadId: sent.threadId,
@@ -1825,6 +1839,7 @@ export class EmailService {
           entityId: email.id,
           direction: MessageDirection.OUTGOING,
           entityType: ExternalEntityType.EMAIL,
+          workspaceId: conversation.workspaceId,
         },
       });
     } catch (err) {
@@ -2020,7 +2035,7 @@ export class EmailService {
               channelId,
               createdBy: userId,
               initialMessageId: 'temp',
-              ...(channel.workspaceId ? { workspaceId: channel.workspaceId } : {}),
+              workspaceId: channel.workspaceId,
               ...(firstEmail.receivedAt && {
                 createdAt: firstEmail.receivedAt,
                 lastActivityAt: firstEmail.receivedAt,
@@ -2063,7 +2078,7 @@ export class EmailService {
             data: {
               conversationId: conv.conversationId,
               senderId: userId,
-              ...(channel.workspaceId ? { workspaceId: channel.workspaceId } : {}),
+              workspaceId: channel.workspaceId,
               content: '',
               hasAttachment: true,
               metadata: { ticketId: createdTicket.id },
@@ -2193,7 +2208,7 @@ export class EmailService {
 
         const emailInsert = rowsToInsert.length > 0
           ? await tx.email.createMany({
-              data: rowsToInsert.map(row => ({ ...row, conversationId })),
+              data: rowsToInsert.map(row => ({ ...row, conversationId, workspaceId: channel.workspaceId })),
               skipDuplicates: true,
             })
           : { count: 0 };
@@ -2234,6 +2249,7 @@ export class EmailService {
             entityId: row.id,
             messageId: row.id,
             direction: MessageDirection.INCOMING,
+            workspaceId: channel.workspaceId,
           })),
           skipDuplicates: true,
         });

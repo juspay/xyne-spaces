@@ -248,10 +248,20 @@ export async function createEtaSystemMessage(params: {
     metadata.stageId = stageId;
   }
 
+  // Stamp the denormalized tenant key from the owning conversation.
+  const conversation = await db.conversation.findUnique({
+    where: { conversationId },
+    select: { workspaceId: true },
+  });
+  if (!conversation) {
+    throw new Error(`Conversation not found for ETA system message: ${conversationId}`);
+  }
+
   await db.message.create({
     data: {
       messageId: uuidv4(),
       conversationId,
+      workspaceId: conversation.workspaceId,
       senderId: 'system',
       content,
       msgType: MessageType.SYSTEM,

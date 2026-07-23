@@ -201,6 +201,10 @@ Release notes have been generated for **${ticket.title}**
       const now = new Date();
       const canvasId = uuidv4();
       const participantId = uuidv4();
+      const workspaceId = botUser.workspaceId;
+      if (!workspaceId) {
+        throw new Error('workspaceId required: release bot user has no workspace');
+      }
 
       const dateStr = now.toLocaleDateString('en-US', {
         year: 'numeric',
@@ -216,6 +220,7 @@ Release notes have been generated for **${ticket.title}**
           id: canvasId,
           title: finalTitle,
           content: blocks as any,
+          workspaceId,
           createdBy: botUser.id,
           visibility: 'PUBLIC',
           isTemplate: false,
@@ -240,6 +245,7 @@ Release notes have been generated for **${ticket.title}**
           id: participantId,
           canvasId,
           userId: botUser.id,
+          workspaceId,
           role: 'VIEWER',
           joinedAt: now,
           updatedAt: now,

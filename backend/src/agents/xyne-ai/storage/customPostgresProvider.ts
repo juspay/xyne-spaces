@@ -176,8 +176,8 @@ export async function createXyneAIMemoryProvider(): Promise<XyneAIMemoryProvider
       const execution = await db.workflowExecution.create({
         data: {
           id: uuid,
-          workflowId,
           workspaceId,
+          workflowId,
           status: ASK_AI_STATUS,
           tag: 'root',
           ignoreDuration: 0,
@@ -187,6 +187,7 @@ export async function createXyneAIMemoryProvider(): Promise<XyneAIMemoryProvider
 
       await db.workflowExecutionUsers.create({
         data: {
+          workspaceId,
           userId,
           workflowExecutionId: uuid,
         },
@@ -462,9 +463,15 @@ export async function createXyneAIMemoryProvider(): Promise<XyneAIMemoryProvider
         ? JSON.stringify(attachmentMetadata)
         : null;
 
+      const parentExecution = await db.workflowExecution.findUniqueOrThrow({
+        where: { id: sessionId },
+        select: { workspaceId: true },
+      });
+
       const step = await db.workflowStep.create({
         data: {
           id: messageId,
+          workspaceId: parentExecution.workspaceId,
           workflowExecutionId: sessionId,
           stepExecutorType: 'agent',
           stepName: role,

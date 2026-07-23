@@ -229,6 +229,7 @@ export class TicketDuplicateBackfillController {
             description: true,
             projectId: true,
             createdBy: true,
+            workspaceId: true,
           },
         });
 
@@ -357,6 +358,7 @@ export class TicketDuplicateBackfillController {
                     targetTicketId: duplicateCandidate.id,
                     relationType: TicketReferenceRelation.DUPLICATE_POSSIBLE,
                     createdBy: ticket.createdBy,
+                    workspaceId: ticket.workspaceId,
                   },
                 ],
                 skipDuplicates: true,

@@ -82,6 +82,7 @@ export class RcasSideEffectHandler extends BaseSideEffectHandler {
       await recordTicketTimelineEvent({
         activity: {
           ticketId: rca.ticketId,
+          workspaceId: ticket.workspaceId,
           updatedBy: actorId,
           activityType: ActivityType.RCA_CREATED,
           value: { rcaId, rcaTitle: rca.title },
@@ -97,6 +98,7 @@ export class RcasSideEffectHandler extends BaseSideEffectHandler {
         await recordTicketTimelineEvent({
           message: {
             conversationId: ticket.conversationId,
+            workspaceId: ticket.workspaceId,
             senderId: actorId,
             content: `RCA created: ${rca.title}`,
             activityType: ActivityType.RCA_CREATED,
@@ -158,6 +160,7 @@ export class RcasSideEffectHandler extends BaseSideEffectHandler {
       await recordTicketTimelineEvent({
         activity: {
           ticketId: rca.ticketId,
+          workspaceId: ticket.workspaceId,
           updatedBy: actorId,
           activityType: ActivityType.RCA_UPDATED,
           value: { rcaId, rcaTitle: rca.title },
@@ -173,6 +176,7 @@ export class RcasSideEffectHandler extends BaseSideEffectHandler {
         await recordTicketTimelineEvent({
           message: {
             conversationId: ticket.conversationId,
+            workspaceId: ticket.workspaceId,
             senderId: actorId,
             content: `RCA updated: ${rca.title}`,
             activityType: ActivityType.RCA_UPDATED,

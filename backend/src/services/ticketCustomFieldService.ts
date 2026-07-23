@@ -1,4 +1,5 @@
 import { FormContextType, FormEntityType, Prisma } from '@prisma/client';
+import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import { resolveParentOption, isFieldActive } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
 import { resolveFormFieldDefinitionsForForm } from '@/utils/fieldDefinition';
@@ -585,6 +586,7 @@ export const syncCustomFieldValues = async (
     },
   });
   const existingValueByFieldId = new Map(existingValues.map(value => [value.fieldId, value]));
+  const workspaceId = await resolveWorkspaceIdFromModel(prismaClient, 'ticket', { id: ticketId });
 
   await Promise.all(
     customFieldValues.fieldValues.map(async fieldValue => {
@@ -601,6 +603,7 @@ export const syncCustomFieldValues = async (
         },
         create: {
           entityId: ticketId,
+          workspaceId,
           entityType: FormEntityType.TICKET,
           formId: customFieldValues.formId,
           fieldId: fieldValue.fieldId,

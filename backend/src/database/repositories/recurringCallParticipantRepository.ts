@@ -1,4 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
+import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import {
   InvitationResponse,
   MeetingStatus,
@@ -36,10 +37,13 @@ export class RecurringCallParticipantRepository {
       },
     });
 
+    const workspaceId = await resolveWorkspaceIdFromModel(client, 'recurringCallSeries', { id: recurringSeriesId });
+
     await client.recurringCallParticipant.createMany({
       data: participantUserIds.map(userId => ({
         id: uuidv4(),
         recurringSeriesId,
+        workspaceId,
         userId,
         invitedBy: organizerId,
         invitedAt: now,
@@ -96,12 +100,15 @@ export class RecurringCallParticipantRepository {
       },
     });
 
+    const workspaceId = await resolveWorkspaceIdFromModel(client, 'recurringCallSeries', { id: recurringSeriesId });
+
     await client.recurringCallParticipant.createMany({
       data: normalizedExternalInvitees.map(email => {
         const participantId = uuidv4();
         return {
           id: participantId,
           recurringSeriesId,
+          workspaceId,
           userId: participantId,
           invitedBy: organizerId,
           invitedAt: new Date(),

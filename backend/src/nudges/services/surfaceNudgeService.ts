@@ -1,4 +1,5 @@
 import { db } from '@/database/client';
+import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import { logger } from '@/utils/logger';
 import type { Prisma, NudgeKind, SurfaceAreaType } from '@prisma/client';
 import { rebuildSurfaceNudgeAudienceCounts } from './surfaceNudgeAudienceCountService';
@@ -44,6 +45,8 @@ class NudgeService {
 
     if (candidates.length === 0) return;
 
+    const workspaceId = await resolveWorkspaceIdFromModel(db, 'project', { id: projectId });
+
     try {
       await db.$transaction(async (tx) => {
         for (const candidate of candidates) {
@@ -51,6 +54,7 @@ class NudgeService {
             data: {
               nudgeKind,
               sourceId,
+              workspaceId,
               title: candidate.title,
               description: candidate.description,
               priority: candidate.priority ?? priority ?? 'medium',

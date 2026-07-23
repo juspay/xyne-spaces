@@ -292,7 +292,7 @@ export class ConversationController {
   private async pushVespaJobForMessage(
     messageID: string,
     userId: string,
-    workspaceId?: string
+    workspaceId: string
   ): Promise<void> {
     vespaQueue
       .addJob({
@@ -318,6 +318,7 @@ export class ConversationController {
                 errorDetails: JSON.stringify(error),
                 userId: userId,
                 createdAt: new Date(),
+                workspaceId: workspaceId,
               },
             });
           }
@@ -523,7 +524,7 @@ export class ConversationController {
           : [];
 
       // Push Vespa job for message indexing
-      this.pushVespaJobForMessage(message.messageId, userId, req.user?.workspaceId).catch(
+      this.pushVespaJobForMessage(message.messageId, userId, req.user!.workspaceId!).catch(
         (error) => {
           logger.error(
             `[ConversationController] Error pushing Vespa job for message ${message.messageId}:`,
@@ -1045,7 +1046,7 @@ export class ConversationController {
           : [];
 
       // Push Vespa job for message indexing
-      this.pushVespaJobForMessage(message.messageId, userId, req.user?.workspaceId).catch(
+      this.pushVespaJobForMessage(message.messageId, userId, req.user!.workspaceId!).catch(
         (error) => {
           logger.error(
             `[ConversationController] Error pushing Vespa job for message ${message.messageId}:`,
@@ -1644,7 +1645,7 @@ export class ConversationController {
       await redisService.broadcastMessageToSession(conversationId, chatMessage);
 
       // Push Vespa job for message indexing
-      this.pushVespaJobForMessage(message.messageId, userId, req.user?.workspaceId).catch(
+      this.pushVespaJobForMessage(message.messageId, userId, req.user!.workspaceId!).catch(
         (error) => {
           logger.error(
             `[ConversationController] Error pushing Vespa job for message ${message.messageId}:`,

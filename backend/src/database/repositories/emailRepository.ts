@@ -24,6 +24,13 @@ export class EmailRepository {
     createdAt?: Date;
   }): Promise<Email> {
     const rfcMessageId = normalizeRfcMessageId(data.rfcMessageId);
+    const channel = await this.db.channel.findUnique({
+      where: { id: data.channelId },
+      select: { workspaceId: true },
+    });
+    if (!channel?.workspaceId) {
+      throw new Error(`Could not find workspaceId for channel ${data.channelId}`);
+    }
     const email = await this.db.email.upsert({
       where: {
         externalMessageId_channelId: {
@@ -34,6 +41,7 @@ export class EmailRepository {
       update: {},
       create: {
         type: data.type,
+        workspaceId: channel.workspaceId,
         subject: data.subject,
         body: data.body,
         to: data.to,
