@@ -1853,6 +1853,21 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const handleTicketClick = useCallback(
     (e: React.MouseEvent | KeyboardEvent, ticket: Ticket) => {
       const isCmdClick = 'metaKey' in e && (e.metaKey || e.ctrlKey);
+      const ws = window.location.pathname.split('/').find(s => s.length > 0) ?? '';
+
+      // Desk tickets open in the Support screen, not the chat ticket panel.
+      const ticketChannel = allChannels.find(c => c.id === ticket.channelId);
+      if (isDeskChannelType(ticketChannel?.type) && ticket.xyneId) {
+        const supportUrl = `/support/${ticket.channelId}/${ticket.xyneId}`;
+        if (!isMobile && isCmdClick) {
+          window.open(`${ws ? `/${ws}` : ''}${supportUrl}`, '_blank');
+          return;
+        }
+        void navigate(supportUrl, {
+          state: { conversationId: ticket.conversationId, ticketId: ticket.id },
+        });
+        return;
+      }
 
       // Desk/support tickets (EMAIL / SLACK / APP channels) belong to the Support
       // desk experience, not the chat conversation panel. Route those to the desk
@@ -1868,7 +1883,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
       // Only open in new tab on desktop when Cmd/Ctrl+Click is pressed
       if (!isMobile && isCmdClick) {
-        const ws = window.location.pathname.split('/').find(s => s.length > 0) ?? '';
         const relativeUrl = isDeskTicket
           ? supportRoute
           : `/chat/dir/${ticket.channelId}?tab=tickets&ticketId=${ticket.id}&conversationId=${ticket.conversationId}`;
@@ -1903,7 +1917,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         );
       }
     },
-    [navigate, isMobile, baseRoute, buildChannelRoute, channelsById],
+    [navigate, channel, isMobile, baseRoute, buildChannelRoute, allChannels],
   );
 
   const openCreateForColumn = useCallback(

@@ -223,8 +223,13 @@ const SearchResultItem = ({
               {getResultIcon(result)}
               <div className='flex-1 min-w-0'>
                 {/* Line 1: subject gets the full row */}
-                <div className='font-semibold text-xs text-foreground truncate'>
-                  <RenderMessageWithHTML message={result.title} />
+                <div className='flex items-baseline gap-1 font-semibold text-xs text-foreground'>
+                  {result.searchContext?.xyneId && (
+                    <span className='shrink-0'>{result.searchContext.xyneId} ·</span>
+                  )}
+                  <div className='min-w-0 truncate'>
+                    <RenderMessageWithHTML message={result.title} />
+                  </div>
                 </div>
                 {/* Line 2: sender on the left, timestamp aligned on the right */}
                 <div className='flex items-center justify-between gap-2 text-[11px] text-muted-foreground'>
