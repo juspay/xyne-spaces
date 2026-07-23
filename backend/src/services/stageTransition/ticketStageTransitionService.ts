@@ -15,6 +15,7 @@ import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { FormEntityType } from '@xyne/shared';
 import { formService } from '@/services/formService';
 import { decideVisitVersion, foldFormRowsToValues } from './visitVersioning';
+import { maybeCreateEntryApprovalRequest } from './stageEntryApproval';
 
 const prisma = DatabaseClient.getInstance();
 
@@ -459,6 +460,14 @@ export class TicketStageTransitionService {
     logger.info(
       `[TicketStageTransitionService] Ticket ${ticketId} moved from "${ticket.stageName}" to "${toStageName}" (visitIndex=${result.newVisitIndex})`,
     );
+
+    // Ticket has landed on the target stage — auto-create the approval request for
+    // that stage's single outgoing transition if it's configured for on-entry
+    // approval. This Prisma write doesn't fire the ticket side effect, so it's an
+    // explicit call (the tx.mutate landing paths are covered by TicketsSideEffectHandler).
+    // Fire-and-forget: it's best-effort and swallows its own errors, so awaiting
+    // would only add latency to the transition response.
+    void maybeCreateEntryApprovalRequest(ticketId, userId, toStageName);
 
     return {
       success: true,

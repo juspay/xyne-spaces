@@ -7202,6 +7202,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   )
                   .optional(),
                 formId: z.string().optional(),
+                requestApprovalOnEntry: z.boolean().optional(),
               })
             )
             .optional(),
@@ -7356,7 +7357,9 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   existing.name !== stage.name ||
                   existing.eta !== stage.eta ||
                   existing.sequenceNumber !== assignedSequenceNumber ||
-                  existing.defaultTicketStatusV2 !== stage.defaultTicketStatusV2
+                  existing.defaultTicketStatusV2 !== stage.defaultTicketStatusV2 ||
+                  (existing.requestApprovalOnEntry ?? false) !==
+                    (stage.requestApprovalOnEntry ?? false)
                 ) {
                   await tx.mutate.stages.update({
                     id: stageId,
@@ -7365,6 +7368,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                     sequenceNumber: assignedSequenceNumber,
                     defaultTicketStatusV2:
                       (stage.defaultTicketStatusV2 as TicketStatusV2) || undefined,
+                    requestApprovalOnEntry: stage.requestApprovalOnEntry ?? false,
                     updatedBy: authData.sub,
                     updatedAt: now,
                   });
@@ -7420,6 +7424,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   sequenceNumber: assignedSequenceNumber,
                   defaultTicketStatusV2:
                     (stage.defaultTicketStatusV2 as TicketStatusV2) || TicketStatusV2.STARTED,
+                  requestApprovalOnEntry: stage.requestApprovalOnEntry ?? false,
                   boardId: boardId,
                   createdBy: authData.sub,
                   updatedBy: authData.sub,
@@ -15380,6 +15385,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               formId: z.string().nullable().optional(),
               requiresApproval: z.boolean().optional(),
               bypassApprovalForAutomation: z.boolean().optional(),
+              requestApprovalOnEntry: z.boolean().optional(),
               visitSlaMode: z.string().optional(),
               fixedEtaHours: z.number().nullable().optional(),
               onReenter: z.string().optional(),
@@ -15451,6 +15457,10 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               ...(t.formId != null && { formId: t.formId }),
               requiresApproval: t.requiresApproval ?? false,
               bypassApprovalForAutomation: t.bypassApprovalForAutomation ?? false,
+              // On-entry auto-approval only makes sense for an approval-gated edge.
+              // Coerce (rather than reject the whole save) so a stale flag left on a
+              // non-approval edge can't block configuring the rest of the board.
+              requestApprovalOnEntry: (t.requestApprovalOnEntry ?? false) && (t.requiresApproval ?? false),
               visitSlaMode: (t.visitSlaMode as VisitSlaMode) ?? VisitSlaMode.STAGE_DEFAULT,
               ...(t.fixedEtaHours != null && { fixedEtaHours: t.fixedEtaHours }),
               onReenter: (t.onReenter as ReenterMode) ?? ReenterMode.RESET,
