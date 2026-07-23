@@ -46,6 +46,7 @@ export class AssignTicketStep extends BaseActionStep<typeof AssignTicketConfigSc
       data: {
         ticketId,
         updatedBy: context.automation.createdById,
+        workspaceId: context.automation.workspaceId,
         activityType: ActivityType.ASSIGNED_TO,
         value: { oldValue: prev?.assignedTo ?? null, newValue: assigneeId, isAutomation: true },
       },

@@ -457,6 +457,7 @@ export async function resolveApiGroup(slackGroupId: string, botOauthToken: strin
   if (dbUserIds.length > 0) {
     await dbClient.userGroupMapping.createMany({
       data: dbUserIds.map((userId) => ({
+        workspaceId: resolvedWorkspaceId,
         userGroupId: group.id,
         userId,
       })),

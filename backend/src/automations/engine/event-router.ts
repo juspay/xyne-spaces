@@ -66,6 +66,7 @@ class EventRouter {
                 data: {
                   workflowExecutionId: created.id,
                   context: JSON.stringify(initialContext),
+                  workspaceId,
                 },
               });
               return created;

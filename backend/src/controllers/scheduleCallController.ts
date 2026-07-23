@@ -187,6 +187,7 @@ export class ScheduleCallController {
           id: seriesId,
           title,
           description,
+          workspaceId: req.user!.workspaceId!,
           organizerId: userId,
           channelId: finalChannelId!,
           recurrenceRule,

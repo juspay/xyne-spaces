@@ -149,6 +149,7 @@ class EmailClassificationWorker {
       where: { id: ticketId },
       select: {
         id: true,
+        workspaceId: true,
         userGroupId: true,
         assignedTo: true,
         boardId: true,
@@ -312,6 +313,7 @@ class EmailClassificationWorker {
         await prisma.ticketActivity.create({
           data: {
             ticketId,
+            workspaceId: ticket.workspaceId,
             updatedBy: SYSTEM_ACTOR,
             activityType: ActivityType.ASSIGNED_TO,
             value: {
@@ -335,6 +337,7 @@ class EmailClassificationWorker {
         // 2. In-app notification activity (appears in the user's activity feed)
         await activityService.createActivity({
           userId: newAssignedTo,
+          workspaceId: ticket.workspaceId,
           actorAction: 'ticket_assigned',
           actionSource: 'ticket',
           actionSourceId: ticketId,
@@ -358,6 +361,7 @@ class EmailClassificationWorker {
         await prisma.ticketActivity.create({
           data: {
             ticketId,
+            workspaceId: ticket.workspaceId,
             updatedBy: SYSTEM_ACTOR,
             activityType: ActivityType.PRIORITY,
             value: {

@@ -32,8 +32,12 @@ export class NudgeEvaluationEngine {
     }
 
     // 2. Enrich the activity event via UserActivityService
+    const eventUser = await db.user.findUniqueOrThrow({
+      where: { id: event.userId },
+      select: { workspaceId: true },
+    });
     const enrichedActivity = await userActivityService.resolveActivity(
-      this.toUserActivityEvent(event),
+      this.toUserActivityEvent(event, eventUser.workspaceId),
     );
     const enrichedMeta = (enrichedActivity.contextMetadata as Record<string, unknown>) ?? {};
 
@@ -243,10 +247,10 @@ export class NudgeEvaluationEngine {
     }
   }
 
-  private toUserActivityEvent(event: ActivityEventNudgePayload): UserActivityEvent {
+  private toUserActivityEvent(event: ActivityEventNudgePayload, workspaceId: string): UserActivityEvent {
     return {
       id: '',
-      workspaceId: null,
+      workspaceId,
       userId: event.userId,
       sessionId: event.sessionId,
       eventCategory: event.eventCategory,

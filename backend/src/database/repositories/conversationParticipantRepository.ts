@@ -67,10 +67,12 @@ export class ConversationParticipantRepository extends BaseRepository<
     }
 
     const channelId = data.channelId ?? await this.resolveConversationChannelId(data.conversationId);
+    const workspaceId = await this.resolveConversationWorkspaceId(data.conversationId);
 
     return await this.db.conversationParticipant.create({
       data: {
         conversationId: data.conversationId,
+        workspaceId,
         userId: data.userId,
         participationType: data.participationType ?? null, // Can be AUTHOR, MENTIONED, or null (manual subscription)
         isSubscribed: data.isSubscribed ?? true, // Default to subscribed
@@ -90,6 +92,7 @@ export class ConversationParticipantRepository extends BaseRepository<
     await this.validateEnum(participationType, 'participationType', ['AUTHOR', 'MENTIONED']);
 
     const resolvedChannelId = channelId ?? await this.resolveConversationChannelId(conversationId);
+    const workspaceId = await this.resolveConversationWorkspaceId(conversationId);
 
     return await this.db.conversationParticipant.upsert({
       where: {
@@ -100,6 +103,7 @@ export class ConversationParticipantRepository extends BaseRepository<
       },
       create: {
         conversationId,
+        workspaceId,
         userId,
         participationType,
         ...(resolvedChannelId && { channelId: resolvedChannelId }),
@@ -118,6 +122,15 @@ export class ConversationParticipantRepository extends BaseRepository<
     });
 
     return conversation?.channelId;
+  }
+
+  private async resolveConversationWorkspaceId(conversationId: string): Promise<string | null> {
+    const conversation = await this.db.conversation.findUniqueOrThrow({
+      where: { conversationId },
+      select: { workspaceId: true },
+    });
+
+    return conversation.workspaceId;
   }
 
   async findById(id: string): Promise<ConversationParticipant | null> {

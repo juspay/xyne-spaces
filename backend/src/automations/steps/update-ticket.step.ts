@@ -70,6 +70,7 @@ export class UpdateTicketStep extends BaseActionStep<typeof UpdateTicketConfigSc
           data: {
             ticketId,
             updatedBy,
+            workspaceId: context.automation.workspaceId,
             activityType: ActivityType.STAGE_NAME,
             value: { field: 'stageName', oldValue: ticket.stageName ?? null, newValue: newStageName, source: ActivitySource.AUTOMATION, isAutomation: true },
           },

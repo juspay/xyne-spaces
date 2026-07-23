@@ -670,7 +670,8 @@ export class UserManagementService {
       await this.prisma.userGroupMapping.create({
         data: {
           userId,
-          userGroupId: groupId
+          userGroupId: groupId,
+          workspaceId: user.workspaceId,
         }
       });
 
@@ -816,12 +817,18 @@ export class UserManagementService {
       }
 
       // ── 3. Upsert into user_profiles ──────────────────────────────────────
+      const user = await this.getUser(userId);
+      if (!user) {
+        throw new Error(`User not found: ${userId}`);
+      }
+
       await this.prisma.userProfile.upsert({
         where: { userId },
         create: {
           userId,
           voiceSignature: buffer,
           hasVoiceSignature: true,
+          workspaceId: user.workspaceId,
         },
         update: {
           voiceSignature: buffer,

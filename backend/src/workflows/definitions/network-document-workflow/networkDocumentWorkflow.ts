@@ -238,7 +238,7 @@ async function createTicketForDocument(
     const uniqueTags = [...new Set(analysisResult.tags)].slice(0, 20);
     for (const tag of uniqueTags) {
       await db.ticketTag.create({
-        data: { name: tag, ticketId: ticket.id },
+        data: { name: tag, ticketId: ticket.id, workspaceId: ticket.workspaceId },
       });
     }
     await dualWriteTicketTags(ticket.id, uniqueTags);

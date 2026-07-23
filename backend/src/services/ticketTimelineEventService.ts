@@ -30,6 +30,8 @@ export interface RecordTicketActivityInput {
   updatedBy: string;
   activityType: ActivityType;
   value: Prisma.InputJsonValue;
+  /** Denormalized tenant key; conditionally set (omitted when falsy). */
+  workspaceId?: string | null;
   /** Denormalized key behind @@index([channelId, timestamp]); needed by desk metrics for some kinds. */
   channelId?: string | null;
   timestamp?: Date;
@@ -74,6 +76,7 @@ export async function recordTicketTimelineEvent(
         updatedBy: activity.updatedBy,
         activityType: activity.activityType,
         value: activity.value,
+        ...(activity.workspaceId ? { workspaceId: activity.workspaceId } : {}),
         ...(activity.channelId != null ? { channelId: activity.channelId } : {}),
         ...(activity.timestamp ? { timestamp: activity.timestamp } : {}),
       },

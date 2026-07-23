@@ -38,7 +38,7 @@ export class ApplicationBackfillService {
     return undefined;
   }
 
-  private async createDefaultStages(boardId: string, createdBy: string): Promise<void> {
+  private async createDefaultStages(boardId: string, createdBy: string, workspaceId: string): Promise<void> {
     const defaultStages = [
       { name: 'TODO', eta: 1, defaultTicketStatusV2: 'TODO' as TicketStatusV2 },
       { name: 'IN-PROGRESS', eta: 2, defaultTicketStatusV2: 'STARTED' as TicketStatusV2 },
@@ -55,6 +55,7 @@ export class ApplicationBackfillService {
       await db.stage.create({
         data: {
           boardId,
+          workspaceId,
           name: stage.name,
           eta: stage.eta,
           sequenceNumber,
@@ -67,7 +68,7 @@ export class ApplicationBackfillService {
     }
   }
 
-  async backFillReleaseChangeTypes(applicationId: string): Promise<void> {
+  async backFillReleaseChangeTypes(applicationId: string, workspaceId: string): Promise<void> {
 
     logger.info(`Setting up ReleaseChangeTypes for application: ${applicationId}...`);
     // Create or get MIGRATION ReleaseChangeType
@@ -77,7 +78,7 @@ export class ApplicationBackfillService {
 
     if (!migrationChangeType) {
       migrationChangeType = await db.releaseChangeType.create({
-        data: { changeType: XyneChangeType.MIGRATION, applicationId, createdAt: new Date() },
+        data: { changeType: XyneChangeType.MIGRATION, applicationId, workspaceId, createdAt: new Date() },
       });
       logger.info(`Created ReleaseChangeType: MIGRATION (${migrationChangeType.id})`);
     }
@@ -88,7 +89,7 @@ export class ApplicationBackfillService {
 
     if (!envChangeType) {
       envChangeType = await db.releaseChangeType.create({
-        data: { changeType: XyneChangeType.ENV, applicationId, createdAt: new Date() },
+        data: { changeType: XyneChangeType.ENV, applicationId, workspaceId, createdAt: new Date() },
       });
       logger.info(`Created ReleaseChangeType: ENV (${envChangeType.id})`);
     }
@@ -330,7 +331,7 @@ export class ApplicationBackfillService {
           logger.info(`Created board: ${boardName} (${board.id})`);
 
           // Create default stages for the new board
-          await this.createDefaultStages(board.id, createdBy);
+          await this.createDefaultStages(board.id, createdBy, project.workspaceId);
         } else {
           logger.info(`Board "${boardName}" already exists, using existing board (${board.id})`);
         }
@@ -340,6 +341,7 @@ export class ApplicationBackfillService {
           data: {
             name: app.name,
             projectId: validChannel.projectId,
+            workspaceId: validChannel.workspaceId,
             boardId: board.id,
             mainReleaseBoardId,
             channelId: validChannel.id,
@@ -351,7 +353,7 @@ export class ApplicationBackfillService {
             lastDeployedAt: new Date(),
           },
         });
-        await this.backFillReleaseChangeTypes(application.id);
+        await this.backFillReleaseChangeTypes(application.id, validChannel.workspaceId);
         logger.info(`Created application: ${application.id} linked to board: ${board.id}`);
         createdApps.push(app.name);
       }

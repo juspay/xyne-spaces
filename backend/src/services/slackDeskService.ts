@@ -172,6 +172,7 @@ class SlackDeskService {
             bcc: [],
             conversationId,
             channelId: conversation.channelId,
+            workspaceId: conversation.workspaceId,
             externalThreadId: threadTs,
             externalMessageId: messageTs,
             sentByUserId: userId,
@@ -185,6 +186,7 @@ class SlackDeskService {
             externalThreadId: threadTs,
             messageId: created.id,
             entityId: created.id,
+            workspaceId: conversation.workspaceId,
             direction: MessageDirection.OUTGOING,
             entityType: ExternalEntityType.EMAIL,
           },
@@ -242,6 +244,7 @@ class SlackDeskService {
         data: tickets.map(ticket => ({
           ticketId: ticket.id,
           updatedBy: userId,
+          workspaceId: conversation.workspaceId,
           timestamp: email.createdAt,
           activityType: ActivityType.EMAIL_SENT,
           channelId: ticket.channelId,

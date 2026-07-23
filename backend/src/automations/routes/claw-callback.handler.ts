@@ -11,10 +11,16 @@ export async function handleClawCallback(
   const payload = (req.body ?? {}) as Record<string, unknown>;
 
   try {
-    const existingRow = await db.workflowStep.findUnique({
-      where: { workflowExecutionId_stepName: { workflowExecutionId: executionId, stepName } },
-      select: { data: true },
-    });
+    const [existingRow, workflowExecution] = await Promise.all([
+      db.workflowStep.findUnique({
+        where: { workflowExecutionId_stepName: { workflowExecutionId: executionId, stepName } },
+        select: { data: true },
+      }),
+      db.workflowExecution.findUniqueOrThrow({
+        where: { id: executionId },
+        select: { workspaceId: true },
+      }),
+    ]);
     if (!existingRow) {
       logger.warn(
         `[automations] claw-callback: no workflow_step row for execution=${executionId} step=${stepName} — proceeding with empty existing data`,
@@ -32,6 +38,7 @@ export async function handleClawCallback(
         stepExecutorType: 'RUN_AGENT',
         status: 'EXTERNAL_WAIT',
         data: JSON.stringify(merged),
+        workspaceId: workflowExecution.workspaceId,
       },
       update: {
         data: JSON.stringify(merged),

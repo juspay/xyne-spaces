@@ -133,10 +133,15 @@ export class VespaFileWorker {
 			const entityId = job.data.docId;
 			const entityType = job.data.schema;
 			const userId = job.data.userId || null;
+			const workspaceId = job.data.workspaceId;
+			if (!workspaceId) {
+				throw new Error('workspaceId required: vespa job missing workspaceId');
+			}
 			await db.vespaInsertionLogs.create({
 				data: {
 					entityId,
 					entityType,
+					workspaceId,
 					type: VespaOperationType[job.data.jobType],
 					status: 'FAILED',
 					namespace: this.namespace,

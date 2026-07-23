@@ -93,7 +93,7 @@ export const resolveBoardAdditionalFields = ({
   formEntityValues: readonly FormEntityValueRow[] | undefined;
   boardId: string | null | undefined;
   ticketId: string;
-  workspaceId: string | null | undefined;
+  workspaceId: string;
 }): ResolvedBoardAdditionalField[] => {
   const boardFormId = formMapping?.formId;
   const membershipRows = formMapping?.formFields;
@@ -137,7 +137,7 @@ export const resolveBoardAdditionalFields = ({
     }
 
     return {
-      workspaceId: workspaceId ?? null,
+      workspaceId,
       id: `placeholder-${resolvedFieldId}`,
       formId: boardFormId,
       fieldId: resolvedFieldId,

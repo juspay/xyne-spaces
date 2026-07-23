@@ -59,6 +59,7 @@ export class ChannelsSideEffectHandler extends BaseSideEffectHandler {
         data: {
           conversationId,
           channelId,
+          workspaceId: this.ctx.workspaceId,
           createdBy: this.ctx.userID,
           initialMessageId: messageId,
           lastActivityAt: nowDate,
@@ -74,6 +75,7 @@ export class ChannelsSideEffectHandler extends BaseSideEffectHandler {
         data: {
           messageId,
           conversationId,
+          workspaceId: this.ctx.workspaceId,
           senderId: this.ctx.userID,
           content: systemMessageContent,
           msgType: MessageType.SYSTEM,
@@ -99,6 +101,7 @@ export class ChannelsSideEffectHandler extends BaseSideEffectHandler {
         data: {
           id: conversationParticipantId,
           conversationId,
+          workspaceId: this.ctx.workspaceId,
           userId: this.ctx.userID,
           participationType: ConversationParticipation.AUTHOR,
           isSubscribed: true,

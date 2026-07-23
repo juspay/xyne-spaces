@@ -1,4 +1,5 @@
 import { repositories } from '../database/repositories/index';
+import { getContextOrNull } from '@/database/tenant/context';
 import { ACLAuditEventType, ACLAuditTargetType } from '@prisma/client';
 import { ACLAuditLog, ACLAuditLogWithActor, PaginationOptions, PaginatedResult } from '../types/database';
 import { logger } from '../utils/logger';
@@ -29,11 +30,15 @@ export class ACLAuditService {
     actorUserId?: string
   ): Promise<ACLAuditLog> {
     try {
+      // System/no-context entry points (e.g. the ACL seed script) legitimately have no tenant.
+      // workspaceId is nullable, so record a tenant-less audit row rather than throwing.
+      const workspaceId = getContextOrNull()?.workspaceId ?? null;
       const auditLog = await repositories.aclAuditLogs.create({
         eventType,
         targetType,
         targetId,
         description,
+        workspaceId,
         actorUser: actorUserId ? { connect: { id: actorUserId } } : undefined,
       });
 

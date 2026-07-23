@@ -366,6 +366,7 @@ export class AgentToolsMappingController {
             const newMapping = await repositories.agentToolsMappings.create({
               agent: { connect: { id: agentId } },
               tool: { connect: { id: toolId } },
+              workspaceId: req.user!.workspaceId!,
               status,
               specialDescription
             });
@@ -438,6 +439,7 @@ export class AgentToolsMappingController {
             const newMapping = await repositories.agentToolsMappings.create({
               agent: { connect: { id: agentId } },
               tool: { connect: { id: tool.id } },
+              workspaceId: req.user!.workspaceId!,
               status,
               specialDescription
             });
@@ -515,6 +517,7 @@ export class AgentToolsMappingController {
             const newMapping = await repositories.agentToolsMappings.create({
               agent: { connect: { id: agent.id } },
               tool: { connect: { id: toolId } },
+              workspaceId: req.user!.workspaceId!,
               status,
               specialDescription
             });

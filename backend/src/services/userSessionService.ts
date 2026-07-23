@@ -57,9 +57,17 @@ export class UserSessionService {
       logger.info(`🔍 [${sessionCreateId}] Found ${existingActiveSessions} existing active sessions`);
       
       logger.info(`🔍 [${sessionCreateId}] 💾 Creating session in database...`);
+      const sessionUser = await this.prisma.user.findUnique({
+        where: { id: sessionData.userId },
+        select: { workspaceId: true },
+      });
+      if (!sessionUser) {
+        throw new Error(`workspaceId required: user ${sessionData.userId} not found`);
+      }
       const session = await this.prisma.userSession.create({
         data: {
           userId: sessionData.userId,
+          workspaceId: sessionUser.workspaceId,
           refreshToken: sessionData.refreshToken,
           refreshTokenExpiry: sessionData.refreshTokenExpiry,
           accessToken: sessionData.accessToken,

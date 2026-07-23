@@ -321,6 +321,7 @@ export class TicketService {
           data: activities.map(activity => ({
             ticketId,
             updatedBy: userId,
+            workspaceId: updatedTicket.workspaceId,
             activityType: activity.activityType,
             value: activity.value,
           })),
@@ -372,6 +373,11 @@ export class TicketService {
       new Set(tagNames.map(t => t.trim()).filter(Boolean)),
     );
 
+    const ticket = await prisma.ticket.findUniqueOrThrow({
+      where: { id: ticketId },
+      select: { workspaceId: true },
+    });
+
     const existing = await prisma.ticketTag.findMany({
       where: { ticketId },
       select: { name: true },
@@ -396,7 +402,7 @@ export class TicketService {
       }
       if (toAdd.length > 0) {
         await tx.ticketTag.createMany({
-          data: toAdd.map(name => ({ name, ticketId })),
+          data: toAdd.map(name => ({ name, ticketId, workspaceId: ticket.workspaceId })),
         });
         await dualWriteTicketTags(ticketId, toAdd, tx);
       }

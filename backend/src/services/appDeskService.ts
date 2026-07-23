@@ -147,6 +147,7 @@ class AppDeskService {
           bcc: [],
           conversationId,
           channelId: conversation.channelId,
+          workspaceId: conversation.workspaceId,
           externalThreadId: threadId,
           externalMessageId: ackExternalId,
           sentByUserId: userId,
@@ -160,6 +161,7 @@ class AppDeskService {
           externalThreadId: threadId,
           messageId: created.id,
           entityId: created.id,
+          workspaceId: conversation.workspaceId,
           direction: MessageDirection.OUTGOING,
           entityType: ExternalEntityType.EMAIL,
         },
@@ -196,6 +198,7 @@ class AppDeskService {
       await this.prisma.ticketActivity.createMany({
         data: tickets.map(ticket => ({
           ticketId: ticket.id,
+          workspaceId: conversation.workspaceId,
           updatedBy: userId,
           timestamp: email.createdAt,
           activityType: ActivityType.EMAIL_SENT,

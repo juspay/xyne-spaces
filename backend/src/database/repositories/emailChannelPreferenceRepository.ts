@@ -14,10 +14,10 @@ export class EmailChannelPreferenceRepository {
    * Validates that the channel is a desk type
    * @throws Error if channel is not a desk type or doesn't exist
    */
-  private async validateEmailChannel(channelId: string): Promise<void> {
+  private async validateEmailChannel(channelId: string): Promise<{ workspaceId: string }> {
     const channel = await this.db.channel.findUnique({
       where: { id: channelId },
-      select: { type: true, id: true },
+      select: { type: true, id: true, workspaceId: true },
     });
 
     if (!channel) {
@@ -29,6 +29,8 @@ export class EmailChannelPreferenceRepository {
         `Channel ${channelId} is not a desk channel. EmailChannelPreference can only be created for desk channels. Current type: ${channel.type}`
       );
     }
+
+    return { workspaceId: channel.workspaceId };
   }
 
   /**
@@ -55,10 +57,10 @@ export class EmailChannelPreferenceRepository {
     dlEmail?: string;
     workspaceId?: string;
   }) {
-    await this.validateEmailChannel(data.channelId);
+    const { workspaceId } = await this.validateEmailChannel(data.channelId);
 
     return await this.db.emailChannelPreference.create({
-      data,
+      data: { ...data, workspaceId },
     });
   }
 
@@ -99,11 +101,11 @@ export class EmailChannelPreferenceRepository {
     dlEmail?: string;
     workspaceId?: string;
   }) {
-    await this.validateEmailChannel(data.channelId);
+    const { workspaceId } = await this.validateEmailChannel(data.channelId);
 
     return await this.db.emailChannelPreference.upsert({
       where: { channelId: data.channelId },
-      create: data,
+      create: { ...data, workspaceId },
       update: {
         ...(data.ownerUserId !== undefined && { ownerUserId: data.ownerUserId }),
         ...(data.assigneeUserGroupId !== undefined && { assigneeUserGroupId: data.assigneeUserGroupId }),

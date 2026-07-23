@@ -47,6 +47,14 @@ export class ChannelUserStatusRepository extends BaseRepository<ChannelUserStatu
     return seenConversations[seenConversations.length - 1]?.createdAt ?? null;
   }
 
+  private async getChannelWorkspaceId(channelId: string): Promise<string> {
+    const channel = await this.db.channel.findUniqueOrThrow({
+      where: { id: channelId },
+      select: { workspaceId: true },
+    });
+    return channel.workspaceId;
+  }
+
   /**
    * Create a new channel user status record
    */
@@ -57,10 +65,12 @@ export class ChannelUserStatusRepository extends BaseRepository<ChannelUserStatu
       data.channelId,
       lastViewedAt,
     );
+    const workspaceId = await this.getChannelWorkspaceId(data.channelId);
 
     return this.db.channelUserStatus.create({
       data: {
         channelId: data.channelId,
+        workspaceId,
         userId: data.userId,
         lastViewedAt,
         conversationSeenCutoffAt,
@@ -151,6 +161,7 @@ export class ChannelUserStatusRepository extends BaseRepository<ChannelUserStatu
     const now = new Date();
     const lastViewedAt = data.lastViewedAt ?? now;
     const conversationSeenCutoffAt = await this.getConversationSeenCutoffAt(channelId, lastViewedAt);
+    const workspaceId = await this.getChannelWorkspaceId(channelId);
 
     return this.db.channelUserStatus.upsert({
       where: {
@@ -166,6 +177,7 @@ export class ChannelUserStatusRepository extends BaseRepository<ChannelUserStatu
       },
       create: {
         channelId,
+        workspaceId,
         userId,
         lastViewedAt,
         conversationSeenCutoffAt,

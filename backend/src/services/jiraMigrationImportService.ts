@@ -578,8 +578,12 @@ export class JiraMigrationImportService {
     url: string;
     isDeleted?: boolean;
   }>();
+  // Set once per execute() run (see resetExecutionCaches/execute); used to stamp workspaceId
+  // on rows created from run-scoped buffers (e.g. flushPendingExternalMappings) where threading
+  // the value through every call site would be impractical.
+  private currentWorkspaceId: string | null = null;
 
-  private async setTicketTagsReplaceSet(ticketId: string, tags: string[], updatedBy: string): Promise<void> {
+  private async setTicketTagsReplaceSet(ticketId: string, tags: string[], updatedBy: string, workspaceId: string): Promise<void> {
     const desired = Array.from(new Set(tags.map(tag => tag.trim()).filter(tag => tag.length > 0)));
 
     const existingRows = await db.ticketTag.findMany({
@@ -596,7 +600,7 @@ export class JiraMigrationImportService {
 
     if (toAdd.length > 0) {
       await db.ticketTag.createMany({
-        data: toAdd.map(name => ({ ticketId, name })),
+        data: toAdd.map(name => ({ ticketId, name, workspaceId })),
         skipDuplicates: true,
       });
       await dualWriteTicketTags(ticketId, toAdd);
@@ -623,6 +627,7 @@ export class JiraMigrationImportService {
             removed: toRemove,
             source: 'jira-migration',
           },
+          workspaceId,
         },
       });
     }
@@ -653,6 +658,7 @@ export class JiraMigrationImportService {
     this.existingCommentMessagesByKey.clear();
     this.existingAttachmentsByKey.clear();
     this.userResolver.reset();
+    this.currentWorkspaceId = null;
   }
 
   private cacheTicketRecord(ticket: CachedTicketRecord, issueId?: string | null, issueKey?: string | null): void {
@@ -1155,6 +1161,7 @@ export class JiraMigrationImportService {
           fieldType: field.fieldType,
           isOptional: true,
           sequenceNumber,
+          workspaceId,
         });
       }
 
@@ -1211,6 +1218,7 @@ export class JiraMigrationImportService {
   private async ensureExactJiraStages(
     boardId: string,
     actorUserId: string,
+    workspaceId: string,
     issues: JiraIssue[],
     stages: JiraStageSummary[],
     statusV2ByStatus: Map<string, TicketStatusV2>,
@@ -1255,6 +1263,7 @@ export class JiraMigrationImportService {
             sequenceNumber,
             createdBy: actorUserId,
             defaultTicketStatusV2: mappedStatusV2,
+            workspaceId,
           },
         });
 
@@ -1369,6 +1378,7 @@ export class JiraMigrationImportService {
         contextId: boardId,
         contextType: FormContextType.BOARD,
         entityType: FormEntityType.TICKET,
+        workspaceId,
       },
     });
 
@@ -1646,6 +1656,7 @@ export class JiraMigrationImportService {
     channelId: string,
     fallbackUserId: string,
     unresolvedUsers: Map<string, UnresolvedJiraUser>,
+    workspaceId: string,
   ): Promise<{
     imported: number;
     skipped: number;
@@ -1811,6 +1822,7 @@ export class JiraMigrationImportService {
           isSubscribed: true,
           joinedAt,
           channelId,
+          workspaceId,
         })),
         skipDuplicates: true,
       });
@@ -2431,6 +2443,7 @@ export class JiraMigrationImportService {
 	      targetTicketId: string;
 	      relationType: TicketReferenceRelation;
 	      activityValue: Record<string, any>;
+	      workspaceId: string;
 	    }> = [];
 	    const relationshipTicketIds = new Set<string>();
 	    const migratedTicketIds = new Set<string>();
@@ -2467,6 +2480,7 @@ export class JiraMigrationImportService {
 	          sourceTicketId: normalizedPair.sourceTicketId,
 	          targetTicketId: normalizedPair.targetTicketId,
 	          relationType: mappedLink.relationType,
+	          workspaceId: sourceTicket.workspaceId,
 	          activityValue: {
             action: 'imported_from_jira',
             relationType: mappedLink.relationType,
@@ -2537,12 +2551,14 @@ export class JiraMigrationImportService {
       targetTicketId: string;
       relationType: TicketReferenceRelation;
       createdBy: string;
+      workspaceId: string;
     }> = [];
     const activitiesToCreate: Array<{
       ticketId: string;
       updatedBy: string;
       activityType: ActivityType;
       value: Record<string, any>;
+      workspaceId: string;
     }> = [];
 
     for (const candidate of relationshipCandidates) {
@@ -2557,12 +2573,14 @@ export class JiraMigrationImportService {
         targetTicketId: candidate.targetTicketId,
         relationType: candidate.relationType,
         createdBy: actorUserId,
+        workspaceId: candidate.workspaceId,
       });
       activitiesToCreate.push({
         ticketId: candidate.sourceTicketId,
         updatedBy: actorUserId,
         activityType: ActivityType.REFERENCE_TICKET,
         value: candidate.activityValue,
+        workspaceId: candidate.workspaceId,
       });
     }
 
@@ -2670,12 +2688,13 @@ export class JiraMigrationImportService {
 
     let createdSubTickets = 0;
     const seenMappingKeys = new Set<string>();
-    const mappingsToCreate: Array<{ ticketId: string; subTicketId: string }> = [];
+    const mappingsToCreate: Array<{ ticketId: string; subTicketId: string; workspaceId: string }> = [];
     const activitiesToCreate: Array<{
       ticketId: string;
       updatedBy: string;
       activityType: ActivityType;
       value: Record<string, any>;
+      workspaceId: string;
     }> = [];
     const candidates: Array<{
       issue: JiraIssue;
@@ -2750,6 +2769,7 @@ export class JiraMigrationImportService {
           mappingsToCreate.push({
             ticketId: candidate.parentTicket.id,
             subTicketId: existingSubTicket.id,
+            workspaceId: candidate.parentTicket.workspaceId,
           });
         }
         continue;
@@ -2774,6 +2794,7 @@ export class JiraMigrationImportService {
         mappingsToCreate.push({
           ticketId: candidate.parentTicket.id,
           subTicketId: subTicket.id,
+          workspaceId: candidate.parentTicket.workspaceId,
         });
       }
 
@@ -2788,6 +2809,7 @@ export class JiraMigrationImportService {
           mappedTicketId: candidate.childTicket.id,
           mappedTicketXyneId: candidate.childTicket.xyneId,
         },
+        workspaceId: candidate.parentTicket.workspaceId,
       });
 
       createdSubTickets += 1;
@@ -2857,6 +2879,9 @@ export class JiraMigrationImportService {
     const pendingMappings = this.pendingExternalMappings;
     this.pendingExternalMappings = [];
 
+    const workspaceId = this.currentWorkspaceId;
+    if (!workspaceId) throw new Error('workspaceId required: no active migration run context');
+
     await db.externalMessage.createMany({
       data: pendingMappings.map(mapping => ({
         externalSourceId: mapping.externalSourceId,
@@ -2866,6 +2891,7 @@ export class JiraMigrationImportService {
         entityId: mapping.entityId,
         direction: mapping.direction,
         entityType: mapping.entityType,
+        workspaceId,
       })),
       skipDuplicates: true,
     });
@@ -2969,6 +2995,7 @@ export class JiraMigrationImportService {
       (board as any).workspaceId ||
       (project as any).workspaceId ||
       config.defaultWorkspaceId;
+    this.currentWorkspaceId = workspaceId;
 
     const normalizedStatusV2Mappings = new Map<string, TicketStatusV2>();
     for (const [rawStatus, rawStatusV2] of Object.entries(input.statusV2Mappings || {})) {
@@ -3148,6 +3175,7 @@ export class JiraMigrationImportService {
       stages = await this.ensureExactJiraStages(
         board.id,
         fallbackUserId,
+        workspaceId,
         issuesChunk,
         stages,
         normalizedStatusV2Mappings,
@@ -3315,6 +3343,7 @@ export class JiraMigrationImportService {
                   isSubscribed: true,
                   joinedAt: createdAt,
                   channelId: channel.id,
+                  workspaceId,
                 },
                 update: {
                   participationType: ConversationParticipation.AUTHOR,
@@ -3390,6 +3419,7 @@ export class JiraMigrationImportService {
                     entityId: createdTicket.id,
                     direction: MessageDirection.INCOMING,
                     entityType: ExternalEntityType.TICKET,
+                    workspaceId,
                   },
                   {
                     externalSourceId,
@@ -3399,6 +3429,7 @@ export class JiraMigrationImportService {
                     entityId: initialMessageId,
                     direction: MessageDirection.INCOMING,
                     entityType: ExternalEntityType.MESSAGE,
+                    workspaceId,
                   },
                 ],
                 skipDuplicates: true,
@@ -3450,6 +3481,7 @@ export class JiraMigrationImportService {
                 data: uniqueTagNames.map(name => ({
                   ticketId: createdTicketId,
                   name,
+                  workspaceId,
                 })),
                 skipDuplicates: true,
               });
@@ -3500,6 +3532,7 @@ export class JiraMigrationImportService {
                     eta: true,
                     ticketType: true,
                     createdAt: true,
+                    workspaceId: true,
                   },
                 });
 
@@ -3580,7 +3613,7 @@ export class JiraMigrationImportService {
                     allTagNames.push(...sprintNames);
 	                  }
 		                  const desiredTags = [...new Set(allTagNames.filter(Boolean))];
-		                  await this.setTicketTagsReplaceSet(ticketId, desiredTags, fallbackUserId);
+		                  await this.setTicketTagsReplaceSet(ticketId, desiredTags, fallbackUserId, currentTicket.workspaceId);
 		                }
 		              }
 
@@ -3706,6 +3739,7 @@ export class JiraMigrationImportService {
             contextId: string;
             fieldValue: string;
             actualFieldValue: any;
+            workspaceId: string;
           }> = [];
 
           for (const [jiraFieldId, mapping] of fieldMap.entries()) {
@@ -3735,6 +3769,7 @@ export class JiraMigrationImportService {
                 contextId: board.id,
                 fieldValue: '',
                 actualFieldValue: value,
+                workspaceId,
               });
             }
           }
@@ -3830,7 +3865,7 @@ export class JiraMigrationImportService {
             | undefined;
 
           try {
-            const commentResult = await this.importComments(externalSourceId, issue, conversationId, channel.id, fallbackUserId, unresolvedUsers);
+            const commentResult = await this.importComments(externalSourceId, issue, conversationId, channel.id, fallbackUserId, unresolvedUsers, workspaceId);
             importedComments += commentResult.imported;
             skippedComments += commentResult.skipped;
             importedCommentData = {

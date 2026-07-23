@@ -78,6 +78,7 @@ export function createCreateCanvasTool(): Tool<{ markdown: string; title: string
             data: {
               id: canvasId,
               title,
+              workspaceId: user.workspaceId,
               content: [], // Empty - Y-Sweet is the source of truth
               createdBy: askAIBot.id, // Ask AI bot is the creator
               visibility: 'PRIVATE',
@@ -94,6 +95,7 @@ export function createCreateCanvasTool(): Tool<{ markdown: string; title: string
             data: {
               id: botParticipantId,
               canvasId,
+              workspaceId: user.workspaceId,
               userId: askAIBot.id,
               role: 'OWNER',
               joinedAt: now,
@@ -105,6 +107,7 @@ export function createCreateCanvasTool(): Tool<{ markdown: string; title: string
             data: {
               id: userParticipantId,
               canvasId,
+              workspaceId: user.workspaceId,
               userId,
               role: 'OWNER',
               joinedAt: now,

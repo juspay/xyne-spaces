@@ -55,6 +55,7 @@ export class UpdateTagsStep extends BaseActionStep<typeof UpdateTagsConfigSchema
         data: added.map(tag => ({
           ticketId,
           updatedBy: context.automation.createdById,
+          workspaceId: context.automation.workspaceId,
           activityType: ActivityType.TAGS,
           value: { action: 'added', newValue: tag, isAutomation: true },
         })),

@@ -52,13 +52,14 @@ export class AttachmentController {
         logger.error(`[AttachmentController] Error queuing Vespa job for attachment ${attachment.id}:`, error);
         // Log failed insertion to Postgres
         try {
-          if (db.vespaInsertionLogs) {
+          if (db.vespaInsertionLogs && workspaceId) {
             await db.vespaInsertionLogs.create({
               data: {
                 status: "FAILED",
                 type: "INSERT",
                 entityId: attachment.id,
                 entityType: fileSchema,
+                workspaceId,
                 namespace: NAMESPACE,
                 errorMessage: `Failed to enqueue Vespa job: ${error instanceof Error ? error.message : String(error)}`,
                 errorDetails: JSON.stringify(error),

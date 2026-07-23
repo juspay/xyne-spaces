@@ -77,6 +77,7 @@ export class UserGroupRepository extends BaseRepository<UserGroup, CreateUserGro
         await tx.userGroupMapping.createMany({
           data: data.userIds.map(userId => ({
             userGroupId: userGroup.id,
+            workspaceId: userGroup.workspaceId,
             userId,
             ...(data.userRoleUpdates?.[userId] ? { roleId: data.userRoleUpdates[userId] } : {}),
           })),
@@ -86,6 +87,7 @@ export class UserGroupRepository extends BaseRepository<UserGroup, CreateUserGro
         await tx.userGroupMapping.create({
           data: {
             userGroupId: userGroup.id,
+            workspaceId: userGroup.workspaceId,
             userId: actorUserId,
             ...(data.userRoleUpdates?.[actorUserId] ? { roleId: data.userRoleUpdates[actorUserId] } : {}),
           },

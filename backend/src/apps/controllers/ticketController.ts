@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import { randomUUID } from 'crypto';
 import { z } from 'zod';
 import { logger } from '@/utils/logger';
@@ -247,8 +248,9 @@ const replaceTicketTags = async (ticketId: string, tags: string[]): Promise<void
   const normalizedTags = Array.from(new Set(tags.map(tag => tag.trim()).filter(Boolean)));
   const ticket = await prismaClient.ticket.findUnique({
     where: { id: ticketId },
-    select: { projectId: true },
+    select: { projectId: true, workspaceId: true },
   });
+  if (!ticket) return;
 
   const existingMappings = await prismaClient.ticketTagMapping.findMany({
     where: { ticketId },
@@ -264,7 +266,7 @@ const replaceTicketTags = async (ticketId: string, tags: string[]): Promise<void
   if (tagsToAdd.length > 0) {
     if (ticket?.projectId) {
       await prismaClient.projectTag.createMany({
-        data: tagsToAdd.map(name => ({ name, projectId: ticket.projectId! })),
+        data: tagsToAdd.map(name => ({ name, projectId: ticket.projectId!, workspaceId: ticket.workspaceId })),
         skipDuplicates: true,
       });
 
@@ -282,16 +284,16 @@ const replaceTicketTags = async (ticketId: string, tags: string[]): Promise<void
           .map(name => {
             const tagId = tagIdByName.get(name);
             if (!tagId) return null;
-            return { ticketId, tagId, tagName: name };
+            return { ticketId, tagId, tagName: name, workspaceId: ticket.workspaceId };
           })
-          .filter((value): value is { ticketId: string; tagId: string; tagName: string } => value !== null),
+          .filter((value): value is { ticketId: string; tagId: string; tagName: string; workspaceId: string } => value !== null),
         skipDuplicates: true,
       });
     }
 
     // Mirror to legacy table while downstream consumers are still being migrated.
     await prismaClient.ticketTag.createMany({
-      data: tagsToAdd.map(name => ({ ticketId, name })),
+      data: tagsToAdd.map(name => ({ ticketId, name, workspaceId: ticket.workspaceId })),
       skipDuplicates: true,
     });
   }
@@ -376,6 +378,7 @@ const transferTicketToBoard = async (params: {
           stageLeftAt: null,
           stageEta: calculateETADeadline(now, firstStage.eta),
           updatedBy,
+          workspaceId: updatedTicket.workspaceId,
         },
       });
     }
@@ -1755,6 +1758,7 @@ export class TicketController {
             fieldId: field.id,
             fieldValue: stringValue,
             actualFieldValue: normalizedFieldValue.actualFieldValue,
+            workspaceId: ticket.workspaceId,
             createdAt: timestamp,
             updatedAt: timestamp,
           },
@@ -2124,6 +2128,7 @@ export class TicketController {
               messageId: externalMessageId,
               direction: MessageDirection.OUTGOING,
               entityType: ExternalEntityType.EMAIL,
+              workspaceId,
             },
           });
           claimedExternalMessageId = claimed.id;
@@ -2593,6 +2598,7 @@ export class TicketController {
     emailId: string,
   ): Promise<void> {
     try {
+      const workspaceId = await resolveWorkspaceIdFromModel(prismaClient, 'externalSource', { id: externalSourceId });
       await prismaClient.externalMessage.create({
         data: {
           externalSourceId,
@@ -2602,6 +2608,7 @@ export class TicketController {
           entityId: emailId,
           direction: MessageDirection.INCOMING,
           entityType: ExternalEntityType.EMAIL,
+          workspaceId,
         },
       });
     } catch (error) {

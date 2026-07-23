@@ -41,8 +41,9 @@ export async function createSkill(req: Request, res: Response) {
   
   try {
     const userId = req.user?.id;
-    
-    if (!userId) {
+    const workspaceId = req.user?.workspaceId;
+
+    if (!userId || !workspaceId) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
@@ -90,6 +91,7 @@ export async function createSkill(req: Request, res: Response) {
           description: trimmedDescription,
           instructions: trimmedInstructions,
           enabled: true,
+          workspaceId,
         },
       });
     });

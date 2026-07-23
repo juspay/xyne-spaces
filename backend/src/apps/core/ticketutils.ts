@@ -3,6 +3,7 @@ import { logger } from '@/utils/logger';
 import { findOrCreateConversation } from './conversationUtils';
 import { TicketRepository } from '@/database/repositories/ticketRepository';
 import { DatabaseClient } from '@/database/client';
+import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import { FormEntityType, MessageType, TicketPriority, VespaInsertionStatus, VespaOperationType } from '@prisma/client';
 import type { Prisma } from '@prisma/client';
 import { serializeTicketMd } from '@xyne/shared';
@@ -15,6 +16,7 @@ import { TicketIdService } from '@/services/ticketIdService';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { ticketSchema } from '@/vespa/src/types';
 import { NAMESPACE } from '@/vespa/src/config';
+import { getContextOrNull } from '@/database/tenant/context';
 
 // Initialize Block Kit parser instance
 const blockKitParser = new SlackBlockKitParser();
@@ -64,6 +66,8 @@ async function pushVespaJobForTicket(
       const db = DatabaseClient.getInstance();
       const vespaLogs = db.vespaInsertionLogs;
       if (vespaLogs) {
+        const logWorkspaceId = workspaceId ?? getContextOrNull()?.workspaceId;
+        if (!logWorkspaceId) throw new Error('workspaceId required: no tenant context');
         await vespaLogs.create({
           data: {
             status: VespaInsertionStatus.FAILED,
@@ -74,6 +78,7 @@ async function pushVespaJobForTicket(
             errorMessage: `Failed to enqueue Vespa job: ${error instanceof Error ? error.message : String(error)}`,
             errorDetails: JSON.stringify(error),
             userId: userId,
+            workspaceId: logWorkspaceId,
             createdAt: new Date(),
           },
         });
@@ -158,8 +163,7 @@ export async function createTicketWithConversation(
     const finalConversationId = conversationResult.conversationId;
     const messageId = conversationResult.messageId;
 
-    const project = await prisma.project.findUnique({ where: { id: projectId }, select: { workspaceId: true } });
-    const workspaceId = project?.workspaceId ?? '';
+    const workspaceId = await resolveWorkspaceIdFromModel(prisma, 'project', { id: projectId });
 
     // Generate xyneId and create ticket in a transaction
     const ticket = await prisma.$transaction(async (tx) => {
@@ -222,6 +226,7 @@ export async function createTicketWithConversation(
             contextId: customFieldValues.contextId,
             fieldValue: fieldValue.fieldValue,
             actualFieldValue: fieldValue.actualFieldValue,
+            workspaceId,
           })),
         });
       }

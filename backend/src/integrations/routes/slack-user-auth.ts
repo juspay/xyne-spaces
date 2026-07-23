@@ -190,6 +190,7 @@ router.get('/callback', async (req: Request, res: Response): Promise<void> => {
       },
       create: {
         userId: stateData.userId,
+        workspaceId: stateData.workspaceId,
         provider: 'slack',
         providerUserId: slackUserId,
         encryptedToken,

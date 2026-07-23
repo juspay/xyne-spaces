@@ -19,7 +19,7 @@ import { db } from '@/database/client';
  * Upserts each template command (matched by sourceCommandId) and removes installed commands
  * whose template source no longer exists. Used on both install and Update.
  */
-async function syncInstalledCommands(installedAppId: string, appId: string): Promise<void> {
+async function syncInstalledCommands(installedAppId: string, appId: string, workspaceId: string): Promise<void> {
   // One transaction so the install never ends up with a half-synced command snapshot if the
   // process dies mid-loop (partial create/update/delete).
   await db.$transaction(async (tx) => {
@@ -48,6 +48,7 @@ async function syncInstalledCommands(installedAppId: string, appId: string): Pro
         await tx.installedAppCommand.create({
           data: {
             installedAppId,
+            workspaceId,
             sourceCommandId: c.id,
             commandName: c.commandName,
             description: c.description,
@@ -101,7 +102,7 @@ export async function installApp(appId: string, workspaceId: string) {
     if (existingInstallation) {
       const jwtToken = jwt.sign({ appId, userId: existingInstallation.userId }, signingSecret, { noTimestamp: true });
       await repositories.appPermissions.syncFromAppApproved(appId, existingInstallation.id);
-      await syncInstalledCommands(existingInstallation.id, appId);
+      await syncInstalledCommands(existingInstallation.id, appId, workspaceId);
       await repositories.installedApps.update(existingInstallation.id, {
         version: app.version,
         webhookUrl: existingInstallation.webhookUrl ?? app.webhookUrl ?? null,
@@ -155,6 +156,7 @@ export async function installApp(appId: string, workspaceId: string) {
     const installedApp = await repositories.installedApps.create({
       appId,
       userId: appUser.id,
+      workspaceId,
       webhookUrl: app.webhookUrl ?? null,
       version: app.version,
       createdAt: now,
@@ -162,7 +164,7 @@ export async function installApp(appId: string, workspaceId: string) {
     });
 
     await repositories.appPermissions.copyFromApp(appId, installedApp.id);
-    await syncInstalledCommands(installedApp.id, appId);
+    await syncInstalledCommands(installedApp.id, appId, workspaceId);
     logger.info(`[INSTALL-APP] Installed app ${appId} (entry ${installedApp.id}) in workspace ${workspaceId}`);
 
     return { jwtToken };

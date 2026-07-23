@@ -414,7 +414,8 @@ export class ConfigSyncService {
         agent: { connect: { id: newAgent.id } },
         tool: { connect: { id: toolId } },
         status: tool.status === ToolStatus.ENABLED ? 'Enabled' : 'Disabled',
-        specialDescription: `Version ${version} - ${reason}: Auto-configured tool mapping from config.ts`
+        specialDescription: `Version ${version} - ${reason}: Auto-configured tool mapping from config.ts`,
+        workspaceId
       });
     }
 

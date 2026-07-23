@@ -98,6 +98,7 @@ export class ProjectController {
                 errorMessage: `Failed to enqueue Vespa job: ${error instanceof Error ? error.message : String(error)}`,
                 errorDetails: JSON.stringify(error),
                 userId: userId,
+                workspaceId: req.user!.workspaceId!,
                 createdAt: new Date(),
               },
             });

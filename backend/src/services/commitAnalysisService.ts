@@ -298,7 +298,7 @@ export class CommitAnalysisService {
         allUsers.map(u =>
           db.channelParticipant.upsert({
             where: { channelId_userId: { channelId: channel.id, userId: u.id } },
-            create: { channelId: channel.id, userId: u.id },
+            create: { channelId: channel.id, userId: u.id, workspaceId },
             update: {},
           }),
         ),

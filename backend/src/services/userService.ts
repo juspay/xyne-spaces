@@ -226,10 +226,15 @@ export class UserService {
 
       if (!existingPreference) {
         logger.info(`Creating user preference entry for user ${userId}`);
+        const user = await this.prisma.user.findUniqueOrThrow({
+          where: { id: userId },
+          select: { workspaceId: true },
+        });
         await this.prisma.userPreference.create({
           data: {
             ...USER_PREFERENCE_NOTIFICATION_DEFAULTS,
             userId,
+            workspaceId: user.workspaceId,
             askai_custom_instruction: null, // Initialize with null
           },
         });

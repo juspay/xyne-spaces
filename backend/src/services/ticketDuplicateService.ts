@@ -1,4 +1,5 @@
 import { logger } from '@/utils/logger';
+import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import { config } from '@/config/env';
 import { DatabaseClient } from '@/database/client';
 import { transformVespaResults } from '@/services/vespaSearch/resultTransform';
@@ -261,10 +262,13 @@ class TicketDuplicateService {
         return;
       }
 
+      const workspaceId = await resolveWorkspaceIdFromModel(prisma, 'project', { id: projectId });
+
       const referenceRows = [
         {
           sourceTicketId: ticketId,
           targetTicketId: duplicateCandidate.id,
+          workspaceId,
           relationType: TicketReferenceRelation.DUPLICATE_POSSIBLE,
           createdBy: ticketCreatedBy,
         },

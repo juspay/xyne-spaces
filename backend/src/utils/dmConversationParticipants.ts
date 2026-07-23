@@ -24,6 +24,11 @@ export async function ensureDmConversationAuthorParticipant({
 
   const client = tx ?? db;
 
+  const channel = await client.channel.findUniqueOrThrow({
+    where: { id: channelId },
+    select: { workspaceId: true },
+  });
+
   await client.conversationParticipant.upsert({
     where: {
       conversationId_userId: {
@@ -35,6 +40,7 @@ export async function ensureDmConversationAuthorParticipant({
       conversationId,
       userId: senderId,
       channelId,
+      workspaceId: channel.workspaceId,
       participationType: ConversationParticipation.AUTHOR,
       isSubscribed: true,
     },

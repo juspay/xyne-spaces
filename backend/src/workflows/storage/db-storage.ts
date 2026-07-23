@@ -111,18 +111,18 @@ export class DBWorkflowStorage implements WorkflowStorage {
   // Helper method to create workflow step and emit real-time event
   private async createStepAndNotify(
     workflowExecutionId: string,
-    data: Parameters<WorkflowStepRepository['create']>[0]
+    data: Omit<Parameters<WorkflowStepRepository['create']>[0], 'workspaceId'>
   ): Promise<WorkflowStep> {
-    const createdStep = await this.workflowStepRepo.create(data)
+    // Resolve the owning execution first so we can stamp the denormalized
+    // tenant key (workspaceId) onto the step and reuse it for parent lookup.
+    const execution = await this.workflowExecutionRepo.findById(workflowExecutionId)
+    if (!execution) {
+      throw new Error(`Workflow execution not found: ${workflowExecutionId}`)
+    }
+    const createdStep = await this.workflowStepRepo.create({ ...data, workspaceId: execution.workspaceId })
     // Get parent execution ID if this is a child execution
     // Frontend subscribes to parent execution ID, so we need to broadcast to both
-    let parentExecutionId: string | null = null
-    try {
-      const execution = await this.workflowExecutionRepo.findById(workflowExecutionId)
-      parentExecutionId = execution?.parentWorkflowExecutionId || null
-    } catch (error) {
-      logger.error(`❌ [DB-STORAGE] Failed to get parent execution ID:`, error)
-    }
+    const parentExecutionId: string | null = execution.parentWorkflowExecutionId || null
 
     const eventData = {
       type: 'step_added' as const,
@@ -1298,12 +1298,17 @@ export class DBWorkflowStorage implements WorkflowStorage {
 
   async createChildWorkflowExecution(parentExecutionId: string, workflowId: string, checkpointId: string): Promise<string> {
     try {
+      const parentExecution = await this.workflowExecutionRepo.findById(parentExecutionId)
+      if (!parentExecution) {
+        throw new Error(`Parent workflow execution not found: ${parentExecutionId}`)
+      }
       const childExecution = await this.workflowExecutionRepo.create({
         workflow: { connect: { id: workflowId } },
         parentWorkflowExecution: { connect: { id: parentExecutionId } },
         sourceStepsId: checkpointId,
         status: WorkflowExecutionStatus.RUNNING,
-        tag: 'child'
+        tag: 'child',
+        workspaceId: parentExecution.workspaceId
       })
 
       return childExecution.id
@@ -1478,7 +1483,8 @@ export class DBWorkflowStorage implements WorkflowStorage {
         stepsId: inputStepDbId,
         toolCallId: toolExecution.id,
         stepType: 'tool',
-        toolName: normalizedToolName
+        toolName: normalizedToolName,
+        workspaceId: inputStep.workspaceId
       });
     } catch (error) {
       throw new Error(`Failed to create tool execution step: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -1632,7 +1638,8 @@ export class DBWorkflowStorage implements WorkflowStorage {
       // Create AgentStep linking to the INPUT step
       await repositories.agentSteps.create({
         stepsId: inputStepDbId,
-        stepType: 'llm-call'
+        stepType: 'llm-call',
+        workspaceId: inputStep.workspaceId
       });
     } catch (error) {
       throw new Error(`Failed to create LLM call step: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -1688,7 +1695,8 @@ export class DBWorkflowStorage implements WorkflowStorage {
       // Create AgentStep linking to the INPUT step
       await repositories.agentSteps.create({
         stepsId: inputStepDbId,
-        stepType: 'assistant-message'
+        stepType: 'assistant-message',
+        workspaceId: inputStep.workspaceId
       });
     } catch (error) {
       throw new Error(`Failed to create assistant message step: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -1727,7 +1735,8 @@ export class DBWorkflowStorage implements WorkflowStorage {
       // Create AgentStep linking to the INPUT step
       await repositories.agentSteps.create({
         stepsId: inputStepDbId,
-        stepType: 'user-message'
+        stepType: 'user-message',
+        workspaceId: inputStep.workspaceId
       });
     } catch (error) {
       throw new Error(`Failed to create user message step: ${error instanceof Error ? error.message : 'Unknown error'}`)
@@ -1767,7 +1776,8 @@ export class DBWorkflowStorage implements WorkflowStorage {
       // Create AgentStep linking to the INPUT step
       await repositories.agentSteps.create({
         stepsId: inputStepDbId,
-        stepType: 'hooks'
+        stepType: 'hooks',
+        workspaceId: inputStep.workspaceId
       });
     } catch (err) {
       throw new Error(`Failed to create error step: ${err instanceof Error ? err.message : 'Unknown error'}`)
@@ -2107,7 +2117,8 @@ export class DBWorkflowStorage implements WorkflowStorage {
           tag: "child",                                 // Store context in execution
           status: 'PENDING',  // Child starts as PENDING, worker poller will pick it up
           parentWorkflowExecution: { connect: { id: workflowExecutionId } },
-          sourceStepsId: parallelStepDbId  // Use WorkflowStep DB ID, not step name
+          sourceStepsId: parallelStepDbId,  // Use WorkflowStep DB ID, not step name
+          workspaceId: parentExecution.workspaceId
         })
 
         childExecutions.push({
@@ -3115,13 +3126,20 @@ export class DBWorkflowStorage implements WorkflowStorage {
     logger.info(`💡 [KNOWLEDGE] Saving ${learnings.length} learnings for checkpoint: ${checkpointId}`)
     
     const db = DatabaseClient.getInstance()
-    
+
+    // Resolve the owning execution to stamp the denormalized tenant key.
+    const execution = await this.workflowExecutionRepo.findById(workflowExecutionId)
+    if (!execution) {
+      throw new Error(`Workflow execution not found: ${workflowExecutionId}`)
+    }
+
     // Use Prisma createMany for batch insert
     await db.workflowKnowledge.createMany({
       data: learnings.map((learning) => ({
         id: crypto.randomUUID(),
         workflowExecutionId,
         checkpointId,
+        workspaceId: execution.workspaceId,
         learningType: learning.learningType,
         title: learning.title,
         content: learning.content,

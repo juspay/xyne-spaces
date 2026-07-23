@@ -20,6 +20,11 @@ export const queueWhatsAppChannelVespaJob = (channelId: string, userId: string, 
   }).catch(async error => {
     logger.error('[WhatsAppMigration] Error queuing Vespa job for channel', error, { channelId });
     try {
+      const ws = workspaceId
+        ?? (await db.channel.findUnique({ where: { id: channelId }, select: { workspaceId: true } }))?.workspaceId;
+      if (!ws) {
+        throw new Error(`Could not resolve workspaceId for channel ${channelId}`);
+      }
       await db.vespaInsertionLogs.create({
         data: {
           status: 'FAILED',
@@ -30,6 +35,7 @@ export const queueWhatsAppChannelVespaJob = (channelId: string, userId: string, 
           errorMessage: `Failed to enqueue Vespa job: ${error instanceof Error ? error.message : String(error)}`,
           errorDetails: JSON.stringify(error),
           userId,
+          workspaceId: ws,
           createdAt: new Date(),
         },
       });

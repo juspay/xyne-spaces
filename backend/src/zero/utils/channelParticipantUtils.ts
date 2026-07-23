@@ -92,6 +92,13 @@ export async function addChannelParticipant(
     return { added: false, participantId: existingParticipant.id };
   }
 
+  // Denormalized tenant key sourced from the parent channel.
+  const channelForWorkspace = await tx.run(zql.channels.where('id', channelId).one());
+  const workspaceId = channelForWorkspace?.workspaceId;
+  if (!workspaceId) {
+    throw new Error(`workspaceId required: channel ${channelId} not found`);
+  }
+
   const id = participantId;
   const now = timestamp;
   const conversationSeenCutoffAt = await getConversationSeenCutoffAt(tx, channelId, now);
@@ -106,6 +113,7 @@ export async function addChannelParticipant(
   // Insert into channel_participants
   await tx.mutate.channel_participants.insert({
     id,
+    workspaceId,
     channelId,
     userId,
     role,
@@ -131,6 +139,7 @@ export async function addChannelParticipant(
   } else {
     await tx.mutate.channel_user_status.insert({
       id: channelUserStatusId,
+      workspaceId,
       channelId,
       userId,
       lastViewedAt: now,
@@ -192,6 +201,13 @@ export async function addChannelParticipants(
     return { addedCount: 0, addedUserIds: [] };
   }
 
+  // Denormalized tenant key sourced from the parent channel.
+  const channelForWorkspace = await tx.run(zql.channels.where('id', channelId).one());
+  const workspaceId = channelForWorkspace?.workspaceId;
+  if (!workspaceId) {
+    throw new Error(`workspaceId required: channel ${channelId} not found`);
+  }
+
   // Check for existing soft-deleted channel_user_status records
   const existingSoftDeletedStatuses = await tx.run(zql.channel_user_status
     .where('channelId', channelId)
@@ -212,6 +228,7 @@ export async function addChannelParticipants(
 
     await tx.mutate.channel_participants.insert({
       id: participantId,
+      workspaceId,
       channelId,
       userId,
       role,
@@ -237,6 +254,7 @@ export async function addChannelParticipants(
     } else {
       await tx.mutate.channel_user_status.insert({
         id: uuidv4(),
+        workspaceId,
         channelId,
         userId,
         lastViewedAt: timestamp,

@@ -672,6 +672,7 @@ export class CallDocumentService {
 
       const canvasId = uuidv4();
       const participantId = uuidv4();
+      const workspaceId = await repositories.channels.getWorkspaceId(channelId);
 
       const title = `📋 PRD: ${prd.title}`;
       const content = formatPRDToBlockNote(prd, callId);
@@ -683,6 +684,7 @@ export class CallDocumentService {
           title,
           content: [],
           channelId,
+          workspaceId,
           createdBy: createdByUserId,
           visibility: 'PUBLIC',
           isTemplate: false,
@@ -705,6 +707,7 @@ export class CallDocumentService {
         data: {
           id: participantId,
           canvasId,
+          workspaceId,
           userId: createdByUserId,
           role: 'OWNER',
           joinedAt: now,
@@ -717,6 +720,7 @@ export class CallDocumentService {
         data: {
           id: uuidv4(),
           canvasId,
+          workspaceId,
           userId: callCreatorUserId,
           role: 'OWNER',
           joinedAt: now,
@@ -764,6 +768,7 @@ export class CallDocumentService {
 
       const canvasId = uuidv4();
       const participantId = uuidv4();
+      const workspaceId = await repositories.channels.getWorkspaceId(channelId);
 
       // Prepare canvas content (title, content, mentions)
       const { title, content: sanitizedContent, mentionedUserIds } = await this.prepareCanvasContent(
@@ -780,6 +785,7 @@ export class CallDocumentService {
           title,
           content: [],
           channelId,
+          workspaceId,
           createdBy: createdByUserId,
           visibility: 'PUBLIC',
           isTemplate: false,
@@ -805,6 +811,7 @@ export class CallDocumentService {
         data: {
           id: participantId,
           canvasId,
+          workspaceId,
           userId: createdByUserId,
           role: CanvasRole.OWNER,
           joinedAt: now,
@@ -817,6 +824,7 @@ export class CallDocumentService {
         data: {
           id: uuidv4(),
           canvasId,
+          workspaceId,
           userId: callCreatorUserId,
           role: CanvasRole.OWNER,
           joinedAt: now,

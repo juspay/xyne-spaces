@@ -87,6 +87,20 @@ export class ExternalSourceRepository {
     isActive?: boolean;
     lastSyncCursor?: string | null;
   }) {
+    // workspaceId is a required tenant key. Prefer the explicit value; otherwise
+    // denormalize from the parent channel (all current callers pass channelId).
+    let workspaceId = data.workspaceId;
+    if (!workspaceId) {
+      if (!data.channelId) {
+        throw new Error('externalSource create requires a workspaceId or a channelId to derive it from');
+      }
+      const channel = await this.db.channel.findUniqueOrThrow({
+        where: { id: data.channelId },
+        select: { workspaceId: true },
+      });
+      workspaceId = channel.workspaceId;
+    }
+
     return await this.db.externalSource.create({
       data: {
         name: data.name,
@@ -97,7 +111,7 @@ export class ExternalSourceRepository {
         boardId: data.boardId,
         credentials: data.credentials,
         ownerUserId: data.ownerUserId,
-        workspaceId: data.workspaceId,
+        workspaceId,
         isActive: data.isActive ?? true,
         lastSyncCursor: data.lastSyncCursor,
       }

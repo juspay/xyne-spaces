@@ -8,6 +8,7 @@ import type { MessageWithOptionalNudgeCounts } from '../components/ui/MessageBub
  */
 export function initialMessageSummaryToMessage(
   summary: InitialMessageSummary,
+  workspaceId: string | null,
 ): MessageWithOptionalNudgeCounts {
   return {
     messageId: summary.messageId,
@@ -28,7 +29,7 @@ export function initialMessageSummaryToMessage(
     isSent: summary.isSent,
     reactions_md: summary.reactions_md ?? null,
     link_preview_md: summary.link_preview_md ?? null,
-    workspaceId: summary.workspaceId ?? null,
+    workspaceId,
   };
 }
 
@@ -38,7 +39,7 @@ export function initialMessageSummaryToMessage(
  * to the given userId (respects the visibleTo visibility filter).
  */
 export function getInitialMessageFromConversation(
-  conversation: { initial_message_md?: string | null },
+  conversation: { initial_message_md?: string | null; workspaceId: string | null },
   userId?: string,
 ): MessageWithOptionalNudgeCounts | null {
   const summary = parseInitialMessageMd(conversation.initial_message_md);
@@ -50,7 +51,8 @@ export function getInitialMessageFromConversation(
     return null;
   }
 
-  return initialMessageSummaryToMessage(summary);
+  // A message's workspace is its conversation's workspace (authoritative, non-null).
+  return initialMessageSummaryToMessage(summary, conversation.workspaceId);
 }
 
 /**

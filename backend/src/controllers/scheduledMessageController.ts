@@ -114,6 +114,7 @@ export async function createScheduledMessage(req: Request, res: Response) {
         scheduledTime,
         isActive: true,
         createdBy: userId,
+        workspaceId: req.user!.workspaceId!,
       },
     });
 

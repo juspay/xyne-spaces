@@ -52,7 +52,7 @@ export async function ensureCsatFormFields(boardId: string, workspaceId: string,
     });
     try {
       await db.formContextMapping.create({
-        data: { id: randomUUID(), contextId: boardId, contextType: 'BOARD', entityType: 'TICKET', formId: form.id },
+        data: { id: randomUUID(), contextId: boardId, contextType: 'BOARD', entityType: 'TICKET', formId: form.id, workspaceId },
       });
       logger.info(`[csat] provisioned new ticket form with CSAT fields | boardId=${boardId} formId=${form.id}`);
     } catch (err) {
@@ -194,6 +194,7 @@ export async function recordCsatRating(
         timestamp: new Date(),
         activityType: ActivityType.CSAT_RECEIVED,
         channelId: ticket.channelId,
+        workspaceId: ticket.workspaceId,
         value: {
           field: 'csat',
           rating,

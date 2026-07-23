@@ -77,6 +77,14 @@ export class ExternalStepResponseRepository extends BaseRepository<ExternalStepR
     workflowStepId: string,
     rawResponse: string
   ): Promise<ExternalStepResponse> {
+    // Stamp the denormalized tenant key from the owning execution.
+    const execution = await this.db.workflowExecution.findUnique({
+      where: { id: workflowExecutionId },
+      select: { workspaceId: true },
+    });
+    if (!execution) {
+      throw new Error(`Workflow execution not found: ${workflowExecutionId}`);
+    }
     return await this.db.externalStepResponse.upsert({
       where: {
         workflowStepId
@@ -88,7 +96,8 @@ export class ExternalStepResponseRepository extends BaseRepository<ExternalStepR
       create: {
         workflowExecutionId,
         workflowStepId,
-        rawResponse
+        rawResponse,
+        workspaceId: execution.workspaceId
       }
     });
   }

@@ -162,13 +162,13 @@ async function fetchTicketsFromBitbot(
   return ticketResponse.tickets;
 }
 
-async function pushVespaJobForTicket(ticketId: string, userId: string, workspaceId?: string): Promise<void> {
+async function pushVespaJobForTicket(ticketId: string, userId: string, workspaceId: string): Promise<void> {
   vespaBackfillQueue
     .addJob({
       schema: ticketSchema,
       jobType: 'feed',
       docId: ticketId,
-      ...(workspaceId ? { workspaceId } : {}),
+      workspaceId,
     })
     .catch(async (error) => {
       logger.error('[Migration] Error queuing Vespa job for ticket:', error);
@@ -186,6 +186,7 @@ async function pushVespaJobForTicket(ticketId: string, userId: string, workspace
               errorMessage: `Failed to enqueue Vespa job: ${error instanceof Error ? error.message : String(error)}`,
               errorDetails: JSON.stringify(error),
               userId: userId,
+              workspaceId,
               createdAt: new Date(),
             },
           });
@@ -221,7 +222,10 @@ async function ingestTicket(
     // Resolve workspaceId from channelId to get the correct bot token
     const jiraffeChannelRepo = new ChannelRepository();
     const jiraffeCh = await jiraffeChannelRepo.findById(channelId);
-    const jiraffeWsId = jiraffeCh?.workspaceId || workspaceId || '';
+    const jiraffeWsId = jiraffeCh?.workspaceId || workspaceId;
+    if (!jiraffeWsId) {
+      throw new Error('workspaceId required: channel has no workspaceId and none provided');
+    }
     const jiraffeBotToken = getBotConfigByWorkspaceId(jiraffeWsId).slackBotToken;
     if (!jiraffeBotToken) {
       throw new Error('slackBotToken is not configured for this workspace');
@@ -232,6 +236,7 @@ async function ingestTicket(
         sourceType: 'jiraffe',
         displayName: 'Jiraffe Migration',
         channelId: channelId,
+        workspaceId: jiraffeWsId,
         credentials: encrypt(JSON.stringify({ botToken: jiraffeBotToken })),
       },
     });
@@ -373,7 +378,7 @@ async function ingestTicket(
         },
       });
       await syncConversationTicketMdFromPrismaTicket(db, updatedTicket);
-      pushVespaJobForTicket(updatedTicket.id, userId, workspaceId || undefined).catch((error) => {
+      pushVespaJobForTicket(updatedTicket.id, userId, updatedTicket.workspaceId).catch((error) => {
         logger.error(
           `[Slack Jiraffe] Error pushing Vespa job for updated ticket ${updatedTicket.id}:`,
           error
@@ -473,6 +478,7 @@ async function ingestTicket(
       data: [
         {
           externalSourceId: externalSource.id,
+          workspaceId: newTicket.workspaceId,
           externalId: ticket.id,
           externalThreadId: ticket.slack_thread_ts,
           messageId: '',
@@ -482,6 +488,7 @@ async function ingestTicket(
         },
         {
           externalSourceId: externalSource.id,
+          workspaceId: newTicket.workspaceId,
           externalId: ticket.slack_thread_ts,
           externalThreadId: ticket.slack_thread_ts,
           messageId: '',
@@ -495,7 +502,7 @@ async function ingestTicket(
     return newTicket;
   });
 
-  pushVespaJobForTicket(createdTicket.id, userId, workspaceId || undefined).catch((error) => {
+  pushVespaJobForTicket(createdTicket.id, userId, createdTicket.workspaceId).catch((error) => {
     logger.error(`[Slack Jiraffe] Error pushing Vespa job for ticket ${createdTicket.id}:`, error);
   });
 

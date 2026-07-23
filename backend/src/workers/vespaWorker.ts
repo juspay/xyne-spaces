@@ -127,10 +127,18 @@ export class VespaWorker {
 			const entityId = job.data.docId;
 			const entityType = job.data.schema;
 			const userId = job.data.userId || null;
+			const workspaceId = job.data.workspaceId;
+			if (!workspaceId) {
+				logger.warn(
+					`[VESPA_WORKER] Skipping DB failure record for job ${job.id} (${entityType}/${entityId}): no workspaceId on job payload`,
+				);
+				return;
+			}
 			await db.vespaInsertionLogs.create({
 				data: {
 					entityId,
 					entityType,
+					workspaceId,
 					type: VespaOperationType[job.data.jobType],
 					status: 'FAILED',
 					namespace: this.namespace,

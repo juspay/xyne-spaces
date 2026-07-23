@@ -63,6 +63,7 @@ export async function saveCustomInstruction(req: Request, res: Response) {
       create: {
         ...USER_PREFERENCE_NOTIFICATION_DEFAULTS,
         userId,
+        workspaceId: req.user!.workspaceId!,
         askai_custom_instruction: instruction ?? null,
       },
       select: {

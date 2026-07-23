@@ -321,6 +321,7 @@ export class MicrosoftDeskService {
           channelId: channel.id,
           userId: channelData.userId,
           role: 'ADMIN',
+          workspaceId: channelData.workspaceId,
         },
       });
 
@@ -331,6 +332,7 @@ export class MicrosoftDeskService {
           lastViewedAt: now,
           conversationSeenCutoffAt,
           updatedAt: now,
+          workspaceId: channelData.workspaceId,
         },
       });
 
@@ -339,6 +341,7 @@ export class MicrosoftDeskService {
           channelId: channel.id,
           lastActivityAt: now,
           participantCount: 1,
+          workspaceId: channelData.workspaceId,
         },
       });
 
@@ -356,6 +359,7 @@ export class MicrosoftDeskService {
           displayName: credentials.email,
           channelId: channel.id,
           boardId: channelData.boardId ?? board?.id, // @deprecated - kept for backward compatibility
+          workspaceId: channelData.workspaceId,
           credentials: encryptedCredentials,
           isActive: true,
           // Cursor intentionally left null — the caller triggers an initial refetch
@@ -377,6 +381,7 @@ export class MicrosoftDeskService {
           ...(channelData.boardId ? { boardId: channelData.boardId } : board?.id ? { boardId: board.id } : {}),
           emailMergeMode: config.emailMergeModeDefault as EmailMergeMode,
           deskType: DeskType.EMAIL,
+          workspaceId: channelData.workspaceId,
         },
       });
 

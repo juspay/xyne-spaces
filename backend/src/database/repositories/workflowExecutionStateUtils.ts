@@ -16,6 +16,21 @@ export type WorkflowExecutionWithState = WorkflowExecution & {
 };
 
 /**
+ * Resolve the workspaceId to denormalize onto a WorkflowExecutionState row from
+ * its owning WorkflowExecution (1:1 via workflowExecutionId).
+ */
+async function resolveExecutionWorkspaceId(workflowExecutionId: string): Promise<string | null> {
+  const execution = await prisma.workflowExecution.findUnique({
+    where: { id: workflowExecutionId },
+    select: { workspaceId: true },
+  });
+  if (!execution) {
+    throw new Error(`workspaceId required: workflowExecution ${workflowExecutionId} not found`);
+  }
+  return execution.workspaceId;
+}
+
+/**
  * Fetches the state (context and output) for a workflow execution
  */
 export async function getExecutionState(workflowExecutionId: string): Promise<{ context: string | null; output: string | null }> {
@@ -86,9 +101,11 @@ export async function upsertExecutionState(
       },
     });
   } else {
+    const workspaceId = await resolveExecutionWorkspaceId(workflowExecutionId);
     await prisma.workflowExecutionState.create({
       data: {
         workflowExecutionId,
+        workspaceId,
         context: data.context ?? null,
         output: data.output ?? null,
       },
@@ -104,9 +121,11 @@ export async function createExecutionState(
   context?: string | null,
   output?: string | null
 ): Promise<void> {
+  const workspaceId = await resolveExecutionWorkspaceId(workflowExecutionId);
   await prisma.workflowExecutionState.create({
     data: {
       workflowExecutionId,
+      workspaceId,
       context: context ?? null,
       output: output ?? null,
     },
@@ -128,10 +147,12 @@ export async function persistAutomationPauseState(
   workflowExecutionId: string,
   data: { context: string; currentStepIndex: number }
 ): Promise<void> {
+  const workspaceId = await resolveExecutionWorkspaceId(workflowExecutionId);
   await prisma.workflowExecutionState.upsert({
     where: { workflowExecutionId },
     create: {
       workflowExecutionId,
+      workspaceId,
       context: data.context,
       currentStepIndex: data.currentStepIndex,
     },
@@ -149,10 +170,12 @@ export async function persistAutomationState(
     currentStepIndex?: number;
   },
 ): Promise<void> {
+  const workspaceId = await resolveExecutionWorkspaceId(workflowExecutionId);
   await prisma.workflowExecutionState.upsert({
     where: { workflowExecutionId },
     create: {
       workflowExecutionId,
+      workspaceId,
       context: data.context,
       ...(data.currentStepIndex !== undefined
         ? { currentStepIndex: data.currentStepIndex }
@@ -179,7 +202,7 @@ export async function markAutomationFailed(
 ): Promise<'marked' | 'skipped-terminal' | 'not-found'> {
   const execution = await prisma.workflowExecution.findUnique({
     where: { id: workflowExecutionId },
-    select: { id: true, status: true },
+    select: { id: true, status: true, workspaceId: true },
   });
   if (!execution) return 'not-found';
   if (TERMINAL_RUN_STATUSES.has(execution.status)) return 'skipped-terminal';
@@ -214,7 +237,7 @@ export async function markAutomationFailed(
     }),
     prisma.workflowExecutionState.upsert({
       where: { workflowExecutionId },
-      create: { workflowExecutionId, context: JSON.stringify(mergedContext) },
+      create: { workflowExecutionId, workspaceId: execution.workspaceId, context: JSON.stringify(mergedContext) },
       update: { context: JSON.stringify(mergedContext) },
     }),
   ]);

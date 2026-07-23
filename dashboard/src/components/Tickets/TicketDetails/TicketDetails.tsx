@@ -1181,12 +1181,13 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const boardCustomFieldsFormId = formMapping?.formId;
 
   const allFormFields = useMemo(() => {
+    if (!ticket?.workspaceId) return [];
     const allFields = resolveBoardAdditionalFields({
       formMapping: formMapping ?? undefined,
       formEntityValues: formEntityValues as FormEntityValueWithField[] | undefined,
-      boardId: ticket?.boardId,
+      boardId: ticket.boardId,
       ticketId,
-      workspaceId: ticket?.workspaceId,
+      workspaceId: ticket.workspaceId,
     });
 
     // Only show fields that either have no parent, or whose parent's current value

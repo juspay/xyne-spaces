@@ -2,7 +2,6 @@ import { BaseRepository } from './base';
 import { Project, ProjectType, TicketStatusV2 } from '@prisma/client';
 import { QueryOptions, PaginationOptions, PaginatedResult } from '@/types/database';
 import { sanitizeProjectCode } from '@xyne/shared';
-import { EntitySequenceService } from '@/services/entitySequenceService';
 //import { queueProjectIngestion } from '@/queues/vespaQueue';
 
 export interface CreateProjectInput {
@@ -68,32 +67,42 @@ export class ProjectRepository extends BaseRepository<Project, CreateProjectInpu
         }
       });
 
-      // Create default stages for the board with proper status mappings.
-      // Allocate from the shared counter so deleting a stage never makes its
-      // sequence number available again.
-      let currentMaxStageSequence = 0;
-      const defaultStages = [];
-      for (const stage of [
-        { name: 'To Do', defaultTicketStatusV2: TicketStatusV2.TODO },
-        { name: 'In Progress', defaultTicketStatusV2: TicketStatusV2.STARTED },
-        { name: 'Review', defaultTicketStatusV2: TicketStatusV2.STARTED },
-        { name: 'Completed', defaultTicketStatusV2: TicketStatusV2.COMPLETED },
-      ]) {
-        const sequenceNumber = await EntitySequenceService.getNextBoardStageSequence(
-          board.id,
-          currentMaxStageSequence,
-        );
-        currentMaxStageSequence = Math.max(currentMaxStageSequence, sequenceNumber);
-        defaultStages.push({
-          ...stage,
-          sequenceNumber,
-          boardId: board.id,
-          createdBy: data.createdBy,
-        });
-      }
-
+      // Create default stages for the board with proper status mappings
       await tx.stage.createMany({
-        data: defaultStages,
+        data: [
+          {
+            name: 'To Do',
+            sequenceNumber: 1,
+            boardId: board.id,
+            workspaceId: board.workspaceId,
+            createdBy: data.createdBy,
+            defaultTicketStatusV2: TicketStatusV2.TODO,
+          },
+          {
+            name: 'In Progress',
+            sequenceNumber: 2,
+            boardId: board.id,
+            workspaceId: board.workspaceId,
+            createdBy: data.createdBy,
+            defaultTicketStatusV2: TicketStatusV2.STARTED,
+          },
+          {
+            name: 'Review',
+            sequenceNumber: 3,
+            boardId: board.id,
+            workspaceId: board.workspaceId,
+            createdBy: data.createdBy,
+            defaultTicketStatusV2: TicketStatusV2.STARTED,
+          },
+          {
+            name: 'Completed',
+            sequenceNumber: 4,
+            boardId: board.id,
+            workspaceId: board.workspaceId,
+            createdBy: data.createdBy,
+            defaultTicketStatusV2: TicketStatusV2.COMPLETED,
+          },
+        ]
       });
 
       return project;

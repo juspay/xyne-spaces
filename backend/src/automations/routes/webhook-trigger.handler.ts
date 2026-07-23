@@ -114,6 +114,7 @@ router.post(
             data: {
               workflowExecutionId: created.id,
               context: JSON.stringify(initialContext),
+              workspaceId: workflow.workspaceId,
             },
           });
           return created;
