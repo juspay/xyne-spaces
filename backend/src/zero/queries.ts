@@ -550,6 +550,19 @@ export const queries = defineQueries({
         );
     }
   ),
+  messagesByIds: defineQuery(
+    z.object({ messageIds: z.array(z.string()) }),
+    ({ ctx, args: { messageIds } }) => {
+      return zql.messages
+        .where(helpers => helpers.cmp('messageId', 'IN', messageIds))
+        .where(helpers =>
+          helpers.or(
+            helpers.cmp('visibleTo', 'IS', null),
+            helpers.cmp('visibleTo', '=', ctx.userID),
+          ),
+        );
+    },
+  ),
 
   getConversationById: defineQuery(
     z.object({ conversationId: z.string() }),
