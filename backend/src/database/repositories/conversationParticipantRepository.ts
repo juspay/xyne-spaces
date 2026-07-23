@@ -1,6 +1,34 @@
 import { BaseRepository } from './base';
-import { ConversationParticipant, ConversationParticipation } from '@prisma/client';
+import { ConversationParticipant, ConversationParticipation, Prisma } from '@prisma/client';
 import { QueryOptions } from '@/types/database';
+import { ThreadListCursor, ThreadListSection } from '@/utils/threadListCursor';
+import { ACLFactory } from '@/services/pythonQuery/acl';
+import { getContextOrNull } from '@/database/tenant/context';
+
+export interface ThreadListEntry {
+  conversationId: string;
+  channelId: string;
+  sectionAtLoad: ThreadListSection;
+}
+
+export interface ThreadListPage {
+  threads: ThreadListEntry[];
+  nextCursor: ThreadListCursor | null;
+  hasMore: boolean;
+}
+
+interface ThreadListDatabaseRow {
+  id: string;
+  conversationId: string;
+  conversation: {
+    channelId: string;
+  };
+}
+
+interface ThreadListSectionRow {
+  row: ThreadListDatabaseRow;
+  section: ThreadListSection;
+}
 
 export interface CreateConversationParticipantInput {
   conversationId: string;
@@ -164,5 +192,121 @@ export class ConversationParticipantRepository extends BaseRepository<
     });
 
     return participant?.participationType ?? null;
+  }
+
+  /**
+   * Returns a non-live page of thread membership for the Threads inbox.
+   *
+   * Read state is derived from the two timestamps instead of being persisted separately.
+   * Each section uses the same Prisma cursor pagination pattern as other API repositories.
+   */
+  async findUserThreadsPage(
+    limit: number,
+    cursor: ThreadListCursor | null
+  ): Promise<ThreadListPage> {
+    let pageRows: ThreadListSectionRow[];
+    let hasMore: boolean;
+
+    if (cursor?.section === 'read') {
+      const readRows = await this.findUserThreadSection(
+        'read',
+        limit + 1,
+        cursor.participantId
+      );
+      hasMore = readRows.length > limit;
+      pageRows = readRows.slice(0, limit).map((row) => ({ row, section: 'read' }));
+    } else {
+      const unreadRows = await this.findUserThreadSection(
+        'unread',
+        limit + 1,
+        cursor?.participantId
+      );
+
+      if (unreadRows.length > limit) {
+        hasMore = true;
+        pageRows = unreadRows.slice(0, limit).map((row) => ({ row, section: 'unread' }));
+      } else {
+        const readCapacity = limit - unreadRows.length;
+        const readRows = await this.findUserThreadSection('read', readCapacity + 1);
+        hasMore = readRows.length > readCapacity;
+        pageRows = [
+          ...unreadRows.map((row) => ({ row, section: 'unread' as const })),
+          ...readRows.slice(0, readCapacity).map((row) => ({ row, section: 'read' as const })),
+        ];
+      }
+    }
+
+    const lastPageRow = pageRows.at(-1);
+
+    return {
+      threads: pageRows.map(({ row, section }) => ({
+        conversationId: row.conversationId,
+        channelId: row.conversation.channelId,
+        sectionAtLoad: section,
+      })),
+      nextCursor:
+        hasMore && lastPageRow
+          ? {
+              section: lastPageRow.section,
+              participantId: lastPageRow.row.id,
+            }
+          : null,
+      hasMore,
+    };
+  }
+
+  private async findUserThreadSection(
+    section: ThreadListSection,
+    take: number,
+    cursorParticipantId?: string
+  ): Promise<ThreadListDatabaseRow[]> {
+    const tenantContext = getContextOrNull();
+    if (!tenantContext || tenantContext.system) {
+      throw new Error('Authenticated tenant context is required to list user threads');
+    }
+
+    const userId = tenantContext.userId;
+    const lastReplyAtField = this.db.conversationParticipant.fields.lastReplyAt;
+    const sectionWhere: Prisma.ConversationParticipantWhereInput =
+      section === 'unread'
+        ? {
+            OR: [
+              { lastReadAt: null },
+              { lastReadAt: { lt: lastReplyAtField } },
+            ],
+          }
+        : {
+            lastReadAt: {
+              not: null,
+              gte: lastReplyAtField,
+            },
+          };
+
+    const acl = ACLFactory.getACL('conversationParticipant', tenantContext, this.db);
+    const where = await acl.applyToWhere({
+      userId,
+      isSubscribed: true,
+      lastReplyAt: { not: null },
+      ...sectionWhere,
+    });
+
+    return this.db.conversationParticipant.findMany({
+      where,
+      orderBy: [{ lastReplyAt: 'desc' }, { id: 'desc' }],
+      take,
+      ...(cursorParticipantId
+        ? {
+            cursor: { id: cursorParticipantId },
+            skip: 1,
+          }
+        : {}),
+      select: {
+        id: true,
+        conversationId: true,
+        conversation: {
+          select: { channelId: true },
+        },
+      },
+    });
   }
 }

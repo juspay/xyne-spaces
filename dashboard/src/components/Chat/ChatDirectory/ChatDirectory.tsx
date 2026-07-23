@@ -79,7 +79,7 @@ import ChannelItemV2 from './ChannelItemV2';
 import Tooltip from '../../ui/Tooltip';
 import ChannelCommandMenu from './ChannelCommandMenu';
 import AppNavigator from '../../AppNavigator/AppNavigator';
-import { useUnreadThreadsCount } from '../../../hooks/useUnreadThreadsCount';
+import { useThreadSidebarState } from '../../../hooks/useUnreadThreadsCount';
 import { useOverdueRemindersCount } from '../../../hooks/useOverdueRemindersCount';
 import { useRecapUnreadCount, usePrefetchRecap } from '../../../hooks/useRecapData';
 import { stateMachineActor } from '../../../machines/stateMachine';
@@ -120,7 +120,7 @@ const ChatDirectory = ({
   const lastVisitedChannelId = useLastVisitedChannel(workspaceId ?? '');
   const { isMobile } = usePlatform();
 
-  const threadCount = useUnreadThreadsCount();
+  const { mentionCount: threadCount, hasUnreadThreads } = useThreadSidebarState();
   const overdueRemindersCount = useOverdueRemindersCount();
   const { unreadCount: recapUnreadCount } = useRecapUnreadCount();
   const prefetchRecap = usePrefetchRecap();
@@ -525,7 +525,7 @@ const ChatDirectory = ({
           <button
             className={cn(
               'flex items-center justify-start gap-3 w-full px-3 py-2 text-sm font-medium tracking-[-0.14px] rounded-[10px] border border-transparent transition-colors hover:bg-sidebar-accent hover:border-sidebar-border',
-              threadCount > 0
+              hasUnreadThreads
                 ? 'text-sidebar-accent-foreground font-semibold'
                 : 'text-sidebar-foreground hover:text-sidebar-accent-foreground',
             )}
@@ -534,7 +534,7 @@ const ChatDirectory = ({
             }}
             data-track-category='CHAT_SIDEBAR'
             data-track-name='OPEN_THREADS'
-            data-track-metadata={JSON.stringify({ threadCount })}
+            data-track-metadata={JSON.stringify({ threadCount, hasUnreadThreads })}
           >
             <span className='size-4 flex items-center justify-center shrink-0'>
               <Subtask className='size-4' />
