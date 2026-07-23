@@ -240,7 +240,7 @@ export const ElectronUpdateNudge = (): ReactElement | null => {
     const attempt = readStorage<UpdateAttempt>(UPDATE_ATTEMPT_STORAGE_KEY);
     let saved = readNudgeState();
     if (attempt) {
-      const succeeded = __APP_VERSION__ === attempt.latestVersion;
+      const succeeded = __APP_VERSION__ !== attempt.currentVersion;
       writeStorage(UPDATE_RESULT_STORAGE_KEY, {
         ...attempt,
         loadedVersion: __APP_VERSION__,
@@ -270,12 +270,19 @@ export const ElectronUpdateNudge = (): ReactElement | null => {
       }
     }
 
-    if (saved && saved.latestVersion !== __APP_VERSION__) {
-      // A fresh app/renderer start always gives an automatic update a new full warning period.
-      saved = { ...saved, countdownEndsAt: null };
-      writeStorage(NUDGE_STORAGE_KEY, saved);
-      setNudge(saved);
-      setVisible(true);
+    if (saved) {
+      if (saved.currentVersion === __APP_VERSION__ && saved.latestVersion !== __APP_VERSION__) {
+        // App hasn't been updated since the nudge was saved — still needs the update.
+        // A fresh app/renderer start always gives an automatic update a new full warning period.
+        saved = { ...saved, countdownEndsAt: null };
+        writeStorage(NUDGE_STORAGE_KEY, saved);
+        setNudge(saved);
+        setVisible(true);
+      } else {
+        // App was already updated (or versions match) — nudge is stale, clear it.
+        removeStorage(NUDGE_STORAGE_KEY);
+        saved = null;
+      }
     }
 
     return electronAPI.onAppUpdateAvailable((data: UpdateAvailableInfo) => {
