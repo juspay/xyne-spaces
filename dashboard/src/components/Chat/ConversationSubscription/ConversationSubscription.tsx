@@ -119,7 +119,7 @@ export const ConversationSubscription = React.forwardRef<
           data-track-name='TOGGLE_SUBSCRIPTION_ICON'
         >
           {isSubscribed ? (
-            <NotificationBellOn size={16} className='text-sidebar-badge-accent' />
+            <NotificationBellOn size={16} className='text-primary' />
           ) : (
             <NotificationBellOff size={16} className='text-muted-foreground' />
           )}
@@ -163,7 +163,7 @@ export const ConversationSubscription = React.forwardRef<
           </>
         ) : (
           <>
-            <NotificationBellOn size={16} className='text-sidebar-badge-accent' />
+            <NotificationBellOn size={16} className='text-primary' />
             <span className='text-sm text-muted-foreground'>Subscribe to notifications</span>
           </>
         )}

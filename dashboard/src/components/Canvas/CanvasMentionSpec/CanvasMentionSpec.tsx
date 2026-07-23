@@ -1,10 +1,12 @@
 import { createReactInlineContentSpec } from '@blocknote/react';
 import type { ReactCustomInlineContentRenderProps } from '@blocknote/react';
 import { createContext, useContext } from 'react';
-import { Lock } from 'lucide-react';
+import type { ReactElement } from 'react';
+import { Lock, Users } from 'lucide-react';
 import { CanvasRole } from '@xyne/shared';
 import { HoverCard } from '../../ui/HoverCard/HoverCard';
 import Button from '../../ui/Button';
+import Avatar from '../../ui/Avatar/Avatar';
 
 function formatCanvasRoleLabel(role: CanvasRole): string {
   return role.charAt(0) + role.slice(1).toLowerCase();
@@ -77,6 +79,33 @@ type NoStyleSchema = Record<string, never>;
 
 type MentionRenderProps = ReactCustomInlineContentRenderProps<MentionConfig, NoStyleSchema>;
 
+// The mention lives inside a contenteditable, so the avatar is marked non-editable
+// to keep it out of the selection/cursor path.
+const MentionAvatar = ({
+  isGroup,
+  userId,
+}: {
+  isGroup: boolean;
+  userId: string;
+}): ReactElement | null => {
+  if (isGroup) {
+    return (
+      <span
+        contentEditable={false}
+        className='mr-1 inline-flex size-4 shrink-0 select-none items-center justify-center rounded-full bg-black/10 align-middle dark:bg-white/15'
+      >
+        <Users className='size-2.5' />
+      </span>
+    );
+  }
+  if (!userId) return null;
+  return (
+    <span contentEditable={false} className='mr-1 inline-flex select-none align-middle'>
+      <Avatar userId={userId} size='xs' rounded showActiveStatus={false} />
+    </span>
+  );
+};
+
 const MentionRender = ({ inlineContent }: MentionRenderProps) => {
   const props = inlineContent.props;
   const displayName = props.groupId && props.groupName ? props.groupName : props.username || '';
@@ -96,16 +125,21 @@ const MentionRender = ({ inlineContent }: MentionRenderProps) => {
 
   if (hasAccess) {
     return (
-      <span className='inline-flex items-center align-middle rounded-[4px] bg-black/5 px-1 py-0.5 font-medium leading-none text-[#0066cc]'>
-        @{displayName}
+      <span
+        className='inline whitespace-nowrap rounded-[4px] px-1 py-0.5 align-baseline font-medium'
+        style={{ backgroundColor: 'var(--mention-bg)', color: 'var(--mention-color)' }}
+      >
+        <MentionAvatar isGroup={isGroup} userId={props.userId} />
+        {displayName}
       </span>
     );
   }
 
   const trigger = (
-    <span className='inline-flex items-center gap-1 align-middle rounded-[4px] border border-dashed border-amber-400 bg-amber-50 px-1 py-0.5 font-medium leading-none text-amber-700'>
-      @{displayName}
-      <Lock className='h-3 w-3' />
+    <span className='inline whitespace-nowrap rounded-[4px] border border-dashed border-amber-400 bg-amber-50 px-1 py-0.5 align-baseline font-medium text-amber-700'>
+      <MentionAvatar isGroup={isGroup} userId={props.userId} />
+      {displayName}
+      <Lock className='ml-1 inline h-3 w-3 align-middle' />
     </span>
   );
 
@@ -115,14 +149,7 @@ const MentionRender = ({ inlineContent }: MentionRenderProps) => {
 
   if (isGroup) {
     return (
-      <HoverCard
-        trigger={trigger}
-        openDelay={120}
-        side='top'
-        align='start'
-        className='w-60 p-3'
-        showArrow
-      >
+      <HoverCard trigger={trigger} openDelay={120} side='top' align='start' className='w-60 p-3'>
         <div className='space-y-2'>
           <div className='text-xs text-muted-foreground'>
             <span className='font-medium text-foreground'>{props.groupName}</span>{' '}
@@ -153,14 +180,7 @@ const MentionRender = ({ inlineContent }: MentionRenderProps) => {
   }
 
   return (
-    <HoverCard
-      trigger={trigger}
-      openDelay={120}
-      side='top'
-      align='start'
-      className='w-60 p-3'
-      showArrow
-    >
+    <HoverCard trigger={trigger} openDelay={120} side='top' align='start' className='w-60 p-3'>
       <div className='space-y-2'>
         <div className='text-xs text-muted-foreground'>
           <span className='font-medium text-foreground'>{props.username}</span>{' '}

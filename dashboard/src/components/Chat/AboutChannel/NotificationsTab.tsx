@@ -101,7 +101,7 @@ const NotificationsTab = ({ channel, isParticipant }: NotificationsTabProps): Re
   const switchClass = cn(
     'relative inline-flex h-5 w-9 items-center rounded-full',
     'bg-muted transition-colors duration-200',
-    'data-[state=checked]:bg-sidebar-badge-accent',
+    'data-[state=checked]:bg-primary',
     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
   );
   const thumbClass = cn(

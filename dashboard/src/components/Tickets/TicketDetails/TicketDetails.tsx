@@ -4407,7 +4407,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                     setShowBackwardConfirmDialog(false);
                   }
                 }}
-                className='bg-sidebar-badge-accent text-sidebar-badge-accent-foreground hover:opacity-90'
+                className='bg-primary text-primary-foreground hover:opacity-90'
                 data-track-category='Tickets'
                 data-track-name='ConfirmBackwardStageChange'
                 data-track-metadata={JSON.stringify({ stageName: backwardStageChange?.stageName })}
@@ -4519,7 +4519,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
               </Button>
               <Button
                 onClick={confirmBoardChange}
-                className='bg-sidebar-badge-accent text-sidebar-badge-accent-foreground hover:opacity-90'
+                className='bg-primary text-primary-foreground hover:opacity-90'
               >
                 Confirm
               </Button>

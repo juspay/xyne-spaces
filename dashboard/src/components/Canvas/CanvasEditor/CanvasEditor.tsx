@@ -39,7 +39,8 @@ import {
   CanvasMentionContext,
 } from '../CanvasMentionSpec';
 import { createElement } from 'react';
-import { RiGroupLine, RiUserLine } from 'react-icons/ri';
+import { RiGroupLine } from 'react-icons/ri';
+import Avatar from '../../ui/Avatar/Avatar';
 import { CanvasEditorProps, CanvasEditorRef } from '../Canvas.types';
 import {
   resolveFileUrl,
@@ -292,6 +293,23 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
             ...(currentUser?.id !== undefined && { currentUserId: currentUser.id }),
           },
         );
+        // The library hardcodes a generic person glyph; swap in the user's avatar.
+        // Items only carry the email, so resolve the id from it.
+        const idByEmail = new Map<string, string>();
+        for (const u of users) {
+          if (u.email) idByEmail.set(u.email, u.id);
+        }
+        for (const item of userItems) {
+          const userId = item.subtext ? idByEmail.get(item.subtext) : undefined;
+          if (userId) {
+            item.icon = createElement(Avatar, {
+              userId,
+              size: 'sm',
+              rounded: true,
+              showActiveStatus: false,
+            });
+          }
+        }
         // User groups - include deactivated with indicator
         const queryLower = query.toLowerCase().trim();
         const filteredGroups = (
@@ -337,7 +355,12 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
               title: displayName,
               subtext: u.email ?? '',
               group: 'Users',
-              icon: createElement(RiUserLine, { size: 18 }),
+              icon: createElement(Avatar, {
+                userId: u.id,
+                size: 'sm',
+                rounded: true,
+                showActiveStatus: false,
+              }),
               onItemClick: () => {
                 logger.info(Event.CANVAS_MENTION_DEBUG, {
                   message: 'CanvasEditor user mention onItemClick',
@@ -528,7 +551,7 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
         onBlurCapture={handleBlurCapture}
         data-testid='canvas-editor'
       >
-        <div className='flex-1 overflow-auto pt-8'>
+        <div className='thin-scrollbar flex-1 overflow-auto pt-8'>
           <CanvasMentionContext.Provider value={mentionContextValue}>
             <BlockNoteView
               editor={asBlockNoteEditorForView(editor)}

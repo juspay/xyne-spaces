@@ -4,12 +4,20 @@ import Avatar from './Avatar';
 import { cn } from '../../../utils/classNames';
 import type { AvatarSize } from './Avatar';
 
+export type AvatarGroupShape = 'circle' | 'square';
+
 interface AvatarGroupProps extends Omit<React.ComponentProps<'div'>, 'children'> {
   userIds: (string | null | undefined)[];
   size?: AvatarSize;
   className?: string;
   count?: number;
   isGroupDMAvatar?: boolean;
+  /**
+   * Silhouette of each avatar in the stack.
+   * - `circle` (default): round avatars separated by a masked cut-out.
+   * - `square`: squircles separated by a solid `--background` border.
+   */
+  shape?: AvatarGroupShape;
 }
 
 /**
@@ -52,10 +60,12 @@ function AvatarCountBadge({
   count,
   size,
   pixelSize,
+  className,
 }: {
   count: number;
   size: AvatarSize;
   pixelSize: number;
+  className?: string;
 }): ReactElement {
   const textSizeClasses: Record<AvatarSize, string> = {
     xs: 'text-[8px]',
@@ -75,6 +85,7 @@ function AvatarCountBadge({
         'shrink-0 overflow-hidden rounded-full',
         'bg-muted flex items-center justify-center',
         'font-medium text-muted-foreground',
+        className,
       )}
       style={{
         width: pixelSize,
@@ -104,6 +115,7 @@ const AvatarGroup = ({
   className,
   count,
   isGroupDMAvatar = false,
+  shape = 'circle',
   ...props
 }: AvatarGroupProps): ReactElement => {
   // Filter out null/undefined userIds
@@ -165,17 +177,35 @@ const AvatarGroup = ({
     );
   }
 
+  // In square mode the overlap separator is a real border in `--background`
+  // rather than the radial mask cut-out used by the circular stack.
+  const squareItemClassName = shape === 'square' ? 'rounded-[4px] border-2 border-background' : '';
+
   // Default mode: flex layout with overlapping masks
   return (
-    <div data-slot='avatar-group' className={cn('flex items-center', className)} {...props}>
+    <div
+      data-slot='avatar-group'
+      data-shape={shape}
+      className={cn('flex items-center', className)}
+      {...props}
+    >
       {avatarsToShow.map((userId, index) => (
-        <AvatarStackItem key={`${userId}-${index}`} size={pixelSize}>
+        <AvatarStackItem
+          key={`${userId}-${index}`}
+          size={pixelSize}
+          className={squareItemClassName}
+        >
           <Avatar userId={userId} size={size} showActiveStatus={false} />
         </AvatarStackItem>
       ))}
       {remainingCount > 0 && (
         <div data-slot='avatar-stack-item'>
-          <AvatarCountBadge count={remainingCount} size={size} pixelSize={pixelSize} />
+          <AvatarCountBadge
+            count={remainingCount}
+            size={size}
+            pixelSize={pixelSize}
+            className={squareItemClassName}
+          />
         </div>
       )}
     </div>

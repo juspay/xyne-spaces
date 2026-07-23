@@ -450,7 +450,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
                   <Button
                     onClick={applyLink}
                     disabled={!linkUrl.trim()}
-                    className='rounded bg-sidebar-badge-accent px-3 py-1.5 text-xs text-white disabled:opacity-50 disabled:text-white'
+                    className='rounded bg-primary px-3 py-1.5 text-xs text-white disabled:opacity-50 disabled:text-white'
                   >
                     {hasSelection && isActive.link ? 'Update' : 'Apply'}
                   </Button>
@@ -527,7 +527,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
                           type='button'
                           onClick={insertImageFromUrl}
                           disabled={!imageUrl.trim()}
-                          className='w-full py-1.5 text-xs font-medium bg-sidebar-badge-accent text-white rounded-lg disabled:opacity-50 hover:opacity-90 transition-opacity'
+                          className='w-full py-1.5 text-xs font-medium bg-primary text-white rounded-lg disabled:opacity-50 hover:opacity-90 transition-opacity'
                         >
                           Insert
                         </button>

@@ -983,7 +983,7 @@ export const TicketFiltersDropdown = ({
                         data-track-name='confirm-save-view'
                         onClick={handleSaveView}
                         disabled={!viewName.trim() || isSaving}
-                        className='text-sm font-semibold px-4 h-8 rounded-[8px] bg-sidebar-badge-accent text-white disabled:opacity-50 disabled:cursor-not-allowed'
+                        className='text-sm font-semibold px-4 h-8 rounded-[8px] bg-primary text-white disabled:opacity-50 disabled:cursor-not-allowed'
                       >
                         Save
                       </button>

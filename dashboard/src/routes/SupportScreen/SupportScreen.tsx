@@ -2062,7 +2062,7 @@ const SupportScreen = (): ReactElement => {
               </div>
             </Panel>
             <PanelResizeHandle className='w-[2px] transition-colors cursor-col-resize flex items-center justify-center group'>
-              <div className='w-[2px] h-full bg-sidebar-divider group-hover:bg-sidebar-badge-accent group-active:bg-sidebar-badge-accent'></div>
+              <div className='w-[2px] h-full bg-sidebar-divider group-hover:bg-primary group-active:bg-primary'></div>
             </PanelResizeHandle>
           </>
         )}
@@ -2738,7 +2738,7 @@ const SupportScreen = (): ReactElement => {
                             <Button
                               variant='default'
                               size='sm'
-                              className='rounded-[10px] bg-sidebar-badge-accent hover:bg-sidebar-badge-accent/90 text-white'
+                              className='rounded-[10px] bg-primary hover:bg-primary/90 text-white'
                               onClick={() => openNewCompose(selectedChannelId)}
                               data-track-category='Support'
                               data-track-name='OpenComposeEmail'
@@ -2783,7 +2783,7 @@ const SupportScreen = (): ReactElement => {
                       type='button'
                       size='sm'
                       variant='default'
-                      className='bg-sidebar-badge-accent hover:bg-sidebar-badge-accent/90 text-white'
+                      className='bg-primary hover:bg-primary/90 text-white'
                       onClick={handleMarkSelectedAsRead}
                       data-track-category='Support'
                       data-track-name='MarkSelectedTicketsAsRead'
