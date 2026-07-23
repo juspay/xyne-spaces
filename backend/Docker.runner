@@ -1,0 +1,287 @@
+# Multi-stage build for production optimization
+FROM node:22-slim AS base
+
+ARG user=nixuser
+ARG group=xyne
+ARG gid=1000
+ARG GITHUB_PAT_TOKEN
+
+WORKDIR /app
+
+# Install build dependencies for native modules and OpenSSL
+RUN apt-get update && apt-get install -y \
+    python3 \
+    make \
+    g++ \
+    git \
+    openssl \
+    libssl-dev \
+    ca-certificates \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Build the shared module
+FROM base AS shared-builder
+WORKDIR /app/shared
+COPY shared/. ./
+RUN npm cache clean --force && npm ci --ignore-scripts && npm run build
+
+
+# Build the application
+FROM base AS builder
+# Create and copy framework directory
+RUN mkdir -p ./framework
+WORKDIR /app/framework
+COPY framework/. ./
+RUN npm cache clean --force && npm install && npm run build
+# Copy shared module
+WORKDIR /app
+RUN mkdir -p ./shared
+COPY --from=shared-builder /app/shared ./shared
+# Create backend directory and copy files
+RUN mkdir -p ./backend
+WORKDIR /app/backend
+COPY backend/. ./
+# Remove postinstall script since we build framework separately
+RUN sed -i '/"postinstall":/d' package.json
+RUN npm cache clean --force && npm ci
+RUN npm run db:generate
+RUN npm run db:common:generate
+RUN npm run build && npm prune --production
+RUN sed -i 's|"baseUrl": "./src"|"baseUrl": "./dist"|' tsconfig.json
+RUN rm -rf src tests eslint-rules manual_migrations scripts docs *.md *.cjs
+WORKDIR /app
+
+# Production image
+FROM node:22-slim AS runner
+
+ARG user=nixuser
+ARG group=xyne
+ARG gid=1000
+ARG GITHUB_PAT_TOKEN
+
+# Switch to root to install packages
+USER root
+
+WORKDIR /app
+
+# Install CA certificates and essential tools
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    sudo \
+    curl \
+    git \
+    jq \
+    postgresql \
+    postgresql-contrib \
+    postgresql-client \
+    libpq-dev \
+    postgresql-server-dev-all \
+    protobuf-compiler \
+    libssl-dev \
+    pkg-config \
+    build-essential \
+    wget \
+    xz-utils \
+    python3 \
+    python3-pip \
+    redis-server \
+    redis-tools \
+    lsb-release \
+    software-properties-common \
+    apt-transport-https \
+    gnupg \
+    lsof \
+    procps \
+    findutils \
+    netcat-openbsd \
+    ffmpeg \
+    && apt-get update \
+    && update-ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install Docker CLI and Docker Compose plugin (for test runner to spin up containers)
+RUN install -m 0755 -d /etc/apt/keyrings && \
+    curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc && \
+    chmod a+r /etc/apt/keyrings/docker.asc && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian \
+    $(. /etc/os-release && echo "$VERSION_CODENAME") stable" > /etc/apt/sources.list.d/docker.list && \
+    apt-get update && \
+    apt-get install -y docker-ce-cli docker-compose-plugin && \
+    rm -rf /var/lib/apt/lists/*
+
+# Create nixuser and xyne group, add to docker group for container management
+RUN groupadd --system ${group} && \
+    useradd --system --gid ${group} --create-home --home-dir /home/${user} ${user} && \
+    groupadd -f docker && \
+    usermod -aG docker ${user} && \
+    mkdir -m 0755 /nix && \
+    chown ${user}:${group} /nix && \
+    mkdir -p /home/${user}/.ssh && \
+    chown -R ${user}:${group} /home/${user} && \
+    chmod 700 /home/${user}/.ssh
+
+# Install Nix as nixuser (single-user installation)  
+USER ${user}
+ENV HOME=/home/${user}
+WORKDIR /home/${user}
+
+RUN curl -L https://nixos.org/nix/install -o nix.install.sh && \
+    bash nix.install.sh --no-daemon && \
+    rm nix.install.sh
+
+# Configure nix with experimental features
+RUN mkdir -p /home/${user}/.config/nix && \
+    echo "experimental-features = nix-command flakes" > /home/${user}/.config/nix/nix.conf && \
+    chown -R ${user}:${group} /home/${user}/.config
+
+# Source nix profile and install essential tools
+ENV PATH="/home/${user}/.nix-profile/bin:${PATH}"
+RUN . /home/${user}/.nix-profile/etc/profile.d/nix.sh \
+    && nix profile add nixpkgs#cachix --option access-tokens "github.com=${GITHUB_PAT_TOKEN}" || echo "Cachix install failed, continuing..."
+
+# Install custom attic from juspay/attic
+# RUN . /home/${user}/.nix-profile/etc/profile.d/nix.sh \
+#     && mkdir attic && cd attic/ \
+#     && nix build github:juspay/attic -vL -j auto --cores 0 --fallback --option access-tokens "github.com=${GITHUB_PAT_TOKEN}"
+
+# Switch back to root for remaining setup
+USER root
+WORKDIR /app
+
+# Install Rust for the user
+RUN GROUP_NAME=$(getent group ${gid} | cut -d: -f1) && \
+    export HOME=/home/${user} && \
+    export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt && \
+    export SSL_CERT_DIR=/etc/ssl/certs && \
+    export RUSTUP_HOME=/home/${user}/.rustup && \
+    export CARGO_HOME=/home/${user}/.cargo && \
+    sudo -u ${user} bash -c 'curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y' && \
+    chown -R ${user}:$GROUP_NAME /home/${user}/.rustup /home/${user}/.cargo
+
+# Install diesel_cli (SEPARATE LAYER for caching - this compiles from source and takes ~9 mins)
+# By putting it before COPY, it only rebuilds when Dockerfile changes, not when app code changes
+RUN sudo -u nixuser bash -c '. /home/nixuser/.cargo/env && cargo install diesel_cli --no-default-features --features postgres' && \
+    ln -s /home/nixuser/.cargo/bin/diesel /usr/local/bin/diesel
+
+# Install OpenCode CLI for agentic workflows (when OPENCODE_ENABLED=true)
+RUN curl -fsSL https://raw.githubusercontent.com/anomalyco/opencode/refs/heads/dev/install | bash || \
+    npm install -g opencode-ai@latest || \
+    echo "OpenCode installation failed, will fallback to existing @framework"
+
+# Install LSP language servers for oh-my-opencode plugin
+RUN npm install -g \
+    typescript-language-server \
+    typescript \
+    @vtsls/language-server \
+    @biomejs/biome \
+    && echo "LSP language servers installed successfully"
+
+# Copy the built application and source files
+COPY --from=builder --chown=${user}:${group} /app/backend ./backend
+COPY --from=builder --chown=${user}:${group} /app/framework ./framework
+COPY --from=builder --chown=${user}:${group} /app/shared ./shared
+COPY --chown=${user}:${group} guidelines ./guidelines
+
+# Install npm packages and fix npm cache ownership
+RUN mkdir -p logs tmp .cache /home/${user}/.npm && \
+    npm install -g @xyne/xyne-cli@latest newman typescript && \
+    cd /app/backend && \
+    npm install @napi-rs/canvas-linux-arm64-gnu --save-optional || true && \
+    npm install tsconfig-paths && \
+    mkdir -p node_modules/.cache && \
+    chown -R ${user}:${group} /app/logs /app/tmp /app/.cache /home/${user}/.npm && \
+    chmod -R 775 /app/logs /app/tmp /app/.cache && \
+    find /app/backend/node_modules/.bin -type f -exec chmod 755 {} + 2>/dev/null || true && \
+    find /app/backend/node_modules -name "*.mjs" -exec chmod 755 {} + 2>/dev/null || true && \
+    find /app/backend/node_modules/@esbuild -name "esbuild" -exec chmod 755 {} + 2>/dev/null || true
+
+# Combined: nix config, symlinks, system nix config, git config, and shell setup
+# System-wide nix configuration and symlinks (Stable)
+RUN mkdir -p /etc/nix && \
+    echo "max-jobs = auto" >> /etc/nix/nix.conf && \
+    echo "cores = 0" >> /etc/nix/nix.conf && \
+    echo "build-cores = 0" >> /etc/nix/nix.conf && \
+    echo "http-connections = 256" >> /etc/nix/nix.conf && \
+    echo "http2 = true" >> /etc/nix/nix.conf && \
+    echo "use-xdg-base-directories = false" >> /etc/nix/nix.conf && \
+    echo "trusted-users = root nixuser ${user}" >> /etc/nix/nix.conf && \
+    # Create symlinks for nix commands
+    ln -sf /nix/var/nix/profiles/default/bin/nix /usr/local/bin/nix && \
+    ln -sf /nix/var/nix/profiles/default/bin/nix-shell /usr/local/bin/nix-shell && \
+    ln -sf /nix/var/nix/profiles/default/bin/nix-develop /usr/local/bin/nix-develop
+
+# User nix configuration & Shell setup (Device specific)
+RUN mkdir -p /home/${user}/.config/nix && \
+    echo "experimental-features = nix-command flakes" > /home/${user}/.config/nix/nix.conf && \
+    echo "sandbox = false" >> /home/${user}/.config/nix/nix.conf && \
+    echo "max-jobs = auto" >> /home/${user}/.config/nix/nix.conf && \
+    echo "cores = 0" >> /home/${user}/.config/nix/nix.conf && \
+    echo "build-cores = 0" >> /home/${user}/.config/nix/nix.conf && \
+    echo "http-connections = 256" >> /home/${user}/.config/nix/nix.conf && \
+    echo "http2 = true" >> /home/${user}/.config/nix/nix.conf && \
+    echo "substituters = https://cache.nixos.org https://ghcide-nix.cachix.org https://euler.cachix.org" >> /home/${user}/.config/nix/nix.conf && \
+    echo "trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= ghcide-nix.cachix.org-1:SM4zDbUAvnuGzbly90/HDhJh6hqB+cclJt2h2CSky2Q= euler.cachix.org-1:BShpD9YAXD4/sTY8kH4vJZQJhJzLQx2uq8s+Y4E/0Ls=" >> /home/${user}/.config/nix/nix.conf && \
+    rm -f /home/${user}/.bashrc /home/${user}/.profile && \
+    echo 'export PATH="/nix/var/nix/profiles/default/bin:/nix/var/nix/profiles/default/sbin:$PATH"' > /home/${user}/.bashrc && \
+    echo 'export NIX_LINK=/nix/var/nix/profiles/default' >> /home/${user}/.bashrc && \
+    echo 'export NIX_SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt' >> /home/${user}/.bashrc && \
+    echo '. "$HOME/.nix-profile/etc/profile.d/nix.sh"' >> /home/${user}/.bashrc && \
+    echo 'source /home/${user}/.bashrc' > /home/${user}/.profile && \
+    chown -R ${user}:${group} /home/${user}/.config /home/${user}/.bashrc /home/${user}/.profile && \
+    usermod --shell /bin/bash ${user}
+
+# Git configuration (system-wide so it works for root and nixuser)
+RUN git config --system user.email "john.doe@gmail.com" && \
+    git config --system user.name "Xyne Workflow Bot" && \
+    git config --system init.defaultBranch main && \
+    git config --system pull.rebase false && \
+    cat /etc/gitconfig
+
+# Verify attic installation and symlink
+# RUN ls -la /usr/local/bin/attic && \
+#     ls -la /home/nixuser/attic/result/bin/attic
+
+# Switch to non-root user
+USER ${user}
+
+# Verify attic
+#  is accessible for user
+# RUN attic --version && echo "Attic verification successful for ${user} user"
+
+# Configure cachix for user using nixuser's installation.
+# CACHIX_AUTH_TOKEN is passed as a build arg (e.g. --build-arg CACHIX_AUTH_TOKEN=...); never hardcode it.
+ARG CACHIX_AUTH_TOKEN
+RUN su nixuser -c "cd ~ && cachix authtoken \"${CACHIX_AUTH_TOKEN}\" && cachix use euler" || true
+
+# Copy cachix config from nixuser to user
+RUN if [ -d /home/nixuser/.config/cachix ]; then \
+    mkdir -p /home/${user}/.config && \
+    cp -r /home/nixuser/.config/cachix /home/${user}/.config/ && \
+    chown -R ${user}:${group} /home/${user}/.config/cachix; \
+    fi
+
+# Set up nix environment for user
+ENV USER=${user}
+ENV HOME=/home/${user}
+ENV NIX_LINK=/nix/var/nix/profiles/default
+ENV NIX_PATH=${NIX_PATH:+$NIX_PATH:}nixpkgs=/home/${user}/.nix-defexpr/channels/nixpkgs
+ENV NIX_SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+
+# Override base image's Rust environment variables and include nix in PATH
+ENV RUSTUP_HOME=/home/${user}/.rustup
+ENV CARGO_HOME=/home/${user}/.cargo
+ENV PATH="/home/${user}/.cargo/bin:/nix/var/nix/profiles/default/bin:/nix/var/nix/profiles/default/sbin:$PATH"
+
+EXPOSE 3001 5432 6379
+
+ENV NODE_ENV=production
+
+# Override the entrypoint from base image
+ENTRYPOINT []
+
+# Set final working directory to backend
+WORKDIR /app/backend
+
+# Run production worker from compiled dist folder
+CMD ["npm", "run", "start:worker"]
