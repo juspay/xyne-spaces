@@ -47,6 +47,12 @@ import { getCallTicketsCreatedFromSuggestionsTotal } from '@/services/otel/sugge
 import { processMeetLinksFromChatMessage } from '@/services/meetLinkService';
 import { handleUnreadCount } from '@/zero/utils/unreadCountUtlis';
 import { ensureDmConversationAuthorParticipant } from '@/utils/dmConversationParticipants';
+import { ConversationParticipantRepository } from '@/database/repositories/conversationParticipantRepository';
+import {
+  decodeThreadListCursor,
+  encodeThreadListCursor,
+  type ThreadListCursor,
+} from '@/utils/threadListCursor';
 
 // Local type definitions
 interface UserInfo {
@@ -78,6 +84,7 @@ export class ConversationController {
   private userRepository: UserRepository;
   private channelUserStatusRespository: ChannelUserStatusRepository;
   private conversationV3Repository: ConversationV3Repository;
+  private conversationParticipantRepository: ConversationParticipantRepository;
 
   constructor() {
     this.conversationRepository = new ConversationRepository();
@@ -89,7 +96,54 @@ export class ConversationController {
     this.userRepository = new UserRepository();
     this.channelUserStatusRespository = new ChannelUserStatusRepository();
     this.conversationV3Repository = new ConversationV3Repository();
+    this.conversationParticipantRepository = new ConversationParticipantRepository();
   }
+
+  /**
+   * Get a stable, explicitly paginated list of threads for the authenticated user.
+   * Existing thread contents remain live through Zero; this endpoint controls only list membership
+   * and initial placement.
+   * GET /api/conversations/threads
+   */
+  getUserThreads = async (req: Request, res: Response): Promise<void> => {
+    const queryResult = z
+      .object({
+        limit: z.coerce.number().int().min(1).max(50).default(20),
+        cursor: z.string().min(1).max(2048).optional(),
+      })
+      .safeParse(req.query);
+
+    if (!queryResult.success) {
+      res.status(400).json({ error: 'Invalid thread list pagination parameters' });
+      return;
+    }
+
+    let cursor: ThreadListCursor | null = null;
+    if (queryResult.data.cursor) {
+      try {
+        cursor = decodeThreadListCursor(queryResult.data.cursor);
+      } catch {
+        res.status(400).json({ error: 'Invalid thread list cursor' });
+        return;
+      }
+    }
+
+    try {
+      const page = await this.conversationParticipantRepository.findUserThreadsPage(
+        queryResult.data.limit,
+        cursor
+      );
+
+      res.json({
+        threads: page.threads,
+        nextCursor: page.nextCursor ? encodeThreadListCursor(page.nextCursor) : null,
+        hasMore: page.hasMore,
+      });
+    } catch (error) {
+      logger.error('Failed to fetch user threads', { userId: req.user!.id, error });
+      res.status(500).json({ error: 'Failed to fetch user threads' });
+    }
+  };
 
   /**
    * Get a single message in a conversation with attachments and nudgeCounts.
