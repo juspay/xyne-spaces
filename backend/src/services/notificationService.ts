@@ -17,9 +17,30 @@ import { getNotificationJobsExpected } from '@/services/otel';
 import { DatabaseClient } from '@/database/client';
 import * as notificationFilterService from './notificationFilterService';
 import type { PrefetchedFilterData } from './notificationFilterService';
-import { serializeInitialMessageMd, type InitialMessageSummary } from '@xyne/shared';
+import { serializeInitialMessageMd, isDeskChannelType, type InitialMessageSummary } from '@xyne/shared';
 
 const prisma = DatabaseClient.getInstance();
+
+function buildTicketActionUrl(
+  ticket: {
+    workspaceId: string;
+    channelId: string | null;
+    conversationId: string | null;
+    xyneId: string | null;
+    channel?: { type: string | null } | null;
+  },
+  ticketId: string,
+): string {
+  if (!ticket.channelId) return `/${ticket.workspaceId}/support`;
+
+  if (isDeskChannelType(ticket.channel?.type) || !ticket.conversationId) {
+    return ticket.xyneId
+      ? `/${ticket.workspaceId}/support/${ticket.channelId}/${ticket.xyneId}`
+      : `/${ticket.workspaceId}/support/${ticket.channelId}`;
+  }
+
+  return `/${ticket.workspaceId}/chat/dir/${ticket.channelId}?tab=tickets&ticketId=${ticketId}&conversationId=${ticket.conversationId}`;
+}
 
 /**
  * Fetches conversation data for embedding in notification payloads.
@@ -188,6 +209,7 @@ class NotificationService {
       // Fetch ticket separately
       const ticket = await prisma.ticket.findUnique({
         where: { id: workflow.ticketId },
+        include: { channel: { select: { type: true } } },
       });
       if (!ticket) {
         logger.info(
@@ -237,7 +259,7 @@ class NotificationService {
         type: notificationType,
         relatedEntityType: 'workflow',
         relatedEntityId: workflowId,
-        actionUrl: `/${ticket.workspaceId}/tickets/${ticket.id}`,
+        actionUrl: buildTicketActionUrl(ticket, ticket.id),
         metadata: {
           workflowId,
           ticketId: ticket.id,
@@ -1888,6 +1910,7 @@ class NotificationService {
           channelId: true,
           conversationId: true,
           workspaceId: true,
+          channel: { select: { type: true } },
         },
       });
       if (!ticket) {
@@ -1909,9 +1932,7 @@ class NotificationService {
         return;
       }
 
-      const actionUrl = ticket.channelId && ticket.conversationId
-        ? `/${ticket.workspaceId}/chat/dir/${ticket.channelId}?tab=tickets&ticketId=${ticketId}&conversationId=${ticket.conversationId}`
-        : `/${ticket.workspaceId}/tickets?tickets=${ticketId}`;
+      const actionUrl = buildTicketActionUrl(ticket, ticketId);
 
       await this.createNotification(assignedTo, {
         title: 'Ticket Assigned',
@@ -1958,6 +1979,7 @@ class NotificationService {
           channelId: true,
           conversationId: true,
           workspaceId: true,
+          channel: { select: { type: true } },
         },
       });
       if (!ticket) {
@@ -2003,9 +2025,7 @@ class NotificationService {
             ? `Your stage change${stageLabel} on ticket ${ticketLabel} was approved`
             : `Your stage change${stageLabel} on ticket ${ticketLabel} was rejected`;
 
-      const actionUrl = ticket.channelId && ticket.conversationId
-        ? `/${ticket.workspaceId}/chat/dir/${ticket.channelId}?tab=tickets&ticketId=${ticketId}&conversationId=${ticket.conversationId}`
-        : `/${ticket.workspaceId}/tickets?tickets=${ticketId}`;
+      const actionUrl = buildTicketActionUrl(ticket, ticketId);
 
       await this.createNotification(recipientUserId, {
         title,
@@ -2051,6 +2071,7 @@ class NotificationService {
           channelId: true,
           conversationId: true,
           workspaceId: true,
+          channel: { select: { type: true } },
         },
       });
       if (!ticket) {
@@ -2058,9 +2079,7 @@ class NotificationService {
         return;
       }
 
-      const actionUrl = ticket.channelId && ticket.conversationId
-        ? `/${ticket.workspaceId}/chat/dir/${ticket.channelId}?tab=tickets&ticketId=${ticketId}&conversationId=${ticket.conversationId}`
-        : `/${ticket.workspaceId}/tickets?tickets=${ticketId}`;
+      const actionUrl = buildTicketActionUrl(ticket, ticketId);
 
       const ticketDisplayId = ticket.xyneId || ticket.id;
       const title = 'Ticket Reassigned';
@@ -2120,6 +2139,7 @@ class NotificationService {
           channelId: true,
           conversationId: true,
           workspaceId: true,
+          channel: { select: { type: true } },
         },
       });
       if (!ticket) {
@@ -2127,9 +2147,7 @@ class NotificationService {
         return;
       }
 
-      const actionUrl = ticket.channelId && ticket.conversationId
-        ? `/${ticket.workspaceId}/chat/dir/${ticket.channelId}?tab=tickets&ticketId=${ticketId}&conversationId=${ticket.conversationId}`
-        : `/${ticket.workspaceId}/tickets?tickets=${ticketId}`;
+      const actionUrl = buildTicketActionUrl(ticket, ticketId);
 
       const ticketDisplayId = ticket.xyneId || ticket.id;
       const title = 'Due Date Changed';
@@ -2190,6 +2208,7 @@ class NotificationService {
           channelId: true,
           conversationId: true,
           workspaceId: true,
+          channel: { select: { type: true } },
         },
       });
       if (!ticket) {
@@ -2197,9 +2216,7 @@ class NotificationService {
         return;
       }
 
-      const actionUrl = ticket.channelId && ticket.conversationId
-        ? `/${ticket.workspaceId}/chat/dir/${ticket.channelId}?tab=tickets&ticketId=${ticketId}&conversationId=${ticket.conversationId}`
-        : `/${ticket.workspaceId}/tickets?tickets=${ticketId}`;
+      const actionUrl = buildTicketActionUrl(ticket, ticketId);
 
       const ticketDisplayId = ticket.xyneId || ticket.id;
       const title = 'Status Changed';
@@ -2261,6 +2278,7 @@ class NotificationService {
           channelId: true,
           conversationId: true,
           workspaceId: true,
+          channel: { select: { type: true } },
         },
       });
       if (!ticket) {
@@ -2268,9 +2286,7 @@ class NotificationService {
         return;
       }
 
-      const actionUrl = ticket.channelId && ticket.conversationId
-        ? `/${ticket.workspaceId}/chat/dir/${ticket.channelId}?tab=tickets&ticketId=${ticketId}&conversationId=${ticket.conversationId}`
-        : `/${ticket.workspaceId}/tickets?tickets=${ticketId}`;
+      const actionUrl = buildTicketActionUrl(ticket, ticketId);
 
       const ticketDisplayId = ticket.xyneId || ticket.id;
       const title = 'Priority Changed';
@@ -2332,6 +2348,7 @@ class NotificationService {
           channelId: true,
           conversationId: true,
           workspaceId: true,
+          channel: { select: { type: true } },
         },
       });
       if (!ticket) {
@@ -2339,9 +2356,7 @@ class NotificationService {
         return;
       }
 
-      const actionUrl = ticket.channelId && ticket.conversationId
-        ? `/${ticket.workspaceId}/chat/dir/${ticket.channelId}?tab=tickets&ticketId=${ticketId}&conversationId=${ticket.conversationId}`
-        : `/${ticket.workspaceId}/tickets?tickets=${ticketId}`;
+      const actionUrl = buildTicketActionUrl(ticket, ticketId);
 
       const ticketDisplayId = ticket.xyneId || ticket.id;
       const title = 'User Group Changed';
@@ -2402,6 +2417,7 @@ class NotificationService {
           channelId: true,
           conversationId: true,
           workspaceId: true,
+          channel: { select: { type: true } },
         },
       });
       if (!ticket) {
@@ -2409,9 +2425,7 @@ class NotificationService {
         return;
       }
 
-      const actionUrl = ticket.channelId && ticket.conversationId
-        ? `/${ticket.workspaceId}/chat/dir/${ticket.channelId}?tab=tickets&ticketId=${ticketId}&conversationId=${ticket.conversationId}`
-        : `/${ticket.workspaceId}/tickets?tickets=${ticketId}`;
+      const actionUrl = buildTicketActionUrl(ticket, ticketId);
 
       const ticketDisplayId = ticket.xyneId || ticket.id;
       const title = 'Title Changed';
@@ -2471,6 +2485,7 @@ class NotificationService {
           channelId: true,
           conversationId: true,
           workspaceId: true,
+          channel: { select: { type: true } },
         },
       });
       if (!ticket) {
@@ -2478,9 +2493,7 @@ class NotificationService {
         return;
       }
 
-      const actionUrl = ticket.channelId && ticket.conversationId
-        ? `/${ticket.workspaceId}/chat/dir/${ticket.channelId}?tab=tickets&ticketId=${ticketId}&conversationId=${ticket.conversationId}`
-        : `/${ticket.workspaceId}/tickets?tickets=${ticketId}`;
+      const actionUrl = buildTicketActionUrl(ticket, ticketId);
 
       const ticketDisplayId = ticket.xyneId || ticket.id;
       const title = 'Description Updated';
@@ -2539,6 +2552,7 @@ class NotificationService {
           channelId: true,
           conversationId: true,
           workspaceId: true,
+          channel: { select: { type: true } },
         },
       });
       if (!ticket) {
@@ -2546,9 +2560,7 @@ class NotificationService {
         return;
       }
 
-      const actionUrl = ticket.channelId && ticket.conversationId
-        ? `/${ticket.workspaceId}/chat/dir/${ticket.channelId}?tab=tickets&ticketId=${ticketId}&conversationId=${ticket.conversationId}`
-        : `/${ticket.workspaceId}/tickets?tickets=${ticketId}`;
+      const actionUrl = buildTicketActionUrl(ticket, ticketId);
 
       const ticketDisplayId = ticket.xyneId || ticket.id;
       const title = 'RCA Added';
@@ -2607,6 +2619,7 @@ class NotificationService {
           channelId: true,
           conversationId: true,
           workspaceId: true,
+          channel: { select: { type: true } },
         },
       });
       if (!ticket) {
@@ -2614,9 +2627,7 @@ class NotificationService {
         return;
       }
 
-      const actionUrl = ticket.channelId && ticket.conversationId
-        ? `/${ticket.workspaceId}/chat/dir/${ticket.channelId}?tab=tickets&ticketId=${ticketId}&conversationId=${ticket.conversationId}`
-        : `/${ticket.workspaceId}/tickets?tickets=${ticketId}`;
+      const actionUrl = buildTicketActionUrl(ticket, ticketId);
 
       const ticketDisplayId = ticket.xyneId || ticket.id;
       const title = 'RCA Updated';
@@ -2676,6 +2687,7 @@ class NotificationService {
           channelId: true,
           conversationId: true,
           workspaceId: true,
+          channel: { select: { type: true } },
         },
       });
       if (!ticket) {
@@ -2683,9 +2695,7 @@ class NotificationService {
         return;
       }
 
-      const actionUrl = ticket.channelId && ticket.conversationId
-        ? `/${ticket.workspaceId}/chat/dir/${ticket.channelId}?tab=tickets&ticketId=${ticketId}&conversationId=${ticket.conversationId}`
-        : `/${ticket.workspaceId}/tickets?tickets=${ticketId}`;
+      const actionUrl = buildTicketActionUrl(ticket, ticketId);
 
       const ticketDisplayId = ticket.xyneId || ticket.id;
       const title = 'Sub-ticket Added';
@@ -2747,6 +2757,7 @@ class NotificationService {
           channelId: true,
           conversationId: true,
           workspaceId: true,
+          channel: { select: { type: true } },
         },
       });
       if (!ticket) {
@@ -2754,9 +2765,7 @@ class NotificationService {
         return;
       }
 
-      const actionUrl = ticket.channelId && ticket.conversationId
-        ? `/${ticket.workspaceId}/chat/dir/${ticket.channelId}?tab=tickets&ticketId=${ticketId}&conversationId=${ticket.conversationId}`
-        : `/${ticket.workspaceId}/tickets?tickets=${ticketId}`;
+      const actionUrl = buildTicketActionUrl(ticket, ticketId);
 
       const ticketDisplayId = ticket.xyneId || ticket.id;
       const title = 'Related Ticket Added';
@@ -2819,6 +2828,7 @@ class NotificationService {
           channelId: true,
           conversationId: true,
           workspaceId: true,
+          channel: { select: { type: true } },
         },
       });
       if (!ticket) {
@@ -2826,9 +2836,7 @@ class NotificationService {
         return;
       }
 
-      const actionUrl = ticket.channelId && ticket.conversationId
-        ? `/${ticket.workspaceId}/chat/dir/${ticket.channelId}?tab=tickets&ticketId=${ticketId}&conversationId=${ticket.conversationId}`
-        : `/${ticket.workspaceId}/tickets?tickets=${ticketId}`;
+      const actionUrl = buildTicketActionUrl(ticket, ticketId);
 
       const ticketDisplayId = ticket.xyneId || ticket.id;
       const title = 'Related Ticket Removed';

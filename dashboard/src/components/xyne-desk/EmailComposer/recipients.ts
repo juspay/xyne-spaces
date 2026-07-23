@@ -71,7 +71,7 @@ export const buildContactPool = (
 
   for (const u of users) {
     const email = (u.email || '').toLowerCase().trim();
-    if (!email || isSelf(email)) continue;
+    if (!email) continue;
     map.set(email, { email, name: u.name || undefined, source: 'org' });
   }
   for (const c of deskContacts) {
