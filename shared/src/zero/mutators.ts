@@ -1534,11 +1534,12 @@ export const mutators = defineMutators({
         messageId: z.string(),
         timestamp: z.number(),
         type: z.nativeEnum(MessageType),
+        attachmentIds: z.array(z.string()).optional(),
       }),
       async ({
         tx,
         ctx,
-        args: { channelId, content, type, conversationId, messageId, timestamp },
+        args: { channelId, content, type, conversationId, messageId, timestamp, attachmentIds },
       }) => {
         if (content === '') {
           throw new Error('Message content or files are required to start a conversation');
@@ -1546,37 +1547,62 @@ export const mutators = defineMutators({
 
         const now = timestamp;
 
-        // Query for drafts first to determine hasAttachments before conversation insert
-        const channelDrafts = await tx.run(
-          zql.draft_messages.where('channelId', channelId).where('userId', ctx.userID),
-        );
-        const draft = channelDrafts.find(d => d.conversationId === null);
-
         let hasAttachments = false;
-        if (draft) {
-          const draftAttachments = await tx.run(
-            zql.message_attachments
-              .where('entityId', draft.id)
-              .where('entityType', AttachmentEntityType.DRAFT),
-          );
-
-          if (draftAttachments.length > 0) {
+        if (attachmentIds !== undefined) {
+          // Explicit list from a pending-message-aware caller: transfer only
+          // those ids, leave any other DRAFT attachments alone, never touch
+          // the draft row (the client's clearContent mutator owns draft state).
+          if (attachmentIds.length > 0) {
             hasAttachments = true;
-            // Transfer attachments from draft to message
-            for (const attachment of draftAttachments) {
+            for (const attachmentId of attachmentIds) {
+              const attachment = await tx.run(
+                zql.message_attachments.where('id', attachmentId).one(),
+              );
+              if (!attachment) continue;
+              if (
+                attachment.entityType === AttachmentEntityType.CHAT &&
+                attachment.entityId === messageId
+              ) {
+                continue;
+              }
               await tx.mutate.message_attachments.update({
-                id: attachment.id,
+                id: attachmentId,
                 entityId: messageId,
                 entityType: AttachmentEntityType.CHAT,
-                conversationId: conversationId,
+                conversationId,
               });
             }
           }
+        } else {
+          // Legacy path: scan the current draft and transfer everything.
+          const channelDrafts = await tx.run(
+            zql.draft_messages.where('channelId', channelId).where('userId', ctx.userID),
+          );
+          const draft = channelDrafts.find(d => d.conversationId === null);
 
-          // Delete the draft message after transferring
-          await tx.mutate.draft_messages.delete({
-            id: draft.id,
-          });
+          if (draft) {
+            const draftAttachments = await tx.run(
+              zql.message_attachments
+                .where('entityId', draft.id)
+                .where('entityType', AttachmentEntityType.DRAFT),
+            );
+
+            if (draftAttachments.length > 0) {
+              hasAttachments = true;
+              for (const attachment of draftAttachments) {
+                await tx.mutate.message_attachments.update({
+                  id: attachment.id,
+                  entityId: messageId,
+                  entityType: AttachmentEntityType.CHAT,
+                  conversationId: conversationId,
+                });
+              }
+            }
+
+            await tx.mutate.draft_messages.delete({
+              id: draft.id,
+            });
+          }
         }
 
         await tx.mutate.conversations.insert({
@@ -2063,6 +2089,7 @@ export const mutators = defineMutators({
         timestamp: z.number(),
         messageId: z.string(),
         childConversationId: z.string().optional(),
+        attachmentIds: z.array(z.string()).optional(),
       }),
       async ({
         tx,
@@ -2075,6 +2102,7 @@ export const mutators = defineMutators({
           timestamp,
           messageId,
           childConversationId,
+          attachmentIds,
         },
       }) => {
         if (content === '') {
@@ -2094,40 +2122,64 @@ export const mutators = defineMutators({
           throw new Error("Channel doesn't exists");
         }
 
-        // Query for drafts in this channel for this user (follows backend logic)
-        const channelDrafts = await tx.run(
-          zql.draft_messages.where('channelId', conversation.channelId).where('userId', ctx.userID),
-        );
-
-        // Find the draft for this specific conversation
-        const draft = channelDrafts.find(d => d.conversationId === conversationId);
-
-        // Transfer attachments from draft to message if found
         let hasAttachments = false;
-        if (draft) {
-          const draftAttachments = await tx.run(
-            zql.message_attachments
-              .where('entityId', draft.id)
-              .where('entityType', AttachmentEntityType.DRAFT),
-          );
-
-          if (draftAttachments.length > 0) {
+        if (attachmentIds !== undefined) {
+          // Explicit list from a pending-message-aware caller: transfer only
+          // those ids, leave any other DRAFT attachments alone, never touch
+          // the draft row (the client's clearContent mutator owns draft state).
+          if (attachmentIds.length > 0) {
             hasAttachments = true;
-            // Transfer attachments from draft to message
-            for (const attachment of draftAttachments) {
+            for (const attachmentId of attachmentIds) {
+              const attachment = await tx.run(
+                zql.message_attachments.where('id', attachmentId).one(),
+              );
+              if (!attachment) continue;
+              if (
+                attachment.entityType === AttachmentEntityType.CHAT &&
+                attachment.entityId === messageId
+              ) {
+                continue;
+              }
               await tx.mutate.message_attachments.update({
-                id: attachment.id,
+                id: attachmentId,
                 entityId: messageId,
                 entityType: AttachmentEntityType.CHAT,
-                conversationId: conversationId,
+                conversationId,
               });
             }
           }
+        } else {
+          // Legacy path: scan the draft for this conversation and transfer everything.
+          const channelDrafts = await tx.run(
+            zql.draft_messages
+              .where('channelId', conversation.channelId)
+              .where('userId', ctx.userID),
+          );
+          const draft = channelDrafts.find(d => d.conversationId === conversationId);
 
-          // Delete the draft message after transferring
-          await tx.mutate.draft_messages.delete({
-            id: draft.id,
-          });
+          if (draft) {
+            const draftAttachments = await tx.run(
+              zql.message_attachments
+                .where('entityId', draft.id)
+                .where('entityType', AttachmentEntityType.DRAFT),
+            );
+
+            if (draftAttachments.length > 0) {
+              hasAttachments = true;
+              for (const attachment of draftAttachments) {
+                await tx.mutate.message_attachments.update({
+                  id: attachment.id,
+                  entityId: messageId,
+                  entityType: AttachmentEntityType.CHAT,
+                  conversationId: conversationId,
+                });
+              }
+            }
+
+            await tx.mutate.draft_messages.delete({
+              id: draft.id,
+            });
+          }
         }
 
         const message = {
@@ -2964,6 +3016,33 @@ export const mutators = defineMutators({
             });
           }
         }
+      },
+    ),
+    clearContent: defineMutator(
+      z.object({
+        channelId: z.string(),
+        conversationId: z.string().optional(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { channelId, conversationId, timestamp } }) => {
+        // Called at send-time to detach the draft from the message the user
+        // just queued: zeroes content and hasAttachment so `markChannelAsViewed`
+        // can garbage-collect the row on channel exit. The actual DRAFT-typed
+        // attachment rows are not touched — the send mutator claims them by id
+        // when it fires (immediate or on retry).
+        const channelDrafts = await tx.run(
+          zql.draft_messages.where('channelId', channelId).where('userId', ctx.userID),
+        );
+        const draft = conversationId
+          ? channelDrafts.find(d => d.conversationId === conversationId)
+          : channelDrafts.find(d => d.conversationId === null);
+        if (!draft) return;
+        await tx.mutate.draft_messages.update({
+          id: draft.id,
+          content: '',
+          hasAttachment: false,
+          updatedAt: timestamp,
+        });
       },
     ),
   },
