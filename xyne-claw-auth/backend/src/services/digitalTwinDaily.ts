@@ -24,11 +24,14 @@ import {
   fetchUserHostedCalls,
   fetchUserCanvases,
 } from "./userMemoryFetcher.js";
+import { assembleConversationUnits, isContextAssemblerEnabled } from "./contextAssembler.js";
 import { curateAndPersistBatch } from "./userMemoryCuratorClient.js";
+import { packRecordsIntoBatches } from "./userMemoryBatcher.js";
+import { assembleTwinFeedbackRecords, markTwinFeedbackLearned } from "./twinResponseFeedback.js";
+import { recordPipelineEvent, prunePipelineEvents } from "./digitalTwinPipelineEvents.js";
+import { synthesizeSoulFilesForUser } from "./twinSoulSynthesizer.js";
 
 const logger = createLogger("digital-twin-daily", createTraceId());
-
-const BATCH_SIZE = 40;
 
 function yesterdayWindow(): { from: Date; to: Date; dateStr: string } {
   const now = new Date();
@@ -44,7 +47,12 @@ async function processUser(userId: string, window: { from: Date; to: Date; dateS
   let total = 0;
 
   for (const [source, fetcher] of [
-    ["messages", () => fetchUserMessages(userId, window)] as const,
+    // "messages" → thread-complete conversation units when the assembler flag is
+    // on, else the legacy flat outgoing-message stream. calls/canvases unchanged.
+    ["messages", () =>
+      isContextAssemblerEnabled()
+        ? assembleConversationUnits(userId, window)
+        : fetchUserMessages(userId, window)] as const,
     ["calls", () => fetchUserHostedCalls(userId, window)] as const,
     ["canvases", () => fetchUserCanvases(userId, window)] as const,
   ]) {
@@ -52,13 +60,23 @@ async function processUser(userId: string, window: { from: Date; to: Date; dateS
     try {
       records = await fetcher();
     } catch (err) {
-      logger.warn("[daily] fetch failed", { userId, source, err: err instanceof Error ? err.message : String(err) });
+      const message = err instanceof Error ? err.message : String(err);
+      logger.warn("[daily] fetch failed", { userId, source, err: message });
+      await recordPipelineEvent({
+        userId,
+        source: `daily:${window.dateStr}:${source}`,
+        window: { from: window.from, to: window.to },
+        status: "error",
+        recordCount: 0,
+        error: message,
+      });
       continue;
     }
     if (records.length === 0) continue;
 
-    for (let i = 0; i < records.length; i += BATCH_SIZE) {
-      const batch = records.slice(i, i + BATCH_SIZE);
+    // Token-budgeted batching (userMemoryBatcher) — replaces fixed BATCH_SIZE
+    // now that a single message renders up to 3k chars.
+    for (const batch of packRecordsIntoBatches(records)) {
       try {
         const inserted = await curateAndPersistBatch({
           userId,
@@ -75,6 +93,33 @@ async function processUser(userId: string, window: { from: Date; to: Date; dateS
         });
       }
     }
+  }
+
+  // Twin response feedback (accept / decline / edit / ignore) — the DEFERRED
+  // learning loop that replaced the old immediate-on-accept curator call.
+  // Reconcile stale pending → ignored, distil the decided rows, and mark them
+  // learned ONLY after a successful curate so a failure never drops a signal.
+  try {
+    const { records, ids } = await assembleTwinFeedbackRecords(userId);
+    if (records.length > 0) {
+      let ok = true;
+      for (const batch of packRecordsIntoBatches(records)) {
+        try {
+          total += await curateAndPersistBatch({
+            userId,
+            window: { from: window.from, to: window.to },
+            records: batch,
+            source: `daily:${window.dateStr}:twin_feedback`,
+          });
+        } catch (err) {
+          ok = false;
+          logger.warn("[daily] twin_feedback curator batch failed", { userId, err: err instanceof Error ? err.message : String(err) });
+        }
+      }
+      if (ok) await markTwinFeedbackLearned(ids);
+    }
+  } catch (err) {
+    logger.warn("[daily] twin_feedback assembly failed", { userId, err: err instanceof Error ? err.message : String(err) });
   }
 
   return { candidates: total };
@@ -96,6 +141,15 @@ async function runDigitalTwinDailySync(): Promise<void> {
     try {
       const { candidates } = await processUser(u.id, window);
       totalCandidates += candidates;
+      // Recompile the persona files (soul.md, …) from the user's approved facts
+      // so the always-loaded twin persona stays fresh. Best-effort — a synth
+      // failure never fails the daily run.
+      await synthesizeSoulFilesForUser(u.id, "daily").catch((err) => {
+        logger.warn("[daily] soul synthesis failed", {
+          userId: u.id,
+          err: err instanceof Error ? err.message : String(err),
+        });
+      });
     } catch (err) {
       totalErrors += 1;
       logger.error("[daily] user processing failed", {
@@ -104,11 +158,13 @@ async function runDigitalTwinDailySync(): Promise<void> {
       });
     }
   }
+  const prunedEvents = await prunePipelineEvents(30);
   logger.info("[daily] complete", {
     date: window.dateStr,
     users: users.length,
     totalCandidates,
     totalErrors,
+    prunedEvents,
   });
 }
 

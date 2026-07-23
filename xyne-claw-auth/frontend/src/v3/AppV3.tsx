@@ -9,7 +9,7 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import clawLoginImage from "../assets/claw-login.png";
 import { IconContext } from "@phosphor-icons/react";
 import { useAuth } from "../hooks/useAuth";
-import { checkIsAdmin } from "../lib/api";
+import { checkAccess } from "../lib/api";
 import { AdminStatusContext } from "./hooks/useAdminStatus";
 import { SnackbarProvider } from "./components/ui/Snackbar";
 import { TooltipProvider } from "./components/ui/Tooltip";
@@ -31,6 +31,7 @@ import { DigitalTwinPageV3 } from "./components/digital-twin/DigitalTwinPageV3";
 import { AdminPageV3 } from "./components/AdminPageV3";
 import { MetricsPageV3 } from "./components/MetricsPageV3";
 import { EvalsPageV3 } from "./components/EvalsPageV3";
+import { SearchEvalsPageV3 } from "./components/SearchEvalsPageV3";
 import { ErrorPipelinePageV3 } from "./components/ErrorPipelinePageV3";
 import { CliLoginPageV3 } from "./components/CliLoginPageV3";
 import { ChatProvider } from "./hooks/useChat";
@@ -39,15 +40,22 @@ import { ChatProvider } from "./hooks/useChat";
 export function AppV3() {
   const auth = useAuth();
   const [isAdmin, setIsAdmin] = useState(false);
+  const [hasSearchEvalAccess, setHasSearchEvalAccess] = useState(false);
   const [isAdminLoading, setIsAdminLoading] = useState(true);
   const authUserId = auth.status === "authenticated" ? auth.user.id : null;
 
   useEffect(() => {
     if (!authUserId) return;
     setIsAdminLoading(true);
-    checkIsAdmin(authUserId)
-      .then(setIsAdmin)
-      .catch(() => setIsAdmin(false))
+    checkAccess(authUserId)
+      .then(({ isAdmin, hasSearchEvalAccess }) => {
+        setIsAdmin(isAdmin);
+        setHasSearchEvalAccess(hasSearchEvalAccess);
+      })
+      .catch(() => {
+        setIsAdmin(false);
+        setHasSearchEvalAccess(false);
+      })
       .finally(() => setIsAdminLoading(false));
   }, [authUserId]);
 
@@ -123,7 +131,7 @@ export function AppV3() {
   const userId = auth.user.id;
 
   return (
-    <AdminStatusContext.Provider value={{ isAdmin, isAdminLoading }}>
+    <AdminStatusContext.Provider value={{ isAdmin, isAdminLoading, hasSearchEvalAccess }}>
     <SnackbarProvider>
       <TooltipProvider>
         <IconContext.Provider value={{ weight: "regular" }}>
@@ -134,7 +142,7 @@ export function AppV3() {
           <Routes>
             <Route path="/v3/cli-login" element={<CliLoginPageV3 />} />
             <Route path="*" element={
-          <ShellV3 isAdmin={isAdmin}>
+          <ShellV3 isAdmin={isAdmin} hasSearchEvalAccess={hasSearchEvalAccess}>
           <Routes>
             <Route path="/v3" element={<Navigate to="/v3/home" replace />} />
             <Route path="/v3/home" element={
@@ -199,14 +207,21 @@ export function AppV3() {
                 <Navigate to="/v3/home" replace />
               )
             } />
-            <Route path="/v3/error-pipeline" element={
-              isAdmin ? (
+            <Route path="/v3/search-evals" element={
+              hasSearchEvalAccess ? (
                 <div className="flex flex-1 flex-col overflow-hidden rounded-xl bg-xyne-surface shadow-sm">
-                  <ErrorPipelinePageV3 userId={userId} />
+                  <SearchEvalsPageV3 userId={userId} />
                 </div>
               ) : isAdminLoading ? null : (
                 <Navigate to="/v3/home" replace />
               )
+            } />
+            {/* Viewable by everyone (shareable error links); bucket controls
+                inside the page are disabled for non-admins. */}
+            <Route path="/v3/error-pipeline" element={
+              <div className="flex flex-1 flex-col overflow-hidden rounded-xl bg-xyne-surface shadow-sm">
+                <ErrorPipelinePageV3 userId={userId} />
+              </div>
             } />
             <Route path="/v3/digital-twin" element={
               <div className="flex flex-1 flex-col overflow-hidden rounded-xl bg-xyne-surface shadow-sm">

@@ -4,7 +4,8 @@ import { createLogger } from "../logger.js";
 
 const log = createLogger("cli-tokens");
 
-const TOKEN_PREFIX = "xyne_cli_";
+export const TOKEN_PREFIX = "xyne_cli_";
+export const SERVICE_TOKEN_PREFIX = "xyne_svc_";
 const LAST_USED_THROTTLE_MS = 60_000;
 const lastUsedUpdates = new Map<string, number>();
 
@@ -42,7 +43,7 @@ function recordLastUsed(tokenHash: string): void {
 }
 
 export async function verify(raw: string | undefined): Promise<VerifiedCliToken | null> {
-  if (!raw || !raw.startsWith(TOKEN_PREFIX)) return null;
+  if (!raw || (!raw.startsWith(TOKEN_PREFIX) && !raw.startsWith(SERVICE_TOKEN_PREFIX))) return null;
 
   const tokenHash = hash(raw);
   const record = await prisma.surfaceAccessToken.findUnique({

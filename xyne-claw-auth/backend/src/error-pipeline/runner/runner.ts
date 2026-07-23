@@ -8,6 +8,7 @@ import { hostname } from "node:os";
 import { randomUUID } from "node:crypto";
 import { getFixRecord, saveFixRecord } from "./store.js";
 import { agentRunRepository } from "../../repositories/agentRunRepository.js";
+import { getLatestSessionForRun } from "../../queue/run-recovery-worker.js";
 import { handleAutomationWebhook } from "../../routes/webhook.js";
 import type { Request, Response } from "express";
 import type { WorkItem } from "../types.js";
@@ -29,7 +30,7 @@ const RUN_POLL_MS = 5_000;
 /**
  * The runner: ONE worker per stream. Each worker owns its bucket, pulls items
  * one at a time, and spawns the agent (doctor-agent by default) to debug the
- * error — everything PR-related is the AGENT's job, not ours. Sequential
+ * error and produce a detailed RCA (no PR/COE for now). Sequential
  * within a stream ("one completes, then the next"); streams run in parallel
  * (max = number of lanes).
  *
@@ -179,13 +180,13 @@ class Runner {
     const q = getQueue();
     const { item, bucket } = claimed;
 
-    // Dedup: this shape was already worked recently — skip. Anything PR-related
-    // (is there an open PR? raise one?) is entirely the AGENT's job; it has the
-    // [errpipe:<key>] marker to search by.
+    // Dedup: this shape was already worked recently — skip. The prior RCA is
+    // findable by the [errpipe:<key>] marker embedded in its report.
     const prior = await getFixRecord(item.errorKey);
     if (prior && prior.status === "completed" && Date.now() - prior.updatedAt < COOLDOWN_MS) {
-      log.info(`[runner] ${item.errorKey} completed recently — ack, skip`);
-      await q.ack(claimed);
+      const remainingSeconds = Math.max(1, Math.ceil((COOLDOWN_MS - (Date.now() - prior.updatedAt)) / 1000));
+      log.info(`[runner] ${item.errorKey} completed recently — ack, skip (hold dedup ${remainingSeconds}s)`);
+      await q.ack(claimed, { keepDedupForSeconds: remainingSeconds });
       return;
     }
 
@@ -228,28 +229,40 @@ class Runner {
       attempts: claimed.deliveries,
     });
     log.info(`[runner] ${bucket} ${item.errorKey}: ${status}`);
-    await q.ack(claimed);
+    // On success, hold the dedup marker for the full cooldown so Grafana's
+    // re-fires of this now-fixed error are dropped at ingest (no re-queue → skip
+    // churn). On failure, release it (default) so a later occurrence can retry.
+    await q.ack(claimed, status === "completed" ? { keepDedupForSeconds: Math.ceil(COOLDOWN_MS / 1000) } : undefined);
   }
 
   // The detailed "how to debug / how to use the sandbox" flow lives in the
-  // agent's own system prompt (DB-backed, editable without a deploy), and the
-  // writable sandbox is now unlocked by config (allowWriteInReadOnlyJob), so the
-  // task stays a plain, natural ask: here's the error → check Grafana → RCA →
-  // raise the PR. The one non-obvious bit it must carry: the doctor prompt is
-  // written for an interactive human loop, but a pipeline run is HEADLESS —
-  // nobody confirms — so we tell it to go end-to-end without pausing, or it
-  // stalls at investigation and never opens a PR. The errpipe marker is per-run
-  // and must ride along or the PR dedupe breaks.
+  // agent's own system prompt (DB-backed, editable without a deploy), so the
+  // task stays a plain, natural ask: here's the error → check Grafana →
+  // replicate → full technical RCA. Deliberately NO PR / COE step for now —
+  // the deliverable is the RCA report itself. The one non-obvious bit it must
+  // carry: the doctor prompt is written for an interactive human loop, but a
+  // pipeline run is HEADLESS — nobody confirms — so we tell it to go
+  // end-to-end without pausing, or it stalls mid-investigation. The errpipe
+  // marker is per-run and must ride along in the report so a later run (or a
+  // human) can find prior work on the same error shape.
   private buildTask(item: WorkItem): string {
     return [
       `${item.error.message}`,
       "",
-      "This is an error we're seeing in production. Check Grafana for the logs and surrounding context, do a root-cause analysis, and raise a PR with the fix.",
-      "This is an automated, unattended run — work through it end to end (investigate → fix → PR) without pausing for confirmation. If the root cause isn't clear enough for a safe fix, report the blocker instead of opening a speculative PR.",
+      "This is an error we're seeing in production. Check Grafana for the logs and surrounding context, reproduce the error, and produce a full, detailed technical root-cause analysis.",
+      "Do NOT raise a PR or open a COE — the deliverable is the RCA report only.",
+      "The RCA must include:",
+      "- What happened: the exact failure, where in the code it originates (file/function), and the error's blast radius.",
+      "- Root cause: the precise chain from trigger to failure, backed by the log evidence you found.",
+      "- Reproduction: concrete step-by-step instructions (requests, payloads, preconditions) so anyone can replicate the error independently.",
+      "- Suggested fix: what you would change and why — described, not implemented.",
+      "This is an automated, unattended run — work through it end to end (investigate → replicate → RCA) without pausing for confirmation. If you can't pin down the root cause, report exactly what you ruled out and what's still unknown.",
       "",
       `bucket: ${item.classification.bucket}`,
       `requestId: ${item.error.sampleRequestId ?? "unknown"}`,
-      `Include [errpipe:${item.errorKey}] in the PR title.`,
+      `occurrences in alert window: ${item.error.count ?? "unknown"}`,
+      `alert fired at: ${item.error.occurredAt ? new Date(item.error.occurredAt).toISOString() : "unknown"}`,
+      `Include [errpipe:${item.errorKey}] in the RCA report.`,
     ].join("\n");
   }
 
@@ -316,24 +329,42 @@ class Runner {
     // tied to this loop's liveness (fire-and-forget) — we're just watching the
     // row the run-result callback writes. No heartbeat: the runner isn't keeping
     // the run alive, so there's nothing to "keep fresh".
+    // Session we're watching — reassigned when a run hands off (see below).
+    let watchSessionId = sessionId;
     const deadline = Date.now() + ERROR_PIPELINE.agentTimeoutMs;
     while (Date.now() < deadline) {
       await sleep(RUN_POLL_MS);
       let run: Awaited<ReturnType<typeof agentRunRepository.findBySessionId>>;
       try {
-        run = await agentRunRepository.findBySessionId(sessionId);
+        run = await agentRunRepository.findBySessionId(watchSessionId);
       } catch (err) {
-        log.warn(`[runner] poll error (session ${sessionId}): ${err instanceof Error ? err.message : String(err)}`);
+        log.warn(`[runner] poll error (session ${watchSessionId}): ${err instanceof Error ? err.message : String(err)}`);
         continue;
       }
       if (!run) continue; // row not visible yet
       if (run.status === "completed" || run.status === "failed" || run.status === "cancelled") {
         const text = run.result ?? run.error ?? "";
-        return { sessionId, conversationId, status: run.status, result: text };
+        if (text.trim()) {
+          return { sessionId: watchSessionId, conversationId, status: run.status, result: text };
+        }
+        // Terminal but EMPTY. A run that hits claw's turn limit doesn't end —
+        // it checkpoints and is RE-DISPATCHED under a new sessionId, so this
+        // row is finalized with no text while the real answer (and its
+        // attachments) land on the continuation. Ask the recovery worker which
+        // session the run is on NOW: it records the chain when it performs the
+        // handoff, so this is the authoritative link — not "some newer run in
+        // the same conversation", which could match a human's follow-up chat.
+        const latest = await getLatestSessionForRun(watchSessionId).catch(() => null);
+        if (latest && latest !== watchSessionId) {
+          log.info(`[runner] ${watchSessionId} handed off → following continuation ${latest}`);
+          watchSessionId = latest;
+          continue;
+        }
+        return { sessionId: watchSessionId, conversationId, status: run.status, result: text };
       }
     }
-    log.warn(`[runner] run ${sessionId} did not finalize within timeout — marking failed`);
-    return { sessionId, conversationId, status: "failed", result: "run did not finalize within the timeout" };
+    log.warn(`[runner] run ${watchSessionId} did not finalize within timeout — marking failed`);
+    return { sessionId: watchSessionId, conversationId, status: "failed", result: "run did not finalize within the timeout" };
   }
 
   private async record(item: WorkItem, bucket: string, patch: Partial<import("./store.js").FixRecord> & { status: import("./store.js").FixStatus; attempts: number }): Promise<void> {

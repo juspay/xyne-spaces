@@ -20,7 +20,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { workspacePath } from "./workspace.js";
 import type { ThinkingLevel } from "@earendil-works/pi-ai";
-import { AGENT, SERVER } from "./config.js";
+import { AGENT, LITELLM, SERVER } from "./config.js";
 import { ensureSessionDebugDir, sessionDir } from "./session-store.js";
 import { SUBAGENT_DEFINITIONS, getSandboxSession, probeSession, REPO_CONFIGS, buildSandboxStoreKey, type SubagentDefinition, type SetupStep } from "xyne-claw-shared";
 import type { McpToolGroup } from "./mcp.js";
@@ -252,7 +252,6 @@ function summarizeChildToolCall(toolName: string, args: unknown): string | null 
       grafana: "📊",
       deepwiki: "📚",
       context7: "📖",
-      pgm: "📋",
       "juspay-internal-tools": "🏦",
       Attio: "📇",
       MailerLite: "📧",
@@ -435,6 +434,7 @@ export interface SkillTrigger {
 
 export interface SubagentProviderResolution {
   parentProvider: string;
+  subagentProviderMode?: "parent" | "spaces" | "fast-model" | undefined;
   subagentProviders?: Record<string, string> | undefined;
   providerConfigs?: Record<string, { apiKey: string; model: string; baseUrl?: string; authType?: string }> | undefined;
 }
@@ -706,8 +706,17 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
 
         // Apply copilot proxy (no-op for other providers) then register model via the same helper the parent uses
         const effectiveConfig = await applyCopilotProxyIfNeeded(resolvedProvider?.provider, resolvedProvider?.config);
-        const model = resolveModel(modelRegistry, resolvedProvider?.provider, effectiveConfig);
-        log.info(`[${def.name}] Using provider=${resolvedProvider?.provider ?? "litellm"} model=${resolvedProvider?.config.model ?? "shared"}`);
+        // fast-model is EXPLICIT opt-in (no faster grid model exists yet —
+        // fast-mode-plan.md Slice A deferred 2026-07-15). Default/undefined/
+        // "spaces" all keep today's LITELLM.model routing.
+        const litellmFallbackModel =
+          providerResolution?.subagentProviderMode === "fast-model"
+            ? LITELLM.fastModel
+            : LITELLM.model;
+        const model = resolveModel(modelRegistry, resolvedProvider?.provider, effectiveConfig, {
+          model: resolvedProvider ? undefined : litellmFallbackModel,
+        });
+        log.info(`[${def.name}] Using provider=${resolvedProvider?.provider ?? "litellm"} model=${resolvedProvider?.config.model ?? litellmFallbackModel}`);
 
         // Materialize skills onto disk so the child session loads them as
         // proper pi resources (same path the parent takes in agent.ts),
@@ -1417,7 +1426,7 @@ function resolveCustomSubagentTools(
 
 /**
  * Group MCP tool groups into subagent wrappers based on serverType.
- * Also wraps custom tools that match a subagent definition (e.g. custom:pgm).
+ * Also wraps custom tools that match a subagent definition (e.g. custom:sandbox).
  * Write tools (from adapter's writeTools) stay as direct tools in the parent agent.
  * Server types without a matching SubagentDefinition pass through as direct tools.
  */
@@ -1488,10 +1497,10 @@ export function buildSubagentTools(
     }
   }
 
-  // Wrap custom tools that match a subagent definition (e.g. custom:pgm)
+  // Wrap custom tools that match a subagent definition (e.g. custom:sandbox)
   const remainingCustomTools: ToolDefinition[] = [];
   if (customTools) {
-    // Group custom tools by source prefix (e.g. "custom:pgm" → "pgm" tools)
+    // Group custom tools by source prefix (e.g. "custom:sandbox" → "sandbox" tools)
     const customBySource = new Map<string, ToolDefinition[]>();
     for (const t of customTools) {
       const source = (t as unknown as { source?: string }).source;

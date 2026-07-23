@@ -19,7 +19,7 @@ import {
   type ClaudeModelInfo,
 } from "../../lib/api";
 
-const SUBAGENTS = ["spaces", "bitbucket", "grafana", "deepwiki", "context7", "pgm"] as const;
+const SUBAGENTS = ["spaces", "bitbucket", "grafana", "deepwiki", "context7"] as const;
 
 const PROVIDER_META: Record<string, { label: string; defaultModel: string; defaultBaseUrl: string }> = {
   copilot: { label: "GitHub Copilot", defaultModel: "gpt-4o", defaultBaseUrl: "https://api.githubcopilot.com" },

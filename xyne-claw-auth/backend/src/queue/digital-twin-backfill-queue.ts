@@ -70,7 +70,22 @@ export async function enqueueDigitalTwinBackfill(args: {
   // Remove a prior job if it exists — user re-enabling with a different
   // window means we want a fresh walk, not a resume from the old cursor.
   const existing = await getBackfillQueue().getJob(id);
-  if (existing) await existing.remove();
+  if (existing) {
+    try {
+      await existing.remove();
+    } catch (err) {
+      // An ACTIVE (locked) job can't be removed by BullMQ. That job is already
+      // walking from the persisted cursor, so leaving it in place is exactly
+      // what we want — do NOT add a duplicate (BullMQ would refuse the id
+      // anyway). This is why callers guard live jobs with backfillJobIsLive
+      // before enqueuing; this catch is the defensive backstop that keeps a
+      // resume/enable from 500-ing on "locked by another worker".
+      if (/locked by another worker/i.test(err instanceof Error ? err.message : String(err))) {
+        return id;
+      }
+      throw err;
+    }
+  }
   await getBackfillQueue().add("backfill", data, { jobId: id });
   return id;
 }
@@ -91,6 +106,24 @@ export async function cancelDigitalTwinBackfill(userId: string): Promise<number>
     }
   }
   return removed;
+}
+
+/**
+ * True when a live (progressing) job exists for this user+source — active,
+ * waiting, delayed, or waiting-children. Used by the startup self-heal to AVOID
+ * re-enqueuing a source that's already running (which would orphan the live job
+ * and cause the very stall we're recovering from). A `failed`/`completed`/absent
+ * job returns false → safe to re-enqueue.
+ */
+export async function backfillJobIsLive(userId: string, source: BackfillSource): Promise<boolean> {
+  try {
+    const job = await getBackfillQueue().getJob(jobIdFor(userId, source));
+    if (!job) return false;
+    const state = await job.getState();
+    return state === "active" || state === "waiting" || state === "delayed" || state === "waiting-children";
+  } catch {
+    return false;
+  }
 }
 
 export async function closeBackfillQueue(): Promise<void> {

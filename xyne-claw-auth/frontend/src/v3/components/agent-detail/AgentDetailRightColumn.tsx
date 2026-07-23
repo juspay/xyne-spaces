@@ -381,7 +381,7 @@ export function AgentDetailRightColumn({
           {activeTab === "contributors" && (
             <ContributorsTab agent={agent} userId={userId} permissions={permissions} />
           )}
-          {activeTab === "memory" && <MemoryTab agentSlug={agent.slug} canDelete={permissions.canEdit} />}
+          {activeTab === "memory" && <MemoryTab agent={agent} canDelete={permissions.canEdit} />}
           {activeTab === "scheduled-jobs" && (
             <ScheduledJobsTab jobs={scheduledJobs} onJobsChange={onJobsChange} />
           )}

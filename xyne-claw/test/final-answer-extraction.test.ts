@@ -2,12 +2,13 @@ import { test, expect } from "vitest";
 import { extractFinalAnswerText } from "../src/agent.js";
 
 /**
- * extractFinalAnswerText returns the last TWO non-empty assistant turns joined
- * in chronological order. Rationale (see agent.ts "Final-answer extraction"):
- * a trailing todo-write splits the final answer and a short wrap-up across two
- * adjacent assistant turns, and which one holds the real answer is
- * nondeterministic (Mode A: answer first, Mode B: answer last) — so the only
- * shape-independent rule is to keep both.
+ * extractFinalAnswerText returns non-empty assistant turns of the current turn,
+ * joined in chronological order. By default it keeps ALL of them (ask-ai etc.),
+ * so the stored answer matches the streamed transcript; passing `maxTurns` (2 for
+ * thread/Slack replies) keeps only that many trailing turns for a clean reply.
+ * Rationale (see agent.ts "Final-answer extraction"): a trailing todo-write
+ * splits the answer across adjacent turns and which one holds it is
+ * nondeterministic, so 2 is the smallest split-agnostic window.
  */
 
 type Block = { type: string; text?: string; name?: string };
@@ -63,6 +64,58 @@ test("empty assistant turns (bare tool calls) don't consume a slot", () => {
     assistant(text("Verified and done.")),
   ]);
   expect(extractFinalAnswerText(session)).toBe(`${answer}\n\nVerified and done.`);
+});
+
+test("keeps ALL non-empty assistant turns of the current turn (3+), in order", () => {
+  // Multi-step turn: narration → tool → narration → tool → answer → wrap-up.
+  // The old last-2 rule dropped the early narration; we now keep every turn so
+  // the stored answer matches the streamed transcript (no completion repaint).
+  const session = sessionWith([
+    user("summarize the incident"),
+    assistant(text("Let me search the logs."), toolCall("search")),
+    toolResult(),
+    assistant(text("Found 3 matching entries — analyzing."), toolCall("read")),
+    toolResult(),
+    assistant(text("Root cause: a config typo [clf-log#2].")),
+    assistant(text("Done — all cited.")),
+  ]);
+  expect(extractFinalAnswerText(session)).toBe(
+    "Let me search the logs.\n\n" +
+      "Found 3 matching entries — analyzing.\n\n" +
+      "Root cause: a config typo [clf-log#2].\n\n" +
+      "Done — all cited.",
+  );
+});
+
+test("maxTurns=2 (thread reply) keeps only the last two non-empty assistant turns", () => {
+  // Same 3+-turn session as above, but a thread invocation caps at 2 so the
+  // posted reply stays a clean answer + wrap-up (drops the early narration).
+  const session = sessionWith([
+    user("summarize the incident"),
+    assistant(text("Let me search the logs."), toolCall("search")),
+    toolResult(),
+    assistant(text("Found 3 matching entries — analyzing."), toolCall("read")),
+    toolResult(),
+    assistant(text("Root cause: a config typo [clf-log#2].")),
+    assistant(text("Done — all cited.")),
+  ]);
+  expect(extractFinalAnswerText(session, 2)).toBe(
+    "Root cause: a config typo [clf-log#2].\n\nDone — all cited.",
+  );
+  // Empty turns still don't consume a slot under the cap.
+  const withEmpty = sessionWith([
+    user("check my tickets"),
+    assistant(text("Searching…"), toolCall("search")),
+    toolResult(),
+    assistant(text("All 3 tickets are resolved [clf-xyz#0]."), toolCall("todo-write")),
+    toolResult(),
+    assistant(toolCall("verify")), // empty — skipped
+    toolResult(),
+    assistant(text("Verified and done.")),
+  ]);
+  expect(extractFinalAnswerText(withEmpty, 2)).toBe(
+    "All 3 tickets are resolved [clf-xyz#0].\n\nVerified and done.",
+  );
 });
 
 test("never crosses the current turn's user message into a previous exchange", () => {

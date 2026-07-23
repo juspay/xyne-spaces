@@ -154,6 +154,14 @@ export class StubMemoryProvider implements MemoryProvider {
     return deleted;
   }
 
+  async clearAll(bankId: string): Promise<number> {
+    const bank = this.banks.get(bankId);
+    if (!bank) return 0;
+    const deleted = bank.size;
+    bank.clear();
+    return deleted;
+  }
+
   /** Test helper: clear all banks. Not part of the MemoryProvider interface. */
   reset(): void {
     this.banks.clear();

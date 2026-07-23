@@ -19,6 +19,8 @@ import { routeError } from "../error-pipeline/buckets.js";
 import { agentRunRepository } from "../repositories/agentRunRepository.js";
 import type { IncomingError } from "../error-pipeline/types.js";
 import { createLogger } from "../logger.js";
+import { prisma } from "../db.js";
+import { persistRunStreamResult } from "./run-stream.js";
 
 const log = createLogger("error-pipeline");
 
@@ -37,7 +39,16 @@ export const errorPipelineIngestRouter = Router();
 export const errorPipelineInternalRouter = Router();
 
 errorPipelineInternalRouter.post("/run-result", async (req: Request, res: Response) => {
-  const p = req.body as { sessionId?: string; status?: string; result?: string; error?: string };
+  const p = req.body as {
+    sessionId?: string;
+    status?: string;
+    result?: string;
+    error?: string;
+    userId?: string;
+    agentSlug?: string;
+    conversationId?: string | null;
+    attachments?: Array<{ fileName: string; mimeType: string; data: string }>;
+  };
   if (!p.sessionId) {
     res.status(400).json({ success: false, error: "sessionId is required" });
     return;
@@ -56,7 +67,36 @@ errorPipelineInternalRouter.post("/run-result", async (req: Request, res: Respon
     return;
   }
   res.json({ success: true });
-  log.info(`[run-result] finalized ${p.sessionId} → ${status}`);
+  log.info(`[run-result] finalized ${p.sessionId} → ${status} (attachments=${p.attachments?.length ?? 0})`);
+
+  // Persist the assistant turn into the run's conversation AFTER acking (claw
+  // only needs the AgentRun finalized). Without this, the report files the
+  // agent attaches exist only in this callback payload and vanish — the
+  // pipeline UI's Attachments section and "Open chat" had nothing to show.
+  // Best-effort: a persistence failure must never make claw retry the ack.
+  // persistRunStreamResult dedupes on sessionId across claw's retries.
+  if (p.conversationId && p.userId && (p.result || p.attachments?.length)) {
+    try {
+      const user = await prisma.user.findUnique({ where: { id: p.userId }, select: { orgId: true } });
+      if (user?.orgId) {
+        await persistRunStreamResult({
+          conversationId: p.conversationId,
+          agentSlug: p.agentSlug ?? ERROR_PIPELINE.agentSlug,
+          userId: p.userId,
+          content: p.result ?? "",
+          status: status === "completed" ? "completed" : "failed",
+          orgId: user.orgId,
+          sessionId: p.sessionId,
+          ...(p.attachments?.length ? { attachments: p.attachments } : {}),
+        });
+        log.info(`[run-result] persisted assistant turn for ${p.sessionId} (conv ${p.conversationId}, ${p.attachments?.length ?? 0} attachments)`);
+      } else {
+        log.warn(`[run-result] no orgId for user ${p.userId} — skipping conversation persistence`);
+      }
+    } catch (err) {
+      log.warn(`[run-result] conversation persistence failed for ${p.sessionId}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
 });
 
 export const INGEST_JWT_AUDIENCE = "error-pipeline";
@@ -107,6 +147,18 @@ interface GrafanaAlert {
   status?: string;
   labels?: Record<string, string>;
   annotations?: Record<string, string>;
+  values?: Record<string, unknown>;
+  startsAt?: string;
+}
+
+/**
+ * The alert's numeric values map holds one entry per refId: the LogsQL
+ * count() (large), its reduce (same number), and possibly a 0/1 threshold
+ * expression. The max is therefore always the occurrence count.
+ */
+function countFromValues(values: Record<string, unknown> | undefined): number | undefined {
+  const nums = Object.values(values ?? {}).filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+  return nums.length > 0 ? Math.max(...nums) : undefined;
 }
 
 /**
@@ -126,11 +178,15 @@ function fromGrafanaPayload(body: unknown): IncomingError[] | null {
     const labels = a?.labels ?? {};
     const message = labels["full"] || labels["message"] || a?.annotations?.["summary"] || labels["alertname"] || "";
     if (!message) continue;
+    const count = countFromValues(a?.values);
+    const occurredAt = a?.startsAt ? Date.parse(a.startsAt) : NaN;
     items.push({
       source: labels["source"] || "backend",
       message: message.slice(0, 20_000),
       ...(labels["message"] ? { normMessage: labels["message"] } : {}),
       ...(labels["requestId"] ? { sampleRequestId: labels["requestId"] } : {}),
+      ...(count !== undefined ? { count } : {}),
+      ...(Number.isFinite(occurredAt) ? { occurredAt } : {}),
     });
   }
   return items;

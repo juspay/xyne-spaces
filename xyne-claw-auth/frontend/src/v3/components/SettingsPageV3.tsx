@@ -79,7 +79,6 @@ const SUBAGENT_NAMES: Record<string, string> = {
   grafana: "Grafana Agent",
   deepwiki: "DeepWiki Agent",
   context7: "Context7 Agent",
-  pgm: "PGM Agent",
 };
 
 /* =================================================================== */
@@ -97,7 +96,6 @@ export function SettingsPageV3() {
     "grafana",
     "deepwiki",
     "context7",
-    "pgm",
   ]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

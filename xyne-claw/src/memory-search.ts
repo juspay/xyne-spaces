@@ -22,15 +22,27 @@ export function buildMemorySearchTool(
   agentSlug: string,
   userId: string,
   sessionId: string,
+  memoryBankId?: string,
 ): ToolDefinition {
+  // The twin's recall is hard-gated server-side to the caller's `user:` tag and
+  // the subsystem param is ignored for it (see execute below) — so only the
+  // shared-agent description needs to warn that session-ingested facts carry no
+  // subsystem tags (twin facts still do, via user-memory-curator's taxonomy).
+  const twin = isDigitalTwinAgent(agentSlug);
   return {
     name: "memory-search",
     label: "Search Agent Memory",
     description: [
       "Search the agent's shared knowledge bank for facts relevant to a query.",
       "",
-      "Use this for anything that overlaps a known subsystem (see system prompt for the list).",
+      "Scope to a subsystem whenever the query fits one (see the system prompt for",
+      "the list) — scoped recall is ~10x faster. Search unscoped when nothing fits.",
       "Examples: 'how to mention a user in Spaces', 'ticket creation API requirements'.",
+      "",
+      "Time-aware: put a time reference in the query and it's honored — 'what is the",
+      "user working on now', 'what did they work on before the launch', 'projects from",
+      "last quarter'. Recent facts rank higher, so 'now'-style queries surface current",
+      "work over old work. No separate date parameter — phrase it in the query.",
       "",
       "Returns up to N memories as a numbered list. If empty, the bank has no",
       "matching knowledge — proceed without calling again on the same query.",
@@ -41,11 +53,14 @@ export function buildMemorySearchTool(
       properties: {
         query: {
           type: "string",
-          description: "Natural language search query. Be specific — semantic match works better than keywords.",
+          description: "Natural language search query. Be specific — semantic match works better than keywords. Include a time reference for temporal questions (e.g. 'now', 'before the X launch', 'last month').",
         },
         subsystem: {
           type: "string",
-          description: "Optional: restrict to one subsystem (e.g. 'spaces', 'ticket-creation').",
+          description: twin
+            ? "Ignored for personal memory — recall always searches your whole personal bank."
+            : "Restrict to one subsystem from the system-prompt list (e.g. 'spaces', 'ticket-creation'). " +
+              "Prefer this when the query fits — scoped recall is much faster than unscoped.",
         },
         limit: {
           type: "number",
@@ -56,6 +71,15 @@ export function buildMemorySearchTool(
     }),
     async execute(_toolCallId: string, params: unknown) {
       if (!HINDSIGHT.enabled) {
+        // Loud on purpose: the tool exists because the agent row says
+        // memoryEnabled=true, but this pod booted without HINDSIGHT_URL /
+        // MEMORY_PROVIDER. Without this line the split-brain (claw-auth
+        // retains fine, claw recall dead) is invisible in logs.
+        log.warn(
+          `[memory-search] HINDSIGHT disabled on this pod but agent has memoryEnabled — ` +
+          `set HINDSIGHT_URL (or MEMORY_PROVIDER) on the xyne-claw deployment and restart. ` +
+          `agentSlug=${agentSlug} sessionId=${sessionId}`,
+        );
         return {
           content: [{ type: "text" as const, text: "Memory not configured for this deployment." }],
           details: {},
@@ -79,8 +103,10 @@ export function buildMemorySearchTool(
       // allowed to read this user's personal memories. When invoked, it
       // recalls ONLY this user's personal memories (tag `user:<id>`), never
       // shared agent memory — enforced server-side, ignored by the LLM.
-      // Subsystem filtering is disallowed for twin recalls; the gate always
-      // narrows to the user's own bank.
+      // An optional `subsystem` narrows WITHIN the user's own facts (the twin's
+      // curator labels: style / expertise / projects / relationships /
+      // preferences / decisions / context / docs). The `user:` gate is still
+      // authoritative and always applied on top.
       //
       // The "assistant" agent (also seeded with a Digital-Twin-style prompt)
       // is the default-everywhere agent and does NOT get personal memory —
@@ -91,17 +117,36 @@ export function buildMemorySearchTool(
       // isDigitalTwinAgent in memory.ts.
       const isDigitalTwin = isDigitalTwinAgent(agentSlug);
       const tags = isDigitalTwin
-        ? [`user:${userId}`]
+        ? subsystem
+          ? [`user:${userId}`, `subsystem:${subsystem}`]
+          : [`user:${userId}`]
         : subsystem
           ? [`subsystem:${subsystem}`]
           : ["shared"];
       try {
         const provider = getMemoryProvider();
-        const bankId = bankIdForAgent(agentSlug);
+        const bankId = isDigitalTwin
+          ? bankIdForAgent(agentSlug)
+          : memoryBankId?.trim() || bankIdForAgent(agentSlug);
+        // Over-fetch 2x: session-ingest banks hold many near-copies of the
+        // same fact (447 overlapping sessions), and the reranker happily fills
+        // the top-N with them. dedupeSimilar below collapses the copies, so we
+        // need surplus candidates to still return `limit` distinct facts.
         const hits = await provider.recall(bankId, query.slice(0, 1000), {
-          budget: "low",
+          // "mid" won the 2026-07-20 retrieval eval: P@5 72% vs 62% on "low"
+          // (deeper candidate fetch gives RRF better material; boosts made
+          // things worse — 57-66%). Latency stays sub-second scoped, ~1-2s
+          // unscoped with the rrf reranker.
+          budget: "mid",
           tags,
-          maxTokens: limit * 250,
+          // Over-fetch 2× so dedupeSimilar still returns `limit` distinct facts.
+          maxTokens: limit * 2 * 250,
+          // Twin recall is temporal: anchor relative time expressions in the
+          // query to "now", and prefer evolution-aware observation memories
+          // (e.g. "switched from A to B") over raw facts when they exist.
+          ...(isDigitalTwin
+            ? { preferObservations: true, queryTimestamp: new Date().toISOString() }
+            : {}),
         });
         // AUTHORITATIVE privacy filter for the digital-twin bank — do NOT trust
         // the provider's tag filter. Hindsight over-matches tag queries
@@ -113,9 +158,15 @@ export function buildMemorySearchTool(
         // banks hold agent knowledge, not personal data — left as provider-filtered
         // to avoid changing their recall behaviour.)
         const scoped = isDigitalTwin
-          ? hits.filter((m) => (m.tags ?? []).includes(`user:${userId}`))
+          ? hits.filter((m) => {
+              const t = m.tags ?? [];
+              // user gate is authoritative; the optional subsystem narrows within it.
+              if (!t.includes(`user:${userId}`)) return false;
+              if (subsystem && !t.includes(`subsystem:${subsystem}`)) return false;
+              return true;
+            })
           : hits;
-        const trimmed = scoped.slice(0, limit);
+        const trimmed = dedupeSimilar(scoped).slice(0, limit);
 
         if (sessionId) {
           // Fire-and-forget: POST recall hits to claw-auth so the Memory tab's
@@ -152,6 +203,36 @@ export function buildMemorySearchTool(
       }
     },
   };
+}
+
+/**
+ * Collapse near-duplicate recall hits, keeping the highest-ranked copy.
+ * Session-ingest extracts the same fact from many overlapping sessions
+ * ("REDIS_HOST is..." x40); rerankers surface the copies together and crowd
+ * distinct knowledge out of the top-N. Token-set Jaccard on normalized text
+ * is enough to catch these copies — they're paraphrases of one sentence, not
+ * subtle semantic overlaps. Observations (consolidated facts) rank first when
+ * present, so the kept copy tends to be the canonical one.
+ */
+function dedupeSimilar(hits: RecalledMemory[]): RecalledMemory[] {
+  const kept: { hit: RecalledMemory; tokens: Set<string> }[] = [];
+  for (const hit of hits) {
+    const tokens = new Set(
+      hit.text
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, " ")
+        .split(/\s+/)
+        .filter((t) => t.length > 2),
+    );
+    const isDup = kept.some((k) => {
+      let overlap = 0;
+      for (const t of tokens) if (k.tokens.has(t)) overlap++;
+      const union = k.tokens.size + tokens.size - overlap;
+      return union > 0 && overlap / union >= 0.6;
+    });
+    if (!isDup) kept.push({ hit, tokens });
+  }
+  return kept.map((k) => k.hit);
 }
 
 async function logRecallHits(

@@ -38,7 +38,10 @@ export function SelectField({
   const fieldId = id ?? `select-${label?.toLowerCase().replace(/\s+/g, "-") ?? "field"}`;
   const hasError = Boolean(error);
 
-  const selected = value ? options.find((o) => o.value === value) ?? null : null;
+  // `value` may legitimately be "" (a real option, e.g. "All types"/"Default")
+  // — only an omitted/undefined value means "nothing selected". A falsy check
+  // here would hide "" options behind the placeholder even when selected.
+  const selected = value !== undefined ? options.find((o) => o.value === value) ?? null : null;
   const selectedLabel = selected?.label ?? "";
   const [inputValue, setInputValue] = useState(selectedLabel);
   useEffect(() => {

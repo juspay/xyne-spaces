@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from "express";
-import { requireClawAdmin, getRequesterId, getOrgId, isClawAdmin } from "../middleware/agent-acl.js";
+import { requireClawAdmin, getRequesterId, getOrgId, isClawAdmin, hasSearchEvalAccess } from "../middleware/agent-acl.js";
 import { windowFromDays } from "../lib/time-window.js";
 import { writeAuditLog } from "../lib/audit.js";
 import { userRoleRepository, userRepository, auditLogRepository, agentRunRepository, agentRepository, sharedProviderCredentialRepository, agentProviderCredentialsRepository } from "../repositories/index.js";
@@ -13,6 +13,8 @@ import { getAdminOrgScope, getOrgNameMap, withOrgLabel } from "../lib/admin-org-
 import jwt from "jsonwebtoken";
 import { ERROR_PIPELINE } from "../config.js";
 import { INGEST_JWT_AUDIENCE } from "./error-pipeline.js";
+import { cloneBranchSession, piSessionStoreKey } from "./lib/branching.js";
+import { chatMessageRepository } from "../repositories/index.js";
 import { getQueue as epQueue } from "../error-pipeline/queue.js";
 import { bucketStats as epBucketStats } from "../error-pipeline/buckets.js";
 import { listFixRecords } from "../error-pipeline/runner/store.js";
@@ -21,10 +23,28 @@ const log = createLogger("admin");
 
 const router = Router();
 
-router.get("/roles", requireClawAdmin, async (_req: Request, res: Response) => {
+// Roles grantable through this generic endpoint. CLAW_ADMIN is the platform
+// superset; SEARCH_EVAL_ACCESS is a narrower grant for the Search Evals
+// feature (see middleware/agent-acl.ts hasSearchEvalAccess). Both routes stay
+// gated by requireClawAdmin — granting the narrower role still requires full
+// admin, so this isn't a privilege-escalation path.
+const GRANTABLE_ROLES = ["CLAW_ADMIN", "SEARCH_EVAL_ACCESS"] as const;
+type GrantableRole = (typeof GRANTABLE_ROLES)[number];
+
+function parseRole(raw: unknown): GrantableRole | null {
+  const r = typeof raw === "string" && raw.trim() ? raw.trim() : "CLAW_ADMIN";
+  return (GRANTABLE_ROLES as readonly string[]).includes(r) ? (r as GrantableRole) : null;
+}
+
+router.get("/roles", requireClawAdmin, async (req: Request, res: Response) => {
   try {
-    // TODO(admin-org-scope): user_roles has no orgId by design; keep CLAW_ADMIN grants platform-global.
-    const roles = await userRoleRepository.listByRole("CLAW_ADMIN");
+    const role = parseRole(req.query["role"]);
+    if (!role) {
+      res.status(400).json({ success: false, error: `role must be one of: ${GRANTABLE_ROLES.join(", ")}` });
+      return;
+    }
+    // TODO(admin-org-scope): user_roles has no orgId by design; keep grants platform-global.
+    const roles = await userRoleRepository.listByRole(role);
     const orgNames = await getOrgNameMap(roles.map((r) => r.user.orgId));
     res.json({
       success: true,
@@ -45,10 +65,15 @@ router.post("/roles", requireClawAdmin, async (req: Request, res: Response) => {
     // Accept the field as `userId` (legacy) or `userIdOrEmail` (frontend
     // started passing emails too). Either is looked up first by ID then by
     // email — matches the pattern used by /subagents/:name/shares.
-    const body = req.body as { userId?: string; userIdOrEmail?: string };
+    const body = req.body as { userId?: string; userIdOrEmail?: string; role?: string };
     const raw = (body.userIdOrEmail ?? body.userId ?? "").trim();
     if (!raw) {
       res.status(400).json({ success: false, error: "userId or email is required" });
+      return;
+    }
+    const role = parseRole(body.role);
+    if (!role) {
+      res.status(400).json({ success: false, error: `role must be one of: ${GRANTABLE_ROLES.join(", ")}` });
       return;
     }
 
@@ -62,16 +87,16 @@ router.post("/roles", requireClawAdmin, async (req: Request, res: Response) => {
       return;
     }
 
-    const role = await userRoleRepository.upsert(targetUser.id, "CLAW_ADMIN", requesterId);
+    const grantedRole = await userRoleRepository.upsert(targetUser.id, role, requesterId);
     await writeAuditLog({
       actorUserId: requesterId,
       eventType: "ROLE_GRANTED",
       targetId: targetUser.id,
-      description: `CLAW_ADMIN granted to ${targetUser.email}`,
-      metadata: { targetEmail: targetUser.email },
+      description: `${role} granted to ${targetUser.email}`,
+      metadata: { targetEmail: targetUser.email, role },
     });
-    log.info(`[admin] CLAW_ADMIN granted to ${targetUser.email} by ${requesterId}`);
-    res.status(201).json({ success: true, data: role });
+    log.info(`[admin] ${role} granted to ${targetUser.email} by ${requesterId}`);
+    res.status(201).json({ success: true, data: grantedRole });
   } catch (err) {
     log.error("[admin] grant role error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
@@ -82,18 +107,23 @@ router.delete("/roles/:userId", requireClawAdmin, async (req: Request<{ userId: 
   try {
     const requesterId = getRequesterId(req)!;
     const { userId } = req.params;
-    if (userId === requesterId) { res.status(400).json({ success: false, error: "Cannot revoke your own CLAW_ADMIN role" }); return; }
+    const role = parseRole(req.query["role"]);
+    if (!role) {
+      res.status(400).json({ success: false, error: `role must be one of: ${GRANTABLE_ROLES.join(", ")}` });
+      return;
+    }
+    if (userId === requesterId) { res.status(400).json({ success: false, error: `Cannot revoke your own ${role} role` }); return; }
 
     const targetUser = await userRepository.findById(userId);
     if (!targetUser) { res.status(404).json({ success: false, error: "User not found" }); return; }
 
-    await userRoleRepository.delete(userId, "CLAW_ADMIN");
-    await writeAuditLog({ actorUserId: requesterId, eventType: "ROLE_REVOKED", targetId: userId, description: `CLAW_ADMIN revoked from ${targetUser.email}`, metadata: { targetEmail: targetUser.email } });
-    log.info(`[admin] CLAW_ADMIN revoked from ${targetUser.email} by ${requesterId}`);
+    await userRoleRepository.delete(userId, role);
+    await writeAuditLog({ actorUserId: requesterId, eventType: "ROLE_REVOKED", targetId: userId, description: `${role} revoked from ${targetUser.email}`, metadata: { targetEmail: targetUser.email, role } });
+    log.info(`[admin] ${role} revoked from ${targetUser.email} by ${requesterId}`);
     res.json({ success: true });
   } catch (err: unknown) {
     if (err instanceof Error && "code" in err && (err as { code: string }).code === "P2025") {
-      res.status(404).json({ success: false, error: "User does not have CLAW_ADMIN role" });
+      res.status(404).json({ success: false, error: "User does not have that role" });
       return;
     }
     log.error("[admin] revoke role error:", err);
@@ -113,8 +143,11 @@ router.get("/roles/check/:userId", async (req: Request<{ userId: string }>, res:
       res.status(401).json({ success: false, error: "Unauthenticated" });
       return;
     }
-    const admin = await isClawAdmin(requesterId);
-    res.json({ success: true, data: { isAdmin: admin } });
+    const [admin, searchEvalAccess] = await Promise.all([
+      isClawAdmin(requesterId),
+      hasSearchEvalAccess(requesterId),
+    ]);
+    res.json({ success: true, data: { isAdmin: admin, hasSearchEvalAccess: searchEvalAccess } });
   } catch (err) {
     log.error("[admin] check role error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
@@ -943,7 +976,11 @@ router.post("/error-pipeline/token", requireClawAdmin, async (req: Request, res:
 
 // Error-pipeline inspection — the pipeline lives in THIS service now, so
 // these read the queue/store directly (the old S2S proxies to claw are gone).
-router.get("/error-pipeline/items/:bucket", requireClawAdmin, async (req: Request, res: Response) => {
+// READ endpoints (items/buckets/fixes/rules GET) are open to any
+// authenticated user (the /admin mount already runs requireAuth) so the
+// Error Pipeline page is viewable org-wide; every WRITE (rule save/delete,
+// flush, seed, token mint) stays CLAW_ADMIN-gated.
+router.get("/error-pipeline/items/:bucket", async (req: Request, res: Response) => {
   try {
     const limit = Math.min(Number(req.query["limit"] ?? 100) || 100, 500);
     const bucket = String(req.params["bucket"] ?? "default");
@@ -979,7 +1016,7 @@ router.post("/error-pipeline/seed", requireClawAdmin, async (req: Request, res: 
   }
 });
 
-router.get("/error-pipeline/buckets", requireClawAdmin, async (_req: Request, res: Response) => {
+router.get("/error-pipeline/buckets", async (_req: Request, res: Response) => {
   try {
     res.json({ success: true, data: { buckets: await epBucketStats() } });
   } catch (err) {
@@ -1008,7 +1045,78 @@ router.post("/error-pipeline/buckets/:name/flush", requireClawAdmin, async (req:
   }
 });
 
-router.get("/error-pipeline/fixes", requireClawAdmin, async (req: Request, res: Response) => {
+/**
+ * POST /error-pipeline/fork-conversation — private per-user thread for an error.
+ *
+ * The pipeline conversation belongs to no user and is READ-ONLY: claw keys
+ * agent sessions by conversation+agent (not by user), so if several people
+ * chatted on the same error they'd share ONE session — the UI hides their
+ * messages from each other, but the model would still see everyone's turns and
+ * could answer one person using another's question. Every user therefore gets
+ * `<conv>__u__<userId>`, seeded with a FULL clone of the run's session so the
+ * error, the RCA and the tool history all carry over. The canonical run thread
+ * is never written to, so a later user forks from the clean run rather than
+ * from someone else's tangent. Idempotent: repeat calls return the same id.
+ */
+router.post("/error-pipeline/fork-conversation", async (req: Request, res: Response) => {
+  try {
+    const requesterId = getRequesterId(req);
+    if (!requesterId) { res.status(401).json({ success: false, error: "x-user-id is required" }); return; }
+    const { conversationId } = (req.body ?? {}) as { conversationId?: string };
+    if (!conversationId || !/^[A-Za-z0-9_-]{1,80}$/.test(conversationId)) {
+      res.status(400).json({ success: false, error: "valid conversationId is required" });
+      return;
+    }
+    const forkId = `${conversationId}__u__${requesterId}`;
+    // Session ids ride filesystem paths in claw (isSafeId: [A-Za-z0-9_-]{1,128}).
+    if (forkId.length > 128) {
+      res.status(400).json({ success: false, error: "conversationId too long to fork" });
+      return;
+    }
+    const slug = ERROR_PIPELINE.agentSlug;
+
+    // AUTHORIZATION: only a PIPELINE conversation may be forked. Without this
+    // the endpoint would clone ANY conversation's session into the caller's own
+    // fork — letting them read someone else's private chat history through it.
+    // A pipeline conversation is one owned by an automation run of the pipeline
+    // agent, run as the pipeline's service user.
+    const pipelineRun = await prisma.agentRun.findFirst({
+      where: { conversationId, agentSlug: slug, triggerSource: "automation" },
+      select: { id: true },
+    });
+    if (!pipelineRun) {
+      log.warn(`[admin] fork-conversation refused: ${conversationId} is not an error-pipeline conversation (requester ${requesterId})`);
+      res.status(404).json({ success: false, error: "Not an error-pipeline conversation" });
+      return;
+    }
+
+    // Already forked? The presence of messages is the cheap marker; the session
+    // clone below is itself idempotent (claw skips when the target exists).
+    const existing = await chatMessageRepository.findByConversationAndAgent(forkId, slug).catch(() => []);
+    if (existing.length > 0) {
+      res.json({ success: true, data: { conversationId: forkId, created: false } });
+      return;
+    }
+
+    const clone = await cloneBranchSession({
+      sourceConversationId: piSessionStoreKey(conversationId, slug),
+      targetConversationId: piSessionStoreKey(forkId, slug),
+      branchMode: "full",
+    }).catch((err) => ({ success: false, error: err instanceof Error ? err.message : String(err) }));
+    // A missing source session (very old run, swept from disk+GCS) is NOT fatal:
+    // the fork still works, the agent just starts without the run's history.
+    if (!clone.success) {
+      log.warn(`[admin] fork-conversation: session clone failed ${conversationId} → ${forkId}: ${clone.error ?? "unknown"}`);
+    }
+    log.info(`[admin] error-pipeline conversation forked for ${requesterId}: ${forkId} (session cloned=${clone.success})`);
+    res.json({ success: true, data: { conversationId: forkId, created: true, sessionCloned: clone.success } });
+  } catch (err) {
+    log.error("[admin] error-pipeline fork-conversation error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+router.get("/error-pipeline/fixes", async (req: Request, res: Response) => {
   try {
     const limit = Math.min(Number(req.query["limit"] ?? 200) || 200, 500);
     res.json({ success: true, data: { fixes: await listFixRecords(limit) } });
@@ -1024,7 +1132,7 @@ router.get("/error-pipeline/fixes", requireClawAdmin, async (req: Request, res: 
 // whole point of the DB-backed taxonomy: when a new subsystem merges, add a
 // lane or tune an existing lane's markers from the UI — no deploy.
 
-router.get("/error-pipeline/rules", requireClawAdmin, async (_req: Request, res: Response) => {
+router.get("/error-pipeline/rules", async (_req: Request, res: Response) => {
   try {
     const rules = await prisma.errorBucket.findMany({
       orderBy: { matchOrder: "asc" },

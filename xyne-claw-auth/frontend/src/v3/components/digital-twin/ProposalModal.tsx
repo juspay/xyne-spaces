@@ -8,6 +8,7 @@ import { useSnackbar } from "../ui/Snackbar";
 
 export const SUBSYSTEM_LABELS: Record<string, string> = {
   style:         "Communication style",
+  triage:        "Response triage",
   expertise:     "Expertise",
   projects:      "Projects",
   relationships: "Relationships",

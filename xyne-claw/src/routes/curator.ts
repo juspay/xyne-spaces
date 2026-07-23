@@ -11,7 +11,8 @@
 import { Router } from "express";
 import type { Request, Response } from "express";
 import { validateS2SKey } from "../middleware/auth.js";
-import { distillSession } from "../curator.js";
+import { classifyIngestSubsystem, distillSession, distillLargeTranscript } from "../curator.js";
+import { parseClaudeSession } from "../claude-session-parse.js";
 import type { SessionTranscriptForCurator } from "xyne-claw-shared";
 
 import { createLogger } from "../logger.js";
@@ -19,9 +20,44 @@ const log = createLogger("curator");
 
 export const curatorRouter = Router();
 
+curatorRouter.post("/internal/curator/classify-subsystem", validateS2SKey, async (req: Request, res: Response) => {
+  try {
+    const body = (req.body ?? {}) as {
+      sessionId?: string;
+      agentSlug?: string;
+      agentName?: string;
+      task?: string;
+      transcript?: string;
+      taxonomy?: Array<{ name?: unknown; memoryCount?: unknown }>;
+    };
+    if (!body.sessionId || !body.agentSlug || typeof body.transcript !== "string") {
+      res.status(400).json({ success: false, error: "Missing required fields: sessionId, agentSlug, transcript" });
+      return;
+    }
+    const subsystem = await classifyIngestSubsystem({
+      sessionId: body.sessionId,
+      agentSlug: body.agentSlug,
+      agentName: typeof body.agentName === "string" ? body.agentName : body.agentSlug,
+      task: typeof body.task === "string" ? body.task : "",
+      transcript: body.transcript,
+      taxonomy: Array.isArray(body.taxonomy)
+        ? body.taxonomy.flatMap((entry) =>
+            typeof entry?.name === "string"
+              ? [{ name: entry.name, memoryCount: typeof entry.memoryCount === "number" ? entry.memoryCount : 0 }]
+              : [],
+          )
+        : [],
+    });
+    res.json({ success: true, subsystem });
+  } catch (err) {
+    log.error(`[curator-route] classify-subsystem failed: ${err instanceof Error ? err.message : String(err)}`);
+    res.status(500).json({ success: false, error: err instanceof Error ? err.message : "Internal error" });
+  }
+});
+
 curatorRouter.post("/internal/curator/distill", validateS2SKey, async (req: Request, res: Response) => {
   try {
-    const body = (req.body ?? {}) as Partial<SessionTranscriptForCurator>;
+    const body = (req.body ?? {}) as Partial<SessionTranscriptForCurator> & { bankId?: string };
 
     // Minimum validation — anything else flagged at the LLM/validation layer.
     if (!body.sessionId || !body.agentSlug || !body.userId || typeof body.task !== "string") {
@@ -42,10 +78,94 @@ curatorRouter.post("/internal/curator/distill", validateS2SKey, async (req: Requ
       ...(typeof body.transcript === "string" ? { transcript: body.transcript } : {}),
     };
 
-    const updates = await distillSession(transcript);
+    const updates = await distillSession(transcript, body.bankId);
     res.json({ success: true, updates });
   } catch (err) {
     log.error(`[curator-route] distill failed: ${err instanceof Error ? err.message : String(err)}`);
+    res.status(500).json({
+      success: false,
+      error: err instanceof Error ? err.message : "Internal error",
+    });
+  }
+});
+
+/**
+ * Distill an uploaded Claude session file into subsystem-update candidates.
+ *
+ * Body: { sessionId, agentSlug, userId, filename, rawSession }
+ *   rawSession — the raw uploaded export (Claude Code JSONL or claude.ai JSON).
+ *
+ * We parse + normalize on claw (same pod as the curator/LLM key), then run the
+ * map-reduce distill (distillLargeTranscript). Returns the same
+ * { success, updates } shape as /internal/curator/distill; claw-auth persists
+ * the updates as PendingMemoryReview rows behind the admin HITL gate.
+ *
+ * S2S-protected. This can be slow (N map calls) — callers must use a long
+ * timeout and run it off the user's request path.
+ */
+curatorRouter.post("/internal/curator/distill-session", validateS2SKey, async (req: Request, res: Response) => {
+  try {
+    const body = (req.body ?? {}) as {
+      sessionId?: string;
+      agentSlug?: string;
+      userId?: string;
+      filename?: string;
+      rawSession?: string;
+      bankId?: string;
+      parseOnly?: boolean;
+    };
+
+    if (!body.sessionId || !body.agentSlug || !body.userId || typeof body.rawSession !== "string") {
+      res.status(400).json({
+        success: false,
+        error: "Missing required fields: sessionId, agentSlug, userId, rawSession",
+      });
+      return;
+    }
+
+    const parsed = parseClaudeSession(body.rawSession, body.filename ?? "");
+    if (parsed.turnCount === 0) {
+      res.status(422).json({
+        success: false,
+        error: "Could not parse any conversation turns from the uploaded session (unrecognized format).",
+        meta: { format: parsed.format },
+      });
+      return;
+    }
+
+    const meta = {
+      format: parsed.format,
+      turnCount: parsed.turnCount,
+      conversationCount: parsed.conversationCount,
+      toolsUsed: parsed.toolsUsed,
+      task: parsed.task,
+    };
+    if (body.parseOnly === true) {
+      res.json({ success: true, transcript: parsed.transcript, meta });
+      return;
+    }
+
+    const updates = await distillLargeTranscript({
+      sessionId: body.sessionId,
+      agentSlug: body.agentSlug,
+      userId: body.userId,
+      task: parsed.task,
+      result: parsed.result,
+      toolsUsed: parsed.toolsUsed,
+      transcript: parsed.transcript,
+    }, body.bankId);
+
+    log.info(
+      `[curator-route] distill-session done sessionId=${body.sessionId} agentSlug=${body.agentSlug} format=${parsed.format} turns=${parsed.turnCount} conversations=${parsed.conversationCount} updates=${updates.length}`,
+    );
+
+    res.json({
+      success: true,
+      updates,
+      meta,
+    });
+  } catch (err) {
+    log.error(`[curator-route] distill-session failed: ${err instanceof Error ? err.message : String(err)}`);
     res.status(500).json({
       success: false,
       error: err instanceof Error ? err.message : "Internal error",

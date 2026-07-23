@@ -145,7 +145,9 @@ export function ReviewPanel({ userId, refreshKey, onApproved, onBackfill, onUplo
 
   const handleRejected = useCallback((candidateId: string) => {
     removeFromList(candidateId);
-  }, [removeFromList]);
+    // Propagate so parent status counts + sibling panels re-sync on reject too.
+    onApproved?.();
+  }, [removeFromList, onApproved]);
 
   /* ── Approve all pending proposals across every subsystem ──
      Each subsystem is approved via /clusters/:subsystem/approve, which retains
@@ -172,7 +174,7 @@ export function ReviewPanel({ userId, refreshKey, onApproved, onBackfill, onUplo
   /* ── All caught up ── */
   if (!loading && totalPending === 0 && clusters !== null) {
     return (
-      <div className="flex flex-col items-center gap-[8px] rounded-xl border border-xyne-border bg-xyne-surface-sunken px-[16px] py-[20px] text-center">
+      <div className="flex flex-col items-center gap-[8px] rounded-xl border border-xyne-border bg-xyne-surface px-[16px] py-[22px] text-center">
         <CheckCircleIcon size={20} weight="duotone" className="text-xyne-fg-muted" />
         <div>
           <p className="text-[12px] font-semibold text-xyne-fg-primary">All caught up</p>

@@ -61,6 +61,51 @@ describe("cli-tokens", () => {
     expect(state.lastUsedHash).toBe(token.hashed);
   });
 
+  it("generates, hashes, and verifies a service token round trip", async () => {
+    const { hash, verify } = await import("./cli-tokens.js");
+    const { generateServiceToken } = await import("./service-tokens.js");
+    const token = generateServiceToken();
+
+    expect(token.raw.startsWith("xyne_svc_")).toBe(true);
+    expect(token.hashed).toBe(hash(token.raw));
+    expect(token.prefix).toBe(token.raw.slice(0, 12));
+
+    state.tokenRecord = {
+      userId: "service-user",
+      orgId: "org-1",
+      scopes: ["runs:write"],
+      expiresAt: null,
+      revokedAt: null,
+      user: { orgId: "org-1" },
+    };
+
+    await expect(verify(token.raw)).resolves.toEqual({
+      userId: "service-user",
+      orgId: "org-1",
+      scopes: ["runs:write"],
+    });
+    expect(state.findUniqueHash).toBe(token.hashed);
+  });
+
+  it.each([
+    ["expired", new Date(Date.now() - 1_000), null],
+    ["revoked", null, new Date()],
+  ])("rejects a %s service token", async (_label, expiresAt, revokedAt) => {
+    const { verify } = await import("./cli-tokens.js");
+    const { generateServiceToken } = await import("./service-tokens.js");
+    const token = generateServiceToken();
+    state.tokenRecord = {
+      userId: "service-user",
+      orgId: "org-1",
+      scopes: ["runs:write"],
+      expiresAt,
+      revokedAt,
+      user: { orgId: "org-1" },
+    };
+
+    await expect(verify(token.raw)).resolves.toBeNull();
+  });
+
   it("rejects a token when stored orgId no longer matches the user's org", async () => {
     const { hash, verify } = await import("./cli-tokens.js");
     const raw = "xyne_cli_stale_org";

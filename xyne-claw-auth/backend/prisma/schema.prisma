@@ -30,7 +30,7 @@ model User {
 
   /// Digital Twin opt-in. Pipeline (backfill + daily curator + recall) is fully
   /// dormant when false — nothing about this user's Spaces data gets read.
-  digitalTwinEnabled                   Boolean               @default(false)
+  digitalTwinEnabled                   Boolean                    @default(false)
   digitalTwinEnabledAt                 DateTime?
   /// Optional string appended to the end of every Digital Twin reply
   /// (mention-driven flow). Capped at 500 chars. Empty / null = no suffix.
@@ -40,9 +40,14 @@ model User {
   /// Per-user memory approval mode. "manual" preserves the existing
   /// review queue; "auto" lets the curator retain high-confidence
   /// candidates immediately while falling back to pending on retain failure.
-  digitalTwinMemoryApprovalMode        String                @default("manual")
+  digitalTwinMemoryApprovalMode        String                     @default("manual")
   /// Minimum curator confidence required when auto-approval is enabled.
-  digitalTwinMemoryAutoApproveMinScore Float                 @default(0.9)
+  digitalTwinMemoryAutoApproveMinScore Float                      @default(0.9)
+  /// When the twin should auto-reply to an @mention. "always" (default) replies
+  /// to every mention when enabled — the original behaviour. "learned" consults
+  /// the user's captured respond/ignore patterns and stays silent on a
+  /// high-confidence "the user would ignore this" verdict (fail-open to reply).
+  digitalTwinRespondPolicy             String                     @default("learned")
   /// Per-source backfill state. JSON shape:
   ///   { messages: { from, to, cursor, complete },
   ///     calls:    { from, to, cursor, complete },
@@ -51,6 +56,9 @@ model User {
   /// Restart-resumable: BullMQ jobs re-pick up from cursor on pod restart.
   digitalTwinBackfillState             Json?
   userMemoryCandidates                 UserMemoryCandidate[]
+  digitalTwinPipelineEvents            DigitalTwinPipelineEvent[]
+  agentMemoryFiles                     AgentMemoryFile[]
+  twinBehaviorSignals                  TwinBehaviorSignal[]
 
   /// Multi-tenancy (phase 1, org-only). Required: every user belongs to exactly
   /// one org (the "Juspay" default until multi-org ships). Enforced NOT NULL by
@@ -63,6 +71,134 @@ model User {
 
   @@unique([email, orgId])
   @@map("users")
+}
+
+/// Deterministic, file-based agent memory (Memory v2). Generic across agents —
+/// scoped by (agentSlug, userId, name). Unlike the Hindsight-backed candidate
+/// memories (semantic recall), these are named documents fetched deterministically
+/// by key — e.g. the Digital Twin's `soul.md` (always-loaded persona), `people.md`,
+/// `projects.md`. Up to 3 per (agent,user) may be flagged loadInPrompt, each
+/// ≤ 10k chars, and are injected verbatim into the agent's system prompt so it
+/// works well with zero tool calls. For the twin these are compiled by the soul
+/// synthesizer from approved facts, editable by the user, and writable by the
+/// agent mid-chat. userId NULL = shared across all users of that agent.
+model AgentMemoryFile {
+  id           String   @id @default(cuid())
+  /// Which agent these files belong to (agent slug, e.g. "digital-twin").
+  agentSlug    String
+  /// Owner user for per-user agents (the twin). NULL = shared across all users
+  /// of this agent (regular agent knowledge files).
+  userId       String?
+  user         User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Stable name / key, unique per (agent, user). Ends in `.md` by convention.
+  name         String
+  /// Verbatim document content (≤ 10k chars, enforced in the app layer).
+  content      String   @default("")
+  /// User-toggleable: inject this file into the agent's system prompt. At most
+  /// 3 per (agent, user) may be true (enforced in the app layer).
+  loadInPrompt Boolean  @default(false)
+  /// Display / injection order.
+  sortOrder    Int      @default(0)
+  /// Provenance of the last write: "seed" | "synthesizer" | "user" | "agent".
+  /// The synthesizer skips files last edited by the user so it never clobbers
+  /// hand edits.
+  updatedBy    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([agentSlug, userId, name])
+  @@index([agentSlug, userId, loadInPrompt])
+  @@map("agent_memory_files")
+}
+
+/// Durable behavioural signal for the Digital Twin: one row per inbound mention
+/// the user did (responded) or did not (ignored) reply to. Written by the
+/// Context Assembler at ingestion — INDEPENDENT of the curator LLM, so a failed
+/// distill never loses the signal (Memory v2, gap-1 durability fix). Powers the
+/// learned respond/ignore gate. Idempotent on (userId, sourceMessageId) so a
+/// re-backfill upserts rather than duplicates.
+model TwinBehaviorSignal {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// "mention" | "dm" | "reply" — how the user was pulled in.
+  eventType       String   @default("mention")
+  /// "responded" | "ignored".
+  outcome         String
+  channelId       String?
+  channelName     String?
+  /// "dm" | "group_dm" | "public" | "private".
+  channelType     String?
+  /// Who pulled them in (actor of the mention), if known.
+  actorId         String?
+  /// Response latency in ms when responded; how long unanswered when ignored.
+  latencyMs       Int?
+  /// The inbound message that triggered it (dedup key + gate context).
+  sourceMessageId String?
+  /// Short excerpt of the trigger message, for the gate + observability.
+  triggerPreview  String?
+  occurredAt      DateTime
+  createdAt       DateTime @default(now())
+
+  /// What the respond/ignore gate DECIDED at mention time ("respond" | "ignore"
+  /// | null=gate didn't run). Set by the webhook when it silences the twin.
+  gateDecision        String?
+  gateConfidence      Float?
+  gateReason          String?
+  gateAt              DateTime?
+  /// Feedback signal: the gate stayed silent (gateDecision="ignore") but the
+  /// user DID respond themselves → a wrong silence. Reconciled by the daily
+  /// pipeline (assembler) and fed back to future gate decisions.
+  shouldHaveResponded Boolean   @default(false)
+
+  @@unique([userId, sourceMessageId])
+  @@index([userId, occurredAt])
+  @@index([userId, outcome])
+  @@index([userId, channelType, outcome])
+  @@index([userId, shouldHaveResponded])
+  @@map("twin_behavior_signals")
+}
+
+/// The user's accept / decline / edit / ignore of a Digital Twin PROPOSED
+/// response (the approve/decline DM). Distinct from TwinBehaviorSignal (which is
+/// about the respond/ignore GATE): this captures how good the twin's actual
+/// DRAFT was. A "pending" row is written when the approval DM is sent; it is
+/// updated on approve/decline, and reconciled to "ignored" by the daily job if
+/// the user never acts. The daily learning loop consumes decided rows and marks
+/// `learnedAt` so the twin's memory learns what got accepted vs edited vs
+/// declined vs ignored — the feedback loop, moved OFF the immediate accept path.
+model TwinResponseFeedback {
+  id               String   @id @default(cuid())
+  userId           String
+  conversationId   String
+  channelId        String?
+  channelName      String?
+  /// The inbound message that triggered the twin (dedup + link key).
+  sourceMessageId  String?
+  /// The incoming message text the twin was responding to.
+  incomingTask     String?
+  /// The twin's proposed delivery. "react" | "reply" | "react_and_reply".
+  deliveryAction   String   @default("reply")
+  deliveryEmoji    String?
+  /// "origin_thread" | "origin_channel" | "channel" | "thread".
+  destinationKind  String?
+  /// The twin's proposed reply text (the draft shown for approval).
+  draftMessage     String?
+  /// What the user actually approved (may be edited); null on decline/ignore.
+  finalMessage     String?
+  /// "pending" | "accepted" | "accepted_edited" | "declined" | "ignored".
+  status           String   @default("pending")
+  proposedAt       DateTime @default(now())
+  decidedAt        DateTime?
+  /// Set once the daily learning loop has consumed this row.
+  learnedAt        DateTime?
+  createdAt        DateTime @default(now())
+
+  @@unique([userId, sourceMessageId])
+  @@index([userId, status])
+  @@index([userId, decidedAt])
+  @@index([status, proposedAt])
+  @@map("twin_response_feedback")
 }
 
 /// Top-level tenant. Phase 1 introduces exactly one org ("Juspay") that every
@@ -176,6 +312,7 @@ model SurfaceAgent {
   surfaceTenantId  String   @default("")
   surfaceChannelId String?
   signingSecret    String?  @db.Text
+  config           Json?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
@@ -289,6 +426,11 @@ model UserMemoryCandidate {
   /// or "daily:<YYYY-MM-DD>:<source>" or "upload:<filename>".
   source String
 
+  /// The DigitalTwinPipelineEvent this candidate was emitted by. Lets the
+  /// memories list deep-link a retained memory back to the LLM reasoning that
+  /// proposed it. Null for candidates created before this link existed.
+  pipelineEventId String?
+
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
   approvedAt DateTime?
@@ -296,7 +438,64 @@ model UserMemoryCandidate {
 
   @@index([userId, status])
   @@index([userId, subsystem, status])
+  @@index([hindsightMemoryId])
   @@map("user_memory_candidates")
+}
+
+/// One observability record per curator invocation (backfill window, daily
+/// source, upload, or twin-approval). Persisted best-effort so the pipeline
+/// viewer can show the LLM exchange, the records fed in, and per-run counts
+/// without re-running anything. Pruned to a rolling 30-day window.
+model DigitalTwinPipelineEvent {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// "backfill" | "daily" | "upload" | "twin-approval" — derived from `source`.
+  runType    String
+  /// The pipeline source string exactly as the run built it, e.g.
+  /// "backfill:<jobId>:<source>:<YYYY-MM>" or "daily:<YYYY-MM-DD>:<source>".
+  source     String
+  /// "messages" | "calls" | "canvases" — derived from `source`; null when the
+  /// source has no per-kind segment (upload / twin-approval).
+  sourceKind String?
+
+  /// The window the fed records belong to.
+  windowFrom DateTime
+  windowTo   DateTime
+
+  /// "ok" (candidates created) | "empty" (nothing created, no error) | "error".
+  status String
+
+  /// Count of records fed to the curator for this event.
+  recordCount Int   @default(0)
+  /// Preview of the fed records. JSON shape:
+  ///   [{ id, type, ts, channelId?, channelName?, title?, textPreview }]
+  records     Json?
+
+  /// This user's already-retained memories the curator saw for dedup.
+  existingMemoryCount Int @default(0)
+  /// Candidates the LLM emitted (pre server-side filter).
+  emittedCount        Int @default(0)
+  /// Emitted candidates that survived the server-side filter ("kept" verdicts).
+  keptCount           Int @default(0)
+  /// Rows actually inserted into user_memory_candidates.
+  candidatesCreated   Int @default(0)
+  /// Of those, how many were auto-approved (retained to Hindsight immediately).
+  autoApproved        Int @default(0)
+
+  /// Wall-clock duration of the batch, ms.
+  durationMs Int     @default(0)
+  /// Failure message when status="error".
+  error      String?
+  /// Full UserMemoryCuratorTrace, verbatim. Present when the distill returned one.
+  trace      Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([userId, runType, createdAt])
+  @@map("digital_twin_pipeline_events")
 }
 
 model UserRole {
@@ -421,16 +620,16 @@ model ChannelAgentChainBinding {
 }
 
 model UserProviderCredentials {
-  userId          String
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  provider        String /// "spaces" | "copilot" | "claude"
-  encryptedKey    String?  @db.Text
-  iv              String?
-  authTag         String?
-  model           String?
-  baseUrl         String?
-  authType        String? /// "api_key" (default) | "oauth_token" — how to send the credential at runtime
-  reasoningEffort String? /// "low" | "medium" | "high" — only meaningful for reasoning-capable models (codex gpt-5.x, etc.). Null = service default ("medium").
+  userId             String
+  user               User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider           String /// "spaces" | "copilot" | "claude"
+  encryptedKey       String?                   @db.Text
+  iv                 String?
+  authTag            String?
+  model              String?
+  baseUrl            String?
+  authType           String? /// "api_key" (default) | "oauth_token" — how to send the credential at runtime
+  reasoningEffort    String? /// "low" | "medium" | "high" — only meaningful for reasoning-capable models (codex gpt-5.x, etc.). Null = service default ("medium").
   /// When set, this row is a BINDING to a SharedProviderCredential (same
   /// semantics as AgentProviderCredentials.sharedCredentialId): key material
   /// comes from the shared row; model/reasoningEffort here are overrides.
@@ -439,8 +638,8 @@ model UserProviderCredentials {
   /// refreshes would invalidate each other's OAuth session.
   sharedCredentialId String?
   sharedCredential   SharedProviderCredential? @relation(fields: [sharedCredentialId], references: [id], onDelete: SetNull)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt          DateTime                  @default(now())
+  updatedAt          DateTime                  @updatedAt
 
   @@id([userId, provider])
   @@index([sharedCredentialId])
@@ -467,17 +666,17 @@ model UserSubagentConfig {
 /// Writes gated by AGENT_OWNER or admin. Decrypted key never returned to any
 /// API surface — only ever decrypted in-process at dispatch time.
 model AgentProviderCredentials {
-  agentId         String
-  agent           Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  provider        String /// "copilot" | "claude" | "codex" | "openrouter" | ...
-  encryptedKey    String?  @db.Text
-  iv              String?
-  authTag         String?
-  model           String?
-  baseUrl         String?
-  authType        String? /// "api_key" (default) | "oauth_token"
-  reasoningEffort String? /// "low" | "medium" | "high" — only meaningful for reasoning-capable models. Null = service default ("medium").
-  createdByUserId String?
+  agentId            String
+  agent              Agent                     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  provider           String /// "copilot" | "claude" | "codex" | "openrouter" | ...
+  encryptedKey       String?                   @db.Text
+  iv                 String?
+  authTag            String?
+  model              String?
+  baseUrl            String?
+  authType           String? /// "api_key" (default) | "oauth_token"
+  reasoningEffort    String? /// "low" | "medium" | "high" — only meaningful for reasoning-capable models. Null = service default ("medium").
+  createdByUserId    String?
   /// When set, this row is a BINDING: key material comes from the referenced
   /// SharedProviderCredential (this row's encryptedKey/iv/authTag stay null),
   /// while model/reasoningEffort/baseUrl here act as per-agent OVERRIDES.
@@ -486,8 +685,8 @@ model AgentProviderCredentials {
   /// re-auth/refresh; a binding means ONE stored session shared by all.
   sharedCredentialId String?
   sharedCredential   SharedProviderCredential? @relation(fields: [sharedCredentialId], references: [id], onDelete: SetNull)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt          DateTime                  @default(now())
+  updatedAt          DateTime                  @updatedAt
 
   @@id([agentId, provider])
   @@index([createdByUserId])
@@ -502,14 +701,14 @@ model AgentProviderCredentials {
 /// no matter how many agents use it. Admin-managed; the decrypted key is never
 /// returned by any API — only decrypted in-process at dispatch time.
 model SharedProviderCredential {
-  id              String   @id @default(cuid())
+  id              String                     @id @default(cuid())
   /// NULL = platform-wide credential (CLAW_ADMIN-only to create): bindable by
   /// agents of ANY org — e.g. one Codex ChatGPT account serving both Juspay
   /// and NY agents. Non-null = scoped to that org (owners can create/bind).
   orgId           String?
   provider        String /// "codex" | "claude" | "copilot" | "openrouter" | ...
   name            String /// display name shown in pickers, e.g. "Team Codex (NY)"
-  encryptedKey    String?  @db.Text
+  encryptedKey    String?                    @db.Text
   iv              String?
   authTag         String?
   model           String? /// default model for bindings without an override
@@ -517,8 +716,8 @@ model SharedProviderCredential {
   authType        String? /// "api_key" (default) | "oauth_token"
   reasoningEffort String?
   ownerUserId     String? /// who connected it; re-auth gated to owner/admin
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt       DateTime                   @default(now())
+  updatedAt       DateTime                   @updatedAt
   agentBindings   AgentProviderCredentials[]
   userBindings    UserProviderCredentials[]
 
@@ -587,22 +786,22 @@ model Agent {
 /// model untouched; uniqueness is enforced on the (caller, callee) pair.
 /// See xyne-claw/src/agent-delegation.ts for the runtime governor this feeds.
 model AgentDelegationGrant {
-  id              String   @id @default(cuid())
-  callerAgentId   String
-  calleeAgentId   String
+  id               String    @id @default(cuid())
+  callerAgentId    String
+  calleeAgentId    String
   /// 'user' (default) = the callee runs under the SAME human end-user identity
   /// as the top-level run (a callee can never exceed what the human may already
   /// do — contains the confused-deputy risk). 'callee_app' = run under the
   /// callee agent's own app identity (opt-in, riskier; audited).
-  identityMode      String    @default("user")
-  enabled           Boolean   @default(true)
+  identityMode     String    @default("user")
+  enabled          Boolean   @default(true)
   /// "pending" | "approved" | "rejected"
-  status            String    @default("pending")
+  status           String    @default("pending")
   approvedByUserId String?
-  approvedAt        DateTime?
-  createdByUserId   String?
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
+  approvedAt       DateTime?
+  createdByUserId  String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   @@unique([callerAgentId, calleeAgentId])
   @@index([callerAgentId])
@@ -653,7 +852,7 @@ model AgentRun {
   agentSlug        String
   provider         String? /// LLM provider used for the run: spaces|codex|claude|copilot|openrouter
   model            String? /// Concrete model id, e.g. private-large, open-large, gpt-5.5
-  triggerSource    String /// "spaces" | "scheduled" | "chat" | "api"
+  triggerSource    String /// "spaces" | "scheduled" | "chat" | "api" | "automation" | "slack"
   status           String    @default("running") /// "running" | "completed" | "failed" | "cancelled"
   currentToolLabel String?
   task             String    @db.Text
@@ -667,6 +866,7 @@ model AgentRun {
   reasoning        String?   @db.Text
   toolsUsed        String[]  @default([])
   toolInvocations  Json? /// Array<ToolInvocation> with args, result (truncated), durationMs, isError
+  metadata         Json? /// Additive per-run integration metadata (for example external result callback configuration)
   tokensIn         Int?
   tokensOut        Int?
   tokensCacheRead  Int?
@@ -767,28 +967,40 @@ model ChatAttachment {
 }
 
 model AgentRequest {
-  id            String   @id @default(cuid())
-  targetType    String   @default("agent") // "agent" | "skill"
-  agentId       String?
-  agentSlug     String?
-  skillId       String?
-  skillSlug     String?
-  requestType   String // "push_to_spaces" | "push_to_global" | "clone"
-  requesterId   String
-  status        String   @default("pending") // "pending" | "approved" | "rejected"
-  reviewerId    String?
-  reviewNote    String?
+  id                  String   @id @default(cuid())
+  targetType          String   @default("agent") // "agent" | "skill"
+  agentId             String?
+  agentSlug           String?
+  skillId             String?
+  skillSlug           String?
+  requestType         String // "push_to_spaces" | "push_to_global" | "clone"
+  requesterId         String
+  status              String   @default("pending") // "pending" | "approved" | "rejected"
+  reviewerId          String?
+  reviewNote          String?
   // For requestType == "clone": the name the requester chose for their copy,
   // captured at request time and applied when the owner approves. Null → the
   // clone falls back to "<source> (Copy)".
-  requestedName String?
+  requestedName       String?
   // For requestType == "clone": the agent that was created when the request
   // was approved. Lets the approve path stay idempotent (replay returns the
   // same clone) and gives the frontend a deep-link target.
-  resultAgentId String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  orgId         String
+  resultAgentId       String?
+  // ── requestType == "skill_update" (skill revision proposal) ──────────────
+  // The proposer's full replacement markdown, held server-side so the (signed)
+  // approval card only ever carries the requestId — the body can't be tampered
+  // with client-side and the resolve step re-reads it authoritatively.
+  proposedContent     String?  @db.Text
+  // sha256 of the skill content the proposer diffed against, checked at approve
+  // time so a concurrent edit (optimistic-concurrency drift) is rejected (409).
+  baseContentHash     String?
+  // sha256 of proposedContent — integrity check before persisting on approve.
+  proposedContentHash String?
+  // Free-text summary the proposer supplied ("what changed and why").
+  requestNote         String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  orgId               String
 
   @@index([status])
   @@index([requesterId])
@@ -1644,6 +1856,119 @@ model EvalVerdict {
 }
 
 // ==========================================
+// Search Evals — Vespa search retrieval-relevance testing
+// (distinct from the agent EvalFolder/EvalGeneration models above)
+// ==========================================
+
+/// One uploaded CSV of {query, goldId, gold answer} rows. `permissionMode`
+/// ("with" = scoped to createdBy's own Spaces ACL, "without" = public
+/// content only — never a true unrestricted bypass, see
+/// publicOnlyConditionForSchema() in vespa-direct.ts) and `asOfTimestamp` are
+/// fixed at upload time — they describe the eval set's context (whose
+/// access, and as of when the gold answers were valid), not a per-run
+/// choice. Every run against this sheet inherits them; only entity type +
+/// rank profile vary per run.
+model SearchEvalSheet {
+  id             String            @id @default(cuid())
+  name           String
+  description    String?           @db.Text /// optional free text — what this eval set is about
+  orgId          String
+  permissionMode String            @default("with") /// "with" | "without"
+  asOfTimestamp  DateTime?
+  createdBy      String?
+  createdAt      DateTime          @default(now())
+  queries        SearchEvalQuery[]
+  runs           SearchEvalRun[]
+
+  @@index([orgId])
+  @@map("search_eval_sheets")
+}
+
+/// One row of an uploaded sheet: a query, its gold answer text (reference only,
+/// not used for scoring — v1 scoring is a pure retrieval hit-check), and the
+/// gold doc's own Vespa docId — the same id transformHit()/resultTransform.ts
+/// put in a result's top-level `id` for every entity type (messageId for a
+/// message, the file's own id, channelId, callId, the email's own id, or a
+/// ticket's internal id — see mapper.ts). Required, same as `query`: a row
+/// with no gold id has nothing to score against.
+model SearchEvalQuery {
+  id         String             @id @default(cuid())
+  sheetId    String
+  sheet      SearchEvalSheet    @relation(fields: [sheetId], references: [id], onDelete: Cascade)
+  query      String             @db.Text
+  goldAnswer String?            @db.Text
+  goldId     String             @db.Text
+  createdAt  DateTime           @default(now())
+  results    SearchEvalResult[]
+
+  @@index([sheetId])
+  @@map("search_eval_queries")
+}
+
+/// One run = a sheet's queries searched under a fixed entity-type + rank-profile
+/// choice. `permissionMode`/`asOfTimestamp` are copied from the sheet at
+/// creation time (fixed there, not chosen per run) — kept denormalized here so
+/// each run's historical display is accurate even if read long after.
+model SearchEvalRun {
+  id             String             @id @default(cuid())
+  sheetId        String
+  sheet          SearchEvalSheet    @relation(fields: [sheetId], references: [id], onDelete: Cascade)
+  queryType      String[] /// entity types searched; empty = all types
+  rankProfile    String? /// null = let the backend auto-pick (default_native for scored text)
+  /// Overrides for the active rank profile's `input.query(<name>)` params —
+  /// only meaningful when rankProfile is a real per-schema "tunable" profile
+  /// (see TUNABLE_INPUTS_BY_AREA in SearchEvalsPageV3.tsx / the tunable
+  /// rank-profile inputs {} block per Vespa schema); null otherwise.
+  rankProfileInputs Json?
+  permissionMode String /// "with" | "without" — copied from the sheet at run creation
+  asOfTimestamp  DateTime?
+  status         String             @default("running") /// "running" | "completed" | "failed"
+  createdBy      String?
+  orgId          String
+  startedAt      DateTime           @default(now())
+  completedAt    DateTime?
+  /// Top1/Top3/Top10 count+% and Mean Reciprocal Rank — written by the worker
+  /// alongside completedAt when the run finishes (null while "running", or for
+  /// runs from before this existed — the API falls back to live computation
+  /// from `results` in that case). `completedAt` is the "with timestamp" this
+  /// was asked to be stored with.
+  queriesScored  Int?
+  top1Count      Int?
+  top1Pct        Float?
+  top3Count      Int?
+  top3Pct        Float?
+  top10Count     Int?
+  top10Pct       Float?
+  mrr            Float?
+  results        SearchEvalResult[]
+
+  @@index([sheetId, startedAt])
+  @@index([orgId])
+  @@map("search_eval_runs")
+}
+
+/// One query's outcome within a run: did the row's goldId show up in the
+/// top-10 Vespa results, and at what rank. `topResults` keeps up to the
+/// top-20 (10 past the scoring cutoff, for manual "how close was this miss"
+/// review) full result objects, each including its raw match-features.
+model SearchEvalResult {
+  id         String          @id @default(cuid())
+  runId      String
+  run        SearchEvalRun   @relation(fields: [runId], references: [id], onDelete: Cascade)
+  queryId    String
+  query      SearchEvalQuery @relation(fields: [queryId], references: [id], onDelete: Cascade)
+  hit        Boolean         @default(false)
+  rank       Int?
+  topResults Json /// SearchEvalTopResult[] — { id, xyneId, messageId, conversationId, relevanceScore, snippet, raw }
+  debug      Json? /// SearchEvalDebugPayload[] — { stage, yql, vespaParams } per Vespa query stage, for manual confirmation
+  createdAt  DateTime        @default(now())
+
+  @@unique([runId, queryId])
+  @@index([runId])
+  @@map("search_eval_results")
+}
+
+// ==========================================
 // MCP Gateway Registry Tables
 // Backend services dynamically register their tools here
 // ==========================================
@@ -1674,15 +1999,15 @@ model ServiceRegistry {
 // mode is a plain string (auto | review | drop) — no Postgres enum, per the
 // enum→text convention.
 model ErrorBucket {
-  id           String   @id @default(cuid())
-  name         String   @unique
-  description  String   @default("") // one-liner for the LLM prompt
-  keywords     String[] @default([]) // literal phrases (auto-escaped, case-insensitive) — the friendly editor
-  markers      String   @default("") // advanced: raw regex, unioned with keywords. Escape hatch for power patterns.
-  matchOrder   Int      @default(20) // pattern-check order, ascending (1 = tried first; default bucket = 25). NOT urgency.
-  enabled      Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String   @default("") // one-liner for the LLM prompt
+  keywords    String[] @default([]) // literal phrases (auto-escaped, case-insensitive) — the friendly editor
+  markers     String   @default("") // advanced: raw regex, unioned with keywords. Escape hatch for power patterns.
+  matchOrder  Int      @default(20) // pattern-check order, ascending (1 = tried first; default bucket = 25). NOT urgency.
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   @@index([enabled, matchOrder])
   @@map("error_buckets")

@@ -25,10 +25,6 @@ export const PLATFORM_ONLY_CONFIG_KEYS: ReadonlySet<string> = new Set<string>([
   "LITELLM_API_KEY",
   "XYNE_AI_EXTENDED_URL",
   "XYNE_AI_EXTENDED_API_KEY",
-  // Remote git URLs for platform data repos — env-only; a per-agent remote was
-  // a git-clone RCE/SSRF sink (see pgm/tools.ts ensureGitRepo).
-  "PGM_REMOTE_URL",
-  "WORKLOAD_REMOTE_URL",
   "GENIUS_API_URL",
   "QUERY_ROUTING_KEY",
   "IMAGE_GENERATION_ENDPOINT",

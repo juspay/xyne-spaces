@@ -18,6 +18,8 @@ import { SelectField } from "./ui/SelectField";
 import { Badge } from "./ui/Badge";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
 import { useSnackbar } from "./ui/Snackbar";
+import { ServiceTokensCard } from "./ServiceTokensCard";
+import { SurfacesCard } from "./SurfacesCard";
 
 import {
   listOrganizations,
@@ -235,6 +237,12 @@ export function OrganizationsPageV3({ userId }: { userId: string }) {
                   </div>
                 ))}
               </div>
+              {canManage && (
+                <>
+                  <SurfacesCard userId={userId} org={org} />
+                  <ServiceTokensCard userId={userId} org={org} />
+                </>
+              )}
             </>
           )}
         </div>

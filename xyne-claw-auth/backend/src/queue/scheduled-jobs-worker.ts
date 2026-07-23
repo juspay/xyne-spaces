@@ -6,6 +6,7 @@ import { decrypt } from "../crypto.js";
 import { agentRunRepository, chatMessageRepository } from "../repositories/index.js";
 import { ensureUserExists } from "../lib/users-jit.js";
 import { resolveAgentProviderConfigs } from "../lib/agent-provider-config.js";
+import { resolveFastMode } from "../lib/fast-mode.js";
 import { registerRunRecovery, type RecoverySessionContext } from "./run-recovery-worker.js";
 import type { ScheduledJobData } from "./scheduled-jobs-queue.js";
 
@@ -81,8 +82,9 @@ async function processJob(job: Job<ScheduledJobData>): Promise<void> {
   // agent-level creds only, honoring the agent's providerAlwaysOn policy.
   // Best-effort — if the row is gone we fire without it (platform default).
   const { providerConfigs, providerOrder, parent: providerParent } = agentRow
-    ? await resolveAgentProviderConfigs(agentRow)
+    ? await resolveAgentProviderConfigs(agentRow, { headlessBulk: true })
     : { providerConfigs: {}, providerOrder: [] as string[], parent: undefined as string | undefined };
+  const fastModeEnabled = await resolveFastMode(runConversationId, agentSlug, agentRow?.config);
 
   const progressUrl = `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`;
   const dispatchPayload = {
@@ -120,6 +122,7 @@ async function processJob(job: Job<ScheduledJobData>): Promise<void> {
     ...(providerParent ? { provider: providerParent } : {}),
     ...(Object.keys(providerConfigs).length > 0 ? { providerConfigs } : {}),
     ...(providerOrder.length > 1 ? { providerOrder } : {}),
+    fastMode: fastModeEnabled,
   };
 
   const res = await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run`, {
@@ -167,6 +170,7 @@ async function processJob(job: Job<ScheduledJobData>): Promise<void> {
       conversationId: runConversationId,
       scheduledJobId,
       ...(channelId ? { channelId } : {}),
+      fastMode: fastModeEnabled,
     }).catch((e) => log.warn(`[scheduler] AgentRun.start failed:`, e instanceof Error ? e.message : e));
     await chatMessageRepository.create({
       conversationId: runConversationId,

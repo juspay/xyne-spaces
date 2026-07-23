@@ -57,6 +57,8 @@ type AgentSortKey =
 
 // ── Helpers ────────────────────────────────────────────────────────────
 export function fmtNum(n: number): string {
+  // B tier so cache-inclusive token totals don't render as "4970.4M".
+  if (n >= 1_000_000_000) return (n / 1_000_000_000).toFixed(1) + "B";
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
   if (n >= 1_000) return (n / 1_000).toFixed(1) + "K";
   return String(n);
@@ -896,10 +898,12 @@ export function AgentsDashboardPageV3({ userId }: Props) {
                     <span className="text-[12px] font-medium uppercase tracking-wide text-xyne-fg-muted">Tokens</span>
                     <CoinIcon size={15} className="text-amber-500" />
                   </div>
+                  {/* IN = fresh + cached input actually processed. tokensIn alone
+                      understated cache-heavy agents ~10x (cacheRead dominates). */}
                   <div className="flex items-end gap-3">
                     <div className="flex flex-col">
                       <span className="text-[10px] font-medium uppercase tracking-wide text-xyne-fg-tertiary">In</span>
-                      <span className="text-[22px] font-bold leading-none text-xyne-fg-primary">{fmtNum(d.overview.totalTokensIn)}</span>
+                      <span className="text-[22px] font-bold leading-none text-xyne-fg-primary">{fmtNum(d.overview.totalTokensIn + (d.overview.totalTokensCached ?? 0))}</span>
                     </div>
                     <span className="mb-0.5 text-[16px] text-xyne-fg-muted">/</span>
                     <div className="flex flex-col">
@@ -907,6 +911,9 @@ export function AgentsDashboardPageV3({ userId }: Props) {
                       <span className="text-[22px] font-bold leading-none text-xyne-fg-primary">{fmtNum(d.overview.totalTokensOut)}</span>
                     </div>
                   </div>
+                  <span className="text-[10px] text-xyne-fg-tertiary">
+                    {fmtNum(d.overview.totalTokensIn)} fresh · {fmtNum(d.overview.totalTokensCached ?? 0)} cached
+                  </span>
                 </div>
               </div>
             </Section>

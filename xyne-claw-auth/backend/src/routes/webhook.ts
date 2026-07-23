@@ -25,10 +25,16 @@ import { getValidClaudeBearer } from "../lib/claude-oauth-refresh.js";
 import { getValidCodexBearer } from "../lib/codex-oauth-refresh.js";
 import { resolveAgentProviderConfigs, resolveSubagentProviderMode, KNOWN_PROVIDERS, buildProviderConfig, agentCredRefreshTarget, userCredRefreshTarget } from "../lib/agent-provider-config.js";
 import { expandSpacesMentions, resolveUnboundMentions } from "../lib/mention-transform.js";
+import { shouldTwinRespond, recordTwinSilence, FAIL_CLOSED } from "../services/twinRespondGate.js";
+import { recordTwinApprovalPending } from "../services/twinResponseFeedback.js";
+
 import { buildSpacesMentionLookups, buildSpacesMentionLookupsDb } from "../lib/mention-lookups.js";
 import { mintSessionToken } from "../lib/session-tokens.js";
 import { verifySpacesSignature } from "../middleware/verify-spaces-signature.js";
+import { coerceAutomationForwardResult } from "../lib/automation-result.js";
 import { parseSlashCommand } from "../lib/parseSlashCommand.js";
+import { resolveFastMode, setFastModeOverride } from "../lib/fast-mode.js";
+import { acquireTwinSlot, renameTwinSlot, releaseTwinSlot } from "../lib/twin-limiter.js";
 import { handleSlashCommandBeforeRun, persistGoalStart, recordTurnAndDecide } from "../services/goalRelooper.js";
 import {
   QUEUE_ENABLED,
@@ -53,20 +59,26 @@ import {
   registerRunRecovery,
   touchRunRecovery,
   handleRunCompletion,
+  handleRunHandoff,
+  hasActiveRunRecovery,
   getRecoveryContextForSession,
   cancelRunRecovery,
   type RecoverySessionContext,
 } from "../queue/run-recovery-worker.js";
 import { appendCitations, buildThreadCitationMeta } from "../lib/citations.js";
 import { htmlToPlainText } from "../lib/html-to-text.js";
+import { gcsService } from "../services/gcsService.js";
 import { getSpacesAuthForUser, spacesDbAvailable, getSpacesUserWorkspaceId, getWorkspaceIdForUser } from "../lib/spaces-db.js";
 import { ensureUserExists, orgIdForSpacesUser } from "../lib/users-jit.js";
 import { finalizeOrphanedRun } from "../services/orphan-run-finalizer.js";
 import { requireStrictS2S, s2sKeyMatches, requireResultToken } from "../middleware/require-auth.js";
 import { renderAttachmentsToPdf } from "../lib/result-pdf.js";
 import { renderMarkdownToHtml } from "../lib/result-html.js";
+import { sendStoredExternalResultCallback, type ExternalResultCallbackConfig } from "../lib/external-result-callback.js";
+import { deliverSlackResult, type SlackDeliveryTarget } from "../lib/slack-delivery.js";
 import JSZip from "jszip";
-import { buildWriteApprovalFlow, buildTwinApprovalFlow, buildUserQuestionFlow, buildPromoteProviderFlow, buildGoalSuggestionFlow, buildPlanFlow } from "xyne-claw-shared";
+import { buildWriteApprovalFlow, buildTwinApprovalFlow, buildUserQuestionFlow, buildPromoteProviderFlow, buildGoalSuggestionFlow, buildPlanFlow, isTwinDelivery } from "xyne-claw-shared";
+import type { TwinDelivery } from "xyne-claw-shared";
 import type { Todo } from "xyne-claw-shared";
 
 const clog = createLogger("webhook");
@@ -351,11 +363,24 @@ function interpolateChainTask(template: string, vars: Record<string, string>): s
 
 export interface SessionContext {
   mentionedUserId: string;
+  /**
+   * The RUN OWNER — the userId the AgentRun + `user` ChatMessage are persisted
+   * under (run.ts uses the dispatch `userId`). For a twin USER_MENTIONED run
+   * this is the MENTIONED user, NOT the sender. The assistant ChatMessage
+   * written in /result MUST be tagged with this, or the owner can't see their
+   * own twin reply (filtered out by the per-user read ACL) and the SENDER sees
+   * it in their history. Optional: older/other conversation flows omit it and
+   * fall back to the responseMode-derived owner (= sender for "conversation").
+   */
+  targetUserId?: string;
   senderId: string;
   senderName: string;
   channelId: string;
   channelName: string;
   conversationId: string;
+  /** The message that triggered this run (the mention). The Twin's twin_deliver
+   *  "react" action targets THIS message. */
+  sourceMessageId?: string;
   task: string;
   /**
    * The ORIGINAL user request that kicked off this run/chain. For a first-touch
@@ -401,6 +426,10 @@ export interface SessionContext {
    * skipped too. Absent for normal mentions.
    */
   resultForwardUrl?: string;
+  /** External API caller result target. The optional secret is AES-GCM encrypted. */
+  externalResultCallback?: ExternalResultCallbackConfig;
+  /** Terminal result target for a run dispatched from a per-agent Slack app. */
+  slackDelivery?: SlackDeliveryTarget;
   /**
    * When true, the result-forward branch resolves the agent's plain `@Name`
    * mentions into clickable/notifying Spaces mentions (name→userId via
@@ -477,11 +506,15 @@ function automationRunDedupKey(conversationId: string, agentSlug: string): strin
  * session key — those identifiers are required to make the conv index
  * usable, and the original behaviour is the safe default.
  */
-export async function setSession(sessionId: string, ctx: SessionContext): Promise<void> {
+export async function setSession(
+  sessionId: string,
+  ctx: SessionContext,
+  options: { skipConversationIndex?: boolean } = {},
+): Promise<void> {
   const redis = redisService.getConnection();
   const json = JSON.stringify(ctx);
   await redis.set(`${SESSION_PREFIX}${sessionId}`, json, "EX", SESSION_TTL);
-  if (ctx.conversationId && ctx.agentSlug) {
+  if (!options.skipConversationIndex && ctx.conversationId && ctx.agentSlug) {
     await redis.set(convKey(ctx.conversationId, ctx.agentSlug, ctx.mentionedUserId), json, "EX", SESSION_TTL);
   }
 }
@@ -998,11 +1031,39 @@ function decryptStoredField(stored: string): string {
  */
 async function sendDigitalTwinApprovalDm(
   ctx: SessionContext,
-  resultText: string,
+  delivery: TwinDelivery,
   attachments: Array<{ fileName: string; mimeType: string; data: string }> | undefined,
   sessionId: string,
 ): Promise<void> {
+  // Defense-in-depth: an `ignore` delivery must NEVER reach here (the caller
+  // drops it). If it somehow does, never open a DM / post / write a pending row.
+  if (delivery.action === "ignore") {
+    clog.warn(`[webhook/result] sendDigitalTwinApprovalDm called with action=ignore — dropping, session ${sessionId}`);
+    await deleteSession(sessionId);
+    return;
+  }
   const token = ctx.appToken;
+
+  // Apply the user's configured Twin signature/disclaimer to the REPLY body (not
+  // to a react-only delivery). Deterministic server-side append — the same
+  // behaviour the old suffix decoration gave the raw result, now scoped to the
+  // structured delivery's message.
+  let effectiveDelivery = delivery;
+  if (delivery.message && ctx.mentionedUserId) {
+    try {
+      const u = await prisma.user.findUnique({
+        where: { id: ctx.mentionedUserId },
+        select: { digitalTwinResponseSuffix: true },
+      });
+      const suffix = u?.digitalTwinResponseSuffix?.trim();
+      if (suffix && !delivery.message.endsWith(suffix)) {
+        effectiveDelivery = { ...delivery, message: `${delivery.message.trimEnd()}\n\n${suffix}` };
+      }
+    } catch (err) {
+      clog.warn(`[webhook/result] Twin suffix lookup failed for user ${ctx.mentionedUserId}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   // workspaceId required by prod openDm schema. Empty fallback only to satisfy
   // types — the earlier USER_MENTIONED gate already rejected runs where we
   // couldn't resolve the workspaceId, so this should always have a real value.
@@ -1011,19 +1072,21 @@ async function sendDigitalTwinApprovalDm(
     workspaceId: ctx.workspaceId ?? "",
   }, token)) as { channelId: string };
 
-  const twinFlow = withSpacesAppId(buildTwinApprovalFlow(
-    resultText,
-    ctx.channelId,
-    ctx.conversationId,
-    ctx.mentionedUserId,
-    ctx.workspaceId ?? "",
-    ctx.senderName,
-    ctx.channelName,
-    ctx.task,
-    ctx.agentSlug,
-    dmResult.channelId,
-    CONFIG.spacesAppUrl,
-  ), ctx.spacesAppId);
+  const twinFlow = withSpacesAppId(buildTwinApprovalFlow({
+    delivery: effectiveDelivery,
+    ...(ctx.sourceMessageId ? { sourceMessageId: ctx.sourceMessageId } : {}),
+    targetChannelId: ctx.channelId,
+    targetConversationId: ctx.conversationId,
+    mentionedUserId: ctx.mentionedUserId,
+    workspaceId: ctx.workspaceId ?? "",
+    senderId: ctx.senderId,
+    senderName: ctx.senderName,
+    channelName: ctx.channelName,
+    task: ctx.task,
+    ...(ctx.agentSlug ? { agentSlug: ctx.agentSlug } : {}),
+    dmChannelId: dmResult.channelId,
+    spacesBaseUrl: CONFIG.spacesAppUrl,
+  }), ctx.spacesAppId);
 
   if (attachments?.length) {
     const form = new FormData();
@@ -1044,6 +1107,18 @@ async function sendDigitalTwinApprovalDm(
       userId: ctx.spacesAppUserId,
     }, token);
   }
+
+  // Record a PENDING feedback row so the daily learning loop can later reconcile
+  // the user's accept / decline / edit / ignore of this proposal. Fire-and-forget.
+  void recordTwinApprovalPending({
+    userId: ctx.mentionedUserId,
+    conversationId: ctx.conversationId,
+    channelId: ctx.channelId,
+    channelName: ctx.channelName,
+    ...(ctx.sourceMessageId ? { sourceMessageId: ctx.sourceMessageId } : {}),
+    incomingTask: ctx.task,
+    delivery: effectiveDelivery,
+  });
 
   clog.info(`[webhook/result] Digital Twin: sent approve/decline DM to ${ctx.mentionedUserId} (asked by ${ctx.senderId})`);
   await deleteSession(sessionId);
@@ -1232,6 +1307,18 @@ function formatActionDescription(tool: string, params: Record<string, unknown>, 
     return lines.join("\n");
   }
 
+  if (tool === "create-skill") {
+    const name = (params["name"] as string) ?? "";
+    const slug = (params["slug"] as string) ?? "";
+    const description = (params["description"] as string) ?? "";
+    const content = (params["content"] as string) ?? "";
+    const lines = [`**Create Skill**`, ``, `**Name:** ${name}`];
+    if (slug) lines.push(`**Slug:** \`${slug}\``);
+    if (description) lines.push(`**Description:** ${description}`);
+    lines.push(``, `**Content (${content.length} chars):**`, "```md", content.slice(0, 1500) + (content.length > 1500 ? "\n…(truncated)" : ""), "```");
+    return lines.join("\n");
+  }
+
   // Fallback for unknown tools
   const entries = Object.entries(params).filter(([, v]) => v != null).slice(0, 8);
   const lines = [`**${tool}**`, ``];
@@ -1338,7 +1425,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     // webhook (digital-twin) and reject on all others. This means:
     //   - The mentioned user MUST have the Digital Twin Spaces App
     //     installed in their workspace for the Twin flow to work.
-    //   - Assistant, doctor-agent, pgm-agent etc. are explicitly NOT
+    //   - Assistant, doctor-agent etc. are explicitly NOT
     //     entry points for the Twin — they're conversation agents only.
     //   - The DM with approve/decline buttons always arrives from the
     //     Digital Twin bot (because we authenticate using digital-twin's
@@ -1524,17 +1611,60 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         "**Slash commands**",
         "- `/goal <condition>` — work autonomously until the condition is met",
         "- `/goal status` — show the active goal",
-        "- `/stop` (or `/goal clear`) — stop the current run and clear any active goal",
+        "- `/stop` (or `/goal clear`) — stop the current run, drop queued messages, and clear any active goal",
         "- `/clear` — wipe this thread's context and start fresh",
         "- `/compact [focus]` — summarize & shrink the context, then continue",
         "- `/queue` — show messages waiting behind the current run · `/queue clear` — drop them",
         "- `/upgrade [task]` — use the premium model for this conversation",
+        "- `/fast [task]` / `/fast off` — fast mode: the agent calls tools directly instead of delegating to subagents (quicker for short asks; use normal mode for deep investigations)",
         "- `/help` — show this list",
       ].join("\n"),
       userId: agent.spacesAppUserId,
       metadata: { contentFormat: "markdown" },
     }, agent.appToken).catch((err) => {
       log.warn("Failed to post /help reply", { error: err instanceof Error ? err.message : String(err) });
+    });
+    return;
+  }
+
+  if (slash?.kind === "fastModeUsage") {
+    await spacesAppFetch("/chat/postMessage", {
+      channelId: payload.channelId,
+      conversationId: payload.conversationId,
+      markdownText: "Usage: `/fast` · `/fast off` · `/fast <task>` (turn on fast mode and run the task)",
+      userId: agent.spacesAppUserId,
+      metadata: { contentFormat: "markdown" },
+    }, agent.appToken).catch((err) => {
+      log.warn("Failed to post /fast reply", { error: err instanceof Error ? err.message : String(err) });
+    });
+    return;
+  }
+
+  if (slash?.kind === "fastMode") {
+    // This slash handler runs only for normal mention/DM webhooks; scheduled
+    // automation runs can only be detected here by their one-shot conversation id.
+    const isAutomationThread = payload.conversationId?.startsWith("scheduled_") === true;
+    let markdownText = isAutomationThread
+      ? "⚡ `/fast` does not persist for scheduled/automation firings because each firing uses a new conversation. Set `fastMode: true` on the agent instead."
+      : slash.enabled
+        ? "⚡ fast mode on — tools load on demand, no subagent delegation."
+        : "⚡ fast mode off — subagent delegation restored for the next run.";
+    if (!isAutomationThread) {
+      try {
+        await setFastModeOverride(payload.conversationId, agent.slug, slash.enabled);
+      } catch (err) {
+        log.warn("Failed to set /fast override", { error: err instanceof Error ? err.message : String(err) });
+        markdownText = "⚠️ couldn't persist fast mode — try again";
+      }
+    }
+    await spacesAppFetch("/chat/postMessage", {
+      channelId: payload.channelId,
+      conversationId: payload.conversationId,
+      markdownText,
+      userId: agent.spacesAppUserId,
+      metadata: { contentFormat: "markdown" },
+    }, agent.appToken).catch((err) => {
+      log.warn("Failed to post /fast reply", { error: err instanceof Error ? err.message : String(err) });
     });
     return;
   }
@@ -1589,10 +1719,11 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     return;
   }
 
-  // ── /stop (and /goal clear) ── halt what's active in this thread: cancel the
-  // in-flight run AND clear any active goal. Does NOT drop queued messages —
-  // use `/queue clear` for that. Any thread participant may stop (same
-  // permissive model as the old /goal clear).
+  // ── /stop (and /goal clear) ── halt EVERYTHING active in this thread: cancel
+  // the in-flight run, drop queued messages, and clear any active goal. Queued
+  // messages must go too — the cancel's failure result drains the queue
+  // immediately, so keeping them would restart work the instant it stopped.
+  // Any thread participant may stop (same permissive model as /goal clear).
   if (slash?.kind === "goalClear") {
     const convId = payload.conversationId;
     let goalWasActive = false;
@@ -1610,7 +1741,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     const parts: string[] = [];
     parts.push(`Stopped ${stopResult.stopped} running run${stopResult.stopped === 1 ? "" : "s"}`);
     parts.push(`cleaned ${stopResult.cleaned} stale run${stopResult.cleaned === 1 ? "" : "s"}`);
-    parts.push(`${stopResult.queued} queued`);
+    parts.push(`dropped ${stopResult.queued} queued message${stopResult.queued === 1 ? "" : "s"}`);
     if (goalWasActive) parts.push("cleared the active /goal");
     const reply =
       stopResult.hadRunningRows || goalWasActive || stopResult.queued > 0
@@ -1696,6 +1827,31 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
   const userRequestedUpgrade = upgradeMatch !== null;
   if (userRequestedUpgrade) {
     task = upgradeMatch[1]?.trim() ?? "";
+  }
+
+  // `/fast <task>` — enable fast mode AND dispatch the remainder in one shot,
+  // mirroring `/upgrade <task>`. Bare `/fast`, `/fast on|off`, and on/off
+  // typos were already handled (ack-only) by the parseSlashCommand branch
+  // above, so only the with-task shape reaches this regex. `/fast off <task>`
+  // disables fast mode and still runs the task.
+  const FAST_TASK_RE = /^\s*\/fast\s+([\s\S]+?)\s*$/i;
+  const fastTaskMatch = FAST_TASK_RE.exec(taskWithoutMentions);
+  if (fastTaskMatch) {
+    let rest = fastTaskMatch[1]!.trim();
+    let fastEnable = true;
+    if (/^off\b/i.test(rest)) {
+      fastEnable = false;
+      rest = rest.replace(/^off\b/i, "").trim();
+    }
+    task = rest;
+    if (payload.conversationId) {
+      try {
+        await setFastModeOverride(payload.conversationId, agent.slug, fastEnable);
+      } catch (err) {
+        // Run the task anyway — resolveFastMode falls back to agent config.
+        log.warn("Failed to set /fast override for /fast <task>", { error: err instanceof Error ? err.message : String(err) });
+      }
+    }
   }
 
   // For USER_MENTIONED: run as the mentioned user (their tools, their twin).
@@ -2282,8 +2438,45 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       }
     }
 
+    const fastModeEnabled = await resolveFastMode(payload.conversationId, runAgentSlug, agentRow?.config);
+
+    // Twin concurrency cap (2026-07-15): twin runs are ~2/3 of all traffic and
+    // land on the shared LiteLLM key — unthrottled they blow through the key's
+    // concurrent-request limit (the 429 storm). Twin dispatches queue for a
+    // slot here (nobody is waiting on their twin); everything else is
+    // unaffected. The slot is re-keyed to the run's sessionId below and freed
+    // by /webhook/result on any terminal callback (TTL backstop in the lib).
+    let twinSlotToken: string | null = null;
+    if (runAsTwin) {
+      twinSlotToken = await acquireTwinSlot();
+      if (twinSlotToken === null) {
+        log.warn(`Twin dispatch dropped for ${targetUserId} — concurrency queue never drained`);
+        return;
+      }
+    }
+
+    // Digital Twin (USER_MENTIONED): make WHO mentioned the user and WHERE
+    // explicit in the run context. The thread history labels the sender only by
+    // id, so the twin can't otherwise reason about who's asking / where to reply.
+    //
+    // CRITICAL: build this ONCE here and reuse it for BOTH the live
+    // /internal/run dispatch (fetchRun below) AND the run-recovery / goal-replay
+    // payload (dispatchPayload). A prior split built the live-run context inline
+    // (thread-awareness only) while a SEPARATE dispatchContext carried the
+    // mention note — so the first/live run shipped WITHOUT the "@mentioned by"
+    // block and only the recovery copy had it. Single source of truth = no drift.
+    const twinMentionNote =
+      eventType === "USER_MENTIONED"
+        ? `## You were @mentioned\nYou were @mentioned by **${payload.senderName ?? "someone"}**${payload.channelName ? ` in **#${payload.channelName}**` : ""}. Their message is the Query below — decide how you'd respond to them, there.`
+        : "";
+    const threadAwarenessBlock = history
+      ? `## Thread Awareness\nYou are in a group thread in Xyne Spaces where multiple users and agents can participate. The thread history below shows messages from other participants — use it to understand context. Your own previous messages are NOT included here (they are already in your session). If you need more context, use spaces-messages or spaces-message-detail to read the full thread.\n\n**Speaker labels in the history below:**\n- \`human-user:<id>\` — a human in the thread; their words are user input.\n- \`@<agent-slug> (OTHER AI AGENT — not you; do not adopt this voice or identity)\` — another AI agent's message. When they say "I", they mean themselves, NOT you. NEVER answer in their voice, NEVER claim to be them, and NEVER paraphrase their first-person identity as your own. If asked to compare yourself to them, refer to them in the third person ("the X agent said …").\n\n${history}`
+      : "";
+    const dispatchContext = [twinMentionNote, threadAwarenessBlock].filter(Boolean).join("\n\n");
+
     const runUrl = `${CONFIG.internalUrl}/claw/api/v1/internal/run`;
-    const runRes = await fetch(runUrl, {
+    // eslint-disable-next-line no-inner-declarations
+    const fetchRun = () => fetch(runUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -2300,13 +2493,13 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
         progressUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`,
         channelId: payload.channelId,
+        // WHO/WHERE for the twin_deliver mandate's who/where line (run.ts reads
+        // these to populate "You were mentioned by X in #Y" in the SYSTEM prompt).
+        ...(payload.senderName ? { senderName: payload.senderName } : {}),
+        ...(payload.channelName ? { channelName: payload.channelName } : {}),
         ...(payload.projectId ? { projectId: payload.projectId } : {}),
         ...(payload.projectName ? { projectName: payload.projectName } : {}),
-        ...(history
-          ? {
-              context: `## Thread Awareness\nYou are in a group thread in Xyne Spaces where multiple users and agents can participate. The thread history below shows messages from other participants — use it to understand context. Your own previous messages are NOT included here (they are already in your session). If you need more context, use spaces-messages or spaces-message-detail to read the full thread.\n\n**Speaker labels in the history below:**\n- \`human-user:<id>\` — a human in the thread; their words are user input.\n- \`@<agent-slug> (OTHER AI AGENT — not you; do not adopt this voice or identity)\` — another AI agent's message. When they say "I", they mean themselves, NOT you. NEVER answer in their voice, NEVER claim to be them, and NEVER paraphrase their first-person identity as your own. If asked to compare yourself to them, refer to them in the third person ("the X agent said …").\n\n${history}`
-            }
-          : {}),
+        ...(dispatchContext ? { context: dispatchContext } : {}),
         ...(agentSkills && agentSkills.length > 0 ? { skills: agentSkills } : {}),
         ...(resolvedParentProvider ? { provider: resolvedParentProvider } : {}),
         ...(runtimeProviderOrder.length > 1 ? { providerOrder: runtimeProviderOrder } : {}),
@@ -2322,13 +2515,34 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         // and custom-tool config values (PPT_API_KEY etc). Without this,
         // those features silently default to "off"/"allow" on Spaces mentions.
         ...(agentRow?.config ? { agentConfig: agentRow.config as Record<string, unknown> } : {}),
+        fastMode: fastModeEnabled,
         // `/compact` — force a one-shot compaction of the resumed session
         // before this turn so the thread continues with a smaller context.
         ...(compactBeforeRun ? { compactBeforeRun: true } : {}),
       }),
     });
 
+    let runRes: Awaited<ReturnType<typeof fetchRun>>;
+    try {
+      runRes = await fetchRun();
+    } catch (err) {
+      // Dispatch never happened — free the twin slot instead of letting it
+      // TTL out (15 min of wasted capacity per network blip otherwise).
+      if (twinSlotToken !== null) void releaseTwinSlot(twinSlotToken);
+      throw err;
+    }
+
     const body = (await runRes.json()) as { success: boolean; sessionId?: string };
+
+    // Re-key the twin slot to the real sessionId (released by /webhook/result);
+    // free it immediately if the dispatch didn't produce a run.
+    if (twinSlotToken !== null) {
+      if (body.success && body.sessionId) {
+        void renameTwinSlot(twinSlotToken, body.sessionId);
+      } else {
+        void releaseTwinSlot(twinSlotToken);
+      }
+    }
 
     if (body.success && body.sessionId) {
       // Spaces email auto-draft sends a synthetic APP_MENTIONED carrying this URL
@@ -2374,11 +2588,17 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         // (targetUserId), NOT mentionedUserIds[0] — so the approve/decline DM
         // and the per-user conv index route to the correct person.
         mentionedUserId: eventType === "USER_MENTIONED" ? targetUserId : agent.spacesAppUserId,
+        // The run owner — same value dispatched as the run's `userId` below and
+        // used by run.ts for the user ChatMessage. The assistant reply is tagged
+        // with this in /result so the whole twin session is owned by the
+        // mentioned user, not the sender.
+        targetUserId,
         senderId: payload.userId,
         senderName: payload.senderName ?? payload.userId,
         channelId: payload.channelId,
         channelName: payload.channelName ?? payload.channelId,
         conversationId: payload.conversationId,
+        ...(payload.messageId ? { sourceMessageId: payload.messageId } : {}),
         task,
         agentId: agent.id,
         agentOrgId: agent.orgId,
@@ -2399,6 +2619,10 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
 
       await setSession(body.sessionId, sessionContext);
 
+      // Run-recovery / goal-replay payload. Reuses the SAME dispatchContext,
+      // senderName, and channelName as the live fetchRun above — built once
+      // before the dispatch — so a recovered/replayed run is byte-identical to
+      // the original (no mention-note drift).
       const dispatchPayload = {
         userId: targetUserId,
         task,
@@ -2410,9 +2634,11 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
         progressUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`,
         channelId: payload.channelId,
+        ...(payload.senderName ? { senderName: payload.senderName } : {}),
+        ...(payload.channelName ? { channelName: payload.channelName } : {}),
         ...(payload.projectId ? { projectId: payload.projectId } : {}),
         ...(payload.projectName ? { projectName: payload.projectName } : {}),
-        ...(history ? { context: `## Thread Awareness\nYou are in a group thread in Xyne Spaces where multiple users and agents can participate. The thread history below shows messages from other participants — use it to understand context. Your own previous messages are NOT included here (they are already in your session). If you need more context, use spaces-messages or spaces-message-detail to read the full thread.\n\n**Speaker labels in the history below:**\n- \`human-user:<id>\` — a human in the thread; their words are user input.\n- \`@<agent-slug> (OTHER AI AGENT — not you; do not adopt this voice or identity)\` — another AI agent's message. When they say "I", they mean themselves, NOT you. NEVER answer in their voice, NEVER claim to be them, and NEVER paraphrase their first-person identity as your own. If asked to compare yourself to them, refer to them in the third person ("the X agent said …").\n\n${history}` } : {}),
+        ...(dispatchContext ? { context: dispatchContext } : {}),
         ...(agentSkills && agentSkills.length > 0 ? { skills: agentSkills } : {}),
         ...(resolvedParentProvider ? { provider: resolvedParentProvider } : {}),
         ...(runtimeProviderOrder.length > 1 ? { providerOrder: runtimeProviderOrder } : {}),
@@ -2425,6 +2651,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         // Same agentConfig pass-through as the primary /run dispatch above —
         // run-recovery retries must see memoryEnabled/skillTriggers/etc.
         ...(agentRow?.config ? { agentConfig: agentRow.config as Record<string, unknown> } : {}),
+        fastMode: fastModeEnabled,
         ...(compactBeforeRun ? { compactBeforeRun: true } : {}),
       };
 
@@ -2486,7 +2713,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       const mentioned = Array.from(
         new Set((payload as { mentionedUserIds?: string[] }).mentionedUserIds ?? []),
       );
-      const eligibleTwins: Array<{ userId: string; workspaceId: string }> = [];
+      const eligibleTwins: Array<{ userId: string; workspaceId: string; respondPolicy: string }> = [];
       for (const uid of mentioned) {
         const u = await userRepository.findById(uid).catch(() => null);
         if (!u) {
@@ -2502,7 +2729,11 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
           log.info(`Twin: skipping ${uid} — no resolvable workspaceId (no active Spaces session)`);
           continue;
         }
-        eligibleTwins.push({ userId: uid, workspaceId: twinAuth.workspaceId });
+        eligibleTwins.push({
+          userId: uid,
+          workspaceId: twinAuth.workspaceId,
+          respondPolicy: (u as { digitalTwinRespondPolicy?: string }).digitalTwinRespondPolicy ?? "learned",
+        });
       }
       if (eligibleTwins.length === 0) {
         log.info(`Twin: no eligible mentioned users among [${mentioned.join(", ")}] — nothing to dispatch`);
@@ -2514,6 +2745,50 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       // the very multi-mention bug we're fixing.
       for (const twin of eligibleTwins) {
         try {
+          // Learned respond/ignore gate — only when the user opted in. Consults
+          // their captured patterns. FAIL-CLOSED: the twin posts ONLY on a usable
+          // gate "respond". A respond:false (at any confidence), or a null/errored
+          // gate, → stay silent. Better a wrong silence (recoverable via the
+          // should-have-replied feedback loop) than a wrong post AS the user.
+          if (twin.respondPolicy === "learned") {
+            const decision = await shouldTwinRespond(twin.userId, {
+              incoming: payload.content ?? "",
+              ...(payload.channelName ? { channelName: payload.channelName } : {}),
+              ...(payload.channelId ? { channelId: payload.channelId } : {}),
+              ...(payload.conversationId ? { conversationId: payload.conversationId } : {}),
+              ...(payload.senderName ? { senderName: payload.senderName } : {}),
+              ...(payload.userId ? { senderId: payload.userId } : {}),
+              ...(payload.messageId ? { sourceMessageId: payload.messageId } : {}),
+            }).catch(() => null);
+            if (!decision || !decision.respond) {
+              log.info(
+                `Twin: staying silent for ${twin.userId} — ${
+                  decision
+                    ? `gate ignore (conf ${decision.confidence.toFixed(2)}): ${decision.reason}`
+                    : "gate unavailable (fail-closed)"
+                }`,
+              );
+              // Record the silence so the daily pipeline can reconcile it: if the
+              // user replies themselves, it becomes a "should have responded"
+              // correction that feeds future gate decisions.
+              await recordTwinSilence(
+                twin.userId,
+                {
+                  sourceMessageId: payload.messageId,
+                  ...(payload.channelId ? { channelId: payload.channelId } : {}),
+                  ...(payload.channelName ? { channelName: payload.channelName } : {}),
+                  ...(payload.userId ? { senderId: payload.userId } : {}),
+                  occurredAt: payload.createdAt,
+                  triggerPreview: payload.cleanContent || payload.content,
+                },
+                decision ?? FAIL_CLOSED,
+              ).catch(() => {});
+              continue;
+            }
+            log.info(
+              `Twin: proceeding for ${twin.userId} — gate=${decision.source} respond=true conf=${decision.confidence.toFixed(2)}`,
+            );
+          }
           await dispatchRunForTarget(twin.userId, twin.workspaceId);
         } catch (err) {
           log.error(`Twin dispatch failed for user ${twin.userId} — other mentioned users unaffected`, {
@@ -2549,9 +2824,15 @@ interface StopReconcileSummary {
 async function reconcileStoppedRuns(conversationId: string, fallbackAgentSlug: string): Promise<StopReconcileSummary> {
   const runningRuns = await agentRunRepository.listRunningByConversation(conversationId);
   const agentSlugs = new Set<string>([fallbackAgentSlug, ...runningRuns.map((run) => run.agentSlug)]);
+  // DROP queued messages BEFORE cancelling. The cancelled run's failure result
+  // drains the queue in the same breath as the cancel, so a queued message
+  // would instantly re-start the work the user just stopped — /queue clear can
+  // never win that race (2026-07-16: customer-support resumed its stopped plan
+  // one second after 🛑 from a queued "\help"). /stop means halt everything in
+  // the thread; the user can resend a message to continue.
   let queued = 0;
   for (const agentSlug of agentSlugs) {
-    queued += await queueDepth(conversationId, agentSlug);
+    queued += await clearQueue(conversationId, agentSlug);
   }
 
   const summary: StopReconcileSummary = {
@@ -2655,6 +2936,7 @@ async function redispatchQueuedMessage(msg: QueuedMessage): Promise<void> {
       spacesAppToken: true,
       spacesAppId: true,
       spacesAppUserId: true,
+      config: true,
     },
   });
   if (!agentRow?.spacesAppToken || !agentRow.spacesAppId) {
@@ -2665,6 +2947,7 @@ async function redispatchQueuedMessage(msg: QueuedMessage): Promise<void> {
     ?? (await getWorkspaceIdForUser(msg.userId, "webhook").catch(() => null))
     ?? (agentRow.spacesAppUserId ? await getSpacesUserWorkspaceId(agentRow.spacesAppUserId).catch(() => null) : null);
   const traceId = createTraceId();
+  const fastModeEnabled = await resolveFastMode(msg.conversationId, msg.agentSlug, agentRow.config);
   const res = await fetch(runUrl, {
     method: "POST",
     headers: {
@@ -2683,6 +2966,7 @@ async function redispatchQueuedMessage(msg: QueuedMessage): Promise<void> {
       progressUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`,
       channelId: msg.channelId,
       ...(msg.context ? { context: msg.context } : {}),
+      fastMode: fastModeEnabled,
     }),
   });
   if (!res.ok) {
@@ -3004,6 +3288,7 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
         ttlSeconds: 3600,
       })
     : undefined;
+  const fastModeEnabled = await resolveFastMode(payload.conversationId, agentSlug, forwardedAgentConfig);
 
   // Resolve the agent's configured provider so an automation run uses the same
   // (premium) model a human chat would — not the platform default. Headless:
@@ -3016,7 +3301,10 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
   let providerOrder: Awaited<ReturnType<typeof resolveAgentProviderConfigs>>["providerOrder"] = [];
   let providerParent: string | undefined;
   try {
-    ({ providerConfigs, providerOrder, parent: providerParent } = await resolveAgentProviderConfigs(agent));
+    // headlessBulk: this handler serves automations, external webhooks, and
+    // the error-pipeline runner — the per-agent automationProvider downgrade
+    // applies here (never to human chat/mention dispatches).
+    ({ providerConfigs, providerOrder, parent: providerParent } = await resolveAgentProviderConfigs(agent, { headlessBulk: true }));
   } catch (provErr) {
     clog.error(`[webhook] AUTODBG ${sessionId}: resolveAgentProviderConfigs THREW: ${provErr instanceof Error ? provErr.stack || provErr.message : String(provErr)}`);
     await releaseAutomationSlot();
@@ -3044,6 +3332,7 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
         callbackUrl: clawCallbackUrl,
         ...(resultToken ? { sessionToken: resultToken } : {}),
         ...(forwardedAgentConfig ? { agentConfig: forwardedAgentConfig } : {}),
+        fastMode: fastModeEnabled,
         // Primary provider — the pod keys its model off `provider` (defaults to
         // "spaces"/kimi when unset), so without this every automation ran on
         // private-large regardless of the agent's configured provider.
@@ -3106,6 +3395,7 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
       ...(payload.workspaceId ? { workspaceId: payload.workspaceId } : {}),
       ...(resultToken ? { sessionToken: resultToken } : {}),
       ...(forwardedAgentConfig ? { agentConfig: forwardedAgentConfig } : {}),
+      fastMode: fastModeEnabled,
       ...(Object.keys(providerConfigs).length > 0 ? { providerConfigs } : {}),
       ...(providerOrder.length > 1 ? { providerOrder } : {}),
       // Primary provider must survive a recovery replay too — without it the
@@ -3162,17 +3452,16 @@ async function forwardResult(
   // The Spaces automation RUN_AGENT executor (backend/src/automations/steps/
   // run-agent.step.ts) reads the forwarded `result` field, runs JSON.parse on it
   // (parseAgentJson) and validates the parsed object against the step's
-  // outputSchema. A plain-markdown result fails JSON.parse → the step treats it
-  // as a validation failure and RE-RUNS the whole agent ("retrying claw agent
-  // (N/3)"); the retry then self-skips (already-reviewed) and that skip — which
-  // happens to be JSON — wins, so the real review is discarded. We can only fix
-  // claw, so for automation callbacks we send `result` as a JSON object string
-  // `{"result":"<text>"}` (mirrors claw's coerceAutomationResult). The executor
-  // unwraps it (step output.result = <text>), so downstream steps/threads still
-  // render plain text. Non-automation forward targets (Spaces auto-draft) keep
-  // the raw text so they don't suddenly receive escaped JSON.
+  // outputSchema. Plain-text/markdown results must be wrapped as
+  // `{"result":"<text>"}` so the executor still produces a parseable object and
+  // downstream steps see `output.result = <text>`. Structured JSON output is
+  // already a JSON object string, so wrapping it again double-encodes the
+  // payload and breaks the schema check. We therefore forward JSON object
+  // strings unchanged and only wrap plain text. Non-automation forward targets
+  // (Spaces auto-draft) keep the raw text so they don't suddenly receive
+  // escaped JSON.
   const isAutomationCallback = url.includes("/automations/claw-callback/");
-  const resultField = isAutomationCallback ? JSON.stringify({ result }) : result;
+  const resultField = isAutomationCallback ? coerceAutomationForwardResult(result) : result;
   try {
     const res = await fetch(url, {
       method: "POST",
@@ -3194,6 +3483,46 @@ async function forwardResult(
 }
 
 // ── POST /webhook/result — callback from xyne-claw (MUST be before /:agentSlug) ──
+
+/**
+ * Persist the callback's base64 attachments as chat_attachments rows on an
+ * assistant message (GCS upload + row per file) — mirrors what the run-stream
+ * (interactive chat) persist does. Without this, files produced by headless
+ * runs (automations, the error-pipeline doctor) exist only as Spaces posts
+ * and the claw chat / error-pipeline UIs have nothing to show.
+ * Best-effort per file: one bad attachment never blocks the rest.
+ */
+async function persistCallbackAttachments(
+  chatMessageId: string,
+  uploaderUserId: string,
+  attachments: Array<{ fileName: string; mimeType: string; data: string }> | undefined,
+): Promise<void> {
+  if (!attachments?.length) return;
+  const now = new Date();
+  const year = String(now.getUTCFullYear());
+  const month = String(now.getUTCMonth() + 1).padStart(2, "0");
+  for (const att of attachments) {
+    try {
+      const buffer = Buffer.from(att.data, "base64");
+      const safeName = att.fileName.replace(/[^\w.\-]+/g, "_").slice(0, 200);
+      const destPath = `chat-attachments/${uploaderUserId}/${year}/${month}/${Date.now()}-${crypto.randomUUID()}-${safeName}`;
+      await gcsService.uploadFile(buffer, destPath, att.mimeType);
+      await prisma.chatAttachment.create({
+        data: {
+          chatMessageId,
+          uploaderUserId,
+          storageProvider: "gcs",
+          url: destPath,
+          originalFilename: att.fileName,
+          mimeType: att.mimeType,
+          size: buffer.length,
+        },
+      });
+    } catch (err) {
+      clog.warn(`[webhook/result] failed to persist attachment ${att.fileName}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+}
 
 router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body as { sessionId?: string })?.sessionId), async (req: Request, res: Response) => {
   const payload = req.body as {
@@ -3228,6 +3557,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     pendingGoalSuggestion?: { condition: string; rationale: string };
     provider?: string;
     model?: string;
+    fastMode?: boolean;
     // Conversation identity claw ships on every callback (see
     // xyne-claw/src/routes/run.ts:1040-1046). Used by the conv-keyed
     // fallback below — needed because /goal refires (and other code paths
@@ -3242,6 +3572,10 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     // generic "I wasn't able to produce a response". See xyne-claw run.ts.
     emptyReason?: "provider_capacity";
     emptyReasonDetail?: string;
+    // Digital Twin mention flow: the structured delivery produced by the
+    // mandatory twin_deliver tool (react and/or reply, and where). Absent when
+    // the model never delivered — claw-auth then stays silent (fail-closed).
+    twinDelivery?: TwinDelivery;
   };
 
   const sessionId = payload.sessionId ?? "";
@@ -3249,6 +3583,51 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
   // Acknowledge immediately (per-run token already verified by
   // requireResultToken middleware).
   res.json({ success: true });
+
+  // Free the twin concurrency slot on ANY terminal callback (completed /
+  // failed / handoff). Cheap no-op ZREM for non-twin sessions; the limiter's
+  // TTL prune is the backstop when a callback never arrives.
+  if (sessionId) void releaseTwinSlot(sessionId);
+
+  if (payload.status === "handoff") {
+    const lastTurn = typeof (payload as { lastTurn?: unknown }).lastTurn === "number"
+      ? (payload as { lastTurn: number }).lastTurn
+      : undefined;
+    clog.info(`[webhook/result] handoff callback session=${sessionId} conversation=${payload.conversationId ?? ""} agent=${payload.agentSlug ?? ""} lastTurn=${lastTurn ?? "unknown"}`);
+    const handoff = await handleRunHandoff(sessionId).catch((err) => {
+      clog.warn(`[webhook/result] handoff re-dispatch failed session=${sessionId}:`, err instanceof Error ? err.message : String(err));
+      return null;
+    });
+    if (handoff) {
+      clog.info(`[webhook/result] handoff re-dispatched root=${handoff.rootSessionId} newSession=${handoff.newSessionId}`);
+    } else if (await hasActiveRunRecovery(sessionId).catch(() => false)) {
+      // A failed handoff dispatch schedules a recovery retry. A duplicate/stale
+      // handoff can also race a live continuation; both will produce a result later.
+      clog.info(`[webhook/result] handoff continuation remains active session=${sessionId}`);
+    } else {
+      clog.warn(`[webhook/result] handoff callback had no recovery state session=${sessionId}`);
+      // No new run was dispatched, so this handoff is terminal for an external
+      // caller. Notify it now instead of waiting for a result that cannot arrive.
+      let handoffCtx = await resolveSessionContext(sessionId, payload.conversationId, payload.agentSlug, payload.userId);
+      handoffCtx = await ensureSessionContextOrg(handoffCtx, sessionId);
+      let callback = handoffCtx?.externalResultCallback;
+      if (!handoffCtx && sessionId) {
+        const storedRun = await agentRunRepository.findBySessionId(sessionId).catch(() => null);
+        const metadata = storedRun?.metadata as { externalResultCallback?: ExternalResultCallbackConfig } | null | undefined;
+        callback = metadata?.externalResultCallback;
+      }
+      if (callback) {
+        await sendStoredExternalResultCallback(callback, {
+          sessionId,
+          status: "failed",
+          result: "",
+          error: "run_handoff_not_recoverable",
+        });
+        await deleteSession(sessionId);
+      }
+    }
+    return;
+  }
 
   // ── Mid-run message queue: this /result is the END of the active run for
   // this conversation. On EVERY exit path below (success, empty, failed, early
@@ -3284,6 +3663,30 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     resultAgentSlug = ctx?.agentSlug ?? resultAgentSlug;
     dedupReleaseConversationId = ctx?.conversationId ?? "";
     dedupReleaseAgentSlug = ctx?.agentSlug ?? "";
+
+  // ── Digital Twin mention flow (approval) ───────────────────────────────────
+  // The run delivered a STRUCTURED proposal via the mandatory twin_deliver tool.
+  // Route it straight to the approve/decline DM — NONE of the conversation-reply
+  // processing below (citations, memory-search footer, thread posting) runs, so
+  // the user never sees process narration or tool footers. Fail-CLOSED: if the
+  // model never delivered (no twinDelivery), the Twin wasn't confident enough to
+  // speak, so we stay silent rather than posting anything.
+  if (ctx?.responseMode === "approval" && payload.status === "completed") {
+    // action="ignore" is a CONFIDENT decision to post nothing. It is a valid
+    // delivery (isTwinDelivery returns true), so this MUST be checked BEFORE the
+    // dispatch below — otherwise it would wrongly open an approval DM. Drop it and
+    // end the session; no DM, no post, no pending feedback row.
+    if (payload.twinDelivery?.action === "ignore") {
+      clog.info(`[webhook/result] Digital Twin chose to ignore — dropping, no DM/post, session ${sessionId}`);
+      await deleteSession(sessionId);
+    } else if (isTwinDelivery(payload.twinDelivery)) {
+      await sendDigitalTwinApprovalDm(ctx, payload.twinDelivery, payload.attachments, sessionId);
+    } else {
+      clog.info(`[webhook/result] Digital Twin stayed silent — no twin_deliver delivery (fail-closed), session ${sessionId}`);
+      await deleteSession(sessionId);
+    }
+    return;
+  }
 
   // Digital Twin response-suffix. If the responding agent is `digital-twin`
   // and the *target user* (the person the Twin is acting as) has configured
@@ -3378,6 +3781,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       ...(payload.toolInvocations !== undefined ? { toolInvocations: payload.toolInvocations } : {}),
       ...(payload.tokenUsage ? { tokenUsage: payload.tokenUsage } : {}),
       ...(payload.latency ? { latency: payload.latency } : {}),
+      ...(payload.fastMode !== undefined ? { fastMode: payload.fastMode === true } : {}),
     }).catch(() => {});
   }
 
@@ -3399,6 +3803,9 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       clog.warn(`[webhook/result] Failed to process ${sessionId} lock contention in run recovery:`, err instanceof Error ? err.message : err);
       return null;
     });
+    let sessionLockRecovered = Boolean(
+      recoveryFailure && !recoveryFailure.exhausted && recoveryFailure.terminalDrop !== true,
+    );
     if (!recoveryFailure && ctx?.responseMode === "conversation" && ctx.conversationId && ctx.agentSlug) {
       const queuedMsg: QueuedMessage = {
         eventId: `lock:${sessionId || ctx.traceId || createTraceId()}`,
@@ -3417,9 +3824,29 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         ts: Date.now(),
       };
       const enq = await enqueueMessage(queuedMsg);
+      sessionLockRecovered = enq.enqueued || enq.deduped;
       clog.info(`[webhook/result] Session ${sessionId}: session locked; queued from session context enqueued=${enq.enqueued} deduped=${enq.deduped} full=${enq.full} pos=${enq.position}`);
     } else {
       clog.info(`[webhook/result] Session ${sessionId}: session locked; queued via run recovery without user-facing failure`);
+    }
+    if (!sessionLockRecovered) {
+      // Recovery was absent/exhausted and the FIFO did not accept the run, so
+      // this branch is terminal. Do not fail callbacks for deferred/requeued runs.
+      let callback = ctx?.externalResultCallback;
+      if (!ctx && sessionId) {
+        const storedRun = await agentRunRepository.findBySessionId(sessionId).catch(() => null);
+        const metadata = storedRun?.metadata as { externalResultCallback?: ExternalResultCallbackConfig } | null | undefined;
+        callback = metadata?.externalResultCallback;
+      }
+      if (callback) {
+        await sendStoredExternalResultCallback(callback, {
+          sessionId,
+          status: "failed",
+          result: "",
+          error: "session_locked",
+        });
+        await deleteSession(sessionId);
+      }
     }
     // Release OUR busy marker so it doesn't leak for BUSY_TTL_MS (20m) and
     // stall the queue — but do NOT drainNextQueued here: that would instantly
@@ -3442,6 +3869,44 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       clog.info(`[webhook/result] Session ${sessionId}: retry queued (${recoveryFailure.retriesUsed}/${recoveryFailure.maxRetries})`);
       return;
     }
+  }
+
+  // External API callbacks are interposed by /run: claw only ever calls this
+  // internal endpoint, and claw-auth performs the untrusted outbound delivery.
+  // Prefer Redis context, with AgentRun.metadata as a durable fallback.
+  let externalResultCallback = ctx?.externalResultCallback;
+  if (!ctx && sessionId) {
+    const storedRun = await agentRunRepository.findBySessionId(sessionId).catch(() => null);
+    const metadata = storedRun?.metadata as { externalResultCallback?: ExternalResultCallbackConfig } | null | undefined;
+    externalResultCallback = metadata?.externalResultCallback;
+  }
+  if (externalResultCallback) {
+    await deleteSession(sessionId);
+    await sendStoredExternalResultCallback(
+      externalResultCallback,
+      {
+        sessionId,
+        status: payload.status ?? "failed",
+        result: payload.result ?? "",
+        ...(payload.error ? { error: payload.error } : {}),
+      },
+    );
+    return;
+  }
+
+  // Slack runs are finalized above in the same ordering as external callbacks,
+  // then delivered to the originating thread instead of a Spaces conversation.
+  if (ctx?.slackDelivery) {
+    await deleteSession(sessionId);
+    await deliverSlackResult({
+      target: ctx.slackDelivery,
+      status: payload.status ?? "failed",
+      result: resultWithCitations,
+      ...(payload.attachments?.length ? { attachments: payload.attachments } : {}),
+    }).catch((err) => {
+      clog.warn(`[webhook/result] Slack delivery failed for session ${sessionId}: ${err instanceof Error ? err.message : String(err)}`);
+    });
+    return;
   }
 
   if (payload.status !== "completed") {
@@ -3674,6 +4139,15 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
   const log = createLogger("webhook/result", ctx.traceId ?? sessionId.slice(0, 8));
   log.info(`status=${payload.status}, resultLength=${resultWithCitations.length}`);
 
+  // The assistant transcript row must be owned by the RUN OWNER — the mentioned
+  // user for a twin USER_MENTIONED run — so it lines up with the AgentRun and
+  // the `user` ChatMessage (both persisted under targetUserId by run.ts). Using
+  // ctx.senderId here mis-tagged the reply to the SENDER: the owner then can't
+  // see their own twin reply (per-user read ACL filters it out) while the
+  // sender saw it in their history. Fall back to the responseMode-derived owner
+  // for sessions created before this field existed / non-twin flows.
+  const runOwnerId = ctx.targetUserId ?? (ctx.responseMode === "approval" ? ctx.mentionedUserId : ctx.senderId);
+
   // Live tap: tell v3 viewers the turn finished so they refetch the canonical
   // transcript (assistant text + paired tool calls) from Postgres. The assistant
   // ChatMessage save below is fire-and-forget, so the client refetches with a
@@ -3697,16 +4171,24 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
   // (suppressed at dispatch), so nothing to clean up.
   if (ctx.resultForwardUrl) {
     if (resultWithCitations.trim() && ctx.conversationId && ctx.agentSlug && ctx.agentOrgId) {
+      const parentId = await chatMessageRepository.latestMessageId(ctx.conversationId, ctx.agentSlug).catch(() => null);
       chatMessageRepository.create({
         conversationId: ctx.conversationId,
         agentSlug: ctx.agentSlug,
-        userId: ctx.senderId,
+        userId: runOwnerId,
         orgId: ctx.agentOrgId,
+        ...(parentId ? { parentId } : {}),
         role: "assistant",
         content: resultWithCitations,
         status: "completed",
         ...(payload.reasoning ? { reasoning: payload.reasoning } : {}),
-      }).catch((e) => log.warn("Failed to save assistant ChatMessage", { error: e instanceof Error ? e.message : String(e) }));
+      })
+        // Files the agent produced must land in chat_attachments too — the
+        // run-stream (interactive chat) path persists them, but this branch
+        // silently dropped them, so pipeline/automation runs never showed
+        // their reports (e.g. the error-pipeline RCA .html) as attachments.
+        .then((msg) => persistCallbackAttachments(msg.id, runOwnerId, payload.attachments))
+        .catch((e) => log.warn("Failed to save assistant ChatMessage", { error: e instanceof Error ? e.message : String(e) }));
     }
     // Automation reply: resolve the agent's plain `@Name` mentions into
     // clickable/notifying Spaces mentions before forwarding, so the
@@ -3776,16 +4258,25 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
 
   // Persist the assistant response as a ChatMessage (transcript) — fire-and-forget
   if (resultWithCitations.trim() && ctx.conversationId && ctx.agentSlug && ctx.agentOrgId) {
+    // Same chaining as the forward branch above — keeps the tree linear so a
+    // follow-up in chat resumes THIS run's pi session instead of branching.
+    const parentId = await chatMessageRepository.latestMessageId(ctx.conversationId, ctx.agentSlug).catch(() => null);
     chatMessageRepository.create({
       conversationId: ctx.conversationId,
       agentSlug: ctx.agentSlug,
-      userId: ctx.senderId,
+      userId: runOwnerId,
       orgId: ctx.agentOrgId,
+      ...(parentId ? { parentId } : {}),
       role: "assistant",
       content: resultWithCitations,
       status: "completed",
       ...(payload.reasoning ? { reasoning: payload.reasoning } : {}),
-    }).catch((e) => log.warn("Failed to save assistant ChatMessage", { error: e instanceof Error ? e.message : String(e) }));
+    })
+      // Same as the forward branch: keep agent-produced files on the
+      // transcript row (Spaces gets them as posted files, but the claw chat
+      // UI reads chat_attachments).
+      .then((msg) => persistCallbackAttachments(msg.id, runOwnerId, payload.attachments))
+      .catch((e) => log.warn("Failed to save assistant ChatMessage", { error: e instanceof Error ? e.message : String(e) }));
   }
 
   // Notify user if result is empty (but not if copilot has pendingResponses)
@@ -3953,19 +4444,21 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           workspaceId: ctx.workspaceId ?? "",
         }, token)) as { channelId: string };
 
-        const twinFlow = withSpacesAppId(buildTwinApprovalFlow(
-          combinedResult,
-          ctx.channelId,
-          ctx.conversationId,
-          ctx.mentionedUserId,
-          ctx.workspaceId ?? "",
-          ctx.senderName,
-          ctx.channelName,
-          ctx.task,
-          ctx.agentSlug,
-          dmResult.channelId,
-          CONFIG.spacesAppUrl,
-        ), ctx.spacesAppId);
+        const twinFlow = withSpacesAppId(buildTwinApprovalFlow({
+          delivery: { action: "reply", message: combinedResult },
+          ...(ctx.sourceMessageId ? { sourceMessageId: ctx.sourceMessageId } : {}),
+          targetChannelId: ctx.channelId,
+          targetConversationId: ctx.conversationId,
+          mentionedUserId: ctx.mentionedUserId,
+          workspaceId: ctx.workspaceId ?? "",
+          senderId: ctx.senderId,
+          senderName: ctx.senderName,
+          channelName: ctx.channelName,
+          task: ctx.task,
+          ...(ctx.agentSlug ? { agentSlug: ctx.agentSlug } : {}),
+          dmChannelId: dmResult.channelId,
+          spacesBaseUrl: CONFIG.spacesAppUrl,
+        }), ctx.spacesAppId);
 
         await spacesAppFetch("/chat/postMessage", {
           channelId: dmResult.channelId,
@@ -4052,8 +4545,8 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       // resultWithCitations branch is skipped — without this, EVERY reply from
       // such agents (e.g. xyne-spaces-architect) is invisible in the chat window
       // and its tool calls can't pair to an assistant row. Uses ctx.agentSlug +
-      // ctx.senderId to match the user-message rows so the per-agent scope and
-      // per-user ACL on read both line up.
+      // runOwnerId to match the user-message rows (also written under the run
+      // owner) so the per-agent scope and per-user ACL on read both line up.
       // `!resultWithCitations.trim()` guards against a double-save: the normal
       // save above already fires when result.text is non-empty, so only persist
       // here when it was empty (the actual Verify-Responses/copilot case).
@@ -4062,7 +4555,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         chatMessageRepository.create({
           conversationId: ctx.conversationId,
           agentSlug: ctx.agentSlug,
-          userId: ctx.senderId,
+          userId: runOwnerId,
           orgId: ctx.agentOrgId,
           role: "assistant",
           content: pendingReply,
@@ -4091,6 +4584,8 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
             userId: action["userId"] as string,
             signature: action["signature"] as string,
             agentSlug: ctx.agentSlug ?? "",
+            channelId: ctx.channelId,
+            conversationId: ctx.conversationId,
           }), ctx.spacesAppId);
 
           if (action["tool"] === "spaces-memory-create" && (action["params"] as Record<string, unknown>)?.["content"]) {
@@ -4123,10 +4618,12 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     }
 
     if (ctx.responseMode === "approval") {
-      // Digital Twin: everything goes through an approve/decline DM. Return
-      // immediately — don't post pendingQuestions/pendingActions/chain
-      // notifications to the originating thread.
-      await sendDigitalTwinApprovalDm(ctx, resultWithCitations, payload.attachments, sessionId);
+      // Digital Twin approval is handled by the early twin-delivery branch above
+      // (it short-circuits before any conversation processing). Reaching here
+      // means a completed approval run that produced no structured delivery —
+      // stay silent (fail-closed) rather than posting anything.
+      clog.warn(`[webhook/result] approval path reached post-processing with no delivery — staying silent, session ${sessionId}`);
+      await deleteSession(sessionId);
       return;
     } else {
       // ── Agent conversation mode: edit the progress placeholder in-place,
@@ -4500,6 +4997,8 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           userId: action["userId"] as string,
           signature: action["signature"] as string,
           agentSlug: ctx.agentSlug ?? "",
+          channelId: ctx.channelId,
+          conversationId: ctx.conversationId,
         }), ctx.spacesAppId);
 
         // Post in the same thread where the conversation happened

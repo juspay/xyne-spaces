@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { ReactNode, Ref } from "react";
 import { X } from "@phosphor-icons/react";
 
 interface SidePanelProps {
@@ -12,6 +12,9 @@ interface SidePanelProps {
   /** Action buttons rendered in the header, before the close button */
   actions?: ReactNode;
   width?: number;
+  /** Ref to the scrollable body — lets callers track/drive scroll position
+   *  (e.g. stick-to-bottom during streaming). */
+  bodyRef?: Ref<HTMLDivElement>;
   /**
    * When true, the panel renders as a floating card: pulled in from the edges
    * with rounded corners on all sides and a soft shadow. Default flush-edge
@@ -21,7 +24,7 @@ interface SidePanelProps {
   children: ReactNode;
 }
 
-export function SidePanel({ onClose, icon, title, badge, subtitle, footer, actions, width = 560, floating = false, children }: SidePanelProps) {
+export function SidePanel({ onClose, icon, title, badge, subtitle, footer, actions, width = 560, floating = false, bodyRef, children }: SidePanelProps) {
   return (
     <div
       data-id="side-panel"
@@ -69,6 +72,7 @@ export function SidePanel({ onClose, icon, title, badge, subtitle, footer, actio
       </div>
 
       <div
+        ref={bodyRef}
         data-id="side-panel-body"
         className={
           floating
@@ -82,8 +86,10 @@ export function SidePanel({ onClose, icon, title, badge, subtitle, footer, actio
       {footer && (
         <div
           data-id="side-panel-footer"
+          // `justify-end` + gap suit button rows; a full-width child (e.g. a
+          // chat composer) overrides it with `w-full`, so keep items stretched.
           className={`flex shrink-0 items-center justify-end gap-2 border-t border-xyne-border-subtle ${
-            floating ? "px-6 py-4" : "px-5 py-4"
+            floating ? "px-6 py-4" : "px-4 py-3"
           }`}
         >
           {footer}

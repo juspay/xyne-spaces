@@ -10,7 +10,7 @@ interface Props {
 
 const STEPS = ["Identity", "System Prompt", "Tools", "Skills", "Review"];
 const COLORS = ["#6366f1", "#8b5cf6", "#a855f7", "#ec4899", "#f43f5e", "#ef4444", "#f97316", "#eab308", "#22c55e", "#10b981", "#14b8a6", "#06b6d4", "#3b82f6"];
-const SUBAGENT_EMOJI: Record<string, string> = { spaces: "🔍", bitbucket: "🔀", grafana: "📊", deepwiki: "📚", context7: "📖", pgm: "📋", git: "🔧" };
+const SUBAGENT_EMOJI: Record<string, string> = { spaces: "🔍", bitbucket: "🔀", grafana: "📊", deepwiki: "📚", context7: "📖", git: "🔧" };
 
 function slugify(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40);
