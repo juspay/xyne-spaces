@@ -122,6 +122,9 @@ interface UseSearchMetricsOptions {
 }
 
 const BACKEND_RESULTS_LIMIT = 25;
+// Load-more uses a fixed-size window (constant `limit`, advancing `offset`). Vespa caps the
+// query offset at maxOffset (1000), so stop paginating before `offset` would cross it.
+const MAX_BACKEND_OFFSET = 1000;
 
 /**
  * Cap on user rows fetched for any Cmd+K user surface (plain-search USERS
@@ -341,6 +344,10 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
 
   // Search State
   const [searchResults, setSearchResults] = useState<DisplaySearchResult[]>([]);
+  // Whether the ALL-tab results should render as per-docType sections. Mirrors the
+  // backend's `grouped` flag (true when Vespa grouped by docType, false for a flat
+  // ranked list). Defaults true to preserve the sectioned ALL view.
+  const [isGrouped, setIsGrouped] = useState(true);
   const [isSearching, setIsSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
@@ -1143,6 +1150,9 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
                 presentationSummary: 'lean',
               });
 
+              // Honor the backend grouping decision: flat response => flat ALL view.
+              setIsGrouped(vespaResponse.grouped);
+
               // Merge local users only when no type filter AND no message-only mention is active
               // (a bare @user/#channel filter is message-only, so people shouldn't be merged in).
               if (typeFilter || hasMessageOnlyMention) {
@@ -1162,8 +1172,14 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
                 ];
                 totalCount = vespaResponse.totalCount + filteredLocalUsers.length;
               }
-              currentOffset = vespaResponse.limit;
-              hasMore = false;
+              currentOffset = vespaResponse.results.length;
+              // Paginate the ALL tab only in flat mode; grouped responses are capped
+              // per docType and can't be offset-paginated.
+              hasMore =
+                !vespaResponse.grouped &&
+                vespaResponse.results.length >= BACKEND_RESULTS_LIMIT &&
+                currentOffset < vespaResponse.totalCount &&
+                currentOffset + BACKEND_RESULTS_LIMIT <= MAX_BACKEND_OFFSET;
             } else {
               const currentSessionId = searchSessionId || '';
               const results = await searchService.vespaSearch({
@@ -1173,11 +1189,12 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
               });
               mergedResults = results.results;
               totalCount = results.totalCount;
-              currentOffset = results.limit;
+              currentOffset = results.results.length;
               hasMore =
                 results.results.length > 0 &&
                 results.results.length >= BACKEND_RESULTS_LIMIT &&
-                currentOffset < totalCount;
+                currentOffset < totalCount &&
+                currentOffset + BACKEND_RESULTS_LIMIT <= MAX_BACKEND_OFFSET;
             }
 
             setSearchResults(mergedResults);
@@ -1197,6 +1214,9 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         } catch (searchError) {
           setSearchError(searchError instanceof Error ? searchError.message : 'Search failed');
           setSearchResults([]);
+          // Reset to the default (sectioned) mode so a failed search doesn't render
+          // stale results in the previous grouped/flat mode.
+          setIsGrouped(true);
         } finally {
           setIsSearching(false);
           pendingSearchCountRef.current -= 1;
@@ -1363,8 +1383,12 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         const searchFilters: VespaSearchFilters = {
           query: searchText,
           apps: `${VespaApps.CHAT},${VespaApps.TICKET},${VespaApps.FILE},${VespaApps.MAIL}`,
+          // ALL-tab load-more only runs when the initial search was flat (grouped=false),
+          // so force a flat continuation; without this the multi-app query re-groups.
+          ...(activeTab === TabType.ALL && { groupBy: '' }),
           offset: currentOffset,
-          limit: currentOffset + pageSize,
+          // Fixed-size window: constant limit, advancing offset (standard pagination).
+          limit: pageSize,
           filterOnly: !searchText && !!hasFilters,
           includeBotMessages,
           onlyMyChannels,
@@ -1483,11 +1507,13 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         });
         setSearchResults(prev => [...prev, ...results.results]);
 
-        const newOffset = results.limit;
+        const newOffset = currentOffset + results.results.length;
         const hasMore =
           results.results.length > 0 &&
           results.results.length >= BACKEND_RESULTS_LIMIT &&
-          newOffset < results.totalCount;
+          newOffset < results.totalCount &&
+          // Stop before the next page's offset would exceed Vespa's maxOffset.
+          newOffset + BACKEND_RESULTS_LIMIT <= MAX_BACKEND_OFFSET;
 
         setPaginationState(prev => ({
           ...prev,
@@ -1626,6 +1652,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     onManualKeystroke: handleManualKeystroke,
 
     searchResults,
+    isGrouped,
     isSearching,
     searchError,
     isLoadingMore,
