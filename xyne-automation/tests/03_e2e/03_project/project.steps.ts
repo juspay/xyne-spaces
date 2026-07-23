@@ -83,6 +83,18 @@ export default class ProjectSteps {
       waitUntil: 'domcontentloaded',
       timeout: 60000,
     });
+
+    if (!setAsNewUser) {
+      // Existing-user scenarios intentionally skip AI onboarding. Seed that
+      // state before authentication so the destination page never mounts the
+      // overlay and the shared skip step does not need to reload the app.
+      await page.evaluate(() => {
+        localStorage.setItem('xyne-ai-onboarding-completed', 'true');
+        localStorage.removeItem('xyne-ai-onboarding-active');
+        sessionStorage.removeItem('xyne-ai-onboarding-pending');
+      });
+    }
+
     await page.getByRole('button', { name: 'Sign in with Google' }).click();
 
     let response: Awaited<ReturnType<typeof page.waitForResponse>>;

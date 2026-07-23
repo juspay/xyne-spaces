@@ -9,30 +9,22 @@ export default class E2eCommonSteps {
   public async ensureNotLoggedIn(): Promise<void> {
     const page = testContext.activePage;
     const context = testContext.currentSession.context;
-    const authUrl = `${config.dashboard.baseUrl}/auth`;
 
     testContext.lastResponse = null;
 
     await context.clearCookies();
-    try {
-      await page.goto(authUrl, {
-        waitUntil: 'domcontentloaded',
-        timeout: 60000, // Increased timeout to 60s
+
+    // Every scenario starts with a fresh BrowserContext, so about:blank cannot
+    // contain auth state. Avoid loading the full auth page here; the following
+    // login or protected-route step performs the only navigation the scenario
+    // needs. Relogin flows can already access the dashboard origin and must also
+    // clear its client-side state.
+    if (page.url().startsWith(config.dashboard.baseUrl)) {
+      await page.evaluate(() => {
+        localStorage.clear();
+        sessionStorage.clear();
       });
-    } catch (error) {
-      if (!(error instanceof Error) || !error.message.includes('ERR_ABORTED')) {
-        throw error;
-      }
-
-      await page.waitForURL(`**/auth**`);
     }
-
-    await page.waitForLoadState('domcontentloaded');
-
-    await page.evaluate(() => {
-      localStorage.clear();
-      sessionStorage.clear();
-    });
   }
 
   @Step('verifying user is redirected to <urlPath>')

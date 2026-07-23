@@ -263,30 +263,17 @@ async function clearAuthState(): Promise<void> {
   const context = testContext.currentSession.context;
 
   await context.clearCookies();
-  try {
-    await page.goto(`${config.dashboard.baseUrl}/auth`, {
-      waitUntil: 'domcontentloaded',
-      timeout: 60000, // Increased timeout to 60s for baseline fixture setup
-    });
-  } catch (error) {
-    if (
-      !(error instanceof Error) ||
-      (!error.message.includes('ERR_ABORTED') &&
-        !error.message.includes('interrupted by another navigation'))
-    ) {
-      throw error;
-    }
-    // Auth page redirected, wait for redirect to complete
-    await page.waitForLoadState('domcontentloaded');
-  }
-  try {
-    await page.evaluate(() => {
-      localStorage.clear();
-      sessionStorage.clear();
-    });
-  } catch {
-    // localStorage may be inaccessible on about:blank or cross-origin pages — safe to skip
-  }
+  // Keep the page on a script-free resource while switching fixture users.
+  // This establishes the dashboard origin for localStorage without allowing a
+  // pending app redirect to race the next login.
+  await page.goto(`${config.dashboard.baseUrl}/version.json`, {
+    waitUntil: 'domcontentloaded',
+    timeout: 30000,
+  });
+  await page.evaluate(() => {
+    localStorage.clear();
+    sessionStorage.clear();
+  });
 }
 
 async function loginAsUser(userAlias: string): Promise<StoredUser> {
@@ -296,17 +283,15 @@ async function loginAsUser(userAlias: string): Promise<StoredUser> {
   const params = new URLSearchParams({ email: catalogUser.email, setAsNewUser: 'false' });
 
   const page = testContext.activePage;
-  const responsePromise = page.waitForResponse(
-    (r) => r.url().includes('/test/auth/login') && r.request().method() === 'POST'
+  const response = await page.request.post(
+    `${config.dashboard.baseUrl}/api/test/auth/login?${params.toString()}`,
+    { data: {} }
   );
-
-  await page.goto(`${config.dashboard.baseUrl}/auth?${params.toString()}`, {
-    waitUntil: 'domcontentloaded',
-    timeout: 60000, // Increased timeout to 60s for baseline fixture setup
-  });
-  await page.getByRole('button', { name: 'Sign in with Google' }).click();
-
-  const response = await responsePromise;
+  assert.equal(
+    response.ok(),
+    true,
+    `Expected baseline test login for ${userAlias} to succeed, got status ${response.status()}.`
+  );
   const body = (await response.json().catch(() => null)) as AuthResponseBody | null;
   const user = body?.user;
 
@@ -315,6 +300,17 @@ async function loginAsUser(userAlias: string): Promise<StoredUser> {
   assertString(user.email, 'user.email');
   assertString(user.name, 'user.name');
   assertString(user.workspaceId, 'user.workspaceId');
+
+  await page.evaluate(
+    ({ userId, userEmail }) => {
+      localStorage.setItem('user_id', userId);
+      localStorage.setItem('user_email', userEmail);
+      localStorage.setItem('xyne-ai-onboarding-completed', 'true');
+      localStorage.removeItem('xyne-ai-onboarding-active');
+      sessionStorage.removeItem('xyne-ai-onboarding-pending');
+    },
+    { userId: user.id, userEmail: user.email }
+  );
 
   return {
     alias: catalogUser.alias,
@@ -371,13 +367,21 @@ async function addMemberToChannel(_adminUser: StoredUser, user: StoredUser): Pro
 // member's own session -- the owner's view looks fine either way.
 async function isBaselineChannelVisibleToMember(
   channelName: string,
+  workspaceId: string,
   timeoutMs: number
 ): Promise<boolean> {
   const page = testContext.activePage;
 
-  await page.locator("[data-testid='nav-chat']").first().click();
+  // Direct fixture login intentionally leaves the page on /version.json to
+  // avoid loading the app for users that are only needed by API setup. Load the
+  // authenticated member's chat route before checking their sidebar.
+  await page.goto(`${config.dashboard.baseUrl}/${workspaceId}/chat/dir`, {
+    waitUntil: 'domcontentloaded',
+    timeout: 60000,
+  });
+
   const channelList = page.locator("[data-testid='channel-list']").first();
-  await channelList.waitFor({ state: 'visible' });
+  await channelList.waitFor({ state: 'visible', timeout: 60000 });
 
   try {
     await channelList
@@ -414,8 +418,18 @@ async function findMembersMissingChannel(
 ): Promise<StoredUser[]> {
   const missing: StoredUser[] = [];
   for (const member of members) {
-    await loginAsUser(member.alias);
-    if (!(await isBaselineChannelVisibleToMember(channelName, timeoutMs))) {
+    const authenticatedMember = await loginAsUser(member.alias);
+    assertString(
+      authenticatedMember.workspaceId,
+      `workspaceId for baseline member ${authenticatedMember.alias}`
+    );
+    if (
+      !(await isBaselineChannelVisibleToMember(
+        channelName,
+        authenticatedMember.workspaceId,
+        timeoutMs
+      ))
+    ) {
       missing.push(member);
     }
   }

@@ -19,7 +19,13 @@ RUN cd ../icons && npm run build
 
 # --- dashboard: deps then source ---
 COPY dashboard/package*.json ./
-RUN --mount=type=cache,target=/root/.npm npm ci
+# The test image already builds ../shared above. Remove only the dashboard's
+# workspace lifecycle hooks from the copied manifest so npm still runs package
+# install scripts (for native/binary dependencies) without rebuilding shared or
+# attempting to install Husky inside an image that has no .git directory.
+RUN --mount=type=cache,target=/root/.npm \
+    npm pkg delete scripts.postinstall scripts.prepare \
+    && npm ci
 COPY dashboard .
 
 COPY package.json /package.json
@@ -29,4 +35,10 @@ COPY package.json /package.json
 # test image. docker-compose.test.yml also layers it at runtime.
 COPY dashboard/.env.test .env
 
-CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
+# Compile the dashboard while building the image instead of making the first
+# Playwright navigation cold-transform the entire Vite module graph. This layer
+# remains cached for automation-only changes, and preview serves only after the
+# complete test bundle is available.
+RUN NODE_OPTIONS=--max-old-space-size=8192 ./node_modules/.bin/vite build --mode test
+
+CMD ["npm", "run", "preview", "--", "--host", "0.0.0.0", "--port", "5173"]

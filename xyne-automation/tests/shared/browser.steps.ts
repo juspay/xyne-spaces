@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { expect } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 import { Step } from 'gauge-ts';
 import { config } from '@/config';
 import { testContext } from '@/tests/shared/runtime/test-context';
@@ -46,6 +46,29 @@ function resolveStoredText(text: unknown): string {
 
     return String(value);
   });
+}
+
+const SIDEBAR_NAVIGATION_TIMEOUT_MS = 10000;
+
+async function getSidebarDestinationPath(page: Page, item: Locator): Promise<string> {
+  const href = await item.getAttribute('href');
+  assert.ok(href, 'Expected sidebar navigation item to have an href.');
+
+  return new URL(href, page.url()).pathname;
+}
+
+function isAtPath(page: Page, expectedPath: string): boolean {
+  return new URL(page.url()).pathname === expectedPath;
+}
+
+async function waitForPath(page: Page, expectedPath: string): Promise<void> {
+  await page.waitForURL((url) => url.pathname === expectedPath, {
+    timeout: SIDEBAR_NAVIGATION_TIMEOUT_MS,
+  });
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 export default class BrowserSteps {
@@ -207,40 +230,51 @@ export default class BrowserSteps {
   public async navigateViaSidebar(itemId: string): Promise<void> {
     const page = testContext.activePage;
     // Wait for the sidebar to be mounted before deciding toolbar vs overflow.
-    await page.locator("[data-testid='nav-more']").first().waitFor({ state: 'visible' });
+    const moreTrigger = page.locator("[data-testid='nav-more']").first();
+    await moreTrigger.waitFor({ state: 'visible' });
 
-    const clickNavItem = async (): Promise<void> => {
-      const toolbarItem = page.locator(`[data-testid='nav-${itemId}']`).first();
-      if (await toolbarItem.isVisible()) {
-        await toolbarItem.click();
+    const toolbarItem = page.locator(`[data-testid='nav-${itemId}']`).first();
+    if (await toolbarItem.isVisible()) {
+      const expectedPath = await getSidebarDestinationPath(page, toolbarItem);
+      await toolbarItem.click();
+      await waitForPath(page, expectedPath);
+      return;
+    }
+
+    // Item is not in the toolbar — open the "More" overflow menu and click it there.
+    await moreTrigger.click();
+    let moreItem = page.locator(`[data-testid='more-${itemId}']`).first();
+    await moreItem.waitFor({ state: 'visible' });
+    const expectedPath = await getSidebarDestinationPath(page, moreItem);
+
+    try {
+      await moreItem.click({ timeout: 2000 });
+      await waitForPath(page, expectedPath);
+      return;
+    } catch (initialError) {
+      // A click can close the Radix popover before Playwright dispatches the final
+      // click event. Treat it as successful only if the URL actually changed.
+      if (isAtPath(page, expectedPath)) {
         return;
       }
 
-      // Item is not in the toolbar — open the "More" overflow menu and click it there.
-      await page.locator("[data-testid='nav-more']").first().click();
-      const moreItem = page.locator(`[data-testid='more-${itemId}']`).first();
+      // The popover item may have been unmounted by the failed click. Reopen the
+      // menu if necessary and resolve a fresh locator before the forced retry.
+      if (!(await moreItem.isVisible())) {
+        await moreTrigger.click();
+      }
+
+      moreItem = page.locator(`[data-testid='more-${itemId}']`).first();
       await moreItem.waitFor({ state: 'visible' });
-      try {
-        await moreItem.click({ timeout: 5000 });
-      } catch (_error) {
-        // Only retry if the item is still visible — the first click may have
-        // landed and closed the popover already.
-        if (await moreItem.isVisible()) {
-          await moreItem.click({ force: true, timeout: 5000 });
-        }
-      }
-    };
 
-    // Retry the click until the route changes (recovers a silently-missed click); an
-    // unchanged URL means we're already on the target page, so don't fail.
-    const urlBefore = page.url();
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      await clickNavItem();
       try {
-        await page.waitForURL((url) => url.href !== urlBefore, { timeout: 2000 });
-        return;
-      } catch (_error) {
-        // already there or missed click — retry
+        await moreItem.click({ force: true, timeout: 5000 });
+        await waitForPath(page, expectedPath);
+      } catch (retryError) {
+        throw new Error(
+          `Sidebar navigation to "${itemId}" did not reach "${expectedPath}". ` +
+            `Initial attempt: ${errorMessage(initialError)} Retry: ${errorMessage(retryError)}`
+        );
       }
     }
   }
@@ -1161,14 +1195,23 @@ export default class BrowserSteps {
   public async skipXyneAIOnboarding(): Promise<void> {
     const page = testContext.activePage;
 
-    await page.evaluate(() => {
+    const stateChanged = await page.evaluate(() => {
+      const stateChanged =
+        localStorage.getItem('xyne-ai-onboarding-completed') !== 'true' ||
+        localStorage.getItem('xyne-ai-onboarding-active') !== null ||
+        sessionStorage.getItem('xyne-ai-onboarding-pending') !== null;
+
       // Mark AI onboarding as completed
       localStorage.setItem('xyne-ai-onboarding-completed', 'true');
       // Clear active state
       localStorage.removeItem('xyne-ai-onboarding-active');
       // Clear pending flag
       sessionStorage.removeItem('xyne-ai-onboarding-pending');
+
+      return stateChanged;
     });
+
+    if (!stateChanged) return;
 
     // Refresh to apply changes - use domcontentloaded for faster reload
     await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });

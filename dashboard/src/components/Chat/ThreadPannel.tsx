@@ -983,6 +983,7 @@ export const ThreadMessages = ({
                   <button
                     className='flex items-center justify-center p-[8px] rounded-[8px] size-[28px] hover:bg-accent transition-colors text-foreground shrink-0'
                     title='More'
+                    data-testid='thread-more-options-button'
                   >
                     <ThreeDotsMenuVertical size={16} className='opacity-60' />
                   </button>
@@ -1290,6 +1291,7 @@ export const ThreadMessages = ({
                       <button
                         className='flex items-center justify-center p-[8px] rounded-[8px] size-[28px] hover:bg-accent transition-colors text-foreground shrink-0'
                         title='More'
+                        data-testid='thread-more-options-button'
                       >
                         <ThreeDotsMenuVertical size={16} className='opacity-60' />
                       </button>

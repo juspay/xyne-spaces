@@ -14,6 +14,7 @@ interface DockerOpts {
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape sequence stripping
 const ANSI_REGEX = /\x1B\[[0-9;]*[A-Za-z]/g;
+const MAX_CAPTURED_OUTPUT_CHARS = 64 * 1024;
 
 function composeArgs(opts: DockerOpts): string[] {
   return [
@@ -33,6 +34,7 @@ function exec(
 ): Promise<Omit<StepEntry, 'id' | 'title'>> {
   const startTime = Date.now();
   let logStream: fs.WriteStream | null = null;
+  let recentOutput = '';
 
   if (opts.logFile) {
     const dir = path.dirname(opts.logFile);
@@ -50,8 +52,10 @@ function exec(
 
     const handleData = (data: Buffer) => {
       const str = data.toString();
+      const cleanOutput = str.replace(ANSI_REGEX, '');
+      recentOutput = `${recentOutput}${cleanOutput}`.slice(-MAX_CAPTURED_OUTPUT_CHARS);
       renderer.stepOutput(str);
-      if (logStream) logStream.write(str.replace(ANSI_REGEX, ''));
+      if (logStream) logStream.write(cleanOutput);
     };
 
     child.stdout?.on('data', handleData);
@@ -59,10 +63,12 @@ function exec(
 
     child.on('close', (code) => {
       logStream?.end();
+      const errorOutput = recentOutput.trim();
       resolve({
         status: code === 0 ? 'passed' : 'failed',
         duration: Date.now() - startTime,
         error: code !== 0 ? `Exit code ${code}` : undefined,
+        diagnosticOutput: code !== 0 && errorOutput ? errorOutput : undefined,
       });
     });
 
