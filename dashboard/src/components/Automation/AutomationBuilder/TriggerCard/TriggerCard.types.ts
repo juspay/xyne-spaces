@@ -14,4 +14,5 @@ export interface TriggerCardProps {
   onConfigChange: (config: Record<string, unknown>) => void;
   issues?: ValidationIssue[];
   view?: 'event' | 'condition';
+  onFormFieldNamesResolved?: (map: Map<string, string>) => void;
 }

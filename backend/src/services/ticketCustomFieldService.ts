@@ -520,10 +520,13 @@ const emitCustomFieldWriteSideEffects = async (
       const valueChanged =
         !field.hadPreviousValue || !customFieldValuesEqual(previousRaw, field.newActualValue);
       if (valueChanged) {
-        formFieldChanges[field.fieldId] = {
+        const changeEntry = {
           previousValue: toTicketChangeValue(previousRaw ?? null),
           newValue: toTicketChangeValue(field.newActualValue),
         };
+        formFieldChanges[field.fieldId] = changeEntry;
+        formFieldChanges[field.fieldName] = changeEntry;
+        formFieldChanges[field.fieldName.toLowerCase()] = changeEntry;
       }
     }
 

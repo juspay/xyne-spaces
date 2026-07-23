@@ -248,7 +248,7 @@ function ValueOperand({
           entityKind={entityKind}
         />
       </div>
-      <UseVariableButton sources={variableSources} onPick={onChange} />
+      <UseVariableButton sources={variableSources} onPick={onChange} modal={true} />
     </div>
   );
 }
@@ -341,6 +341,7 @@ function VariableField({ value, sources, onChange }: VariableFieldProps): React.
       align='start'
       side='bottom'
       sideOffset={4}
+      modal={true}
       className='rounded-xl p-0 overflow-hidden'
       trigger={
         <button

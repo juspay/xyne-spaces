@@ -73,11 +73,13 @@ export function UseVariableButton({
   onPick,
   targetEntityKind,
   targetLeafType,
+  modal = false,
 }: {
   sources: VariablePickerSource[];
   onPick: (reference: string) => void;
   targetEntityKind?: string | null;
   targetLeafType?: string | null;
+  modal?: boolean;
 }): React.ReactElement {
   const [open, setOpen] = useState(false);
 
@@ -119,6 +121,7 @@ export function UseVariableButton({
       align='end'
       side='bottom'
       sideOffset={4}
+      modal={modal}
       className='rounded-xl p-0 overflow-hidden'
       trigger={triggerButton}
     >
