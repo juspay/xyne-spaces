@@ -20,14 +20,14 @@ export function useScreenRecorder(
   const unsubscribeRef = useRef<(() => void) | null>(null);
 
   const finalizeRecording = useCallback(
-    async (filePath: string): Promise<void> => {
+    async (filePath: string, recordingToken: string): Promise<void> => {
       const electronAPI = window.electronAPI;
       if (!electronAPI?.readErrorReportRecordingFile) {
         return;
       }
 
       try {
-        const blob = await electronAPI.readErrorReportRecordingFile(filePath);
+        const blob = await electronAPI.readErrorReportRecordingFile(recordingToken);
         const file = new File([blob], 'screen-recording.webm', { type: 'video/webm' });
 
         onRecordingComplete(file, filePath);
@@ -87,7 +87,7 @@ export function useScreenRecorder(
 
     electronAPI
       .stopErrorReportRecording()
-      .then(({ filePath }) => finalizeRecording(filePath))
+      .then(({ filePath, recordingToken }) => finalizeRecording(filePath, recordingToken))
       .catch((err: unknown) => {
         toast.error('Failed to stop recording', {
           description: err instanceof Error ? err.message : 'Please try again.',

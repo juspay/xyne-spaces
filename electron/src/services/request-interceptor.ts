@@ -136,11 +136,110 @@ export function setupXyneSpacesInterceptor(): void {
 }
 
 /**
+ * XYNE-16859 Issue 24: deny screen/microphone capture web APIs
+ * (`getUserMedia`, `getDisplayMedia`) for any webContents that is not the
+ * top-level main application window. Without this, an XSS'd `<webview>` or
+ * browser panel could bypass our error-report:* IPC gate entirely by calling
+ * `navigator.mediaDevices.getUserMedia` / `getDisplayMedia` directly, since
+ * macOS's app-level Screen-Recording + Microphone TCC grants would otherwise
+ * auto-grant the child web-contents silently.
+ *
+ * Applied to every session the app uses. `display-capture` is also handled by
+ * `setDisplayMediaRequestHandler` further down (in-app picker for calls); the
+ * permission handler is the belt to that suspenders — the picker still shows
+ * for the main window, embedded contents can't request at all.
+ */
+const RESTRICTED_MEDIA_PERMISSIONS = new Set(['media', 'display-capture', 'mediaKeySystem']);
+function isTopLevelMainWindow(webContents: Electron.WebContents | undefined): boolean {
+  if (!webContents) return false;
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  return webContents === mainWindow.webContents;
+}
+function installMediaPermissionGuard(targetSession: Electron.Session, label: string): void {
+  targetSession.setPermissionRequestHandler((webContents, permission, callback) => {
+    if (RESTRICTED_MEDIA_PERMISSIONS.has(permission)) {
+      const allowed = isTopLevelMainWindow(webContents);
+      if (!allowed) {
+        Logger.warn(
+          `[permissions:${label}] denied ${permission} for non-main webContents (url=${webContents?.getURL() ?? 'n/a'})`,
+        );
+      }
+      callback(allowed);
+      return;
+    }
+    callback(true);
+  });
+  targetSession.setPermissionCheckHandler((webContents, permission) => {
+    if (RESTRICTED_MEDIA_PERMISSIONS.has(permission)) {
+      return isTopLevelMainWindow(webContents ?? undefined);
+    }
+    return true;
+  });
+}
+function setupMediaPermissionGuard(): void {
+  installMediaPermissionGuard(session.defaultSession, 'default');
+  installMediaPermissionGuard(session.fromPartition('persist:xyne-spaces'), 'xyne-spaces');
+  installMediaPermissionGuard(session.fromPartition('persist:browser-tabs'), 'browser-tabs');
+  app.on('session-created', (createdSession) => {
+    installMediaPermissionGuard(createdSession, 'dynamic');
+  });
+}
+
+function installFrontendCsp(): void {
+  const xyneHosts = 'https://*.xyne.juspay.net';
+  const xyneWs = 'wss://*.xyne.juspay.net';
+  const googleApis = 'https://apis.google.com https://accounts.google.com';
+  const googleFontsCss = 'https://fonts.googleapis.com';
+  const googleFontsFiles = 'https://fonts.gstatic.com';
+  const cspDirectives = [
+    `default-src 'self' ${xyneHosts}`,
+    `script-src 'self' ${xyneHosts} ${googleApis}`,
+    `style-src 'self' 'unsafe-inline' ${xyneHosts} ${googleFontsCss}`,
+    `img-src 'self' data: blob: https:`,
+    `media-src 'self' blob: ${xyneHosts}`,
+    `connect-src 'self' ${xyneHosts} ${xyneWs} https://o4507796893925376.ingest.us.sentry.io https://accounts.google.com https://*.googleapis.com`,
+    `font-src 'self' data: ${xyneHosts} ${googleFontsFiles}`,
+    `frame-src 'self' blob: ${xyneHosts} https://www.youtube.com https://accounts.google.com https://docs.google.com`,
+    `worker-src 'self' blob:`,
+    `object-src 'none'`,
+    `base-uri 'none'`,
+    `form-action 'self' ${xyneHosts}`,
+    `frame-ancestors 'none'`,
+  ].join('; ');
+
+  const cspTargets = [
+    config.FRONTEND_URL,
+    config.MTLS_FRONTEND_URL,
+  ]
+    .filter((url): url is string => typeof url === 'string' && url.length > 0)
+    .map((url) => `${url}/*`);
+
+  if (cspTargets.length === 0) return;
+
+  session.defaultSession.webRequest.onHeadersReceived(
+    { urls: cspTargets },
+    (details, callback) => {
+      const headers: Record<string, string[]> = { ...(details.responseHeaders ?? {}) };
+      // Strip any weaker CSP the backend sent (case-insensitive) so ours wins.
+      for (const key of Object.keys(headers)) {
+        if (key.toLowerCase() === 'content-security-policy') {
+          delete headers[key];
+        }
+      }
+      headers['Content-Security-Policy'] = [cspDirectives];
+      callback({ responseHeaders: headers });
+    },
+  );
+}
+
+/**
  * Sets up request and response interception
  */
 export function setupRequestInterceptor(): void {
   // Set up download handler first to prevent "Save As" dialog issues
   setupDownloadHandler();
+  setupMediaPermissionGuard();
+  installFrontendCsp();
   
   session.defaultSession.webRequest.onBeforeSendHeaders(
     { urls: [
