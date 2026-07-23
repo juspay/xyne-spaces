@@ -16,7 +16,6 @@ const UploadFilesBodySchema = z.object({
   markdownText: z.string().optional(),
   metadata: z.string().optional(), // JSON-encoded string
   conversationId: z.string().trim().optional(),
-  userId: z.string().min(1, 'User ID is required').trim(),
 }).refine(
   data => !!data.channelId || !!data.channelName || !!data.conversationId,
   { message: 'Either channelId, channelName, or conversationId is required', path: ['channelId'] }
@@ -36,7 +35,7 @@ export class FilesController {
   getFileInfo = async (req: Request, res: Response): Promise<void> => {
     try {
       const { attachmentId } = req.params;
-      const workspaceId = req.body.workspaceId as string | undefined;
+      const workspaceId = req.user?.workspaceId;
 
       const attachment = await this.messageAttachmentRepository.findById(attachmentId);
       if (!attachment) {
@@ -73,7 +72,7 @@ export class FilesController {
   downloadFile = async (req: Request, res: Response): Promise<void> => {
     try {
       const { attachmentId } = req.params;
-      const workspaceId = req.body.workspaceId as string | undefined;
+      const workspaceId = req.user?.workspaceId;
 
       const attachment = await this.messageAttachmentRepository.findById(attachmentId);
       if (!attachment) {
@@ -131,7 +130,8 @@ export class FilesController {
         return;
       }
 
-      const { channelId, channelName, text, markdownText, metadata, conversationId, userId } = bodyResult.data;
+      const { channelId, channelName, text, markdownText, metadata, conversationId } = bodyResult.data;
+      const userId = req.user!.id; // bot's userId from the verified app token
 
       // Resolve channelId from channelName or conversationId if not provided
       const resolvedChannelId = await resolveChannelId(channelId, conversationId, channelName);

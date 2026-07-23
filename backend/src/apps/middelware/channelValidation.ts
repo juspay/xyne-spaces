@@ -146,7 +146,8 @@ export async function validateChannelIdsAccess(
 
 /**
  * Middleware to validate channel access for GET requests
- * Reads channelId and conversationId from query params, userId from body
+ * Reads channelId and conversationId from query params, userId from the
+ * authenticated app user (req.user, set by authenticateApp)
  */
 export async function validateChannelAccessForGet(
   req: Request,
@@ -157,7 +158,7 @@ export async function validateChannelAccessForGet(
     const channelId = req.query.channelId as string | undefined;
     const channelName = req.query.channelName as string | undefined;
     const conversationId = req.query.conversationId as string | undefined;
-    const userId = req.body.userId;
+    const userId = req.user?.id;
 
     const validationResult = ChannelValidationSchema.safeParse({
       channelId,
@@ -193,7 +194,8 @@ export async function validateChannelAccessForGet(
 
 /**
  * Middleware to validate channel access for POST requests
- * Reads channelId, conversationId, and userId from body
+ * Reads channelId and conversationId from body, userId from the
+ * authenticated app user (req.user, set by authenticateApp)
  */
 export async function validateChannelAccessForPost(
   req: Request,
@@ -204,7 +206,7 @@ export async function validateChannelAccessForPost(
     const channelId = req.body.channelId;
     const channelName = req.body.channelName;
     const conversationId = req.body.conversationId;
-    const userId = req.body.userId ?? req.user?.id;
+    const userId = req.user?.id;
 
     const validationResult = ChannelValidationSchema.safeParse({
       channelId,
