@@ -2141,6 +2141,7 @@ model Stage {
   updatedAt            DateTime?    @updatedAt
   defaultTicketStatus     TicketStatus    @default(IN_PROGRESS)  // Deprecated - use defaultTicketStatusV2
   defaultTicketStatusV2   TicketStatusV2 @default(STARTED)
+  requestApprovalOnEntry  Boolean?       // NULL treated as false in code; auto-create approval request when a ticket enters the PREVIOUS stage (linear/DEFAULT boards only)
 
   // Relations
   board           Board            @relation(fields: [boardId], references: [id])
@@ -2175,6 +2176,7 @@ model StageTransition {
   formId                      String?
   requiresApproval            Boolean?      // NULL treated as false in code
   bypassApprovalForAutomation Boolean?      // NULL treated as false in code
+  requestApprovalOnEntry      Boolean?      // NULL treated as false in code; auto-create approval request when ticket enters the fromStage (single-outgoing edges only)
   visitSlaMode                VisitSlaMode? // NULL treated as STAGE_DEFAULT in code
   fixedEtaHours               Int?
   onReenter                   ReenterMode?  // NULL treated as RESET in code

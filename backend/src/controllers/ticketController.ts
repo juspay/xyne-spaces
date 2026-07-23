@@ -42,6 +42,7 @@ import { ticketSchema, fileSchema, SubApp } from '@/vespa/src/types';
 import { isSupportedMimeType } from '@/services/fileProcessor';
 import { logger } from '@/utils/logger';
 import { messageMetadataService } from '@/services/messageMetadataService';
+import { maybeCreateEntryApprovalRequest } from '@/services/stageTransition/stageEntryApproval';
 import { db } from '@/database/client';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import { DatabaseClient } from '@/database/client';
@@ -321,6 +322,13 @@ export class TicketController {
 
       return ticket;
     });
+
+    // Ticket committed on its initial stage — auto-create the on-entry approval
+    // request if that stage's single outgoing transition is configured for it.
+    // Post-commit + fire-and-forget so it can't delay or fail ticket creation.
+    if (ticket.stageName) {
+      void maybeCreateEntryApprovalRequest(ticket.id, createdBy, ticket.stageName);
+    }
 
     ticketDuplicateService.persistDuplicateReferences({
       ticketId: ticket.id,
@@ -1014,6 +1022,13 @@ export class TicketController {
 
         return { ticket, conversationId };
       });
+
+      // Ticket committed on its initial stage — auto-create the on-entry approval
+      // request if that stage's single outgoing transition is configured for it.
+      // Post-commit + fire-and-forget so it can't delay or fail ticket creation.
+      if (ticket.stageName) {
+        void maybeCreateEntryApprovalRequest(ticket.id, ticket.createdBy, ticket.stageName);
+      }
 
       const ticketChannelId = sourceConversationId ? validatedConversation.channelId : channelId;
       if (ticketChannelId) {

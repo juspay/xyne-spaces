@@ -516,6 +516,7 @@ const BoardStageConfigScreen = ({
       readonly eta: number;
       readonly sequenceNumber: number;
       readonly defaultTicketStatusV2: TicketStatusV2;
+      readonly requestApprovalOnEntry?: boolean | null;
       readonly prStatusMappings?: readonly {
         readonly id: string;
         readonly stageId: string;
@@ -810,6 +811,7 @@ const BoardStageConfigScreen = ({
         toStageId: string;
         formId: string | null;
         requiresApproval: boolean | null;
+        requestApprovalOnEntry?: boolean | null;
         visitSlaMode: string | null;
         fixedEtaHours: number | null;
         onReenter: string | null;
@@ -836,6 +838,7 @@ const BoardStageConfigScreen = ({
             id: t.id,
             formId: t.formId,
             requiresApproval: t.requiresApproval ?? false,
+            requestApprovalOnEntry: t.requestApprovalOnEntry ?? false,
             approvers: (t.transitionApprovers ?? [])
               .map(
                 (a: {
@@ -966,6 +969,7 @@ const BoardStageConfigScreen = ({
           })
           .filter((x): x is ApproverEntry => x !== null),
         formId: s.formContextMappings?.[0]?.formId || '',
+        requestApprovalOnEntry: s.requestApprovalOnEntry ?? false,
         conditions,
         position: { x: 0, y: 0 },
       };
@@ -1005,6 +1009,7 @@ const BoardStageConfigScreen = ({
             thenCondition: 'is_needed',
             thenValue: '',
             approvers: stage.approvers,
+            requestApprovalOnEntry: stage.requestApprovalOnEntry ?? false,
           });
         }
       }
@@ -1229,6 +1234,7 @@ const BoardStageConfigScreen = ({
               return {
                 ...stage,
                 approvers: condition.approvers,
+                requestApprovalOnEntry: condition.requestApprovalOnEntry ?? false,
               };
             }
           }
@@ -1581,6 +1587,7 @@ const BoardStageConfigScreen = ({
         toStageId: string;
         formId?: string | null;
         requiresApproval?: boolean;
+        requestApprovalOnEntry?: boolean;
         approvers?: Array<{ approverId: string; approverType: 'USER' | 'ROLE' }>;
         visitSlaMode?: string;
         fixedEtaHours?: number | null;
@@ -1610,6 +1617,9 @@ const BoardStageConfigScreen = ({
             ...(meta.requiresApproval !== undefined && {
               requiresApproval: meta.requiresApproval,
             }),
+            ...(meta.requestApprovalOnEntry !== undefined && {
+              requestApprovalOnEntry: meta.requestApprovalOnEntry,
+            }),
             ...(meta.approvers !== undefined && { approvers: meta.approvers }),
             ...(meta.visitSlaMode !== undefined && { visitSlaMode: meta.visitSlaMode }),
             ...(meta.fixedEtaHours !== undefined && { fixedEtaHours: meta.fixedEtaHours }),
@@ -1633,6 +1643,7 @@ const BoardStageConfigScreen = ({
         toStageId: t.toStageId,
         ...(t.formId !== undefined && { formId: t.formId }),
         requiresApproval: t.requiresApproval ?? false,
+        requestApprovalOnEntry: t.requestApprovalOnEntry ?? false,
         ...(t.visitSlaMode !== undefined && { visitSlaMode: t.visitSlaMode }),
         ...(t.fixedEtaHours !== undefined && { fixedEtaHours: t.fixedEtaHours }),
         ...(t.onReenter !== undefined && { onReenter: t.onReenter }),
@@ -2049,6 +2060,7 @@ const BoardStageConfigScreen = ({
           prStatuses: (stage.prStatuses || []) as PRStatusEvent[],
           approvers: stage.approvers,
           formId: stage.formId,
+          requestApprovalOnEntry: stage.requestApprovalOnEntry ?? false,
         };
       });
 

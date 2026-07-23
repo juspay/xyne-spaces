@@ -4432,6 +4432,7 @@ export const mutators = defineMutators({
                 )
                 .optional(),
               formId: z.string().optional(),
+              requestApprovalOnEntry: z.boolean().optional(),
             }),
           )
           .optional(),
@@ -4527,6 +4528,7 @@ export const mutators = defineMutators({
               updatedAt: timestamp,
               defaultTicketStatusV2:
                 (stage.defaultTicketStatusV2 as TicketStatusV2) || TicketStatusV2.STARTED,
+              requestApprovalOnEntry: stage.requestApprovalOnEntry ?? false,
             });
 
             // Differential PR status mapping sync
@@ -11289,6 +11291,7 @@ export const mutators = defineMutators({
             formId: z.string().nullable().optional(),
             requiresApproval: z.boolean().optional(),
             bypassApprovalForAutomation: z.boolean().optional(),
+            requestApprovalOnEntry: z.boolean().optional(),
             visitSlaMode: z.string().optional(),
             fixedEtaHours: z.number().nullable().optional(),
             onReenter: z.string().optional(),
@@ -11330,6 +11333,8 @@ export const mutators = defineMutators({
             ...(t.formId != null && { formId: t.formId }),
             requiresApproval: t.requiresApproval ?? false,
             bypassApprovalForAutomation: t.bypassApprovalForAutomation ?? false,
+            // Coerce off when the edge isn't approval-gated (mirrors the server).
+            requestApprovalOnEntry: (t.requestApprovalOnEntry ?? false) && (t.requiresApproval ?? false),
             visitSlaMode: (t.visitSlaMode as VisitSlaMode) ?? VisitSlaMode.STAGE_DEFAULT,
             ...(t.fixedEtaHours != null && { fixedEtaHours: t.fixedEtaHours }),
             onReenter: (t.onReenter as ReenterMode) ?? ReenterMode.RESET,

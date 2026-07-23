@@ -69,6 +69,7 @@ interface DuplicateSourceStage {
   eta?: number | null;
   sequenceNumber: number;
   defaultTicketStatusV2?: TicketStatusV2 | null;
+  requestApprovalOnEntry?: boolean | null;
   prStatusMappings?: readonly {
     prStatus: PRStatusEvent;
   }[];
@@ -100,6 +101,7 @@ interface DuplicateSourceTransition {
   formId?: string | null;
   requiresApproval?: boolean | null;
   bypassApprovalForAutomation?: boolean | null;
+  requestApprovalOnEntry?: boolean | null;
   visitSlaMode?: string | null;
   fixedEtaHours?: number | null;
   onReenter?: string | null;
@@ -116,6 +118,7 @@ interface ClonedBoardStage {
   eta: number;
   sequenceNumber: number;
   defaultTicketStatusV2: TicketStatusV2;
+  requestApprovalOnEntry: boolean;
   prStatusMappings: {
     id: string;
     stageId: string;
@@ -912,6 +915,7 @@ const BoardEditScreen = ({
             .map(approver => approver.userId)
             .filter((userId): userId is string => Boolean(userId)),
           ...(clonedFormId && { formId: clonedFormId }),
+          requestApprovalOnEntry: stage.requestApprovalOnEntry ?? false,
         };
       });
 
@@ -931,6 +935,7 @@ const BoardEditScreen = ({
           eta: stage.eta ?? 0,
           sequenceNumber: stage.sequenceNumber,
           defaultTicketStatusV2: stage.defaultTicketStatusV2 ?? TicketStatusV2.STARTED,
+          requestApprovalOnEntry: stage.requestApprovalOnEntry ?? false,
           prStatusMappings: (stage.prStatusMappings ?? []).map(mapping => ({
             id: prStatusMappingIds[`${stage.sequenceNumber}-${mapping.prStatus}`] ?? uuidv4(),
             stageId,
@@ -998,6 +1003,7 @@ const BoardEditScreen = ({
             ...(clonedFormId && { formId: clonedFormId }),
             requiresApproval: transition.requiresApproval ?? false,
             bypassApprovalForAutomation: transition.bypassApprovalForAutomation ?? false,
+            requestApprovalOnEntry: transition.requestApprovalOnEntry ?? false,
             ...(transition.visitSlaMode && { visitSlaMode: transition.visitSlaMode }),
             ...(transition.fixedEtaHours !== null &&
               transition.fixedEtaHours !== undefined && {
