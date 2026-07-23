@@ -128,6 +128,30 @@ function isMainWindowSender(event: IpcMainEvent | IpcMainInvokeEvent): boolean {
   return trusted;
 }
 
+// XYNE-16859 Issue 24: the error-report screen/mic capture handlers can enumerate
+// displays, start a silent screen+microphone recording, and read the captured bytes
+// back. Restrict them to the trusted top-level frame of the main application window
+// so embedded <webview>s, browser panels, and injected sub-frames cannot drive
+// silent capture or read recordings.
+function isTrustedErrorReportSender(event: IpcMainInvokeEvent): boolean {
+  const mainWindow = getMainWindow();
+  const frame = event.senderFrame;
+  return (
+    !!mainWindow &&
+    !mainWindow.isDestroyed() &&
+    event.sender === mainWindow.webContents &&
+    !!frame &&
+    frame.parent === null
+  );
+}
+
+function assertTrustedErrorReportSender(event: IpcMainInvokeEvent): void {
+  if (!isTrustedErrorReportSender(event)) {
+    errorLogger.warn('[error-report] blocked capture IPC from untrusted sender');
+    throw new Error('Unauthorized sender for error-report capture');
+  }
+}
+
 export function setupIpcHandlers(): void {
 
   // Set up mTLS IPC handlers
@@ -199,7 +223,8 @@ export function setupIpcHandlers(): void {
     return Logger.getClientSessionId();
   });
 
-  ipcMain.handle('error-report:get-native-logs', async () => {
+  ipcMain.handle('error-report:get-native-logs', async (event) => {
+    assertTrustedErrorReportSender(event);
     const logFiles = [
       {
         fileName: 'errors.log',
@@ -229,7 +254,10 @@ export function setupIpcHandlers(): void {
   });
 
   // Same approach as screen-picker.ts: call getSources from main process
-  ipcMain.handle('error-report:get-screen-sources', async () => {
+  ipcMain.handle('error-report:get-screen-sources', async (event) => {
+    if (!isTrustedErrorReportSender(event)) {
+      return { sources: [], permissionError: 'denied' };
+    }
     try {
       const sources = await desktopCapturer.getSources({
         types: ['screen', 'window'],
@@ -258,19 +286,53 @@ export function setupIpcHandlers(): void {
   });
 
   // Error Report Recorder handlers
-  ipcMain.handle('error-report:start-recording', (_event, { sourceId, withMic }: { sourceId: string; withMic: boolean }) =>
-    errorReportRecorder.startRecording(sourceId, withMic),
-  );
-  ipcMain.handle('error-report:stop-recording', () => errorReportRecorder.stopRecording());
-  ipcMain.handle('error-report:get-recording-state', () => errorReportRecorder.getRecordingState());
-  ipcMain.handle('error-report:read-recording-file', (_event, { filePath }: { filePath: string }) =>
-    errorReportRecorder.readRecordingFile(filePath),
-  );
-  ipcMain.handle('error-report:cleanup-recording', (_event, { filePath }: { filePath: string }) =>
-    errorReportRecorder.cleanupRecordingFile(filePath),
-  );
+  ipcMain.handle('error-report:start-recording', async (event, { sourceId, withMic }: { sourceId: string; withMic: boolean }) => {
+    assertTrustedErrorReportSender(event);
 
-  ipcMain.handle('error-report:save-file', async (_event, { fileName, buffer, sourcePath }: { fileName: string; buffer: ArrayBuffer | null; sourcePath: string | null }) => {
+    // XYNE-16859 Issue 24: never start a screen/mic recording silently. Require an
+    // explicit main-process consent confirmation that a compromised renderer cannot
+    // fake or bypass.
+    const mainWindow = getMainWindow();
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      throw new Error('No active window for screen recording');
+    }
+    const { response } = await dialog.showMessageBox(mainWindow, {
+      type: 'warning',
+      buttons: ['Cancel', 'Start recording'],
+      defaultId: 1,
+      cancelId: 0,
+      noLink: true,
+      title: 'Screen recording',
+      message: withMic
+        ? 'Xyne Spaces will record the screen you selected and your microphone for this error report.'
+        : 'Xyne Spaces will record the screen you selected for this error report.',
+      detail: 'Recording begins only after you confirm, and you can stop it at any time.',
+    });
+    if (response !== 1) {
+      throw new Error('Screen recording consent denied');
+    }
+
+    return errorReportRecorder.startRecording(sourceId, withMic);
+  });
+  ipcMain.handle('error-report:stop-recording', (event) => {
+    assertTrustedErrorReportSender(event);
+    return errorReportRecorder.stopRecording();
+  });
+  ipcMain.handle('error-report:get-recording-state', (event) => {
+    assertTrustedErrorReportSender(event);
+    return errorReportRecorder.getRecordingState();
+  });
+  ipcMain.handle('error-report:read-recording-file', (event, { recordingToken }: { recordingToken: string }) => {
+    assertTrustedErrorReportSender(event);
+    return errorReportRecorder.readRecordingByToken(recordingToken);
+  });
+  ipcMain.handle('error-report:cleanup-recording', (event, { filePath }: { filePath: string }) => {
+    assertTrustedErrorReportSender(event);
+    return errorReportRecorder.cleanupRecordingFile(filePath);
+  });
+
+  ipcMain.handle('error-report:save-file', async (event, { fileName, buffer, sourcePath }: { fileName: string; buffer: ArrayBuffer | null; sourcePath: string | null }) => {
+    assertTrustedErrorReportSender(event);
     const result = await dialog.showSaveDialog({
       defaultPath: fileName,
       filters: [

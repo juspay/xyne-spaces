@@ -1,5 +1,46 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
+// Preload runs in the renderer, but the electron tsconfig omits the DOM lib.
+// Declare the minimal `window` surface the origin check actually reads.
+declare const window: {
+  location: { protocol: string; hostname: string; origin: string };
+};
+
+// ── Renderer trust boundary ────────────────────────────────────────────────
+// This preload injects a *privileged* IPC bridge: mTLS key generation,
+// certificate storage, cookie/session control, screen recording, native file
+// access, app reload, and more. It is attached to the main window, the
+// certificate-health-check window, and the local popup windows (meeting popup,
+// recording pill) — all of which load first-party Xyne content or bundled
+// file:// assets.
+//
+// If the renderer is ever navigated to — or embeds a sub-frame of — an
+// untrusted origin (open redirect, malicious link, compromised sub-resource),
+// that origin must NOT inherit this bridge. We therefore gate exposure on a
+// strict first-party origin allowlist. An untrusted frame simply never gets
+// `window.electronAPI`, so it cannot reach any privileged IPC channel.
+function isTrustedOrigin(): boolean {
+  try {
+    const { protocol, hostname } = window.location;
+    // Bundled UI custom scheme: xyne-spaces / xyne-spaces-dev / xyne-spaces-sandbox
+    if (protocol.startsWith('xyne-spaces')) return true;
+    // Bundled local HTML: loading/error pages, meeting popup, recording pill, recorder
+    if (protocol === 'file:') return true;
+    // First-party Xyne web app + auth origins (prod + sandbox live under *.xyne.juspay.net)
+    if (protocol === 'https:' && (hostname === 'xyne.juspay.net' || hostname.endsWith('.xyne.juspay.net'))) {
+      return true;
+    }
+    // Local development
+    if ((protocol === 'http:' || protocol === 'https:') && (hostname === 'localhost' || hostname === '127.0.0.1')) {
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+
 interface ElectronAuthData {
   workspaces: { id: string; name: string; role: string }[];
   email: string;
@@ -8,7 +49,7 @@ interface ElectronAuthData {
   userExistsButRemoved: boolean;
 }
 
-contextBridge.exposeInMainWorld('electronAPI', {
+const electronAPI = {
   openExternal: (url: string) => {
     ipcRenderer.send('open-external', url);
   },
@@ -183,8 +224,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('error-report:stop-recording'),
   getErrorReportRecordingState: () =>
     ipcRenderer.invoke('error-report:get-recording-state'),
-  readErrorReportRecordingFile: (filePath: string) =>
-    ipcRenderer.invoke('error-report:read-recording-file', { filePath }),
+  readErrorReportRecordingFile: (recordingToken: string) =>
+    ipcRenderer.invoke('error-report:read-recording-file', { recordingToken }),
   cleanupErrorReportRecording: (filePath: string) =>
     ipcRenderer.invoke('error-report:cleanup-recording', { filePath }),
   onErrorReportRecordingProgress: (callback: (data: { elapsedSeconds: number }) => void) => {
@@ -208,7 +249,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Generic IPC send (used by standalone HTML windows like meeting-popup)
   ipcSend: (channel: string, ...args: unknown[]) => {
-    const allowed = ['meeting-popup:content-height', 'recording-pill:content-size', 'recording-pill:recording-stopped', 'error-report-recorder:chunk', 'error-report-recorder:stopped', 'error-report-recorder:error'];
+    const allowed = ['meeting-popup:content-height', 'recording-pill:content-size', 'recording-pill:recording-stopped'];
     if (allowed.includes(channel)) ipcRenderer.send(channel, ...args);
   },
 
@@ -309,4 +350,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
       return () => ipcRenderer.removeListener('claw:enabled-changed', listener);
     },
   },
-});
+};
+
+if (isTrustedOrigin()) {
+  contextBridge.exposeInMainWorld('electronAPI', electronAPI);
+} else {
+  // eslint-disable-next-line no-console
+  console.warn(
+    '[preload] Untrusted origin — electronAPI bridge withheld:',
+    window.location.origin,
+  );
+}
