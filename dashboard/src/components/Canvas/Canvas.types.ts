@@ -4,7 +4,7 @@ import type { CanvasMarkdownExportResult, CanvasPdfExportResult } from '../../ut
 
 export interface CanvasEditorRef {
   handlePresent: () => void;
-  handleThemeChange: (event: React.ChangeEvent<HTMLSelectElement>) => void;
+  handleThemeChange: (themeOrEvent: string | React.ChangeEvent<HTMLSelectElement>) => void;
   getBlocks: () => PartialBlock[];
   replaceContent: (blocks: PartialBlock[]) => void;
   exportMarkdown: (title: string) => Promise<CanvasMarkdownExportResult>;
@@ -42,7 +42,7 @@ export interface CanvasEditorProps {
 
 export interface CollaborativeCanvasEditorRef {
   handlePresent: () => void;
-  handleThemeChange: (event: React.ChangeEvent<HTMLSelectElement>) => void;
+  handleThemeChange: (themeOrEvent: string | React.ChangeEvent<HTMLSelectElement>) => void;
   getBlocks: () => PartialBlock[];
   replaceContent: (blocks: PartialBlock[]) => void;
   exportMarkdown: (title: string) => Promise<CanvasMarkdownExportResult>;

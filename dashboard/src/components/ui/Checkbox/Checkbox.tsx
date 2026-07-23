@@ -5,8 +5,6 @@ interface CheckboxProps {
   onChange: (checked: boolean) => void;
   label?: string;
   indeterminate?: boolean;
-  /** Fill the checked box with the theme accent color (--sidebar-badge-accent) instead of neutral --primary. */
-  accent?: boolean;
   /** Non-interactive state. Dims the whole control (label + box) and blocks toggling,
       while keeping the checked glyph/fill visible so the current value still reads clearly. */
   disabled?: boolean;
@@ -18,15 +16,12 @@ export function Checkbox({
   onChange,
   label = 'Edit entire series',
   indeterminate = false,
-  accent = false,
   disabled = false,
   size = 'md',
 }: CheckboxProps): ReactElement {
   const sm = size === 'sm';
   const inputRef = useRef<HTMLInputElement>(null);
-  const glyphStroke = accent
-    ? 'var(--sidebar-badge-accent-foreground)'
-    : 'hsl(var(--primary-foreground))';
+  const glyphStroke = 'hsl(var(--primary-foreground))';
   useEffect(() => {
     if (inputRef.current) inputRef.current.indeterminate = indeterminate;
   }, [indeterminate]);
@@ -49,7 +44,7 @@ export function Checkbox({
           relative flex items-center justify-center
           ${sm ? 'w-3 h-3 rounded-[3px]' : 'w-[18px] h-[18px] rounded-[4px]'} shrink-0
           border transition-all duration-150 ease-in-out
-          ${checked || indeterminate ? (accent ? 'bg-sidebar-badge-accent border-sidebar-badge-accent ' : 'bg-primary border-primary ') : 'bg-card border-border '}
+          ${checked || indeterminate ? 'bg-primary border-primary ' : 'bg-card border-border '}
         `}
       >
         <input

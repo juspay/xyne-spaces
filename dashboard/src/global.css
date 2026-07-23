@@ -1943,6 +1943,24 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   mask: radial-gradient(circle 9px at -4px 50%, transparent 99%, #fff 100%);
 }
 
+/* AvatarGroup shape="square" — squircles separated by a solid --background
+   border instead of the circular mask cut-out. */
+[data-slot="avatar-group"][data-shape="square"] [data-slot="avatar-stack-item"] img,
+[data-slot="avatar-group"][data-shape="square"]
+  [data-slot="avatar-stack-item"]
+  [data-slot="avatar"],
+[data-slot="avatar-group"][data-shape="square"]
+  [data-slot="avatar-stack-item"]
+  [data-slot="avatar-fallback"] {
+  border-radius: 4px;
+}
+
+[data-slot="avatar-group"][data-shape="square"]
+  [data-slot="avatar-stack-item"]:not(:first-of-type)
+  [data-slot="avatar"] {
+  mask: none;
+}
+
 /* ============================================================================
  * WORKFLOW STEP DETAILS - Prevent horizontal overflow
  * ============================================================================ */
@@ -2067,10 +2085,150 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 }
 
 /* Prevent BlockNote's custom mention wrapper from shifting the surrounding text baseline. */
+/* Keep the mention chip on the text baseline. `vertical-align: middle` centres
+   the box against the parent's mid-x-height instead, which leaves the chip's
+   own text sitting above the surrounding line. Inheriting the line-height means
+   the chip's text metrics match the paragraph's, so the two baselines land on
+   the same pixel. The chip must stay `display: inline` — vertical padding on an
+   inline box is painted but excluded from line-box height, so a line containing
+   a mention keeps the same height. An inline-block/inline-flex chip would add
+   its padding to the line box and space that line further apart. */
 .canvas-editor-container [data-inline-content-type="mention"],
 .collaborative-canvas-editor [data-inline-content-type="mention"] {
-  line-height: 1;
-  vertical-align: middle;
+  line-height: inherit;
+  vertical-align: baseline;
+}
+
+/* ============================================================
+   BlockNote palette → app tokens.
+   Every piece of BlockNote's Mantine UI (slash menu, drag-handle menu,
+   formatting toolbar, tooltips) is painted from these variables. They are
+   normally set on the BlockNoteView root, but those menus render in a portal
+   on <body>, so they fall out of that scope and land on the light defaults —
+   which is why the drag menu stayed white in midnight. Defining them at :root
+   fixes the portals, and because our own tokens already flip per theme this
+   single mapping serves light and midnight both.
+   ============================================================ */
+:root {
+  --bn-colors-editor-text: hsl(var(--foreground));
+  --bn-colors-editor-background: transparent;
+  --bn-colors-menu-text: hsl(var(--popover-foreground));
+  --bn-colors-menu-background: hsl(var(--popover));
+  --bn-colors-tooltip-text: hsl(var(--popover-foreground));
+  --bn-colors-tooltip-background: hsl(var(--muted));
+  --bn-colors-hovered-text: hsl(var(--foreground));
+  --bn-colors-hovered-background: hsl(var(--muted));
+  --bn-colors-selected-text: hsl(var(--accent-foreground));
+  --bn-colors-selected-background: hsl(var(--accent));
+  --bn-colors-disabled-text: hsl(var(--muted-foreground));
+  --bn-colors-disabled-background: hsl(var(--muted));
+  --bn-colors-shadow: hsl(var(--foreground) / 0.12);
+  --bn-colors-border: hsl(var(--border));
+  --bn-colors-side-menu: hsl(var(--muted-foreground));
+}
+
+/* BlockNote menus cap out at `max-height: inherit`, which resolves to the whole
+   viewport — so the slash menu runs the full page height. Cap them and give the
+   overflow the app's thin, track-less scrollbar. */
+/* Cap only the suggestion menus — NOT .mantine-Menu-dropdown, whose nested
+   submenus (the drag handle's "Colors" flyout) render inside it and get
+   clipped by an overflow container. */
+.bn-mantine .bn-suggestion-menu,
+.bn-mantine .bn-grid-suggestion-menu {
+  max-height: 320px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--border)) transparent;
+}
+.bn-mantine .bn-suggestion-menu::-webkit-scrollbar,
+.bn-mantine .bn-grid-suggestion-menu::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.bn-mantine .bn-suggestion-menu::-webkit-scrollbar-track,
+.bn-mantine .bn-grid-suggestion-menu::-webkit-scrollbar-track {
+  background: transparent;
+}
+.bn-mantine .bn-suggestion-menu::-webkit-scrollbar-thumb,
+.bn-mantine .bn-grid-suggestion-menu::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--border));
+  border-radius: 9999px;
+}
+.bn-mantine .bn-suggestion-menu::-webkit-scrollbar-thumb:hover,
+.bn-mantine .bn-grid-suggestion-menu::-webkit-scrollbar-thumb:hover {
+  background-color: hsl(var(--muted-foreground));
+}
+
+/* Match BlockNote's menus to the app's DropdownMenu geometry. The colours come
+   from the :root mapping above; this aligns the shape — container padding,
+   32px single-line rows, 14px text, bare glyphs instead of BlockNote's
+   8px-padded icon tiles. */
+/* .mantine-Menu-dropdown is deliberately unscoped: nested submenus (the drag
+   handle's "Colors" flyout) portal outside .bn-mantine, so a scoped rule misses
+   them and they fall back to Mantine's stock dropdown. Mantine is not a direct
+   dependency — it only arrives via @blocknote/mantine — so every match here is
+   a BlockNote menu. */
+.bn-mantine .bn-suggestion-menu,
+.bn-mantine .bn-grid-suggestion-menu,
+.mantine-Menu-dropdown {
+  padding: 4px;
+  min-width: 8rem;
+  border-radius: 6px;
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--popover));
+  color: hsl(var(--popover-foreground));
+  /* Tailwind shadow-md, matching DropdownMenuContent. Black-based in both
+     themes — a --foreground-based shadow becomes a white glow in midnight. */
+  box-shadow:
+    0 4px 6px -1px rgb(0 0 0 / 0.1),
+    0 2px 4px -2px rgb(0 0 0 / 0.1);
+}
+.bn-mantine .bn-suggestion-menu-item,
+.mantine-Menu-dropdown .mantine-Menu-item {
+  height: auto;
+  min-height: 32px;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 2px;
+  font-size: 14px;
+  line-height: 20px;
+  color: hsl(var(--popover-foreground));
+  background-color: transparent;
+}
+.bn-mantine .bn-suggestion-menu-item[aria-selected="true"],
+.bn-mantine .bn-suggestion-menu-item:hover,
+.mantine-Menu-dropdown .mantine-Menu-item:hover,
+.mantine-Menu-dropdown .mantine-Menu-item[data-hovered],
+.mantine-Menu-dropdown .mantine-Menu-item[data-expanded] {
+  background-color: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
+}
+/* Cap only nested dropdowns — the leaf colour list. Capping a dropdown that
+   itself hosts a submenu clips the flyout out of existence. */
+.mantine-Menu-dropdown .mantine-Menu-dropdown {
+  max-height: 320px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--border)) transparent;
+}
+/* Bare glyph — drop the filled tile. */
+.bn-mt-suggestion-menu-item-section[data-position="left"] {
+  background-color: transparent;
+  padding: 0;
+  color: inherit;
+}
+.bn-mt-suggestion-menu-item-title {
+  font-size: 14px;
+  line-height: 20px;
+}
+/* Single-line rows, like every other menu in the app. */
+.bn-mt-suggestion-menu-item-subtitle {
+  display: none;
+}
+.bn-mantine .bn-suggestion-menu-label {
+  padding: 6px 8px;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
 }
 
 /* ============================================================
@@ -2094,8 +2252,9 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   max-width: calc(var(--canvas-content-width) + 2 * var(--canvas-gutter));
   margin-inline: auto;
   background-color: transparent;
-  font-size: 16px;
-  line-height: 1.6;
+  font-size: 15px;
+  line-height: 1.55;
+  font-weight: 450;
   color: hsl(var(--foreground));
 }
 
@@ -2111,43 +2270,127 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   background-color: hsl(var(--accent));
 }
 
-.canvas-editor-container .bn-editor .bn-block-content[data-content-type="heading"][data-level="1"],
+.canvas-editor-container
+  .bn-editor
+  .bn-block
+  .bn-block-content[data-content-type="heading"][data-level="1"],
 .collaborative-canvas-editor
   .bn-editor
+  .bn-block
   .bn-block-content[data-content-type="heading"][data-level="1"] {
-  font-size: 1.875rem; /* 30px */
-  line-height: 1.3;
-  font-weight: 700;
-  letter-spacing: -0.01em;
+  font-size: 2.125rem; /* 34px */
+  line-height: 1.5;
+  font-weight: 650;
+  letter-spacing: normal;
+  padding-top: 22px;
 }
-.canvas-editor-container .bn-editor .bn-block-content[data-content-type="heading"][data-level="2"],
+.canvas-editor-container
+  .bn-editor
+  .bn-block
+  .bn-block-content[data-content-type="heading"][data-level="2"],
 .collaborative-canvas-editor
   .bn-editor
+  .bn-block
   .bn-block-content[data-content-type="heading"][data-level="2"] {
   font-size: 1.5rem; /* 24px */
   line-height: 1.3;
   font-weight: 600;
+  padding-top: 20px;
 }
-.canvas-editor-container .bn-editor .bn-block-content[data-content-type="heading"][data-level="3"],
+.canvas-editor-container
+  .bn-editor
+  .bn-block
+  .bn-block-content[data-content-type="heading"][data-level="3"],
 .collaborative-canvas-editor
   .bn-editor
+  .bn-block
   .bn-block-content[data-content-type="heading"][data-level="3"] {
   font-size: 1.25rem; /* 20px */
-  line-height: 1.35;
+  line-height: 1.3;
+  font-weight: 600;
+  padding-top: 18px;
+}
+.canvas-editor-container
+  .bn-editor
+  .bn-block
+  .bn-block-content[data-content-type="heading"][data-level="4"],
+.collaborative-canvas-editor
+  .bn-editor
+  .bn-block
+  .bn-block-content[data-content-type="heading"][data-level="4"] {
+  font-size: 1.125rem; /* 18px */
+  line-height: 1.3;
   font-weight: 600;
 }
+.canvas-editor-container .bn-editor .bn-block-content[data-content-type="paragraph"],
+.collaborative-canvas-editor .bn-editor .bn-block-content[data-content-type="paragraph"] {
+  padding-top: 8px;
+}
 
+/* The UA default `strong { font-weight: bolder }` resolves to 900 against a 600
+   heading, pulling in Inter Black. Headings are already bold — keep the weight. */
+.canvas-editor-container .bn-editor .bn-block-content[data-content-type="heading"] :is(strong, b),
+.collaborative-canvas-editor
+  .bn-editor
+  .bn-block-content[data-content-type="heading"]
+  :is(strong, b) {
+  font-weight: inherit;
+}
+
+/* Hover handle (+ / drag) alignment.
+ *
+ * The side menu is a Floating UI element anchored `left-start` — to the TOP of
+ * the block — and its buttons are vertically centred inside it. So the handle's
+ * centre lands at height/2 below the block's top edge, and to sit on the first
+ * line every height must be:
+ *
+ *     height = 2 x block padding-top + first line box
+ *
+ * (BlockNote's own 30px default is exactly 2x3px + 24px at their 16px/1.5 base.)
+ * Body text here is 15px/1.55 = 23.25px. Keep these in sync with the
+ * padding-top values above — changing one without the other misaligns the handle.
+ */
+.canvas-editor-container .bn-side-menu,
+.collaborative-canvas-editor .bn-side-menu {
+  /* paragraph: 2x8 + 23.25 */
+  height: 39px;
+}
 .canvas-editor-container .bn-side-menu[data-block-type="heading"][data-level="1"],
 .collaborative-canvas-editor .bn-side-menu[data-block-type="heading"][data-level="1"] {
-  height: 75px;
+  /* 2x22 + (34 x 1.5) */
+  height: 95px;
 }
 .canvas-editor-container .bn-side-menu[data-block-type="heading"][data-level="2"],
 .collaborative-canvas-editor .bn-side-menu[data-block-type="heading"][data-level="2"] {
-  height: 67px;
+  /* 2x20 + (24 x 1.3) */
+  height: 71px;
 }
 .canvas-editor-container .bn-side-menu[data-block-type="heading"][data-level="3"],
 .collaborative-canvas-editor .bn-side-menu[data-block-type="heading"][data-level="3"] {
-  height: 63px;
+  /* 2x18 + (20 x 1.3) */
+  height: 62px;
+}
+.canvas-editor-container .bn-side-menu[data-block-type="heading"][data-level="4"],
+.collaborative-canvas-editor .bn-side-menu[data-block-type="heading"][data-level="4"] {
+  /* 2x3 + (18 x 1.3) — h4 keeps BlockNote's default padding */
+  height: 29px;
+}
+.canvas-editor-container .bn-side-menu[data-block-type="quote"],
+.canvas-editor-container .bn-side-menu[data-block-type="toggleListItem"],
+.collaborative-canvas-editor .bn-side-menu[data-block-type="quote"],
+.collaborative-canvas-editor .bn-side-menu[data-block-type="toggleListItem"] {
+  /* 2x14 + 23.25 */
+  height: 51px;
+}
+.canvas-editor-container .bn-side-menu[data-block-type="codeBlock"],
+.collaborative-canvas-editor .bn-side-menu[data-block-type="codeBlock"] {
+  /* 2x(14 + 1px border + 12px pre padding) + 23.25 */
+  height: 77px;
+}
+.canvas-editor-container .bn-side-menu[data-block-type="divider"],
+.collaborative-canvas-editor .bn-side-menu[data-block-type="divider"] {
+  /* 2x(16 + 3.5) + 1px rule */
+  height: 40px;
 }
 
 .canvas-editor-container .bn-editor .bn-block-group .bn-block-group > .bn-block-outer::before,
@@ -2155,30 +2398,120 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   display: none;
 }
 
-/* Quote block — subtle left rule + muted text (token-based). */
+/* Divider — 16px of air above/below the block, with the 1px rule centred in an
+   8px band (BlockNote hardcodes rgb(125,121,122) and a 0.5em margin). */
+.canvas-editor-container .bn-editor .bn-block-content[data-content-type="divider"],
+.collaborative-canvas-editor .bn-editor .bn-block-content[data-content-type="divider"] {
+  padding-top: 16px;
+  padding-bottom: 16px;
+}
+.canvas-editor-container .bn-editor [data-content-type="divider"] hr,
+.collaborative-canvas-editor .bn-editor [data-content-type="divider"] hr {
+  border-top-color: hsl(var(--border));
+  margin: 3.5px 0;
+}
+
+/* Lists — 8px above / 4px below, 24px marker box with a 12px gutter. The marker
+   is pinned to the first line (BlockNote centres it across the whole block). */
+.canvas-editor-container .bn-editor .bn-block-content[data-content-type="bulletListItem"],
+.canvas-editor-container .bn-editor .bn-block-content[data-content-type="numberedListItem"],
+.collaborative-canvas-editor .bn-editor .bn-block-content[data-content-type="bulletListItem"],
+.collaborative-canvas-editor .bn-editor .bn-block-content[data-content-type="numberedListItem"] {
+  padding-top: 8px;
+  padding-bottom: 4px;
+}
+
+/* Bullet — a drawn 6px dot rather than BlockNote's "•" text glyph. The extra
+   ancestors are needed to outrank BlockNote's own `content` rules. */
+.canvas-editor-container
+  .bn-editor
+  .bn-block-outer
+  .bn-block
+  .bn-block-content[data-content-type="bulletListItem"]::before,
+.collaborative-canvas-editor
+  .bn-editor
+  .bn-block-outer
+  .bn-block
+  .bn-block-content[data-content-type="bulletListItem"]::before {
+  content: "";
+  min-width: 24px;
+  height: 1.55em;
+  align-self: flex-start;
+  padding-right: 0;
+  margin-right: 12px;
+  background-image: radial-gradient(circle at center, currentColor 3px, transparent 3px);
+}
+
+/* Numbered — right-aligned in the 24px box, pinned to the first line. */
+.canvas-editor-container
+  .bn-editor
+  .bn-block-outer
+  .bn-block
+  .bn-block-content[data-content-type="numberedListItem"]::before,
+.collaborative-canvas-editor
+  .bn-editor
+  .bn-block-outer
+  .bn-block
+  .bn-block-content[data-content-type="numberedListItem"]::before {
+  min-width: 24px;
+  height: 1.55em;
+  align-self: flex-start;
+  justify-content: flex-end;
+  align-items: center;
+  padding-right: 0;
+  margin-right: 12px;
+}
+
+/* Toggle list — same 14/10 rhythm as the quote, 12px between chevron and text.
+   BlockNote centres the chevron across the whole block; the design tops it out
+   so it tracks the first line on multi-line items. */
+.canvas-editor-container .bn-editor .bn-block-content[data-content-type="toggleListItem"],
+.collaborative-canvas-editor .bn-editor .bn-block-content[data-content-type="toggleListItem"] {
+  padding-top: 14px;
+  padding-bottom: 10px;
+}
+.canvas-editor-container .bn-editor [data-content-type="toggleListItem"] .bn-toggle-wrapper,
+.collaborative-canvas-editor .bn-editor [data-content-type="toggleListItem"] .bn-toggle-wrapper {
+  align-items: flex-start;
+  gap: 12px;
+}
+
+/* Quote block — 4px bar at 10% foreground, 20px gutter, muted text (token-based). */
+.canvas-editor-container .bn-editor .bn-block-content[data-content-type="quote"],
+.collaborative-canvas-editor .bn-editor .bn-block-content[data-content-type="quote"] {
+  padding-top: 14px;
+  padding-bottom: 10px;
+}
 .canvas-editor-container .bn-editor [data-content-type="quote"] blockquote,
 .collaborative-canvas-editor .bn-editor [data-content-type="quote"] blockquote {
-  border-left: 3px solid hsl(var(--border));
+  border-left: 4px solid hsl(var(--foreground) / 0.1);
   color: hsl(var(--muted-foreground));
-  padding-left: 0.85em;
+  padding-left: 20px;
   font-style: normal;
 }
 
 /* Code block — theme-adaptive (BlockNote hardcodes a #161616 dark box that
    blends into the midnight page and is heavy in light). Uses tokens so it
    stays a subtle, bordered surface in both themes, with a monospace font. */
+.canvas-editor-container .bn-editor .bn-block-content[data-content-type="codeBlock"],
+.collaborative-canvas-editor .bn-editor .bn-block-content[data-content-type="codeBlock"] {
+  padding-top: 14px;
+  padding-bottom: 10px;
+}
 .canvas-editor-container .bn-editor [data-content-type="codeBlock"],
 .collaborative-canvas-editor .bn-editor [data-content-type="codeBlock"] {
-  background-color: hsl(var(--muted));
+  background-color: hsl(var(--foreground) / 0.04);
   color: hsl(var(--foreground));
-  border: 1px solid hsl(var(--border));
+  border: 1px solid hsl(var(--foreground) / 0.06);
+  border-radius: 8px;
 }
 .canvas-editor-container .bn-editor [data-content-type="codeBlock"] > pre,
 .collaborative-canvas-editor .bn-editor [data-content-type="codeBlock"] > pre {
   font-family:
     ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
-  font-size: 0.875em;
-  padding: 16px 18px;
+  font-size: 15px;
+  line-height: 1.55;
+  padding: 12px;
 }
 /* Language dropdown (revealed on hover) picks up the theme text colour. */
 .canvas-editor-container .bn-editor [data-content-type="codeBlock"] > div > select,
@@ -2196,6 +2529,13 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 .canvas-editor-container .bn-editor [data-content-type="table"] th,
 .collaborative-canvas-editor .bn-editor [data-content-type="table"] th {
   background-color: hsl(var(--muted));
+  font-weight: 600;
+}
+/* BlockNote wraps header text in <strong>; the UA default `bolder` would resolve
+   to 900 against the header weight. Headers are already bold — keep the weight. */
+.canvas-editor-container .bn-editor [data-content-type="table"] th :is(strong, b),
+.collaborative-canvas-editor .bn-editor [data-content-type="table"] th :is(strong, b) {
+  font-weight: inherit;
 }
 /* Table cell selection fill — themed (BlockNote hardcodes a periwinkle #c8c8ff). */
 .canvas-editor-container .bn-editor .selectedCell:after,

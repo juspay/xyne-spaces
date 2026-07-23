@@ -814,7 +814,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
   };
 
   return (
-    <div className='flex flex-col h-full bg-background' data-testid='canvas-list'>
+    <div className='flex flex-col h-full' data-testid='canvas-list'>
       {paginated && (
         <CanvasPageSubscription
           key={`${channelId ?? 'user'}:${activeFilter}:${

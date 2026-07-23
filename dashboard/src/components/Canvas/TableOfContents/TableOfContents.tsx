@@ -1,6 +1,5 @@
 import React, { useCallback } from 'react';
-import { List } from 'lucide-react';
-import { Popover } from '../../ui/Popover/Popover';
+import { HoverCard } from '../../ui/HoverCard/HoverCard';
 
 export interface TocHeading {
   id: string;
@@ -26,49 +25,46 @@ export const TableOfContents: React.FC<TableOfContentsProps> = ({ headings, onHe
   }
 
   return (
-    <div className='absolute right-0 top-1/2 -translate-y-1/2 z-40 hidden md:block'>
-      <Popover
+    <div className='absolute left-0 top-1/2 -translate-y-1/2 z-40 hidden md:block'>
+      <HoverCard
+        openDelay={100}
+        closeDelay={150}
         trigger={
           <button
-            className='flex flex-col gap-1 py-2 px-2 bg-background/90 hover:bg-background shadow-md rounded-l-lg border border-r-0 border-border transition-all duration-200 hover:shadow-lg max-h-[300px]'
+            className='flex flex-col gap-1.5 py-2 px-2 transition-all duration-200 max-h-[300px]'
             aria-label='Table of Contents'
           >
-            <List className='w-4 h-4 text-muted-foreground flex-shrink-0' />
-            <div className='flex flex-col gap-0.5 overflow-hidden flex-1'>
+            <div className='flex flex-col items-start gap-1.5 overflow-hidden flex-1'>
               {headings.map(heading => (
                 <div
                   key={heading.id}
-                  className={`h-[2px] bg-muted-foreground rounded-full transition-all flex-shrink-0 ${
-                    heading.level === 1 ? 'w-3' : heading.level === 2 ? 'w-2' : 'w-1.5'
+                  className={`h-[2px] bg-muted-foreground/60 rounded-full transition-all flex-shrink-0 ${
+                    heading.level === 1 ? 'w-4' : heading.level === 2 ? 'w-3' : 'w-2'
                   }`}
-                  title={heading.text}
                 />
               ))}
             </div>
           </button>
         }
-        side='left'
+        side='right'
         align='center'
         sideOffset={8}
-        className='w-64'
+        className='w-64 p-2'
       >
         <div className='max-h-[60vh] overflow-y-auto'>
-          <div className='mb-2 pb-2 border-b border-border'>
-            <h3 className='text-sm font-semibold text-foreground'>Table of Contents</h3>
-          </div>
           <div className='space-y-1.5'>
             {headings.map(heading => (
               <button
                 key={heading.id}
                 onClick={() => handleClick(heading.id)}
-                className={`block w-full text-left text-sm truncate hover:text-foreground hover:bg-accent rounded px-2 py-1 transition-colors ${
+                className={`block w-full text-left text-sm truncate hover:text-foreground hover:bg-accent rounded pr-2 py-1 transition-colors ${
                   heading.level === 1
-                    ? 'font-medium text-foreground pl-2'
+                    ? 'font-medium text-foreground pl-0'
                     : heading.level === 2
-                      ? 'text-muted-foreground pl-6'
-                      : 'text-muted-foreground pl-10 text-xs'
+                      ? 'text-muted-foreground pl-4'
+                      : 'text-muted-foreground pl-8 text-xs'
                 }`}
-                title={heading.text}
+                aria-label={heading.text}
                 data-track-category='CANVAS'
                 data-track-name='Navigate_To_Heading'
                 data-track-metadata={JSON.stringify({
@@ -82,7 +78,7 @@ export const TableOfContents: React.FC<TableOfContentsProps> = ({ headings, onHe
             ))}
           </div>
         </div>
-      </Popover>
+      </HoverCard>
     </div>
   );
 };

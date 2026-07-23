@@ -144,7 +144,7 @@ const ChatScreen = ({ shouldStackThread = false }: ChatScreenProps): ReactElemen
             >
               <div
                 id='panel-resize-divider'
-                className='w-[2px] h-full bg-sidebar-divider group-hover:bg-sidebar-badge-accent group-active:bg-sidebar-badge-accent'
+                className='w-[2px] h-full bg-sidebar-divider group-hover:bg-primary group-active:bg-primary'
               ></div>
             </PanelResizeHandle>
 
@@ -153,11 +153,12 @@ const ChatScreen = ({ shouldStackThread = false }: ChatScreenProps): ReactElemen
                 data-id='conversation-view'
                 className={cn(
                   'flex-1 h-full overflow-hidden relative flex flex-col rounded-2xl',
-                  // DM + Bookmarks routes render their own transparent left sidebar + an
-                  // opaque detail panel; keep this wrapper transparent so the wallpaper
-                  // shows through those sidebars.
+                  // DM + Bookmarks + Canvas routes render their own transparent left
+                  // sidebar + an opaque detail panel; keep this wrapper transparent so
+                  // the wallpaper shows through those sidebars.
                   !pathnameWithoutWorkspace.startsWith('/chat/dm') &&
                     !pathnameWithoutWorkspace.startsWith('/chat/bookmarks') &&
+                    !pathnameWithoutWorkspace.startsWith('/chat/canvas') &&
                     'border border-border bg-background',
                 )}
               >

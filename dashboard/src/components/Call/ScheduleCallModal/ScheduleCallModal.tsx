@@ -1513,7 +1513,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                                         className={cn(
                                           'w-full h-7 rounded-full text-[13px] font-medium transition-colors',
                                           recurrenceFrequency === freq
-                                            ? 'bg-sidebar-badge-accent text-white'
+                                            ? 'bg-primary text-white'
                                             : 'text-foreground bg-secondary',
                                         )}
                                       >
@@ -1546,7 +1546,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                                               className={cn(
                                                 'size-[22px] rounded-full text-[12px] transition-colors',
                                                 recurrenceDays.includes(key)
-                                                  ? 'bg-sidebar-badge-accent text-white'
+                                                  ? 'bg-primary text-white'
                                                   : 'bg-secondary/90',
                                               )}
                                             >
@@ -1774,7 +1774,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                                         }
                                         setShowCustomPanel(false);
                                       }}
-                                      className='rounded-lg text-sm leading-5 bg-sidebar-badge-accent h-8 gap-2.5'
+                                      className='rounded-lg text-sm leading-5 bg-primary h-8 gap-2.5'
                                     >
                                       Done
                                     </Button>

@@ -524,7 +524,7 @@ export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
 
   return (
     <>
-      <div className='h-full overflow-auto' data-testid='canvas-list'>
+      <div className='h-full overflow-auto no-scrollbar' data-testid='canvas-list'>
         <CanvasListGroupedContent
           projectGroups={activeProjectGroups}
           personalFolderGroups={activePersonalFolderGroups}

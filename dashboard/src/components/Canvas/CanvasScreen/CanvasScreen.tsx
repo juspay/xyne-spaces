@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { ReactElement, useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useParams, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
@@ -20,28 +21,36 @@ import {
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent,
 } from '../../ui/dropdown-menu';
 import { Dialog } from '../../ui/Dialog';
+import { Popover } from '../../ui/Popover';
 import Input from '../../ui/Input';
 import AvatarGroup from '../../ui/Avatar/AvatarGroup';
+import { ArrowLeft, CheckCircle, GitCompare, Loader2, RotateCcw } from 'lucide-react';
 import {
-  ArrowLeft,
-  CheckCircle,
-  Download,
-  FileDown,
+  CheckTickSingle,
+  ColorPalette,
+  File02PdfFormat,
   FileText,
-  GitCompare,
-  History,
-  Loader2,
-  Maximize2,
-  Minimize2,
-  RotateCcw,
-} from 'lucide-react';
+  Hashtag,
+  Markdown,
+  MaximizeFourArrow,
+  MinimizeFourArrow,
+  PlaySquare,
+  ReminderClockwise,
+  Share01,
+  Share02,
+  ThreeDotsMenuVertical,
+} from '@xyne/icons';
 import type { CollaboratorInfo } from '../../../hooks/useCanvasYjsProvider';
-import { generateUserColor } from '../../../hooks/useCanvasYjsProvider';
 import { DocumentNotFoundIcon } from '../../icons';
 import { useUsers } from '../../../hooks/useUsers';
-import { CanvasParticipantsTray, type ParticipantItem } from '../CanvasParticipantsTray';
+import { type ParticipantItem } from '../CanvasParticipantsTray';
+import { cn } from '../../../utils/classNames';
+import { formatDate, formatRelativeTime, formatTimeAmPm } from '../../../utils/dateUtils';
 
 import type {
   Canvas,
@@ -51,7 +60,7 @@ import type {
   CollaborativeCanvasEditorRef,
 } from '../Canvas.types';
 import type { PartialBlock } from '@blocknote/core';
-import { PresentToolbar } from 'blocknote-layout-extensions';
+import { PRESENTATION_THEMES } from 'blocknote-layout-extensions';
 import { useAuth } from '../../../hooks/useAuth';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useZero } from '../../../hooks/useZero';
@@ -175,7 +184,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   const [isApproved, setIsApproved] = useState(false);
   const [selectedTheme, setSelectedTheme] = useState('white');
   const [collaborators, setCollaborators] = useState<CollaboratorInfo[]>([]);
-  const [showParticipantsTray, setShowParticipantsTray] = useState(false);
   const {
     filter: activeFilter,
     setFilter: setActiveFilter,
@@ -187,15 +195,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   const [showVersionDiff, setShowVersionDiff] = useState(false);
   const [restoringVersionId, setRestoringVersionId] = useState<string | undefined>(undefined);
   const [renamingVersionId, setRenamingVersionId] = useState<string | undefined>(undefined);
-  const lastUpdatedText = selectedCanvas?.updatedAt
-    ? `Last updated ${new Date(selectedCanvas.updatedAt).toLocaleString(undefined, {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-      })}`
-    : null;
 
   // Ref for CanvasEditor to access presentation methods
   const editorRef = useRef<CanvasEditorRef | CollaborativeCanvasEditorRef | null>(null);
@@ -850,26 +849,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
     ...collaborators.map(c => c.id).filter(id => id !== user?.id),
   ].filter((id): id is string => !!id);
 
-  const trayParticipants: ParticipantItem[] = collaboratorUserIds.map(userId => {
-    const collaborator = collaborators.find(c => c.id === userId);
-    const userData = allUsers.find(u => u.id === userId);
-    const isCurrentUser = userId === user?.id;
-
-    const displayName = userData?.name || (isCurrentUser ? user?.name : undefined) || 'Unknown';
-    const displayEmail = userData?.email || (isCurrentUser ? user?.email : undefined);
-
-    return {
-      id: userId,
-      userId,
-      user: {
-        name: displayName,
-        ...(displayEmail && { email: displayEmail }),
-      },
-      color: collaborator?.color || generateUserColor(userId),
-    };
-  });
-
-  // Participants from database (canvas_participants table) for the participants tray
+  // Participants from database (canvas_participants table) for the avatar stack
   const dbParticipants: ParticipantItem[] = (canvasParticipants || [])
     .filter((participant): participant is CanvasParticipant & { userId: string } =>
       Boolean(participant.userId),
@@ -880,10 +860,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
       role: p.role,
     }));
 
-  // Check if current user is the owner
-  const isCanvasOwner =
-    selectedCanvas?.createdBy === user?.id ||
-    dbParticipants.some(p => p.userId === user?.id && p.role === CanvasRole.OWNER);
   const currentContentForVersionCompare =
     latestContentRef.current || currentContent || selectedCanvas?.content || [];
   const displayedContent = previewVersion
@@ -971,6 +947,60 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
     })();
   }, [currentTitle]);
 
+  // Rows for the canvas-details popover behind the avatar stack. Any row whose
+  // underlying data is missing is dropped rather than rendered empty.
+  const canvasDetailRows = useMemo((): { label: string; value: ReactNode }[] => {
+    if (!selectedCanvas) return [];
+
+    const nameForUser = (userId?: string): string | undefined => {
+      if (!userId) return undefined;
+      const match = allUsers.find(u => u.id === userId);
+      if (match?.name) return match.name;
+      return userId === user?.id ? (user?.name ?? undefined) : undefined;
+    };
+
+    const rows: { label: string; value: ReactNode }[] = [];
+
+    const createdByName = nameForUser(selectedCanvas.createdBy);
+    if (createdByName) rows.push({ label: 'Created by:', value: createdByName });
+
+    if (selectedCanvas.createdAt) {
+      rows.push({
+        label: 'Created on:',
+        value: `${formatDate(selectedCanvas.createdAt)} ${formatTimeAmPm(selectedCanvas.createdAt)}`,
+      });
+    }
+
+    const lastEditedByName = nameForUser(selectedCanvas.lastEditedBy);
+    if (lastEditedByName) rows.push({ label: 'Last update:', value: lastEditedByName });
+
+    const lastUpdatedAt = selectedCanvas.lastEditedAt ?? selectedCanvas.updatedAt;
+    if (lastUpdatedAt) {
+      rows.push({ label: 'Last updated:', value: formatRelativeTime(lastUpdatedAt) });
+    }
+
+    const channelName =
+      selectedCanvas.channel?.name ??
+      visibleChannels.find(channel => channel.id === selectedCanvas.channelId)?.name;
+    if (channelName) {
+      rows.push({
+        label: 'Created in:',
+        value: (
+          <span className='flex min-w-0 items-center gap-0.5'>
+            <Hashtag size={16} className='shrink-0' />
+            <span className='truncate'>{channelName}</span>
+          </span>
+        ),
+      });
+    }
+
+    return rows;
+  }, [allUsers, selectedCanvas, user?.id, user?.name, visibleChannels]);
+
+  // Shared metrics for the header's 28px icon buttons.
+  const headerIconButtonClass =
+    'flex size-7 shrink-0 items-center justify-center rounded-lg text-foreground transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
+
   return (
     <div className='relative h-full bg-muted flex' data-component='CanvasScreen'>
       {/* Main Content Area */}
@@ -979,230 +1009,316 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
           <>
             {/* Canvas Header */}
             <div
-              className={`bg-background border-b border-border p-2 md:p-4 flex justify-between items-center gap-1 md:gap-2 sticky top-0 ${baseRoute === '/chat/activity' ? 'md:border-b-0' : ''}`}
+              className='sticky top-0 z-20 flex shrink-0 flex-col bg-background'
               data-testid='canvas-header'
             >
-              <div className='flex items-start gap-1 md:gap-2 flex-1 min-w-0'>
-                <Button
-                  variant='ghost'
-                  size='iconSm'
-                  onClick={handleLeaveCanvas}
-                  aria-label='Go back'
-                  data-track-category='CANVAS'
-                  data-track-name='Go_Back_From_Canvas'
-                  data-track-metadata={JSON.stringify({ canvasId: selectedCanvas?.id })}
-                >
-                  <ArrowLeft size={16} />
-                </Button>
+              <div className='flex flex-col px-3 pt-2'>
+                <div className='flex h-9 items-center gap-1'>
+                  {/* Title */}
+                  <div className='flex min-w-0 flex-1 items-center'>
+                    {/* Desktop navigates back through the app chrome / browser history;
+                        mobile has no other affordance, so the arrow stays there. */}
+                    <Button
+                      variant='ghost'
+                      size='iconSm'
+                      onClick={handleLeaveCanvas}
+                      aria-label='Go back'
+                      className='md:hidden'
+                      data-track-category='CANVAS'
+                      data-track-name='Go_Back_From_Canvas'
+                      data-track-metadata={JSON.stringify({ canvasId: selectedCanvas?.id })}
+                    >
+                      <ArrowLeft size={16} />
+                    </Button>
 
-                <div className='flex min-w-0 flex-1 flex-col'>
-                  <Input
-                    type='text'
-                    aria-label='Canvas title'
-                    value={currentTitle}
-                    data-testid='canvas-title-input'
-                    onChange={e => {
-                      const newTitle = e.target.value;
-                      setCurrentTitle(newTitle);
-                      titleRef.current = newTitle;
-                    }}
-                    readOnly={!canEdit}
-                    onBlur={() => {
-                      handleTitleSave();
-                    }}
-                    className={`text-base md:text-xl font-bold flex-1 border-none shadow-none focus:ring-0 focus-visible:ring-0 focus-visible:border-none px-0 py-0 h-auto ${!canEdit ? 'cursor-default' : ''}`}
-                    placeholder='Untitled Canvas'
-                  />
-                  {lastUpdatedText && (
-                    <div className='mt-1 truncate text-[11px] text-muted-foreground md:text-xs'>
-                      {lastUpdatedText}
+                    <div className='flex min-w-0 flex-1 items-center gap-2 px-3 py-1'>
+                      <FileText size={16} className='shrink-0 text-foreground' />
+                      <Input
+                        type='text'
+                        aria-label='Canvas title'
+                        value={currentTitle}
+                        data-testid='canvas-title-input'
+                        onChange={e => {
+                          const newTitle = e.target.value;
+                          setCurrentTitle(newTitle);
+                          titleRef.current = newTitle;
+                        }}
+                        readOnly={!canEdit}
+                        onBlur={() => {
+                          handleTitleSave();
+                        }}
+                        className={cn(
+                          'h-auto min-w-0 flex-1 border-none bg-transparent px-0 py-0 text-base font-semibold text-foreground shadow-none focus:ring-0 focus-visible:border-none focus-visible:ring-0',
+                          !canEdit && 'cursor-default',
+                        )}
+                        placeholder='Untitled Canvas'
+                      />
                     </div>
-                  )}
-                </div>
-              </div>
+                  </div>
 
-              <div className='flex items-center justify-end gap-1 shrink-0'>
-                <div className='text-xs md:text-sm text-muted-foreground whitespace-nowrap hidden md:block'>
-                  {isSaving ? 'Saving...' : 'Saved'}
-                </div>
+                  {/* Actions */}
+                  <div className='flex shrink-0 items-center gap-3'>
+                    {/* Approve to Knowledge Base Button (Only for Knowledge Canvases) */}
+                    {isKnowledgeCanvas && selectedCanvas?.id && (
+                      <div>
+                        {isApproved ? (
+                          <Button variant='secondary' size='sm' disabled>
+                            <CheckCircle size={16} className='text-green-600' />
+                            Approved
+                          </Button>
+                        ) : (
+                          <Button
+                            variant='default'
+                            size='sm'
+                            onClick={() => void handleApproveKnowledge()}
+                            disabled={isApproving}
+                            data-track-category='CANVAS'
+                            data-track-name='APPROVE_KNOWLEDGE'
+                            data-track-metadata={JSON.stringify({ canvasId: selectedCanvas?.id })}
+                          >
+                            {isApproving ? (
+                              <Loader2 size={16} className='animate-spin' />
+                            ) : (
+                              <CheckCircle size={16} />
+                            )}
+                            {isApproving ? 'Approving...' : 'Approve to Knowledge Base'}
+                          </Button>
+                        )}
+                      </div>
+                    )}
 
-                {/* Slideshow Presentation Toolbar - Hidden on mobile */}
-                <div className='ml-2 pl-4 border-l border-border hidden md:block'>
-                  <PresentToolbar
-                    selectedTheme={selectedTheme}
-                    onThemeChange={e => {
-                      setSelectedTheme(e.target.value);
-                      editorRef.current?.handleThemeChange(e);
-                    }}
-                    onPresent={() => {
-                      editorRef.current?.handlePresent();
-                    }}
-                    height={32}
-                  />
-                </div>
+                    {selectedCanvas?.id && (
+                      <>
+                        {/* Avatar stack — opens the canvas details popover */}
+                        <Popover
+                          align='end'
+                          className='w-[340px] max-w-[calc(100vw-24px)]'
+                          trigger={
+                            <button
+                              type='button'
+                              className='flex shrink-0 items-center justify-center rounded-lg py-2 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'
+                              aria-label='Canvas details'
+                              data-testid='canvas-details-button'
+                              data-track-category='CANVAS'
+                              data-track-name='SHOW_PARTICIPANTS_TRAY'
+                              data-track-metadata={JSON.stringify({
+                                canvasId: selectedCanvas.id,
+                                isCollaborative: selectedCanvas.isCollaborative,
+                              })}
+                            >
+                              <AvatarGroup
+                                userIds={
+                                  selectedCanvas.isCollaborative
+                                    ? collaboratorUserIds
+                                    : dbParticipants.map(p => p.userId)
+                                }
+                                size='sm'
+                                count={3}
+                                shape='square'
+                              />
+                            </button>
+                          }
+                        >
+                          <div className='flex flex-col gap-2' data-testid='canvas-details-popover'>
+                            {canvasDetailRows.map(row => (
+                              <div key={row.label} className='flex items-center gap-4 text-sm'>
+                                <span className='w-[104px] shrink-0 whitespace-nowrap text-muted-foreground'>
+                                  {row.label}
+                                </span>
+                                <span className='min-w-0 flex-1 truncate whitespace-nowrap text-foreground'>
+                                  {row.value}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </Popover>
 
-                {/* Approve to Knowledge Base Button (Only for Knowledge Canvases) */}
-                {isKnowledgeCanvas && selectedCanvas?.id && (
-                  <div className='ml-2'>
-                    {isApproved ? (
-                      <Button variant='secondary' size='sm' disabled>
-                        <CheckCircle size={16} className='text-green-600' />
-                        Approved
-                      </Button>
-                    ) : (
+                        {/* Share */}
+                        <button
+                          type='button'
+                          onClick={() => setShowShareModal(true)}
+                          className={headerIconButtonClass}
+                          title='Share'
+                          aria-label='Share'
+                          data-testid='canvas-share-button'
+                          data-track-category='CANVAS'
+                          data-track-name='Open_Share_Modal'
+                          data-track-metadata={JSON.stringify({ canvasId: selectedCanvas.id })}
+                        >
+                          <Share01 size={16} className='shrink-0 opacity-60' />
+                        </button>
+
+                        {/* Icon button group */}
+                        <div className='flex items-center gap-1'>
+                          {/* Ask AI */}
+                          <button
+                            type='button'
+                            onClick={handleAskAI}
+                            className={headerIconButtonClass}
+                            title='Ask AI'
+                            aria-label='Ask AI'
+                            data-track-category='CANVAS'
+                            data-track-name='Ask_AI_From_Canvas'
+                            data-track-metadata={JSON.stringify({ canvasId: selectedCanvas.id })}
+                          >
+                            <img
+                              alt='AI'
+                              width='16'
+                              height='16'
+                              src='/svgs/icons/ai-bot-gradient-star.svg'
+                            />
+                          </button>
+
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <button
+                                type='button'
+                                className={headerIconButtonClass}
+                                title='More options'
+                                aria-label='More options'
+                                data-testid='canvas-more-menu-button'
+                                data-track-category='CANVAS'
+                                data-track-name='Open_Canvas_Menu'
+                                data-track-metadata={JSON.stringify({
+                                  canvasId: selectedCanvas.id,
+                                })}
+                              >
+                                <ThreeDotsMenuVertical size={16} className='shrink-0 opacity-60' />
+                              </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align='end' className='min-w-[180px]'>
+                              <DropdownMenuItem
+                                className='gap-2'
+                                onClick={() => setShowVersionHistory(true)}
+                                data-testid='canvas-version-history-item'
+                                data-track-category='CANVAS'
+                                data-track-name='Open_Version_History'
+                                data-track-metadata={JSON.stringify({
+                                  canvasId: selectedCanvas.id,
+                                })}
+                              >
+                                <ReminderClockwise size={16} className='shrink-0' />
+                                <span className='flex-1'>Version history</span>
+                              </DropdownMenuItem>
+
+                              <DropdownMenuSub>
+                                <DropdownMenuSubTrigger
+                                  className='gap-2'
+                                  data-testid='canvas-export-button'
+                                  data-track-category='CANVAS'
+                                  data-track-name='Open_Export_Menu'
+                                  data-track-metadata={JSON.stringify({
+                                    canvasId: selectedCanvas.id,
+                                  })}
+                                >
+                                  <Share02 size={16} className='shrink-0' />
+                                  <span className='flex-1'>Export</span>
+                                </DropdownMenuSubTrigger>
+                                <DropdownMenuSubContent>
+                                  <DropdownMenuItem
+                                    className='gap-2'
+                                    onClick={handleExportMarkdown}
+                                    data-testid='canvas-export-markdown'
+                                  >
+                                    <Markdown size={16} className='shrink-0' />
+                                    <span className='flex-1'>Export as Markdown</span>
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    className='gap-2'
+                                    onClick={handleExportPdf}
+                                    data-testid='canvas-export-pdf'
+                                  >
+                                    <File02PdfFormat size={16} className='shrink-0' />
+                                    <span className='flex-1'>Export as PDF</span>
+                                  </DropdownMenuItem>
+                                </DropdownMenuSubContent>
+                              </DropdownMenuSub>
+
+                              <DropdownMenuItem
+                                className='gap-2'
+                                onClick={() => {
+                                  editorRef.current?.handlePresent();
+                                }}
+                                data-testid='canvas-present-item'
+                              >
+                                <PlaySquare size={16} className='shrink-0' />
+                                <span className='flex-1'>Present</span>
+                              </DropdownMenuItem>
+
+                              <DropdownMenuSub>
+                                <DropdownMenuSubTrigger className='gap-2'>
+                                  <ColorPalette size={16} className='shrink-0' />
+                                  Presentation theme
+                                </DropdownMenuSubTrigger>
+                                <DropdownMenuSubContent>
+                                  {PRESENTATION_THEMES.map(theme => (
+                                    <DropdownMenuItem
+                                      key={theme.value}
+                                      className='gap-2'
+                                      onClick={() => {
+                                        setSelectedTheme(theme.value);
+                                        editorRef.current?.handleThemeChange(theme.value);
+                                      }}
+                                    >
+                                      <span className='flex-1 truncate'>{theme.label}</span>
+                                      {selectedTheme === theme.value && (
+                                        <CheckTickSingle size={14} className='shrink-0' />
+                                      )}
+                                    </DropdownMenuItem>
+                                  ))}
+                                </DropdownMenuSubContent>
+                              </DropdownMenuSub>
+
+                              {onToggleFullscreen && (
+                                <DropdownMenuItem
+                                  className='hidden gap-2 md:flex'
+                                  onClick={onToggleFullscreen}
+                                  data-testid='canvas-fullscreen-item'
+                                  data-track-category='CANVAS'
+                                  data-track-name={
+                                    isFullscreen ? 'Exit_Fullscreen' : 'Enter_Fullscreen'
+                                  }
+                                  data-track-metadata={JSON.stringify({
+                                    canvasId: selectedCanvas?.id,
+                                  })}
+                                >
+                                  {isFullscreen ? (
+                                    <MinimizeFourArrow size={16} className='shrink-0' />
+                                  ) : (
+                                    <MaximizeFourArrow size={16} className='shrink-0' />
+                                  )}
+                                  <span className='flex-1'>
+                                    {isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+                                  </span>
+                                </DropdownMenuItem>
+                              )}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
+                      </>
+                    )}
+
+                    {(isEditingMessage || isCreatingMessage) && (
                       <Button
                         variant='default'
                         size='sm'
-                        onClick={() => void handleApproveKnowledge()}
-                        disabled={isApproving}
+                        onClick={() => void handleDone()}
                         data-track-category='CANVAS'
-                        data-track-name='APPROVE_KNOWLEDGE'
+                        data-track-name='Done_Editing_Canvas'
                         data-track-metadata={JSON.stringify({ canvasId: selectedCanvas?.id })}
                       >
-                        {isApproving ? (
-                          <Loader2 size={16} className='animate-spin' />
-                        ) : (
-                          <CheckCircle size={16} />
-                        )}
-                        {isApproving ? 'Approving...' : 'Approve to Knowledge Base'}
+                        Done
                       </Button>
                     )}
                   </div>
-                )}
-
-                {selectedCanvas?.id && (
-                  <div className='flex items-center gap-3 ml-2'>
-                    <Button
-                      variant='secondary'
-                      size='sm'
-                      onClick={() => setShowVersionHistory(true)}
-                      title='Version history'
-                      data-track-category='CANVAS'
-                      data-track-name='Open_Version_History'
-                      data-track-metadata={JSON.stringify({ canvasId: selectedCanvas.id })}
-                    >
-                      <History size={16} />
-                      <span className='hidden lg:inline'>History</span>
-                    </Button>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          variant='secondary'
-                          size='sm'
-                          title='Export canvas'
-                          data-testid='canvas-export-button'
-                          data-track-category='CANVAS'
-                          data-track-name='Open_Export_Menu'
-                          data-track-metadata={JSON.stringify({ canvasId: selectedCanvas.id })}
-                        >
-                          <Download size={16} />
-                          <span className='hidden lg:inline'>Export</span>
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align='end' className='w-52'>
-                        <DropdownMenuItem
-                          onClick={handleExportMarkdown}
-                          data-testid='canvas-export-markdown'
-                        >
-                          <FileText size={16} className='mr-2' />
-                          Export as Markdown
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={handleExportPdf} data-testid='canvas-export-pdf'>
-                          <FileDown size={16} className='mr-2' />
-                          Export as PDF
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                    {/* Fullscreen Toggle Button - Hidden on mobile */}
-                    {onToggleFullscreen && (
-                      <Button
-                        variant='secondary'
-                        size='sm'
-                        onClick={onToggleFullscreen}
-                        title={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
-                        className='hidden md:inline-flex'
-                        data-track-category='CANVAS'
-                        data-track-name={isFullscreen ? 'Exit_Fullscreen' : 'Enter_Fullscreen'}
-                        data-track-metadata={JSON.stringify({ canvasId: selectedCanvas?.id })}
-                      >
-                        {isFullscreen ? (
-                          <>
-                            <Minimize2 size={16} />
-                          </>
-                        ) : (
-                          <>
-                            <Maximize2 size={16} />
-                          </>
-                        )}
-                      </Button>
-                    )}
-                    {/* Participants/Collaborators button */}
-                    <button
-                      onClick={() => setShowParticipantsTray(true)}
-                      className='inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 border border-input bg-background shadow-sm hover:bg-accent hover:text-accent-foreground h-8 px-3'
-                      aria-label={
-                        selectedCanvas.isCollaborative ? 'View collaborators' : 'View participants'
-                      }
-                      data-track-category='CANVAS'
-                      data-track-name='SHOW_PARTICIPANTS_TRAY'
-                      data-track-metadata={JSON.stringify({
-                        canvasId: selectedCanvas.id,
-                        isCollaborative: selectedCanvas.isCollaborative,
-                      })}
-                    >
-                      <AvatarGroup
-                        userIds={
-                          selectedCanvas.isCollaborative
-                            ? collaboratorUserIds
-                            : dbParticipants.map(p => p.userId)
-                        }
-                        size='sm'
-                        count={3}
-                      />
-                      {selectedCanvas.isCollaborative && (
-                        <span className='text-xs text-green-600'>Live</span>
-                      )}
-                    </button>
-                    {/* Ask AI Button */}
-                    {selectedCanvas.id && (
-                      <Button variant='secondary' size='sm' onClick={handleAskAI} title='Ask AI'>
-                        <img
-                          alt='AI'
-                          width='16'
-                          height='16'
-                          src='/svgs/icons/ai-bot-gradient-star.svg'
-                        />
-                      </Button>
-                    )}
-                    <Button
-                      variant='default'
-                      size='sm'
-                      onClick={() => setShowShareModal(true)}
-                      data-testid='canvas-share-button'
-                      data-track-category='CANVAS'
-                      data-track-name='Open_Share_Modal'
-                      data-track-metadata={JSON.stringify({ canvasId: selectedCanvas.id })}
-                    >
-                      Share
-                    </Button>
-                  </div>
-                )}
-
-                {(isEditingMessage || isCreatingMessage) && (
-                  <div className='ml-4 border-l border-border pl-4'>
-                    <Button
-                      variant='default'
-                      size='sm'
-                      onClick={() => void handleDone()}
-                      data-track-category='CANVAS'
-                      data-track-name='Done_Editing_Canvas'
-                      data-track-metadata={JSON.stringify({ canvasId: selectedCanvas?.id })}
-                    >
-                      Done
-                    </Button>
-                  </div>
-                )}
+                </div>
               </div>
+
+              {/* Decorative scroll fade below the header row */}
+              <div
+                aria-hidden='true'
+                className='h-3 w-full shrink-0 bg-gradient-to-b from-background to-transparent'
+              />
             </div>
 
             {baseRoute === '/chat/activity' && (
@@ -1483,23 +1599,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
           />
         </Dialog>
       )}
-
-      <Dialog
-        open={showParticipantsTray}
-        onOpenChange={open => !open && setShowParticipantsTray(false)}
-        title={selectedCanvas?.isCollaborative ? 'Active Collaborators' : 'Canvas Participants'}
-      >
-        <CanvasParticipantsTray
-          title={selectedCanvas?.isCollaborative ? 'Active Collaborators' : 'Canvas Participants'}
-          onClose={() => setShowParticipantsTray(false)}
-          participants={selectedCanvas?.isCollaborative ? trayParticipants : dbParticipants}
-          showRole={!selectedCanvas?.isCollaborative}
-          showColor={selectedCanvas?.isCollaborative ?? false}
-          canvasId={selectedCanvas?.id ?? undefined}
-          isCollaborative={selectedCanvas?.isCollaborative ?? false}
-          isOwner={isCanvasOwner}
-        />
-      </Dialog>
     </div>
   );
 };

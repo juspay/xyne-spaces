@@ -130,7 +130,7 @@ const MonthView: React.FC<{
               className={`
                 aspect-square flex items-center justify-center text-sm rounded-md transition-colors
                 ${isSelected ? 'bg-[var(--ticket-accent)] text-white font-semibold' : ''}
-                ${!isSelected && isToday ? 'border border-sidebar-badge-accent text-sidebar-badge-accent font-semibold' : ''}
+                ${!isSelected && isToday ? 'border border-primary text-primary font-semibold' : ''}
                 ${!isSelected && !isToday && !isDisabled ? 'hover:bg-muted text-foreground' : ''}
                 ${isDisabled ? 'text-muted-foreground cursor-not-allowed' : 'cursor-pointer'}
               `}

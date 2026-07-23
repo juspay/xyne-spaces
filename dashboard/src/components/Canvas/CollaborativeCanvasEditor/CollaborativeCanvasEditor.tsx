@@ -60,7 +60,8 @@ import {
   CanvasMentionContext,
 } from '../CanvasMentionSpec';
 import { createElement } from 'react';
-import { RiGroupLine, RiUserLine } from 'react-icons/ri';
+import { RiGroupLine } from 'react-icons/ri';
+import Avatar from '../../ui/Avatar/Avatar';
 import { TableOfContents, TocHeading } from '../TableOfContents';
 import { CanvasSearch } from '../CanvasSearch/CanvasSearch';
 import { SelectionAskAI } from '../SelectionAskAI';
@@ -330,7 +331,12 @@ export const CollaborativeCanvasEditor = forwardRef<
             title: displayName,
             subtext: u.email ?? '',
             group: 'Users',
-            icon: createElement(RiUserLine, { size: 18 }),
+            icon: createElement(Avatar, {
+              userId: u.id,
+              size: 'sm',
+              rounded: true,
+              showActiveStatus: false,
+            }),
             onItemClick: () => {
               logger.info(Event.CANVAS_MENTION_DEBUG, {
                 message: 'User mention onItemClick fired',
@@ -612,7 +618,7 @@ export const CollaborativeCanvasEditor = forwardRef<
         data-testid='canvas-editor'
       >
         <div
-          className='flex-1 overflow-auto pt-8 min-h-0'
+          className='thin-scrollbar flex-1 overflow-auto pt-8 min-h-0'
           style={{
             maxWidth: '100%',
             wordBreak: 'break-word',

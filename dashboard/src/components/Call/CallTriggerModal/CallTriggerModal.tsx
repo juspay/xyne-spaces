@@ -122,7 +122,7 @@ export const CallTriggerModal: React.FC<CallTriggerModalProps> = ({
       className={cn(
         'h-full transition-colors rounded-lg w-8.5 !p-2',
         usesCustomTriggerStyle && 'w-full',
-        !usesCustomTriggerStyle && 'bg-sidebar-badge-accent',
+        !usesCustomTriggerStyle && 'bg-primary',
         'flex items-center justify-center gap-2',
         disabled ? 'opacity-50 cursor-not-allowed' : '',
         className,
@@ -136,7 +136,7 @@ export const CallTriggerModal: React.FC<CallTriggerModalProps> = ({
         )}
       />
       {!isMobile && hasActiveCalls && (
-        <Badge className='bg-background text-sidebar-badge-accent'>{validActiveCalls.length}</Badge>
+        <Badge className='bg-background text-primary'>{validActiveCalls.length}</Badge>
       )}
       {!isMobile && <div className='h-4 w-px bg-muted-foreground/50' />}
       {!isMobile && (

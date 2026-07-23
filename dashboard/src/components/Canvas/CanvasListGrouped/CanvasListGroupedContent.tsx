@@ -1,17 +1,18 @@
 import React, { useEffect, useMemo } from 'react';
 import {
-  ChevronDown,
-  ChevronRight,
+  ChevronBigDown,
+  ChevronBigRight,
+  DeleteDustbin01,
   FileText,
-  Folder,
-  FolderOpen,
-  Hash,
-  MoreHorizontal,
-  Pencil,
-  Plus,
-  Trash2,
-  User,
-} from 'lucide-react';
+  FolderDefault,
+  Hashtag,
+  PencilEdit,
+  PlusDefault,
+  Spinner,
+  ThreeDotsMenuHorizontal,
+  UserDefault,
+} from '@xyne/icons';
+import { cn } from '../../../utils/classNames';
 import type { Canvas, CanvasChannel, CanvasFolder, CanvasProject } from '../Canvas.types';
 import {
   DropdownMenu,
@@ -45,11 +46,26 @@ function toArray<T>(value: unknown): T[] {
   return (value as T[] | undefined) ?? [];
 }
 
+/**
+ * Sidebar idiom shared with the chat directory. Every item — section headers
+ * and rows alike — is 36px so the list keeps a single vertical rhythm. Rows add
+ * a hover border that appears without shifting layout (transparent at rest).
+ */
+const SECTION_HEADER_CLASS =
+  'flex min-w-0 flex-1 items-center gap-2 h-9 px-3 text-left text-sm font-medium tracking-[-0.14px] text-sidebar-foreground hover:text-sidebar-accent-foreground transition-colors';
+
+const ROW_CLASS =
+  'group flex items-center gap-3 h-9 px-3 rounded-[10px] border border-transparent text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:border-sidebar-border hover:text-sidebar-accent-foreground';
+
+/** Hover-revealed control: `display`, not `opacity`, so it reserves no width. */
+const HOVER_ACTION_CLASS =
+  'hidden group-hover:flex items-center justify-center p-1 rounded-md shrink-0 hover:bg-sidebar-accent disabled:opacity-40';
+
 const SearchLoadingRow: React.FC<{ indentClassName?: string }> = ({ indentClassName = 'pl-2' }) => (
   <div
-    className={`flex items-center gap-2 ${indentClassName} pr-2 py-2 text-sm text-muted-foreground`}
+    className={`flex items-center gap-3 ${indentClassName} px-3 h-9 text-sm text-sidebar-foreground`}
   >
-    <div className='animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600' />
+    <Spinner size={16} className='animate-spin shrink-0' />
     <span>Searching...</span>
   </div>
 );
@@ -57,7 +73,6 @@ const SearchLoadingRow: React.FC<{ indentClassName?: string }> = ({ indentClassN
 interface FolderGroupSectionProps {
   folderGroup: FolderGroup;
   indentClassName: string;
-  canvasIndentClassName: string;
   currentUserId?: string | undefined;
   selectedCanvasId?: string | undefined;
   adminChannelIds: ReadonlySet<string>;
@@ -84,7 +99,6 @@ interface FolderGroupSectionProps {
 const FolderGroupSection: React.FC<FolderGroupSectionProps> = ({
   folderGroup,
   indentClassName,
-  canvasIndentClassName,
   currentUserId,
   selectedCanvasId,
   adminChannelIds,
@@ -182,128 +196,134 @@ const FolderGroupSection: React.FC<FolderGroupSectionProps> = ({
 
   return (
     <div key={folderGroup.folder.id}>
-      <div
-        className={[
-          'flex items-center group',
-          indentClassName,
-          'pr-2 py-1.5 hover:bg-accent rounded-md',
-        ].join(' ')}
-      >
-        <button
-          className='flex items-center gap-2 shrink-0'
-          onClick={() => onToggleFolder(folderGroup.folder.id)}
-          title={isCollapsed ? 'Expand folder' : 'Collapse folder'}
-          data-track-category='CANVAS'
-          data-track-name='TOGGLE_CANVAS_FOLDER_ICON'
-        >
-          {isCollapsed ? (
-            <ChevronRight className='w-3.5 h-3.5 text-muted-foreground shrink-0' />
-          ) : (
-            <ChevronDown className='w-3.5 h-3.5 text-muted-foreground shrink-0' />
-          )}
-          <Folder className='w-3.5 h-3.5 text-amber-500 shrink-0' />
-        </button>
-        {isRenaming ? (
-          <Input
-            value={renamingFolderName}
-            onChange={event => setRenamingFolderName(event.target.value)}
-            onBlur={() => onConfirmRenameFolder(folderGroup.folder)}
-            onKeyDown={event => {
-              if (event.key === 'Enter') {
-                event.preventDefault();
-                onConfirmRenameFolder(folderGroup.folder);
-              }
-              if (event.key === 'Escape') {
-                event.preventDefault();
-                onCancelRenameFolder();
-              }
-            }}
-            onClick={event => event.stopPropagation()}
-            className='ml-1 h-7 flex-1 min-w-0 text-sm px-2 py-0'
-          />
-        ) : (
+      <div className={cn(indentClassName, 'relative')}>
+        <div className={ROW_CLASS}>
           <button
-            className='ml-1 min-w-0 flex-1 text-left'
+            className='flex items-center gap-2 shrink-0'
             onClick={() => onToggleFolder(folderGroup.folder.id)}
-            aria-label={`${isCollapsed ? 'Expand' : 'Collapse'} ${folderGroup.folder.name}`}
             title={isCollapsed ? 'Expand folder' : 'Collapse folder'}
             data-track-category='CANVAS'
-            data-track-name='TOGGLE_CANVAS_FOLDER'
+            data-track-name='TOGGLE_CANVAS_FOLDER_ICON'
           >
-            <span className='block text-sm truncate'>
-              <HighlightedText text={folderGroup.folder.name} query={searchQuery} />
-            </span>
+            {isCollapsed ? (
+              <ChevronBigRight size={12} className='shrink-0' />
+            ) : (
+              <ChevronBigDown size={12} className='shrink-0' />
+            )}
+            <FolderDefault size={16} className='shrink-0' />
           </button>
-        )}
-        <button
-          className='p-1 opacity-0 group-hover:opacity-100 hover:bg-muted rounded transition-all disabled:opacity-40'
-          onClick={() => void onCreateCanvasInFolder(folderGroup.folder)}
-          disabled={isCreatingCanvas}
-          title='Create canvas in folder'
-          data-track-category='CANVAS'
-          data-track-name='CREATE_CANVAS_IN_FOLDER'
-        >
-          <Plus className='w-4 h-4 text-muted-foreground' />
-        </button>
-        {canRenameFolder && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                className='p-1 opacity-0 group-hover:opacity-100 hover:bg-muted rounded transition-all'
-                onClick={event => event.stopPropagation()}
-                title='Folder actions'
-                data-track-category='CANVAS'
-                data-track-name='CANVAS_FOLDER_ACTIONS_MENU'
-              >
-                <MoreHorizontal className='w-4 h-4 text-muted-foreground' />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align='end' className='w-40'>
-              <DropdownMenuItem
-                onClick={() => onStartRenameFolder(folderGroup.folder)}
-                data-track-category='CANVAS'
-                data-track-name='RENAME_CANVAS_FOLDER'
-              >
-                <Pencil className='w-4 h-4 mr-2' />
-                Rename
-              </DropdownMenuItem>
-              {canDeleteFolder && (
-                <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    onClick={() => onDeleteFolder(folderGroup.folder, folderCanvases.length)}
-                    className='text-red-600 focus:text-red-600 focus:bg-red-50'
-                    data-track-category='CANVAS'
-                    data-track-name='DELETE_CANVAS_FOLDER'
-                  >
-                    <Trash2 className='w-4 h-4 mr-2' />
-                    Delete
-                  </DropdownMenuItem>
-                </>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
+          {isRenaming ? (
+            <Input
+              value={renamingFolderName}
+              onChange={event => setRenamingFolderName(event.target.value)}
+              onBlur={() => onConfirmRenameFolder(folderGroup.folder)}
+              onKeyDown={event => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  onConfirmRenameFolder(folderGroup.folder);
+                }
+                if (event.key === 'Escape') {
+                  event.preventDefault();
+                  onCancelRenameFolder();
+                }
+              }}
+              onClick={event => event.stopPropagation()}
+              className='h-7 flex-1 min-w-0 text-sm px-2 py-0'
+            />
+          ) : (
+            <button
+              className='min-w-0 flex-1 text-left'
+              onClick={() => onToggleFolder(folderGroup.folder.id)}
+              aria-label={`${isCollapsed ? 'Expand' : 'Collapse'} ${folderGroup.folder.name}`}
+              title={isCollapsed ? 'Expand folder' : 'Collapse folder'}
+              data-track-category='CANVAS'
+              data-track-name='TOGGLE_CANVAS_FOLDER'
+            >
+              <span className='block truncate text-sm font-medium tracking-[-0.14px]'>
+                <HighlightedText text={folderGroup.folder.name} query={searchQuery} />
+              </span>
+            </button>
+          )}
+          <button
+            className={HOVER_ACTION_CLASS}
+            onClick={() => void onCreateCanvasInFolder(folderGroup.folder)}
+            disabled={isCreatingCanvas}
+            title='Create canvas in folder'
+            data-track-category='CANVAS'
+            data-track-name='CREATE_CANVAS_IN_FOLDER'
+          >
+            <PlusDefault size={14} />
+          </button>
+          {canRenameFolder && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  className={HOVER_ACTION_CLASS}
+                  onClick={event => event.stopPropagation()}
+                  title='Folder actions'
+                  data-track-category='CANVAS'
+                  data-track-name='CANVAS_FOLDER_ACTIONS_MENU'
+                >
+                  <ThreeDotsMenuHorizontal size={14} />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align='end' className='w-40'>
+                <DropdownMenuItem
+                  className='gap-2'
+                  onClick={() => onStartRenameFolder(folderGroup.folder)}
+                  data-track-category='CANVAS'
+                  data-track-name='RENAME_CANVAS_FOLDER'
+                >
+                  <PencilEdit size={14} className='shrink-0' />
+                  <span className='flex-1'>Rename</span>
+                </DropdownMenuItem>
+                {canDeleteFolder && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onClick={() => onDeleteFolder(folderGroup.folder, folderCanvases.length)}
+                      className='gap-2 text-destructive focus:text-destructive'
+                      data-track-category='CANVAS'
+                      data-track-name='DELETE_CANVAS_FOLDER'
+                    >
+                      <DeleteDustbin01 size={14} className='shrink-0' />
+                      <span className='flex-1'>Delete</span>
+                    </DropdownMenuItem>
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+        </div>
       </div>
-      {!isCollapsed && isFolderLoading && (
-        <SearchLoadingRow indentClassName={canvasIndentClassName} />
+      {/* Children sit behind a vertical guide rail, per the frame's
+          folder-with-nested-canvases group. The 18px offset centres the rail on
+          the folder row's chevron (12px row padding + half of the 12px glyph).
+          It uses `ml-*`, not `pl-*`: `cn` runs tailwind-merge, so a `pl-*` on the
+          indent wrapper would override the caller's `pl-10` rather than add to
+          it, leaving children rendering shallower than the folder they belong to. */}
+      {!isCollapsed && (isFolderLoading || visibleFolderCanvases.length > 0) && (
+        <div className={indentClassName}>
+          <div className='ml-[18px] border-l border-border pl-3'>
+            {isFolderLoading && <SearchLoadingRow indentClassName='' />}
+            {visibleFolderCanvases.map(canvas => (
+              <CanvasRow
+                key={canvas.id}
+                canvas={canvas}
+                indentClassName=''
+                onSelect={onSelect}
+                selectedCanvasId={selectedCanvasId}
+                currentUserId={currentUserId}
+                trackNames={groupedCanvasRowTrackNames}
+                onDelete={onDelete}
+                onDuplicate={onDuplicate}
+                onToggleStar={onToggleStar}
+                highlightQuery={searchQuery}
+              />
+            ))}
+          </div>
+        </div>
       )}
-      {!isCollapsed &&
-        visibleFolderCanvases.map(canvas => (
-          <CanvasRow
-            key={canvas.id}
-            canvas={canvas}
-            indentClassName={canvasIndentClassName}
-            onSelect={onSelect}
-            selectedCanvasId={selectedCanvasId}
-            currentUserId={currentUserId}
-            trackNames={groupedCanvasRowTrackNames}
-            onDelete={onDelete}
-            onDuplicate={onDuplicate}
-            onToggleStar={onToggleStar}
-            highlightQuery={searchQuery}
-          />
-        ))}
     </div>
   );
 };
@@ -420,25 +440,25 @@ const ChannelSection: React.FC<ChannelSectionProps> = ({
   return (
     <div key={channelGroup.channel.id}>
       {showChannelHeader && (
-        <div className='flex items-center group'>
+        <div className='group flex items-center pl-3'>
           <button
-            className='flex min-w-0 flex-1 items-center gap-2 pl-6 pr-3 py-1.5 hover:bg-accent rounded-md text-left'
+            className={SECTION_HEADER_CLASS}
             onClick={() => onToggleChannel(channelGroup.channel.id)}
             data-track-category='CANVAS'
             data-track-name='TOGGLE_CANVAS_CHANNEL'
           >
             {isCollapsed ? (
-              <ChevronRight className='w-3.5 h-3.5 text-muted-foreground shrink-0' />
+              <ChevronBigRight size={12} className='shrink-0' />
             ) : (
-              <ChevronDown className='w-3.5 h-3.5 text-muted-foreground shrink-0' />
+              <ChevronBigDown size={12} className='shrink-0' />
             )}
-            <Hash className='w-3.5 h-3.5 text-muted-foreground shrink-0' />
-            <span className='text-sm truncate'>
+            <Hashtag size={12} className='shrink-0' />
+            <span className='truncate'>
               <HighlightedText text={channelName} query={searchQuery} />
             </span>
           </button>
           <button
-            className='p-1 opacity-0 group-hover:opacity-100 hover:bg-accent rounded transition-all disabled:opacity-40'
+            className={HOVER_ACTION_CLASS}
             onClick={() => onOpenChannelCreateDialog(channelGroup.channel, channelFolders)}
             disabled={isCreatingCanvas || !!channelGroup.channel.isArchived}
             title={
@@ -449,18 +469,17 @@ const ChannelSection: React.FC<ChannelSectionProps> = ({
             data-track-category='CANVAS'
             data-track-name='OPEN_CHANNEL_CANVAS_CREATE'
           >
-            <Plus className='w-4 h-4 text-muted-foreground' />
+            <PlusDefault size={14} />
           </button>
         </div>
       )}
       {!isCollapsed && (
-        <div className='space-y-0.5'>
+        <div>
           {channelFolders.map(folder => (
             <FolderGroupSection
               key={folder.id}
               folderGroup={{ folder, canvases: [] }}
               indentClassName='pl-10'
-              canvasIndentClassName='pl-14'
               currentUserId={currentUserId}
               selectedCanvasId={selectedCanvasId}
               adminChannelIds={adminChannelIds}
@@ -597,57 +616,56 @@ const ProjectSection: React.FC<ProjectSectionProps> = ({
     hasMatchingChannel;
 
   return (
-    <section
-      key={group.project.id}
-      className={showProjectHeader ? 'border-b border-border pb-1 last:border-b-0' : ''}
-    >
+    <section key={group.project.id} className={showProjectHeader ? 'pb-1' : ''}>
       {showProjectHeader && (
-        <div className='flex items-center group'>
+        <div className='group flex items-center'>
           <button
-            className='flex min-w-0 flex-1 items-center gap-2 px-3 py-2 hover:bg-accent rounded-md text-left'
+            className={SECTION_HEADER_CLASS}
             onClick={() => onToggleProject(group.project.id)}
             data-track-category='CANVAS'
             data-track-name='TOGGLE_CANVAS_PROJECT'
           >
             {isProjectCollapsed ? (
-              <ChevronRight className='w-4 h-4 text-muted-foreground shrink-0' />
+              <ChevronBigRight size={12} className='shrink-0' />
             ) : (
-              <ChevronDown className='w-4 h-4 text-muted-foreground shrink-0' />
+              <ChevronBigDown size={12} className='shrink-0' />
             )}
-            <FolderOpen className='w-4 h-4 text-amber-500 shrink-0' />
-            <span className='font-semibold text-sm truncate'>
+            <FolderDefault size={14} className='shrink-0' />
+            <span className='truncate font-semibold'>
               <HighlightedText text={group.project.name} query={searchQuery} />
             </span>
           </button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
-                className='p-1 opacity-0 group-hover:opacity-100 hover:bg-accent rounded transition-all disabled:opacity-40'
+                className={HOVER_ACTION_CLASS}
                 onClick={event => event.stopPropagation()}
                 title='Create canvas or folder'
                 disabled={isCreatingCanvas}
                 data-track-category='CANVAS'
                 data-track-name='OPEN_PROJECT_CANVAS_CREATE'
               >
-                <Plus className='w-4 h-4 text-muted-foreground' />
+                <PlusDefault size={14} />
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align='end' className='w-44'>
               <DropdownMenuItem
+                className='gap-2'
                 onClick={() => void onCreateCanvasInProject(group.project, projectFolders)}
                 data-track-category='CANVAS'
                 data-track-name='CREATE_PROJECT_CANVAS'
               >
-                <FileText className='w-4 h-4 mr-2' />
-                Create canvas
+                <FileText size={14} className='shrink-0' />
+                <span className='flex-1'>Create canvas</span>
               </DropdownMenuItem>
               <DropdownMenuItem
+                className='gap-2'
                 onClick={() => onCreateFolder(group.project.id, projectFolders)}
                 data-track-category='CANVAS'
                 data-track-name='CREATE_CANVAS_FOLDER'
               >
-                <Folder className='w-4 h-4 mr-2 text-amber-500' />
-                Create folder
+                <FolderDefault size={14} className='shrink-0' />
+                <span className='flex-1'>Create folder</span>
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -655,7 +673,7 @@ const ProjectSection: React.FC<ProjectSectionProps> = ({
       )}
 
       {!isProjectCollapsed && (
-        <div className='space-y-0.5'>
+        <div>
           {group.channels.map(channelGroup => (
             <ChannelSection
               key={channelGroup.channel.id}
@@ -695,7 +713,6 @@ const ProjectSection: React.FC<ProjectSectionProps> = ({
               key={folder.id}
               folderGroup={{ folder, canvases: [] }}
               indentClassName='pl-6'
-              canvasIndentClassName='pl-10'
               currentUserId={currentUserId}
               selectedCanvasId={selectedCanvasId}
               adminChannelIds={adminChannelIds}
@@ -840,7 +857,7 @@ export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> =
   if (isEmpty) {
     return (
       <div className='flex flex-col items-center justify-center h-full text-center py-16'>
-        <FileText className='w-16 h-16 text-muted-foreground mb-4' />
+        <FileText size={64} className='text-muted-foreground mb-4' />
         <h3 className='text-lg font-medium text-foreground mb-2'>No canvases yet</h3>
         <p className='text-muted-foreground text-sm'>
           Create your first personal canvas or folder to get started.
@@ -850,53 +867,55 @@ export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> =
   }
 
   return (
-    <div className='p-2 space-y-1'>
+    <div className='space-y-1'>
       {isSearchLoading && (
-        <div className='flex items-center justify-center gap-2 px-3 py-3 text-sm text-muted-foreground'>
-          <div className='animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600' />
+        <div className='flex items-center justify-center gap-3 px-3 h-9 text-sm text-sidebar-foreground'>
+          <Spinner size={16} className='animate-spin shrink-0' />
           <span>Searching...</span>
         </div>
       )}
 
-      <section className='border-b border-border pb-1'>
-        <div className='flex items-center group'>
+      <section className='pb-1'>
+        <div className='group flex items-center'>
           <button
-            className='flex min-w-0 flex-1 items-center gap-2 px-3 py-2 hover:bg-accent rounded-md text-left'
+            className={SECTION_HEADER_CLASS}
             onClick={() => onSetPersonalSectionCollapsed(!isPersonalSectionCollapsed)}
             data-track-category='CANVAS'
             data-track-name='TOGGLE_PERSONAL_CANVAS_SECTION'
           >
             {isPersonalSectionCollapsed ? (
-              <ChevronRight className='w-4 h-4 text-muted-foreground shrink-0' />
+              <ChevronBigRight size={12} className='shrink-0' />
             ) : (
-              <ChevronDown className='w-4 h-4 text-muted-foreground shrink-0' />
+              <ChevronBigDown size={12} className='shrink-0' />
             )}
-            <User className='w-4 h-4 text-muted-foreground shrink-0' />
-            <span className='font-semibold text-sm'>My Canvases</span>
+            <UserDefault size={14} className='shrink-0' />
+            <span className='truncate font-semibold'>My Canvases</span>
           </button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
-                className='p-1 opacity-0 group-hover:opacity-100 hover:bg-accent rounded transition-all disabled:opacity-40'
+                className={HOVER_ACTION_CLASS}
                 onClick={event => event.stopPropagation()}
                 title='Create personal canvas or folder'
                 disabled={isCreatingCanvas}
                 data-track-category='CANVAS'
                 data-track-name='OPEN_PERSONAL_CANVAS_CREATE'
               >
-                <Plus className='w-4 h-4 text-muted-foreground' />
+                <PlusDefault size={14} />
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align='end' className='w-44'>
               <DropdownMenuItem
+                className='gap-2'
                 onClick={() => void onCreatePersonalCanvas()}
                 data-track-category='CANVAS'
                 data-track-name='CREATE_PERSONAL_CANVAS'
               >
-                <FileText className='w-4 h-4 mr-2' />
-                Create canvas
+                <FileText size={14} className='shrink-0' />
+                <span className='flex-1'>Create canvas</span>
               </DropdownMenuItem>
               <DropdownMenuItem
+                className='gap-2'
                 onClick={() =>
                   onCreateFolder(
                     null,
@@ -906,8 +925,8 @@ export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> =
                 data-track-category='CANVAS'
                 data-track-name='CREATE_PERSONAL_CANVAS_FOLDER'
               >
-                <Folder className='w-4 h-4 mr-2 text-amber-500' />
-                Create folder
+                <FolderDefault size={14} className='shrink-0' />
+                <span className='flex-1'>Create folder</span>
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -919,7 +938,6 @@ export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> =
                 key={folderGroup.folder.id}
                 folderGroup={folderGroup}
                 indentClassName='pl-6'
-                canvasIndentClassName='pl-10'
                 currentUserId={currentUserId}
                 selectedCanvasId={selectedCanvasId}
                 adminChannelIds={adminChannelIds}
@@ -959,7 +977,7 @@ export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> =
               />
             ))}
             {personalFolderGroups.length === 0 && visiblePersonalCanvases.length === 0 && (
-              <div className='px-6 py-2 text-sm text-muted-foreground'>
+              <div className='px-6 py-2 text-sm text-sidebar-foreground'>
                 Create a personal canvas or folder to get started.
               </div>
             )}

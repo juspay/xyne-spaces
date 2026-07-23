@@ -294,7 +294,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
               size='sm'
               onClick={handleSubmit}
               disabled={selectedParticipants.length === 0}
-              className='rounded-lg text-[13px] bg-sidebar-badge-accent hover:bg-sidebar-badge-accent hover:opacity-80 disabled:opacity-20 disabled:cursor-not-allowed'
+              className='rounded-lg text-[13px] bg-primary hover:bg-primary hover:opacity-80 disabled:opacity-20 disabled:cursor-not-allowed'
             >
               Start Call
             </Button>
