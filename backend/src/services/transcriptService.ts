@@ -6,7 +6,7 @@ import { config } from '@/config/env';
 import { Agent, createUserMessage } from '@framework';
 import { extractAgentContent } from '@/utils/agentUtils';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
-import { MessageType } from '@xyne/shared';
+import { MessageType, OrgLLMServiceAccountPurpose } from '@xyne/shared';
 import { db } from '@/database/client';
 import { randomUUID } from 'crypto';
 import * as yaml from 'js-yaml';
@@ -21,6 +21,7 @@ import { executeStreamingLlmRequest } from './callLlmRetry';
 import { callRecordingService } from '@/services/callRecordingService';
 import { callDocumentService } from '@/services/callDocumentService';
 import { acquireLock, releaseLock } from '@/utils/distributedLock';
+import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
 
 const SPEAKER_IDENTIFICATION_CAC_KEY = 'speaker_identification_config';
 
@@ -228,13 +229,18 @@ export class TranscriptService {
    * Create a fresh Agent instance for each request
    * This prevents state pollution and BUSY errors between concurrent requests
    */
-  private createAgent(callId?: string): Agent | null {
+  private async createAgent(callId?: string): Promise<Agent | null> {
     try {
-      const apiKey = config.llm.callLitellmApiKey;
-      const baseUrl = config.llm.litellmBaseUrl;
+      const userId = await this.getCreatedByUserIdForCall(callId);
+      const credential = await orgLLMCredentialService.getCredentialByUserId(
+        userId,
+        OrgLLMServiceAccountPurpose.CALL_TRANSCRIPT,
+      );
 
-      if (!apiKey || !baseUrl) {
-        logger.warn('LiteLLM credentials not configured. AI features will be disabled.');
+      if (!credential) {
+        logger.warn('Org LiteLLM credentials not configured. AI features will be disabled.', {
+          userId,
+        });
         return null;
       }
 
@@ -243,12 +249,12 @@ export class TranscriptService {
           provider: {
             type: 'litellm' as const,
             config: {
-              apiKey,
-              baseUrl,
+              apiKey: credential.apiKey,
+              baseUrl: credential.baseUrl,
               timeout: 300000,
             },
           },
-          defaultModel: config.llm.callLitellmModel || 'glm-latest',
+          defaultModel: credential.defaultModel || config.llm.callLitellmModel || 'glm-latest',
         },
         tools: {
           enabled: [],
@@ -278,6 +284,15 @@ export class TranscriptService {
       });
       return null;
     }
+  }
+
+  private async getCreatedByUserIdForCall(callId: string | null | undefined): Promise<string | null> {
+    if (!callId) {
+      return null;
+    }
+
+    const call = await repositories.calls.findByExternalId(callId);
+    return call?.createdByUserId ?? null;
   }
 
   /**
@@ -1127,7 +1142,7 @@ Output ONLY the processed transcript, nothing else.`;
    */
   async generateTicketSuggestions(transcript: string, callId?: string): Promise<TicketSuggestion[]> {
     const logCallId = callId || 'unknown';
-    const agent = this.createAgent(logCallId);
+    const agent = await this.createAgent(logCallId);
     if (!agent) {
       logger.error('ticket_suggestions_generation_failed', {
         callId: logCallId,
@@ -1232,7 +1247,7 @@ Output ONLY the processed transcript, nothing else.`;
     if (config.pulse.enabledChannels.length === 0) return [];
     const logCallId = callId || 'unknown';
 
-    const agent = this.createAgent(logCallId);
+    const agent = await this.createAgent(logCallId);
     if (!agent) {
       logger.error('pulse_data_generation_failed', {
         callId: logCallId,

@@ -1,5 +1,5 @@
 import type { DeleteID, InsertValue, Transaction, UpdateValue } from '@rocicorp/zero';
-import { OrgRole, Schema } from '@xyne/shared';
+import { OrgRole, Schema, WorkspaceRole } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, TableSchema } from '../core/types';
 import { zql } from '../../queries';
@@ -43,6 +43,10 @@ export class OrgMembersACL extends BaseACL<'org_members'> {
   }
 
   async canInsert(args: InsertValue<TableSchema<'org_members'>>, tx: Transaction<Schema>): Promise<void> {
+    if (this.ctx.role === WorkspaceRole.COMMUNITY_MEMBER) {
+      throw new MutationACLError('Organization member insert failed: community members cannot add organization members', 'org_members');
+    }
+
     // Allow organization's createdBy user to add themselves as OWNER (for org creation flow)
     if (args.email) {
       const currentUser = await tx.run(zql.users.where('id', this.ctx.userID).one());
@@ -69,6 +73,9 @@ export class OrgMembersACL extends BaseACL<'org_members'> {
   }
 
   async canUpdate(args: UpdateValue<TableSchema<'org_members'>>, tx: Transaction<Schema>): Promise<void> {
+    if (this.ctx.role === WorkspaceRole.COMMUNITY_MEMBER) {
+      throw new MutationACLError('Organization member update failed: community members cannot modify member roles', 'org_members');
+    }
     const targetMember = await tx.run(zql.org_members.where('memberId', args.memberId).one());
     if (!targetMember) {
       throw new MutationACLError('Organization member update failed: the member does not exist', 'org_members');
@@ -116,6 +123,9 @@ export class OrgMembersACL extends BaseACL<'org_members'> {
   }
 
   async canDelete(args: DeleteID<TableSchema<'org_members'>>, tx: Transaction<Schema>): Promise<void> {
+    if (this.ctx.role === WorkspaceRole.COMMUNITY_MEMBER) {
+      throw new MutationACLError('Organization member delete failed: community members cannot remove members', 'org_members');
+    }
     const memberData = await tx.run(zql.org_members.where('memberId', args.memberId).one());
     if (!memberData) {
       throw new MutationACLError('Organization member delete failed: member not found', 'org_members');

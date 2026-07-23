@@ -19,6 +19,8 @@ import { config } from '../../../../config/env.js';
 import { PPTX_DESIGNER_SYSTEM_PROMPT } from './prompt.js';
 import { ChannelRepository } from '../../../../database/repositories/channelRepository.js';
 import { logLLMCallStart, logLLMSuccess, logLLMError } from '../../../agentLogger.js';
+import { orgLLMCredentialService } from '../../../../services/orgLLMCredentialService.js';
+import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
 
 const storageService = getStorageService();
 
@@ -175,12 +177,19 @@ export function createCreatePptTool(): Tool<
           `Create a ${num_slides}-slide presentation for the following request:\n\n${query}\n\n` +
           `Respond with ONLY the raw JSON object — no markdown fences, no extra text.`;
 
-        const baseUrl = config.litellm.baseUrl.endsWith('/')
-          ? config.litellm.baseUrl
-          : `${config.litellm.baseUrl}/`;
+        const credential = await orgLLMCredentialService.getCredentialByUserId(
+          context.userId,
+          OrgLLMServiceAccountPurpose.ASK_AI,
+        );
+        if (!credential) {
+          throw new Error('LiteLLM credentials are not configured for this organization');
+        }
+
+        const baseUrl = credential.baseUrl.endsWith('/')
+          ? credential.baseUrl
+          : `${credential.baseUrl}/`;
         
         const url = `${baseUrl}chat/completions`;
-        const apiKey = config.litellm.askAiApiKey;
 
         const requestPayload = {
           model,
@@ -203,7 +212,7 @@ export function createCreatePptTool(): Tool<
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`,
+            'Authorization': `Bearer ${credential.apiKey}`,
           },
           body: JSON.stringify(requestPayload),
         });

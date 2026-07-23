@@ -14,6 +14,11 @@ import jwt from 'jsonwebtoken';
 import { getFrontendUrl, resolveConfiguredOAuthRedirectUrl } from '@/utils/publicUrls';
 import { persistCalendarOAuthCredentials } from '@/services/calendarTokenRefresh';
 import { jwtVerify, createRemoteJWKSet } from 'jose';
+import { WorkspaceType } from '@xyne/shared';
+import {
+  OrganizationDomainConflictError,
+  organizationDomainService,
+} from '@/services/organizationDomainService';
 
 export class MicrosoftAuthController {
   private oauthClient: AuthorizationCode | undefined;
@@ -68,6 +73,17 @@ export class MicrosoftAuthController {
     this.msJwks = createRemoteJWKSet(
       new URL(`https://login.microsoftonline.com/${jwksTenant}/discovery/v2.0/keys`)
     );
+  }
+
+  private getEnterpriseAwareWorkspaces<T extends { workspaceType?: string | null }>(
+    workspaces: T[],
+    enterpriseLogin?: boolean,
+  ): T[] {
+    if (!enterpriseLogin) {
+      return workspaces;
+    }
+
+    return workspaces.filter(workspace => workspace.workspaceType !== WorkspaceType.COMMUNITY);
   }
 
   private getRedirectUrl(req: Request, platform: string, params: Record<string, string>): string {
@@ -174,19 +190,39 @@ export class MicrosoftAuthController {
         const codeVerifier = pkceServiceV2.generateCodeVerifier();
         const codeChallenge = pkceServiceV2.generateCodeChallenge(codeVerifier);
 
+        let validatedRedirectTo: string | undefined;
+        const redirectToParam = req.query['redirect_to'] as string | undefined;
+        if (redirectToParam) {
+          const allowedOrigins = (process.env.ALLOWED_REDIRECT_ORIGINS ?? '')
+            .split(',')
+            .map((origin) => origin.trim())
+            .filter(Boolean);
+          try {
+            const origin = new URL(redirectToParam).origin;
+            const frontendOrigin = new URL(getFrontendUrl(req)).origin;
+            if (allowedOrigins.includes(origin) || origin === frontendOrigin) {
+              validatedRedirectTo = redirectToParam;
+            }
+          } catch (_error) {
+            // Ignore malformed redirect targets; only configured/current frontend origins are allowed.
+          }
+        }
+
         // Get invitationId from query (for invitation flow)
         const invitationId = req.query.invitationId as string | undefined;
 
         const connectCalendar = req.query.connectCalendar === 'true';
+        const enterpriseLogin = req.query.enterpriseLogin === 'true';
 
         const state = await oauthStateServiceV2.generateState(
           platform,
           codeChallenge,
-          undefined,
+          validatedRedirectTo,
           'microsoft',
           undefined,
           invitationId,
           connectCalendar,
+          enterpriseLogin,
         );
 
         await pkceServiceV2.storeVerifier(state, codeVerifier);
@@ -235,6 +271,7 @@ export class MicrosoftAuthController {
   handleCallback = async (req: Request, res: Response): Promise<void> => {
     const requestId = `MS_CALLBACK_${Date.now()}`;
     let resolvedPlatform: string = 'web';
+    let peekedState: Awaited<ReturnType<typeof oauthStateServiceV2.validateState>> = null;
 
     try {
       if (this.oauthClient && this.userService && this.userSessionService) {
@@ -243,7 +280,6 @@ export class MicrosoftAuthController {
         logger.info(`[${requestId}] Microsoft OAuth callback received`);
 
         // Peek at state early to determine platform for error redirects
-        let peekedState: Awaited<ReturnType<typeof oauthStateServiceV2.validateState>> = null;
         if (state) {
           peekedState = await oauthStateServiceV2.validateState(state as string, false);
           if (peekedState) {
@@ -385,8 +421,64 @@ export class MicrosoftAuthController {
           throw new Error('Email not available in Microsoft profile');
         }
 
-        const workspaces = await this.userService.getWorkspacesByEmail(microsoftUserData.email);
+        const workspaces = this.getEnterpriseAwareWorkspaces(
+          await this.userService.getWorkspacesByEmail(microsoftUserData.email),
+          peekedState?.enterpriseLogin,
+        );
         logger.info(`[${requestId}] User has ${workspaces.length} workspace(s)`);
+
+        const refreshToken = token.refresh_token as string | undefined;
+        const isProduction = process.env.NODE_ENV === 'production';
+
+        if (resolvedPlatform !== 'mobile' && workspaces.length === 0) {
+          const userExistsButRemoved = await this.userService.userExistsButNoActiveWorkspaces(
+            microsoftUserData.email,
+          );
+          const domainConflict = !userExistsButRemoved
+            ? await organizationDomainService.findEnterpriseWorkspaceByEmailDomain(microsoftUserData.email)
+            : null;
+          const domainConflictError = domainConflict
+            ? new OrganizationDomainConflictError(domainConflict.domain, domainConflict)
+            : null;
+
+          res.cookie('google_access_token', jwt.sign({
+            providerUserId: microsoftUserData.providerUserId,
+            email: microsoftUserData.email,
+            name: microsoftUserData.name,
+            picture: microsoftUserData.picture,
+            provider: AuthProvider.MICROSOFT,
+            refreshToken: refreshToken ?? null,
+            connectCalendar: peekedState?.connectCalendar,
+          }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
+            httpOnly: true,
+            secure: isProduction,
+            sameSite: 'lax' as const,
+            path: '/',
+            maxAge: 10 * 60 * 1000,
+          });
+
+          const frontendUrl = peekedState?.redirectTo ?? getFrontendUrl(req);
+          const params = new URLSearchParams({
+            success: 'true',
+            email: microsoftUserData.email,
+            name: microsoftUserData.name,
+            picture: microsoftUserData.picture || '',
+            workspaces: JSON.stringify([]),
+            userExistsButRemoved: String(userExistsButRemoved),
+          });
+          if (domainConflictError && domainConflict) {
+            params.set('domainConflictError', domainConflictError.message);
+            params.set('enterpriseJoinWorkspaceId', domainConflict.workspace.id);
+            params.set('enterpriseJoinWorkspaceName', domainConflict.workspace.name);
+            params.set('enterpriseJoinOrgName', domainConflict.name);
+          }
+
+          logger.info(
+            `[${requestId}] No workspace found for ${microsoftUserData.email}; redirecting with pending auth for org creation`,
+          );
+          res.redirect(`${frontendUrl}?${params.toString()}`);
+          return;
+        }
 
         logger.info(`[${requestId}] Finding/creating user: ${microsoftUserData.email}`);
         const { user, isNewUser } = await this.userService.findOrCreateOAuthUser({
@@ -416,7 +508,6 @@ export class MicrosoftAuthController {
 
         // Create user session
         let sessionId = null;
-        const refreshToken = token.refresh_token as string | undefined;
 
         if (refreshToken) {
           try {
@@ -478,11 +569,10 @@ export class MicrosoftAuthController {
           ? await this.userService.userExistsButNoActiveWorkspaces(microsoftUserData.email)
           : false;
 
-        const isProduction = process.env.NODE_ENV === 'production';
         const cookieOptions = {
           httpOnly: true,
           secure: isProduction,
-          sameSite: 'strict' as const,
+          sameSite: 'lax' as const,
           path: '/',
         };
 
@@ -496,7 +586,7 @@ export class MicrosoftAuthController {
           email: microsoftUserData.email,
           name: microsoftUserData.name,
           picture: microsoftUserData.picture,
-          provider: 'microsoft',
+          provider: AuthProvider.MICROSOFT,
           refreshToken: refreshToken ?? null,
           accessToken: accessToken ?? null,
           accessTokenExpiry: accessTokenExpiry?.toISOString(),
@@ -523,7 +613,7 @@ export class MicrosoftAuthController {
         }
 
         // Redirect to frontend with success
-        const frontendUrl = getFrontendUrl(req);
+        const frontendUrl = peekedState?.redirectTo ?? getFrontendUrl(req);
 
         // If this was a "connect calendar" re-auth, redirect straight to the calls page
         if (peekedState?.connectCalendar && user.workspaceId) {
@@ -546,6 +636,9 @@ export class MicrosoftAuthController {
           workspaces: JSON.stringify(workspaces),
           userExistsButRemoved: String(userExistsButRemoved),
         });
+        if (workspaces.length === 1) {
+          params.set('autoLoginWorkspace', workspaces[0]!.id);
+        }
 
         res.redirect(`${frontendUrl}?${params.toString()}`);
       } else {
@@ -560,6 +653,15 @@ export class MicrosoftAuthController {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       logger.error(`[${requestId}] Microsoft OAuth callback failed: ${errorMessage}`);
+
+      if (resolvedPlatform !== 'mobile' && peekedState?.redirectTo) {
+        const params = new URLSearchParams({
+          error: 'auth_failed',
+          message: errorMessage,
+        });
+        res.redirect(`${peekedState.redirectTo}?${params.toString()}`);
+        return;
+      }
 
       res.redirect(
         this.getRedirectUrl(req, resolvedPlatform, {
@@ -715,7 +817,10 @@ export class MicrosoftAuthController {
 
       // Email was already verified from the ID token above.
 
-      const workspaces = await this.userService.getWorkspacesByEmail(email);
+      const workspaces = this.getEnterpriseAwareWorkspaces(
+        await this.userService.getWorkspacesByEmail(email),
+        stateData.enterpriseLogin,
+      );
       const userExistsButRemoved = await this.userService.userExistsButNoActiveWorkspaces(email);
       logger.info(`[${requestId}] User has ${workspaces.length} workspace(s), userExistsButRemoved: ${userExistsButRemoved}`);
       logger.info(`[${requestId}] PROFILE: email=${email}, msId=${profile.id}, verifiedOid=${idTokenClaims.oid ?? 'NULL'}, workspaceCount=${workspaces.length}`);

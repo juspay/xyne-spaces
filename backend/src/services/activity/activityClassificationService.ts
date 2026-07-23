@@ -13,6 +13,8 @@ import {
 import { config as envConfig } from '@/config/env';
 import { LLMClient, createUserMessage } from 'agentic-framework';
 import type { LLMClientConfig } from 'agentic-framework';
+import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
+import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
 
 const ACTIVITY_CLASSIFICATION_REQUEST_MAX_ATTEMPTS = 3;
 const ACTIVITY_CLASSIFICATION_RETRY_BASE_DELAY_MS = 1000;
@@ -167,34 +169,39 @@ type ThreadContextResult = {
 export class ActivityClassificationService {
   // private readonly model = 'glm-46-fp8';
   private readonly model = ACTIVITY_CLASSIFICATION_MODEL;
-  private llmClient: LLMClient | null = null;
 
-  private getLLMClient(): LLMClient {
-    if (!this.llmClient) {
-      const llmConfig: LLMClientConfig = {
-        provider: {
-          type: 'litellm',
-          config: {
-            apiKey: envConfig.activityClassification.litellmApiKey,
-            baseUrl: envConfig.litellm.baseUrl,
-            timeout: envConfig.llm?.requestTimeoutMs,
-            customHeaders: {
-              'x-litellm-disable-logging': 'true',
-            },
+  private async getLLMClient(workspaceId: string | null | undefined): Promise<LLMClient | null> {
+    const credential = await orgLLMCredentialService.getCredentialByWorkspaceId(
+      workspaceId,
+      OrgLLMServiceAccountPurpose.ACTIVITY_CLASSIFICATION,
+    );
+
+    if (!credential) {
+      return null;
+    }
+
+    const llmConfig: LLMClientConfig = {
+      provider: {
+        type: 'litellm',
+        config: {
+          apiKey: credential.apiKey,
+          baseUrl: credential.baseUrl,
+          timeout: envConfig.llm?.requestTimeoutMs,
+          customHeaders: {
+            'x-litellm-disable-logging': 'true',
           },
         },
-        defaultModel: this.model,
-        temperature: 0.2,
-        retry: {
-          maxAttempts: ACTIVITY_CLASSIFICATION_REQUEST_MAX_ATTEMPTS,
-          baseDelay: ACTIVITY_CLASSIFICATION_RETRY_BASE_DELAY_MS,
-          maxDelay: ACTIVITY_CLASSIFICATION_RETRY_MAX_DELAY_MS,
-          exponentialBackoff: true,
-        },
-      };
-      this.llmClient = new LLMClient(llmConfig);
-    }
-    return this.llmClient;
+      },
+      defaultModel: credential.defaultModel ?? this.model,
+      temperature: 0.2,
+      retry: {
+        maxAttempts: ACTIVITY_CLASSIFICATION_REQUEST_MAX_ATTEMPTS,
+        baseDelay: ACTIVITY_CLASSIFICATION_RETRY_BASE_DELAY_MS,
+        maxDelay: ACTIVITY_CLASSIFICATION_RETRY_MAX_DELAY_MS,
+        exponentialBackoff: true,
+      },
+    };
+    return new LLMClient(llmConfig);
   }
 
   async classifyActivity(activityId: string): Promise<{
@@ -242,9 +249,11 @@ export class ActivityClassificationService {
       };
     }
 
-    if (!envConfig.activityClassification.litellmApiKey) {
-      logger.warn('[ActivityClassification] ACTIVITY_CLASSIFICATION_LITELLM_API_KEY is not set. Skipping classification.', {
+    const llmClient = await this.getLLMClient(activity.workspaceId);
+    if (!llmClient) {
+      logger.warn('[ActivityClassification] Org LiteLLM credentials are not configured. Skipping classification.', {
         activityId,
+        workspaceId: activity.workspaceId,
       });
       return { status: 'pending', usedLLM: false, reason: 'llm_unavailable' };
     }
@@ -293,7 +302,7 @@ export class ActivityClassificationService {
         activityId,
         model: this.model,
       });
-      const llmResponse = await this.getLLMClient().generate({
+      const llmResponse = await llmClient.generate({
         messages: [createUserMessage(prompt)],
         model: this.model,
       });
@@ -358,10 +367,16 @@ export class ActivityClassificationService {
       return { status: 'skipped', reason: 'empty_audience' };
     }
 
-    if (!envConfig.activityClassification.litellmApiKey) {
-      logger.warn('[ActivityClassification] ACTIVITY_CLASSIFICATION_LITELLM_API_KEY is not set. Skipping audience classification.', {
+    const credentialActivity = await db.activity.findFirst({
+      where: { id: { in: activityIds } },
+      select: { workspaceId: true },
+    });
+    const llmClient = await this.getLLMClient(credentialActivity?.workspaceId);
+    if (!llmClient) {
+      logger.warn('[ActivityClassification] Org LiteLLM credentials are not configured. Skipping audience classification.', {
         messageId,
         channelId,
+        workspaceId: credentialActivity?.workspaceId,
         activityCount: activityIds.length,
       });
       return { status: 'pending', usedLLM: false, reason: 'llm_unavailable' };
@@ -421,7 +436,7 @@ export class ActivityClassificationService {
         messageId,
         model: this.model,
       });
-      const llmResponse = await this.getLLMClient().generate({
+      const llmResponse = await llmClient.generate({
         messages: [createUserMessage(prompt)],
         model: this.model,
       });

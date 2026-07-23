@@ -11,10 +11,17 @@ import { pkceServiceV2 } from '../services/pkceServiceV2';
 import { MicrosoftAuthController } from './microsoftAuthController';
 import { channelService } from '../services/channelService';
 import { persistCalendarOAuthCredentials } from '@/services/calendarTokenRefresh';
+import { WorkspaceJoinPolicy, WorkspaceType } from '@xyne/shared';
+import type { WorkspaceJoinPolicy as WorkspaceJoinPolicyValue, WorkspaceType as WorkspaceTypeValue } from '@xyne/shared';
 
 import '../types/express';
 import { config } from '@/config/env';
 import { getFrontendUrl, resolveConfiguredOAuthRedirectUrl } from '@/utils/publicUrls';
+import {
+  OrganizationDomainConflictError,
+  isOrganizationPolicyError,
+  organizationDomainService,
+} from '@/services/organizationDomainService';
 
 /**
  * Result type for single workspace auto-login
@@ -255,6 +262,17 @@ export class AuthV2Controller {
     return 'web';
   }
 
+  private getEnterpriseAwareWorkspaces<T extends { workspaceType?: string | null }>(
+    workspaces: T[],
+    enterpriseLogin?: boolean,
+  ): T[] {
+    if (!enterpriseLogin) {
+      return workspaces;
+    }
+
+    return workspaces.filter(workspace => workspace.workspaceType !== WorkspaceType.COMMUNITY);
+  }
+
   initiateLogin = async (req: Request, res: Response): Promise<void> => {
     const requestId = `LOGIN_${Date.now()}`;
 
@@ -267,6 +285,7 @@ export class AuthV2Controller {
 
       const isNy = req.query.isNy === 'true';
       const connectCalendar = req.query.connectCalendar === 'true';
+      const enterpriseLogin = req.query.enterpriseLogin === 'true';
 
       const codeVerifier = pkceServiceV2.generateCodeVerifier();
       const codeChallenge = pkceServiceV2.generateCodeChallenge(codeVerifier);
@@ -280,7 +299,8 @@ export class AuthV2Controller {
           .filter(Boolean);
         try {
           const origin = new URL(redirectToParam).origin;
-          if (allowedOrigins.includes(origin)) {
+          const frontendOrigin = new URL(getFrontendUrl(req)).origin;
+          if (allowedOrigins.includes(origin) || origin === frontendOrigin) {
             validatedRedirectTo = redirectToParam;
           }
         } catch (_e) {
@@ -291,7 +311,7 @@ export class AuthV2Controller {
       // Get invitationId from query (for invitation flow)
       const invitationId = req.query.invitationId as string | undefined;
       
-      const state = await oauthStateServiceV2.generateState(platform, codeChallenge, validatedRedirectTo, undefined, isNy, invitationId, connectCalendar);
+      const state = await oauthStateServiceV2.generateState(platform, codeChallenge, validatedRedirectTo, undefined, isNy, invitationId, connectCalendar, enterpriseLogin);
 
       await pkceServiceV2.storeVerifier(state, codeVerifier);
 
@@ -453,7 +473,10 @@ export class AuthV2Controller {
 
       logger.info(`[${requestId}] [DEBUG] Google auth success for: ${googleUserData.email}`);
 
-      const workspaces = await this.userService.getWorkspacesByEmail(googleUserData.email);
+      const workspaces = this.getEnterpriseAwareWorkspaces(
+        await this.userService.getWorkspacesByEmail(googleUserData.email),
+        stateData.enterpriseLogin,
+      );
       logger.info(`[${requestId}] [DEBUG] User has ${workspaces.length} workspace(s) before invitation check`);
 
       // Check for pending invitation from cookie (web) or OAuth state (electron/mobile)
@@ -465,6 +488,12 @@ export class AuthV2Controller {
       const pendingInvitationId = cookieInvitationId || stateInvitationId;
       
       const userExistsButRemoved = await this.userService.userExistsButNoActiveWorkspaces(googleUserData.email);
+      const domainConflict = workspaces.length === 0 && !userExistsButRemoved
+        ? await organizationDomainService.findEnterpriseWorkspaceByEmailDomain(googleUserData.email)
+        : null;
+      const domainConflictError = domainConflict
+        ? new OrganizationDomainConflictError(domainConflict.domain, domainConflict)
+        : null;
 
       const isProduction = process.env.NODE_ENV === 'production';
       res.cookie('google_access_token', jwt.sign({
@@ -603,6 +632,12 @@ export class AuthV2Controller {
         workspaces: JSON.stringify(workspaces),
         userExistsButRemoved: String(userExistsButRemoved),
       });
+      if (domainConflictError && domainConflict) {
+        params.set('domainConflictError', domainConflictError.message);
+        params.set('enterpriseJoinWorkspaceId', domainConflict.workspace.id);
+        params.set('enterpriseJoinWorkspaceName', domainConflict.workspace.name);
+        params.set('enterpriseJoinOrgName', domainConflict.name);
+      }
 
       res.redirect(`${frontendUrl}?${params.toString()}`);
       return;
@@ -810,7 +845,10 @@ export class AuthV2Controller {
       };
 
       logger.info(`[${requestId}] Getting workspaces for: ${googleUserData.email}`);
-      const workspaces = await this.userService.getWorkspacesByEmail(googleUserData.email);
+      const workspaces = this.getEnterpriseAwareWorkspaces(
+        await this.userService.getWorkspacesByEmail(googleUserData.email),
+        stateData.enterpriseLogin,
+      );
       const userExistsButRemoved = await this.userService.userExistsButNoActiveWorkspaces(googleUserData.email);
 
       const isProduction = process.env.NODE_ENV === 'production';
@@ -1642,6 +1680,25 @@ export class AuthV2Controller {
 
     } catch (error) {
       logger.error('Error creating organization:', error);
+      if (isOrganizationPolicyError(error)) {
+        res.status(error.statusCode).json({
+          error: error.message,
+          code: error.code,
+          ...(error instanceof Error && 'domain' in error ? { domain: error.domain } : {}),
+          ...(error instanceof Error && 'existingOrg' in error ? { existingOrg: error.existingOrg } : {}),
+        });
+        return;
+      }
+
+      const statusCode = (error as Error & { statusCode?: number }).statusCode;
+      if (statusCode) {
+        res.status(statusCode).json({
+          error: 'Failed to create organization',
+          message: error instanceof Error ? error.message : 'Unknown error',
+        });
+        return;
+      }
+
       res.status(500).json({
         error: 'Failed to create organization',
         message: error instanceof Error ? error.message : 'Unknown error'
@@ -1764,9 +1821,25 @@ export class AuthV2Controller {
    */
   createWorkspaceAuth = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { workspaceName } = req.body as { workspaceName?: string };
+      const { workspaceName, workspaceType, joinPolicy } = req.body as {
+        workspaceName?: string;
+        workspaceType?: string;
+        joinPolicy?: string;
+      };
       if (!workspaceName) {
         res.status(400).json({ error: 'Missing required fields', message: 'workspaceName is required' });
+        return;
+      }
+      if (
+        workspaceType &&
+        workspaceType !== WorkspaceType.ENTERPRISE &&
+        workspaceType !== WorkspaceType.COMMUNITY
+      ) {
+        res.status(400).json({ error: 'Invalid workspace type', message: 'workspaceType must be ENTERPRISE or COMMUNITY' });
+        return;
+      }
+      if (joinPolicy && !Object.values(WorkspaceJoinPolicy).includes(joinPolicy as WorkspaceJoinPolicyValue)) {
+        res.status(400).json({ error: 'Invalid join policy', message: 'joinPolicy must be INVITE_ONLY, OPEN, or REQUEST_TO_JOIN' });
         return;
       }
 
@@ -1780,6 +1853,10 @@ export class AuthV2Controller {
       const { organization, workspace, workspaceUser } = await this.userService.createWorkspaceInOrg(
         { userId: fullUser.id, providerUserId: fullUser.providerUserId, email: fullUser.email, name: fullUser.name, picture: fullUser.picture },
         workspaceName,
+        {
+          workspaceType: (workspaceType ?? WorkspaceType.ENTERPRISE) as WorkspaceTypeValue,
+          joinPolicy: joinPolicy as WorkspaceJoinPolicyValue | undefined,
+        },
       );
 
       await this.userService.ensureUserPresence(workspaceUser.id, workspace.id);
@@ -1852,7 +1929,8 @@ export class AuthV2Controller {
     } catch (error) {
       logger.error('Error creating workspace:', error);
       const message = error instanceof Error ? error.message : 'Unknown error';
-      res.status(message.includes('already exists') ? 409 : 500).json({
+      const statusCode = (error as Error & { statusCode?: number }).statusCode;
+      res.status(statusCode ?? (message.includes('already exists') ? 409 : 500)).json({
         error: 'Failed to create workspace',
         message,
       });

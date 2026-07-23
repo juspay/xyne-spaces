@@ -22,31 +22,16 @@ import {
   type Attachment,
 } from '@juspay-jaf/jaf';
 
-// Import config for environment variables
-import { config as envConfig } from '../../config/env.js';
-
 // Import langfuse for prompt management
 import { getPromptFromLangfuse, PROMPT_NAMES } from '../xyne-ai/langfuse/index.js';
 
 import { logger } from '../../utils/logger.js';
+import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
+import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
 
 // Import and re-export shared types from helpers
 import type { EnhancedEntityMetadata } from '../xyne-ai/tools/helpers.js';
 export type { EnhancedEntityMetadata };
-
-// ============================================================================
-// Configuration - Loaded from environment variables
-// ============================================================================
-
-// LiteLLM proxy URL from environment
-const LITELLM_BASE_URL = envConfig.litellm.baseUrl;
-
-// LiteLLM API key from environment
-const LITELLM_API_KEY = envConfig.litellm.apiKey;
-
-// ============================================================================
-// Types
-// ============================================================================
 
 /**
  * Context for the summarizer agent
@@ -320,11 +305,17 @@ function parseAgentOutput(
  * Create the model provider instance
  * Uses LiteLLM for model access
  */
-export function createModelProvider() {
-  return makeLiteLLMProvider(
-    LITELLM_BASE_URL,
-    LITELLM_API_KEY
+export async function createModelProvider(context: SummarizerContext) {
+  const credential = await orgLLMCredentialService.getCredentialByUserId(
+    context.userId,
+    OrgLLMServiceAccountPurpose.DEFAULT,
   );
+
+  if (!credential) {
+    throw new Error(`No active DEFAULT LiteLLM service account credential for user ${context.userId}`);
+  }
+
+  return makeLiteLLMProvider(credential.baseUrl, credential.apiKey);
 }
 
 // ============================================================================
@@ -365,8 +356,8 @@ export async function* summarizeStream(
   input: ThreadSummaryInput,
   context: SummarizerContext
 ): AsyncGenerator<StreamChunk, void, unknown> {
-  const modelProvider = createModelProvider();
-  logger.info(`[Summariser] Calling "${context.modelName}" with "LITELLM_API_KEY"`);
+  const modelProvider = await createModelProvider(context);
+  logger.info(`[Summariser] Calling "${context.modelName}" with "ORG_LITELLM_SERVICE_ACCOUNT"`);
 
   const isSearchMessage = context.summarizationType === 'searchMessage';
   const idMapping = isSearchMessage ? undefined : input.messageIdMapping;
@@ -421,7 +412,7 @@ export async function* summarizeStream(
       switch (event.type) {
         case 'llm_call_start': {
           const callModel = (event.data as { model?: string }).model ?? context.modelName;
-          logger.info(`[Summariser] Calling "${callModel}" with "LITELLM_API_KEY"`);
+          logger.info(`[Summariser] Calling "${callModel}" with "ORG_LITELLM_SERVICE_ACCOUNT"`);
           break;
         }
 
@@ -578,8 +569,8 @@ export async function summarizeThread(
   context: SummarizerContext,
   onEvent?: (event: TraceEvent) => void
 ): Promise<SummaryOutput> {
-  const modelProvider = createModelProvider();
-  logger.info(`[Summariser] Calling "${context.modelName}" with "LITELLM_API_KEY"`);
+  const modelProvider = await createModelProvider(context);
+  logger.info(`[Summariser] Calling "${context.modelName}" with "ORG_LITELLM_SERVICE_ACCOUNT"`);
 
   const idMapping = input.messageIdMapping;
   const entityMapping = input.entityMapping;  // NEW: Extract entity mapping

@@ -26,7 +26,7 @@ export class DocxStrategy extends BaseStrategy {
         }
     }
 
-    async parse(buffer: Buffer, _vespaDocId: string): Promise<ProcessingResult> {
+    async parse(buffer: Buffer, vespaDocId: string): Promise<ProcessingResult> {
         try {
             const zip = await JSZip.loadAsync(buffer)
 
@@ -54,7 +54,7 @@ export class DocxStrategy extends BaseStrategy {
             // Chunk while carrying page and label metadata forward
             const { chunks, chunks_map } = this.chunkByParagraphsWithMeta(paragraphData)
 
-            const documentOutline = await this.buildDocumentOutline(chunks, chunks_map)
+            const documentOutline = await this.buildDocumentOutline(chunks, chunks_map, vespaDocId)
 
             return {
                 chunks,
@@ -191,4 +191,3 @@ export class DocxStrategy extends BaseStrategy {
         return "docx-xml-parser"
     }
 }
-

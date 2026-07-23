@@ -12,6 +12,9 @@ import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
+import { WorkspaceJoinPolicy, WorkspaceType } from '@xyne/shared';
+import { aiProvisioningService } from '@/services/aiProvisioningService';
+import { isOrganizationPolicyError, organizationDomainService } from '@/services/organizationDomainService';
 
 export class InvitationController {
   /**
@@ -109,6 +112,14 @@ export class InvitationController {
       }
 
       logger.error('[InvitationController] Failed to create invitation:', error);
+
+      if (isOrganizationPolicyError(error)) {
+        res.status(error.statusCode).json({
+          error: error.message,
+          code: error.code,
+        });
+        return;
+      }
 
       if (error instanceof Error) {
         if (error.message.includes('already exists')) {
@@ -305,6 +316,14 @@ export class InvitationController {
     } catch (error) {
       logger.error('[InvitationController] Failed to accept invitation:', error);
 
+      if (isOrganizationPolicyError(error)) {
+        res.status(error.statusCode).json({
+          error: error.message,
+          code: error.code,
+        });
+        return;
+      }
+
       if (error instanceof Error) {
         res.status(400).json({ error: error.message });
         return;
@@ -335,10 +354,13 @@ export class InvitationController {
 
       const invitedBy = req.user!.id;
       const prisma = DatabaseClient.getInstance();
+      const normalizedOwnerEmail = ownerEmail.trim().toLowerCase();
+
+      await organizationDomainService.assertCanCreateOrgForEmail(normalizedOwnerEmail);
 
       // Reject if the owner email is already an active member of any org
       const existingMembership = await prisma.orgMember.findFirst({
-        where: { email: ownerEmail.trim().toLowerCase(), leftAt: null },
+        where: { email: normalizedOwnerEmail, leftAt: null },
         select: { orgId: true },
       });
       if (existingMembership) {
@@ -364,6 +386,8 @@ export class InvitationController {
             name: workspaceName.trim(),
             createdBy: invitedBy,
             status: Status.ACTIVE,
+            workspaceType: WorkspaceType.ENTERPRISE,
+            joinPolicy: WorkspaceJoinPolicy.INVITE_ONLY,
           },
         });
 
@@ -392,7 +416,7 @@ export class InvitationController {
         await tx.orgMember.create({
           data: {
             orgId: org.orgId,
-            email: ownerEmail.trim().toLowerCase(),
+            email: normalizedOwnerEmail,
             role: 'OWNER',
             invitedBy: req.user?.email ?? undefined,
           },
@@ -401,12 +425,18 @@ export class InvitationController {
         return { org, workspace };
       });
 
+      await organizationDomainService.createDomainMappingForOrg({
+        orgId: org.orgId,
+        email: normalizedOwnerEmail,
+        verifiedByUserId: invitedBy,
+      });
+
       // Sync all hardcoded bots into the newly provisioned workspace
       await unifiedBotUserService.syncAllBotUsers(workspace.id);
 
       // Create invitation outside the transaction (sends email — non-DB side-effect)
       const invitation = await invitationService.createInvitation({
-        email: ownerEmail.trim().toLowerCase(),
+        email: normalizedOwnerEmail,
         role: 'OWNER',
         workspaceId: workspace.id,
         orgId: org.orgId,
@@ -415,7 +445,7 @@ export class InvitationController {
       invitationId = invitation.invitationId ?? invitation.id;
 
       const emailResult = await invitationService.sendInvitationEmail({
-        to: ownerEmail.trim().toLowerCase(),
+        to: normalizedOwnerEmail,
         inviterName: req.user?.name ?? 'Administrator',
         workspaceName: workspaceName.trim(),
         invitationLink: `${config.slackFrontendUrl}/launch?path=${encodeURIComponent(`invite?workspaceId=${workspace.id}&invitationId=${invitationId}`)}`,
@@ -427,9 +457,14 @@ export class InvitationController {
         // 1. Delete invitation
         await invitationService.deleteInvitation(invitation.id);
         
+        // 1a. Delete organization domain mappings
+        await prisma.organizationDomain.deleteMany({
+          where: { orgId: org.orgId },
+        });
+
         // 2. Delete org member
         await prisma.orgMember.delete({ 
-          where: { email: ownerEmail.trim().toLowerCase() } 
+          where: { email: normalizedOwnerEmail } 
         });
         
         // 3. Delete workspace-organization link
@@ -466,6 +501,17 @@ export class InvitationController {
         throw new Error(`Failed to send invitation email: ${emailResult.error}`);
       }
 
+      try {
+        await aiProvisioningService.enqueueOrgSync(org.orgId);
+        await aiProvisioningService.enqueueWorkspaceSync(workspace.id);
+      } catch (error) {
+        logger.error('[InvitationController] Failed to enqueue AI provisioning jobs', {
+          orgId: org.orgId,
+          workspaceId: workspace.id,
+          error,
+        });
+      }
+
       logger.info(`[InvitationController] Provisioned org=${org.orgId} workspace=${workspace.id} owner=${ownerEmail.trim()}`);
 
       res.status(201).json({
@@ -476,6 +522,16 @@ export class InvitationController {
       });
     } catch (error) {
       logger.error('[InvitationController] Failed to provision org:', error);
+
+      if (isOrganizationPolicyError(error)) {
+        res.status(error.statusCode).json({
+          error: error.message,
+          code: error.code,
+          ...(error instanceof Error && 'domain' in error ? { domain: error.domain } : {}),
+          ...(error instanceof Error && 'existingOrg' in error ? { existingOrg: error.existingOrg } : {}),
+        });
+        return;
+      }
 
       if (error instanceof Error) {
         const status = error.message.includes('already exists') ? 409 : 400;

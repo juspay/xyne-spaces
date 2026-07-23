@@ -20,6 +20,7 @@ export type GeneratedTag = z.infer<typeof GeneratedTagSchema>;
 export type GeneratorFn = (
   context: string,
   categories: Record<string, CategoryConfig>,
+  workspaceId: string,
 ) => Promise<GeneratedTag[]>;
 
 export type TagGenerationJobData = z.infer<typeof TagGenerationJobDataSchema>;

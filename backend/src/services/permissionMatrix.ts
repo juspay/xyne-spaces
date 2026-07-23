@@ -29,7 +29,8 @@ export type ResourceName =
   | 'WORKSPACE'
   | 'ORGANIZATIONS'
   | 'TICKET-MIGRATION'
-  | 'CONFLUENCE-MIGRATION';
+  | 'CONFLUENCE-MIGRATION'
+  | 'EXTERNAL-STEP-RESPONSE';
 
 export interface PermissionEntry {
   resourceName: ResourceName;
@@ -56,6 +57,19 @@ export const PERMISSION_MATRIX: Record<WorkspaceRole, readonly PermissionEntry[]
     { resourceName: 'TOOLS', accessType: AccessType.WRITE },
     { resourceName: 'AGENT-TOOLS-MAPPINGS', accessType: AccessType.WRITE },
     { resourceName: 'ANALYTICS', accessType: AccessType.WRITE },
+    { resourceName: 'PROJECTS', accessType: AccessType.WRITE },
+    { resourceName: 'XYNE-APPS', accessType: AccessType.WRITE },
+    { resourceName: 'CHANNELS', accessType: AccessType.WRITE },
+    { resourceName: 'CANVASES', accessType: AccessType.WRITE },
+  ],
+  COMMUNITY_MEMBER: [
+    { resourceName: 'TICKETS', accessType: AccessType.WRITE },
+    { resourceName: 'WORKFLOWS', accessType: AccessType.WRITE },
+    { resourceName: 'AGENTS', accessType: AccessType.WRITE },
+    { resourceName: 'MODELS', accessType: AccessType.WRITE },
+    { resourceName: 'TOOLS', accessType: AccessType.WRITE },
+    { resourceName: 'AGENT-TOOLS-MAPPINGS', accessType: AccessType.WRITE },
+    { resourceName: 'EXTERNAL-STEP-RESPONSE', accessType: AccessType.WRITE },
     { resourceName: 'PROJECTS', accessType: AccessType.WRITE },
     { resourceName: 'XYNE-APPS', accessType: AccessType.WRITE },
     { resourceName: 'CHANNELS', accessType: AccessType.WRITE },

@@ -36,6 +36,7 @@ import microsoftDeskAuthRoutes from '@/integrations/routes/microsoft-desk-auth';
 import conversationRoutes from '@/routes/conversations';
 import organizationRoutes from '@/routes/organizations';
 import invitationRoutes from '@/routes/invitations';
+import communityRoutes from '@/routes/community';
 import reactionRoutes from '@/routes/reactionRoutes';
 import userAssignmentStateRoutes from '@/routes/userAssignmentState';
 import { UserManagementController } from '@/controllers/userManagementController';
@@ -473,6 +474,7 @@ export class App {
     // Apply general rate limiter to all API routes from this point onward
     this.app.use('/api/auth', authRoutes);
     this.app.use('/api/v2/auth', authV2Routes);
+    this.app.use('/api/community', communityRoutes);
     this.app.use('/api/bots', unifiedBotRoutes); // Unified bot framework routes
     this.app.use('/api/public/users', publicUserRoutes);
 

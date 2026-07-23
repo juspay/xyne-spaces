@@ -329,6 +329,10 @@ export class WorkflowPoller {
       }
 
       logger.info(`💡 Generating consolidated knowledge from ${pendingResults.length} agentic checkpoints for ${workflowExecutionId}`)
+      const workflowContext = await storage.loadInitialContext(workflowExecutionId);
+      if (!workflowContext) {
+        throw new Error(`Workflow context not found for ${workflowExecutionId}`);
+      }
 
       // Generate consolidated learnings from all checkpoint data
       const consolidatedLearnings = await generateConsolidatedKnowledgeLearnings(
@@ -336,7 +340,8 @@ export class WorkflowPoller {
           checkpointId: r.checkpointId,
           conversationResult: r.result,
           gitInfo: r.gitInfo
-        }))
+        })),
+        workflowContext,
       )
 
       if (consolidatedLearnings.length === 0) {

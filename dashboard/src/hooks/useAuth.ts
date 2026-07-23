@@ -2,7 +2,14 @@ import { useSelector } from '@xstate/react';
 import { useCallback } from 'react';
 import axios from 'axios';
 import { authActor } from '../machines/authMachine';
-import type { AuthState, User, Workspace, OAuthCallbackOutput } from '../machines/authMachine';
+import type {
+  AuthState,
+  CommunityJoinRequestContext,
+  User,
+  Workspace,
+  OAuthCallbackOutput,
+  EnterpriseJoinTarget,
+} from '../machines/authMachine';
 import { Context } from '@xyne/shared/index';
 import { apiInstance } from '../services/clients/apiClient';
 
@@ -21,13 +28,17 @@ export interface UseAuthReturn {
   isLoggingInToWorkspace: boolean;
   userExistsButRemoved: boolean;
   selfDmChannelId: string | null;
+  communityJoinRequest: CommunityJoinRequestContext | null;
+  enterpriseJoinTarget: EnterpriseJoinTarget | null;
 
   signInWithGoogle: () => void;
   signInWithMicrosoft: () => void;
   signInWithEmail: (email: string, password: string, invitationId?: string) => Promise<void>;
   logout: () => void;
   clearError: () => void;
+  startEnterpriseLogin: () => void;
   selectWorkspace: (workspaceId: string) => void;
+  joinCommunityWorkspace: (workspaceId: string) => void;
   createOrg: (orgName: string, workspaceName: string) => void;
 }
 
@@ -113,6 +124,10 @@ export const useAuth = (): UseAuthReturn => {
     send({ type: 'CLEAR_ERROR' });
   }, [send]);
 
+  const startEnterpriseLogin = useCallback(() => {
+    send({ type: 'START_ENTERPRISE_LOGIN' });
+  }, [send]);
+
   const selectWorkspace = useCallback(
     (workspaceId: string) => {
       send({ type: 'SELECT_WORKSPACE', workspaceId });
@@ -123,6 +138,13 @@ export const useAuth = (): UseAuthReturn => {
   const createOrg = useCallback(
     (orgName: string, workspaceName: string) => {
       send({ type: 'SUBMIT_CREATE_ORG', orgName, workspaceName });
+    },
+    [send],
+  );
+
+  const joinCommunityWorkspace = useCallback(
+    (workspaceId: string) => {
+      send({ type: 'JOIN_COMMUNITY_WORKSPACE', workspaceId });
     },
     [send],
   );
@@ -139,6 +161,7 @@ export const useAuth = (): UseAuthReturn => {
       state.matches('loggingOut') ||
       state.matches('authenticating') ||
       state.matches('loggingInToWorkspace') ||
+      state.matches('joiningCommunityWorkspace') ||
       state.matches('submittingCreateOrg'),
     state: state.value as AuthState,
     isNewUser: state.context.isNewUser,
@@ -146,16 +169,21 @@ export const useAuth = (): UseAuthReturn => {
     pendingUserData: state.context.pendingUserData,
     isSelectingWorkspace: state.matches('selectingWorkspace'),
     isCreatingOrg: state.matches('creatingOrg'),
-    isLoggingInToWorkspace: state.matches('loggingInToWorkspace'),
+    isLoggingInToWorkspace:
+      state.matches('loggingInToWorkspace') || state.matches('joiningCommunityWorkspace'),
     userExistsButRemoved: state.context.userExistsButRemoved,
     selfDmChannelId: state.context.selfDmChannelId,
+    communityJoinRequest: state.context.communityJoinRequest,
+    enterpriseJoinTarget: state.context.enterpriseJoinTarget,
 
     signInWithGoogle,
     signInWithMicrosoft,
     signInWithEmail,
     logout,
     clearError,
+    startEnterpriseLogin,
     selectWorkspace,
+    joinCommunityWorkspace,
     createOrg,
   };
 };

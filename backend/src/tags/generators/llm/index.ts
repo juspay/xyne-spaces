@@ -1,17 +1,15 @@
 import { z } from 'zod';
 import { LLMClient, createUserMessage } from '@framework';
 
-import { config } from '../../../config/env.js';
 import { AgentsConfig } from '../../../agents/config.js';
 import { logLLMCallStart, logLLMError } from '../../../agents/agentLogger.js';
 import { parseAgentOutput } from '../../../services/agents/utils.js';
 import { logger } from '../../../utils/logger.js';
+import { orgLLMCredentialService } from '../../../services/orgLLMCredentialService.js';
 import type { CategoryConfig, GeneratedTag } from '../../types.js';
 import { validateGeneratedTags } from '../validate.js';
 import { LlmRawOutputSchema } from './schema.js';
-
-const LITELLM_BASE_URL = config.litellm.baseUrl;
-const LITELLM_API_KEY = config.litellm.apiKey;
+import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
 
 const AGENT_NAME = 'TagGeneratorLLM';
 
@@ -71,23 +69,31 @@ ${context}
 export async function generateLlmTags(
   context: string,
   categories: Record<string, CategoryConfig>,
+  workspaceId: string,
 ): Promise<GeneratedTag[]> {
   const cacConfig = await AgentsConfig.fetch();
   const modelName = cacConfig.tagGenerationModelName;
+  const credential = await orgLLMCredentialService.getCredentialByWorkspaceId(
+    workspaceId,
+    OrgLLMServiceAccountPurpose.DEFAULT,
+  );
+
+  if (!credential) {
+    throw new Error(`No active DEFAULT LiteLLM service account credential for workspace ${workspaceId}`);
+  }
 
   const llmClient = new LLMClient({
     provider: {
       type: 'litellm',
       config: {
-        apiKey: LITELLM_API_KEY,
-        baseUrl: LITELLM_BASE_URL,
-        timeout: config.tagGenerationLlmTimeoutMs,
+        apiKey: credential.apiKey,
+        baseUrl: credential.baseUrl,
       },
     },
     defaultModel: modelName,
   });
 
-  logLLMCallStart(AGENT_NAME, modelName, 'LITELLM_API_KEY');
+  logLLMCallStart(AGENT_NAME, modelName, 'ORG_LITELLM_SERVICE_ACCOUNT');
 
   let responseContent: string;
   try {

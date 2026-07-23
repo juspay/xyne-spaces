@@ -1,5 +1,5 @@
 import type { DeleteID, InsertValue, Transaction, UpdateValue } from '@rocicorp/zero';
-import { Schema } from '@xyne/shared';
+import { Schema, WorkspaceRole } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, TableSchema } from '../core/types';
 import { verifyWorkspaceAdminOrOwnerFromContext } from '../core/admin-access';
@@ -12,6 +12,9 @@ import { verifyWorkspaceAdminOrOwnerFromContext } from '../core/admin-access';
 export class WorkspacesACL extends BaseACL<'workspaces'> {
 
   async canInsert(_args: InsertValue<TableSchema<'workspaces'>>, _tx: Transaction<Schema>): Promise<void> {
+    if (this.ctx.role === WorkspaceRole.COMMUNITY_MEMBER) {
+      throw new MutationACLError('Workspace insert failed: community members cannot create workspaces', 'workspaces');
+    }
     // Workspace creation is handled through auth/organization flow, not direct mutation
     throw new MutationACLError(
       'Workspace insert failed: workspaces are created through organization flow',
@@ -20,6 +23,9 @@ export class WorkspacesACL extends BaseACL<'workspaces'> {
   }
 
   async canUpdate(args: UpdateValue<TableSchema<'workspaces'>>, _tx: Transaction<Schema>): Promise<void> {
+    if (this.ctx.role === WorkspaceRole.COMMUNITY_MEMBER) {
+      throw new MutationACLError('Workspace update failed: community members cannot modify workspace settings', 'workspaces');
+    }
     // Security check: workspaceId must match context
     if (this.ctx.workspaceId && this.ctx.workspaceId !== args.id) {
       throw new MutationACLError(
@@ -41,6 +47,9 @@ export class WorkspacesACL extends BaseACL<'workspaces'> {
   }
 
   async canDelete(args: DeleteID<TableSchema<'workspaces'>>, _tx: Transaction<Schema>): Promise<void> {
+    if (this.ctx.role === WorkspaceRole.COMMUNITY_MEMBER) {
+      throw new MutationACLError('Workspace delete failed: community members cannot delete workspaces', 'workspaces');
+    }
     // Security check: workspaceId must match context
     if (this.ctx.workspaceId && this.ctx.workspaceId !== args.id) {
       throw new MutationACLError(

@@ -12,6 +12,8 @@
 
 import { PrismaClient, AccessType, AuthProvider, UserStatus, SessionStatus, WorkspaceRole, OrgRole, ProjectType } from '@prisma/client';
 import { repositories } from '../src/database/repositories/index';
+import { WorkspaceJoinPolicy, WorkspaceType, OrgLLMServiceAccountProvider, OrgLLMServiceAccountPurpose, OrgLLMServiceAccountCredentialStatus } from '@xyne/shared';
+import { encrypt } from '../src/services/encryptionService';
 
 const prisma = new PrismaClient();
 
@@ -212,6 +214,8 @@ async function main() {
             name: 'Default Workspace',
             orgId: defaultOrg.orgId,
             createdBy: 'system',
+            workspaceType: WorkspaceType.ENTERPRISE,
+            joinPolicy: WorkspaceJoinPolicy.INVITE_ONLY,
           }
         });
         console.log('  ✅ Created default workspace');
@@ -376,7 +380,75 @@ async function main() {
       throw error;
     }
 
-    // Step 5: Clean up expired user sessions
+    // Step 5: Seed org LLM service account credentials from env
+    console.log('\n🔑 Seeding org LLM service account credentials...');
+    try {
+      const litellmApiKey = process.env.LITELLM_API_KEY;
+      const litellmBaseUrl = process.env.LITELLM_BASE_URL || 'https://grid.ai.example.com/';
+
+      if (!litellmApiKey) {
+        console.log('  ⚠️  LITELLM_API_KEY not set in environment, skipping org LLM credential seeding');
+      } else {
+        const defaultOrg = await prisma.organization.findFirst({
+          where: { name: 'Xyne Default' },
+        });
+
+        if (!defaultOrg) {
+          console.log('  ⚠️  Default organization not found, skipping org LLM credential seeding');
+        } else {
+          const purposes = Object.values(OrgLLMServiceAccountPurpose);
+          const now = new Date();
+          const credentialsPayload = {
+            source: 'xyne-spaces',
+            litellmTeamId: 'seed-default-team',
+            key: litellmApiKey,
+            providerUrl: litellmBaseUrl,
+            defaultModel: process.env.DEFAULT_MODEL_NAME ?? null,
+            teamAlias: defaultOrg.name,
+            provisionedAt: now.toISOString(),
+          };
+          const encryptedCredentials = encrypt(JSON.stringify(credentialsPayload));
+
+          for (const purpose of purposes) {
+            try {
+              await prisma.orgLLMServiceAccountCredential.upsert({
+                where: {
+                  orgId_provider_purpose: {
+                    orgId: defaultOrg.orgId,
+                    provider: OrgLLMServiceAccountProvider.LITELLM,
+                    purpose,
+                  },
+                },
+                create: {
+                  orgId: defaultOrg.orgId,
+                  provider: OrgLLMServiceAccountProvider.LITELLM,
+                  purpose,
+                  credentials: encryptedCredentials,
+                  status: OrgLLMServiceAccountCredentialStatus.ACTIVE,
+                  lastProvisionedAt: now,
+                  createdAt: now,
+                  updatedAt: now,
+                },
+                update: {
+                  credentials: encryptedCredentials,
+                  status: OrgLLMServiceAccountCredentialStatus.ACTIVE,
+                  lastProvisionedAt: now,
+                  updatedAt: now,
+                },
+              });
+              console.log(`  ✅ Seeded LLM credential for purpose: ${purpose}`);
+            } catch (error) {
+              console.error(`  ❌ Failed to seed LLM credential for purpose ${purpose}:`, error);
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.error('  ❌ Failed to seed org LLM credentials:', error);
+      // Don't throw - this is not critical for ACL seeding
+    }
+
+    // Step 6: Clean up expired user sessions
     console.log('\n🧹 Cleaning up expired user sessions...');
     try {
       const now = new Date();
@@ -417,7 +489,7 @@ async function main() {
     // per-board form mappings) now lives in `scripts/release-manager/seed-release.ts` — run that
     // separately after this ACL seed.
 
-    // Step 6: Verify setup
+    // Step 7: Verify setup
     console.log('\n🔍 Verifying ACL setup...');
     
     // Verify resources

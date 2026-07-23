@@ -6,6 +6,8 @@ import { ResearchAnalysisResult } from './types';
 import { LLMClient, UserMessage, createUserMessage } from '@framework';
 import { z } from 'zod';
 import {logger} from '@/utils/logger';
+import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
+import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
 
 // Step IDs for query workflow
 export enum QueryWorkflowSteps {
@@ -17,16 +19,20 @@ export enum QueryWorkflowSteps {
 
 
 // Initialize LLM client for merchant ID extraction
-const initializeLLMClient = (): LLMClient => {
-  if (!process.env.LITELLM_API_KEY) {
-    throw new Error('LITELLM_API_KEY is not set in the environment variables.');
+const initializeLLMClient = async (ticketId: string): Promise<LLMClient> => {
+  const credential = await orgLLMCredentialService.getCredentialByTicketId(
+    ticketId,
+    OrgLLMServiceAccountPurpose.DEFAULT,
+  );
+  if (!credential) {
+    throw new Error(`No active DEFAULT LiteLLM service account credential for ticket ${ticketId}`);
   }
   return new LLMClient({
     provider: {
       type: 'litellm',
       config: {
-        apiKey: process.env.LITELLM_API_KEY,
-        baseUrl: process.env.LITELLM_BASE_URL,
+        apiKey: credential.apiKey,
+        baseUrl: credential.baseUrl,
         timeout: 600000, // 10 minutes
         retries: 5
       },
@@ -36,7 +42,11 @@ const initializeLLMClient = (): LLMClient => {
 };
 
 // Function to extract merchant ID from description using LLM
-const extractMerchantId = async (queryId: string, description: string): Promise<{ merchantId: string | null }> => {
+const extractMerchantId = async (
+  queryId: string,
+  description: string,
+  ticketId: string,
+): Promise<{ merchantId: string | null }> => {
   logger.info(`🔍 Extracting merchant ID for ticket: ${queryId}`);
 
   if (config.use_mock_analysis) {
@@ -46,7 +56,7 @@ const extractMerchantId = async (queryId: string, description: string): Promise<
   }
 
   try {
-    const llmClient = initializeLLMClient();
+    const llmClient = await initializeLLMClient(ticketId);
 
     const prompt = `Please extract the merchant ID from the following description. Return ONLY a JSON object with the structure: { "merchant_id": "extracted_id" }. If no merchant ID is found, return: { "merchant_id": null }. Common merchant ID formats: meesho, flipkart, amazon, etc.
 
@@ -385,7 +395,8 @@ export const queryWorkflow: WorkflowDefinition<
           QueryWorkflowSteps.EXTRACT_MERCHANT_ID,
           extractMerchantId,
           queryId,
-          description
+          description,
+          context.ticketId,
         );
         merchantId = extractionResult.merchantId || 'meesho'; // Default to 'meesho' if extraction fails
         logger.info(`📝 Extracted/Default merchant ID: ${merchantId}`);

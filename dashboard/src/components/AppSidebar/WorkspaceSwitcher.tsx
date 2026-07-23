@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import axios from 'axios';
 import { Plus, Check, Loader2, LogIn, ChevronDown, ChevronRight } from 'lucide-react';
+import { WorkspaceType } from '@xyne/shared';
 import { API_BASE_URL } from '../../config';
 import {
   getLastActiveWorkspaceId,
@@ -11,6 +12,8 @@ import {
 } from '../../machines/authMachine';
 import { queryClient } from '../../services/clients/queryClient';
 import { useCanCreateWorkspace } from '../../hooks/usePermissions';
+
+type CreateWorkspaceType = (typeof WorkspaceType)[keyof typeof WorkspaceType];
 
 interface WorkspaceItem {
   id: string;
@@ -56,6 +59,9 @@ export const WorkspaceSwitcher: React.FC = () => {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [showSignInList, setShowSignInList] = useState(false);
   const [workspaceName, setWorkspaceName] = useState('');
+  const [createWorkspaceType, setCreateWorkspaceType] = useState<CreateWorkspaceType>(
+    WorkspaceType.ENTERPRISE,
+  );
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -145,6 +151,7 @@ export const WorkspaceSwitcher: React.FC = () => {
       setShowCreateForm(false);
       setShowSignInList(false);
       setWorkspaceName('');
+      setCreateWorkspaceType(WorkspaceType.ENTERPRISE);
       setError(null);
     }
   }, [isOpen]);
@@ -222,7 +229,7 @@ export const WorkspaceSwitcher: React.FC = () => {
     try {
       const res = await axios.post<CreateWorkspaceResponse>(
         `${API_BASE_URL}/auth/create-workspace`,
-        { workspaceName: workspaceName.trim() },
+        { workspaceName: workspaceName.trim(), workspaceType: createWorkspaceType },
         { withCredentials: true },
       );
       const newWorkspaceId = res.data.user.workspaceId;
@@ -273,6 +280,7 @@ export const WorkspaceSwitcher: React.FC = () => {
 
   // Total unread across all workspaces
   const totalUnread = Array.from(activityCounts.values()).reduce((sum, c) => sum + c, 0);
+  const createLabel = 'Create enterprise workspace';
 
   return (
     <div className='relative'>
@@ -442,52 +450,57 @@ export const WorkspaceSwitcher: React.FC = () => {
               )}
 
               {/* Create a new workspace */}
-              {canCreateWorkspace &&
-                (showCreateForm ? (
-                  <form
-                    onSubmit={e => void handleCreate(e)}
-                    className='px-3 pb-3 pt-1 flex flex-col gap-2'
-                  >
-                    {error && <p className='text-xs text-red-500'>{error}</p>}
-                    <input
-                      type='text'
-                      placeholder='Workspace name'
-                      value={workspaceName}
-                      onChange={e => setWorkspaceName(e.target.value)}
+              {showCreateForm ? (
+                <form
+                  onSubmit={e => void handleCreate(e)}
+                  className='px-3 pb-3 pt-1 flex flex-col gap-2'
+                >
+                  {error && <p className='text-xs text-red-500'>{error}</p>}
+                  <p className='text-xs font-medium text-foreground'>{createLabel}</p>
+                  <input
+                    type='text'
+                    placeholder='Workspace name'
+                    value={workspaceName}
+                    onChange={e => setWorkspaceName(e.target.value)}
+                    data-track-category='Workspace_Switcher'
+                    data-track-name='Workspace_Name_Input'
+                    className='w-full px-2 py-1.5 text-sm border border-border rounded-md bg-background focus:outline-none focus:ring-1 focus:ring-ring'
+                    required
+                    // eslint-disable-next-line jsx-a11y/no-autofocus
+                    autoFocus
+                  />
+                  <div className='flex gap-2'>
+                    <button
+                      type='submit'
+                      disabled={creating || !workspaceName.trim()}
                       data-track-category='Workspace_Switcher'
-                      data-track-name='Workspace_Name_Input'
-                      className='w-full px-2 py-1.5 text-sm border border-border rounded-md bg-background focus:outline-none focus:ring-1 focus:ring-ring'
-                      required
-                      // eslint-disable-next-line jsx-a11y/no-autofocus
-                      autoFocus
-                    />
-                    <div className='flex gap-2'>
-                      <button
-                        type='submit'
-                        disabled={creating || !workspaceName.trim()}
-                        data-track-category='Workspace_Switcher'
-                        data-track-name='Create_Workspace'
-                        className='flex-1 py-1.5 text-xs font-medium bg-primary text-primary-foreground rounded-md disabled:opacity-50 hover:opacity-90'
-                      >
-                        {creating ? 'Creating…' : 'Create'}
-                      </button>
-                      <button
-                        type='button'
-                        onClick={() => {
-                          setShowCreateForm(false);
-                          setError(null);
-                        }}
-                        data-track-category='Workspace_Switcher'
-                        data-track-name='Cancel_Create_Workspace'
-                        className='flex-1 py-1.5 text-xs font-medium border border-border rounded-md hover:bg-muted'
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </form>
-                ) : (
+                      data-track-name='Create_Workspace'
+                      className='flex-1 py-1.5 text-xs font-medium bg-primary text-primary-foreground rounded-md disabled:opacity-50 hover:opacity-90'
+                    >
+                      {creating ? 'Creating…' : 'Create'}
+                    </button>
+                    <button
+                      type='button'
+                      onClick={() => {
+                        setShowCreateForm(false);
+                        setCreateWorkspaceType(WorkspaceType.ENTERPRISE);
+                        setError(null);
+                      }}
+                      data-track-category='Workspace_Switcher'
+                      data-track-name='Cancel_Create_Workspace'
+                      className='flex-1 py-1.5 text-xs font-medium border border-border rounded-md hover:bg-muted'
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <div className='flex flex-col'>
                   <button
-                    onClick={() => setShowCreateForm(true)}
+                    onClick={() => {
+                      setCreateWorkspaceType(WorkspaceType.ENTERPRISE);
+                      setShowCreateForm(true);
+                    }}
                     data-track-category='Workspace_Switcher'
                     data-track-name='Show_Create_Workspace_Form'
                     className='w-full flex items-center gap-3 px-3 py-2.5 hover:bg-muted transition-colors text-left'
@@ -495,9 +508,10 @@ export const WorkspaceSwitcher: React.FC = () => {
                     <div className='size-7 rounded-md flex items-center justify-center bg-muted shrink-0'>
                       <Plus size={14} className='text-foreground' />
                     </div>
-                    <span className='text-sm text-foreground'>Create a new workspace</span>
+                    <span className='text-sm text-foreground'>Create enterprise workspace</span>
                   </button>
-                ))}
+                </div>
+              )}
             </div>
           )}
         </div>

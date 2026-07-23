@@ -5,6 +5,8 @@ import { redisService } from './redisService';
 import { getPrompt, PROMPT_NAMES } from '../agents/xyne-ai/langfuse/prompts.js';
 import { compileFallbackPrompt } from '../agents/xyne-ai/langfuse/fallback-prompts.js';
 import { CacConfigService } from './cacConfigService';
+import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
+import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
 
 async function getProjectRecapPrompt(
   promptName: string,
@@ -86,15 +88,22 @@ function getDateRangeInTimezone(date: Date): { startOfDay: Date; endOfDay: Date;
   return { startOfDay, endOfDay, dateStr };
 }
 
-async function callLLM(userPrompt: string, systemPrompt: string): Promise<string> {
-  const { config: envConfig } = await import('../config/env.js');
+async function callLLM(userPrompt: string, systemPrompt: string, projectId: string): Promise<string> {
   const agentsConfig = AgentsConfig.defaults();
+  const credential = await orgLLMCredentialService.getCredentialByProjectId(
+    projectId,
+    OrgLLMServiceAccountPurpose.DEFAULT,
+  );
+  if (!credential) {
+    throw new Error('LiteLLM credentials are not configured for this organization');
+  }
 
-  const response = await fetch(`${envConfig.litellm.baseUrl}/chat/completions`, {
+  const baseUrl = credential.baseUrl.replace(/\/+$/, '');
+  const response = await fetch(`${baseUrl}/chat/completions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${envConfig.litellm.apiKey}`,
+      Authorization: `Bearer ${credential.apiKey}`,
     },
     body: JSON.stringify({
       model: agentsConfig.summariserModelName,
@@ -289,6 +298,7 @@ export class ProjectRecapGenerationService {
       const summary = await this.summarizeChannelVerbose(
         channel.id,
         channel.name,
+        projectId,
         project.name,
         dateStr,
         startOfDay,
@@ -348,6 +358,7 @@ export class ProjectRecapGenerationService {
   private async summarizeChannelVerbose(
     channelId: string,
     channelName: string,
+    projectId: string,
     projectName: string,
     dateStr: string,
     startOfDay: Date,
@@ -423,6 +434,7 @@ export class ProjectRecapGenerationService {
       const verboseSummary = await callLLM(
         prompt,
         'You are a thorough technical writer summarizing team communication for a daily recap. Write in flowing paragraphs.',
+        projectId,
       );
 
       const result: ChannelVerboseSummary = {
@@ -537,6 +549,7 @@ export class ProjectRecapGenerationService {
       const output = await callLLM(
         prompt,
         'You are a project manager creating a concise daily recap. Respond with valid JSON only.',
+        project.id,
       );
 
       let parsed: ParsedOutput;

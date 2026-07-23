@@ -8,8 +8,8 @@ import {
   type RunState,
 } from '@juspay-jaf/jaf';
 import { db } from '@/database/client';
-import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
+import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
 import {
   NudgeOutputSchemaLenient,
   type ProactiveNudgeOutputLenient,
@@ -24,6 +24,7 @@ import type {
   NudgeDefinition,
 } from '../types';
 import { isEligibleMessage, buildMessageNudgeContext } from './helpers';
+import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
 
 const CREATE_TICKET_PROMPT_NAME = 'nudge_create_ticket_from_message';
 const CREATE_TICKET_PROMPT_LABEL = 'production';
@@ -91,7 +92,14 @@ async function runCreateTicketNudgeExtraction(
     modelConfig: { temperature: 0.1 },
   };
 
-  const provider = makeLiteLLMProvider(config.litellm.baseUrl, config.litellm.apiKey);
+  const credential = await orgLLMCredentialService.getCredentialByProjectId(
+    context.projectId,
+    OrgLLMServiceAccountPurpose.DEFAULT,
+  );
+  if (!credential) {
+    throw new Error('LiteLLM credentials are not configured for this organization');
+  }
+  const provider = makeLiteLLMProvider(credential.baseUrl, credential.apiKey);
   const initialState: RunState<CreateTicketNudgeLLMContext> = {
     runId: generateRunId(),
     traceId: generateTraceId(),
@@ -106,7 +114,7 @@ async function runCreateTicketNudgeExtraction(
     modelProvider: provider as RunConfig<CreateTicketNudgeLLMContext>['modelProvider'],
     maxTurns: 2,
     modelOverride: modelName,
-    onEvent: createAgentEventLogger('CreateTicketNudge', 'LITELLM_API_KEY'),
+    onEvent: createAgentEventLogger('CreateTicketNudge', 'ORG_LITELLM_SERVICE_ACCOUNT'),
   };
 
   const result = await run(initialState, runConfig);

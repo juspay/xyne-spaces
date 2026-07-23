@@ -6,6 +6,8 @@ import {
 } from '@/database/repositories/teamIntelligenceTeamRepository';
 import { redisService } from '@/services/redisService';
 import { logger } from '@/utils/logger';
+import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
+import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
 
 export interface TeamBulletsDateRangeInput {
   from: Date;
@@ -16,23 +18,24 @@ export interface TeamBulletsDateRangeInput {
 }
 
 class TeamIntelligenceTeamDashboardService {
-  private readonly llmClient: LLMClient | null;
+  private async getDefaultWorkspaceLlmClient(): Promise<LLMClient | null> {
+    const credential = await orgLLMCredentialService.getCredentialByWorkspaceId(
+      appConfig.defaultWorkspaceId,
+      OrgLLMServiceAccountPurpose.DEFAULT,
+    );
+    if (!credential) return null;
 
-  constructor() {
-    const apiKey = appConfig.llm.litellmApiKey;
-    this.llmClient = apiKey
-      ? new LLMClient({
-          provider: {
-            type: 'litellm',
-            config: {
-              apiKey,
-              baseUrl: appConfig.llm.litellmBaseUrl,
-              timeout: appConfig.llm.requestTimeoutMs,
-            },
-          },
-          defaultModel: appConfig.workflow.defaultModelName,
-        })
-      : null;
+    return new LLMClient({
+      provider: {
+        type: 'litellm',
+        config: {
+          apiKey: credential.apiKey,
+          baseUrl: credential.baseUrl,
+          timeout: appConfig.llm.requestTimeoutMs,
+        },
+      },
+      defaultModel: appConfig.workflow.defaultModelName,
+    });
   }
 
   async getTeamBullets(input: TeamBulletsDateRangeInput) {
@@ -116,11 +119,16 @@ class TeamIntelligenceTeamDashboardService {
   }
 
   private async llmMatchChannelIds(teamNames: string[], candidates: TeamChannelRecapChannelCandidate[]): Promise<string[]> {
-    if (!this.llmClient || candidates.length === 0) {
+    if (candidates.length === 0) {
       return [];
     }
 
     try {
+      const llmClient = await this.getDefaultWorkspaceLlmClient();
+      if (!llmClient) {
+        return [];
+      }
+
       const candidateJson = JSON.stringify(
         candidates.map((candidate) => ({
           channelId: candidate.channelId,
@@ -143,7 +151,7 @@ class TeamIntelligenceTeamDashboardService {
         'Do not include channel IDs that are not present in the candidate list.',
       ].join('\n');
 
-      const response = await this.llmClient.generate({
+      const response = await llmClient.generate({
         model: appConfig.workflow.defaultModelName,
         messages: [createUserMessage(prompt)],
         parameters: { maxTokens: 1024 },

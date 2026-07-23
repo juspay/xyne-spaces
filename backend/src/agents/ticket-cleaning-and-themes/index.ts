@@ -18,9 +18,11 @@ import {
 } from '@juspay-jaf/jaf';
 
 import { config } from '../../config/env.js';
+import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
 import { parseAgentOutput } from '../../services/agents/utils.js';
 import { logger } from '../../utils/logger.js';
 import { getPromptFromLangfuse, PROMPT_NAMES } from '../xyne-ai/langfuse/index.js';
+import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
 
 export interface TicketDescriptionCleanerInput {
   title: string;
@@ -98,8 +100,6 @@ const SingleMetaThemeOutputSchema = z.object({
   description: z.string(),
 });
 
-const LITELLM_BASE_URL = config.litellm.baseUrl;
-const LITELLM_API_KEY = config.litellm.apiKey;
 const DEFAULT_MODEL = config.ticketDescriptionClean?.model || 'glm-latest';
 const LANGFUSE_PROMPT_LABEL = 'production';
 
@@ -174,17 +174,27 @@ function parseSingleMetaThemeOutput(content: string): SingleMetaThemeAnalyzerOut
   };
 }
 
-export function createModelProvider() {
-  return makeLiteLLMProvider(LITELLM_BASE_URL, LITELLM_API_KEY);
+export async function createModelProvider(projectId: string) {
+  const credential = await orgLLMCredentialService.getCredentialByProjectId(
+    projectId,
+    OrgLLMServiceAccountPurpose.DEFAULT,
+  );
+
+  if (!credential) {
+    throw new Error(`No active DEFAULT LiteLLM service account credential for project ${projectId}`);
+  }
+
+  return makeLiteLLMProvider(credential.baseUrl, credential.apiKey);
 }
 
 export async function cleanTicketDescriptionWithLlm(
   input: TicketDescriptionCleanerInput,
+  context: { projectId: string },
   onEvent?: (event: TraceEvent) => void,
 ): Promise<TicketDescriptionCleanerOutput> {
   const prompt = await getTicketDescriptionCleanerPrompt();
   const agent = createTicketDescriptionCleanerAgent<TicketDescriptionCleanerOutput>(prompt);
-  const modelProvider = createModelProvider();
+  const modelProvider = await createModelProvider(context.projectId);
   const promptInput = {
     title: input.title || '',
     description: input.description || '',
@@ -242,6 +252,7 @@ export async function cleanTicketDescriptionWithLlm(
 
 export async function generateSingleClusterThemeWithLlm(
   input: SingleClusterThemeAnalyzerInput,
+  projectId: string,
 ): Promise<SingleClusterThemeAnalyzerOutput> {
   if (!input?.cluster_id?.trim()) {
     throw new Error('Cluster theme generation failed: missing cluster_id');
@@ -253,7 +264,7 @@ export async function generateSingleClusterThemeWithLlm(
 
   const prompt = await getSingleClusterThemeAnalyzerPrompt();
   const agent = createTicketDescriptionCleanerAgent<SingleClusterThemeAnalyzerOutput>(prompt);
-  const modelProvider = createModelProvider();
+  const modelProvider = await createModelProvider(projectId);
 
   const runConfig: RunConfig<Record<string, never>> = {
     agentRegistry: new Map([['TicketDescriptionCleaner', agent]]),
@@ -305,6 +316,7 @@ export async function generateSingleClusterThemeWithLlm(
 
 export async function generateSingleMetaThemeWithLlm(
   input: SingleMetaThemeAnalyzerInput,
+  projectId: string,
 ): Promise<SingleMetaThemeAnalyzerOutput> {
   if (!Array.isArray(input?.impacted_clusters) || input.impacted_clusters.length === 0) {
     throw new Error('Meta theme generation failed: impacted_clusters is empty');
@@ -316,7 +328,7 @@ export async function generateSingleMetaThemeWithLlm(
 
   const prompt = await getSingleMetaThemeAnalyzerPrompt();
   const agent = createTicketDescriptionCleanerAgent<SingleMetaThemeAnalyzerOutput>(prompt);
-  const modelProvider = createModelProvider();
+  const modelProvider = await createModelProvider(projectId);
 
   const runConfig: RunConfig<Record<string, never>> = {
     agentRegistry: new Map([['TicketDescriptionCleaner', agent]]),

@@ -13,6 +13,7 @@ interface OAuthState {
   isNy?: boolean;
   invitationId?: string;
   connectCalendar?: boolean;
+  enterpriseLogin?: boolean;
 }
 
 class OAuthStateService {
@@ -29,6 +30,7 @@ class OAuthStateService {
     isNy?: boolean,
     invitationId?: string,
     connectCalendar?: boolean,
+    enterpriseLogin?: boolean,
   ): Promise<string> {
     const { redisService } = await import('./redisService');
     const client = redisService.getClient();
@@ -45,6 +47,7 @@ class OAuthStateService {
       ...(isNy ? { isNy } : {}),
       ...(invitationId ? { invitationId } : {}),
       ...(connectCalendar ? { connectCalendar } : {}),
+      ...(enterpriseLogin ? { enterpriseLogin } : {}),
     };
 
     await client.setex(

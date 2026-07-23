@@ -11,8 +11,8 @@ import {
   type Tool,
 } from '@juspay-jaf/jaf';
 import { DatabaseClient, db } from '@/database/client';
-import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
+import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
 import { getPromptFromLangfuse } from '@/agents/xyne-ai/langfuse/index.js';
 import { createAgentEventLogger } from '@/agents/agentLogger';
 import { vespaService } from '@/services/vespaSearch';
@@ -26,6 +26,7 @@ import type {
   NudgeDefinition,
 } from '../types';
 import { isEligibleMessage, buildMessageNudgeContext } from './helpers';
+import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
 
 const prisma = DatabaseClient.getInstance();
 
@@ -176,7 +177,14 @@ async function runRelatedTicketAgent(
   context: MessageNudgeEvaluationContext,
 ): Promise<RelatedTicketResultOutput> {
   const systemPrompt = await resolveRelatedTicketPrompt();
-  const provider = makeLiteLLMProvider(config.litellm.baseUrl, config.litellm.apiKey);
+  const credential = await orgLLMCredentialService.getCredentialByProjectId(
+    context.message.projectId,
+    OrgLLMServiceAccountPurpose.DEFAULT,
+  );
+  if (!credential) {
+    throw new Error('LiteLLM credentials are not configured for this organization');
+  }
+  const provider = makeLiteLLMProvider(credential.baseUrl, credential.apiKey);
 
   const userInput = {
     message: {
@@ -212,7 +220,7 @@ async function runRelatedTicketAgent(
     modelProvider: provider as RunConfig<NudgeToolContext>['modelProvider'],
     maxTurns: 6,
     modelOverride: context.modelName ?? 'glm-flash-experimental',
-    onEvent: createAgentEventLogger('FindRelatedTicketNudge', 'LITELLM_API_KEY'),
+    onEvent: createAgentEventLogger('FindRelatedTicketNudge', 'ORG_LITELLM_SERVICE_ACCOUNT'),
   };
 
   const result = await run(initialState, runConfig);

@@ -195,6 +195,7 @@ export enum OrgRole {
   ADMIN = 'ADMIN',
   MEMBER = 'MEMBER',
   VIEWER = 'VIEWER',
+  COMMUNITY_MEMBER = 'COMMUNITY_MEMBER',
 }
 
 // @ts-ignore TS1294
@@ -209,7 +210,117 @@ export enum WorkspaceRole {
   ADMIN = 'ADMIN',
   MEMBER = 'MEMBER',
   GUEST = 'GUEST',
+  COMMUNITY_MEMBER = 'COMMUNITY_MEMBER',
 }
+
+export const WorkspaceType = {
+  ENTERPRISE: 'ENTERPRISE',
+  COMMUNITY: 'COMMUNITY',
+} as const;
+
+export type WorkspaceType = typeof WorkspaceType[keyof typeof WorkspaceType];
+
+export const WorkspaceJoinPolicy = {
+  INVITE_ONLY: 'INVITE_ONLY',
+  OPEN: 'OPEN',
+  REQUEST_TO_JOIN: 'REQUEST_TO_JOIN',
+} as const;
+
+export type WorkspaceJoinPolicy = typeof WorkspaceJoinPolicy[keyof typeof WorkspaceJoinPolicy];
+
+export const CommunityJoinResultStatus = {
+  JOINED: 'JOINED',
+  REQUEST_PENDING: 'REQUEST_PENDING',
+  REQUEST_REJECTED: 'REQUEST_REJECTED',
+} as const;
+
+export type CommunityJoinResultStatus =
+  typeof CommunityJoinResultStatus[keyof typeof CommunityJoinResultStatus];
+
+export const WorkspaceJoinRequestStatus = {
+  PENDING: 'PENDING',
+  APPROVED: 'APPROVED',
+  REJECTED: 'REJECTED',
+} as const;
+
+export type WorkspaceJoinRequestStatus =
+  typeof WorkspaceJoinRequestStatus[keyof typeof WorkspaceJoinRequestStatus];
+
+export const WorkspaceJoinRequestAction = {
+  APPROVE: 'APPROVE',
+  REJECT: 'REJECT',
+} as const;
+
+export type WorkspaceJoinRequestAction =
+  typeof WorkspaceJoinRequestAction[keyof typeof WorkspaceJoinRequestAction];
+
+export const AIProvisioningSubjectType = {
+  ORG: 'ORG',
+  WORKSPACE: 'WORKSPACE',
+  USER: 'USER',
+} as const;
+
+export type AIProvisioningSubjectType =
+  typeof AIProvisioningSubjectType[keyof typeof AIProvisioningSubjectType];
+
+export const AIProvisioningProvider = {
+  CLAW_LITELLM: 'CLAW_LITELLM',
+} as const;
+
+export type AIProvisioningProvider =
+  typeof AIProvisioningProvider[keyof typeof AIProvisioningProvider];
+
+export const AIProvisioningStatus = {
+  PENDING: 'PENDING',
+  RUNNING: 'RUNNING',
+  SUCCESS: 'SUCCESS',
+  FAILED: 'FAILED',
+} as const;
+
+export type AIProvisioningStatus =
+  typeof AIProvisioningStatus[keyof typeof AIProvisioningStatus];
+
+export const OrgLLMServiceAccountProvider = {
+  LITELLM: 'LITELLM',
+} as const;
+
+export type OrgLLMServiceAccountProvider =
+  typeof OrgLLMServiceAccountProvider[keyof typeof OrgLLMServiceAccountProvider];
+
+export const OrgLLMServiceAccountPurpose = {
+  ASK_AI: 'ASK_AI',
+  CALL_TRANSCRIPT: 'CALL_TRANSCRIPT',
+  ACTIVITY_CLASSIFICATION: 'ACTIVITY_CLASSIFICATION',
+  TICKET_DUPLICATE: 'TICKET_DUPLICATE',
+  TICKET_BOARD: 'TICKET_BOARD',
+  EMAIL_REWRITE: 'EMAIL_REWRITE',
+  SUMMARISER: 'SUMMARISER',
+  WORKFLOW: 'WORKFLOW',
+  DEFAULT: 'DEFAULT',
+} as const;
+
+export type OrgLLMServiceAccountPurpose =
+  typeof OrgLLMServiceAccountPurpose[keyof typeof OrgLLMServiceAccountPurpose];
+
+export const OrgLLMServiceAccountCredentialStatus = {
+  PENDING: 'PENDING',
+  ACTIVE: 'ACTIVE',
+  FAILED: 'FAILED',
+  REVOKED: 'REVOKED',
+} as const;
+
+export type OrgLLMServiceAccountCredentialStatus =
+  typeof OrgLLMServiceAccountCredentialStatus[keyof typeof OrgLLMServiceAccountCredentialStatus];
+
+export const OrganizationDomainVerificationStatus = {
+  PENDING: 'PENDING',
+  VERIFIED: 'VERIFIED',
+  UNVERIFIED: 'UNVERIFIED',
+  REJECTED: 'REJECTED',
+} as const;
+
+export type OrganizationDomainVerificationStatus =
+  typeof OrganizationDomainVerificationStatus[keyof typeof OrganizationDomainVerificationStatus];
 
 // @ts-ignore TS1294
 export enum Status {
@@ -1451,6 +1562,9 @@ export const workspaceTable = table('workspaces')
     updatedAt: number(),
     status: enumeration<Status>(),
     metadata: json().optional(),
+    workspaceType: string().optional(),
+    joinPolicy: string().optional(),
+    landingChannelId: string().optional(),
   })
   .primaryKey('id');
 

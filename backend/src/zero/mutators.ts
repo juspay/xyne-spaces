@@ -130,6 +130,7 @@ import {
   deleteDelayedMessageEntityAttachments,
 } from '@/zero/utils/attachmentEntityCleanup';
 import { deliverDraftServerMessage } from '@/services/messageDeliveryService';
+import { organizationDomainService } from '@/services/organizationDomainService';
 // Data-driven visit versioning + ETA reset/continue decision for NON_LINEAR transitions.
 import { decideVisitVersion, foldFormRowsToValues } from '@/services/stageTransition/visitVersioning';
 import {
@@ -13475,12 +13476,16 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             zql.org_members.where('orgId', orgId).where('email', email).one(),
           );
           if (existing) {
+            if (existing.leftAt) {
+              await organizationDomainService.assertOrgMemberLimit(orgId, email);
+            }
             await tx.mutate.org_members.update({
               memberId: existing.memberId,
               leftAt: null,
               joinedAt: timestamp,
             });
           } else {
+            await organizationDomainService.assertOrgMemberLimit(orgId, email);
             await tx.mutate.org_members.insert({
               memberId,
               orgId,

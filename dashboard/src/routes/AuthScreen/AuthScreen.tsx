@@ -14,6 +14,20 @@ import { ThemeProvider } from '@juspay/blend-design-system';
 import { reactNativeBridge } from '../../utils/reactNativeBridge';
 import { usePlatform } from '../../hooks/usePlatform';
 import { dropAllDatabases } from '@rocicorp/zero';
+import {
+  ENTERPRISE_WORKSPACE_LOGIN_INTENT_KEY,
+  PENDING_COMMUNITY_WORKSPACE_ID_KEY,
+  PENDING_COMMUNITY_WORKSPACE_NAME_KEY,
+} from '../../machines/authMachine';
+
+interface CommunityWorkspaceListItem {
+  id: string;
+  name: string;
+}
+
+interface CommunityWorkspaceOrganization {
+  workspaces: CommunityWorkspaceListItem[];
+}
 
 /**
  * AuthScreen - Mobile-Responsive Login Page with Modern Design
@@ -49,6 +63,8 @@ const AuthScreen = (): ReactElement => {
     signInWithMicrosoft,
     logout,
     signInWithEmail,
+    communityJoinRequest,
+    enterpriseJoinTarget,
   } = useAuth();
   const { data: providers } = useOAuthProviders();
   const [searchParams] = useSearchParams();
@@ -59,8 +75,20 @@ const AuthScreen = (): ReactElement => {
   const [showEmailForm, setShowEmailForm] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [pendingCommunityWorkspaceName, setPendingCommunityWorkspaceName] = useState<string | null>(
+    () => localStorage.getItem(PENDING_COMMUNITY_WORKSPACE_NAME_KEY),
+  );
+  const [isRequestingEnterpriseJoin, setIsRequestingEnterpriseJoin] = useState(false);
+  const [enterpriseJoinRequestMessage, setEnterpriseJoinRequestMessage] = useState('');
+  const [enterpriseJoinRequestError, setEnterpriseJoinRequestError] = useState('');
   const orgNameInputRef = useRef<HTMLInputElement>(null);
   const { isMobile } = usePlatform();
+  const isOrganizationNameTakenError =
+    error?.toLowerCase().includes('organization with name') ||
+    error?.toLowerCase().includes('organization name already exists');
+  const isOrganizationDomainConflictError = error
+    ?.toLowerCase()
+    .includes('organization already exists for');
 
   // Forgot password flow
   const [showForgotPassword, setShowForgotPassword] = useState(false);
@@ -85,6 +113,56 @@ const AuthScreen = (): ReactElement => {
     if (param === 'true' || wasCompleted) {
       setIsEnrollmentFlow(true);
     }
+  }, [searchParams]);
+
+  useEffect(() => {
+    const communityWorkspaceId = searchParams.get('communityWorkspaceId')?.trim();
+    if (!communityWorkspaceId) return;
+    localStorage.removeItem(ENTERPRISE_WORKSPACE_LOGIN_INTENT_KEY);
+    localStorage.setItem(PENDING_COMMUNITY_WORKSPACE_ID_KEY, communityWorkspaceId);
+    localStorage.removeItem(PENDING_COMMUNITY_WORKSPACE_NAME_KEY);
+    setPendingCommunityWorkspaceName(null);
+  }, [searchParams]);
+
+  useEffect(() => {
+    const pendingWorkspaceId =
+      searchParams.get('communityWorkspaceId')?.trim() ||
+      localStorage.getItem(PENDING_COMMUNITY_WORKSPACE_ID_KEY)?.trim();
+
+    if (!pendingWorkspaceId) {
+      localStorage.removeItem(PENDING_COMMUNITY_WORKSPACE_NAME_KEY);
+      setPendingCommunityWorkspaceName(null);
+      return;
+    }
+
+    let isCancelled = false;
+
+    apiInstance
+      .get<{ organizations: CommunityWorkspaceOrganization[] }>('/community/workspaces')
+      .then(response => {
+        if (isCancelled) return;
+        const communityWorkspace = (response.data.organizations || [])
+          .flatMap(org => org.workspaces)
+          .find(workspace => workspace.id === pendingWorkspaceId);
+
+        if (communityWorkspace) {
+          localStorage.setItem(PENDING_COMMUNITY_WORKSPACE_NAME_KEY, communityWorkspace.name);
+          setPendingCommunityWorkspaceName(communityWorkspace.name);
+          return;
+        }
+
+        localStorage.removeItem(PENDING_COMMUNITY_WORKSPACE_NAME_KEY);
+        setPendingCommunityWorkspaceName(null);
+      })
+      .catch(() => {
+        if (isCancelled) return;
+        localStorage.removeItem(PENDING_COMMUNITY_WORKSPACE_NAME_KEY);
+        setPendingCommunityWorkspaceName(null);
+      });
+
+    return (): void => {
+      isCancelled = true;
+    };
   }, [searchParams]);
 
   useEffect(() => {
@@ -145,6 +223,41 @@ const AuthScreen = (): ReactElement => {
     e.preventDefault();
     if (orgName.trim() && workspaceName.trim()) {
       createOrg(orgName.trim(), workspaceName.trim());
+    }
+  };
+
+  const handleRequestEnterpriseJoin = async (): Promise<void> => {
+    if (!enterpriseJoinTarget?.workspaceId) {
+      setEnterpriseJoinRequestError('Enterprise workspace is unavailable for this organization.');
+      return;
+    }
+
+    setIsRequestingEnterpriseJoin(true);
+    setEnterpriseJoinRequestMessage('');
+    setEnterpriseJoinRequestError('');
+    try {
+      const response = await apiInstance.post<{
+        joinRequest?: { isExisting?: boolean; status?: string };
+      }>(`/community/${enterpriseJoinTarget.workspaceId}/join`, {
+        workspaceType: 'ENTERPRISE',
+      });
+      const isExisting = response.data.joinRequest?.isExisting;
+      const requestStatus = response.data.joinRequest?.status;
+      setEnterpriseJoinRequestMessage(
+        requestStatus === 'APPROVED'
+          ? `Your request to join ${enterpriseJoinTarget.orgName} is approved. Continue to Enterprise login.`
+          : isExisting
+            ? `Your request to join ${enterpriseJoinTarget.orgName} is already pending.`
+            : `Your request to join ${enterpriseJoinTarget.orgName} has been submitted.`,
+      );
+    } catch (err) {
+      if (err instanceof Error && err.message) {
+        setEnterpriseJoinRequestError(err.message);
+      } else {
+        setEnterpriseJoinRequestError('Failed to request enterprise access.');
+      }
+    } finally {
+      setIsRequestingEnterpriseJoin(false);
     }
   };
 
@@ -241,6 +354,13 @@ const AuthScreen = (): ReactElement => {
     return <Navigate to={dest} replace={true}></Navigate>;
   }
 
+  const hasEnterpriseWorkspaceLoginIntent =
+    localStorage.getItem(ENTERPRISE_WORKSPACE_LOGIN_INTENT_KEY) === 'true';
+
+  if (communityJoinRequest && !hasEnterpriseWorkspaceLoginIntent) {
+    return <Navigate to='/community' replace={true} />;
+  }
+
   const pendingInvitationId =
     localStorage.getItem('pending_invitation_id') ?? Cookies.get('pending_invitation_id');
   if (pendingInvitationId && (isSelectingWorkspace || isCreatingOrg)) {
@@ -250,11 +370,6 @@ const AuthScreen = (): ReactElement => {
         replace={true}
       />
     );
-  }
-
-  if (isCreatingOrg && !userExistsButRemoved) {
-    sessionStorage.setItem('no_access_from_auth', '1');
-    return <Navigate to='/no-access' replace={true} />;
   }
 
   const googleSignInButton = (
@@ -301,6 +416,13 @@ const AuthScreen = (): ReactElement => {
                   <h2 className='text-lg lg:text-xl font-medium md:font-semibold text-foreground'>
                     Log in to Xyne Spaces
                   </h2>
+                  {pendingCommunityWorkspaceName ? (
+                    <div className='mt-2 max-w-full rounded-lg border border-blue-100 bg-blue-50 px-4 py-2'>
+                      <p className='max-w-[420px] whitespace-normal break-words text-sm font-semibold leading-snug text-blue-950'>
+                        You will be joining {pendingCommunityWorkspaceName} Community
+                      </p>
+                    </div>
+                  ) : null}
                   <p className='text-xs sm:text-sm md:text-sm text-muted-foreground pb-4'>
                     {isLoading
                       ? 'Signing you in...'
@@ -310,7 +432,7 @@ const AuthScreen = (): ReactElement => {
               )}
 
               {/* Error Message */}
-              {error && (
+              {error && !(isCreatingOrg && isOrganizationDomainConflictError) && (
                 <div
                   className='p-3 sm:p-4 bg-red-50 border border-red-200 rounded-lg max-h-24 overflow-y-auto'
                   role='alert'
@@ -384,8 +506,62 @@ const AuthScreen = (): ReactElement => {
                 </div>
               )}
 
+              {isCreatingOrg && isOrganizationDomainConflictError && (
+                <div className='flex flex-col gap-4'>
+                  <div className='p-4 bg-amber-50 border border-amber-200 rounded-lg text-center'>
+                    <h3 className='text-base font-semibold text-amber-800 mb-2'>
+                      Organization Already Exists
+                    </h3>
+                    <p className='text-sm text-amber-700'>{error}</p>
+                    {enterpriseJoinTarget ? (
+                      <p className='mt-2 text-xs text-amber-700'>
+                        Request access to {enterpriseJoinTarget.workspaceName}.
+                      </p>
+                    ) : null}
+                  </div>
+
+                  {enterpriseJoinRequestMessage ? (
+                    <div className='rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-center text-sm text-emerald-700'>
+                      {enterpriseJoinRequestMessage}
+                    </div>
+                  ) : null}
+
+                  {enterpriseJoinRequestError ? (
+                    <div className='rounded-lg border border-red-200 bg-red-50 p-3 text-center text-sm text-red-700'>
+                      {enterpriseJoinRequestError}
+                    </div>
+                  ) : null}
+
+                  {enterpriseJoinTarget ? (
+                    <button
+                      type='button'
+                      onClick={() => {
+                        void handleRequestEnterpriseJoin();
+                      }}
+                      disabled={isRequestingEnterpriseJoin || Boolean(enterpriseJoinRequestMessage)}
+                      className='w-full rounded-lg bg-black px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50'
+                      data-track-category='Auth'
+                      data-track-name='RequestEnterpriseWorkspaceAccess'
+                    >
+                      {isRequestingEnterpriseJoin ? 'Submitting request...' : 'Request to join'}
+                    </button>
+                  ) : null}
+
+                  <button
+                    type='button'
+                    onClick={handleTryDifferentAccount}
+                    className='text-sm text-muted-foreground hover:text-foreground text-center cursor-pointer'
+                    data-track-category='Auth'
+                    data-track-name='TryDifferentAccount'
+                  >
+                    Try with a different account
+                  </button>
+                </div>
+              )}
+
               {/* Create Organization Form - only for new users */}
-              {((isCreatingOrg && !userExistsButRemoved) || showCreateOrgForm) && (
+              {((isCreatingOrg && !userExistsButRemoved && !isOrganizationDomainConflictError) ||
+                showCreateOrgForm) && (
                 <form onSubmit={handleCreateOrg} className='flex flex-col gap-4'>
                   <div className='text-center'>
                     <h3 className='text-lg font-semibold text-foreground'>Create Organization</h3>
@@ -393,7 +569,7 @@ const AuthScreen = (): ReactElement => {
                   </div>
 
                   {/* Duplicate Name Error Alert */}
-                  {error?.toLowerCase().includes('already exists') && (
+                  {isOrganizationNameTakenError && (
                     <div className='p-3 bg-amber-50 border border-amber-200 rounded-lg'>
                       <p className='text-sm text-amber-700'>
                         <span className='font-medium'>Organization name taken.</span> Please choose
@@ -417,13 +593,13 @@ const AuthScreen = (): ReactElement => {
                         ref={orgNameInputRef}
                         onChange={e => {
                           setOrgName(e.target.value);
-                          if (error?.toLowerCase().includes('already exists')) {
+                          if (isOrganizationNameTakenError) {
                             clearError();
                           }
                         }}
                         placeholder='Juspay Inc'
                         className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 bg-background text-foreground ${
-                          error?.toLowerCase().includes('already exists')
+                          isOrganizationNameTakenError
                             ? 'border-amber-400 focus:ring-amber-500'
                             : 'border-border focus:ring-blue-500'
                         }`}
@@ -431,7 +607,7 @@ const AuthScreen = (): ReactElement => {
                         data-track-category='Auth'
                         data-track-name='OrgNameInput'
                       />
-                      {error?.toLowerCase().includes('already exists') && (
+                      {isOrganizationNameTakenError && (
                         <p className='text-xs text-amber-600 mt-1'>
                           Try adding your team name or a unique identifier
                         </p>

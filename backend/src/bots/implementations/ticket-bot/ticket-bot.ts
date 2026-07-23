@@ -16,6 +16,8 @@ import { workflowRerunService } from '@/workflows/services/workflowRerunService'
 import { workflowRegistry } from '@/workflows/registry/workflowRegistry';
 import { WorkflowType } from '@/workflows/types/workflow-enums';
 import { ConversationSummarizationService } from '@/services/conversationSummarizationService';
+import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
+import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
 
 // Define types for the bot
 type TicketBotInput = {
@@ -89,8 +91,6 @@ export class TicketBot extends UnifiedBaseBot<TicketBotInput, TicketBotOutput> {
 
   private conversationRepository: ConversationRepository;
   private messageRepository: MessageRepository;
-  private llmClient: LLMClient;
-  private summarizationService: ConversationSummarizationService;
   private prisma: PrismaClient;
 
   // Model configuration
@@ -98,7 +98,6 @@ export class TicketBot extends UnifiedBaseBot<TicketBotInput, TicketBotOutput> {
   private readonly COMPACTION_THRESHOLD = 0.95; // 95%
 
   // Model limits (from framework)
-  private readonly MODEL_CONTEXT_WINDOW: number;
   private readonly MAX_OUTPUT_TOKENS = 4000; // Standard output limit
 
   constructor() {
@@ -107,15 +106,34 @@ export class TicketBot extends UnifiedBaseBot<TicketBotInput, TicketBotOutput> {
     this.messageRepository = new MessageRepository();
     this.prisma = DatabaseClient.getInstance();
 
-    if (!process.env.LITELLM_API_KEY) {
-      throw new Error('LITELLM_API_KEY is not set in the environment variables.');
+    logger.info(`[TicketBot] Initialized (model: ${this.MODEL}, threshold: 95%)`);
+  }
+
+  private async createLlmRuntime(context: BotExecutionContext): Promise<{
+    llmClient: LLMClient;
+    summarizationService: ConversationSummarizationService;
+    modelContextWindow: number;
+  }> {
+    const credential = context.userId
+      ? await orgLLMCredentialService.getCredentialByUserId(
+        context.userId,
+        OrgLLMServiceAccountPurpose.DEFAULT,
+      )
+      : await orgLLMCredentialService.getCredentialByChannelId(
+        context.channelId,
+        OrgLLMServiceAccountPurpose.DEFAULT,
+      );
+
+    if (!credential) {
+      throw new Error('No active DEFAULT LiteLLM service account credential for ticket bot execution');
     }
-    this.llmClient = new LLMClient({
+
+    const llmClient = new LLMClient({
       provider: {
         type: 'litellm',
         config: {
-          apiKey: process.env.LITELLM_API_KEY,
-          baseUrl: process.env.LITELLM_BASE_URL,
+          apiKey: credential.apiKey,
+          baseUrl: credential.baseUrl,
           timeout: 120000, // 2 minutes for large summarization tasks
         },
       },
@@ -123,25 +141,25 @@ export class TicketBot extends UnifiedBaseBot<TicketBotInput, TicketBotOutput> {
     });
 
     // Get model context window from framework
-    this.MODEL_CONTEXT_WINDOW = this.llmClient.getContextWindow(this.MODEL);
+    const modelContextWindow = llmClient.getContextWindow(this.MODEL);
 
     // Initialize summarization service
-    this.summarizationService = new ConversationSummarizationService(this.llmClient, {
+    const summarizationService = new ConversationSummarizationService(llmClient, {
       defaultChunkSize: 30000, // Reduced from 55500 to 30000 for faster processing
       modelLimits: {
-        contextWindow: this.MODEL_CONTEXT_WINDOW,
+        contextWindow: modelContextWindow,
         maxOutputTokens: this.MAX_OUTPUT_TOKENS,
         safetyMargin: 0.85
       }
     });
 
-    logger.info(`[TicketBot] Summarization service initialized (model: ${this.MODEL}, context: ${this.MODEL_CONTEXT_WINDOW}, threshold: 95%)`);
+    return { llmClient, summarizationService, modelContextWindow };
   }
 
   /**
    * Summarize bot messages (always summarizes when called)
    */
-  private async _summarizeBotMessages(botMessages: string[]): Promise<string> {
+  private async _summarizeBotMessages(llmClient: LLMClient, botMessages: string[]): Promise<string> {
     logger.info(`[TicketBot] Summarizing ${botMessages.length} bot messages`);
     
     if (!botMessages || botMessages.length === 0) {
@@ -165,7 +183,7 @@ Provide a concise but informative summary:`;
     const llmMessages: UserMessage[] = [createUserMessage(prompt)];
 
     try {
-      const response = await this.llmClient.generate({
+      const response = await llmClient.generate({
         model: config.workflow.defaultModelName,
         messages: llmMessages,
       });
@@ -184,6 +202,7 @@ Provide a concise but informative summary:`;
     context: BotExecutionContext
   ): AsyncGenerator<BotEvent> {
     try {
+      const { llmClient, summarizationService, modelContextWindow } = await this.createLlmRuntime(context);
       logger.info(`[TicketBot] Execution started with executionId: ${context.executionId}`, { input, context });
       logger.info(`[TicketBot] Input product:`, input.product);
       logger.info(`[TicketBot] Input userPrompt:`, input.userPrompt);
@@ -333,7 +352,7 @@ Provide a concise but informative summary:`;
               let botSection = '';
               if (botMessages.length > 0) {
                 logger.info(`[TicketBot] Summarizing ${botMessages.length} bot messages...`);
-                const botSummary = await this._summarizeBotMessages(botMessages);
+                const botSummary = await this._summarizeBotMessages(llmClient, botMessages);
                 if (botSummary) {
                   botSection = `\n\n--- Bot Output Summary ---\n${botSummary}`;
                 }
@@ -370,17 +389,17 @@ Provide a concise but informative summary:`;
         
         try {
           // Count tokens in the final description
-          const descriptionTokens = await this.llmClient.countTokens(
+          const descriptionTokens = await llmClient.countTokens(
             [createUserMessage(description)],
             [], // No tools
             this.MAX_OUTPUT_TOKENS
           );
           
-          const threshold = Math.floor((this.MODEL_CONTEXT_WINDOW - this.MAX_OUTPUT_TOKENS) * this.COMPACTION_THRESHOLD);
+          const threshold = Math.floor((modelContextWindow - this.MAX_OUTPUT_TOKENS) * this.COMPACTION_THRESHOLD);
           
           logger.info(
-            `[TicketBot] Description tokens: ${descriptionTokens}/${this.MODEL_CONTEXT_WINDOW} ` +
-            `(${(descriptionTokens / this.MODEL_CONTEXT_WINDOW * 100).toFixed(1)}% of context, ` +
+            `[TicketBot] Description tokens: ${descriptionTokens}/${modelContextWindow} ` +
+            `(${(descriptionTokens / modelContextWindow * 100).toFixed(1)}% of context, ` +
             `${(descriptionTokens / threshold * 100).toFixed(1)}% of threshold)` +
             ` [using framework token counter]`
           );
@@ -389,7 +408,7 @@ Provide a concise but informative summary:`;
             logger.info(`[TicketBot] Description exceeds threshold! Summarizing...`);
             
             try {
-              const result = await this.summarizationService.summarize({
+              const result = await summarizationService.summarize({
                 messages: [description],
                 context: { type: 'general' },
                 chunkingConfig: {

@@ -6,6 +6,7 @@ dotenv.config();
 const envSchema = Joi.object({
   NODE_ENV: Joi.string().valid('development', 'production', 'test').default('development'),
   SANDBOX_TEST_MODE: Joi.boolean().default(false),
+  ORG_MEMBER_LIMIT: Joi.number().integer().min(1).allow(null).default(null),
   RESEARCH_AGENT_URL: Joi.string().default(''),
   // Python transcription agent (health server also exposes /embed-voice)
   PYTHON_AGENT_URL: Joi.string().default(''),
@@ -49,6 +50,9 @@ const envSchema = Joi.object({
   GOOGLE_REFRESH_TOKEN_NEW: Joi.string().allow('').default(''),
   EMAIL_FROM: Joi.string().allow('').default(''),
   EMAIL_FROM_NAME: Joi.string().allow('').default(''),
+  COMMUNITY_JOIN_APPROVED_EMAIL_MESSAGE: Joi.string()
+    .allow('')
+    .default(''),
   JWT_SECRET: Joi.string().required(),
   JWT_EXPIRATION_SECONDS: Joi.number().default(86400), // 24 hours in seconds
   FORCE_LOGOUT_BEFORE: Joi.number().optional(), // Unix timestamp (seconds) - reject tokens issued before this time
@@ -88,6 +92,16 @@ const envSchema = Joi.object({
   TAG_GENERATION_CONCURRENCY: Joi.number().integer().min(1).max(20).default(1),
   TAG_GENERATION_LLM_TIMEOUT_MS: Joi.number().integer().min(1000).default(120000),
   ENABLE_STITCH_WORKER: Joi.boolean().default(false),
+  ENABLE_AI_PROVISIONING_WORKER: Joi.boolean().default(false),
+  XYNE_CLAW_AUTH_INTERNAL_URL: Joi.string().uri().allow('').default(''),
+  AI_PROVISIONING_QUEUE_ATTEMPTS: Joi.number().integer().min(1).default(3),
+  AI_PROVISIONING_QUEUE_BACKOFF_MS: Joi.number().integer().min(0).default(5000),
+  AI_PROVISIONING_REQUEST_TIMEOUT_MS: Joi.number().integer().min(1000).default(30000),
+  COMMUNITY_WORKSPACE_USER_BUDGET: Joi.number().integer().min(0).allow(null).default(null),
+  ENTERPRISE_WORKSPACE_USER_BUDGET: Joi.number().integer().min(0).allow(null).default(null),
+  LITELLM_MANAGEMENT_BASE_URL: Joi.string().uri().allow('').default(''),
+  LITELLM_MANAGEMENT_ADMIN_KEY: Joi.string().allow('').default(''),
+  LITELLM_CHANGED_BY: Joi.string().default(''),
   BACKEND_URL: Joi.string().default(''),
   SLACK_BOT_TOKEN: Joi.string().allow('').default(''),
   SLACK_FRONTEND_URL: Joi.string().allow('').default(''),
@@ -417,6 +431,7 @@ export const config = {
   env: envVars.NODE_ENV,
   isTestEnv: envVars.NODE_ENV === 'test',
   isSandboxTestMode: envVars.SANDBOX_TEST_MODE === true,
+  orgMemberLimit: (envVars.ORG_MEMBER_LIMIT as number | null) ?? null,
   research_agent_url: envVars.RESEARCH_AGENT_URL,
   pythonAgentUrl: envVars.PYTHON_AGENT_URL as string,
   nx_graph_server_url: envVars.NX_GRAPH_SERVER_URL,
@@ -521,6 +536,20 @@ export const config = {
   tagGenerationConcurrency: envVars.TAG_GENERATION_CONCURRENCY as number,
   tagGenerationLlmTimeoutMs: envVars.TAG_GENERATION_LLM_TIMEOUT_MS as number,
   enableStitchWorker: envVars.ENABLE_STITCH_WORKER,
+  enableAiProvisioningWorker: envVars.ENABLE_AI_PROVISIONING_WORKER,
+  aiProvisioning: {
+    xyneClawAuthInternalUrl: envVars.XYNE_CLAW_AUTH_INTERNAL_URL as string,
+    s2sKey: envVars.XYNE_CLAW_S2S_KEY as string,
+    queueAttempts: envVars.AI_PROVISIONING_QUEUE_ATTEMPTS as number,
+    queueBackoffMs: envVars.AI_PROVISIONING_QUEUE_BACKOFF_MS as number,
+    requestTimeoutMs: envVars.AI_PROVISIONING_REQUEST_TIMEOUT_MS as number,
+    communityWorkspaceUserBudget: (envVars.COMMUNITY_WORKSPACE_USER_BUDGET as number | null) ?? null,
+    enterpriseWorkspaceUserBudget: (envVars.ENTERPRISE_WORKSPACE_USER_BUDGET as number | null) ?? null,
+    litellmManagementBaseUrl:
+      (envVars.LITELLM_MANAGEMENT_BASE_URL as string) || (envVars.LITELLM_BASE_URL as string),
+    litellmManagementAdminKey: envVars.LITELLM_MANAGEMENT_ADMIN_KEY as string,
+    litellmChangedBy: envVars.LITELLM_CHANGED_BY as string,
+  },
   backendUrl: envVars.BACKEND_URL,
   slackBotToken: envVars.SLACK_BOT_TOKEN,
   slackFrontendUrl: envVars.SLACK_FRONTEND_URL,
@@ -757,6 +786,9 @@ export const config = {
     refreshToken: envVars.GOOGLE_REFRESH_TOKEN as string,
     fromEmail: envVars.EMAIL_FROM as string,
     fromName: envVars.EMAIL_FROM_NAME as string,
+  },
+  communityJoinApprovedEmail: {
+    message: envVars.COMMUNITY_JOIN_APPROVED_EMAIL_MESSAGE as string,
   },
   microsoftGraph: {
     baseUrl: envVars.MICROSOFT_GRAPH_BASE_URL as string,

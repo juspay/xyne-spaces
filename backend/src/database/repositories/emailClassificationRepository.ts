@@ -29,6 +29,7 @@ export class EmailClassificationRepository {
 
     return {
       channelId: pref.channelId,
+      ownerUserId: pref.ownerUserId,
       enabled: pref.classificationEnabled,
       classificationPrompt: pref.classificationPrompt ?? '',
       categoryField: pref.categoryField ?? 'Query Type',

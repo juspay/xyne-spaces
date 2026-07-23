@@ -64,7 +64,7 @@ export class ConfigSyncService {
         name: defaultModelName,
         provider: 'litellm',
         credentials: JSON.stringify({
-          apiKey: 'YOUR_LITELLM_API_KEY',
+          apiKey: 'YOUR_ORG_LITELLM_SERVICE_ACCOUNT',
           baseUrl: 'YOUR_LITELLM_BASE_URL',
           timeout: 600000,
           retries: 5
