@@ -695,6 +695,12 @@ export function AutomationBuilder({
   const operators = operatorsQuery.data ?? [];
   const triggerSchema = triggerSchemaQuery.data ?? null;
 
+  const [formFieldNameMap, setFormFieldNameMap] = useState<Map<string, string>>(new Map());
+
+  const handleFormFieldNamesResolved = useCallback((map: Map<string, string>) => {
+    setFormFieldNameMap(map);
+  }, []);
+
   const triggerIssues = issuesUnder(validation?.issues, 'trigger');
 
   return (
@@ -1002,6 +1008,7 @@ export function AutomationBuilder({
               onChangeType={handleTriggerTypeChange}
               onConfigChange={handleTriggerConfigChange}
               issues={triggerIssues}
+              onFormFieldNamesResolved={handleFormFieldNamesResolved}
             />
           </BuilderSection>
 
@@ -1022,6 +1029,7 @@ export function AutomationBuilder({
                 config.steps,
                 stepSchemaCache,
                 index,
+                formFieldNameMap,
               );
               const stepIssues = issuesUnder(validation?.issues, `steps[${index}]`);
 

@@ -46,6 +46,7 @@ import {
   validateUserCustomFieldReferences,
   type CustomFieldWritePayload,
 } from '@/services/ticketCustomFieldService';
+import { emitTicketUpdated } from '@/automations/triggers/ticket-updated.trigger';
 
 const externalSourceRepo = new ExternalSourceRepository();
 const emailChannelPreferenceRepo = new EmailChannelPreferenceRepository();
@@ -1664,7 +1665,7 @@ export class TicketController {
       // Fetch ticket to get board context and conversation
       const ticket = await prismaClient.ticket.findUnique({
         where: { id: ticketId },
-        select: { id: true, boardId: true, conversationId: true, workspaceId: true },
+        select: { id: true, boardId: true, conversationId: true, workspaceId: true, channelId: true, projectId: true, createdBy: true },
       });
 
       if (!ticket) {
@@ -1812,6 +1813,37 @@ export class TicketController {
           
           logger.info(`[TicketController] Emitted ADDITIONAL_FORM_FIELD_UPDATED for field "${fieldName}" on ticket ${ticketId}`);
         }
+
+        // Emit TICKET_UPDATED
+        // Key by fieldId + fieldName + fieldName.toLowerCase() so conditions referencing
+        // either the ID or the name resolve correctly.
+        const prevValue = existing?.actualFieldValue ?? existing?.fieldValue ?? null;
+        const newValue = normalizedFieldValue.actualFieldValue ?? stringValue;
+        const toChangeValue = (v: unknown): string | number | null => {
+          if (typeof v === 'string' || typeof v === 'number') return v;
+          if (v == null) return null;
+          return String(v);
+        };
+        const prevNorm = toChangeValue(prevValue);
+        const newNorm = toChangeValue(newValue);
+        if (prevNorm === newNorm) {
+          res.status(200).json({ success: true, fieldName, ticketId });
+          return;
+        }
+        const changeEntry = {
+          previousValue: prevNorm,
+          newValue: newNorm,
+        };
+        void emitTicketUpdated({
+          ticket: { ...ticket, channelId: ticket.channelId ?? '', projectId: ticket.projectId ?? '', createdBy: ticket.createdBy ?? '' },
+          changes: {},
+          formFieldChanges: {
+            [field.id]: changeEntry,
+            [field.fieldName]: changeEntry,
+            [field.fieldName.toLowerCase()]: changeEntry,
+          },
+          performedById: req.user!.id,
+        });
       } catch (eventError) {
         // Don't fail the request if event emission fails
         logger.error('[TicketController] Error emitting form field update event:', eventError);

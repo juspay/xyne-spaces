@@ -7,9 +7,11 @@ import type {
   StepSchema,
   TriggerSchema,
   ValidationIssue,
+  JsonSchema,
 } from '../Automation.types';
 import { CONDITIONAL_STEP_TYPE, SWITCH_STEP_TYPE } from '../Automation.types';
 import type { VariablePickerSource } from './VariablePicker/VariablePicker.types';
+import { resolveSchema } from './SchemaForm/SchemaForm.utils';
 
 export function emptyConfig(): AutomationConfig {
   return {
@@ -24,9 +26,48 @@ export function buildVariableSources(
   steps: AutomationStepConfig[],
   schemaCache: Record<string, StepSchema | undefined>,
   upToIndex: number,
+  formFieldNameMap?: Map<string, string>,
 ): VariablePickerSource[] {
   const sources: VariablePickerSource[] = [];
   if (triggerSchema) {
+    let triggerOutputSchema: JsonSchema =
+      triggerSchema.type === 'WEBHOOK'
+        ? buildWebhookTriggerOutputSchema(triggerConfig)
+        : triggerSchema.outputSchema;
+
+    if (triggerSchema.type === 'TICKET_UPDATED' && formFieldNameMap && formFieldNameMap.size > 0) {
+      const selectedFieldIds = triggerConfig['formFieldIds'];
+      const selectedIds = Array.isArray(selectedFieldIds)
+        ? new Set<string>(selectedFieldIds.map(String))
+        : null;
+
+      const formFieldProperties: Record<string, JsonSchema> = {};
+      for (const [fieldId, fieldName] of formFieldNameMap.entries()) {
+        if (selectedIds && !selectedIds.has(fieldId)) continue;
+        formFieldProperties[fieldName] = {
+          type: 'object',
+          properties: {
+            previousValue: { anyOf: [{ type: 'string' }, { type: 'number' }, { type: 'null' }] },
+            newValue: { anyOf: [{ type: 'string' }, { type: 'number' }, { type: 'null' }] },
+          },
+        };
+      }
+
+      if (Object.keys(formFieldProperties).length > 0) {
+        // zodToJsonSchema wraps the schema as { $ref: '#/definitions/output', definitions: {...} }.
+        // Injecting properties at the top level would be ignored by resolveSchema in flattenSource,
+        // which follows $ref back to the definitions content. Resolve first so our injection sticks.
+        const resolvedBase = resolveSchema(triggerOutputSchema);
+        triggerOutputSchema = {
+          ...resolvedBase,
+          properties: {
+            ...(resolvedBase.properties ?? {}),
+            formFieldChanges: { type: 'object', properties: formFieldProperties },
+          },
+        };
+      }
+    }
+
     sources.push({
       sourceKey: 'trigger',
       role: 'trigger',
@@ -34,10 +75,7 @@ export function buildVariableSources(
       sublabel: triggerSchema.name,
       groupKey: 'trigger',
       groupLabel: `Trigger — ${triggerSchema.name}`,
-      schema:
-        triggerSchema.type === 'WEBHOOK'
-          ? buildWebhookTriggerOutputSchema(triggerConfig)
-          : triggerSchema.outputSchema,
+      schema: triggerOutputSchema,
     });
   }
 
