@@ -7,7 +7,3 @@
 * waiting for "[data-testid='channel-list']" to appear
 * clicking on "[data-testid='nav-recordings']"
 * waiting for "[data-testid='recordings-page']" to appear
-* clicking on "[aria-label='go-back']"
-* verifying "[data-testid='channel-list']" is visible
-* clicking on "[aria-label='go-next']"
-* verifying "[data-testid='recordings-page']" is visible

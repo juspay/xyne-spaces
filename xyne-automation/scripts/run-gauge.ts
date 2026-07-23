@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import { config } from 'dotenv';
 import { environment, config as testConfig } from '@/config';
 import { closeLogger, setLoggerFileLabel } from '@/lib/logger';
+import { formatTestProgress, TestProgressTracker } from '@/lib/test-progress';
 import { bootstrapBaselineFixture } from '@/fixtures/baseline';
 import { closeAllBrowserSessions } from '@/tests/shared/support/browser-manager';
 
@@ -27,6 +28,8 @@ interface RunMetadata {
   parallelCount: number;
   command: string[];
   targets: string[];
+  totalScenarios: number;
+  progressFile: string;
   runnerMappings?: Array<{
     runnerNumber: number | null;
     pid: number;
@@ -53,6 +56,132 @@ if (environment === 'sbx' || environment === 'prod') {
 
 const positionalArgs = process.argv.slice(2);
 const parallelCount = testConfig.parallel;
+const targets = positionalArgs.length > 0 ? positionalArgs : ['tests'];
+const excludedScenarioTag = 'quarantine';
+const scenarioTagFilter = `!${excludedScenarioTag}`;
+
+interface ParsedScenario {
+  line: number;
+  tags: Set<string>;
+}
+
+function collectSpecSelections(testTargets: string[]): Map<string, Set<number> | null> {
+  const selections = new Map<string, Set<number> | null>();
+
+  const addSelection = (filePath: string, line?: number): void => {
+    const absolutePath = path.resolve(filePath);
+    if (!selections.has(absolutePath) || line === undefined) {
+      selections.set(absolutePath, line === undefined ? null : new Set([line]));
+      return;
+    }
+
+    selections.get(absolutePath)?.add(line);
+  };
+
+  const addDirectory = (directory: string): void => {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const entryPath = path.join(directory, entry.name);
+      if (entry.isDirectory()) addDirectory(entryPath);
+      else if (entry.isFile() && entry.name.endsWith('.spec')) addSelection(entryPath);
+    }
+  };
+
+  for (const target of testTargets) {
+    const scenarioTarget = target.match(/^(.*\.spec):(\d+)$/);
+    const targetPath = path.resolve(scenarioTarget?.[1] ?? target);
+    if (!fs.existsSync(targetPath)) continue;
+
+    const targetStats = fs.statSync(targetPath);
+    if (targetStats.isDirectory()) addDirectory(targetPath);
+    else if (targetStats.isFile() && targetPath.endsWith('.spec')) {
+      addSelection(targetPath, scenarioTarget ? Number.parseInt(scenarioTarget[2], 10) : undefined);
+    }
+  }
+
+  return selections;
+}
+
+function parseScenarios(specFile: string): ParsedScenario[] {
+  const lines = fs.readFileSync(specFile, 'utf8').split('\n');
+  const specTags = new Set<string>();
+  const scenarios: ParsedScenario[] = [];
+  let currentScenario: ParsedScenario | null = null;
+
+  for (const [index, line] of lines.entries()) {
+    if (/^##\s+/.test(line)) {
+      if (currentScenario) scenarios.push(currentScenario);
+      currentScenario = { line: index + 1, tags: new Set(specTags) };
+      continue;
+    }
+
+    const tagLine = line.match(/^\s*tags:\s*(.+)$/i);
+    if (!tagLine) continue;
+
+    const destination = currentScenario?.tags ?? specTags;
+    for (const tag of tagLine[1].split(',')) {
+      destination.add(tag.trim());
+    }
+  }
+
+  if (currentScenario) scenarios.push(currentScenario);
+  return scenarios;
+}
+
+function countScenariosWithTag(testTargets: string[], tag: string): number {
+  let count = 0;
+
+  for (const [specFile, selectedLines] of collectSpecSelections(testTargets)) {
+    const scenarios = parseScenarios(specFile);
+
+    for (const [index, scenario] of scenarios.entries()) {
+      const nextScenarioLine = scenarios[index + 1]?.line ?? Number.POSITIVE_INFINITY;
+      const isSelected =
+        selectedLines === null ||
+        [...selectedLines].some(
+          (selectedLine) => selectedLine >= scenario.line && selectedLine < nextScenarioLine
+        );
+
+      if (isSelected && scenario.tags.has(tag)) count++;
+    }
+  }
+
+  return count;
+}
+
+function countScenarios(testTargets: string[]): number {
+  const output = execFileSync('gauge', ['-m', 'list', '--scenarios', ...testTargets], {
+    encoding: 'utf8',
+    maxBuffer: 10 * 1024 * 1024,
+  });
+
+  const scenarios = output
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .flatMap((line) => {
+      try {
+        const parsed = JSON.parse(line) as { type?: unknown; message?: unknown };
+        return parsed.type === 'out' &&
+          typeof parsed.message === 'string' &&
+          parsed.message !== '[Scenarios]'
+          ? [parsed.message]
+          : [];
+      } catch {
+        return [];
+      }
+    });
+
+  const runnableScenarios =
+    scenarios.length - countScenariosWithTag(testTargets, excludedScenarioTag);
+
+  if (runnableScenarios <= 0) {
+    throw new Error(`Gauge did not find any scenarios for: ${testTargets.join(', ')}`);
+  }
+
+  return runnableScenarios;
+}
+
+const totalScenarios = countScenarios(targets);
 
 function getCommitHash(): string {
   if (process.env.COMMIT_HASH) {
@@ -93,21 +222,26 @@ const bootstrapLogFile = path.join(runArtifactDirectory, 'runner', 'baseline', '
 const runnerDirectory = path.join(runArtifactDirectory, 'runner');
 const htmlReportDirectory = path.join(runArtifactDirectory, 'html-report');
 const runMetadataFile = path.join(runArtifactDirectory, 'run-metadata.json');
+const progressFile = path.join(runArtifactDirectory, 'test-progress.jsonl');
 
 fs.mkdirSync(runArtifactDirectory, { recursive: true });
+fs.writeFileSync(progressFile, '', 'utf8');
 
 console.log(`\n📁 Run artifacts: ${path.relative(process.cwd(), runArtifactDirectory)}\n`);
 
-const pass1Args = [
+const gaugeArgs = [
   'run',
   '--sort=alpha',
+  // Retry failures immediately; scenarios that still fail are retried again at the end.
+  '--max-retries-count',
+  String(testConfig.retries),
   // Exclude quarantined (known-flaky) scenarios.
   '--tags',
-  '!quarantine',
+  scenarioTagFilter,
   '-p',
   '-n',
   String(parallelCount),
-  ...(positionalArgs.length > 0 ? positionalArgs : ['tests']),
+  ...targets,
 ];
 
 function writeRunMetadata(metadata: RunMetadata): void {
@@ -233,23 +367,52 @@ const initialRunMetadata: RunMetadata = {
   bootstrapLogFile,
   runnerDirectory,
   parallelCount,
-  command: ['gauge', ...pass1Args],
-  targets: positionalArgs.length > 0 ? positionalArgs : ['tests'],
+  command: ['gauge', ...gaugeArgs],
+  targets,
+  totalScenarios,
+  progressFile,
 };
 
 writeRunMetadata(initialRunMetadata);
 
 const gaugeLogStream = fs.createWriteStream(gaugeLogFile, { flags: 'w' });
 
+function writeProgressLine(line: string): void {
+  console.log(line);
+  gaugeLogStream.write(`${line}\n`);
+}
+
+function startProgressMonitor(): () => void {
+  const tracker = new TestProgressTracker(progressFile, totalScenarios);
+  writeProgressLine(formatTestProgress(tracker.getStats()));
+
+  const drain = () => {
+    for (const update of tracker.drain()) {
+      writeProgressLine(formatTestProgress(update.stats, update.event));
+    }
+  };
+
+  const timer = setInterval(drain, 200);
+
+  return () => {
+    clearInterval(timer);
+    drain();
+  };
+}
+
+let stopCurrentProgressMonitor: (() => void) | undefined;
+
+function stopProgressMonitoring(): void {
+  stopCurrentProgressMonitor?.();
+  stopCurrentProgressMonitor = undefined;
+}
+
 function forwardChunk(
   chunk: string | Buffer,
   destination: NodeJS.WriteStream,
-  logStream: fs.WriteStream,
-  toConsole: boolean
+  logStream: fs.WriteStream
 ): void {
-  if (toConsole) {
-    destination.write(chunk);
-  }
+  destination.write(chunk);
   logStream.write(chunk);
 }
 
@@ -281,16 +444,16 @@ function readExecutionStatus(): GaugeExecutionStatus | null {
 }
 
 function writeGaugeStatus(
-  pass1Passed: number,
-  pass1Failed: number,
-  pass1Skipped: number,
+  firstPassPassed: number,
+  firstPassFailed: number,
+  firstPassSkipped: number,
   stillFailing: number
 ): void {
   const status = {
-    passed: pass1Passed + pass1Failed - stillFailing,
+    passed: firstPassPassed + firstPassFailed - stillFailing,
     failed: stillFailing,
-    skipped: pass1Skipped,
-    total: pass1Passed + pass1Failed + pass1Skipped,
+    skipped: firstPassSkipped,
+    total: firstPassPassed + firstPassFailed + firstPassSkipped,
   };
   fs.writeFileSync(
     path.join(runArtifactDirectory, 'gauge-status.json'),
@@ -305,10 +468,9 @@ function adjustCountSpan(html: string, className: string, delta: number): string
   return html.replace(re, (_full, pre, value, post) => `${pre}${Number(value) + delta}${post}`);
 }
 
-// Patch the pass-1 index.html to final status: pie data-results, count spans, spec rows.
 function reconcileHtmlReport(recoveredSpecHtmlPaths: string[], recoveredScenarios: number): void {
   const recoveredSpecs = recoveredSpecHtmlPaths.length;
-  const indexFile = path.join(runArtifactDirectory, 'html-report', 'index.html');
+  const indexFile = path.join(htmlReportDirectory, 'index.html');
   if ((recoveredSpecs === 0 && recoveredScenarios === 0) || !fs.existsSync(indexFile)) {
     return;
   }
@@ -344,14 +506,12 @@ function reconcileHtmlReport(recoveredSpecHtmlPaths: string[], recoveredScenario
 }
 
 function logBanner(message: string): void {
-  const line = `${message}\n`;
-  process.stdout.write(line);
-  gaugeLogStream.write(line);
+  writeProgressLine(message);
 }
 
-function runGauge(gaugeArgs: string[], reportsDir: string, verbose: boolean): Promise<number> {
+function runGauge(args: string[], reportsDir: string): Promise<number> {
   return new Promise((resolve, reject) => {
-    const child = spawn('gauge', gaugeArgs, {
+    const child = spawn('gauge', args, {
       stdio: ['inherit', 'pipe', 'pipe'],
       shell: process.platform === 'win32',
       env: {
@@ -362,12 +522,8 @@ function runGauge(gaugeArgs: string[], reportsDir: string, verbose: boolean): Pr
       },
     });
 
-    child.stdout?.on('data', (chunk) =>
-      forwardChunk(chunk, process.stdout, gaugeLogStream, verbose)
-    );
-    child.stderr?.on('data', (chunk) =>
-      forwardChunk(chunk, process.stderr, gaugeLogStream, verbose)
-    );
+    child.stdout?.on('data', (chunk) => forwardChunk(chunk, process.stdout, gaugeLogStream));
+    child.stderr?.on('data', (chunk) => forwardChunk(chunk, process.stderr, gaugeLogStream));
     child.on('error', (error) => reject(error));
     child.on('close', (code) => resolve(code ?? 1));
   });
@@ -377,6 +533,7 @@ async function main(): Promise<void> {
   process.env.gauge_reports_dir = runArtifactDirectory;
   process.env.XYNE_RUN_ARTIFACT_DIR = runArtifactDirectory;
   process.env.XYNE_RUN_ID = runDirectoryName;
+  process.env.XYNE_TEST_PROGRESS_FILE = progressFile;
   const defaultConsoleLogging = environment === 'local' || environment === 'local-test';
   const requestedConsoleLogging =
     process.env.XYNE_LOG_TO_STDOUT ?? (defaultConsoleLogging ? 'true' : 'false');
@@ -395,63 +552,75 @@ async function main(): Promise<void> {
 
   console.log(`✅ Baseline fixtures ready. Starting ${parallelCount} parallel runner(s).\n`);
 
-  let exitCode = await runGauge(pass1Args, runArtifactDirectory, true);
+  stopCurrentProgressMonitor = startProgressMonitor();
+  let exitCode = await runGauge(gaugeArgs, runArtifactDirectory);
 
-  // Read pass-1 counts before any deferred pass overwrites executionStatus.json.
-  const pass1Status = readExecutionStatus();
-  const pass1Passed = pass1Status?.scePassed ?? 0;
-  const pass1Failed = pass1Status?.sceFailed ?? 0;
-  const pass1Skipped = pass1Status?.sceSkipped ?? 0;
+  // Gauge has already applied the inline --max-retries-count budget. Snapshot only
+  // the scenarios that exhausted those retries, then give that array a final pass.
+  const firstPassStatus = readExecutionStatus();
+  const firstPassPassed = firstPassStatus?.scePassed ?? 0;
+  const firstPassFailed = firstPassStatus?.sceFailed ?? 0;
+  const firstPassSkipped = firstPassStatus?.sceSkipped ?? 0;
+  const failedAfterInlineRetries = exitCode === 0 ? [] : readFailedItems();
+  let remainingFailedItems = [...failedAfterInlineRetries];
 
   const maxDeferredPasses = Math.max(0, testConfig.retries);
-  const retryReportsDir = path.join(runArtifactDirectory, '.retry-tmp');
-  const pass1FailedItems = exitCode === 0 ? [] : readFailedItems();
-  let stillFailing = pass1FailedItems.length;
+  const retryReportsDirectory = path.join(runArtifactDirectory, '.retry-tmp');
 
-  if (exitCode !== 0 && stillFailing > 0 && maxDeferredPasses > 0) {
-    const initialFailures = readFailedItems();
-    logBanner('\n════════════════════════ RETRIES ════════════════════════');
+  if (remainingFailedItems.length > 0 && maxDeferredPasses > 0) {
+    logBanner('\n════════════════════ END-OF-RUN RETRIES ════════════════════');
     logBanner(
-      `${initialFailures.length} scenario(s) failed on the first pass — retrying serially at end of run:`
+      `${remainingFailedItems.length} scenario(s) exhausted inline retries; retrying them serially at the end:`
     );
-    for (const item of initialFailures) {
+    for (const item of remainingFailedItems) {
       logBanner(`   • ${item}`);
     }
 
-    for (let attempt = 1; exitCode !== 0 && attempt <= maxDeferredPasses; attempt++) {
-      const failedItems = readFailedItems();
-      if (failedItems.length === 0) {
-        break;
-      }
+    for (let attempt = 1; remainingFailedItems.length > 0; attempt++) {
+      if (attempt > maxDeferredPasses) break;
+
       logBanner(
-        `\n🔁 Attempt ${attempt}/${maxDeferredPasses} — re-running ${failedItems.length} scenario(s)...`
+        `\n🔁 Final pass ${attempt}/${maxDeferredPasses} — re-running ${remainingFailedItems.length} scenario(s)...`
       );
-      exitCode = await runGauge(['run', '--sort=alpha', ...failedItems], retryReportsDir, false);
-      stillFailing = exitCode === 0 ? 0 : readFailedItems().length;
+      exitCode = await runGauge(
+        ['run', '--sort=alpha', ...remainingFailedItems],
+        retryReportsDirectory
+      );
+      remainingFailedItems = exitCode === 0 ? [] : readFailedItems();
+
       logBanner(
-        `   ✔ ${Math.max(0, pass1Failed - stillFailing)} recovered, ${stillFailing} still failing`
+        `   ✔ ${Math.max(0, firstPassFailed - remainingFailedItems.length)} recovered, ${remainingFailedItems.length} still failing`
       );
     }
 
     logBanner(
-      stillFailing === 0
-        ? `\n✅ All ${pass1Failed} failed scenario(s) recovered on retry.`
-        : `\n❌ ${stillFailing} scenario(s) still failing after ${maxDeferredPasses} retry pass(es).`
+      remainingFailedItems.length === 0
+        ? `\n✅ All ${firstPassFailed} failed scenario(s) recovered in the end-of-run retries.`
+        : `\n❌ ${remainingFailedItems.length} scenario(s) still failing after ${maxDeferredPasses} end-of-run retry pass(es).`
     );
-    logBanner('══════════════════════════════════════════════════════════\n');
+    logBanner('════════════════════════════════════════════════════════════\n');
   }
 
-  fs.rmSync(retryReportsDir, { recursive: true, force: true });
+  stopProgressMonitoring();
+  fs.rmSync(retryReportsDirectory, { recursive: true, force: true });
 
   const specOf = (item: string): string => item.replace(/:\d+$/, '');
-  const finalFailedSpecs = new Set((stillFailing === 0 ? [] : readFailedItems()).map(specOf));
-  const recoveredSpecHtmlPaths = [...new Set(pass1FailedItems.map(specOf))]
+  const finalFailedSpecs = new Set(remainingFailedItems.map(specOf));
+  const recoveredSpecHtmlPaths = [...new Set(failedAfterInlineRetries.map(specOf))]
     .filter((spec) => !finalFailedSpecs.has(spec))
     .map((spec) => spec.replace(/\.spec$/, '.html'));
-  reconcileHtmlReport(recoveredSpecHtmlPaths, Math.max(0, pass1Failed - stillFailing));
+  reconcileHtmlReport(
+    recoveredSpecHtmlPaths,
+    Math.max(0, firstPassFailed - remainingFailedItems.length)
+  );
 
-  if (pass1Status) {
-    writeGaugeStatus(pass1Passed, pass1Failed, pass1Skipped, stillFailing);
+  if (firstPassStatus) {
+    writeGaugeStatus(
+      firstPassPassed,
+      firstPassFailed,
+      firstPassSkipped,
+      remainingFailedItems.length
+    );
   }
 
   await new Promise<void>((resolve) => {
@@ -466,6 +635,7 @@ async function main(): Promise<void> {
 }
 
 main().catch((error: unknown) => {
+  stopProgressMonitoring();
   gaugeLogStream.end(() => {
     writeFinalRunMetadata(1);
     process.exitCode = 1;

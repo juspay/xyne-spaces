@@ -348,6 +348,7 @@ Set automatically by `scripts/run-gauge.ts` — do not set manually:
 - `XYNE_RUN_ARTIFACT_DIR` - path to current run artifact directory (`reports/<hash>-<seq>/`)
 - `XYNE_RUN_ID` - UUID for current run
 - `XYNE_LOG_TO_STDOUT` - controls logger console output. `true` during bootstrap, `false` during Gauge workers (workers write to per-runner log files only)
+- `XYNE_TEST_PROGRESS_FILE` - append-only scenario result events used by the parent runner to render aggregate progress across Gauge workers
 - `gauge_reports_dir` - set to `${artifactDir}/html-report` so Gauge writes HTML report into artifact folder
 
 ## Shared runtime rules

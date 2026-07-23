@@ -13,7 +13,9 @@ import {
   type ExecutionContext,
   Gauge,
 } from 'gauge-ts';
+import { config } from '@/config';
 import { closeLogger, gaugeLogger, setLoggerFileLabel } from '@/lib/logger';
+import { appendScenarioProgressEvent } from '@/lib/test-progress';
 import { loadBaselineFixtureIntoWorkerContext } from '@/fixtures/baseline';
 import { testContext } from '@/tests/shared/runtime/test-context';
 import {
@@ -94,6 +96,21 @@ export default class HooksSteps {
 
     await resetAllBrowserSessionsForReuse();
     testContext.resetScenarioState();
+
+    const progressFile = config.testProgressFile;
+    const scenario = context.getCurrentScenario();
+    const specification = context.getCurrentSpec();
+    const scenarioName = scenario?.getName();
+    const specificationFile = specification?.getFileName();
+
+    if (progressFile && scenario && scenarioName && specificationFile) {
+      appendScenarioProgressEvent(progressFile, {
+        scenarioId: `${specificationFile}:${scenarioName}`,
+        scenarioName,
+        status: scenario.getIsFailing() ? 'failed' : 'passed',
+        timestamp: new Date().toISOString(),
+      });
+    }
   }
 
   @AfterSuite()
