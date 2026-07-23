@@ -1,6 +1,8 @@
 import { useCallback, useMemo, useState } from 'react';
 import { Variable } from 'lucide-react';
 import type { Editor } from '@tiptap/react';
+import type { MentionResult } from '@xyne/shared';
+import { useUserGroupSearch } from '@xyne/shared/hooks';
 import { cn } from '../../../../utils/classNames';
 import { Popover } from '../../../ui/Popover/Popover';
 import { EmailEditor } from '../../../xyne-desk/EmailEditor/EmailEditor';
@@ -8,10 +10,8 @@ import { MentionExtension } from '../../../ui/TipTapExtensions';
 import { MentionSelector } from '../../../ui/Selectors';
 import { useMentionSearch } from '../../../../hooks/useMentionSearch';
 import { useActiveUserSearch } from '../../../../hooks/useUsers';
-import { useUserGroupSearch } from '../../../../hooks/useUserGroupSearch';
 import { useAuth } from '../../../../hooks/useAuth';
 import { userToMentionResult } from '../../../../utils/userDisplayName';
-import type { MentionResult } from '../../../ui/Selectors';
 import { VariablePicker } from '../VariablePicker/VariablePicker';
 import type { VariablePickerSource } from '../VariablePicker/VariablePicker.types';
 import {
