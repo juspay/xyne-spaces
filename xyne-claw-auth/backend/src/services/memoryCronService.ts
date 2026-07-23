@@ -1,7 +1,7 @@
 /**
  * Memory Cron Service (xyne-claw-auth)
  *
- * Runs at 2:00 AM IST (20:30 UTC) every day. Two passes:
+ * Runs at 2:00 AM IST (20:30 UTC) every day. Its passes include:
  *
  *   1. Batch review creation
  *      Queries agent_runs for yesterday's completed sessions (per agentSlug
@@ -18,6 +18,11 @@
  *      prefetchMemory) and bulk-inserts into MemoryRecallHit. Drives the
  *      "hot memories" panel in the Memory tab.
  *
+ *   3. Retention and Hindsight hygiene
+ *      Runs the existing opt-in utility sweep, then duplicate collapse,
+ *      Hindsight retention placeholder, and novelty reporting for the
+ *      configured bank allowlist.
+ *
  * Transcripts are read from the agent_runs table (Postgres), which the run
  * pipeline already writes for every completed session. No disk-based
  * transcript dump or shared-PVC requirement.
@@ -29,12 +34,15 @@
 import { readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import type { Prisma } from "@prisma/client";
-import { bankIdForAgent, getMemoryProvider } from "xyne-claw-shared";
+import { bankIdForAgent, buildRetainMission, getMemoryProvider } from "xyne-claw-shared";
 import { prisma } from "../db.js";
 import { createLogger, createTraceId } from "../logger.js";
 import { acquireCronLeaderLock } from "../lib/cron-leader-lock.js";
 import { shouldReviewSession } from "./sessionHeuristic.js";
-import { distillSession } from "./sessionCurator.js";
+import { classifySessionSubsystemForBank, distillSession } from "./sessionCurator.js";
+import type { SubsystemUpdate } from "./sessionCurator.js";
+import { runNightlyMemoryHygiene } from "./memoryHygieneService.js";
+import { runRetentionSweep } from "./memoryRetentionService.js";
 
 const logger = createLogger("memory-cron", createTraceId());
 
@@ -490,6 +498,33 @@ async function runMemorySync(): Promise<void> {
 
   // Pass 2: ingest yesterday's recall-hits into the MemoryRecallHit table.
   await ingestRecallHits(dateStr);
+
+  // Pass 3 runs strictly after ingest so the utility calculation sees the
+  // newest recall hits. Retention ships dark: both the global switch and the
+  // per-agent string flag must be explicitly enabled before this pass exists.
+  if (process.env["MEMORY_RETENTION_ENABLED"] === "1") {
+    const agents = await prisma.agent.findMany({ select: { slug: true, config: true } });
+    const optedIn = [...new Set(agents
+      .filter((agent) => ((agent.config ?? null) as Record<string, unknown> | null)?.["memoryRetention"] === "on")
+      .map((agent) => agent.slug))];
+    for (const agentSlug of optedIn) {
+      try {
+        const summary = await runRetentionSweep(agentSlug, { dryRun: false });
+        logger.info("[memory-cron] Retention sweep complete", { agentSlug, ...summary });
+      } catch (err) {
+        logger.error("[memory-cron] Retention sweep failed", {
+          agentSlug,
+          err: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+  } else {
+    logger.info("[memory-cron] Retention disabled by MEMORY_RETENTION_ENABLED kill-switch");
+  }
+
+  // Pass 4: Hindsight-native database/API hygiene for the configured bank
+  // allowlist. This function hard-skips unless HINDSIGHT_URL is configured.
+  await runNightlyMemoryHygiene();
 }
 
 // ── Recall-hit ingest ──────────────────────────────────────────────────────
@@ -640,10 +675,122 @@ export function initMemoryCron(): void {
  *
  * Exported so the routes layer can call it without going through the cron.
  */
+// Session-ingest pipeline (2026-07-17, default ON): instead of distilling a
+// session into ≤1500-char subsystem blobs (double compression: our curator
+// squeezes the transcript, then Hindsight's extraction squeezes the squeeze),
+// queue ONE review row carrying the session transcript itself. On admin
+// approval the transcript is retained as-is and Hindsight's tuned extraction
+// (verbose + retain_mission) produces rich atomic facts — 10x knowledge yield
+// in the 2026-07-17 4-way bank experiment. Set MEMORY_SESSION_INGEST=0 to
+// fall back to the legacy distill pipeline.
+const SESSION_INGEST_ENABLED = process.env["MEMORY_SESSION_INGEST"] !== "0";
+/** Transcript cap for an ingest row — generous; Hindsight chunks internally. */
+const INGEST_TRANSCRIPT_MAX_CHARS = 200_000;
+
 export async function curateApprovedTranscript(
   transcript: SessionTranscript,
   reviewDate: string,
 ): Promise<string[]> {
+  // NEVER shared-curate the digital twin. Twin sessions are private per-user
+  // conversations with their OWN user-memory pipeline (user-tagged facts, the
+  // user approves). Auto-ingesting them here would retain private transcripts
+  // into the twin bank tagged "shared" (2026-07-17 pre-deploy audit).
+  if (bankIdForAgent(transcript.agentSlug) === bankIdForAgent("digital-twin")) {
+    logger.info("[memory-cron] Skipping digital-twin session — twin uses the user-memory pipeline", {
+      sessionId: transcript.sessionId,
+    });
+    return [];
+  }
+
+  // Per-agent escape hatch: `memoryPipeline: "legacy"` in agent config keeps
+  // this agent on the distill+HITL path (2026-07-17: pinned for heavy memory
+  // users like infra-doctor until they migrate deliberately).
+  const pipelineAgent = await prisma.agent.findFirst({
+    where: { slug: transcript.agentSlug, orgId: transcript.orgId },
+    select: { config: true },
+  }).catch(() => null);
+  const pinnedLegacy = ((pipelineAgent?.config ?? null) as Record<string, unknown> | null)?.["memoryPipeline"] === "legacy";
+
+  if (SESSION_INGEST_ENABLED && !pinnedLegacy) {
+    // AUTO-ingest (owner decision 2026-07-17): no human approval on the
+    // nightly path — the heuristic filter is the only gate. The old double
+    // gate (batch approve + per-row approve) reviewed LLM-generated memory
+    // content; under session-ingest the content is just the transcript of a
+    // session that already ran, so there is nothing left to review. Retain
+    // immediately; write an APPROVED review row as the audit trail so the
+    // Memory tab history shows exactly what was ingested and when.
+    const content = buildTranscriptBlob(transcript).slice(0, INGEST_TRANSCRIPT_MAX_CHARS);
+    const bankId = bankIdForAgent(transcript.agentSlug);
+    const agentRow = await prisma.agent.findFirst({
+      where: { slug: transcript.agentSlug, orgId: transcript.orgId },
+      select: { name: true, description: true },
+    }).catch(() => null);
+    await memory.ensureBank(bankId, {
+      mission: `Shared memory for xyne-claw agent "${transcript.agentSlug}".`,
+      retainMission: buildRetainMission({ name: agentRow?.name ?? transcript.agentSlug, description: agentRow?.description ?? null }),
+    });
+    const subsystem = await classifySessionSubsystemForBank(memory, bankId, {
+      sessionId: transcript.sessionId,
+      agentSlug: transcript.agentSlug,
+      agentName: agentRow?.name ?? transcript.agentSlug,
+      task: transcript.task,
+      transcript: content,
+    });
+    const tags = [
+      "shared",
+      `agent:${transcript.agentSlug}`,
+      `session:${transcript.sessionId}`,
+      // Provenance: whose session taught the agent this. `contributor:` NOT
+      // `user:` — the user: prefix is the twin bank's privacy filter and must
+      // never gain meaning on shared banks.
+      `contributor:${transcript.userId}`,
+      "source:session-ingest",
+      ...(subsystem ? [`subsystem:${subsystem}`] : []),
+    ];
+    const retained = await memory.retain(bankId, [
+      {
+        content,
+        tags,
+        metadata: {
+          agentSlug: transcript.agentSlug,
+          sessionId: transcript.sessionId,
+          source: "session-ingest",
+          ...(subsystem ? { subsystem } : {}),
+        },
+      },
+    ]);
+    const created = await prisma.pendingMemoryReview.create({
+      data: {
+        agentSlug: transcript.agentSlug,
+        orgId: transcript.orgId,
+        userId: null,
+        sessionId: transcript.sessionId,
+        scope: "shared",
+        subsystem,
+        action: "ingest_session",
+        replacesMemoryId: null,
+        isNewSubsystem: false,
+        content,
+        curatorReasoning: `Auto-ingested: transcript retained; the memory provider extracts atomic facts (task: ${transcript.task.slice(0, 200)})`,
+        curatorConfidence: null,
+        tokensIn: transcript.tokensIn,
+        tokensOut: transcript.tokensOut,
+        toolCount: transcript.toolInvocations.length,
+        status: "approved",
+        hindsightMemoryId: retained.find((r) => r.id)?.id ?? null,
+      },
+    });
+    logger.info("[memory-cron] Session auto-ingested to memory", {
+      agentSlug: transcript.agentSlug,
+      sessionId: transcript.sessionId,
+      reviewDate,
+      transcriptChars: content.length,
+      subsystem,
+    });
+    return [created.id];
+  }
+
+  // Legacy distill pipeline (MEMORY_SESSION_INGEST=0).
   const candidates = await distillSession({
     sessionId: transcript.sessionId,
     agentSlug: transcript.agentSlug,
@@ -663,8 +810,101 @@ export async function curateApprovedTranscript(
     return [];
   }
 
+  return persistSubsystemReviews(transcript, candidates, reviewDate);
+}
+
+/**
+ * Persist curator SubsystemUpdate candidates as PENDING PendingMemoryReview
+ * rows (scope "shared", userId null). Shared by the nightly curate path and
+ * the upload-session path so the two never drift. Returns the created row ids.
+ *
+ * Nothing here touches Hindsight — rows are pending until an admin approves
+ * them in the review queue, at which point the routes layer retains + deletes.
+ */
+export async function persistSubsystemReviews(
+  transcript: SessionTranscript,
+  candidates: SubsystemUpdate[],
+  reviewDate: string,
+): Promise<string[]> {
+  if (candidates.length === 0) return [];
+
+  // Agent-level auto-approve (2026-07-17): when the agent opts in via config
+  // (`memoryAutoApprove: true`), candidates whose curator confidence clears
+  // `memoryAutoApproveMinConfidence` (default 0.8) are retained immediately
+  // and recorded as approved — no review click. Lower-confidence candidates
+  // still queue as pending for a human.
+  const agentRow = await prisma.agent.findFirst({
+    where: { slug: transcript.agentSlug, orgId: transcript.orgId },
+    select: { name: true, description: true, config: true },
+  }).catch(() => null);
+  const agentCfg = (agentRow?.config ?? null) as Record<string, unknown> | null;
+  const autoApprove = agentCfg?.["memoryAutoApprove"] === true || agentCfg?.["memoryAutoApprove"] === "true";
+  const minConfidenceRaw = Number(agentCfg?.["memoryAutoApproveMinConfidence"]);
+  const minConfidence = Number.isFinite(minConfidenceRaw) && minConfidenceRaw > 0 && minConfidenceRaw <= 1 ? minConfidenceRaw : 0.8;
+
   const reviewIds: string[] = [];
   for (const c of candidates) {
+    const qualifies = autoApprove && typeof c.confidence === "number" && c.confidence >= minConfidence;
+    if (qualifies) {
+      try {
+        const bankId = bankIdForAgent(transcript.agentSlug);
+        await memory.ensureBank(bankId, {
+          mission: `Shared memory for xyne-claw agent "${transcript.agentSlug}".`,
+          retainMission: buildRetainMission({ name: agentRow?.name ?? transcript.agentSlug, description: agentRow?.description ?? null }),
+        });
+        const retained = await memory.retain(bankId, [
+          {
+            content: c.proposedContent,
+            tags: [
+              "shared",
+              `agent:${transcript.agentSlug}`,
+              `session:${transcript.sessionId}`,
+              ...(c.subsystem ? [`subsystem:${c.subsystem}`] : []),
+              "source:auto-approved",
+            ],
+            metadata: {
+              agentSlug: transcript.agentSlug,
+              sessionId: transcript.sessionId,
+              ...(c.subsystem ? { subsystem: c.subsystem } : {}),
+              curatorConfidence: String(c.confidence),
+              source: "auto-approved",
+            },
+          },
+        ]);
+        const created = await prisma.pendingMemoryReview.create({
+          data: {
+            agentSlug: transcript.agentSlug,
+            orgId: transcript.orgId,
+            userId: null,
+            sessionId: transcript.sessionId,
+            scope: "shared",
+            subsystem: c.subsystem,
+            action: c.action,
+            replacesMemoryId: null,
+            isNewSubsystem: c.isNewSubsystem,
+            content: c.proposedContent,
+            curatorReasoning: `Auto-approved (confidence ${c.confidence} >= ${minConfidence}): ${c.reasoning ?? ""}`.slice(0, 2000),
+            curatorConfidence: c.confidence,
+            tokensIn: transcript.tokensIn,
+            tokensOut: transcript.tokensOut,
+            toolCount: transcript.toolInvocations.length,
+            status: "approved",
+            hindsightMemoryId: retained.find((r) => r.id)?.id ?? null,
+          },
+        });
+        reviewIds.push(created.id);
+        continue;
+      } catch (err) {
+        // Retain failed — fall through and queue the candidate as pending so
+        // nothing is lost; a human (or a retry) picks it up.
+        logger.warn("[memory-cron] Auto-approve retain failed — queuing candidate as pending", {
+          agentSlug: transcript.agentSlug,
+          sessionId: transcript.sessionId,
+          subsystem: c.subsystem,
+          err: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
     // Memory is agent-wide and subsystem-scoped. The candidate proposes either
     // a brand-new subsystem (action=create, isNewSubsystem=true) or an update
     // to an existing one (action=update, replacesMemoryId set). On approve,
@@ -703,6 +943,7 @@ export async function curateApprovedTranscript(
 
   return reviewIds;
 }
+
 
 const MAX_ARGS_CHARS = 500;
 const MAX_RESULT_CHARS = 500;

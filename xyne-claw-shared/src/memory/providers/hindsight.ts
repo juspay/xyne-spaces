@@ -17,6 +17,9 @@ import type {
   EntityGraphNode,
   ListFilter,
   Memory,
+  MemoryGraph,
+  MemoryGraphEdge,
+  MemoryGraphNode,
   MemoryProvider,
   PaginatedMemories,
   ProviderCapabilities,
@@ -42,6 +45,9 @@ interface HindsightRetainItem {
   tags?: string[];
   timestamp: string;
   metadata?: Record<string, string>;
+  /** Per-item observation scoping (see RetainItem.observationScopes). A list of
+   *  tag-lists → one consolidation pass per inner list. */
+  observation_scopes?: string[][];
 }
 
 interface HindsightRetainResponse {
@@ -89,16 +95,27 @@ const CAPABILITIES: ProviderCapabilities = {
   sparseRetrieval: true,
 };
 
+// Per-operation HTTP timeouts (ms), env-tunable so a slow / self-hosted
+// Hindsight can be given headroom without a code change. Reads (recall/list)
+// and reflect default higher because `recall` sits on the twin respond-gate +
+// agent memory-search hot paths and was timing out at 10s.
+const timeoutMs = (envVar: string, fallback: number): number => {
+  const n = Number(process.env[envVar]);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+};
 const DEFAULT_TIMEOUT_MS = {
-  ensure: 5_000,
+  ensure: timeoutMs("HINDSIGHT_ENSURE_TIMEOUT_MS", 15_000),
   // Retain runs async on Hindsight's side (returns operation_id immediately
   // and processes extraction in the background). 60s buffer covers the
   // request-acceptance round-trip even for very large transcript blobs.
-  retain: 60_000,
-  recall: 10_000,
-  list: 10_000,
-  delete: 5_000,
-  reflect: 30_000,
+  retain: timeoutMs("HINDSIGHT_RETAIN_TIMEOUT_MS", 60_000),
+  // Recall latency scales with bank size: a 2k-fact bank answers in 7-11s
+  // (measured 2026-07-17). Default 60s gives generous headroom on the gate +
+  // agent memory-search hot paths; tune DOWN via env if you want it tighter.
+  recall: timeoutMs("HINDSIGHT_RECALL_TIMEOUT_MS", 60_000),
+  list: timeoutMs("HINDSIGHT_LIST_TIMEOUT_MS", 30_000),
+  delete: timeoutMs("HINDSIGHT_DELETE_TIMEOUT_MS", 10_000),
+  reflect: timeoutMs("HINDSIGHT_REFLECT_TIMEOUT_MS", 60_000),
 };
 
 export class HindsightProvider implements MemoryProvider {
@@ -130,6 +147,8 @@ export class HindsightProvider implements MemoryProvider {
     if (this.bankCache.has(bankId)) return;
 
     try {
+      // NOTE: 0.6.2 answers 405 to GET /banks/:id, so the exists-probe always
+      // falls through to create-or-409 — harmless, kept for newer versions.
       const res = await fetch(`${this.baseUrl}/v1/${this.tenant}/banks/${bankId}`, {
         method: "GET",
         headers: this.headers,
@@ -137,7 +156,7 @@ export class HindsightProvider implements MemoryProvider {
       });
       if (res.ok) {
         // Already exists — make sure tuning matches what we want, then cache.
-        await this.applyBankTuning(bankId);
+        await this.applyBankTuning(bankId, opts);
         this.bankCache.add(bankId);
         return;
       }
@@ -148,7 +167,7 @@ export class HindsightProvider implements MemoryProvider {
         signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS.ensure),
       });
       if (createRes.ok || createRes.status === 409) {
-        await this.applyBankTuning(bankId);
+        await this.applyBankTuning(bankId, opts);
         this.bankCache.add(bankId);
       }
     } catch (err) {
@@ -157,24 +176,80 @@ export class HindsightProvider implements MemoryProvider {
   }
 
   /**
-   * Tune Hindsight's bank config to suit our curator-driven flow:
-   *   - enable_observations=false: prevents Hindsight from running a second
-   *     extraction pass that produces near-duplicate "observation" memories
-   *     for every "world" fact (gives ~2x duplication otherwise).
+   * Tune Hindsight's bank config for fact-quality extraction:
+   *   - enable_observations: OFF by default (the second "observation" pass
+   *     ~2x-duplicates world facts; verified experimentally 2026-07-17). Banks
+   *     that want evolution/temporal tracking (the Digital Twin) pass
+   *     opts.enableObservations=true; observation consolidation is then confined
+   *     per-user via RetainItem.observationScopes so a shared bank can't mix users.
+   *   - retain_extraction_mode="verbose": richer facts per chunk. Safe for
+   *     transcript-sized input; NEVER flip the old blob pipeline to verbose —
+   *     verbose over a small dense blob produced ZERO facts twice in testing.
+   *   - retain_mission: caller-supplied steering (see EnsureBankOpts).
    *
-   * Best-effort — non-fatal if Hindsight rejects the patch or the endpoint
-   * isn't available. The bank still works, just with the default config.
+   * PERSISTENCE GOTCHA (found 2026-07-17): Hindsight materializes the bank
+   * row lazily on FIRST retain. A config PATCH before that returns 200 and
+   * persists NOTHING — which is why production banks silently ran defaults
+   * for months. So this VERIFIES via GET (overrides must contain what we
+   * set) and, when the bank is unmaterialized, fires a tiny warmup retain to
+   * force materialization, then re-applies. Best-effort — never throws.
    */
-  private async applyBankTuning(bankId: string): Promise<void> {
+  private async applyBankTuning(bankId: string, opts: EnsureBankOpts = {}): Promise<void> {
+    const desired: Record<string, unknown> = {
+      // Per-bank: the Digital Twin opts INTO observations (evolution tracking),
+      // scoped per-user via observationScopes; every other bank stays OFF.
+      enable_observations: opts.enableObservations === true,
+      retain_extraction_mode: "verbose",
+      ...(opts.retainMission ? { retain_mission: opts.retainMission } : {}),
+    };
     try {
-      await fetch(this.bankPath(bankId, "/config"), {
-        method: "PATCH",
-        headers: this.headers,
-        body: JSON.stringify({ updates: { enable_observations: false } }),
-        signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS.ensure),
-      });
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        await fetch(this.bankPath(bankId, "/config"), {
+          method: "PATCH",
+          headers: this.headers,
+          body: JSON.stringify({ updates: desired }),
+          signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS.ensure),
+        });
+        if (await this.tuningPersisted(bankId, desired)) {
+          if (attempt > 1) log.info(`[hindsight] bank tuning persisted for ${bankId} on attempt ${attempt}`);
+          return;
+        }
+        // Not persisted → bank likely unmaterialized. Warmup retain forces the
+        // row into existence; the throwaway content extracts to nothing useful
+        // and is tagged for later cleanup.
+        if (attempt === 1) {
+          await fetch(this.bankPath(bankId, "/memories"), {
+            method: "POST",
+            headers: this.headers,
+            body: JSON.stringify({
+              items: [{ content: "bank tuning warmup", timestamp: new Date().toISOString(), tags: ["warmup-tuning"] }],
+              async: true,
+            }),
+            signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS.retain),
+          }).catch(() => undefined);
+        }
+        await new Promise((resolve) => setTimeout(resolve, 3_000));
+      }
+      log.warn(`[hindsight] bank tuning NOT persisted for ${bankId} after retries — bank runs provider defaults (concise extraction, observations on)`);
     } catch (err) {
       log.warn(`[hindsight] applyBankTuning(${bankId}) failed: ${errMsg(err)}`);
+    }
+  }
+
+  /** True when every desired key is visible in the bank's stored overrides. */
+  private async tuningPersisted(bankId: string, desired: Record<string, unknown>): Promise<boolean> {
+    try {
+      const res = await fetch(this.bankPath(bankId, "/config"), {
+        method: "GET",
+        headers: this.headers,
+        signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS.ensure),
+      });
+      if (!res.ok) return false;
+      const data = (await res.json()) as { overrides?: Record<string, unknown> };
+      const ov = data.overrides ?? {};
+      return Object.entries(desired).every(([k, v]) => JSON.stringify(ov[k]) === JSON.stringify(v));
+    } catch {
+      return false;
     }
   }
 
@@ -184,9 +259,13 @@ export class HindsightProvider implements MemoryProvider {
     const body: { items: HindsightRetainItem[]; async: boolean } = {
       items: items.map((it): HindsightRetainItem => ({
         content: it.content,
-        timestamp: new Date().toISOString(),
+        // Real event time when the caller supplies it (e.g. the twin passes the
+        // source message's timestamp) → Hindsight can rank by recency + answer
+        // temporal queries. Falls back to now() otherwise.
+        timestamp: it.timestamp ?? new Date().toISOString(),
         ...(it.tags ? { tags: it.tags } : {}),
         ...(it.metadata ? { metadata: it.metadata } : {}),
+        ...(it.observationScopes ? { observation_scopes: it.observationScopes } : {}),
       })),
       // Async retain: Hindsight queues the LLM extraction in the background
       // and returns an operation_id immediately. For long sessions the sync
@@ -226,6 +305,8 @@ export class HindsightProvider implements MemoryProvider {
       ...(opts.tagGroups ? { tag_groups: serializeTagGroup(opts.tagGroups) } : {}),
       ...(opts.types?.length ? { types: opts.types } : {}),
       ...(opts.maxTokens ? { max_tokens: opts.maxTokens } : {}),
+      ...(opts.preferObservations ? { prefer_observations: true } : {}),
+      ...(opts.queryTimestamp ? { query_timestamp: opts.queryTimestamp } : {}),
     };
 
     const res = await fetch(this.bankPath(bankId, "/memories/recall"), {
@@ -282,7 +363,9 @@ export class HindsightProvider implements MemoryProvider {
       items?: Array<Record<string, unknown>>;
       total?: number;
     };
-    const rawItems = data.items ?? [];
+    // Drop soft-retired memories (state=invalidated — see deleteMemory) so a
+    // deleted memory disappears from every view (memories tab, count, graph).
+    const rawItems = (data.items ?? []).filter((m) => m["state"] !== "invalidated");
     let mapped = rawItems.map((m) => mapMemory(m));
 
     // Client-side tag filter — Hindsight's list endpoint can't do this for us.
@@ -320,13 +403,34 @@ export class HindsightProvider implements MemoryProvider {
 
   async deleteMemory(bankId: string, memoryId: string): Promise<void> {
     if (!this.enabled) return;
+    // Hindsight exposes NO hard per-id delete — `DELETE /memories/{id}` 405s
+    // (the only DELETEs are the bank-wide "clear by type" and per-memory
+    // observation-clear). The per-memory removal is a curation op: PATCH the
+    // memory to state=invalidated, which soft-retires it (excluded from recall).
+    // We also filter invalidated out of listMemories, so from the app's POV it
+    // is gone. 404 → already gone (idempotent).
     const res = await fetch(this.bankPath(bankId, `/memories/${memoryId}`), {
-      method: "DELETE",
+      method: "PATCH",
       headers: this.headers,
+      body: JSON.stringify({ state: "invalidated", reason: "Deleted by user" }),
       signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS.delete),
     });
     if (!res.ok && res.status !== 404) {
-      throw new Error(`Hindsight delete ${res.status}`);
+      const txt = await res.text().catch(() => "");
+      // 405 = this Hindsight deployment predates reversible curation (the PATCH
+      // /memories/{id} invalidate endpoint, added upstream 2026-06-10 / PR #1976).
+      // There is NO other per-memory delete/invalidate endpoint, so this can only
+      // be fixed by upgrading Hindsight — surface that explicitly (marker string
+      // `HINDSIGHT_CURATION_UNSUPPORTED` so callers can map it to a clear message
+      // instead of an opaque 500) rather than a bare status code.
+      if (res.status === 405) {
+        throw new Error(
+          `HINDSIGHT_CURATION_UNSUPPORTED: this Hindsight deployment does not support ` +
+            `per-memory invalidate (PATCH /memories/{id} → 405). Upgrade Hindsight to ` +
+            `a build with reversible curation (PR #1976, 2026-06-10) to enable memory deletion.`,
+        );
+      }
+      throw new Error(`Hindsight invalidate ${res.status}: ${txt.slice(0, 200)}`);
     }
   }
 
@@ -338,6 +442,27 @@ export class HindsightProvider implements MemoryProvider {
    * each. Best-effort per id; returns the count actually deleted.
    */
   async deleteByTag(bankId: string, tag: string): Promise<number> {
+    return this.sweepDelete(bankId, tag);
+  }
+
+  /**
+   * Hard-delete EVERY memory in the bank ("clear all memories" reset). The
+   * bank row and its config overrides survive — only memories go. Callers own
+   * the authorization; pair with a re-seed (backfill) when the user wants a
+   * fresh start rather than an empty brain.
+   */
+  async clearAll(bankId: string): Promise<number> {
+    return this.sweepDelete(bankId);
+  }
+
+  /**
+   * Shared sweep: page the RAW list (where `items.length` vs page size tells
+   * us when to stop — the listMemories abstraction can't expose that), collect
+   * ids (optionally only those carrying `tag` — Hindsight's list endpoint
+   * can't filter by tag server-side), then DELETE each. Best-effort per id;
+   * returns the count actually deleted.
+   */
+  private async sweepDelete(bankId: string, tag?: string): Promise<number> {
     if (!this.enabled) return 0;
     const PAGE = 500;
     const ids: string[] = [];
@@ -348,14 +473,14 @@ export class HindsightProvider implements MemoryProvider {
       );
       if (!res.ok) {
         const txt = await res.text().catch(() => "");
-        throw new Error(`Hindsight list ${res.status} during deleteByTag: ${txt.slice(0, 200)}`);
+        throw new Error(`Hindsight list ${res.status} during sweepDelete: ${txt.slice(0, 200)}`);
       }
       const data = (await res.json()) as { items?: Array<Record<string, unknown>> };
       const items = data.items ?? [];
       for (const it of items) {
         const tags = (it["tags"] as string[] | undefined) ?? [];
         const id = String(it["id"] ?? "");
-        if (id && tags.includes(tag)) ids.push(id);
+        if (id && (!tag || tags.includes(tag))) ids.push(id);
       }
       if (items.length < PAGE) break; // last page
     }
@@ -423,6 +548,79 @@ export class HindsightProvider implements MemoryProvider {
     return { nodes, edges };
   }
 
+  /**
+   * Memory graph — nodes are MEMORIES, edges are Hindsight's precomputed
+   * `semantic` / `temporal` / `entity` links. Cytoscape shape ({data:{…}} wrappers)
+   * unwrapped to flat. `entities` + `color` live on node.data; `tags` + `fact_type`
+   * live on table_rows (joined by id here). `tags` are filtered SQL-side by
+   * Hindsight (all_strict), so passing `["user:<id>"]` scopes to one user reliably.
+   */
+  async getMemoryGraph(bankId: string, opts?: { tags?: string[]; limit?: number }): Promise<MemoryGraph> {
+    if (!this.enabled) return { nodes: [], edges: [] };
+    const params = new URLSearchParams();
+    for (const t of opts?.tags ?? []) params.append("tags", t);
+    if (opts?.tags?.length) params.set("tags_match", "all_strict");
+    params.set("limit", String(opts?.limit ?? 2000));
+    const res = await fetch(this.bankPath(bankId, `/graph?${params.toString()}`), {
+      method: "GET",
+      headers: this.headers,
+      signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS.list),
+    });
+    if (!res.ok) {
+      if (res.status === 404) return { nodes: [], edges: [] };
+      const txt = await res.text().catch(() => "");
+      throw new Error(`Hindsight getMemoryGraph ${res.status}: ${txt.slice(0, 200)}`);
+    }
+    const data = (await res.json()) as {
+      nodes?: Array<{ data?: Record<string, unknown> }>;
+      edges?: Array<{ data?: Record<string, unknown> }>;
+      table_rows?: Array<Record<string, unknown>>;
+    };
+    // table_rows carry tags + fact_type per unit (node.data does not).
+    const rowById = new Map<string, Record<string, unknown>>();
+    for (const r of data.table_rows ?? []) {
+      const id = r["id"];
+      if (typeof id === "string") rowById.set(id, r);
+    }
+    const nodes: MemoryGraphNode[] = (data.nodes ?? [])
+      .map((n) => n.data ?? {})
+      .filter((d): d is Record<string, unknown> => typeof d === "object" && d !== null && typeof d["id"] === "string")
+      .map((d) => {
+        const id = d["id"] as string;
+        const row = rowById.get(id);
+        const entsStr = typeof d["entities"] === "string" ? (d["entities"] as string) : "";
+        const entities =
+          entsStr && entsStr !== "None" ? entsStr.split(",").map((s) => s.trim()).filter(Boolean) : [];
+        const tags = Array.isArray(row?.["tags"])
+          ? (row!["tags"] as unknown[]).filter((t): t is string => typeof t === "string")
+          : [];
+        const factType = typeof row?.["fact_type"] === "string" ? (row!["fact_type"] as string) : undefined;
+        return {
+          id,
+          ...(entities.length ? { entities } : {}),
+          ...(factType ? { factType } : {}),
+          ...(tags.length ? { tags } : {}),
+        };
+      });
+    const edges: MemoryGraphEdge[] = (data.edges ?? [])
+      .map((e) => e.data ?? {})
+      .filter(
+        (d): d is Record<string, unknown> =>
+          typeof d === "object" &&
+          d !== null &&
+          typeof d["source"] === "string" &&
+          typeof d["target"] === "string" &&
+          typeof d["linkType"] === "string",
+      )
+      .map((d) => ({
+        source: d["source"] as string,
+        target: d["target"] as string,
+        linkType: d["linkType"] as string,
+        ...(typeof d["weight"] === "number" ? { weight: d["weight"] } : {}),
+      }));
+    return { nodes, edges };
+  }
+
   async reflect(bankId: string, query: string): Promise<ReflectResult> {
     if (!this.enabled) return { text: "" };
     const res = await fetch(this.bankPath(bankId, "/reflect"), {
@@ -462,7 +660,7 @@ function mapMemory(m: Record<string, unknown>): Memory {
     content: String(m["text"] ?? m["content"] ?? ""),
     ...(m["tags"] ? { tags: m["tags"] as string[] } : {}),
     ...(m["metadata"] ? { metadata: m["metadata"] as Record<string, string> } : {}),
-    ...(m["fact_type"] ? { factType: m["fact_type"] as string } : {}),
+    ...((m["fact_type"] ?? m["type"]) ? { factType: (m["fact_type"] ?? m["type"]) as string } : {}),
     ...(createdAt ? { createdAt } : {}),
   };
 }

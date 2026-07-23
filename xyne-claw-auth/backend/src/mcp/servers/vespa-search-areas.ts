@@ -31,7 +31,7 @@
  * `createdAtTimestamp`; `mail` uses `timestamp`.
  */
 
-import { esc, aclConditionForSchema } from "./vespa-direct.js";
+import { esc, aclConditionForSchema, publicOnlyConditionForSchema } from "./vespa-direct.js";
 
 // ── Operator DSL ──────────────────────────────────────────────────────────────
 
@@ -195,6 +195,29 @@ const fileLikeFields = (tsField: string, extra: FieldDef[] = []): FieldDef[] => 
   ...extra,
 ];
 
+// Real rank-profile names per schema, read directly off the source .sd files in
+// the sibling vespa-core repo (/Users/priyanshu.c/Desktop/codeeee/vespa-core/
+// vespa/common/schemas/<schema>.sd — cross-checked against what's actually
+// deployed too, byte-identical apart from a DIMS→384 template substitution).
+// Each schema's `tunable` profile (message/ticket/file/mail — chat_container has
+// none) declares its OWN distinct `inputs {}` block with different names/
+// defaults; see TUNABLE_INPUTS_BY_AREA in the frontend (SearchEvalsPageV3.tsx)
+// for the mirrored values driving the "Tunable" UI. `default_native` and
+// `unranked` are always valid (BASE_RANK_PROFILES) — listed explicitly here too
+// since setting allowedRankProfiles replaces the base list, not extends it.
+const MESSAGE_RANK_PROFILES = [
+  "default_native", "unranked", "tunable", "personalized", "default_random", "default_fuzzy",
+  "default_native_tb", "default_native_tb2",
+  ...Array.from({ length: 23 }, (_, i) => `default_native_${i}`),
+];
+const TICKET_RANK_PROFILES = ["default_native", "unranked", "tunable", "semantic_ranking", "default_fuzzy"];
+const FILE_RANK_PROFILES = ["default_native", "unranked", "tunable", "default_fuzzy"];
+const CHANNEL_RANK_PROFILES = ["default_native", "unranked", "default_fuzzy", "autocomplete"];
+const MAIL_RANK_PROFILES = [
+  "default_native", "unranked", "tunable", "global_sorted", "default_bm25", "default_ai", "default_fuzzy",
+  "default_native_best_chunk_025", "default_native_top_chunk_lexical_025",
+];
+
 export const SEARCH_AREAS: Record<string, SearchArea> = {
   channel: {
     source: "chat_container",
@@ -211,6 +234,7 @@ export const SEARCH_AREAS: Record<string, SearchArea> = {
       dateField("lastActiveDate", "Channel last-activity date (dd/mm/yy, IST).", "lastActivityAt"),
     ],
     allowedGroupByFields: ["scopeType", "visibility", "projectId"],
+    allowedRankProfiles: CHANNEL_RANK_PROFILES,
   },
 
   message: {
@@ -221,6 +245,7 @@ export const SEARCH_AREAS: Record<string, SearchArea> = {
     fields: chatFields("createdAtTimestamp"),
     // createdAt = day-string ("12/05/2026") → per-day grouping (not the ms timestamp).
     allowedGroupByFields: ["channelId", "senderId", "senderEmail", "messageType", "conversationId", "createdAt"],
+    allowedRankProfiles: MESSAGE_RANK_PROFILES,
   },
 
   ticket: {
@@ -245,6 +270,7 @@ export const SEARCH_AREAS: Record<string, SearchArea> = {
     ],
     // createdAt = day-string ("12/05/2026") → per-day grouping (not the ms timestamp).
     allowedGroupByFields: ["status", "priority", "stage", "assignedTo", "createdBy", "projectId", "channelId", "boardId", "createdAt"],
+    allowedRankProfiles: TICKET_RANK_PROFILES,
   },
 
   // Chat attachments are ingested into the `file` schema with subApp
@@ -265,6 +291,7 @@ export const SEARCH_AREAS: Record<string, SearchArea> = {
       dateField("createdDate", "Attachment creation date (dd/mm/yy, IST).", "createdAt"),
     ],
     allowedGroupByFields: ["channelId", "uploaderId", "conversationId"],
+    allowedRankProfiles: FILE_RANK_PROFILES,
   },
 
   canvas: {
@@ -274,6 +301,7 @@ export const SEARCH_AREAS: Record<string, SearchArea> = {
     timestampField: "createdAt",
     fields: fileLikeFields("createdAt"),
     allowedGroupByFields: ["channelId", "ownerId"],
+    allowedRankProfiles: FILE_RANK_PROFILES,
   },
 
   transcript: {
@@ -286,6 +314,7 @@ export const SEARCH_AREAS: Record<string, SearchArea> = {
       strField("callType", "Call type of the transcript.", ["in"], "callType"),
     ]),
     allowedGroupByFields: ["channelId", "ownerId", "callType", "conversationId"],
+    allowedRankProfiles: FILE_RANK_PROFILES,
   },
 
   file: {
@@ -303,6 +332,7 @@ export const SEARCH_AREAS: Record<string, SearchArea> = {
       strField("folderId", "Knowledge-base folder id (collections subApp).", ["in"], "clFd"),
     ]),
     allowedGroupByFields: ["channelId", "ownerId", "subApp", "callType", "conversationId", "collectionId", "folderId"],
+    allowedRankProfiles: FILE_RANK_PROFILES,
   },
 
   mail: {
@@ -310,6 +340,7 @@ export const SEARCH_AREAS: Record<string, SearchArea> = {
     baseConditions: [],
     aclSchemaKey: "mail",
     timestampField: "timestamp",
+    allowedRankProfiles: MAIL_RANK_PROFILES,
     fields: [
       strField("channelId", "Support/desk channel the mail belongs to.", ["contains", "in"]),
       strField("from", "Sender email.", ["contains"]),
@@ -318,7 +349,6 @@ export const SEARCH_AREAS: Record<string, SearchArea> = {
       strField("bcc", "BCC recipient email(s).", ["containsAny"]),
       strField("subject", "Email subject (token match).", ["contains"]),
       strField("attachmentName", "Attachment filename(s).", ["containsAny"], "attachmentFilenames"),
-      strField("labels", "Gmail labels.", ["containsAny"]),
       strField("mailId", "Gmail message id (this single email).", ["in"]),
       strField("threadId", "Desk conversation id (the channel conversation this email belongs to).", ["in"]),
       strField("gmailThreadId", "Underlying Gmail thread id — groups the actual email thread (a mail + all its replies).", ["in"], "parentThreadId"),
@@ -625,17 +655,25 @@ export interface BuiltQuery {
 }
 
 /**
- * Assemble a Vespa YQL string from structured params. All field names and the
- * ACL clause come from the registry (never the model), so no field-name or
- * clause injection is possible; every value passes through esc().
- * Throws (caught by the tool handler → err(...)) on any validation failure.
+ * Builds the AND-able clause list for ONE area (retrieval primitive, base
+ * conditions, workspace isolation, docType narrowing, filters, ACL) — the
+ * shared core both buildYqlFromParams (single `from sources <one schema>`,
+ * used by the spaces-vespa-search MCP tool) and buildFederatedYqlFromParams
+ * (one `from sources <n schemas>` with each area's clause-group OR'd
+ * together, used by search-eval-vespa.ts's "All types") build on. Does NOT
+ * handle sort/groupBy/rankProfile — those are single-area-only concerns
+ * (federating across schemas with different field names/rank-profile inputs
+ * makes "sort by X" or "groupBy X" ambiguous, so federated callers don't get
+ * them) and stay in buildYqlFromParams.
  */
-export function buildYqlFromParams(params: StructuredQueryParams, userId: string, workspaceId: string): BuiltQuery {
-  const area = resolveArea(params.searchArea);
-  if (!area) {
-    throw new Error(`Unknown searchArea "${params.searchArea}". Valid areas: ${AREA_NAMES.join(", ")}.`);
-  }
-
+function buildAreaClauses(
+  area: SearchArea,
+  areaName: string,
+  params: StructuredQueryParams,
+  userId: string,
+  workspaceId: string,
+  opts?: { publicOnly?: boolean },
+): { source: string; clauses: string[]; query: string } {
   const clauses: string[] = [];
   const query = (params.query ?? "").trim();
 
@@ -671,10 +709,10 @@ export function buildYqlFromParams(params: StructuredQueryParams, userId: string
   // 3. Optional docType narrowing.
   if (params.docType != null && params.docType !== "") {
     if (!area.allowedDocTypes) {
-      throw new Error(`docType is not applicable for area "${params.searchArea}" (its docType is fixed).`);
+      throw new Error(`docType is not applicable for area "${areaName}" (its docType is fixed).`);
     }
     if (!area.allowedDocTypes.includes(params.docType)) {
-      throw new Error(`docType "${params.docType}" is not allowed for area "${params.searchArea}". Allowed: ${area.allowedDocTypes.join(", ")}.`);
+      throw new Error(`docType "${params.docType}" is not allowed for area "${areaName}". Allowed: ${area.allowedDocTypes.join(", ")}.`);
     }
     clauses.push(`docType contains "${esc(params.docType)}"`);
   }
@@ -684,7 +722,7 @@ export function buildYqlFromParams(params: StructuredQueryParams, userId: string
   for (const [fieldName, bag] of Object.entries(params.filters ?? {})) {
     const field = fieldByName.get(fieldName);
     if (!field) {
-      throw new Error(`"${fieldName}" is not a valid filter for area "${params.searchArea}". Allowed: ${area.fields.map(f => f.name).join(", ")}.`);
+      throw new Error(`"${fieldName}" is not a valid filter for area "${areaName}". Allowed: ${area.fields.map(f => f.name).join(", ")}.`);
     }
     if (!bag || typeof bag !== "object" || Array.isArray(bag)) {
       throw new Error(`Filter "${fieldName}" must be an operator object, e.g. { in: [...] } or { contains: "..." }.`);
@@ -714,10 +752,16 @@ export function buildYqlFromParams(params: StructuredQueryParams, userId: string
     }
   }
 
-  // 5. ACL — code-controlled, always appended (never LLM-supplied).
+  // 5. ACL — code-controlled, always appended (never LLM-supplied). opts.publicOnly
+  // substitutes the real per-user guard for a public-only condition (see the doc
+  // comment above) — visibility is always restricted one way or the other, never skipped.
   if (area.aclSchemaKey) {
-    const acl = aclConditionForSchema(area.aclSchemaKey, userId, "");
-    if (acl) clauses.push(acl);
+    if (opts?.publicOnly) {
+      clauses.push(publicOnlyConditionForSchema(area.aclSchemaKey));
+    } else {
+      const acl = aclConditionForSchema(area.aclSchemaKey, userId, "");
+      if (acl) clauses.push(acl);
+    }
   }
 
   // Guard only against a genuinely empty WHERE (Vespa rejects it). null-ACL
@@ -725,6 +769,35 @@ export function buildYqlFromParams(params: StructuredQueryParams, userId: string
   // them with no query/filter is allowed — they are workspace-isolated, not
   // per-user ACL'd.
   if (clauses.length === 0) clauses.push("true");
+
+  return { source: area.source, clauses, query };
+}
+
+/**
+ * Assemble a Vespa YQL string from structured params. All field names and the
+ * ACL clause come from the registry (never the model), so no field-name or
+ * clause injection is possible; every value passes through esc().
+ * Throws (caught by the tool handler → err(...)) on any validation failure.
+ *
+ * `opts.publicOnly` is code-only (never LLM/agent-reachable) — the MCP tool call
+ * sites never pass it. It exists solely for search-eval-vespa.ts's
+ * "without permission" mode: instead of the real per-user ACL guard, it
+ * substitutes a public-only visibility condition (see
+ * publicOnlyConditionForSchema() in ./vespa-direct.ts) — never a true
+ * unrestricted bypass.
+ */
+export function buildYqlFromParams(
+  params: StructuredQueryParams,
+  userId: string,
+  workspaceId: string,
+  opts?: { publicOnly?: boolean },
+): BuiltQuery {
+  const area = resolveArea(params.searchArea);
+  if (!area) {
+    throw new Error(`Unknown searchArea "${params.searchArea}". Valid areas: ${AREA_NAMES.join(", ")}.`);
+  }
+
+  const { source, clauses, query } = buildAreaClauses(area, params.searchArea, params, userId, workspaceId, opts);
 
   const hasGroupBy = params.groupBy != null && params.groupBy !== "";
   const hasSort = params.sort != null && !!params.sort.by;
@@ -734,7 +807,7 @@ export function buildYqlFromParams(params: StructuredQueryParams, userId: string
     throw new Error(`groupBy and sort cannot be combined — Vespa grouping ignores order by. Use one or the other.`);
   }
 
-  let yql = `select * from sources ${area.source} where ${clauses.join(" and ")}`;
+  let yql = `select * from sources ${source} where ${clauses.join(" and ")}`;
 
   // 7a. Sort — order by an allowed (date/number attribute) field, asc/desc.
   if (hasSort) {
@@ -785,6 +858,72 @@ export function buildYqlFromParams(params: StructuredQueryParams, userId: string
   }
 
   return { yql, query, ...(rankProfile ? { rankProfile } : {}) };
+}
+
+export interface FederatedBuiltQuery {
+  yql: string;
+  query: string;
+  /** Same rules as BuiltQuery.rankProfile — undefined lets queryDirect auto-pick. */
+  rankProfile?: string;
+  /** The distinct Vespa schema names in the `from sources` clause, in order. */
+  sources: string[];
+}
+
+/**
+ * One federated Vespa query across MULTIPLE search areas — `select * from
+ * sources <schema1>, <schema2>, ... where (<area1's clauses>) or (<area2's
+ * clauses>) or ...` — each area's own clause-group (retrieval/base/workspace/
+ * docType/filters/ACL, via buildAreaClauses) stays self-contained inside its
+ * own parens, so a doc matches if it satisfies ANY one area's full condition.
+ * Mirrors how the main backend's YqlBuilder federates multiple schemas into
+ * one query (guardedParts joined with " or "), rather than issuing N separate
+ * single-schema queries and merging results client-side.
+ *
+ * Vespa applies exactly ONE ranking.profile to the whole query, so it must be
+ * a profile that exists on every involved source — only "default_native"
+ * (present on message/file/ticket/channel/mail) and "unranked" qualify;
+ * anything else throws. No sort/groupBy here — federating differing schemas'
+ * field vocabularies under one sort/group key isn't well-defined, and no
+ * caller currently needs it (search-eval-vespa.ts's only use is a plain
+ * "All types" query+date-filter, never sort/groupBy).
+ */
+export function buildFederatedYqlFromParams(
+  areaNames: string[],
+  params: Omit<StructuredQueryParams, "searchArea">,
+  userId: string,
+  workspaceId: string,
+  opts?: { publicOnly?: boolean },
+): FederatedBuiltQuery {
+  if (areaNames.length === 0) {
+    throw new Error("buildFederatedYqlFromParams: at least one area is required.");
+  }
+
+  const query = (params.query ?? "").trim();
+  const sources: string[] = [];
+  const groups: string[] = [];
+  for (const areaName of areaNames) {
+    const area = resolveArea(areaName);
+    if (!area) {
+      throw new Error(`Unknown searchArea "${areaName}". Valid areas: ${AREA_NAMES.join(", ")}.`);
+    }
+    const { source, clauses } = buildAreaClauses(area, areaName, { ...params, searchArea: areaName }, userId, workspaceId, opts);
+    sources.push(source);
+    groups.push(clauses.join(" and "));
+  }
+
+  const yql = `select * from sources ${sources.join(", ")} where ${groups.map(g => `(${g})`).join(" or ")}`;
+
+  let rankProfile: string | undefined;
+  if (params.rankProfile != null && params.rankProfile !== "") {
+    if (!BASE_RANK_PROFILES.includes(params.rankProfile)) {
+      throw new Error(`rankProfile "${params.rankProfile}" is not valid for a federated ("All types") query — it must exist on every involved source. Allowed: ${BASE_RANK_PROFILES.join(", ")}.`);
+    }
+    rankProfile = params.rankProfile;
+  } else if (query) {
+    rankProfile = "default_native";
+  }
+
+  return { yql, query, ...(rankProfile ? { rankProfile } : {}), sources };
 }
 
 // ── Prompt / schema helpers for the tool layer ─────────────────────────────────

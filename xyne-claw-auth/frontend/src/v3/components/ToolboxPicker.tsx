@@ -38,7 +38,7 @@ export interface ToolboxSelection {
 
 const SUBAGENT_EMOJI: Record<string, string> = {
   spaces: "🔍", bitbucket: "🔀", grafana: "📊", deepwiki: "📚",
-  context7: "📖", pgm: "📋", git: "🔧",
+  context7: "📖", git: "🔧",
 };
 
 /** Tailwind class for the risk status dot. Unknown → write (amber). */

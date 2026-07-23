@@ -178,7 +178,12 @@ async function main(): Promise<void> {
 
   const backfillState: Record<string, unknown> = {};
   for (const s of SOURCES) {
-    backfillState[s] = { from: from.toISOString(), to: now.toISOString(), cursor: now.toISOString(), complete: false };
+    // cursor = LOWER bound of the next chunk. The worker walks CHRONOLOGICALLY
+    // (oldest → newest) via `while (windowLower < to)` starting at `cursor`, so
+    // it MUST seed at `from`. Seeding at `now` (= `to`) makes the loop exit
+    // immediately → instant "complete" with 0 windows/0 records. Mirrors the
+    // route-based enable in routes/digital-twin.ts.
+    backfillState[s] = { from: from.toISOString(), to: now.toISOString(), cursor: from.toISOString(), complete: false };
   }
 
   const approveFields = {

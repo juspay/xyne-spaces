@@ -184,6 +184,9 @@
 
   --comp-font-sans:  'Geist', 'Inter', ui-sans-serif, system-ui, sans-serif;
   --comp-font-mono:  'JetBrains Mono', ui-monospace, 'Courier New', monospace;
+  /* Editorial display serif — used for Digital Twin headings / large display
+     text only (hero, section/trigger titles). Not a body font. */
+  --comp-font-serif: 'Fraunces', 'Georgia', ui-serif, serif;
 
   /* label / caption */
   --comp-text-2xs:  0.625rem;   /* 10px */

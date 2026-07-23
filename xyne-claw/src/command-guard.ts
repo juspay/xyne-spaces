@@ -51,7 +51,7 @@ export function createCommandGuard(): (context: BeforeToolCallContext, signal?: 
       log.warn(`[guard] Blocked command (${result.label}): ${command.slice(0, 200)}`);
       return {
         block: true,
-        reason: `Command blocked by safety guard: "${result.label}" is not allowed. Use the appropriate tool instead (e.g., pgm-* tools for git operations).`,
+        reason: `Command blocked by safety guard: "${result.label}" is not allowed. Use the appropriate tool instead.`,
       };
     }
 

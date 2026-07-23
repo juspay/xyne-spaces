@@ -1629,6 +1629,18 @@ export async function checkIsAdmin(userId: string): Promise<boolean> {
   return data.data.isAdmin;
 }
 
+/** Combined self-check — one round trip for both the blanket CLAW_ADMIN flag
+ *  and the narrower Search Evals grant (CLAW_ADMIN or SEARCH_EVAL_ACCESS). */
+export async function checkAccess(
+  userId: string,
+): Promise<{ isAdmin: boolean; hasSearchEvalAccess: boolean }> {
+  const data = await request<{
+    success: boolean;
+    data: { isAdmin: boolean; hasSearchEvalAccess: boolean };
+  }>(`${AUTH_API_URL}/api/v1/admin/roles/check/${userId}`, { headers: { "x-user-id": userId } });
+  return data.data;
+}
+
 // ── Organizations (phase 1, org-only) ──────────────────────────────────────
 export type OrgRole = "OWNER" | "ADMIN" | "MEMBER";
 
@@ -1659,6 +1671,38 @@ export interface OrgDetail {
   members: OrgMemberRow[];
 }
 
+export interface ServiceAccessToken {
+  id: string;
+  name: string | null;
+  prefix: string;
+  userId: string;
+  lastUsedAt: string | null;
+  expiresAt: string | null;
+  revokedAt: string | null;
+  createdAt: string;
+}
+
+export interface MintedServiceAccessToken extends ServiceAccessToken {
+  /** Returned only by the mint endpoint. It cannot be retrieved later. */
+  token: string;
+}
+
+export interface ConnectedSurface {
+  id: string;
+  orgId: string;
+  surfaceId: string;
+  surfaceTenantId: string;
+  status: "ACTIVE" | "INACTIVE";
+  config: Record<string, unknown> | null;
+  surface: {
+    id: string;
+    key: string;
+    identityMode: "USER_ID" | "ACCESS_TOKEN";
+    supportsUserResolution: boolean;
+    status: "ACTIVE" | "INACTIVE";
+  };
+}
+
 /** Orgs the caller belongs to (with one-org-per-user, this is their org). */
 export async function listOrganizations(userId: string): Promise<OrgSummary[]> {
   const data = await request<{ success: boolean; data: OrgSummary[] }>(
@@ -1674,6 +1718,81 @@ export async function getOrganization(userId: string, orgId: string): Promise<Or
     { headers: { "x-user-id": userId } },
   );
   return data.data;
+}
+
+export async function listOrgSurfaces(userId: string, orgId: string): Promise<ConnectedSurface[]> {
+  return request<ConnectedSurface[]>(
+    `${AUTH_API_URL}/api/v1/organizations/${orgId}/surfaces`,
+    { headers: { "x-user-id": userId } },
+  );
+}
+
+export async function storeSlackConfigToken(
+  orgId: string,
+  accessToken: string,
+  refreshToken: string,
+): Promise<void> {
+  await request<{ success: boolean }>(
+    `${AUTH_API_URL}/api/v1/surfaces/slack/config-token`,
+    { method: "POST", body: JSON.stringify({ orgId, accessToken, refreshToken }) },
+  );
+}
+
+export async function createSlackAgentApp(
+  slug: string,
+  orgId?: string,
+): Promise<{ appId: string; installUrl: string; reused: boolean }> {
+  const response = await request<{
+    success: boolean;
+    data: { appId: string; installUrl: string; reused: boolean };
+  }>(`${AUTH_API_URL}/api/v1/surfaces/slack/agents/${encodeURIComponent(slug)}/create-app`, {
+    method: "POST",
+    body: JSON.stringify(orgId ? { orgId } : {}),
+  });
+  return response.data;
+}
+
+export interface SlackAgentStatus {
+  agentId: string;
+  agentSlug: string;
+  appId: string;
+  status: "command" | "created" | "installed";
+  commandName?: string;
+  installs: Array<{ teamId: string; teamName: string; installedAt: string }>;
+  installUrl: string | null;
+}
+
+export async function removeSlackAgentRegistration(slug: string, orgId?: string): Promise<void> {
+  const query = orgId ? `?orgId=${encodeURIComponent(orgId)}` : "";
+  await request<{ success: boolean }>(
+    `${AUTH_API_URL}/api/v1/surfaces/slack/agents/${encodeURIComponent(slug)}/slack-app${query}`,
+    { method: "DELETE" },
+  );
+}
+
+export async function registerSlackCommand(
+  slug: string,
+  options: { orgId?: string; commandName?: string } = {},
+): Promise<{ commandName: string; appId: string }> {
+  const response = await request<{
+    success: boolean;
+    data: { commandName: string; appId: string };
+  }>(`${AUTH_API_URL}/api/v1/surfaces/slack/agents/${encodeURIComponent(slug)}/register-command`, {
+    method: "POST",
+    body: JSON.stringify({
+      ...(options.orgId ? { orgId: options.orgId } : {}),
+      ...(options.commandName ? { commandName: options.commandName } : {}),
+    }),
+  });
+  return response.data;
+}
+
+export async function listSlackAgentStatuses(orgId?: string): Promise<SlackAgentStatus[]> {
+  const query = orgId ? `?orgId=${encodeURIComponent(orgId)}` : "";
+  const response = await request<{ success: boolean; data: SlackAgentStatus[] }>(
+    `${AUTH_API_URL}/api/v1/surfaces/slack/agents/status${query}`,
+  );
+  return response.data;
 }
 
 export async function addOrgMember(
@@ -1713,9 +1832,54 @@ export async function removeOrgMember(
   });
 }
 
-export async function listAdminRoles(userId: string, orgScope?: AdminOrgScope): Promise<AdminRole[]> {
+export async function listOrgServiceTokens(
+  userId: string,
+  orgId: string,
+): Promise<ServiceAccessToken[]> {
+  const data = await request<{ success: boolean; data: ServiceAccessToken[] }>(
+    `${AUTH_API_URL}/api/v1/organizations/${orgId}/service-tokens`,
+    { headers: { "x-user-id": userId } },
+  );
+  return data.data;
+}
+
+export async function mintOrgServiceToken(
+  userId: string,
+  orgId: string,
+  input: { name: string; userId: string; expiresAt?: string | null },
+): Promise<MintedServiceAccessToken> {
+  const data = await request<{ success: boolean; data: MintedServiceAccessToken }>(
+    `${AUTH_API_URL}/api/v1/organizations/${orgId}/service-tokens`,
+    {
+      method: "POST",
+      headers: { "x-user-id": userId },
+      body: JSON.stringify(input),
+    },
+  );
+  return data.data;
+}
+
+export async function revokeOrgServiceToken(
+  userId: string,
+  orgId: string,
+  tokenId: string,
+): Promise<void> {
+  await request(`${AUTH_API_URL}/api/v1/organizations/${orgId}/service-tokens/${tokenId}`, {
+    method: "DELETE",
+    headers: { "x-user-id": userId },
+  });
+}
+
+/** `role` defaults to "CLAW_ADMIN" server-side; pass "SEARCH_EVAL_ACCESS" to
+ *  manage the narrower Search Evals grant instead. */
+export async function listAdminRoles(
+  userId: string,
+  orgScope?: AdminOrgScope,
+  role?: string,
+): Promise<AdminRole[]> {
   const qs = new URLSearchParams();
   applyAdminOrgScope(qs, orgScope);
+  if (role) qs.set("role", role);
   const suffix = qs.toString() ? `?${qs.toString()}` : "";
   const data = await request<{ success: boolean; data: AdminRole[] }>(
     `${AUTH_API_URL}/api/v1/admin/roles${suffix}`,
@@ -1724,16 +1888,21 @@ export async function listAdminRoles(userId: string, orgScope?: AdminOrgScope): 
   return data.data;
 }
 
-export async function grantAdmin(userId: string, targetUserId: string): Promise<void> {
+export async function grantAdmin(userId: string, targetUserId: string, role?: string): Promise<void> {
   await request<{ success: boolean }>(
     `${AUTH_API_URL}/api/v1/admin/roles`,
-    { method: "POST", headers: { "x-user-id": userId }, body: JSON.stringify({ userId: targetUserId }) },
+    {
+      method: "POST",
+      headers: { "x-user-id": userId },
+      body: JSON.stringify({ userId: targetUserId, ...(role ? { role } : {}) }),
+    },
   );
 }
 
-export async function revokeAdmin(userId: string, targetUserId: string): Promise<void> {
+export async function revokeAdmin(userId: string, targetUserId: string, role?: string): Promise<void> {
+  const qs = role ? `?role=${encodeURIComponent(role)}` : "";
   await request<{ success: boolean }>(
-    `${AUTH_API_URL}/api/v1/admin/roles/${targetUserId}`,
+    `${AUTH_API_URL}/api/v1/admin/roles/${targetUserId}${qs}`,
     { method: "DELETE", headers: { "x-user-id": userId } },
   );
 }
@@ -3602,8 +3771,11 @@ export interface DashboardOverview {
   cancelledRuns: number;
   runningRuns: number;
   uniqueUsers: number;
+  /** Fresh (non-cached) input tokens. Real input volume = this + totalTokensCached. */
   totalTokensIn: number;
   totalTokensOut: number;
+  /** cacheRead + cacheWrite — replayed/stored context; dominates on cache-heavy agents. */
+  totalTokensCached?: number;
 }
 
 export interface DashboardAgentRow {
@@ -3902,20 +4074,85 @@ export async function getDoctorBitbucketStats(userId: string): Promise<DoctorBit
 
 // ── Digital Twin (personal user memory) ──────────────────────────────────────
 
+export interface DigitalTwinBackfillProgress {
+  windowsTotal: number;
+  windowsDone: number;
+  recordsSeen: number;
+  candidatesMade: number;
+  currentWindow: { from: string; to: string } | null;
+  lastError: { message: string; windowUpper: string; at: string } | null;
+  startedAt: string;
+  updatedAt: string;
+}
+
 export interface DigitalTwinBackfillEntry {
   from: string;
   to: string;
   cursor: string;
   complete: boolean;
+  /** Added by the observability work — richer per-window counters. Absent on
+   *  rows written before the feature shipped (fall back to cursor math). */
+  progress?: DigitalTwinBackfillProgress;
+}
+
+/** BullMQ job probe attached to each source in the normalized backfill block. */
+export interface DigitalTwinBackfillJobInfo {
+  state: string;
+  attemptsMade: number;
+  maxAttempts: number;
+  failedReason: string | null;
+}
+
+export interface DigitalTwinBackfillSourceProgress {
+  complete: boolean;
+  /** True when this incomplete source was paused by the user (kept, not running). */
+  paused?: boolean;
+  pausedAt?: string | null;
+  windowsDone: number | null;
+  windowsTotal: number | null;
+  recordsSeen: number | null;
+  candidatesMade: number | null;
+  currentWindow: { from: string; to: string } | null;
+  pctByWindows: number | null;
+  pctByTime: number | null;
+  lastError: { message: string; windowUpper: string; at: string } | null;
+  job: DigitalTwinBackfillJobInfo | null;
+}
+
+/** Server-normalized backfill view (counts + BullMQ state + server-side stall).
+ *  Preferred over raw backfillState when present. */
+export interface DigitalTwinBackfillBlock {
+  overall: {
+    running: boolean;
+    /** True when the backfill is paused (kept, resumable). Never running/stalled. */
+    paused: boolean;
+    stalled: boolean;
+    windowsDone: number;
+    windowsTotal: number;
+    recordsSeen: number;
+    candidatesMade: number;
+    pctByWindows: number | null;
+    updatedAt: string | null;
+  };
+  sources: Record<string, DigitalTwinBackfillSourceProgress>;
 }
 
 export interface DigitalTwinStatus {
   enabled: boolean;
   enabledAt: string | null;
   backfillState: Record<string, DigitalTwinBackfillEntry> | null;
+  /** Normalized backfill observability block. Null when no backfill has run. */
+  backfill?: DigitalTwinBackfillBlock | null;
   pendingCandidates: number;
   totalCandidates: number;
   approvedCandidates: number;
+  /** Real count of the user's memories live in Hindsight (matches the memories
+   *  tab). Differs from approvedCandidates, which counts approved candidate rows
+   *  and inflates via Hindsight dedup + re-backfills. Use this for "N memories". */
+  memoryCount?: number;
+  /** True while a manual "delete memories" (all / range) is running in the
+   *  background — drives the deletion indicator. */
+  memoryDeleteInProgress?: boolean;
   mdFileCount: number;
   /** Optional suffix the user has configured. Empty string when unset. */
   responseSuffix: string;
@@ -3924,6 +4161,145 @@ export interface DigitalTwinStatus {
   memoryApprovalMode: string;
   /** Min curator confidence (0–1) required to auto-approve a candidate. */
   memoryAutoApproveMinScore: number;
+  /** When the twin auto-replies: "always" (every mention) or "learned"
+   *  (consult captured respond/ignore patterns, stay silent on high-confidence
+   *  ignore). */
+  respondPolicy?: string;
+}
+
+// ── Pipeline observability (curator trace + per-window events) ────────────────
+
+export type PipelineRunType = "backfill" | "daily" | "upload" | "twin-approval";
+export type PipelineSourceKind = "messages" | "calls" | "canvases";
+export type PipelineStatus = "ok" | "empty" | "error";
+
+/** One candidate exactly as the LLM emitted it, with the server-side verdict. */
+export interface CuratorEmittedCandidate {
+  text: string;
+  subsystem?: string;
+  signalScore?: number;
+  groundedOnIds?: string[];
+  verdict: "kept" | "dropped";
+  dropReason?: "empty-or-too-long" | "bad-subsystem" | "low-signal" | "ungrounded" | "malformed";
+}
+
+/** Full trace of one curator LLM call. Mirrors UserMemoryCuratorTrace in
+ *  xyne-claw-shared. */
+export interface CuratorTrace {
+  model: string;
+  durationMs: number;
+  systemPrompt?: string;
+  prompt?: string;
+  /** Absent while the run is still RUNNING — the trace is partial until the
+   *  curator LLM responds. Guard (`trace?.promptChars != null`) before reading. */
+  promptChars?: number;
+  /** Model reasoning / "thinking" when the provider returns it. */
+  reasoning?: string;
+  /** finish_reason from the model's first choice. */
+  finishReason?: string;
+  /** Non-tool assistant text (populated when the model answered in content). */
+  rawContent?: string;
+  toolCallName?: string;
+  /** How the args were obtained: proper tool_calls vs recovered from content. */
+  toolCallSource?: "tool_calls" | "recovered-content";
+  rawResponse?: string;
+  usage?: { promptTokens?: number; completionTokens?: number };
+  /** Absent while the run is still RUNNING (populated once the LLM responds).
+   *  Guard (`trace?.emitted`) before reading `.length` / `.map`. */
+  emitted?: CuratorEmittedCandidate[];
+  error?: string;
+}
+
+/** Per-file outcome of a soul-synthesis run (runType="synthesize"). */
+export interface SynthFileResult {
+  name: string;
+  factsUsed: number;
+  action: "updated" | "skipped" | "error";
+  chars?: number;
+  error?: string;
+}
+
+/** Trace stored on a synthesize pipeline event (instead of a CuratorTrace). */
+export interface SynthTrace {
+  kind: "synthesize";
+  trigger: "daily" | "manual";
+  running?: boolean;
+  files: SynthFileResult[];
+}
+
+/** Trace stored on a runType="gate" event: one respond/ignore decision + (for
+ *  LLM decisions) the full exchange. */
+export interface GateTrace {
+  kind: "gate";
+  respond: boolean;
+  confidence: number;
+  reason: string;
+  decisionSource: string;
+  incoming: string;
+  channelName?: string;
+  channelType?: string;
+  senderName?: string;
+  systemPrompt?: string;
+  userPrompt?: string;
+  response?: string;
+  thinking?: string;
+  model?: string;
+  /** Set when the gate FAILED (timeout / HTTP error / bad response) and
+   *  fail-opened — the event is recorded with status="error". */
+  error?: string;
+}
+
+export interface PipelineRecordPreview {
+  id: string;
+  type: string;
+  ts: string;
+  channelId?: string;
+  channelName?: string;
+  title?: string;
+  textPreview: string;
+}
+
+export interface PipelineEventSummary {
+  id: string;
+  createdAt: string;
+  runType: string;
+  source: string;
+  sourceKind: string | null;
+  windowFrom: string;
+  windowTo: string;
+  status: string;
+  recordCount: number;
+  existingMemoryCount: number;
+  emittedCount: number;
+  keptCount: number;
+  candidatesCreated: number;
+  autoApproved: number;
+  durationMs: number;
+  error: string | null;
+  hasTrace: boolean;
+  /** Live approval outcome — candidates currently approved / pending / rejected
+   *  for this event. "accepted" (approvedCount) changes as the user reviews. */
+  approvedCount?: number;
+  pendingCount?: number;
+  rejectedCount?: number;
+}
+
+export interface PipelineEventDetail extends PipelineEventSummary {
+  records: PipelineRecordPreview[] | null;
+  trace: CuratorTrace | SynthTrace | GateTrace | null;
+}
+
+export interface PipelineEventsPage {
+  events: PipelineEventSummary[];
+  nextBefore: string | null;
+}
+
+export interface PipelineEventFilters {
+  limit?: number;
+  before?: string;
+  runType?: string;
+  status?: string;
+  sourceKind?: string;
 }
 
 export interface DigitalTwinEstimate {
@@ -3956,6 +4332,35 @@ export interface DigitalTwinCandidate {
 export async function getDigitalTwinStatus(userId: string): Promise<DigitalTwinStatus> {
   const data = await request<{ success: boolean; data: DigitalTwinStatus }>(
     `${AUTH_API_URL}/api/v1/digital-twin/status`,
+    { headers: { "x-user-id": userId } },
+  );
+  return data.data;
+}
+
+export async function listDigitalTwinPipelineEvents(
+  userId: string,
+  filters: PipelineEventFilters = {},
+): Promise<PipelineEventsPage> {
+  const params = new URLSearchParams();
+  if (filters.limit) params.set("limit", String(filters.limit));
+  if (filters.before) params.set("before", filters.before);
+  if (filters.runType) params.set("runType", filters.runType);
+  if (filters.status) params.set("status", filters.status);
+  if (filters.sourceKind) params.set("sourceKind", filters.sourceKind);
+  const qs = params.toString();
+  const data = await request<{ success: boolean; data: PipelineEventsPage }>(
+    `${AUTH_API_URL}/api/v1/digital-twin/pipeline/events${qs ? `?${qs}` : ""}`,
+    { headers: { "x-user-id": userId } },
+  );
+  return data.data;
+}
+
+export async function getDigitalTwinPipelineEvent(
+  userId: string,
+  id: string,
+): Promise<PipelineEventDetail> {
+  const data = await request<{ success: boolean; data: PipelineEventDetail }>(
+    `${AUTH_API_URL}/api/v1/digital-twin/pipeline/events/${encodeURIComponent(id)}`,
     { headers: { "x-user-id": userId } },
   );
   return data.data;
@@ -4003,9 +4408,78 @@ export async function disableDigitalTwin(
   return data.data;
 }
 
+/** Pause the in-flight backfill: cancels the queue jobs but KEEPS progress (the
+ *  cursor). The Twin stays enabled. Resume continues from exactly here. */
+export async function pauseDigitalTwinBackfill(
+  userId: string,
+): Promise<{ paused: boolean; pausedSources: number; cancelledJobs: number }> {
+  const data = await request<{ success: boolean; data: { paused: boolean; pausedSources: number; cancelledJobs: number } }>(
+    `${AUTH_API_URL}/api/v1/digital-twin/backfill/pause`,
+    { method: "POST", headers: { "x-user-id": userId, "Content-Type": "application/json" } },
+  );
+  return data.data;
+}
+
+/** Resume a paused (or wedged) backfill: re-enqueues each incomplete source from
+ *  its persisted cursor. */
+export async function resumeDigitalTwinBackfill(
+  userId: string,
+): Promise<{ resumed: number; jobIds: string[] }> {
+  const data = await request<{ success: boolean; data: { resumed: number; jobIds: string[] } }>(
+    `${AUTH_API_URL}/api/v1/digital-twin/backfill/resume`,
+    { method: "POST", headers: { "x-user-id": userId, "Content-Type": "application/json" } },
+  );
+  return data.data;
+}
+
+/** Delete the user's stored memories — all, or a created-date range. Runs in
+ *  the background (202); poll status.memoryDeleteInProgress for the indicator. */
+export async function deleteDigitalTwinMemories(
+  userId: string,
+  opts: { mode: "all" | "range"; from?: string; to?: string },
+): Promise<{ deleting: boolean; mode?: string }> {
+  const data = await request<{ success: boolean; data: { deleting: boolean; mode?: string } }>(
+    `${AUTH_API_URL}/api/v1/digital-twin/memories/delete`,
+    {
+      method: "POST",
+      headers: { "x-user-id": userId, "Content-Type": "application/json" },
+      body: JSON.stringify(opts),
+    },
+  );
+  return data.data;
+}
+
 export async function listDigitalTwinClusters(userId: string): Promise<{ clusters: DigitalTwinClusterPreview[] }> {
   const data = await request<{ success: boolean; data: { clusters: DigitalTwinClusterPreview[] } }>(
     `${AUTH_API_URL}/api/v1/digital-twin/clusters`,
+    { headers: { "x-user-id": userId } },
+  );
+  return data.data;
+}
+
+/** Memory constellation graph from Hindsight — nodes = memories (id === the
+ *  memory id from listDigitalTwinMemories), edges = real semantic/temporal/entity
+ *  relationships, plus per-memory extracted entities. */
+export interface DigitalTwinGraphNode {
+  id: string;
+  entities?: string[];
+  factType?: string;
+}
+export interface DigitalTwinGraphEdge {
+  source: string;
+  target: string;
+  /** "semantic" | "temporal" | "entity". */
+  linkType: string;
+  weight?: number;
+}
+export interface DigitalTwinGraph {
+  nodes: DigitalTwinGraphNode[];
+  edges: DigitalTwinGraphEdge[];
+}
+
+export async function getDigitalTwinGraph(userId: string): Promise<DigitalTwinGraph> {
+  const data = await request<{ success: boolean; data: DigitalTwinGraph }>(
+    `${AUTH_API_URL}/api/v1/digital-twin/graph`,
     { headers: { "x-user-id": userId } },
   );
   return data.data;
@@ -4060,11 +4534,12 @@ export async function updateDigitalTwinSettings(
     responseSuffix?: string | null;
     memoryApprovalMode?: "manual" | "auto";
     memoryAutoApproveMinScore?: number;
+    respondPolicy?: "always" | "learned";
   },
-): Promise<{ responseSuffix: string; memoryApprovalMode: string; memoryAutoApproveMinScore: number }> {
+): Promise<{ responseSuffix: string; memoryApprovalMode: string; memoryAutoApproveMinScore: number; respondPolicy?: string }> {
   const data = await request<{
     success: boolean;
-    data: { responseSuffix: string; memoryApprovalMode: string; memoryAutoApproveMinScore: number };
+    data: { responseSuffix: string; memoryApprovalMode: string; memoryAutoApproveMinScore: number; respondPolicy?: string };
   }>(
     `${AUTH_API_URL}/api/v1/digital-twin/settings`,
     {
@@ -4092,6 +4567,82 @@ export async function uploadDigitalTwinMd(
   return data.data;
 }
 
+// ── Memory files (Memory v2 — deterministic, file-based persona) ──────
+
+export interface DigitalTwinMemoryFile {
+  id: string;
+  name: string;
+  content: string;
+  loadInPrompt: boolean;
+  sortOrder: number;
+  updatedBy: string | null;
+  updatedAt: string;
+}
+
+export async function listDigitalTwinMemoryFiles(
+  userId: string,
+): Promise<{ files: DigitalTwinMemoryFile[]; maxLoaded: number; maxChars: number }> {
+  const data = await request<{
+    success: boolean;
+    data: { files: DigitalTwinMemoryFile[]; maxLoaded: number; maxChars: number };
+  }>(`${AUTH_API_URL}/api/v1/digital-twin/memory-files`, {
+    headers: { "x-user-id": userId },
+  });
+  return data.data;
+}
+
+export async function saveDigitalTwinMemoryFile(
+  userId: string,
+  name: string,
+  content: string,
+): Promise<{ file: DigitalTwinMemoryFile; truncated: boolean; maxChars: number }> {
+  const data = await request<{
+    success: boolean;
+    data: { file: DigitalTwinMemoryFile; truncated: boolean; maxChars: number };
+  }>(`${AUTH_API_URL}/api/v1/digital-twin/memory-files/${encodeURIComponent(name)}`, {
+    method: "PUT",
+    headers: { "x-user-id": userId, "Content-Type": "application/json" },
+    body: JSON.stringify({ content }),
+  });
+  return data.data;
+}
+
+export async function setDigitalTwinMemoryFileLoad(
+  userId: string,
+  name: string,
+  load: boolean,
+): Promise<{ file: DigitalTwinMemoryFile }> {
+  const data = await request<{ success: boolean; data: { file: DigitalTwinMemoryFile } }>(
+    `${AUTH_API_URL}/api/v1/digital-twin/memory-files/${encodeURIComponent(name)}/load`,
+    {
+      method: "POST",
+      headers: { "x-user-id": userId, "Content-Type": "application/json" },
+      body: JSON.stringify({ load }),
+    },
+  );
+  return data.data;
+}
+
+export async function deleteDigitalTwinMemoryFile(
+  userId: string,
+  name: string,
+): Promise<{ deleted: boolean }> {
+  const data = await request<{ success: boolean; data: { deleted: boolean } }>(
+    `${AUTH_API_URL}/api/v1/digital-twin/memory-files/${encodeURIComponent(name)}`,
+    { method: "DELETE", headers: { "x-user-id": userId } },
+  );
+  return data.data;
+}
+
+/** Kick off a background persona rebuild from approved memories (202). */
+export async function synthesizeDigitalTwin(userId: string): Promise<{ status: string }> {
+  const data = await request<{ success: boolean; data: { status: string } }>(
+    `${AUTH_API_URL}/api/v1/digital-twin/synthesize`,
+    { method: "POST", headers: { "x-user-id": userId } },
+  );
+  return data.data;
+}
+
 // ── Memory Bank (Hindsight) ───────────────────────────────────────────
 
 const MEMORY_BASE = "/claw/api/v1/memory";
@@ -4106,6 +4657,12 @@ export interface MemoryBankMemory {
   createdAt: string;
   recallHits7d: number;
   lastRecalledAt: string | null;
+  /** Pipeline event that proposed this memory, for the "View reasoning"
+   *  deep-link. Null for memories retained before the link existed. */
+  pipelineEventId?: string | null;
+  /** Raw Hindsight tags (user:… / subsystem:… / scope:… / pipeline:…). Present
+   *  on the digital-twin list response; used by the constellation view. */
+  tags?: string[];
 }
 
 export interface MemoryBankStats {
@@ -4443,6 +5000,13 @@ export interface GlobalMetrics {
     avgLlmMs: number | null;
     avgToolMs: number | null;
     errorRate: number;
+    /** Window token totals. in = fresh input; cacheRead/cacheWrite = replayed/
+        stored context (real consumption on cache-heavy agents); out = generated. */
+    tokens?: { in: number; out: number; cacheRead: number; cacheWrite: number };
+    /** Distinct users in the window. */
+    uniqueUsers?: number;
+    /** Memory adoption — runs that recalled >=1 memory (per-agent endpoint only). */
+    memoryRecall?: { runsWithRecall: number; rate: number };
   };
   delta: {
     runs: number;
@@ -4496,6 +5060,8 @@ export interface AgentMetrics {
   totals: GlobalMetrics["totals"] & {
     avgTurns: number | null;
     avgTokensPerSec: number | null;
+    // tokens + uniqueUsers inherited from GlobalMetrics["totals"] — both
+    // endpoints report them with identical shapes.
   };
   delta: GlobalMetrics["delta"];
   perDay: GlobalMetricsDayBucket[];
@@ -5183,6 +5749,199 @@ export function parseEvalConversations(
   return { error: "Unrecognized shape" };
 }
 
+// ── Search Evals (Vespa search retrieval-relevance testing) ────────────────
+
+export interface SearchEvalSheetSummary {
+  id: string;
+  name: string;
+  description: string | null;
+  permissionMode: SearchEvalPermissionMode;
+  asOfTimestamp: string | null;
+  createdAt: string;
+  _count: { queries: number };
+  runs: Array<{ id: string; status: string; startedAt: string; permissionMode: string }>;
+}
+
+export interface SearchEvalQueryRow {
+  id: string;
+  query: string;
+  goldAnswer: string | null;
+  goldId: string;
+}
+
+export interface SearchEvalSheetDetail extends SearchEvalSheetSummary {
+  queries: SearchEvalQueryRow[];
+}
+
+export async function listSearchEvalSheets(userId: string): Promise<SearchEvalSheetSummary[]> {
+  const data = await request<{ success: boolean; sheets: SearchEvalSheetSummary[] }>(
+    `${AUTH_API_URL}/api/v1/search-evals/sheets`,
+    { headers: { "x-user-id": userId } },
+  );
+  return data.sheets ?? [];
+}
+
+export async function uploadSearchEvalSheet(
+  payload: {
+    name: string;
+    description?: string;
+    permissionMode: SearchEvalPermissionMode;
+    asOfTimestamp?: string;
+    queries: Array<{ query: string; goldAnswer?: string; goldId: string }>;
+  },
+  userId: string,
+): Promise<SearchEvalSheetDetail> {
+  const data = await request<{ success: boolean; sheet: SearchEvalSheetDetail }>(
+    `${AUTH_API_URL}/api/v1/search-evals/sheets`,
+    { method: "POST", headers: { "x-user-id": userId }, body: JSON.stringify(payload) },
+  );
+  return data.sheet;
+}
+
+export async function getSearchEvalSheet(id: string, userId: string): Promise<SearchEvalSheetDetail> {
+  const data = await request<{ success: boolean; sheet: SearchEvalSheetDetail }>(
+    `${AUTH_API_URL}/api/v1/search-evals/sheets/${id}`,
+    { headers: { "x-user-id": userId } },
+  );
+  return data.sheet;
+}
+
+export type SearchEvalPermissionMode = "with" | "without";
+
+export async function startSearchEvalRun(
+  sheetId: string,
+  payload: { queryType: string[]; rankProfile?: string; rankProfileInputs?: Record<string, number> },
+  userId: string,
+): Promise<{ runId: string; jobId: string }> {
+  return request<{ success: boolean; runId: string; jobId: string }>(
+    `${AUTH_API_URL}/api/v1/search-evals/sheets/${sheetId}/runs`,
+    { method: "POST", headers: { "x-user-id": userId }, body: JSON.stringify(payload) },
+  );
+}
+
+interface SearchEvalTopKStat {
+  count: number;
+  pct: number | null;
+}
+
+/** Top1/Top3/Top10 count+% and Mean Reciprocal Rank — persisted on the run
+ *  (stamped alongside completedAt) so past runs are comparable over time. */
+export interface SearchEvalMetricsSummary {
+  queriesTotal: number;
+  queriesScored: number;
+  top1: SearchEvalTopKStat;
+  top3: SearchEvalTopKStat;
+  top10: SearchEvalTopKStat;
+  mrr: number | null;
+}
+
+export interface SearchEvalRunSummary {
+  id: string;
+  status: string;
+  permissionMode: SearchEvalPermissionMode;
+  queryType: string[];
+  rankProfile: string | null;
+  rankProfileInputs: Record<string, number> | null;
+  asOfTimestamp: string | null;
+  startedAt: string;
+  completedAt: string | null;
+  summary: SearchEvalMetricsSummary | null;
+  _count: { results: number };
+}
+
+/** Run history for a sheet, newest first — powers the run "chat list". */
+export async function listSearchEvalRuns(sheetId: string, userId: string): Promise<SearchEvalRunSummary[]> {
+  const data = await request<{ success: boolean; runs: SearchEvalRunSummary[] }>(
+    `${AUTH_API_URL}/api/v1/search-evals/sheets/${sheetId}/runs`,
+    { headers: { "x-user-id": userId } },
+  );
+  return data.runs ?? [];
+}
+
+export interface SearchEvalTopResult {
+  id: string | null;
+  xyneId: string | null;
+  messageId: string | null;
+  conversationId: string | null;
+  relevanceScore: number | null;
+  snippet: string | null;
+  /** Full untouched result object (title, type, subtitle, metadata, the
+   *  complete searchContext) for full inspection of any of the top-20. */
+  raw: Record<string, unknown> | null;
+}
+
+export interface SearchEvalDebugPayload {
+  stage: string;
+  yql: string;
+  vespaParams: Record<string, unknown>;
+}
+
+export interface SearchEvalResultRow {
+  queryId: string;
+  query: string;
+  goldAnswer: string | null;
+  goldId: string;
+  hit: boolean | null;
+  rank: number | null;
+  topResults: SearchEvalTopResult[] | null;
+  debug: SearchEvalDebugPayload[] | null;
+}
+
+export interface SearchEvalRunDetail {
+  run: {
+    id: string;
+    sheetId: string;
+    sheetName: string;
+    sheetDescription: string | null;
+    status: string;
+    permissionMode: SearchEvalPermissionMode;
+    queryType: string[];
+    rankProfile: string | null;
+    rankProfileInputs: Record<string, number> | null;
+    asOfTimestamp: string | null;
+    startedAt: string;
+    completedAt: string | null;
+  };
+  progress: { phase: string; queriesTotal: number; queriesDone: number } | null;
+  summary: SearchEvalMetricsSummary;
+  rows: SearchEvalResultRow[];
+}
+
+export async function getSearchEvalRun(runId: string, userId: string): Promise<SearchEvalRunDetail> {
+  return request<{ success: boolean } & SearchEvalRunDetail>(
+    `${AUTH_API_URL}/api/v1/search-evals/runs/${runId}`,
+    { headers: { "x-user-id": userId } },
+  );
+}
+
+/** Downloads the full per-query result data for a run as a real .xlsx
+ *  workbook (Summary + Results sheets, incl. match-features breakdown) —
+ *  binary response, so this bypasses the JSON `request()` helper and
+ *  triggers a browser download directly via a temporary object-URL anchor. */
+export async function downloadSearchEvalRunExport(runId: string, userId: string): Promise<void> {
+  const res = await fetch(`${AUTH_API_URL}/api/v1/search-evals/runs/${runId}/export`, {
+    credentials: "include",
+    headers: { "x-user-id": userId },
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({})) as { error?: string };
+    throw new ApiError(res.status, body.error ?? `Export failed: ${res.status}`);
+  }
+  const blob = await res.blob();
+  const disposition = res.headers.get("Content-Disposition") ?? "";
+  const match = /filename="([^"]+)"/.exec(disposition);
+  const filename = match?.[1] ?? `search-eval-run-${runId}.xlsx`;
+
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 // ── Error pipeline (Grafana → Claw auto-fix) admin inspection ──────────────
 
 export interface ErrorPipelineBucketStat {
@@ -5194,8 +5953,25 @@ export interface ErrorPipelineItem {
   errorKey: string;
   enqueuedAt: number;
   attempts: number;
-  error: { source: string; message: string; normMessage?: string; sampleRequestId?: string };
+  error: { source: string; message: string; normMessage?: string; sampleRequestId?: string; count?: number; occurredAt?: number };
   classification: { bucket: string; reason: string; signal: string };
+}
+
+/**
+ * Private per-user thread for a pipeline error. Returns the forked
+ * conversationId (`<conv>__u__<userId>`), creating it — with a full clone of
+ * the run's agent session — on first call. Idempotent.
+ */
+export async function forkErrorPipelineConversation(userId: string, conversationId: string): Promise<string> {
+  const data = await request<{ success: boolean; data: { conversationId: string } }>(
+    `${AUTH_API_URL}/api/v1/admin/error-pipeline/fork-conversation`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-user-id": userId },
+      body: JSON.stringify({ conversationId }),
+    },
+  );
+  return data.data.conversationId;
 }
 
 export async function getErrorPipelineBuckets(userId: string): Promise<Record<string, ErrorPipelineBucketStat>> {

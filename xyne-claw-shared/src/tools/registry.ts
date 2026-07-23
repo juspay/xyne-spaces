@@ -27,6 +27,7 @@ import * as postmanSbx from "./postman-sbx/index.js";
 import * as todo from "./todo/index.js";
 import * as orchestrator from "./orchestrator/index.js";
 import * as agentIntrospect from "./agent-introspect/index.js";
+import * as skillManagement from "./skill-management/index.js";
 
 /** All custom tools, keyed by slug */
 const CUSTOM_TOOLS: Record<string, ToolDefinition> = {};
@@ -34,10 +35,6 @@ const CUSTOM_TOOLS: Record<string, ToolDefinition> = {};
 function register(tool: ToolDefinition): void {
   CUSTOM_TOOLS[tool.slug] = tool;
 }
-
-// PGM tools disabled: they render user/model-controlled Quarto documents in
-// the claw process. Re-enable only after moving rendering into the sandbox or
-// hard-disabling document execution.
 
 // Register schedule + ask-question + add-citations tools
 register(schedule.scheduleTask);
@@ -177,6 +174,11 @@ register(jenkins.jenkinsGetBuildLogs);
 // Register postman_sbx (sandbox-resident collection execution)
 register(postmanSbx.postmanSbxRunCollection);
 
+// Register skill-management tools — create-skill (write tool: draft + approve →
+// personal skill) and update-skill (proposes a diff to the skill owner via DM).
+register(skillManagement.createSkillTool);
+register(skillManagement.updateSkillTool);
+
 // Register plan-tracking tools (todo-write / todo-read). The agent maintains an
 // explicit todo list that renders as a live, in-place-updating card in the
 // Spaces thread (via claw-auth's kind:"plan" progress handler). todo-write
@@ -205,10 +207,6 @@ register(sandbox.sandboxDestroy);
 register(sandbox.sandboxRepoSetup);
 register(sandbox.gitRead);
 
-// Workload tools disabled for the same reason as PGM: Quarto rendering is
-// process-local execution and the report body is model/user-controlled.
-
-
 // Register sandbox-pw tools (browser via @playwright/mcp through sandbox-router-test)
 for (const t of sandboxPw.SANDBOX_PW_TOOLS) register(t);
 
@@ -223,7 +221,7 @@ export function getCustomTool(slug: string): ToolDefinition | undefined {
   return CUSTOM_TOOLS[slug];
 }
 
-/** Get all custom tools matching a source prefix (e.g., "custom:pgm") */
+/** Get all custom tools matching a source prefix (e.g., "custom:sandbox") */
 export function getToolsBySource(source: string): ToolDefinition[] {
   return Object.values(CUSTOM_TOOLS).filter((t) => t.source === source);
 }

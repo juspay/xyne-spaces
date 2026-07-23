@@ -17,15 +17,24 @@
 
 import { Router, type Request, type Response } from "express";
 import type { Prisma } from "@prisma/client";
-import { bankIdForAgent, getMemoryProvider } from "xyne-claw-shared";
+import { bankIdForAgent, buildRetainMission, getMemoryProvider } from "xyne-claw-shared";
 import type { MemoryRecord, EntityGraphEdge } from "xyne-claw-shared";
 import { prisma } from "../db.js";
 import { agentRepository } from "../repositories/index.js";
 import { createLogger, createTraceId } from "../logger.js";
 import { requireAuth, requireUserAuth } from "../middleware/require-auth.js";
-import { isClawAdmin, requireClawAdmin, getOrgId } from "../middleware/agent-acl.js";
-import { curateApprovedTranscript, readSessionTranscript, type SessionTranscript } from "../services/memoryCronService.js";
-import { enqueueAgentBackfill } from "../queue/agent-backfill-queue.js";
+import { isClawAdmin, requireClawAdmin, getOrgId, getRequesterId } from "../middleware/agent-acl.js";
+import { curateApprovedTranscript, persistSubsystemReviews, readSessionTranscript, type SessionTranscript } from "../services/memoryCronService.js";
+import { classifySessionSubsystemForBank, distillSessionFile, parseSessionFile } from "../services/sessionCurator.js";
+import { enqueueAgentBackfill, getAgentBackfillQueue } from "../queue/agent-backfill-queue.js";
+import { runRetentionSweep } from "../services/memoryRetentionService.js";
+import {
+  getPromptFiles,
+  getFile as getAgentFile,
+  listFiles as listAgentFiles,
+  upsertFile as upsertAgentFile,
+  MAX_FILE_CHARS,
+} from "../services/agentMemoryFiles.js";
 
 const logger = createLogger("memory-review", createTraceId());
 
@@ -50,6 +59,115 @@ function isDigitalTwinAgent(agentSlug: string | undefined): boolean {
 }
 
 export const memoryRouter = Router();
+
+/**
+ * GET /memory/agent-prompt-files?agentSlug=&userId=
+ *
+ * Internal (S2S): returns the file-based memory files flagged loadInPrompt for
+ * (agentSlug, userId) — the always-loaded persona (soul.md, …) that xyne-claw
+ * injects into the agent's system prompt at run start. Mounted under the memory
+ * router which accepts x-s2s-key. Degrades to an empty list on any error so a
+ * missing/slow file store never breaks a run.
+ */
+memoryRouter.get("/agent-prompt-files", requireAuth, async (req, res) => {
+  try {
+    const userId = typeof req.query["userId"] === "string" ? req.query["userId"].trim() : "";
+    const agentSlug =
+      typeof req.query["agentSlug"] === "string" && req.query["agentSlug"].trim()
+        ? (req.query["agentSlug"] as string).trim()
+        : DIGITAL_TWIN_SLUG;
+    if (!userId) {
+      res.json({ success: true, data: { files: [] } });
+      return;
+    }
+    const files = await getPromptFiles(agentSlug, userId);
+    res.json({
+      success: true,
+      data: { files: files.map((f) => ({ name: f.name, content: f.content })) },
+    });
+  } catch (err) {
+    logger.error("[memory] agent-prompt-files failed", { err: err instanceof Error ? err.message : String(err) });
+    res.json({ success: true, data: { files: [] } });
+  }
+});
+
+const AGENT_FILE_NAME_RE = /^[a-zA-Z0-9._-]{1,64}$/;
+
+/**
+ * GET /memory/agent-file?agentSlug=&userId=&name=
+ * Internal (S2S): deterministic file read for the mid-chat read-memory-file
+ * tool. With `name` → that file's content; without → the list of file names.
+ */
+memoryRouter.get("/agent-file", requireAuth, async (req, res) => {
+  try {
+    const userId = typeof req.query["userId"] === "string" ? req.query["userId"].trim() : "";
+    const agentSlug =
+      typeof req.query["agentSlug"] === "string" && req.query["agentSlug"].trim()
+        ? (req.query["agentSlug"] as string).trim()
+        : DIGITAL_TWIN_SLUG;
+    const name = typeof req.query["name"] === "string" ? req.query["name"].trim() : "";
+    if (!userId) {
+      res.json({ success: true, data: { file: null, files: [] } });
+      return;
+    }
+    if (name) {
+      const f = await getAgentFile(agentSlug, userId, name);
+      res.json({
+        success: true,
+        data: { file: f ? { name: f.name, content: f.content, loadInPrompt: f.loadInPrompt } : null },
+      });
+      return;
+    }
+    const files = await listAgentFiles(agentSlug, userId);
+    res.json({
+      success: true,
+      data: { files: files.map((f) => ({ name: f.name, chars: f.content.length, loadInPrompt: f.loadInPrompt })) },
+    });
+  } catch (err) {
+    logger.error("[memory] agent-file read failed", { err: err instanceof Error ? err.message : String(err) });
+    res.json({ success: true, data: { file: null, files: [] } });
+  }
+});
+
+/**
+ * POST /memory/agent-file  { agentSlug, userId, name, content, mode }
+ * Internal (S2S): mid-chat write-memory-file tool. mode "append" (default)
+ * concatenates to the existing file; "replace" overwrites. Provenance "agent".
+ */
+memoryRouter.post("/agent-file", requireAuth, async (req, res) => {
+  try {
+    const body = (req.body ?? {}) as {
+      agentSlug?: unknown;
+      userId?: unknown;
+      name?: unknown;
+      content?: unknown;
+      mode?: unknown;
+    };
+    const userId = typeof body.userId === "string" ? body.userId.trim() : "";
+    const agentSlug =
+      typeof body.agentSlug === "string" && body.agentSlug.trim() ? body.agentSlug.trim() : DIGITAL_TWIN_SLUG;
+    const name = typeof body.name === "string" ? body.name.trim() : "";
+    const content = typeof body.content === "string" ? body.content : "";
+    const mode = body.mode === "replace" ? "replace" : "append";
+    if (!userId || !AGENT_FILE_NAME_RE.test(name) || !content.trim()) {
+      res.status(400).json({ success: false, error: "userId, valid name, and content are required" });
+      return;
+    }
+    let finalContent = content;
+    if (mode === "append") {
+      const current = await getAgentFile(agentSlug, userId, name);
+      finalContent = current?.content ? `${current.content.trimEnd()}\n\n${content.trim()}` : content.trim();
+    }
+    const file = await upsertAgentFile({ agentSlug, userId, name, content: finalContent, updatedBy: "agent" });
+    res.json({
+      success: true,
+      data: { file: { name: file.name, chars: file.content.length, maxChars: MAX_FILE_CHARS } },
+    });
+  } catch (err) {
+    logger.error("[memory] agent-file write failed", { err: err instanceof Error ? err.message : String(err) });
+    res.status(500).json({ success: false, error: "Internal error" });
+  }
+});
 
 /**
  * In-process lock to dedupe concurrent approve requests for the same batch.
@@ -183,7 +301,16 @@ memoryRouter.get("/reviews", requireUserAuth, requireClawAdmin, async (req, res)
       skip: Number(offset),
     });
 
-    res.json({ success: true, data: reviews });
+    // Session-ingest rows carry the WHOLE transcript (up to 200K chars) as
+    // content — the approve path reads it from the DB, but the list/UI only
+    // needs a preview. Without this cap one page of ingest rows is multi-MB.
+    const data = reviews.map((r) =>
+      r.action === "ingest_session" && r.content.length > 2_000
+        ? { ...r, content: `${r.content.slice(0, 2_000)}\n\n…[transcript preview — full ${r.content.length}-char session is retained on approval]` }
+        : r,
+    );
+
+    res.json({ success: true, data });
   } catch (err) {
     logger.error("[memory] GET /reviews failed", { err: err instanceof Error ? err.message : String(err) });
     res.status(500).json({ success: false, error: "Internal error" });
@@ -202,6 +329,136 @@ memoryRouter.patch("/review/:id", requireUserAuth, requireClawAdmin, async (req,
   const { action } = req.body as { action?: string };
   await handleReviewAction((req.params["id"] as string) ?? "", action ?? "", res);
 });
+
+/**
+ * POST /memory/reviews/approve-all
+ * Body: { agentSlug?: string }
+ *
+ * Approve EVERY pending review row (optionally scoped to one agent): retain
+ * each row's content and mark it approved. Rows whose retain fails stay
+ * pending (nothing is lost; re-run to retry). Capped per call so a huge
+ * backlog can't hold the request open forever — the response says how many
+ * remain.
+ */
+memoryRouter.post("/reviews/approve-all", requireUserAuth, requireClawAdmin, async (req, res) => {
+  try {
+    const { agentSlug } = (req.body ?? {}) as { agentSlug?: string };
+    const BATCH = 200;
+    const rows = await prisma.pendingMemoryReview.findMany({
+      where: { status: "pending", ...(agentSlug ? { agentSlug } : {}) },
+      orderBy: { createdAt: "asc" },
+      take: BATCH,
+    });
+
+    let approved = 0;
+    let failed = 0;
+    for (const review of rows) {
+      try {
+        const hindsightMemoryId = await retainReviewRow(review);
+        await prisma.pendingMemoryReview.update({
+          where: { id: review.id },
+          data: { status: "approved", ...(hindsightMemoryId ? { hindsightMemoryId } : {}), updatedAt: new Date() },
+        });
+        approved++;
+      } catch (err) {
+        failed++;
+        logger.warn("[memory] approve-all: retain failed for row — left pending", {
+          reviewId: review.id,
+          agentSlug: review.agentSlug,
+          err: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
+    const remaining = await prisma.pendingMemoryReview.count({
+      where: { status: "pending", ...(agentSlug ? { agentSlug } : {}) },
+    });
+
+    logger.info("[memory] approve-all complete", { agentSlug: agentSlug ?? "(all)", approved, failed, remaining, by: getRequesterId(req) });
+    res.json({ success: true, data: { approved, failed, remaining } });
+  } catch (err) {
+    logger.error("[memory] POST /reviews/approve-all failed", { err: err instanceof Error ? err.message : String(err) });
+    res.status(500).json({ success: false, error: "Internal error" });
+  }
+});
+
+/**
+ * POST /memory/reviews/reject-all
+ * Body: { agentSlug?: string }
+ *
+ * Reject EVERY pending review row (optionally scoped to one agent). Pure
+ * status flip — nothing was retained for pending rows, so nothing touches
+ * the bank. The one-click cleanup for stale blob-era candidate backlogs.
+ */
+memoryRouter.post("/reviews/reject-all", requireUserAuth, requireClawAdmin, async (req, res) => {
+  try {
+    const { agentSlug } = (req.body ?? {}) as { agentSlug?: string };
+    const result = await prisma.pendingMemoryReview.updateMany({
+      where: { status: "pending", ...(agentSlug ? { agentSlug } : {}) },
+      data: { status: "rejected", updatedAt: new Date() },
+    });
+    logger.info("[memory] reject-all complete", { agentSlug: agentSlug ?? "(all)", rejected: result.count, by: getRequesterId(req) });
+    res.json({ success: true, data: { rejected: result.count } });
+  } catch (err) {
+    logger.error("[memory] POST /reviews/reject-all failed", { err: err instanceof Error ? err.message : String(err) });
+    res.status(500).json({ success: false, error: "Internal error" });
+  }
+});
+
+/**
+ * Retain one pending review row's content to the agent's (tuned) bank.
+ * Shared by single approve, approve-all, and nothing else. Throws on retain
+ * failure — callers decide whether that's a 502 or a skip-and-continue.
+ *
+ * 2026-07-17: retain-then-delete REMOVED here. The old "one memory per
+ * subsystem, full replacement" invariant capped every subsystem at one
+ * ≤1500-char blob and made updates destructive (last-writer-wins
+ * forgetting). Facts now ACCUMULATE; Hindsight's extraction + consolidation
+ * own dedupe/conflict resolution. review.replacesMemoryId is ignored.
+ */
+async function retainReviewRow(review: {
+  id: string;
+  agentSlug: string;
+  subsystem: string | null;
+  sessionId: string | null;
+  content: string;
+  curatorConfidence: number | null;
+  action: string | null;
+}): Promise<string | null> {
+  const bankId = bankIdForAgent(review.agentSlug);
+  // Tuned bank: retain_mission steers Hindsight's fact extraction toward
+  // the agent's domain (verified 2026-07-17: unsteered defaults produce
+  // thin generic facts). Best-effort agent lookup for the description.
+  const agentRow = await prisma.agent.findFirst({
+    where: { slug: review.agentSlug },
+    select: { name: true, description: true },
+  }).catch(() => null);
+  await memory.ensureBank(bankId, {
+    mission: `Shared memory for xyne-claw agent "${review.agentSlug}".`,
+    retainMission: buildRetainMission({ name: agentRow?.name ?? review.agentSlug, description: agentRow?.description ?? null }),
+  });
+  const isIngest = review.action === "ingest_session";
+  const retained = await memory.retain(bankId, [
+    {
+      content: review.content,
+      tags: [
+        `agent:${review.agentSlug}`,
+        "shared",
+        ...(review.subsystem ? [`subsystem:${review.subsystem}`] : []),
+        ...(review.sessionId ? [`session:${review.sessionId}`] : []),
+      ],
+      metadata: {
+        agentSlug: review.agentSlug,
+        ...(review.subsystem ? { subsystem: review.subsystem } : {}),
+        ...(review.sessionId ? { sessionId: review.sessionId } : {}),
+        ...(review.curatorConfidence != null ? { curatorConfidence: String(review.curatorConfidence) } : {}),
+        source: isIngest ? "session-ingest" : "curator-approved",
+        action: review.action ?? "create",
+      },
+    },
+  ]);
+  return retained.find((r) => r.id)?.id ?? null;
+}
 
 async function handleReviewAction(
   reviewId: string,
@@ -228,60 +485,8 @@ async function handleReviewAction(
 
     if (action === "approve") {
       try {
-        const bankId = bankIdForAgent(review.agentSlug);
-        await memory.ensureBank(bankId, {
-          mission: `Agent-wide subsystem memory for xyne-claw agent "${review.agentSlug}". One memory per subsystem; replaced atomically on update.`,
-        });
-        const tags = [
-          `agent:${review.agentSlug}`,
-          "shared",
-          ...(review.subsystem ? [`subsystem:${review.subsystem}`] : []),
-          ...(review.sessionId ? [`session:${review.sessionId}`] : []),
-        ];
-        const retained = await memory.retain(bankId, [
-          {
-            content: review.content,
-            tags,
-            metadata: {
-              agentSlug: review.agentSlug,
-              ...(review.subsystem ? { subsystem: review.subsystem } : {}),
-              ...(review.sessionId ? { sessionId: review.sessionId } : {}),
-              ...(review.curatorConfidence != null ? { curatorConfidence: String(review.curatorConfidence) } : {}),
-              source: "curator-approved",
-              action: review.action ?? "create",
-            },
-          },
-        ]);
-        newHindsightMemoryId = retained.find((r) => r.id)?.id ?? null;
-
-        // Update: drop the replaced memory AFTER the new one is safely retained.
-        // If this delete fails, we log + alert; admin will see two memories
-        // tagged subsystem:X in the Memory tab and can manually clean up.
-        // Order matters: retain-then-delete means we never lose the subsystem.
-        if (review.action === "update" && review.replacesMemoryId) {
-          try {
-            await memory.deleteMemory(bankId, review.replacesMemoryId);
-            logger.info("[memory] Replaced subsystem memory deleted", {
-              provider: memory.name,
-              reviewId,
-              agentSlug: review.agentSlug,
-              subsystem: review.subsystem,
-              replaced: review.replacesMemoryId,
-              newMemoryId: newHindsightMemoryId,
-            });
-          } catch (err) {
-            logger.error("[memory] DUPLICATE: failed to delete replaced memory after retain — manual cleanup needed", {
-              err: err instanceof Error ? err.message : String(err),
-              reviewId,
-              agentSlug: review.agentSlug,
-              subsystem: review.subsystem,
-              orphaned: review.replacesMemoryId,
-              newMemoryId: newHindsightMemoryId,
-            });
-          }
-        }
-
-        logger.info("[memory] Subsystem memory approved and retained", {
+        newHindsightMemoryId = await retainReviewRow(review);
+        logger.info("[memory] Memory approved and retained", {
           provider: memory.name,
           reviewId,
           agentSlug: review.agentSlug,
@@ -330,6 +535,39 @@ async function handleReviewAction(
 
 const RANGE_DAYS: Record<string, number> = { "7d": 7, "30d": 30, "90d": 90 };
 
+/** POST /memory/banks/:agentSlug/retention-sweep — admin-only, dry-run by default. */
+memoryRouter.post("/banks/:agentSlug/retention-sweep", requireClawAdmin, async (req, res) => {
+  try {
+    const agentSlug = req.params["agentSlug"] as string;
+    const body = (req.body ?? {}) as { dryRun?: unknown; maxInvalidations?: unknown };
+    if (body.dryRun !== undefined && typeof body.dryRun !== "boolean") {
+      res.status(400).json({ success: false, error: "dryRun must be a boolean" });
+      return;
+    }
+    if (body.maxInvalidations !== undefined
+      && (!Number.isInteger(body.maxInvalidations) || (body.maxInvalidations as number) < 1)) {
+      res.status(400).json({ success: false, error: "maxInvalidations must be a positive integer" });
+      return;
+    }
+    const summary = await runRetentionSweep(agentSlug, {
+      dryRun: body.dryRun !== false,
+      ...(body.maxInvalidations !== undefined ? { maxInvalidations: body.maxInvalidations as number } : {}),
+    });
+    logger.info("[memory] Admin retention sweep complete", {
+      agentSlug,
+      requesterId: getRequesterId(req),
+      dryRun: body.dryRun !== false,
+      ...summary,
+    });
+    res.json({ success: true, data: summary });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    logger.error("[memory] POST retention-sweep failed", { err: message });
+    res.status(message.startsWith("Refusing") || message.includes("disabled") || message.includes("not opted in") ? 400 : 500)
+      .json({ success: false, error: message });
+  }
+});
+
 /**
  * GET /memory/banks/:agentSlug/memories
  * Query: ?scope=user|shared&search=...&limit=50&offset=0
@@ -376,7 +614,10 @@ memoryRouter.get("/banks/:agentSlug/memories", requireUserAuth, async (req, res)
     // post-filter has room to find the user's actual records even if
     // Hindsight returned a mixed bag.
     if (isDigitalTwinAgent(agentSlug) && userTag) {
-      const WIDE_FETCH = 500;
+      // Wide because the twin bank is SHARED across users and Hindsight can't
+      // tag-filter server-side — we over-fetch then filter to `userTag`. Sized
+      // to surface a heavy user's full set so pagination can page through it.
+      const WIDE_FETCH = Number(process.env["TWIN_MEMORIES_WIDE_FETCH"] ?? 2000);
       const widePage = await memory.listMemories(bankId, {
         limit: WIDE_FETCH,
         offset: 0,
@@ -407,6 +648,11 @@ memoryRouter.get("/banks/:agentSlug/memories", requireUserAuth, async (req, res)
           });
       const hitMap = new Map(hits.map((h) => [h.hindsightMemoryId, { count: h._count._all, lastHit: h._max.recalledAt }]));
 
+      // Trace link: the pipeline event that proposed each memory is carried on
+      // the memory itself as a `pipeline:<eventId>` tag (added at retain time).
+      // We read it straight from the tags — NOT via candidate.hindsightMemoryId,
+      // which Hindsight's retain leaves null. Memories retained before this tag
+      // existed simply have no pipeline: tag → the UI shows "No trace".
       const data = items.map((m) => {
         const tags = m.tags ?? [];
         const isShared = tags.includes("shared");
@@ -427,6 +673,7 @@ memoryRouter.get("/banks/:agentSlug/memories", requireUserAuth, async (req, res)
           createdAt: m.createdAt ?? null,
           recallHits7d: hitMap.get(m.id)?.count ?? 0,
           lastRecalledAt: hitMap.get(m.id)?.lastHit ?? null,
+          pipelineEventId: tags.find((t) => t.startsWith("pipeline:"))?.slice("pipeline:".length) ?? null,
         };
       });
 
@@ -1107,13 +1354,23 @@ memoryRouter.delete("/banks/:agentSlug/memories/:hindsightMemoryId", requireUser
       provider: memory.name,
       agentSlug,
       hindsightMemoryId,
-      by: (req as { user?: { id?: string } }).user?.id,
+      by: getRequesterId(req),
     });
     res.json({ success: true });
   } catch (err) {
-    logger.error("[memory] DELETE /banks/:agentSlug/memories/:hindsightMemoryId failed", {
-      err: err instanceof Error ? err.message : String(err),
-    });
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error("[memory] DELETE /banks/:agentSlug/memories/:hindsightMemoryId failed", { err: msg });
+    // Hindsight too old to support per-memory invalidate (405). Not a bug in this
+    // service — return an actionable 503 so the UI shows a real reason instead of
+    // a generic "Internal error", and ops knows to upgrade Hindsight.
+    if (msg.includes("HINDSIGHT_CURATION_UNSUPPORTED")) {
+      res.status(503).json({
+        success: false,
+        error: "Memory deletion is unavailable on this environment — the Hindsight service needs an upgrade (reversible curation).",
+        code: "HINDSIGHT_CURATION_UNSUPPORTED",
+      });
+      return;
+    }
     res.status(500).json({ success: false, error: "Internal error" });
   }
 });
@@ -1134,7 +1391,7 @@ memoryRouter.delete("/banks/:agentSlug/memories/:hindsightMemoryId", requireUser
 memoryRouter.post("/banks/:agentSlug/upload-md", requireUserAuth, async (req, res) => {
   try {
     const agentSlug = req.params["agentSlug"] as string;
-    const userId = (req as { user?: { id?: string } }).user?.id;
+    const userId = getRequesterId(req);
     if (!userId) {
       res.status(401).json({ success: false, error: "Unauthenticated" });
       return;
@@ -1429,24 +1686,24 @@ memoryRouter.post("/recall-hits", requireAuth, async (req, res) => {
       return;
     }
 
-    const slugs = [...new Set(hits.map((h) => h?.agentSlug).filter((x): x is string => typeof x === "string" && !!x))];
-    const orgId = getOrgId(req);
-    if (!orgId) {
-      logger.warn(`[memory/recall-hits] orgId is required slugs=${slugs.join(",") || "none"} hitCount=${hits.length}`);
-      res.status(400).json({ success: false, error: "orgId is required" });
-      return;
-    }
-    const agents = await prisma.agent.findMany({
-      where: { orgId, slug: { in: slugs } },
-      select: { slug: true },
+    // Org resolution (fixed 2026-07-17): this is an S2S callback from claw,
+    // which carries NO org context on the request — the getOrgId(req) guard
+    // added in the phase-2 org migration 400'd every batch, silently killing
+    // recall-hit tracking from 2026-07-05 onward. Derive orgId PER HIT from
+    // the run's user (User rows are org-scoped), which is also correct for
+    // same-slug agents in different orgs.
+    const userIds = [...new Set(hits.map((h) => h?.userId).filter((x): x is string => typeof x === "string" && !!x))];
+    const users = await prisma.user.findMany({
+      where: { id: { in: userIds } },
+      select: { id: true, orgId: true },
     });
-    const agentSlugs = new Set(agents.map((agent) => agent.slug));
+    const orgByUser = new Map(users.map((u) => [u.id, u.orgId]));
 
     const rows = hits
-      .filter((h) => h && h.agentSlug && agentSlugs.has(h.agentSlug) && h.hindsightMemoryId && h.userId && h.sessionId && h.scope && h.recalledAt)
+      .filter((h) => h && h.agentSlug && h.hindsightMemoryId && h.userId && h.sessionId && h.scope && h.recalledAt && orgByUser.has(h.userId))
       .map((h) => ({
         agentSlug: h.agentSlug,
-        orgId,
+        orgId: orgByUser.get(h.userId) as string,
         hindsightMemoryId: h.hindsightMemoryId,
         userId: h.userId,
         sessionId: h.sessionId,
@@ -1455,6 +1712,11 @@ memoryRouter.post("/recall-hits", requireAuth, async (req, res) => {
         recalledAt: new Date(h.recalledAt),
       }))
       .filter((r) => !Number.isNaN(r.recalledAt.getTime()));
+
+    const droppedUnknownUser = hits.length - rows.length;
+    if (droppedUnknownUser > 0) {
+      logger.warn(`[memory/recall-hits] dropped ${droppedUnknownUser}/${hits.length} hit(s) (unknown user or malformed)`);
+    }
 
     if (rows.length === 0) {
       res.status(400).json({ success: false, error: "No valid hits in payload" });
@@ -1652,7 +1914,7 @@ memoryRouter.post("/banks/:agentSlug/backfill", requireUserAuth, async (req, res
     // multi-day range blows past the ~60s nginx gateway timeout → 504. The
     // worker (agent-backfill-worker) runs it async; the UI polls the Pending
     // Review counts. Idempotent per (agent, range) at the queue level.
-    const requestedBy = (req as { user?: { id?: string } }).user?.id;
+    const requestedBy = getRequesterId(req);
     const jobId = await enqueueAgentBackfill({
       agentSlug,
       from,
@@ -1665,6 +1927,37 @@ memoryRouter.post("/banks/:agentSlug/backfill", requireUserAuth, async (req, res
     logger.error("[memory] POST /banks/:agentSlug/backfill failed", {
       err: err instanceof Error ? err.message : String(err),
     });
+    res.status(500).json({ success: false, error: "Internal error" });
+  }
+});
+
+/**
+ * GET /memory/banks/:agentSlug/backfill/:jobId
+ *
+ * Poll a queued backfill's state so the UI can show real progress instead of
+ * pretending a 202 means done. Returns the BullMQ state plus the worker's
+ * summary (returnvalue) once completed, or the failure reason.
+ */
+memoryRouter.get("/banks/:agentSlug/backfill/:jobId", requireUserAuth, async (req, res) => {
+  try {
+    const jobId = req.params["jobId"] as string;
+    const job = await getAgentBackfillQueue().getJob(jobId);
+    if (!job) {
+      res.status(404).json({ success: false, error: "Backfill job not found (it may have completed and been cleaned up)" });
+      return;
+    }
+    const state = await job.getState().catch(() => "unknown");
+    res.json({
+      success: true,
+      data: {
+        jobId,
+        state,
+        ...(state === "completed" ? { summary: job.returnvalue ?? null } : {}),
+        ...(state === "failed" ? { failedReason: job.failedReason ?? null } : {}),
+      },
+    });
+  } catch (err) {
+    logger.error("[memory] GET backfill status failed", { err: err instanceof Error ? err.message : String(err) });
     res.status(500).json({ success: false, error: "Internal error" });
   }
 });
@@ -1756,7 +2049,7 @@ memoryRouter.post("/banks/:agentSlug/enable", requireUserAuth, async (req, res) 
 
     logger.info("[memory] Agent enrolled in memory", {
       agentSlug,
-      by: (req as { user?: { id?: string } }).user?.id,
+      by: getRequesterId(req),
       ...readMemoryStatus(config),
     });
 
@@ -1791,12 +2084,296 @@ memoryRouter.post("/banks/:agentSlug/disable", requireUserAuth, async (req, res)
 
     logger.info("[memory] Agent unenrolled from memory", {
       agentSlug,
-      by: (req as { user?: { id?: string } }).user?.id,
+      by: getRequesterId(req),
     });
 
     res.json({ success: true, data: readMemoryStatus(config) });
   } catch (err) {
     logger.error("[memory] POST disable failed", { err: err instanceof Error ? err.message : String(err) });
     res.status(500).json({ success: false, error: "Internal error" });
+  }
+});
+
+/**
+ * POST /memory/banks/:agentSlug/clear-all
+ *
+ * Permanently removes every memory in an agent's bank while preserving the
+ * bank and its configuration. Owner/admin only because the bank is shared.
+ */
+memoryRouter.post("/banks/:agentSlug/clear-all", requireUserAuth, async (req, res) => {
+  try {
+    const agentSlug = req.params["agentSlug"] as string;
+    const userId = getRequesterId(req);
+    if (!userId) {
+      res.status(401).json({ success: false, error: "Unauthenticated" });
+      return;
+    }
+
+    const agent = await agentRepository.findBySlug(agentSlug, getOrgId(req));
+    if (!agent) {
+      logger.warn(`[memory/clear-all] agent org-scoped miss slug=${agentSlug} orgId=${getOrgId(req) ?? "none"} userId=${userId}`);
+      res.status(404).json({ success: false, error: "Agent not found" });
+      return;
+    }
+    const admin = await isClawAdmin(userId);
+    if (!admin && agent.ownerUserId !== userId) {
+      res.status(403).json({ success: false, error: "Only the agent owner or an admin can clear all memories." });
+      return;
+    }
+
+    if (!memory.clearAll) {
+      res.status(501).json({ success: false, error: "The configured memory provider does not support clearing all memories." });
+      return;
+    }
+
+    const deleted = await memory.clearAll(bankIdForAgent(agentSlug));
+    const reviews = await prisma.pendingMemoryReview.updateMany({
+      where: { agentSlug, status: { in: ["pending", "approved"] } },
+      data: { status: "rejected", updatedAt: new Date() },
+    });
+
+    logger.info("[memory] All memories cleared", {
+      agentSlug,
+      deleted,
+      by: userId,
+    });
+    res.json({ success: true, data: { deleted, reviewsRejected: reviews.count } });
+  } catch (err) {
+    logger.error("[memory] POST /banks/:agentSlug/clear-all failed", {
+      err: err instanceof Error ? err.message : String(err),
+    });
+    res.status(500).json({ success: false, error: "Internal error" });
+  }
+});
+
+/**
+ * DELETE /memory/banks/:agentSlug/subsystems/:subsystem
+ *
+ * Permanently removes every memory carrying `subsystem:<name>` in the agent's
+ * bank. Owner/admin only, same policy as clear-all — a subsystem is a shared
+ * slice of the bank, not any one user's data. Twin bank refused: its
+ * subsystems (style/expertise/...) span EVERY user's personal facts.
+ */
+memoryRouter.delete("/banks/:agentSlug/subsystems/:subsystem", requireUserAuth, async (req, res) => {
+  try {
+    const agentSlug = req.params["agentSlug"] as string;
+    const subsystem = (req.params["subsystem"] as string).trim().toLowerCase();
+    const userId = getRequesterId(req);
+    if (!userId) {
+      res.status(401).json({ success: false, error: "Unauthenticated" });
+      return;
+    }
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(subsystem)) {
+      res.status(400).json({ success: false, error: "Invalid subsystem name" });
+      return;
+    }
+    if (isDigitalTwinAgent(agentSlug)) {
+      res.status(400).json({ success: false, error: "Subsystem deletion is not available for the Digital Twin." });
+      return;
+    }
+
+    const agent = await agentRepository.findBySlug(agentSlug, getOrgId(req));
+    if (!agent) {
+      res.status(404).json({ success: false, error: "Agent not found" });
+      return;
+    }
+    const admin = await isClawAdmin(userId);
+    if (!admin && agent.ownerUserId !== userId) {
+      res.status(403).json({ success: false, error: "Only the agent owner or an admin can delete a subsystem." });
+      return;
+    }
+
+    if (!memory.deleteByTag) {
+      res.status(501).json({ success: false, error: "The configured memory provider does not support tag deletion." });
+      return;
+    }
+
+    const deleted = await memory.deleteByTag(bankIdForAgent(agentSlug), `subsystem:${subsystem}`);
+    const reviews = await prisma.pendingMemoryReview.updateMany({
+      where: { agentSlug, subsystem, status: { in: ["pending", "approved"] } },
+      data: { status: "rejected", updatedAt: new Date() },
+    });
+
+    logger.info("[memory] Subsystem deleted", { agentSlug, subsystem, deleted, by: userId });
+    res.json({ success: true, data: { deleted, reviewsRejected: reviews.count } });
+  } catch (err) {
+    logger.error("[memory] DELETE /banks/:agentSlug/subsystems/:subsystem failed", {
+      err: err instanceof Error ? err.message : String(err),
+    });
+    res.status(500).json({ success: false, error: "Internal error" });
+  }
+});
+
+/**
+ * POST /memory/banks/:agentSlug/upload-session
+ *
+ * Upload a raw Claude session export (Claude Code JSONL or claude.ai JSON) and
+ * distill it into the agent's shared memory. Owner/admin only — the bank is
+ * shared across everyone who uses the agent.
+ *
+ * The raw export is sent to claw's /internal/curator/distill-session, which
+ * parses + normalizes it and runs a chunked map-reduce distill so a large
+ * session isn't truncated. The resulting candidates are persisted as PENDING
+ * `PendingMemoryReview` rows (scope "shared") — NOT retained to the live bank
+ * until an admin approves them. Nothing about the agent's live memory changes
+ * on upload.
+ *
+ * Async: the parse + N-chunk distill is slow (many LLM calls), so the handler
+ * responds 202 immediately and does the work in the background (same pattern as
+ * batch approve). Uploaded candidates carry a `claude-<ts>-<file>` sessionId so
+ * admins can spot upload-sourced proposals in the review queue.
+ */
+memoryRouter.post("/banks/:agentSlug/upload-session", requireUserAuth, async (req, res) => {
+  try {
+    const agentSlug = req.params["agentSlug"] as string;
+    const userId = getRequesterId(req);
+    if (!userId) {
+      res.status(401).json({ success: false, error: "Unauthenticated" });
+      return;
+    }
+
+    // Owner/admin gate — identical to /upload-md.
+    const agent = await agentRepository.findBySlug(agentSlug, getOrgId(req));
+    if (!agent) {
+      logger.warn(`[memory/upload-session] agent org-scoped miss slug=${agentSlug} orgId=${getOrgId(req) ?? "none"} userId=${userId}`);
+      res.status(404).json({ success: false, error: "Agent not found" });
+      return;
+    }
+    const admin = await isClawAdmin(userId);
+    if (!admin && agent.ownerUserId !== userId) {
+      res.status(403).json({ success: false, error: "Only the agent owner or an admin can upload sessions." });
+      return;
+    }
+    // The twin bank holds per-user private memories; a "shared" upload into it
+    // is never correct (twin knowledge flows through the user-memory pipeline).
+    if (bankIdForAgent(agentSlug) === bankIdForAgent("digital-twin")) {
+      res.status(400).json({ success: false, error: "Sessions cannot be uploaded to the digital twin — twin memory is per-user and managed from the Digital Twin page." });
+      return;
+    }
+
+    const body = (req.body ?? {}) as { filename?: string; content?: string };
+    const filename = (body.filename ?? "").trim();
+    const content = (body.content ?? "").trim();
+    if (!filename || !content) {
+      res.status(400).json({ success: false, error: "filename and content are required" });
+      return;
+    }
+    // express.json() is configured for 50 MB; cap sessions well under that.
+    if (content.length > 20_000_000) {
+      res.status(413).json({ success: false, error: "Session exceeds 20 MB limit" });
+      return;
+    }
+
+    const now = new Date();
+    const reviewDate = now.toISOString().slice(0, 10); // YYYY-MM-DD
+    const sessionId = `claude-${now.getTime()}-${filename}`.slice(0, 200);
+
+    // Respond immediately — the parse + map-reduce distill is slow and must not
+    // block the request. Candidates appear in the review queue when done.
+    res.status(202).json({ success: true, data: { sessionId, status: "processing" } });
+
+    setImmediate(async () => {
+      try {
+        // Session-ingest path (2026-07-17, default ON): parse + clean on claw
+        // (no LLM), then retain the transcript DIRECTLY — the uploader is the
+        // owner/admin, so the upload itself is the approval, and the memory
+        // provider's tuned extraction (verbose + retain_mission) produces the
+        // facts. The legacy map-reduce distill (MEMORY_SESSION_INGEST=0)
+        // queues per-subsystem review rows instead.
+        if (process.env["MEMORY_SESSION_INGEST"] !== "0") {
+          const parsed = await parseSessionFile({ sessionId, agentSlug, userId, filename, rawSession: content });
+          if (!parsed) {
+            logger.warn("[memory] /upload-session parse produced no transcript", { agentSlug, filename, by: userId });
+            return;
+          }
+          const bankId = bankIdForAgent(agentSlug);
+          await memory.ensureBank(bankId, {
+            mission: `Shared memory for xyne-claw agent "${agentSlug}".`,
+            retainMission: buildRetainMission({ name: agent.name, description: agent.description }),
+          });
+          const subsystem = await classifySessionSubsystemForBank(memory, bankId, {
+            sessionId,
+            agentSlug,
+            agentName: agent.name,
+            task: parsed.meta.task ?? `Uploaded session: ${filename}`,
+            transcript: parsed.transcript,
+          });
+          const tags = [
+            "shared",
+            `agent:${agentSlug}`,
+            `session:${sessionId}`,
+            // Provenance: uploaded Claude sessions have NO agent_runs row, so
+            // without this tag the contributor is unrecoverable. contributor:
+            // (not user:) — user: is the twin privacy filter prefix.
+            `contributor:${userId}`,
+            "source:claude-upload",
+            ...(subsystem ? [`subsystem:${subsystem}`] : []),
+          ];
+          // Retain in generous slices (provider chunks internally at ~3K; the
+          // slices just keep individual request bodies sane for huge uploads).
+          const SLICE = 150_000;
+          const items = [];
+          for (let i = 0; i < parsed.transcript.length; i += SLICE) {
+            items.push({
+              content: parsed.transcript.slice(i, i + SLICE),
+              tags,
+              metadata: {
+                agentSlug,
+                sessionId,
+                source: "claude-upload",
+                filename: filename.slice(0, 120),
+                ...(subsystem ? { subsystem } : {}),
+              },
+            });
+          }
+          await memory.retain(bankId, items);
+          logger.info("[memory] /upload-session transcript retained for extraction", {
+            agentSlug, filename, by: userId,
+            transcriptChars: parsed.transcript.length,
+            slices: items.length,
+            format: parsed.meta.format,
+            turnCount: parsed.meta.turnCount,
+            subsystem,
+          });
+          return;
+        }
+
+        const candidates = await distillSessionFile({ sessionId, agentSlug, userId, filename, rawSession: content });
+        if (candidates.length === 0) {
+          logger.info("[memory] /upload-session produced no candidates", { agentSlug, filename, by: userId });
+          return;
+        }
+        const transcript: SessionTranscript = {
+          sessionId,
+          userId,
+          agentSlug,
+          orgId: agent.orgId,
+          conversationId: null,
+          channelId: null,
+          task: `Claude session upload "${filename}"`,
+          result: "",
+          toolsUsed: [],
+          toolInvocations: [],
+          tokensIn: 0,
+          tokensOut: 0,
+          approvalStrategy: "upload",
+          startedAt: now,
+          completedAt: new Date(),
+        };
+        const reviewIds = await persistSubsystemReviews(transcript, candidates, reviewDate);
+        logger.info("[memory] /upload-session curated claude session", {
+          agentSlug, filename, candidatesCreated: reviewIds.length, by: userId,
+        });
+      } catch (err) {
+        logger.error("[memory] /upload-session background processing failed", {
+          agentSlug, filename, err: err instanceof Error ? err.message : String(err),
+        });
+      }
+    });
+  } catch (err) {
+    logger.error("[memory] POST /banks/:agentSlug/upload-session failed", {
+      err: err instanceof Error ? err.message : String(err),
+    });
+    if (!res.headersSent) res.status(500).json({ success: false, error: "Internal error" });
   }
 });

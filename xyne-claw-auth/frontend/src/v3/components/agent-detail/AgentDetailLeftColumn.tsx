@@ -93,7 +93,7 @@ function kindToTab(kind: string): Exclude<ToolTabKey, "subagents"> {
  * because some `custom`-kind integrations (notably the `custom:sandbox`
  * tool source — sandbox-create, sandbox-run, sandbox-pw-*, etc.) belong in
  * the Sandbox tab next to the builtin bash/edit, not in Platform alongside
- * Google/Microsoft/pgm/research-agent. Special-case those by slug.
+ * Google/Microsoft/research-agent. Special-case those by slug.
  */
 function integrationTab(intg: { kind: string; slug: string }): Exclude<ToolTabKey, "subagents"> {
   if (intg.kind === "custom" && intg.slug === "custom:sandbox") return "sandbox";
@@ -210,7 +210,6 @@ const SECTION_INFO: Record<ToolTabKey, SectionInfoDef> = {
     what: "Platform tools are shipped directly by Xyne and are always available — no external connections needed. They cover capabilities like web research, document processing, and data retrieval that are useful across many agent types.",
     when: "Enable platform tools when the agent needs general-purpose capabilities (e.g. browsing the web for up-to-date information, processing uploaded documents, or running internal search queries).",
     examples: [
-      { name: "pgm",             note: "Package manager tool for looking up library versions" },
       { name: "google",          note: "Search Google and retrieve page content" },
       { name: "research-agent",  note: "Deep research across multiple sources" },
     ],

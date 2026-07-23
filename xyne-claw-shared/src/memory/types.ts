@@ -32,6 +32,16 @@ export interface RetainItem {
   content: string;
   tags?: string[];
   metadata?: Record<string, string>;
+  /** When the fact actually OCCURRED (ISO). Providers that model time (Hindsight)
+   *  use this for recency ranking + temporal queries. Falls back to now() when
+   *  omitted — so "worked on A in Jan" and "on B in June" are distinguishable
+   *  instead of both looking like they happened at retain time. */
+  timestamp?: string;
+  /** How to scope observation consolidation (Hindsight). A list of tag-lists
+   *  runs one pass per inner list — e.g. `[["user:abc"]]` confines observations
+   *  to that user's own facts, which is REQUIRED on a shared multi-user bank so
+   *  observations never mix users. Ignored by providers without observations. */
+  observationScopes?: string[][];
 }
 
 export interface RetainedMemory {
@@ -58,6 +68,13 @@ export interface RecallOpts {
   types?: string[];
   /** Soft upper bound on returned tokens; providers may approximate. */
   maxTokens?: number;
+  /** Prefer higher-level "observation" memories (evolution-aware syntheses) over
+   *  raw facts when available. Hindsight-only; ignored elsewhere. */
+  preferObservations?: boolean;
+  /** ISO "now" anchor for relative time expressions in the query ("last month",
+   *  "before X"). Hindsight parses time windows from the query TEXT; this sets
+   *  the reference point. Ignored by providers without temporal search. */
+  queryTimestamp?: string;
 }
 
 export interface RecalledMemory {
@@ -127,8 +144,48 @@ export interface EntityGraph {
   edges: EntityGraphEdge[];
 }
 
+/**
+ * Memory-level graph — nodes are MEMORIES (not entities), edges are the real
+ * relationships Hindsight precomputes: `semantic` (embedding similarity),
+ * `temporal` (time-based), `entity` (shared entities). Powers the constellation
+ * view. Node id === the memory/unit id from listMemories, so callers can
+ * cross-reference against their own memory list.
+ */
+export interface MemoryGraphNode {
+  id: string;
+  /** Canonical entity names Hindsight extracted for this memory. */
+  entities?: string[];
+  /** Hindsight fact type: "world" | "experience" | "observation". */
+  factType?: string;
+  tags?: string[];
+}
+export interface MemoryGraphEdge {
+  source: string;
+  target: string;
+  /** "semantic" | "temporal" | "entity". */
+  linkType: string;
+  weight?: number;
+}
+export interface MemoryGraph {
+  nodes: MemoryGraphNode[];
+  edges: MemoryGraphEdge[];
+}
+
 export interface EnsureBankOpts {
   mission?: string;
+  /**
+   * Plain-language steering for the provider's retain-time extraction (what
+   * to keep, what to ignore). Providers that support it (Hindsight
+   * `retain_mission`) apply it as bank config; others ignore it. Callers
+   * build it from the agent's description — see buildRetainMission in the
+   * hindsight provider.
+   */
+  retainMission?: string;
+  /** Enable Hindsight's observation layer (evolution/consolidation memories) for
+   *  this bank. Default OFF (avoids ~2× duplication). The Digital Twin bank turns
+   *  this ON for temporal/evolution tracking, scoping observations per-user via
+   *  RetainItem.observationScopes. */
+  enableObservations?: boolean;
 }
 
 /**
@@ -170,11 +227,22 @@ export interface MemoryProvider {
    */
   deleteByTag?(bankId: string, tag: string): Promise<number>;
 
+  /**
+   * Hard-delete EVERY memory in the bank. The bank row and config overrides
+   * survive. Optional — callers feature-detect and own authorization.
+   */
+  clearAll?(bankId: string): Promise<number>;
+
   /** Capable providers only. Capability flag: `reflect`. */
   reflect?(bankId: string, query: string): Promise<ReflectResult>;
 
   /** Entity-relationship graph for the bank. Capable providers only — flag: `entityGraph`. */
   getEntityGraph?(bankId: string): Promise<EntityGraph>;
+
+  /** Memory-level graph (nodes = memories, edges = semantic/temporal/entity links)
+   *  for the constellation view. `opts.tags` scopes to a subset (e.g. one user);
+   *  Hindsight filters these at the SQL layer. Optional — callers feature-detect. */
+  getMemoryGraph?(bankId: string, opts?: { tags?: string[]; limit?: number }): Promise<MemoryGraph>;
 }
 
 /** Convert an agent slug into a stable bank id usable by every provider. */
@@ -186,4 +254,16 @@ export function bankIdForAgent(agentSlug: string): string {
     .replace(/^-+|-+$/g, "")
     .slice(0, 44);
   return `xyne-${sanitized}`;
+}
+
+/** Org-scoped bank id: `xyne-<org8>-<slug>`. org8 = first 8 lowercased alphanumeric chars of orgId. Multi-org fix (2026-07-17): slug-only bank ids made same-slug agents in different orgs share one memory bank. */
+export function bankIdForAgentOrg(agentSlug: string, orgId: string): string {
+  const sanitized = agentSlug
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/-{2,}/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 44);
+  const org8 = orgId.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 8);
+  return `xyne-${org8}-${sanitized}`;
 }

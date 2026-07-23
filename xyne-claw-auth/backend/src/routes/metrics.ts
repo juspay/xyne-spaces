@@ -403,6 +403,12 @@ interface MetricsResponse {
     avgLlmMs: number | null;
     avgToolMs: number | null;
     errorRate: number;
+    /** Window token totals — fresh input, cached (read/write), and output. */
+    tokens?: { in: number; out: number; cacheRead: number; cacheWrite: number };
+    /** Distinct users in the window. */
+    uniqueUsers?: number;
+    /** Memory adoption — runs that recalled >=1 memory (per-agent endpoint only). */
+    memoryRecall?: { runsWithRecall: number; rate: number };
   };
   delta: {
     runs: number;       // current - previous (raw)
@@ -477,9 +483,15 @@ metricsRouter.get("/agent/:slug", async (req: Request<{ slug: string }>, res: Re
       avg_tool_ms: number | null;
       avg_turns: number | null;
       avg_tps: number | null;
+      tokens_in: bigint;
+      tokens_out: bigint;
+      tokens_cache_read: bigint;
+      tokens_cache_write: bigint;
+      unique_users: bigint;
     }>>`
       SELECT
         COUNT(*)                                       AS runs,
+        COUNT(DISTINCT "userId")                       AS unique_users,
         COUNT(*) FILTER (WHERE status = 'completed')   AS completed,
         COUNT(*) FILTER (WHERE status = 'failed')      AS failed,
         COUNT(*) FILTER (WHERE status = 'cancelled')   AS cancelled,
@@ -488,7 +500,11 @@ metricsRouter.get("/agent/:slug", async (req: Request<{ slug: string }>, res: Re
         AVG("llmTotalMs")                              AS avg_llm_ms,
         AVG("toolMs")                                  AS avg_tool_ms,
         AVG("llmTurns")                                AS avg_turns,
-        AVG("tokensPerSec")                            AS avg_tps
+        AVG("tokensPerSec")                            AS avg_tps,
+        COALESCE(SUM("tokensIn"), 0)                   AS tokens_in,
+        COALESCE(SUM("tokensOut"), 0)                  AS tokens_out,
+        COALESCE(SUM("tokensCacheRead"), 0)            AS tokens_cache_read,
+        COALESCE(SUM("tokensCacheWrite"), 0)           AS tokens_cache_write
       FROM "agent_runs"
       WHERE "agentSlug" = ${slug}
         AND "completedAt" >= ${windowStart}
@@ -545,6 +561,32 @@ metricsRouter.get("/agent/:slug", async (req: Request<{ slug: string }>, res: Re
         avgTurns: t?.avg_turns != null ? Number(t.avg_turns.toFixed(2)) : null,
         avgTokensPerSec: round(t?.avg_tps ?? null),
         errorRate: totalsRuns > 0 ? totalsErrors / totalsRuns : 0,
+        // Token accounting. "fresh" input is what providers bill as new input;
+        // cacheRead is prior context replayed from provider cache (cheap but
+        // real consumption); cacheWrite is context written to cache. Total
+        // input processed = fresh + cacheRead + cacheWrite — reporting only
+        // `tokensIn` understates real volume ~10x on cache-heavy agents.
+        tokens: {
+          in: t ? Number(t.tokens_in) : 0,
+          out: t ? Number(t.tokens_out) : 0,
+          cacheRead: t ? Number(t.tokens_cache_read) : 0,
+          cacheWrite: t ? Number(t.tokens_cache_write) : 0,
+        },
+        uniqueUsers: t ? Number(t.unique_users) : 0,
+        // Memory adoption: fraction of runs that recalled >=1 memory. THE
+        // number to manage after ingesting sessions — a fat bank nobody
+        // queries is dead weight (2026-07-20: ~1% of runs used memory).
+        memoryRecall: await (async () => {
+          const sessions = await prisma.$queryRaw<Array<{ n: bigint }>>`
+            SELECT COUNT(DISTINCT "sessionId") AS n
+            FROM "memory_recall_hits"
+            WHERE "agentSlug" = ${slug}
+              AND "recalledAt" >= ${windowStart}
+              AND "recalledAt" <  ${windowEnd}
+          `;
+          const withRecall = sessions[0] ? Number(sessions[0].n) : 0;
+          return { runsWithRecall: withRecall, rate: totalsRuns > 0 ? withRecall / totalsRuns : 0 };
+        })(),
       },
       delta: {
         runs: totalsRuns - prevRuns,
@@ -785,16 +827,26 @@ metricsRouter.get("/global", async (req: Request, res: Response) => {
       p95_total_ms: number | null;
       avg_llm_ms: number | null;
       avg_tool_ms: number | null;
+      tokens_in: bigint;
+      tokens_out: bigint;
+      tokens_cache_read: bigint;
+      tokens_cache_write: bigint;
+      unique_users: bigint;
     }>>`
       SELECT
         COUNT(*)                                       AS runs,
+        COUNT(DISTINCT "userId")                       AS unique_users,
         COUNT(*) FILTER (WHERE status = 'completed')   AS completed,
         COUNT(*) FILTER (WHERE status = 'failed')      AS failed,
         COUNT(*) FILTER (WHERE status = 'cancelled')   AS cancelled,
         PERCENTILE_CONT(0.5)  WITHIN GROUP (ORDER BY "totalMs")    AS p50_total_ms,
         PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY "totalMs")    AS p95_total_ms,
         AVG("llmTotalMs")                              AS avg_llm_ms,
-        AVG("toolMs")                                  AS avg_tool_ms
+        AVG("toolMs")                                  AS avg_tool_ms,
+        COALESCE(SUM("tokensIn"), 0)                   AS tokens_in,
+        COALESCE(SUM("tokensOut"), 0)                  AS tokens_out,
+        COALESCE(SUM("tokensCacheRead"), 0)            AS tokens_cache_read,
+        COALESCE(SUM("tokensCacheWrite"), 0)           AS tokens_cache_write
       FROM "agent_runs"
       WHERE "completedAt" >= ${windowStart}
         AND "completedAt" <  ${windowEnd}
@@ -871,6 +923,15 @@ metricsRouter.get("/global", async (req: Request, res: Response) => {
         avgLlmMs: round(t?.avg_llm_ms ?? null),
         avgToolMs: round(t?.avg_tool_ms ?? null),
         errorRate: totalsRuns > 0 ? totalsErrors / totalsRuns : 0,
+        // Same accounting as the per-agent endpoint: fresh vs cached input
+        // reported separately so the UI can show true volume (fresh+cached).
+        tokens: {
+          in: t ? Number(t.tokens_in) : 0,
+          out: t ? Number(t.tokens_out) : 0,
+          cacheRead: t ? Number(t.tokens_cache_read) : 0,
+          cacheWrite: t ? Number(t.tokens_cache_write) : 0,
+        },
+        uniqueUsers: t ? Number(t.unique_users) : 0,
       },
       delta: {
         runs: totalsRuns - prevRuns,

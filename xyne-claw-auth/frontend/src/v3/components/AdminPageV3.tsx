@@ -24,6 +24,7 @@ import {
   CaretRightIcon,
   CheckIcon,
   EyeIcon,
+  SlackLogoIcon,
 } from "@phosphor-icons/react";
 
 import { PageLayout } from "./ui/PageLayout";
@@ -68,6 +69,10 @@ import {
   deleteAdminMcpGlobalCreds,
   setAdminMcpFallbackFlag,
   getCredentialFields,
+  createSlackAgentApp,
+  listSlackAgentStatuses,
+  registerSlackCommand,
+  removeSlackAgentRegistration,
   listWorkflowGlobalRequests,
   approveWorkflowGlobalRequest,
   rejectWorkflowGlobalRequest,
@@ -80,6 +85,7 @@ import {
   type AdminScheduledJob,
   type AdminMcpServerSummary,
   type AdminMcpGlobalCredsDetail,
+  type SlackAgentStatus,
 } from "../../lib/api";
 import type { Agent, AgentLight, McpServer, CredentialField } from "../../lib/types";
 
@@ -130,9 +136,11 @@ export function AdminPageV3({ userId }: Props) {
   /* Common datasets */
   const [agents, setAgents] = useState<AgentLight[]>([]);
   const [admins, setAdmins] = useState<AdminRole[]>([]);
+  const [searchEvalUsers, setSearchEvalUsers] = useState<AdminRole[]>([]);
   const [requests, setRequests] = useState<AgentRequestItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [newAdminId, setNewAdminId] = useState("");
+  const [newSearchEvalUserId, setNewSearchEvalUserId] = useState("");
 
   /* MCP publish requests */
   const [mcpRequests, setMcpRequests] = useState<McpServer[]>([]);
@@ -184,6 +192,7 @@ export function AdminPageV3({ userId }: Props) {
 
   /* Confirm dialogs */
   const [revokeTarget, setRevokeTarget] = useState<AdminRole | null>(null);
+  const [revokeSearchEvalTarget, setRevokeSearchEvalTarget] = useState<AdminRole | null>(null);
   const [promoteTarget, setPromoteTarget] = useState<AgentLight | null>(null);
   const [demoteTarget, setDemoteTarget] = useState<AgentLight | null>(null);
   const [deleteAgentTarget, setDeleteAgentTarget] = useState<AgentLight | null>(null);
@@ -195,6 +204,20 @@ export function AdminPageV3({ userId }: Props) {
 
   /* Spaces App registration flow */
   const [spacesFlow, setSpacesFlow] = useState<SpacesFlow | null>(null);
+  const [slackCreatingSlug, setSlackCreatingSlug] = useState<string | null>(null);
+  const [slackAgentStatuses, setSlackAgentStatuses] = useState<Record<string, SlackAgentStatus>>({});
+  const [slackStatusesReady, setSlackStatusesReady] = useState(false);
+  const [slackInstall, setSlackInstall] = useState<{
+    agent: AgentLight;
+    appId: string;
+  } | null>(null);
+  /* Slack surface choice: command on the umbrella app vs a dedicated app */
+  const [slackChoice, setSlackChoice] = useState<{
+    agent: AgentLight;
+    commandName: string;
+  } | null>(null);
+  const [slackRegisteringCommand, setSlackRegisteringCommand] = useState(false);
+  const slackFocusListenerRef = useRef<(() => void) | null>(null);
   const pictureInputRef = useRef<HTMLInputElement | null>(null);
   const rowPictureInputRef = useRef<HTMLInputElement | null>(null);
   const [rowUploadSlug, setRowUploadSlug] = useState<string | null>(null);
@@ -219,14 +242,16 @@ export function AdminPageV3({ userId }: Props) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [a, r, reqs] = await Promise.all([
+      const [a, r, sr, reqs] = await Promise.all([
         // Admin panel: the full roster across all users (server enforces admin).
         listAgents(userId, true, adminOrgScope),
         listAdminRoles(userId, adminOrgScope).catch(() => []),
+        listAdminRoles(userId, adminOrgScope, "SEARCH_EVAL_ACCESS").catch(() => []),
         listPendingRequests(userId, adminOrgScope).catch(() => []),
       ]);
       setAgents(a);
       setAdmins(r);
+      setSearchEvalUsers(sr);
       setRequests(reqs);
     } catch (err) {
       console.error("[admin] load error:", err);
@@ -237,6 +262,35 @@ export function AdminPageV3({ userId }: Props) {
   }, [userId, adminOrgScope, showSnackbar]);
 
   useEffect(() => { load(); }, [load]);
+
+  const loadSlackAgentStatuses = useCallback(async () => {
+    setSlackStatusesReady(false);
+    try {
+      const orgIds = [...new Set(agents.map((agent) => agent.orgId))];
+      const results = await Promise.allSettled(orgIds.map((orgId) => listSlackAgentStatuses(orgId)));
+      const rows = results.flatMap((result, index) => {
+        if (result.status === "fulfilled") return result.value;
+        console.warn(`[admin] Slack agent status load failed for org ${orgIds[index]}`);
+        return [];
+      });
+      setSlackAgentStatuses(Object.fromEntries(rows.map((status) => [status.agentId, status])));
+      if (orgIds.length > 0 && results.every((result) => result.status === "rejected")) {
+        showSnackbar({ variant: "error", title: "Failed to load Slack app status" });
+      }
+    } finally {
+      setSlackStatusesReady(true);
+    }
+  }, [agents, showSnackbar]);
+
+  useEffect(() => {
+    if (tab === "agents") void loadSlackAgentStatuses();
+  }, [tab, loadSlackAgentStatuses]);
+
+  useEffect(() => () => {
+    if (slackFocusListenerRef.current) {
+      window.removeEventListener("focus", slackFocusListenerRef.current);
+    }
+  }, []);
 
   const loadAuditLogs = useCallback(async () => {
     setAuditLoading(true);
@@ -587,6 +641,37 @@ export function AdminPageV3({ userId }: Props) {
     }
   };
 
+  const handleGrantSearchEval = async () => {
+    if (!newSearchEvalUserId.trim()) return;
+    try {
+      await grantAdmin(userId, newSearchEvalUserId.trim(), "SEARCH_EVAL_ACCESS");
+      showSnackbar({ variant: "success", title: "Search Eval access granted" });
+      setNewSearchEvalUserId("");
+      load();
+    } catch (err) {
+      showSnackbar({
+        variant: "error",
+        title: err instanceof Error ? err.message : "Failed to grant access",
+      });
+    }
+  };
+
+  const confirmRevokeSearchEval = async () => {
+    if (!revokeSearchEvalTarget) return;
+    try {
+      await revokeAdmin(userId, revokeSearchEvalTarget.userId, "SEARCH_EVAL_ACCESS");
+      showSnackbar({ variant: "success", title: "Search Eval access revoked" });
+      load();
+    } catch (err) {
+      showSnackbar({
+        variant: "error",
+        title: err instanceof Error ? err.message : "Failed to revoke",
+      });
+    } finally {
+      setRevokeSearchEvalTarget(null);
+    }
+  };
+
   /* ── Agent action handlers ─────────────────────────────────────── */
 
   const confirmPromote = async () => {
@@ -766,6 +851,161 @@ export function AdminPageV3({ userId }: Props) {
   const handleSkipGrant = useCallback(() => {
     setSpacesFlow((f) => (f ? { ...f, step: "upload" } : f));
   }, []);
+
+  const handleCreateSlackApp = useCallback(async (agent: AgentLight) => {
+    setSlackCreatingSlug(agent.slug);
+    try {
+      const created = await createSlackAgentApp(agent.slug, agent.orgId);
+      setSlackAgentStatuses((current) => {
+        const existing = current[agent.id];
+        return {
+          ...current,
+          [agent.id]: created.reused && existing ? {
+            ...existing,
+            appId: created.appId,
+            installUrl: created.installUrl,
+          } : {
+            agentId: agent.id,
+            agentSlug: agent.slug,
+            appId: created.appId,
+            status: "created",
+            installs: [],
+            installUrl: created.installUrl,
+          },
+        };
+      });
+      setSlackInstall({ agent, appId: created.appId });
+      showSnackbar({
+        variant: "success",
+        title: created.reused ? `Slack app ready for ${agent.name}` : `Slack app created for ${agent.name}`,
+      });
+    } catch (error) {
+      showSnackbar({
+        variant: "error",
+        title: error instanceof Error ? error.message : "Failed to create Slack app",
+      });
+    } finally {
+      setSlackCreatingSlug(null);
+    }
+  }, [showSnackbar]);
+
+  const openFreshSlackInstall = useCallback(async (agent: AgentLight) => {
+    setSlackCreatingSlug(agent.slug);
+    try {
+      const created = await createSlackAgentApp(agent.slug, agent.orgId);
+      setSlackAgentStatuses((current) => {
+        const existing = current[agent.id];
+        return {
+          ...current,
+          [agent.id]: created.reused && existing ? {
+            ...existing,
+            appId: created.appId,
+            installUrl: created.installUrl,
+          } : {
+            agentId: agent.id,
+            agentSlug: agent.slug,
+            appId: created.appId,
+            status: "created",
+            installs: [],
+            installUrl: created.installUrl,
+          },
+        };
+      });
+      if (slackFocusListenerRef.current) {
+        window.removeEventListener("focus", slackFocusListenerRef.current);
+      }
+      const refreshOnce = () => {
+        window.removeEventListener("focus", refreshOnce);
+        slackFocusListenerRef.current = null;
+        void loadSlackAgentStatuses();
+      };
+      slackFocusListenerRef.current = refreshOnce;
+      window.addEventListener("focus", refreshOnce, { once: true });
+      window.open(created.installUrl, "_blank", "noopener,noreferrer");
+    } catch (error) {
+      showSnackbar({
+        variant: "error",
+        title: error instanceof Error ? error.message : "Failed to open Slack install",
+      });
+    } finally {
+      setSlackCreatingSlug(null);
+    }
+  }, [loadSlackAgentStatuses, showSnackbar]);
+
+  const handleRemoveSlackRegistration = useCallback(async (agent: AgentLight) => {
+    try {
+      await removeSlackAgentRegistration(agent.slug, agent.orgId);
+      setSlackAgentStatuses((current) => {
+        const next = { ...current };
+        delete next[agent.id];
+        return next;
+      });
+      showSnackbar({
+        variant: "success",
+        title: `Slack registration removed for ${agent.name}`,
+        description: "If the Slack app still exists, delete it in the Slack console too.",
+      });
+    } catch (error) {
+      showSnackbar({
+        variant: "error",
+        title: error instanceof Error ? error.message : "Failed to remove Slack registration",
+      });
+    }
+  }, [showSnackbar]);
+
+  const handleSlackAction = useCallback((agent: AgentLight) => {
+    const status = slackAgentStatuses[agent.id];
+    if (status && status.status !== "command") {
+      void openFreshSlackInstall(agent);
+      return;
+    }
+    // New registration (or command-only so far): let the admin choose between
+    // a slash command on the org's umbrella app and a dedicated Slack app.
+    setSlackChoice({
+      agent,
+      commandName: status?.commandName ?? `/${agent.slug}`,
+    });
+  }, [openFreshSlackInstall, slackAgentStatuses]);
+
+  const handleRegisterSlackCommand = useCallback(async () => {
+    if (!slackChoice) return;
+    const { agent, commandName } = slackChoice;
+    setSlackRegisteringCommand(true);
+    try {
+      const registered = await registerSlackCommand(agent.slug, {
+        ...(agent.orgId ? { orgId: agent.orgId } : {}),
+        commandName,
+      });
+      setSlackAgentStatuses((current) => ({
+        ...current,
+        [agent.id]: {
+          ...(current[agent.id] ?? {
+            agentId: agent.id,
+            agentSlug: agent.slug,
+            appId: "",
+            status: "command" as const,
+            installs: [],
+            installUrl: null,
+          }),
+          commandName: registered.commandName,
+          ...(current[agent.id] ? {} : { status: "command" as const }),
+        },
+      }));
+      showSnackbar({
+        variant: "success",
+        title: `${registered.commandName} is live in Slack`,
+        description: `${agent.name} now answers ${registered.commandName} in every channel of the connected workspace.`,
+      });
+      setSlackChoice(null);
+    } catch (error) {
+      showSnackbar({
+        variant: "error",
+        title: error instanceof Error ? error.message : "Failed to register Slack command",
+      });
+    } finally {
+      setSlackRegisteringCommand(false);
+    }
+  }, [showSnackbar, slackChoice]);
 
   const openRowPicturePicker = useCallback((slug: string) => {
     setRowUploadSlug(slug);
@@ -970,6 +1210,9 @@ export function AdminPageV3({ userId }: Props) {
                     globalAgents={globalAgents}
                     personalAgents={personalAgents}
                     spacesFlow={spacesFlow}
+                    slackCreatingSlug={slackCreatingSlug}
+                    slackAgentStatuses={slackAgentStatuses}
+                    slackStatusesReady={slackStatusesReady}
                     onResumeSetup={(a, hasApp) =>
                       setSpacesFlow({
                         requestId: "",
@@ -978,6 +1221,8 @@ export function AdminPageV3({ userId }: Props) {
                       })
                     }
                     onUploadPicture={openRowPicturePicker}
+                    onSlackAction={handleSlackAction}
+                    onRemoveSlack={handleRemoveSlackRegistration}
                     onPromote={setPromoteTarget}
                     onDemote={setDemoteTarget}
                     onDelete={setDeleteAgentTarget}
@@ -995,6 +1240,11 @@ export function AdminPageV3({ userId }: Props) {
                     onNewAdminIdChange={setNewAdminId}
                     onGrant={handleGrant}
                     onRevoke={setRevokeTarget}
+                    searchEvalUsers={searchEvalUsers}
+                    newSearchEvalUserId={newSearchEvalUserId}
+                    onNewSearchEvalUserIdChange={setNewSearchEvalUserId}
+                    onGrantSearchEval={handleGrantSearchEval}
+                    onRevokeSearchEval={setRevokeSearchEvalTarget}
                     showOrgLabels={allOrgs}
                   />
                 )}
@@ -1121,6 +1371,84 @@ export function AdminPageV3({ userId }: Props) {
         )}
       </Dialog>
 
+      <Dialog
+        open={slackInstall !== null}
+        onOpenChange={(open) => { if (!open) setSlackInstall(null); }}
+        title="Slack app created"
+        description={slackInstall ? `${slackInstall.agent.name} is ready to install in a Slack workspace.` : undefined}
+        footer={
+          slackInstall ? (
+            <Button
+              variant="primary"
+              leadingIcon={<SlackLogoIcon size={14} />}
+              onClick={() => void openFreshSlackInstall(slackInstall.agent)}
+            >
+              Install to workspace
+            </Button>
+          ) : undefined
+        }
+      >
+        <p className="text-[13px] text-xyne-fg-secondary">
+          Slack app ID: <span className="font-mono text-xyne-fg-primary">{slackInstall?.appId}</span>
+        </p>
+      </Dialog>
+
+      {/* Slack surface choice: umbrella command vs dedicated app */}
+      <Dialog
+        open={slackChoice !== null}
+        onOpenChange={(open) => { if (!open) setSlackChoice(null); }}
+        title={slackChoice ? `Add ${slackChoice.agent.name} to Slack` : "Add to Slack"}
+        description="How should people reach this agent?"
+      >
+        {slackChoice ? (
+          <div className="flex flex-col gap-4">
+            <div className="rounded-lg border border-xyne-border-subtle p-3 flex flex-col gap-2">
+              <p className="text-[13px] font-medium text-xyne-fg-primary">⚡ Command on the Xyne app (recommended)</p>
+              <p className="text-[12px] text-xyne-fg-secondary">
+                Works in every channel immediately — no install, no approval. Replies post
+                in-channel; follow-ups continue in the thread.
+              </p>
+              <TextField
+                label="Command"
+                value={slackChoice.commandName}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setSlackChoice((current) => current ? { ...current, commandName: value } : current);
+                }}
+                placeholder={`/${slackChoice.agent.slug}`}
+              />
+              <Button
+                variant="primary"
+                size="sm"
+                disabled={slackRegisteringCommand}
+                onClick={() => void handleRegisterSlackCommand()}
+              >
+                {slackRegisteringCommand ? "Registering…" : "Register command"}
+              </Button>
+            </div>
+            <div className="rounded-lg border border-xyne-border-subtle p-3 flex flex-col gap-2">
+              <p className="text-[13px] font-medium text-xyne-fg-primary">🤖 Its own Slack app</p>
+              <p className="text-[12px] text-xyne-fg-secondary">
+                A real @{slackChoice.agent.slug} bot: DM it, @mention it, its own name and avatar.
+                Requires a workspace install (and possibly Slack-admin approval).
+              </p>
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={slackRegisteringCommand}
+                onClick={() => {
+                  const agent = slackChoice.agent;
+                  setSlackChoice(null);
+                  void handleCreateSlackApp(agent);
+                }}
+              >
+                Create dedicated app
+              </Button>
+            </div>
+          </div>
+        ) : null}
+      </Dialog>
+
       {/* Reject request inline */}
       <Dialog
         open={rejectingRequestId !== null}
@@ -1171,6 +1499,19 @@ export function AdminPageV3({ userId }: Props) {
         confirmLabel="Revoke"
         danger
         onConfirm={confirmRevoke}
+      />
+      <ConfirmDialog
+        open={Boolean(revokeSearchEvalTarget)}
+        onOpenChange={(open) => { if (!open) setRevokeSearchEvalTarget(null); }}
+        title="Revoke Search Eval access"
+        description={
+          revokeSearchEvalTarget
+            ? `Revoke Search Eval access from ${revokeSearchEvalTarget.user.name} (${revokeSearchEvalTarget.user.email})?`
+            : ""
+        }
+        confirmLabel="Revoke"
+        danger
+        onConfirm={confirmRevokeSearchEval}
       />
       <ConfirmDialog
         open={Boolean(promoteTarget)}
@@ -1787,7 +2128,12 @@ function AgentsTab({
   globalAgents,
   personalAgents,
   spacesFlow,
+  slackCreatingSlug,
+  slackAgentStatuses,
+  slackStatusesReady,
   onResumeSetup,
+  onSlackAction,
+  onRemoveSlack,
   onUploadPicture,
   onPromote,
   onDemote,
@@ -1799,7 +2145,12 @@ function AgentsTab({
   globalAgents: AgentLight[];
   personalAgents: AgentLight[];
   spacesFlow: SpacesFlow | null;
+  slackCreatingSlug: string | null;
+  slackAgentStatuses: Record<string, SlackAgentStatus>;
+  slackStatusesReady: boolean;
   onResumeSetup: (a: AgentLight, hasApp: boolean) => void;
+  onSlackAction: (a: AgentLight) => void;
+  onRemoveSlack: (a: AgentLight) => void;
   onUploadPicture: (slug: string) => void;
   onPromote: (a: AgentLight) => void;
   onDemote: (a: AgentLight) => void;
@@ -1826,6 +2177,7 @@ function AgentsTab({
           {globalAgents.map((a) => {
             const registered = Boolean(a.spacesAppId && a.spacesAppTokenConfigured);
             const hasApp = Boolean(a.spacesAppId);
+            const slackStatus = slackAgentStatuses[a.id];
             return (
               <div
                 key={a.id}
@@ -1848,19 +2200,77 @@ function AgentsTab({
                         label={registered ? "Registered" : "Not registered"}
                       />
                     </span>
+                    {slackStatus && (
+                      <span className="ml-2 inline-block align-middle">
+                        <Badge
+                          as="span"
+                          size="sm"
+                          variant={slackStatus.status === "installed" ? "success" : "info"}
+                          label={slackStatus.status === "installed"
+                            ? `Slack: ${slackStatus.installs.map((install) => install.teamName).join(", ") || "installed"}`
+                            : "Slack app created"}
+                        />
+                      </span>
+                    )}
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
-                  {!registered && (
+                  {slackStatus && (
                     <Button
                       size="sm"
                       variant="ghost"
-                      leadingIcon={<PlugIcon size={13} />}
-                      onClick={() => onResumeSetup(a, hasApp)}
+                      leadingIcon={<SlackLogoIcon size={13} />}
+                      onClick={() => onSlackAction(a)}
                     >
-                      {hasApp ? "Resume setup" : "Register"}
+                      {slackStatus.status === "installed" ? "Add to another workspace" : "Install to workspace"}
                     </Button>
                   )}
+                  <Menu
+                    align="end"
+                    trigger={(props) => (
+                      <button
+                        {...(props as React.ButtonHTMLAttributes<HTMLButtonElement> & { ref?: React.Ref<HTMLButtonElement> })}
+                        type="button"
+                        disabled={slackCreatingSlug === a.slug}
+                        className="inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-[12px] font-medium text-xyne-fg-secondary transition-colors hover:bg-xyne-surface-subtle hover:text-xyne-fg-primary disabled:opacity-50"
+                      >
+                        {slackCreatingSlug === a.slug ? <SpinnerGapIcon size={13} className="animate-spin" /> : <PlugIcon size={13} />}
+                        {hasApp && !registered ? "Resume setup" : "Register"}
+                        <CaretDownIcon size={11} />
+                      </button>
+                    )}
+                  >
+                    <MenuItem
+                      onSelect={() => onResumeSetup(a, hasApp)}
+                      disabled={registered}
+                      leading={<PlugIcon size={13} />}
+                    >
+                      {registered ? "Spaces (registered)" : hasApp ? "Spaces (resume setup)" : "Spaces"}
+                    </MenuItem>
+                    <MenuItem
+                      onSelect={() => onSlackAction(a)}
+                      disabled={!slackStatusesReady}
+                      leading={<SlackLogoIcon size={13} />}
+                    >
+                      {!slackStatusesReady
+                        ? "Slack (loading status)"
+                        : slackStatus?.status === "installed"
+                          ? "Slack (add workspace)"
+                          : slackStatus?.status === "command"
+                            ? `Slack (${slackStatus.commandName ?? "command"})`
+                            : slackStatus
+                              ? "Slack (install)"
+                              : "Add to Slack"}
+                    </MenuItem>
+                    {slackStatus ? (
+                      <MenuItem
+                        onSelect={() => void onRemoveSlack(a)}
+                        leading={<SlackLogoIcon size={13} />}
+                      >
+                        Remove from Slack
+                      </MenuItem>
+                    ) : null}
+                  </Menu>
                   {registered && (
                     <Button
                       size="sm"
@@ -1904,6 +2314,8 @@ function AgentsTab({
           <div className="space-y-2">
             {personalAgents.map((a) => {
               const registered = Boolean(a.spacesAppId && a.spacesAppTokenConfigured);
+              const hasApp = Boolean(a.spacesAppId);
+              const slackStatus = slackAgentStatuses[a.id];
               return (
                 <div
                   key={a.id}
@@ -1923,9 +2335,75 @@ function AgentsTab({
                           owner: {a.ownerUserId.slice(0, 8)}…
                         </span>
                       )}
+                      {slackStatus && (
+                        <span className="ml-2 inline-block align-middle">
+                          <Badge
+                            as="span"
+                            size="sm"
+                            variant={slackStatus.status === "installed" ? "success" : "info"}
+                            label={slackStatus.status === "installed"
+                              ? `Slack: ${slackStatus.installs.map((install) => install.teamName).join(", ") || "installed"}`
+                              : "Slack app created"}
+                          />
+                        </span>
+                      )}
                     </div>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
+                    {slackStatus && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        leadingIcon={<SlackLogoIcon size={13} />}
+                        onClick={() => onSlackAction(a)}
+                      >
+                        {slackStatus.status === "installed" ? "Add to another workspace" : "Install to workspace"}
+                      </Button>
+                    )}
+                    <Menu
+                      align="end"
+                      trigger={(props) => (
+                        <button
+                          {...(props as React.ButtonHTMLAttributes<HTMLButtonElement> & { ref?: React.Ref<HTMLButtonElement> })}
+                          type="button"
+                          disabled={slackCreatingSlug === a.slug}
+                          className="inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-[12px] font-medium text-xyne-fg-secondary transition-colors hover:bg-xyne-surface-subtle hover:text-xyne-fg-primary disabled:opacity-50"
+                        >
+                          {slackCreatingSlug === a.slug ? <SpinnerGapIcon size={13} className="animate-spin" /> : <PlugIcon size={13} />}
+                          Register
+                          <CaretDownIcon size={11} />
+                        </button>
+                      )}
+                    >
+                      <MenuItem
+                        onSelect={() => onResumeSetup(a, hasApp)}
+                        disabled={registered}
+                        leading={<PlugIcon size={13} />}
+                      >
+                        {registered ? "Spaces (registered)" : hasApp ? "Spaces (resume setup)" : "Spaces"}
+                      </MenuItem>
+                      <MenuItem
+                        onSelect={() => onSlackAction(a)}
+                        disabled={!slackStatusesReady}
+                        leading={<SlackLogoIcon size={13} />}
+                      >
+                        {!slackStatusesReady
+                          ? "Slack (loading status)"
+                          : slackStatus?.status === "installed"
+                            ? "Slack (add workspace)"
+                            : slackStatus
+                              ? "Slack (install)"
+                              : "Create Slack app"}
+                      </MenuItem>
+                      {slackStatus ? (
+                        <MenuItem
+                          onSelect={() => void onRemoveSlack(a)}
+                          leading={<SlackLogoIcon size={13} />}
+                        >
+                          Remove from Slack
+                        </MenuItem>
+                      ) : null}
+                    </Menu>
                     {registered && (
                       <Button
                         size="sm"
@@ -1972,6 +2450,11 @@ function AdminsTab({
   onNewAdminIdChange,
   onGrant,
   onRevoke,
+  searchEvalUsers,
+  newSearchEvalUserId,
+  onNewSearchEvalUserIdChange,
+  onGrantSearchEval,
+  onRevokeSearchEval,
   showOrgLabels,
 }: {
   admins: AdminRole[];
@@ -1980,17 +2463,88 @@ function AdminsTab({
   onNewAdminIdChange: (v: string) => void;
   onGrant: () => void | Promise<void>;
   onRevoke: (a: AdminRole) => void;
+  searchEvalUsers: AdminRole[];
+  newSearchEvalUserId: string;
+  onNewSearchEvalUserIdChange: (v: string) => void;
+  onGrantSearchEval: () => void | Promise<void>;
+  onRevokeSearchEval: (a: AdminRole) => void;
   showOrgLabels: boolean;
 }) {
   return (
-    <div className="space-y-4 pt-4">
+    <div className="space-y-8 pt-4">
+      <RoleAccessSection
+        heading="Admins"
+        grantLabel="Grant admin"
+        grantButtonLabel="Grant admin"
+        revokeLabel="Revoke admin"
+        entries={admins}
+        currentUserId={currentUserId}
+        newUserId={newAdminId}
+        onNewUserIdChange={onNewAdminIdChange}
+        onGrant={onGrant}
+        onRevoke={onRevoke}
+        showOrgLabels={showOrgLabels}
+      />
+      <RoleAccessSection
+        heading="Search Eval access"
+        description="Lets someone use Search Evals (including its ACL-bypassing “without permission” mode) without granting full admin."
+        grantLabel="Grant Search Eval access"
+        grantButtonLabel="Grant access"
+        revokeLabel="Revoke Search Eval access"
+        entries={searchEvalUsers}
+        currentUserId={currentUserId}
+        newUserId={newSearchEvalUserId}
+        onNewUserIdChange={onNewSearchEvalUserIdChange}
+        onGrant={onGrantSearchEval}
+        onRevoke={onRevokeSearchEval}
+        showOrgLabels={showOrgLabels}
+      />
+    </div>
+  );
+}
+
+function RoleAccessSection({
+  heading,
+  description,
+  grantLabel,
+  grantButtonLabel,
+  revokeLabel,
+  entries,
+  currentUserId,
+  newUserId,
+  onNewUserIdChange,
+  onGrant,
+  onRevoke,
+  showOrgLabels,
+}: {
+  heading: string;
+  description?: string;
+  grantLabel: string;
+  grantButtonLabel: string;
+  revokeLabel: string;
+  entries: AdminRole[];
+  currentUserId: string;
+  newUserId: string;
+  onNewUserIdChange: (v: string) => void;
+  onGrant: () => void | Promise<void>;
+  onRevoke: (a: AdminRole) => void;
+  showOrgLabels: boolean;
+}) {
+  return (
+    <div className="space-y-4">
+      <div>
+        <h3 className="text-[13px] font-medium text-xyne-fg-primary">{heading}</h3>
+        {description && (
+          <p className="mt-1 text-[12px] text-xyne-fg-tertiary">{description}</p>
+        )}
+      </div>
       <div className="flex items-end gap-2">
         <div className="flex-1">
           <TextField
-            label="Grant admin"
+            label={grantLabel}
             placeholder="User ID or email (e.g. user@example.com)"
-            value={newAdminId}
-            onChange={(e) => onNewAdminIdChange(e.target.value)}
+            value={newUserId}
+            onChange={(e) => onNewUserIdChange(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter") onGrant();
             }}
@@ -2000,14 +2554,14 @@ function AdminsTab({
           variant="primary"
           leadingIcon={<UserPlusIcon size={13} />}
           onClick={onGrant}
-          disabled={!newAdminId.trim()}
+          disabled={!newUserId.trim()}
         >
-          Grant admin
+          {grantButtonLabel}
         </Button>
       </div>
 
       <div className="space-y-2">
-        {admins.map((r) => (
+        {entries.map((r) => (
           <div
             key={r.id}
             className="flex items-center justify-between rounded-xl border border-xyne-border bg-xyne-surface px-4 py-3"
@@ -2029,9 +2583,7 @@ function AdminsTab({
               variant="ghost"
               disabled={r.userId === currentUserId}
               onClick={() => onRevoke(r)}
-              aria-label={
-                r.userId === currentUserId ? "Cannot revoke yourself" : "Revoke admin"
-              }
+              aria-label={r.userId === currentUserId ? "Cannot revoke yourself" : revokeLabel}
             >
               <TrashIcon size={14} className="text-xyne-error-fg" />
             </Button>

@@ -33,6 +33,7 @@ interface Memory {
   id: string;
   hindsightMemoryId: string;
   category: string | null;
+  tags?: string[];
   content: string;
   curatorReasoning: string | null;
   curatorConfidence: number | null;
@@ -277,11 +278,13 @@ interface MemoryStatusFlags {
 
 export function MemoryTab({ agentSlug, canDelete = false, userTag }: Props) {
   const [sub, setSub] = useState<Sub>("all");
+  const [memorySearch, setMemorySearch] = useState("");
   const [stats, setStats] = useState<Stats | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
   const [statsRange, setStatsRange] = useState<"7d" | "30d" | "90d">("7d");
   const [showBackfill, setShowBackfill] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
+  const [showSessionUpload, setShowSessionUpload] = useState(false);
   const [status, setStatus] = useState<MemoryStatusFlags | null>(null);
   const [statusLoading, setStatusLoading] = useState(true);
   const [toggling, setToggling] = useState(false);
@@ -387,7 +390,7 @@ export function MemoryTab({ agentSlug, canDelete = false, userTag }: Props) {
           }`}>
             <Power size={16} />
           </div>
-          <div className="flex-1 min-w-0">
+          <div className="flex-1 min-w-[220px]">
             <div className="text-[13px] font-semibold text-xyne-fg-primary">
               Memory: {statusLoading ? "…" : memoryOn ? "Enabled" : "Disabled"}
             </div>
@@ -400,7 +403,7 @@ export function MemoryTab({ agentSlug, canDelete = false, userTag }: Props) {
           {/* Banner-right action cluster. Backfill + Refresh live here so
                 they don't orphan their own row below the sub-nav. Disable /
                 Enable is the primary action and sits last on the right. */}
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={() => setShowBackfill(true)}
               title="Trigger batch creation for past sessions (bootstrap initial memory)"
@@ -415,6 +418,15 @@ export function MemoryTab({ agentSlug, canDelete = false, userTag }: Props) {
                 className="inline-flex items-center gap-1.5 rounded-full border border-xyne-border-subtle bg-xyne-surface px-3 py-1.5 text-[12px] font-medium text-xyne-fg-secondary hover:text-xyne-fg-primary hover:border-xyne-border"
               >
                 <Inbox size={12} /> Upload .md
+              </button>
+            )}
+            {canDelete && (
+              <button
+                onClick={() => setShowSessionUpload(true)}
+                title="Upload Claude session exports (.jsonl / .json, or a .zip of them) — parsed and retained as agent memory"
+                className="inline-flex items-center gap-1.5 rounded-full border border-xyne-border-subtle bg-xyne-surface px-3 py-1.5 text-[12px] font-medium text-xyne-fg-secondary hover:text-xyne-fg-primary hover:border-xyne-border"
+              >
+                <Inbox size={12} /> Upload sessions
               </button>
             )}
             <button
@@ -549,11 +561,21 @@ export function MemoryTab({ agentSlug, canDelete = false, userTag }: Props) {
         )}
       </div>
 
-      {sub === "all" && <AllMemories agentSlug={agentSlug} userTag={userTag} canDelete={canDelete} onDelete={handleDelete} />}
+      {sub === "all" && <AllMemories agentSlug={agentSlug} userTag={userTag} canDelete={canDelete} onDelete={handleDelete} search={memorySearch} onSearchChange={setMemorySearch} />}
       {sub === "hot" && <HotMemories hot={stats?.hot ?? []} loading={statsLoading} canDelete={canDelete} onDelete={handleDelete} />}
       {sub === "pending" && <PendingBatches agentSlug={agentSlug} onChange={loadStats} />}
       {sub === "candidates" && <CandidatesView agentSlug={agentSlug} onChange={loadStats} />}
-      {sub === "graph" && <GraphView agentSlug={agentSlug} userTag={userTag} />}
+      {sub === "graph" && (
+        <GraphView
+          agentSlug={agentSlug}
+          userTag={userTag}
+          canDelete={canDelete}
+          onEntityClick={(label) => {
+            setMemorySearch(label);
+            setSub("all");
+          }}
+        />
+      )}
       {sub === "tester" && <RecallTester agentSlug={agentSlug} userTag={userTag} />}
       </>
       )}
@@ -576,6 +598,16 @@ export function MemoryTab({ agentSlug, canDelete = false, userTag }: Props) {
           onDone={() => {
             setShowUpload(false);
             setSub("pending");
+            loadStats();
+          }}
+        />
+      )}
+      {showSessionUpload && (
+        <UploadSessionModal
+          agentSlug={agentSlug}
+          onClose={() => setShowSessionUpload(false)}
+          onDone={() => {
+            setShowSessionUpload(false);
             loadStats();
           }}
         />
@@ -734,6 +766,57 @@ function BackfillModal({
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<BackfillResult | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // Live progress: auto-ingest writes one approved review row per session AS
+  // the backfill walks the date range, so polling the approved-row count is a
+  // real progress signal without any backend job machinery.
+  const [progressCount, setProgressCount] = useState<number | null>(null);
+  const [trackingJobId, setTrackingJobId] = useState<string | null>(null);
+  const progressBase = useRef<number | null>(null);
+  const tracking = running || trackingJobId !== null;
+
+  // Poll the backfill JOB until the worker finishes (the POST returns 202
+  // immediately — "queued" is not "done").
+  useEffect(() => {
+    if (!trackingJobId) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const res = await fetch(`/claw/api/v1/memory/banks/${encodeURIComponent(agentSlug)}/backfill/${encodeURIComponent(trackingJobId)}`, { credentials: "include" });
+        const data = await res.json();
+        if (cancelled || !data.success) return;
+        const state = data.data?.state;
+        if (state === "completed") {
+          setResult((data.data?.summary ?? {}) as BackfillResult);
+          setTrackingJobId(null);
+        } else if (state === "failed") {
+          setErr(data.data?.failedReason ?? "Backfill job failed.");
+          setTrackingJobId(null);
+        }
+      } catch { /* keep polling */ }
+    };
+    poll();
+    const id = setInterval(poll, 3000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [trackingJobId, agentSlug]);
+
+  useEffect(() => {
+    if (!tracking) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const res = await fetch(`/claw/api/v1/memory/banks/${encodeURIComponent(agentSlug)}/stats?range=90d`, { credentials: "include" });
+        const data = await res.json();
+        const total = data?.data?.totals?.approved;
+        if (!cancelled && typeof total === "number") {
+          if (progressBase.current === null) progressBase.current = total;
+          setProgressCount(Math.max(0, total - progressBase.current));
+        }
+      } catch { /* best-effort */ }
+    };
+    poll();
+    const id = setInterval(poll, 3000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [tracking, agentSlug]);
 
   const fromMs = Date.parse(from);
   const toMs = Date.parse(to);
@@ -751,11 +834,15 @@ function BackfillModal({
       const res = await fetch(`/claw/api/v1/memory/banks/${encodeURIComponent(agentSlug)}/backfill`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ from, to }),
       });
       const data = await res.json();
       if (!res.ok || !data.success) {
         setErr(data.error ?? `Backfill failed: ${res.status}`);
+      } else if (data.data?.jobId) {
+        // 202: the worker runs async — track the job until it completes.
+        setTrackingJobId(String(data.data.jobId));
       } else {
         setResult(data.data);
       }
@@ -790,13 +877,15 @@ function BackfillModal({
         </div>
 
         <p className="mb-4 text-[12px] leading-relaxed text-xyne-fg-tertiary">
-          Runs the batch-creation cron across a date range of transcripts for{" "}
-          <span className="font-mono text-xyne-fg-secondary">{agentSlug}</span>.
-          Creates pending batches you can approve in the Pending Review tab.{" "}
+          Replays past sessions for{" "}
+          <span className="font-mono text-xyne-fg-secondary">{agentSlug}</span>{" "}
+          through the memory pipeline: each meaningful session's transcript is
+          ingested directly (no approval needed) and facts appear in the bank
+          as extraction completes.{" "}
           <strong className="font-semibold text-xyne-fg-secondary">Idempotent:</strong>{" "}
-          existing approved or rejected batches are preserved. Days without
-          transcripts on disk (older than the 14-day retention window) are
-          silently skipped.
+          existing approved or rejected batches are preserved. Covers as far
+          back as run history goes, up to 30 days per pass — run it again with
+          an earlier range for older history.
         </p>
 
         {!result && (
@@ -851,14 +940,28 @@ function BackfillModal({
               ))}
             </div>
 
+            {tracking && (
+              <div className="mt-4 rounded-lg border border-xyne-border-subtle bg-xyne-surface-subtle p-3">
+                <div className="flex items-center gap-2 text-[12px] text-xyne-fg-secondary">
+                  <Loader2 size={12} className="animate-spin shrink-0" />
+                  <span>
+                    Ingesting sessions…{" "}
+                    {progressCount !== null && progressCount > 0
+                      ? <b className="text-xyne-fg-primary">+{progressCount} memor{progressCount === 1 ? "y" : "ies"} in the bank so far</b>
+                      : "warming up (facts appear as extraction completes)"}
+                  </span>
+                </div>
+              </div>
+            )}
+
             <div className="mt-5 flex justify-end">
               <button
                 onClick={run}
-                disabled={running || rangeInvalid}
+                disabled={tracking || rangeInvalid}
                 className="inline-flex items-center gap-1.5 rounded-full bg-xyne-fg-primary px-4 py-1.5 text-[12px] font-medium text-xyne-fg-inverse hover:bg-xyne-fg-secondary disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
-                {running ? <Loader2 size={12} className="animate-spin" /> : <History size={12} />}
-                {running ? "Running…" : "Start backfill"}
+                {tracking ? <Loader2 size={12} className="animate-spin" /> : <History size={12} />}
+                {tracking ? "Running…" : "Start backfill"}
               </button>
             </div>
           </>
@@ -910,16 +1013,33 @@ function StatCard({ label, value, highlight = false }: { label: string; value: n
 
 // ── All Memories sub-view ────────────────────────────────────────────────
 
-function AllMemories({ agentSlug, userTag, canDelete, onDelete }: { agentSlug: string; userTag?: string; canDelete: boolean; onDelete: (id: string) => void }) {
+function AllMemories({
+  agentSlug,
+  userTag,
+  canDelete,
+  onDelete,
+  search,
+  onSearchChange,
+}: {
+  agentSlug: string;
+  userTag?: string;
+  canDelete: boolean;
+  onDelete: (id: string) => void;
+  search: string;
+  onSearchChange: (search: string) => void;
+}) {
   const [memories, setMemories] = useState<Memory[]>([]);
   const [loading, setLoading] = useState(false);
-  const [search, setSearch] = useState("");
   const [total, setTotal] = useState(0);
+  const [typeFilter, setTypeFilter] = useState<"all" | "world" | "experience" | "observation">("all");
+  const [sourceFilter, setSourceFilter] = useState<"all" | "session-ingest" | "claude-upload" | "other">("all");
+  const [groupBy, setGroupBy] = useState<"none" | "type" | "session" | "subsystem">("none");
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const params = new URLSearchParams({ limit: "50", status: "approved" });
+      const params = new URLSearchParams({ limit: "200", status: "approved" });
       if (search.trim()) params.set("search", search.trim());
       if (userTag) params.set("userTag", userTag);
       const res = await fetch(`${BASE}/banks/${encodeURIComponent(agentSlug)}/memories?${params}`);
@@ -935,6 +1055,83 @@ function AllMemories({ agentSlug, userTag, canDelete, onDelete }: { agentSlug: s
 
   useEffect(() => { load(); }, [load]);
 
+  const filteredMemories = useMemo(() => memories.filter((memory) => {
+    const category = (memory.category ?? "").toLowerCase();
+    if (typeFilter !== "all" && category !== typeFilter) return false;
+
+    if (sourceFilter !== "all") {
+      const source = memory.tags?.find((tag) => tag.startsWith("source:"))?.slice("source:".length);
+      if (sourceFilter === "other" ? source === "session-ingest" || source === "claude-upload" : source !== sourceFilter) {
+        return false;
+      }
+    }
+    return true;
+  }), [memories, sourceFilter, typeFilter]);
+
+  const groupedMemories = useMemo(() => {
+    if (groupBy === "none") return [] as Array<{ key: string; label: string; memories: Memory[] }>;
+
+    const groups = new Map<string, Memory[]>();
+    for (const memory of filteredMemories) {
+      let key: string;
+      if (groupBy === "type") {
+        key = (memory.category ?? "(none)").toLowerCase();
+      } else {
+        const prefix = groupBy === "session" ? "session:" : "subsystem:";
+        key = memory.tags?.find((tag) => tag.startsWith(prefix))?.slice(prefix.length) || (groupBy === "session" ? "(no session)" : "(none)");
+      }
+      const items = groups.get(key) ?? [];
+      items.push(memory);
+      groups.set(key, items);
+    }
+
+    const entries = [...groups.entries()].map(([key, groupMemories]) => {
+      let label = key;
+      if (groupBy === "type") label = CATEGORY_META[key]?.label ?? (key === "(none)" ? key : key.toUpperCase());
+      if (groupBy === "session" && key !== "(no session)") {
+        const newest = groupMemories.reduce((latest, memory) =>
+          Date.parse(memory.createdAt) > Date.parse(latest.createdAt) ? memory : latest,
+        );
+        label = `${key.slice(0, 8)} · newest ${fmtDate(newest.createdAt)}`;
+      }
+      return { key, label, memories: groupMemories };
+    });
+
+    return entries.sort((a, b) => {
+      const emptyKey = groupBy === "session" ? "(no session)" : "(none)";
+      if (a.key === emptyKey) return 1;
+      if (b.key === emptyKey) return -1;
+      if (groupBy === "session") {
+        const newest = (items: Memory[]) => Math.max(...items.map((memory) => Date.parse(memory.createdAt)));
+        return newest(b.memories) - newest(a.memories);
+      }
+      if (groupBy === "type") {
+        const order = ["world", "experience", "observation", "mental_model"];
+        const aIndex = order.indexOf(a.key);
+        const bIndex = order.indexOf(b.key);
+        if (aIndex !== -1 || bIndex !== -1) return (aIndex === -1 ? order.length : aIndex) - (bIndex === -1 ? order.length : bIndex);
+      }
+      return a.label.localeCompare(b.label);
+    });
+  }, [filteredMemories, groupBy]);
+
+  const filtersActive = typeFilter !== "all" || sourceFilter !== "all";
+  const toggleGroup = (key: string) => {
+    setCollapsedGroups((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const chipClass = (active: boolean) => [
+    "rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors",
+    active
+      ? "border-xyne-fg-primary bg-xyne-fg-primary text-xyne-fg-inverse"
+      : "border-xyne-border-subtle bg-xyne-surface text-xyne-fg-secondary hover:border-xyne-border hover:text-xyne-fg-primary",
+  ].join(" ");
+
   return (
     <div className="space-y-3">
       {/* Centered, shorter search — sits as a single compact pill above
@@ -944,12 +1141,51 @@ function AllMemories({ agentSlug, userTag, canDelete, onDelete }: { agentSlug: s
           <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-xyne-fg-muted" />
           <input
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => onSearchChange(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") load(); }}
             placeholder="Search memory content…"
             className="w-full rounded-full border border-xyne-border-subtle bg-xyne-surface-subtle pl-8 pr-3 py-1.5 text-[13px] text-xyne-fg-primary placeholder:text-xyne-fg-tertiary focus:bg-xyne-surface focus:border-xyne-border-focus focus:shadow-[var(--comp-focus-ring)] focus:outline-none"
           />
         </div>
+      </div>
+
+      <div className="flex flex-wrap items-end gap-x-5 gap-y-3 rounded-lg border border-xyne-border-subtle bg-xyne-surface-subtle px-3 py-2.5">
+        <div className="space-y-1.5">
+          <div className="text-[10px] font-semibold uppercase tracking-[0.06em] text-xyne-fg-tertiary">Fact type</div>
+          <div className="flex flex-wrap gap-1.5">
+            {([["all", "All"], ["world", "World"], ["experience", "Experience"], ["observation", "Observation"]] as const).map(([value, label]) => (
+              <button key={value} type="button" aria-pressed={typeFilter === value} onClick={() => setTypeFilter(value)} className={chipClass(typeFilter === value)}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="space-y-1.5">
+          <div className="text-[10px] font-semibold uppercase tracking-[0.06em] text-xyne-fg-tertiary">Source</div>
+          <div className="flex flex-wrap gap-1.5">
+            {([["all", "All"], ["session-ingest", "Session-ingest"], ["claude-upload", "Claude-upload"], ["other", "Other"]] as const).map(([value, label]) => (
+              <button key={value} type="button" aria-pressed={sourceFilter === value} onClick={() => setSourceFilter(value)} className={chipClass(sourceFilter === value)}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <label className="ml-auto space-y-1.5">
+          <span className="block text-[10px] font-semibold uppercase tracking-[0.06em] text-xyne-fg-tertiary">Group by</span>
+          <select
+            value={groupBy}
+            onChange={(e) => {
+              setGroupBy(e.target.value as "none" | "type" | "session" | "subsystem");
+              setCollapsedGroups(new Set());
+            }}
+            className="rounded-full border border-xyne-border-subtle bg-xyne-surface px-3 py-1.5 text-[12px] text-xyne-fg-secondary focus:border-xyne-border-focus focus:outline-none"
+          >
+            <option value="none">None</option>
+            <option value="type">Type</option>
+            <option value="session">Session</option>
+            <option value="subsystem">Subsystem</option>
+          </select>
+        </label>
       </div>
 
       {loading ? (
@@ -970,21 +1206,52 @@ function AllMemories({ agentSlug, userTag, canDelete, onDelete }: { agentSlug: s
         )
       ) : (
         <>
-          <div className="text-xs text-zinc-500">{memories.length} of {total} memories</div>
+          <div className="text-xs text-zinc-500">
+            {filtersActive ? `${filteredMemories.length} of ${memories.length} shown` : `${memories.length} of ${total} memories`}
+          </div>
           <CategoryLegend
             visibleCategories={
               new Set(
-                memories
+                filteredMemories
                   .map((m) => (m.category ?? "").toLowerCase())
                   .filter((c): c is string => !!c && c in CATEGORY_META),
               )
             }
           />
-          <div className="space-y-2">
-            {memories.map((m) => (
-              <MemoryRow key={m.id} m={m} canDelete={canDelete} onDelete={onDelete} />
-            ))}
-          </div>
+          {filteredMemories.length === 0 ? (
+            <EmptyState icon={Search} title="No memories match these filters" description="Try changing the fact type or source filter." />
+          ) : groupBy === "none" ? (
+            <div className="space-y-2">
+              {filteredMemories.map((m) => (
+                <MemoryRow key={m.id} m={m} canDelete={canDelete} onDelete={onDelete} />
+              ))}
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {groupedMemories.map((group) => {
+                const collapseKey = `${groupBy}:${group.key}`;
+                const collapsed = collapsedGroups.has(collapseKey);
+                return (
+                  <div key={collapseKey} className="space-y-2">
+                    <div className="flex items-center gap-2 rounded-lg border border-xyne-border-subtle bg-xyne-surface-subtle px-3 py-2 text-xs">
+                      <span className="font-semibold text-xyne-fg-primary">{group.label}</span>
+                      <span className="text-xyne-fg-tertiary">{group.memories.length} memor{group.memories.length === 1 ? "y" : "ies"}</span>
+                      <button type="button" onClick={() => toggleGroup(collapseKey)} className="ml-auto text-xyne-fg-tertiary underline hover:text-xyne-fg-primary">
+                        {collapsed ? "expand" : "collapse"}
+                      </button>
+                    </div>
+                    {!collapsed && (
+                      <div className="space-y-2">
+                        {group.memories.map((m) => (
+                          <MemoryRow key={m.id} m={m} canDelete={canDelete} onDelete={onDelete} />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </>
       )}
     </div>
@@ -1429,6 +1696,59 @@ function CandidatesView({ agentSlug, onChange }: { agentSlug: string; onChange: 
     }
   }
 
+  const [approvingAll, setApprovingAll] = useState(false);
+
+  const [rejectingAll, setRejectingAll] = useState(false);
+
+  async function rejectAll(): Promise<void> {
+    if (!window.confirm(`Reject all ${candidates.length} pending candidates for this agent? Nothing is deleted from the bank — pending candidates were never retained.`)) return;
+    setRejectingAll(true);
+    setErr(null);
+    try {
+      const res = await fetch(`${BASE}/reviews/reject-all`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ agentSlug }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setErr(data.error ?? `Reject all failed: ${res.status}`);
+        return;
+      }
+      await load();
+      onChange();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRejectingAll(false);
+    }
+  }
+
+  async function approveAll(): Promise<void> {
+    setApprovingAll(true);
+    setErr(null);
+    try {
+      const res = await fetch(`${BASE}/reviews/approve-all`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ agentSlug }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setErr(data.error ?? `Approve all failed: ${res.status}`);
+        return;
+      }
+      await load();
+      onChange();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setApprovingAll(false);
+    }
+  }
+
   const grouped = useMemo(() => {
     const out = new Map<string, PendingReview[]>();
     for (const c of candidates) {
@@ -1447,9 +1767,31 @@ function CandidatesView({ agentSlug, onChange }: { agentSlug: string; onChange: 
             visually noisy. Auto-reload still fires on mount + after each
             approve/reject. */}
       {candidates.length > 0 && (
-        <div className="text-[12px] text-xyne-fg-tertiary">
-          {candidates.length} pending candidate{candidates.length === 1 ? "" : "s"}
-          {grouped.length > 0 ? ` across ${grouped.length} subsystem${grouped.length === 1 ? "" : "s"}` : ""}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="text-[12px] text-xyne-fg-tertiary">
+            {candidates.length} pending candidate{candidates.length === 1 ? "" : "s"}
+            {grouped.length > 0 ? ` across ${grouped.length} subsystem${grouped.length === 1 ? "" : "s"}` : ""}
+          </div>
+          <div className="flex items-center gap-2">
+          <button
+            onClick={() => void rejectAll()}
+            disabled={rejectingAll || approvingAll}
+            title="Reject every pending candidate for this agent (nothing was retained; this only clears the queue)"
+            className="inline-flex items-center gap-1.5 rounded-full border border-xyne-error-fg/40 px-3 py-1.5 text-[12px] font-medium text-xyne-error-fg hover:bg-xyne-error-bg disabled:opacity-50"
+          >
+            {rejectingAll ? <Loader2 size={12} className="animate-spin" /> : <X size={12} />}
+            {rejectingAll ? "Rejecting…" : "Reject all"}
+          </button>
+          <button
+            onClick={() => void approveAll()}
+            disabled={approvingAll || rejectingAll}
+            title="Retain every pending candidate for this agent — failed retains stay pending for retry"
+            className="inline-flex items-center gap-1.5 rounded-full bg-xyne-success px-3 py-1.5 text-[12px] font-medium text-xyne-fg-inverse hover:bg-xyne-success-fg disabled:opacity-50"
+          >
+            {approvingAll ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+            {approvingAll ? "Approving…" : "Approve all"}
+          </button>
+          </div>
         </div>
       )}
 
@@ -1617,12 +1959,26 @@ function CandidateCard({
 
 // ── Graph sub-view (subsystem-level graph) ─────────────────────────────
 //
-// Shows the agent's CURATED subsystems as nodes (not Hindsight's raw
-// entities). Edges connect subsystems that share contributing sessions —
-// i.e., the same agent_runs session produced memories in both subsystems.
-//
-// Much more meaningful than the entity graph: every node is something the
-// admin explicitly approved, edges reflect cross-subsystem investigations.
+// Hindsight entities are the primary source. Curated subsystems remain as a
+// fallback for older banks that predate entity ingestion.
+
+interface EntityNode {
+  id: string;
+  label: string;
+  mentionCount?: number;
+  color?: string;
+  [key: string]: unknown;
+}
+interface EntityEdge {
+  id: string;
+  source: string;
+  target: string;
+  linkType?: string;
+  weight?: number;
+  color?: string;
+  lastCooccurred?: string;
+  [key: string]: unknown;
+}
 
 interface SubsystemNode {
   name: string;
@@ -1639,6 +1995,77 @@ interface SubsystemEdge {
 
 const NODE_WIDTH = 220;
 const NODE_HEIGHT = 88;
+
+function layoutEntities(entities: EntityNode[], edges: EntityEdge[]): RFNode[] {
+  const g = new dagre.graphlib.Graph();
+  g.setGraph({ rankdir: "LR", nodesep: 60, ranksep: 120, marginx: 24, marginy: 24 });
+  g.setDefaultEdgeLabel(() => ({}));
+  entities.forEach((entity) => g.setNode(entity.id, { width: NODE_WIDTH, height: NODE_HEIGHT }));
+  edges.forEach((edge) => {
+    if (g.hasNode(edge.source) && g.hasNode(edge.target)) g.setEdge(edge.source, edge.target);
+  });
+  dagre.layout(g);
+
+  const maxMentionCount = Math.max(1, ...entities.map((entity) => entity.mentionCount ?? 0));
+
+  return entities.map((entity) => {
+    const pos = g.node(entity.id);
+    const mentionCount = entity.mentionCount ?? 0;
+    const sat = 0.4 + 0.5 * (mentionCount / maxMentionCount);
+    return {
+      id: entity.id,
+      position: { x: (pos?.x ?? 0) - NODE_WIDTH / 2, y: (pos?.y ?? 0) - NODE_HEIGHT / 2 },
+      data: {
+        label: (
+          <div style={{ textAlign: "left", lineHeight: 1.25 }}>
+            <div style={{ fontWeight: 600, fontSize: 13, color: "rgb(228,228,231)" }}>{entity.label}</div>
+            <div style={{ fontSize: 10, color: "rgb(161,161,170)", marginTop: 2 }}>
+              {mentionCount} {mentionCount === 1 ? "mention" : "mentions"}
+            </div>
+          </div>
+        ),
+      },
+      style: {
+        width: NODE_WIDTH,
+        height: NODE_HEIGHT,
+        background: `rgba(99,102,241,${0.12 + 0.18 * sat})`,
+        border: entity.color
+          ? `1.5px solid ${entity.color}`
+          : `1.5px solid rgba(165,180,252,${sat})`,
+        borderRadius: 10,
+        padding: "8px 12px",
+        display: "flex",
+        alignItems: "flex-start",
+        boxShadow: "0 2px 8px rgba(0,0,0,0.25)",
+        cursor: "pointer",
+      },
+    };
+  });
+}
+
+function makeEntityEdges(edges: EntityEdge[]): RFEdge[] {
+  if (edges.length === 0) return [];
+  const maxWeight = Math.max(1, ...edges.map((edge) => edge.weight ?? 0));
+  return edges.map((edge) => {
+    const weight = edge.weight ?? 0;
+    return {
+      id: edge.id,
+      source: edge.source,
+      target: edge.target,
+      type: "smoothstep",
+      animated: false,
+      style: {
+        stroke: edge.color ?? "rgba(165,180,252,0.55)",
+        strokeWidth: Math.max(1.5, (weight / maxWeight) * 3.5),
+      },
+      label: edge.linkType ?? (weight > 0 ? String(weight) : undefined),
+      labelStyle: { fontSize: 10, fill: "rgb(165,180,252)" },
+      labelBgStyle: { fill: "rgb(24,24,27)", fillOpacity: 0.85 },
+      labelBgPadding: [4, 4] as [number, number],
+      labelBgBorderRadius: 4,
+    };
+  });
+}
 
 function layoutSubsystems(subsystems: SubsystemNode[], edges: SubsystemEdge[]): RFNode[] {
   const g = new dagre.graphlib.Graph();
@@ -1723,13 +2150,24 @@ function makeSubsystemEdges(edges: SubsystemEdge[]): RFEdge[] {
   }));
 }
 
-function GraphView({ agentSlug, userTag }: { agentSlug: string; userTag?: string }) {
+type GraphData =
+  | { source: "entities"; nodes: EntityNode[]; edges: EntityEdge[] }
+  | { source: "subsystems"; subsystems: SubsystemNode[]; edges: SubsystemEdge[] };
+
+function GraphView({
+  agentSlug,
+  userTag,
+  canDelete = false,
+  onEntityClick,
+}: {
+  agentSlug: string;
+  userTag?: string;
+  canDelete?: boolean;
+  onEntityClick: (label: string) => void;
+}) {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [raw, setRaw] = useState<{ subsystems: SubsystemNode[]; edges: SubsystemEdge[] }>({
-    subsystems: [],
-    edges: [],
-  });
+  const [raw, setRaw] = useState<GraphData>({ source: "entities", nodes: [], edges: [] });
   const [nodes, setNodes, onNodesChange] = useNodesState<RFNode>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<RFEdge>([]);
   const [selectedSubsystem, setSelectedSubsystem] = useState<string | null>(null);
@@ -1739,10 +2177,26 @@ function GraphView({ agentSlug, userTag }: { agentSlug: string; userTag?: string
     setErr(null);
     try {
       const tagQs = userTag ? `?userTag=${encodeURIComponent(userTag)}` : "";
-      const res = await fetch(`${BASE}/banks/${encodeURIComponent(agentSlug)}/subsystem-graph${tagQs}`);
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error ?? "Failed to load subsystem graph");
-      setRaw({ subsystems: data.data.subsystems ?? [], edges: data.data.edges ?? [] });
+      const bankPath = `${BASE}/banks/${encodeURIComponent(agentSlug)}`;
+      // Subsystems are the primary view: they're the curated partition the
+      // memory pipeline tags facts with (and what recall scopes by). The
+      // entity graph is the fallback for banks whose facts predate
+      // subsystem tagging on ingest.
+      const subRes = await fetch(`${bankPath}/subsystem-graph${tagQs}`);
+      const subData = await subRes.json();
+      if (!subData.success) throw new Error(subData.error ?? "Failed to load subsystem graph");
+
+      const subsystems: SubsystemNode[] = subData.data.subsystems ?? [];
+      if (subsystems.length > 0) {
+        setRaw({ source: "subsystems", subsystems, edges: subData.data.edges ?? [] });
+        return;
+      }
+
+      const entityRes = await fetch(`${bankPath}/graph${tagQs}`);
+      const entityData = await entityRes.json();
+      if (!entityData.success) throw new Error(entityData.error ?? "Failed to load entity graph");
+      setRaw({ source: "entities", nodes: entityData.data.nodes ?? [], edges: entityData.data.edges ?? [] });
+      setSelectedSubsystem(null);
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
@@ -1753,19 +2207,35 @@ function GraphView({ agentSlug, userTag }: { agentSlug: string; userTag?: string
   useEffect(() => { load(); }, [load]);
 
   useEffect(() => {
-    if (raw.subsystems.length === 0) {
+    const rawNodes = raw.source === "entities" ? raw.nodes : raw.subsystems;
+    if (rawNodes.length === 0) {
       setNodes([]);
       setEdges([]);
       return;
     }
-    setNodes(layoutSubsystems(raw.subsystems, raw.edges));
-    setEdges(makeSubsystemEdges(raw.edges));
+    if (raw.source === "entities") {
+      setNodes(layoutEntities(raw.nodes, raw.edges));
+      setEdges(makeEntityEdges(raw.edges));
+    } else {
+      setNodes(layoutSubsystems(raw.subsystems, raw.edges));
+      setEdges(makeSubsystemEdges(raw.edges));
+    }
   }, [raw, setNodes, setEdges]);
 
-  const totalMemories = useMemo(
-    () => raw.subsystems.reduce((sum, s) => sum + s.memoryCount, 0),
-    [raw.subsystems],
-  );
+  const nodeCount = raw.source === "entities" ? raw.nodes.length : raw.subsystems.length;
+  const totalCount = raw.source === "entities"
+    ? raw.nodes.reduce((sum, entity) => sum + (entity.mentionCount ?? 0), 0)
+    : raw.subsystems.reduce((sum, subsystem) => sum + subsystem.memoryCount, 0);
+  const hasNodes = nodeCount > 0;
+
+  const handleNodeClick = (_: React.MouseEvent, node: RFNode) => {
+    if (raw.source === "entities") {
+      const entity = raw.nodes.find((candidate) => candidate.id === node.id);
+      if (entity) onEntityClick(entity.label);
+    } else {
+      setSelectedSubsystem(node.id);
+    }
+  };
 
   return (
     <div className="space-y-3">
@@ -1773,22 +2243,30 @@ function GraphView({ agentSlug, userTag }: { agentSlug: string; userTag?: string
             semantic moves to a quieter second line so the counts read
             cleanly. Local refresh button removed (the sub-nav already
             has a global Refresh; the duplicate was visual noise). */}
-      {raw.subsystems.length > 0 && (
+      {hasNodes && (
         <div className="flex flex-col gap-0.5">
           <div className="text-[12px] text-xyne-fg-secondary tabular-nums">
             <span className="font-medium text-xyne-fg-primary">
-              {raw.subsystems.length}
+              {nodeCount}
             </span>{" "}
-            {raw.subsystems.length === 1 ? "subsystem" : "subsystems"}
+            {raw.source === "entities"
+              ? nodeCount === 1 ? "entity" : "entities"
+              : nodeCount === 1 ? "subsystem" : "subsystems"}
             <span className="mx-1.5 text-xyne-fg-muted">·</span>
-            <span className="font-medium text-xyne-fg-primary">{totalMemories}</span>{" "}
-            {totalMemories === 1 ? "memory" : "memories"}
+            <span className="font-medium text-xyne-fg-primary">{totalCount}</span>{" "}
+            {raw.source === "entities"
+              ? totalCount === 1 ? "mention" : "mentions"
+              : totalCount === 1 ? "memory" : "memories"}
             <span className="mx-1.5 text-xyne-fg-muted">·</span>
             <span className="font-medium text-xyne-fg-primary">{raw.edges.length}</span>{" "}
-            {raw.edges.length === 1 ? "cross-link" : "cross-links"}
+            {raw.source === "entities"
+              ? raw.edges.length === 1 ? "link" : "links"
+              : raw.edges.length === 1 ? "cross-link" : "cross-links"}
           </div>
           <div className="text-[11px] text-xyne-fg-tertiary">
-            Edges connect subsystems touched in the same session — click a node to drill in.
+            {raw.source === "entities"
+              ? "Edges connect co-occurring entities — click a node to search memories."
+              : "Edges connect subsystems touched in the same session — click a node to drill in."}
           </div>
         </div>
       )}
@@ -1799,19 +2277,12 @@ function GraphView({ agentSlug, userTag }: { agentSlug: string; userTag?: string
         </div>
       )}
 
-      {raw.subsystems.length === 0 && !loading && !err ? (
+      {!hasNodes && !loading && !err ? (
         <EmptyState
           icon={Network}
-          title="No subsystems yet"
-          description={
-            <>
-              Approve some memory candidates in the{" "}
-              <strong className="font-medium text-xyne-fg-secondary">Candidates</strong>{" "}
-              tab to start building the bank.
-            </>
-          }
+          title="No graph yet — facts build the entity graph as they're ingested."
         />
-      ) : raw.subsystems.length === 1 ? (
+      ) : raw.source === "subsystems" && raw.subsystems.length === 1 ? (
         <>
           <div className="rounded-lg border border-xyne-warning-fg/30 bg-xyne-warning-bg/40 px-3 py-2 text-[12px] text-xyne-warning-fg">
             Only one subsystem — no cross-links yet. Approve memories in different subsystems from
@@ -1823,7 +2294,7 @@ function GraphView({ agentSlug, userTag }: { agentSlug: string; userTag?: string
               edges={edges}
               onNodesChange={onNodesChange}
               onEdgesChange={onEdgesChange}
-              onNodeClick={(_, node) => setSelectedSubsystem(node.id)}
+              onNodeClick={handleNodeClick}
               fitView
               fitViewOptions={{ padding: 0.3, maxZoom: 1.2 }}
               minZoom={0.3}
@@ -1843,7 +2314,7 @@ function GraphView({ agentSlug, userTag }: { agentSlug: string; userTag?: string
             edges={edges}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
-            onNodeClick={(_, node) => setSelectedSubsystem(node.id)}
+            onNodeClick={handleNodeClick}
             fitView
             fitViewOptions={{ padding: 0.2 }}
             minZoom={0.2}
@@ -1862,12 +2333,23 @@ function GraphView({ agentSlug, userTag }: { agentSlug: string; userTag?: string
         </div>
       )}
 
-      {selectedSubsystem && (
+      {hasNodes && (
+        <div className="text-center text-[11px] text-xyne-fg-tertiary">
+          Graph source: {raw.source}
+        </div>
+      )}
+
+      {raw.source === "subsystems" && selectedSubsystem && (
         <SubsystemMemoriesPanel
           agentSlug={agentSlug}
           userTag={userTag}
           subsystem={selectedSubsystem}
+          canDelete={canDelete}
           onClose={() => setSelectedSubsystem(null)}
+          onDeleted={() => {
+            setSelectedSubsystem(null);
+            load();
+          }}
         />
       )}
     </div>
@@ -1878,17 +2360,44 @@ function SubsystemMemoriesPanel({
   agentSlug,
   userTag,
   subsystem,
+  canDelete = false,
   onClose,
+  onDeleted,
 }: {
   agentSlug: string;
   userTag?: string;
   subsystem: string;
+  canDelete?: boolean;
   onClose: () => void;
+  onDeleted?: () => void;
 }) {
   const [memories, setMemories] = useState<Memory[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const panelRef = useRef<HTMLDivElement | null>(null);
+
+  const deleteSubsystem = async () => {
+    const typed = window.prompt(
+      `This permanently deletes ALL ${memories.length} memories in subsystem "${subsystem}". Type the subsystem name to confirm:`,
+    );
+    if (typed?.trim().toLowerCase() !== subsystem.toLowerCase()) return;
+    setDeleting(true);
+    setErr(null);
+    try {
+      const res = await fetch(
+        `${BASE}/banks/${encodeURIComponent(agentSlug)}/subsystems/${encodeURIComponent(subsystem)}`,
+        { method: "DELETE", credentials: "include" },
+      );
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error ?? "Failed to delete subsystem");
+      onDeleted?.();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1919,9 +2428,20 @@ function SubsystemMemoriesPanel({
         <span className="text-xs uppercase tracking-wide text-zinc-500">Subsystem</span>
         <span className="font-mono text-sm font-semibold text-indigo-300">{subsystem}</span>
         <span className="text-xs text-zinc-500">· {memories.length} {memories.length === 1 ? "memory" : "memories"}</span>
+        {canDelete && (
+          <button
+            onClick={deleteSubsystem}
+            disabled={deleting || loading}
+            className="ml-auto flex items-center gap-1 rounded border border-rose-800/60 px-2 py-1 text-[11px] text-rose-300 hover:bg-rose-950/40 disabled:opacity-50"
+            title="Delete every memory in this subsystem"
+          >
+            {deleting ? <Loader2 size={11} className="animate-spin" /> : <Trash2 size={11} />}
+            Delete subsystem
+          </button>
+        )}
         <button
           onClick={onClose}
-          className="ml-auto rounded p-1 text-zinc-500 hover:bg-zinc-800"
+          className={`${canDelete ? "" : "ml-auto "}rounded p-1 text-zinc-500 hover:bg-zinc-800`}
           title="Close"
         >
           <X size={14} />
@@ -2055,6 +2575,184 @@ function RecallTester({ agentSlug, userTag }: { agentSlug: string; userTag?: str
               </div>
             )
       )}
+    </div>
+  );
+}
+
+/**
+ * Upload Claude session exports as agent memory. Accepts individual session
+ * files (.jsonl from Claude Code, .json from claude.ai) AND .zip archives of
+ * them — the zip is expanded client-side (jszip) and each contained session
+ * uploads separately, so one export-everything archive seeds the whole bank.
+ *
+ * Each session POSTs to /banks/:slug/upload-session (owner/admin; the upload
+ * IS the approval): claw parses + strips harness scaffolding, the transcript
+ * is retained, and the memory provider extracts atomic facts in the
+ * background (~1-2 min per session before facts appear).
+ */
+function UploadSessionModal({
+  agentSlug,
+  onClose,
+  onDone,
+}: {
+  agentSlug: string;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const MAX_SESSION_BYTES = 20_000_000; // backend hard cap
+  const [sessions, setSessions] = useState<Array<{ name: string; content: string }>>([]);
+  const [skipped, setSkipped] = useState<string[]>([]);
+  const [reading, setReading] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [failures, setFailures] = useState<string[]>([]);
+  const [doneCount, setDoneCount] = useState<number | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function onPickFiles(e: React.ChangeEvent<HTMLInputElement>): Promise<void> {
+    const files = Array.from(e.target.files ?? []);
+    if (files.length === 0) return;
+    setErr(null);
+    setReading(true);
+    const picked: Array<{ name: string; content: string }> = [];
+    const skip: string[] = [];
+    try {
+      for (const file of files) {
+        if (/\.zip$/i.test(file.name)) {
+          const { default: JSZip } = await import("jszip");
+          const zip = await JSZip.loadAsync(await file.arrayBuffer());
+          for (const entry of Object.values(zip.files)) {
+            if (entry.dir) continue;
+            const base = entry.name.split("/").pop() ?? entry.name;
+            if (entry.name.startsWith("__MACOSX/") || base.startsWith(".")) continue;
+            if (!/\.(jsonl|json)$/i.test(base)) continue;
+            const content = await entry.async("string");
+            if (content.length > MAX_SESSION_BYTES) { skip.push(`${base} (over 20MB)`); continue; }
+            if (!content.trim()) { skip.push(`${base} (empty)`); continue; }
+            picked.push({ name: base, content });
+          }
+        } else if (/\.(jsonl|json)$/i.test(file.name)) {
+          if (file.size > MAX_SESSION_BYTES) { skip.push(`${file.name} (over 20MB)`); continue; }
+          picked.push({ name: file.name, content: await file.text() });
+        } else {
+          skip.push(`${file.name} (unsupported type)`);
+        }
+      }
+      if (picked.length === 0) {
+        setErr(skip.length > 0 ? `No usable sessions found (${skip.length} skipped).` : "No sessions found in the selection.");
+      }
+      setSessions(picked);
+      setSkipped(skip);
+    } catch (readErr) {
+      setErr(readErr instanceof Error ? readErr.message : String(readErr));
+    } finally {
+      setReading(false);
+    }
+  }
+
+  async function run(): Promise<void> {
+    setUploading(true);
+    setErr(null);
+    setFailures([]);
+    const failed: string[] = [];
+    let ok = 0;
+    for (let i = 0; i < sessions.length; i++) {
+      setProgress(i + 1);
+      const s = sessions[i];
+      if (!s) continue;
+      try {
+        const res = await fetch(`/claw/api/v1/memory/banks/${encodeURIComponent(agentSlug)}/upload-session`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ filename: s.name, content: s.content }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.status === 202 && data.success) ok++;
+        else failed.push(`${s.name}: ${data.error ?? `HTTP ${res.status}`}`);
+      } catch (e) {
+        failed.push(`${s.name}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+    setFailures(failed);
+    setDoneCount(ok);
+    setUploading(false);
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={uploading ? undefined : onClose}>
+      <div
+        className="w-full max-w-md rounded-xl border border-xyne-border bg-xyne-surface p-5 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-3 flex items-center gap-2">
+          <Inbox size={16} className="text-xyne-fg-secondary" />
+          <h3 className="text-[14px] font-semibold text-xyne-fg-primary">Upload Claude sessions</h3>
+          <button
+            onClick={onClose}
+            disabled={uploading}
+            aria-label="Close"
+            className="ml-auto rounded-md p-1 text-xyne-fg-tertiary hover:bg-xyne-surface-subtle hover:text-xyne-fg-primary transition-colors disabled:opacity-50"
+          >
+            <X size={14} />
+          </button>
+        </div>
+
+        {doneCount !== null ? (
+          <div className="space-y-3 text-[13px] text-xyne-fg-secondary">
+            <p className="flex items-center gap-2 text-emerald-500">
+              <Check size={14} /> Uploaded <b>{doneCount}</b> session{doneCount === 1 ? "" : "s"} — parsing and extracting memories in the background.
+            </p>
+            <p className="text-xyne-fg-tertiary">
+              New facts appear in this agent's bank within a few minutes (source: claude-upload).
+            </p>
+            {failures.length > 0 && (
+              <div className="rounded-lg border border-xyne-error-fg/30 bg-xyne-error-bg/40 p-2 text-[12px] text-xyne-error-fg">
+                {failures.length} failed:
+                <ul className="mt-1 list-disc pl-4">{failures.slice(0, 5).map((f) => <li key={f}>{f}</li>)}</ul>
+              </div>
+            )}
+            <button
+              onClick={onDone}
+              className="w-full rounded-lg bg-xyne-accent px-3 py-2 text-[13px] font-medium text-white hover:opacity-90"
+            >
+              Done
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <p className="text-[12px] text-xyne-fg-tertiary">
+              Pick Claude Code session files (<span className="font-mono">.jsonl</span>), claude.ai exports (<span className="font-mono">.json</span>),
+              or a <span className="font-mono">.zip</span> containing them. Each session is parsed, cleaned of harness noise, and retained as
+              this agent's memory — uploading is the approval.
+            </p>
+            <input
+              type="file"
+              accept=".jsonl,.json,.zip"
+              multiple
+              disabled={reading || uploading}
+              onChange={(e) => void onPickFiles(e)}
+              className="block w-full text-[12px] text-xyne-fg-secondary file:mr-3 file:rounded-lg file:border-0 file:bg-xyne-surface-subtle file:px-3 file:py-1.5 file:text-[12px] file:font-medium file:text-xyne-fg-primary hover:file:bg-xyne-surface-sunken"
+            />
+            {reading && (
+              <p className="flex items-center gap-2 text-[12px] text-xyne-fg-tertiary"><Loader2 size={12} className="animate-spin" /> Reading files…</p>
+            )}
+            {sessions.length > 0 && !reading && (
+              <p className="text-[12px] text-xyne-fg-secondary">
+                <b>{sessions.length}</b> session{sessions.length === 1 ? "" : "s"} ready{skipped.length > 0 ? ` · ${skipped.length} skipped` : ""}.
+              </p>
+            )}
+            {err && <p className="text-[12px] text-xyne-error-fg">{err}</p>}
+            <button
+              onClick={() => void run()}
+              disabled={uploading || reading || sessions.length === 0}
+              className="w-full rounded-lg bg-xyne-accent px-3 py-2 text-[13px] font-medium text-white hover:opacity-90 disabled:opacity-50"
+            >
+              {uploading ? `Uploading ${progress}/${sessions.length}…` : `Upload ${sessions.length > 0 ? sessions.length : ""} session${sessions.length === 1 ? "" : "s"}`}
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

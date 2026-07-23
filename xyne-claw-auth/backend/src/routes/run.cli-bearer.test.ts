@@ -4,11 +4,16 @@ import type { Request, Response } from "express";
 const state = vi.hoisted(() => ({
   agentFindUniqueArgs: null as unknown,
   fetchBodies: [] as Array<Record<string, unknown>>,
+  startInputs: [] as Array<Record<string, unknown>>,
+  sessionContexts: [] as Array<{ sessionId: string; context: Record<string, unknown>; options?: Record<string, unknown> }>,
+  order: [] as string[],
   config: {
+    selfUrl: "https://auth.example.internal",
     xyneClawUrl: "http://claw.local",
     xyneClawS2sKey: "s2s-secret",
     clawSseTransport: false,
     internalUrl: "http://auth.local",
+    encryptionKey: Buffer.alloc(32, 7),
   },
 }));
 
@@ -41,6 +46,7 @@ vi.mock("../middleware/require-auth.js", () => ({
   }),
   requireStrictS2S: vi.fn((_req, _res, next) => next()),
   requireResultToken: vi.fn(() => (_req: Request, _res: Response, next: () => void) => next()),
+  s2sKeyMatches: vi.fn((value: unknown) => value === "s2s-secret"),
 }));
 
 vi.mock("../db.js", () => ({
@@ -56,6 +62,7 @@ vi.mock("../db.js", () => ({
       findUnique: vi.fn(async (args: unknown) => {
         state.agentFindUniqueArgs = args;
         return {
+          id: "agent-id",
           systemPrompt: "agent prompt",
           modelId: null,
           config: {},
@@ -73,10 +80,16 @@ vi.mock("../db.js", () => ({
 vi.mock("../repositories/index.js", () => ({
   chatMessageRepository: { create: vi.fn(async () => ({})) },
   agentRunRepository: {
-    start: vi.fn(async () => ({})),
+    start: vi.fn(async (input: Record<string, unknown>) => {
+      state.startInputs.push(input);
+      return {};
+    }),
     findBySessionId: vi.fn(async () => null),
   },
   chatAttachmentRepository: { linkToMessage: vi.fn(async () => ({})) },
+  // run.ts calls isClawAdmin (agent-acl) on the dispatch path for the A2A
+  // callable-agents resolution (2026-07); agent-acl reads this repository.
+  userRoleRepository: { findByUserAndRole: vi.fn(async () => null) },
 }));
 
 vi.mock("../services/agentCatalogService.js", () => ({
@@ -102,6 +115,10 @@ vi.mock("../lib/subagent-resolver.js", () => ({
 
 vi.mock("../lib/agent-provider-config.js", () => ({
   resolveAgentProviderConfigs: vi.fn(async () => ({ providerConfigs: {}, providerOrder: [] })),
+  // run.ts also imports these (fast-mode work, 2026-07-15); a vi.mock factory
+  // replaces the WHOLE module, so any unmocked import is undefined and the
+  // handler 502s on a TypeError.
+  resolveSubagentProviderMode: vi.fn(() => "spaces"),
 }));
 
 vi.mock("xyne-claw-shared", () => ({
@@ -126,6 +143,10 @@ vi.mock("../redis.js", () => ({
   redisService: {
     getConnection: () => ({
       publish: vi.fn(async () => 1),
+      // resolveFastMode reads the per-thread override; null = no override.
+      get: vi.fn(async () => null),
+      set: vi.fn(async () => "OK"),
+      expire: vi.fn(async () => 1),
     }),
   },
 }));
@@ -134,7 +155,17 @@ vi.mock("../lib/spaces-db.js", () => ({
   getWorkspaceIdForUser: vi.fn(async () => null),
 }));
 
-async function postRun(body: Record<string, unknown>): Promise<{ status: number; body: Record<string, unknown> }> {
+vi.mock("./webhook.js", () => ({
+  setSession: vi.fn(async (sessionId: string, context: Record<string, unknown>, options?: Record<string, unknown>) => {
+    state.order.push("setSession");
+    state.sessionContexts.push({ sessionId, context, ...(options ? { options } : {}) });
+  }),
+}));
+
+async function postRun(
+  body: Record<string, unknown>,
+  options: { s2s?: boolean } = {},
+): Promise<{ status: number; body: Record<string, unknown> }> {
   const { runRouter } = await import("./run.js");
   return await new Promise((resolve, reject) => {
     let statusCode = 200;
@@ -145,6 +176,7 @@ async function postRun(body: Record<string, unknown>): Promise<{ status: number;
       baseUrl: "",
       headers: {
         authorization: "Bearer xyne_cli_real",
+        ...(options.s2s ? { "x-s2s-key": "s2s-secret" } : {}),
       },
       body,
       ip: "127.0.0.1",
@@ -176,12 +208,18 @@ describe("/run CLI bearer path", () => {
   beforeEach(() => {
     state.agentFindUniqueArgs = null;
     state.fetchBodies = [];
+    state.startInputs = [];
+    state.sessionContexts = [];
+    state.order = [];
     vi.stubGlobal("fetch", vi.fn(async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      let body: Record<string, unknown> | undefined;
       if (init?.body && typeof init.body === "string") {
-        state.fetchBodies.push(JSON.parse(init.body) as Record<string, unknown>);
+        body = JSON.parse(init.body) as Record<string, unknown>;
+        state.fetchBodies.push(body);
       }
+      state.order.push("fetch");
       return new Response(JSON.stringify({ success: true, sessionId: "claw-session" }), {
-        status: 200,
+        status: body?.["detached"] === true ? 202 : 200,
         headers: { "Content-Type": "application/json" },
       });
     }));
@@ -220,5 +258,103 @@ describe("/run CLI bearer path", () => {
     expect(response.body["error"]).toBe("Body userId does not match authenticated session");
     expect(state.fetchBodies).toHaveLength(0);
     expect(state.agentFindUniqueArgs).toBeNull();
+  });
+
+  it("interposes and persists an external callback for detached runs", async () => {
+    const response = await postRun({
+      agentSlug: "agent-a",
+      task: "do detached work",
+      triggerSource: "api",
+      detached: true,
+      callbackUrl: "https://qa.example.com/results",
+      callbackSecret: "qa-callback-secret",
+    });
+
+    expect(response).toEqual({ status: 202, body: { success: true, sessionId: "claw-session" } });
+    expect(state.fetchBodies[0]?.["callbackUrl"]).toBe("http://auth.local/claw/api/v1/webhook/result");
+    expect(JSON.stringify(state.fetchBodies[0])).not.toContain("qa.example.com");
+    expect(JSON.stringify(state.fetchBodies[0])).not.toContain("qa-callback-secret");
+
+    const metadata = state.startInputs[0]?.["metadata"] as {
+      externalResultCallback: { url: string; encryptedSecret: string };
+    };
+    expect(metadata.externalResultCallback.url).toBe("https://qa.example.com/results");
+    expect(metadata.externalResultCallback.encryptedSecret).not.toContain("qa-callback-secret");
+    const { decryptSurfaceSecret } = await import("../lib/surface-resolver.js");
+    expect(decryptSurfaceSecret(metadata.externalResultCallback.encryptedSecret)).toBe("qa-callback-secret");
+    expect(state.sessionContexts[0]?.context["externalResultCallback"]).toEqual(metadata.externalResultCallback);
+  });
+
+  it("interposes external callbacks for non-detached runs too", async () => {
+    const response = await postRun({
+      agentSlug: "agent-a",
+      task: "do regular work",
+      triggerSource: "api",
+      conversationId: "external-conversation",
+      callbackUrl: "https://qa.example.com/results",
+    });
+
+    expect(response).toEqual({ status: 200, body: { success: true, sessionId: "claw-session" } });
+    expect(state.fetchBodies[0]?.["callbackUrl"]).toBe("http://auth.local/claw/api/v1/webhook/result");
+    expect(JSON.stringify(state.fetchBodies[0])).not.toContain("qa.example.com");
+    expect(state.startInputs[0]?.["metadata"]).toEqual({
+      externalResultCallback: { url: "https://qa.example.com/results" },
+    });
+    expect(state.sessionContexts[0]?.options).toEqual({ skipConversationIndex: true });
+  });
+
+  it("rejects Slack delivery context from a non-S2S caller", async () => {
+    const slackDelivery = {
+      surfaceAgentId: "surface-agent-1",
+      teamId: "T123",
+      channelId: "C123",
+      threadTs: "100.01",
+      slackUserId: "U123",
+    };
+    const response = await postRun({
+      agentSlug: "agent-a",
+      task: "from Slack",
+      triggerSource: "slack",
+      conversationId: "slack:T123:C123:100.01",
+      slackDelivery,
+    });
+
+    expect(response).toMatchObject({ status: 400, body: { error: "slackDelivery requires internal service authentication" } });
+    expect(state.sessionContexts).toHaveLength(0);
+    expect(state.fetchBodies).toHaveLength(0);
+  });
+
+  it("stores Slack delivery context from an S2S caller before forwarding the run", async () => {
+    const slackDelivery = {
+      surfaceAgentId: "surface-agent-1",
+      teamId: "T123",
+      channelId: "C123",
+      threadTs: "100.01",
+      slackUserId: "U123",
+    };
+    const response = await postRun({
+      agentSlug: "agent-a",
+      task: "from Slack",
+      triggerSource: "slack",
+      conversationId: "slack:T123:C123:100.01",
+      slackDelivery,
+    }, { s2s: true });
+
+    expect(response.status).toBe(200);
+    expect(state.order.slice(0, 2)).toEqual(["setSession", "fetch"]);
+    expect(state.sessionContexts[0]?.context["slackDelivery"]).toEqual(slackDelivery);
+    expect(state.fetchBodies[0]?.["callbackUrl"]).toBe("http://auth.local/claw/api/v1/webhook/result");
+  });
+
+  it("rejects a disallowed external callback target at submit time", async () => {
+    const response = await postRun({
+      agentSlug: "agent-a",
+      task: "do work",
+      triggerSource: "api",
+      callbackUrl: "http://169.254.169.254/latest/meta-data",
+    });
+
+    expect(response).toMatchObject({ status: 400, body: { error: "callbackUrl is not an allowed target" } });
+    expect(state.fetchBodies).toHaveLength(0);
   });
 });

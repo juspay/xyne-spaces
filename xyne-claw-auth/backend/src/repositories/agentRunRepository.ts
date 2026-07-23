@@ -25,6 +25,10 @@ function stripNulDeep(value: unknown): unknown {
 // without limit on a heavy investigation. Keep the most recent rows.
 const MAX_TOOL_INVOCATIONS = Number(process.env["MAX_TOOL_INVOCATIONS"] ?? 1000);
 
+function sanitizeMetricValue(v: string | number | boolean): string {
+  return String(v).replace(/\s+/g, "_").slice(0, 120);
+}
+
 /**
  * Per-session write lock backed by a Postgres advisory lock.
  *
@@ -88,13 +92,15 @@ export interface StartRunInput {
   userId: string;
   agentSlug: string;
   orgId: string;
-  triggerSource: "spaces" | "scheduled" | "chat" | "api" | "automation";
+  triggerSource: "spaces" | "scheduled" | "chat" | "api" | "automation" | "slack";
   task: string;
   conversationId?: string | null;
   scheduledJobId?: string | null;
   channelId?: string | null;
   projectId?: string | null;
   projectName?: string | null;
+  fastMode?: boolean | null;
+  metadata?: unknown;
 }
 
 export interface FinalizeRunInput {
@@ -124,6 +130,7 @@ export interface FinalizeRunInput {
    *  the chat callback so the messages endpoint can pair runs ↔ assistants
    *  deterministically once branching introduces multiple assistant siblings. */
   chatMessageId?: string | null;
+  fastMode?: boolean | null;
 }
 
 export const agentRunRepository = {
@@ -152,21 +159,33 @@ export const agentRunRepository = {
           ...(input.channelId ? { channelId: input.channelId } : {}),
           ...(input.projectId ? { projectId: input.projectId } : {}),
           ...(input.projectName ? { projectName: input.projectName } : {}),
+          ...(input.metadata !== undefined ? { metadata: input.metadata as Prisma.InputJsonValue } : {}),
         },
       });
       log.info(
-        `[agent-run] start session=${input.sessionId} agent=${input.agentSlug} user=${input.userId}`,
+        `[agent-run] start session=${input.sessionId} agent=${input.agentSlug} user=${input.userId} fastMode=${input.fastMode === true}`,
         {
           event: "agent_run_start",
           sessionId: input.sessionId,
           userId: input.userId,
           agentSlug: input.agentSlug,
+          fastMode: input.fastMode === true,
           triggerSource: input.triggerSource,
           ...(input.conversationId ? { conversationId: input.conversationId } : {}),
           ...(input.channelId ? { channelId: input.channelId } : {}),
           ...(input.projectId ? { projectId: input.projectId } : {}),
         },
       );
+      log.info([
+        "[metric]",
+        "name=agent_run",
+        "kind=count",
+        "phase=start",
+        `session=${sanitizeMetricValue(input.sessionId)}`,
+        `agent=${sanitizeMetricValue(input.agentSlug)}`,
+        `triggerSource=${sanitizeMetricValue(input.triggerSource)}`,
+        `fastMode=${input.fastMode === true}`,
+      ].join(" "));
       return row;
     } catch (err) {
       // Idempotent on the unique sessionId: when two paths race to register the
@@ -287,6 +306,7 @@ export const agentRunRepository = {
       sessionId,
       ...(existingRow?.userId ? { userId: existingRow.userId } : {}),
       ...(existingRow?.agentSlug ? { agentSlug: existingRow.agentSlug } : {}),
+      ...(input.fastMode !== undefined ? { fastMode: input.fastMode === true } : {}),
       status: input.status,
       ...(input.error ? { error: String(input.error).slice(0, 500) } : {}),
       toolsUsedCount: input.toolsUsed?.length ?? 0,
@@ -299,6 +319,15 @@ export const agentRunRepository = {
       tokensIn: input.tokenUsage?.input ?? null,
       tokensOut: input.tokenUsage?.output ?? null,
     });
+    log.info([
+      "[metric]",
+      "name=agent_run",
+      "kind=count",
+      "phase=end",
+      `session=${sanitizeMetricValue(sessionId)}`,
+      `status=${sanitizeMetricValue(input.status)}`,
+      `fastMode=${input.fastMode === true}`,
+    ].join(" "));
     return updated;
     });
   },
@@ -306,6 +335,22 @@ export const agentRunRepository = {
   rate: (sessionId: string, userId: string, rating: "up" | "down", comment?: string | null) =>
     prisma.agentRun.updateMany({
       where: { sessionId, userId },
+      data: { rating, ratingComment: comment ?? null, ratedAt: new Date() },
+    }),
+
+  // Rate by the assistant ChatMessage the run produced. Preferred by the Spaces
+  // ask-ai v2 surfaces: the assistant message id is known the instant a turn
+  // completes (synced on the `done` frame), whereas the run's sessionId only
+  // reaches the client via a later /messages refetch. Scoped by userId so a
+  // caller can only rate their own run.
+  rateByChatMessageId: (
+    chatMessageId: string,
+    userId: string,
+    rating: "up" | "down",
+    comment?: string | null,
+  ) =>
+    prisma.agentRun.updateMany({
+      where: { chatMessageId, userId },
       data: { rating, ratingComment: comment ?? null, ratedAt: new Date() },
     }),
 
@@ -710,13 +755,19 @@ export const agentRunRepository = {
    */
   listByUserLight: (
     userId: string,
-    opts?: { since?: Date; limit?: number; status?: string },
+    // agentSlug/conversationId: the /runs/light route always accepted and
+    // forwarded agentSlug, but this signature silently dropped it (spread into
+    // an opts shape that never read it) — fixed 2026-07-17 alongside adding
+    // conversationId for the MCP "other sessions in this thread" lookup.
+    opts?: { since?: Date; limit?: number; status?: string; agentSlug?: string; conversationId?: string },
   ) =>
     prisma.agentRun.findMany({
       where: {
         userId,
         ...(opts?.status ? { status: opts.status } : {}),
         ...(opts?.since ? { startedAt: { gte: opts.since } } : {}),
+        ...(opts?.agentSlug ? { agentSlug: opts.agentSlug } : {}),
+        ...(opts?.conversationId ? { conversationId: opts.conversationId } : {}),
       },
       select: {
         sessionId: true,
@@ -733,6 +784,41 @@ export const agentRunRepository = {
       },
       orderBy: { startedAt: "desc" },
       take: opts?.limit ?? 500,
+    }),
+
+  /**
+   * Content search over the user's OWN runs: case-insensitive substring match
+   * on the task text (what the user asked the agent). Powers GET /runs/search
+   * and the claw_search_sessions MCP tool — replaces the model brute-forcing
+   * batched /runs/light pages + spill-file grep to answer "find the session
+   * where I asked X" (2026-07-16: 14 tool calls to find one architect
+   * session). Light projection plus the task itself so the caller can render
+   * a match snippet.
+   */
+  searchByUser: (
+    userId: string,
+    query: string,
+    opts?: { agentSlug?: string; limit?: number },
+  ) =>
+    prisma.agentRun.findMany({
+      where: {
+        userId,
+        ...(opts?.agentSlug ? { agentSlug: opts.agentSlug } : {}),
+        task: { contains: query, mode: "insensitive" },
+      },
+      select: {
+        sessionId: true,
+        agentSlug: true,
+        status: true,
+        triggerSource: true,
+        startedAt: true,
+        completedAt: true,
+        conversationId: true,
+        channelId: true,
+        task: true,
+      },
+      orderBy: { startedAt: "desc" },
+      take: opts?.limit ?? 20,
     }),
 
   /**
@@ -843,6 +929,7 @@ export const agentRunRepository = {
       unique_users: bigint;
       total_tokens_in: bigint;
       total_tokens_out: bigint;
+      total_tokens_cached: bigint;
     };
     const rows = await prisma.$queryRaw<Row[]>`
       SELECT
@@ -853,7 +940,11 @@ export const agentRunRepository = {
         COUNT(*) FILTER (WHERE status = 'running')    AS running_runs,
         COUNT(DISTINCT "userId")        AS unique_users,
         COALESCE(SUM("tokensIn"),  0)   AS total_tokens_in,
-        COALESCE(SUM("tokensOut"), 0)   AS total_tokens_out
+        COALESCE(SUM("tokensOut"), 0)   AS total_tokens_out,
+        -- cacheRead + cacheWrite: replayed/stored context. Real input volume
+        -- is fresh + cached; tokensIn alone understates cache-heavy agents
+        -- by ~10x (doctor-agent: 15.7M fresh vs 231M cacheRead per day).
+        COALESCE(SUM("tokensCacheRead"), 0) + COALESCE(SUM("tokensCacheWrite"), 0) AS total_tokens_cached
       FROM agent_runs
       WHERE "agentSlug" IN (SELECT slug FROM agents WHERE scope = 'global')
       ${cutoff ? Prisma.sql`AND "startedAt" >= ${cutoff}` : Prisma.empty}
@@ -868,6 +959,7 @@ export const agentRunRepository = {
       uniqueUsers: Number(r.unique_users),
       totalTokensIn: Number(r.total_tokens_in),
       totalTokensOut: Number(r.total_tokens_out),
+      totalTokensCached: Number(r.total_tokens_cached),
     };
   },
 

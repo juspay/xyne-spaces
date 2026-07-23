@@ -13,7 +13,9 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "postinstall": "npx playwright install chromium"
+    "postinstall": "npx playwright install chromium",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.28.0",
@@ -31,14 +33,7 @@
     "@types/node": "^22.0.0",
     "@types/pdf-parse": "^1.1.5",
     "@types/pdfkit": "^0.13.9",
-    "typescript": "^5.7.0"
-  },
-  "overrides": {
-    "hono": "4.12.30",
-    "fast-uri@3": "3.1.4",
-    "fastify@5": "5.10.0",
-    "path-to-regexp@8": "8.4.2",
-    "qs": "6.15.2",
-    "ip-address": "10.1.1"
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.9"
   }
 }

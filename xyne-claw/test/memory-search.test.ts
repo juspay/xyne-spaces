@@ -50,6 +50,7 @@ test("non-twin (shared) recall is NOT user-filtered (provider-trusted)", async (
 
 test("memory disabled → returns 'not configured' without calling the provider", async () => {
   delete process.env["HINDSIGHT_URL"];
+  delete process.env["MEMORY_PROVIDER"]; // both gates must be off (config.ts ORs them)
   vi.resetModules(); // re-evaluate config with HINDSIGHT_URL unset
   const text = await runRecall("digital-twin", "u1");
   expect(text).toMatch(/not configured/i);

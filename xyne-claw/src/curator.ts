@@ -23,6 +23,7 @@
 import { bankIdForAgent, getMemoryProvider } from "xyne-claw-shared";
 import type { SessionTranscriptForCurator, SubsystemUpdate } from "xyne-claw-shared";
 import { fetchLiteLLMWithRetry } from "./litellm-retry.js";
+import { chunkTranscript } from "./claude-session-parse.js";
 
 import { createLogger } from "./logger.js";
 const log = createLogger("curator");
@@ -36,6 +37,17 @@ const MAX_TRANSCRIPT_CHARS = 12_000;
 const MAX_MEMORY_CHARS = 1_500;
 const MIN_CONFIDENCE = 0.7;
 const MAX_NEW_SUBSYSTEMS_PER_SESSION = 1;
+const MAX_INGEST_SUBSYSTEM_CHARS = 40;
+
+// Map-reduce config for large (uploaded) transcripts. A normal in-app session
+// fits in one MAX_TRANSCRIPT_CHARS window; an uploaded Claude session can be
+// hundreds of KB, so we chunk it, extract dense notes per chunk (MAP), then
+// run the SAME classify+propose distill over the concatenated notes (REDUCE).
+const CHUNK_CHARS = Number(process.env["MEMORY_CURATOR_CHUNK_CHARS"] ?? 10_000);
+const MAX_CHUNKS = Number(process.env["MEMORY_CURATOR_MAX_CHUNKS"] ?? 40);
+// The reduce step feeds combined notes back through distillSession, whose
+// prompt budget is MAX_TRANSCRIPT_CHARS — so combined notes must fit that.
+const MAX_COMBINED_NOTES_CHARS = MAX_TRANSCRIPT_CHARS;
 
 interface KnownSubsystem {
   name: string;
@@ -43,11 +55,11 @@ interface KnownSubsystem {
   content: string;
 }
 
-async function getKnownSubsystems(agentSlug: string): Promise<KnownSubsystem[]> {
+async function getKnownSubsystems(agentSlug: string, bankId?: string): Promise<KnownSubsystem[]> {
   try {
     const provider = getMemoryProvider();
-    const bankId = bankIdForAgent(agentSlug);
-    const page = await provider.listMemories(bankId, { limit: 200 });
+    const resolvedBankId = bankId?.trim() || bankIdForAgent(agentSlug);
+    const page = await provider.listMemories(resolvedBankId, { limit: 200 });
     const out: KnownSubsystem[] = [];
     const seen = new Set<string>();
     for (const m of page.memories) {
@@ -152,6 +164,66 @@ const PROPOSE_TOOL = {
     },
   },
 };
+
+const INGEST_CLASSIFY_TOOL = {
+  type: "function" as const,
+  function: {
+    name: "emit_ingest_subsystem",
+    description: "Emit the single dominant subsystem for a retained session.",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        subsystem: {
+          type: "string",
+          description: "One lowercase kebab-case subsystem slug, at most 40 characters.",
+        },
+      },
+      required: ["subsystem"],
+    },
+  },
+};
+
+export interface IngestSubsystemClassificationInput {
+  sessionId: string;
+  agentSlug: string;
+  agentName: string;
+  task: string;
+  transcript: string;
+  taxonomy: Array<{ name: string; memoryCount: number }>;
+}
+
+/**
+ * Pick exactly one dominant subsystem for a session-ingest document. This is
+ * deliberately a single cheap curator call; callers fail open when it returns
+ * null so classification can never block retention.
+ */
+export async function classifyIngestSubsystem(
+  input: IngestSubsystemClassificationInput,
+): Promise<string | null> {
+  const taxonomy = input.taxonomy
+    .filter((entry) => sanitizeIngestSubsystemName(entry.name) !== null)
+    .sort((a, b) => b.memoryCount - a.memoryCount)
+    .map((entry) => `- ${entry.name} (${entry.memoryCount} memories)`)
+    .join("\n");
+  const systemPrompt = `Classify an agent session into exactly ONE dominant subsystem.
+
+Prefer a name from the existing taxonomy whenever it reasonably fits. Only coin a new name when none fits. The result must be a lowercase kebab-case slug of at most 40 characters. Return only through the required tool call.`;
+  const userPrompt = [
+    `Agent slug: ${input.agentSlug}`,
+    `Agent name: ${input.agentName}`,
+    `Task: ${input.task}`,
+    "",
+    "Existing subsystem taxonomy:",
+    taxonomy || "(empty)",
+    "",
+    "Cleaned transcript excerpt:",
+    input.transcript.slice(0, 4_000),
+  ].join("\n");
+  const result = await llmCall(systemPrompt, userPrompt, INGEST_CLASSIFY_TOOL, input.sessionId);
+  const raw = result as { subsystem?: unknown } | null;
+  return sanitizeIngestSubsystemName(raw?.subsystem);
+}
 
 const CLASSIFY_SYSTEM_PROMPT = `You classify an agent session transcript into subsystems of the agent's domain.
 
@@ -405,6 +477,18 @@ function sanitizeSubsystemName(s: unknown): string | null {
   return cleaned;
 }
 
+function sanitizeIngestSubsystemName(s: unknown): string | null {
+  if (typeof s !== "string") return null;
+  const cleaned = s
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+  if (!cleaned || cleaned.length > MAX_INGEST_SUBSYSTEM_CHARS) return null;
+  return cleaned;
+}
+
 async function classifyTouchedSubsystems(
   t: SessionTranscriptForCurator,
   known: KnownSubsystem[],
@@ -486,8 +570,8 @@ async function proposeSubsystemUpdate(
  *
  * Called by claw's /internal/curator/distill endpoint.
  */
-export async function distillSession(t: SessionTranscriptForCurator): Promise<SubsystemUpdate[]> {
-  const known = await getKnownSubsystems(t.agentSlug);
+export async function distillSession(t: SessionTranscriptForCurator, bankId?: string): Promise<SubsystemUpdate[]> {
+  const known = await getKnownSubsystems(t.agentSlug, bankId);
 
   const classification = await classifyTouchedSubsystems(t, known);
   if (classification.existing.length === 0 && classification.newProposals.length === 0) {
@@ -520,4 +604,178 @@ export async function distillSession(t: SessionTranscriptForCurator): Promise<Su
   log.info(`[curator] Distilled sessionId=${t.sessionId} agentSlug=${t.agentSlug} updates=${updates.length} existingTouched=${classification.existing.length} newProposed=${classification.newProposals.length}`);
 
   return updates;
+}
+
+/* ────────────────────────────────────────────────────────────────────────
+ * Large-transcript map-reduce (uploaded Claude sessions)
+ *
+ * distillSession assumes a single ≤12k window. An uploaded session is far
+ * larger, and naively truncating it to 12k would silently drop most of what
+ * happened. Instead we:
+ *   MAP    — chunk the transcript on turn boundaries; per chunk, extract dense
+ *            structured notes, carrying a rolling summary forward for continuity
+ *            so later chunks know what earlier chunks established.
+ *   REDUCE — concatenate the notes (+ final rolling summary) into one compact
+ *            synthetic transcript and run the EXISTING distillSession over it,
+ *            producing one coherent proposal per subsystem — identical output
+ *            shape and identical HITL review path as a normal session.
+ *
+ * Cost is bounded: at most MAX_CHUNKS map calls, then the usual 1 classify +
+ * N propose calls. Any map failure degrades to skipping that chunk's notes,
+ * never a thrown error.
+ * ──────────────────────────────────────────────────────────────────────── */
+
+const EXTRACT_TOOL = {
+  type: "function" as const,
+  function: {
+    name: "emit_chunk_notes",
+    description:
+      "Emit dense, durable notes extracted from this transcript chunk plus an updated running summary.",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        notes: {
+          type: "string",
+          description:
+            "Durable, reusable facts this chunk established about the agent's domain — architecture, components, how subsystems work, debugging steps, gotchas, corrections. Bullet style. Omit session-specific trivia. ≤ 1500 chars.",
+        },
+        runningSummary: {
+          type: "string",
+          description:
+            "A rolling summary of the WHOLE session so far (this chunk + everything before it), so the next chunk has continuity. ≤ 600 chars.",
+        },
+      },
+      required: ["notes", "runningSummary"],
+    },
+  },
+};
+
+const EXTRACT_SYSTEM_PROMPT = `You are reading ONE chunk of a longer agent session transcript, in order.
+
+You are given a running summary of everything BEFORE this chunk, then the chunk itself. Your job:
+1. Extract durable, reusable knowledge this chunk reveals about the agent's domain — how a subsystem works, its components, how to debug it, patterns to follow, mistakes to avoid, corrections to earlier understanding. Architecture over file:line; connected understanding over isolated trivia.
+2. Produce an updated running summary covering the whole session so far, so the next chunk keeps continuity.
+
+Rules:
+- Only record what is demonstrably in the transcript. Do not invent or rely on outside knowledge.
+- If this chunk adds nothing durable, return empty notes but still update the running summary.
+- Be dense and concrete. This output is fed to a later distillation step, not a human.
+
+Call emit_chunk_notes with your result.`;
+
+function buildExtractUserPrompt(
+  agentSlug: string,
+  priorSummary: string,
+  chunk: string,
+  idx: number,
+  total: number,
+): string {
+  return [
+    `Agent: ${agentSlug}`,
+    `Chunk ${idx + 1} of ${total}.`,
+    "",
+    "Running summary of the session BEFORE this chunk:",
+    priorSummary || "(this is the first chunk — no prior summary)",
+    "",
+    "Transcript chunk:",
+    chunk,
+  ].join("\n");
+}
+
+interface RawChunkNotes {
+  notes?: unknown;
+  runningSummary?: unknown;
+}
+
+async function extractChunkNotes(
+  agentSlug: string,
+  sessionId: string,
+  chunk: string,
+  idx: number,
+  total: number,
+  priorSummary: string,
+): Promise<{ notes: string; runningSummary: string }> {
+  const result = await llmCall(
+    EXTRACT_SYSTEM_PROMPT,
+    buildExtractUserPrompt(agentSlug, priorSummary, chunk, idx, total),
+    EXTRACT_TOOL,
+    `${sessionId}#chunk${idx + 1}`,
+  );
+  if (!result) return { notes: "", runningSummary: priorSummary };
+  const raw = result as RawChunkNotes;
+  const notes = typeof raw.notes === "string" ? raw.notes.trim() : "";
+  const runningSummary =
+    typeof raw.runningSummary === "string" && raw.runningSummary.trim()
+      ? raw.runningSummary.trim()
+      : priorSummary;
+  return { notes, runningSummary };
+}
+
+/**
+ * Distill a LARGE (uploaded) transcript via map-reduce. For a transcript that
+ * already fits one window this is just distillSession. Returns the same
+ * SubsystemUpdate[] shape as distillSession.
+ */
+export async function distillLargeTranscript(
+  t: SessionTranscriptForCurator,
+  bankId?: string,
+): Promise<SubsystemUpdate[]> {
+  const full = t.transcript ?? `Task: ${t.task}\n\nFinal response:\n${t.result}`;
+  const chunks = chunkTranscript(full, CHUNK_CHARS);
+
+  // Small enough to distill directly — no map-reduce needed.
+  if (chunks.length <= 1) {
+    return distillSession(t, bankId);
+  }
+
+  const usedChunks = chunks.slice(0, MAX_CHUNKS);
+  if (chunks.length > MAX_CHUNKS) {
+    log.warn(
+      `[curator] transcript exceeded MAX_CHUNKS sessionId=${t.sessionId} chunks=${chunks.length} cap=${MAX_CHUNKS} — distilling first ${MAX_CHUNKS}`,
+    );
+  }
+
+  const notesParts: string[] = [];
+  let runningSummary = "";
+  for (let i = 0; i < usedChunks.length; i++) {
+    const chunk = usedChunks[i] ?? "";
+    const { notes, runningSummary: nextSummary } = await extractChunkNotes(
+      t.agentSlug,
+      t.sessionId,
+      chunk,
+      i,
+      usedChunks.length,
+      runningSummary,
+    );
+    runningSummary = nextSummary;
+    if (notes) notesParts.push(`## Segment ${i + 1}\n${notes}`);
+  }
+
+  const combined = [
+    "This is a distilled set of notes extracted from a long uploaded session, in order.",
+    "",
+    "Overall session summary:",
+    runningSummary || "(no summary produced)",
+    "",
+    "Per-segment durable notes:",
+    notesParts.length > 0 ? notesParts.join("\n\n") : "(no durable notes extracted)",
+  ]
+    .join("\n")
+    .slice(0, MAX_COMBINED_NOTES_CHARS);
+
+  log.info(
+    `[curator] map complete sessionId=${t.sessionId} agentSlug=${t.agentSlug} chunks=${usedChunks.length} notesSegments=${notesParts.length} combinedChars=${combined.length}`,
+  );
+
+  // REDUCE — run the existing single-window distill over the combined notes.
+  return distillSession({
+    sessionId: t.sessionId,
+    agentSlug: t.agentSlug,
+    userId: t.userId,
+    task: t.task,
+    result: t.result,
+    toolsUsed: t.toolsUsed,
+    transcript: combined,
+  }, bankId);
 }

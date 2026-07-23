@@ -62,6 +62,7 @@ import {
 } from "../../lib/api";
 import { ContextPicker } from "../../components/ContextPicker";
 import { DebugDrawer } from "../../components/DebugDrawer";
+import { MessageRatingButtons } from "../../components/MessageRatingButtons";
 import type { AgentLight } from "../../lib/types";
 import { Avatar, nameToHsl } from "./ui/Avatar";
 import { Dialog } from "./ui/Dialog";
@@ -846,7 +847,7 @@ export function CitationPanel({
 
 /* ── reasoning block ─────────────────────────────────────────────── */
 
-function ReasoningBlock({ text, streaming }: { text: string; streaming: boolean }) {
+export function ReasoningBlock({ text, streaming }: { text: string; streaming: boolean }) {
   const [expanded, setExpanded] = useState(false);
   return (
     <div data-id="reasoning-block" className="rounded-lg border border-xyne-border-subtle bg-xyne-surface-subtle">
@@ -1013,7 +1014,7 @@ function InvocationItem({
   );
 }
 
-function InvocationBlocks({ invocations }: { invocations: ToolInvocation[] }) {
+export function InvocationBlocks({ invocations }: { invocations: ToolInvocation[] }) {
   const roots: ToolInvocation[] = [];
   const childrenByParent = new Map<string, ToolInvocation[]>();
   for (const inv of invocations) {
@@ -1265,6 +1266,32 @@ function LivePlanCard({ todos }: { todos: PlanTodo[] }) {
 
 /* ── message thread ──────────────────────────────────────────────── */
 
+/** Rating-relevant slice of the AgentRun that produced an assistant message. */
+type RunRatingInfo = {
+  sessionId: string;
+  rating: "up" | "down" | null;
+  ratingComment: string | null;
+};
+
+/** Build the assistant-message-id → run-rating map from a list of AgentRuns.
+ *  Keyed by chatMessageId (set on run finalize), which is the stable link
+ *  between an assistant message and the run that produced it under branching. */
+function buildRunByMsgId(
+  runs: Array<{ chatMessageId?: string | null; sessionId: string; rating?: "up" | "down" | null; ratingComment?: string | null }>,
+): Map<string, RunRatingInfo> {
+  const next = new Map<string, RunRatingInfo>();
+  for (const r of runs) {
+    if (r.chatMessageId) {
+      next.set(r.chatMessageId, {
+        sessionId: r.sessionId,
+        rating: r.rating ?? null,
+        ratingComment: r.ratingComment ?? null,
+      });
+    }
+  }
+  return next;
+}
+
 function MessageThread({
   messages,
   sending,
@@ -1289,6 +1316,9 @@ function MessageThread({
   onApproveAction,
   onApproveAndContinueAction,
   onDeclineAction,
+  userId,
+  runByMsgId,
+  onRated,
 }: {
   messages: ChatMsg[];
   sending: boolean;
@@ -1316,6 +1346,9 @@ function MessageThread({
   onApproveAction: (msgId: string, action: PendingAction) => Promise<void>;
   onApproveAndContinueAction: (msgId: string, action: PendingAction) => Promise<void>;
   onDeclineAction: (msgId: string, action: PendingAction) => void;
+  userId: string;
+  runByMsgId: Map<string, RunRatingInfo>;
+  onRated: (msgId: string, rating: "up" | "down", comment?: string) => void;
 }) {
   // Inline edit state for the latest visible user message. Older messages are
   // intentionally not editable — see comment in useChat.editLatestUserMessage.
@@ -1508,6 +1541,7 @@ function MessageThread({
         const msgInvocations = isStream ? liveInvocations : safeInvocationsByMsgId.get(msg.id) ?? [];
         const msgReasoning = isStream ? liveReasoning : safeReasoningByMsgId.get(msg.id);
         const msgPendingActions = safePendingActionsByMsgId.get(msg.id) ?? [];
+        const runInfo = runByMsgId.get(msg.id);
 
         const hasInvocations = msgInvocations.length > 0;
         const hasPlan = isStream && livePlanTodos.length > 0;
@@ -1607,13 +1641,27 @@ function MessageThread({
                   )}
                 </div>
               )}
-              <button
-                type="button"
-                onClick={() => onOpenTurnDebugger(assistantTurnIndex, isStream, msg.id)}
-                className="ml-1 inline-flex w-fit items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-xyne-fg-muted transition hover:bg-xyne-surface hover:text-xyne-fg-secondary"
-              >
-                <ChartBarIcon size={11} /> Debug this response
-              </button>
+              <div className="ml-1 flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => onOpenTurnDebugger(assistantTurnIndex, isStream, msg.id)}
+                  className="inline-flex w-fit items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-xyne-fg-muted transition hover:bg-xyne-surface hover:text-xyne-fg-secondary"
+                >
+                  <ChartBarIcon size={11} /> Debug this response
+                </button>
+                {/* Per-message 👍/👎 — only once the run is finalized and linked
+                    (chatMessageId is set on finalize, so it appears after the
+                    turn completes). */}
+                {!isStream && runInfo && (
+                  <MessageRatingButtons
+                    userId={userId}
+                    sessionId={runInfo.sessionId}
+                    rating={runInfo.rating}
+                    ratingComment={runInfo.ratingComment}
+                    onRated={(rating, comment) => onRated(msg.id, rating, comment)}
+                  />
+                )}
+              </div>
             </div>
           </div>
         );
@@ -2431,7 +2479,7 @@ export interface PendingFile {
   previewUrl: string;
 }
 
-interface InputAreaProps {
+export interface InputAreaProps {
   agentName: string;
   value: string;
   onChange: (v: string) => void;
@@ -2469,7 +2517,7 @@ interface InputAreaProps {
  *   • ↑ on empty input — recall last user message
  *   • Esc              — clear the current input
  */
-const InputArea = forwardRef<InputAreaHandle, InputAreaProps>(function InputArea(
+export const InputArea = forwardRef<InputAreaHandle, InputAreaProps>(function InputArea(
   {
     agentName,
     value,
@@ -3230,10 +3278,11 @@ export function ChatPageV3() {
   // to the Nth chronological run, so we pin selection by run sessionId derived
   // from the assistant message's AgentRun.chatMessageId.
   const [debugSessionId, setDebugSessionId]   = useState<string | null>(null);
-  // Map: assistant message id → AgentRun.sessionId. Populated when the active
-  // conversation is loaded. Used by the "Debug this response" button to derive
-  // the selectedSessionId for the drawer.
-  const [debugRunByMsgId, setDebugRunByMsgId] = useState<Map<string, string>>(new Map());
+  // Map: assistant message id → { sessionId, rating, ratingComment } for the
+  // AgentRun that produced it. Populated when the active conversation is loaded.
+  // Used by the "Debug this response" button (sessionId) and the per-message
+  // 👍/👎 rating control (rating + comment).
+  const [runByMsgId, setRunByMsgId] = useState<Map<string, RunRatingInfo>>(new Map());
   const [selectedCitation, setSelectedCitation] = useState<CitationSelection | null>(null);
   const [citationPanelWidth, setCitationPanelWidth] = useState<number>(() => {
     try {
@@ -3430,11 +3479,7 @@ export function ChatPageV3() {
     if (sending || !conversationId || !activeAgentSlug) return;
     listRuns(userId, { conversationId, agentSlug: activeAgentSlug, limit: 200 })
       .then((runs) => {
-        const next = new Map<string, string>();
-        for (const r of runs) {
-          if (r.chatMessageId) next.set(r.chatMessageId, r.sessionId);
-        }
-        setDebugRunByMsgId(next);
+        setRunByMsgId(buildRunByMsgId(runs));
       })
       .catch(() => {});
   }, [sending, conversationId, activeAgentSlug, userId]);
@@ -3561,11 +3606,7 @@ export function ChatPageV3() {
             // the chat thread, so failure here is silent.
             listRuns(userId, { conversationId: targetConvId, agentSlug: activeAgentSlug, limit: 200 })
               .then((runs) => {
-                const next = new Map<string, string>();
-                for (const r of runs) {
-                  if (r.chatMessageId) next.set(r.chatMessageId, r.sessionId);
-                }
-                setDebugRunByMsgId(next);
+                setRunByMsgId(buildRunByMsgId(runs));
               })
               .catch(() => {});
           }
@@ -3750,11 +3791,7 @@ export function ChatPageV3() {
       // "Debug this response" picks the right run under branching.
       listRuns(userId, { conversationId: conv.conversationId, agentSlug: conv.agentSlug, limit: 200 })
         .then((runs) => {
-          const next = new Map<string, string>();
-          for (const r of runs) {
-            if (r.chatMessageId) next.set(r.chatMessageId, r.sessionId);
-          }
-          setDebugRunByMsgId(next);
+          setRunByMsgId(buildRunByMsgId(runs));
         })
         .catch(() => {});
     } catch {
@@ -4098,11 +4135,24 @@ export function ChatPageV3() {
                       // Resolve to sessionId via the runs map. Falls back to
                       // null when the run isn't ready yet (streaming) — the
                       // drawer's selectedTurnIndex still gets us close.
-                      setDebugSessionId(debugRunByMsgId.get(assistantMessageId) ?? null);
+                      setDebugSessionId(runByMsgId.get(assistantMessageId)?.sessionId ?? null);
                       setSelectedCitation(null);
                       setShowDebugger(true);
                     }}
                     onOpenCitation={handleOpenCitation}
+                    userId={userId}
+                    runByMsgId={runByMsgId}
+                    onRated={(msgId, rating, comment) => {
+                      // Optimistically reflect the new rating in the shared map
+                      // so the buttons stay truthful without a full refetch.
+                      setRunByMsgId((prev) => {
+                        const existing = prev.get(msgId);
+                        if (!existing) return prev;
+                        const next = new Map(prev);
+                        next.set(msgId, { ...existing, rating, ratingComment: comment ?? null });
+                        return next;
+                      });
+                    }}
                     pendingActionsByMsgId={pendingActionsByMsgId}
                     onApproveAction={handleApproveAction}
                     onApproveAndContinueAction={handleApproveAndContinueAction}

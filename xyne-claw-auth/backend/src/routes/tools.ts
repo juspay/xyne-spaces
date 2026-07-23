@@ -232,7 +232,7 @@ export async function buildAvailableToolsCatalog(tenantUniqueId: string | undefi
       writeToolsByType.set(server.type, set);
     }
 
-    // Custom tool sources (pgm, google, research-agent, etc.)
+    // Custom tool sources (google, research-agent, sandbox, etc.)
     const customSources = [...new Set(tools.filter((t) => t.source.startsWith("custom:")).map((t) => t.source))];
     const customGroups = customSources.map((source) => ({
       source,
@@ -337,7 +337,7 @@ export async function buildAvailableToolsCatalog(tenantUniqueId: string | undefi
       });
     }
 
-    // 3) Custom tool sources (custom:pgm, custom:google, ...). Each
+    // 3) Custom tool sources (custom:sandbox, custom:google, ...). Each
     //    source becomes its own card so users can opt-in by capability
     //    rather than by individual tool.
     for (const source of customSources) {
@@ -633,7 +633,7 @@ router.post("/sync", requireClawAdmin, async (req: Request, res: Response) => {
     }
     totalSynced += builtins.length;
 
-    // Sync custom tools from shared registry (pgm, research-agent, etc.).
+    // Sync custom tools from shared registry (research-agent, sandbox, etc.).
     // SKIP_CATALOG_SOURCES (google/microsoft) are per-user OAuth MCP connectors,
     // NOT custom tools — upserting them here would resurrect the `custom:*` rows
     // the catalog-cleanup migration deletes (and the picker would list them under

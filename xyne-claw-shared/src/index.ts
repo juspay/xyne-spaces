@@ -7,7 +7,20 @@ export { PLATFORM_ONLY_CONFIG_KEYS, stripPlatformConfigKeys } from "./tools/plat
 export { getSandboxSession, probeSession, buildSandboxStoreKey, REPO_CONFIGS, SBX_GIT, type RepoSetupConfig, type SetupStep } from "./tools/sandbox/index.js";
 export type { Citation, CitationIconKey } from "./types/citation.js";
 export { citationIconUrl, citationIconKey, iconUrlForKey, toolIconKey, CITATION_ICONS } from "./types/citation.js";
-export { FlowBuilder, mdToMrkdwn, buildWriteApprovalFlow, buildTwinApprovalFlow, buildUserQuestionFlow, buildPromoteProviderFlow, buildGoalSuggestionFlow, buildAgentCallProposalFlow, buildCloneApprovalFlow } from "./flow/builder.js";
+export type { TwinDelivery, TwinDeliveryAction, TwinReplyDestination, TwinDestinationCandidate } from "./types/twin-delivery.js";
+export { isTwinDelivery } from "./types/twin-delivery.js";
+export {
+  normalizeSkillContent,
+  hashSkillContent,
+  skillHashEquals,
+  computeSkillDiff,
+  formatSkillDiffForCard,
+  resolveSkillUpdateApprover,
+  authorizeSkillUpdateApproval,
+} from "./skill-diff/index.js";
+export type { SkillDiff, SkillForAuthz, ApproverResolution, SkillApprovalAuthz } from "./skill-diff/index.js";
+export { createSkillTool, updateSkillTool } from "./tools/skill-management/index.js";
+export { FlowBuilder, mdToMrkdwn, buildWriteApprovalFlow, buildWriteResultFlow, buildTwinApprovalFlow, buildUserQuestionFlow, buildPromoteProviderFlow, buildGoalSuggestionFlow, buildAgentCallProposalFlow, buildCloneApprovalFlow, buildSkillUpdateApprovalFlow } from "./flow/builder.js";
 export type { FlowDefinition, FlowComponent, FlowAction, SelectOption } from "./flow/builder.js";
 export { buildPlanFlow } from "./flow/plan-flow.js";
 export type { Todo, TodoStatus } from "./flow/plan-flow.js";
@@ -20,6 +33,8 @@ export {
   registerMemoryProvider,
   listMemoryProviders,
   bankIdForAgent,
+  bankIdForAgentOrg,
+  buildRetainMission,
   HindsightProvider,
   StubMemoryProvider,
 } from "./memory/index.js";
@@ -38,11 +53,16 @@ export type {
   SessionTranscriptForCurator,
   SubsystemUpdate,
   UserMemoryRecord,
+  UserMemoryChannelType,
+  UserMemoryThreadMessage,
+  UserMemoryThreadContext,
   UserMemorySubsystem,
   UserMemoryCandidatePayload,
   UserMemoryDistillRequest,
   UserMemoryDistillResponse,
   ExistingUserMemory,
+  UserMemoryCuratorTrace,
+  UserMemoryCuratorEmittedCandidate,
   EntityGraph,
   EntityGraphNode,
   EntityGraphEdge,

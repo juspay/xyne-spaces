@@ -11,97 +11,200 @@
  * `user_memory_candidates` with sourceRefs resolved from the input batch.
  */
 
+import { Agent } from "undici";
 import { bankIdForAgent, getMemoryProvider } from "xyne-claw-shared";
+import { baseRecordId } from "./userMemoryBatcher.js";
 import { CONFIG } from "../config.js";
 import { prisma } from "../db.js";
 import { createLogger, createTraceId } from "../logger.js";
 import type {
   ExistingUserMemory,
   UserMemoryCandidatePayload,
+  UserMemoryCuratorTrace,
   UserMemoryDistillRequest,
   UserMemoryDistillResponse,
   UserMemoryRecord,
 } from "xyne-claw-shared";
+import {
+  startCuratorBatchEvent,
+  updateCuratorBatchAttempt,
+  finishCuratorBatchEvent,
+  type PipelineRecordPreview,
+} from "./digitalTwinPipelineEvents.js";
 
 const logger = createLogger("user-memory-curator-client", createTraceId());
+// claw's /distill runs its OWN retry ladder internally: up to
+// USER_MEMORY_CURATOR_MAX_ATTEMPTS LLM calls, each timeout escalating by
+// USER_MEMORY_CURATOR_TIMEOUT_STEP_MS (10m → 12m → 14m). This client fetch wraps
+// that whole ladder in ONE request, so it must outlast the SUM of those
+// per-attempt timeouts — otherwise it aborts a still-working curator before its
+// later (longer) retries can finish. Compute from the same knobs (keep them in
+// sync across both services) + a buffer for network/gateway overhead.
+const CURATOR_BASE_MS = Number(process.env["USER_MEMORY_CURATOR_TIMEOUT_MS"] ?? 600_000);
+const CURATOR_STEP_MS = Number(process.env["USER_MEMORY_CURATOR_TIMEOUT_STEP_MS"] ?? 120_000);
+const CURATOR_ATTEMPTS = Math.max(1, Number(process.env["USER_MEMORY_CURATOR_MAX_ATTEMPTS"] ?? 3));
+// Σ per-attempt timeouts = attempts·base + step·(0+1+…+(attempts−1)); +15% buffer.
 const DISTILL_TIMEOUT_MS = Number(
-  process.env["USER_MEMORY_CURATOR_TIMEOUT_MS"] ?? 600_000,
+  process.env["USER_MEMORY_CLIENT_TIMEOUT_MS"] ??
+    Math.round(
+      (CURATOR_ATTEMPTS * CURATOR_BASE_MS +
+        CURATOR_STEP_MS * ((CURATOR_ATTEMPTS * (CURATOR_ATTEMPTS - 1)) / 2)) *
+        1.15,
+    ),
 );
+
+// The distill call is NON-streaming: claw sends response headers only AFTER the
+// full LLM distill finishes (10–14 min). undici's default headersTimeout AND
+// bodyTimeout are 300s (5 min), so the fetch would abort at ~5 min via a
+// "Headers Timeout Error" REGARDLESS of the AbortSignal above — this is the real
+// "5-minute timeout" we kept hitting. Disable both (0) so the AbortSignal is the
+// sole clock; keep connectTimeout so a genuinely dead pod still fails fast.
+const distillDispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0, connectTimeout: 10_000 });
 const TWIN_BANK_ID = bankIdForAgent("digital-twin");
 const memory = getMemoryProvider();
 const DEFAULT_AUTO_APPROVE_MIN_SCORE = 0.9;
 
 interface SourceRef {
-  type: "message" | "call" | "canvas" | "mention_reply";
+  type: "message" | "call" | "canvas" | "mention_reply" | "conversation";
   id: string;
   channelId?: string;
   ts: string;
 }
 
+/** Ensure the twin bank exists AND has observations enabled (Hindsight's
+ *  evolution/temporal tracking). Cached per-pod in the provider, so calling
+ *  before each retain is cheap. Best-effort — retain still works if it fails. */
+export async function ensureTwinBank(): Promise<void> {
+  try {
+    await memory.ensureBank(TWIN_BANK_ID, { enableObservations: true });
+  } catch {
+    /* non-fatal */
+  }
+}
+
+/** The latest source-record timestamp backing a candidate — its representative
+ *  EVENT time, passed to Hindsight so facts rank by when they happened (not when
+ *  approved). Falls back to undefined → provider uses now(). */
+export function pickEventTimestamp(sourceRefs: unknown): string | undefined {
+  if (!Array.isArray(sourceRefs)) return undefined;
+  let bestMs = 0;
+  let bestIso: string | undefined;
+  for (const r of sourceRefs) {
+    const ts = (r as { ts?: unknown } | null)?.ts;
+    if (typeof ts !== "string") continue;
+    const t = Date.parse(ts);
+    if (Number.isFinite(t) && t > bestMs) {
+      bestMs = t;
+      bestIso = new Date(t).toISOString();
+    }
+  }
+  return bestIso;
+}
+
+/** Observation scope confining consolidation to ONE user's facts (shared bank
+ *  safety — observations never mix users). */
+export function twinObservationScopes(userId: string): string[][] {
+  return [[`user:${userId}`]];
+}
+
+/** Client-side attempts for the claw distill S2S call. The curator LLM already
+ *  retries internally (no-tool-call / bad-json / 5xx); THIS layer covers
+ *  TRANSPORT failures — claw restart, a connection dropped by an intermediate
+ *  idle-timeout on a long call, or a 5xx — which otherwise silently lose the
+ *  whole batch (trace=null, 0 candidates), exactly the "24 → 0, no trace" case. */
+const DISTILL_CLIENT_ATTEMPTS = Math.max(1, Number(process.env["USER_MEMORY_CLIENT_MAX_ATTEMPTS"] ?? 3));
+
 export async function distillUserMemoryViaClaw(
   req: UserMemoryDistillRequest,
-): Promise<UserMemoryCandidatePayload[]> {
+  /** Fired at the START of each attempt so callers can surface live "running /
+   *  retrying attempt N/M" state. `prevError` is set from attempt 2 onward. */
+  onAttempt?: (attempt: number, maxAttempts: number, prevError?: string) => void,
+): Promise<{ candidates: UserMemoryCandidatePayload[]; trace: UserMemoryCuratorTrace | null }> {
   if (!CONFIG.xyneClawS2sKey) {
-    logger.warn(
-      "[user-memory-curator-client] XYNE_CLAW_S2S_KEY not set — refusing call",
-    );
-    return [];
+    logger.warn("[user-memory-curator-client] XYNE_CLAW_S2S_KEY not set — refusing call");
+    return { candidates: [], trace: null };
   }
   const url = `${CONFIG.xyneClawUrl.replace(/\/$/, "")}/internal/user-memory/distill`;
-  const tStart = Date.now();
 
-  try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-s2s-key": CONFIG.xyneClawS2sKey,
-      },
-      body: JSON.stringify(req),
-      signal: AbortSignal.timeout(DISTILL_TIMEOUT_MS),
-    });
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      logger.warn("[user-memory-curator-client] non-OK from claw", {
-        status: res.status,
-        body: body.slice(0, 300),
+  let prevError: string | undefined;
+  for (let attempt = 1; attempt <= DISTILL_CLIENT_ATTEMPTS; attempt++) {
+    onAttempt?.(attempt, DISTILL_CLIENT_ATTEMPTS, prevError);
+    const tStart = Date.now();
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-s2s-key": CONFIG.xyneClawS2sKey,
+        },
+        body: JSON.stringify({ ...req, includeTrace: true }),
+        signal: AbortSignal.timeout(DISTILL_TIMEOUT_MS),
+        // `dispatcher` is an undici extension not in the DOM RequestInit type.
+        dispatcher: distillDispatcher,
+      } as unknown as RequestInit);
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        logger.warn("[user-memory-curator-client] non-OK from claw", {
+          status: res.status,
+          body: body.slice(0, 300),
+          userId: req.userId,
+          recordsCount: req.records.length,
+          durationMs: Date.now() - tStart,
+          attempt,
+          maxAttempts: DISTILL_CLIENT_ATTEMPTS,
+        });
+        // 5xx/gateway = transient → retry; 4xx is a real request problem → don't.
+        if (res.status >= 500 && attempt < DISTILL_CLIENT_ATTEMPTS) {
+          prevError = `claw ${res.status}`;
+          await new Promise((r) => setTimeout(r, 2000 * attempt));
+          continue;
+        }
+        return { candidates: [], trace: null };
+      }
+      const data = (await res.json()) as UserMemoryDistillResponse;
+      if (!data.success || !Array.isArray(data.candidates)) {
+        // claw responded (not a transport failure) — malformed body; don't retry.
+        logger.warn("[user-memory-curator-client] malformed response", {
+          error: data.error,
+          userId: req.userId,
+          recordsCount: req.records.length,
+        });
+        return { candidates: [], trace: null };
+      }
+      if (attempt > 1) {
+        logger.info("[user-memory-curator-client] distill succeeded on retry", { userId: req.userId, attempt });
+      }
+      return { candidates: data.candidates, trace: data.trace ?? null };
+    } catch (err) {
+      // Transport failure: timeout / connection reset / dropped by an
+      // intermediate proxy on a long call — the failure that was losing whole
+      // batches. Retry with backoff; only give up after the last attempt.
+      const isLast = attempt >= DISTILL_CLIENT_ATTEMPTS;
+      logger.error("[user-memory-curator-client] call failed", {
+        err: err instanceof Error ? err.message : String(err),
+        name: err instanceof Error ? err.name : "unknown",
+        cause:
+          err instanceof Error && (err as { cause?: unknown }).cause
+            ? String((err as { cause?: unknown }).cause)
+            : undefined,
+        url,
         userId: req.userId,
         recordsCount: req.records.length,
         durationMs: Date.now() - tStart,
+        timeoutMs: DISTILL_TIMEOUT_MS,
+        attempt,
+        maxAttempts: DISTILL_CLIENT_ATTEMPTS,
+        willRetry: !isLast,
       });
-      return [];
+      if (!isLast) {
+        prevError = err instanceof Error ? err.message : String(err);
+        await new Promise((r) => setTimeout(r, 2000 * attempt));
+        continue;
+      }
+      return { candidates: [], trace: null };
     }
-    const data = (await res.json()) as UserMemoryDistillResponse;
-    if (!data.success || !Array.isArray(data.candidates)) {
-      logger.warn("[user-memory-curator-client] malformed response", {
-        error: data.error,
-        userId: req.userId,
-        recordsCount: req.records.length,
-      });
-      return [];
-    }
-    return data.candidates;
-  } catch (err) {
-    // Include enough context to tell apart: timeout (90s), connection
-    // refused, TLS error, JSON parse, AbortError. Earlier this catch only
-    // logged err.message which the MCP log viewer was stripping, so we
-    // couldn't distinguish a fetch throw from a JSON.parse throw from a
-    // signal abort.
-    logger.error("[user-memory-curator-client] call failed", {
-      err: err instanceof Error ? err.message : String(err),
-      name: err instanceof Error ? err.name : "unknown",
-      cause:
-        err instanceof Error && (err as { cause?: unknown }).cause
-          ? String((err as { cause?: unknown }).cause)
-          : undefined,
-      url,
-      userId: req.userId,
-      recordsCount: req.records.length,
-      durationMs: Date.now() - tStart,
-      timeoutMs: DISTILL_TIMEOUT_MS,
-    });
-    return [];
   }
+  return { candidates: [], trace: null };
 }
 
 /** How many of the user's existing memories to pull for update-vs-create
@@ -150,6 +253,19 @@ async function fetchExistingUserMemories(userId: string): Promise<ExistingUserMe
  *
  * Returns the inserted candidate count for logging/progress UI.
  */
+/** First 300 chars of each fed record, for the pipeline-event preview. */
+function recordPreviews(records: UserMemoryRecord[]): PipelineRecordPreview[] {
+  return records.map((r) => ({
+    id: r.id,
+    type: r.type,
+    ts: r.ts,
+    ...(r.channelId ? { channelId: r.channelId } : {}),
+    ...(r.channelName ? { channelName: r.channelName } : {}),
+    ...(r.title ? { title: r.title } : {}),
+    textPreview: (r.text ?? "").slice(0, 300),
+  }));
+}
+
 export async function curateAndPersistBatch(args: {
   userId: string;
   window: { from: Date; to: Date };
@@ -160,27 +276,75 @@ export async function curateAndPersistBatch(args: {
   const { userId, window, records, source } = args;
   if (records.length === 0) return 0;
 
+  const tStart = Date.now();
+  const previews = recordPreviews(records);
+  // "running" event BEFORE the slow distill call so the pipeline feed shows the
+  // batch immediately (reload-survivably) instead of going silent for minutes.
+  // Its id is reused to stamp candidates AND to write the terminal event below
+  // (single row, no double-write).
+  const eventId = await startCuratorBatchEvent({
+    userId,
+    source,
+    window,
+    recordCount: records.length,
+    records: previews,
+    maxAttempts: DISTILL_CLIENT_ATTEMPTS,
+  });
   const existingMemories = await fetchExistingUserMemories(userId);
 
-  const candidates = await distillUserMemoryViaClaw({
-    userId,
-    window: { from: window.from.toISOString(), to: window.to.toISOString() },
-    records,
-    existingMemories,
-  });
+  const { candidates, trace } = await distillUserMemoryViaClaw(
+    {
+      userId,
+      window: { from: window.from.toISOString(), to: window.to.toISOString() },
+      records,
+      existingMemories,
+    },
+    // Surface each distill attempt/retry on the running event.
+    (attempt, maxAttempts, prevError) => {
+      void updateCuratorBatchAttempt(eventId, attempt, maxAttempts, prevError);
+    },
+  );
 
-  if (candidates.length === 0) return 0;
+  const emittedCount = trace?.emitted.length ?? 0;
+  const keptCount = trace?.emitted.filter((e) => e.verdict === "kept").length ?? 0;
 
-  // Resolve groundedOnIds → sourceRefs using the input batch we sent.
+  if (candidates.length === 0) {
+    await finishCuratorBatchEvent(eventId, {
+      userId,
+      source,
+      window,
+      status: trace?.error ? "error" : "empty",
+      recordCount: records.length,
+      records: previews,
+      existingMemoryCount: existingMemories.length,
+      emittedCount,
+      keptCount,
+      candidatesCreated: 0,
+      autoApproved: 0,
+      durationMs: Date.now() - tStart,
+      error: trace?.error ?? null,
+      trace,
+    });
+    return 0;
+  }
+
+  // Resolve groundedOnIds → sourceRefs using the input batch we sent. Records
+  // may carry a `#pN` sub-chunk id (a batching artefact, see userMemoryBatcher);
+  // strip it back to the real record id and dedupe so two sub-chunks of the same
+  // unit don't produce duplicate sourceRefs.
   const byId = new Map(records.map((r) => [r.id, r]));
   const candidateRows = candidates.map((c) => {
     const refs: SourceRef[] = [];
+    const seenIds = new Set<string>();
     for (const id of c.groundedOnIds) {
       const r = byId.get(id);
       if (!r) continue;
+      const baseId = baseRecordId(r.id);
+      if (seenIds.has(baseId)) continue;
+      seenIds.add(baseId);
       refs.push({
         type: r.type,
-        id: r.id,
+        id: baseId,
         ...(r.channelId ? { channelId: r.channelId } : {}),
         ts: r.ts,
       });
@@ -201,7 +365,25 @@ export async function curateAndPersistBatch(args: {
       Array.isArray(r.sourceRefs) &&
       (r.sourceRefs as unknown as SourceRef[]).length > 0,
   );
-  if (writable.length === 0) return 0;
+  if (writable.length === 0) {
+    await finishCuratorBatchEvent(eventId, {
+      userId,
+      source,
+      window,
+      status: "empty",
+      recordCount: records.length,
+      records: previews,
+      existingMemoryCount: existingMemories.length,
+      emittedCount,
+      keptCount,
+      candidatesCreated: 0,
+      autoApproved: 0,
+      durationMs: Date.now() - tStart,
+      error: null,
+      trace,
+    });
+    return 0;
+  }
 
   const user = await (prisma.user.findUnique as any)({
     where: { id: userId },
@@ -216,8 +398,34 @@ export async function curateAndPersistBatch(args: {
     DEFAULT_AUTO_APPROVE_MIN_SCORE;
   const now = new Date();
 
+  // Record the pipeline event FIRST — its id (a) is stamped onto every
+  // candidate row and (b) is added as a `pipeline:<id>` TAG on any memory we
+  // auto-retain. The tag is how the memories list finds the trace: Hindsight's
+  // retain returns no usable id, so candidate.hindsightMemoryId is unreliable —
+  // the tag travels with the memory and is returned by listMemories.
+  // `writable.length` is the create count: createMany below inserts every row.
+  const pipelineEventId = await finishCuratorBatchEvent(eventId, {
+    userId,
+    source,
+    window,
+    status: writable.length > 0 ? "ok" : "empty",
+    recordCount: records.length,
+    records: previews,
+    existingMemoryCount: existingMemories.length,
+    emittedCount,
+    keptCount,
+    candidatesCreated: writable.length,
+    autoApproved: 0, // fixed up in the log below; not persisted per-row
+    durationMs: Date.now() - tStart,
+    error: null,
+    trace,
+  });
+
   let autoApproved = 0;
   const rows: Array<Record<string, unknown>> = [];
+
+  // Make sure the twin bank has observations enabled before we retain (cached).
+  if (autoApproveEnabled) await ensureTwinBank();
 
   for (const row of writable) {
     if (autoApproveEnabled && row.signalScore >= minScore) {
@@ -227,13 +435,21 @@ export async function curateAndPersistBatch(args: {
           `user:${userId}`,
           `subsystem:${row.subsystem}`,
           "scope:user",
+          ...(pipelineEventId ? [`pipeline:${pipelineEventId}`] : []),
         ];
-        const out = await memory.retain(TWIN_BANK_ID, [{ content, tags }]);
+        const eventTs = pickEventTimestamp(row.sourceRefs);
+        const out = await memory.retain(TWIN_BANK_ID, [{
+          content,
+          tags,
+          ...(eventTs ? { timestamp: eventTs } : {}),
+          observationScopes: twinObservationScopes(userId),
+        }]);
         rows.push({
           ...row,
           status: "approved",
           approvedAt: now,
           hindsightMemoryId: out?.[0]?.id ?? null,
+          pipelineEventId,
         });
         autoApproved += 1;
         continue;
@@ -254,12 +470,22 @@ export async function curateAndPersistBatch(args: {
       }
     }
 
-    rows.push({ ...row, status: "pending" });
+    rows.push({ ...row, status: "pending", pipelineEventId });
   }
 
   const result = await (prisma.userMemoryCandidate.createMany as any)({
     data: rows,
   });
+
+  // The event was recorded before the retain loop (so its id could tag the
+  // auto-approved memories); patch the real auto-approved count back now.
+  if (pipelineEventId && autoApproved > 0) {
+    await (prisma.digitalTwinPipelineEvent.update as any)({
+      where: { id: pipelineEventId },
+      data: { autoApproved },
+    }).catch(() => {});
+  }
+
   logger.info("[user-memory-curator-client] candidates persisted", {
     userId,
     source,
@@ -268,7 +494,9 @@ export async function curateAndPersistBatch(args: {
     autoApproved,
     approvalMode: user?.digitalTwinMemoryApprovalMode ?? "manual",
     minScore,
+    pipelineEventId,
   });
+
   return result.count;
 }
 

@@ -43,6 +43,7 @@ function metricLine(
   sessionId: string,
   ok: boolean,
   inflightAtStart: number,
+  fastMode: boolean,
 ): string {
   return [
     "[metric]",
@@ -55,6 +56,7 @@ function metricLine(
     `session=${sanitize(sessionId)}`,
     `ok=${ok}`,
     `inflight=${inflightAtStart}`,
+    `fastMode=${fastMode}`,
   ].join(" ");
 }
 
@@ -64,6 +66,7 @@ function wrapStream(
   sessionId: string,
   startedAt: number,
   inflightAtStart: number,
+  fastMode: boolean,
 ): AssistantMessageEventStream {
   let firstContentAt: number | undefined;
   let lastTerminalEvent: AssistantMessageEvent | undefined;
@@ -78,7 +81,7 @@ function wrapStream(
     const ok = eventOk(lastTerminalEvent, result);
     const provider = model.provider || "unknown";
     const modelId = model.id || model.name || "unknown";
-    log.info(metricLine(ttftMs, totalMs, provider, modelId, sessionId, ok, inflightAtStart));
+    log.info(metricLine(ttftMs, totalMs, provider, modelId, sessionId, ok, inflightAtStart, fastMode));
     if (ttftMs > 30_000) {
       log.warn(`[llm] slow-ttft ttft_ms=${ttftMs} provider=${sanitize(provider)} inflight=${inflightAtStart}`);
     }
@@ -120,8 +123,9 @@ function wrapStream(
   return wrapped as AssistantMessageEventStream;
 }
 
-export function installLlmCallMetrics(agent: StreamAgent, sessionId: string): void {
+export function installLlmCallMetrics(agent: StreamAgent, sessionId: string, labels?: { fastMode?: boolean }): void {
   const baseStreamFn = agent.streamFn;
+  const fastMode = labels?.fastMode === true;
   agent.streamFn = (model, context, options) => {
     const startedAt = Date.now();
     llmCallsInFlight += 1;
@@ -130,7 +134,7 @@ export function installLlmCallMetrics(agent: StreamAgent, sessionId: string): vo
       const totalMs = Date.now() - startedAt;
       const provider = model.provider || "unknown";
       const modelId = model.id || model.name || "unknown";
-      log.info(metricLine(totalMs, totalMs, provider, modelId, sessionId, ok, inflightAtStart));
+      log.info(metricLine(totalMs, totalMs, provider, modelId, sessionId, ok, inflightAtStart, fastMode));
       if (totalMs > 30_000) {
         log.warn(`[llm] slow-ttft ttft_ms=${totalMs} provider=${sanitize(provider)} inflight=${inflightAtStart}`);
       }
@@ -139,7 +143,7 @@ export function installLlmCallMetrics(agent: StreamAgent, sessionId: string): vo
     try {
       const stream = baseStreamFn(model, context, options);
       return Promise.resolve(stream)
-        .then((resolvedStream) => wrapStream(resolvedStream, model, sessionId, startedAt, inflightAtStart))
+        .then((resolvedStream) => wrapStream(resolvedStream, model, sessionId, startedAt, inflightAtStart, fastMode))
         .catch((err: unknown) => {
           settleBeforeStream(false);
           throw err;

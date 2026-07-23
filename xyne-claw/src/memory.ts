@@ -14,7 +14,7 @@
  */
 
 import { bankIdForAgent, getMemoryProvider } from "xyne-claw-shared";
-import { HINDSIGHT } from "./config.js";
+import { HINDSIGHT, SERVER } from "./config.js";
 
 import { createLogger } from "./logger.js";
 const log = createLogger("memory");
@@ -61,11 +61,14 @@ export interface SubsystemSummary {
 export async function listSubsystemTaxonomy(
   agentSlug: string,
   opts?: { userTag?: string },
+  memoryBankId?: string,
 ): Promise<SubsystemSummary[]> {
   if (!HINDSIGHT.enabled) return [];
   try {
     const provider = getMemoryProvider();
-    const bankId = bankIdForAgent(agentSlug);
+    const bankId = isDigitalTwinAgent(agentSlug)
+      ? bankIdForAgent(agentSlug)
+      : memoryBankId?.trim() || bankIdForAgent(agentSlug);
     const page = await provider.listMemories(bankId, { limit: 200 });
     const acc = new Map<string, { count: number; sample: string }>();
     for (const m of page.memories) {
@@ -95,4 +98,45 @@ export async function listSubsystemTaxonomy(
 
 function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+// ── File-based memory (Memory v2) ─────────────────────────────────────────
+
+export interface PromptMemoryFile {
+  name: string;
+  content: string;
+}
+
+/**
+ * Fetch the deterministic, always-loaded memory files for (agentSlug, userId)
+ * from claw-auth — the persona (soul.md, …) injected into the system prompt at
+ * run start. S2S. Degrades to [] on any error so a slow/absent file store never
+ * breaks a run. Content is already ≤10k chars/file and ≤3 files (enforced
+ * server-side).
+ */
+export async function fetchAgentPromptFiles(agentSlug: string, userId: string): Promise<PromptMemoryFile[]> {
+  if (!SERVER.authServiceUrl || !userId) return [];
+  try {
+    const qs = new URLSearchParams({ agentSlug, userId });
+    const res = await fetch(
+      `${SERVER.authServiceUrl.replace(/\/+$/, "")}/claw/api/v1/memory/agent-prompt-files?${qs.toString()}`,
+      {
+        headers: {
+          ...(SERVER.s2sKey ? { "x-s2s-key": SERVER.s2sKey, "x-user-id": userId } : {}),
+        },
+        signal: AbortSignal.timeout(5_000),
+      },
+    );
+    if (!res.ok) return [];
+    const data = (await res.json()) as {
+      data?: { files?: Array<{ name?: unknown; content?: unknown }> };
+    };
+    const files = data?.data?.files ?? [];
+    return files
+      .filter((f): f is { name: string; content: string } => typeof f?.name === "string" && typeof f?.content === "string")
+      .map((f) => ({ name: f.name, content: f.content }));
+  } catch (err) {
+    log.warn(`[memory] fetchAgentPromptFiles failed agent=${agentSlug}: ${errMsg(err)}`);
+    return [];
+  }
 }

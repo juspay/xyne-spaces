@@ -438,7 +438,6 @@ Search/list canvas docs.
 - **projectId** (string) — Restrict to one project.
 - **folderId** (string) — Restrict to one folder. Pass the literal `"none"` for ungrouped/personal canvases.
 - **visibility** (string, enum: `PUBLIC | PRIVATE`).
-- **docType** (string, enum: `Canvas | Quarto`).
 - **createdBy** (string) — Creator userID.
 - **starredOnly** (boolean) — Only canvases you've starred.
 - **excludeCallGenerated** (boolean, default false) — Hide auto-generated RCA/PRD/call-summary/migration docs (matches the dashboard's default view). Set `true` to cut that noise; leave default to see everything.

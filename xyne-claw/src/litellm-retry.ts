@@ -1,5 +1,15 @@
+import { Agent } from "undici";
 import { createLogger } from "./logger.js";
 const log = createLogger("litellm-retry");
+
+// LLM completions are non-streaming here: the gateway sends response headers
+// only AFTER generating the full completion, which can take many minutes. undici's
+// default headersTimeout AND bodyTimeout are 300s (5 min), so a bare fetch aborts
+// at ~5 min with a "Headers Timeout Error" regardless of our AbortSignal — the
+// real cause of the recurring "5-minute" curator timeouts. Disable both so the
+// caller's AbortSignal.timeout(timeoutMs) is the sole clock; keep a connectTimeout
+// so a genuinely unreachable gateway still fails fast.
+const llmDispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0, connectTimeout: 10_000 });
 
 /**
  * LiteLLM fetch with 429/5xx retry — for the offline curator paths.
@@ -55,7 +65,12 @@ export async function fetchLiteLLMWithRetry(
       await sleep(delay);
     }
     try {
-      const res = await fetch(url, { ...init, signal: AbortSignal.timeout(opts.timeoutMs) });
+      const res = await fetch(url, {
+        ...init,
+        signal: AbortSignal.timeout(opts.timeoutMs),
+        // undici extension (not in the DOM RequestInit type) — see llmDispatcher.
+        dispatcher: llmDispatcher,
+      } as unknown as RequestInit);
       if (!RETRYABLE_STATUSES.has(res.status)) return res;
       lastResponse = res;
       lastError = undefined;

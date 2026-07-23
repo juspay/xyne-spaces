@@ -2,7 +2,7 @@ import { redisService } from "../../redis.js";
 
 /**
  * Durable record of what the runner's agents did with each error, keyed by
- * errorKey (Redis on claw-auth's existing instance, 30d TTL). Read before
+ * errorKey (Redis on claw-auth's existing instance, 7d TTL). Read before
  * working an item (recent-completion dedup) and by the admin /fixes endpoint.
  */
 
@@ -25,7 +25,7 @@ export interface FixRecord {
 
 const KEY = (errorKey: string) => `errpipe:fix:${errorKey}`;
 const INDEX = "errpipe:fix:index";
-const TTL_SECONDS = 30 * 24 * 60 * 60;
+const TTL_SECONDS = 7 * 24 * 60 * 60;
 
 export async function getFixRecord(errorKey: string): Promise<FixRecord | null> {
   const raw = await redisService.getConnection().get(KEY(errorKey));

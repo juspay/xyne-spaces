@@ -4,12 +4,12 @@
  *
  * Distills a batch of a single user's authored Spaces records (messages /
  * hosted calls / authored canvases) into candidate facts about that user,
- * tagged into one of eight fixed subsystems.
+ * tagged into one of the fixed subsystems (see USER_MEMORY_SUBSYSTEMS).
  *
  * Difference from the session curator (curator.ts):
  *   - Input is THIS user's records, not an agent's transcript.
  *   - Output is FACTS ABOUT the user, not subsystem-memory updates.
- *   - Taxonomy is fixed (8 labels — see USER_MEMORY_SUBSYSTEMS) and the
+ *   - Taxonomy is fixed (see USER_MEMORY_SUBSYSTEMS) and the
  *     curator MUST pick one, never invent.
  *   - Returns 0..N candidates per call; expectation is most batches emit
  *     a handful of high-signal facts, not one per record.
@@ -25,6 +25,8 @@ import {
   USER_MEMORY_SUBSYSTEMS,
   type ExistingUserMemory,
   type UserMemoryCandidatePayload,
+  type UserMemoryCuratorEmittedCandidate,
+  type UserMemoryCuratorTrace,
   type UserMemoryRecord,
   type UserMemorySubsystem,
 } from "xyne-claw-shared";
@@ -40,10 +42,24 @@ const LITELLM_API_KEY = process.env["LITELLM_API_KEY"] ?? "";
 // (avoids having to keep two model env vars in sync when we upgrade Haiku).
 const CURATOR_MODEL = process.env["LITELLM_MODEL"] ?? "claude-haiku-4-5-20251001";
 const CURATOR_TIMEOUT_MS = Number(process.env["USER_MEMORY_CURATOR_TIMEOUT_MS"] ?? 600_000);
+// Per-retry timeout escalation: a slow LLM gateway is usually just slow, not
+// stuck, so give each retry more room. attempt 1 = base (10m), attempt 2 =
+// base+step (12m), attempt 3 = base+2·step (14m).
+const CURATOR_TIMEOUT_STEP_MS = Number(process.env["USER_MEMORY_CURATOR_TIMEOUT_STEP_MS"] ?? 120_000);
 
 /** Hard cap per batch — over this the prompt blows past Haiku's window. */
 const MAX_RECORDS_PER_BATCH = 50;
 const MAX_TEXT_CHARS_PER_RECORD = 1_500;
+/** Assembled conversation units (type="conversation") carry a whole thread and
+ *  legitimately need far more room than a single message. This is now a
+ *  NON-CLIPPING backstop, not a real cap: the claw-auth batch packer
+ *  (userMemoryBatcher) already bounds every record to ≤ its char budget
+ *  (BATCH_TOKEN_BUDGET × 4 = 320k chars) by sub-chunking oversized units, so a
+ *  full conversation unit (3k-char messages, whole thread, + async hydration)
+ *  arrives already-bounded. Set at that same 320k ceiling so this slice never
+ *  truncates a unit the packer already sized — the earlier 5k value re-clipped
+ *  the very messages the 3k-per-message change was meant to preserve. */
+const MAX_CONVERSATION_CHARS = 320_000;
 /** Raised from 12 → 20: the enriched prompt scans a broad facet checklist
  *  (voice, response patterns, per-person tone, expertise, …) and a rich batch
  *  legitimately surfaces more distinct grounded facts than the old bland pass.
@@ -75,7 +91,7 @@ const EMIT_CANDIDATES_TOOL = {
                 type: "string",
                 enum: [...USER_MEMORY_SUBSYSTEMS],
                 description:
-                  "MUST be one of the eight fixed labels. style=voice + response/interaction mechanics (length, structure, openers, sign-offs, emoji, punctuation, register, how they ack/ask/disagree), expertise=domain knowledge & systems they demonstrably know, projects=ongoing work/codenames they drive, relationships=who they work with AND how the tone shifts per person, preferences=tools/workflow/formatting conventions they prefer or reject, decisions=judgment calls + the reasoning + date, context=identity/role/team/tenure, docs=references to canvases they authored.",
+                  "MUST be one of the fixed labels. style=voice + response/interaction mechanics (length, structure, openers, sign-offs, emoji, punctuation, register, how they ack/ask/disagree), triage=respond-vs-ignore behaviour (which senders/channels/channel-types/topics/message-types they engage with vs stay silent on — feeds the auto-reply gate; keep separate from style), expertise=domain knowledge & systems they demonstrably know, projects=ongoing work/codenames they drive, relationships=who they work with AND how the tone shifts per person, preferences=tools/workflow/formatting conventions they prefer or reject, decisions=judgment calls + the reasoning + date, context=identity/role/team/tenure, docs=references to canvases they authored.",
               },
               signalScore: {
                 type: "number",
@@ -108,10 +124,11 @@ Your output is reviewed by the user, then fed to their personal "Digital Twin" a
 - **HOW** the user actually communicates — their voice, their response shapes, and how they treat different people — so the reply reads like THEM and not a generic bot.
 Cover both, exhaustively. Your job is comprehensive extraction: sweep the whole batch and surface every distinct, grounded signal — do not stop after a few facts.
 
-# Two kinds of input record
+# Kinds of input record
 
 - **Solo records** (type = message / call / canvas): something the user authored. Source for what they work on, know, prefer, decide — and, from the phrasing itself, their voice.
 - **Reply records** (type = mention_reply): an incoming message aimed at the user (a question, request, or @mention) PAIRED with the user's own reply. These are the highest-signal source for **response patterns** — study the pair, not just the reply. What were they asked, and exactly how did they answer: length, opener, tone, structure, whether they ask a clarifying question back, how quickly they commit?
+- **Conversation units** (type = conversation): a full thread the user took part in. The first line names the channel + its TYPE (dm / group_dm / public / private), the message count, the user's role (AUTHOR / MENTIONED / PARTICIPANT), and — when they were mentioned — a behavioural verdict: RESPONDED (with latency) or IGNORED (with how long unanswered). Then the parent message (what the thread replies to) and every turn in order. **Other people's lines are CONTEXT only — extract facts about THE USER, never about a co-participant.** These are the richest source for BOTH the user's voice/response-shape AND when / where / with whom they answer vs ignore. See "Reading conversation units" below.
 
 # The bar for "concrete"
 
@@ -141,6 +158,12 @@ Walk this list before you finish and emit a grounded candidate for each DISTINCT
 - Acknowledgement & commitment style: "on it", "ack", "will do by EOD".
 - How they ASK: what they ask first, whether they front-load context, how they request review or info.
 
+**TRIAGE — respond vs ignore** (subsystem "triage") — this facet FEEDS the respond/ignore gate, so label it precisely and keep it SEPARATE from STYLE (style = HOW they write; triage = WHETHER they reply at all):
+- Which senders / channels / channel-types (DM vs public vs @channel broadcast) / topics they RESPOND to versus let sit or IGNORE.
+- Response conditions: answer direct DMs but skip @channel broadcasts? reply fast to their manager but ignore marketing threads? engage on their own projects but not others'?
+- Explicit non-response: mentions they were tagged in and NEVER replied to — and what those share (bot/automation pings, off-topic, out-of-hours, threads they don't drive). A tagged-but-unanswered mention is a first-class signal, not an absence of one.
+- Only emit when the batch evidences a real engage-vs-silent PATTERN across ≥2 instances; don't infer from a single non-reply.
+
 **RELATIONSHIPS — per-person interaction** (subsystem "relationships"):
 - Who they interact with most, and how the tone SHIFTS per person (terse with peer X, deferential to manager Y, jokey with Z).
 - Who reviews their work, who they mentor, who they escalate to, cross-team contacts.
@@ -167,6 +190,22 @@ Examples:
 - "When asked for a status update, replies with a 2-3 line summary and calls out the current blocker first — no greeting."
 - "When @priya requests a review, acks within the hour with a one-line caveat like 'lgtm-ing the easy bits first' rather than a full review."
 - "Answers ambiguous asks with a clarifying question before committing — usually about the deadline."
+
+# Reading conversation units (type = conversation)
+
+The behavioural header gives you the outcome — mine BOTH outcomes, and always weigh the channel TYPE (the same words mean different things in a private DM vs a public channel):
+- **RESPONDED**: capture the response SHAPE → "style"; if the tone is specific to WHO asked or WHERE → "relationships". Note latency + prioritisation habits ("replies to direct DMs within minutes, lets #general @channel pings sit until EOD").
+- **IGNORED**: a mention the user did NOT answer IN-THREAD is a real, first-class signal — but before calling it a true ignore, CHECK THE HYDRATION BLOCK (see below). If they engaged elsewhere, it's a cross-channel response habit, not an ignore. A genuine ignore (no engagement anywhere) is itself signal — capture WHAT they skip and WHERE ("leaves broad @channel FYIs in #announcements unanswered", "rarely replies to group_dm pings but always answers 1:1 DMs"). Route to "triage" (whether/where they engage) and, as apt, "relationships" (who they deprioritise). Only emit an ignore pattern when it's evidenced across ≥2 units — a single non-response is often just timing, not a pattern.
+- **AUTHOR / PARTICIPANT** threads (no mention): read for how the user drives or joins a discussion — how they open, hand off, escalate, or close a thread.
+Never emit a fact grounded only in a co-participant's line; the memory must be about the user.
+
+## The hydration block ("What @you did NEXT, elsewhere")
+
+An IGNORED unit may be followed by a block titled "What @you did NEXT, elsewhere". These lines are the SAME user's own later messages in OTHER channels/DMs, shown with the delay since the ping and the channel type/name. They exist because a user often answers a ping OUT-OF-THREAD — replying in another channel, or DMing the person who asked — which would otherwise look like an ignore. Read the block strictly as CONTEXT for ONE question: **did the user actually engage with this ping elsewhere, or truly ignore it?**
+- If a follow-up plausibly ADDRESSES the ping (same topic, or a DM to the asker soon after) → this is a **cross-channel response pattern**, not an ignore. Emit a "triage" fact: e.g. "when @-mentioned in a public channel, tends not to reply in-thread but follows up by DMing the asker within the hour". Add "relationships"/"style" facts if the who/how is specific.
+- If the follow-ups are UNRELATED (the user was just busy elsewhere) → treat the mention as a genuine ignore and read it as above.
+- STAY GROUNDED: do NOT assume an unrelated next message is a reply. Only treat it as engagement when it plausibly addresses the ping. When in doubt, say nothing rather than invent a response.
+- The hydration lines are CONTEXT ONLY — do NOT mine them for facts about what the user did in those other channels (those messages are curated in their own right). Use them solely to characterise the respond/ignore behaviour for THIS ping, and ground that fact on THIS unit's id.
 
 # Good vs bad
 
@@ -195,13 +234,18 @@ GOOD: "Decided on 2026-05-22 to ship the workspaceId fix to /channel/openDm imme
 9. **Avoid PII bleed.** No names of private individuals (customers, interview candidates). Frequent public collaborators (teammates, manager) are fine.
 10. **No speculation.** If a record is ambiguous, skip it — don't guess.
 
-Call emit_user_candidates with your result. The tool schema enforces the shape.`;
+Call emit_user_candidates with your result. The tool schema enforces the shape.
+IMPORTATNT NOTE: The memory text must be atleast 2 sentences and maximum 4 sentences`;
 
 /** Cap how many existing memories we inline (prompt-size guard) and how much
  *  of each we show — enough for the curator to recognise a match without
  *  blowing the window on a heavy user. */
 const MAX_EXISTING_IN_PROMPT = 120;
 const MAX_EXISTING_TEXT_CHARS = 300;
+
+/** Cap on prompt + raw-response text stored in the trace so a large batch
+ *  can't bloat the persisted DigitalTwinPipelineEvent row. */
+const TRACE_TEXT_CAP = 120_000;
 
 function buildUserPrompt(
   records: UserMemoryRecord[],
@@ -239,34 +283,107 @@ function buildUserPrompt(
     else if (r.channelId) headerBits.push(`channel=${r.channelId}`);
     if (r.title) headerBits.push(`title="${r.title.slice(0, 80)}"`);
     lines.push(headerBits.join(" "));
-    lines.push((r.text ?? "").slice(0, MAX_TEXT_CHARS_PER_RECORD));
+    const textCap = r.type === "conversation" ? MAX_CONVERSATION_CHARS : MAX_TEXT_CHARS_PER_RECORD;
+    lines.push((r.text ?? "").slice(0, textCap));
     lines.push("");
   }
   return lines.join("\n");
 }
 
 /**
- * Run the user-memory curator on a batch of records. Returns the raw
- * candidate payloads (server-side attaches sourceRefs from the input ids
- * before persisting).
+ * Best-effort recovery when the forced tool_choice doesn't materialize as a
+ * proper `tool_calls` array and the emit_user_candidates payload ends up in
+ * message.content instead. Two shapes are handled:
+ *
+ *   1. Plain JSON — `{ "candidates": [...] }` (optionally fenced / wrapped in
+ *      prose). Some gateways answer the forced call this way.
+ *   2. GLM native tool-call markup that LiteLLM failed to normalize into
+ *      tool_calls, e.g. (note the sometimes-doubled opening tag):
+ *        <tool_call><tool_call>emit_user_candidates<arg_key>candidates</arg_key><arg_value>[...]</arg_value></tool_call>
+ *      This is intermittent — glm-latest usually emits well-formed markup that
+ *      LiteLLM parses fine; a malformed variant leaks through as text.
+ *
+ * Returns a JSON string that parses to `{ candidates: [...] }` (including an
+ * empty array — a legitimate "no candidates" result), or null otherwise.
  */
-export async function distillUserMemory(
+function extractToolArgsFromContent(content: string): string | null {
+  const stripped = content.replace(/```(?:json)?/gi, "").replace(/```/g, "").trim();
+  const tryParse = (s: string): string | null => {
+    try {
+      const obj = JSON.parse(s) as { candidates?: unknown };
+      if (obj && typeof obj === "object" && Array.isArray(obj.candidates)) return s;
+    } catch {
+      /* not JSON — fall through */
+    }
+    return null;
+  };
+
+  // 1) Plain JSON payload in content — whole string, then first `{`…last `}`.
+  const whole = tryParse(stripped);
+  if (whole) return whole;
+  const first = stripped.indexOf("{");
+  const last = stripped.lastIndexOf("}");
+  const sliced = first >= 0 && last > first ? tryParse(stripped.slice(first, last + 1)) : null;
+  if (sliced) return sliced;
+
+  // 2) GLM native tool-call markup — pull the `candidates` arg_value and
+  //    rebuild the payload. Non-greedy up to the first </arg_value>.
+  const argValue = stripped
+    .match(/<arg_key>\s*candidates\s*<\/arg_key>\s*<arg_value>([\s\S]*?)<\/arg_value>/i)?.[1]
+    ?.trim();
+  if (argValue !== undefined) return tryParse(`{"candidates":${argValue}}`);
+
+  return null;
+}
+
+/** How many times to (re)attempt the LLM call for a single batch before giving
+ *  up. Transient model-output failures (no tool_call, bad/malformed JSON) and
+ *  5xx/timeouts are RETRIED — the same prompt very often succeeds on a fresh
+ *  sample, so a one-off formatting glitch no longer discards a whole batch of
+ *  records (previously "malformed-candidates" → the window's records were lost). */
+const CURATOR_MAX_ATTEMPTS = Math.max(1, Number(process.env["USER_MEMORY_CURATOR_MAX_ATTEMPTS"] ?? 3));
+
+/** Error stages that are worth retrying (transient / output-quality). 4xx and
+ *  no-api-key are permanent and are NOT retried. */
+function isRetryableCuratorError(error: string): boolean {
+  if (error === "no-tool-call" || error === "bad-json" || error === "malformed-candidates") return true;
+  const httpMatch = error.match(/^llm-http-(\d+)$/);
+  if (httpMatch) return Number(httpMatch[1]) >= 500;
+  if (error === "no-api-key") return false;
+  // Thrown errors (network / timeout / abort) surface as their message — retry.
+  return true;
+}
+
+/** Per-attempt debug context, surfaced in the trace whether the attempt won or
+ *  lost (thinking, finish reason, raw content, how the tool args were obtained). */
+interface AttemptMeta {
+  usage?: { promptTokens?: number; completionTokens?: number };
+  reasoning?: string;
+  finishReason?: string;
+  rawContent?: string;
+  toolCallName?: string;
+  toolCallSource?: "tool_calls" | "recovered-content";
+}
+
+type AttemptResult =
+  | {
+      ok: true;
+      candidates: UserMemoryCandidatePayload[];
+      emitted: UserMemoryCuratorEmittedCandidate[];
+      rawResponse: string;
+      meta: AttemptMeta;
+    }
+  | { ok: false; error: string; retryable: boolean; rawResponse?: string; meta: AttemptMeta };
+
+/** One LLM call + parse + server-side filter. Never throws — always resolves to
+ *  an AttemptResult so the retry loop can decide whether to try again. */
+async function runDistillAttempt(
   userId: string,
-  window: { from: string; to: string },
-  records: UserMemoryRecord[],
-  existingMemories: ExistingUserMemory[] = [],
-): Promise<UserMemoryCandidatePayload[]> {
-  if (records.length === 0) return [];
-  if (!LITELLM_API_KEY) {
-    log.warn("[user-memory-curator] LITELLM_API_KEY not set — skipping");
-    return [];
-  }
-
-  const batch = records.slice(0, MAX_RECORDS_PER_BATCH);
-  if (records.length > MAX_RECORDS_PER_BATCH) {
-    log.warn(`[user-memory-curator] batch truncated ${records.length} → ${MAX_RECORDS_PER_BATCH} records userId=${userId}`);
-  }
-
+  prompt: string,
+  batch: UserMemoryRecord[],
+  timeoutMs: number,
+): Promise<AttemptResult> {
+  const meta: AttemptMeta = {};
   let raw: string | undefined;
   try {
     const res = await fetchLiteLLMWithRetry(`${LITELLM_URL}/v1/chat/completions`, {
@@ -279,32 +396,99 @@ export async function distillUserMemory(
         model: CURATOR_MODEL,
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
-          { role: "user", content: buildUserPrompt(batch, window, existingMemories) },
+          { role: "user", content: prompt },
         ],
         tools: [EMIT_CANDIDATES_TOOL],
         tool_choice: { type: "function", function: { name: EMIT_CANDIDATES_TOOL.function.name } },
         temperature: 0.2,
       }),
-    }, { timeoutMs: CURATOR_TIMEOUT_MS, label: `user-memory-curator:${userId}` });
+      // maxRetries:0 → ONE fetch here; the curator's own attempt loop is the
+      // single retry ladder (with the escalating timeout). Avoids nesting this
+      // primitive's 4× retry inside our 3× loop (which would multiply the time
+      // budget and make the per-retry escalation incoherent).
+    }, { timeoutMs, label: `user-memory-curator:${userId}`, maxRetries: 0 });
 
     if (!res.ok) {
       const body = await res.text().catch(() => "");
       log.warn(`[user-memory-curator] LiteLLM returned ${res.status} userId=${userId}: ${body.slice(0, 200)}`);
-      return [];
+      // Retry 5xx AND 429 (rate-limit) at the curator level now that the inner
+      // helper no longer retries them (maxRetries:0 above).
+      return { ok: false, error: `llm-http-${res.status}`, retryable: res.status >= 500 || res.status === 429, meta };
     }
 
     const data = (await res.json()) as {
-      choices?: Array<{ message?: { tool_calls?: Array<{ function?: { arguments?: string } }> } }>;
+      choices?: Array<{
+        finish_reason?: string;
+        message?: {
+          content?: string | null;
+          reasoning_content?: string | null;
+          reasoning?: string | null;
+          tool_calls?: Array<{ function?: { name?: string; arguments?: string } }>;
+        };
+      }>;
+      usage?: { prompt_tokens?: number; completion_tokens?: number };
     };
 
-    raw = data.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments;
+    if (data.usage) {
+      meta.usage = {};
+      if (typeof data.usage.prompt_tokens === "number") meta.usage.promptTokens = data.usage.prompt_tokens;
+      if (typeof data.usage.completion_tokens === "number") meta.usage.completionTokens = data.usage.completion_tokens;
+    }
+
+    const choice = data.choices?.[0];
+    const message = choice?.message;
+
+    // Debug context — captured whether or not we end up with a usable tool
+    // call, so a failed distill is as inspectable as a successful one.
+    if (choice?.finish_reason !== undefined) meta.finishReason = choice.finish_reason;
+    if (typeof message?.content === "string" && message.content.trim()) meta.rawContent = message.content;
+    const reasoningRaw = message?.reasoning_content ?? message?.reasoning;
+    if (typeof reasoningRaw === "string" && reasoningRaw.trim()) meta.reasoning = reasoningRaw;
+
+    const toolCall = message?.tool_calls?.[0]?.function;
+    raw = toolCall?.arguments;
+    if (raw) {
+      meta.toolCallSource = "tool_calls";
+      if (typeof toolCall?.name === "string") meta.toolCallName = toolCall.name;
+    }
+
+    // Some gateways/models (observed with glm-latest via LiteLLM) don't honor
+    // the forced tool_choice and instead answer with the emit_user_candidates
+    // JSON in message.content. Recover from content when it parses as our
+    // payload so a cooperative-but-non-conforming model still yields candidates.
+    if (!raw && typeof message?.content === "string" && message.content.trim()) {
+      const recovered = extractToolArgsFromContent(message.content);
+      if (recovered) {
+        log.warn(
+          `[user-memory-curator] recovered candidates from message.content (no tool_call) userId=${userId} model=${CURATOR_MODEL}`,
+        );
+        raw = recovered;
+        meta.toolCallSource = "recovered-content";
+        meta.toolCallName = EMIT_CANDIDATES_TOOL.function.name;
+      }
+    }
+
     if (!raw) {
-      log.warn(`[user-memory-curator] no tool_call in response userId=${userId}`);
-      return [];
+      // Diagnostics: forced tool_choice produced no tool_call AND content
+      // didn't parse as our payload. Capture what the model actually returned
+      // so the pipeline viewer ("Raw LLM response") and logs show the cause
+      // (e.g. finish_reason=length truncation, a refusal, or plain prose).
+      const toolCallCount = message?.tool_calls?.length ?? 0;
+      const content = typeof message?.content === "string" ? message.content : "";
+      const diag =
+        `no tool_call — finish_reason=${choice?.finish_reason ?? "unknown"} ` +
+        `tool_calls=${toolCallCount} content_chars=${content.length}\n` +
+        `content:\n${content.slice(0, 4_000)}`;
+      log.warn(
+        `[user-memory-curator] no tool_call in response userId=${userId} model=${CURATOR_MODEL} ` +
+          `finish_reason=${choice?.finish_reason ?? "unknown"} tool_calls=${toolCallCount} content_chars=${content.length} ` +
+          `content_preview=${JSON.stringify(content.slice(0, 300))}`,
+      );
+      return { ok: false, error: "no-tool-call", retryable: true, rawResponse: diag, meta };
     }
   } catch (err) {
     log.warn(`[user-memory-curator] LLM call failed userId=${userId}: ${err instanceof Error ? err.message : String(err)}`);
-    return [];
+    return { ok: false, error: err instanceof Error ? err.message : String(err), retryable: true, meta };
   }
 
   let parsed: { candidates?: unknown };
@@ -312,20 +496,25 @@ export async function distillUserMemory(
     parsed = JSON.parse(raw);
   } catch (err) {
     log.warn(`[user-memory-curator] bad JSON from LLM userId=${userId}: ${err instanceof Error ? err.message : String(err)}`);
-    return [];
+    return { ok: false, error: "bad-json", retryable: true, rawResponse: raw, meta };
   }
 
   if (!Array.isArray(parsed.candidates)) {
     log.warn(`[user-memory-curator] malformed candidates field userId=${userId}`);
-    return [];
+    return { ok: false, error: "malformed-candidates", retryable: true, rawResponse: raw, meta };
   }
 
   const recordIds = new Set(batch.map((r) => r.id));
   const subsystemSet = new Set<UserMemorySubsystem>(USER_MEMORY_SUBSYSTEMS);
   const out: UserMemoryCandidatePayload[] = [];
+  const emitted: UserMemoryCuratorEmittedCandidate[] = [];
 
   for (const c of parsed.candidates) {
-    if (!c || typeof c !== "object") continue;
+    // malformed = the entry isn't an object; we can't report its fields.
+    if (!c || typeof c !== "object") {
+      emitted.push({ text: "", verdict: "dropped", dropReason: "malformed" });
+      continue;
+    }
     const cand = c as Record<string, unknown>;
     const text = typeof cand["text"] === "string" ? (cand["text"] as string).trim() : "";
     const subsystem = cand["subsystem"];
@@ -334,19 +523,149 @@ export async function distillUserMemory(
       ? (cand["groundedOnIds"] as unknown[]).filter((id): id is string => typeof id === "string")
       : [];
 
-    if (!text || text.length > 1_500) continue;
-    if (typeof subsystem !== "string" || !subsystemSet.has(subsystem as UserMemorySubsystem)) continue;
-    if (signalScore < 0.7) continue;
-    const validIds = groundedOnIds.filter((id) => recordIds.has(id));
-    if (validIds.length === 0) continue;
+    const base: UserMemoryCuratorEmittedCandidate = {
+      text,
+      verdict: "dropped",
+      ...(typeof subsystem === "string" ? { subsystem } : {}),
+      signalScore,
+      groundedOnIds,
+    };
 
-    out.push({
+    if (!text || text.length > 1_500) {
+      emitted.push({ ...base, dropReason: "empty-or-too-long" });
+      continue;
+    }
+    if (typeof subsystem !== "string" || !subsystemSet.has(subsystem as UserMemorySubsystem)) {
+      emitted.push({ ...base, dropReason: "bad-subsystem" });
+      continue;
+    }
+    if (signalScore < 0.7) {
+      emitted.push({ ...base, dropReason: "low-signal" });
+      continue;
+    }
+    const validIds = groundedOnIds.filter((id) => recordIds.has(id));
+    if (validIds.length === 0) {
+      emitted.push({ ...base, dropReason: "ungrounded" });
+      continue;
+    }
+
+    const kept: UserMemoryCandidatePayload = {
       text,
       subsystem: subsystem as UserMemorySubsystem,
       signalScore: Math.min(1, Math.max(0, signalScore)),
       groundedOnIds: validIds,
-    });
+    };
+    out.push(kept);
+    emitted.push({ ...base, verdict: "kept", groundedOnIds: validIds });
   }
 
-  return out;
+  return { ok: true, candidates: out, emitted, rawResponse: raw, meta };
+}
+
+/**
+ * Run the user-memory curator on a batch of records. Returns the raw
+ * candidate payloads (server-side attaches sourceRefs from the input ids
+ * before persisting) plus a full observability trace of the LLM exchange
+ * (prompt, raw response, per-candidate keep/drop verdicts, failure stage).
+ *
+ * Retries the LLM call on transient/output-quality failures up to
+ * CURATOR_MAX_ATTEMPTS so a one-off malformed response no longer drops the
+ * batch's records permanently.
+ */
+export async function distillUserMemory(
+  userId: string,
+  window: { from: string; to: string },
+  records: UserMemoryRecord[],
+  existingMemories: ExistingUserMemory[] = [],
+): Promise<{ candidates: UserMemoryCandidatePayload[]; trace: UserMemoryCuratorTrace }> {
+  // Empty batch — no LLM call, no prompt. Empty trace with no error stage.
+  if (records.length === 0) {
+    return {
+      candidates: [],
+      trace: { model: CURATOR_MODEL, durationMs: 0, prompt: "", promptChars: 0, emitted: [] },
+    };
+  }
+
+  const startedAt = Date.now();
+  if (!LITELLM_API_KEY) {
+    log.warn("[user-memory-curator] LITELLM_API_KEY not set — skipping");
+    return {
+      candidates: [],
+      trace: {
+        model: CURATOR_MODEL,
+        durationMs: Date.now() - startedAt,
+        prompt: "",
+        promptChars: 0,
+        emitted: [],
+        error: "no-api-key",
+      },
+    };
+  }
+
+  const batch = records.slice(0, MAX_RECORDS_PER_BATCH);
+  if (records.length > MAX_RECORDS_PER_BATCH) {
+    log.warn(`[user-memory-curator] batch truncated ${records.length} → ${MAX_RECORDS_PER_BATCH} records userId=${userId}`);
+  }
+
+  const prompt = buildUserPrompt(batch, window, existingMemories);
+  const promptChars = prompt.length;
+
+  const traceBase = (meta: AttemptMeta, attempts: number) => ({
+    model: CURATOR_MODEL,
+    durationMs: Date.now() - startedAt,
+    systemPrompt: SYSTEM_PROMPT.slice(0, TRACE_TEXT_CAP),
+    prompt: prompt.slice(0, TRACE_TEXT_CAP),
+    promptChars,
+    attempts,
+    ...(meta.finishReason !== undefined ? { finishReason: meta.finishReason } : {}),
+    ...(meta.reasoning ? { reasoning: meta.reasoning.slice(0, TRACE_TEXT_CAP) } : {}),
+    ...(meta.rawContent ? { rawContent: meta.rawContent.slice(0, TRACE_TEXT_CAP) } : {}),
+    ...(meta.toolCallName ? { toolCallName: meta.toolCallName } : {}),
+    ...(meta.toolCallSource ? { toolCallSource: meta.toolCallSource } : {}),
+    ...(meta.usage ? { usage: meta.usage } : {}),
+  });
+
+  let last: AttemptResult | null = null;
+  let attempts = 0;
+  for (let i = 1; i <= CURATOR_MAX_ATTEMPTS; i++) {
+    attempts = i;
+    // Escalate the per-call timeout on each retry (10m → 12m → 14m).
+    const attemptTimeoutMs = CURATOR_TIMEOUT_MS + (i - 1) * CURATOR_TIMEOUT_STEP_MS;
+    const result = await runDistillAttempt(userId, prompt, batch, attemptTimeoutMs);
+    last = result;
+
+    if (result.ok) {
+      if (i > 1) {
+        log.info(`[user-memory-curator] succeeded on attempt ${i}/${CURATOR_MAX_ATTEMPTS} userId=${userId}`);
+      }
+      return {
+        candidates: result.candidates,
+        trace: {
+          ...traceBase(result.meta, attempts),
+          rawResponse: result.rawResponse.slice(0, TRACE_TEXT_CAP),
+          emitted: result.emitted,
+        },
+      };
+    }
+
+    if (!result.retryable || i === CURATOR_MAX_ATTEMPTS) break;
+    log.warn(
+      `[user-memory-curator] attempt ${i}/${CURATOR_MAX_ATTEMPTS} failed (${result.error}) — retrying userId=${userId}`,
+    );
+    // Small linear backoff so a transient gateway blip has time to clear.
+    await new Promise((r) => setTimeout(r, 400 * i));
+  }
+
+  // Exhausted retries (or a permanent failure). Surface the last attempt's
+  // context + the failing stage in the trace.
+  const f = last as Extract<AttemptResult, { ok: false }>;
+  return {
+    candidates: [],
+    trace: {
+      ...traceBase(f.meta, attempts),
+      ...(f.rawResponse !== undefined ? { rawResponse: f.rawResponse.slice(0, TRACE_TEXT_CAP) } : {}),
+      emitted: [],
+      error: f.error,
+    },
+  };
 }

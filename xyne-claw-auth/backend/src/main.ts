@@ -60,7 +60,9 @@ import { memoryRouter } from "./routes/memory.js";
 import { digitalTwinRouter } from "./routes/digital-twin.js";
 import { controlCenterRouter } from "./routes/control-center.js";
 import { evalsRouter } from "./routes/evals/index.js";
+import { searchEvalsRouter } from "./routes/search-evals/index.js";
 import { cliAuthRouter } from "./routes/cli-auth.js";
+import { surfacesSlackRouter } from "./routes/surfaces-slack.js";
 import { mcpGatewayRouter } from "./mcpgateway/index.js";
 import { initScheduledJobsWorker, closeWorker } from "./queue/scheduled-jobs-worker.js";
 import { closeQueue } from "./queue/scheduled-jobs-queue.js";
@@ -70,12 +72,14 @@ import { initAgentBackfillWorker, closeAgentBackfillWorker } from "./queue/agent
 import { closeAgentBackfillQueue } from "./queue/agent-backfill-queue.js";
 import { initEvalImportWorker, closeEvalImportWorker } from "./queue/eval-import-worker.js";
 import { initEvalGenerationWorker, closeEvalGenerationWorker } from "./queue/eval-generation-worker.js";
+import { initSearchEvalRunWorker, closeSearchEvalRunWorker } from "./queue/search-eval-run-worker.js";
 import { initEvalJudgeWorker, closeEvalJudgeWorker } from "./queue/eval-judge-worker.js";
 import { initFailureCuratorWorker, closeFailureCuratorWorker } from "./services/failure-curator-worker.js";
 import { initOrphanFinalizerWorker, closeOrphanFinalizerWorker } from "./services/orphan-finalizer-worker.js";
 import { closeBackfillQueue } from "./queue/digital-twin-backfill-queue.js";
 import { bootstrapCustomTools } from "./bootstrap-tools.js";
 import { initMemoryCron } from "./services/memoryCronService.js";
+import { initSlackConfigTokenCron } from "./services/slackConfigTokenService.js";
 import { initDigitalTwinDaily } from "./services/digitalTwinDaily.js";
 import {
   startBitbucketStatsBackgroundRefresh,
@@ -83,7 +87,7 @@ import {
 } from "./services/bitbucket-stats.js";
 
 import { requireAuth, requireS2S, requireStrictS2S, requireUserAuth, s2sKeyMatches } from "./middleware/require-auth.js";
-import { requireClawAdmin } from "./middleware/agent-acl.js";
+import { requireClawAdmin, requireSearchEvalAccess } from "./middleware/agent-acl.js";
 import { redisService } from "./redis.js";
 
 const app = express();
@@ -92,6 +96,17 @@ const app = express();
 // otherwise; the verify callback gets the buffer before parsing.
 app.use(express.json({
   limit: "50mb",
+  verify: (req, _res, buf) => {
+    if (buf && buf.length > 0) {
+      (req as unknown as { rawBody?: Buffer }).rawBody = Buffer.from(buf);
+    }
+  },
+}));
+// Slack slash commands POST application/x-www-form-urlencoded; the signature
+// is computed over the raw form body, so capture it the same way.
+app.use(express.urlencoded({
+  extended: false,
+  limit: "1mb",
   verify: (req, _res, buf) => {
     if (buf && buf.length > 0) {
       (req as unknown as { rawBody?: Buffer }).rawBody = Buffer.from(buf);
@@ -143,6 +158,8 @@ app.use(`${BASE}/sessions`, mcpRouter);
 app.use(`${BASE}/gateways`, requireAuth, requireClawAdmin, gatewaysRouter);
 app.use(`${BASE}/agents`, requireAuth, agentsRouter);
 app.use(`${BASE}/cli`, cliAuthRouter);
+// Public Slack ingress; authenticates itself with the per-install HMAC secret.
+app.use(`${BASE}/surfaces/slack`, surfacesSlackRouter);
 app.use(`${BASE}/chain-workflows`, requireAuth, chainWorkflowsRouter);
 app.use(`${BASE}/spaces`, requireAuth, spacesRouter);
 app.use(`${BASE}/tools`, requireAuth, toolsRouter);
@@ -245,11 +262,13 @@ app.use(`${BASE}/digital-twin`, requireUserAuth, digitalTwinRouter);
 app.use(`${BASE}/control-center`, requireAuth, controlCenterRouter);
 app.use(`${BASE}/research-agent`, requireAuth, researchAgentRouter);
 app.use(`${BASE}/evals`, requireAuth, requireClawAdmin, evalsRouter);
+app.use(`${BASE}/search-evals`, requireAuth, requireSearchEvalAccess, searchEvalsRouter);
 
 // MCP Gateway routes (for backend service registration)
 app.use(`${BASE}/gateway`, mcpGatewayRouter);
 
-const server = app.listen(CONFIG.port, () => {
+const server = app.
+listen(CONFIG.port, () => {
   log.info(`[xyne-claw-auth] Server listening on port ${CONFIG.port}`);
   // npx cache scrub: prior deploys left half-installed package trees in
   // ~/.npm/_npx (e.g. node-fetch present, data-uri-to-buffer missing),
@@ -280,7 +299,9 @@ const server = app.listen(CONFIG.port, () => {
     initEvalImportWorker();
     initEvalGenerationWorker();
     initEvalJudgeWorker();
+    initSearchEvalRunWorker();
     initMemoryCron();
+    initSlackConfigTokenCron();
     initDigitalTwinDaily();
     initFailureCuratorWorker();
     initOrphanFinalizerWorker();
@@ -309,6 +330,7 @@ async function shutdown(signal: string): Promise<void> {
     await closeEvalImportWorker().catch(() => {});
     await closeEvalGenerationWorker().catch(() => {});
     await closeEvalJudgeWorker().catch(() => {});
+    await closeSearchEvalRunWorker().catch(() => {});
     closeFailureCuratorWorker();
     closeOrphanFinalizerWorker();
     await closeQueue().catch(() => {});

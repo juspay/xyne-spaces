@@ -27,6 +27,7 @@ import {
   ChartBarIcon,
   BrainIcon,
   FlaskIcon,
+  MagnifyingGlassIcon,
   PulseIcon,
   ShieldCheckIcon,
   BuildingsIcon,
@@ -49,6 +50,8 @@ export interface ShellV3Props {
   children: React.ReactNode;
   /** When true, the Admin nav item is appended to the sidebar. */
   isAdmin?: boolean;
+  /** CLAW_ADMIN or the narrower SEARCH_EVAL_ACCESS role — gates the Search Evals nav item independently of Evals/Admin. */
+  hasSearchEvalAccess?: boolean;
 }
 
 type PhosphorWeight = "thin" | "light" | "regular" | "bold" | "fill" | "duotone";
@@ -118,6 +121,7 @@ const SIDEBAR_GROUPS: SidebarGroupConfig[] = [
     items: [
       { label: "Metrics", path: "/v3/metrics", icon: ChartBarIcon },
       { label: "Evals", path: "/v3/evals", icon: FlaskIcon },
+      { label: "Search Evals", path: "/v3/search-evals", icon: MagnifyingGlassIcon },
       { label: "Error Pipeline", path: "/v3/error-pipeline", icon: PulseIcon },
     ],
   },
@@ -290,11 +294,19 @@ function SidebarFlyout({
 
 /* ── ShellV3 ───────────────────────────────────────────────────────── */
 
-export function ShellV3({ children, isAdmin = false }: ShellV3Props) {
-  // Admin section appended only for users with CLAW_ADMIN
+export function ShellV3({ children, isAdmin = false, hasSearchEvalAccess = false }: ShellV3Props) {
+  // Admin section appended only for users with CLAW_ADMIN. Evals stays
+  // CLAW_ADMIN-only; Search Evals additionally opens up to the narrower
+  // SEARCH_EVAL_ACCESS grant (isAdmin implies hasSearchEvalAccess too).
   const sidebarGroups: SidebarGroupConfig[] = (isAdmin
     ? [...SIDEBAR_GROUPS, ADMIN_GROUP]
-    : SIDEBAR_GROUPS.map((g) => ({ ...g, items: g.items.filter((i) => i.path !== "/v3/evals" && i.path !== "/v3/error-pipeline") }))
+    : SIDEBAR_GROUPS.map((g) => ({
+        ...g,
+        items: g.items.filter((i) => {
+          if (i.path === "/v3/search-evals") return hasSearchEvalAccess;
+          return i.path !== "/v3/evals";
+        }),
+      }))
   ).filter((g) => g.items.length > 0);
   const auth = useAuth();
   const location = useLocation();

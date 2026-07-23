@@ -22,7 +22,7 @@ import {
 
 // Fallback list — used only if /api/v1/tools/available 404s. The canonical
 // list lives in xyne-claw-shared SUBAGENT_DEFINITIONS and is fetched at runtime.
-const FALLBACK_SUBAGENTS = ["spaces", "bitbucket", "grafana", "deepwiki", "context7", "pgm"];
+const FALLBACK_SUBAGENTS = ["spaces", "bitbucket", "grafana", "deepwiki", "context7"];
 
 const PROVIDER_META: Record<string, { label: string; defaultModel: string; defaultBaseUrl: string }> = {
   copilot: { label: "GitHub Copilot", defaultModel: "gpt-4o", defaultBaseUrl: "https://api.githubcopilot.com" },

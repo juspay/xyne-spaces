@@ -7,6 +7,8 @@
  * in xyne-claw-shared. They mirror @xyne/shared/types/flowUI exactly.
  */
 
+import type { TwinDelivery, TwinReplyDestination } from "../types/twin-delivery.js";
+
 // ── Inlined FlowUI types (mirrors @xyne/shared) ──────────────────────────────
 
 type FlowComponentType =
@@ -312,6 +314,8 @@ export function buildWriteApprovalFlow(
     userId: string;
     signature: string;
     agentSlug: string;
+    channelId?: string;
+    conversationId?: string;
   },
 ): FlowDefinition {
   return new FlowBuilder(`write-approval-${crypto.randomUUID()}`)
@@ -327,6 +331,7 @@ export function buildWriteApprovalFlow(
     })
     .addRow('actions', [
       FlowBuilder.button('approve', '✓  Approve', { type: 'submit', actionId: 'approve-write', successMessage: 'Approved' }, { variant: 'primary' }),
+      FlowBuilder.button('approve-continue', '✓  Approve & Continue', { type: 'submit', actionId: 'approve-continue', successMessage: 'Approved — continuing' }, { variant: 'secondary' }),
       FlowBuilder.button('decline', '✕  Decline', { type: 'submit', actionId: 'decline-write' }, { variant: 'destructive' }),
     ])
     .setData({
@@ -337,44 +342,162 @@ export function buildWriteApprovalFlow(
       userId: action.userId,
       signature: action.signature,
       agentSlug: action.agentSlug,
+      ...(action.channelId !== undefined ? { channelId: action.channelId } : {}),
+      ...(action.conversationId !== undefined ? { conversationId: action.conversationId } : {}),
     })
     .build();
+}
+
+/**
+ * Write result card — replaces the approval card after the tool ran.
+ * Success: a trimmed detail card (no buttons). Failure: an error card with
+ * Retry / Retry & Continue buttons that re-submit the SAME HMAC-signed action
+ * (params unchanged → signature still valid; flow-action.ts re-verifies).
+ */
+export function buildWriteResultFlow(opts: {
+  tool: string;
+  ok: boolean;
+  heading: string;
+  details: Array<{ label: string; value: string }>;
+  errorText?: string;
+  retry?: {
+    serverType: string;
+    params: Record<string, unknown>;
+    userId: string;
+    signature: string;
+    agentSlug: string;
+    channelId?: string;
+    conversationId?: string;
+    spacesAppId?: string;
+  };
+}): FlowDefinition {
+  const b = new FlowBuilder(`write-result-${crypto.randomUUID()}`)
+    .setTitle(opts.ok ? 'Action Completed' : 'Action Failed')
+    .addText('res-head', `${opts.ok ? '✅' : '❌'} ${opts.heading}`, {
+      variant: opts.ok ? 'success' : 'danger',
+      bold: true,
+    });
+
+  const cardChildren =
+    opts.details.length > 0
+      ? opts.details.map((d, i) => FlowBuilder.text(`res-d-${i}`, `**${d.label}:** ${d.value}`))
+      : [FlowBuilder.text('res-d-0', opts.errorText ?? (opts.ok ? 'Done.' : 'The action did not complete.'))];
+
+  b.addCard('res-card', cardChildren, { maxHeight: '280px', overflowY: 'auto' });
+
+  if (!opts.ok && opts.retry) {
+    b.addRow('res-actions', [
+      FlowBuilder.button('retry', '↻  Retry', { type: 'submit', actionId: 'retry-write', successMessage: 'Retrying' }, { variant: 'primary' }),
+      FlowBuilder.button('retry-continue', '↻  Retry & Continue', { type: 'submit', actionId: 'retry-continue', successMessage: 'Retrying' }, { variant: 'secondary' }),
+    ]).setData({
+      actionType: 'write',
+      serverType: opts.retry.serverType,
+      tool: opts.tool,
+      params: JSON.stringify(opts.retry.params),
+      userId: opts.retry.userId,
+      signature: opts.retry.signature,
+      agentSlug: opts.retry.agentSlug,
+      ...(opts.retry.channelId !== undefined ? { channelId: opts.retry.channelId } : {}),
+      ...(opts.retry.conversationId !== undefined ? { conversationId: opts.retry.conversationId } : {}),
+      ...(opts.retry.spacesAppId !== undefined ? { spacesAppId: opts.retry.spacesAppId } : {}),
+    });
+  }
+
+  return b.build();
 }
 
 /**
  * Digital Twin approval — shows draft response + Approve/Decline + optional edit textarea.
  * Context data stored in flowJSON.data so flow-action.ts can post as the user.
  */
-export function buildTwinApprovalFlow(
-  result: string,
-  targetChannelId: string,
-  targetConversationId: string,
-  mentionedUserId: string,
-  workspaceId: string,
+export interface TwinApprovalFlowParams {
+  /** The Twin's structured proposal — react and/or reply, and where. */
+  delivery: TwinDelivery;
+  /** The message that triggered the Twin (the react target + display context). */
+  sourceMessageId?: string;
+  /** Origin channel + thread the mention came from (the default reply target). */
+  targetChannelId: string;
+  targetConversationId: string;
+  mentionedUserId: string;
+  workspaceId: string;
+  /** The person who mentioned the user (display + dm_sender destination). */
+  senderId?: string;
+  senderName: string;
+  channelName: string;
+  /** The incoming message text (shown as context + paired for learning). */
+  task: string;
+  agentSlug?: string;
+  dmChannelId?: string;
+  spacesBaseUrl?: string;
+}
+
+/** Human label for a resolved reply destination, shown in the approval card. */
+function twinDestinationLabel(
+  dest: TwinReplyDestination | undefined,
+  originChannelName: string,
   senderName: string,
-  channelName: string,
-  task: string,
-  agentSlug?: string,
-  dmChannelId?: string,
-  spacesBaseUrl?: string,
-): FlowDefinition {
+): string {
+  switch (dest?.kind) {
+    case undefined:
+    case "origin_thread": return "this thread";
+    case "origin_channel": return `#${originChannelName} (new message)`;
+    case "dm_sender": return `DM to ${senderName}`;
+    case "dm": return `DM to ${dest.userName ?? "a teammate"}`;
+    case "channel": return `#${dest.channelName ?? dest.channelId}`;
+    case "thread": return `a thread in #${dest.channelName ?? dest.channelId}`;
+  }
+}
+
+/**
+ * Digital Twin approval DM. Renders the Twin's STRUCTURED proposal (react with
+ * an emoji and/or reply, and where) — never raw assistant text — and, on Approve,
+ * hands the delivery back to the flow-action handler which executes it as the
+ * user. React targets the triggering message; a reply's destination defaults to
+ * the origin thread and is shown explicitly when the Twin chose to reply elsewhere.
+ */
+export function buildTwinApprovalFlow(params: TwinApprovalFlowParams): FlowDefinition {
+  const {
+    delivery, sourceMessageId, targetChannelId, targetConversationId,
+    mentionedUserId, workspaceId, senderId, senderName, channelName, task,
+    agentSlug, dmChannelId, spacesBaseUrl,
+  } = params;
+
+  const willReact = delivery.action === "react" || delivery.action === "react_and_reply";
+  const willReply = delivery.action === "reply" || delivery.action === "react_and_reply";
+  const message = delivery.message ?? "";
+  const dest = delivery.destination;
+  const destLabel = twinDestinationLabel(dest, channelName, senderName);
+
   // Deep link back to the originating thread so the reviewer can open the full
   // context in one tap. Rendered as a Slack-mrkdwn link the TextNode parser
   // turns into an <a>. `spaces-tools.ts` uses the same /chat/dir/<ch>/<conv> path.
   const threadLink = spacesBaseUrl
     ? `\n\n<${spacesBaseUrl.replace(/\/+$/, '')}/chat/dir/${targetChannelId}/${targetConversationId}|↗ Open thread>`
     : '';
-  const flow = new FlowBuilder(`twin-approval-${crypto.randomUUID()}`)
+
+  // One-line summary of what Approve will do, so the reviewer sees intent at a glance.
+  const planParts: string[] = [];
+  if (willReact) planParts.push(`react ${delivery.emoji ?? ''}`.trim());
+  if (willReply) planParts.push(`reply in *${destLabel}*`);
+  const planLine = `*On approve:* ${planParts.join(' · ')}`;
+  const reasonLine = willReply && dest && dest.kind !== 'origin_thread' && delivery.destinationReason
+    ? `\n_Why here: ${delivery.destinationReason}_`
+    : '';
+
+  const b = new FlowBuilder(`twin-approval-${crypto.randomUUID()}`)
     .setTitle('Digital Twin Response')
     .addText('context', `*${senderName}* mentioned you in *#${channelName}*:\n> ${task}${threadLink}`)
     .addDivider('d1')
-    .addTextarea('edit', 'editedContent', {
-      label: 'Proposed response:',
-      rows: 10,
-    })
-    .addDivider('d2')
+    .addText('plan', `${planLine}${reasonLine}`);
+
+  // Editable body only when the Twin is actually posting a message.
+  if (willReply) {
+    b.addTextarea('edit', 'editedContent', { label: 'Proposed reply:', rows: 10 });
+  }
+
+  b.addDivider('d2')
     .addRow('actions', [
-      FlowBuilder.button('approve', 'Approve & Send', { type: 'submit', actionId: 'twin-approve', successMessage: 'Sent' }, { variant: 'primary' }),
+      FlowBuilder.button('approve', willReply ? 'Approve & Send' : 'Approve', { type: 'submit', actionId: 'twin-approve', successMessage: 'Done' }, { variant: 'primary' }),
       FlowBuilder.button('decline', 'Decline', { type: 'submit', actionId: 'twin-decline' }, { variant: 'destructive' }),
     ])
     .setData({
@@ -383,17 +506,33 @@ export function buildTwinApprovalFlow(
       targetConversationId,
       mentionedUserId,
       workspaceId,
-      messageContent: result,
-      // Persist the incoming message + channel so the approve handler can pair
-      // (incoming → the user's final reply) and feed it to the twin's memory
-      // learning loop. Display-only fields elsewhere; these are read back.
+      // The reply body (the approve handler prefers the edited textarea value).
+      messageContent: message,
+      // Structured delivery — read back by the approve handler to execute react
+      // and/or post-to-destination. Stored flat so it survives the flow JSON
+      // round-trip through Spaces without nested-object surprises.
+      deliveryAction: delivery.action,
+      ...(delivery.emoji ? { deliveryEmoji: delivery.emoji } : {}),
+      destinationKind: dest?.kind ?? 'origin_thread',
+      ...(dest?.kind === 'channel' ? { destinationChannelId: dest.channelId, ...(dest.channelName ? { destinationChannelName: dest.channelName } : {}) } : {}),
+      ...(dest?.kind === 'thread' ? { destinationChannelId: dest.channelId, destinationConversationId: dest.conversationId, ...(dest.channelName ? { destinationChannelName: dest.channelName } : {}) } : {}),
+      // DM to a specific person: carry their userId so the approve handler can
+      // open/resolve the DM channel. `dm_sender` needs nothing extra — it resolves
+      // to the stored senderId at approve time.
+      ...(dest?.kind === 'dm' ? { destinationUserId: dest.userId, ...(dest.userName ? { destinationUserName: dest.userName } : {}) } : {}),
+      ...(delivery.destinationReason ? { destinationReason: delivery.destinationReason } : {}),
+      ...(sourceMessageId ? { sourceMessageId } : {}),
+      // Persist the incoming message + participants so the approve/decline
+      // handlers can record the outcome for the daily learning loop.
       incomingTask: task,
       channelName,
+      ...(senderId ? { senderId } : {}),
       ...(agentSlug ? { agentSlug } : {}),
       ...(dmChannelId ? { dmChannelId } : {}),
-    })
-    .build();
-  flow.state.values['editedContent'] = result;
+    });
+
+  const flow = b.build();
+  if (willReply) flow.state.values['editedContent'] = message;
   return flow;
 }
 
@@ -611,4 +750,153 @@ export function buildCloneApprovalFlow(
       agentSlug: context.agentSlug,
     })
     .build();
+}
+
+/**
+ * Skill-update approval — raised by the `update-skill` tool. DM'd to the
+ * skill's OWNER (or, for global skills, an admin) with the unified diff of the
+ * proposed change and Approve / Decline buttons. Tapping Approve fires
+ * flow-action.ts's `skill-update` branch, which re-fetches the request +
+ * skill, re-checks ownership + content integrity, and applies the update;
+ * Decline marks the request rejected.
+ *
+ * The card carries ONLY `requestId` as authoritative state — the diff/content
+ * live in the SkillChangeRequest row so a large markdown body never travels in
+ * the (signed) card and can't be tampered with client-side. `approverUserId`
+ * is included solely for the fail-closed caller check; flow-action re-reads the
+ * real approver from the DB.
+ */
+/** Rendering caps for the git-style diff card. FlowJSON has no native diff
+ *  component, so each line is its own styled text node — cap the totals so a
+ *  full-file rewrite can't emit thousands of components. */
+const DIFF_CARD_MAX_HUNKS = 6;
+const DIFF_CARD_MAX_LINES = 60;
+const DIFF_LINE_MAX_CHARS = 160;
+
+/** mrkdwn-neutralize a raw diff line so `*`/`_`/backticks in skill content
+ *  don't format-bomb the card. Zero-width-space after each marker keeps the
+ *  visible text identical while defeating the parser. */
+function neutralizeMrkdwn(line: string): string {
+  return line.replace(/([*_~`])/g, "$1​");
+}
+
+function diffLineComponent(id: string, kind: 'ctx' | 'add' | 'del', text: string): FlowComponent {
+  const clipped = text.length > DIFF_LINE_MAX_CHARS ? `${text.slice(0, DIFF_LINE_MAX_CHARS)}…` : text;
+  const prefix = kind === 'add' ? '+ ' : kind === 'del' ? '− ' : '  ';
+  const style: FlowComponentStyle =
+    kind === 'add'
+      ? { backgroundColor: 'rgba(46,160,67,0.15)', borderLeft: '3px solid #2ea043', padding: '1px 8px' }
+      : kind === 'del'
+        ? { backgroundColor: 'rgba(248,81,73,0.15)', borderLeft: '3px solid #f85149', padding: '1px 8px' }
+        : { padding: '1px 8px', borderLeft: '3px solid transparent' };
+  return {
+    id,
+    type: 'text',
+    // Bypass mdToMrkdwn (FlowBuilder.text would convert) — diff content must
+    // render verbatim, so neutralize markers instead.
+    props: { content: prefix + neutralizeMrkdwn(clipped), size: 'sm', ...(kind === 'ctx' ? { variant: 'muted' } : {}) },
+    style,
+  };
+}
+
+/**
+ * Skill-update approval — raised by the `update-skill` tool, DM'd to the
+ * skill's owner. Git-style rendering (2026-07-15 redesign): header + stat
+ * chips, one-line summary, per-hunk cards with green/red line highlighting,
+ * an explicit SHRINK WARNING when the proposal deletes far more than it adds
+ * (the guard that would have flagged the truncated-tool-args incident), and
+ * Approve/Decline. The card still carries ONLY `requestId` as authoritative
+ * state — content/diff live server-side on the request row.
+ */
+export function buildSkillUpdateApprovalFlow(
+  context: {
+    requestId: string;
+    approverUserId: string;
+    skillSlug: string;
+    skillName: string;
+    proposerName: string;
+    /** Structured diff (computeSkillDiff). Preferred over diffText. */
+    diff?: { hunks: Array<{ header: string; lines: Array<{ kind: 'ctx' | 'add' | 'del'; text: string }> }>; added: number; removed: number };
+    /** Legacy fallback: preformatted fenced diff text. Used when `diff` absent. */
+    diffText?: string;
+    summary?: string;
+    agentSlug?: string;
+    /** Unique app id — lets the /action handler resolve the agent token
+     *  unambiguously (agentSlug alone is ambiguous for global/multi-org
+     *  agents, so the card could never be collapsed after approve/decline). */
+    spacesAppId?: string;
+    spacesBaseUrl?: string;
+  },
+): FlowDefinition {
+  const b = new FlowBuilder(`skill-update-${crypto.randomUUID()}`)
+    .setTitle('Skill Update Request')
+    .addHeading('title', `Skill update: ${context.skillName}`, 3);
+
+  const stats = context.diff ? `  ·  *+${context.diff.added}* / *−${context.diff.removed}*  ·  ${context.diff.hunks.length} hunk${context.diff.hunks.length === 1 ? '' : 's'}` : '';
+  b.addText('meta', `proposed by *${context.proposerName}* on \`${context.skillSlug}\`${stats}`, { variant: 'muted', size: 'sm' });
+
+  if (context.summary) {
+    b.addText('summary', `*Summary:* ${context.summary.length > 300 ? `${context.summary.slice(0, 300)}…` : context.summary}`);
+  }
+
+  // Shrink warning — a proposal that deletes much more than it adds is the
+  // signature of truncated tool arguments (a "full replacement" that lost its
+  // tail), which destroyed a 318-rule skill on 2026-07-15. Make it unmissable.
+  if (context.diff && context.diff.removed > 30 && context.diff.removed > context.diff.added * 3) {
+    b.addCard('shrink-warning', [
+      FlowBuilder.text(
+        'shrink-warning-text',
+        `⚠️ *This update REMOVES ${context.diff.removed} lines but adds only ${context.diff.added}.* If the proposer claimed a "full replacement", the content may have been truncated — verify the tail of the skill before approving.`,
+        { variant: 'danger' },
+      ),
+    ], { border: '1px solid #f85149', borderRadius: '6px', padding: '8px' });
+  }
+
+  b.addDivider('d1');
+
+  if (context.diff && context.diff.hunks.length > 0) {
+    let linesUsed = 0;
+    let hunksRendered = 0;
+    let truncated = false;
+    for (const [hi, hunk] of context.diff.hunks.entries()) {
+      if (hunksRendered >= DIFF_CARD_MAX_HUNKS || linesUsed >= DIFF_CARD_MAX_LINES) { truncated = true; break; }
+      const children: FlowComponent[] = [
+        { id: `h${hi}-header`, type: 'text', props: { content: hunk.header, variant: 'muted', size: 'xs' }, style: { padding: '2px 8px' } },
+      ];
+      for (const [li, line] of hunk.lines.entries()) {
+        if (linesUsed >= DIFF_CARD_MAX_LINES) { truncated = true; break; }
+        children.push(diffLineComponent(`h${hi}-l${li}`, line.kind, line.text));
+        linesUsed++;
+      }
+      b.addCard(`hunk-${hi}`, children, {
+        border: '1px solid rgba(128,128,128,0.25)',
+        borderRadius: '6px',
+        padding: '4px 0',
+        margin: '4px 0',
+        maxHeight: '320px',
+        overflowY: 'auto',
+      });
+      hunksRendered++;
+    }
+    if (truncated) {
+      b.addText('diff-truncated', `_… diff truncated for display (showing ${linesUsed} lines across ${hunksRendered} hunks). The FULL proposed content is stored on the request and applied exactly as reviewed by the integrity hash._`, { variant: 'muted', size: 'sm' });
+    }
+  } else if (context.diffText) {
+    b.addText('diff', context.diffText);
+  }
+
+  b.addDivider('d2')
+    .addRow('actions', [
+      FlowBuilder.button('approve', '✓  Approve', { type: 'submit', actionId: 'skill-update-approve', successMessage: 'Approved' }, { variant: 'primary' }),
+      FlowBuilder.button('decline', '✕  Decline', { type: 'submit', actionId: 'skill-update-decline' }, { variant: 'destructive' }),
+    ])
+    .setData({
+      actionType: 'skill-update',
+      requestId: context.requestId,
+      approverUserId: context.approverUserId,
+      skillSlug: context.skillSlug,
+      ...(context.agentSlug ? { agentSlug: context.agentSlug } : {}),
+      ...(context.spacesAppId ? { spacesAppId: context.spacesAppId } : {}),
+    });
+  return b.build();
 }

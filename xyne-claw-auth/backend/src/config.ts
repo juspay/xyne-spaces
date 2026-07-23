@@ -140,6 +140,13 @@ export const CONFIG = {
   vespaNamespace: process.env["VESPA_NAMESPACE"] ?? "namespace",
   vespaCluster: process.env["VESPA_CLUSTER"] ?? "my_content",
   /**
+   * Pause (ms) the search-eval-run-worker inserts after each row's Vespa
+   * query, in BOTH permission modes — a large sheet (hundreds/thousands of
+   * rows) run at full QUERY_CONCURRENCY would otherwise hammer the Vespa
+   * pod with sustained parallel query load. Default 500ms.
+   */
+  searchEvalQueryDelayMs: Number(process.env["SEARCH_EVAL_QUERY_DELAY_MS"] ?? 500),
+  /**
    * BITBOT — Juspay PR-analysis service. The MCP adapter spawns a stdio
    * child (servers/bitbot-server.ts) that POSTs to {bitbotBaseUrl}/api/prs/bulk
    * to fetch PRs across Bitbucket repos. Access is gated by NAT-IP allowlist

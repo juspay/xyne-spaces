@@ -127,6 +127,21 @@ export function ProviderTabV3({ agent, userId }: Props) {
   const [subagentMode, setSubagentMode] = useState<"parent" | "spaces">(seedSubagentMode);
   const [savedSubagentMode, setSavedSubagentMode] = useState<"parent" | "spaces">(seedSubagentMode);
 
+  /**
+   * Which provider AUTOMATION / SCHEDULED / error-pipeline runs use.
+   * These headless bulk paths fire on every PR, feedback message, and cron
+   * tick — they can burn ~90% of an agent's premium quota. "platform"
+   * downgrades ONLY those runs to the platform default model; human chat and
+   * mentions keep the full provider order.
+   * Stored at agent.config.automationProvider; undefined ⇒ same as chat.
+   */
+  const seedAutomationMode: "default" | "platform" =
+    (agent.config as Record<string, unknown> | undefined)?.["automationProvider"] === "platform"
+      ? "platform"
+      : "default";
+  const [automationMode, setAutomationMode] = useState<"default" | "platform">(seedAutomationMode);
+  const [savedAutomationMode, setSavedAutomationMode] = useState<"default" | "platform">(seedAutomationMode);
+
   const [orderSaving, setOrderSaving] = useState(false);
   const [orderSaved, setOrderSaved] = useState(false);
   /** Provider preference order explainer modal — the inline wall of
@@ -139,7 +154,8 @@ export function ProviderTabV3({ agent, userId }: Props) {
   const orderIsDirty =
     JSON.stringify(providerOrder) !== JSON.stringify(savedOrder) ||
     alwaysOn !== savedAlwaysOn ||
-    subagentMode !== savedSubagentMode;
+    subagentMode !== savedSubagentMode ||
+    automationMode !== savedAutomationMode;
 
   const [creds, setCreds] = useState<AgentProviderCredentialStatus[]>([]);
   const [loading, setLoading] = useState(true);
@@ -395,12 +411,17 @@ export function ProviderTabV3({ agent, userId }: Props) {
       // JSON config minimal — the backend/runtime treat undefined as "spaces".
       if (subagentMode === "parent") cfg.subagentProviderMode = "parent";
       else delete cfg.subagentProviderMode;
+      // Automation/scheduled downgrade. Omit when "default" so the JSON stays
+      // minimal — the backend treats undefined as "same provider as chat".
+      if (automationMode === "platform") cfg.automationProvider = "platform";
+      else delete cfg.automationProvider;
       await updateAgent(agent.slug, { config: cfg });
       // Mirror the just-saved state so future edits compute against it
       // and the dirty check clears (button returns to its quiet default).
       setSavedOrder([...providerOrder]);
       setSavedAlwaysOn(alwaysOn);
       setSavedSubagentMode(subagentMode);
+      setSavedAutomationMode(automationMode);
       setOrderSaved(true);
       // The button morphs to "Saved" briefly, then this resets to false —
       // since the dirty check now reads clean, the button drops back to
@@ -609,6 +630,55 @@ export function ProviderTabV3({ agent, userId }: Props) {
               </span>
             </p>
           )}
+        </div>
+
+        {/* Automation/scheduled model — headless bulk runs (automations, error
+            pipeline, scheduled jobs) fire on every PR / message / cron tick and
+            can dominate premium-provider usage. This downgrades ONLY those runs
+            to the platform default model; chat and mentions are unaffected. */}
+        <div className="mb-4 rounded-lg border border-xyne-border bg-xyne-surface-subtle p-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-[13px] font-medium text-xyne-fg-primary">Automations &amp; scheduled runs</div>
+              <p className="mt-1 text-[12px] text-xyne-fg-secondary leading-relaxed">
+                {automationMode === "default"
+                  ? "Same as chat — automation, scheduled, and error-pipeline runs use this agent's full provider order."
+                  : "Platform default — automation, scheduled, and error-pipeline runs use the platform model; chat and mentions keep the premium provider."}
+              </p>
+            </div>
+            <div
+              role="radiogroup"
+              aria-label="Which provider automation and scheduled runs use"
+              className="flex shrink-0 rounded-full border border-xyne-border bg-xyne-surface p-0.5"
+            >
+              <button
+                type="button"
+                role="radio"
+                aria-checked={automationMode === "default"}
+                onClick={() => setAutomationMode("default")}
+                className={`rounded-full px-3 py-1 text-[11px] font-medium transition-colors ${
+                  automationMode === "default"
+                    ? "bg-xyne-fg-primary text-xyne-fg-inverse"
+                    : "text-xyne-fg-secondary hover:text-xyne-fg-primary"
+                }`}
+              >
+                Same as chat
+              </button>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={automationMode === "platform"}
+                onClick={() => setAutomationMode("platform")}
+                className={`rounded-full px-3 py-1 text-[11px] font-medium transition-colors ${
+                  automationMode === "platform"
+                    ? "bg-xyne-fg-primary text-xyne-fg-inverse"
+                    : "text-xyne-fg-secondary hover:text-xyne-fg-primary"
+                }`}
+              >
+                Platform default
+              </button>
+            </div>
+          </div>
         </div>
 
         {/* Selected providers (the ordered list) */}

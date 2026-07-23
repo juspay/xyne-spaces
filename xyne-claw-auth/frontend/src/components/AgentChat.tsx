@@ -32,6 +32,7 @@ import {
 import type { AgentLight } from "../lib/types";
 import { resolveEffectiveParents } from "../lib/branching";
 import { MessageBubble } from "./MessageBubble";
+import { MessageRatingButtons } from "./MessageRatingButtons";
 import { ContextPicker } from "./ContextPicker";
 import { DebugDrawer } from "./DebugDrawer";
 
@@ -1375,19 +1376,35 @@ export function AgentChat({ userId }: Props) {
                         ...(isStreaming ? { streaming: true } : {}),
                         ...(m.role === "assistant" ? {
                           footer: (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                // Branching-safe: pin to this assistant's run by
-                                // sessionId rather than chronological index.
-                                setDebugTurnIndex(assistantTurnIndex);
-                                setDebugSessionId(runByAssistantMsgId.get(m.id)?.sessionId ?? null);
-                                setShowDebugger(true);
-                              }}
-                              className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-300"
-                            >
-                              <Bug size={11} /> Debug this response
-                            </button>
+                            <span className="inline-flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  // Branching-safe: pin to this assistant's run by
+                                  // sessionId rather than chronological index.
+                                  setDebugTurnIndex(assistantTurnIndex);
+                                  setDebugSessionId(runByAssistantMsgId.get(m.id)?.sessionId ?? null);
+                                  setShowDebugger(true);
+                                }}
+                                className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-300"
+                              >
+                                <Bug size={11} /> Debug this response
+                              </button>
+                              {/* Per-message 👍/👎 — only once the run is linked
+                                  (chatMessageId set on finalize). */}
+                              {(() => {
+                                const run = runByAssistantMsgId.get(m.id);
+                                return run ? (
+                                  <MessageRatingButtons
+                                    userId={userId}
+                                    sessionId={run.sessionId}
+                                    rating={run.rating}
+                                    ratingComment={run.ratingComment}
+                                    onRated={() => { if (convId) refreshRuns(convId); }}
+                                  />
+                                ) : null;
+                              })()}
+                            </span>
                           ),
                         } : {}),
                         ...(msgPending?.length ? {

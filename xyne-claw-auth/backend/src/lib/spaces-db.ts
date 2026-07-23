@@ -159,6 +159,7 @@ export type SpacesAuthCaller =
   | "scheduled-job"
   | "write-action"
   | "clone-owner-dm"
+  | "skill-update-owner-dm"
   | "unknown";
 
 export async function getSpacesAuthForUser(

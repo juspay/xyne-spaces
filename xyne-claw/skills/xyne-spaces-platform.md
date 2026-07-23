@@ -75,10 +75,10 @@ Google Meet, Zoom, in-person.
 
 ## Canvases — rich collaborative docs
 
-Design docs, runbooks, reports, decks. Two `docType`s: **`Canvas`** (freeform doc) and **`Quarto`** (rendered report/deck).
+Design docs, runbooks, reports, decks.
 
 - Each canvas has a **`viewAccessId`** — the id in its URL `/chat/canvas/<viewAccessId>`.
-- **`spaces-canvases`** finds them (by title, channel, visibility `PUBLIC|PRIVATE|ORG|CHANNEL`, docType, creator). **`spaces-read-canvas`** reads the full markdown body — always read the body before answering questions about a canvas.
+- **`spaces-canvases`** finds them (by title, channel, visibility `PUBLIC|PRIVATE|ORG|CHANNEL`, creator). **`spaces-read-canvas`** reads the full markdown body — always read the body before answering questions about a canvas.
 - "Is there a doc/spec/runbook about X?" → canvases are usually the answer.
 
 ## Files & attachments — two distinct things
