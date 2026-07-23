@@ -42,6 +42,18 @@ const ApplyConversationLabelOutputSchema = z.object({
   skipReason: z.string().nullable(),
 });
 
+const SKIPPABLE_LABEL_ERROR_CODES = new Set([
+  'channel_not_found',
+  'label_not_found',
+  'label_id_mismatch',
+  'conversation_not_found',
+  'conversation_channel_mismatch',
+  'conversation_workspace_mismatch',
+  'ticket_not_found',
+  'ticket_channel_mismatch',
+  'ticket_workspace_mismatch',
+]);
+
 interface ApplyConversationLabelOutput extends Record<string, unknown> {
   conversationId: string | null;
   channelId: string | null;
@@ -127,17 +139,7 @@ export class ApplyConversationLabelStep extends BaseActionStep<
       };
     } catch (err) {
       const code = (err as { code?: string } | null)?.code;
-      if (code === 'channel_not_found') return skipped('channel_not_found');
-      if (code === 'label_not_found') return skipped('label_not_found');
-      if (code === 'label_id_mismatch') return skipped('label_id_mismatch');
-      if (code === 'conversation_not_found') return skipped('conversation_not_found');
-      if (code === 'conversation_channel_mismatch') return skipped('conversation_channel_mismatch');
-      if (code === 'conversation_workspace_mismatch') {
-        return skipped('conversation_workspace_mismatch');
-      }
-      if (code === 'ticket_not_found') return skipped('ticket_not_found');
-      if (code === 'ticket_channel_mismatch') return skipped('ticket_channel_mismatch');
-      if (code === 'ticket_workspace_mismatch') return skipped('ticket_workspace_mismatch');
+      if (code && SKIPPABLE_LABEL_ERROR_CODES.has(code)) return skipped(code);
       throw err;
     }
   }

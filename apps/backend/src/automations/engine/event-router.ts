@@ -6,7 +6,6 @@ import { currentUpstreamChain } from './automation-context-storage';
 import {
   AUTOMATION_WORKFLOW_TYPE,
   DESK_AUTOMATION_WORKFLOW_TYPE,
-  EXECUTABLE_AUTOMATION_WORKFLOW_TYPES,
   parseAutomationMetadata,
   triggerTypeToEventType,
 } from '../types/workflow-adapter';
@@ -97,7 +96,7 @@ class EventRouter {
     if (event.type !== EMAIL_RECEIVED_EVENT || typeof event.payload.channelId !== 'string') {
       return db.workflow.findMany({
         where: {
-          workflowType: { in: [...EXECUTABLE_AUTOMATION_WORKFLOW_TYPES] },
+          workflowType: AUTOMATION_WORKFLOW_TYPE,
           ...baseWhere,
         },
       });
