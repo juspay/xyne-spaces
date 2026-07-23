@@ -133,6 +133,22 @@ export const releaseDoclingSchedulerPermit = async (
     permit.permitId,
   )
 }
+/**
+ * Release both permits associated with an OCR submit: the request permit
+ * ('ocr-submit') and the weighted page permit ('ocr-submit-pages'). Both share
+ * the same permitId, so a single permitId is enough to release the pair.
+ * Idempotent — safe to call for permits that were never acquired.
+ */
+export const releaseDoclingOcrSubmitPermit = async (
+  permit: { permitId?: string | null },
+): Promise<void> => {
+  if (!permit.permitId) return
+  await Promise.all([
+    releaseDoclingSchedulerPermit({ kind: 'ocr-submit', permitId: permit.permitId }),
+    releaseDoclingSchedulerPermit({ kind: 'ocr-submit-pages', permitId: permit.permitId }),
+  ])
+}
+
 export const listActiveDoclingSchedulerPermitIds = async (kind: string, limit = 200): Promise<string[]> => {
   const now = Date.now()
   const client = getClient()
