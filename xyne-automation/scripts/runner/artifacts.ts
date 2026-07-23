@@ -14,6 +14,7 @@ export interface StepEntry {
   status: 'passed' | 'failed' | 'skipped';
   duration: number;
   error?: string;
+  diagnosticOutput?: string;
 }
 
 interface GaugeScenario {

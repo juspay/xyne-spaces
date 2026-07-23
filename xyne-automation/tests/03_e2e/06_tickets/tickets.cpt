@@ -89,6 +89,8 @@
 * clicking on "[data-testid='send-message-button']"
 * waiting for message with text <messageText> to appear in virtuoso list
 * clicking hover action "[data-testid='hover-action-reply-in-thread']" on message with text <messageText>
+* waiting for "[data-testid='thread-more-options-button']" to appear
+* clicking on "[data-testid='thread-more-options-button']"
 * waiting for "[data-testid='thread-create-ticket-button']" to appear
 * clicking on "[data-testid='thread-create-ticket-button']"
 * waiting for "[data-testid='ticket-title-input']" to appear
@@ -111,6 +113,8 @@
 * clicking on "[data-testid='send-message-button']"
 * waiting for message with text <messageText> to appear in virtuoso list
 * clicking hover action "[data-testid='hover-action-reply-in-thread']" on message with text <messageText>
+* waiting for "[data-testid='thread-more-options-button']" to appear
+* clicking on "[data-testid='thread-more-options-button']"
 * waiting for "[data-testid='thread-create-ticket-button']" to appear
 * clicking on "[data-testid='thread-create-ticket-button']"
 * waiting for "[data-testid='ticket-title-input']" to appear

@@ -5,6 +5,7 @@ export type RunMode = 'local' | 'ci';
 
 const PORT_NAMES = [
   'POSTGRES_BIND_PORT',
+  'COMMON_POSTGRES_BIND_PORT',
   'REDIS_BIND_PORT',
   'LIVEKIT_HTTP_BIND_PORT',
   'LIVEKIT_HTTPS_BIND_PORT',

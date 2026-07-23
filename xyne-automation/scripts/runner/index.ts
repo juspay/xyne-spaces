@@ -237,6 +237,15 @@ function prepareArtifactDirectory(artifactDir: string): void {
   fs.mkdirSync(artifactDir, { recursive: true });
 }
 
+const MAX_DOCKER_START_ATTEMPTS = 3;
+const PORT_BIND_CONFLICT_REGEX =
+  /address already in use|failed to bind host port|port is already allocated/i;
+
+function isPortBindConflict(result: StepEntry): boolean {
+  const failureDetails = `${result.error ?? ''}\n${result.diagnosticOutput ?? ''}`;
+  return result.status === 'failed' && PORT_BIND_CONFLICT_REGEX.test(failureDetails);
+}
+
 async function main(): Promise<void> {
   const cliArgs = parseArgs(process.argv);
   const mode = detectMode(cliArgs.mode);
@@ -247,7 +256,7 @@ async function main(): Promise<void> {
   const artifactDir = path.join(originalRoot, 'xyne-automation', 'reports', `${commitHash}-runner`);
   prepareArtifactDirectory(artifactDir);
 
-  const portMap = await buildPortMap(mode);
+  let portMap = await buildPortMap(mode);
   const projectRoot = await resolveProjectRoot(mode, originalRoot, !cliArgs.plain);
 
   // Docker compose files are in the monorepo root
@@ -347,6 +356,32 @@ async function main(): Promise<void> {
     if (result.status === 'failed') failed = true;
   };
 
+  const refreshLocalPortBindings = async (): Promise<void> => {
+    if (mode !== 'local') return;
+    portMap = await buildPortMap(mode);
+    Object.assign(dockerOpts.env, portMapToEnv(portMap));
+  };
+
+  const startDockerServices = async (): Promise<StepEntry> => {
+    const startTime = Date.now();
+    await refreshLocalPortBindings();
+
+    let result = await dockerUp(dockerOpts, artifactDir, renderer);
+    let attempt = 1;
+
+    while (mode === 'local' && attempt < MAX_DOCKER_START_ATTEMPTS && isPortBindConflict(result)) {
+      attempt++;
+      renderer.log(
+        `Host port collision detected. Retrying Docker startup with fresh ports (attempt ${attempt}/${MAX_DOCKER_START_ATTEMPTS}).`
+      );
+      await dockerDown(dockerOpts, false, artifactDir, renderer);
+      await refreshLocalPortBindings();
+      result = await dockerUp(dockerOpts, artifactDir, renderer);
+    }
+
+    return { ...result, duration: Date.now() - startTime };
+  };
+
   if (mode === 'ci') {
     renderer.startStep(stepIndex, 'Clean old artifacts');
     const cleanStart = Date.now();
@@ -385,7 +420,7 @@ async function main(): Promise<void> {
 
   if (!failed) {
     renderer.startStep(stepIndex++, 'Start all Docker services');
-    await runStep(() => dockerUp(dockerOpts, artifactDir, renderer));
+    await runStep(startDockerServices);
   }
 
   if (!failed) {

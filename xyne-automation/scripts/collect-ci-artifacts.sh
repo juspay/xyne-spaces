@@ -26,6 +26,8 @@ mkdir -p "$OUTPUT_DIR"
 # Keep this list in sync with the services defined under docker-compose.{dev,test}.yml.
 SERVICES=(
   postgres
+  common-postgres
+  backend-migrate
   claw-auth-postgres
   redis
   livekit

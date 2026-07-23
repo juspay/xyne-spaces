@@ -54,9 +54,22 @@ export default class InputBoxSteps {
   // ACTION - Buttons
   // ===========================================
 
+  private async ensureFormattingToolbarVisible(): Promise<void> {
+    const page = testContext.activePage;
+    const insertLinkButton = page.locator('button[aria-label="Insert link"]').first();
+
+    if (await insertLinkButton.isVisible()) return;
+
+    const toggleButton = page.locator("[data-testid='toggle-format-toolbar-btn']").first();
+    await toggleButton.waitFor({ state: 'visible' });
+    await toggleButton.click();
+    await insertLinkButton.waitFor({ state: 'visible' });
+  }
+
   @Step('clicking link toolbar button')
   public async clickLinkToolbarButton(): Promise<void> {
     const page = testContext.activePage;
+    await this.ensureFormattingToolbarVisible();
     await page.locator('button[aria-label="Insert link"]').first().click();
   }
 
@@ -648,6 +661,7 @@ export default class InputBoxSteps {
   public async insertingLinkWithTextAndUrl(text: string, url: string): Promise<void> {
     const page = testContext.activePage;
     await page.locator("[data-testid='message-input']").first().click();
+    await this.ensureFormattingToolbarVisible();
     await page.locator('button[aria-label="Insert link"]').first().click();
     await page.locator('input[placeholder="Link text"]').first().fill(text);
     await page.locator('input[type="url"][placeholder*="example.com"]').first().fill(url);

@@ -77,6 +77,36 @@ export default defineConfig({
         : {}),
     },
   },
+  preview: {
+    port: 5173,
+    host: true,
+    allowedHosts: ['dashboard', 'localhost', '.localhost'],
+    proxy: {
+      // Keep the same-origin routes used by browser tests when the test image
+      // serves its prebuilt bundle with `vite preview`.
+      '/claw/api/v1': {
+        target: process.env.VITE_CLAW_BACKEND_URL || 'http://localhost:3003',
+        changeOrigin: true,
+        secure: false,
+      },
+      ...(process.env.VITE_ENVIRONMENT === 'test'
+        ? {
+            '/api': {
+              target: process.env.VITE_API_BASE_URL,
+              changeOrigin: true,
+              secure: false,
+              ws: true,
+            },
+            '/zero': {
+              target: process.env.VITE_ZERO_SERVER,
+              changeOrigin: true,
+              secure: false,
+              ws: true,
+            },
+          }
+        : {}),
+    },
+  },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

@@ -18,6 +18,7 @@ export interface Config {
   browser: BrowserType;
   enableBrowserConsoleLogs: boolean;
   parallel: number;
+  testProgressFile?: string;
 }
 
 export function getEnvironment(): Environment {
@@ -155,6 +156,7 @@ function getConfigForEnv(env: Environment): Config {
     browser: getBrowser(),
     enableBrowserConsoleLogs: getEnableBrowserConsoleLogs(env),
     parallel: getParallel(env),
+    testProgressFile: process.env.XYNE_TEST_PROGRESS_FILE || undefined,
   };
 }
 
