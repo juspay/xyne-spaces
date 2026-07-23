@@ -17,7 +17,7 @@ import {
   markDoclingPartSubmitRetry,
 } from '../scheduler/store'
 import {
-  releaseDoclingSchedulerPermit,
+  releaseDoclingOcrSubmitPermit,
 } from '../runtime/submitPermits'
 import {
   type DoclingResultEvent,
@@ -43,7 +43,7 @@ const releaseOcrPermitsForFile = async (fileId: string) => {
   const parts = await getDoclingPartsForFile(fileId)
   for (const part of parts) {
     if (part.submitPermitId) {
-      await releaseDoclingSchedulerPermit({ kind: 'ocr-submit', permitId: part.submitPermitId })
+      await releaseDoclingOcrSubmitPermit({ permitId: part.submitPermitId })
     }
   }
 }
@@ -74,14 +74,14 @@ const handleResultEvent = async (event: DoclingResultEvent) => {
     part.status !== DOCLING_PART_STATUS.Submitted
   ) {
     if (part.submitPermitId) {
-      await releaseDoclingSchedulerPermit({ kind: 'ocr-submit', permitId: part.submitPermitId })
+      await releaseDoclingOcrSubmitPermit({ permitId: part.submitPermitId })
     }
     return // duplicate / stale
   }
 
   if (event.status === 'failed') {
     if (part.submitPermitId) {
-      await releaseDoclingSchedulerPermit({ kind: 'ocr-submit', permitId: part.submitPermitId })
+      await releaseDoclingOcrSubmitPermit({ permitId: part.submitPermitId })
     }
     const message = event.error || 'unknown OCR failure'
     logger.warn('[DOCLING_SCHEDULER_METRICS][result] OCR failed', {
@@ -131,7 +131,7 @@ const handleResultEvent = async (event: DoclingResultEvent) => {
     resultPath: path,
   })
   if (part.submitPermitId) {
-    await releaseDoclingSchedulerPermit({ kind: 'ocr-submit', permitId: part.submitPermitId })
+    await releaseDoclingOcrSubmitPermit({ permitId: part.submitPermitId })
   }
   logger.info('[DOCLING_SCHEDULER_METRICS][result] OCR result stored → part ready', {
     fileId: part.fileId,
