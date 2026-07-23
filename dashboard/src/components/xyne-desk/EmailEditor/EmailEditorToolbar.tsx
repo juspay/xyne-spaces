@@ -753,7 +753,7 @@ export const EmailEditorToolbar: React.FC<EmailEditorToolbarProps> = ({
               <Button
                 onClick={applyLink}
                 disabled={!linkUrl.trim()}
-                className='rounded bg-sidebar-badge-accent px-3 py-1.5 text-xs text-white disabled:opacity-50 disabled:text-white'
+                className='rounded bg-primary px-3 py-1.5 text-xs text-white disabled:opacity-50 disabled:text-white'
               >
                 {hasSelection && isActive.link ? 'Update' : 'Apply'}
               </Button>

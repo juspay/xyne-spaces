@@ -2300,7 +2300,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                 setCreateTicketSeed(null);
                 setIsCreateModalOpen(true);
               }}
-              className='flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-primary-foreground bg-sidebar-badge-accent rounded-lg transition-colors flex-shrink-0'
+              className='flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-primary-foreground bg-primary rounded-lg transition-colors flex-shrink-0'
             >
               <Plus className='w-4 h-4' />
               <span className='hidden sm:inline font-semibold text-sm'>Create Ticket</span>
@@ -2647,7 +2647,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                       <div
                         className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${
                           visibleColumns.has(column.key)
-                            ? 'bg-sidebar-badge-accent border'
+                            ? 'bg-primary border'
                             : 'border-input bg-background'
                         }`}
                       >
@@ -3081,7 +3081,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                     setShowBackwardConfirmDialog(false);
                   }
                 }}
-                className='bg-sidebar-badge-accent text-primary-foreground hover:bg-blue-700'
+                className='bg-primary text-primary-foreground hover:bg-blue-700'
                 data-track-category='Tickets'
                 data-track-name='ConfirmBackwardStageChange'
                 data-track-metadata={JSON.stringify({
@@ -3116,7 +3116,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
               </Button>
               <Button
                 onClick={confirmRejectedApproval}
-                className='bg-sidebar-badge-accent text-primary-foreground hover:bg-blue-700'
+                className='bg-primary text-primary-foreground hover:bg-blue-700'
               >
                 Approve
               </Button>

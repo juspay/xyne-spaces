@@ -548,7 +548,6 @@ export const TicketListView = function TicketListView({
             <Checkbox
               checked={allSelected}
               indeterminate={someSelected}
-              accent
               // none selected → select all; partial or all selected → clear.
               onChange={() => onToggleSelectAll(pageRows, selectedOnPage === 0)}
               label=''

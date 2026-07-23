@@ -909,7 +909,7 @@ const ActivityListView = (): ReactElement => {
                     className={cn(
                       'relative inline-flex h-5 w-9 items-center rounded-full',
                       'bg-muted transition-colors duration-200',
-                      'data-[state=checked]:bg-sidebar-badge-accent',
+                      'data-[state=checked]:bg-primary',
                       'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
                     )}
                   >
@@ -1032,7 +1032,7 @@ const ActivityListView = (): ReactElement => {
                       {count > 0 && tab.value === 'all' && (
                         <Badge
                           className={cn(
-                            'ml-2 h-3.5 text-[9px] px-1 leading-none shrink-0 sm:h-5 sm:text-xs sm:px-1.5 bg-sidebar-badge-accent',
+                            'ml-2 h-3.5 text-[9px] px-1 leading-none shrink-0 sm:h-5 sm:text-xs sm:px-1.5 bg-primary',
                             count > 99 && 'sm:text-[10px]',
                           )}
                         >
@@ -1110,7 +1110,7 @@ const ActivityListView = (): ReactElement => {
 
         {/* RESIZE HANDLE */}
         <PanelResizeHandle className='w-[2px] transition-colors cursor-col-resize flex items-center justify-center group'>
-          <div className='w-[2px] h-full bg-sidebar-divider group-hover:bg-sidebar-badge-accent group-active:bg-sidebar-badge-accent'></div>
+          <div className='w-[2px] h-full bg-sidebar-divider group-hover:bg-primary group-active:bg-primary'></div>
         </PanelResizeHandle>
 
         {/* RIGHT PANEL - Detail View */}

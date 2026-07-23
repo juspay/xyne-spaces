@@ -156,7 +156,7 @@ const AppearanceSection: FC<{ state: PreferencesState }> = ({ state }) => (
               background: themeOption.bg,
               border:
                 state.theme === themeOption.id
-                  ? '2px solid var(--sidebar-badge-accent)'
+                  ? '2px solid hsl(var(--primary))'
                   : '2px solid transparent',
             }}
           >

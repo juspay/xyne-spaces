@@ -1,5 +1,13 @@
 import React, { useState } from 'react';
-import { Copy, Globe, Lock, MoreHorizontal, Share2, Star, Trash2 } from 'lucide-react';
+import {
+  CopyDefault,
+  FileText,
+  Globe,
+  Share01,
+  Star,
+  ThreeDotsMenuHorizontal,
+  DeleteDustbin01,
+} from '@xyne/icons';
 import { CanvasRole, CanvasVisibility } from '@xyne/shared';
 import type { Canvas } from './Canvas.types';
 import {
@@ -12,7 +20,7 @@ import {
 import { Dialog } from '../ui/Dialog';
 import { Tooltip } from '../ui/Tooltip/Tooltip';
 import { CanvasShareModal } from './CanvasShareModal';
-import { formatDate } from '../../utils/dateUtils';
+import { cn } from '../../utils/classNames';
 
 interface CanvasRowTrackNames {
   canvasOpen: string;
@@ -40,7 +48,7 @@ export const HighlightedText: React.FC<{ text: string; query?: string | undefine
     parts.push(
       <mark
         key={`${matchIndex}-${matchEnd}`}
-        className='rounded bg-yellow-100 px-0.5 text-foreground'
+        className='rounded bg-[var(--search-result-highlight-bg)] px-0.5 text-foreground'
       >
         {text.slice(matchIndex, matchEnd)}
       </mark>,
@@ -83,99 +91,114 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
   highlightQuery,
 }) => {
   const [shareOpen, setShareOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const isSelected = selectedCanvasId === canvas.id;
   const isOwner = canvas.createdBy === currentUserId;
   const isEditor = canvas.accessLevel === CanvasRole.EDITOR;
   const canToggleStar = !!onToggleStar;
-  const createdDateText = `Created ${formatDate(canvas.createdAt)}`;
 
-  const { Icon: RowIcon, iconColor } =
-    canvas.visibility === CanvasVisibility.PUBLIC
-      ? { Icon: Globe, iconColor: 'text-muted-foreground' }
-      : { Icon: Lock, iconColor: 'text-muted-foreground' };
+  // The frame uses `file/file-text` for canvas rows. Public canvases keep the
+  // globe so the (exceptional) shared state stays legible at a glance.
+  const RowIcon = canvas.visibility === CanvasVisibility.PUBLIC ? Globe : FileText;
 
   return (
     <>
-      <div className={`flex items-center group ${indentClassName} pr-2`}>
-        <button
-          className={`flex min-w-0 flex-1 items-center gap-2 px-3 py-2 text-left hover:bg-accent rounded-md transition-colors ${
-            isSelected ? 'bg-accent' : ''
-          }`}
-          onClick={event => onSelect(event, canvas)}
-          data-track-category='CANVAS'
-          data-track-name={trackNames.canvasOpen}
+      {/* Indent lives on a wrapper so the row keeps its own `px-3` from the
+          frame spec — a `pl-*` indent on the row itself would fight it. */}
+      <div className={indentClassName}>
+        <div
+          className={cn(
+            'group flex items-center gap-3 h-9 px-3 rounded-[10px] border border-transparent transition-colors',
+            isSelected
+              ? 'bg-sidebar-accent border-sidebar-border text-sidebar-accent-foreground'
+              : 'text-sidebar-foreground hover:bg-sidebar-accent hover:border-sidebar-border hover:text-sidebar-accent-foreground',
+          )}
         >
-          <RowIcon className={`w-4 h-4 shrink-0 ${iconColor}`} />
-          <div className='min-w-0 flex-1'>
+          <button
+            className='flex min-w-0 flex-1 items-center gap-3 text-left'
+            onClick={event => onSelect(event, canvas)}
+            data-track-category='CANVAS'
+            data-track-name={trackNames.canvasOpen}
+          >
+            <span className='size-4 flex items-center justify-center shrink-0'>
+              <RowIcon size={16} />
+            </span>
             <Tooltip
               content={canvas.title || 'Untitled'}
               side='top'
               align='start'
               className='max-w-xs break-words'
             >
-              <div className='text-sm truncate'>
+              <span className='min-w-0 flex-1 truncate block text-sm font-medium tracking-[-0.14px]'>
                 <HighlightedText text={canvas.title || 'Untitled'} query={highlightQuery} />
-              </div>
+              </span>
             </Tooltip>
-            <div className='text-xs text-muted-foreground truncate'>{createdDateText}</div>
-          </div>
-        </button>
-
-        {canToggleStar && (
-          <button
-            className='p-1 hover:bg-accent rounded transition-colors'
-            onClick={event => {
-              event.stopPropagation();
-              onToggleStar?.(canvas);
-            }}
-            title={canvas.isStarred ? 'Unstar canvas' : 'Star canvas'}
-            data-track-category='CANVAS'
-            data-track-name='TOGGLE_CANVAS_STAR'
-          >
-            <Star
-              className={`w-4 h-4 ${
-                canvas.isStarred ? 'fill-yellow-400 text-yellow-500' : 'text-muted-foreground'
-              }`}
-            />
           </button>
-        )}
 
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
+          {canToggleStar && (
             <button
-              className='p-1 opacity-0 group-hover:opacity-100 hover:bg-accent rounded transition-all'
-              onClick={event => event.stopPropagation()}
+              className={cn(
+                'items-center justify-center p-1 rounded-md shrink-0 hover:bg-sidebar-accent',
+                // Display (not opacity) so a hidden control reserves no width and
+                // the title truncates only when it genuinely runs out of room.
+                canvas.isStarred ? 'flex' : 'hidden group-hover:flex',
+              )}
+              onClick={event => {
+                event.stopPropagation();
+                onToggleStar?.(canvas);
+              }}
+              title={canvas.isStarred ? 'Unstar canvas' : 'Star canvas'}
               data-track-category='CANVAS'
-              data-track-name={trackNames.actionsMenu}
+              data-track-name='TOGGLE_CANVAS_STAR'
             >
-              <MoreHorizontal className='w-4 h-4 text-muted-foreground' />
+              <Star
+                size={14}
+                variant={canvas.isStarred ? 'Solid' : 'Stroke'}
+                {...(canvas.isStarred ? { className: 'text-status-pending' } : {})}
+              />
             </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align='end' className='w-44'>
-            {onDuplicate && (
-              <DropdownMenuItem onClick={() => onDuplicate(canvas)}>
-                <Copy className='w-4 h-4 mr-2' />
-                Duplicate
-              </DropdownMenuItem>
-            )}
-            <DropdownMenuItem onClick={() => setShareOpen(true)}>
-              <Share2 className='w-4 h-4 mr-2' />
-              Share
-            </DropdownMenuItem>
-            {onDelete && isOwner && (
-              <>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  onClick={() => onDelete(canvas.id)}
-                  className='text-red-600 focus:text-red-600 focus:bg-red-50'
-                >
-                  <Trash2 className='w-4 h-4 mr-2' />
-                  Delete
+          )}
+
+          <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+            <DropdownMenuTrigger asChild>
+              <button
+                className={cn(
+                  'items-center justify-center p-1 rounded-md shrink-0 hover:bg-sidebar-accent',
+                  menuOpen ? 'flex' : 'hidden group-hover:flex',
+                )}
+                onClick={event => event.stopPropagation()}
+                data-track-category='CANVAS'
+                data-track-name={trackNames.actionsMenu}
+              >
+                <ThreeDotsMenuHorizontal size={14} />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align='end' className='w-44'>
+              {onDuplicate && (
+                <DropdownMenuItem className='gap-2' onClick={() => onDuplicate(canvas)}>
+                  <CopyDefault size={14} className='shrink-0' />
+                  <span className='flex-1'>Duplicate</span>
                 </DropdownMenuItem>
-              </>
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
+              )}
+              <DropdownMenuItem className='gap-2' onClick={() => setShareOpen(true)}>
+                <Share01 size={14} className='shrink-0' />
+                <span className='flex-1'>Share</span>
+              </DropdownMenuItem>
+              {onDelete && isOwner && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onClick={() => onDelete(canvas.id)}
+                    className='gap-2 text-destructive focus:text-destructive'
+                  >
+                    <DeleteDustbin01 size={14} className='shrink-0' />
+                    <span className='flex-1'>Delete</span>
+                  </DropdownMenuItem>
+                </>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       </div>
 
       {shareOpen && (

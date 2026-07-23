@@ -1,14 +1,31 @@
 import { ReactElement, useState, useRef, useCallback, useEffect } from 'react';
-import { Outlet, useLocation, useNavigate, Link } from 'react-router-dom';
-import { FileText, Plus, ArrowLeft, Loader2, List, FolderTree, Search, Star } from 'lucide-react';
+import { Outlet, useLocation, useNavigate } from 'react-router-dom';
+import {
+  Bot,
+  CheckTickSingle,
+  FileText,
+  FolderDefault,
+  ListDefault,
+  PlusDefault,
+  SearchBig,
+  Spinner,
+  Star,
+  ThreeDotsMenuHorizontal,
+} from '@xyne/icons';
 import { CanvasList } from '../CanvasList';
 import { CanvasListGrouped } from '../CanvasListGrouped';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import type { Canvas } from '../Canvas.types';
 import { useAuth } from '../../../hooks/useAuth';
-import { Button } from '../../ui/Button';
 import { Switch } from '../../ui/Switch';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '../../ui/dropdown-menu';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
 import Input from '../../ui/Input';
 import { v4 as uuidv4 } from 'uuid';
@@ -20,6 +37,8 @@ import {
   PanelResizeHandle,
   type ImperativePanelHandle,
 } from 'react-resizable-panels';
+import AppNavigator from '../../AppNavigator/AppNavigator';
+import { cn } from '../../../utils/classNames';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { usePath } from '../../../hooks/usePath';
 import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
@@ -49,6 +68,7 @@ const CanvasPanel = (): ReactElement => {
   const [excludeCallGeneratedCanvases, setExcludeCallGeneratedCanvases] = useState(true);
   const [showStarredOnly, setShowStarredOnly] = useState(false);
   const [groupedSearchQuery, setGroupedSearchQuery] = useState('');
+  const [listOptionsOpen, setListOptionsOpen] = useState(false);
   const debouncedGroupedSearchQuery = useDebouncedValue(groupedSearchQuery, 300);
   const effectiveGroupedSearchQuery =
     debouncedGroupedSearchQuery.trim().length >= 2 ? debouncedGroupedSearchQuery : '';
@@ -191,161 +211,153 @@ const CanvasPanel = (): ReactElement => {
 
   // Render the left panel content
   const renderLeftPanel = (): ReactElement => (
-    <div className='flex-1 h-full flex flex-col bg-background border-r border-border'>
-      {/* Header */}
-      <div className='p-[18px] border-b border-border'>
-        <div className='flex items-center justify-between gap-3 mb-3'>
-          <div className='flex min-w-0 items-center gap-2'>
-            {!isMobile && (
-              <Link
-                to='/chat/dir'
-                className='p-1 rounded-md text-foreground hover:text-muted-foreground hover:bg-accent transition-colors duration-200'
-                aria-label='Go back'
-              >
-                <ArrowLeft size={20} />
-              </Link>
-            )}
-            <h2 className='truncate text-lg font-semibold text-foreground'>Canvases</h2>
-          </div>
-          <div className='flex shrink-0 items-center gap-2'>
-            <Tooltip
-              content={showStarredOnly ? 'Show all items' : 'Show starred only'}
-              side='bottom'
-              delayDuration={300}
-            >
-              <button
-                type='button'
-                className={`flex items-center justify-center rounded-md border p-1.5 transition-colors ${
-                  showStarredOnly
-                    ? 'border-amber-200 bg-amber-50 text-amber-600'
-                    : 'border-border text-muted-foreground hover:bg-accent'
-                }`}
-                aria-label={showStarredOnly ? 'Show all items' : 'Show starred only'}
-                title={showStarredOnly ? 'Show all items' : 'Show starred only'}
-                onClick={() => setShowStarredOnly(prev => !prev)}
-                data-track-category='CANVAS'
-                data-track-name='TOGGLE_STARRED_CANVAS_FILTER'
-              >
-                <Star
-                  size={16}
-                  className={showStarredOnly ? 'fill-amber-400 text-amber-500' : undefined}
-                />
-              </button>
-            </Tooltip>
-            <Tooltip
-              content={
-                excludeCallGeneratedCanvases ? 'Show system generated' : 'Hide system generated'
-              }
-              side='bottom'
-              delayDuration={300}
-            >
-              <div>
-                <Switch
-                  id='exclude-call-generated-canvases'
-                  checked={!excludeCallGeneratedCanvases}
-                  onCheckedChange={checked => setExcludeCallGeneratedCanvases(!checked)}
-                />
-              </div>
-            </Tooltip>
-            <div className='flex items-center border border-border rounded-md'>
-              <button
-                type='button'
-                className={`p-1.5 rounded-l-md transition-colors ${
-                  viewMode === 'grouped'
-                    ? 'bg-accent text-foreground'
-                    : 'text-muted-foreground hover:bg-accent/50'
-                }`}
-                onClick={() => setViewMode('grouped')}
-                title='Group by project'
-                data-track-category='CANVAS'
-                data-track-name='VIEW_MODE_GROUPED'
-                data-testid='canvas-view-grouped'
-              >
-                <FolderTree size={16} />
-              </button>
-              <button
-                type='button'
-                className={`p-1.5 rounded-r-md transition-colors ${
-                  viewMode === 'list'
-                    ? 'bg-accent text-foreground'
-                    : 'text-muted-foreground hover:bg-accent/50'
-                }`}
-                onClick={() => setViewMode('list')}
-                title='List view'
-                data-track-category='CANVAS'
-                data-track-name='VIEW_MODE_LIST'
-                data-testid='canvas-view-list'
-              >
-                <List size={16} />
-              </button>
-            </div>
-            <Tooltip content='New Canvas' side='bottom' delayDuration={300}>
-              <Button
-                variant='default'
-                size='sm'
-                onClick={() => void handleCreateCanvas()}
-                disabled={isCreatingCanvas}
-                aria-label='New Canvas'
-                data-track-category='CANVAS'
-                data-track-name='Create_Canvas'
-              >
-                {isCreatingCanvas ? (
-                  <Loader2 size={16} className='animate-spin' />
-                ) : (
-                  <Plus size={16} />
-                )}
-              </Button>
-            </Tooltip>
-          </div>
-        </div>
-        {viewMode === 'grouped' && (
-          <div className='relative'>
-            <Search className='absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground' />
-            <Input
-              type='text'
-              value={groupedSearchQuery}
-              onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
-                setGroupedSearchQuery(event.target.value)
-              }
-              placeholder='Search canvases'
-              className='pl-9 w-full'
-              data-testid='canvas-grouped-search-input'
-            />
-          </div>
-        )}
+    <div className={cn('h-full w-full flex flex-col', isMobile && 'bg-sidebar')}>
+      <div className='w-full h-[52px] shrink-0'>
+        <AppNavigator />
       </div>
+      <div className='flex-1 min-h-0 flex flex-col overflow-hidden border-t border-border'>
+        {/* Header — the frame is a bare title row; the list controls live behind
+            the overflow menu so the chrome stays as quiet as the design. */}
+        <div className='shrink-0 px-3 pt-3'>
+          <div className='flex items-center justify-between gap-2 px-3 py-1'>
+            <h2 className='truncate text-base font-semibold leading-normal text-sidebar-accent-foreground'>
+              Canvases
+            </h2>
+            <div className='flex shrink-0 items-center gap-1'>
+              <Tooltip content='New canvas' side='bottom' delayDuration={300}>
+                <button
+                  type='button'
+                  className='size-7 flex items-center justify-center rounded-[10px] border border-transparent text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:border-sidebar-border hover:text-sidebar-accent-foreground disabled:opacity-40'
+                  onClick={() => void handleCreateCanvas()}
+                  disabled={isCreatingCanvas}
+                  aria-label='New Canvas'
+                  data-track-category='CANVAS'
+                  data-track-name='Create_Canvas'
+                >
+                  {isCreatingCanvas ? (
+                    <Spinner size={16} className='animate-spin' />
+                  ) : (
+                    <PlusDefault size={16} />
+                  )}
+                </button>
+              </Tooltip>
+              <DropdownMenu open={listOptionsOpen} onOpenChange={setListOptionsOpen}>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type='button'
+                    className='size-7 flex items-center justify-center rounded-[10px] border border-transparent text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:border-sidebar-border hover:text-sidebar-accent-foreground'
+                    aria-label='Canvas list options'
+                    data-track-category='CANVAS'
+                    data-track-name='CANVAS_LIST_OPTIONS_MENU'
+                    data-testid='canvas-list-options'
+                  >
+                    <ThreeDotsMenuHorizontal size={16} />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align='end' className='w-56'>
+                  <DropdownMenuItem
+                    className='gap-2'
+                    onClick={() => setViewMode('grouped')}
+                    data-track-category='CANVAS'
+                    data-track-name='VIEW_MODE_GROUPED'
+                    data-testid='canvas-view-grouped'
+                  >
+                    <FolderDefault size={14} className='shrink-0' />
+                    <span className='flex-1'>Group by project</span>
+                    {viewMode === 'grouped' && <CheckTickSingle size={14} className='shrink-0' />}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className='gap-2'
+                    onClick={() => setViewMode('list')}
+                    data-track-category='CANVAS'
+                    data-track-name='VIEW_MODE_LIST'
+                    data-testid='canvas-view-list'
+                  >
+                    <ListDefault size={14} className='shrink-0' />
+                    <span className='flex-1'>List view</span>
+                    {viewMode === 'list' && <CheckTickSingle size={14} className='shrink-0' />}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    className='gap-2'
+                    onClick={() => setShowStarredOnly(prev => !prev)}
+                    data-track-category='CANVAS'
+                    data-track-name='TOGGLE_STARRED_CANVAS_FILTER'
+                  >
+                    <Star size={14} className='shrink-0' />
+                    <span className='flex-1'>Starred only</span>
+                    {showStarredOnly && <CheckTickSingle size={14} className='shrink-0' />}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className='gap-2'
+                    // Keep the menu open — this row hosts a switch, so selecting it
+                    // should toggle in place rather than dismiss.
+                    onSelect={event => event.preventDefault()}
+                  >
+                    <Bot size={14} className='shrink-0' />
+                    <span className='flex-1'>Show system generated</span>
+                    <Switch
+                      id='exclude-call-generated-canvases'
+                      checked={!excludeCallGeneratedCanvases}
+                      onCheckedChange={checked => setExcludeCallGeneratedCanvases(!checked)}
+                    />
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </div>
+          {viewMode === 'grouped' && (
+            <div className='relative mt-2'>
+              <SearchBig
+                size={16}
+                className='absolute left-3 top-1/2 -translate-y-1/2 text-sidebar-foreground'
+              />
+              <Input
+                type='text'
+                value={groupedSearchQuery}
+                onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
+                  setGroupedSearchQuery(event.target.value)
+                }
+                placeholder='Search canvases'
+                className='pl-9 w-full'
+                data-testid='canvas-grouped-search-input'
+              />
+            </div>
+          )}
+        </div>
 
-      {/* Canvas List */}
-      <div className='flex-1 min-h-0 overflow-auto'>
-        {viewMode === 'grouped' ? (
-          <CanvasListGrouped
-            onSelect={handleSelectCanvas}
-            currentUserId={user?.id}
-            selectedCanvasId={selectedCanvasId}
-            onDelete={handleDeleteCanvas}
-            onDuplicate={handleDuplicateCanvas}
-            isPersonalSectionCollapsed={isPersonalSectionCollapsed}
-            onSetPersonalSectionCollapsed={setIsPersonalSectionCollapsed}
-            excludeCallGeneratedCanvases={excludeCallGeneratedCanvases}
-            showStarredOnly={showStarredOnly}
-            onToggleStar={handleToggleStar}
-            searchQuery={effectiveGroupedSearchQuery}
-          />
-        ) : (
-          <CanvasList
-            paginated={true}
-            onSelect={handleSelectCanvas}
-            onDelete={handleDeleteCanvas}
-            onDuplicate={handleDuplicateCanvas}
-            currentUserId={user?.id}
-            activeFilter={activeFilter}
-            onFilterChange={setActiveFilter}
-            excludeCallGeneratedCanvases={excludeCallGeneratedCanvases}
-            showStarredOnly={showStarredOnly}
-            onToggleStar={handleToggleStar}
-            {...(selectedCanvasId ? { selectedCanvasId } : {})}
-          />
-        )}
+        {/* Canvas List */}
+        <div className='flex-1 min-h-0 overflow-auto no-scrollbar px-3 pt-2 pb-3'>
+          {viewMode === 'grouped' ? (
+            <CanvasListGrouped
+              onSelect={handleSelectCanvas}
+              currentUserId={user?.id}
+              selectedCanvasId={selectedCanvasId}
+              onDelete={handleDeleteCanvas}
+              onDuplicate={handleDuplicateCanvas}
+              isPersonalSectionCollapsed={isPersonalSectionCollapsed}
+              onSetPersonalSectionCollapsed={setIsPersonalSectionCollapsed}
+              excludeCallGeneratedCanvases={excludeCallGeneratedCanvases}
+              showStarredOnly={showStarredOnly}
+              onToggleStar={handleToggleStar}
+              searchQuery={effectiveGroupedSearchQuery}
+            />
+          ) : (
+            <CanvasList
+              paginated={true}
+              onSelect={handleSelectCanvas}
+              onDelete={handleDeleteCanvas}
+              onDuplicate={handleDuplicateCanvas}
+              currentUserId={user?.id}
+              activeFilter={activeFilter}
+              onFilterChange={setActiveFilter}
+              excludeCallGeneratedCanvases={excludeCallGeneratedCanvases}
+              showStarredOnly={showStarredOnly}
+              onToggleStar={handleToggleStar}
+              {...(selectedCanvasId ? { selectedCanvasId } : {})}
+            />
+          )}
+        </div>
       </div>
     </div>
   );
@@ -380,7 +392,7 @@ const CanvasPanel = (): ReactElement => {
 
   // Desktop view - two-panel layout with resizable panels
   return (
-    <div className='flex h-full w-full md:rounded-2xl overflow-hidden shadow-md'>
+    <div className='flex h-full w-full overflow-hidden'>
       <PanelGroup
         direction='horizontal'
         className='flex align-top h-full'
@@ -393,12 +405,12 @@ const CanvasPanel = (): ReactElement => {
 
         {/* RESIZE HANDLE */}
         <PanelResizeHandle className='w-[2px] transition-colors cursor-col-resize flex items-center justify-center group'>
-          <div className='w-[2px] h-full bg-sidebar-divider group-hover:bg-sidebar-badge-accent group-active:bg-sidebar-badge-accent'></div>
+          <div className='w-[2px] h-full bg-sidebar-divider group-hover:bg-primary group-active:bg-primary'></div>
         </PanelResizeHandle>
 
         {/* RIGHT PANEL - Detail View */}
         <Panel>
-          <div className='flex-1 flex flex-col bg-background relative h-full'>
+          <div className='flex-1 flex flex-col bg-background relative h-full overflow-hidden rounded-2xl border border-border'>
             <div className='flex-1 h-full overflow-hidden'>
               {isOnIndexRoute ? renderPlaceholder() : <Outlet />}
             </div>

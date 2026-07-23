@@ -42,7 +42,7 @@ export const Av = ({ initials, color }: { initials: string; color: string }): Re
   </div>
 );
 
-/** Unread badge — --sidebar-badge-accent = #57ab02 */
+/** Unread badge — hardcoded hex; the live badge uses --primary. */
 export const UnreadBadge = ({ n }: { n: number }): ReactElement => (
   <span className='h-[14px] min-w-[14px] px-[3px] rounded-full bg-[#57ab02] text-white text-[8px] font-bold flex items-center justify-center leading-none'>
     {n}

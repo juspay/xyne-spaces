@@ -142,7 +142,7 @@ function DesktopLayout({
             />
           </Panel>
           <PanelResizeHandle className='w-[2px] transition-colors cursor-col-resize flex items-center justify-center group'>
-            <div className='w-[2px] h-full bg-sidebar-divider group-hover:bg-sidebar-badge-accent group-active:bg-sidebar-badge-accent' />
+            <div className='w-[2px] h-full bg-sidebar-divider group-hover:bg-primary group-active:bg-primary' />
           </PanelResizeHandle>
         </React.Fragment>
       ) : null}
