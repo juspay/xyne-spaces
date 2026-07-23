@@ -94,10 +94,6 @@ export async function authenticateApp(
       return;
     }
 
-    // Use values from verified token, not the unverified decode
-    req.body.userId = verifiedResult.data.userId;
-    req.body.appId = verifiedResult.data.appId;
-
     // Load permissions by status.
     // approved + delete = currently effective (active).
     // hasPendingChanges = true when any permission is 'new' or 'delete',
@@ -112,14 +108,16 @@ export async function authenticateApp(
     }
 
     (req as any).auth = {
+      appId: verifiedResult.data.appId,
       permissions: effectiveNames,
       installedAppId: installedApp.id,
       permissionsStale: hasPendingChanges,
       installedAppCreatedAt: installedApp.createdAt,
     };
 
-    // Fetch user to get workspaceId for downstream controllers that expect req.user
-    const user = await repositories.users.findById(userId);
+    // Fetch user to get workspaceId for downstream controllers that expect req.user.
+    // Use the userId from the verified token, not the unverified decode.
+    const user = await repositories.users.findById(verifiedResult.data.userId);
     if (!user) {
       logger.warn('[APP-AUTH] User not found for app token');
       sendError(res, 401);

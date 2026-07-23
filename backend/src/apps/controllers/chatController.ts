@@ -20,7 +20,9 @@ const ChatActionBodySchema = z.object({
   markdownText: z.string().optional(), // raw markdown (with optional frontmatter) — stored as-is
   attachments: z.array(z.any()).optional(),
   metadata: z.record(z.unknown()).optional(), // message metadata (e.g. hasAppActions, appId)
-  userId: z.string().min(1, 'User ID is required').trim(),
+  // Only the internal S2S /api/internal/postAsUser route (no app auth) supplies this;
+  // app-token callers are identified via req.user set by authenticateApp.
+  userId: z.string().min(1, 'User ID is required').trim().optional(),
   uploadedFiles: z.array(z.object({
     originalName: z.string(),
     fileName: z.string(),
@@ -90,7 +92,6 @@ const ChannelHistoryQuerySchema = z.object({
 const AgentProgressBodySchema = z.object({
   conversationId: z.string().min(1).trim(),
   channelId: z.string().min(1).trim().optional(),
-  userId: z.string().min(1).trim(),     // agent's spacesAppUserId — must be channel participant
   agentSlug: z.string().min(1).trim().optional(),
   toolLabel: z.string().optional(),
   status: z.enum(['working', 'done']).default('working'),
@@ -177,8 +178,10 @@ export class ChatController {
    * POST /api/external-event/chat/postMessage
    *
    * Required fields:
-   * - userId: string - User ID posting the message
    * - channelId or conversationId: string - Target channel or conversation
+   *
+   * The posting user is taken from the app token (req.user); only the internal
+   * S2S postAsUser route passes userId in the body.
    *
    * Optional fields:
    * - text: string - Message text content
@@ -214,6 +217,14 @@ export class ChatController {
         contentFormat,
       } = bodyResult.data;
 
+      // App-token callers post as the authenticated bot user; the S2S postAsUser
+      // route has no req.user and passes the human user's id in the body.
+      const senderUserId = req.user?.id ?? userId;
+      if (!senderUserId) {
+        res.status(400).json({ error: 'userId is required', code: 'VALIDATION_ERROR' });
+        return;
+      }
+
       const resolvedChannelId = await resolveChannelId(channelId, conversationId, channelName);
 
       let content: string;
@@ -221,7 +232,8 @@ export class ChatController {
 
       if (flow) {
         const flowId = crypto.randomUUID();
-        const appId = (req.body as Record<string, unknown>).appId;
+        // Verified token appId for app callers; the S2S postAsUser route may pass it in the body.
+        const appId = (req as any).auth?.appId ?? (req.body as Record<string, unknown>).appId;
         if (appId !== undefined && !isAlphanumericId(appId)) {
           res.status(400).json({ error: 'Invalid appId', code: 'VALIDATION_ERROR' });
           return;
@@ -272,7 +284,7 @@ export class ChatController {
 
       const result = await findOrCreateConversation(
         resolvedChannelId,
-        userId,
+        senderUserId,
         content,
         isMarkdown,
         conversationId,
@@ -337,7 +349,7 @@ export class ChatController {
           });
           return;
         }
-        const appId = (req.body as Record<string, unknown>).appId;
+        const appId = (req as any).auth?.appId ?? (req.body as Record<string, unknown>).appId;
         if (appId !== undefined && !isAlphanumericId(appId)) {
           res.status(400).json({ error: 'Invalid appId', code: 'VALIDATION_ERROR' });
           return;
@@ -382,7 +394,8 @@ export class ChatController {
    * Publish an ephemeral agent progress signal (no DB write).
    * POST /api/apps/chat/agentProgress
    *
-   * Body: { conversationId, channelId?, userId (agent), agentSlug?, toolLabel?, status }
+   * Body: { conversationId, channelId?, agentSlug?, toolLabel?, status }
+   * The agent's spacesAppUserId comes from the app token (req.user) — it must be a channel participant.
    * Delivery: Redis pub/sub on `session:{channelId}:messages` — same channel as typing indicator,
    * so the dashboard WebSocket already subscribes. msgType=SYSTEM so it does not persist.
    */
@@ -393,7 +406,8 @@ export class ChatController {
         res.status(400).json({ error: 'Validation error', code: 'VALIDATION_ERROR', details: parsed.error.errors });
         return;
       }
-      const { conversationId, channelId, userId, agentSlug, toolLabel, status, triggeredByUserId, sessionId } = parsed.data;
+      const { conversationId, channelId, agentSlug, toolLabel, status, triggeredByUserId, sessionId } = parsed.data;
+      const userId = req.user!.id; // agent's spacesAppUserId from the verified app token
 
       // Resolve channelId if only conversationId was given — dashboard subscribes on channel.
       const resolvedChannelId = await resolveChannelId(channelId, conversationId);

@@ -489,8 +489,7 @@ export class TicketController {
    * - projectId: string - Project ID to which the ticket belongs
    * - boardId: string - Board ID to which the ticket belongs
    * - channelId: string - Channel ID (validated by middleware)
-   * - userId: string - User ID (added by authentication middleware)
-   * 
+   *
    * Optional fields:
    * - text: string - Text content for the message to which the ticket will be attached (if not provided, no text will be added to the message)
    * - priority: TicketPriority - Priority of the ticket (defaults to LOW)
@@ -1057,7 +1056,7 @@ export class TicketController {
         error: errorMessage,
         stack: errorStack,
         ticketId: req.body.ticketId,
-        userId: req.body.userId,
+        userId: req.user?.id,
       });
       res.status(500).json({ 
         error: 'Internal server error',
@@ -1093,7 +1092,7 @@ export class TicketController {
       const limit = Math.min(Math.max(rawLimit, 1), 100);
       const decodedCursor = decodeCursor<MerchantTicketsListCursor>(cursor);
 
-      const access = await validateChannelIdsAccess(validatedChannelIds, req.body.userId);
+      const access = await validateChannelIdsAccess(validatedChannelIds, req.user!.id);
       if (!access.ok) {
         res.status(access.status).json({
           error: access.error,

@@ -13,10 +13,11 @@ export function getSlackAuthContext(req: Request): {
 	workspaceId?: string;
 } {
 	return {
-		userId:
-			(req.body?.userId as string | undefined) ?? req._slackAuth?.userId ?? "",
+		userId: req._slackAuth?.userId ?? req.user?.id ?? "",
 		appId:
-			(req.body?.appId as string | undefined) ?? req._slackAuth?.appId ?? "",
+			req._slackAuth?.appId ??
+			((req as any).auth?.appId as string | undefined) ??
+			"",
 		workspaceId: req.user?.workspaceId,
 	};
 }
@@ -102,8 +103,10 @@ function wrapSlackResponseAndAuth(
 			return;
 		}
 
-		const { userId, appId } = req.body;
-		req._slackAuth = { userId, appId };
+		req._slackAuth = {
+			userId: req.user?.id ?? "",
+			appId: ((req as any).auth?.appId as string | undefined) ?? "",
+		};
 		onAuthSuccess();
 	});
 }
