@@ -39,6 +39,7 @@ export interface UseMentionSearchResult {
 
 export interface UseMentionSearchOptions {
   includeSpecialMentions?: boolean;
+  excludeSelf?: boolean;
 }
 
 function emailLocalPart(email: string | null | undefined): string {
@@ -145,7 +146,7 @@ export const useMentionSearch = (
   threadParticipantIds?: ReadonlySet<string>,
   options: UseMentionSearchOptions = {},
 ): UseMentionSearchResult => {
-  const { includeSpecialMentions = true } = options;
+  const { includeSpecialMentions = true, excludeSelf = true } = options;
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
   // Gates the Vespa membership fetch — fires only after the picker has been
@@ -253,8 +254,10 @@ export const useMentionSearch = (
         : membersLoaded
           ? allWorkspaceUsers.filter(u => memberIds.has(u.id))
           : allWorkspaceUsers.filter(u => dmRankAffinity.has(u.id));
-    // Keep yourself only in a self-DM; otherwise you're never a mention candidate.
-    return src.filter(u => (isSelfDm ? true : u.id !== currentUserId));
+    // Keep yourself only in a self-DM (or when the caller opted out of this
+    // chat-specific default, e.g. the automation composer); otherwise you're
+    // never a mention candidate.
+    return src.filter(u => (isSelfDm || !excludeSelf ? true : u.id !== currentUserId));
   }, [
     shouldSearch,
     usersData,
@@ -265,6 +268,7 @@ export const useMentionSearch = (
     dmRankAffinity,
     isSelfDm,
     currentUserId,
+    excludeSelf,
   ]);
 
   const candidateIdsKey = useMemo(() => eligibleUsers.map(u => u.id).join(','), [eligibleUsers]);
