@@ -44,6 +44,7 @@ import { MentionSelector } from '../Selectors';
 import { CommandSelector } from '../Selectors';
 import { EmojiSelector } from '../Selectors';
 import { AttachmentPreview } from '../files';
+import { useOverlayZIndex } from '../../../contexts/OverlayZIndexContext';
 import type { UploadedFile } from '../files/Files.types';
 import { FilePreviewModal } from '../../FileViewer/FileViewerModal';
 import type { MentionResult } from '@xyne/shared';
@@ -306,6 +307,9 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     const [isCanvasAttachmentModalOpen, setIsCanvasAttachmentModalOpen] = useState(false);
 
     const { isMobile } = usePlatform();
+    // z-index for portaled overlays (attachment menu). Raised when the composer
+    // lives inside a high-z surface like the Cmd+K dialog; defaults to `z-50`.
+    const overlayZIndex = useOverlayZIndex();
 
     const hasSendableContent = React.useMemo(
       () => !!content || allAttachments.length > 0 || !!attachedCanvas,
@@ -1614,7 +1618,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                           <PaperclipSlant className='h-4 w-4 text-muted-foreground' />
                         </button>
                       </DropdownMenuTrigger>
-                      <DropdownMenuContent side='top' align='start'>
+                      <DropdownMenuContent side='top' align='start' className={overlayZIndex}>
                         <DropdownMenuItem
                           onClick={() => {
                             handleAttachClick();
@@ -1647,6 +1651,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                     open={isTranscriptSelectorOpen}
                     onOpenChange={setIsTranscriptSelectorOpen}
                     className='max-w-[900px] w-full !p-0 border-none bg-transparent shadow-none overflow-visible'
+                    {...(overlayZIndex && { zIndexClassName: overlayZIndex })}
                   >
                     <CallTranscriptSelector
                       onSelect={transcript => {

@@ -2,6 +2,7 @@ import React, { useState, useCallback } from 'react';
 import { Plus } from 'lucide-react';
 import { CanvasList } from '../CanvasList';
 import { Button } from '../../ui/Button';
+import { OverlayPortal } from '../../ui/OverlayPortal';
 import type { Canvas } from '../Canvas.types';
 import { useAuth } from '../../../hooks/useAuth';
 
@@ -60,10 +61,13 @@ export const CanvasAttachmentModal: React.FC<CanvasAttachmentModalProps> = ({
   }
 
   return (
-    <div className='fixed inset-0 z-50 flex items-center justify-center'>
-      {/* Backdrop */}
+    <OverlayPortal className='flex items-center justify-center' onEscape={handleClose}>
+      {/* Backdrop — mouse-only close affordance; kept out of the tab order so
+          OverlayPortal's FocusScope auto-focuses the modal's ✕, not this
+          invisible full-screen button. Keyboard close is Escape / the ✕. */}
       <button
         type='button'
+        tabIndex={-1}
         className='absolute inset-0 bg-black/50 backdrop-blur-sm cursor-default'
         onClick={handleClose}
         onKeyDown={e => {
@@ -156,7 +160,7 @@ export const CanvasAttachmentModal: React.FC<CanvasAttachmentModalProps> = ({
           </div>
         </div>
       </div>
-    </div>
+    </OverlayPortal>
   );
 };
 

@@ -8,6 +8,7 @@ import type { EmojiPickerButtonProps } from './EditorToolbar.types';
 import { emojiService } from '../../../services/Emoji/emojiService';
 import { useCustomEmojis } from '../../../hooks/useCustomEmojis';
 import { useTheme } from '../../../hooks/useTheme';
+import { OverlayPortal } from '../OverlayPortal';
 
 type AddCustomEmojiModalProps = {
   open: boolean;
@@ -42,17 +43,7 @@ export const AddCustomEmojiModal: React.FC<AddCustomEmojiModalProps> = ({
   };
 
   return (
-    <div
-      className='fixed inset-0 z-50 flex items-center justify-center bg-black/40'
-      onMouseDown={e => e.stopPropagation()}
-      onTouchStart={e => e.stopPropagation()}
-      onKeyDown={e => {
-        if (e.key === 'Escape') {
-          e.stopPropagation();
-        }
-      }}
-      role='presentation'
-    >
+    <OverlayPortal className='flex items-center justify-center bg-black/40' onEscape={handleClose}>
       <div className='w-full max-w-[520px] mx-4 rounded-lg bg-background text-foreground shadow-xl'>
         {/* Header */}
         <div className='flex items-center justify-between px-6 py-4 border-b'>
@@ -131,7 +122,7 @@ export const AddCustomEmojiModal: React.FC<AddCustomEmojiModalProps> = ({
           </button>
         </div>
       </div>
-    </div>
+    </OverlayPortal>
   );
 };
 
