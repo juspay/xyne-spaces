@@ -11,6 +11,13 @@ import { logger } from '@/utils/logger';
 import { MessagesSideEffectHandler } from '@/zero/side-effects/tables/messages-handler';
 import { buildUserQueryContext } from '@/utils/queryContext';
 import { db } from '@/database/client';
+import {
+  AutomationTemplateAttachmentSchema,
+  AUTOMATION_TEMPLATE_MAX_TOTAL_BYTES,
+  createAutomationDeliveryFiles,
+  prepareRenderedAutomationFiles,
+  removeUnclaimedAutomationDeliveryFiles,
+} from '../services/automation-template.service';
 
 const MAX_SEND_MESSAGE_RECIPIENTS = 500;
 
@@ -19,12 +26,30 @@ const SendMessageConfigSchema = z
     channelId: variableRef(z.string().min(1)).optional(),
     userIds: z.array(variableRef(z.string().min(1))).optional(),
     senderId: variableRef(z.string().min(1)).optional(),
-    content: variableRef(z.string().min(1)),
+    content: variableRef(z.string().min(1)).optional(),
+    attachments: z.array(AutomationTemplateAttachmentSchema).max(10).optional(),
   })
   .refine(
     (data) =>
-      data.channelId !== undefined ||
-      (data.userIds !== undefined && data.userIds.length > 0),
+      (typeof data.content === 'string' && data.content.trim().length > 0) ||
+      (data.attachments?.length ?? 0) > 0,
+    {
+      message: 'Message content or at least one attachment is required',
+      path: ['content'],
+    }
+  )
+  .refine(
+    (data) =>
+      (data.attachments ?? []).reduce((sum, attachment) => sum + attachment.size, 0) <=
+      AUTOMATION_TEMPLATE_MAX_TOTAL_BYTES,
+    {
+      message: 'Total attachment size cannot exceed 25MB',
+      path: ['attachments'],
+    }
+  )
+  .refine(
+    (data) =>
+      data.channelId !== undefined || (data.userIds !== undefined && data.userIds.length > 0),
     {
       message: 'At least one of channel or users must be specified',
       path: ['channelId'],
@@ -60,7 +85,8 @@ export class SendMessageStep extends BaseActionStep<
   readonly configSchema = SendMessageConfigSchema;
   readonly outputSchema = SendMessageOutputSchema;
   readonly name = 'Send a message';
-  readonly description = 'Posts a message to a channel and/or sends DMs to selected users.';
+  readonly description =
+    'Posts a message with optional text-template attachments to a channel and/or selected users.';
   readonly category = StepCategory.MESSAGING;
   readonly icon = 'Send';
 
@@ -73,7 +99,8 @@ export class SendMessageStep extends BaseActionStep<
       configuredSenderId ?? (await getAutomationsBotUserId(context.automation.workspaceId));
     const workspaceId = context.automation.workspaceId;
     const automationId = context.automation.id;
-    const content = config.content;
+    const content = config.content ?? '';
+    let preparedFiles: Awaited<ReturnType<typeof prepareRenderedAutomationFiles>> = [];
     const channelId = config.channelId;
     const requestedUserIdsRaw = config.userIds ?? [];
     const uniqueRequestedUserIds = Array.from(new Set(requestedUserIdsRaw));
@@ -107,14 +134,25 @@ export class SendMessageStep extends BaseActionStep<
     const deliver = async (
       channelId: string
     ): Promise<{ messageId: string; channelId: string; conversationId: string }> => {
-      const result = await conversationService.createConversationWithMessage({
-        channelId,
-        userId: senderId,
-        content,
-        msgType,
-        isBot,
-        isMarkdown: true,
+      const deliveryFiles = await createAutomationDeliveryFiles({
+        files: preparedFiles,
+        automationId,
       });
+      let result: Awaited<ReturnType<typeof conversationService.createConversationWithMessage>>;
+      try {
+        result = await conversationService.createConversationWithMessage({
+          channelId,
+          userId: senderId,
+          content,
+          msgType,
+          isBot,
+          isMarkdown: true,
+          uploadedFiles: deliveryFiles,
+        });
+      } catch (error) {
+        await removeUnclaimedAutomationDeliveryFiles(deliveryFiles);
+        throw error;
+      }
       const messageId = result.message.messageId;
 
       // Fire the message side-effect so automation-posted mentions create
@@ -186,7 +224,7 @@ export class SendMessageStep extends BaseActionStep<
       }
     }
 
-    // Post to channel if provided
+    // Validate the channel before rendering/uploading any run-specific files.
     if (channelId) {
       const channelInWorkspace = await db.channel.findFirst({
         where: { id: channelId, workspaceId },
@@ -197,7 +235,15 @@ export class SendMessageStep extends BaseActionStep<
           `[SendMessageStep] Channel ${channelId} not found in workspace ${workspaceId}`
         );
       }
+    }
 
+    preparedFiles = await prepareRenderedAutomationFiles({
+      attachments: config.attachments ?? [],
+      context,
+    });
+
+    // Post to channel if provided
+    if (channelId) {
       const delivered = await deliver(channelId);
       messageIds.push(delivered.messageId);
       channelIds.push(delivered.channelId);

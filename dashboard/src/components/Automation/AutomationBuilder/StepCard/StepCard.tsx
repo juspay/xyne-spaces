@@ -208,11 +208,13 @@ export function StepCard({
                 />
               ) : step.type === 'SEND_MESSAGE' ? (
                 <SendMessageStepForm
+                  stepId={step.id}
                   value={step.config}
                   onChange={onConfigChange}
                   issues={issues ?? null}
                   pathPrefix={pathPrefix}
                   variableSources={variableSources}
+                  readOnly={readOnly}
                 />
               ) : step.type === 'MAKE_CALL' ? (
                 <MakeCallStepForm

@@ -319,6 +319,45 @@ export function fetchClawAgents(): Promise<ClawAgent[]> {
   return unwrap(apiInstance.get<SuccessEnvelope<ClawAgent[]>>('/automations/claw/agents'));
 }
 
+export interface AutomationTemplateAttachment {
+  attachmentId: string;
+  originalFilename: string;
+  mimetype: 'text/plain' | 'text/markdown' | 'text/html';
+  size: number;
+  templatePaths: string[];
+}
+
+export async function uploadAutomationTemplates(
+  stepId: string,
+  files: File[],
+): Promise<AutomationTemplateAttachment[]> {
+  const formData = new FormData();
+  formData.append('stepId', stepId);
+  files.forEach(file => formData.append('files', file));
+  return unwrap(
+    apiInstance.post<SuccessEnvelope<AutomationTemplateAttachment[]>>(
+      '/automations/attachments',
+      formData,
+    ),
+  );
+}
+
+export async function fetchAutomationTemplateContent(attachmentId: string): Promise<string> {
+  const response = await apiInstance.get<Blob>(
+    `/attachments/${encodeURIComponent(attachmentId)}/download`,
+    { responseType: 'blob' },
+  );
+  return response.data.text();
+}
+
+export function releaseAutomationTemplate(attachmentId: string): Promise<{ removed: boolean }> {
+  return unwrap(
+    apiInstance.delete<SuccessEnvelope<{ removed: boolean }>>(
+      `/automations/attachments/${encodeURIComponent(attachmentId)}`,
+    ),
+  );
+}
+
 // ─── Runs API (REST — replaces Zero queries for runs) ────────────────────
 export interface RunsListPage {
   runs: AutomationRun[];

@@ -41,6 +41,7 @@ export function SwitchCard({
   onDelete,
   issues,
   pathPrefix,
+  readOnly = false,
   ensureSchema,
   renderConditionalCard,
   renderSwitchCard,
@@ -274,6 +275,7 @@ export function SwitchCard({
                     ensureSchema={ensureSchema}
                     issues={issuesUnder(`${pathPrefix}.config.cases[${caseIndex}].steps`)}
                     pathPrefix={`${pathPrefix}.config.cases[${caseIndex}].steps`}
+                    readOnly={readOnly}
                     renderConditionalCard={renderConditionalCard}
                     renderSwitchCard={renderSwitchCard}
                   />
@@ -302,6 +304,7 @@ export function SwitchCard({
                 ensureSchema={ensureSchema}
                 issues={issuesUnder(`${pathPrefix}.config.default`)}
                 pathPrefix={`${pathPrefix}.config.default`}
+                readOnly={readOnly}
                 renderConditionalCard={renderConditionalCard}
                 renderSwitchCard={renderSwitchCard}
               />

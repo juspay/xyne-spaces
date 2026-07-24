@@ -24,6 +24,7 @@ export interface ConditionalCardProps {
   onDelete: () => void;
   issues: ValidationIssue[];
   pathPrefix: string;
+  readOnly?: boolean;
   ensureSchema: (type: string) => void;
   renderConditionalCard: (
     step: ConditionalStepConfig,

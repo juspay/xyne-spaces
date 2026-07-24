@@ -5,7 +5,7 @@ import { tokenize, isPureRef, extractRefPath } from '../util/variable-ref';
 
 const FORBIDDEN_KEYS: ReadonlySet<string> = new Set(['__proto__', 'constructor', 'prototype']);
 
-function resolvePath(context: AutomationContext, path: string): unknown {
+export function resolveAutomationPath(context: AutomationContext, path: string): unknown {
   const segments = path.split('.');
   if (segments.length === 0) return undefined;
   if (segments.some(s => FORBIDDEN_KEYS.has(s))) return undefined;
@@ -60,11 +60,10 @@ export class VariableResolver {
     if (isPureRef(value)) {
       const path = extractRefPath(value);
       if (path === null) return value;
-      return resolvePath(context, path);
+      return resolveAutomationPath(context, path);
     }
 
     const tokens = tokenize(value);
-
     let result = '';
     let stripNextSpanClose = false;
     for (let i = 0; i < tokens.length; i++) {
@@ -76,7 +75,7 @@ export class VariableResolver {
       }
 
       if (!isRichTextSlot(tokens[i - 1])) {
-        result += stringifyForTemplate(resolvePath(context, token.path));
+        result += stringifyForTemplate(resolveAutomationPath(context, token.path));
         continue;
       }
 
@@ -87,7 +86,7 @@ export class VariableResolver {
         continue;
       }
 
-      result += markdownToHtml(stringifyForTemplate(resolvePath(context, token.path)));
+      result += markdownToHtml(stringifyForTemplate(resolveAutomationPath(context, token.path)));
     }
     return result;
   }
@@ -189,20 +188,20 @@ function resolveEntityRefs(path: string, context: AutomationContext): ResolvedEn
   if (leaf === 'id' || leaf === 'name' || leaf === 'email') {
     const field = ENTITY_FIELDS[parent];
     if (field?.shape === 'object') {
-      const ref = toRef(field, resolvePath(context, segments.slice(0, -1).join('.')));
+      const ref = toRef(field, resolveAutomationPath(context, segments.slice(0, -1).join('.')));
       return ref ? [ref] : null;
     }
   }
 
   const field = ENTITY_FIELDS[leaf];
   if (field?.shape === 'id') {
-    const ref = toRef(field, resolvePath(context, path));
+    const ref = toRef(field, resolveAutomationPath(context, path));
     return ref ? [ref] : null;
   }
 
   const arrayField = ENTITY_ARRAY_FIELDS[leaf];
   if (arrayField) {
-    const value = resolvePath(context, path);
+    const value = resolveAutomationPath(context, path);
     if (!Array.isArray(value)) return null;
     return value.map((item) => toRef(arrayField, item)).filter((ref): ref is ResolvedEntityRef => ref !== null);
   }
