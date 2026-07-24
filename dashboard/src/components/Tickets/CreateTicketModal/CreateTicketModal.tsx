@@ -52,7 +52,8 @@ import { useAllVisibleChannels } from '../../../hooks/useChannels';
 import { useDuplicateTicketCheck } from '../../../hooks/useDuplicateTicketCheck';
 import { useTitleGenerator } from '../../../hooks/useTitleGenerator';
 import { useChannelAssignGate } from '../../../hooks/useChannelAssignGate';
-import { useActiveUserSearch, useUsers } from '../../../hooks/useUsers';
+import { useActiveUsers, useUsers, useSelf } from '../../../hooks/useUsers';
+import { channelMembersFirst, currentUserFirst } from '../../../utils/channelMembersFirst';
 import { useUserGroups } from '../../../hooks/useUserGroup';
 import { useWorkflowTypes } from '../../../hooks/useWorkflowTypes';
 import { useBoardSuggestion } from '../../../hooks/useBoardSuggestion';
@@ -96,7 +97,7 @@ import { isReleaseBoard } from '../../../utils/boardUtils';
 import { useDraftAttachments } from '../../../hooks/useDraft';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { openCreateTicketWindow, subscribeCreateTicketResult } from '../../../utils/electronApp';
-import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { getUserDisplayName, withYouLabel } from '../../../utils/userDisplayName';
 import {
   resolveDisplayFormFields,
   type ResolvedDisplayFormField,
@@ -598,7 +599,11 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   const [ticketTypeOptions] = useCachedQuery(
     queries.lookupValuesByType({ type: LookupType.TICKET_TYPE }),
   );
-  const users = useActiveUserSearch(assigneeSearchValue, 15);
+  // Full active-user list; we filter and rank it below so channel members are
+  // actually present to float to the top (a pre-sliced top-N search would drop
+  // them before we could rank).
+  const activeUsers = useActiveUsers();
+  const selfId = useSelf()?.id;
 
   // Fetch all users for dynamic USER fields
   const allUsers = useUsers();
@@ -1494,22 +1499,33 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   );
 
   const assigneeOptions = useMemo(() => {
-    const userOptions =
-      users?.map(user => ({
-        ...user,
-        label: getUserDisplayName(user) || user.email,
-        value: `user:${user.id}`,
-        icon: (
-          <Avatar
-            userId={user.id}
-            size={'sm'}
-            showActiveStatus={false}
-            className='rounded-md size-4 flex items-center justify-center'
-          />
-        ),
-        type: 'user' as const,
-        badge: assigneeShouldGate && !assigneeMemberIds.has(user.id) ? 'Not in channel' : undefined,
-      })) || [];
+    const query = assigneeSearchValue.trim().toLowerCase();
+    const matchedUsers = !query
+      ? activeUsers
+      : activeUsers.filter(
+          user =>
+            getUserDisplayName(user).toLowerCase().includes(query) ||
+            (user.email ?? '').toLowerCase().includes(query),
+        );
+    // You first, then channel members, then cap the rows (this list isn't
+    // virtualized). Deactivated users aren't shown here — the source is active-only.
+    const membersFirst = channelMembersFirst(matchedUsers, user => user.id, assigneeMemberIds);
+    const rankedUsers = currentUserFirst(membersFirst, user => user.id, selfId).slice(0, 25);
+    const userOptions = rankedUsers.map(user => ({
+      ...user,
+      label: withYouLabel(getUserDisplayName(user), user.id === selfId),
+      value: `user:${user.id}`,
+      icon: (
+        <Avatar
+          userId={user.id}
+          size={'sm'}
+          showActiveStatus={false}
+          className='rounded-md size-4 flex items-center justify-center'
+        />
+      ),
+      type: 'user' as const,
+      badge: assigneeShouldGate && !assigneeMemberIds.has(user.id) ? 'Not in channel' : undefined,
+    }));
 
     const filteredGroups = assigneeSearchValue.trim()
       ? userGroupOptions
@@ -1526,24 +1542,26 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         type: 'userGroup' as const,
       })) || [];
 
+    // Users keep their channel-members-first rank; groups follow, alphabetical.
+    const sortedGroups = [...groupOptions].sort((a, b) => a.label.localeCompare(b.label));
+
     // Always include the selected option so the pill stays visible when it
     // falls outside the current search result window (e.g. after close resets the query).
-    const options = showUserGroupsOnly
-      ? groupOptions.sort((a, b) => a.label.localeCompare(b.label))
-      : [...userOptions, ...groupOptions].sort((a, b) => a.label.localeCompare(b.label));
+    const options = showUserGroupsOnly ? sortedGroups : [...userOptions, ...sortedGroups];
 
     if (selectedAssigneeOption && !options.some(o => o.value === selectedAssigneeOption.value)) {
       return [selectedAssigneeOption as (typeof options)[number], ...options];
     }
     return options;
   }, [
-    users,
+    activeUsers,
     userGroupOptions,
     assigneeSearchValue,
     showUserGroupsOnly,
     selectedAssigneeOption,
     assigneeShouldGate,
     assigneeMemberIds,
+    selfId,
   ]);
 
   // Get tag options

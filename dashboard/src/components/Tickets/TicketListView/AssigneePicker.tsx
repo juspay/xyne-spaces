@@ -3,12 +3,13 @@ import { Search, UserPlus, X } from 'lucide-react';
 import { AvatarSize } from '../../UserAvatar/UserAvatar';
 import { Popover } from '../../ui/Popover/Popover';
 import UserAvatar from '../../UserAvatar/UserAvatar';
-import { useActiveUsers } from '../../../hooks/useUsers';
+import { useActiveUsers, useSelf } from '../../../hooks/useUsers';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
-import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { getUserDisplayName, withYouLabel } from '../../../utils/userDisplayName';
 import { cn } from '../../../utils/classNames';
 import { useChannelAssignGate } from '../../../hooks/useChannelAssignGate';
+import { channelMembersFirst, currentUserFirst } from '../../../utils/channelMembersFirst';
 
 interface AssigneePickerProps {
   ticketId: string;
@@ -28,6 +29,7 @@ export function AssigneePicker({
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
   const users = useActiveUsers();
+  const selfId = useSelf()?.id;
   const zero = useZero();
   const gate = useChannelAssignGate(channelId);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -42,13 +44,18 @@ export function AssigneePicker({
   const filteredUsers = useMemo(() => {
     if (!users) return [];
     const q = search.trim().toLowerCase();
-    if (!q) return users;
-    return users.filter(u => {
-      const name = getUserDisplayName(u).toLowerCase();
-      const email = (u.email ?? '').toLowerCase();
-      return name.includes(q) || email.includes(q);
-    });
-  }, [users, search]);
+    const matched = !q
+      ? users
+      : users.filter(u => {
+          const name = getUserDisplayName(u).toLowerCase();
+          const email = (u.email ?? '').toLowerCase();
+          return name.includes(q) || email.includes(q);
+        });
+    // You first, then channel members, then non-members (kept, since a user who
+    // left the channel may still be the assignee). Applies idle and searching.
+    const membersFirst = channelMembersFirst(matched, u => u.id, gate.memberIds);
+    return currentUserFirst(membersFirst, u => u.id, selfId);
+  }, [users, search, gate.memberIds, selfId]);
 
   const assign = (userId: string | null): void => {
     void zero.mutate(
@@ -171,7 +178,9 @@ export function AssigneePicker({
             >
               <UserAvatar userId={user.id} showActiveStatus={false} size={AvatarSize.SM} />
               <div className='flex-1 min-w-0'>
-                <div className='text-foreground truncate'>{getUserDisplayName(user)}</div>
+                <div className='text-foreground truncate'>
+                  {withYouLabel(getUserDisplayName(user), user.id === selfId)}
+                </div>
                 {user.email ? (
                   <div className='text-[10px] text-muted-foreground truncate'>{user.email}</div>
                 ) : null}

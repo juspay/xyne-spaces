@@ -3,9 +3,14 @@ import { Virtuoso } from 'react-virtuoso';
 import { Search, Check, User as UserIcon } from 'lucide-react';
 import Avatar from '../../../../ui/Avatar/Avatar';
 import Input from '../../../../ui/Input/Input';
-import { useUsers } from '../../../../../hooks/useUsers';
+import { useUsers, useSelf } from '../../../../../hooks/useUsers';
+import { useChannelMemberIds } from '../../../../../hooks/useChannelMemberIds';
 import type { User } from '../../../../../machines/stateMachine';
-import { getUserDisplayName, isUserDeactivated } from '../../../../../utils/userDisplayName';
+import {
+  getUserDisplayName,
+  isUserDeactivated,
+  withYouLabel,
+} from '../../../../../utils/userDisplayName';
 import { usePlatform } from '../../../../../hooks/usePlatform';
 import { Switch } from '../../../../ui/Switch';
 import { UNASSIGNED_FILTER_VALUE, ASSIGNEE_INVERT_MARKER } from '../../../../../zero/queries';
@@ -20,6 +25,17 @@ interface UserSubmenuProps {
   includeUnassigned?: boolean;
   /** Offer an "Exclude selected" toggle that inverts the selection. */
   allowInvert?: boolean;
+  /** When set, members of this channel are ranked above non-members. */
+  channelId?: string | undefined;
+  /**
+   * Users to rank first when there is no channel context — e.g. a project
+   * board ranks people already on the project's tickets. Ignored when
+   * `channelId` is set (channel membership takes precedence). Any `user:`/
+   * `group:` selector prefix is stripped defensively before matching.
+   */
+  priorityUserIds?: string[] | undefined;
+  /** Sink deactivated users to the bottom of the list (used by the assignee filter). */
+  demoteDeactivated?: boolean;
 }
 
 // A row is either a user or the pinned "Unassigned" option.
@@ -38,6 +54,9 @@ export const UserSubmenu = ({
   className = '',
   includeUnassigned = false,
   allowInvert = false,
+  channelId,
+  priorityUserIds,
+  demoteDeactivated = false,
 }: UserSubmenuProps): ReactElement => {
   // The invert marker rides inside the selection array; strip it for all
   // selection/ordering logic so it never behaves like a user id.
@@ -57,6 +76,19 @@ export const UserSubmenu = ({
   }, [searchQuery]);
 
   const users = useUsers();
+  const selfId = useSelf()?.id;
+  const { memberIds } = useChannelMemberIds(channelId);
+
+  // Users to float to the top: channel members when scoped to a channel,
+  // otherwise the caller-provided priority set (e.g. project-board people).
+  const priorityUserIdSet = useMemo(() => {
+    if (channelId) return memberIds;
+    const ids = new Set<string>();
+    for (const id of priorityUserIds ?? []) {
+      ids.add(id.replace(/^(user:|group:|userGroup:)/, ''));
+    }
+    return ids;
+  }, [channelId, memberIds, priorityUserIds]);
 
   const usersMap = useMemo(() => {
     return new Map<string, User>(users.map((u: User) => [u.id, u]));
@@ -114,12 +146,30 @@ export const UserSubmenu = ({
       baseUsers = users;
     }
 
-    // Selected users first, then everyone else — both groups alphabetical.
+    // Order (each group alphabetical):
+    //   1. selected filter chips (stay on top so they can be deselected)
+    //   2. the current user ("You")
+    //   3. (assignee filters) active before deactivated — deactivated sink last
+    //   4. priority users: channel members, or project-ticket people
+    //   5. everyone else
+    // With no priority set and no deactivation demotion this collapses to the
+    // previous selected-first/alphabetical order.
     const selectedSet = new Set(selectedUsers);
     const sorted = [...baseUsers].sort((a, b) => {
       const aSel = selectedSet.has(a.id) ? 1 : 0;
       const bSel = selectedSet.has(b.id) ? 1 : 0;
       if (aSel !== bSel) return bSel - aSel;
+      const aSelf = a.id === selfId ? 1 : 0;
+      const bSelf = b.id === selfId ? 1 : 0;
+      if (aSelf !== bSelf) return bSelf - aSelf;
+      if (demoteDeactivated) {
+        const aDeactivated = isUserDeactivated(a) ? 1 : 0;
+        const bDeactivated = isUserDeactivated(b) ? 1 : 0;
+        if (aDeactivated !== bDeactivated) return aDeactivated - bDeactivated;
+      }
+      const aPriority = priorityUserIdSet.has(a.id) ? 1 : 0;
+      const bPriority = priorityUserIdSet.has(b.id) ? 1 : 0;
+      if (aPriority !== bPriority) return bPriority - aPriority;
       return getUserDisplayName(a).localeCompare(getUserDisplayName(b));
     });
 
@@ -132,7 +182,17 @@ export const UserSubmenu = ({
       UNASSIGNED_FILTER_VALUE,
       ...sorted.slice(selectedCount),
     ];
-  }, [users, usersMap, normalizedAvailableUserIds, selectedUsers, searchTerm, includeUnassigned]);
+  }, [
+    users,
+    usersMap,
+    normalizedAvailableUserIds,
+    selectedUsers,
+    searchTerm,
+    includeUnassigned,
+    priorityUserIdSet,
+    demoteDeactivated,
+    selfId,
+  ]);
 
   // Re-attach the invert marker on every write; inverting an empty selection
   // filters nothing, so the marker is dropped with the last deselection.
@@ -185,7 +245,7 @@ export const UserSubmenu = ({
 
   const renderUserRow = (user: User): ReactElement => {
     const isSelected = selectedUsers.includes(user.id);
-    const displayName = getUserDisplayName(user);
+    const displayName = withYouLabel(getUserDisplayName(user), user.id === selfId);
     const isDeactivated = isUserDeactivated(user);
     return (
       <button

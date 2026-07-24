@@ -564,6 +564,9 @@ export const TicketFiltersDropdown = ({
             label='Assignee'
             includeUnassigned
             allowInvert
+            channelId={channelId}
+            priorityUserIds={availableUsers}
+            demoteDeactivated
           />
         );
       case 'userGroups':
@@ -794,6 +797,9 @@ export const TicketFiltersDropdown = ({
                   label='Assignee'
                   includeUnassigned
                   allowInvert
+                  channelId={channelId}
+                  priorityUserIds={availableUsers}
+                  demoteDeactivated
                 />
               </Popover.Content>
             </Popover.Root>

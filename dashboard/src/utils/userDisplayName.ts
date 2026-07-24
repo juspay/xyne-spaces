@@ -59,6 +59,17 @@ export function getUserDisplayName(
 }
 
 /**
+ * Append a "(You)" marker to a label when it belongs to the current user.
+ * Used by assignee pickers to surface and pin the logged-in user.
+ *
+ * The result carries a presentation suffix, so any downstream search/match
+ * should run against the raw name/email, not this returned string.
+ */
+export function withYouLabel(label: string, isCurrentUser: boolean): string {
+  return isCurrentUser ? `${label} (You)` : label;
+}
+
+/**
  * Get display name for a user by ID from a list of users
  */
 export function getUserDisplayNameById(

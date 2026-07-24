@@ -10,7 +10,7 @@ import {
 } from '@xyne/shared';
 import { getPriorityIcon, formatEta, isEtaUrgent, isStageEtaOverdue } from './TicketCard.utils';
 import { cn } from '../../../utils/classNames';
-import { useUser, useUsers } from '../../../hooks/useUsers';
+import { useUser, useUsers, useSelf } from '../../../hooks/useUsers';
 import { TicketStatusWithStages } from '../TicketStatus/TicketStatusIcon';
 import Tooltip, { TruncatedTooltip } from '../../ui/Tooltip';
 import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
@@ -142,8 +142,12 @@ const AssigneeEditor: React.FC<{
 }> = ({ selectedValue, onSelect, onOpenChange, channelId }) => {
   const users = useUsers();
   const userGroups = useUserGroups();
-  const assigneeOptions = useAssigneeOptions(users, userGroups || []);
+  const selfId = useSelf()?.id;
   const { shouldGate, memberIds, gatedAssign } = useChannelAssignGate(channelId);
+  // Pass memberIds so channel members are ranked above non-members, and selfId so
+  // the current user pins to the top as "(You)". Empty memberIds when the ticket
+  // has no channel / participants haven't loaded → no membership reordering.
+  const assigneeOptions = useAssigneeOptions(users, userGroups || [], memberIds, selfId);
   const options = useMemo<SelectorOption[]>(() => {
     if (!shouldGate) return assigneeOptions;
     return assigneeOptions.map(o => {
