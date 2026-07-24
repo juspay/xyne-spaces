@@ -64,8 +64,8 @@ const formatTime = (date: Date): string =>
     hour12: true,
   });
 
-// A "From" header can be "Rahul Kumar <john.doe@gmail.com>", a bare address
-// like "bitbucket-no-reply@juspay.email", an RFC 2047 encoded-word, or a list of
+// A "From" header can be "Jane Doe <jane.doe@example.com>", a bare address
+// like "bitbucket-no-reply@example.com", an RFC 2047 encoded-word, or a list of
 // several addresses — parseFirstEmailAddress handles all of those and returns
 // the first sender. The name is null for bare addresses, so the row falls back
 // to showing the email (Gmail-style).

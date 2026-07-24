@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { MultiPullRequestService } from '../services/multiPullRequestService.js';
 import { MultiBitbucketConfig, RepositoryConfig } from '../types/bitbucket.js';
 import {logger} from '@/utils/logger';
+import { config } from '@/config/env';
 
 export class MultiPullRequestController {
   private multiPullRequestService: MultiPullRequestService;
@@ -27,15 +28,15 @@ export class MultiPullRequestController {
     ];
 
     // Initialize with configuration from environment variables
-    const config: MultiBitbucketConfig = {
-      baseUrl: process.env.BITBUCKET_BASE_URL || 'https://bitbucket.example.com',
+    const bitbucketConfig: MultiBitbucketConfig = {
+      baseUrl: config.bitbucket.baseUrl,
       repositories: repositories,
       username: process.env.BITBUCKET_USERNAME || '',
       password: process.env.BITBUCKET_PASSWORD || '',
       token: process.env.BITBUCKET_TOKEN
     };
 
-    this.multiPullRequestService = new MultiPullRequestService(config);
+    this.multiPullRequestService = new MultiPullRequestService(bitbucketConfig);
   }
 
 

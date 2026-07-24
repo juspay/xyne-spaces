@@ -100,7 +100,7 @@ review:
     - If the file_path matches a pathMentions pattern, you MUST append the corresponding mention(s) to the end of comment_text
     - Append mentions with a space before them, using the exact format from pathMentions (e.g., @"email@example.com")
     - Check file paths with and without leading "./" - match both "yama.config.yaml" and "./yama.config.yaml"
-    - Example: If file_path is "yama.config.yaml" or "./yama.config.yaml" and pathMentions has a rule for it, your comment_text MUST end with: " [your comment text] @"john.doe@gmail.com"
+    - Example: If file_path is "yama.config.yaml" or "./yama.config.yaml" and pathMentions has a rule for it, your comment_text MUST end with: " [your comment text] @"jane.doe@example.com"
     - This is MANDATORY - you MUST add mentions when file paths match pathMentions patterns
     
     Example add_comment() call format:
@@ -114,7 +114,7 @@ review:
     - file_path: "yama.config.yaml"
     - line_number: 50
     - code_snippet: "[code snippet]"
-    - comment_text: "Your review comment here @"john.doe@gmail.com"
+    - comment_text: "Your review comment here @"jane.doe@example.com"
     - search_context: {"before": [], "after": []}
     - NEVER call add_comment() without file_path, line_number, and proper search_context object format
 
@@ -180,10 +180,10 @@ review:
   pathMentions:
     - path: "backend/src/zero/acl"  # Matches ALL files in this directory and subdirectories
       mentions:
-        - "@john.doe@gmail.com"
+        - "@codeowner@example.com"
     - path: "backend/src/zero/vespa-injection"  # Matches ALL files in this directory and subdirectories
       mentions:
-        - "@john.doe@gmail.com"
+        - "@codeowner@example.com"
 
   # Analysis focus areas (converted from your V1 categories and severity levels)
   # AI uses these in priority order
