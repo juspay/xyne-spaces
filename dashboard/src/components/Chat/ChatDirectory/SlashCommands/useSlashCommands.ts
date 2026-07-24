@@ -1,6 +1,14 @@
 import { useState, useRef, useMemo, useCallback, useEffect } from 'react';
 import { useLocation, useParams } from 'react-router-dom';
-import { SlidersHorizontal, User as UserIcon, type LucideIcon } from 'lucide-react';
+import {
+  SlidersHorizontal,
+  User as UserIcon,
+  MessagesSquare,
+  FileText,
+  Bookmark,
+  Inbox,
+  type LucideIcon,
+} from 'lucide-react';
 import { ChannelScopeType } from '@xyne/shared';
 import type { User, Channel } from '@xyne/shared';
 import { parseSearchCommand, COMMAND_KINDS, getCommand, type SearchCommandKind } from './commands';
@@ -17,6 +25,34 @@ import { getUserDisplayName } from '../../../../utils/userDisplayName';
 import { getDMSearchableNames } from '../ChatDirectory.utils';
 import type { CommandTarget } from './QuickDmComposer';
 
+/**
+ * `/goto` label match: every whitespace-separated query token must prefix a word
+ * in the label. So "work man" finds "Workspace Management" (out-of-order and
+ * partial words work), not just a contiguous substring. Mirrors the AND-token
+ * matching used by channel search. Empty query matches everything.
+ */
+function labelMatchesTokens(label: string, query: string): boolean {
+  const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return true;
+  const words = label.toLowerCase().split(/\s+/).filter(Boolean);
+  return tokens.every(token => words.some(word => word.startsWith(token)));
+}
+
+/**
+ * A slash-command "click" for usage metrics: a command row being applied
+ * (`stage: 'command'`) or a target row being picked (`stage: 'target'`).
+ * `terminal` marks the click that actually executes the command (drives the
+ * session-end reason). The selection gesture (mouse/tab/arrow+enter) is added
+ * by the parent, which owns the keyboard/mouse handlers.
+ */
+export interface SlashCommandClickInfo {
+  stage: 'command' | 'target';
+  command: SearchCommandKind;
+  terminal: boolean;
+  targetType?: 'user' | 'channel';
+  destination?: string;
+}
+
 interface UseSlashCommandsParams {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -28,6 +64,8 @@ interface UseSlashCommandsParams {
   resetSearchState: () => void;
   /** Navigate to an app route (used by `/record`). */
   navigate: (path: string) => void;
+  /** Metrics: emit a slash-command click (command applied / target picked). Optional. */
+  onCommandClick?: (info: SlashCommandClickInfo) => void;
 }
 
 interface CommandGhost {
@@ -52,6 +90,8 @@ export interface GotoExtra {
   label: string;
   icon: LucideIcon;
   run: () => void;
+  /** Pin above the `/goto` "Navigate" sections (a destination, not a setting). */
+  pinTop?: boolean;
 }
 
 export interface UseSlashCommandsReturn {
@@ -102,6 +142,7 @@ export function useSlashCommands({
   hasNavigated,
   resetSearchState,
   navigate,
+  onCommandClick,
 }: UseSlashCommandsParams): UseSlashCommandsReturn {
   // Raw command text is kept here (NOT fed to the search hook) so Vespa is never queried while a
   // command is active. Once a target is picked, `commandTarget` holds it (a user OR a channel) and
@@ -232,7 +273,7 @@ export function useSlashCommands({
     if (!isNav) return [];
     const query = commandQuery.trim().toLowerCase();
     if (!query) return visibleNavItems;
-    return visibleNavItems.filter(item => item.label.toLowerCase().includes(query));
+    return visibleNavItems.filter(item => labelMatchesTokens(item.label, query));
   }, [isNav, commandQuery, visibleNavItems]);
 
   // `/goto` also reaches destinations that aren't rail routes: Preferences (a modal, opened via the
@@ -257,6 +298,43 @@ export function useSlashCommands({
   const profileChannelId = currentChannelId ?? lastVisitedChannelId;
   const gotoExtras = useMemo<GotoExtra[]>(
     () => [
+      {
+        id: 'threads',
+        label: 'Threads',
+        icon: MessagesSquare,
+        pinTop: true,
+        run: (): void => {
+          navigate('/chat/dir/threads');
+        },
+      },
+      {
+        id: 'drafts',
+        label: 'Drafts',
+        icon: FileText,
+        pinTop: true,
+        run: (): void => {
+          // The old /chat/drafts route redirects here; go straight to the canonical page.
+          navigate('/chat/drafts-sent?tab=drafts');
+        },
+      },
+      {
+        id: 'bookmarks',
+        label: 'Bookmarks',
+        icon: Bookmark,
+        pinTop: true,
+        run: (): void => {
+          navigate('/chat/bookmarks');
+        },
+      },
+      {
+        id: 'unreads',
+        label: 'Unreads',
+        icon: Inbox,
+        pinTop: true,
+        run: (): void => {
+          navigate('/chat/dir/unreads');
+        },
+      },
       {
         id: 'preferences',
         label: 'Preferences',
@@ -286,7 +364,7 @@ export function useSlashCommands({
     if (!isNav) return [];
     const query = commandQuery.trim().toLowerCase();
     if (!query) return gotoExtras;
-    return gotoExtras.filter(extra => extra.label.toLowerCase().includes(query));
+    return gotoExtras.filter(extra => labelMatchesTokens(extra.label, query));
   }, [isNav, commandQuery, gotoExtras]);
 
   useEffect(() => {
@@ -320,15 +398,22 @@ export function useSlashCommands({
   }, []);
 
   // Seed the editor with `/call `/`/chat ` when a command is picked from the `/` list.
-  const applyCommand = useCallback((word: string): void => {
-    const text = `/${word} `;
-    // Mirror the command text into the ref/state synchronously so isInCommandMode() is correct
-    // before Lexical's onChange fires — otherwise the mention-trigger guards briefly treat the
-    // input as a normal search.
-    commandTextRef.current = text;
-    setCommandText(text);
-    setTextRef.current?.(text);
-  }, []);
+  const applyCommand = useCallback(
+    (word: string): void => {
+      const text = `/${word} `;
+      // Mirror the command text into the ref/state synchronously so isInCommandMode() is correct
+      // before Lexical's onChange fires — otherwise the mention-trigger guards briefly treat the
+      // input as a normal search.
+      commandTextRef.current = text;
+      setCommandText(text);
+      setTextRef.current?.(text);
+      // Metrics: command row applied (not terminal — the picker/target step follows).
+      if ((COMMAND_KINDS as string[]).includes(word)) {
+        onCommandClick?.({ stage: 'command', command: word as SearchCommandKind, terminal: false });
+      }
+    },
+    [onCommandClick],
+  );
 
   // Action commands (`/askai`, `/record`) take no target — dispatch the behaviour keyed by kind,
   // then close Cmd+K. Deps live here (not in the static catalog) so the table can close over the
@@ -355,10 +440,12 @@ export function useSlashCommands({
       const handler = handlers[kind];
       if (!handler) return;
       handler();
+      // Metrics: action commands (`/askai`, `/record`) execute at the command stage (terminal).
+      onCommandClick?.({ stage: 'command', command: kind, terminal: true });
       exitCommandMode();
       onOpenChange(false);
     },
-    [exitCommandMode, onOpenChange],
+    [exitCommandMode, onOpenChange, onCommandClick],
   );
 
   // `/goto`: route to the picked nav-bar section and close Cmd+K. Like runActionCommand, the deps
@@ -366,10 +453,17 @@ export function useSlashCommands({
   const runNavSection = useCallback(
     (item: NavigationItem): void => {
       navigate(item.path);
+      // Metrics: `/goto` target picked (a nav-bar route). Destination is an app path, not PII.
+      onCommandClick?.({
+        stage: 'target',
+        command: 'goto',
+        terminal: true,
+        destination: item.path,
+      });
       exitCommandMode();
       onOpenChange(false);
     },
-    [navigate, exitCommandMode, onOpenChange],
+    [navigate, exitCommandMode, onOpenChange, onCommandClick],
   );
 
   // `/goto` non-route destination: run its action (open the Preferences modal / route to Profile),
@@ -377,16 +471,33 @@ export function useSlashCommands({
   const runGotoExtra = useCallback(
     (extra: GotoExtra): void => {
       extra.run();
+      // Metrics: `/goto` target picked (a modal/dynamic destination). Id is a constant, not PII.
+      onCommandClick?.({
+        stage: 'target',
+        command: 'goto',
+        terminal: true,
+        destination: extra.id,
+      });
       exitCommandMode();
       onOpenChange(false);
     },
-    [exitCommandMode, onOpenChange],
+    [exitCommandMode, onOpenChange, onCommandClick],
   );
 
   const runCommandTarget = useCallback(
     (target: CommandTarget): void => {
       const def = commandKind ? getCommand(commandKind) : null;
-      if (def?.type !== 'picker') return;
+      if (def?.type !== 'picker' || !commandKind) return;
+      // Metrics: target picked. `/call` fires immediately (terminal → session 'invoke'); `/chat`
+      // only *opens* the composer here — it's invoked when a message is actually sent (see the
+      // composer's onSent), so this pick is non-terminal and escaping the composer is an 'abandon'.
+      // Log only the target *type*, never the recipient.
+      onCommandClick?.({
+        stage: 'target',
+        command: commandKind,
+        terminal: def.pickerAction === 'call',
+        targetType: target.type,
+      });
       if (def.pickerAction === 'call') {
         if (target.type === 'user') {
           // A 1:1 call fires instantly, matching the rest of the app.
@@ -420,6 +531,7 @@ export function useSlashCommands({
       exitCommandMode,
       onOpenChange,
       selectTarget,
+      onCommandClick,
     ],
   );
 

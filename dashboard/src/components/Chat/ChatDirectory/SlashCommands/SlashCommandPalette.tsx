@@ -1,11 +1,11 @@
-import { ReactElement } from 'react';
+import { ReactElement, type MouseEventHandler } from 'react';
 import { Command } from 'cmdk';
 import { Users } from 'lucide-react';
 import { COMMAND_KINDS, getCommand } from './commands';
 import { getUserDisplayName } from '../../../../utils/userDisplayName';
 import Avatar from '../../../ui/Avatar/Avatar';
 import ChannelIcon from '../../ChannelIcon/ChannelIcon';
-import type { UseSlashCommandsReturn } from './useSlashCommands';
+import type { UseSlashCommandsReturn, GotoExtra } from './useSlashCommands';
 
 // cmdk group-heading style (uppercase mono muted) so the palette matches the menu's
 // other sections.
@@ -17,6 +17,13 @@ const COMMAND_GROUP_HEADING_CLASS =
 // touches only the hook + this file, never the parent.
 interface SlashCommandPaletteProps {
   command: UseSlashCommandsReturn;
+  /**
+   * Primes the parent's selection-gesture ref before cmdk's synthetic onSelect,
+   * so slash-command metrics can record a mouse pick as `selection_type: 'mouse'`
+   * (keyboard picks are primed by the parent's keydown handler). Same contract as
+   * the search result rows' `onItemMouseDown`.
+   */
+  onItemMouseDown?: MouseEventHandler;
 }
 
 /**
@@ -25,7 +32,10 @@ interface SlashCommandPaletteProps {
  * Rendered as cmdk rows; selection (aria-selected) is driven imperatively by the parent,
  * which relies on the `data-item-label` / `data-command-word` / `value` attributes here.
  */
-export function SlashCommandPalette({ command }: SlashCommandPaletteProps): ReactElement | null {
+export function SlashCommandPalette({
+  command,
+  onItemMouseDown,
+}: SlashCommandPaletteProps): ReactElement | null {
   const {
     commandKind,
     commandText,
@@ -69,6 +79,7 @@ export function SlashCommandPalette({ command }: SlashCommandPaletteProps): Reac
               data-item-label={`/${kind}`}
               data-command-word={kind}
               onSelect={() => (def.type === 'action' ? onRunAction(kind) : onApplyCommand(kind))}
+              onMouseDownCapture={onItemMouseDown}
               onMouseEnter={() => onHoverCommand(kind)}
               className='flex items-center gap-2.5 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1'
             >
@@ -95,6 +106,7 @@ export function SlashCommandPalette({ command }: SlashCommandPaletteProps): Reac
           value={`command-${commandKind}`}
           data-item-label={activeDef.title}
           onSelect={() => onRunAction(commandKind)}
+          onMouseDownCapture={onItemMouseDown}
           className='flex items-center gap-2.5 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1'
         >
           <div className='flex items-center justify-center size-7 rounded-md bg-muted text-foreground shrink-0'>
@@ -118,16 +130,39 @@ export function SlashCommandPalette({ command }: SlashCommandPaletteProps): Reac
         <div className='py-6 text-center text-sm text-muted-foreground'>No matching sections</div>
       );
     }
+    // Pinned extras (e.g. Threads) render above the nav sections — they're
+    // destinations, not settings; the rest (Preferences/Profile) stay below.
+    const pinnedExtras = commandGotoExtras.filter(extra => extra.pinTop);
+    const settingsExtras = commandGotoExtras.filter(extra => !extra.pinTop);
+    const renderExtra = (extra: GotoExtra): ReactElement => (
+      <Command.Item
+        key={extra.id}
+        value={`goto-${extra.id}`}
+        data-item-label={extra.label}
+        onSelect={() => onRunGotoExtra(extra)}
+        onMouseDownCapture={onItemMouseDown}
+        className='flex items-center gap-2.5 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1'
+      >
+        <div className='flex items-center justify-center size-7 rounded-md bg-muted text-foreground shrink-0'>
+          <extra.icon size={15} />
+        </div>
+        <div className='flex-1 min-w-0'>
+          <div className='text-sm font-semibold text-foreground truncate'>{extra.label}</div>
+        </div>
+      </Command.Item>
+    );
     return (
       <>
-        {commandNavResults.length > 0 && (
+        {(pinnedExtras.length > 0 || commandNavResults.length > 0) && (
           <Command.Group heading={activeDef.heading} className={COMMAND_GROUP_HEADING_CLASS}>
+            {pinnedExtras.map(renderExtra)}
             {commandNavResults.map(item => (
               <Command.Item
                 key={item.path}
                 value={`goto-${item.path}`}
                 data-item-label={item.label}
                 onSelect={() => onRunNavSection(item)}
+                onMouseDownCapture={onItemMouseDown}
                 className='flex items-center gap-2.5 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1'
               >
                 <div className='flex items-center justify-center size-7 rounded-md bg-muted text-foreground shrink-0'>
@@ -140,26 +175,9 @@ export function SlashCommandPalette({ command }: SlashCommandPaletteProps): Reac
             ))}
           </Command.Group>
         )}
-        {commandGotoExtras.length > 0 && (
+        {settingsExtras.length > 0 && (
           <Command.Group heading='Settings' className={COMMAND_GROUP_HEADING_CLASS}>
-            {commandGotoExtras.map(extra => (
-              <Command.Item
-                key={extra.id}
-                value={`goto-${extra.id}`}
-                data-item-label={extra.label}
-                onSelect={() => onRunGotoExtra(extra)}
-                className='flex items-center gap-2.5 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1'
-              >
-                <div className='flex items-center justify-center size-7 rounded-md bg-muted text-foreground shrink-0'>
-                  <extra.icon size={15} />
-                </div>
-                <div className='flex-1 min-w-0'>
-                  <div className='text-sm font-semibold text-foreground truncate'>
-                    {extra.label}
-                  </div>
-                </div>
-              </Command.Item>
-            ))}
+            {settingsExtras.map(renderExtra)}
           </Command.Group>
         )}
       </>
@@ -184,6 +202,7 @@ export function SlashCommandPalette({ command }: SlashCommandPaletteProps): Reac
               value={`command-user-${user.id}`}
               data-item-label={getUserDisplayName(user)}
               onSelect={() => onRunTarget({ type: 'user', user })}
+              onMouseDownCapture={onItemMouseDown}
               className='flex items-center gap-2.5 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1'
             >
               <Avatar userId={user.id} size='sm' />
@@ -208,6 +227,7 @@ export function SlashCommandPalette({ command }: SlashCommandPaletteProps): Reac
               value={`command-channel-${channel.id}`}
               data-item-label={channel.name}
               onSelect={() => onRunTarget({ type: 'channel', channel })}
+              onMouseDownCapture={onItemMouseDown}
               className='flex items-center gap-2.5 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1'
             >
               <div className='flex items-center justify-center size-7 rounded-md bg-muted text-muted-foreground shrink-0'>
@@ -235,6 +255,7 @@ export function SlashCommandPalette({ command }: SlashCommandPaletteProps): Reac
               onSelect={() =>
                 onRunTarget({ type: 'channel', channel, displayName: label, isDm: true })
               }
+              onMouseDownCapture={onItemMouseDown}
               className='flex items-center gap-2.5 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1'
             >
               <div className='flex items-center justify-center size-7 rounded-md bg-muted text-muted-foreground shrink-0'>

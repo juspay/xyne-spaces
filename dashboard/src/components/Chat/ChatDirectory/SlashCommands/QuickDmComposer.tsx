@@ -11,7 +11,7 @@ import { channelService } from '../../../../services/Chat/channelService';
 import { mutators } from '../../../../zero/mutators';
 import { sendConversationWithAttachments } from '../../AddDmForm/useExistingDmChannel';
 import Avatar from '../../../ui/Avatar/Avatar';
-import { SelectorZIndexContext } from '../../../ui/Selectors/BasePopoverSelector';
+import { OverlayZIndexContext } from '../../../../contexts/OverlayZIndexContext';
 import { getUserDisplayName, userToMentionResult } from '../../../../utils/userDisplayName';
 
 /**
@@ -154,7 +154,7 @@ export const QuickDmComposer: React.FC<QuickDmComposerProps> = ({ target, onSent
           emoji popovers portal to <body> — raise them above the dialog so they're not
           hidden behind it. Scoped via context so no other InputBox is affected. */}
       <div className='px-3 py-3'>
-        <SelectorZIndexContext.Provider value='z-[10000]'>
+        <OverlayZIndexContext.Provider value='z-[10000]'>
           <InputBox
             id={`quick-dm-${targetId}`}
             autoFocus='end'
@@ -168,7 +168,7 @@ export const QuickDmComposer: React.FC<QuickDmComposerProps> = ({ target, onSent
             disableDraftUpload
             features={{ richText: true, mentions: true, fileAttachments: true, emojiPicker: true }}
           />
-        </SelectorZIndexContext.Provider>
+        </OverlayZIndexContext.Provider>
       </div>
     </div>
   );

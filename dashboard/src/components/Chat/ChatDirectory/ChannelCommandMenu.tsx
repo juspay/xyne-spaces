@@ -71,7 +71,10 @@ import { useDeskPeople, ALL_DESK } from '../../../hooks/useDeskPeople';
 import { useUsers, useUserSearch, useUser } from '../../../hooks/useUsers';
 import { QuickDmComposer } from './SlashCommands/QuickDmComposer';
 import { SlashCommandPalette } from './SlashCommands/SlashCommandPalette';
-import { useSlashCommands } from './SlashCommands/useSlashCommands';
+import { useSlashCommands, type SlashCommandClickInfo } from './SlashCommands/useSlashCommands';
+import { getCommand, COMMAND_KINDS } from './SlashCommands/commands';
+import { useSlashCommandMetrics } from '../../../hooks/useSlashCommandMetrics';
+import type { SlashSelectionType } from '../../../types/slashCommandEvents';
 import { CallConfirmationModal } from '../../Call/CallConfirmationModal';
 import { ActionModal } from '../../Call/ActionModal';
 import { cn } from '../../../utils/classNames';
@@ -230,6 +233,18 @@ const ChannelCommandMenu = ({
   // synthetic .click() strips modifier flags, so we prime this ref from
   // onMouseDownCapture and from the Enter branch of handleCommandKeyDown.
   const lastModifierRef = useRef<boolean>(false);
+  // Slash-command usage funnel (logs-only). `lastSlashSelectionRef` is primed by
+  // the mouse/keyboard handlers before cmdk's synthetic onSelect fires, so the
+  // click event can record how the row was chosen (mouse / tab / arrow+enter).
+  // `slashSessionActiveRef`/`slashInvokedRef` drive the session start/end effects.
+  const slashMetrics = useSlashCommandMetrics({ userId: currentUserID });
+  const lastSlashSelectionRef = useRef<SlashSelectionType>('unknown');
+  const slashSessionActiveRef = useRef(false);
+  const slashInvokedRef = useRef(false);
+  // The last rendered view (`stage:command:count`) logged, so a changed view —
+  // including one reached by backspacing — re-emits, but a consecutive identical
+  // render (e.g. async result settling) doesn't.
+  const lastSlashImpressionKeyRef = useRef('');
   const openedAtHrefRef = useRef('');
   useEffect(() => {
     if (open) {
@@ -548,6 +563,29 @@ const ChannelCommandMenu = ({
   // Slash-command mode (`/call`, `/chat`, `/askai`). All command state + logic lives in the hook;
   // the parent feeds it the shared cmdk selection (activeItemLabel/hasNavigated) and wires its
   // outputs into the ghost text, mention guards, keyboard handler, and the palette render below.
+  // Metrics: a command was applied or a target picked. Reads the gesture primed
+  // by the mouse/keyboard handlers, and marks `slashInvokedRef` for terminal
+  // clicks so the session-end reason is 'invoke'. Must run synchronously with the
+  // priming gesture — the dispatch handlers call `onCommandClick` inline, so the
+  // ref still holds the gesture that triggered this click; a deferred emit would
+  // read a stale/reset value.
+  const handleSlashCommandClick = useCallback(
+    (info: SlashCommandClickInfo): void => {
+      const selectionType = lastSlashSelectionRef.current;
+      lastSlashSelectionRef.current = 'unknown';
+      if (info.terminal) slashInvokedRef.current = true;
+      slashMetrics.onClick({
+        stage: info.stage,
+        command: info.command,
+        selectionType,
+        terminal: info.terminal,
+        ...(info.targetType && { targetType: info.targetType }),
+        ...(info.destination && { destination: info.destination }),
+      });
+    },
+    [slashMetrics],
+  );
+
   const slash = useSlashCommands({
     open,
     onOpenChange,
@@ -556,6 +594,7 @@ const ChannelCommandMenu = ({
     hasNavigated,
     resetSearchState,
     navigate: path => void navigate(path),
+    onCommandClick: handleSlashCommandClick,
   });
   // The parent owns the input box, ghost, keydown handler, mention guards and the compose/confirm
   // overlays, so it reads these fields directly. Everything the palette needs is handed to it as the
@@ -578,6 +617,99 @@ const ChannelCommandMenu = ({
     onSetTextReady,
     handleEditorText,
   } = slash;
+
+  // ── Slash-command funnel: session start / end ────────────────────────────
+  // A session spans one entry into command mode (`/`) until a command executes
+  // or the box leaves command mode. `commandActive` covers discovery, picker,
+  // compose and call-confirm; pairing it with `open` ends the session when the
+  // box closes. Declared before the impression effect so the session id exists
+  // when the first impression fires.
+  useEffect(() => {
+    const inCommandMode = commandActive && open;
+    if (inCommandMode && !slashSessionActiveRef.current) {
+      slashSessionActiveRef.current = true;
+      slashInvokedRef.current = false;
+      lastSlashImpressionKeyRef.current = '';
+      slashMetrics.onSessionStart();
+    } else if (!inCommandMode && slashSessionActiveRef.current) {
+      slashSessionActiveRef.current = false;
+      const reason = slashInvokedRef.current ? 'invoke' : !open ? 'abandon' : 'clear';
+      slashMetrics.onSessionEnd(reason);
+      slashInvokedRef.current = false;
+    }
+  }, [commandActive, open, slashMetrics]);
+
+  // ── Slash-command funnel: impressions ────────────────────────────────────
+  // Fire once per distinct options view — the `/` discovery list, then each
+  // command's picker — deduped by a stage+command key so keystrokes within the
+  // same view don't re-log.
+  useEffect(() => {
+    if (!(commandActive && open && commandText.startsWith('/'))) {
+      lastSlashImpressionKeyRef.current = '';
+      return;
+    }
+    const kind = slash.commandKind;
+    const def = kind ? getCommand(kind) : null;
+    // A bare/partial `/` prefix shows the discovery list; any *resolved* command
+    // (`kind` set) shows its own view — a picker (`/chat`/`/call`), the `/goto`
+    // sections, or a single run row for an action (`/askai`/`/record`).
+    const stage: 'discovery' | 'picker' = kind ? 'picker' : 'discovery';
+    const command = kind;
+
+    // Count the rows the palette actually renders for the current view.
+    let optionsCount: number;
+    if (!def) {
+      // Discovery: the palette filters the command list by the raw typed prefix.
+      optionsCount = COMMAND_KINDS.filter(k =>
+        k.startsWith(commandText.slice(1).toLowerCase()),
+      ).length;
+    } else if (def.type === 'action') {
+      optionsCount = 1; // a single run row (`/askai`, `/record`)
+    } else if (def.type === 'goto') {
+      optionsCount = slash.commandNavResults.length + slash.commandGotoExtras.length;
+    } else {
+      optionsCount =
+        slash.commandUserResults.length +
+        slash.commandChannelResults.length +
+        slash.commandGroupDmResults.length;
+    }
+
+    // The typed text driving the view — the partial command word for discovery
+    // (`/ch`), or just the command token for a resolved command (`/chat`). Never
+    // the picker's recipient/query arg (PII), so drop everything after the first
+    // token for discovery and use `/<command>` once one is resolved.
+    const typedText = command ? `/${command}` : (commandText.split(/\s/)[0] ?? commandText);
+
+    // Emit when the rendered view changes (stage + command + count + typed text),
+    // so each intermediate text re-emits — `/ch`, `/cha`, `/c`, `/` all get their
+    // own line, and backspacing re-logs them. Only a consecutive identical render
+    // (e.g. picker results settling) is skipped. Re-visited views re-log — dedupe
+    // per session in the query if a dashboard needs unique-per-session counts.
+    const key = `${stage}:${command ?? ''}:${optionsCount}:${typedText}`;
+    if (key === lastSlashImpressionKeyRef.current) return;
+
+    // Debounce ~300ms so rapid typing (`/`→`/c`→`/ch`→`/chat`) collapses to the
+    // view the user actually pauses on — one impression per settled view, not a
+    // log line per keystroke. A change before the timer fires cancels it via the
+    // cleanup and restarts the countdown toward the new view; leaving command
+    // mode also cancels it (guard above returns without scheduling).
+    const timer = setTimeout(() => {
+      lastSlashImpressionKeyRef.current = key;
+      slashMetrics.onImpression(stage, command, optionsCount, typedText);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [
+    commandActive,
+    open,
+    commandText,
+    slash.commandKind,
+    slash.commandNavResults,
+    slash.commandGotoExtras,
+    slash.commandUserResults,
+    slash.commandChannelResults,
+    slash.commandGroupDmResults,
+    slashMetrics,
+  ]);
 
   // Once the seeded `/` actually lands (command mode is genuinely active), drop the seed flag so
   // normal search resumes if the user later clears the slash.
@@ -1571,6 +1703,8 @@ const ChannelCommandMenu = ({
 
   const handleItemMouseDown = (e: React.MouseEvent): void => {
     lastModifierRef.current = e.metaKey || e.ctrlKey;
+    // Metrics: prime the slash-command selection gesture before cmdk's onSelect.
+    lastSlashSelectionRef.current = 'mouse';
   };
 
   // Mouse hover and keyboard selection both write `aria-selected`, but through
@@ -2445,6 +2579,8 @@ const ChannelCommandMenu = ({
       if ((e.key === 'Tab' || e.key === 'ArrowRight') && commandGhost.canComplete) {
         e.preventDefault();
         e.stopPropagation();
+        // Metrics: this is the only place Tab is a selection gesture (command-word autocomplete).
+        lastSlashSelectionRef.current = e.key === 'Tab' ? 'tab' : 'arrow_right';
         applyCommand(commandGhost.word);
         return;
       }
@@ -2456,6 +2592,9 @@ const ChannelCommandMenu = ({
       if (e.key === 'Enter') {
         e.preventDefault();
         e.stopPropagation();
+        // Metrics: keyboard selection (arrow-navigate then Enter) — primed before the
+        // synthetic click triggers cmdk's onSelect and the command dispatch.
+        lastSlashSelectionRef.current = 'arrow_enter';
         const active = commandRef.current?.querySelector(
           '[cmdk-item][aria-selected="true"]',
         ) as HTMLElement | null;
@@ -3096,7 +3235,12 @@ const ChannelCommandMenu = ({
           >
             <QuickDmComposer
               target={commandTarget}
-              onSent={() => onOpenChange(false)}
+              onSent={() => {
+                // Metrics: sending is what completes `/chat` — mark the session invoked so its
+                // end reason is 'invoke'. Escaping the composer without sending stays 'abandon'.
+                slashInvokedRef.current = true;
+                onOpenChange(false);
+              }}
               onBack={clearTarget}
             />
           </div>
@@ -3206,7 +3350,7 @@ const ChannelCommandMenu = ({
             }}
           >
             {commandActive || seedCommandMode ? (
-              <SlashCommandPalette command={slash} />
+              <SlashCommandPalette command={slash} onItemMouseDown={handleItemMouseDown} />
             ) : (
               <>
                 {/* Best local matches pinned to the top of the list — both popup and
@@ -4105,6 +4249,27 @@ const ChannelCommandMenu = ({
         <DialogPrimitive.Portal>
           <DialogPrimitive.Overlay />
           <DialogPrimitive.Content
+            onInteractOutside={event => {
+              // Keep the palette open when the interaction comes from a composer
+              // overlay portaled to <body> (canvas/emoji modals). They live
+              // outside this dialog's DOM subtree, so Radix would otherwise read
+              // the click as "outside" and dismiss everything. Mirrors the
+              // sonner-toast guard in Dialog.tsx.
+              const target = (event.detail?.originalEvent?.target ?? null) as Element | null;
+              if (target?.closest?.('[data-overlay-portal]')) {
+                event.preventDefault();
+              }
+            }}
+            onEscapeKeyDown={event => {
+              // While focus is inside such an overlay, Escape should close only
+              // the overlay (it owns that via OverlayPortal), not the palette.
+              // Scoped to the focused target — not a global query — so the
+              // palette's own Escape is unchanged when no overlay is focused.
+              const target = event.target as Element | null;
+              if (target?.closest?.('[data-overlay-portal]')) {
+                event.preventDefault();
+              }
+            }}
             onCloseAutoFocus={e => {
               const href = window.location.pathname + window.location.search;
               if (href !== openedAtHrefRef.current) e.preventDefault();

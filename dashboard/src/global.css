@@ -1107,23 +1107,14 @@ span.chat-input-group-mention[data-mention-type="group"]:hover {
   background-color: #d1fae5 !important;
 }
 
-/* Special Mentions (@channel, @here) */
+/* Special Mentions (@channel, @here) — scoped to the special-mention class only.
+   Real #channel mentions also carry data-mention-type="channel" on their wrapper
+   (MentionNodeView), so matching that here wrongly gave them this yellow; they
+   render via MentionText's pale-blue --mention-channel-bg instead. */
 .chat-input-special-mention,
-span[data-mention-type="channel"],
-span[data-mention-type="here"],
 .chat-input-field .chat-input-special-mention,
-.chat-input-field span[data-mention-type="channel"],
-.chat-input-field span[data-mention-type="here"],
 .chat-input-field .ProseMirror .chat-input-special-mention,
-.chat-input-field .ProseMirror span[data-mention-type="channel"],
-.chat-input-field .ProseMirror span[data-mention-type="here"],
-.ProseMirror .chat-input-special-mention,
-.ProseMirror span[data-mention-type="channel"],
-.ProseMirror span[data-mention-type="here"],
-span[data-mention-type="channel"].chat-input-special-mention,
-span[data-mention-type="here"].chat-input-special-mention,
-span.chat-input-special-mention[data-mention-type="channel"],
-span.chat-input-special-mention[data-mention-type="here"] {
+.ProseMirror .chat-input-special-mention {
   font-weight: 400 !important;
   cursor: pointer !important;
   position: relative !important;
@@ -1140,21 +1131,9 @@ span.chat-input-special-mention[data-mention-type="here"] {
 }
 
 .chat-input-special-mention:hover,
-span[data-mention-type="channel"]:hover,
-span[data-mention-type="here"]:hover,
 .chat-input-field .chat-input-special-mention:hover,
-.chat-input-field span[data-mention-type="channel"]:hover,
-.chat-input-field span[data-mention-type="here"]:hover,
 .chat-input-field .ProseMirror .chat-input-special-mention:hover,
-.chat-input-field .ProseMirror span[data-mention-type="channel"]:hover,
-.chat-input-field .ProseMirror span[data-mention-type="here"]:hover,
-.ProseMirror .chat-input-special-mention:hover,
-.ProseMirror span[data-mention-type="channel"]:hover,
-.ProseMirror span[data-mention-type="here"]:hover,
-span[data-mention-type="channel"].chat-input-special-mention:hover,
-span[data-mention-type="here"].chat-input-special-mention:hover,
-span.chat-input-special-mention[data-mention-type="channel"]:hover,
-span.chat-input-special-mention[data-mention-type="here"]:hover {
+.ProseMirror .chat-input-special-mention:hover {
   color: #1264a3 !important;
   background-color: #fef3c7 !important;
 }
@@ -3083,21 +3062,9 @@ img.inline-emoji,
 }
 
 [data-theme="midnight"] .chat-input-special-mention,
-[data-theme="midnight"] span[data-mention-type="channel"],
-[data-theme="midnight"] span[data-mention-type="here"],
 [data-theme="midnight"] .chat-input-field .chat-input-special-mention,
-[data-theme="midnight"] .chat-input-field span[data-mention-type="channel"],
-[data-theme="midnight"] .chat-input-field span[data-mention-type="here"],
 [data-theme="midnight"] .chat-input-field .ProseMirror .chat-input-special-mention,
-[data-theme="midnight"] .chat-input-field .ProseMirror span[data-mention-type="channel"],
-[data-theme="midnight"] .chat-input-field .ProseMirror span[data-mention-type="here"],
-[data-theme="midnight"] .ProseMirror .chat-input-special-mention,
-[data-theme="midnight"] .ProseMirror span[data-mention-type="channel"],
-[data-theme="midnight"] .ProseMirror span[data-mention-type="here"],
-[data-theme="midnight"] span[data-mention-type="channel"].chat-input-special-mention,
-[data-theme="midnight"] span[data-mention-type="here"].chat-input-special-mention,
-[data-theme="midnight"] span.chat-input-special-mention[data-mention-type="channel"],
-[data-theme="midnight"] span.chat-input-special-mention[data-mention-type="here"] {
+[data-theme="midnight"] .ProseMirror .chat-input-special-mention {
   color: #60a5fa !important;
   background-color: #451a03 !important;
 }
