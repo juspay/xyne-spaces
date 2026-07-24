@@ -13,3 +13,4 @@ export { GeneratedTagsSubmenu } from './GeneratedTagsSubmenu/GeneratedTagsSubmen
 export { ConversationLabelSubmenu } from './ConversationLabelSubmenu/ConversationLabelSubmenu';
 export { RoleSubmenu } from './RoleSubmenu/RoleSubmenu';
 export type { RoleAssignmentValue } from './RoleSubmenu/RoleSubmenu';
+export { EmailSubmenu } from './EmailSubmenu/EmailSubmenu';

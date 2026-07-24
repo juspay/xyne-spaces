@@ -146,6 +146,12 @@ const readFiltersFromUrl = (params: URLSearchParams): TicketFilters => {
   const generatedTags = params.getAll('generatedTags');
   if (generatedTags.length) filters.generatedTags = generatedTags;
 
+  const fromEmails = params.getAll('fromEmail');
+  if (fromEmails.length) filters.fromEmails = fromEmails;
+
+  const toEmails = params.getAll('toEmail');
+  if (toEmails.length) filters.toEmails = toEmails;
+
   const hasAiDraft = params.get('hasAiDraft');
   if (hasAiDraft === '1') filters.hasAiDraft = true;
 
@@ -227,6 +233,8 @@ const FILTER_PARAM_KEYS = [
   'generatedTags',
   'hasAiDraft',
   'conversationLabelId',
+  'fromEmail',
+  'toEmail',
   'dueDateStart',
   'dueDateEnd',
   'createdDateStart',
@@ -269,6 +277,8 @@ const writeFiltersToUrl = (params: URLSearchParams, filters: TicketFilters): voi
   filters.sourceChannels?.forEach((c: string) => params.append('sourceChannels', c));
   filters.aiCategory?.forEach((c: string) => params.append('aiCategory', c));
   filters.generatedTags?.forEach((t: string) => params.append('generatedTags', t));
+  filters.fromEmails?.forEach((email: string) => params.append('fromEmail', email));
+  filters.toEmails?.forEach((email: string) => params.append('toEmail', email));
 
   if (filters.hasAiDraft) {
     params.set('hasAiDraft', '1');

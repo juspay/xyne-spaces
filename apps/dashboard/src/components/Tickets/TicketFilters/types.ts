@@ -27,6 +27,8 @@ export interface TicketFilters {
   aiCategory?: string[]; // AI classification categories (e.g. "Mandate", "Refund")
   generatedTags?: string[]; // AI-generated tags in "category:tag" format (e.g. "priority:high")
   hasAiDraft?: boolean; // filter to show only tickets with AI-generated email drafts
+  fromEmails?: string[]; // filter to tickets containing an email from any address
+  toEmails?: string[]; // filter to tickets containing an email sent to any address
   conversationLabelId?: string; // desk-only: single Gmail-style conversation label id
   // Dynamic form fields: fieldId -> filter value
   // For SELECT fields: string array of selected values

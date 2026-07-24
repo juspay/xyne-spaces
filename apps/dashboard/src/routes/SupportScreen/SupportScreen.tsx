@@ -18,6 +18,7 @@ import {
   Table2,
   Columns3,
   Check,
+  Copy,
   Tag,
   Split,
   Paperclip,
@@ -106,6 +107,7 @@ import {
   StagesSubmenu,
   DynamicFieldSubmenu,
   ConversationLabelSubmenu,
+  EmailSubmenu,
 } from '../../components/Tickets/TicketFilters/Submenus';
 import { getIconForFieldType } from '../../components/Tickets/TicketFilters/fieldTypeIcons';
 import {
@@ -117,6 +119,7 @@ import {
   toDynamicFieldQueryFilters,
   type DynamicFieldQueryFilter,
 } from '../../utils/board/dynamicFieldFilters';
+import { ticketMatchesEmailFilters } from '../../utils/ticketEmailFilters';
 import { dynamicColumnKey } from '../../components/Tickets/TicketTable/dynamicFieldColumns';
 import { useDeskTableColumns, DESK_TABLE_BUILTIN_COLUMNS } from './useDeskTableColumns';
 import { tagsConfigApi } from '../../api/tagsConfigApi';
@@ -177,6 +180,7 @@ import type {
 } from '../../components/Chat/XyneAISidebar/utils/XyneAITypes';
 import { parseFromField, stripHtml } from '../../components/xyne-desk/EmailComposer/helpers';
 import { EmailBodyRenderer } from '../../components/xyne-desk/EmailBody/EmailBodyRenderer';
+import { useCopyButton } from '../../hooks/useCopyButton';
 import CallThread from '../../components/xyne-desk/CallThread/CallThread';
 import { SlackThread, SlackComposer } from '../../components/xyne-desk/SlackThread';
 import { EmailThreadHeader } from '../../components/xyne-desk/EmailBody/EmailThreadHeader';
@@ -743,6 +747,9 @@ const SupportScreen = (): ReactElement => {
       hasAiDraft: filters.hasAiDraft === true ? true : undefined,
       userGroups:
         filters.userGroups && filters.userGroups.length > 0 ? filters.userGroups : undefined,
+      fromEmails:
+        filters.fromEmails && filters.fromEmails.length > 0 ? filters.fromEmails : undefined,
+      toEmails: filters.toEmails && filters.toEmails.length > 0 ? filters.toEmails : undefined,
       lastEmailAtStart: filters.lastEmailAtStart,
       lastEmailAtEnd: filters.lastEmailAtEnd,
       dynamicFieldFilters: toDynamicFieldQueryFilters(dynamicFieldEntries),
@@ -821,6 +828,8 @@ const SupportScreen = (): ReactElement => {
     (filters.aiCategory && filters.aiCategory.length > 0) ||
     (filters.generatedTags && filters.generatedTags.length > 0) ||
     (filters.userGroups && filters.userGroups.length > 0) ||
+    (filters.fromEmails && filters.fromEmails.length > 0) ||
+    (filters.toEmails && filters.toEmails.length > 0) ||
     filters.lastEmailAtStart !== undefined ||
     filters.lastEmailAtEnd !== undefined ||
     (filters.dynamicFields && Object.keys(filters.dynamicFields).length > 0) ||
@@ -896,6 +905,18 @@ const SupportScreen = (): ReactElement => {
     [filters, setFilters],
   );
 
+  const handleEmailFilterChange = useCallback(
+    (values: { fromEmails: string[]; toEmails: string[] }): void => {
+      const newFilters = { ...filters };
+      if (values.fromEmails.length > 0) newFilters.fromEmails = values.fromEmails;
+      else delete newFilters.fromEmails;
+      if (values.toEmails.length > 0) newFilters.toEmails = values.toEmails;
+      else delete newFilters.toEmails;
+      setFilters(newFilters);
+    },
+    [filters, setFilters],
+  );
+
   // Priority and Stages/Status are their own top-level popover buttons; the More-Filters
   // menu carries the rest. The "Label" filter is hidden while a sidebar label view is
   // active (`selectedLabel`): the whole list is already scoped to that label, so a second
@@ -905,6 +926,7 @@ const SupportScreen = (): ReactElement => {
       { id: 'aiCategory', label: 'AI Category', icon: Sparkles },
       { id: 'generatedTags', label: 'AI Tags', icon: TagIcon },
       { id: 'userGroups', label: 'User Groups', icon: Users },
+      { id: 'email', label: 'Email', icon: Mail },
       { id: 'date', label: 'Date', icon: CalendarDays },
       ...deskDynamicFields.map(field => ({
         id: `dynamic-${field.id}`,
@@ -958,6 +980,15 @@ const SupportScreen = (): ReactElement => {
           <UserGroupSubmenu
             selectedGroups={filters.userGroups || []}
             onChange={(groups: string[]) => handleFilterChange('userGroups', groups)}
+            onClose={() => setActiveSubmenu(null)}
+          />
+        );
+      case 'email':
+        return (
+          <EmailSubmenu
+            selectedFromEmails={filters.fromEmails || []}
+            selectedToEmails={filters.toEmails || []}
+            onChange={handleEmailFilterChange}
             onClose={() => setActiveSubmenu(null)}
           />
         );
@@ -1026,6 +1057,7 @@ const SupportScreen = (): ReactElement => {
     handleFilterChange,
     handleDateRangeChange,
     handleDynamicFieldChange,
+    handleEmailFilterChange,
     availableAiCategories,
     deskDynamicFields,
   ]);
@@ -2671,6 +2703,11 @@ const SupportScreen = (): ReactElement => {
                                       )) ||
                                     (item.id === 'userGroups' &&
                                       !!(filters.userGroups && filters.userGroups.length > 0)) ||
+                                    (item.id === 'email' &&
+                                      !!(
+                                        (filters.fromEmails && filters.fromEmails.length > 0) ||
+                                        (filters.toEmails && filters.toEmails.length > 0)
+                                      )) ||
                                     ('dynamicFieldId' in item &&
                                       !!filters.dynamicFields?.[item.dynamicFieldId]) ||
                                     (item.id === 'conversationLabel' &&
@@ -3389,6 +3426,8 @@ type SupportTicketDetailProps = {
     conversationIdWhitelist: string[] | undefined;
     hasAiDraft: boolean | undefined;
     userGroups: string[] | undefined;
+    fromEmails?: string[] | undefined;
+    toEmails?: string[] | undefined;
     lastEmailAtStart: number | undefined;
     lastEmailAtEnd: number | undefined;
     dynamicFieldFilters?: DynamicFieldQueryFilter[] | undefined;
@@ -3652,6 +3691,7 @@ export const SupportTicketDetail = ({
   const channelId = ticket?.channelId || '';
   const conversationId = ticket?.conversationId ?? stateConversationId;
   const title = ticket?.title ?? null;
+  const { copied: subjectCopied, copy: copySubject } = useCopyButton();
   const [threadConversation] = useCachedQuery(
     queries.threadConversationV2({
       conversationId: conversationId || '',
@@ -3904,26 +3944,46 @@ export const SupportTicketDetail = ({
     if (!cursorStart || !channelId) return;
     try {
       const { conversationIdWhitelist: _ciw, ...restTicketFilter } = ticketFilter;
-      const result = (await zero.run(
-        queries.supportTicketsPageV3({
-          channelId,
-          isMember,
-          ...restTicketFilter,
-          ...(_ciw !== undefined ? { conversationIds: _ciw } : {}),
-          limit: 1,
-          start: cursorStart,
-          dir,
-        }),
-        { type: 'complete' },
-      )) as Array<{
-        id: string;
-        xyneId?: string | null;
-        channelId?: string | null;
-        conversationId: string;
-        title: string;
-      }>;
-      const target = result?.[0];
-      if (target) goToTicket(target);
+      const hasEmailFilter = Boolean(
+        ticketFilter.fromEmails?.length || ticketFilter.toEmails?.length,
+      );
+      const pageLimit = hasEmailFilter ? 50 : 1;
+      let start = cursorStart;
+      for (let page = 0; page < 20; page += 1) {
+        const result = (await zero.run(
+          queries.supportTicketsPageV3({
+            channelId,
+            isMember,
+            ...restTicketFilter,
+            ...(_ciw !== undefined ? { conversationIds: _ciw } : {}),
+            limit: pageLimit,
+            start,
+            dir,
+          }),
+          { type: 'complete' },
+        )) as Array<{
+          id: string;
+          xyneId?: string | null;
+          channelId?: string | null;
+          conversationId: string;
+          title: string;
+          lastEmailAt: number;
+          emails?: unknown;
+        }>;
+        const target = hasEmailFilter
+          ? result.find(ticket =>
+              ticketMatchesEmailFilters(ticket, ticketFilter.fromEmails, ticketFilter.toEmails),
+            )
+          : result[0];
+        if (target) {
+          goToTicket(target);
+          return;
+        }
+        if (!hasEmailFilter || result.length < pageLimit) return;
+        const last = result[result.length - 1];
+        if (!last) return;
+        start = { id: last.id, lastEmailAt: last.lastEmailAt };
+      }
     } catch (err) {
       logger.error(Event.ZERO_RUN_ERROR, {
         source: 'SupportTicketDetail.navigateAdjacent',
@@ -4248,11 +4308,35 @@ export const SupportTicketDetail = ({
                 )}
                 {/* `min-w-[8rem]` (rem, so it tracks font scaling) is what makes the
                     row break its flex line instead of crushing the title to nothing. */}
-                <TruncatedTooltip content={title || 'Untitled Ticket'} side='bottom'>
-                  <span className='font-medium text-foreground flex-1 min-w-[8rem] truncate'>
-                    {title || 'Untitled Ticket'}
-                  </span>
-                </TruncatedTooltip>
+                <div className='flex items-center gap-1 flex-1 min-w-[8rem]'>
+                  <TruncatedTooltip content={title || 'Untitled Ticket'} side='bottom'>
+                    <span className='font-medium text-foreground min-w-0 truncate'>
+                      {title || 'Untitled Ticket'}
+                    </span>
+                  </TruncatedTooltip>
+                  {title && (
+                    <Tooltip
+                      side='bottom'
+                      delayDuration={300}
+                      content={subjectCopied ? 'Subject copied' : 'Copy subject'}
+                    >
+                      <button
+                        type='button'
+                        onClick={event => {
+                          event.stopPropagation();
+                          copySubject(title);
+                        }}
+                        onKeyDown={event => event.stopPropagation()}
+                        className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0'
+                        aria-label='Copy subject'
+                        data-track-category='Support'
+                        data-track-name='CopyTicketSubject'
+                      >
+                        {subjectCopied ? <Check size={14} /> : <Copy size={14} />}
+                      </button>
+                    </Tooltip>
+                  )}
+                </div>
 
                 {/* One cluster so the actions wrap as a block rather than dribbling
                     onto the next line one icon at a time. `[&>*]:shrink-0` keeps the

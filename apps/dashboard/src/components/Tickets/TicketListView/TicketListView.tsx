@@ -22,6 +22,7 @@ import {
   type DynamicFieldQueryFilter,
   type FormEntityValueLike,
 } from '../../../utils/board/dynamicFieldFilters';
+import { ticketMatchesEmailFilters } from '../../../utils/ticketEmailFilters';
 
 const PAGE_SIZE = 50;
 
@@ -41,6 +42,8 @@ interface TicketListViewProps {
     conversationIdWhitelist?: string[] | undefined;
     hasAiDraft?: boolean | undefined;
     userGroups?: string[] | undefined;
+    fromEmails?: string[] | undefined;
+    toEmails?: string[] | undefined;
     lastEmailAtStart?: number | undefined;
     lastEmailAtEnd?: number | undefined;
     dynamicFieldFilters?: DynamicFieldQueryFilter[] | undefined;
@@ -113,6 +116,8 @@ export const TicketListView = function TicketListView({
     conversationIdWhitelist,
     hasAiDraft,
     userGroups,
+    fromEmails,
+    toEmails,
     lastEmailAtStart,
     lastEmailAtEnd,
     dynamicFieldFilters,
@@ -139,6 +144,8 @@ export const TicketListView = function TicketListView({
         ? { conversationIds: conversationIdWhitelist }
         : {}),
       hasAiDraft,
+      fromEmails,
+      toEmails,
       lastEmailAtStart,
       lastEmailAtEnd,
       // Spam/Starred are filtered server-side (they need an overlay row) so pagination is
@@ -167,6 +174,8 @@ export const TicketListView = function TicketListView({
         ac: aiCategory ?? null,
         ci: conversationIdWhitelist ?? null,
         ad: hasAiDraft ?? null,
+        fe: fromEmails ?? null,
+        te: toEmails ?? null,
         mf: mailboxFolder ?? null,
         g: userGroups ?? null,
         ds: lastEmailAtStart ?? null,
@@ -182,6 +191,8 @@ export const TicketListView = function TicketListView({
       aiCategory,
       conversationIdWhitelist,
       hasAiDraft,
+      fromEmails,
+      toEmails,
       mailboxFolder,
       userGroups,
       lastEmailAtStart,
@@ -284,8 +295,11 @@ export const TicketListView = function TicketListView({
         ),
       );
     }
+    if (fromEmails?.length || toEmails?.length) {
+      rows = rows.filter(ticket => ticketMatchesEmailFilters(ticket, fromEmails, toEmails));
+    }
     return rows;
-  }, [allRows, mailboxFolder, dynamicFieldEntries]);
+  }, [allRows, mailboxFolder, dynamicFieldEntries, fromEmails, toEmails]);
 
   // Paginate over the FILTERED rows: render one PAGE_SIZE window; a (PAGE_SIZE+1)th filtered
   // row is the "next page exists" sentinel (mirrors the server keyset paging, on filtered rows).
