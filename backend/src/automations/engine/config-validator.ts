@@ -301,6 +301,26 @@ export class ConfigValidator {
         issues,
       );
 
+      if (step.type === 'SEND_MESSAGE') {
+        const attachments = (step.config as { attachments?: unknown }).attachments;
+        if (Array.isArray(attachments)) {
+          attachments.forEach((attachment, attachmentIndex) => {
+            const paths = (attachment as { templatePaths?: unknown })?.templatePaths;
+            if (!Array.isArray(paths)) return;
+            paths.forEach((path, pathIndex) => {
+              if (typeof path !== 'string') return;
+              this.checkRef(
+                `{{context.${path}}}`,
+                `${stepPath}.config.attachments[${attachmentIndex}].templatePaths[${pathIndex}]`,
+                outputSchemas,
+                issues,
+                null,
+              );
+            });
+          });
+        }
+      }
+
       outputSchemas.set(`${step.id}.input`, stepImpl.configSchema);
       outputSchemas.set(
         `${step.id}.output`,

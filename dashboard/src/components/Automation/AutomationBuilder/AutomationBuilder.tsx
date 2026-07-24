@@ -111,6 +111,7 @@ const renderConditionalCard = (
     onDelete={props.onDelete}
     issues={props.issues}
     pathPrefix={props.pathPrefix}
+    readOnly={props.readOnly ?? false}
     ensureSchema={props.ensureSchema}
     renderConditionalCard={props.renderConditionalCard}
     renderSwitchCard={props.renderSwitchCard}
@@ -136,6 +137,7 @@ const renderSwitchCard = (
     onDelete={props.onDelete}
     issues={props.issues}
     pathPrefix={props.pathPrefix}
+    readOnly={props.readOnly ?? false}
     ensureSchema={props.ensureSchema}
     renderConditionalCard={props.renderConditionalCard}
     renderSwitchCard={props.renderSwitchCard}
@@ -1050,6 +1052,7 @@ export function AutomationBuilder({
                     onDelete={() => handleDeleteStep(index)}
                     issues={stepIssues}
                     pathPrefix={`steps[${index}]`}
+                    readOnly={!editMode}
                     ensureSchema={ensureSchema}
                     renderConditionalCard={renderConditionalCard}
                     renderSwitchCard={renderSwitchCard}
@@ -1070,6 +1073,7 @@ export function AutomationBuilder({
                     onDelete={() => handleDeleteStep(index)}
                     issues={stepIssues}
                     pathPrefix={`steps[${index}]`}
+                    readOnly={!editMode}
                     ensureSchema={ensureSchema}
                     renderConditionalCard={renderConditionalCard}
                     renderSwitchCard={renderSwitchCard}

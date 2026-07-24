@@ -1,4 +1,4 @@
-import { Router, type Request, type Response } from 'express';
+import { Router, type NextFunction, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { triggerRegistry } from '../triggers/trigger-registry';
@@ -32,6 +32,14 @@ import {
 import { approvalService, ApprovalError } from '../services/approval.service';
 import { notifyAdminsOfArchiveRequest } from '../services/approval-notifications';
 import { encryptWebhookStepHeaders } from '../engine/webhook-step-encryption';
+import { uploadAutomationTemplates } from '@/middleware/upload';
+import { AppError } from '@/middleware/errorHandler';
+import {
+  AutomationTemplateInputError,
+  claimAutomationTemplates,
+  releaseAutomationTemplate,
+  storeAutomationTemplates,
+} from '../services/automation-template.service';
 
 const router = Router();
 
@@ -125,6 +133,57 @@ router.get('/schema/operators', (_req, res) => {
   const list = Object.entries(OPERATOR_METADATA).map(([value, meta]) => ({ value, ...meta }));
   res.json({ success: true, data: list, timestamp: new Date().toISOString() });
 });
+
+router.post(
+  '/attachments',
+  uploadAutomationTemplates,
+  async (req: Request, res: Response, next: NextFunction) => {
+    const auth = getAuthContext(req);
+    if (!auth) {
+      sendUnauthorized(res);
+      return;
+    }
+    try {
+      const files = (req.files as Express.Multer.File[] | undefined) ?? [];
+      const stepId = typeof req.body?.stepId === 'string' ? req.body.stepId : '';
+      const attachments = await storeAutomationTemplates({
+        files,
+        stepId,
+        userId: auth.userId,
+        workspaceId: auth.workspaceId,
+      });
+      res.json({ success: true, data: attachments, timestamp: new Date().toISOString() });
+    } catch (error) {
+      if (error instanceof AutomationTemplateInputError) {
+        res.status(error.statusCode).json({ success: false, error: error.message });
+        return;
+      }
+      logger.error('[automations] template attachment upload failed', error);
+      next(new AppError('Failed to upload template attachment', 500));
+    }
+  },
+);
+
+router.delete(
+  '/attachments/:attachmentId',
+  async (req: Request<{ attachmentId: string }>, res: Response, next: NextFunction) => {
+    const auth = getAuthContext(req);
+    if (!auth) {
+      sendUnauthorized(res);
+      return;
+    }
+    try {
+      const removed = await releaseAutomationTemplate({
+        attachmentId: req.params.attachmentId,
+        workspaceId: auth.workspaceId,
+      });
+      res.json({ success: true, data: { removed }, timestamp: new Date().toISOString() });
+    } catch (error) {
+      logger.error('[automations] template attachment release failed', error);
+      next(new AppError('Failed to release template attachment', 500));
+    }
+  },
+);
 
 router.get('/schema/triggers', (_req, res) => {
   res.json({
@@ -220,19 +279,22 @@ router.post('/', async (req: Request, res: Response) => {
     const prepared = prepareConfigForSave(parsed.data.config, res);
     if (!prepared) return;
 
-    const workflow = await db.workflow.create({
-      data: {
-        workflowType: AUTOMATION_WORKFLOW_TYPE,
-        workflowName: parsed.data.name,
-        workspaceId: auth.workspaceId,
-        status: AutomationStatus.DRAFT,
-        eventType: prepared.eventType,
-        context: prepared.context,
-        metadata: buildAutomationMetadata({
-          description: parsed.data.description ?? null,
-          createdById: auth.userId,
-        }),
-      },
+    const workflow = await db.$transaction(async tx => {
+      await claimAutomationTemplates(tx, prepared.config, auth.workspaceId);
+      return tx.workflow.create({
+        data: {
+          workflowType: AUTOMATION_WORKFLOW_TYPE,
+          workflowName: parsed.data.name,
+          workspaceId: auth.workspaceId,
+          status: AutomationStatus.DRAFT,
+          eventType: prepared.eventType,
+          context: prepared.context,
+          metadata: buildAutomationMetadata({
+            description: parsed.data.description ?? null,
+            createdById: auth.userId,
+          }),
+        },
+      });
     });
     res.status(201).json({
       success: true,
@@ -240,6 +302,10 @@ router.post('/', async (req: Request, res: Response) => {
       timestamp: new Date().toISOString(),
     });
   } catch (err) {
+    if (err instanceof AutomationTemplateInputError) {
+      res.status(err.statusCode).json({ success: false, error: err.message });
+      return;
+    }
     logger.error('[automations] create failed:', err);
     res.status(500).json({ success: false, error: 'Failed to create automation' });
   }
@@ -363,17 +429,20 @@ router.put('/:id', async (req: Request<{ id: string }>, res: Response) => {
     });
 
     if (existing.status === AutomationStatus.DRAFT && existingAutomation.createdById === auth.userId) {
-      const updated = await db.workflow.update({
-        where: { id: existing.id },
-        data: {
-          ...(parsed.data.name !== undefined && { workflowName: parsed.data.name }),
-          ...(prepared && {
-            context: prepared.context,
-            eventType: prepared.eventType,
-          }),
-          metadata,
-          updatedAt: new Date(),
-        },
+      const updated = await db.$transaction(async tx => {
+        if (prepared) await claimAutomationTemplates(tx, prepared.config, auth.workspaceId);
+        return tx.workflow.update({
+          where: { id: existing.id },
+          data: {
+            ...(parsed.data.name !== undefined && { workflowName: parsed.data.name }),
+            ...(prepared && {
+              context: prepared.context,
+              eventType: prepared.eventType,
+            }),
+            metadata,
+            updatedAt: new Date(),
+          },
+        });
       });
       res.json({
         success: true,
@@ -385,17 +454,20 @@ router.put('/:id', async (req: Request<{ id: string }>, res: Response) => {
 
     // Create a new DRAFT version in the same lineage; do not mutate approved/live rows.
     const seriesId = existing.automationSeriesId ?? existing.id;
-    const newVersion = await db.workflow.create({
-      data: {
-        workflowType: AUTOMATION_WORKFLOW_TYPE,
-        workflowName: parsed.data.name ?? existing.workflowName,
-        workspaceId: auth.workspaceId,
-        status: AutomationStatus.DRAFT,
-        automationSeriesId: seriesId,
-        context: prepared ? prepared.context : existing.context,
-        ...(prepared && { eventType: prepared.eventType }),
-        metadata,
-      },
+    const newVersion = await db.$transaction(async tx => {
+      if (prepared) await claimAutomationTemplates(tx, prepared.config, auth.workspaceId);
+      return tx.workflow.create({
+        data: {
+          workflowType: AUTOMATION_WORKFLOW_TYPE,
+          workflowName: parsed.data.name ?? existing.workflowName,
+          workspaceId: auth.workspaceId,
+          status: AutomationStatus.DRAFT,
+          automationSeriesId: seriesId,
+          context: prepared ? prepared.context : existing.context,
+          ...(prepared && { eventType: prepared.eventType }),
+          metadata,
+        },
+      });
     });
 
     res.status(201).json({
@@ -404,6 +476,10 @@ router.put('/:id', async (req: Request<{ id: string }>, res: Response) => {
       timestamp: new Date().toISOString(),
     });
   } catch (err) {
+    if (err instanceof AutomationTemplateInputError) {
+      res.status(err.statusCode).json({ success: false, error: err.message });
+      return;
+    }
     logger.error('[automations] update failed:', err);
     res.status(500).json({ success: false, error: 'Failed to create automation version' });
   }
