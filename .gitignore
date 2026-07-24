@@ -18,7 +18,7 @@ Backend/target/
 .gradle/
 # IDE files
 .vscode/
-.github/
+
 .idea/
 *.swp
 *.swo
