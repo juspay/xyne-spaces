@@ -196,23 +196,29 @@ export class GoogleService {
     startHistoryId: string,
   ): Promise<{ messageIds: string[]; historyId: string | null }> {
     try {
-      const response = await this.gmail.users.history.list({
-        userId: 'me',
-        startHistoryId,
-        historyTypes: ['messageAdded'],
-      });
-
       const messageIds: string[] = [];
-      for (const record of response.data.history || []) {
-        for (const msg of record.messagesAdded || []) {
-          if (msg.message?.id) messageIds.push(msg.message.id);
-        }
-      }
+      let historyId: string | null = null;
+      let pageToken: string | undefined;
 
-      return {
-        messageIds,
-        historyId: response.data.historyId ?? null,
-      };
+      do {
+        const response = await this.gmail.users.history.list({
+          userId: 'me',
+          startHistoryId,
+          historyTypes: ['messageAdded'],
+          ...(pageToken && { pageToken }),
+        });
+
+        for (const record of response.data.history || []) {
+          for (const msg of record.messagesAdded || []) {
+            if (msg.message?.id) messageIds.push(msg.message.id);
+          }
+        }
+
+        historyId = response.data.historyId ?? historyId;
+        pageToken = response.data.nextPageToken ?? undefined;
+      } while (pageToken);
+
+      return { messageIds, historyId };
     } catch (error) {
       logger.error(`${TAG} Failed to fetch history`, error);
       throw new Error(`Failed to fetch Gmail history: ${getErrorMessage(error)}`);
