@@ -98,21 +98,21 @@ export function expandSpacesMentions(input: string | undefined | null): string {
 const UNBOUND_USER_MENTION_RE =
   /(^|[^A-Za-z0-9_>])@([A-Z][A-Za-z'\-]*(?:\s[A-Z][A-Za-z'\-]*){0,2})(?!\[|<\/|\.[A-Za-z0-9])\b/g;
 
-// `@<email>` shorthand — e.g. `@john.doe@gmail.com`. Same anti-collision
+// `@<email>` shorthand — e.g. `@jane.doe@example.com`. Same anti-collision
 // rules as the name pattern: NOT followed by `[`, NOT inside an HTML span.
 // We deliberately keep this loose (matching common-form emails) rather than
 // the full RFC 5322 grammar; downstream lookup tolerates a miss.
 const UNBOUND_EMAIL_MENTION_RE =
   /(^|[^A-Za-z0-9_>])@([A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,})(?!\[|<\/)\b/g;
 
-// Dotted handle shorthand — e.g. `@bowmitha.c`, `@utkarsh.kumar`,
-// `@deepak.kushwaha`. This is the username form agents copy out of
-// Bitbucket/Jira/PR text; at Juspay it is exactly the email local-part. The
+// Dotted handle shorthand — e.g. `@jane.doe`, `@john.smith`,
+// `@alex.chen`. This is the username form agents copy out of
+// Bitbucket/Jira/PR text; here it is exactly the email local-part. The
 // name pattern above can't match it (lowercase, dots) and the email pattern
 // requires a full `@domain.tld`, so without this these mentions silently
 // stay plain text. Resolved via `byHandle` (email startsWith `${handle}@`).
 // `pre` additionally excludes `@` and `.` so the domain of a full email
-// (`@john.doe@gmail.com`) never matches; trailing lookahead excludes bracketed
+// (`@user@example.com`) never matches; trailing lookahead excludes bracketed
 // mentions, full emails, and partial backtracking inside longer handle/email
 // tokens.
 const UNBOUND_HANDLE_MENTION_RE =
@@ -155,11 +155,11 @@ export interface MentionLookups {
  * lift it into the HTML span.
  *
  * Name path:
- *   `@Anirudh Naruka`         →  byName → 1 match  →  `@Anirudh Naruka[userId]`
- *   `@Anirudh`                →  byName → 2 matches →  left as-is (ambiguous)
+ *   `@Jane Doe`               →  byName → 1 match  →  `@Jane Doe[userId]`
+ *   `@Jane`                   →  byName → 2 matches →  left as-is (ambiguous)
  *
  * Email path:
- *   `@john.doe@gmail.com` → byEmail → 1 match → `@<displayName>[userId]`
+ *   `@jane.doe@example.com` → byEmail → 1 match → `@<displayName>[userId]`
  *                                                     (the visible label
  *                                                     becomes the user's
  *                                                     real name, not the

@@ -88,16 +88,10 @@ export async function resolveOrCreateChannel(
     return existing.id;
   }
 
-  // 2. Find creator user: prefer john.doe@gmail.com, fallback to john.doe@gmail.com
-  let creatorUser = await db.user.findFirst({
-    where: { workspaceId, email: 'john.doe@gmail.com' },
+  // 2. Find creator user: the xyne.spaces service account (SLACK_MIGRATION_CREATOR_EMAIL)
+  const creatorUser = await db.user.findFirst({
+    where: { workspaceId, email: config.slackMigrationCreatorEmail },
   });
-
-  if (!creatorUser) {
-    creatorUser = await db.user.findFirst({
-      where: { workspaceId, email: 'john.doe@gmail.com' },
-    });
-  }
 
   if (!creatorUser) {
     logger.error('[Migration] No suitable creator user found in workspace for channel creation', { workspaceId });

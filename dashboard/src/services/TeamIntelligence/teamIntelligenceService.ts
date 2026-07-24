@@ -415,7 +415,7 @@ export const getMemberInsights = async (
   email: string,
   params: { from: string; to: string },
 ): Promise<UserProductivity> => {
-  // GET /api/team-intelligence-dashboard/user/overview?from=2026-05-01&to=2026-05-20&userEmail=john.doe@gmail.com"
+  // GET /api/team-intelligence-dashboard/user/overview?from=2026-05-01&to=2026-05-20&userEmail=jane.doe@example.com"
   const response = await apiInstance.get<UserProductivity>(
     '/team-intelligence-dashboard/user/overview',
     {

@@ -4,7 +4,7 @@ import { transformBitbucketDiff } from '@/utils/diffUtils';
 import { PullRequestData, BitbucketDuplicatePRError } from '@/types/bitbucket';
 import { config } from '@/config/env';
 
-const BASE_URL = 'https://bitbucket.example.com/rest/api/latest';
+const BASE_URL = config.bitbucket.baseUrl;
 
 export class BitbucketManager {
   constructor(private prMetricsRepository = new PRMetricsRepository()) {}

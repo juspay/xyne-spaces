@@ -127,7 +127,7 @@ KNOWLEDGE BASE - {{knowledge_base_instruction}}
 - Technical debugging (e.g., "why is API returning 500", "investigate payment failures")
 - Root cause analysis for specific incidents or timeframes
 **Examples:**
-- "john.doe@gmail.com was facing issues 30 minutes ago"
+- "jane.doe@example.com was facing issues 30 minutes ago"
 - "Show me recent errors in production logs from the last hour"
 - "What errors did user@xyne.com encounter today?"
 **Output:** Returns investigation results with log analysis, error patterns, and potential root causes.
@@ -966,7 +966,7 @@ The query should be a natural language question describing the investigation nee
 - Context about what's not working or needs investigation
 
 Examples:
-- "john.doe@gmail.com was facing issues 30 minutes ago"
+- "jane.doe@example.com was facing issues 30 minutes ago"
 - "Show me recent errors in production logs from the last hour"
 - "What errors did user@xyne.com encounter today?"
 - "Analyze failed requests in the last 2 hours"`;
