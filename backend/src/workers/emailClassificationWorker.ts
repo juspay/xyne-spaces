@@ -13,10 +13,10 @@ import { ActivityClassification, ActivityType } from '@prisma/client';
 import type { BoardMetadata } from '@xyne/shared';
 import { emitTicketUpdated } from '@/automations/triggers/ticket-updated.trigger';
 import { runWithContext } from '@/database/tenant/context';
+import { getAutomationsBotUserId } from '@/automations/steps/automations-bot';
 
 const emailClassificationService = new EmailClassificationService();
 const prisma = DatabaseClient.getInstance();
-const SYSTEM_ACTOR = 'system';
 
 function shouldAssignTicketPerson(
   boardId: string | null,
@@ -75,12 +75,13 @@ class EmailClassificationWorker {
     }
     return runWithContext(
       { userId: 'email-classification-worker', workspaceId: channel.workspaceId },
-      () => this.classifyAndAssign(job),
+      () => this.classifyAndAssign(job, channel.workspaceId),
     );
   }
 
-  private async classifyAndAssign(job: Bull.Job<EmailClassificationJobData>): Promise<void> {
+  private async classifyAndAssign(job: Bull.Job<EmailClassificationJobData>, workspaceId: string): Promise<void> {
     const { ticketId, channelId, emailId, groupId } = job.data;
+    const systemActorId = await getAutomationsBotUserId(workspaceId);
     // If explicit flags provided (retrigger path), respect them; otherwise run both (normal ingestion path)
     const runClassification = job.data.runClassification ?? true;
     const runPriority = job.data.runPriority ?? true;
@@ -215,7 +216,7 @@ class EmailClassificationWorker {
             ticketId,
             userGroupId: effectiveGroupId!,
             boardId: ticket.boardId!,
-            createdBy: SYSTEM_ACTOR,
+            createdBy: systemActorId,
             projectId: ticket.projectId ?? undefined,
             channelId: ticket.channelId ?? undefined,
           });
@@ -280,14 +281,14 @@ class EmailClassificationWorker {
         void emitTicketUpdated({
           ticket: updatedTicket,
           changes: { assignedTo: { previousValue: ticket.assignedTo ?? null, newValue: newAssignedTo } },
-          performedById: SYSTEM_ACTOR,
+          performedById: systemActorId,
         });
         try {
           await syncUserWorkload(
             newAssignedTo,
             effectiveGroupId!,
             ticket.boardId!,
-            SYSTEM_ACTOR,
+            systemActorId,
           );
           logger.info(
             `[EMAIL-CLASSIFICATION-WORKER] Synced workload for user ${newAssignedTo}`,
@@ -314,7 +315,7 @@ class EmailClassificationWorker {
           data: {
             ticketId,
             workspaceId: ticket.workspaceId,
-            updatedBy: SYSTEM_ACTOR,
+            updatedBy: systemActorId,
             activityType: ActivityType.ASSIGNED_TO,
             value: {
               field: 'assignedTo',
@@ -344,7 +345,7 @@ class EmailClassificationWorker {
           ticketId,
           conversationId: ticket.conversationId ?? undefined,
           channelId: ticket.channelId ?? undefined,
-          actorId: SYSTEM_ACTOR,
+          actorId: systemActorId,
           classification: ActivityClassification.ACTIONABLE,
         });
         logger.info(`[EMAIL-CLASSIFICATION-WORKER] Created in-app activity for user ${newAssignedTo} on ${ticketId}`);
@@ -362,7 +363,7 @@ class EmailClassificationWorker {
           data: {
             ticketId,
             workspaceId: ticket.workspaceId,
-            updatedBy: SYSTEM_ACTOR,
+            updatedBy: systemActorId,
             activityType: ActivityType.PRIORITY,
             value: {
               field: 'priority',
