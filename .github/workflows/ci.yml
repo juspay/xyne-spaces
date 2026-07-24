@@ -1,0 +1,148 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel superseded runs on the same ref to save CI minutes.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "22"
+  # --include=dev: the runner env can set NODE_ENV=production, which would
+  #   skip the devDependencies (typescript, react, @types/*) these builds need.
+  # --ignore-scripts: several packages have prepare/postinstall hooks that
+  #   auto-build sibling packages (e.g. backend's postinstall runs
+  #   `cd ../shared && npm install && npm run build`); we orchestrate builds
+  #   explicitly instead. NOTE: npm still runs the `prepare` of file:../
+  #   linked deps when packing them, so each job installs those packages'
+  #   node_modules first — that's why the lib-build steps below precede the
+  #   app's own `npm ci`.
+  NPM_FLAGS: "--include=dev --ignore-scripts --prefer-offline --no-audit"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Backend: needs shared + framework (file:../ deps) installed AND built
+  # before its own npm ci, because npm packs file: deps and runs their
+  # `prepare` (tsc) — which requires their node_modules to exist.
+  # Mirrors backend/Dockerfile's stage order.
+  # ---------------------------------------------------------------------------
+  backend:
+    name: Backend typecheck + build
+    runs-on: ubuntu-latest
+    # tsc over backend's type surface (incl. generated Prisma/Zero schemas)
+    # exceeds Node's ~2GB default heap on the runner.
+    env:
+      NODE_OPTIONS: "--max-old-space-size=8192"
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Build @xyne/shared (file dep)
+        working-directory: shared
+        run: |
+          npm ci ${{ env.NPM_FLAGS }}
+          npm run build
+
+      - name: Build agentic-framework (file dep)
+        working-directory: framework
+        run: |
+          npm ci ${{ env.NPM_FLAGS }}
+          npm run build
+
+      - name: Install dependencies
+        working-directory: backend
+        run: npm ci ${{ env.NPM_FLAGS }}
+
+      - name: Prisma generate (app + common schemas)
+        working-directory: backend
+        run: |
+          npm run db:generate
+          npm run db:common:generate
+
+      - name: Typecheck
+        working-directory: backend
+        run: npm run typecheck
+
+      - name: Build
+        working-directory: backend
+        run: npm run build
+
+  # ---------------------------------------------------------------------------
+  # Dashboard: needs shared + icons (file:../ deps) installed AND built first,
+  # for the same file:-dep prepare reason. Mirrors dashboard/Dockerfile.
+  # ---------------------------------------------------------------------------
+  dashboard:
+    name: Dashboard typecheck + build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Build @xyne/shared (file dep)
+        working-directory: shared
+        run: |
+          npm ci ${{ env.NPM_FLAGS }}
+          npm run build
+
+      - name: Build @xyne/icons (file dep)
+        working-directory: icons
+        run: |
+          npm ci ${{ env.NPM_FLAGS }}
+          npm run build
+
+      - name: Install dependencies
+        working-directory: dashboard
+        run: npm ci ${{ env.NPM_FLAGS }}
+
+      - name: Typecheck
+        working-directory: dashboard
+        run: npm run typecheck
+
+      - name: Build
+        working-directory: dashboard
+        # Matches dashboard/Dockerfile — vite build needs a larger V8 heap.
+        env:
+          NODE_OPTIONS: "--max-old-space-size=8192"
+        run: npm run build
+
+  # ---------------------------------------------------------------------------
+  # xyne-claw stack: kata-sdk -> xyne-claw-shared -> xyne-claw (typecheck only;
+  # these expose typecheck but no build script). kata-sdk has no lifecycle
+  # scripts, so installing it first is sufficient for its file: link.
+  # ---------------------------------------------------------------------------
+  xyne-claw:
+    name: xyne-claw typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install kata-sdk
+        working-directory: packages/kata-sdk
+        run: npm ci ${{ env.NPM_FLAGS }}
+
+      - name: Install + typecheck xyne-claw-shared
+        working-directory: xyne-claw-shared
+        run: |
+          npm ci ${{ env.NPM_FLAGS }}
+          npm run typecheck
+
+      - name: Install + typecheck xyne-claw
+        working-directory: xyne-claw
+        run: |
+          npm ci ${{ env.NPM_FLAGS }}
+          npm run typecheck
