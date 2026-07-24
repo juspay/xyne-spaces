@@ -46,6 +46,8 @@ function toArray<T>(value: unknown): T[] {
   return (value as T[] | undefined) ?? [];
 }
 
+const SHARED_PERSONAL_FOLDER_ID = '__shared_personal_canvases__';
+
 /**
  * Sidebar idiom shared with the chat directory. Every item — section headers
  * and rows alike — is 36px so the list keeps a single vertical rhythm. Rows add
@@ -758,6 +760,106 @@ const ProjectSection: React.FC<ProjectSectionProps> = ({
   );
 };
 
+interface SharedPersonalSectionProps {
+  sharedRootCanvases: Canvas[];
+  currentUserId?: string | undefined;
+  selectedCanvasId?: string | undefined;
+  collapsedFolders: ReadonlySet<string>;
+  onSelect: (e: React.MouseEvent | KeyboardEvent, canvas: Canvas) => void;
+  onDelete?: ((id: string) => void) | undefined;
+  onDuplicate?: ((canvas: Canvas) => void) | undefined;
+  onToggleStar?: ((canvas: Canvas) => void) | undefined;
+  onToggleFolder: (folderId: string) => void;
+  searchQuery: string;
+}
+
+const SharedPersonalSection: React.FC<SharedPersonalSectionProps> = ({
+  sharedRootCanvases,
+  currentUserId,
+  selectedCanvasId,
+  collapsedFolders,
+  onSelect,
+  onDelete,
+  onDuplicate,
+  onToggleStar,
+  onToggleFolder,
+  searchQuery,
+}) => {
+  const isSearchActive = searchQuery.length > 0;
+  const isCollapsed = !isSearchActive && collapsedFolders.has(SHARED_PERSONAL_FOLDER_ID);
+  const sharedFolderNameMatches = matchesGroupedCanvasSearch('Shared', searchQuery);
+  const visibleSharedRootCanvases = useMemo(
+    () =>
+      isSearchActive
+        ? sharedRootCanvases.filter(
+            canvas => sharedFolderNameMatches || canvasMatchesGroupedSearch(canvas, searchQuery),
+          )
+        : sharedRootCanvases,
+    [isSearchActive, searchQuery, sharedFolderNameMatches, sharedRootCanvases],
+  );
+  const shouldShowSharedFolder =
+    !isSearchActive || sharedFolderNameMatches || visibleSharedRootCanvases.length > 0;
+
+  if (!shouldShowSharedFolder) return null;
+
+  return (
+    <div>
+      <div className={cn('pl-6', 'relative')}>
+        <div className={ROW_CLASS}>
+          <button
+            className='flex items-center gap-2 shrink-0'
+            onClick={() => onToggleFolder(SHARED_PERSONAL_FOLDER_ID)}
+            title={isCollapsed ? 'Expand folder' : 'Collapse folder'}
+            data-track-category='CANVAS'
+            data-track-name='TOGGLE_SHARED_CANVAS_FOLDER_ICON'
+          >
+            {isCollapsed ? (
+              <ChevronBigRight size={12} className='shrink-0' />
+            ) : (
+              <ChevronBigDown size={12} className='shrink-0' />
+            )}
+            <FolderDefault size={16} className='shrink-0' />
+          </button>
+          <button
+            className='min-w-0 flex-1 text-left'
+            onClick={() => onToggleFolder(SHARED_PERSONAL_FOLDER_ID)}
+            aria-label={`${isCollapsed ? 'Expand' : 'Collapse'} Shared`}
+            title={isCollapsed ? 'Expand folder' : 'Collapse folder'}
+            data-track-category='CANVAS'
+            data-track-name='TOGGLE_SHARED_CANVAS_FOLDER'
+          >
+            <span className='block truncate text-sm font-medium tracking-[-0.14px]'>
+              <HighlightedText text='Shared' query={searchQuery} />
+            </span>
+          </button>
+        </div>
+      </div>
+
+      {!isCollapsed && (
+        <div className='pl-6'>
+          <div className='ml-[18px] border-l border-border pl-3'>
+            {visibleSharedRootCanvases.map(canvas => (
+              <CanvasRow
+                key={canvas.id}
+                canvas={canvas}
+                indentClassName=''
+                onSelect={onSelect}
+                selectedCanvasId={selectedCanvasId}
+                currentUserId={currentUserId}
+                trackNames={groupedCanvasRowTrackNames}
+                onDelete={onDelete}
+                onDuplicate={onDuplicate}
+                onToggleStar={onToggleStar}
+                highlightQuery={searchQuery}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 export interface CanvasListGroupedContentProps {
   projectGroups: ProjectGroup[];
   personalFolderGroups: FolderGroup[];
@@ -843,16 +945,32 @@ export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> =
   isSearchLoading,
 }) => {
   const isSearchActive = searchQuery.length > 0;
-  const visiblePersonalCanvases = useMemo(() => {
-    const filtered = filterExcludedCallGeneratedCanvases(
+  const personalRootCanvases = useMemo(() => {
+    let filtered = filterExcludedCallGeneratedCanvases(
       personalCanvases,
       excludeCallGeneratedCanvases,
     );
 
+    filtered = currentUserId
+      ? filtered.filter(canvas => canvas.createdBy === currentUserId)
+      : filtered;
+
     return isSearchActive
       ? filtered.filter(canvas => canvasMatchesGroupedSearch(canvas, searchQuery))
       : filtered;
-  }, [excludeCallGeneratedCanvases, isSearchActive, personalCanvases, searchQuery]);
+  }, [currentUserId, excludeCallGeneratedCanvases, isSearchActive, personalCanvases, searchQuery]);
+  const sharedRootCanvases = useMemo(() => {
+    let filtered = filterExcludedCallGeneratedCanvases(
+      personalCanvases,
+      excludeCallGeneratedCanvases,
+    );
+
+    filtered = currentUserId ? filtered.filter(canvas => canvas.createdBy !== currentUserId) : [];
+
+    return isSearchActive
+      ? filtered.filter(canvas => canvasMatchesGroupedSearch(canvas, searchQuery))
+      : filtered;
+  }, [currentUserId, excludeCallGeneratedCanvases, isSearchActive, personalCanvases, searchQuery]);
 
   if (isEmpty) {
     return (
@@ -961,7 +1079,7 @@ export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> =
                 searchQuery={searchQuery}
               />
             ))}
-            {visiblePersonalCanvases.map(canvas => (
+            {personalRootCanvases.map(canvas => (
               <CanvasRow
                 key={canvas.id}
                 canvas={canvas}
@@ -976,11 +1094,25 @@ export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> =
                 highlightQuery={searchQuery}
               />
             ))}
-            {personalFolderGroups.length === 0 && visiblePersonalCanvases.length === 0 && (
-              <div className='px-6 py-2 text-sm text-sidebar-foreground'>
-                Create a personal canvas or folder to get started.
-              </div>
-            )}
+            <SharedPersonalSection
+              sharedRootCanvases={sharedRootCanvases}
+              currentUserId={currentUserId}
+              selectedCanvasId={selectedCanvasId}
+              collapsedFolders={collapsedFolders}
+              onSelect={onSelect}
+              onDelete={onDelete}
+              onDuplicate={onDuplicate}
+              onToggleStar={onToggleStar}
+              onToggleFolder={onToggleFolder}
+              searchQuery={searchQuery}
+            />
+            {personalFolderGroups.length === 0 &&
+              personalRootCanvases.length === 0 &&
+              sharedRootCanvases.length === 0 && (
+                <div className='px-6 py-2 text-sm text-sidebar-foreground'>
+                  Create a personal canvas or folder to get started.
+                </div>
+              )}
           </>
         )}
       </section>
