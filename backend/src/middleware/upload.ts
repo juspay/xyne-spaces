@@ -162,6 +162,29 @@ const createUploadStreamConfig = (fileSizeBytes: number, maxFiles: number) =>
 
 const uploadStreamConfig = createUploadStreamConfig(MAX_FILE_SIZE_BYTES, MAX_FILE_FIELDS);
 
+const AUTOMATION_TEMPLATE_MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
+const automationTemplateUploadConfig = createUploadStreamConfig(
+  AUTOMATION_TEMPLATE_MAX_FILE_SIZE_BYTES,
+  10,
+);
+
+/** Stream up to ten automation text templates directly to object storage. */
+export const uploadAutomationTemplates = (req: any, res: any, next: any) => {
+  const multerMiddleware = automationTemplateUploadConfig.array('files', 10);
+  multerMiddleware(req, res, (err: any) => {
+    if (err) {
+      const normalized = normalizeMulterError(
+        err,
+        AUTOMATION_TEMPLATE_MAX_FILE_SIZE_BYTES,
+      );
+      if (normalized instanceof AppError) return next(normalized);
+      logger.error('[AUTOMATION-TEMPLATE-UPLOAD] Storage upload failed', normalized);
+      return next(new AppError('Failed to upload template attachment', 500));
+    }
+    next();
+  });
+};
+
 const formatFileSize = (bytes: number): string => {
   if (bytes >= 1024 * 1024 && bytes % (1024 * 1024) === 0) {
     return `${bytes / (1024 * 1024)}MB`;

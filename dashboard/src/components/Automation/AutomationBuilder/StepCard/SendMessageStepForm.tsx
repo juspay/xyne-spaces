@@ -5,12 +5,15 @@ import { EntityKind } from '../SchemaForm/SchemaForm.utils';
 import { SendMessageRichTextField } from '../SchemaForm/SendMessageRichTextField';
 import type { VariablePickerSource } from '../VariablePicker/VariablePicker.types';
 import type { ValidationIssue } from '../../Automation.types';
+import type { AutomationTemplateAttachment } from '../../../../api/automationsApi';
+import { TemplateAttachmentsField } from './TemplateAttachmentsField';
 
 interface SendMessageConfigShape {
   channelId?: string;
   userIds?: string[];
   senderId?: string;
   content?: string;
+  attachments?: AutomationTemplateAttachment[];
 }
 
 interface SendMessageStepFormProps {
@@ -19,6 +22,8 @@ interface SendMessageStepFormProps {
   issues: ValidationIssue[] | null;
   pathPrefix: string;
   variableSources: VariablePickerSource[];
+  stepId: string;
+  readOnly?: boolean;
 }
 
 export function SendMessageStepForm({
@@ -27,6 +32,8 @@ export function SendMessageStepForm({
   issues,
   pathPrefix,
   variableSources,
+  stepId,
+  readOnly = false,
 }: SendMessageStepFormProps): React.ReactElement {
   const cfg = value as SendMessageConfigShape;
 
@@ -92,8 +99,7 @@ export function SendMessageStepForm({
       <FieldRow
         label='Message'
         error={issuesAt.get('content')}
-        required
-        description='Type @ to mention a person. Use the Variable button to insert values from the trigger or earlier steps.'
+        description='Optional when files are attached. Type @ to mention someone or insert an automation variable.'
       >
         <SendMessageRichTextField
           value={cfg.content ?? ''}
@@ -101,6 +107,20 @@ export function SendMessageStepForm({
           variableSources={variableSources}
           channelId={cfg.channelId ?? null}
           placeholder='Type your message… use @ to mention someone'
+        />
+      </FieldRow>
+
+      <FieldRow
+        label='Files'
+        error={issuesAt.get('attachments')}
+        description='Attach UTF-8 text templates. Variables are resolved into run-specific copies before the message is sent.'
+      >
+        <TemplateAttachmentsField
+          stepId={stepId}
+          value={Array.isArray(cfg.attachments) ? cfg.attachments : []}
+          onChange={next => setField('attachments', next)}
+          variableSources={variableSources}
+          readOnly={readOnly}
         />
       </FieldRow>
     </div>

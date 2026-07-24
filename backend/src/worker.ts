@@ -43,6 +43,7 @@ config()
 
 class WorkerService {
   private isShuttingDown = false
+  private automationTemplateCleanupTimer: NodeJS.Timeout | null = null
 
   async start(): Promise<void> {
     try {
@@ -219,6 +220,22 @@ class WorkerService {
         );
         logger.info('Starting automation schedule worker...');
         await automationScheduleWorker.start();
+
+        const { cleanupUnreferencedAutomationTemplates } = await import(
+          '@/automations/services/automation-template.service'
+        );
+        const cleanupTemplates = (): void => {
+          void cleanupUnreferencedAutomationTemplates()
+            .then((removed) => {
+              if (removed > 0) {
+                logger.info(`[automations] Cleaned up ${removed} unreferenced templates`);
+              }
+            })
+            .catch((error) => logger.error('[automations] Template cleanup failed', error));
+        };
+        cleanupTemplates();
+        this.automationTemplateCleanupTimer = setInterval(cleanupTemplates, 60 * 60 * 1000);
+        this.automationTemplateCleanupTimer.unref();
       }
 
       if (appConfig.enableEmailFetchWorker) {
@@ -298,6 +315,10 @@ class WorkerService {
 
     try {
       logger.info('Shutting down worker service...')
+      if (this.automationTemplateCleanupTimer) {
+        clearInterval(this.automationTemplateCleanupTimer)
+        this.automationTemplateCleanupTimer = null
+      }
       const vespaEnabled = process.env.ENABLE_VESPA_WORKER === 'true'
       const vespaFileWorkerEnabled = process.env.ENABLE_VESPA_FILE_WORKER === 'true'
       const gcsPollingEnabled = process.env.ENABLE_GCS_POLLING_WORKER === 'true'

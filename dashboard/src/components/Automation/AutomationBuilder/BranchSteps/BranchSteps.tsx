@@ -31,6 +31,7 @@ export interface BranchStepsProps {
   ensureSchema: (type: string) => void;
   issues: ValidationIssue[];
   pathPrefix: string;
+  readOnly?: boolean;
   renderConditionalCard: (
     step: ConditionalStepConfig,
     props: ControlFlowRenderProps,
@@ -52,6 +53,7 @@ export interface ControlFlowRenderProps {
   onDelete: () => void;
   issues: ValidationIssue[];
   pathPrefix: string;
+  readOnly?: boolean;
   ensureSchema: (type: string) => void;
   renderConditionalCard: (
     step: ConditionalStepConfig,
@@ -123,6 +125,7 @@ export function BranchSteps({
   ensureSchema,
   issues,
   pathPrefix,
+  readOnly = false,
   renderConditionalCard,
   renderSwitchCard,
 }: BranchStepsProps): React.ReactElement {
@@ -223,6 +226,7 @@ export function BranchSteps({
               onDelete: () => handleRemove(i),
               issues: stepIssues,
               pathPrefix: `${pathPrefix}[${i}]`,
+              readOnly,
               ensureSchema,
               renderConditionalCard,
               renderSwitchCard,
@@ -259,6 +263,7 @@ export function BranchSteps({
                 onDelete={() => handleRemove(i)}
                 issues={stepIssues ?? []}
                 pathPrefix={`${pathPrefix}[${i}].config.`}
+                readOnly={readOnly}
               />
             );
           })
