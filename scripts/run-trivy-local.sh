@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 #
-# run-trivy-local.sh — reproduce the CI Trivy scans on your machine (Docker-based; the
-# `trivy` binary is NOT required). Mirrors the Jenkins "Security Scan" stages.
+# run-trivy-local.sh — reproduce the CI Trivy scan on your machine (Docker-based; the
+# `trivy` binary is NOT required). Mirrors the Jenkins "Security Scan" source stage.
+#
+# Scope: SOURCE TREE (filesystem) ONLY. Container image scanning was removed — both here and
+# in the Jenkinsfile — because it was flaky on the remote dind daemon (Trivy cache-lock
+# timeouts) and mostly surfaced base-image vulnerabilities the app can't remediate.
 #
 # Usage:
-#   ./scripts/run-trivy-local.sh                      # scan the repo (fs) only
-#   ./scripts/run-trivy-local.sh <local-image:tag>    # also scan a built container image
+#   ./scripts/run-trivy-local.sh          # scan the repo (fs)
 #
 # Behaviour is controlled by the same flag as CI:
 #   SECURITY_BREAK_BUILD=false|true   (default false)  false=warn & pass, true=fail on HIGH/CRITICAL
@@ -14,8 +17,8 @@
 # gitleaks (husky hooks + the CI gitleaks stage), not Trivy.
 #
 # Examples:
+#   ./scripts/run-trivy-local.sh
 #   SECURITY_BREAK_BUILD=true ./scripts/run-trivy-local.sh
-#   ./scripts/run-trivy-local.sh xyne-spaces-backend:$(git rev-parse --short=10 HEAD)
 #
 set -euo pipefail
 
@@ -26,25 +29,22 @@ TRIVY_IMAGE="${TRIVY_IMAGE:-public.ecr.aws/aquasecurity/trivy:${TRIVY_VERSION}}"
 TRIVY_CACHE_DIR="${TRIVY_CACHE_DIR:-$HOME/.cache/trivy-xyne}"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-IMAGE_REF="${1:-}"
 LOCAL_REPORT_DIR="$REPO_ROOT/security-reports"
 SOURCE_JSON="/scan/security-reports/trivy-fs.json"
 
 if [ "$SECURITY_BREAK_BUILD" = "true" ]; then EXIT_CODE=1; else EXIT_CODE=0; fi
-FS_SCANNERS="vuln,misconfig"; IMG_SCANNERS="vuln"
+FS_SCANNERS="vuln,misconfig"
 SOURCE_SKIP_DIRS=(--skip-dirs /scan/.securitybin --skip-dirs /scan/security-reports --skip-dirs '**/node_modules' --skip-dirs '**/dist')
 REPO_MOUNT=(-v "$REPO_ROOT:/scan" -v "$TRIVY_CACHE_DIR:/root/.cache/")
-IMAGE_MOUNT=(-v "$REPO_ROOT:/scan" -v /var/run/docker.sock:/var/run/docker.sock -v "$TRIVY_CACHE_DIR:/root/.cache/")
 
 mkdir -p "$TRIVY_CACHE_DIR" "$LOCAL_REPORT_DIR"
-echo "== Trivy local scan =="
+echo "== Trivy local scan (source/fs only) =="
 echo "   SECURITY_BREAK_BUILD=$SECURITY_BREAK_BUILD  -> gate --exit-code=$EXIT_CODE"
 echo "   image=$TRIVY_IMAGE  cache=$TRIVY_CACHE_DIR"
 echo "   reports=$LOCAL_REPORT_DIR"
 echo
 
 source_gate_failed=false
-image_gate_failed=false
 
 echo "== [1/2] Source scan (fs): write full findings JSON (warnings, never fails) =="
 docker run --rm "${REPO_MOUNT[@]}" \
@@ -61,36 +61,10 @@ if ! docker run --rm "${REPO_MOUNT[@]}" \
   source_gate_failed=true
 fi
 
-if [ -n "$IMAGE_REF" ]; then
-  SAFE_IMAGE_REF="$(printf '%s' "$IMAGE_REF" | tr -c 'A-Za-z0-9._-' '-')"
-  IMAGE_JSON="/scan/security-reports/trivy-image-${SAFE_IMAGE_REF}.json"
-
-  echo
-  echo "== Image scan: $IMAGE_REF - write full findings JSON (warnings) =="
-  docker run --rm "${IMAGE_MOUNT[@]}" \
-    "$TRIVY_IMAGE" image --scanners "$IMG_SCANNERS" --ignore-unfixed \
-    --format json -o "$IMAGE_JSON" --exit-code 0 --no-progress "$IMAGE_REF"
-
-  docker run --rm "${REPO_MOUNT[@]}" \
-    "$TRIVY_IMAGE" convert --format table "$IMAGE_JSON"
-
-  echo
-  echo "== Image scan: $IMAGE_REF - GATE (HIGH,CRITICAL, exit-code=$EXIT_CODE) =="
-  if ! docker run --rm "${REPO_MOUNT[@]}" \
-    "$TRIVY_IMAGE" convert --severity HIGH,CRITICAL --exit-code "$EXIT_CODE" "$IMAGE_JSON"; then
-    image_gate_failed=true
-  fi
-fi
-
-if [ "$source_gate_failed" = true ] || [ "$image_gate_failed" = true ]; then
+if [ "$source_gate_failed" = true ]; then
   echo
   echo "== Trivy gate FAILED ==" >&2
-  if [ "$source_gate_failed" = true ]; then
-    echo "   Source scan has HIGH/CRITICAL findings." >&2
-  fi
-  if [ "$image_gate_failed" = true ]; then
-    echo "   Image scan has HIGH/CRITICAL findings." >&2
-  fi
+  echo "   Source scan has HIGH/CRITICAL findings." >&2
   exit 1
 fi
 
