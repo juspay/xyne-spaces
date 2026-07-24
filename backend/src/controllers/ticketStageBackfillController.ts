@@ -24,6 +24,11 @@ const requestSchema = z
       .datetime({ offset: true })
       .transform(value => new Date(value))
       .optional(),
+    createdBefore: z
+      .string()
+      .datetime({ offset: true })
+      .transform(value => new Date(value))
+      .optional(),
     dryRun: z.boolean().optional().default(false),
   })
   .strict()
@@ -44,6 +49,14 @@ const requestSchema = z
         code: z.ZodIssueCode.custom,
         message: 'targetStage and destinationStage must be different',
         path: ['destinationStage'],
+      });
+    }
+
+    if (data.createdAfter && data.createdBefore && data.createdAfter >= data.createdBefore) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'createdAfter must be earlier than createdBefore',
+        path: ['createdBefore'],
       });
     }
   });
@@ -79,6 +92,7 @@ type BackfillScope = {
   workspaceId: string;
   boardId: string;
   createdAfter?: Date;
+  createdBefore?: Date;
 };
 
 type ResolvedDestinationStages = Record<
@@ -109,7 +123,14 @@ export class TicketStageBackfillController {
           channelId: scope.channelId,
           workspaceId: scope.workspaceId,
           boardId: scope.boardId,
-          ...(scope.createdAfter ? { createdAt: { gt: scope.createdAfter } } : {}),
+          ...(scope.createdAfter || scope.createdBefore
+            ? {
+                createdAt: {
+                  ...(scope.createdAfter ? { gt: scope.createdAfter } : {}),
+                  ...(scope.createdBefore ? { lt: scope.createdBefore } : {}),
+                },
+              }
+            : {}),
           stageName: sourceStage.name,
         },
         select: {
@@ -296,7 +317,14 @@ export class TicketStageBackfillController {
         workspaceId,
         ...(options.targetStage ? { stageName: options.targetStage } : {}),
         ...(options.boardId ? { boardId: options.boardId } : {}),
-        ...(options.createdAfter ? { createdAt: { gt: options.createdAfter } } : {}),
+        ...(options.createdAfter || options.createdBefore
+          ? {
+              createdAt: {
+                ...(options.createdAfter ? { gt: options.createdAfter } : {}),
+                ...(options.createdBefore ? { lt: options.createdBefore } : {}),
+              },
+            }
+          : {}),
         ...(externalTicketIds ? { id: { in: externalTicketIds } } : {}),
       };
 
@@ -505,6 +533,7 @@ export class TicketStageBackfillController {
                 workspaceId,
                 boardId: ticket.boardId,
                 ...(options.createdAfter ? { createdAfter: options.createdAfter } : {}),
+                ...(options.createdBefore ? { createdBefore: options.createdBefore } : {}),
               },
               sourceStage,
               destinationStage,
