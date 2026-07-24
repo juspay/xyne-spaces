@@ -12,6 +12,12 @@ export interface DialogProps {
   title?: ReactNode;
   description?: ReactNode;
   className?: string;
+  /**
+   * Tailwind z-index class for the overlay + content. Defaults to `z-50`. Raise
+   * it (e.g. `z-[10000]`) when the dialog is opened from inside a higher-z
+   * surface such as the Cmd+K dialog (`z-[9999]`).
+   */
+  zIndexClassName?: string;
   focusRef?: RefObject<HTMLElement | null>;
   /**
    * Escape hatch for the dialog's open auto-focus. When provided it takes
@@ -53,6 +59,7 @@ export const Dialog = ({
   title,
   description,
   className,
+  zIndexClassName = 'z-50',
   focusRef,
   onOpenAutoFocus,
   onEscapeKeyDown,
@@ -103,7 +110,8 @@ export const Dialog = ({
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay
           className={cn(
-            'fixed inset-0 bg-black/50 backdrop-blur-sm z-50',
+            'fixed inset-0 bg-black/50 backdrop-blur-sm',
+            zIndexClassName,
             'data-[state=open]:animate-in data-[state=closed]:animate-out',
             'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
           )}
@@ -140,7 +148,8 @@ export const Dialog = ({
             'w-full',
             'max-w-md',
             'bg-popover text-popover-foreground rounded-lg shadow-lg',
-            'outline-none focus:outline-none z-50',
+            'outline-none focus:outline-none',
+            zIndexClassName,
             'data-[state=open]:animate-in data-[state=closed]:animate-out',
             'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
             'data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95',
