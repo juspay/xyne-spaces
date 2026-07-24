@@ -204,6 +204,11 @@ const TEXT_FILTER_HINTS: Record<string, string> = {
 };
 const TEXT_FILTER_HINT_REGEX = /\b(before|after|on|range|board|tags|stage|status|type):\s*$/i;
 
+const isPreviewableTicketResult = (result: DisplaySearchResult | null): boolean =>
+  !!result &&
+  (result.type === 'ticket' ||
+    (result.type === 'conversation' && result.searchContext?.subApp === 'DESK'));
+
 const ChannelCommandMenu = ({
   channels,
   starred,
@@ -399,6 +404,7 @@ const ChannelCommandMenu = ({
     searchError: error,
     paginationState,
     isLoadingMore,
+    isGrouped,
     resetSearchState,
     onOpen,
     onClose,
@@ -1746,7 +1752,7 @@ const ChannelCommandMenu = ({
     });
   }, []);
 
-  // Handle mouse hover over ticket items to show preview
+  // Handle mouse hover over ticket and Desk items to show preview
   const handleTicketMouseEnter = useCallback(
     (result: DisplaySearchResult): void => {
       setHoveredResult(result);
@@ -1755,14 +1761,14 @@ const ChannelCommandMenu = ({
       if (!previewTicket) {
         return;
       }
-      if (result.type !== 'ticket') {
-        // In ALL tab, close preview when hovering over non-ticket items
+      if (!isPreviewableTicketResult(result)) {
+        // In ALL tab, close preview when hovering over a non-previewable item.
         if (activeTab === TabType.ALL) {
           setPreviewTicket(null);
         }
         return;
       }
-      // Only update if the ticket is different
+      // Only update if the preview target is different.
       if (previewTicket.id !== result.id) {
         setPreviewTicket(result);
       }
@@ -2014,82 +2020,107 @@ const ChannelCommandMenu = ({
   // Render backend results for the search-active branch (flat list filtered by activeTab)
   const renderSearchBackendResults = () => (
     <>
-      {['conversation', 'ticket', 'attachment', 'canvas', 'transcript', 'recording', 'desk']
-        .filter(groupKey => {
-          if (activeTab === TabType.ALL) return true;
-          if (activeTab === TabType.MESSAGES && groupKey === 'conversation') return true;
-          if (activeTab === TabType.TICKETS && groupKey === 'ticket') return true;
-          if (
-            activeTab === TabType.ATTACHMENTS &&
-            (groupKey === 'attachment' ||
-              groupKey === 'canvas' ||
-              groupKey === 'transcript' ||
-              groupKey === 'recording')
-          )
-            return true;
-          if (activeTab === TabType.CANVAS && groupKey === 'canvas') return true;
-          if (activeTab === TabType.CALL && groupKey === 'transcript') return true;
-          if (activeTab === TabType.RECORDING && groupKey === 'recording') return true;
-          if (activeTab === TabType.DESK && groupKey === 'desk') return true;
-          return false;
-        })
-        .map(groupKey => {
-          const items = groupedBackendResults[groupKey];
-          if (!items || items.length === 0) return null;
+      {activeTab === TabType.ALL && !isGrouped ? (
+        <div className='mb-4'>
+          {backendResults
+            .filter(result => result.type !== 'user' && result.type !== 'channel')
+            .map((result, index) => (
+              <SearchResultItem
+                key={`${result.type}-${result.id}`}
+                result={result}
+                channelDisplayName={getResultChannelLabel(result)}
+                onSelect={res => handleBackendResultSelect(res, index + 1)}
+                onPreview={handleFilePreview}
+                onItemMouseDown={handleItemMouseDown}
+                onItemMouseEnter={handleTicketMouseEnter}
+                onItemMouseLeave={handleTicketMouseLeave}
+                isSelected={contextItems.some(c => c.id === `${result.type}-${result.id}`)}
+                mergeMode={deskMergeMode && !!getDeskTicketId(result)}
+                isMergeSelected={selectedMergeTickets.has(result.searchContext?.ticketId || '')}
+                onToggleSelect={handleToggleDeskMergeSelect}
+              />
+            ))}
+        </div>
+      ) : (
+        ['conversation', 'ticket', 'attachment', 'canvas', 'transcript', 'recording', 'desk']
+          .filter(groupKey => {
+            if (activeTab === TabType.ALL) return true;
+            if (activeTab === TabType.MESSAGES && groupKey === 'conversation') return true;
+            if (activeTab === TabType.TICKETS && groupKey === 'ticket') return true;
+            if (
+              activeTab === TabType.ATTACHMENTS &&
+              (groupKey === 'attachment' ||
+                groupKey === 'canvas' ||
+                groupKey === 'transcript' ||
+                groupKey === 'recording')
+            )
+              return true;
+            if (activeTab === TabType.CANVAS && groupKey === 'canvas') return true;
+            if (activeTab === TabType.CALL && groupKey === 'transcript') return true;
+            if (activeTab === TabType.RECORDING && groupKey === 'recording') return true;
+            if (activeTab === TabType.DESK && groupKey === 'desk') return true;
+            return false;
+          })
+          .map(groupKey => {
+            const items = groupedBackendResults[groupKey];
+            if (!items || items.length === 0) return null;
 
-          const displayCount =
-            activeTab !== TabType.ALL ? paginationState[activeTab].cumulativeCount : items.length;
+            const displayCount =
+              activeTab !== TabType.ALL ? paginationState[activeTab].cumulativeCount : items.length;
 
-          const isScreenAll = searchMode === 'screen' && activeTab === TabType.ALL;
-          const displayItems = isScreenAll ? items.slice(0, 2) : items;
-          const hiddenCount = items.length - displayItems.length;
-          const sectionTab = GROUP_KEY_TO_DOC_TYPE[groupKey];
+            const isScreenAll = searchMode === 'screen' && activeTab === TabType.ALL;
+            const displayItems = isScreenAll ? items.slice(0, 2) : items;
+            const hiddenCount = items.length - displayItems.length;
+            const sectionTab = GROUP_KEY_TO_DOC_TYPE[groupKey];
 
-          return (
-            <div key={groupKey} className='mb-4'>
-              <Command.Group
-                heading={
-                  isScreenAll
-                    ? getGroupLabel(groupKey)
-                    : `${getGroupLabel(groupKey)} (${displayCount})`
-                }
-                className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
-              >
-                {displayItems.map((result, index) => (
-                  <SearchResultItem
-                    key={result.id}
-                    result={result}
-                    channelDisplayName={getResultChannelLabel(result)}
-                    onSelect={res => handleBackendResultSelect(res, index + 1)}
-                    onPreview={handleFilePreview}
-                    onItemMouseDown={handleItemMouseDown}
-                    onItemMouseEnter={handleTicketMouseEnter}
-                    onItemMouseLeave={handleTicketMouseLeave}
-                    isSelected={contextItems.some(c => c.id === `${result.type}-${result.id}`)}
-                    mergeMode={deskMergeMode && !!getDeskTicketId(result)}
-                    isMergeSelected={selectedMergeTickets.has(result.searchContext?.ticketId || '')}
-                    onToggleSelect={handleToggleDeskMergeSelect}
-                  />
-                ))}
-                {isScreenAll && hiddenCount > 0 && sectionTab && (
-                  <button
-                    onClick={() => handleSeeMoreNavigate(sectionTab)}
-                    className={`w-full px-2 py-1.5 mt-1 text-sm text-muted-foreground rounded-sm text-left transition-colors ${!isMobile && 'hover:text-foreground hover:bg-accent'}`}
-                    style={{
-                      WebkitTapHighlightColor: 'transparent',
-                      userSelect: 'none',
-                    }}
-                    data-track-category='SEARCH'
-                    data-track-name='SEE_MORE_SECTION'
-                    data-track-metadata={JSON.stringify({ tab: sectionTab })}
-                  >
-                    See {hiddenCount} more
-                  </button>
-                )}
-              </Command.Group>
-            </div>
-          );
-        })}
+            return (
+              <div key={groupKey} className='mb-4'>
+                <Command.Group
+                  heading={
+                    isScreenAll
+                      ? getGroupLabel(groupKey)
+                      : `${getGroupLabel(groupKey)} (${displayCount})`
+                  }
+                  className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
+                >
+                  {displayItems.map((result, index) => (
+                    <SearchResultItem
+                      key={result.id}
+                      result={result}
+                      channelDisplayName={getResultChannelLabel(result)}
+                      onSelect={res => handleBackendResultSelect(res, index + 1)}
+                      onPreview={handleFilePreview}
+                      onItemMouseDown={handleItemMouseDown}
+                      onItemMouseEnter={handleTicketMouseEnter}
+                      onItemMouseLeave={handleTicketMouseLeave}
+                      isSelected={contextItems.some(c => c.id === `${result.type}-${result.id}`)}
+                      mergeMode={deskMergeMode && !!getDeskTicketId(result)}
+                      isMergeSelected={selectedMergeTickets.has(
+                        result.searchContext?.ticketId || '',
+                      )}
+                      onToggleSelect={handleToggleDeskMergeSelect}
+                    />
+                  ))}
+                  {isScreenAll && hiddenCount > 0 && sectionTab && (
+                    <button
+                      onClick={() => handleSeeMoreNavigate(sectionTab)}
+                      className={`w-full px-2 py-1.5 mt-1 text-sm text-muted-foreground rounded-sm text-left transition-colors ${!isMobile && 'hover:text-foreground hover:bg-accent'}`}
+                      style={{
+                        WebkitTapHighlightColor: 'transparent',
+                        userSelect: 'none',
+                      }}
+                      data-track-category='SEARCH'
+                      data-track-name='SEE_MORE_SECTION'
+                      data-track-metadata={JSON.stringify({ tab: sectionTab })}
+                    >
+                      See {hiddenCount} more
+                    </button>
+                  )}
+                </Command.Group>
+              </div>
+            );
+          })
+      )}
 
       {/* Infinite scroll trigger and loading indicator */}
       {paginationState[activeTab].hasMore && (
@@ -2706,16 +2737,18 @@ const ChannelCommandMenu = ({
         setKeyboardSelectedResult(null);
       }
 
-      // Linear-style preview: update preview when navigating to a different ticket
+      // Linear-style preview: update preview when navigating to another ticket/Desk result.
       if (previewTicket) {
-        const ticketId = newlySelectedItem?.getAttribute('data-ticket-id');
-        if (ticketId) {
-          const ticket = backendResults.find(r => r.type === 'ticket' && r.id === ticketId);
-          if (ticket && ticket.id !== previewTicket.id) {
-            setPreviewTicket(ticket);
+        const selectedResult =
+          resultId && resultType
+            ? backendResults.find(r => r.type === resultType && r.id === resultId)
+            : undefined;
+        if (selectedResult && isPreviewableTicketResult(selectedResult)) {
+          if (selectedResult.id !== previewTicket.id) {
+            setPreviewTicket(selectedResult);
           }
         } else {
-          // Navigated to non-ticket item, close the preview
+          // Navigated to a non-previewable item, close the preview.
           setPreviewTicket(null);
         }
       }
@@ -2734,7 +2767,7 @@ const ChannelCommandMenu = ({
       return;
     }
 
-    // ArrowRight: open ticket preview if a ticket is selected, otherwise do nothing (disable tab navigation)
+    // ArrowRight: open ticket/Desk preview for the selected result.
     if (e.key === 'ArrowRight') {
       if (!typeAutocomplete.suggestion && !previewTicket) {
         // Check keyboard selection state (most reliable)
@@ -2743,12 +2776,11 @@ const ChannelCommandMenu = ({
         const mouseTicket = hoveredResult;
 
         // Use whichever is available
-        const ticketToShow =
-          keyboardTicket?.type === 'ticket'
-            ? keyboardTicket
-            : mouseTicket?.type === 'ticket'
-              ? mouseTicket
-              : null;
+        const ticketToShow = isPreviewableTicketResult(keyboardTicket)
+          ? keyboardTicket
+          : isPreviewableTicketResult(mouseTicket)
+            ? mouseTicket
+            : null;
 
         if (ticketToShow) {
           e.preventDefault();
@@ -2758,7 +2790,7 @@ const ChannelCommandMenu = ({
           // Track preview click
           if (searchText.trim()) {
             const ticketIndex = backendResults.findIndex(
-              r => r.type === 'ticket' && r.id === ticketToShow.id,
+              r => r.type === ticketToShow.type && r.id === ticketToShow.id,
             );
             onResultClick(
               ticketToShow,
@@ -2775,12 +2807,12 @@ const ChannelCommandMenu = ({
         const selectedItem = commandRef.current?.querySelector('[cmdk-item][aria-selected="true"]');
         const resultType = selectedItem?.getAttribute('data-result-type');
         const resultId = selectedItem?.getAttribute('data-result-id');
-        if (resultType === 'ticket' && resultId) {
+        if (resultType && resultId) {
           const ticketIndex = backendResults.findIndex(
-            r => r.type === 'ticket' && r.id === resultId,
+            r => r.type === resultType && r.id === resultId,
           );
           const ticket = ticketIndex >= 0 ? backendResults[ticketIndex] : undefined;
-          if (ticket) {
+          if (ticket && isPreviewableTicketResult(ticket)) {
             e.preventDefault();
             e.stopPropagation();
             setPreviewTicket(ticket);
@@ -4136,8 +4168,10 @@ const ChannelCommandMenu = ({
                 <span>Close</span>
               </span>
             ) : activeTab === TabType.TICKETS ||
+              activeTab === TabType.DESK ||
               (activeTab === TabType.ALL &&
-                (hoveredResult?.type === 'ticket' || keyboardSelectedResult?.type === 'ticket')) ? (
+                (isPreviewableTicketResult(hoveredResult) ||
+                  isPreviewableTicketResult(keyboardSelectedResult))) ? (
               <span className='flex gap-2.5 items-center'>
                 <span className='flex gap-1'>
                   <span className='p-1 bg-background rounded-md border border-border'>
@@ -4296,10 +4330,10 @@ const ChannelCommandMenu = ({
                 reconcileHoverSelection();
               }}
               className={cn(
-                'fixed left-0 md:left-1/2 top-0 md:top-[14vh] -translate-x-0 md:-translate-x-1/2 md:translate-y-0 w-full',
-                isMobile ? 'h-[100dvh] flex flex-col' : 'h-screen',
+                'fixed left-0 md:left-1/2 top-0 md:top-[14vh] -translate-x-0 md:-translate-x-1/2 md:translate-y-0 w-full flex flex-col',
+                isMobile ? 'h-[100dvh]' : 'h-screen',
                 contextSelectionMode ? 'md:max-w-4xl' : 'md:max-w-3xl',
-                'md:w-full md:h-auto bg-background md:rounded-2xl shadow-[0px_7px_15px_0px_#0000000D,0px_28px_28px_0px_#00000017,0px_62px_37px_0px_#0000000D,0px_111px_44px_0px_#00000003,0px_173px_48px_0px_#00000000] border border-border',
+                'md:w-full md:h-auto md:max-h-[72vh] md:overflow-hidden bg-background md:rounded-2xl shadow-[0px_7px_15px_0px_#0000000D,0px_28px_28px_0px_#00000017,0px_62px_37px_0px_#0000000D,0px_111px_44px_0px_#00000003,0px_173px_48px_0px_#00000000] border border-border',
                 showMergeDialog ? 'z-40' : 'z-[9999]',
               )}
               onKeyDownCapture={handleCommandKeyDown}
