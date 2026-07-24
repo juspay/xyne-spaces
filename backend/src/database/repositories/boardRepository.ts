@@ -138,7 +138,7 @@ export class BoardRepository {
         for (let i = 0; i < stages.length; i++) {
           const inputStage = data.stages[i];
           if (inputStage.prStatuses && inputStage.prStatuses.length > 0) {
-            await this.syncStagePRStatusMappings(tx, stages[i].id, inputStage.prStatuses);
+            await this.syncStagePRStatusMappings(tx, stages[i].id, inputStage.prStatuses, data.workspaceId);
           }
         }
       }
@@ -157,7 +157,8 @@ export class BoardRepository {
   async syncStagePRStatusMappings(
     tx: any,
     stageId: string,
-    prStatuses: PRStatusEvent[]
+    prStatuses: PRStatusEvent[],
+    workspaceId: string
   ): Promise<void> {
     // Fetch existing mappings
     const existingMappings = await tx.stagePRStatusMapping.findMany({
@@ -193,6 +194,7 @@ export class BoardRepository {
         data: prStatusesToAdd.map(prStatus => ({
           stageId,
           prStatus,
+          workspaceId,
         })),
       });
     }

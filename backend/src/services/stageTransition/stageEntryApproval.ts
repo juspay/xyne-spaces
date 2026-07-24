@@ -196,6 +196,7 @@ async function claimEntryApprovalRequest(
         status: TicketStageRequestStatus.SUBMITTED,
         submittedBy: actorId,
         updatedBy: actorId,
+        workspaceId: ticket.workspaceId,
       },
     });
     won = true;

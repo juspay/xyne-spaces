@@ -465,13 +465,16 @@ export async function createXyneAIMemoryProvider(): Promise<XyneAIMemoryProvider
 
       const parentExecution = await db.workflowExecution.findUniqueOrThrow({
         where: { id: sessionId },
-        select: { workspaceId: true },
+        select: { workspaceId: true, workflow: { select: { workspaceId: true } } },
       });
 
       const step = await db.workflowStep.create({
         data: {
           id: messageId,
-          workspaceId: parentExecution.workspaceId,
+          // WorkflowExecution.workspaceId is nullable; fall back to the parent workflow
+          // (Workflow.workspaceId is NOT NULL) so a legacy null-workspace execution does
+          // not propagate NULL onto the step.
+          workspaceId: parentExecution.workspaceId ?? parentExecution.workflow.workspaceId,
           workflowExecutionId: sessionId,
           stepExecutorType: 'agent',
           stepName: role,

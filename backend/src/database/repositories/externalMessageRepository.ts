@@ -5,7 +5,6 @@
 
 import { DatabaseClient } from '../client';
 import { MessageDirection, ExternalEntityType, Prisma } from '@prisma/client';
-import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 
 export class ExternalMessageRepository {
   private db = DatabaseClient.getInstance();
@@ -81,12 +80,38 @@ export class ExternalMessageRepository {
     }
 
     try {
-      // entityId references either a Message (default/MESSAGE) or an Email
-      // (EMAIL) row depending on entityType; both carry a denormalized
-      // workspaceId we can source from.
-      const workspaceId = data.entityType === ExternalEntityType.EMAIL
-        ? await resolveWorkspaceIdFromModel(this.db, 'email', { id: data.entityId })
-        : await resolveWorkspaceIdFromModel(this.db, 'message', { messageId: data.entityId });
+      // entityId references either a Message (default/MESSAGE) or an Email (EMAIL) row
+      // depending on entityType. Both carry a nullable denormalized workspaceId, so fall
+      // back to a NOT-NULL ancestor (Email -> Channel; Message -> Conversation -> Channel;
+      // Channel.workspaceId is NOT NULL) rather than throwing/leaking for un-backfilled rows.
+      let workspaceId: string;
+      if (data.entityType === ExternalEntityType.EMAIL) {
+        const email = await this.db.email.findUnique({
+          where: { id: data.entityId },
+          select: { workspaceId: true, channel: { select: { workspaceId: true } } },
+        });
+        if (!email) {
+          throw new Error(`workspaceId required: email ${data.entityId} not found`);
+        }
+        workspaceId = email.workspaceId ?? email.channel.workspaceId;
+      } else {
+        const message = await this.db.message.findUnique({
+          where: { messageId: data.entityId },
+          select: {
+            workspaceId: true,
+            conversation: {
+              select: { workspaceId: true, channel: { select: { workspaceId: true } } },
+            },
+          },
+        });
+        if (!message) {
+          throw new Error(`workspaceId required: message ${data.entityId} not found`);
+        }
+        workspaceId =
+          message.workspaceId ??
+          message.conversation.workspaceId ??
+          message.conversation.channel.workspaceId;
+      }
 
       return await this.db.externalMessage.create({
         data: {
