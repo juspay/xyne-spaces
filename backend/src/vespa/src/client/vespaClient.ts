@@ -21,6 +21,7 @@ export interface BatchResult {
 class VespaClient {
   private maxRetries: number;
   private retryDelay: number;
+  private feedTimeoutMs: number;
   private feedEndpoint: string;
   private queryEndpoint: string;
   private logger: ILogger;
@@ -38,6 +39,7 @@ class VespaClient {
       queryEndpoint?: string;
       maxConnections?: number;
       maxConcurrentRequests?: number;
+      feedTimeoutMs?: number;
     },
   ) {
     this.logger = logger || consoleLogger;
@@ -57,9 +59,17 @@ class VespaClient {
     this.feedDispatcher = new Agent(agentOptions);
     this.queryDispatcher = new Agent(agentOptions);
 
+    // Per-request timeout applied ONLY to document inserts (see `insert`), so a slow
+    // Vespa feed — e.g. embedding at index time via the tei-batch-proxy — fails
+    // predictably instead of hanging on undici's defaults. Other feed ops
+    // (update/delete) and queries are unaffected. Tunable via VESPA_FEED_TIMEOUT_MS;
+    // keep it >= the gateway timeout in front of Vespa so the gateway decides first.
+    this.feedTimeoutMs =
+      config?.feedTimeoutMs ?? (Number(process.env.VESPA_FEED_TIMEOUT_MS) || 180_000);
+
     this.concurrencyLimit = pLimit(config?.maxConcurrentRequests || 10);
 
-    this.logger.info(`[VESPA CLIENT] Initialized - feedEndpoint: ${this.feedEndpoint}, queryEndpoint: ${this.queryEndpoint}, maxConnections: ${maxConnections}, maxConcurrentRequests: ${config?.maxConcurrentRequests || 10}`);
+    this.logger.info(`[VESPA CLIENT] Initialized - feedEndpoint: ${this.feedEndpoint}, queryEndpoint: ${this.queryEndpoint}, maxConnections: ${maxConnections}, maxConcurrentRequests: ${config?.maxConcurrentRequests || 10}, feedTimeoutMs: ${this.feedTimeoutMs}`);
   }
 
   private async delay(ms: number): Promise<void> {
@@ -70,11 +80,18 @@ class VespaClient {
     url: string,
     options: RequestInit,
     retryCount = 0,
+    timeoutMs?: number,
   ): Promise<Response> {
     const nonRetryableStatusCodes = [404];
     const dispatcher = url.startsWith(this.queryEndpoint)
       ? this.queryDispatcher
       : this.feedDispatcher;
+    // Opt-in per-attempt timeout (used by `insert`): a fresh abort signal each attempt
+    // so retries get the full budget. Callers that pass no timeoutMs are untouched.
+    if (timeoutMs) {
+      options = { ...options, signal: AbortSignal.timeout(timeoutMs) };
+    }
+    this.logger.info('timeout for vespa insertion',{timeoutMs});
     try {
       const response = await fetch(url, { ...options, dispatcher } as any);
       if (!response.ok) {
@@ -87,7 +104,7 @@ class VespaClient {
         if ((response.status === 429 || response.status >= 500) && retryCount < this.maxRetries) {
           this.logger.info('retrying due to status: ', response.status);
           await this.delay(this.retryDelay * Math.pow(2, retryCount));
-          return this.fetchWithRetry(url, options, retryCount + 1);
+          return this.fetchWithRetry(url, options, retryCount + 1, timeoutMs);
         }
       }
 
@@ -97,7 +114,7 @@ class VespaClient {
 
       if (retryCount < this.maxRetries && !errorMessage.includes('Non-retryable error')) {
         await this.delay(this.retryDelay * Math.pow(2, retryCount)); // Exponential backoff
-        return this.fetchWithRetry(url, options, retryCount + 1);
+        return this.fetchWithRetry(url, options, retryCount + 1, timeoutMs);
       }
       throw error;
     }
@@ -151,7 +168,7 @@ class VespaClient {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ fields: cleanedDocument }),
-      });
+      }, 0, this.feedTimeoutMs);
 
       if (!response.ok) {
         const errorText = response.statusText;
