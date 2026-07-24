@@ -24,7 +24,7 @@ export interface ParticipantMatchResult {
 /**
  * Extract email from Google Calendar format or return as-is for plain emails
  * Examples:
- *   "Abbisetty Pavan <john.doe@gmail.com>" -> "john.doe@gmail.com"
+ *   "Jane Doe <jane.doe@example.com>" -> "jane.doe@example.com"
  *   "user@example.com" -> "user@example.com"
  *   "  Name <email@test.com>  " -> "email@test.com"
  */
@@ -37,7 +37,7 @@ export function extractEmail(input: string): string {
 /**
  * Extract name from Google Calendar format
  * Examples:
- *   "Abbisetty Pavan <john.doe@gmail.com>" -> "Abbisetty Pavan"
+ *   "Jane Doe <jane.doe@example.com>" -> "Jane Doe"
  *   "user@example.com" -> undefined
  */
 export function extractName(input: string): string | undefined {

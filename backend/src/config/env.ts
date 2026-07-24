@@ -116,6 +116,7 @@ const envSchema = Joi.object({
   SLACK_IGNORED_BOT_IDS: Joi.string().allow('').default(''), // Comma-separated list of bot IDs to exclude from migration
   SLACK_MIGRATION_FINAL_MESSAGE: Joi.string().allow('').default(''), // Custom message appended to the final migration notification
   SLACK_MIGRATION_LOG_CHANNEL_ID: Joi.string().allow('').default(''), // Slack channel ID for migration progress/error logs (defaults to #slack-migration-update)
+  SLACK_MIGRATION_CREATOR_EMAIL: Joi.string().email().allow('').default(''), // Service-account email used to create migrated Slack channels
   // Google Sheets — Nightly Slack Migration
   // Uses GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET (config.email). Only needs a refresh token with Sheets scope.
   // One-time setup: https://developers.google.com/oauthplayground → scope: https://www.googleapis.com/auth/spreadsheets
@@ -576,6 +577,7 @@ export const config = {
     ? Buffer.from(envVars.SLACK_MIGRATION_FINAL_MESSAGE, 'base64').toString('utf-8')
     : '',
   slackMigrationLogChannelId: envVars.SLACK_MIGRATION_LOG_CHANNEL_ID,
+  slackMigrationCreatorEmail: envVars.SLACK_MIGRATION_CREATOR_EMAIL as string,
   autoSyncSlackChannel: {
     enabled: envVars.ENABLE_SLACK_MIGRATION_WORKER,
     sheetId: envVars.MIGRATION_SHEET_ID,
