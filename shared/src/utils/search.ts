@@ -61,10 +61,6 @@ export function searchUsers<T extends UserLike>(
       finalScore -= 2;
     }
 
-    // Soft-demote deactivated users: +1 stays below the gap between relevance tiers,
-    // so a relevant deactivated match still outranks a slightly-relevant active one.
-    if (isDeactivated(r.item)) finalScore += 1;
-
     return {
       item: r.item,
       score: finalScore,
@@ -73,6 +69,12 @@ export function searchUsers<T extends UserLike>(
 
   return rescored
     .sort((a, b) => {
+      // Hard-demote deactivated users: all active users rank above all
+      // deactivated ones regardless of relevance, so a deactivated match always
+      // sinks to the bottom of the list and takes a little more effort to reach.
+      const aDeactivated = isDeactivated(a.item);
+      const bDeactivated = isDeactivated(b.item);
+      if (aDeactivated !== bDeactivated) return aDeactivated ? 1 : -1;
       if (a.score !== b.score) {
         return a.score - b.score;
       }

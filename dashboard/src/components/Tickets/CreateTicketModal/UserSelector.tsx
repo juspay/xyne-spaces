@@ -3,9 +3,10 @@ import UserAvatar from '../../UserAvatar/UserAvatar';
 import { AvatarShape, AvatarSize } from '../../UserAvatar/UserAvatar';
 import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
 import type { SelectorOption } from '../../ui/EntitySelector/EntitySelector.types';
-import { useActiveUserSearch, useUser } from '../../../hooks/useUsers';
-import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { useActiveUsers, useUser, useSelf } from '../../../hooks/useUsers';
+import { getUserDisplayName, withYouLabel } from '../../../utils/userDisplayName';
 import { useChannelAssignGate } from '../../../hooks/useChannelAssignGate';
+import { channelMembersFirst, currentUserFirst } from '../../../utils/channelMembersFirst';
 
 /**
  * Props for UserSelector component
@@ -46,13 +47,11 @@ export const UserSelector: React.FC<UserSelectorProps> = ({
 
   // ==================== DATA FETCHING ====================
 
-  /**
-   * Fetch users based on search value (server-side search)
-   * - searchValue is updated by EntitySelector via onSearchChange callback
-   * - Database searches ALL users and returns top 15 matches
-   * - This enables searching through thousands of users efficiently
-   */
-  const users = useActiveUserSearch(searchValue, 15);
+  // Full active-user list (in-memory Zero cache). We filter and rank it
+  // ourselves below so channel members are actually present to float to the
+  // top — a pre-sliced search (top-N) would drop them before we could rank.
+  const activeUsers = useActiveUsers();
+  const selfId = useSelf()?.id;
 
   /**
    * Fetch the selected user's details (for displaying in the button)
@@ -66,16 +65,26 @@ export const UserSelector: React.FC<UserSelectorProps> = ({
    * This is the "adapter" pattern - converting one data shape to another
    */
   const userOptions: SelectorOption[] = useMemo(() => {
-    if (!users) return [];
-
-    return users.map(user => ({
+    const query = searchValue.trim().toLowerCase();
+    const matched = !query
+      ? activeUsers
+      : activeUsers.filter(
+          user =>
+            getUserDisplayName(user).toLowerCase().includes(query) ||
+            (user.email ?? '').toLowerCase().includes(query),
+        );
+    // You first, then channel members, then everyone else; cap the rendered
+    // rows since this list isn't virtualized.
+    const membersFirst = channelMembersFirst(matched, user => user.id, memberIds);
+    const ordered = currentUserFirst(membersFirst, user => user.id, selfId);
+    return ordered.slice(0, 25).map(user => ({
       value: user.id,
-      label: getUserDisplayName(user),
+      label: withYouLabel(getUserDisplayName(user), user.id === selfId),
       subtitle: user.email,
       icon: <UserAvatar userId={user.id} size={AvatarSize.SM} shape={AvatarShape.CIRCULAR} />,
       badge: shouldGate && !memberIds.has(user.id) ? 'Not in channel' : undefined,
     }));
-  }, [users, shouldGate, memberIds]);
+  }, [activeUsers, searchValue, shouldGate, memberIds, selfId]);
 
   /**
    * If a user is selected but not in the search results,

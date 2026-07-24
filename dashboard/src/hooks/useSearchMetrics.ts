@@ -136,8 +136,11 @@ export const CMDK_USER_LIMIT = 25;
 
 /**
  * Rank Cmd+K user candidates:
- *   1. name-prefix matches first
- *   2. within a tier, active before deactivated (soft, not a global demotion)
+ *   1. active before deactivated — a hard, global demotion: ALL deactivated
+ *      users sink below ALL active ones (their own last "bucket"), so reaching
+ *      a deactivated user means scrolling past every active match, i.e. past
+ *      the "See more" fold of the people section.
+ *   2. name-prefix matches (the relevance signal) within each activation group
  *   3. DM-contact users within each tier
  *   4. tie-break by DM recency (smaller index = more recent activity), so
  *      `from:` with no text shows the same people-you-talk-to-most order
@@ -159,18 +162,20 @@ export function rankUsers<T extends { id: string; name: string; status?: string 
   // Stable sort (ES2019+) preserves the incoming `searchUsers` order
   // (alphabetical for non-DM users) when all keys tie.
   return [...users].sort((a, b) => {
-    // 1. name-prefix matches (the relevance signal) first
-    const aPrefix = isPrefixMatch(a.name);
-    const bPrefix = isPrefixMatch(b.name);
-    if (aPrefix !== bPrefix) return aPrefix ? -1 : 1;
-
-    // 2. within a tier, active before deactivated. Soft/per-tier: key 1 already
-    //    let a relevant deactivated user beat a slightly-relevant active one.
+    // 1. active before deactivated — a hard, global demotion. Deactivated users
+    //    are the last "bucket": they always rank below every active match
+    //    regardless of relevance, so they land past the "See more" fold and
+    //    take a little more effort to reach.
     const aDeactivated = isUserDeactivated(a);
     const bDeactivated = isUserDeactivated(b);
     if (aDeactivated !== bDeactivated) return aDeactivated ? 1 : -1;
 
-    // 3. DM contacts before non-contacts, but only after activation
+    // 2. name-prefix matches (the relevance signal) within each activation group
+    const aPrefix = isPrefixMatch(a.name);
+    const bPrefix = isPrefixMatch(b.name);
+    if (aPrefix !== bPrefix) return aPrefix ? -1 : 1;
+
+    // 3. DM contacts before non-contacts
     const aDM = dmContactRecency.has(a.id);
     const bDM = dmContactRecency.has(b.id);
     if (aDM !== bDM) return aDM ? -1 : 1;
