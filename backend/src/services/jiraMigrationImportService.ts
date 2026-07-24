@@ -1680,6 +1680,7 @@ export class JiraMigrationImportService {
       externalId: string;
       conversationId: string;
       senderId: string;
+      workspaceId: string;
       content: string;
       msgType: MessageType;
       hasAttachment: boolean;
@@ -1767,6 +1768,7 @@ export class JiraMigrationImportService {
         externalId: this.buildCommentExternalId(comment.id),
         conversationId,
         senderId,
+        workspaceId,
         content,
         msgType: MessageType.USER,
         hasAttachment: false,

@@ -174,6 +174,17 @@ class SessionRecordingSyncService {
     try {
       const prisma = DatabaseClient.getInstance();
 
+      // Denormalize the tenant key from the owning user (User.workspaceId is NOT NULL).
+      // This background sync path has no request-scoped context and the stamp extension
+      // was removed, so resolve it explicitly rather than insert an untenanted row.
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { workspaceId: true },
+      });
+      if (!user) {
+        throw new Error(`workspaceId required: user ${userId} not found`);
+      }
+
       await (prisma as any).sessionRecordingFile.upsert({
         where: { sessionId },
         update: {
@@ -186,6 +197,7 @@ class SessionRecordingSyncService {
           url,
           status: SessionRecordingProcessStatus.PENDING,
           lastProcessedTurn: null,
+          workspaceId: user.workspaceId,
         },
       });
 

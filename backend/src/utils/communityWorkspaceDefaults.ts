@@ -77,7 +77,7 @@ export async function createCommunityWorkspaceDefaults(
         createdBy: params.createdBy,
         defaultTicketStatusV2: TicketStatusV2.COMPLETED,
       },
-    ],
+    ].map(stage => ({ ...stage, workspaceId: params.workspaceId })),
   });
 
   const channel = await params.db.channel.create({
