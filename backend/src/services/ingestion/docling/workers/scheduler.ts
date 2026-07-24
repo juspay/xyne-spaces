@@ -18,6 +18,7 @@ import { fileSchema, type InsertDocument } from '@/vespa/src/types';
 import { runSyncFallbackForFailedFile } from '../../processors/syncFallback';
 import {
   DOCLING_FILE_STATUS,
+  type DoclingFile,
   type DoclingPart,
   type ProcessingResult,
   type SchedulerChunkMeta,
@@ -114,6 +115,41 @@ const getSchedulerFileContext = async (file: {
     fileName: att.originalFilename || att.id,
     mimeType: att.mimetype || 'application/pdf',
   };
+};
+
+/**
+ * Read a staged part PDF from local disk. The stage lives in the container's
+ * ephemeral /tmp, so it can vanish (pod restart / disk eviction, or the splitter
+ * ran on a different pod) → ENOENT. When that happens, re-fetch the SOURCE PDF
+ * from GCS (its key is on the file row) and re-run the splitter to regenerate the
+ * parts at the same local paths, then read again — so the part self-heals instead
+ * of failing the whole file. Re-splits with the file's ORIGINAL page-chunk size so
+ * the regenerated boundaries match the existing DB part rows exactly.
+ */
+const readStagedPartBuffer = async (
+  file: DoclingFile,
+  ctx: SchedulerFileContext,
+  part: DoclingPart,
+): Promise<Buffer> => {
+  try {
+    return await readBuffer(part.partPath);
+  } catch (error) {
+    if (!isMissingSourceFileError(errMsg(error))) throw error;
+    const gcsKey = file.sourceStorageKey || file.sourcePath;
+    logger.warn(
+      '[DOCLING_SCHEDULER][submitter] staged part missing locally; re-staging from GCS source',
+      { fileId: file.fileId, partIndex: part.partIndex, partPath: part.partPath, gcsKey },
+    );
+    const sourceBuffer = await readSourceBuffer(gcsKey);
+    await stagePdfParts({
+      fileId: file.fileId,
+      sourceBuffer,
+      vespaDocId: ctx.vespaDocId,
+      fileName: ctx.fileName,
+      pageChunkSize: file.pageChunkSize || getRuntimeConfig().pageChunkSize,
+    });
+    return await readBuffer(part.partPath);
+  }
 };
 
 const wrapperGlobalActiveKey =
@@ -748,7 +784,9 @@ const runSubmitterProcessor = async (
       if (!file) throw new Error(`Missing scheduler file for ${work.part.fileId}`);
 
       const ctx = await getSchedulerFileContext(file);
-      const { value: buffer, elapsedMs: readMs } = await timed(() => readBuffer(work.part.partPath));
+      const { value: buffer, elapsedMs: readMs } = await timed(() =>
+        readStagedPartBuffer(file, ctx, work.part),
+      );
       state.telemetry.recordTiming('readPartMs', readMs);
 
       const { elapsedMs: submitMs } = await timed(() =>
