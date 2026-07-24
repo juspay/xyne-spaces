@@ -91,23 +91,31 @@ export class ExternalSourceCore {
     // 1. Preprocess (optional - fetch extra data if needed)
     const enrichedPayload = adapter.preprocess ? await adapter.preprocess(rawPayload, source) : rawPayload;
 
-    if (enrichedPayload && typeof enrichedPayload === 'object' && (enrichedPayload as any).__skipIngestion) {
-      const reason = (enrichedPayload as any).__skipReason || 'unspecified';
-      logger.info(`Skipping ingestion for ${sourceName}: ${reason}`);
-      return [{ success: true, conversationId: '', entityId: '', action: 'skipped' }];
+    // preprocess may split one webhook into several messages (e.g. Gmail history batch); each runs through transform -> sync on its own.
+    const payloads = Array.isArray(enrichedPayload) ? enrichedPayload : [enrichedPayload];
+
+    const allResults: IngestionResult[] = [];
+    for (const payload of payloads) {
+      if (payload && typeof payload === 'object' && (payload as any).__skipIngestion) {
+        const reason = (payload as any).__skipReason || 'unspecified';
+        logger.info(`Skipping ingestion for ${sourceName}: ${reason}`);
+        allResults.push({ success: true, conversationId: '', entityId: '', action: 'skipped' });
+        continue;
+      }
+
+      // 2. Transform to normalized format
+      const parseResult = await adapter.transform(payload);
+
+      if (!parseResult.success || !parseResult.data) {
+        throw new Error(`Transform failed: ${parseResult.error}`);
+      }
+
+      // 3. Sync to database (sourceName already resolved in authenticate.ts)
+      const results = await this.sync(adapter, sourceName, parseResult.data, source);
+      allResults.push(...results);
     }
 
-    // 2. Transform to normalized format
-    const parseResult = await adapter.transform(enrichedPayload);
-
-    if (!parseResult.success || !parseResult.data) {
-      throw new Error(`Transform failed: ${parseResult.error}`);
-    }
-
-    const normalizedData = parseResult.data;
-
-    // 3. Sync to database (sourceName already resolved in authenticate.ts)
-    return await this.sync(adapter, sourceName, normalizedData, source);
+    return allResults;
   }
 
   /**
