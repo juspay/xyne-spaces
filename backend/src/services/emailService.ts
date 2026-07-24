@@ -71,7 +71,6 @@ import { findDuplicateEmailConversation } from '@/utils/vespaDuplicateDetector';
 import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
 import { tagGenerationPipeline } from '@/tags/pipeline';
 import { DESK_EMAIL_SOURCE_TYPE, deskEmailConfigKey } from '@/tags';
-import { AUTODRAFT_SESSION_TAG } from '@/controllers/xyneAIController';
 import { buildDraftEmailClawTask } from '@/agents/xyne-ai/prompts/draft';
 import { runClawAgent } from '@/services/clawAgentService';
 import { convert as htmlToText } from 'html-to-text';
@@ -823,7 +822,7 @@ export class EmailService {
       try {
         await this.prisma.workflowExecution.update({
           where: { id: sessionId },
-          data: { tag: AUTODRAFT_SESSION_TAG },
+          data: { tag: 'autodraft' },
         });
         logger.info('[AutoDraft] session tagged', {
           mode: 'autodraft',

@@ -55,9 +55,6 @@ function ClawChat({ onRequestClose }: ClawChatProps = {}): ReactElement {
     [loadConversation],
   );
 
-  const handleToggleStar = useCallback(async (): Promise<void> => {}, []);
-  const handleRenameConversation = useCallback(async (): Promise<void> => {}, []);
-
   const streamingSessionIds = useMemo(
     () => (isStreaming && conversationId ? [conversationId] : []),
     [isStreaming, conversationId],
@@ -144,10 +141,7 @@ function ClawChat({ onRequestClose }: ClawChatProps = {}): ReactElement {
             onLoadConversation={conversation => {
               void handleLoadConversation(conversation);
             }}
-            onToggleStar={handleToggleStar}
             onDeleteConversation={deleteConversation}
-            onRenameConversation={handleRenameConversation}
-            showStarRenameActions={false}
             selectedAgentSlug={selectedAgentSlug}
             agents={agents}
             onSelectAgent={selectAgent}

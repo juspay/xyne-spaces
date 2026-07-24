@@ -27,15 +27,12 @@ import {
   Mic,
   Hash,
   Lock,
-  Package,
-  Code2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useQuery } from '@tanstack/react-query';
 import { DANGEROUS_EXTENSIONS } from '@xyne/shared';
 import { AIAgentSelector } from './AIAgentSelector';
 import { ComposerCollectionPicker } from './ComposerCollectionPicker';
-import { ComposerResearchPicker } from './ComposerResearchPicker';
 import { ComposerVoiceButton } from './ComposerVoiceButton';
 import { cn } from '../../utils/classNames';
 import { apiInstance } from '../../services/clients/apiClient';
@@ -225,7 +222,6 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
   }));
   const [collections, setCollections] = useState(() => seed.collections);
   const [fileScopes, setFileScopes] = useState(() => seed.fileScopes);
-  const [research, setResearch] = useState(() => seed.research);
   const [webSearchEnabled, setWebSearchEnabled] = useState(() => seed.webSearchEnabled);
   const [deepResearchEnabled, setDeepResearchEnabled] = useState(() => seed.deepResearchEnabled);
   const [createCanvasEnabled, setCreateCanvasEnabled] = useState(() => seed.createCanvasEnabled);
@@ -250,7 +246,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
       recordings: selections.recordings,
       collections,
       fileScopes,
-      research,
+      research: null,
       webSearchEnabled: webSearchAccessible ? webSearchEnabled : false,
       deepResearchEnabled: deepResearchAccessible ? deepResearchEnabled : false,
       createCanvasEnabled,
@@ -259,7 +255,6 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
       selections,
       collections,
       fileScopes,
-      research,
       webSearchEnabled,
       deepResearchEnabled,
       createCanvasEnabled,
@@ -518,9 +513,8 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
       selections.transcripts.length > 0 ||
       selections.recordings.length > 0 ||
       collections.length > 0 ||
-      fileScopes.length > 0 ||
-      research !== null,
-    [attachments, selections, collections, fileScopes, research],
+      fileScopes.length > 0,
+    [attachments, selections, collections, fileScopes],
   );
 
   const canSend = value.trim().length > 0;
@@ -643,19 +637,6 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
                   onRemove={() => setFileScopes(prev => prev.filter(f => f.id !== fs.id))}
                 />
               ))}
-              {research && (
-                <ContextPill
-                  icon={
-                    research.type === 'product' ? (
-                      <Package className='h-3.5 w-3.5 shrink-0 text-muted-foreground' aria-hidden />
-                    ) : (
-                      <Code2 className='h-3.5 w-3.5 shrink-0 text-muted-foreground' aria-hidden />
-                    )
-                  }
-                  label={research.name}
-                  onRemove={() => setResearch(null)}
-                />
-              )}
               {attachments.map(attachment => (
                 <ContextPill
                   key={attachment.id}
@@ -726,8 +707,6 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
                 onCollectionsChange={setCollections}
                 onFileScopesChange={setFileScopes}
               />
-              <ComposerResearchPicker research={research} onResearchChange={setResearch} />
-
               <div className='mx-0.5 h-4 w-px bg-border' />
 
               <ToolbarButton

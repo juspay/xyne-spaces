@@ -32,9 +32,6 @@ import '@/bots/implementations/automations-bot/automations-bot.js';
 // Xyne Release Bot - system bot for posting release notes canvases to threads
 import '@/bots/implementations/xyne-release-bot/xyne-release-bot.js';
 
-// Ask AI Bot - responds to DM conversations and channel/thread @mentions
-import '@/bots/implementations/ask-ai/ask-ai.js';
-
 import { logger } from '@/utils/logger';
 
 // Bitbucket Bot - system bot for Bitbucket webhook events

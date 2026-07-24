@@ -4,7 +4,7 @@ import { Popover } from '../../../ui/Popover';
 import { Drawer } from '../../../ui/Drawer/Drawer';
 import type { ConversationHistory as ConversationHistoryType } from '../utils/XyneAITypes';
 import { usePlatform } from '../../../../hooks/usePlatform';
-import { XyneStarred, XyneUnstarred, XyneRename, XyneDelete } from '../../../icons/xyne-ai';
+import { XyneDelete } from '../../../icons/xyne-ai';
 import { formatRelativeTime } from '../../../../utils/dateUtils';
 import { AgentSelector } from './AgentSelector';
 import type { AgentOption } from './AgentSelector';
@@ -16,10 +16,7 @@ interface ConversationHistoryProps {
   streamingSessionIds: string[];
   onBack: () => void;
   onLoadConversation: (conversation: ConversationHistoryType) => void;
-  onToggleStar: (conversation: ConversationHistoryType) => Promise<void>;
   onDeleteConversation: (conversation: ConversationHistoryType) => Promise<void>;
-  onRenameConversation: (conversation: ConversationHistoryType, newName: string) => Promise<void>;
-  showStarRenameActions?: boolean;
   selectedAgentSlug?: string | null;
   agents?: AgentOption[];
   onSelectAgent?: (slug: string | null) => void;
@@ -75,10 +72,7 @@ export const ConversationHistory = ({
   streamingSessionIds,
   onBack,
   onLoadConversation,
-  onToggleStar,
   onDeleteConversation,
-  onRenameConversation,
-  showStarRenameActions = true,
   onClose,
   selectedAgentSlug,
   agents,
@@ -91,24 +85,9 @@ export const ConversationHistory = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchExpanded, setIsSearchExpanded] = useState(false);
   const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
-  const [renamingId, setRenamingId] = useState<string | null>(null);
-  const [renameValue, setRenameValue] = useState('');
 
   const handleClose = (): void => {
     onClose?.();
-  };
-
-  const handleStartRename = (conversation: ConversationHistoryType): void => {
-    setRenamingId(conversation.id);
-    setRenameValue(conversation.title);
-    setOpenDropdownId(null);
-  };
-
-  const handleRename = async (conversation: ConversationHistoryType): Promise<void> => {
-    if (!renameValue.trim()) return;
-    await onRenameConversation(conversation, renameValue.trim());
-    setRenamingId(null);
-    setRenameValue('');
   };
 
   return (
@@ -239,47 +218,12 @@ export const ConversationHistory = ({
         ) : isMobile ? (
           // Mobile: Date-based grouping
           <>
-            {/* Starred Section */}
-            {conversations.filter(
-              c =>
-                c.isStarred &&
-                (searchQuery === '' || c.title.toLowerCase().includes(searchQuery.toLowerCase())),
-            ).length > 0 && (
-              <ConversationSection
-                title='Starred'
-                conversations={conversations.filter(
-                  c =>
-                    c.isStarred &&
-                    (searchQuery === '' ||
-                      c.title.toLowerCase().includes(searchQuery.toLowerCase())),
-                )}
-                currentConversationId={conversationId}
-                loadingSessionId={loadingSessionId}
-                streamingSessionIds={streamingSessionIds}
-                renamingId={renamingId}
-                renameValue={renameValue}
-                openDropdownId={openDropdownId}
-                onLoadConversation={onLoadConversation}
-                onStartRename={handleStartRename}
-                onRename={handleRename}
-                onToggleStar={onToggleStar}
-                onDeleteConversation={onDeleteConversation}
-                showStarRenameActions={showStarRenameActions}
-                setRenameValue={setRenameValue}
-                setRenamingId={setRenamingId}
-                setOpenDropdownId={setOpenDropdownId}
-                isMobile={isMobile}
-              />
-            )}
-
-            {/* Date-based sections for non-starred */}
             {((): (ReactElement | null)[] => {
-              const nonStarredConversations = conversations.filter(
+              const filteredConversations = conversations.filter(
                 c =>
-                  !c.isStarred &&
-                  (searchQuery === '' || c.title.toLowerCase().includes(searchQuery.toLowerCase())),
+                  searchQuery === '' || c.title.toLowerCase().includes(searchQuery.toLowerCase()),
               );
-              const groupedByDate = groupConversationsByDate(nonStarredConversations);
+              const groupedByDate = groupConversationsByDate(filteredConversations);
 
               return Object.entries(groupedByDate).map(([dateKey, convs]) => {
                 if (convs.length === 0) return null;
@@ -291,17 +235,9 @@ export const ConversationHistory = ({
                     currentConversationId={conversationId}
                     loadingSessionId={loadingSessionId}
                     streamingSessionIds={streamingSessionIds}
-                    renamingId={renamingId}
-                    renameValue={renameValue}
                     openDropdownId={openDropdownId}
                     onLoadConversation={onLoadConversation}
-                    onStartRename={handleStartRename}
-                    onRename={handleRename}
-                    onToggleStar={onToggleStar}
                     onDeleteConversation={onDeleteConversation}
-                    showStarRenameActions={showStarRenameActions}
-                    setRenameValue={setRenameValue}
-                    setRenamingId={setRenamingId}
                     setOpenDropdownId={setOpenDropdownId}
                     isMobile={isMobile}
                   />
@@ -322,71 +258,25 @@ export const ConversationHistory = ({
           </>
         ) : (
           // Desktop: Original layout
-          <>
-            {/* Starred Section */}
-            {conversations.filter(
-              c =>
-                c.isStarred &&
-                (searchQuery === '' || c.title.toLowerCase().includes(searchQuery.toLowerCase())),
-            ).length > 0 && (
-              <ConversationSection
-                title='Starred'
-                conversations={conversations.filter(
-                  c =>
-                    c.isStarred &&
-                    (searchQuery === '' ||
-                      c.title.toLowerCase().includes(searchQuery.toLowerCase())),
-                )}
-                currentConversationId={conversationId}
-                loadingSessionId={loadingSessionId}
-                streamingSessionIds={streamingSessionIds}
-                renamingId={renamingId}
-                renameValue={renameValue}
-                openDropdownId={openDropdownId}
-                onLoadConversation={onLoadConversation}
-                onStartRename={handleStartRename}
-                onRename={handleRename}
-                onToggleStar={onToggleStar}
-                onDeleteConversation={onDeleteConversation}
-                showStarRenameActions={showStarRenameActions}
-                setRenameValue={setRenameValue}
-                setRenamingId={setRenamingId}
-                setOpenDropdownId={setOpenDropdownId}
-                isMobile={isMobile}
-              />
+          <ConversationSection
+            title='All Chats'
+            conversations={conversations.filter(
+              c => searchQuery === '' || c.title.toLowerCase().includes(searchQuery.toLowerCase()),
             )}
-
-            {/* All Chats Section */}
-            <ConversationSection
-              title='All Chats'
-              conversations={conversations.filter(
-                c =>
-                  !c.isStarred &&
-                  (searchQuery === '' || c.title.toLowerCase().includes(searchQuery.toLowerCase())),
-              )}
-              currentConversationId={conversationId}
-              loadingSessionId={loadingSessionId}
-              streamingSessionIds={streamingSessionIds}
-              renamingId={renamingId}
-              renameValue={renameValue}
-              openDropdownId={openDropdownId}
-              onLoadConversation={onLoadConversation}
-              onStartRename={handleStartRename}
-              onRename={handleRename}
-              onToggleStar={onToggleStar}
-              onDeleteConversation={onDeleteConversation}
-              showStarRenameActions={showStarRenameActions}
-              setRenameValue={setRenameValue}
-              setRenamingId={setRenamingId}
-              setOpenDropdownId={setOpenDropdownId}
-              isMobile={isMobile}
-              emptyMessage={
-                searchQuery
-                  ? `No chats found matching "${searchQuery}"`
-                  : 'No conversations yet. Start a new chat!'
-              }
-            />
-          </>
+            currentConversationId={conversationId}
+            loadingSessionId={loadingSessionId}
+            streamingSessionIds={streamingSessionIds}
+            openDropdownId={openDropdownId}
+            onLoadConversation={onLoadConversation}
+            onDeleteConversation={onDeleteConversation}
+            setOpenDropdownId={setOpenDropdownId}
+            isMobile={isMobile}
+            emptyMessage={
+              searchQuery
+                ? `No chats found matching "${searchQuery}"`
+                : 'No conversations yet. Start a new chat!'
+            }
+          />
         )}
       </div>
     </div>
@@ -399,17 +289,9 @@ interface ConversationSectionProps {
   currentConversationId: string;
   loadingSessionId: string | null;
   streamingSessionIds: string[];
-  renamingId: string | null;
-  renameValue: string;
   openDropdownId: string | null;
   onLoadConversation: (conversation: ConversationHistoryType) => void;
-  onStartRename: (conversation: ConversationHistoryType) => void;
-  onRename: (conversation: ConversationHistoryType) => Promise<void>;
-  onToggleStar: (conversation: ConversationHistoryType) => Promise<void>;
   onDeleteConversation: (conversation: ConversationHistoryType) => Promise<void>;
-  showStarRenameActions: boolean;
-  setRenameValue: (value: string) => void;
-  setRenamingId: (id: string | null) => void;
   setOpenDropdownId: (id: string | null) => void;
   isMobile: boolean;
   emptyMessage?: string;
@@ -421,30 +303,14 @@ const ConversationSection = ({
   currentConversationId,
   loadingSessionId,
   streamingSessionIds,
-  renamingId,
-  renameValue,
   openDropdownId,
   onLoadConversation,
-  onStartRename,
-  onRename,
-  onToggleStar,
   onDeleteConversation,
-  showStarRenameActions,
-  setRenameValue,
-  setRenamingId,
   setOpenDropdownId,
   isMobile,
   emptyMessage,
 }: ConversationSectionProps): ReactElement => (
-  <div
-    className={
-      isMobile
-        ? 'bg-muted rounded-[12px] mx-4 my-4'
-        : title === 'Starred'
-          ? 'border-b border-border'
-          : ''
-    }
-  >
+  <div className={isMobile ? 'bg-muted rounded-[12px] mx-4 my-4' : ''}>
     <details open>
       <summary
         className={
@@ -469,23 +335,14 @@ const ConversationSection = ({
                 streamingSessionIds.includes(conversation.sessionId) ||
                 streamingSessionIds.includes(conversation.id)
               }
-              isRenaming={renamingId === conversation.id}
-              renameValue={renameValue}
               isDropdownOpen={openDropdownId === conversation.id}
               onLoad={() => onLoadConversation(conversation)}
-              onStartRename={() => onStartRename(conversation)}
-              onRename={() => void onRename(conversation)}
-              onToggleStar={() => void onToggleStar(conversation)}
               onDelete={() => {
                 if (window.confirm('Delete this conversation?')) {
                   void onDeleteConversation(conversation);
                 }
               }}
-              showStarRenameActions={showStarRenameActions}
-              setRenameValue={setRenameValue}
-              setRenamingId={setRenamingId}
               setOpenDropdownId={setOpenDropdownId}
-              isStarred={title === 'Starred'}
               isMobile={isMobile}
             />
           ))}
@@ -502,19 +359,10 @@ interface ConversationItemProps {
   isActive: boolean;
   isLoadingRow: boolean;
   isStreamingRow: boolean;
-  isRenaming: boolean;
-  renameValue: string;
   isDropdownOpen: boolean;
-  isStarred: boolean;
   isMobile: boolean;
   onLoad: () => void;
-  onStartRename: () => void;
-  onRename: () => void;
-  onToggleStar: () => void;
   onDelete: () => void;
-  showStarRenameActions: boolean;
-  setRenameValue: (value: string) => void;
-  setRenamingId: (id: string | null) => void;
   setOpenDropdownId: (id: string | null) => void;
 }
 
@@ -523,19 +371,10 @@ const ConversationItem = ({
   isActive,
   isLoadingRow,
   isStreamingRow,
-  isRenaming,
-  renameValue,
   isDropdownOpen,
-  isStarred,
   isMobile,
   onLoad,
-  onStartRename,
-  onRename,
-  onToggleStar,
   onDelete,
-  showStarRenameActions,
-  setRenameValue,
-  setRenamingId,
   setOpenDropdownId,
 }: ConversationItemProps): ReactElement => {
   const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -552,8 +391,6 @@ const ConversationItem = ({
   }, []);
 
   const handleTouchStart = (e: React.TouchEvent<HTMLButtonElement>): void => {
-    if (isRenaming) return;
-
     longPressTriggeredRef.current = false;
     const touch = e.touches[0];
     if (touch) {
@@ -614,112 +451,86 @@ const ConversationItem = ({
               isActive ? 'bg-background' : ''
             }`
           : `relative w-full px-4 py-3 hover:bg-accent transition-colors flex items-center gap-3 group ${
-              isActive
-                ? isStarred
-                  ? 'bg-primary/10'
-                  : 'bg-primary/10 border-l-2 border-primary'
-                : ''
+              isActive ? 'bg-primary/10 border-l-2 border-primary' : ''
             }`
       }
     >
-      {isRenaming ? (
-        <input
-          type='text'
-          value={renameValue}
-          onChange={e => setRenameValue(e.target.value)}
-          onKeyDown={e => {
-            if (e.key === 'Enter') {
-              onRename();
-            } else if (e.key === 'Escape') {
-              setRenamingId(null);
-              setRenameValue('');
-            }
-          }}
-          onBlur={onRename}
-          className={`flex-1 text-sm text-foreground font-${isStarred ? 'medium' : 'normal'} font-["Inter"] border border-border rounded px-2 py-1 outline-none focus:border-primary`}
-          data-track-category='XyneAI'
-          data-track-name='RENAME_CONVERSATION_INPUT'
-        />
-      ) : (
-        <button
-          onClick={handleClick}
-          className='flex-1 min-w-0 text-left'
-          onTouchStart={isMobile ? handleTouchStart : undefined}
-          onTouchMove={isMobile ? handleTouchMove : undefined}
-          onTouchEnd={isMobile ? handleTouchEnd : undefined}
-          onTouchCancel={isMobile ? handleTouchEnd : undefined}
-          data-track-category='XyneAI'
-          data-track-name='SELECT_CONVERSATION'
-          data-track-metadata={JSON.stringify({ conversationId: conversation.id })}
+      <button
+        onClick={handleClick}
+        className='flex-1 min-w-0 text-left'
+        onTouchStart={isMobile ? handleTouchStart : undefined}
+        onTouchMove={isMobile ? handleTouchMove : undefined}
+        onTouchEnd={isMobile ? handleTouchEnd : undefined}
+        onTouchCancel={isMobile ? handleTouchEnd : undefined}
+        data-track-category='XyneAI'
+        data-track-name='SELECT_CONVERSATION'
+        data-track-metadata={JSON.stringify({ conversationId: conversation.id })}
+      >
+        <div
+          className={
+            isMobile
+              ? `text-[14px] leading-[20px] tracking-[0.14px] text-foreground font-['Inter'] min-w-0 flex items-center gap-2 ${
+                  isActive ? 'font-semibold' : 'font-normal'
+                }`
+              : `text-sm text-foreground font-normal font-['Inter'] min-w-0 flex items-center gap-2`
+          }
         >
-          <div
-            className={
-              isMobile
-                ? `text-[14px] leading-[20px] tracking-[0.14px] text-foreground font-['Inter'] min-w-0 flex items-center gap-2 ${
-                    isActive ? 'font-semibold' : 'font-normal'
-                  }`
-                : `text-sm text-foreground font-${isStarred ? 'medium' : 'normal'} font-['Inter'] min-w-0 flex items-center gap-2`
-            }
-          >
-            {isLoadingRow && (
-              <Loader2 className='w-3.5 h-3.5 shrink-0 animate-spin text-muted-foreground' />
-            )}
-            <span className='truncate'>{conversation.title}</span>
-            {isStreamingRow && (
-              <span className='shrink-0 text-[10px] uppercase tracking-wide text-primary/80'>
-                Responding
-              </span>
-            )}
-          </div>
-          <div className="text-xs text-muted-foreground font-['Inter'] mt-0.5 flex items-center gap-1 flex-wrap">
-            <span>{formatRelativeTime(conversation.lastUpdated)}</span>
-            {(() => {
-              const channels = (conversation.lastInputContext?.selectedChannels ?? []) as Array<{
-                id: string;
-                name: string;
-              }>;
-              if (!channels.length) return null;
-              const PILL_COLORS = [
-                'bg-blue-100 text-blue-700 border border-blue-200 hover:bg-blue-200',
-                'bg-purple-100 text-purple-700 border border-purple-200 hover:bg-purple-200',
-                'bg-green-100 text-green-700 border border-green-200 hover:bg-green-200',
-                'bg-orange-100 text-orange-700 border border-orange-200 hover:bg-orange-200',
-                'bg-pink-100 text-pink-700 border border-pink-200 hover:bg-pink-200',
-                'bg-teal-100 text-teal-700 border border-teal-200 hover:bg-teal-200',
-                'bg-red-100 text-red-700 border border-red-200 hover:bg-red-200',
-                'bg-yellow-100 text-yellow-700 border border-yellow-200 hover:bg-yellow-200',
-                'bg-indigo-100 text-indigo-700 border border-indigo-200 hover:bg-indigo-200',
-                'bg-cyan-100 text-cyan-700 border border-cyan-200 hover:bg-cyan-200',
-              ];
-              const getColor = (id: string) => {
-                let hash = 0;
-                for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
-                return PILL_COLORS[hash % PILL_COLORS.length]!;
-              };
-              const visible = channels.slice(0, 2);
-              const overflow = channels.length - 2;
-              return (
-                <>
-                  <div className='w-px h-3 bg-border' />
-                  {visible.map(ch => (
-                    <span
-                      key={ch.id}
-                      className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-md text-[10px] font-semibold leading-none shadow-sm cursor-default select-none transition-colors ${getColor(ch.id)}`}
-                    >
-                      # {ch.name}
-                    </span>
-                  ))}
-                  {overflow > 0 && (
-                    <span className='text-[10px] text-muted-foreground font-medium'>
-                      +{overflow}
-                    </span>
-                  )}
-                </>
-              );
-            })()}
-          </div>
-        </button>
-      )}
+          {isLoadingRow && (
+            <Loader2 className='w-3.5 h-3.5 shrink-0 animate-spin text-muted-foreground' />
+          )}
+          <span className='truncate'>{conversation.title}</span>
+          {isStreamingRow && (
+            <span className='shrink-0 text-[10px] uppercase tracking-wide text-primary/80'>
+              Responding
+            </span>
+          )}
+        </div>
+        <div className="text-xs text-muted-foreground font-['Inter'] mt-0.5 flex items-center gap-1 flex-wrap">
+          <span>{formatRelativeTime(conversation.lastUpdated)}</span>
+          {(() => {
+            const channels = (conversation.lastInputContext?.selectedChannels ?? []) as Array<{
+              id: string;
+              name: string;
+            }>;
+            if (!channels.length) return null;
+            const PILL_COLORS = [
+              'bg-blue-100 text-blue-700 border border-blue-200 hover:bg-blue-200',
+              'bg-purple-100 text-purple-700 border border-purple-200 hover:bg-purple-200',
+              'bg-green-100 text-green-700 border border-green-200 hover:bg-green-200',
+              'bg-orange-100 text-orange-700 border border-orange-200 hover:bg-orange-200',
+              'bg-pink-100 text-pink-700 border border-pink-200 hover:bg-pink-200',
+              'bg-teal-100 text-teal-700 border border-teal-200 hover:bg-teal-200',
+              'bg-red-100 text-red-700 border border-red-200 hover:bg-red-200',
+              'bg-yellow-100 text-yellow-700 border border-yellow-200 hover:bg-yellow-200',
+              'bg-indigo-100 text-indigo-700 border border-indigo-200 hover:bg-indigo-200',
+              'bg-cyan-100 text-cyan-700 border border-cyan-200 hover:bg-cyan-200',
+            ];
+            const getColor = (id: string) => {
+              let hash = 0;
+              for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
+              return PILL_COLORS[hash % PILL_COLORS.length]!;
+            };
+            const visible = channels.slice(0, 2);
+            const overflow = channels.length - 2;
+            return (
+              <>
+                <div className='w-px h-3 bg-border' />
+                {visible.map(ch => (
+                  <span
+                    key={ch.id}
+                    className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-md text-[10px] font-semibold leading-none shadow-sm cursor-default select-none transition-colors ${getColor(ch.id)}`}
+                  >
+                    # {ch.name}
+                  </span>
+                ))}
+                {overflow > 0 && (
+                  <span className='text-[10px] text-muted-foreground font-medium'>+{overflow}</span>
+                )}
+              </>
+            );
+          })()}
+        </div>
+      </button>
       {isMobile && isActive && (
         <svg
           xmlns='http://www.w3.org/2000/svg'
@@ -740,41 +551,6 @@ const ConversationItem = ({
           description='Manage this conversation'
         >
           <div className='flex flex-col bg-popover rounded-t-[20px] overflow-hidden'>
-            {showStarRenameActions && (
-              <>
-                <button
-                  onClick={e => {
-                    e.stopPropagation();
-                    onToggleStar();
-                    setOpenDropdownId(null);
-                  }}
-                  className='w-full px-4 py-4 text-left text-sm active:bg-accent flex items-center gap-3 border-b border-border touch-manipulation'
-                  data-track-category='XyneAI'
-                  data-track-name='TOGGLE_STAR_CONVERSATION'
-                  data-track-metadata={JSON.stringify({
-                    conversationId: conversation.id,
-                    isStarred,
-                  })}
-                >
-                  {isStarred || conversation.isStarred ? <XyneStarred /> : <XyneUnstarred />}
-                  <span>{isStarred || conversation.isStarred ? 'Unstar' : 'Star'}</span>
-                </button>
-                <button
-                  onClick={e => {
-                    e.stopPropagation();
-                    onStartRename();
-                    setOpenDropdownId(null);
-                  }}
-                  className='w-full px-4 py-4 text-left text-sm active:bg-accent flex items-center gap-3 border-b border-border touch-manipulation'
-                  data-track-category='XyneAI'
-                  data-track-name='RENAME_CONVERSATION'
-                  data-track-metadata={JSON.stringify({ conversationId: conversation.id })}
-                >
-                  <XyneRename />
-                  <span>Rename</span>
-                </button>
-              </>
-            )}
             <button
               onClick={e => {
                 e.stopPropagation();
@@ -809,38 +585,6 @@ const ConversationItem = ({
           }
           className='w-48 p-0 bg-popover border border-border rounded-lg shadow-lg'
         >
-          {showStarRenameActions && (
-            <>
-              <button
-                onClick={e => {
-                  e.stopPropagation();
-                  onToggleStar();
-                  setOpenDropdownId(null);
-                }}
-                className='w-full px-4 py-2 text-left text-sm hover:bg-accent flex items-center gap-2 border-b border-border'
-                data-track-category='XyneAI'
-                data-track-name='TOGGLE_STAR_DESKTOP'
-                data-track-metadata={JSON.stringify({ conversationId: conversation.id })}
-              >
-                {isStarred || conversation.isStarred ? <XyneStarred /> : <XyneUnstarred />}
-                <span>{isStarred || conversation.isStarred ? 'Unstar' : 'Star'}</span>
-              </button>
-              <button
-                onClick={e => {
-                  e.stopPropagation();
-                  onStartRename();
-                  setOpenDropdownId(null);
-                }}
-                className='w-full px-4 py-2 text-left text-sm hover:bg-accent flex items-center gap-2 border-b border-border'
-                data-track-category='XyneAI'
-                data-track-name='RENAME_DESKTOP'
-                data-track-metadata={JSON.stringify({ conversationId: conversation.id })}
-              >
-                <XyneRename />
-                <span>Rename</span>
-              </button>
-            </>
-          )}
           <button
             onClick={e => {
               e.stopPropagation();

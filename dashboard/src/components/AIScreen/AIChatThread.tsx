@@ -31,7 +31,6 @@ import { Link } from 'react-router-dom';
 import { useXyneAIStream } from '../../hooks/useXyneAIStream';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 import { useAskAIVersion } from '../../hooks/useAskAIVersion';
-import { loadSessionDetail } from '../../hooks/useAskAISessions';
 import type {
   Message,
   MessageAttachment,
@@ -86,7 +85,6 @@ import {
 } from '../Chat/XyneAISidebar/components/activityShared';
 import { AskAIDebugPanel } from '../Chat/XyneAISidebar/components/AskAIDebugPanel';
 import {
-  normalizeLoadedMessagesForDisplay,
   resolveActivePath,
   getSiblings,
   BRANCH_ROOT_KEY,
@@ -1744,16 +1742,6 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
           }
           return;
         }
-
-        const fullConversation = await loadSessionDetail(sessionId);
-        if (!fullConversation) {
-          return;
-        }
-
-        setMessages(normalizeLoadedMessagesForDisplay(fullConversation.messages));
-        setConversationId(fullConversation.sessionId);
-        setBranchSelections(fullConversation.branchSelections ?? {});
-        onConversationChange?.(fullConversation.sessionId);
       } catch (error) {
         console.error('[AIChatThread] Failed to load session:', error);
       } finally {

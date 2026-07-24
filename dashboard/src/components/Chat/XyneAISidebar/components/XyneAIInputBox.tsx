@@ -15,9 +15,6 @@ import {
   FileText,
   Lock,
   Globe,
-  Code2,
-  Package,
-  Search,
   File,
   Ticket,
   Phone,
@@ -62,7 +59,6 @@ import {
 import { MentionSelector } from '../../../ui/Selectors';
 import type { MentionResult } from '@xyne/shared';
 import { usePlatform } from '../../../../hooks/usePlatform';
-import { useResearchOptions, type ResearchContext } from '../../../../hooks/useResearchAgent';
 import type { CollectionSummary } from '../../../../services/Knowledge/collectionService';
 import { useCachedQuery } from '../../../../hooks/useCachedQuery';
 import { queries } from '../../../../zero/queries';
@@ -126,7 +122,6 @@ export interface XyneAIInputBoxProps {
   onInputChange: (value: string) => void;
   onSubmit: () => void;
   onSelectedCollectionsChange?: (collectionIds: string[]) => void;
-  onResearchContextChange?: (context: ResearchContext | null) => void;
   onThreadInfoChange?: (threadInfo: ThreadInfo | null) => void;
   onSelectionInfosChange?: (selectionInfos: SelectionInfo[]) => void;
   onAttachmentsChange?: (attachments: Attachment[]) => void;
@@ -227,7 +222,6 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       onInputChange,
       onSubmit,
       onSelectedCollectionsChange,
-      onResearchContextChange,
       onThreadInfoChange,
       onSelectionInfosChange,
       onAttachmentsChange,
@@ -279,9 +273,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
     },
     ref,
   ): ReactElement => {
-    const researchDropdownRef = useRef<HTMLDivElement>(null);
     const collectionDropdownRef = useRef<HTMLDivElement>(null);
-    const researchSearchInputRef = useRef<HTMLInputElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const hasAutoFocusedRef = useRef(false);
     const isContextModalOpenRef = useRef(isContextModalOpen);
@@ -306,26 +298,10 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
     // Get user mentions using the existing hook
     const { results: mentionResults, searchMentions } = useMentionSearch(channelId ?? undefined);
 
-    // Get research agent products and repositories (lazy-loaded)
-    const {
-      products,
-      repositories,
-      isLoading: isResearchLoading,
-      triggerFetch: triggerResearchFetch,
-      hasFetched: hasResearchFetched,
-    } = useResearchOptions();
-
     const [selectedAttachments, setSelectedAttachments] = useState<Attachment[]>([]);
 
     // Channel search state for # mentions
     const [channelSearchQuery, setChannelSearchQuery] = useState('');
-
-    // Research Agent state
-    const [selectedResearch, setSelectedResearch] = useState<ResearchContext | null>(null);
-    const [showResearchDropdown, setShowResearchDropdown] = useState(false);
-    const [researchSearchQuery, setResearchSearchQuery] = useState('');
-    const [researchHighlightedIndex, setResearchHighlightedIndex] = useState(0);
-    const [researchTab, setResearchTab] = useState<'products' | 'repositories'>('products');
 
     // Collection state
     const [selectedCollections, setSelectedCollections] = useState<{ id: string; name: string }[]>(
@@ -1017,14 +993,6 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       return () => cancelAnimationFrame(rafId);
     }, [editor]);
 
-    useEffect(() => {
-      if (isMobile) return;
-      const rafId = requestAnimationFrame(() => {
-        researchSearchInputRef.current?.focus();
-      });
-      return () => cancelAnimationFrame(rafId);
-    }, [researchTab]);
-
     // Notify parent component when attachments change
     useEffect(() => {
       onAttachmentsChange?.(selectedAttachments);
@@ -1432,16 +1400,9 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       [editor, handleFilesAdded],
     );
 
-    // Close research dropdown when clicking outside
+    // Close collection dropdown when clicking outside
     useEffect(() => {
       const handleClickOutside = (event: MouseEvent): void => {
-        if (
-          researchDropdownRef.current &&
-          !researchDropdownRef.current.contains(event.target as Node)
-        ) {
-          setShowResearchDropdown(false);
-          setResearchSearchQuery('');
-        }
         if (
           collectionDropdownRef.current &&
           !collectionDropdownRef.current.contains(event.target as Node)
@@ -1451,66 +1412,19 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
         }
       };
 
-      if (showResearchDropdown || showCollectionDropdown) {
+      if (showCollectionDropdown) {
         document.addEventListener('mousedown', handleClickOutside);
         return (): void => {
           document.removeEventListener('mousedown', handleClickOutside);
         };
       }
       return undefined;
-    }, [showResearchDropdown, showCollectionDropdown]);
-
-    // Notify parent when research context changes
-    useEffect(() => {
-      onResearchContextChange?.(selectedResearch);
-    }, [selectedResearch, onResearchContextChange]);
+    }, [showCollectionDropdown]);
 
     // Notify parent when browser context changes
     useEffect(() => {
       onBrowserContextChange?.(browserContext);
     }, [browserContext, onBrowserContextChange]);
-
-    // Filter research items based on search query
-    const filteredResearchItems = useMemo(() => {
-      const items = researchTab === 'products' ? products : repositories;
-      if (!researchSearchQuery.trim()) {
-        return items.slice(0, 10);
-      }
-      const query = researchSearchQuery.toLowerCase();
-      return items.filter(item => item.name.toLowerCase().includes(query)).slice(0, 10);
-    }, [products, repositories, researchTab, researchSearchQuery]);
-
-    // Handle research button click
-    const handleResearchButtonClick = (): void => {
-      if (!hasResearchFetched) {
-        triggerResearchFetch();
-      }
-      setShowResearchDropdown(true);
-      setResearchSearchQuery('');
-      setResearchHighlightedIndex(0);
-      setTimeout(() => {
-        researchSearchInputRef.current?.focus();
-      }, 0);
-    };
-
-    // Handle research item selection
-    const handleResearchSelect = (
-      item: { id: string; name: string },
-      type: 'product' | 'repository',
-    ): void => {
-      setSelectedResearch({
-        type,
-        id: item.id,
-        name: item.name,
-      });
-      setShowResearchDropdown(false);
-      setResearchSearchQuery('');
-    };
-
-    // Handle removing research pill
-    const handleRemoveResearch = (): void => {
-      setSelectedResearch(null);
-    };
 
     // Extract user mentions from the TipTap editor
     const extractUserMentionsFromEditor = useCallback((): Record<string, UserTag> => {
@@ -1545,38 +1459,6 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
         onUserTagsChange(userTags);
       }
     }, [editor, inputValue, extractUserMentionsFromEditor, onUserTagsChange]);
-
-    // Handle research search keyboard navigation
-    const handleResearchSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>): void => {
-      switch (e.key) {
-        case 'ArrowDown':
-          e.preventDefault();
-          setResearchHighlightedIndex(prev =>
-            prev < filteredResearchItems.length - 1 ? prev + 1 : prev,
-          );
-          break;
-        case 'ArrowUp':
-          e.preventDefault();
-          setResearchHighlightedIndex(prev => (prev > 0 ? prev - 1 : 0));
-          break;
-        case 'Enter':
-          e.preventDefault();
-          if (filteredResearchItems[researchHighlightedIndex]) {
-            handleResearchSelect(
-              filteredResearchItems[researchHighlightedIndex],
-              researchTab === 'products' ? 'product' : 'repository',
-            );
-          }
-          break;
-        case 'Escape':
-          e.preventDefault();
-          setShowResearchDropdown(false);
-          setResearchSearchQuery('');
-          break;
-        default:
-          break;
-      }
-    };
 
     return (
       <div className={`px-4 ${isMobile ? '' : 'mb-4'} relative`}>
@@ -1639,22 +1521,6 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                 >
                   <BookOpen className='w-4 h-4 text-muted-foreground' />
                 </button>
-
-                {/* Research Agent Button - only show if no research is selected */}
-                {!selectedResearch && (
-                  <button
-                    type='button'
-                    onClick={handleResearchButtonClick}
-                    disabled={isResearchLoading}
-                    className={`flex h-7 py-1 px-2 justify-center items-center ${isMobile ? 'rounded-full' : 'rounded-lg'} border border-border hover:bg-muted transition-all duration-200 ease-in-out flex-shrink-0 ${isResearchLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
-                    aria-label='Select product or repository for research'
-                    title='Deep Research'
-                    data-track-category='XyneAI'
-                    data-track-name='OPEN_RESEARCH_SELECTOR'
-                  >
-                    <Search className='w-4 h-4 text-muted-foreground' />
-                  </button>
-                )}
 
                 {/* Thread Context Pill */}
                 {activeThreadInfo && (
@@ -1886,35 +1752,6 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                     </button>
                   </div>
                 ))}
-
-                {/* Research Context Pill */}
-                {selectedResearch && (
-                  <div
-                    className={`flex h-7 py-1 ${isMobile ? 'px-1' : 'px-2'} justify-center items-center ${isMobile ? 'gap-[4px]' : 'gap-2'} rounded-lg border border-border flex-shrink-0`}
-                  >
-                    <div className='flex items-center gap-1'>
-                      <div className='flex-shrink-0'>
-                        {selectedResearch.type === 'product' ? (
-                          <Package className='w-3.5 h-3.5 text-muted-foreground' />
-                        ) : (
-                          <Code2 className='w-3.5 h-3.5 text-muted-foreground' />
-                        )}
-                      </div>
-                      <span className="text-foreground font-['Inter'] text-sm font-[450] whitespace-nowrap">
-                        {selectedResearch.name}
-                      </span>
-                    </div>
-                    <button
-                      onClick={handleRemoveResearch}
-                      className='hover:bg-accent rounded p-0.5 transition-colors flex-shrink-0'
-                      aria-label={`Remove ${selectedResearch.name}`}
-                      data-track-category='XyneAI'
-                      data-track-name='REMOVE_RESEARCH'
-                    >
-                      <X className='w-3 h-3' />
-                    </button>
-                  </div>
-                )}
 
                 {/* Attachment Pills */}
                 {selectedAttachments.map(attachment => (
@@ -2424,119 +2261,6 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                       </button>
                     );
                   })}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Research Agent Dropdown */}
-        {showResearchDropdown && (
-          <div
-            ref={researchDropdownRef}
-            className='absolute bottom-full left-4 right-4 mb-2 bg-popover border border-border rounded-lg shadow-lg z-50 overflow-hidden'
-          >
-            {/* Tabs */}
-            <div className='flex border-b border-border'>
-              <button
-                type='button'
-                onClick={() => {
-                  setResearchTab('products');
-                  setResearchHighlightedIndex(0);
-                }}
-                className={`flex-1 px-4 py-2 text-sm font-medium transition-colors flex items-center justify-center gap-2 ${
-                  researchTab === 'products'
-                    ? 'text-foreground border-b-2 border-foreground bg-muted'
-                    : 'text-muted-foreground hover:text-muted-foreground hover:bg-accent'
-                }`}
-                data-track-category='XyneAI'
-                data-track-name='SELECT_PRODUCTS_TAB'
-              >
-                <Package className='w-4 h-4' />
-                Products
-              </button>
-              <button
-                type='button'
-                onClick={() => {
-                  setResearchTab('repositories');
-                  setResearchHighlightedIndex(0);
-                }}
-                className={`flex-1 px-4 py-2 text-sm font-medium transition-colors flex items-center justify-center gap-2 ${
-                  researchTab === 'repositories'
-                    ? 'text-foreground border-b-2 border-foreground bg-muted'
-                    : 'text-muted-foreground hover:text-muted-foreground hover:bg-accent'
-                }`}
-                data-track-category='XyneAI'
-                data-track-name='SELECT_REPOSITORIES_TAB'
-              >
-                <Code2 className='w-4 h-4' />
-                Repositories
-              </button>
-            </div>
-
-            {/* Search Input */}
-            <div className='p-2 border-b border-border bg-muted'>
-              <input
-                ref={researchSearchInputRef}
-                type='text'
-                value={researchSearchQuery}
-                onChange={e => {
-                  setResearchSearchQuery(e.target.value);
-                  setResearchHighlightedIndex(0);
-                }}
-                onKeyDown={handleResearchSearchKeyDown}
-                placeholder={`Search ${researchTab}...`}
-                className="w-full bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent font-['Inter']"
-                data-track-category='XyneAI'
-                data-track-name='RESEARCH_SEARCH_INPUT'
-              />
-            </div>
-
-            {/* Items List */}
-            <div className='max-h-64 overflow-y-auto'>
-              {isResearchLoading ? (
-                <div className='px-3 py-6 text-center text-sm text-muted-foreground'>
-                  Loading...
-                </div>
-              ) : filteredResearchItems.length > 0 ? (
-                <div className='py-1'>
-                  {filteredResearchItems.map((item, index) => (
-                    <button
-                      key={item.id}
-                      data-index={index}
-                      tabIndex={index === researchHighlightedIndex ? 0 : -1}
-                      onFocus={() => setResearchHighlightedIndex(index)}
-                      onClick={() =>
-                        handleResearchSelect(
-                          item,
-                          researchTab === 'products' ? 'product' : 'repository',
-                        )
-                      }
-                      className={`w-full text-left px-3 py-2 hover:bg-accent transition-colors flex items-center gap-2 ${
-                        index === researchHighlightedIndex ? 'bg-accent' : ''
-                      }`}
-                      data-track-category='XyneAI'
-                      data-track-name='SELECT_RESEARCH_ITEM'
-                      data-track-metadata={JSON.stringify({ itemId: item.id, type: researchTab })}
-                    >
-                      <div className='flex-shrink-0'>
-                        {researchTab === 'products' ? (
-                          <Package className='w-4 h-4 text-muted-foreground' />
-                        ) : (
-                          <Code2 className='w-4 h-4 text-muted-foreground' />
-                        )}
-                      </div>
-                      <div className='flex-1 min-w-0'>
-                        <div className="text-sm font-medium text-foreground font-['Inter'] truncate">
-                          {item.name}
-                        </div>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <div className='px-3 py-6 text-center text-sm text-muted-foreground'>
-                  No {researchTab} found
                 </div>
               )}
             </div>

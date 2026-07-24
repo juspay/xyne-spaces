@@ -162,10 +162,6 @@ import type {
   ClawCitation,
   ToolInvocation,
 } from '../../components/Chat/XyneAISidebar/utils/XyneAITypes';
-import {
-  fetchSessionDetail,
-  fetchUserSessionForConversation,
-} from '../../services/XyneAI/XyneAISessionsService';
 import { parseFromField, stripHtml } from '../../components/xyne-desk/EmailComposer/helpers';
 import { EmailBodyRenderer } from '../../components/xyne-desk/EmailBody/EmailBodyRenderer';
 import CallThread from '../../components/xyne-desk/CallThread/CallThread';
@@ -3452,7 +3448,7 @@ export const SupportTicketDetail = ({
   const { setSelectedAgentSlug } = useSelectedAgent();
 
   const openDraftAgentSession = useCallback(
-    async (explicitSessionId?: string): Promise<void> => {
+    (explicitSessionId?: string): void => {
       if (!conversationId || !channelId) {
         xyneAIActor.send({ type: 'OPEN' });
         return;
@@ -3464,13 +3460,6 @@ export const SupportTicketDetail = ({
       if (!sessionId) {
         try {
           sessionId = localStorage.getItem(`xd-ai-session:${channelId}_${conversationId}`);
-        } catch {
-          sessionId = null;
-        }
-      }
-      if (!sessionId) {
-        try {
-          sessionId = await fetchUserSessionForConversation(conversationId);
         } catch {
           sessionId = null;
         }
@@ -3540,20 +3529,11 @@ export const SupportTicketDetail = ({
       }
     };
 
-    const hydrateUserSession = async (): Promise<void> => {
-      try {
-        const sessionId = await withRetry(() => fetchUserSessionForConversation(conversationId));
-        if (cancelled || !sessionId) return;
-        const detail = await withRetry(() => fetchSessionDetail(sessionId));
-        if (cancelled) return;
-        const answered = detail.messages.some(m => m.type === 'bot');
-        if (!cancelled) setUserDraftSession({ sessionId, answered });
-      } catch {
-        // 404 = no user session yet for this conv — leave null (button hidden).
-      }
-    };
-
-    void Promise.allSettled([hydrateAutodraft(), hydrateUserSession()]).finally(() => {
+    // Ask AI v1 provided a desk-conversation → session lookup used to restore
+    // the querying user's prior draft-agent session (to gate "See sources").
+    // v2/claw has no equivalent by-conversation lookup on the frontend, so this
+    // restore is dropped — the autodraft insight (hydrateAutodraft) still runs.
+    void Promise.allSettled([hydrateAutodraft()]).finally(() => {
       if (!cancelled) setSourcesHydrating(false);
     });
 

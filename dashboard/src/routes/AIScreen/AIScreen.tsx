@@ -15,8 +15,6 @@ import { CitationDocsProvider } from '../../components/AIScreen/citationDocs';
 import { ChatWithCitationDocs } from '../../components/AIScreen/CitationDocsPanel';
 import { xyneAIStreamManager } from '../../services/XyneAI/XyneAIStreamManager';
 import { useV2SessionInvalidator } from '../../hooks/useAskAISessionsV2';
-import { useSessionInvalidator } from '../../hooks/useAskAISessions';
-import { useAskAIVersion } from '../../hooks/useAskAIVersion';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 
 const AI_ACTIVE_SESSION_KEY = 'ai-active-session-id';
@@ -47,11 +45,9 @@ const AIScreen = (): ReactElement => {
   // chat instead of clearing them — matching XyneAISidebar.
   const lastContextRef = useRef<ComposerContext | undefined>(undefined);
   const navigate = useNavigate();
-  const { askAIVersion } = useAskAIVersion();
   const { selectedAgentSlug } = useSelectedAgent();
-  const isV2 = askAIVersion === 'v2';
-  const effectiveAgentSlug = isV2 ? selectedAgentSlug : null;
-  const { invalidateSessions: invalidateV1Sessions } = useSessionInvalidator();
+  const isV2 = true;
+  const effectiveAgentSlug = selectedAgentSlug;
   const { invalidateSessions: invalidateV2Sessions } = useV2SessionInvalidator();
 
   useEffect(() => {
@@ -203,13 +199,9 @@ const AIScreen = (): ReactElement => {
       // A new chat just acquired its server sessionId — refresh the recents
       // list so this conversation shows up immediately, without needing a
       // page reload or a navigate-away-and-back.
-      if (isV2) {
-        invalidateV2Sessions(effectiveAgentSlug);
-      } else {
-        invalidateV1Sessions();
-      }
+      invalidateV2Sessions(effectiveAgentSlug);
     },
-    [effectiveAgentSlug, invalidateV1Sessions, invalidateV2Sessions, isV2],
+    [effectiveAgentSlug, invalidateV2Sessions],
   );
 
   const handleAccount = useCallback((): void => {

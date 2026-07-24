@@ -179,7 +179,6 @@ import { stageEtaDeadlineQueue } from '@/queues/stageEtaDeadlineQueue';
 import { assignmentReactivationQueue } from '@/queues/assignmentReactivationQueue';
 import { onCallRotationQueue } from '@/queues/onCallRotationQueue';
 import { scheduledMessageQueue } from '@/queues/scheduledMessageQueue';
-import { initializeXyneAI } from '@/agents/xyne-ai';
 import { conversationIngestQueue } from '@/queues/conversationIngestQueue';
 import { documentIngestQueue } from '@/queues/documentIngestQueue';
 import { teamIntelligenceQueue } from '@/team-intelligence/queue';
@@ -923,9 +922,6 @@ export class App {
     }
     botCatalog.markInitialized();
     logger.info(`Unified bot framework initialized with ${botCatalog.count} bot(s)`);
-
-    // Initialize Xyne AI agent (fetches prompts from Langfuse)
-    await initializeXyneAI();
 
     logger.info('Initializing Vespa queue...');
     const { vespaQueue, vespaBackfillQueue } = await import('@/queues/vespaQueue');
