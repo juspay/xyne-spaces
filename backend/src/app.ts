@@ -95,6 +95,7 @@ import cacConfigRoutes from '@/routes/cacConfig';
 import vespaBackfillRoutes from '@/routes/vespaBackfill';
 import ticketMigrationRoutes from '@/routes/ticketMigration';
 import activitiesBackfillRoutes from '@/routes/activitiesBackfill';
+import ticketActivitySystemActorBackfillRoutes from '@/routes/ticketActivitySystemActorBackfill';
 import activityThreadBackfillRoutes from '@/routes/activityThreadBackfill';
 import appPermissionsBackfillRoutes from '@/routes/appPermissionsBackfill';
 import projectTagsBackfillRoutes from '@/routes/projectTagsBackfill';
@@ -392,6 +393,9 @@ export class App {
     if (process.env.ENABLE_ACTIVITIES_BACKFILL_ROUTES === 'true') {
       this.app.use('/api/admin/activities-backfill', activitiesBackfillRoutes);
     }
+    // Ticket activity 'system' actor backfill — legacy literal → real automations bot User id
+    this.app.use('/api/admin/ticket-activity-system-actor-backfill', ticketActivitySystemActorBackfillRoutes);
+    this.app.use('/migrate/api/admin/ticket-activity-system-actor-backfill', ticketActivitySystemActorBackfillRoutes);
     // Activity isThreadActivity backfill
     this.app.use('/migrate/api/admin/activity-thread-backfill', activityThreadBackfillRoutes);
     this.app.use('/api/admin/activity-thread-backfill', activityThreadBackfillRoutes);
