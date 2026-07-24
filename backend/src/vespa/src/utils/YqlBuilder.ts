@@ -28,6 +28,7 @@ const LEXICAL_FUZZY_FIELDS = [
   'boardName', 'xyneId', 'tags', 'createdByName', 'assignedToName', 'closedByName',
   'projectName', 'ticketMentions', 'threadMentions', 'threadSenders',
   'parentTicketXyneId', 'childTicketXyneIds', 'stage', 'status', 'subject_fuzzy', 'chunks_fuzzy',
+  'ticketFormFieldValues',
 ];
 
 // grammar:"tokenize" tokenizes the user query with syntax parsing off (weakAnd/internal/none),

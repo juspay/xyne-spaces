@@ -154,6 +154,7 @@ export type VespaTicketFormField = TicketFormField;
 
 export enum RankProfile {
   nativeRank = "default_native",
+  unifiedRank = 'unified',
   personalizedRank = 'personalized',
   fuzzyRank = 'default_fuzzy',
   duplicateDetection = 'duplicate_detection'
@@ -447,6 +448,9 @@ export interface VespaMailDocument extends VespaDocument {
   threadId: string;
   parentThreadId?: string;
   mailId?: string;
+  xyneId?: string;
+  ticketFormFields?: TicketFormFields;
+  ticketFormFieldValues?: string[]; // Indexed copy used for Desk/All lexical search.
   subject: string;
   chunks: string[];
   timestamp: number;

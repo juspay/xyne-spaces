@@ -572,21 +572,31 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       options.groupBy = groupBy;
     }
 
-    // Checks if "search" is in the string and extracts the last number
+    // Network Conditions override for testing Cmd+K rank profiles.
+    // `unified` selects the named unified profile; the legacy `search<N>`
+    // convention selects default_native_<N>, with search50 as personalized.
     const userAgent = req.get('User-Agent') || '';
-    if (userAgent.includes('search')) {
-      // Regex matches digits (\d+) at the end of the string ($)
-      const match = userAgent.match(/(\d+)$/);
-      
-      if (match && match.length > 1) {
-        const scoreInt = match[1]; // The captured number
-        options.rankProfile = `${RankProfile.nativeRank}_${scoreInt}`;
-        logger.info(`[vespa-search, ${searchId?searchId:""}] User-Agent contained 'search'. Switched rankProfile to: ${options.rankProfile}`);
-        if(parseInt(scoreInt) == 50){
-          options.rankProfile = RankProfile.personalizedRank;
-        }
-      }
+    const isUnifiedProfile = userAgent.trim().toLowerCase() === RankProfile.unifiedRank;
+    const numericProfileToken = userAgent.includes('search')
+      ? userAgent.match(/(\d+)$/)?.[1]
+      : undefined;
 
+    if (isUnifiedProfile) {
+      options.rankProfile = RankProfile.unifiedRank;
+      // Match the full-search `unified` path: its normalized cross-schema
+      // scores must remain in one global list instead of docType buckets.
+      options.groupBy = '';
+    } else if (numericProfileToken) {
+      options.rankProfile =
+        Number(numericProfileToken) === 50
+          ? RankProfile.personalizedRank
+          : `${RankProfile.nativeRank}_${numericProfileToken}`;
+    }
+
+    if (isUnifiedProfile || numericProfileToken) {
+      logger.info(
+        `[vespa-search, ${searchId ? searchId : ''}] User-Agent rank-profile override: ${options.rankProfile}`,
+      );
     }
 
     // Determine which apps to search based on type filter
@@ -816,6 +826,20 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       options.groupBy = '';
     }
 
+    const isMailOnlySearch =
+      searchApps.length === 1 && searchApps[0].trim().toLowerCase() === 'mail';
+    const mailGroupOffset = isMailOnlySearch
+      ? Math.max(Number(offset) || 0, 0)
+      : 0;
+
+    // Vespa's top-level offset paginates hits, not grouping buckets. Desk mail
+    // results are grouped by threadId, so fetch the ranked group prefix and
+    // slice the requested page after parsing the grouping response.
+    if (isMailOnlySearch && mailGroupOffset > 0) {
+      options.offset = 0;
+      options.limit = mailGroupOffset + effectiveLimit;
+    }
+
     // Call vespa search
     const results = await vespaService.searchService.searchVespa(
       q as string,
@@ -840,9 +864,12 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       // Grouped result don't have matchFeatures
       // Need to be added explicitly
       // Return grouped results
-     
+      const pageGroups = isMailOnlySearch
+        ? parsedResults.groups.slice(mailGroupOffset, mailGroupOffset + effectiveLimit)
+        : parsedResults.groups;
+
       const groupedResults = await Promise.all(
-        parsedResults.groups.map(async (group) => {
+        pageGroups.map(async (group) => {
           // Attach matchfeatures to each hit's fields before transformation
           const hitsWithMatchFeatures = group.hits.map((hit: VespaSearchHit) => ({
             ...hit,
@@ -851,7 +878,11 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
               matchfeatures: matchFeaturesMap.get(hit.fields?.docId) || null
             }
           }));
-          const transformedHits = await transformVespaResults(hitsWithMatchFeatures, db, wantDebugInfo);
+          const transformedHits = await transformVespaResults(
+            hitsWithMatchFeatures,
+            db,
+            wantDebugInfo,
+          );
           return {
             groupBy: group.groupBy,
             groupValue: group.groupValue,
@@ -877,7 +908,11 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       // flat results will have matchFeatures returned by vespa.
       // No need to add.
       const hits = parsedResults.hits || [];
-      const transformedResults = await transformVespaResults(hits, db, wantDebugInfo);
+      const transformedResults = await transformVespaResults(
+        hits,
+        db,
+        wantDebugInfo,
+      );
 
       res.json({
         success: true,

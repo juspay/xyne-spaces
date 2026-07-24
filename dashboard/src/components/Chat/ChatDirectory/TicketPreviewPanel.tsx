@@ -1,5 +1,5 @@
 import { ReactElement } from 'react';
-import { Calendar, CheckCircle2, User, UserPlus } from 'lucide-react';
+import { Calendar, CheckCircle2, Mail, User, UserPlus } from 'lucide-react';
 import type { DisplaySearchResult } from '../../../types/search';
 import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWithHTML';
 import Avatar from '../../ui/Avatar/Avatar';
@@ -61,22 +61,29 @@ export const TicketPreviewPanel = ({ ticket }: TicketPreviewPanelProps): ReactEl
   if (!ticket) return null;
 
   const { title, context, metadata, searchContext } = ticket;
+  const isDesk = ticket.type === 'conversation' && searchContext?.subApp === 'DESK';
   const statusStyles = getStatusStyles(searchContext?.ticketStatus);
 
   return (
-    <div className='flex flex-col self-stretch border-l border-border/30 w-80 flex-shrink-0 bg-background'>
+    <div className='flex min-h-0 flex-col self-stretch overflow-hidden border-l border-border/30 w-80 flex-shrink-0 bg-background'>
       {/* Header */}
-      <div className='flex items-center justify-between px-4 py-3 border-b border-border/30 bg-muted/30'>
+      <div className='flex shrink-0 items-center justify-between px-4 py-3 border-b border-border/30 bg-muted/30'>
         <div className='flex items-center gap-2'>
           <div className='p-1.5 bg-primary/10 rounded-md'>
-            <CheckCircle2 size={14} className='text-primary' />
+            {isDesk ? (
+              <Mail size={14} className='text-primary' />
+            ) : (
+              <CheckCircle2 size={14} className='text-primary' />
+            )}
           </div>
-          <span className='text-sm font-semibold text-foreground'>Ticket Preview</span>
+          <span className='text-sm font-semibold text-foreground'>
+            {isDesk ? 'Desk Preview' : 'Ticket Preview'}
+          </span>
         </div>
       </div>
 
       {/* Ticket Content */}
-      <div className='flex-1 overflow-y-auto flex flex-col'>
+      <div className='flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain'>
         {/* Title Section */}
         <div className='p-4 pb-3 border-b border-border/30'>
           {/* XYNE ID */}
@@ -100,6 +107,29 @@ export const TicketPreviewPanel = ({ ticket }: TicketPreviewPanelProps): ReactEl
             <p className='text-sm text-muted-foreground leading-relaxed'>
               <RenderMessageWithHTML message={context} />
             </p>
+          </div>
+        )}
+
+        {isDesk && (searchContext?.senderName || searchContext?.senderEmail) && (
+          <div className='p-4 border-b border-border/30'>
+            <div className='flex items-center gap-3'>
+              <div className='flex items-center justify-center w-8 h-8 rounded-md bg-blue-50 flex-shrink-0'>
+                <User size={14} className='text-blue-600' />
+              </div>
+              <div className='flex flex-col min-w-0'>
+                <span className='text-xs text-muted-foreground uppercase tracking-wider font-medium'>
+                  Sender
+                </span>
+                <span className='text-sm font-medium text-foreground truncate mt-0.5'>
+                  {searchContext.senderName || searchContext.senderEmail}
+                </span>
+                {searchContext.senderName && searchContext.senderEmail && (
+                  <span className='text-xs text-muted-foreground truncate'>
+                    {searchContext.senderEmail}
+                  </span>
+                )}
+              </div>
+            </div>
           </div>
         )}
 

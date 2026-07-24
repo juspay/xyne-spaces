@@ -1151,6 +1151,14 @@ function ResultsBody({
       // timestamp, then the body snippet.
       const senderName = result.searchContext?.senderName || result.subtitle || '';
       const recipientCount = result.searchContext?.recipientCount ?? 0;
+      const deskTicketSubtitle = [
+        result.subtitle || result.searchContext.xyneId,
+        ...(result.searchContext.formFieldMatches ?? []).map(
+          field => `${field.fieldName ?? field.fieldId}: ${field.fieldValue}`,
+        ),
+      ]
+        .filter(Boolean)
+        .join(' | ');
       return (
         <button
           key={key}
@@ -1166,6 +1174,11 @@ function ResultsBody({
             <p className='text-sm font-medium text-foreground truncate'>
               <RenderMessageWithHTML message={result.title} />
             </p>
+            {deskTicketSubtitle && (
+              <div className='text-xs text-foreground truncate'>
+                <RenderMessageWithHTML message={deskTicketSubtitle} />
+              </div>
+            )}
             <div className='flex items-center justify-between gap-2 text-xs text-muted-foreground'>
               <span className='min-w-0 truncate'>
                 {senderName}

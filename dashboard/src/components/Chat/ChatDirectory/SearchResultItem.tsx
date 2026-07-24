@@ -192,6 +192,14 @@ const SearchResultItem = ({
       if (result.searchContext?.subApp === 'DESK') {
         const senderName = result.searchContext?.senderName || result.subtitle || '';
         const recipientCount = result.searchContext?.recipientCount ?? 0;
+        const deskTicketSubtitle = [
+          result.subtitle || result.searchContext.xyneId,
+          ...(result.searchContext.formFieldMatches ?? []).map(
+            field => `${field.fieldName ?? field.fieldId}: ${field.fieldValue}`,
+          ),
+        ]
+          .filter(Boolean)
+          .join(' | ');
         return (
           <Command.Item
             key={result.id}
@@ -206,6 +214,9 @@ const SearchResultItem = ({
                 void onSelect(result);
               }
             }}
+            onMouseDownCapture={handleMouseDown}
+            onMouseEnter={handleMouseEnter}
+            onMouseLeave={handleMouseLeave}
             className='flex flex-col gap-0.5 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1'
           >
             <div className='flex items-start gap-1.5'>
@@ -223,29 +234,29 @@ const SearchResultItem = ({
               {getResultIcon(result)}
               <div className='flex-1 min-w-0'>
                 {/* Line 1: subject gets the full row */}
-                <div className='flex items-baseline gap-1 font-semibold text-xs text-foreground'>
-                  {result.searchContext?.xyneId && (
-                    <span className='shrink-0'>{result.searchContext.xyneId} ·</span>
-                  )}
+                <div className='flex items-baseline gap-1 font-semibold text-sm text-foreground'>
                   <div className='min-w-0 truncate'>
                     <RenderMessageWithHTML message={result.title} />
                   </div>
                 </div>
-                {/* Line 2: sender on the left, timestamp aligned on the right */}
-                <div className='flex items-center justify-between gap-2 text-[11px] text-muted-foreground'>
+                {/* Line 2: ticket ID and matched form fields, ticket-subtitle style */}
+                {deskTicketSubtitle && (
+                  <div className='text-xs text-foreground truncate'>
+                    <RenderMessageWithHTML message={deskTicketSubtitle} />
+                  </div>
+                )}
+                {/* Line 3: sender on the left, timestamp on the right */}
+                <div className='flex items-center justify-between gap-2 text-xs text-muted-foreground'>
                   <span className='min-w-0 truncate'>
                     {senderName}
                     {recipientCount > 0 && ` +${recipientCount} more`}
                   </span>
-                  <span className='shrink-0 whitespace-nowrap'>
+                  <span className='whitespace-nowrap shrink-0'>
                     {utcToIst(result.metadata.timestamp)}
                   </span>
                 </div>
               </div>
               {!mergeMode && isSelected && <SelectedBadge />}
-            </div>
-            <div className={`text-xs text-foreground ${mergeMode ? 'pl-10' : 'pl-6'}`}>
-              <SearchSnippetRenderer message={result.context || ''} wordLimit={40} />
             </div>
           </Command.Item>
         );
@@ -310,9 +321,18 @@ const SearchResultItem = ({
               <div className='font-semibold text-sm text-foreground truncate'>
                 <RenderMessageWithHTML message={result.title} />
               </div>
-              {result.subtitle && (
-                <div className='text-xs text-muted-foreground line-clamp-2'>
-                  <RenderMessageWithHTML message={result.subtitle} />
+              {(result.subtitle || result.metadata.timestamp) && (
+                <div className='flex items-start justify-between gap-2 text-xs text-muted-foreground'>
+                  {result.subtitle && (
+                    <div className='min-w-0 line-clamp-2'>
+                      <RenderMessageWithHTML message={result.subtitle} />
+                    </div>
+                  )}
+                  {result.metadata.timestamp && (
+                    <span className='ml-auto shrink-0 whitespace-nowrap'>
+                      {utcToIst(result.metadata.timestamp)}
+                    </span>
+                  )}
                 </div>
               )}
             </div>

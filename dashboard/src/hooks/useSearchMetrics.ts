@@ -1450,6 +1450,9 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
           searchFilters.type = VespaDocTypes.FILES;
         } else if (activeTab === TabType.TICKETS) {
           searchFilters.type = VespaDocTypes.TICKETS;
+        } else if (activeTab === TabType.DESK) {
+          searchFilters.type = SearchableTypes.EMAILS;
+          searchFilters.apps = VespaApps.MAIL;
         }
 
         // Add assignee filter for Tickets/ALL (force ticket-only search)

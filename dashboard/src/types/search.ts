@@ -22,6 +22,7 @@ export interface SearchContext {
   attachmentIds?: string[]; // Vespa file doc ids for attachments owned by this message
   orgName?: string;
   senderName?: string;
+  senderEmail?: string;
   senderId?: string;
   ticketId?: string;
   xyneId?: string;
@@ -40,6 +41,11 @@ export interface SearchContext {
   tags?: string[];
   mailId?: string; // externalMessageId for mail results (used for scroll-to)
   recipientCount?: number; // total to+cc+bcc (excluding sender) for mail results
+  formFieldMatches?: Array<{
+    fieldId: string;
+    fieldName?: string;
+    fieldValue: string; // HTML-escaped value with Vespa-style <hi> tags around query matches
+  }>;
   attachmentId?: string;
   fileName?: string;
   fileSize?: number;
