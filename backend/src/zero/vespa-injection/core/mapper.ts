@@ -30,6 +30,37 @@ type CanvasesSchema = Schema['tables']['canvases'];
 type TranscriptsSchema = Schema['tables']['calls'];
 type MessageAttachmentsSchema = Schema['tables']['message_attachments'];
 
+const loadTicketFormFields = async (ticketId: string) => {
+  const formEntityValues = await db.formEntityValues.findMany({
+    where: {
+      entityId: ticketId,
+      entityType: 'TICKET',
+    },
+    select: {
+      fieldId: true,
+      actualFieldValue: true,
+    },
+  }) as TicketDynamicFieldValue[];
+
+  const fieldIds = [...new Set(formEntityValues.map(value => value.fieldId))];
+  const formFieldRows = fieldIds.length > 0
+    ? await db.formFields.findMany({
+      where: {
+        id: { in: fieldIds },
+      },
+      select: {
+        id: true,
+        fieldType: true,
+      },
+    })
+    : [];
+  const fieldTypeByFieldId = new Map(
+    formFieldRows.map(field => [field.id, field.fieldType as FormFieldType]),
+  );
+
+  return buildFormFields(formEntityValues, fieldTypeByFieldId);
+};
+
 const getRef = (schema: VespaSchema, docId: string) => `id:${NAMESPACE}:${schema}::${docId}`
 
 /**
@@ -560,33 +591,6 @@ export const mapTicket = async (args: InsertValue<TicketsSchema>): Promise<Vespa
     extractMentionsFromContent(args.description),
   ])
 
-  const formEntityValues = await db.formEntityValues.findMany({
-    where: {
-      entityId: args.id,
-      entityType: 'TICKET',
-    },
-    select: {
-      fieldId: true,
-      actualFieldValue: true,
-    },
-  }) as TicketDynamicFieldValue[];
-
-  const fieldIds = [...new Set(formEntityValues.map(value => value.fieldId))];
-  const formFieldRows = fieldIds.length > 0
-    ? await db.formFields.findMany({
-      where: {
-        id: { in: fieldIds },
-      },
-      select: {
-        id: true,
-        fieldType: true,
-      },
-    })
-    : [];
-  const fieldTypeByFieldId = new Map(
-    formFieldRows.map(field => [field.id, field.fieldType as FormFieldType]),
-  );
-
   // Resolve parent/child ticket relationships
   const { parentTicketXyneId, childTicketXyneIds } = await resolveTicketRelationships(args.id);
   const { messages, threadMentions, threadSenders } = await getThreadInfo(args.conversationId);
@@ -608,7 +612,7 @@ export const mapTicket = async (args: InsertValue<TicketsSchema>): Promise<Vespa
   }
 
   const resolvedChannelName = await resolveChannelName(channel?.name || '', channel?.scopeType);
-  const vespaFormFields = buildFormFields(formEntityValues ?? [], fieldTypeByFieldId);
+  const vespaFormFields = await loadTicketFormFields(args.id);
 
   // Our tag-generation framework's tags, sourced from the latest email in this
   // ticket's conversation (the framework only tags desk-email, not tickets directly).
@@ -1360,14 +1364,21 @@ const chunkPlainText = (text: string, maxLen = 2000): string[] => {
  *   3. externalMessage       → externalSourceId
  *   4. externalSource        → source name
  *   5. messageAttachment[]   → attachmentFilenames
+ *   6. ticket form values    → indexed Desk search values
  */
 export const mapEmail = async (email: Email, workspaceId?: string, orgId?: string): Promise<VespaMailDocument> => {
-  // 1. Resolve conversation → channelId
+  // 1. Resolve conversation → channelId and linked ticket
   const conversation = await db.conversation.findUnique({
     where: { conversationId: email.conversationId },
     select: { channelId: true },
   });
   const channelId = conversation?.channelId ?? '';
+
+  const ticket = await db.ticket.findFirst({
+    where: { conversationId: email.conversationId },
+    select: { id: true, xyneId: true },
+  });
+  const ticketFormFields = ticket ? await loadTicketFormFields(ticket.id) : [];
 
   const { workspaceId: effectiveWorkspaceId, orgId: effectiveOrgId } = await resolveOrgAndWorkspace(
     workspaceId,
@@ -1425,6 +1436,9 @@ export const mapEmail = async (email: Email, workspaceId?: string, orgId?: strin
     threadId: email.conversationId,
     parentThreadId: email.externalThreadId || undefined,
     mailId: email.externalMessageId || undefined,
+    xyneId: ticket?.xyneId ?? undefined,
+    ticketFormFields,
+    ticketFormFieldValues: Array.from(new Set(ticketFormFields.map(field => field.fieldValue))),
     subject: email.subject,
     chunks,
     timestamp: toTimestamp(email.createdAt),

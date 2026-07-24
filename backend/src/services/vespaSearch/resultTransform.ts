@@ -72,6 +72,7 @@ import { PrismaClient } from '@prisma/client';
        callType?: string;
        mailId?: string;
        recipientCount?: number;
+       formFieldMatches?: Array<{ fieldId: string; fieldName?: string; fieldValue: string }>;
        priority?: string;
        stageName?: string;
        projectId?: string;
@@ -149,6 +150,7 @@ import { PrismaClient } from '@prisma/client';
      const channelIdsToFetch = new Set<string>();
      const mailDocIds = new Set<string>();
      const collectionIdsToFetch = new Set<string>();
+     const formFieldIdsToFetch = new Set<string>();
 
      hits.forEach((hit) => {
        const doc = hit.fields;
@@ -198,6 +200,8 @@ import { PrismaClient } from '@prisma/client';
        // click-through navigation into the Desk view.
        if (docType === 'mail' && 'docId' in doc && doc.docId) {
          mailDocIds.add(doc.docId as string);
+         const mailDoc = doc as VespaMailDocument;
+         mailDoc.ticketFormFields?.forEach(field => formFieldIdsToFetch.add(field.fieldId));
        }
 
        // For channels (DM/Group DM), we might need participant names
@@ -325,8 +329,44 @@ import { PrismaClient } from '@prisma/client';
          };
        }
      }
+
+     // Resolve the stable Vespa field IDs to user-facing form labels in one query.
+     // Legacy values use form_fields.id; new-style values use globalFieldId.
+     const formFieldNameMap: Record<string, string> = {};
+     if (formFieldIdsToFetch.size > 0) {
+       const ids = Array.from(formFieldIdsToFetch);
+       const fields = await prisma.formFields.findMany({
+         where: {
+           OR: [
+             { id: { in: ids } },
+             { globalFieldId: { in: ids } },
+           ],
+         },
+         select: {
+           id: true,
+           fieldName: true,
+           globalFieldId: true,
+           globalField: { select: { fieldName: true } },
+         },
+       });
+       for (const field of fields) {
+         const fieldName = field.globalField?.fieldName ?? field.fieldName;
+         if (!fieldName) continue;
+         formFieldNameMap[field.id] = fieldName;
+         if (field.globalFieldId) formFieldNameMap[field.globalFieldId] = fieldName;
+       }
+     }
      // Transform each hit
-     return hits.map((hit) => transformSingleHit(hit, userMap, collectionProjectMap, mailMap, includeDebugInfo));
+     return hits.map((hit) =>
+       transformSingleHit(
+         hit,
+         userMap,
+         collectionProjectMap,
+         mailMap,
+         formFieldNameMap,
+         includeDebugInfo,
+       ),
+     );
    }
    
    /**
@@ -337,8 +377,9 @@ import { PrismaClient } from '@prisma/client';
      userMap: UserMap,
      collectionProjectMap: Record<string, { projectId: string; channelId: string }>,
      mailMap: MailMap,
+     formFieldNameMap: Record<string, string>,
      includeDebugInfo = false,
-): TransformedSearchResult {
+   ): TransformedSearchResult {
      const doc = hit.fields;
      const docType = doc.docType as string;
 
@@ -375,7 +416,7 @@ import { PrismaClient } from '@prisma/client';
          break;
 
        case 'mail':
-         result = transformMail(hit, doc as VespaMailDocument, mailMap);
+         result = transformMail(hit, doc as VespaMailDocument, mailMap, formFieldNameMap);
          break;
 
        case 'call':
@@ -769,6 +810,7 @@ function transformCollection(
      hit: VespaSearchHit,
      doc: VespaMailDocument,
      mailMap: MailMap,
+     formFieldNameMap: Record<string, string>,
    ): TransformedSearchResult {
      // Pick the chunk with the densest <hi>...</hi> highlights (the chunk most
      // relevant to the query). Fall back to the first chunk. Do NOT substring
@@ -801,12 +843,20 @@ function transformCollection(
        (doc.to?.length ?? 0) + (doc.cc?.length ?? 0) + (doc.bcc?.length ?? 0);
 
      const link = mailMap[doc.docId];
+     // Match ticket rendering: keep Vespa's potentially highlighted ID in the
+     // display subtitle, but strip tags from the routing value.
+     const xyneIdPlain = (link?.ticketXyneId ?? doc.xyneId)?.replace(/<\/?hi>/gi, '');
+     const formFieldMatches = getVespaHighlightedFormFields(
+       doc.ticketFormFields,
+       doc.ticketFormFieldValues,
+       formFieldNameMap,
+     );
 
      return {
        id: hit.id,
        type: 'conversation',
        title: doc.subject || '(no subject)',
-       subtitle: senderName,
+       subtitle: doc.xyneId || xyneIdPlain || '',
        context: previewChunk,
        relevanceScore: hit.relevance,
        metadata: {
@@ -818,15 +868,41 @@ function transformCollection(
          mailId: link?.emailId ?? doc.docId,
          conversationId: link?.conversationId,
          ticketId: link?.ticketId,
-         xyneId: link?.ticketXyneId,
+         xyneId: xyneIdPlain,
          channelId: link?.channelId,
          channelTitle: 'Desk',
          senderName,
          senderEmail,
          recipientCount,
+         ...(formFieldMatches.length > 0 && { formFieldMatches }),
          subApp: 'DESK',
        },
      };
+   }
+
+   function getVespaHighlightedFormFields(
+     formFields: VespaMailDocument['ticketFormFields'],
+     highlightedValues: VespaMailDocument['ticketFormFieldValues'],
+     formFieldNameMap: Record<string, string>,
+   ): Array<{ fieldId: string; fieldName?: string; fieldValue: string }> {
+     if (!formFields?.length || !highlightedValues?.length) return [];
+
+     const highlightedByValue = new Map<string, string>();
+     for (const value of highlightedValues) {
+       if (!/<hi>.*?<\/hi>/i.test(value)) continue;
+       highlightedByValue.set(value.replace(/<\/?hi>/gi, ''), value);
+     }
+
+     return formFields.flatMap(field => {
+       const highlighted = highlightedByValue.get(field.fieldValue);
+       if (!highlighted) return [];
+
+       return [{
+         fieldId: field.fieldId,
+         fieldName: formFieldNameMap[field.fieldId],
+         fieldValue: highlighted,
+       }];
+     });
    }
 
    /**

@@ -8,7 +8,7 @@ import { buildKanbanCountsSnapshot } from '@/services/tickets/kanbanCountsSnapsh
 import type { KanbanCountsSnapshot } from '@/services/tickets/kanbanCountsSnapshotService';
 import { websocketService } from '@/services/websocketService';
 import { vespaQueue } from '@/queues/vespaQueue';
-import { ticketSchema } from '@/vespa/src/types';
+import { mailSchema, ticketSchema } from '@/vespa/src/types';
 import { normalizeVespaFieldValue } from '@/zero/vespa-injection/core/form-fields';
 import { createTicketCustomFieldActivity } from '@/services/ticketCustomFieldActivityService';
 import { emitTicketUpdated } from '@/automations/triggers/ticket-updated.trigger';
@@ -63,7 +63,7 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
 
     if (entityType !== 'TICKET' || !ticketId || !fieldId) return;
 
-    await this.queueTicketVespaFeed(ticketId);
+    await this.queueTicketAndMailVespaFeeds(ticketId);
 
     const currentSnapshot = await buildKanbanCountsSnapshot(ticketId);
     if (!currentSnapshot) return;
@@ -82,7 +82,7 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
     });
   }
 
-  private async queueTicketVespaFeed(ticketId: string): Promise<void> {
+  private async queueTicketAndMailVespaFeeds(ticketId: string): Promise<void> {
     try {
       await vespaQueue.addJob({
         schema: ticketSchema,
@@ -91,8 +91,28 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
         userId: this.ctx.userID,
         workspaceId: this.ctx.workspaceId,
       });
+
+      const ticket = await db.ticket.findUnique({
+        where: { id: ticketId },
+        select: { conversationId: true },
+      });
+      if (!ticket?.conversationId) return;
+
+      const emails = await db.email.findMany({
+        where: { conversationId: ticket.conversationId },
+        select: { id: true },
+      });
+      await Promise.all(
+        emails.map(email => vespaQueue.addJob({
+          schema: mailSchema,
+          jobType: 'feed',
+          docId: email.id,
+          userId: this.ctx.userID,
+          workspaceId: this.ctx.workspaceId,
+        })),
+      );
     } catch (error) {
-      logger.error('[FormEntityValuesSideEffectHandler] Failed to queue ticket Vespa feed:', {
+      logger.error('[FormEntityValuesSideEffectHandler] Failed to queue ticket/mail Vespa feeds:', {
         ticketId,
         error: error,
       });
