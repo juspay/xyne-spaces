@@ -77,14 +77,18 @@ export class ExternalStepResponseRepository extends BaseRepository<ExternalStepR
     workflowStepId: string,
     rawResponse: string
   ): Promise<ExternalStepResponse> {
-    // Stamp the denormalized tenant key from the owning execution.
+    // Stamp the denormalized tenant key from the owning execution, falling back to the
+    // parent workflow (Workflow.workspaceId is NOT NULL). WorkflowExecution.workspaceId is
+    // nullable and legitimately null for un-backfilled/legacy executions, so reading it
+    // directly would leak workspaceId = NULL onto the response.
     const execution = await this.db.workflowExecution.findUnique({
       where: { id: workflowExecutionId },
-      select: { workspaceId: true },
+      select: { workspaceId: true, workflow: { select: { workspaceId: true } } },
     });
     if (!execution) {
       throw new Error(`Workflow execution not found: ${workflowExecutionId}`);
     }
+    const workspaceId = execution.workspaceId ?? execution.workflow.workspaceId;
     return await this.db.externalStepResponse.upsert({
       where: {
         workflowStepId
@@ -97,7 +101,7 @@ export class ExternalStepResponseRepository extends BaseRepository<ExternalStepR
         workflowExecutionId,
         workflowStepId,
         rawResponse,
-        workspaceId: execution.workspaceId
+        workspaceId
       }
     });
   }

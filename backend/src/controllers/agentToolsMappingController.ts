@@ -20,7 +20,13 @@ export class AgentToolsMappingController {
         return;
       }
 
-      const mapping = await repositories.agentToolsMappings.create(mappingData);
+      // Stamp the tenant from the authenticated session, not the request body — a client
+      // must not be able to choose the workspace, and the removed stamp extension no longer
+      // fills this. Mirrors the sibling enable/disable handlers.
+      const mapping = await repositories.agentToolsMappings.create({
+        ...mappingData,
+        workspaceId: req.user!.workspaceId!,
+      });
       res.status(201).json(mapping);
     } catch (error) {
       logger.error('Error creating agent tools mapping:', error);
