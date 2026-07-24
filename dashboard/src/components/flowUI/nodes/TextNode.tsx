@@ -11,6 +11,8 @@ import { GenericMentionHoverPopover } from '../../ui/GenericMentionPopover/Gener
 import { useChannel } from '../../../hooks/useChannels';
 import { useCustomEmojis } from '../../../hooks/useCustomEmojis';
 import { useUserGroupById } from '../../../hooks/useUserGroup';
+import { findUnicodeEmoji, preloadEmojiData } from '../../../utils/emojiLookup';
+import { unifiedToNative } from '../../../utils/emojiSearch';
 
 /** Resolves group alias/name from zero store so display name is always correct,
  *  regardless of whether the token had an alias embedded. */
@@ -322,6 +324,12 @@ export const TextNode: React.FC<TextNodeProps> = ({ node, children }) => {
     return map;
   }, [customEmojis]);
 
+  // Standard emoji shortcodes (e.g. :arrow_up:) resolve against the lazily-loaded
+  // emoji-datasource cache; kick off the load so findUnicodeEmoji can hit it.
+  React.useEffect(() => {
+    preloadEmojiData();
+  }, []);
+
   const props = node.props as
     | {
         content: string;
@@ -425,7 +433,12 @@ export const TextNode: React.FC<TextNodeProps> = ({ node, children }) => {
             />
           );
         }
-        // Not a custom emoji — leave as raw shortcode text
+        // Not a custom emoji — fall back to a standard Unicode emoji shortcode
+        // (e.g. :arrow_up: → ⬆️) before giving up and showing the raw shortcode.
+        const standard = findUnicodeEmoji(part.name);
+        if (standard) {
+          return <span key={key}>{unifiedToNative(standard.unified)}</span>;
+        }
         return <span key={key}>:{part.name}:</span>;
       }
       default:
