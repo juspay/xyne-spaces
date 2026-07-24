@@ -56,22 +56,22 @@ export async function authenticate(
 
     let source = await externalSourceRepository.findByName(resolvedSourceName);
     if (!source && sourceName === 'google') {
+      let emailAddress: string | undefined;
       try {
         const message = rawBodyReq.body?.message;
         const encodedData = typeof message?.data === 'string' ? message.data : '';
         if (encodedData) {
           const decoded = Buffer.from(encodedData, 'base64').toString('utf-8');
-          const parsed = JSON.parse(decoded) as { emailAddress?: string };
-          if (parsed.emailAddress) {
-            source = await externalSourceRepository.findGoogleSourceByDisplayEmail(
-              parsed.emailAddress,
-            );
-          }
+          emailAddress = (JSON.parse(decoded) as { emailAddress?: string }).emailAddress;
         }
       } catch (error) {
         logger.warn('Failed Google source fallback by display email', {
           error: error instanceof Error ? error.message : String(error),
         });
+      }
+      // Outside the try above: a genuine lookup failure must propagate to the outer catch (500, so Pub/Sub retries) instead of being swallowed here.
+      if (emailAddress) {
+        source = await externalSourceRepository.findGoogleSourceByDisplayEmail(emailAddress);
       }
     }
 
