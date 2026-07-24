@@ -180,6 +180,20 @@ const FeedbackRequestSchema = z.object({
  */
 export class XyneAIControllerV2 {
   /**
+   * GET /api/xyne-ai/config
+   * Public capability flags for the Ask AI UI. (Re-homed from the removed
+   * v1/v2 factory — Ask AI now always runs on claw.)
+   */
+  getConfig = async (_req: Request, res: Response): Promise<void> => {
+    res.json({
+      webSearchAccessible: config.xyneAiExtended.url ? true : false,
+      deepResearchAccessible: config.xyneAiExtended.url ? true : false,
+      version: 'v2',
+      v2Enabled: true,
+    });
+  };
+
+  /**
    * POST /api/xyne-ai
    * Main query endpoint - proxies to xyne-claw via clawAgentService.
    */
