@@ -1,9 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { xyneAIStreamManager, type StreamState } from '../services/XyneAI';
-import {
-  fetchSessionDetail,
-  fetchUserSessionForConversation,
-} from '../services/XyneAI/XyneAISessionsService';
+import { fetchV2ConversationMessages } from '../services/XyneAI/XyneAISessionsV2Service';
 import type {
   Message,
   DraftSource,
@@ -82,25 +79,15 @@ const latestBotToolInvocations = (messages: Message[]): ToolInvocation[] => {
 const loadPriorMessages = async (
   threadId: string,
   sessionId: string | null,
+  agentSlug: string,
 ): Promise<Message[]> => {
   const active = xyneAIStreamManager.getActiveStream(threadId);
   if (active?.messages.length) return active.messages;
   if (!sessionId) return [];
   try {
-    const detail = await fetchSessionDetail(sessionId);
-    const chain: Message[] = [];
-    for (const m of detail.messages) {
-      const prev = chain[chain.length - 1];
-      chain.push({
-        id: m.id,
-        type: m.type,
-        content: m.content,
-        timestamp: new Date(m.timestamp),
-        isStreaming: false,
-        ...(prev && { parentId: prev.id }),
-      });
-    }
-    return chain;
+    // v2/claw: sessionId is the claw conversation id, so its messages map
+    // cleanly. They already carry parentId (branching tree) from the backend.
+    return await fetchV2ConversationMessages(sessionId, agentSlug);
   } catch {
     return [];
   }
@@ -179,7 +166,6 @@ export function useDeskAIDraft({
   }, [storageKey]);
 
   useEffect(() => {
-    let cancelled = false;
     setDraftContent('');
     setDraftSources([]);
     setDraftInlineCitations([]);
@@ -188,10 +174,7 @@ export function useDeskAIDraft({
     setSessionId(null);
     ourStreamIdRef.current = null;
 
-    if (!isComposeMode && !conversationId)
-      return () => {
-        cancelled = true;
-      };
+    if (!isComposeMode && !conversationId) return;
 
     if (threadId) {
       const active = xyneAIStreamManager.getActiveStream(threadId);
@@ -225,30 +208,19 @@ export function useDeskAIDraft({
       }
     }
 
-    let restoredSessionId: string | null = null;
     if (sessionStorageKey && typeof window !== 'undefined') {
       try {
-        restoredSessionId = localStorage.getItem(sessionStorageKey);
+        const restoredSessionId = localStorage.getItem(sessionStorageKey);
         if (restoredSessionId) setSessionId(restoredSessionId);
       } catch {
         /* non-fatal */
       }
     }
 
-    if (!restoredSessionId && !isComposeMode && conversationId) {
-      void (async () => {
-        try {
-          const resolved = await fetchUserSessionForConversation(conversationId);
-          if (!cancelled && resolved) setSessionId(resolved);
-        } catch {
-          /* lookup failed — first interaction will create a fresh session */
-        }
-      })();
-    }
-
-    return () => {
-      cancelled = true;
-    };
+    // Ask AI v1 resolved a prior session from the desk conversationId here
+    // (fetchUserSessionForConversation). v2/claw has no equivalent
+    // by-conversation lookup, so we rely on the localStorage session key above;
+    // the first interaction otherwise creates a fresh claw session.
   }, [conversationId, storageKey, sessionStorageKey, isComposeMode, threadId]);
 
   useEffect(() => {
@@ -325,7 +297,7 @@ export function useDeskAIDraft({
       const effectiveSessionId =
         options?.disableTools || isComposeMode ? undefined : (sessionIdRef.current ?? undefined);
 
-      const prior = await loadPriorMessages(threadId, effectiveSessionId ?? null);
+      const prior = await loadPriorMessages(threadId, effectiveSessionId ?? null, agentSlug);
       const lastPriorId = prior[prior.length - 1]?.id;
 
       try {

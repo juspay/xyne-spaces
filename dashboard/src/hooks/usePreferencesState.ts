@@ -5,7 +5,6 @@ import { toast } from 'sonner';
 import { useTheme } from './useTheme';
 import { useAILandingDefault } from './useAILandingDefault';
 import { useDebugSettings } from './useDebugSettings';
-import { useAskAIVersion } from './useAskAIVersion';
 import { useEnterSendsMessage } from './useEnterSendsMessage';
 import { useSearchMode } from './useSearchMode';
 import { useThreadBroadcastMentions } from './useThreadBroadcastMentions';
@@ -40,7 +39,6 @@ export function usePreferencesState(enabled: boolean) {
   const { theme, changeTheme } = useTheme();
   const { aiLandingDefault, setAiLandingDefault } = useAILandingDefault();
   const { settings: debugSettings, toggleSendIndicators } = useDebugSettings();
-  const { askAIVersion, setAskAIVersion } = useAskAIVersion();
   const { enterSendsMessage, setEnterSendsMessage } = useEnterSendsMessage();
   const { searchMode, setSearchMode } = useSearchMode();
   const { showClawDashboard, setShowClawDashboard } = useClawDashboardVisibility();
@@ -130,8 +128,6 @@ export function usePreferencesState(enabled: boolean) {
     setAiLandingDefault,
     debugSettings,
     toggleSendIndicators,
-    askAIVersion,
-    setAskAIVersion,
     enterSendsMessage,
     setEnterSendsMessage,
     searchMode,

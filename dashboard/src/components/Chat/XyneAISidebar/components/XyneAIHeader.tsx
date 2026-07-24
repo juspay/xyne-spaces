@@ -1,5 +1,4 @@
 import { ReactElement, ReactNode, useState } from 'react';
-import { Brain } from 'lucide-react';
 import {
   ThreeDotsMenuVertical,
   PencilEditBox,
@@ -27,7 +26,6 @@ interface XyneAIHeaderProps {
   onNewChat: () => void;
   onShowHistory: () => void;
   onShowUserActivity: () => void;
-  onShowMemories: () => void;
   isMobile?: boolean;
   onClose?: () => void;
   title?: string;
@@ -44,7 +42,6 @@ export const XyneAIHeader = ({
   onNewChat,
   onShowHistory,
   onShowUserActivity,
-  onShowMemories,
   isMobile = false,
   onClose,
   title = 'Ask AI',
@@ -95,17 +92,6 @@ export const XyneAIHeader = ({
         >
           <ClockDefault size={16} className='shrink-0' />
           <span className='flex-1'>Chat history</span>
-        </DropdownMenuItem>
-      )}
-      {showMemoriesAndActivity && (
-        <DropdownMenuItem
-          className='gap-2'
-          onClick={onShowMemories}
-          data-track-category='XyneAI'
-          data-track-name='SHOW_MEMORIES'
-        >
-          <Brain size={16} className='shrink-0' />
-          <span className='flex-1'>Memories</span>
         </DropdownMenuItem>
       )}
       {showMemoriesAndActivity && (

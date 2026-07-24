@@ -21,26 +21,10 @@ import { useDragAndDropAreaRef } from '../../../hooks/useDragAndDropAreaRef';
 import { apiInstance } from '../../../services/clients/apiClient';
 import { useChannel, useAllVisibleChannels } from '../../../hooks/useChannels';
 import { useXyneAIStream } from '../../../hooks/useXyneAIStream';
-import { fetchUserSessionForConversation } from '../../../services/XyneAI/XyneAISessionsService';
-import { useAskAIVersion } from '../../../hooks/useAskAIVersion';
 import { ChannelScopeType } from '@xyne/shared';
 import { BASE_URL } from '../../../services/clients/apiClient';
-import type {
-  ConversationHistory as ConversationHistoryType,
-  LastInputContext,
-} from './utils/XyneAITypes';
-import {
-  normalizeLoadedMessagesForDisplay,
-  resolveActivePath,
-  getSiblings,
-  BRANCH_ROOT_KEY,
-} from './utils/XyneAIUtils';
-import {
-  useSessionsList,
-  useSessionMutations,
-  loadSessionDetail,
-  saveSessionMetadata,
-} from '../../../hooks/useAskAISessions';
+import type { ConversationHistory as ConversationHistoryType } from './utils/XyneAITypes';
+import { resolveActivePath, getSiblings, BRANCH_ROOT_KEY } from './utils/XyneAIUtils';
 import { useV2SessionsList, useV2SessionInvalidator } from '../../../hooks/useAskAISessionsV2';
 import {
   deleteV2Conversation,
@@ -83,7 +67,6 @@ import { XyneAIOnboardingHeader } from './components/XyneAIOnboardingHeader';
 import { useAIOnboarding, ALL_ONBOARDING_SUGGESTIONS } from '../../../contexts/AIOnboardingContext';
 import { XyneAIStar } from '../../icons/xyne-ai';
 import { UserActivityPanel } from './components/UserActivityPanel';
-import { MemoriesPanel } from './components/MemoriesPanel';
 import { AskAIDebugPanel } from './components/AskAIDebugPanel';
 import type { UserActivity } from '../../../hooks/useUserActivity';
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -98,7 +81,6 @@ import {
   type SelectionInfo,
   flattenCanvasContexts,
 } from '../../../machines/xyneAIMachine';
-import type { ResearchContext } from '../../../hooks/useResearchAgent';
 import { xyneAIStreamManager } from '../../../services/XyneAI';
 import {
   buildXyneAIStreamThreadId,
@@ -219,7 +201,6 @@ const XyneAISidebar = ({
   );
   const [showHistorySidebar, setShowHistorySidebar] = useState(false);
   const [showUserActivityPanel, setShowUserActivityPanel] = useState(false);
-  const [showMemoriesPanel, setShowMemoriesPanel] = useState(false);
   const [conversations, setConversations] = useState<ConversationHistoryType[]>([]);
   const [feedbackMap, setFeedbackMap] = useState<Record<string, 'LIKE' | 'DISLIKE' | null>>({});
   const [isLoadingConversation, setIsLoadingConversation] = useState(
@@ -243,9 +224,6 @@ const XyneAISidebar = ({
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
   const [deepResearchEnabled, setDeepResearchEnabled] = useState(false);
   const [createCanvasEnabled, setCreateCanvasEnabled] = useState(false);
-  const [selectedResearchContext, setSelectedResearchContext] = useState<ResearchContext | null>(
-    null,
-  );
   const [activeThreadInfo, setActiveThreadInfo] = useState<ThreadInfo | null>(threadInfo ?? null);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [selectedActivities, setSelectedActivities] = useState<UserActivity[]>([]);
@@ -568,7 +546,6 @@ const XyneAISidebar = ({
     },
   });
 
-  const { askAIVersion } = useAskAIVersion();
   const webSearchAccessible = configData?.webSearchAccessible ?? false;
   const deepResearchAccessible = configData?.deepResearchAccessible ?? false;
 
@@ -578,11 +555,11 @@ const XyneAISidebar = ({
     queryKey: ['accessible-claw-agents'],
     queryFn: fetchAccessibleClawAgents,
     staleTime: 60_000,
-    enabled: askAIVersion === 'v2',
   });
 
-  const isV2 = askAIVersion === 'v2';
-  const effectiveAgentSlug = isV2 ? selectedAgentSlug : null;
+  // Ask AI v1 has been removed; everything runs on v2 (xyne-claw) now.
+  const isV2 = true;
+  const effectiveAgentSlug = selectedAgentSlug;
 
   // Per-run model pin. The model list is scoped to the AGENT's LiteLLM key, so
   // it refetches per agent and the pin resets on agent change — a model from
@@ -663,7 +640,6 @@ const XyneAISidebar = ({
     setDebugArtifactsReadyVersion,
     webSearchEnabled: webSearchAccessible ? webSearchEnabled : false,
     deepResearchEnabled: deepResearchAccessible ? deepResearchEnabled : false,
-    researchContext: selectedResearchContext,
     createCanvasEnabled,
     isV2,
     channelId: channelId || undefined, // Pass channelId for thread ID construction
@@ -742,16 +718,7 @@ const XyneAISidebar = ({
     return ALL_ONBOARDING_SUGGESTIONS.filter(s => !askedQuestions.has(s)).slice(0, 3);
   }, [aiOnboarding.isActive, messages]);
 
-  // v1 sessions hooks (used when v2 is not enabled)
-  const { data: sessionsData, refetch: refetchSessions } = useSessionsList();
-  const {
-    toggleStar: toggleStarMutation,
-    rename: renameMutation,
-    deleteSession: deleteSessionMutation,
-    updateMetadata: _updateMetadataMutation,
-  } = useSessionMutations();
-
-  // v2 sessions hooks (used when v2 is enabled)
+  // v2 sessions hooks (xyne-claw backed)
   const { data: v2SessionsData, refetch: refetchV2Sessions } = useV2SessionsList(
     effectiveAgentSlug,
     isV2,
@@ -759,29 +726,11 @@ const XyneAISidebar = ({
   const { invalidateSessions: invalidateV2Sessions } = useV2SessionInvalidator();
 
   // Sync sessions list to local state for the ConversationHistory component
-  // Uses v2 data when available, otherwise falls back to v1
   useEffect(() => {
-    if (isV2 && v2SessionsData) {
+    if (v2SessionsData) {
       setConversations(v2SessionsData);
-    } else if (!isV2 && sessionsData) {
-      setConversations(sessionsData);
     }
-  }, [isV2, v2SessionsData, sessionsData]);
-
-  // Load most recent conversation on mount
-  // Restore input box state from lastInputContext
-  const restoreInputContext = useCallback((ctx: LastInputContext | undefined) => {
-    if (!ctx) return;
-    setSelectedChannels(ctx.selectedChannels ?? []);
-    setSelectedTickets((ctx.selectedTickets ?? []) as SelectedTicket[]);
-    setSelectedCanvases(ctx.selectedCanvases ?? []);
-    setSelectedTranscripts(ctx.selectedTranscripts ?? []);
-    setSelectedRecordings(ctx.selectedRecordings ?? []);
-    setWebSearchEnabled(ctx.webSearchEnabled ?? false);
-    setDeepResearchEnabled(ctx.deepResearchEnabled ?? false);
-    setCreateCanvasEnabled(ctx.createCanvasEnabled ?? false);
-    setSelectedResearchContext(ctx.researchContext ?? null);
-  }, []);
+  }, [v2SessionsData]);
 
   // Thread context: load thread-specific conversation (channel-specific)
   // Global context: load most recent conversation across all channels
@@ -907,91 +856,6 @@ const XyneAISidebar = ({
           setTimeout(() => {
             scrollToBottom();
           }, 100);
-        } else {
-          // v1: Load most recent session from backend
-          let sessions = sessionsData;
-          if (!sessions) {
-            const result = await refetchSessions();
-            sessions = result.data;
-          }
-
-          hasLoadedInitialConversationRef.current = true;
-
-          let targetSessionId: string | undefined;
-          const isDeskTicketContext = Boolean(threadConversationId && channelId);
-          if (isDeskTicketContext && threadConversationId) {
-            const resolved = await fetchUserSessionForConversation(threadConversationId);
-            if (resolved) {
-              targetSessionId = resolved;
-            } else {
-              setIsLoadingConversation(false);
-              return;
-            }
-          } else {
-            if (!sessions || sessions.length === 0) {
-              setIsLoadingConversation(false);
-              return;
-            }
-            const matchingSessions = sessions.filter(s => !s.threadConversationId);
-            if (matchingSessions.length === 0) {
-              setIsLoadingConversation(false);
-              return;
-            }
-            targetSessionId = matchingSessions[0]!.sessionId;
-          }
-
-          const mostRecent = await loadSessionDetail(targetSessionId);
-          if (!mostRecent) {
-            setIsLoadingConversation(false);
-            return;
-          }
-
-          setStreamThreadKey(mostRecent.sessionId);
-          usesDraftStreamKeyRef.current = false;
-
-          const streamTid = buildXyneAIStreamThreadId({
-            channelId: channelId ?? null,
-            threadConversationId: threadConversationId ?? null,
-            streamSessionKey: mostRecent.sessionId,
-          });
-          const liveStream =
-            xyneAIStreamManager.getActiveStream(streamTid) ??
-            xyneAIStreamManager.findActiveStreamBySessionId(mostRecent.sessionId);
-
-          if (liveStream) {
-            setMessages(liveStream.messages);
-            if (liveStream.sessionId) {
-              setConversationId(liveStream.sessionId);
-            }
-            const originalChannelId = getChannelIdFromStreamThreadId(liveStream.threadId);
-            setConversationChannelId(originalChannelId ?? mostRecent.channelId ?? null);
-            setIsLoadingConversation(false);
-            setTimeout(() => {
-              scrollToBottom();
-            }, 100);
-            return;
-          }
-
-          setConversationChannelId(mostRecent.channelId);
-
-          const messagesWithoutStreaming = normalizeLoadedMessagesForDisplay(mostRecent.messages);
-          setMessages(messagesWithoutStreaming);
-          setConversationId(mostRecent.sessionId);
-          setBranchSelections(mostRecent.branchSelections ?? {});
-
-          restoreInputContext(mostRecent.lastInputContext);
-
-          const restoredFeedbackMap: Record<string, 'LIKE' | 'DISLIKE' | null> = {};
-          mostRecent.messages.forEach(msg => {
-            if (msg.feedback === 1) {
-              restoredFeedbackMap[msg.id] = 'LIKE';
-            } else if (msg.feedback === 2) {
-              restoredFeedbackMap[msg.id] = 'DISLIKE';
-            } else {
-              restoredFeedbackMap[msg.id] = null;
-            }
-          });
-          setFeedbackMap(restoredFeedbackMap);
         }
 
         // Scroll to bottom after loading
@@ -1013,11 +877,8 @@ const XyneAISidebar = ({
     scrollToBottom,
     startFreshChat,
     isV2,
-    sessionsData,
-    refetchSessions,
     v2SessionsData,
     refetchV2Sessions,
-    restoreInputContext,
     selectedAgentSlug,
     effectiveAgentSlug,
     setSelectedAgentSlug,
@@ -1026,56 +887,9 @@ const XyneAISidebar = ({
   // Refetch sessions list when history sidebar is opened to get fresh data
   useEffect(() => {
     if (showHistorySidebar) {
-      if (isV2) {
-        void refetchV2Sessions();
-      } else {
-        void refetchSessions();
-      }
+      void refetchV2Sessions();
     }
-  }, [showHistorySidebar, isV2, refetchSessions, refetchV2Sessions]);
-
-  // Save session metadata (branchSelections, feedbackMap) to backend when they change
-  // v2: claw handles its own persistence, skip this effect
-  // v1: Messages are already persisted by the backend during streaming, so we only save metadata
-  useEffect(() => {
-    if (isV2) return;
-
-    const saveChannelId = conversationChannelId || channelId;
-    if (messages.length === 0 || !conversationId || !saveChannelId) {
-      return;
-    }
-
-    const hasStreamingMessages = messages.some(m => m.isStreaming);
-    if (hasStreamingMessages) {
-      return;
-    }
-
-    const currentFeedbackMap: Record<string, number> = {};
-    messages.forEach(msg => {
-      if (msg.feedback !== undefined && msg.feedback !== 0) {
-        currentFeedbackMap[msg.id] = msg.feedback;
-      }
-    });
-
-    const metadata: {
-      branchSelections: Record<string, string>;
-      feedbackMap?: Record<string, number>;
-    } = {
-      branchSelections,
-    };
-    if (Object.keys(currentFeedbackMap).length > 0) {
-      metadata.feedbackMap = currentFeedbackMap;
-    }
-    void saveSessionMetadata(conversationId, metadata);
-  }, [
-    isV2,
-    messages,
-    channelId,
-    conversationChannelId,
-    conversationId,
-    activeThreadInfo?.conversationId,
-    branchSelections,
-  ]);
+  }, [showHistorySidebar, refetchV2Sessions]);
 
   const handleSuggestionClick = (query: string): void => {
     setInputValue(query);
@@ -1179,40 +993,6 @@ const XyneAISidebar = ({
         setTimeout(() => {
           scrollToBottom();
         }, 100);
-      } else {
-        const fullConversation = await loadSessionDetail(conversation.sessionId);
-        if (!fullConversation) {
-          console.error('[XyneAISidebar] Failed to load conversation detail');
-          return;
-        }
-
-        const messagesWithoutStreaming = normalizeLoadedMessagesForDisplay(
-          fullConversation.messages,
-        );
-        setMessages(messagesWithoutStreaming);
-        setConversationId(fullConversation.sessionId);
-        setConversationChannelId(fullConversation.channelId);
-        setBranchSelections(fullConversation.branchSelections ?? {});
-        setEditingMessageId(null);
-        setShowHistorySidebar(false);
-
-        restoreInputContext(fullConversation.lastInputContext);
-
-        const restoredFeedbackMap: Record<string, 'LIKE' | 'DISLIKE' | null> = {};
-        fullConversation.messages.forEach(msg => {
-          if (msg.feedback === 1) {
-            restoredFeedbackMap[msg.id] = 'LIKE';
-          } else if (msg.feedback === 2) {
-            restoredFeedbackMap[msg.id] = 'DISLIKE';
-          } else {
-            restoredFeedbackMap[msg.id] = null;
-          }
-        });
-        setFeedbackMap(restoredFeedbackMap);
-
-        setTimeout(() => {
-          scrollToBottom();
-        }, 100);
       }
     } catch (error) {
       console.error('[XyneAISidebar] Failed to load conversation:', error);
@@ -1232,24 +1012,10 @@ const XyneAISidebar = ({
     }
   }, [conversationId, isFullscreen]);
 
-  const handleToggleStar = async (conversation: ConversationHistoryType): Promise<void> => {
-    if (isV2) return;
-
-    try {
-      await toggleStarMutation.mutateAsync(conversation.sessionId);
-    } catch (error) {
-      console.error('[XyneAISidebar] Failed to toggle star:', error);
-    }
-  };
-
   const handleDeleteConversation = async (conversation: ConversationHistoryType): Promise<void> => {
     try {
-      if (isV2) {
-        await deleteV2Conversation(conversation.sessionId, effectiveAgentSlug);
-        invalidateV2Sessions(effectiveAgentSlug);
-      } else {
-        await deleteSessionMutation.mutateAsync(conversation.sessionId);
-      }
+      await deleteV2Conversation(conversation.sessionId, effectiveAgentSlug);
+      invalidateV2Sessions(effectiveAgentSlug);
       // If deleted conversation was active, clear messages
       if (conversation.sessionId === conversationId) {
         setMessages([]);
@@ -1260,19 +1026,6 @@ const XyneAISidebar = ({
       }
     } catch (error) {
       console.error('[XyneAISidebar] Failed to delete conversation:', error);
-    }
-  };
-
-  const handleRenameConversation = async (
-    conversation: ConversationHistoryType,
-    newName: string,
-  ): Promise<void> => {
-    if (isV2) return;
-
-    try {
-      await renameMutation.mutateAsync({ sessionId: conversation.sessionId, title: newName });
-    } catch (error) {
-      console.error('[XyneAISidebar] Failed to rename conversation:', error);
     }
   };
 
@@ -1924,7 +1677,6 @@ const XyneAISidebar = ({
     inputValue,
     onInputChange: setInputValue,
     onSubmit: () => void handleSubmit(),
-    onResearchContextChange: setSelectedResearchContext,
     onThreadInfoChange: setActiveThreadInfo,
     onSelectionInfosChange: setActiveSelectionInfos,
     onAttachmentsChange: setAttachments,
@@ -2050,13 +1802,10 @@ const XyneAISidebar = ({
             onLoadConversation={(conversation): void => {
               void handleLoadConversation(conversation);
             }}
-            onToggleStar={handleToggleStar}
             onDeleteConversation={handleDeleteConversation}
-            onRenameConversation={handleRenameConversation}
-            showStarRenameActions={!isV2}
             selectedAgentSlug={effectiveAgentSlug}
-            agents={isV2 ? accessibleAgents : []}
-            {...(isV2 ? { onSelectAgent: handleSelectAgentFromHistory } : {})}
+            agents={accessibleAgents}
+            onSelectAgent={handleSelectAgentFromHistory}
             selectedAgentColor={selectedAgentColor}
           />
         ) : showUserActivityPanel ? (
@@ -2065,8 +1814,6 @@ const XyneAISidebar = ({
             onClose={() => setShowUserActivityPanel(false)}
             onAddToChat={handleAddActivities}
           />
-        ) : showMemoriesPanel ? (
-          <MemoriesPanel onClose={() => setShowMemoriesPanel(false)} />
         ) : (
           <div ref={sidebarContentRef} className='flex h-full min-h-0 flex-col'>
             {aiOnboarding.isActive ? (
@@ -2076,7 +1823,6 @@ const XyneAISidebar = ({
                 onNewChat={handleNewChat}
                 onShowHistory={() => setShowHistorySidebar(true)}
                 onShowUserActivity={() => setShowUserActivityPanel(true)}
-                onShowMemories={() => setShowMemoriesPanel(true)}
                 isMobile={isMobile}
                 isCompact={isCompactSidebar}
                 isTight={isTightSidebar}

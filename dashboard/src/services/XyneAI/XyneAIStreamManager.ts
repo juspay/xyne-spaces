@@ -39,27 +39,17 @@ import XyneAIStreamWorker from './xyneAIStream.worker?worker';
 import type { WorkerIncomingMessage, WorkerOutgoingMessage } from './xyneAIStream.worker';
 import { reactNativeBridge, NativeInboundMessageType } from '../../utils/reactNativeBridge';
 import { fetchV2ConversationMessages } from './XyneAISessionsV2Service';
-import { queryClient } from '../clients/queryClient';
-import { SESSIONS_KEY } from '../../hooks/useAskAISessions';
 import { getAskAIErrorInfo } from '../../utils/askAIErrorMapping';
 import {
   deriveStreamSlotKey,
   getStreamSlotKeyFromThreadId,
 } from '../../utils/xyneAIStreamThreadId';
-import { ASK_AI_VERSION_STORAGE_KEY } from '../../hooks/useAskAIVersion';
-import type { AskAIVersion } from '../../hooks/useAskAIVersion';
 import { resolveMessagePendingAction } from '../../components/Claw/claw.utils';
 
 // Prompt-only follow-ups run concurrently with the main answer and may finish
 // after its SSE has closed. Keep reconciliation bounded but long enough to
 // cover the generator's 60s timeout plus callback persistence latency.
 const FOLLOW_UP_RETRY_DELAYS_MS = [500, 1_000, 2_000, 4_000, 8_000, 16_000, 32_000] as const;
-
-function getStoredVersion(): AskAIVersion {
-  const stored = localStorage.getItem(ASK_AI_VERSION_STORAGE_KEY);
-  if (stored === 'v1' || stored === 'v2') return stored;
-  return 'v1';
-}
 
 export interface StreamState {
   streamId: string;
@@ -893,7 +883,7 @@ class XyneAIStreamManager {
   ): Promise<string> {
     const streamId = `stream-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-    request.version = request.version ?? getStoredVersion();
+    request.version = 'v2';
 
     // Handle any existing stream for this thread
     const existingStream = this.activeStreams.get(threadId);
@@ -1696,9 +1686,6 @@ class XyneAIStreamManager {
       threadId,
       currentState.followUpsPending === true,
     );
-    if (currentState.version === 'v1') {
-      void queryClient.invalidateQueries({ queryKey: SESSIONS_KEY });
-    }
 
     const notifyKey = currentState.sessionId || currentState.streamSlotKey || threadId;
     const viewingThis = Boolean(
