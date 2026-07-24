@@ -234,6 +234,8 @@
     "ws@7": "7.5.13",
     "fast-uri@3": "3.1.4",
     "fastify@5": "5.10.0",
+    "handlebars@4": "4.7.9",
+    "tar@7": "7.5.20",
     "xlsx": "npm:@e965/xlsx@0.20.3",
     "brace-expansion@1": "1.1.16",
     "brace-expansion@2": "2.1.2",
