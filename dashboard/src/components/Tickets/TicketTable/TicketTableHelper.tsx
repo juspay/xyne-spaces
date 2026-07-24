@@ -15,7 +15,8 @@ import { cn } from '../../../utils/classNames';
 import { useMemo } from 'react';
 import type { User, UserGroup } from '../../../machines/stateMachine';
 import { EntityOption, StatusEntityOption } from './TicketTableTypes';
-import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { getUserDisplayName, withYouLabel } from '../../../utils/userDisplayName';
+import { channelMembersFirst, currentUserFirst } from '../../../utils/channelMembersFirst';
 
 export const TAG_COLORS = [
   'bg-red-500',
@@ -78,10 +79,29 @@ export const PriorityOptions: EntityOption[] = [
 ];
 
 // Pure helper functions (keep these as-is for direct use)
-export const getAssigneeOptions = (users: User[], userGroups: UserGroup[]): EntityOption[] => {
-  const userOptions: EntityOption[] = users.map(user => ({
+export const getAssigneeOptions = (
+  users: User[],
+  userGroups: UserGroup[],
+  // When provided, channel members are floated above non-members. Omitted by
+  // the cross-channel table/bulk callers, which have no single channel to rank by.
+  memberIds?: Set<string>,
+  // When provided, the current user is pinned to the very top and labelled "(You)".
+  selfId?: string,
+): EntityOption[] => {
+  // On channel-scoped lists (the board card passes memberIds), rank channel
+  // members first, then sink deactivated users to the bottom. Stable sort keeps
+  // the members-first order within each activation group.
+  const rankedUsers = memberIds
+    ? [...channelMembersFirst(users, u => u.id, memberIds)].sort(
+        (a, b) =>
+          Number(a.status === UserStatus.INACTIVE) - Number(b.status === UserStatus.INACTIVE),
+      )
+    : users;
+  // Then float the current user to the very top (only the board card passes selfId).
+  const orderedUsers = currentUserFirst(rankedUsers, u => u.id, selfId);
+  const userOptions: EntityOption[] = orderedUsers.map(user => ({
     value: `user:${user.id}`,
-    label: getUserDisplayName(user),
+    label: withYouLabel(getUserDisplayName(user), user.id === selfId),
     subtitle: user.email,
     icon: <Avatar userId={user.id} size='sm' className='rounded-full' />,
     isDeactivated: user.status === UserStatus.INACTIVE,
@@ -153,10 +173,15 @@ export const getTagsWithCreateOption = (
   return baseOptions;
 };
 
-export const useAssigneeOptions = (users: User[], userGroups: UserGroup[]) => {
+export const useAssigneeOptions = (
+  users: User[],
+  userGroups: UserGroup[],
+  memberIds?: Set<string>,
+  selfId?: string,
+) => {
   return useMemo(() => {
-    return [UNASSIGNED_OPTION, ...getAssigneeOptions(users, userGroups)];
-  }, [users, userGroups]);
+    return [UNASSIGNED_OPTION, ...getAssigneeOptions(users, userGroups, memberIds, selfId)];
+  }, [users, userGroups, memberIds, selfId]);
 };
 
 export const useStageOptions = (stages: Array<{ id: string; name: string }> = []) => {

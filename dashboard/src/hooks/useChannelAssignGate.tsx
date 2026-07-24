@@ -1,11 +1,10 @@
-import { useEffect, useMemo, useRef, type ReactElement } from 'react';
+import { useEffect, useRef, type ReactElement } from 'react';
 import { toast } from 'sonner';
 import { X } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import { useZero } from './useZero';
 import { mutators } from '../zero/mutators';
-import { queries } from '../zero/queries';
-import { useCachedQuery } from './useCachedQuery';
+import { useChannelMemberIds } from './useChannelMemberIds';
 import { useChannel } from './useChannels';
 import { useAuthContextValues } from './useAuth';
 
@@ -101,12 +100,8 @@ export function useChannelAssignGate(channelId: string | undefined): ChannelAssi
   const gatingEnabled = !!channelId;
   const channel = useChannel(channelId || '');
   const channelLabel = channel?.name ? `#${channel.name}` : 'this channel';
-  const [participants] = useCachedQuery(
-    queries.channelParticipants({ channelId: channelId || '' }),
-    { enabled: gatingEnabled },
-  );
-  const memberIds = useMemo(() => new Set((participants ?? []).map(p => p.userId)), [participants]);
-  const shouldGate = gatingEnabled && participants !== undefined;
+  const { memberIds, loaded } = useChannelMemberIds(channelId);
+  const shouldGate = gatingEnabled && loaded;
   const currentUserIsMember = memberIds.has(currentUserId);
 
   const gatedAssign = ({ userId, userName, assign }: GatedAssignParams): void => {
