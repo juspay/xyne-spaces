@@ -520,6 +520,19 @@ function withChatQuoteStyle(children: FlowComponent[]): FlowComponent {
   };
 }
 
+function applyContextTextStyle(component: FlowComponent): FlowComponent {
+  if (component.type === 'text') {
+    return {
+      ...component,
+      props: { ...(component.props ?? {}), variant: 'muted', size: 'sm' },
+    };
+  }
+  if (component.children?.length) {
+    return { ...component, children: component.children.map(applyContextTextStyle) };
+  }
+  return component;
+}
+
 // ============================================================================
 // Block converters
 // ============================================================================
@@ -651,13 +664,17 @@ export function slackBlockToFlowComponent(
       const textSegments = contextBlock.elements
         .filter((el): el is SlackTextObject => !('image_url' in el));
       if (!textSegments.length) return null;
-      // Render each context text element parsed through mrkdwn, then collect into a row
-      const parsed = textSegments.map((el) => mrkdwnToFlowComponent(el, slackToXyneMap, slackToXyneGroupMap));
+      // Render each context text element parsed through mrkdwn, then collect into a row.
+      // Slack shows context blocks as small, muted (gray) secondary text — mirror that
+      // so metadata recedes and the primary section content stays prominent.
+      const parsed = textSegments.map((el) =>
+        applyContextTextStyle(mrkdwnToFlowComponent(el, slackToXyneMap, slackToXyneGroupMap)),
+      );
       return {
         id: crypto.randomUUID(),
         type: 'row',
         style: { gap: '4px' },
-        children: parsed.map((c) => ({ ...c, style: { ...((c as any).style ?? {}), ...{ fontSize: 'sm' } } })),
+        children: parsed,
       };
     }
 
