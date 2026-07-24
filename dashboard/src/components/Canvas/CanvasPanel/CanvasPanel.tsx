@@ -55,6 +55,7 @@ const CanvasPanel = (): ReactElement => {
   const isOnIndexRoute = usePath() === '/chat/canvas';
 
   const canvasPanelRef = useRef<ImperativePanelHandle>(null);
+  const deletedCanvasIdsRef = useRef<Set<string>>(new Set());
   const {
     filter: activeFilter,
     setFilter: setActiveFilter,
@@ -76,14 +77,24 @@ const CanvasPanel = (): ReactElement => {
 
   // Remember which canvas was last opened
   useEffect(() => {
-    if (selectedCanvasId && selectedCanvasId !== 'new' && selectedCanvasId !== lastCanvasId) {
+    if (
+      selectedCanvasId &&
+      selectedCanvasId !== 'new' &&
+      selectedCanvasId !== lastCanvasId &&
+      !deletedCanvasIdsRef.current.has(selectedCanvasId)
+    ) {
       setLastCanvasId(selectedCanvasId);
     }
   }, [selectedCanvasId, lastCanvasId, setLastCanvasId]);
 
   // Restore last opened canvas when landing on the canvas index
   useEffect(() => {
-    if (!isMobile && isOnIndexRoute && lastCanvasId) {
+    if (
+      !isMobile &&
+      isOnIndexRoute &&
+      lastCanvasId &&
+      !deletedCanvasIdsRef.current.has(lastCanvasId)
+    ) {
       void navigate(`/chat/canvas/${lastCanvasId}`, { replace: true });
     }
   }, [isMobile, isOnIndexRoute, lastCanvasId, navigate]);
@@ -136,17 +147,23 @@ const CanvasPanel = (): ReactElement => {
   const handleDeleteCanvas = useCallback(
     (id: string) => {
       try {
+        deletedCanvasIdsRef.current.add(id);
         z.mutate(mutators.canvas.delete({ id }));
         toast.success('Success', {
           description: 'Canvas deleted successfully.',
         });
+        if (selectedCanvasId === id) {
+          setLastCanvasId(null);
+          void navigate('/chat/canvas', { replace: true });
+        }
       } catch {
+        deletedCanvasIdsRef.current.delete(id);
         toast.error('Error', {
           description: 'Failed to delete canvas. Please try again.',
         });
       }
     },
-    [z],
+    [navigate, selectedCanvasId, setLastCanvasId, z],
   );
 
   const handleToggleStar = useCallback(
