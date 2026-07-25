@@ -1,0 +1,427 @@
+schema ticket {
+  document ticket {
+    struct form_field {
+      field fieldId type string {}
+      field fieldValue type string {}
+      field fieldValueLong type long {}
+    }
+
+    field docId type string {
+      indexing: attribute | summary
+    }
+
+    field docType type string {
+        indexing: attribute | summary
+        attribute: fast-search
+        match: exact
+    }
+
+    field convId type string {
+      indexing: attribute | summary
+      attribute: fast-search
+    }
+
+    field userGroupId type string {
+      indexing: attribute | summary
+      attribute: fast-search
+    }
+
+    field channelRef type reference<chat_container> {
+      indexing: attribute
+    }
+
+    field projectRef type reference<project> {
+      indexing: attribute
+    }
+
+    field threadId type string {
+      indexing: attribute | summary
+    }
+
+    field status type string {
+      indexing: index | attribute | summary
+      index: enable-bm25
+    }
+
+    field ownerEmail type string {
+      indexing: index | attribute | summary
+      index: enable-bm25
+    }
+
+    field assignedTo type string {
+      indexing: index | attribute | summary
+      index: enable-bm25
+    }
+
+    field title type string {
+      indexing: index | summary
+      index: enable-bm25
+    }
+
+    field workflowType type string {
+      indexing: attribute | summary
+      attribute: fast-search
+      match: exact
+    }
+
+    field description type string {
+      indexing: index | summary
+      index: enable-bm25
+    }
+
+    field description_clean type string {
+      indexing: index | summary
+      index: enable-bm25
+    }
+
+    field createdBy type string {
+      indexing: index | attribute | summary
+      index: enable-bm25
+    }
+
+    field updatedAt type string {
+      indexing: attribute | summary
+      attribute: fast-search
+    }
+    field createdAt type string {
+      indexing: index | attribute | summary
+      index: enable-bm25
+    }
+    field createdAtTimestamp type double {
+      indexing: attribute | summary
+      attribute: fast-search
+    }
+    field closedBy type string {
+      indexing: attribute | summary
+    }
+
+    field closedAt type string {
+      indexing: index|attribute | summary
+      index: enable-bm25
+    }
+
+    field parentTicketId type string {
+      indexing: attribute | summary
+    }
+
+    # Board to which the ticket belongs
+    field boardId type string {
+      indexing: attribute | summary
+    }
+
+    field ticketType type string {
+      indexing: attribute | summary
+      attribute: fast-search
+      match: exact
+    }
+
+    field priority type string {
+      indexing: index | attribute | summary
+      index: enable-bm25
+    }
+
+    field stage type string {
+      indexing: index | attribute | summary
+      index : enable-bm25
+    }
+
+    field attachmentIds type array<string> {
+      indexing: attribute | summary
+    }
+
+    field metadata type string {
+      indexing: attribute | summary
+    }
+
+    field deletedAt type string {
+      indexing: attribute | summary
+      attribute: fast-search
+    }
+
+    field eta type string {
+      indexing: index | attribute | summary
+      index: enable-bm25
+    }
+
+    field channelName type string {
+      indexing: index | attribute | summary
+      index: enable-bm25
+    }
+
+    field boardName type string {
+      indexing: index | attribute | summary
+      index: enable-bm25
+    }
+
+    field xyneId type string {
+      indexing: index | attribute | summary
+      index: enable-bm25
+    }
+
+    field tags type array<string> {
+      indexing: index | attribute | summary
+      index: enable-bm25
+    }
+
+    field generatedTags type array<string> {
+      indexing: index | attribute | summary
+      index: enable-bm25
+    }
+
+    field entityIds type array<string> {
+      indexing: attribute | summary
+      attribute: fast-search
+    }
+
+    field entityNames type array<string> {
+      indexing: index | attribute | summary
+      index: enable-bm25
+    }
+
+    field entitySurfaceForms type array<string> {
+      indexing: summary
+    }
+
+    field createdByName type string {
+      indexing: index | attribute | summary
+      index: enable-bm25
+    }
+
+    field assignedToName type string {
+      indexing: index | attribute | summary
+      index: enable-bm25
+    }
+
+    field closedByName type string {
+      indexing: index | attribute | summary
+      index: enable-bm25
+    }
+
+    field projectName type string {
+      indexing: index | attribute | summary
+      index: enable-bm25
+    }
+
+    field ticketMentions type array<string> {
+      indexing: index | attribute | summary
+      index: enable-bm25
+    }
+
+    field threadMentions type array<string> {
+      indexing: index | attribute | summary
+      index: enable-bm25
+    }
+
+    field threadSenders type array<string> {
+      indexing: index | attribute | summary
+      index: enable-bm25
+    }
+
+    field replyCount type int {
+      indexing: attribute | summary
+    }
+
+    field initialMessage type string {
+      indexing: index | summary
+      index: enable-bm25
+    }
+
+    field initialMessageSender type string {
+      indexing: index | attribute | summary
+      index: enable-bm25
+    }
+
+    field parentTicketXyneId type string {
+      indexing: index | attribute | summary
+      index: enable-bm25
+    }
+
+    field childTicketXyneIds type array<string> {
+      indexing: index | attribute | summary
+      index: enable-bm25
+    }
+
+    field formFields type array<form_field> {
+      indexing: summary
+      struct-field fieldId {
+        indexing: attribute| summary
+        attribute: fast-search
+      }
+      struct-field fieldValue {
+        indexing: attribute | summary
+        attribute: fast-search
+      }
+      struct-field fieldValueLong {
+        indexing: attribute | summary
+        attribute: fast-search
+      }
+    }
+  }
+
+  import field channelRef.docId as channelId {}
+  import field channelRef.permissions as permissions {}
+  import field channelRef.isPrivate as isPrivate {}
+  import field projectRef.docId as projectId {}
+  import field channelRef.orgId as orgId {}
+  import field channelRef.workspaceId as workspaceId {}
+  
+  field combined_embeddings type tensor<bfloat16>(v[DIMS]) {
+    indexing: input title . " " . input description | embed hf-embedder | attribute | index
+    attribute {
+      distance-metric: angular
+    }
+  }
+  field description_embeddings type tensor<bfloat16>(v[DIMS]) {
+    indexing: input description | embed hf-embedder | attribute | index
+    attribute {
+      distance-metric: angular
+    }
+  }
+  field title_fuzzy type string {
+    indexing: input title |tokenize | lowercase | index | summary
+    index: enable-bm25
+    match {
+        gram
+        gram-size: 3
+    }
+  }
+  field description_fuzzy type string {
+    indexing: input description |tokenize | lowercase | index | summary
+    index: enable-bm25
+    match {
+        gram
+        gram-size: 3
+    }
+  }
+  field initialMessage_fuzzy type string {
+      indexing: input initialMessage |tokenize | lowercase | index | summary
+      index: enable-bm25
+      match {
+          gram
+          gram-size: 3
+    }
+  }  
+  field description_clean_embeddings type tensor<bfloat16>(v[DIMS]) {
+    indexing: input description_clean | embed hf-embedder | attribute | index
+    attribute {
+      distance-metric: angular
+    }
+  }
+
+  fieldset default {
+    fields: title, title_fuzzy, description_fuzzy, initialMessage_fuzzy, description, status, priority, ticketType, workflowType, assignedTo, ownerEmail, createdBy, eta, projectId, stage, permissions, channelName, boardName, xyneId, tags, createdByName, assignedToName, closedByName, projectName, ticketMentions, threadMentions, threadSenders, initialMessage, initialMessageSender, parentTicketXyneId, childTicketXyneIds, formFields.fieldValue, entityNames, createdAt, updatedAt, closedAt, deletedAt
+  }
+
+  rank-profile initial {
+    inputs {
+      query(e) tensor<bfloat16>(v[DIMS])
+      query(alpha) double: 0.5
+    }
+
+    rank-properties {
+      nativeFieldMatch.firstOccurrenceImportance: 0
+    }
+
+    function lexical_score() {
+      expression: 4 * nativeRank(title)
+    }
+
+    function fuzzy_lexical_score() {
+      expression: 4 * nativeRank(title_fuzzy)
+    }
+
+    function vector_score() {
+      expression: max(max(closeness(field, combined_embeddings), closeness(field, description_embeddings)), closeness(field, description_clean_embeddings))
+    }
+
+    function combined_nativeRank() {
+      expression: nativeRank(title, description)
+    }
+  }
+
+  rank-profile unified inherits initial {
+    first-phase {
+      expression: lexical_score
+    }
+    match-features {
+      combined_nativeRank
+      lexical_score
+    }
+  }
+
+  rank-profile default_native inherits unified {
+    first-phase {
+      expression: query(alpha) * vector_score + (1 - query(alpha)) * lexical_score
+    }
+    match-features {
+      combined_nativeRank
+      lexical_score
+      vector_score
+    }
+  }
+
+
+  rank-profile duplicate_detection inherits unified {
+    first-phase {
+      expression: 0.75 * vector_score + 0.25 * lexical_score
+    }
+    match-features {
+      combined_nativeRank
+      lexical_score
+      vector_score
+    }
+  }
+
+  rank-profile default_fuzzy inherits unified {
+    first-phase {
+      expression: query(alpha) * vector_score + (1 - query(alpha)) * fuzzy_lexical_score
+    }
+    match-features {
+      combined_nativeRank
+      lexical_score
+      vector_score
+    }
+  }
+  
+  document-summary default {
+    summary title {
+      bolding: on
+    }
+    summary description {
+      bolding: on
+    }
+    summary description_clean {
+      bolding: on
+    }
+    summary xyneId {
+      bolding: on
+    }
+
+    summary channelId {}
+    summary projectId {}
+  }
+
+  document-summary lean {
+    summary docId {}
+    summary docType {}
+    summary title {
+      bolding: on
+    }
+    summary description {}
+    summary status {}
+    summary stage {}
+    summary xyneId {}
+    summary assignedTo {}
+    summary createdBy {}
+    summary createdAtTimestamp {}
+    summary boardId {}
+    summary convId {}
+    summary attachmentIds {}
+    summary replyCount {}
+    summary threadSenders {}
+    summary formFields {}
+    # imported from channelRef
+    summary channelId {}
+  }
+
+}

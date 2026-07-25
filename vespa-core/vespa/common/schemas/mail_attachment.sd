@@ -1,0 +1,195 @@
+schema mail_attachment {
+  document mail_attachment {
+    # basically the attachmentId
+    field docId type string {
+      indexing: attribute | summary
+      attribute: fast-search
+    }
+
+    field docType type string {
+      indexing: attribute | summary
+      attribute: fast-search
+      match: exact
+    }
+
+    field orgId type string {
+      indexing: attribute | summary
+      attribute: fast-search
+      match: exact
+    }
+
+    field workspaceId type string {
+      indexing: attribute | summary
+      attribute: fast-search
+      match: exact
+    }
+
+    field threadId type string {
+      indexing: attribute | summary
+      attribute: fast-search
+    }
+
+    field mailId type string {
+      indexing: attribute | summary
+      attribute: fast-search
+    }
+
+    field app type string {
+      indexing: attribute | summary
+      attribute: fast-search
+      match: exact
+    }
+
+    field entity type string {
+      indexing: attribute | summary
+      attribute: fast-search
+      match: exact
+    }
+
+    field filename type string {
+      indexing: summary | index
+      index: enable-bm25
+    }
+
+    field fileType type string {
+      indexing: summary | attribute
+    }
+
+     field fileSize type long {
+      indexing: summary | attribute
+    }
+
+    field partId type long {
+      indexing: summary | attribute
+    }
+
+    field chunks type array<string> {
+      indexing: index | summary
+      index {
+        enable-bm25
+      }
+    }
+
+    field timestamp type long {
+      indexing: attribute | summary
+      attribute: fast-search
+    }
+
+    field permissions type array<string> {
+      indexing: attribute | summary
+    }
+    
+  }
+
+  field chunk_embeddings type tensor<bfloat16>(p{}, v[DIMS])  {
+    indexing: input chunks | embed hf-embedder | attribute | index
+    attribute {
+      distance-metric: angular
+    }
+    attribute: paged
+  }
+
+  # filename
+  field name_fuzzy type string {
+    indexing: input filename | index
+    index {
+      enable-bm25
+    }
+    match {
+      gram
+      gram-size: 3
+    }
+  }
+
+  fieldset default {
+    fields: filename, chunks
+  }
+
+  fieldset autocomplete {
+    fields: filename
+  }
+
+  rank-profile initial {
+    inputs {
+      query(e) tensor<bfloat16>(v[DIMS])
+      query(alpha) double: 0.5
+    }
+
+    rank-properties {
+      nativeFieldMatch.firstOccurrenceImportance: 0
+    }
+
+    function lexical_score() {
+      expression: 4 * nativeRank(filename)
+    }
+
+    function fuzzy_lexical_score() {
+      expression: 4 * nativeRank(name_fuzzy)
+    }
+
+    function vector_score() {
+      expression: closeness(field, chunk_embeddings)
+    }
+
+    function chunk_scores() {
+      expression: elementwise(bm25(chunks), x, double)
+    }
+
+    function combined_nativeRank() {
+      expression: nativeRank(filename, chunks)
+    }
+  }
+
+  rank-profile unified inherits initial {
+    first-phase {
+      expression: lexical_score
+    }
+    match-features {
+      combined_nativeRank
+      lexical_score
+      chunk_scores
+    }
+  }
+
+  rank-profile default_native inherits unified {
+    first-phase {
+      expression: query(alpha) * vector_score + (1 - query(alpha)) * lexical_score
+    }
+    match-features {
+      combined_nativeRank
+      lexical_score
+      vector_score
+      chunk_scores
+    }
+  }
+
+
+  rank-profile tunable inherits unified {
+    inputs {
+      query(w_lex) double: 0.5
+      query(w_sem) double: 0.5
+    }
+    first-phase {
+      expression: query(w_lex) * lexical_score + query(w_sem) * vector_score
+    }
+    match-features {
+      combined_nativeRank
+      lexical_score
+      vector_score
+      chunk_scores
+    }
+  }
+
+  document-summary lean {
+    summary docId {}
+    summary docType {}
+    summary filename {}
+    summary fileType {}
+    summary fileSize {}
+    summary timestamp {}
+    summary app {}
+    summary entity {}
+    summary mailId {}
+    summary permissions {}
+  }
+}

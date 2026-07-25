@@ -1,0 +1,232 @@
+schema memory {
+  
+  document memory {
+    # sessionId
+    field docId type string {
+      indexing: attribute | summary
+      # Unique document identifier in Vespa
+    }
+    # FACT , SOP
+    field docType type string {
+      indexing: attribute | summary
+      attribute: fast-search
+      match: exact
+    }
+
+    field orgId type string {
+      indexing: attribute | summary
+      attribute: fast-search
+      match: exact
+    }
+
+    field workspaceId type string {
+      indexing: attribute | summary
+      attribute: fast-search
+      match: exact
+    }
+
+    field userId type string {
+      indexing: attribute | summary
+    }
+
+    field sessionId type string {
+      indexing: index | attribute | summary
+      attribute: fast-search
+    }
+
+    field repoUrl type string {
+      indexing: index | attribute | summary
+      attribute: fast-search
+      index { enable-bm25 }
+    }
+
+    field commitId type string{
+      indexing: attribute | summary
+      attribute: fast-search
+      match: exact
+    }
+
+    field ticketId type string {
+      indexing: attribute | summary
+      attribute: fast-search
+      match: exact
+    }
+
+     field userQuery type string {
+      indexing: index | attribute | summary
+      attribute: fast-search
+      index { enable-bm25 }
+    }
+
+    field tags type array<string> {
+      indexing: index | attribute | summary
+      attribute: fast-search
+      index { enable-bm25 }
+    }
+
+    field filePointers type array<string>{
+      indexing: index | attribute | summary
+      attribute: fast-search
+      index { enable-bm25 }
+    }
+
+    field chatSummary type array<string>{
+      indexing: index | summary
+      index { enable-bm25 }
+    }
+
+    field rawContent type string {
+    indexing: summary
+    }
+
+    field documentType type string {
+      indexing: attribute | summary
+      attribute: fast-search
+      match: exact
+    }
+
+    field createdAt type long {
+      indexing: attribute | summary
+      attribute: fast-search
+    }
+
+    field updatedAt type long {
+      indexing: attribute | summary
+      attribute: fast-search
+    }
+
+    field committedAt type long {
+      indexing: attribute | summary
+      attribute: fast-search
+    }
+
+    field agentUsed type string {
+      indexing: attribute | summary
+      attribute: fast-search
+    }
+
+    field modelUsed type array<string>{
+      indexing: attribute | summary
+      attribute: fast-search
+    }
+
+    field parentRef type string{
+      indexing: attribute | summary
+      attribute: fast-search
+      match: exact
+    }
+    
+    # pending , verified , rejected
+    field reviewStatus type string{
+      indexing: attribute | summary
+      attribute: fast-search
+    }
+
+    field fileStoragePath type string{
+      indexing: attribute | summary
+      attribute: fast-search
+    }
+
+  }
+
+  # Vector embeddings
+  field summary_embeddings type tensor<bfloat16>(p{}, v[DIMS]) {
+    indexing: input chatSummary | embed hf-embedder | attribute | index
+    attribute { distance-metric: angular }
+  }
+
+ field query_embeddings type tensor<bfloat16>(v[DIMS]) {
+    indexing: input userQuery | embed hf-embedder | attribute | index
+    attribute { distance-metric: angular }
+  }
+  
+  
+  fieldset default {
+    fields: chatSummary , repoUrl , tags , userQuery
+  }
+
+  fieldset noChatSummary {
+    fields: repoUrl, tags, userQuery
+}
+
+fieldset noUserQuery {
+    fields: chatSummary, repoUrl, tags
+}
+
+   rank-profile initial {
+     inputs {
+       query(e) tensor<bfloat16>(v[DIMS])
+       query(alpha) double: 0.5
+     }
+
+     rank-properties {
+       nativeFieldMatch.firstOccurrenceImportance: 0
+     }
+
+     function lexical_score() {
+       expression: 4 * nativeRank(chatSummary)
+     }
+
+     function vector_score() {
+       expression: max(closeness(field, summary_embeddings), closeness(field, query_embeddings))
+     }
+
+     function combined_nativeRank() {
+       expression: nativeRank(chatSummary) + nativeRank(tags) + nativeRank(userQuery)
+     }
+   }
+
+  rank-profile unified inherits initial {
+    first-phase {
+      expression: lexical_score
+    }
+    match-features {
+      combined_nativeRank
+      lexical_score
+    }
+  }
+
+  rank-profile default_native inherits unified {
+    first-phase {
+      expression: query(alpha) * vector_score + (1 - query(alpha)) * lexical_score
+    }
+    match-features {
+      combined_nativeRank
+      lexical_score
+      vector_score
+    }
+  }
+
+  rank-profile default_fuzzy inherits unified {
+    first-phase {
+      expression: query(alpha) * vector_score + (1 - query(alpha)) * lexical_score
+    }
+    match-features {
+      combined_nativeRank
+      lexical_score
+      vector_score
+    }
+  }
+  document-summary default {
+
+    summary chatSummary {
+      bolding: on
+      source: chatSummary
+    }
+    summary userQuery{
+      bolding: on
+    }
+   
+  }
+
+  document-summary lean {
+    summary docId {}
+    summary docType {}
+    summary userId {}
+    summary sessionId {}
+    summary userQuery {}
+    summary documentType {}
+    summary createdAt {}
+  }
+  
+}

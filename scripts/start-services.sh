@@ -108,6 +108,29 @@ fi
 echo -e "${BLUE}🚢 Starting infrastructure services...${NC}"
 $COMPOSE_CMD -f docker-compose.dev.yml up -d postgres common-postgres redis livekit fake-gcs minio ysweet transcription-agent victoriametrics grafana otel-collector superposition
 
+# Start Vespa now so it boots (~1 min) in parallel with the database work below.
+# It lives in its own compose file with its own data volume; schemas are deployed
+# at the end of this script. Set SKIP_VESPA=1 to leave search out entirely.
+VESPA_COMPOSE="vespa-core/deployment/docker-compose.dev.yml"
+# -p is required: compose would otherwise name the project after the compose file's
+# parent dir ("deployment") and split Vespa off from the rest of the stack. This is
+# the same project name the root compose file resolves to.
+VESPA_PROJECT="${COMPOSE_PROJECT_NAME:-$(basename "$PWD")}"
+if [ "${SKIP_VESPA:-0}" = "1" ]; then
+    echo -e "${YELLOW}⏭  Skipping Vespa (SKIP_VESPA=1)${NC}"
+elif [ ! -f "$VESPA_COMPOSE" ]; then
+    echo -e "${YELLOW}⚠️  $VESPA_COMPOSE not found, skipping Vespa${NC}"
+    SKIP_VESPA=1
+else
+    echo -e "${BLUE}🔎 Starting Vespa...${NC}"
+    if $COMPOSE_CMD -p "$VESPA_PROJECT" -f "$VESPA_COMPOSE" up -d; then
+        echo -e "${GREEN}✓ Vespa container started${NC}"
+    else
+        echo -e "${YELLOW}⚠️  Vespa failed to start (continuing without search)${NC}"
+        SKIP_VESPA=1
+    fi
+fi
+
 # Wait for PostgreSQL
 echo -e "${BLUE}⏳ Waiting for PostgreSQL...${NC}"
 for i in {1..30}; do
@@ -431,6 +454,40 @@ if [ -d "xyne-claw" ]; then
     cd ..
 fi
 
+# Deploy Vespa schemas (idempotent: waits for health, downloads the embedding
+# model once, builds the application package, then activates it on the config
+# server — via the vespa CLI when installed, otherwise a plain curl upload).
+# Non-fatal on purpose: a dev without search should still get a working stack.
+VESPA_READY=0
+if [ "${SKIP_VESPA:-0}" != "1" ]; then
+    echo -e "${BLUE}🔎 Deploying Vespa schemas (first run downloads the embedding model)...${NC}"
+    if DOCKER_COMPOSE="$COMPOSE_CMD" CONTAINER_CLI="$CONTAINER_RUNTIME" ./vespa-core/scripts/deploy-dev.sh; then
+        echo -e "${GREEN}✓ Vespa schemas deployed${NC}"
+        VESPA_READY=1
+    else
+        echo -e "${YELLOW}⚠️  Vespa schema deploy failed — search will not work.${NC}"
+        echo -e "${YELLOW}   Needs curl plus either zip or python3 (all usually present).${NC}"
+        echo -e "${YELLOW}   Retry on its own with: ${BLUE}npm run services:vespa${NC}"
+    fi
+fi
+
+# Deploy Vespa schemas (idempotent: waits for health, downloads the embedding
+# model once, builds the application package, then activates it on the config
+# server — via the vespa CLI when installed, otherwise a plain curl upload).
+# Non-fatal on purpose: a dev without search should still get a working stack.
+VESPA_READY=0
+if [ "${SKIP_VESPA:-0}" != "1" ]; then
+    echo -e "${BLUE}🔎 Deploying Vespa schemas (first run downloads the embedding model)...${NC}"
+    if DOCKER_COMPOSE="$COMPOSE_CMD" CONTAINER_CLI="$CONTAINER_RUNTIME" ./vespa-core/scripts/deploy-dev.sh; then
+        echo -e "${GREEN}✓ Vespa schemas deployed${NC}"
+        VESPA_READY=1
+    else
+        echo -e "${YELLOW}⚠️  Vespa schema deploy failed — search will not work.${NC}"
+        echo -e "${YELLOW}   Needs curl plus either zip or python3 (all usually present).${NC}"
+        echo -e "${YELLOW}   Retry on its own with: ${BLUE}npm run services:vespa${NC}"
+    fi
+fi
+
 echo ""
 echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}✅ Infrastructure Services Running!${NC}"
@@ -450,6 +507,13 @@ echo -e "  🔭 OTEL:               ${GREEN}http://localhost:4318${NC}"
 echo -e "  🚩 Superposition:      ${GREEN}http://localhost:9999${NC}"
 echo -e "  🗄️  Common PostgreSQL:   ${GREEN}localhost:5434${NC}"
 echo -e "  🗄️  claw-auth-postgres: ${GREEN}localhost:5435${NC}"
+if [ "$VESPA_READY" = "1" ]; then
+    echo -e "  🔎 Vespa feed:         ${GREEN}http://localhost:${VESPA_FEED_PORT:-8083}${NC}"
+    echo -e "  🔎 Vespa query:        ${GREEN}http://localhost:${VESPA_QUERY_PORT:-8081}${NC}"
+    echo -e "  🔎 Vespa admin:        ${GREEN}http://localhost:19071${NC}"
+elif [ "${SKIP_VESPA:-0}" != "1" ]; then
+    echo -e "  🔎 Vespa:              ${YELLOW}started, schemas NOT deployed${NC}"
+fi
 echo ""
 echo -e "${YELLOW}Next steps:${NC}"
 echo -e "  Backend:        ${BLUE}cd backend && npm run dev${NC}"
