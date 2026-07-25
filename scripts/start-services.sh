@@ -43,18 +43,38 @@ fi
 CONTAINER_RUNTIME=""
 COMPOSE_CMD=""
 
-if command -v podman &> /dev/null; then
+if command -v docker &> /dev/null; then
+    CONTAINER_RUNTIME="docker"
+    if command -v docker-compose &> /dev/null; then
+        COMPOSE_CMD="docker-compose"
+    else
+        COMPOSE_CMD="docker compose"
+    fi
+    if ! docker info > /dev/null 2>&1; then
+        echo -e "${YELLOW}⚠️  Docker is installed but not running. Trying Podman...${NC}"
+        CONTAINER_RUNTIME=""
+    else
+        echo -e "${GREEN}✓ Using Docker${NC}"
+    fi
+fi
+
+if [ -z "$CONTAINER_RUNTIME" ] && command -v podman &> /dev/null; then
     CONTAINER_RUNTIME="podman"
 
     # Check if podman-compose is installed
     if ! command -v podman-compose &> /dev/null; then
         echo -e "${YELLOW}⚠️  podman-compose not found. Installing it...${NC}"
+        INSTALLED=false
         if command -v pip3 &> /dev/null; then
-            pip3 install podman-compose
-        elif command -v brew &> /dev/null; then
-            brew install podman-compose
-        else
-            echo -e "${RED}❌ Cannot install podman-compose. Please install pip3 or brew.${NC}"
+            pip3 install --user podman-compose 2>/dev/null && INSTALLED=true || \
+            pip3 install podman-compose 2>/dev/null && INSTALLED=true || true
+        fi
+        if [ "$INSTALLED" = false ] && command -v brew &> /dev/null; then
+            echo -e "${YELLOW}⚠️  pip3 install failed, trying brew...${NC}"
+            brew install podman-compose && INSTALLED=true || true
+        fi
+        if [ "$INSTALLED" = false ]; then
+            echo -e "${RED}❌ Cannot install podman-compose. Please install it manually.${NC}"
             echo -e "${YELLOW}   Falling back to 'podman compose'${NC}"
             COMPOSE_CMD="podman compose"
         fi
@@ -67,27 +87,20 @@ if command -v podman &> /dev/null; then
     fi
 
     # Check if podman machine is running
-    if ! podman machine list 2>/dev/null | grep -q "Currently running"; then
+    if ! podman machine list 2>/dev/null | grep -qi "running"; then
         echo -e "${YELLOW}⚠️  Podman machine not running. Starting default machine...${NC}"
-        podman machine start 2>/dev/null || podman machine init && podman machine start
+        podman machine start 2>/dev/null || {
+            echo -e "${YELLOW}⚠️  Machine may already exist. Trying init...${NC}"
+            podman machine init 2>/dev/null && podman machine start
+        } || true
         echo -e "${GREEN}✓ Podman machine started${NC}"
     fi
 
     echo -e "${GREEN}✓ Using Podman${NC}"
-elif command -v docker &> /dev/null; then
-    CONTAINER_RUNTIME="docker"
-    if command -v docker-compose &> /dev/null; then
-        COMPOSE_CMD="docker-compose"
-    else
-        COMPOSE_CMD="docker compose"
-    fi
-    if ! docker info > /dev/null 2>&1; then
-        echo -e "${RED}❌ Docker is not running. Please start Docker Desktop and try again.${NC}"
-        exit 1
-    fi
-    echo -e "${GREEN}✓ Using Docker${NC}"
-else
-    echo -e "${RED}❌ Neither Docker nor Podman found. Please install one of them.${NC}"
+fi
+
+if [ -z "$CONTAINER_RUNTIME" ]; then
+    echo -e "${RED}❌ No container runtime available. Please start Docker/OrbStack or install Podman.${NC}"
     exit 1
 fi
 
@@ -196,6 +209,28 @@ fi
 echo -e "${BLUE}🔄 Setting up database schema...${NC}"
 cd backend
 
+# Create .env.local from .env.example if it doesn't exist
+if [ ! -f ".env.local" ]; then
+    echo -e "${YELLOW}⚠️  backend/.env.local not found. Creating from .env.example...${NC}"
+    cp .env.example .env.local
+    echo -e "${GREEN}✓ Created backend/.env.local${NC}"
+    echo -e "${YELLOW}   Please review and update values as needed.${NC}"
+fi
+
+# Export key env vars from .env.local to ensure prisma/node use correct values
+# (dotenv -e sometimes fails to override shell/env values)
+export_database_url() {
+    var_name="$1"
+    value=$(grep "^${var_name}=" .env.local 2>/dev/null | sed "s/^${var_name}=//" | tail -n 1)
+    if [ -n "$value" ]; then
+        export "$var_name=$value"
+    fi
+}
+export_database_url "DATABASE_URL"
+export_database_url "COMMON_DATABASE_URL"
+export_database_url "ZERO_UPSTREAM_DB"
+echo -e "${BLUE}   DATABASE_URL: ${DATABASE_URL}${NC}"
+
 # Check if node_modules exists
 if [ ! -d "node_modules" ]; then
   echo -e "${YELLOW}⚠️  Backend dependencies not installed.${NC}"
@@ -243,17 +278,10 @@ else
     npx dotenv -e .env.local -- npx tsx scripts/seed-acl.ts
     echo -e "${GREEN}✓ ACL system seeded${NC}"
 
-    # Prompt for developer user
-    echo -e "${YELLOW}📧 Please enter your email to create a developer user:${NC}"
-    read -p "Email: " USER_EMAIL
-
-    if [ -n "$USER_EMAIL" ]; then
-      echo -e "${BLUE}Creating developer user for ${USER_EMAIL}...${NC}"
-      npx dotenv -e .env.local -- npx tsx scripts/assign-user-group.ts "$USER_EMAIL"
-      echo -e "${GREEN}✓ Developer user created${NC}"
-    else
-      echo -e "${YELLOW}⚠️  Skipping user creation (no email provided)${NC}"
-    fi
+    # Create developer user (uses DEFAULT_ADMIN_EMAIL from .env.local)
+    echo -e "${BLUE}Creating developer user...${NC}"
+    npx dotenv -e .env.local -- npx tsx scripts/assign-user-group.ts
+    echo -e "${GREEN}✓ Developer user created${NC}"
   else
     # User table exists - just sync schema changes without dropping data
     echo -e "${BLUE}Syncing database schema...${NC}"
@@ -363,4 +391,18 @@ echo -e "  Claw auth UI:   ${BLUE}cd xyne-claw-auth/frontend && npm run dev${NC}
 echo ""
 echo -e "${YELLOW}To stop services:${NC}"
 echo -e "  ${BLUE}$COMPOSE_CMD -f docker-compose.dev.yml down${NC}"
+echo ""
+
+# Read dev user email from .env.local for credentials display
+DEV_EMAIL=$(grep -m 1 '^DEFAULT_ADMIN_EMAIL=' backend/.env.local 2>/dev/null | sed 's/^DEFAULT_ADMIN_EMAIL=//' || true)
+if [ -z "$DEV_EMAIL" ] || [[ "$DEV_EMAIL" == definition* ]]; then
+    DEV_EMAIL="admin@xyne.ai"
+fi
+
+echo -e "${GREEN}========================================${NC}"
+echo -e "${GREEN}🔐 Local Dev Login Credentials${NC}"
+echo -e "${GREEN}========================================${NC}"
+echo -e "  ${BLUE}Email:${NC}     ${DEV_EMAIL}"
+echo -e "  ${BLUE}Password:${NC}  ${GREEN}Xyne@Dev123!${NC}"
+echo -e "${GREEN}========================================${NC}"
 echo ""
