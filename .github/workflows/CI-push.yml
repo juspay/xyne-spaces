@@ -1,0 +1,23 @@
+name: CI-push
+
+# Runs the full CI suite (ci.yml) on pushes to protected branches.
+on:
+  push:
+    branches:
+      - main
+      - main-1
+      - master
+      - staging
+      - "release**"
+
+permissions:
+  contents: read
+
+# Protected branches only — never cancel an in-progress run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
