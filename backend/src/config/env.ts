@@ -7,22 +7,24 @@ const envSchema = Joi.object({
   NODE_ENV: Joi.string().valid('development', 'production', 'test').default('development'),
   SANDBOX_TEST_MODE: Joi.boolean().default(false),
   ORG_MEMBER_LIMIT: Joi.number().integer().min(1).allow(null).default(null),
-  RESEARCH_AGENT_URL: Joi.string().default(''),
+  RESEARCH_AGENT_URL: Joi.string().default('http://localhost:8000'),
   // Python transcription agent (health server also exposes /embed-voice)
-  PYTHON_AGENT_URL: Joi.string().default(''),
-  NX_GRAPH_SERVER_URL: Joi.string().default(''),
+  PYTHON_AGENT_URL: Joi.string().default('http://localhost:8080'),
+  NX_GRAPH_SERVER_URL: Joi.string().default('http://localhost:8001'),
   NX_GRAPH_SERVER_URLS: Joi.string().default(''),
   RESEARCH_AGENT_API_KEY: Joi.string().default(''),
   USE_MOCK_ANALYSIS: Joi.boolean().default(false),
   USE_MOCK_BUILD: Joi.boolean().default(false),
   PORT: Joi.number().default(3001),
-  HOST: Joi.string().default(''),
-  CORS_ORIGIN: Joi.string().default(''),
-  ALLOWED_MEDIA_ORIGINS: Joi.string().default(''),
+  HOST: Joi.string().default('localhost'),
+  CORS_ORIGIN: Joi.string().default('http://localhost:3000'),
+  ALLOWED_MEDIA_ORIGINS: Joi.string().default(
+    'http://localhost:5173/,xyne-spaces://./,xyne-spaces-dev://./,xyne-spaces-sandbox://./'
+  ),
   RATE_LIMIT_WINDOW_MS: Joi.number().default(900000),
   RATE_LIMIT_MAX_REQUESTS: Joi.number().default(100),
   LOG_LEVEL: Joi.string().valid('error', 'warn', 'info', 'debug').default('info'),
-  LOG_FILE_PATH: Joi.string().default(''),
+  LOG_FILE_PATH: Joi.string().default('logs/app.log'),
   LOG_USER_SESSION_CHANGES: Joi.boolean().default(true),
   DATABASE_URL: Joi.string().required(),
   DATABASE_READ_REPLICA_POOL_URL: Joi.string().optional().default(''),
@@ -33,7 +35,7 @@ const envSchema = Joi.object({
   ENABLE_COMMON_DB_TICKET_SEQUENCE: Joi.boolean().default(false),
   WORKFLOW_LOCK_DURATION_MS: Joi.number().default(3600000), // 30 minutes in milliseconds
   API_KEYS_ENABLED: Joi.boolean().default(false),
-  API_KEYS_CONFIG: Joi.string().default(''),
+  API_KEYS_CONFIG: Joi.string().default('{}'),
   // Digital Twin: the email of the Digital Twin app's bot user (unique per
   // workspace). USER_MENTIONED is delivered to THIS app at workspace scope (in
   // addition to the existing channel-scoped app delivery) so the twin fires for
@@ -49,10 +51,12 @@ const envSchema = Joi.object({
   GOOGLE_CLIENT_SECRET_NEW: Joi.string().allow('').default(''),
   GOOGLE_REFRESH_TOKEN_NEW: Joi.string().allow('').default(''),
   EMAIL_FROM: Joi.string().allow('').default(''),
-  EMAIL_FROM_NAME: Joi.string().allow('').default(''),
+  EMAIL_FROM_NAME: Joi.string().allow('').default('Xyne Spaces'),
   COMMUNITY_JOIN_APPROVED_EMAIL_MESSAGE: Joi.string()
     .allow('')
-    .default(''),
+    .default(
+      'Your request to join {{workspaceName}} Community is approved.\\n\\nYou can login community now: {{joinLink}}\\n\\nExcited to have you onboard.'
+    ),
   JWT_SECRET: Joi.string().required(),
   JWT_EXPIRATION_SECONDS: Joi.number().default(86400), // 24 hours in seconds
   FORCE_LOGOUT_BEFORE: Joi.number().optional(), // Unix timestamp (seconds) - reject tokens issued before this time
@@ -60,7 +64,7 @@ const envSchema = Joi.object({
   // File Storage Configuration
   STORAGE_PROVIDER: Joi.string().valid('gcs', 'local', 's3').default('gcs'),
   // AWS S3 Configuration
-  AWS_REGION: Joi.string().default(''),
+  AWS_REGION: Joi.string().default('ap-south-1'),
   AWS_ACCESS_KEY_ID: Joi.string().allow('').default(''),
   AWS_SECRET_ACCESS_KEY: Joi.string().allow('').default(''),
   S3_BUCKET_NAME: Joi.string().allow('').default(''),
@@ -72,7 +76,7 @@ const envSchema = Joi.object({
   GCS_CANVAS_BUCKET_NAME: Joi.string().default(''),
   GCS_DOCS_BUCKET_NAME: Joi.string().default(''),
   GCS_MAX_FILE_SIZE_MB: Joi.number().default(1024),
-  FAKE_GCS_HOST: Joi.string().default(''),
+  FAKE_GCS_HOST: Joi.string().default('localhost:4443'),
   TRANSCRIPTION_BUCKET_NAME: Joi.string().default(''),
   GCS_WORKFLOW_STEPS_BUCKET_NAME: Joi.string().default(''),
   GCS_SESSION_RECORDING_BUCKET_NAME: Joi.string().default(''),
@@ -101,16 +105,16 @@ const envSchema = Joi.object({
   ENTERPRISE_WORKSPACE_USER_BUDGET: Joi.number().integer().min(0).allow(null).default(null),
   LITELLM_MANAGEMENT_BASE_URL: Joi.string().uri().allow('').default(''),
   LITELLM_MANAGEMENT_ADMIN_KEY: Joi.string().allow('').default(''),
-  LITELLM_CHANGED_BY: Joi.string().default(''),
-  BACKEND_URL: Joi.string().default(''),
+  LITELLM_CHANGED_BY: Joi.string().default('external-system:xyne-spaces-external'),
+  BACKEND_URL: Joi.string().default('http://localhost:3001'),
   SLACK_BOT_TOKEN: Joi.string().allow('').default(''),
-  SLACK_FRONTEND_URL: Joi.string().allow('').default(''),
-  FRONTEND_URL: Joi.string().default(''),
+  SLACK_FRONTEND_URL: Joi.string().allow('').default('http://localhost:5173'),
+  FRONTEND_URL: Joi.string().default('http://localhost:5173'),
   FOLLOW_HEADER_REDIRECTION: Joi.boolean().default(true),
   TRUSTED_ORIGINAL_HOST_DOMAINS: Joi.string().default(''),
   GOOGLE_AUTH_REDIRECT_URI: Joi.string().uri().allow('').default(''),
   MICROSOFT_AUTH_REDIRECT_URI: Joi.string().uri().allow('').default(''),
-  EXTERNAL_CALL_INVITE_BASE_URL: Joi.string().default(''),
+  EXTERNAL_CALL_INVITE_BASE_URL: Joi.string().default('http://localhost:5174/external'),
   SLACK_SIGNING_SECRET: Joi.string().allow('').default(''), // Slack signing secret for request verification
   SLACK_MIGRATION_APPROVALS: Joi.string().allow('').default(''), // Comma-separated list of approved Slack user IDs
   SLACK_IGNORED_BOT_IDS: Joi.string().allow('').default(''), // Comma-separated list of bot IDs to exclude from migration
@@ -124,10 +128,10 @@ const envSchema = Joi.object({
   MIGRATION_SHEET_ID: Joi.string().allow('').default(''), // Google Spreadsheet ID
   ENABLE_SLACK_MIGRATION_WORKER: Joi.boolean().default(false), // Toggle nightly migration cron on/off
   // Per-workspace Slack bot config (JSON keyed by Xyne workspaceId). Falls back to flat vars if empty.
-  MIGRATION_SLACK_BOT_CONFIGS: Joi.string().allow('').default(''),
+  MIGRATION_SLACK_BOT_CONFIGS: Joi.string().allow('').default('{}'),
   SLACK_MIGRATION_CONCURRENCY: Joi.number().integer().min(1).default(2), // Max channels processed in parallel
-  SLACK_MIGRATION_SYNC_CRON: Joi.string().default(''), // Nightly sync cron (default: 12 AM IST = 18:30 UTC)
-  SLACK_MIGRATION_CLEANUP_CRON: Joi.string().default(''), // Cleanup cron (default: 7 AM IST = 01:30 UTC)
+  SLACK_MIGRATION_SYNC_CRON: Joi.string().default('30 18 * * *'), // Nightly sync cron (default: 12 AM IST = 18:30 UTC)
+  SLACK_MIGRATION_CLEANUP_CRON: Joi.string().default('30 1 * * *'), // Cleanup cron (default: 7 AM IST = 01:30 UTC)
   SLACK_MIGRATION_NOTIFICATIONS_ENABLED: Joi.boolean().default(true), // Enable/disable Slack postMessage notifications during migration
   SYNC_DM_CONCURRENCY: Joi.number().integer().min(1).default(3), // Max DMs/group-DMs migrated in parallel (/sync-dm)
   SYNC_DM_LOG_CHANNEL: Joi.string().allow('').default(''), // Default Slack channel for /sync-dm updates; per-workspace override via MIGRATION_SLACK_BOT_CONFIGS[].syncDmLogChannelId
@@ -138,9 +142,9 @@ const envSchema = Joi.object({
   // LiveKit Configuration
   LIVEKIT_API_KEY: Joi.string().allow('').default(''),
   LIVEKIT_API_SECRET: Joi.string().allow('').default(''),
-  LIVEKIT_URL: Joi.string().default(''),
-  LIVEKIT_CLIENT_URL: Joi.string().default(''),
-  LIVEKIT_SERVER_URL: Joi.string().default(''),
+  LIVEKIT_URL: Joi.string().default('ws://localhost:7880'),
+  LIVEKIT_CLIENT_URL: Joi.string().default('http://localhost:7880'),
+  LIVEKIT_SERVER_URL: Joi.string().default('ws://localhost:7880'),
   // Call Recording Configuration
   CALL_RECORDING_ENABLED: Joi.boolean().default(false),
   CALL_RECORDING_RETENTION_DAYS: Joi.number().integer().min(0).default(0).max(365),
@@ -154,7 +158,7 @@ const envSchema = Joi.object({
   APNS_BUNDLE_ID: Joi.string().allow('').default(''),
   APNS_P8_BASE64: Joi.string().allow('').default(''),
   // Y-Sweet Configuration
-  Y_SWEET_URL: Joi.string().default(''),
+  Y_SWEET_URL: Joi.string().default('http://localhost:8080'),
   // LiteLLM Configuration for AI Agents
   LITELLM_BASE_URL: Joi.string().default(''),
   LITELLM_API_KEY: Joi.string().allow('').default(''),
@@ -169,7 +173,7 @@ const envSchema = Joi.object({
   CALL_LITELLM_API_KEY: Joi.string().allow('').default(''),
   CALL_LITELLM_MODEL: Joi.string().default(''),
   ACTIVITY_CLASSIFICATION_MODEL: Joi.string().default(''),
-  PRODUCT_INSIGHTS_RECLUSTER_CRON: Joi.string().default(''),
+  PRODUCT_INSIGHTS_RECLUSTER_CRON: Joi.string().default('0 2 * * *'),
   PRODUCT_INSIGHTS_RECLUSTER_WINDOW_DAYS: Joi.number().default(30),
   // Working Hours Configuration (in IST)
   WORKING_HOUR_START: Joi.number().default(11),
@@ -178,8 +182,8 @@ const envSchema = Joi.object({
   ENABLE_TICKET_CLEANUP_WORKER: Joi.boolean().default(false),
   ENABLE_WORKER_SCHEDULER: Joi.boolean().default(true),
   ENABLE_RECAP_SCHEDULER: Joi.boolean().default(true),
-  RECAP_GENERATION_CRON: Joi.string().default(''), //5:45 IST daily
-  RECAP_CLEANUP_CRON: Joi.string().default(''), //5:00 IST daily
+  RECAP_GENERATION_CRON: Joi.string().default('15 0 * * *'), //5:45 IST daily
+  RECAP_CLEANUP_CRON: Joi.string().default('30 23 * * *'), //5:00 IST daily
   RECAP_RETENTION_DAYS: Joi.number().default(30),
   ACTIVITY_CLASSIFICATION_MAX_RETRIES: Joi.number().default(2),
   TICKET_DESC_CLEAN_MODEL: Joi.string().default(''),
@@ -196,10 +200,10 @@ const envSchema = Joi.object({
   LANGFUSE_SECRET_KEY: Joi.string().allow('').default(''),
   LANGFUSE_PUBLIC_KEY: Joi.string().allow('').default(''),
   LANGFUSE_BASE_URL: Joi.string().allow('').default(''),
-  MESSAGE_CLASSIFIER_URL: Joi.string().uri().default(''),
+  MESSAGE_CLASSIFIER_URL: Joi.string().uri().default('http://localhost:8082'),
   MESSAGE_CLASSIFIER_TIMEOUT_MS: Joi.number().default(5000),
   // Genius Bot API Configuration
-  GENIUS_API_URL: Joi.string().uri().default(''),
+  GENIUS_API_URL: Joi.string().uri().default('http://localhost:8000'),
   GENIUS_API_KEY: Joi.string().allow('').default(''),
   QUERY_ROUTING_KEY: Joi.string().allow('').default(''),
   // Outage Verification API Configuration
@@ -208,7 +212,7 @@ const envSchema = Joi.object({
   // Channel ID for the global outage alerts channel
   OUTAGE_ALERT_CHANNEL_ID: Joi.string().allow('').default(''),
   // UPI Analytics Bot API Configuration
-  GENIUS_UPI_ANALYTICS_API_URL: Joi.string().uri().default(''),
+  GENIUS_UPI_ANALYTICS_API_URL: Joi.string().uri().default('http://localhost:8000'),
   GENIUS_UPI_ANALYTICS_API_KEY: Joi.string().allow('').default(''),
   GENIUS_UPI_ANALYTICS_USERNAME: Joi.string().allow('').default(''),
   // Xyne Investigation API Configuration
@@ -225,10 +229,10 @@ const envSchema = Joi.object({
   METTLE_API_BASE_URL: Joi.string().uri().default(''),
   METTLE_TOKEN: Joi.string().allow('').default(''),
   // Superposition Configuration
-  SUPERPOSITION_ENDPOINT: Joi.string().uri().default(''),
-  SUPERPOSITION_TOKEN: Joi.string().allow('').default(''),
-  SUPERPOSITION_ORG_ID: Joi.string().allow('').default(''),
-  SUPERPOSITION_WORKSPACE_ID: Joi.string().allow('').default(''),
+  SUPERPOSITION_ENDPOINT: Joi.string().uri().default('http://localhost:9999'),
+  SUPERPOSITION_TOKEN: Joi.string().allow('').default('123456'),
+  SUPERPOSITION_ORG_ID: Joi.string().allow('').default('localorg'),
+  SUPERPOSITION_WORKSPACE_ID: Joi.string().allow('').default('test'),
   SUPERPOSITION_POLLING_INTERVAL: Joi.number().default(60000), // 60 seconds in milliseconds
   SUPERPOSITION_TIMEOUT: Joi.number().default(30000), // 30 seconds in milliseconds
   // Jenkins Configuration
@@ -241,13 +245,13 @@ const envSchema = Joi.object({
   // OpenCode Configuration
   OPENCODE_ENABLED: Joi.boolean().default(false),
   OPENCODE_SPAWN_SERVER: Joi.boolean().default(false),
-  OPENCODE_BASE_URL: Joi.string().uri().default(''),
+  OPENCODE_BASE_URL: Joi.string().uri().default('http://localhost:4096'),
   OPENCODE_TIMEOUT_MS: Joi.number().default(600000),
   OPENCODE_AUTO_COMPACT: Joi.boolean().default(false),
   OPENCODE_MODEL: Joi.string().allow('').default(''),
   QUESTION_TIMEOUT_MINUTES: Joi.number().default(2),
   // Default workflow executor when not specified
-  DEFAULT_WORKFLOW_EXECUTOR: Joi.string().default(''),
+  DEFAULT_WORKFLOW_EXECUTOR: Joi.string().default('xyne-code'),
   // Default model ID for config sync service
   DEFAULT_MODEL_ID: Joi.string().default(''),
   DEFAULT_MODEL_NAME: Joi.string().default(''),
@@ -255,14 +259,14 @@ const envSchema = Joi.object({
   DEFAULT_WORKSPACE_ID: Joi.string().allow('').default(''),
   // oh-my-opencode Plugin Configuration
   OPENCODE_PLUGIN_ENABLED: Joi.boolean().default(true),
-  OPENCODE_PLUGIN_VERSION: Joi.string().allow('').default(''),
+  OPENCODE_PLUGIN_VERSION: Joi.string().allow('').default('latest'),
   // Xyne AI Extended (web search, mem0, deep research, etc.)
   XYNE_AI_EXTENDED_URL: Joi.string().uri().allow('').default(''),
   ENABLE_WORKFLOW_RECOVERY: Joi.boolean().default(true),
   // Otel Configuration
   ENABLE_OTEL_METRICS: Joi.boolean().default(true),
-  OTEL_BASE_URL: Joi.string().default(''),
-  OTEL_SERVICE_NAME: Joi.string().default(''),
+  OTEL_BASE_URL: Joi.string().default('http://localhost:4318'),
+  OTEL_SERVICE_NAME: Joi.string().default('xyne-spaces-backend'),
   OTEL_EXPORT_INTERVAL_MS: Joi.number().default(60000),
   SCM_WEBHOOK_SECRET: Joi.string().default(''),
   BITBUCKET_AUTH: Joi.string().allow('').default(''),
@@ -276,7 +280,7 @@ const envSchema = Joi.object({
   BITBUCKET_TOKEN: Joi.string().allow('').default(''),
   JENKINS_WEBHOOK_SECRET: Joi.string().allow('').default(''),
   GITHUB_TOKEN: Joi.string().allow('').default(''),
-  GITHUB_API_URL: Joi.string().uri().default(''),
+  GITHUB_API_URL: Joi.string().uri().default('https://api.github.com'),
   //Presence Queue Configuration
   PRESENCE_CLEANUP_INTERVAL_MS: Joi.number().default(600000),
   PRESENCE_OFFLINE_GRACE_PERIOD_MS: Joi.number().default(300000),
@@ -308,22 +312,22 @@ const envSchema = Joi.object({
   CONFLUENCE_IMPORT_BATCH_COOLDOWN_MS: Joi.number().integer().min(0).default(5000),
   // Bit-Bot Integration
   ENABLE_FILE_INDEXING: Joi.boolean().default(false),
-  VESPA_QUEUE_NAMES: Joi.string().default(''),
-  VESPA_FEED_URL: Joi.string().uri().default(''),
-  VESPA_QUERY_URL: Joi.string().uri().default(''),
-  VESPA_CONFIG_SERVER_URL: Joi.string().uri().default(''),
+  VESPA_QUEUE_NAMES: Joi.string().default('vespa-ingestion'),
+  VESPA_FEED_URL: Joi.string().uri().default('http://127.0.0.1:8080'),
+  VESPA_QUERY_URL: Joi.string().uri().default('http://127.0.0.1:8081'),
+  VESPA_CONFIG_SERVER_URL: Joi.string().uri().default('http://127.0.0.1:19071'),
   // Microsoft Graph API
-  MICROSOFT_GRAPH_BASE_URL: Joi.string().uri().default(''),
+  MICROSOFT_GRAPH_BASE_URL: Joi.string().uri().default('https://graph.microsoft.com/v1.0'),
   MICROSOFT_GRAPH_CLIENT_STATE_BACKFILL_ENABLED: Joi.boolean().default(true),
   // XYNE Claw Integration (Ask AI v2)
-  XYNE_CLAW_URL: Joi.string().uri().default(''),
+  XYNE_CLAW_URL: Joi.string().uri().default('http://localhost:3002'),
   XYNE_CLAW_S2S_KEY: Joi.string().allow('').default(''),
-  XYNE_CLAW_AUTH_URL: Joi.string().uri().default(''),
-  XYNE_CLAW_WEBHOOK_URL: Joi.string().uri().default(''),
+  XYNE_CLAW_AUTH_URL: Joi.string().uri().default('http://localhost:3003'),
+  XYNE_CLAW_WEBHOOK_URL: Joi.string().uri().default('http://localhost:3003/claw/api/v1/webhook'),
   XYNE_CLAW_AUTH_CALLBACK_URL_AUTOMATION: Joi.string()
     .uri()
-    .default(''),
-  XYNE_CLAW_CALLBACK_URL: Joi.string().allow('').default(''),
+    .default('http://localhost:3003/claw/api/v1/webhook'),
+  XYNE_CLAW_CALLBACK_URL: Joi.string().allow('').default('http://localhost:3001'),
   ASK_AI_VERSION: Joi.string().valid('v1', 'v2').default('v2'),
   // Internal S2S key for service-to-service communication
   INTERNAL_S2S_KEY: Joi.string().allow('').default(''),
@@ -334,8 +338,8 @@ const envSchema = Joi.object({
   // Docling Configuration
   DOCLING_ENABLED: Joi.boolean().default(false),
   DOCLING_BASE_URL: Joi.string().uri().allow('').default(''),
-  DOCLING_HEALTH_ENDPOINT: Joi.string().default(''),
-  DOCLING_PROCESS_ENDPOINT: Joi.string().default(''),
+  DOCLING_HEALTH_ENDPOINT: Joi.string().default('/health'),
+  DOCLING_PROCESS_ENDPOINT: Joi.string().default('/process-document/'),
   DOCLING_TIMEOUT_MS: Joi.number().default(240000),
   DOCLING_HEALTH_CACHE_TTL_MS: Joi.number().default(30000),
   DOCLING_DO_OCR: Joi.boolean().default(true),
@@ -378,23 +382,23 @@ const envSchema = Joi.object({
   KB_INGESTION_OCR_PRIORITY: Joi.number().default(200),
   ATTACHMENT_OCR_PRIORITY: Joi.number().default(100),
   // Staging on the LOCAL filesystem (a tmp folder in the container). Single-pod only.
-  DOCLING_ASYNC_STORAGE_ROOT: Joi.string().default(''),
+  DOCLING_ASYNC_STORAGE_ROOT: Joi.string().default('/tmp/docling-async'),
   DOCLING_KEEP_TEMP_RESULTS: Joi.boolean().default(false),
   // Submit (OCR wrapper) concurrency permits + leases
   DOCLING_ASYNC_SUBMIT_PERMITS: Joi.number().default(16),
   DOCLING_ASYNC_SUBMIT_PERMIT_LEASE_TTL_MS: Joi.number().default(21600000),
   // Redis results stream + consumer group (wrapper publishes to docling:results)
-  DOCLING_RESULTS_STREAM: Joi.string().default(''),
-  DOCLING_RESULT_KEY_PREFIX: Joi.string().default(''),
-  DOCLING_SCHEDULER_RESULT_GROUP: Joi.string().default(''),
+  DOCLING_RESULTS_STREAM: Joi.string().default('docling:results'),
+  DOCLING_RESULT_KEY_PREFIX: Joi.string().default('docling:result'),
+  DOCLING_SCHEDULER_RESULT_GROUP: Joi.string().default('xyne-spaces-scheduler'),
   DOCLING_RESULT_READ_COUNT: Joi.number().default(2),
   DOCLING_RESULT_BLOCK_MS: Joi.number().default(5000),
   DOCLING_RESULT_MIN_IDLE_MS: Joi.number().default(600000),
   // Dynamic runtime-config hash (permits/concurrency tuning without redeploy)
-  DOCLING_RUNTIME_CONFIG_KEY: Joi.string().default(''),
+  DOCLING_RUNTIME_CONFIG_KEY: Joi.string().default('docling:runtime-config'),
   DOCLING_RUNTIME_CONFIG_POLL_MS: Joi.number().default(300000),
   // OCR wrapper service (submitter POSTs parts to /process_async here)
-  DOCLING_SERVICE_URL: Joi.string().uri().default(''),
+  DOCLING_SERVICE_URL: Joi.string().uri().default('http://localhost:8000'),
   DOCLING_ASYNC_SUBMIT_RETRIES: Joi.number().default(5),
   DOCLING_ASYNC_SUBMIT_RETRY_DELAY_MS: Joi.number().default(1000),
   DOCLING_ASYNC_SUBMIT_TIMEOUT_MS: Joi.number().default(120000),
@@ -413,7 +417,7 @@ const envSchema = Joi.object({
   // xyne-spaces-only: when the async OCR scheduler exhausts a file, degrade to
   // the sync ladder instead of dropping it. (No xyne-search equivalent.)
   PDF_ASYNC_SYNC_FALLBACK_ENABLED: Joi.boolean().default(true),
-  REDIS_HOST: Joi.string().default(''),
+  REDIS_HOST: Joi.string().default('localhost'),
   REDIS_PORT: Joi.number().integer().min(1).max(65535).default(6379),
   REDIS_PASSWORD: Joi.string().allow('').default(''),
   REDIS_TLS: Joi.boolean().default(false),
