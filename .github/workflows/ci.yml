@@ -1,15 +1,13 @@
 name: CI
 
+# Reusable workflow: the actual build/lint/secret-scan jobs live here and are
+# called by CI-pr.yml (pull requests) and CI-push.yml (protected branches).
+# Concurrency/cancellation policy is defined by the callers, not here.
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+  workflow_call:
 
-# Cancel superseded runs on the same ref to save CI minutes.
-concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+permissions:
+  contents: read
 
 env:
   NODE_VERSION: "22"
@@ -67,6 +65,7 @@ jobs:
           npm run db:generate
           npm run db:common:generate
 
+      # backend lint intentionally omitted (~259 pre-existing errors — separate cleanup).
       - name: Typecheck
         working-directory: backend
         run: npm run typecheck
@@ -80,7 +79,7 @@ jobs:
   # for the same file:-dep prepare reason. Mirrors dashboard/Dockerfile.
   # ---------------------------------------------------------------------------
   dashboard:
-    name: Dashboard typecheck + build
+    name: Dashboard lint + typecheck + build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -105,6 +104,13 @@ jobs:
         working-directory: dashboard
         run: npm ci ${{ env.NPM_FLAGS }}
 
+      # errors-only (warnings ignored); heap bump avoids OOM on type-aware lint.
+      - name: Lint (errors only)
+        working-directory: dashboard
+        env:
+          NODE_OPTIONS: "--max-old-space-size=8192"
+        run: npm run lint:errors-only
+
       - name: Typecheck
         working-directory: dashboard
         run: npm run typecheck
@@ -115,6 +121,25 @@ jobs:
         env:
           NODE_OPTIONS: "--max-old-space-size=8192"
         run: npm run build
+
+  # Framework lint — self-contained (no file: deps).
+  framework-lint:
+    name: Framework lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install dependencies
+        working-directory: framework
+        run: npm ci ${{ env.NPM_FLAGS }}
+
+      - name: Lint
+        working-directory: framework
+        run: npm run lint
 
   # ---------------------------------------------------------------------------
   # xyne-claw stack: kata-sdk -> xyne-claw-shared -> xyne-claw (typecheck only;
@@ -146,3 +171,26 @@ jobs:
         run: |
           npm ci ${{ env.NPM_FLAGS }}
           npm run typecheck
+
+  # ---------------------------------------------------------------------------
+  # Secret scan (gitleaks). Scans the working tree with the committed
+  # .gitleaks.toml allowlist, mirroring the Jenkins gitleaksScan() step.
+  # Pinned to the same version Jenkins uses. `dir` scans files (not git
+  # history), so a shallow checkout is fine.
+  # ---------------------------------------------------------------------------
+  gitleaks:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    env:
+      GITLEAKS_VERSION: "8.30.1"
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install gitleaks
+        run: |
+          curl -sfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin gitleaks
+          gitleaks version
+
+      - name: Run gitleaks
+        run: gitleaks dir . --config .gitleaks.toml --redact --no-banner --exit-code 1
