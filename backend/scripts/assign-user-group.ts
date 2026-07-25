@@ -1,14 +1,17 @@
 #!/usr/bin/env npx tsx
 
 import { PrismaClient, WorkspaceRole } from '@prisma/client';
+import { hashPassword } from '../src/utils/passwordUtils';
 
 const prisma = new PrismaClient();
 
+const DEV_USER_PASSWORD = 'Xyne@Dev123!';
+
 async function assignUserToGroup() {
-  const email = process.argv[2];
+  const email = process.argv[2] || process.env.DEFAULT_ADMIN_EMAIL;
 
   if (!email) {
-    console.error('❌ Please provide user email as argument');
+    console.error('❌ Please provide user email as argument or set DEFAULT_ADMIN_EMAIL env var');
     console.log('Usage: npx tsx scripts/assign-user-group.ts <user-email>');
     process.exit(1);
   }
@@ -60,6 +63,18 @@ async function assignUserToGroup() {
         part.charAt(0).toUpperCase() + part.slice(1)
       ).join(' ');
 
+      // Create orgMember with password for email/password login
+      const passwordHash = await hashPassword(DEV_USER_PASSWORD);
+      const orgMember = await prisma.orgMember.create({
+        data: {
+          email,
+          orgId: defaultWorkspace.orgId,
+          role: 'MEMBER',
+          passwordHash,
+        }
+      });
+      console.log(`✅ Created orgMember with password for ${email}`);
+
       user = await prisma.user.create({
         data: {
           email,
@@ -69,9 +84,11 @@ async function assignUserToGroup() {
           status: 'ACTIVE',
           workspaceId: defaultWorkspace.id,
           role: WorkspaceRole.MEMBER,
+          orgMemberId: orgMember.memberId,
         }
       });
       console.log(`✅ Created user ${email} in default workspace`);
+      console.log(`ℹ️  Dev login: ${email} / ${DEV_USER_PASSWORD}`);
     }
 
     // Ensure user is linked to DEVELOPER group via UserGroupMapping

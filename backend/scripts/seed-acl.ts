@@ -13,6 +13,7 @@
 import { PrismaClient, AccessType, AuthProvider, UserStatus, SessionStatus, WorkspaceRole, ProjectType } from '@prisma/client';
 import { repositories } from '../src/database/repositories/index';
 import { WorkspaceJoinPolicy, WorkspaceType } from '@xyne/shared';
+import { hashPassword } from '../src/utils/passwordUtils';
 
 const prisma = new PrismaClient();
 
@@ -112,14 +113,18 @@ const DEFAULT_USER_GROUPS = [
 ];
 
 // Default admin user configuration
+const DEFAULT_ADMIN_EMAIL = process.env.DEFAULT_ADMIN_EMAIL || 'admin@xyne.ai';
 const DEFAULT_ADMIN_USER = {
-  name: 'System Administrator',
-  email: 'admin@xyne.ai',
+  name: DEFAULT_ADMIN_EMAIL.split('@')[0],
+  email: DEFAULT_ADMIN_EMAIL,
   authProvider: AuthProvider.GOOGLE,
   providerUserId: 'admin-seed-user-001',
   status: UserStatus.ACTIVE,
   role: WorkspaceRole.ADMIN,
 };
+
+// Default password for the admin user in local dev (meets complexity requirements)
+const DEV_ADMIN_PASSWORD = 'Xyne@Dev123!';
 
 // Default organization and workspace
 const DEFAULT_ORG = {
@@ -380,14 +385,17 @@ async function main() {
         console.log('  ✅ Default admin user already exists');
       } else {
         // Create orgMember FIRST to get memberId
+        const passwordHash = await hashPassword(DEV_ADMIN_PASSWORD);
         const orgMember = await prisma.orgMember.create({
           data: {
             email: DEFAULT_ADMIN_USER.email,
             orgId: DEFAULT_ORG.orgId,
             role: 'OWNER',
+            passwordHash,
           }
         });
         console.log(`  ✅ Created orgMember with id: ${orgMember.memberId}`);
+        console.log(`  ℹ️  Admin login: ${DEFAULT_ADMIN_USER.email} / ${DEV_ADMIN_PASSWORD}`);
 
         // Create admin user with workspaceId and orgMemberId
         adminUser = await repositories.users.create({
