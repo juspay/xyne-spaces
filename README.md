@@ -50,7 +50,7 @@ Xyne Spaces is a modern, scalable platform built with a TypeScript backend and R
 
 - Node.js >= 18.0.0
 - npm >= 8.0.0
-- Docker & Docker Compose (for services)
+- Docker (or OrbStack) with Docker Compose, or Podman with podman-compose
 
 ### Installation
 
@@ -65,6 +65,12 @@ cd xyne-spaces
 ```bash
 # Install root dependencies
 npm install
+
+# Build shared package
+cd shared && npm run build && cd ..
+
+# Build icons package
+cd icons && npm run build && cd ..
 
 # Install backend dependencies
 cd backend && npm install && cd ..
@@ -92,6 +98,8 @@ cd dashboard && npm run dev
 - Backend API: http://localhost:3001
 - API Documentation: http://localhost:3001/api-docs
 
+6. **Login**: The seed script creates a dev admin account using `DEFAULT_ADMIN_EMAIL` from `backend/.env.local` with password `Xyne@Dev123!`. Email/password login is available at the login page — no OAuth setup required for local dev.
+
 ## Development Setup
 
 ### Backend
@@ -103,10 +111,10 @@ cd backend
 
 2. Copy environment variables:
 ```bash
-cp .env.example .env
+cp .env.example .env.local
 ```
 
-3. Configure your environment variables in `.env`
+3. Configure your environment variables in `.env.local`
 
 4. Start the development server:
 ```bash
@@ -162,8 +170,8 @@ xyne-spaces/
 ## Available Scripts
 
 ### Root Level
-- `npm run services` - Start Docker services (database, etc.)
-- `npm run services:stop` - Stop Docker services
+- `npm run services` - Start infrastructure services (Docker/OrbStack or Podman)
+- `npm run services:stop` - Stop infrastructure services
 - `npm run cleanup` - Clean up storage and containers
 
 ### Backend
