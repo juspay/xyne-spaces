@@ -1,0 +1,271 @@
+schema chat_message {
+  document chat_message {
+    field docId type string {
+      indexing: attribute | summary
+    }
+    
+    field docType type string {
+      indexing: attribute | summary
+      attribute: fast-search
+      match: exact
+    }
+
+    field text type string {
+      indexing: index | summary
+      index: enable-bm25
+    }
+
+    field userId type string {
+      indexing: attribute | summary
+      attribute: fast-search
+    }
+
+    field username type string {
+      indexing: index | attribute | summary
+      index: enable-bm25
+    }
+
+    field userEmail type string {
+      indexing: index | attribute | summary
+      index: enable-bm25
+    }
+    field image type string {
+      indexing: attribute | summary
+    }
+
+    field createdAtTimestamp type double {
+      indexing: attribute | summary
+      attribute: fast-search
+    }
+
+    field createdAt type string {
+      indexing: index | attribute | summary
+      index: enable-bm25
+    }
+
+    field messageType type string {
+      indexing: attribute | summary
+      attribute: fast-search
+      match: exact
+    }
+
+    field threadId type string {
+      indexing: attribute | summary
+    }
+
+    # True when this message is its conversation's initial/root message. Lets
+    # search consumers determine thread-root without a separate lookup.
+    field isRootMessage type bool {
+      indexing: attribute | summary
+    }
+
+    field channelRef type reference<chat_container> {
+      indexing: attribute
+    }
+
+    field attachmentIds type array<string> {
+      indexing: attribute | summary
+    }
+
+    field reactions type int {
+      indexing: attribute | summary
+    }
+
+    field replyCount type int {
+      indexing: attribute | summary
+    }
+
+    field replyUsersCount type int {
+      indexing: attribute | summary
+    }
+
+    field mentions type array<string> {
+      indexing: attribute | summary
+      attribute: fast-search
+    }
+
+    field channelMentions type array<string> {
+      indexing: attribute | summary
+      attribute: fast-search
+    }
+
+    field updatedAt type string {
+      indexing: index | attribute | summary
+      index: enable-bm25
+    }
+
+    field deletedAt type double {
+      indexing: attribute | summary
+      attribute: fast-search
+    }
+
+    field metadata type string {
+      indexing: attribute | summary
+    }
+
+    field messageChannelName type string {
+      indexing: index | attribute | summary
+      index: enable-bm25
+    }
+
+    field threadMentions type array<string> {
+      indexing: index | attribute | summary
+      index: enable-bm25
+    }
+
+    field threadSenders type array<string> {
+      indexing: index | attribute | summary
+      index: enable-bm25
+    }
+
+    # NEW: WeightedSet fields for personalization
+    field channelWeightedSet type tensor<float>(key{}) {
+      indexing: attribute | summary
+    }
+
+    field userWeightedSet type tensor<float>(key{}) {
+      indexing: attribute | summary
+    }
+
+    field entityIds type array<string> {
+      indexing: attribute | summary
+      attribute: fast-search
+    }
+
+    field entityNames type array<string> {
+      indexing: index | attribute | summary
+      index: enable-bm25
+    }
+
+    field entitySurfaceForms type array<string> {
+      indexing: summary
+    }
+
+  }
+  import field channelRef.isPrivate as isPrivate {}
+  import field channelRef.permissions as permissions {}
+  import field channelRef.channelName as  channelName {}
+  import field channelRef.docId as channelId {}
+  import field channelRef.isIm as isIm {}
+  import field channelRef.isMpim as isMpim {}
+  import field channelRef.orgId as orgId {}
+  import field channelRef.workspaceId as workspaceId {}
+  field text_embeddings type tensor<bfloat16>(v[DIMS]) {
+    indexing: input text | embed hf-embedder | attribute | index
+    attribute {
+      distance-metric: angular
+    }
+  }
+  
+field text_fuzzy type string {
+    indexing: input text |tokenize | lowercase | index | summary
+    index: enable-bm25
+    match {
+        gram
+        gram-size: 3
+    }
+}
+  fieldset default {
+    fields: text, text_fuzzy, channelId, userId, threadId, attachmentIds, channelName, isPrivate, username, messageChannelName, entityNames
+  }
+
+  rank-profile initial {
+    inputs {
+      query(e) tensor<bfloat16>(v[DIMS])
+      query(alpha) double: 0.5
+    }
+
+    rank-properties {
+      nativeFieldMatch.firstOccurrenceImportance: 0
+    }
+
+    function lexical_score() {
+      expression: 4 * nativeRank(text)
+    }
+
+    function fuzzy_lexical_score() {
+      expression: 4 * nativeRank(text_fuzzy)
+    }
+
+    function vector_score() {
+      expression: closeness(field, text_embeddings)
+    }
+
+    function combined_nativeRank() {
+      expression: nativeRank(text)
+    }
+  }
+
+  rank-profile unified inherits initial {
+    first-phase {
+      expression: lexical_score
+    }
+    match-features {
+      combined_nativeRank
+      lexical_score
+    }
+  }
+
+  rank-profile default_native inherits unified {
+    first-phase {
+      expression: query(alpha) * vector_score + (1 - query(alpha)) * lexical_score
+    }
+    match-features {
+      combined_nativeRank
+      lexical_score
+      vector_score
+    }
+  }
+
+  rank-profile default_fuzzy inherits unified {
+    first-phase {
+      expression: query(alpha) * vector_score + (1 - query(alpha)) * fuzzy_lexical_score
+    }
+    match-features {
+      combined_nativeRank
+      lexical_score
+      vector_score
+    }
+  }
+
+  document-summary default {
+    summary text {
+      bolding: on
+    }
+    summary mentions {}
+    summary channelMentions {}
+    summary attachmentIds {}
+    summary channelName {}
+    summary isPrivate {}
+    summary channelId {}
+    summary isIm {}
+    summary isMpim {}
+    # summary reactions {}
+  }
+
+  document-summary lean {
+    summary docId {}
+    summary docType {}
+    summary text {
+      bolding: on
+    }
+    summary userId {}
+    summary username {}
+    summary createdAtTimestamp {}
+    summary threadId {}
+    summary replyCount {}
+    summary isRootMessage {}
+    summary messageType {}
+    summary threadSenders {}
+    summary attachmentIds {}
+    # imported from channelRef
+    summary channelId {}
+    summary channelName {}
+    summary isIm {}
+    summary isMpim {}
+    summary isPrivate {}
+  }
+
+
+
+}

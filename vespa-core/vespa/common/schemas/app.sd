@@ -1,0 +1,196 @@
+schema app {
+  document app {
+    field docId type string {
+      indexing: attribute | summary
+    }
+
+    field docType type string {
+      indexing: attribute | summary
+      attribute: fast-search
+      match: exact
+    }
+
+    # Stamped at feed time from the creator's workspace (createdByUser.workspaceId).
+    # Kept for back-compat; view scoping uses orgId + scope (below), not workspaceId.
+    field workspaceId type string {
+      indexing: attribute | summary
+      attribute: fast-search
+    }
+
+    # Owning org of the app. Drives the Org view filter (orgId + scope=ORG).
+    field orgId type string {
+      indexing: attribute | summary
+      attribute: fast-search
+    }
+
+    # App scope: "ORG" (org-private) or "GLOBAL" (marketplace). Drives view filters.
+    field scope type string {
+      indexing: attribute | summary
+      attribute: fast-search
+      match: exact
+    }
+
+    # Latest published version (summary only — used client-side to gate the Update button).
+    field version type long {
+      indexing: attribute | summary
+    }
+
+    field name type string {
+      indexing: index | summary
+      index: enable-bm25
+    }
+
+    field description type string {
+      indexing: index | summary
+      index: enable-bm25
+    }
+
+    # User id of the creator (filter/summary only, never text-matched)
+    field createdBy type string {
+      indexing: attribute | summary
+    }
+
+    # Denormalized creator identity — lexical (BM25/fuzzy) only, NOT embedded.
+    field creatorName type string {
+      indexing: index | attribute | summary
+      index: enable-bm25
+    }
+
+    field creatorEmail type string {
+      indexing: index | attribute | summary
+      index: enable-bm25
+    }
+
+    # Owning org's display name. Mirrors the UI "Created by" fallback for
+    # cross-org marketplace apps — lexical (BM25/fuzzy) only, NOT embedded.
+    field orgName type string {
+      indexing: index | attribute | summary
+      index: enable-bm25
+    }
+
+    field createdAt type long {
+      indexing: attribute | summary
+    }
+
+    field updatedAt type long {
+      indexing: attribute | summary
+    }
+  }
+
+  # Semantic vector: name + description only (concept search over what the app does).
+  field text_embeddings type tensor<bfloat16>(v[DIMS]) {
+    indexing: input name . " " . input description | embed hf-embedder | attribute | index
+    attribute {
+      distance-metric: angular
+    }
+  }
+
+  # Typo-tolerant trigram fields for lexical fuzzy matching.
+  field name_fuzzy type string {
+    indexing: input name | tokenize | lowercase | index | summary
+    index: enable-bm25
+    match {
+      gram
+      gram-size: 3
+    }
+  }
+
+  field description_fuzzy type string {
+    indexing: input description | tokenize | lowercase | index | summary
+    index: enable-bm25
+    match {
+      gram
+      gram-size: 3
+    }
+  }
+
+  # Typo-tolerant trigram for org name.
+  field orgName_fuzzy type string {
+    indexing: input orgName | tokenize | lowercase | index | summary
+    index: enable-bm25
+    match {
+      gram
+      gram-size: 3
+    }
+  }
+
+  fieldset default {
+    fields: name, description, name_fuzzy, description_fuzzy, creatorName, creatorEmail, orgName, orgName_fuzzy
+  }
+
+  rank-profile initial {
+    inputs {
+      query(e) tensor<bfloat16>(v[DIMS])
+      query(alpha) double: 0.5
+    }
+
+    rank-properties {
+      nativeFieldMatch.firstOccurrenceImportance: 0
+    }
+
+    function lexical_score() {
+      expression: 4 * nativeRank(name)
+    }
+
+    function fuzzy_lexical_score() {
+      expression: 4 * nativeRank(name_fuzzy)
+    }
+
+    function vector_score() {
+      expression: closeness(field, text_embeddings)
+    }
+
+    function combined_nativeRank() {
+      expression: nativeRank(name, description)
+    }
+  }
+
+  rank-profile unified inherits initial {
+    first-phase {
+      expression: lexical_score
+    }
+    match-features {
+      combined_nativeRank
+      lexical_score
+    }
+  }
+
+  rank-profile default_native inherits unified {
+    first-phase {
+      expression: query(alpha) * vector_score + (1 - query(alpha)) * lexical_score
+    }
+    match-features {
+      combined_nativeRank
+      lexical_score
+      vector_score
+    }
+  }
+
+  rank-profile default_fuzzy inherits unified {
+    first-phase {
+      expression: query(alpha) * vector_score + (1 - query(alpha)) * fuzzy_lexical_score
+    }
+    match-features {
+      combined_nativeRank
+      lexical_score
+      vector_score
+    }
+  }
+
+  document-summary lean {
+    summary docId {}
+    summary docType {}
+    summary name {}
+    summary description {}
+    summary createdBy {}
+    summary creatorName {}
+    summary creatorEmail {}
+    summary orgName {}
+    summary createdAt {}
+    summary updatedAt {}
+    summary workspaceId {}
+    summary orgId {}
+    summary scope {}
+    summary version {}
+  }
+}
