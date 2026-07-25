@@ -1,0 +1,23 @@
+name: CI-pr
+
+# Runs the full CI suite (ci.yml) on every pull request.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+# Cancel superseded runs on ordinary feature branches when a new commit is
+# pushed. Do NOT cancel for protected branches (main/master/staging/release*)
+# so their builds always run to completion.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref }}
+  cancel-in-progress: >-
+    ${{ github.head_ref != 'main'
+        && github.head_ref != 'master'
+        && github.head_ref != 'staging'
+        && !startsWith(github.head_ref, 'release') }}
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml

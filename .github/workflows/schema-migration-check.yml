@@ -1,0 +1,61 @@
+name: Schema Migration Check
+
+# PR-only guards for database schema safety (no DB required — pure git-diff).
+# Two independent jobs so their git state can't interfere with each other.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref }}
+  cancel-in-progress: >-
+    ${{ github.head_ref != 'main'
+        && github.head_ref != 'master'
+        && github.head_ref != 'staging'
+        && !startsWith(github.head_ref, 'release') }}
+
+jobs:
+  # A Prisma schema change must ship with a matching migration, and new models/
+  # enums must be mirrored into shared/src/zero/schema.ts.
+  schema-migrations:
+    name: Validate schema migrations
+    runs-on: ubuntu-latest
+    steps:
+      # fetch-depth: 0 so we can find the merge-base with the target branch.
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      # validate-schema-migrations.sh inspects `git diff --cached` (the staged
+      # index). A CI checkout stages nothing, so we stage exactly the PR's diff
+      # by soft-resetting to the merge-base with the target branch. This makes
+      # the check meaningful without modifying the script.
+      - name: Stage PR changes for schema validation
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          git fetch --no-tags origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          MERGE_BASE="$(git merge-base HEAD "origin/${BASE_REF}")"
+          echo "Staging PR changes relative to merge-base ${MERGE_BASE}"
+          git reset --soft "${MERGE_BASE}"
+
+      - name: Validate schema migrations
+        run: bash scripts/validate-schema-migrations.sh --ci-mode
+
+  # Postgres enums are frozen: block new enum blocks/values and CREATE/ALTER
+  # TYPE in migrations. The script resolves the base via $CHANGE_TARGET (falls
+  # back to main), does its own fetch, and diffs BASE...HEAD.
+  enum-guard:
+    name: Enum guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Enum guard
+        env:
+          CHANGE_TARGET: ${{ github.base_ref }}
+        run: bash scripts/validate-no-new-enums.sh --ci
