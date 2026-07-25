@@ -43,15 +43,16 @@ async function directoryExists(dirPath: string): Promise<boolean> {
   try {
     await access(dirPath, constants.F_OK);
     return true;
-  } catch (error: any) {
+  } catch (error) {
+    const err = error as NodeJS.ErrnoException;
     // Only return false if the error is specifically "file/directory not found"
-    if (error?.code === 'ENOENT') {
+    if (err.code === 'ENOENT') {
       return false;
     }
     // For other errors (permissions, I/O, etc.), log and throw
     // This prevents us from trying to clone into a directory that exists but is inaccessible
-    logger.error('Error checking directory existence', error, { dirPath });
-    throw new Error(`Directory existence check failed for ${dirPath}: ${error?.message || 'Unknown error'}`);
+    logger.error('Error checking directory existence', err, { dirPath });
+    throw new Error(`Directory existence check failed for ${dirPath}: ${err.message || 'Unknown error'}`);
   }
 }
 
