@@ -1,0 +1,306 @@
+schema mail {
+  document mail {
+
+    # basically the messageId
+    field docId type string {
+      indexing: attribute | summary
+      attribute: fast-search
+    }
+
+    field docType type string {
+      indexing: attribute | summary
+      attribute: fast-search
+      match: exact
+    }
+
+    field orgId type string {
+      indexing: attribute | summary
+      attribute: fast-search
+      match: exact
+    }
+
+    field workspaceId type string {
+      indexing: attribute | summary
+      attribute: fast-search
+      match: exact
+    }
+
+    field threadId type string {
+      indexing: attribute | summary
+      attribute: fast-search
+    }
+    field parentThreadId type string {
+      indexing: attribute | summary
+      attribute: fast-search
+    }
+    field mailId type string {
+      indexing: attribute | summary
+      attribute: fast-search
+    }
+
+    field channelRef type reference<chat_container> {
+      indexing: attribute
+    }
+
+  # This will map the useremail with the docId, which is required for the Url construction
+  # every users has different docId for the same mail
+    field userMap type map<string,string>{
+      indexing: summary
+      struct-field key   { indexing: attribute }
+      struct-field value { indexing: attribute }
+    }
+
+    field subject type string {
+      indexing: summary | index
+      index: enable-bm25
+    }
+
+    field chunks type array<string> {
+      indexing: index | summary
+      index {
+        enable-bm25
+      }
+    }
+
+    field timestamp type long {
+      indexing: attribute | summary
+      attribute: fast-search
+    }
+
+    field app type string {
+      indexing: attribute | summary
+      attribute: fast-search
+      match: exact
+    }
+
+    field entity type string {
+      indexing: attribute | summary
+      attribute: fast-search
+      match: exact
+    }
+
+    field from type string {
+      indexing: attribute | summary | index
+      attribute: fast-search
+      index: enable-bm25
+    }
+
+    field to type array<string> {
+      indexing: attribute | summary | index
+      attribute: fast-search
+      index: enable-bm25
+    }
+
+    field cc type array<string> {
+      indexing: attribute | summary | index
+      attribute: fast-search
+      index: enable-bm25
+    }
+
+    field bcc type array<string> {
+      indexing: attribute | summary | index
+      attribute: fast-search
+      index: enable-bm25
+    }
+
+    field mimeType type string {
+      indexing: attribute | summary
+    }
+
+    field attachmentFilenames type array<string> {
+      indexing: attribute | summary | index
+      attribute: fast-search
+      index: enable-bm25
+    }
+
+    # Define attachments as an array of structured objects
+    # order matters
+    struct attachment {
+      field fileType type string {}
+      field fileSize type long {}
+    }
+
+    field attachments type array<attachment> {
+
+    }
+    field labels type array<string> {
+      indexing: attribute | summary | index
+      attribute: fast-search
+    }
+
+    field generatedTags type array<string> {
+      indexing: attribute | summary | index
+      attribute: fast-search
+    }
+
+    field entityPeople type array<string> {
+      indexing: attribute | summary | index
+      attribute: fast-search
+      index: enable-bm25
+    }
+
+    field entityProducts type array<string> {
+      indexing: attribute | summary | index
+      attribute: fast-search
+      index: enable-bm25
+    }
+
+    field entityMerchants type array<string> {
+      indexing: attribute | summary | index
+      attribute: fast-search
+      index: enable-bm25
+    }
+  }
+
+  import field channelRef.docId as channelId {}
+  import field channelRef.permissions as permissions {}
+
+  # Subject-line embedding. mail previously embedded ONLY `chunks`, so a query whose
+  # meaning lives in the subject had nothing to match semantically -- the same gap
+  # ticket.sd closes with combined_embeddings (title + description). Kept as its own
+  # field rather than concatenated into chunk_embeddings because chunks is an array
+  # producing a mapped (p{}) tensor; subject is a single string.
+  # NOTE: unpopulated for existing documents until mail is reindexed. Until then
+  # closeness() on it returns 0 and semantic_score's max() falls back to chunks.
+  field subject_embeddings type tensor<bfloat16>(v[DIMS]) {
+    indexing: input subject | embed hf-embedder | attribute | index
+    attribute {
+      distance-metric: angular
+    }
+  }
+
+  field chunk_embeddings type tensor<bfloat16>(p{}, v[DIMS])  {
+    indexing: input chunks | embed hf-embedder | attribute | index
+    attribute {
+      distance-metric: angular
+    }
+    attribute: paged
+  }
+
+  field subject_fuzzy type string {
+    indexing: input subject | index
+    index {
+      enable-bm25
+    }
+    match {
+      gram
+      gram-size: 3
+    }
+  }
+
+  # Gram-indexed body for fuzzy matching — mirrors `chunks` so the
+  # default_fuzzy rank profile can substring-match typos in the mail body.
+  field chunks_fuzzy type array<string> {
+    indexing: input chunks | index
+    index {
+      enable-bm25
+    }
+    match {
+      gram
+      gram-size: 3
+    }
+  }
+
+  fieldset default {
+    fields: subject, app, entity, chunks, attachmentFilenames, from, to, cc, bcc, labels, entityPeople, entityProducts, entityMerchants
+  }
+
+  fieldset autocomplete {
+    fields: subject, app, entity
+  }
+
+    rank-profile initial {
+      inputs {
+        query(e) tensor<bfloat16>(v[DIMS])
+        query(alpha) double: 0.5
+      }
+
+      rank-properties {
+        nativeFieldMatch.firstOccurrenceImportance: 0
+      }
+
+      function lexical_score() {
+        expression: 4 * nativeRank(subject)
+      }
+
+      function fuzzy_lexical_score() {
+        expression: 4 * nativeRank(subject_fuzzy)
+      }
+
+      function vector_score() {
+        expression: max(closeness(field, subject_embeddings), closeness(field, chunk_embeddings))
+      }
+
+      function chunk_scores() {
+        expression: elementwise(bm25(chunks), x, double)
+      }
+
+      function combined_nativeRank() {
+        expression: nativeRank(subject, chunks)
+      }
+    }
+
+  rank-profile unified inherits initial {
+    first-phase {
+      expression: lexical_score
+    }
+    match-features {
+      combined_nativeRank
+      lexical_score
+      chunk_scores
+    }
+  }
+  # Cross-schema unified profile. Same formula in every schema; only the slot
+  # fields differ. score = w_lex * max(title, body) + w_sem * closeness.
+  # Ceiling is 1.0 everywhere so docTypes are comparable. See UNIFIED.md.
+
+  rank-profile default_native inherits unified {
+    first-phase {
+      expression: query(alpha) * vector_score + (1 - query(alpha)) * lexical_score
+    }
+    match-features {
+      combined_nativeRank
+      lexical_score
+      vector_score
+      chunk_scores
+    }
+  }
+
+  document-summary default {
+    summary subject {
+      bolding: on
+    }
+    summary chunks {
+      bolding: on
+    }
+  }
+
+  document-summary lean {
+    summary docId {}
+    summary docType {}
+    summary subject {
+      bolding: on
+    }
+    summary from {}
+    summary to {}
+    summary timestamp {}
+    summary app {}
+    summary entity {}
+    summary permissions {}
+    summary mailId {}
+  }
+
+
+  rank-profile default_fuzzy inherits unified {
+    first-phase {
+      expression: query(alpha) * vector_score + (1 - query(alpha)) * fuzzy_lexical_score
+    }
+    match-features {
+      combined_nativeRank
+      lexical_score
+      vector_score
+      chunk_scores
+    }
+  }
+
+}

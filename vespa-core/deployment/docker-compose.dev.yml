@@ -1,0 +1,54 @@
+services:
+  vespa:
+    image: vespaengine/vespa
+    container_name: vespa
+    user: "1000:1000"
+    hostname: vespa-container
+    # Low-footprint dev profile. Below the image's documented 4 GB minimum, which is
+    # why VESPA_IGNORE_NOT_ENOUGH_MEMORY is set below. The container JVM heap is a
+    # percentage of this (services.xml <jvm allocated-memory>), so lowering the limit
+    # shrinks the heap with it. Fewer CPUs also means smaller core-count-derived
+    # thread pools in proton and onnxruntime.
+    # Raise both with VESPA_MEM_LIMIT / VESPA_CPUS if feeding gets slow.
+    mem_limit: ${VESPA_MEM_LIMIT:-3g}
+    cpus: ${VESPA_CPUS:-2}
+    ulimits:
+      nproc: 409600
+    ports:
+      # Feed / document API. Published on 8083 because y-sweet owns 8080 and MESSAGE_CLASSIFIER_URL uses 8082.
+      # Container-internal port stays 8080, so services.xml needs no change.
+      - "${VESPA_FEED_PORT:-8083}:8080"
+      # Query
+      - "${VESPA_QUERY_PORT:-8081}:8081"
+      # Config server (vespa deploy target)
+      - "19071:19071"
+    volumes:
+      - ./vespa-data:/opt/vespa/var
+    networks:
+      - xyne
+    environment:
+      # Config server holds the app package + embedded ZooKeeper. It is the largest
+      # JVM after the container cluster, and only does real work during `vespa deploy`.
+      # 512m is the measured floor: 384m dies with OutOfMemoryError while building the
+      # model for these 13 schemas. SerialGC keeps GC overhead minimal on a small heap.
+      - VESPA_CONFIGSERVER_JVMARGS=-Xms64m -Xmx512m -XX:+UseSerialGC
+      - VESPA_CONFIGPROXY_JVMARGS=-Xms32m -Xmx128m -XX:+UseSerialGC
+      # Startup aborts below 4 GB available; we deliberately run at that floor.
+      - VESPA_IGNORE_NOT_ENOUGH_MEMORY=true
+      - VESPA_SKIP_UPGRADE_CHECK=true
+
+    restart: always
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "6"
+
+
+volumes:
+  vespa-data:
+    driver: local
+
+networks:
+  xyne:
+    driver: bridge

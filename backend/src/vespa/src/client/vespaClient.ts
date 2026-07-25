@@ -46,7 +46,9 @@ class VespaClient {
     this.maxRetries = config?.vespaMaxRetryAttempts || 3;
     this.retryDelay = config?.vespaRetryDelay || 1000;
 
-    this.feedEndpoint = config?.feedEndpoint || `http://localhost:8080`;
+    // 8083, not 8080: y-sweet owns 8080 and MESSAGE_CLASSIFIER_URL uses 8082 locally, so Vespa's feed port is
+    // published on 8083 (see vespa-core/deployment/docker-compose.dev.yml).
+    this.feedEndpoint = config?.feedEndpoint || `http://localhost:8083`;
     this.queryEndpoint = config?.queryEndpoint || `http://localhost:8081`;
 
     const maxConnections = config?.maxConnections || 16;

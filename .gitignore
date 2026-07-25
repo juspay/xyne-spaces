@@ -223,3 +223,9 @@ skills-lock.json
 # Security scan artifacts: downloaded scanner binaries + generated reports
 .securitybin/
 security-reports/
+
+#vespa data
+/vespa-core/deployment/vespa-data
+/vespa-core/generated
+#vespa models
+/vespa-core/vespa/models/*
