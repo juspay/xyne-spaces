@@ -121,13 +121,12 @@ export default tseslint.config(
     }
   },
 
-  // Test files specific configuration
+  // Tests are excluded from tsconfig.json, so type-aware linting can't resolve
+  // them. Turn off type-checked rules for test files (also silences the
+  // unbound-method false positives on Jest mocks).
   {
     files: ["**/*.test.ts", "**/*.test.tsx", "**/__tests__/**/*.ts", "**/__tests__/**/*.tsx"],
-    rules: {
-      // Disable unbound method rule for test files as it conflicts with Jest mocks
-      "@typescript-eslint/unbound-method": "off",
-    }
+    ...tseslint.configs.disableTypeChecked,
   },
 
 
