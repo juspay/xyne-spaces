@@ -7,7 +7,7 @@
     "prepare": "husky",
     "services": "chmod +x scripts/start-services.sh && ./scripts/start-services.sh",
     "services:win": "bash scripts/start-services-win.sh",
-    "services:stop": "command -v podman-compose > /dev/null && podman-compose -f docker-compose.dev.yml down || docker-compose -f docker-compose.dev.yml down",
+    "services:stop": "docker info > /dev/null 2>&1 && docker compose -f docker-compose.dev.yml down || (command -v podman-compose > /dev/null && podman-compose -f docker-compose.dev.yml down || podman compose -f docker-compose.dev.yml down)",
     "sandbox": "chmod +x scripts/sandbox.sh && ./scripts/sandbox.sh",
     "cleanup": "chmod +x scripts/cleanup-storage.sh && ./scripts/cleanup-storage.sh",
     "yama": "node node_modules/@juspay/yama/dist/cli/v2.cli.js",
