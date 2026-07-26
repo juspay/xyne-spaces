@@ -214,6 +214,7 @@ if [ ! -f ".env.local" ]; then
     echo -e "${YELLOW}⚠️  backend/.env.local not found. Creating from .env.example...${NC}"
     cp .env.example .env.local
     echo -e "${GREEN}✓ Created backend/.env.local${NC}"
+    node ../scripts/generate-local-secrets.mjs
     echo -e "${YELLOW}   Please review and update values as needed.${NC}"
 fi
 
@@ -473,4 +474,5 @@ echo -e "${GREEN}========================================${NC}"
 echo -e "  ${BLUE}Email:${NC}     ${DEV_EMAIL}"
 echo -e "  ${BLUE}Password:${NC}  ${GREEN}xynelocal@123${NC}"
 echo -e "${GREEN}========================================${NC}"
+echo -e "${YELLOW}💡 Tip: update DEFAULT_ADMIN_EMAIL in backend/.env.local and re-run 'npm run services' to use your own email.${NC}"
 echo ""
