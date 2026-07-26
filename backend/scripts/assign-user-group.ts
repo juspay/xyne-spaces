@@ -5,7 +5,7 @@ import { hashPassword } from '../src/utils/passwordUtils';
 
 const prisma = new PrismaClient();
 
-const DEV_USER_PASSWORD = 'Xyne@Dev123!';
+const DEV_USER_PASSWORD = 'xynelocal@123';
 
 async function assignUserToGroup() {
   const email = process.argv[2] || process.env.DEFAULT_ADMIN_EMAIL;
