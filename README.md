@@ -77,12 +77,35 @@ cd backend && npm install && cd ..
 
 # Install dashboard dependencies
 cd dashboard && npm install && cd ..
+
+# Install xyne-claw-shared (shared dependency for claw services)
+cd xyne-claw-shared && npm install && cd ..
+
+# Install kata-sdk (dependency of xyne-claw-shared)
+cd packages/kata-sdk && npm install && cd ..
+
+# Install xyne-claw dependencies
+cd xyne-claw && npm install && cd ..
+
+# Install xyne-claw-auth backend dependencies
+cd xyne-claw-auth/backend && npm install && cd ../..
+
+# Install xyne-claw-auth frontend dependencies (optional)
+cd xyne-claw-auth/frontend && npm install && cd ../..
 ```
 
 3. **Start services**:
 ```bash
 npm run services
 ```
+
+This will:
+- Start all infrastructure containers (PostgreSQL, Redis, LiveKit, Zero cache, fake-gcs, MinIO, etc.)
+- Auto-create `.env.local` for backend and dashboard from `.env.example` if they don't exist
+- Run database migrations and seed the ACL system
+- Auto-create `.env` for `xyne-claw-auth/backend` and `xyne-claw` from their `.env.example` files
+- Install dependencies for xyne-claw, xyne-claw-auth, xyne-claw-shared, and kata-sdk if needed
+- Set up the claw-auth database schema, seed agents, link Spaces workspace to claw org, and create a dev admin user
 
 4. **Start development servers**:
 ```bash
@@ -91,14 +114,25 @@ cd backend && npm run dev
 
 # Start dashboard (in another terminal)
 cd dashboard && npm run dev
+
+# Start XyneClaw agent server (in another terminal)
+cd xyne-claw && npm run dev
+
+# Start claw-auth backend (in another terminal)
+cd xyne-claw-auth/backend && npm run dev
+
+# Start claw-auth frontend (optional, in another terminal)
+cd xyne-claw-auth/frontend && npm run dev
 ```
 
 5. **Access the application**:
 - Dashboard: http://localhost:5173
 - Backend API: http://localhost:3001
+- XyneClaw: http://localhost:3002
+- Claw Auth: http://localhost:3003
 - API Documentation: http://localhost:3001/api-docs
 
-6. **Login**: The seed script creates a dev admin account using `DEFAULT_ADMIN_EMAIL` from `backend/.env.local` with password `Xyne@Dev123!`. Email/password login is available at the login page — no OAuth setup required for local dev.
+6. **Login**: The seed script creates a dev admin account using `DEFAULT_ADMIN_EMAIL` from `backend/.env.local` with password `xynelocal@123`. Email/password login is available at the login page — no OAuth setup required for local dev.
 
 ## Development Setup
 
@@ -135,6 +169,49 @@ npm run dev
 
 The dashboard will automatically reload when you make changes.
 
+### XyneClaw (Agent Server)
+
+1. Navigate to the xyne-claw directory:
+```bash
+cd xyne-claw
+```
+
+2. Copy environment variables (auto-created by `npm run services`):
+```bash
+cp .env.example .env
+```
+
+3. Configure your environment variables in `.env`
+
+4. Start the development server:
+```bash
+npm run dev
+```
+
+### Claw Auth (MCP Credential Management)
+
+1. Navigate to the claw-auth backend directory:
+```bash
+cd xyne-claw-auth/backend
+```
+
+2. Copy environment variables (auto-created by `npm run services`):
+```bash
+cp .env.example .env
+```
+
+3. Configure your environment variables in `.env`
+
+4. Start the development server:
+```bash
+npm run dev
+```
+
+5. (Optional) Start the claw-auth frontend:
+```bash
+cd ../frontend && npm run dev
+```
+
 ## Project Structure
 
 ```
@@ -161,6 +238,18 @@ xyne-spaces/
 │   │   └── utils/          # Utility functions
 │   ├── public/             # Static assets
 │   └── docs/               # Frontend documentation
+├── xyne-claw/              # Multi-tenant agent orchestration server
+│   ├── src/
+│   └── scripts/
+├── xyne-claw-auth/         # MCP credential management service
+│   ├── backend/
+│   │   ├── src/
+│   │   └── prisma/
+│   └── frontend/
+├── xyne-claw-shared/       # Shared library for xyne-claw ecosystem
+│   └── src/
+├── packages/
+│   └── kata-sdk/           # Kubernetes SDK for xyne-claw-shared
 ├── docker/                 # Docker configuration files
 ├── scripts/                # Build and deployment scripts
 ├── API_DOCUMENTATION.md    # Comprehensive API documentation
@@ -195,6 +284,16 @@ xyne-spaces/
 - `npm run typecheck` - Run TypeScript type checking
 - `npm run format` - Format code with Prettier
 - `npm run validate` - Run all validation checks
+
+### XyneClaw
+- `npm run dev` - Start agent server with hot reload
+- `npm run typecheck` - Run TypeScript type checking
+
+### Claw Auth
+- `npm run dev` - Start auth backend with hot reload
+- `npm run db:push` - Push database schema
+- `npm run db:generate` - Generate Prisma client
+- `npm run db:seed` - Seed database
 
 ## Documentation
 
