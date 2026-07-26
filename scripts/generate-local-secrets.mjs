@@ -46,37 +46,23 @@ try {
   console.warn(`Could not generate VAPID keys: ${err instanceof Error ? err.message : String(err)}`);
 }
 
-// JWT-style secrets: 48 random bytes → 96 hex chars (well above 32-char minimum)
-setIfPlaceholder(
-  "JWT_SECRET",
-  randomBytes(48).toString("hex"),
-  (v) => v.length < 32 || v.toLowerCase().includes("secret"),
-);
+const PLACEHOLDER_PATTERNS = /^(set-me|changeme|placeholder|REPLACE_WITH.*|YOUR_.*|.*example\.com.*)$/i;
 
-setIfPlaceholder(
-  "ZERO_AUTH_SECRET",
-  randomBytes(48).toString("hex"),
-  (v) => v.length < 32 || v.toLowerCase().includes("secret"),
-);
+function isPlaceholder(value) {
+  const v = (value ?? "").trim();
+  return v.length === 0 || PLACEHOLDER_PATTERNS.test(v);
+}
+
+// JWT-style secrets: 48 random bytes → 96 hex chars (well above 32-char minimum)
+setIfPlaceholder("JWT_SECRET", randomBytes(48).toString("hex"), isPlaceholder);
+setIfPlaceholder("ZERO_AUTH_SECRET", randomBytes(48).toString("hex"), isPlaceholder);
 
 // AES-256-GCM: 32 bytes → 64 hex chars
-setIfPlaceholder(
-  "ENCRYPTION_KEY",
-  randomBytes(32).toString("hex"),
-  (v) => !/^[0-9a-fA-F]{64}$/.test(v) || v.toLowerCase().includes("key"),
-);
+setIfPlaceholder("ENCRYPTION_KEY", randomBytes(32).toString("hex"), isPlaceholder);
 
 if (vapidKeys) {
-  setIfPlaceholder(
-    "VAPID_PUBLIC_KEY",
-    vapidKeys.publicKey,
-    (v) => v.trim().length === 0 || v.toLowerCase().includes("vapid"),
-  );
-  setIfPlaceholder(
-    "VAPID_PRIVATE_KEY",
-    vapidKeys.privateKey,
-    (v) => v.trim().length === 0 || v.toLowerCase().includes("vapid"),
-  );
+  setIfPlaceholder("VAPID_PUBLIC_KEY", vapidKeys.publicKey, isPlaceholder);
+  setIfPlaceholder("VAPID_PRIVATE_KEY", vapidKeys.privateKey, isPlaceholder);
 }
 
 writeFileSync(envPath, env);
