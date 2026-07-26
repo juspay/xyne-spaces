@@ -345,7 +345,41 @@ for i in {1..30}; do
     sleep 1
 done
 
-# Setup xyne-claw-auth database schema
+# Setup kata-sdk (dependency of xyne-claw-shared)
+echo -e "${BLUE}🔧 Setting up kata-sdk...${NC}"
+if [ -d "packages/kata-sdk" ] && [ ! -d "packages/kata-sdk/node_modules" ]; then
+    cd packages/kata-sdk
+    echo -e "${YELLOW}⚠️  kata-sdk dependencies not installed. Running npm install...${NC}"
+    npm install
+    echo -e "${GREEN}✓ kata-sdk ready${NC}"
+    cd ../..
+fi
+
+# Setup xyne-claw-shared (shared dependency for xyne-claw and xyne-claw-auth)
+echo -e "${BLUE}🔧 Setting up xyne-claw-shared...${NC}"
+if [ -d "xyne-claw-shared" ] && [ ! -d "xyne-claw-shared/node_modules" ]; then
+    cd xyne-claw-shared
+    echo -e "${YELLOW}⚠️  xyne-claw-shared dependencies not installed. Running npm install...${NC}"
+    npm install
+    echo -e "${GREEN}✓ xyne-claw-shared ready${NC}"
+    cd ..
+fi
+
+# Setup xyne-claw-auth backend
+echo -e "${BLUE}🔧 Setting up xyne-claw-auth backend...${NC}"
+if [ ! -f "xyne-claw-auth/backend/.env" ]; then
+    echo -e "${YELLOW}⚠️  xyne-claw-auth/backend/.env not found. Creating from .env.example...${NC}"
+    cp xyne-claw-auth/backend/.env.example xyne-claw-auth/backend/.env
+    echo -e "${GREEN}✓ Created xyne-claw-auth/backend/.env${NC}"
+    echo -e "${YELLOW}   Please review and update values as needed.${NC}"
+fi
+
+# Ensure SPACES_DB_URL is set in claw-auth .env (links claw-auth to Spaces DB for JIT user mirroring)
+if ! grep -q "^SPACES_DB_URL=" xyne-claw-auth/backend/.env 2>/dev/null; then
+    echo 'SPACES_DB_URL=postgresql://xyne:xyne123@localhost:5433/xyne_dev_db' >> xyne-claw-auth/backend/.env
+    echo -e "${GREEN}✓ Added SPACES_DB_URL to xyne-claw-auth/backend/.env${NC}"
+fi
+
 if [ -f "xyne-claw-auth/backend/.env" ]; then
     echo -e "${BLUE}🔄 Setting up xyne-claw-auth database schema...${NC}"
     cd xyne-claw-auth/backend
@@ -354,14 +388,46 @@ if [ -f "xyne-claw-auth/backend/.env" ]; then
         npm install
     fi
     set -a && source .env && set +a
+    # Pass through DEFAULT_ADMIN_EMAIL from the main backend .env.local if not set locally
+    if [ -z "$DEFAULT_ADMIN_EMAIL" ]; then
+      export DEFAULT_ADMIN_EMAIL=$(grep -m 1 '^DEFAULT_ADMIN_EMAIL=' ../../backend/.env.local 2>/dev/null | sed 's/^DEFAULT_ADMIN_EMAIL=//' || echo "admin@example.in")
+    fi
     npx prisma db push --skip-generate --accept-data-loss
     npx prisma generate
     NODE_OPTIONS="" npx tsx prisma/seed.ts
     echo -e "${GREEN}✓ xyne-claw-auth database schema ready${NC}"
     cd ../..
-else
-    echo -e "${YELLOW}⚠️  xyne-claw-auth/backend/.env not found, skipping schema setup${NC}"
-    echo -e "${YELLOW}   Run: cp xyne-claw-auth/backend/.env.example xyne-claw-auth/backend/.env${NC}"
+fi
+
+# Setup xyne-claw-auth frontend
+echo -e "${BLUE}🔧 Setting up xyne-claw-auth frontend...${NC}"
+if [ -d "xyne-claw-auth/frontend" ]; then
+    cd xyne-claw-auth/frontend
+    if [ ! -d "node_modules" ]; then
+        echo -e "${YELLOW}⚠️  xyne-claw-auth/frontend dependencies not installed. Running npm install...${NC}"
+        npm install
+    fi
+    echo -e "${GREEN}✓ xyne-claw-auth frontend ready${NC}"
+    cd ../..
+fi
+
+# Setup xyne-claw
+echo -e "${BLUE}🔧 Setting up xyne-claw...${NC}"
+if [ ! -f "xyne-claw/.env" ]; then
+    echo -e "${YELLOW}⚠️  xyne-claw/.env not found. Creating from .env.example...${NC}"
+    cp xyne-claw/.env.example xyne-claw/.env
+    echo -e "${GREEN}✓ Created xyne-claw/.env${NC}"
+    echo -e "${YELLOW}   Please review and update values as needed.${NC}"
+fi
+
+if [ -d "xyne-claw" ]; then
+    cd xyne-claw
+    if [ ! -d "node_modules" ]; then
+        echo -e "${YELLOW}⚠️  xyne-claw dependencies not installed. Running npm install...${NC}"
+        npm install
+    fi
+    echo -e "${GREEN}✓ xyne-claw ready${NC}"
+    cd ..
 fi
 
 echo ""
@@ -370,7 +436,7 @@ echo -e "${GREEN}✅ Infrastructure Services Running!${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
 echo -e "${BLUE}Services:${NC}"
-echo -e "  🗄️  PostgreSQL:         ${GREEN}localhost:5432${NC}"
+echo -e "  🗄️  PostgreSQL:         ${GREEN}localhost:5433${NC}"
 echo -e "  💾 Redis:              ${GREEN}localhost:6379${NC}"
 echo -e "  🎥 LiveKit:            ${GREEN}http://localhost:7880${NC}"
 echo -e "  📝 Y-Sweet:            ${GREEN}http://localhost:8080${NC}"
@@ -381,11 +447,13 @@ echo -e "  📊 Grafana:            ${GREEN}http://localhost:3333${NC}"
 echo -e "  📈 VM:                 ${GREEN}http://localhost:8428${NC}"
 echo -e "  🔭 OTEL:               ${GREEN}http://localhost:4318${NC}"
 echo -e "  🚩 Superposition:      ${GREEN}http://localhost:9999${NC}"
-echo -e "  🗄️  claw-auth-postgres: ${GREEN}localhost:5434${NC}"
+echo -e "  🗄️  Common PostgreSQL:   ${GREEN}localhost:5434${NC}"
+echo -e "  🗄️  claw-auth-postgres: ${GREEN}localhost:5435${NC}"
 echo ""
 echo -e "${YELLOW}Next steps:${NC}"
 echo -e "  Backend:        ${BLUE}cd backend && npm run dev${NC}"
 echo -e "  Frontend:       ${BLUE}cd dashboard && npm run dev${NC}"
+echo -e "  XyneClaw:       ${BLUE}cd xyne-claw && npm run dev${NC}"
 echo -e "  Claw auth:      ${BLUE}cd xyne-claw-auth/backend && npm run dev${NC}"
 echo -e "  Claw auth UI:   ${BLUE}cd xyne-claw-auth/frontend && npm run dev${NC}"
 echo ""
@@ -403,6 +471,6 @@ echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}🔐 Local Dev Login Credentials${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo -e "  ${BLUE}Email:${NC}     ${DEV_EMAIL}"
-echo -e "  ${BLUE}Password:${NC}  ${GREEN}Xyne@Dev123!${NC}"
+echo -e "  ${BLUE}Password:${NC}  ${GREEN}xynelocal@123${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
