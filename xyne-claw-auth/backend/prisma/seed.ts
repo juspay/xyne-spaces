@@ -590,6 +590,48 @@ async function main() {
     update: {},
   });
 
+  // Create "spaces" Surface if it doesn't exist
+  const spacesSurface = await prisma.surface.upsert({
+    where: { key: "spaces" },
+    create: { key: "spaces", identityMode: "USER_ID", supportsUserResolution: true },
+    update: {},
+  });
+
+  // Link Spaces default workspace → default org via SurfaceTenantLink.
+  // This lets ensureUserExists() resolve the org from the user's workspaceId.
+  // Try to fetch the workspace ID from the Spaces DB; fall back to a known dev ID.
+  let spacesWorkspaceId = "";
+  const spacesDbUrl = process.env.SPACES_DB_URL;
+  if (spacesDbUrl) {
+    try {
+      const { PrismaClient: SpacesPrisma } = await import("@prisma/client");
+      const spacesDb = new SpacesPrisma({ datasourceUrl: spacesDbUrl });
+      const workspace = await spacesDb.$queryRaw<Array<{ id: string }>>`
+        SELECT id FROM workspaces WHERE name = 'Default Workspace' LIMIT 1
+      `;
+      spacesWorkspaceId = workspace[0]?.id ?? "";
+      await spacesDb.$disconnect();
+    } catch {
+      console.warn("[seed] Could not fetch workspace ID from Spaces DB — SurfaceTenantLink will use fallback");
+    }
+  }
+  if (!spacesWorkspaceId) {
+    // Fallback: query the claw-auth DB for any existing link, keep it as-is
+    const existingLink = await prisma.surfaceTenantLink.findFirst({
+      where: { surfaceType: "spaces" },
+    });
+    spacesWorkspaceId = existingLink?.surfaceTenantId ?? "dev-workspace";
+  }
+
+  if (spacesWorkspaceId) {
+    await prisma.surfaceTenantLink.upsert({
+      where: { surfaceType_surfaceTenantId: { surfaceType: "spaces", surfaceTenantId: spacesWorkspaceId } },
+      create: { surfaceType: "spaces", surfaceTenantId: spacesWorkspaceId, orgId: defaultOrg.id },
+      update: { orgId: defaultOrg.id },
+    });
+    console.log(`[seed] Linked Spaces workspace "${spacesWorkspaceId}" → org "${defaultOrg.name}"`);
+  }
+
   for (const server of SERVERS) {
     const s = server as {
       transport?: string;
@@ -2385,6 +2427,70 @@ DRILL-DOWN: Use this path ONLY when the user wants to EXPLORE a focused tile's d
     },
   });
   console.log("[seed] Upserted claw concierge agent");
+
+  // Create dev admin user linked to the default org (for local dev).
+  // Use the real Spaces user id when available so JIT mirroring never collides
+  // on the (email, orgId) unique constraint.
+  const devEmail = process.env.DEFAULT_ADMIN_EMAIL || "admin@example.in";
+  let devUserId = "";
+
+  if (spacesDbUrl) {
+    try {
+      const { PrismaClient: SpacesPrisma } = await import("@prisma/client");
+      const spacesDb = new SpacesPrisma({ datasourceUrl: spacesDbUrl });
+      const spacesUser = await spacesDb.$queryRaw<Array<{ id: string }>>`
+        SELECT id FROM users WHERE email = ${devEmail} LIMIT 1
+      `;
+      devUserId = spacesUser[0]?.id ?? "";
+      await spacesDb.$disconnect();
+    } catch {
+      console.warn("[seed] Could not fetch admin user id from Spaces DB — falling back to synthetic id");
+    }
+  }
+
+  if (!devUserId) {
+    devUserId = `dev-${devEmail.replace(/[^a-zA-Z0-9]/g, "-")}`;
+  }
+
+  // If we're seeding with a real Spaces user id, remove any stale synthetic
+  // dev-admin row that shares the same email+orgId to prevent the
+  // @@unique([email, orgId]) constraint from blocking JIT mirroring.
+  if (!devUserId.startsWith("dev-")) {
+    const stale = await prisma.user.findUnique({
+      where: { email_orgId: { email: devEmail, orgId: defaultOrg.id } },
+    });
+    if (stale && stale.id !== devUserId) {
+      await prisma.userRole.deleteMany({ where: { userId: stale.id } });
+      await prisma.orgMember.deleteMany({ where: { userId: stale.id } });
+      await prisma.user.delete({ where: { id: stale.id } });
+      console.log(`[seed] Removed stale synthetic dev-admin user ${stale.id}`);
+    }
+  }
+
+  const existingUser = await prisma.user.findUnique({ where: { id: devUserId } });
+  if (!existingUser) {
+    await prisma.user.create({
+      data: {
+        id: devUserId,
+        email: devEmail,
+        name: devEmail.split("@")[0],
+        orgId: defaultOrg.id,
+      },
+    });
+    await prisma.orgMember.upsert({
+      where: { userId_orgId: { userId: devUserId, orgId: defaultOrg.id } },
+      create: { orgId: defaultOrg.id, userId: devUserId, role: "OWNER", invitedBy: "system" },
+      update: {},
+    });
+    await prisma.userRole.upsert({
+      where: { userId_role: { userId: devUserId, role: "CLAW_ADMIN" } },
+      create: { userId: devUserId, role: "CLAW_ADMIN", grantedBy: "system" },
+      update: {},
+    });
+    console.log(`[seed] Created dev admin user: ${devEmail} (org=${defaultOrg.id}, role=CLAW_ADMIN)`);
+  } else {
+    console.log(`[seed] Dev admin user already exists: ${devEmail}`);
+  }
 }
 
 main()

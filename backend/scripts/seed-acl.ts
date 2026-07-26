@@ -124,7 +124,7 @@ const DEFAULT_ADMIN_USER = {
 };
 
 // Default password for the admin user in local dev (meets complexity requirements)
-const DEV_ADMIN_PASSWORD = 'Xyne@Dev123!';
+const DEV_ADMIN_PASSWORD = 'xynelocal@123';
 
 // Default organization and workspace
 const DEFAULT_ORG = {
