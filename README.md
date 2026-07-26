@@ -58,81 +58,41 @@ Xyne Spaces is a modern, scalable platform built with a TypeScript backend and R
 ```bash
 git clone <repository-url>
 cd xyne-spaces
-
 ```
 
-2. **Install dependencies**:
+2. **Start everything** (install, build, infrastructure, seeds, dev servers):
 ```bash
-# Install root dependencies
-npm install
-
-# Build shared package
-cd shared && npm run build && cd ..
-
-# Build icons package
-cd icons && npm run build && cd ..
-
-# Install backend dependencies
-cd backend && npm install && cd ..
-
-# Install dashboard dependencies
-cd dashboard && npm install && cd ..
-
-# Install xyne-claw-shared (shared dependency for claw services)
-cd xyne-claw-shared && npm install && cd ..
-
-# Install kata-sdk (dependency of xyne-claw-shared)
-cd packages/kata-sdk && npm install && cd ..
-
-# Install xyne-claw dependencies
-cd xyne-claw && npm install && cd ..
-
-# Install xyne-claw-auth backend dependencies
-cd xyne-claw-auth/backend && npm install && cd ../..
-
-# Install xyne-claw-auth frontend dependencies (optional)
-cd xyne-claw-auth/frontend && npm install && cd ../..
+npm run up
 ```
 
-3. **Start services**:
+`npm run up` runs three phases in order:
+- `npm run setup` — install dependencies for root and every package (including `/shared` and `/icons`) and build shared packages
+- `npm run services` — start infrastructure containers and seed all databases
+- `npm run dev:all` — start backend, dashboard, `xyne-claw`, and `xyne-claw-auth/backend` dev servers in parallel
+
+Alternatively, run the phases separately:
 ```bash
+npm run setup
 npm run services
+npm run dev:all
 ```
 
-This will:
+`npm run services` will:
 - Start all infrastructure containers (PostgreSQL, Redis, LiveKit, Zero cache, fake-gcs, MinIO, etc.)
 - Auto-create `.env.local` for backend and dashboard from `.env.example` if they don't exist
 - Run database migrations and seed the ACL system
 - Auto-create `.env` for `xyne-claw-auth/backend` and `xyne-claw` from their `.env.example` files
-- Install dependencies for xyne-claw, xyne-claw-auth, xyne-claw-shared, and kata-sdk if needed
+- Install dependencies for `xyne-claw`, `xyne-claw-auth`, `xyne-claw-shared`, and `kata-sdk` if needed
 - Set up the claw-auth database schema, seed agents, link Spaces workspace to claw org, and create a dev admin user
 
-4. **Start development servers**:
-```bash
-# Start backend (in one terminal)
-cd backend && npm run dev
-
-# Start dashboard (in another terminal)
-cd dashboard && npm run dev
-
-# Start XyneClaw agent server (in another terminal)
-cd xyne-claw && npm run dev
-
-# Start claw-auth backend (in another terminal)
-cd xyne-claw-auth/backend && npm run dev
-
-# Start claw-auth frontend (optional, in another terminal)
-cd xyne-claw-auth/frontend && npm run dev
-```
-
-5. **Access the application**:
+3. **Access the application**:
 - Dashboard: http://localhost:5173
 - Backend API: http://localhost:3001
 - XyneClaw: http://localhost:3002
 - Claw Auth: http://localhost:3003
 - API Documentation: http://localhost:3001/api-docs
 
-6. **Login**: The seed script creates a dev admin account using `DEFAULT_ADMIN_EMAIL` from `backend/.env.local` with password `xynelocal@123`. Email/password login is available at the login page — no OAuth setup required for local dev.
+4. **Login**: The seed script creates a dev admin account using `DEFAULT_ADMIN_EMAIL` from `backend/.env.local` with password `xynelocal@123`. Email/password login is available at the login page — no OAuth setup required for local dev.
 
 ## Development Setup
 
