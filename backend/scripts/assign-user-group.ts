@@ -8,7 +8,7 @@ const prisma = new PrismaClient();
 const DEV_USER_PASSWORD = 'xynelocal@123';
 
 async function assignUserToGroup() {
-  const email = process.argv[2] || process.env.DEFAULT_ADMIN_EMAIL;
+  const email = process.argv[2] || process.env.DEFAULT_ADMIN_EMAIL || 'admin@xyne.ai';
 
   if (!email) {
     console.error('❌ Please provide user email as argument or set DEFAULT_ADMIN_EMAIL env var');
