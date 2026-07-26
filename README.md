@@ -92,7 +92,15 @@ npm run dev:all
 - Claw Auth: http://localhost:3003
 - API Documentation: http://localhost:3001/api-docs
 
-4. **Login**: The seed script creates a dev admin account using `DEFAULT_ADMIN_EMAIL` from `backend/.env.local` with password `xynelocal@123`. Email/password login is available at the login page — no OAuth setup required for local dev.
+4. **Login**:
+```
+========================================
+🔐 Local Dev Login Credentials
+========================================
+  Email:     admin@xyne.ai
+  Password:  xynelocal@123
+========================================
+```
 
 ## Development Setup
 
