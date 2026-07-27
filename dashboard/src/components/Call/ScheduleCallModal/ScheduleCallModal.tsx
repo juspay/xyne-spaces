@@ -38,6 +38,7 @@ import { toast } from 'sonner';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Checkbox } from '../../ui/Checkbox/Checkbox';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
+import { Combobox } from '../../ui/Combobox/Combobox';
 import { ExternalInviteesInput } from './ExternalInviteesInput';
 import { InvitationPreviewStep } from './InvitationPreviewStep';
 import type {
@@ -1867,8 +1868,8 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
               {/* Post call updates to channel — shown whenever participants are added; the broadcast
                   channel is independent of the call's own channel. */}
               {showPostCallUpdates && (
-                <div className='flex items-center gap-3'>
-                  <div className='flex items-center gap-1.5'>
+                <div className='space-y-4'>
+                  <div className='flex items-center gap-1.5 w-full'>
                     <Checkbox
                       checked={postCallUpdates}
                       onChange={checked => {
@@ -1895,80 +1896,57 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                     </Tooltip>
                   </div>
                   {postCallUpdates && (
-                    <div className='min-w-48 flex-1 relative'>
-                      <div
-                        className={cn(
-                          'flex items-center gap-2 rounded-lg border h-8 px-3',
-                          updateChannelError ? 'border-red-500' : 'border-input',
+                    <div className='w-full space-y-1'>
+                      <div className='flex w-full items-center gap-2'>
+                        {selectedChannelItem && (
+                          <div className='flex max-w-[45%] min-w-0 shrink-0 items-center gap-1 rounded-lg border border-border bg-card px-2 h-8 text-sm'>
+                            <span className='shrink-0'>{selectedChannelItem.leftSlot}</span>
+                            <span className='flex-1 truncate text-foreground'>
+                              {selectedChannelItem.label}
+                            </span>
+                            <button
+                              type='button'
+                              onClick={() => {
+                                setUpdateChannelId(null);
+                                setChannelSearchQuery('');
+                                setChannelPickerOpen(true);
+                                requestAnimationFrame(() => channelInputRef.current?.focus());
+                              }}
+                              className='ml-0.5 shrink-0 rounded p-0.5 text-foreground hover:bg-muted'
+                              aria-label={`Remove ${selectedChannelItem.label}`}
+                              data-track-category='calls'
+                              data-track-name='remove-post-call-channel'
+                            >
+                              <X className='size-3' />
+                            </button>
+                          </div>
                         )}
-                      >
-                        {updateChannelId && !channelPickerOpen && selectedChannelItem?.leftSlot}
-                        <input
-                          ref={channelInputRef}
-                          value={
-                            channelPickerOpen
-                              ? channelSearchQuery
-                              : (selectedChannelItem?.label ?? '')
-                          }
-                          onChange={e => setChannelSearchQuery(e.target.value)}
-                          onFocus={() => {
-                            setChannelSearchQuery('');
-                            setChannelPickerOpen(true);
-                          }}
-                          onBlur={() => setChannelPickerOpen(false)}
-                          placeholder='Select channel'
-                          data-track-category='calls'
-                          data-track-name='channel-picker-search'
-                          className='flex-1 min-w-0 text-sm text-foreground bg-transparent outline-none placeholder:text-muted-foreground'
-                        />
-                        {updateChannelId && (
-                          <button
-                            type='button'
-                            onMouseDown={e => {
-                              e.preventDefault();
-                              setUpdateChannelId(null);
+                        <div className='min-w-0 flex-1'>
+                          <Combobox
+                            ref={channelInputRef}
+                            items={channelComboboxItems}
+                            value={selectedChannelItem}
+                            queryString={channelSearchQuery}
+                            placeholder={
+                              selectedChannelItem ? 'Search to change channel' : 'Select channel'
+                            }
+                            onInputValueChange={setChannelSearchQuery}
+                            onValueChange={value => {
+                              setUpdateChannelId(value);
                               setChannelSearchQuery('');
-                              setChannelPickerOpen(true);
-                              channelInputRef.current?.focus();
+                              setChannelPickerOpen(false);
                             }}
-                            className='text-muted-foreground hover:text-foreground transition-colors flex-shrink-0'
-                          >
-                            <X className='size-3.5' />
-                          </button>
-                        )}
+                            open={channelPickerOpen}
+                            onOpenChange={setChannelPickerOpen}
+                            onBlur={() => setChannelPickerOpen(false)}
+                            autoHighlight
+                          />
+                        </div>
                       </div>
                       {updateChannelError && (
                         <p className='text-red-500 text-xs mt-1'>
                           Select a channel to post call updates.
                         </p>
-                      )}
-                      {channelPickerOpen && (
-                        <div className='absolute top-full mt-1 left-0 right-0 z-50 bg-popover border border-border rounded-md shadow-lg max-h-48 overflow-y-auto py-1'>
-                          {channelComboboxItems.length === 0 ? (
-                            <p className='text-sm text-muted-foreground px-3 py-2'>
-                              No channels found
-                            </p>
-                          ) : (
-                            channelComboboxItems.map(item => (
-                              <button
-                                key={item.value}
-                                type='button'
-                                onMouseDown={e => {
-                                  e.preventDefault(); // prevent input blur before selection
-                                  setUpdateChannelId(item.value);
-                                  setChannelSearchQuery('');
-                                  setChannelPickerOpen(false);
-                                }}
-                                data-track-category='calls'
-                                data-track-name='select-post-call-channel'
-                                className='w-full flex items-center gap-2 mx-1 px-2 py-1.5 text-sm text-popover-foreground cursor-pointer hover:bg-accent rounded-md'
-                              >
-                                {item.leftSlot}
-                                {item.label}
-                              </button>
-                            ))
-                          )}
-                        </div>
                       )}
                     </div>
                   )}

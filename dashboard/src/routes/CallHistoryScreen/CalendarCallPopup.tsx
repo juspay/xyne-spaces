@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import {
   Download,
   MessageSquare,
@@ -18,12 +18,19 @@ import {
   Satellite,
   Circle,
   AudioLines,
+  CalendarFold,
 } from 'lucide-react';
 import { RRule } from 'rrule';
 import { useSelector } from '@xstate/react';
 import { GoogleCalendarIcon, MicrosoftIcon } from './CalendarIcons';
 import { CallStatus, MeetingStatus } from '@xyne/shared';
-import { Call, isGoogleCalendarCall, isMicrosoftCalendarCall } from './callHistoryItem.utils';
+import {
+  Call,
+  isGoogleCalendarCall,
+  isMicrosoftCalendarCall,
+  isScheduledCallJoinable,
+  isScheduledCallManageable,
+} from './callHistoryItem.utils';
 import Button from '../../components/ui/Button';
 import Avatar from '../../components/ui/Avatar/Avatar';
 import { AvatarStackItem } from '../../components/ui/Avatar/AvatarGroup';
@@ -39,6 +46,7 @@ import {
   RSVP_BADGE_BASE_CLASS,
 } from './CalenderViewUtils';
 import { roomActor } from '../../machines/roomMachine';
+import { useNowWithBoundary } from '../../hooks/useNowWithBoundary';
 
 interface CalendarCallPopupProps {
   call: Call;
@@ -163,7 +171,6 @@ const CalendarCallPopup = ({
   onDeleteClick,
   onHideClick,
 }: CalendarCallPopupProps): React.ReactElement => {
-  const [now, setNow] = useState(() => Date.now());
   const currentCallExternalId = useSelector(roomActor, state => state.context.externalId);
   const isRoomActive = useSelector(
     roomActor,
@@ -173,18 +180,16 @@ const CalendarCallPopup = ({
   const startsAtTime = call.startsAt ? new Date(call.startsAt).getTime() : null;
   const startedAtTime = call.startedAt ? new Date(call.startedAt).getTime() : null;
   const isLive = call.status === CallStatus.ACTIVE || call.status === CallStatus.IN_PROGRESS;
-  const hasReachedScheduledStart = startsAtTime !== null && now >= startsAtTime;
   const isRecurring = !!call.recurringSeriesId;
   const isGoogleCalendar = isGoogleCalendarCall(call);
   const isMicrosoftCalendar = isMicrosoftCalendarCall(call);
   const isExternalCalendar = isGoogleCalendar || isMicrosoftCalendar;
 
-  useEffect(() => {
-    if (isEnded || isExternalCalendar || startsAtTime === null) return;
-
-    const intervalId = window.setInterval(() => setNow(Date.now()), 60_000);
-    return () => window.clearInterval(intervalId);
-  }, [isEnded, isExternalCalendar, startsAtTime]);
+  const now = useNowWithBoundary(
+    startsAtTime,
+    !isEnded && !isExternalCalendar && startsAtTime !== null,
+  );
+  const hasReachedScheduledStart = startsAtTime !== null && now >= startsAtTime;
 
   const [seriesPrompt, setSeriesPrompt] = useState<RsvpChoice | null>(null);
   const [showHideSeriesPrompt, setShowHideSeriesPrompt] = useState(false);
@@ -230,6 +235,11 @@ const CalendarCallPopup = ({
     callExtended.organizerId ?? callExtended.createdByUserId;
 
   const submitRsvp = async (status: RsvpChoice, isSeries: boolean): Promise<void> => {
+    if (startsAtTime !== null && Date.now() >= startsAtTime) {
+      setSeriesPrompt(null);
+      return;
+    }
+
     setIsLoading(true);
     try {
       await callService.updateMeetingStatus(call.externalId, {
@@ -390,7 +400,7 @@ const CalendarCallPopup = ({
   }
 
   // ── Series scope confirmation sub-view ────────────────────────────────────
-  if (seriesPrompt) {
+  if (seriesPrompt && !hasReachedScheduledStart) {
     return (
       <div className='p-5'>
         {/* Call icon */}
@@ -506,8 +516,12 @@ const CalendarCallPopup = ({
   const liveStartedLabel =
     isLive && startedAtTime !== null ? formatRelativeTime(startedAtTime) : null;
 
-  const canEdit = !isEnded && !isLive && currentUserId === organizerUserId && !!onEditClick;
-  const canDelete = !isEnded && !isLive && currentUserId === organizerUserId && !!onDeleteClick;
+  const isUnavailableUntilScheduledStart = !isScheduledCallJoinable(call, now);
+  const isJoinDisabled = isCurrentUserInCall || isUnavailableUntilScheduledStart;
+  const isManageableScheduledCall = isScheduledCallManageable(call, currentUserId);
+
+  const canEdit = isManageableScheduledCall && !!onEditClick;
+  const canDelete = isManageableScheduledCall && !!onDeleteClick;
   const canHide =
     !isEnded && currentUserId !== organizerUserId && !!currentParticipant && !!onHideClick;
   const canGotoMessage = isEnded && !!onGotoMessage;
@@ -772,22 +786,31 @@ const CalendarCallPopup = ({
           currentParticipant && (
             <button
               onClick={onJoinCall}
-              disabled={isCurrentUserInCall}
+              disabled={isJoinDisabled}
               data-track-category='Calls'
               data-track-name='popup-join-call'
               className={cn(
                 'w-full mt-3 h-10 flex items-center justify-center gap-1.5 rounded-xl text-sm font-medium transition-opacity',
-                isCurrentUserInCall
+                isJoinDisabled
                   ? 'bg-muted text-muted-foreground cursor-not-allowed'
                   : 'bg-action-primary text-action-primary-foreground hover:opacity-90 cursor-pointer',
               )}
             >
               {isCurrentUserInCall ? (
                 <AudioLines className='size-4' />
+              ) : isUnavailableUntilScheduledStart ? (
+                <CalendarFold className='size-4' />
               ) : (
                 <Headset className='size-4' />
               )}
-              <span>{isCurrentUserInCall ? 'Already joined' : 'Join Call'}</span>
+
+              <span>
+                {isCurrentUserInCall
+                  ? 'Already joined'
+                  : isUnavailableUntilScheduledStart
+                    ? 'Available at scheduled time'
+                    : 'Join Call'}
+              </span>
             </button>
           )}
 
