@@ -22,6 +22,7 @@ export interface BaseViewerProps {
   height?: number;
   initialTime?: number;
   initialPage?: number;
+  autoPlay?: boolean;
   /**
    * Plain-text snippet of the cited chunk. The PDF viewer feeds it to pdf.js's
    * find controller, which highlights the matching run in the PDF's own text
