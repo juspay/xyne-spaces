@@ -7,7 +7,7 @@ import { createTicketCustomFieldActivity } from '@/services/ticketCustomFieldAct
 import { normalizeCustomFieldValue } from '@/apps/controllers/ticketController.helpers';
 import { logger } from '@/utils/logger';
 import { vespaQueue } from '@/queues/vespaQueue';
-import { ticketSchema } from '@/vespa/src/types';
+import { mailSchema, ticketSchema } from '@/vespa/src/types';
 import {
   buildKanbanCountsSnapshot,
   type KanbanCountsSnapshot,
@@ -423,7 +423,10 @@ const emitCustomFieldWriteSideEffects = async (
     return;
   }
 
-  // 1. Reindex the ticket in Vespa.
+  // 1. Reindex the ticket in Vespa, plus every mail in its conversation.
+  //    Mail docs snapshot the ticket's form fields at index time (mapEmail →
+  //    loadTicketFormFields), so a ticket-only feed leaves `ticketFormFields`
+  //    stale on the desk mails until something else re-feeds them.
   try {
     await vespaQueue.addJob({
       schema: ticketSchema,
@@ -432,6 +435,20 @@ const emitCustomFieldWriteSideEffects = async (
       userId: updatedBy,
       ...(ticket.workspaceId ? { workspaceId: ticket.workspaceId } : {}),
     });
+
+    if (ticket.conversationId) {
+      const emails = await prismaClient.email.findMany({
+        where: { conversationId: ticket.conversationId },
+        select: { id: true },
+      });
+      await Promise.all(emails.map(email => vespaQueue.addJob({
+        schema: mailSchema,
+        jobType: 'feed',
+        docId: email.id,
+        userId: updatedBy,
+        ...(ticket.workspaceId ? { workspaceId: ticket.workspaceId } : {}),
+      })));
+    }
   } catch (error) {
     logger.error('[TicketCustomFieldService] Failed to queue Vespa feed after custom-field write:', {
       ticketId,
