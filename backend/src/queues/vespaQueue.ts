@@ -133,10 +133,17 @@ class VespaQueue {
 		
 		try {
 			const jobData: VespaJob = vespaJob;
-			// KB (collection) feed jobs get top priority among feeds so they ingest
-			// ahead of every other source. Lower number = higher priority in BullMQ.
+			// Name-only feeds insert just the file name (no content parse) so the file
+			// is searchable in cmd+K within seconds — they get the top priority so they
+			// jump ahead of every queued heavy feed. KB (collection) feed jobs get the
+			// next-highest priority among feeds. Lower number = higher priority in BullMQ.
+			const isNameOnlyFeed = jobType === 'feed' && vespaJob.nameOnly === true;
 			const isKbFeed = jobType === 'feed' && vespaJob.app === SubApp.COLLECTIONS;
-			const feedPriority = isKbFeed ? config.kbIngestion.queuePriority : 5;
+			const feedPriority = isNameOnlyFeed
+				? config.fileNameOnlyFeed.queuePriority
+				: isKbFeed
+					? config.kbIngestion.queuePriority
+					: 5;
 			const jobOpts = { priority: jobType === 'delete' ? 1 : feedPriority };
 			if (isKbFeed) {
 				logger.info(
