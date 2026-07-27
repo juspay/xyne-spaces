@@ -321,14 +321,16 @@ export function groupByDay(calls: Call[]): { date: Date; calls: Call[] }[] {
   return Array.from(map.values()).sort((a, b) => a.date.getTime() - b.date.getTime());
 }
 
-export function isScheduledCallJoinable(call: Call): boolean {
-  if (!call.startsAt) return false;
-  if (call.status === CallStatus.ENDED) return false;
+export function isScheduledCallJoinable(call: Call, now = Date.now()): boolean {
+  if (call.status === CallStatus.ACTIVE || call.status === CallStatus.IN_PROGRESS) return true;
+  if (call.status !== CallStatus.SCHEDULED || !call.startsAt) return false;
 
-  if (call.status === CallStatus.ACTIVE) return true;
+  return now >= new Date(call.startsAt).getTime();
+}
 
-  const now = Date.now();
-  const scheduledTime = new Date(call.startsAt).getTime();
+export function isScheduledCallManageable(call: Call, currentUserId: string | undefined): boolean {
+  if (!currentUserId || call.status !== CallStatus.SCHEDULED) return false;
 
-  return now >= scheduledTime;
+  const organizerUserId = call.organizerId ?? call.createdByUserId;
+  return organizerUserId === currentUserId;
 }
