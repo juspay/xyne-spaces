@@ -532,6 +532,22 @@ export class AuthMiddleware {
         googleId: user.providerUserId,
         email: user.email,
       });
+
+      if (req.cookies?.xyne_user_id !== user.id) {
+        const isProduction = process.env.NODE_ENV === 'production';
+        res.cookie('xyne_user_id', user.id, {
+          httpOnly: true,
+          secure: isProduction,
+          sameSite: 'lax',
+          path: '/',
+          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
+        });
+        if (!req.cookies) {
+          req.cookies = {};
+        }
+        req.cookies.xyne_user_id = user.id;
+      }
+
       next();
     } catch (error) {
       logger.error(`[AUTH] Authentication error:`, {
