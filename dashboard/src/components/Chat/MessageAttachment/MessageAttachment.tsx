@@ -831,6 +831,7 @@ const InlineVideoPlayer: React.FC<{
   parentMessage,
 }) => {
   const [hasClickedPlay, setHasClickedPlay] = useState(false);
+  const [shouldStartPlayback, setShouldStartPlayback] = useState(false);
   const [thumbnailBlobUrl, setThumbnailBlobUrl] = useState<string | null>(null);
   const [thumbnailError, setThumbnailError] = useState(false);
   const { isMobile } = usePlatform();
@@ -873,8 +874,10 @@ const InlineVideoPlayer: React.FC<{
           // Stay paused after modal closes - don't auto-play
         } else {
           // Inline video was never played, store the time
-          // so VideoViewer can use it as initialTime when it mounts
+          // so VideoViewer can use it as initialTime when it mounts.
+          // It mounts paused — closing the modal is not a request to play.
           setPendingVideoTime(modalVideoTime);
+          setShouldStartPlayback(false);
           setHasClickedPlay(true);
         }
       }
@@ -883,7 +886,7 @@ const InlineVideoPlayer: React.FC<{
 
   const { canDelete, handleDelete } = useAttachmentDelete(attachmentId, fileName, uploadedBy);
 
-  const openModal = () => {
+  const openModal = ({ startPlayback = false }: { startPlayback?: boolean } = {}) => {
     // Exit fullscreen if active before opening modal
     if (document.fullscreenElement) {
       document.exitFullscreen().catch(() => {
@@ -892,12 +895,14 @@ const InlineVideoPlayer: React.FC<{
     }
     // Capture current video time before opening modal
     const currentTime = videoRef.current?.currentTime;
+    const isPlayingInline = videoRef.current ? !videoRef.current.paused : false;
     const attachment: AttachmentRef = {
       attachmentId,
       fileName,
       fileUrl: '', // Not used for videos
       mimeType,
       fileSize,
+      autoPlay: startPlayback || isPlayingInline,
       ...(currentTime !== undefined && { initialTime: currentTime }),
       ...(conversationId && { conversationId }),
       ...(channelId && { channelId }),
@@ -1054,8 +1059,9 @@ const InlineVideoPlayer: React.FC<{
                 <button
                   onClick={() => {
                     if (isMobile) {
-                      openModal();
+                      openModal({ startPlayback: true });
                     } else {
+                      setShouldStartPlayback(true);
                       setHasClickedPlay(true);
                     }
                   }}
@@ -1077,7 +1083,7 @@ const InlineVideoPlayer: React.FC<{
               {!isMobile && (
                 <div className='absolute bottom-4 right-3 opacity-0 group-hover:opacity-100 transition-opacity'>
                   <button
-                    onClick={openModal}
+                    onClick={() => openModal()}
                     className='p-1.5 rounded-md bg-black/60 backdrop-blur-sm text-white hover:bg-black/80 transition-colors'
                     title='Expand video'
                     aria-label='Expand video'
@@ -1099,9 +1105,10 @@ const InlineVideoPlayer: React.FC<{
                 fileName={fileName}
                 width={dimensions.width}
                 height={dimensions.height}
-                onExpand={openModal}
+                onExpand={() => openModal()}
                 menuContent={inlineMenuContent}
                 ref={videoRef}
+                autoPlay={shouldStartPlayback}
                 {...(pendingVideoTime !== undefined && { initialTime: pendingVideoTime })}
               />
             </div>
