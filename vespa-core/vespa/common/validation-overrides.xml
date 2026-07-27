@@ -1,0 +1,6 @@
+<validation-overrides>
+  <allow until="2026-07-14">indexing-change</allow>
+  <allow until="2026-07-14">field-type-change</allow>
+  <allow until="2026-07-14">global-document-change</allow>
+  <allow until="2026-07-14">schema-removal</allow>
+</validation-overrides>
