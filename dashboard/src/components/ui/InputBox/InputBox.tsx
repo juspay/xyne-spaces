@@ -290,7 +290,6 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       };
     }, []);
 
-    const [sendMode, setSendMode] = useState<'message' | 'ticket'>('message');
     const [isSendMenuOpen, setIsSendMenuOpen] = useState(false);
     const [isScheduleDialogOpen, setIsScheduleDialogOpen] = useState(false);
     const openScheduleDialog = useCallback((): void => setIsScheduleDialogOpen(true), []);
@@ -1782,44 +1781,28 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                       {onCreateTicket ? (
                         <div
                           className={`flex items-center rounded-md overflow-hidden transition-all duration-200 ease-in-out ${
-                            (hasSendableContent || sendMode === 'ticket') && !sendDisabled
+                            hasSendableContent && !sendDisabled
                               ? 'bg-primary text-primary-foreground hover:bg-primary/90'
                               : 'bg-muted text-muted-foreground cursor-not-allowed opacity-50'
                           }`}
                         >
                           <Tooltip
-                            content={sendMode === 'message' ? 'Send message' : 'Create ticket'}
+                            content='Send message'
                             side='top'
                             delayDuration={1000}
                             skipDelayDuration={1000}
                           >
                             <button
                               type='button'
-                              onClick={() => {
-                                if (sendMode === 'message') {
-                                  void handleSend();
-                                } else {
-                                  // Pass current editor content as description for the ticket
-                                  const currentContent = editor?.getText().trim() || '';
-                                  setSendMode('message');
-                                  onCreateTicket(currentContent);
-                                }
-                              }}
+                              onClick={() => void handleSend()}
                               disabled={
-                                disabled ||
-                                sendDisabled ||
-                                isSending ||
-                                (sendMode === 'message' && !hasSendableContent)
+                                disabled || sendDisabled || isSending || !hasSendableContent
                               }
                               className='p-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2'
-                              aria-label={sendMode === 'message' ? 'Send message' : 'Create ticket'}
+                              aria-label='Send message'
                               data-testid='send-message-button'
                               data-track-category='CHAT_INPUT'
-                              data-track-name={
-                                sendMode === 'message'
-                                  ? 'SEND_MESSAGE'
-                                  : 'CREATE_TICKET_FROM_MESSAGE'
-                              }
+                              data-track-name='SEND_MESSAGE'
                               data-track-metadata={JSON.stringify({
                                 ...(conversationId !== null ? { conversationId } : { channelId }),
                                 message: editor?.getText().trim() || '',
@@ -1828,22 +1811,14 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                             >
                               {isSending ? (
                                 <Loader2 className='h-4 w-4 animate-spin' />
-                              ) : sendMode === 'message' ? (
-                                <ArrowUp className='h-4 w-4' />
                               ) : (
-                                <div className='flex items-center gap-2 px-1'>
-                                  <span className='text-xs font-medium whitespace-nowrap'>
-                                    Create Ticket
-                                  </span>
-                                </div>
+                                <ArrowUp className='h-4 w-4' />
                               )}
                             </button>
                           </Tooltip>
                           <div
                             className={`w-px h-4 ${
-                              hasSendableContent || sendMode === 'ticket'
-                                ? 'bg-background/20'
-                                : 'bg-muted-foreground/20'
+                              hasSendableContent ? 'bg-background/20' : 'bg-muted-foreground/20'
                             }`}
                           ></div>
                           <DropdownMenu open={isSendMenuOpen} onOpenChange={setIsSendMenuOpen}>
@@ -1858,24 +1833,14 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                               </button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent side='top' align='end'>
-                              {sendMode === 'message' && !(hasTicket || ticketCreated) && (
+                              {!(hasTicket || ticketCreated) && (
                                 <DropdownMenuItem
                                   onClick={() => {
-                                    setSendMode('ticket');
                                     setIsSendMenuOpen(false);
+                                    onCreateTicket(editor?.getText().trim() || '');
                                   }}
                                 >
                                   <Ticket className='h-4 w-4' /> Create a ticket
-                                </DropdownMenuItem>
-                              )}
-                              {sendMode === 'ticket' && (
-                                <DropdownMenuItem
-                                  onClick={() => {
-                                    setSendMode('message');
-                                    setIsSendMenuOpen(false);
-                                  }}
-                                >
-                                  <ArrowUp className='h-4 w-4' /> Send as message
                                 </DropdownMenuItem>
                               )}
                               {onScheduleSend && (
@@ -1980,9 +1945,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                             aria-label='Send message'
                             data-testid='send-message-button'
                             data-track-category='CHAT_INPUT'
-                            data-track-name={
-                              sendMode === 'message' ? 'SEND_MESSAGE' : 'CREATE_TICKET_FROM_MESSAGE'
-                            }
+                            data-track-name='SEND_MESSAGE'
                             data-track-metadata={JSON.stringify({
                               ...(conversationId !== null ? { conversationId } : { channelId }),
                               hasAttachments: allAttachments.length > 0,

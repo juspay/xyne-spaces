@@ -30,6 +30,56 @@ export const parseAssignee = (value: string | null): CreateTicketFormData['assig
   return type === 'user' ? { type: 'assigneeTo', value: id } : { type: 'userGroup', value: id };
 };
 
+export interface TicketFormSnapshot {
+  title: string;
+  description: string;
+  priority: string;
+  status: string;
+  assignee: string;
+  eta: number | null;
+  tags: string;
+  boardId: string;
+  channelId: string;
+  workflowType: string;
+  merchantId: string;
+  ticketType: string;
+  dynamicFields: string;
+}
+
+export const serializeDynamicFields = (
+  dynamicFields: CreateTicketFormData['dynamicFields'] | undefined,
+): string => {
+  const entries = Object.entries(dynamicFields ?? {})
+    .map(([key, value]): [string, string[]] => [
+      key,
+      (Array.isArray(value) ? value : [value]).map(item => (item ?? '').trim()).filter(Boolean),
+    ])
+    .filter(([, values]) => values.length > 0)
+    .sort(([a], [b]) => a.localeCompare(b));
+  return JSON.stringify(entries);
+};
+
+export const snapshotTicketForm = (values: CreateTicketFormData): TicketFormSnapshot => ({
+  title: (values.title ?? '').trim(),
+  description: (values.description ?? '').trim(),
+  priority: values.priority ?? '',
+  status: values.status ?? '',
+  assignee: values.assignee?.value ?? '',
+  eta: values.eta ? new Date(values.eta).getTime() : null,
+  tags: JSON.stringify([...(values.tags ?? [])].sort()),
+  boardId: values.boardId ?? '',
+  channelId: values.channelId ?? '',
+  workflowType: (values.workflowType ?? '').trim(),
+  merchantId: (values.merchantId ?? '').trim(),
+  ticketType: values.ticketType ?? '',
+  dynamicFields: serializeDynamicFields(values.dynamicFields),
+});
+
+export const ticketFormSnapshotsEqual = (a: TicketFormSnapshot, b: TicketFormSnapshot): boolean => {
+  const keys = Object.keys(a) as Array<keyof TicketFormSnapshot>;
+  return keys.every(key => a[key] === b[key]);
+};
+
 // Get source id
 
 interface MissingMandatoryFieldInput {
