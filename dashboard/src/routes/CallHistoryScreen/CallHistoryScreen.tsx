@@ -112,6 +112,12 @@ function timestampOrUndefined(value: number | undefined): number | undefined {
   return value && value > 0 ? value : undefined;
 }
 
+function isJoinedInvitationResponse(response: string): boolean {
+  return (
+    response === String(InvitationResponse.ACCEPTED) || response === String(InvitationResponse.LEFT)
+  );
+}
+
 function mapVespaCallResultToCall(result: DisplaySearchResult, workspaceId: string): Call {
   const context = result.searchContext;
   const callId = context?.callId || result.id;
@@ -163,6 +169,19 @@ function mapVespaCallResultToCall(result: DisplaySearchResult, workspaceId: stri
     updatedAt: now,
     metadata: null,
     callUpdatesChannel: null,
+    participantCount,
+    participantPreviewUserIds: JSON.stringify(
+      participantUserIds
+        .map((userId, index) =>
+          userId
+            ? {
+                userId,
+                hasJoined: isJoinedInvitationResponse(participantResponses[index] || ''),
+              }
+            : null,
+        )
+        .filter((entry): entry is { userId: string; hasJoined: boolean } => entry !== null),
+    ),
     participants: Array.from({ length: participantCount }, (_, index) => {
       const userId = participantUserIds[index] || '';
       const displayName = stripSearchHighlight(participantNames[index]);

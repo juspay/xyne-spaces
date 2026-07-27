@@ -18,6 +18,7 @@ import { messageMetadataService } from '@/services/messageMetadataService';
 import type { CallParticipantMetadata } from '@xyne/shared';
 import { normalizeEmailList } from '@/utils/email';
 import { CallVespaFeedSource, queueCallVespaDelete, queueCallVespaFeed } from '@/services/callVespaQueue';
+import { refreshCallParticipantPreview } from '@/utils/callParticipantCountUtils';
 
 export type { Call, CallParticipant };
 
@@ -309,15 +310,17 @@ export class CallRepository {
 
   async createParticipant(data: CreateCallParticipantInput): Promise<CallParticipant> {
     const workspaceId = await this.getCallWorkspaceId(data.callId);
-    const result = await DatabaseClient.getInstance().callParticipant.create({
-      data: {
-        ...data,
-        workspaceId,
+    return await DatabaseClient.getInstance().$transaction(async (tx) => {
+      const result = await tx.callParticipant.create({
+        data: {
+          ...data,
+          workspaceId,
         meetingStatus: data.meetingStatus ?? MeetingStatus.PENDING,
-      },
-    });
+        },
+      });
     queueCallVespaFeed(result.callId, { source: CallVespaFeedSource.CallRepositoryCreateParticipant });
-    return result;
+      return result;
+    });
   }
 
   async updateParticipantMeetingStatus(
@@ -406,6 +409,7 @@ export class CallRepository {
     const participantUserIds = baseParticipantUserIds.includes(params.createdByUserId)
       ? baseParticipantUserIds
       : [params.createdByUserId, ...baseParticipantUserIds];
+    const externalInvitees = normalizeEmailList(params.externalInvitees);
 
     await tx.call.create({
       data: {
@@ -429,6 +433,7 @@ export class CallRepository {
         createdAt: new Date(),
         updatedAt: new Date(),
         lastActivityAt: new Date(),
+        participantCount: participantUserIds.length + externalInvitees.length,
         ...(params.metadata && { metadata: params.metadata as Prisma.InputJsonValue }),
         ...(params.callUpdatesChannel !== undefined && { callUpdatesChannel: params.callUpdatesChannel }),
       },
@@ -450,7 +455,6 @@ export class CallRepository {
       })),
     });
 
-    const externalInvitees = normalizeEmailList(params.externalInvitees);
     if (externalInvitees.length > 0) {
       await tx.callParticipant.createMany({
         data: externalInvitees.map((email) => {
@@ -475,6 +479,8 @@ export class CallRepository {
         skipDuplicates: true,
       });
     }
+
+    await refreshCallParticipantPreview(tx, params.callId);
 
     return { callId: params.callId, participantUserIds };
   }
@@ -748,6 +754,7 @@ export class CallRepository {
         endedAt,
       }
     });
+    await refreshCallParticipantPreview(tx, callId);
     queueCallVespaFeed(callId, { source: CallVespaFeedSource.CallRepositoryEndCall });
   }
 
@@ -816,6 +823,9 @@ export class CallRepository {
           data: { status: finalStatus, endedAt: leftAt },
         });
         shouldEndCall = finalStatus === CallStatus.ENDED;
+        if (shouldEndCall) {
+          await refreshCallParticipantPreview(tx, call.id);
+        }
 
         // Update system message whether the call is fully ended or just rescheduled
         messageUpdated = await updateCallSystemMessageIfNeeded({
@@ -870,6 +880,9 @@ export class CallRepository {
           data: { status: finalStatus, endedAt },
         });
         shouldEndCall = finalStatus === CallStatus.ENDED;
+        if (shouldEndCall) {
+          await refreshCallParticipantPreview(tx, call.id);
+        }
 
         // Update system message whether the call is fully ended or just rescheduled
         messageUpdated = await updateCallSystemMessageIfNeeded({
@@ -1526,6 +1539,7 @@ export class CallRepository {
         }
       }
 
+      await refreshCallParticipantPreview(tx, callId);
       return updatedCall;
     });
 
@@ -1582,19 +1596,22 @@ export class CallRepository {
     const { callId, displayName } = params;
     const id = uuidv4();
     const workspaceId = await this.getCallWorkspaceId(callId);
-    const participant = await DatabaseClient.getInstance().callParticipant.create({
-      data: {
-        id,
-        callId,
-        workspaceId,
+    const participant = await DatabaseClient.getInstance().$transaction(async (tx) => {
+      const participant = await tx.callParticipant.create({
+        data: {
+          id,
+          callId,
+          workspaceId,
         userId: id, // Use same value so LiveKit identity (= id) always matches userId
-        invitedBy: 'external_request',
-        invitedAt: new Date(),
-        response: InvitationResponse.REQUESTED,
-        isExternal: true,
-        displayName,
-        meetingStatus: MeetingStatus.PENDING,
-      },
+          invitedBy: 'external_request',
+          invitedAt: new Date(),
+          response: InvitationResponse.REQUESTED,
+          isExternal: true,
+          displayName,
+          meetingStatus: MeetingStatus.PENDING,
+        },
+      });
+      return participant;
     });
     queueCallVespaFeed(participant.callId, { source: CallVespaFeedSource.CallRepositoryCreateLobbyRequest });
     return participant;
@@ -1685,9 +1702,12 @@ export class CallRepository {
     });
     if (!participant) return null;
 
-    const updatedParticipant = await DatabaseClient.getInstance().callParticipant.update({
-      where: { id: participantId },
-      data: { joinedAt: new Date() },
+    const updatedParticipant = await DatabaseClient.getInstance().$transaction(async tx => {
+      const participant = await tx.callParticipant.update({
+        where: { id: participantId },
+        data: { joinedAt: new Date() },
+      });
+      return participant;
     });
     queueCallVespaFeed(updatedParticipant.callId, { source: CallVespaFeedSource.CallRepositoryExternalJoin });
     return updatedParticipant;

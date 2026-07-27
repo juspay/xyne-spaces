@@ -17,10 +17,7 @@ import { useUsers } from '../../../hooks/useUsers';
 import { useAuth } from '../../../hooks/useAuth';
 import { Virtuoso } from 'react-virtuoso';
 import { usePaginatedCalls } from '../../../hooks/usePaginatedCalls';
-import { QueryResultType } from '@rocicorp/zero';
-import { queries } from '../../../zero/queries';
-
-type Call = QueryResultType<typeof queries.userCallHistory>[number];
+import { type Call } from '../../../routes/CallHistoryScreen/callHistoryItem.utils';
 
 // TODO: TranscriptEntry interface for future transcript display
 // interface TranscriptEntry {
@@ -221,7 +218,7 @@ export const CallTranscriptSelector: React.FC<CallTranscriptSelectorProps> = ({
                   </span>
                   <span className='w-1 h-1 rounded-full bg-muted-foreground/30 shrink-0' />
                   <span className='shrink-0'>
-                    {selectedCall.participants?.length || 0} participants
+                    {selectedCall.participantCount ?? 0} participants
                   </span>
                 </div>
               </div>

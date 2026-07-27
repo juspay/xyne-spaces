@@ -1974,6 +1974,8 @@ export const callTable = table('calls')
     updatedAt: number(),
     metadata: json().optional(),
     callUpdatesChannel: string().optional(),
+    participantCount: number().optional(),
+    participantPreviewUserIds: string().optional(),
   })
   .primaryKey('id');
 

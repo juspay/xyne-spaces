@@ -14,9 +14,12 @@ import { formatRelativeTimestamp } from '../../utils/dateUtils';
 import Tooltip from '../../components/ui/Tooltip/Tooltip';
 import {
   type Call,
-  getParticipantUsers,
+  getCallParticipantCount,
+  getParticipantDisplayData,
+  getPreviewParticipantUsers,
   getOtherParticipants,
   hasAnyoneJoined,
+  hasPreviewParticipantJoined,
   getCallStatus,
   getStatusText as getStatusTextUtil,
 } from './callHistoryItem.utils';
@@ -63,21 +66,35 @@ export function CallHistoryItem({
 
   // Get other participants (excluding current user)
   const otherParticipants = getOtherParticipants(call.participants, currentUserId);
+  const participantCount = getCallParticipantCount(call);
+  const otherParticipantCount = Math.max(
+    participantCount - (currentUserParticipant ? 1 : 0),
+    otherParticipants.length,
+  );
   const allUsersData = useUsers();
-  const participantUsers = getParticipantUsers(otherParticipants, allUsersData);
+  const participantUsers = getPreviewParticipantUsers(
+    call.participantPreviewUserIds,
+    allUsersData,
+    currentUserId,
+  );
+  const fallbackParticipantData = getParticipantDisplayData(
+    call.participants,
+    allUsersData,
+    currentUserId,
+  );
   // userIds only contains internal users (for avatar lookup); external users have no profile avatar
-  const userIds = participantUsers.map(u => u.id);
+  const userIds =
+    participantUsers.length > 0 ? participantUsers.map(u => u.id) : fallbackParticipantData.userIds;
 
-  // Unified display names: external users use their stored displayName, internal users use the
-  // users-table name. This prevents 'Unknown' showing for external participants.
-  const participantDisplayNames = otherParticipants.map(p => {
-    if (p.isExternal) return `${p.displayName || 'Guest'} (External)`;
-    const user = allUsersData.find(u => u.id === p.userId);
-    return user?.name || 'Unknown';
-  });
+  const participantDisplayNames =
+    participantUsers.length > 0
+      ? participantUsers.map(user => user.name || user.email || 'Unknown')
+      : fallbackParticipantData.displayNames;
 
   // Determine call status
-  const anyoneJoined = hasAnyoneJoined(otherParticipants);
+  const anyoneJoined =
+    hasPreviewParticipantJoined(call.participantPreviewUserIds, currentUserId) ||
+    hasAnyoneJoined(otherParticipants);
   const callStatus = getCallStatus(
     call,
     isOutgoingCall,
@@ -97,6 +114,7 @@ export function CallHistoryItem({
     isChannelCall,
     userIds,
     participantDisplayNames,
+    otherParticipantCount,
     isOutgoingCall,
     isMissedCall,
     didNotAnswer,
@@ -117,6 +135,7 @@ interface RenderCallItemProps {
   userIds: string[];
   /** Resolved display names for all other participants (handles both internal and external users) */
   participantDisplayNames: string[];
+  otherParticipantCount: number;
   isOutgoingCall: boolean;
   isMissedCall: boolean;
   didNotAnswer: boolean;
@@ -135,6 +154,7 @@ function renderCallItem({
   isChannelCall,
   userIds,
   participantDisplayNames,
+  otherParticipantCount,
   isOutgoingCall,
   isMissedCall,
   didNotAnswer,
@@ -226,14 +246,14 @@ function renderCallItem({
                 // Otherwise show participant names (handles both internal and external users)
                 <>
                   {participantDisplayNames[0] || 'Unknown'}
-                  {participantDisplayNames.length > 1 && (
+                  {otherParticipantCount > 1 && (
                     <span className='text-foreground font-medium'>
                       {', '}
                       {participantDisplayNames.slice(1, 2).join(', ')}
-                      {participantDisplayNames.length > 2 && (
+                      {otherParticipantCount > 2 && (
                         <span className='text-xs ml-1 whitespace-nowrap'>
-                          +{participantDisplayNames.length - 2} other
-                          {participantDisplayNames.length - 2 > 1 ? 's' : ''}
+                          +{otherParticipantCount - 2} other
+                          {otherParticipantCount - 2 > 1 ? 's' : ''}
                         </span>
                       )}
                     </span>

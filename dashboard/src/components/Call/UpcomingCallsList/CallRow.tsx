@@ -3,6 +3,8 @@ import { MoreVertical } from 'lucide-react';
 import { cn } from '../../../utils/classNames';
 import { CallStatus } from '@xyne/shared';
 import {
+  getPreviewParticipantUserIds,
+  getCallParticipantCount,
   isScheduledCallJoinable,
   type Call,
 } from '../../../routes/CallHistoryScreen/callHistoryItem.utils';
@@ -34,7 +36,13 @@ export function CallRow({
   const isEnded = call.status === CallStatus.ENDED;
   const title = call.title || 'Scheduled Call';
   const startTime = call.startsAt ? format(new Date(call.startsAt), 'h:mm a') : '';
-  const participants = formatParticipantText(call.participants ?? [], userMap);
+  const participants = formatParticipantText(
+    getPreviewParticipantUserIds(call.participantPreviewUserIds, currentUserId).map(userId => ({
+      userId,
+    })),
+    userMap,
+    getCallParticipantCount(call),
+  );
   const isOwner = currentUserId === call.createdByUserId;
 
   return (

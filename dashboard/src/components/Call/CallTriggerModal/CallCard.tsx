@@ -9,15 +9,14 @@ import { useAuth } from '../../../hooks/useAuth';
 import { roomActor } from '../../../machines/roomMachine';
 import { CallConfirmationModal } from '../CallConfirmationModal';
 import { useCallConfirmation } from '../../../hooks/useCallConfirmation';
-import {
-  useCallDuration,
-  useFetchCallTitle,
-  getActiveParticipants,
-  isUserActiveInCall,
-} from '../../../hooks/useCalls';
+import { useCallDuration, useFetchCallTitle, isUserActiveInCall } from '../../../hooks/useCalls';
 import { useAutoJoinOnAccept, useCallJoinState } from '../../../hooks/useCallJoinState';
 import { CallJoinButton } from '../CallJoinButton/CallJoinButton';
 import type { CallData } from './CallTriggerModal';
+import {
+  getCallParticipantCount,
+  getPreviewParticipantUserIds,
+} from '../../../routes/CallHistoryScreen/callHistoryItem.utils';
 
 export interface CallCardProps {
   call: CallData;
@@ -41,13 +40,14 @@ export const CallCard: React.FC<CallCardProps> = ({
 
   const isCurrentCall = currentCallId === call.externalId;
   const channel = useChannel(call.channelId || '');
+  const participantCount = getCallParticipantCount(call);
 
   // ── Confirmation modal for switching calls ──
   const { showConfirmModal, modalContent, handleCallAction, handleConfirmCall, closeModal } =
     useCallConfirmation({
       scopeType: channel?.scopeType,
       channelName: channel?.name,
-      participantCount: call.participants?.length || 0,
+      participantCount,
       hasActiveCallInChannel: false,
       isUserInCurrentChannelCall: false,
       isInCall,
@@ -72,14 +72,9 @@ export const CallCard: React.FC<CallCardProps> = ({
   };
 
   // ── Participants ──
-  const activeParticipants = useMemo(
-    () => getActiveParticipants(call.participants || []),
-    [call.participants],
-  );
-
   const participantUserIds = useMemo(
-    () => activeParticipants.map(p => p.userId).slice(0, 3),
-    [activeParticipants],
+    () => getPreviewParticipantUserIds(call.participantPreviewUserIds, user?.id).slice(0, 3),
+    [call.participantPreviewUserIds, user?.id],
   );
 
   const initiatorName = useMemo(() => {
@@ -157,7 +152,7 @@ export const CallCard: React.FC<CallCardProps> = ({
             <span className='w-1 h-1 bg-gray-600 rounded-full flex-shrink-0' />
             <div className='text-xs text-muted-foreground flex items-center gap-1'>
               <Users className='w-3 h-3' />
-              {activeParticipants.length}
+              {participantCount}
             </div>
             {!isCurrentCall && (
               <>
