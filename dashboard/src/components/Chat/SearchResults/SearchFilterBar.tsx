@@ -12,6 +12,7 @@ import { isDMChannel } from '../../Chat/ChatDirectory/ChatDirectory.utils';
 import type { SearchResultsFilters } from '../../../hooks/useSearchResultsScreen';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import type { Channel } from '@xyne/shared';
+import { CMDK_ALL_DEFAULT_RANK_PROFILE } from '../../../config';
 
 interface SearchFilterBarProps {
   filters: SearchResultsFilters;
@@ -102,7 +103,7 @@ const RANK_PROFILE_OPTIONS_BY_TYPE: Partial<
   Record<SearchResultsFilters['docType'], RankProfileOption[]>
 > = {
   all: [
-    { value: '', label: 'default_native' },
+    { value: 'default_native', label: 'default_native' },
     { value: 'default_fuzzy', label: 'default_fuzzy' },
     { value: 'unified', label: 'unified' },
   ],
@@ -250,7 +251,8 @@ export function SearchFilterBar({ filters, onFiltersChange }: SearchFilterBarPro
   const showRankProfile = rankProfileOptions.length > 0;
   const isRankActive = filters.rankProfile !== '';
   const rankProfileLabel =
-    rankProfileOptions.find(o => o.value === filters.rankProfile)?.label ?? 'default_native';
+    rankProfileOptions.find(o => o.value === filters.rankProfile)?.label ??
+    (filters.docType === 'all' ? CMDK_ALL_DEFAULT_RANK_PROFILE : 'default_native');
 
   const showFromIn = filters.docType !== 'channels' && filters.docType !== 'people';
   const showAssignee = filters.docType === 'tickets' || filters.docType === 'all';

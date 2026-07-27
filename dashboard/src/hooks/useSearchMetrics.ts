@@ -28,6 +28,7 @@ import {
 } from '../utils/searchFilterParser';
 import { sudoQueryService } from '../services/hyperAnalytics/sudoQueryService';
 import { affinityService } from '../services/affinityService';
+import { CMDK_ALL_DEFAULT_RANK_PROFILE } from '../config';
 
 // Squashes raw affinity into [0, 1] with diminishing returns.
 // At affinity=50 → sat=0.5; at affinity=200 → sat≈0.9.
@@ -968,6 +969,10 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
           {
             const limit = BACKEND_RESULTS_LIMIT;
             const apps = `${VespaApps.CHAT},${VespaApps.TICKET},${VespaApps.FILE},${VespaApps.MAIL}`;
+            const effectiveRankProfile =
+              activeTab === TabType.ALL
+                ? rankProfile || CMDK_ALL_DEFAULT_RANK_PROFILE
+                : rankProfile;
             const searchFilters: VespaSearchFilters = {
               query: searchText,
               apps: apps,
@@ -976,7 +981,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
               filterOnly: !searchText && !!hasFilters,
               includeBotMessages,
               onlyMyChannels,
-              ...(rankProfile && { rankProfile }),
+              ...(effectiveRankProfile && { rankProfile: effectiveRankProfile }),
               ...(includeDebugInfo && { includeDebugInfo: true }),
               ...(priorityFilter && { priority: priorityFilter }),
               ...(boardFilter && { board: boardFilter }),
@@ -1148,7 +1153,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
                 // Grouping would bucket that single global ranking back into per-type
                 // lists (<=10 each), so opt out with an explicit empty groupBy — the
                 // backend falls back to 'docType' when the param is absent entirely.
-                ...(rankProfile === 'unified'
+                ...(effectiveRankProfile === 'unified'
                   ? { groupBy: '' }
                   : options.groupByDocType && { groupBy: 'docType' }),
                 searchId: currentSessionId,
@@ -1384,6 +1389,8 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       {
         const currentOffset = currentPagination.offset;
         const pageSize = BACKEND_RESULTS_LIMIT;
+        const effectiveRankProfile =
+          activeTab === TabType.ALL ? rankProfile || CMDK_ALL_DEFAULT_RANK_PROFILE : rankProfile;
 
         const searchFilters: VespaSearchFilters = {
           query: searchText,
@@ -1397,7 +1404,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
           filterOnly: !searchText && !!hasFilters,
           includeBotMessages,
           onlyMyChannels,
-          ...(rankProfile && { rankProfile }),
+          ...(effectiveRankProfile && { rankProfile: effectiveRankProfile }),
           ...(includeDebugInfo && { includeDebugInfo: true }),
           ...(priorityFilter && { priority: priorityFilter }),
           ...(boardFilter && { board: boardFilter }),
