@@ -939,6 +939,7 @@ const GROUP_LABELS: Record<string, string> = {
   transcript: 'Calls',
   recording: 'Recordings',
   desk: 'Desk',
+  others: 'Others',
 };
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -1339,7 +1340,6 @@ function ResultsBody({
         metadata: {},
       };
     };
-
     // Renders a collapsible local channel section — label has NO count (mirrors cmdK)
     const renderLocalChannelSection = (
       category: ChannelCategory,
@@ -1457,18 +1457,25 @@ function ResultsBody({
         {/* Backend results: grouped into per-docType sections when the backend
             grouped the response, otherwise a single flat (e.g. time-sorted) list.
             Local users/channels above stay categorized regardless. */}
-        {isGrouped ? (
-          BACKEND_GROUP_ORDER.filter(gk => grouped.has(gk)).map(gk => (
-            <div key={gk} className='mb-6'>
-              <p className='px-1 pb-2 text-xs font-medium text-muted-foreground uppercase tracking-wide font-mono'>
-                {GROUP_LABELS[gk]} ({grouped.get(gk)!.length})
-              </p>
-              <div className='space-y-2'>{grouped.get(gk)!.map(result => renderCard(result))}</div>
-            </div>
-          ))
-        ) : (
-          <div className='space-y-2'>{backendOnly.map(result => renderCard(result))}</div>
-        )}
+        {isGrouped
+          ? BACKEND_GROUP_ORDER.filter(gk => grouped.has(gk)).map(gk => (
+              <div key={gk} className='mb-6'>
+                <p className='px-1 pb-2 text-xs font-medium text-muted-foreground uppercase tracking-wide font-mono'>
+                  {GROUP_LABELS[gk]} ({grouped.get(gk)!.length})
+                </p>
+                <div className='space-y-2'>
+                  {grouped.get(gk)!.map(result => renderCard(result))}
+                </div>
+              </div>
+            ))
+          : backendOnly.length > 0 && (
+              <div className='mb-6'>
+                <p className='px-1 pb-2 text-xs font-medium text-muted-foreground uppercase tracking-wide font-mono'>
+                  {GROUP_LABELS['others']} ({backendOnly.length})
+                </p>
+                <div className='space-y-2'>{backendOnly.map(result => renderCard(result))}</div>
+              </div>
+            )}
         {footer}
       </div>
     );

@@ -444,6 +444,7 @@ const ChannelCommandMenu = ({
   const setSearch = setSearchText;
 
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
+  const isFlatAllView = activeTab === TabType.ALL && !isGrouped;
 
   // Type filter visibility - match tab behavior
   // type:users/people shows grouped local users (same as USERS tab)
@@ -1837,6 +1838,11 @@ const ChannelCommandMenu = ({
     return groups;
   }, [backendResults, activeTab]);
 
+  const flatAllBackendResults = useMemo(
+    () => backendResults.filter(result => result.type !== 'user' && result.type !== 'channel'),
+    [backendResults],
+  );
+
   // Group local channels by category
   const groupedChannels = useMemo(() => {
     const groups: Record<string, typeof filteredLocalChannels> = {};
@@ -1848,6 +1854,11 @@ const ChannelCommandMenu = ({
     });
     return groups;
   }, [filteredLocalChannels]);
+
+  const localGroupDMs =
+    groupedChannels['direct-messages']?.filter(({ channel }) =>
+      isGroupDMChannel(channel.scopeType),
+    ) ?? [];
 
   // Slack-style strong channel match: when the top-ranked regular channel's
   // name prefix-matches the query, the CHANNELS section renders ABOVE the
@@ -1926,6 +1937,8 @@ const ChannelCommandMenu = ({
         return 'Recordings';
       case 'desk':
         return 'Desk';
+      case 'others':
+        return 'Others';
       default:
         return '';
     }
@@ -2020,107 +2033,112 @@ const ChannelCommandMenu = ({
   // Render backend results for the search-active branch (flat list filtered by activeTab)
   const renderSearchBackendResults = () => (
     <>
-      {activeTab === TabType.ALL && !isGrouped ? (
-        <div className='mb-4'>
-          {backendResults
-            .filter(result => result.type !== 'user' && result.type !== 'channel')
-            .map((result, index) => (
-              <SearchResultItem
-                key={`${result.type}-${result.id}`}
-                result={result}
-                channelDisplayName={getResultChannelLabel(result)}
-                onSelect={res => handleBackendResultSelect(res, index + 1)}
-                onPreview={handleFilePreview}
-                onItemMouseDown={handleItemMouseDown}
-                onItemMouseEnter={handleTicketMouseEnter}
-                onItemMouseLeave={handleTicketMouseLeave}
-                isSelected={contextItems.some(c => c.id === `${result.type}-${result.id}`)}
-                mergeMode={deskMergeMode && !!getDeskTicketId(result)}
-                isMergeSelected={selectedMergeTickets.has(result.searchContext?.ticketId || '')}
-                onToggleSelect={handleToggleDeskMergeSelect}
-              />
-            ))}
-        </div>
-      ) : (
-        ['conversation', 'ticket', 'attachment', 'canvas', 'transcript', 'recording', 'desk']
-          .filter(groupKey => {
-            if (activeTab === TabType.ALL) return true;
-            if (activeTab === TabType.MESSAGES && groupKey === 'conversation') return true;
-            if (activeTab === TabType.TICKETS && groupKey === 'ticket') return true;
-            if (
-              activeTab === TabType.ATTACHMENTS &&
-              (groupKey === 'attachment' ||
-                groupKey === 'canvas' ||
-                groupKey === 'transcript' ||
-                groupKey === 'recording')
-            )
-              return true;
-            if (activeTab === TabType.CANVAS && groupKey === 'canvas') return true;
-            if (activeTab === TabType.CALL && groupKey === 'transcript') return true;
-            if (activeTab === TabType.RECORDING && groupKey === 'recording') return true;
-            if (activeTab === TabType.DESK && groupKey === 'desk') return true;
-            return false;
-          })
-          .map(groupKey => {
-            const items = groupedBackendResults[groupKey];
-            if (!items || items.length === 0) return null;
+      {isFlatAllView
+        ? flatAllBackendResults.length > 0 && (
+            <div className='mb-4'>
+              <Command.Group
+                heading={`${getGroupLabel('others')} (${flatAllBackendResults.length})`}
+                className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
+              >
+                {flatAllBackendResults.map((result, index) => (
+                  <SearchResultItem
+                    key={`${result.type}-${result.id}`}
+                    result={result}
+                    channelDisplayName={getResultChannelLabel(result)}
+                    onSelect={res => handleBackendResultSelect(res, index + 1)}
+                    onPreview={handleFilePreview}
+                    onItemMouseDown={handleItemMouseDown}
+                    onItemMouseEnter={handleTicketMouseEnter}
+                    onItemMouseLeave={handleTicketMouseLeave}
+                    isSelected={contextItems.some(c => c.id === `${result.type}-${result.id}`)}
+                    mergeMode={deskMergeMode && !!getDeskTicketId(result)}
+                    isMergeSelected={selectedMergeTickets.has(result.searchContext?.ticketId || '')}
+                    onToggleSelect={handleToggleDeskMergeSelect}
+                  />
+                ))}
+              </Command.Group>
+            </div>
+          )
+        : ['conversation', 'ticket', 'attachment', 'canvas', 'transcript', 'recording', 'desk']
+            .filter(groupKey => {
+              if (activeTab === TabType.ALL) return true;
+              if (activeTab === TabType.MESSAGES && groupKey === 'conversation') return true;
+              if (activeTab === TabType.TICKETS && groupKey === 'ticket') return true;
+              if (
+                activeTab === TabType.ATTACHMENTS &&
+                (groupKey === 'attachment' ||
+                  groupKey === 'canvas' ||
+                  groupKey === 'transcript' ||
+                  groupKey === 'recording')
+              )
+                return true;
+              if (activeTab === TabType.CANVAS && groupKey === 'canvas') return true;
+              if (activeTab === TabType.CALL && groupKey === 'transcript') return true;
+              if (activeTab === TabType.RECORDING && groupKey === 'recording') return true;
+              if (activeTab === TabType.DESK && groupKey === 'desk') return true;
+              return false;
+            })
+            .map(groupKey => {
+              const items = groupedBackendResults[groupKey];
+              if (!items || items.length === 0) return null;
 
-            const displayCount =
-              activeTab !== TabType.ALL ? paginationState[activeTab].cumulativeCount : items.length;
+              const displayCount =
+                activeTab !== TabType.ALL
+                  ? paginationState[activeTab].cumulativeCount
+                  : items.length;
 
-            const isScreenAll = searchMode === 'screen' && activeTab === TabType.ALL;
-            const displayItems = isScreenAll ? items.slice(0, 2) : items;
-            const hiddenCount = items.length - displayItems.length;
-            const sectionTab = GROUP_KEY_TO_DOC_TYPE[groupKey];
+              const isScreenAll = searchMode === 'screen' && activeTab === TabType.ALL;
+              const displayItems = isScreenAll ? items.slice(0, 2) : items;
+              const hiddenCount = items.length - displayItems.length;
+              const sectionTab = GROUP_KEY_TO_DOC_TYPE[groupKey];
 
-            return (
-              <div key={groupKey} className='mb-4'>
-                <Command.Group
-                  heading={
-                    isScreenAll
-                      ? getGroupLabel(groupKey)
-                      : `${getGroupLabel(groupKey)} (${displayCount})`
-                  }
-                  className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
-                >
-                  {displayItems.map((result, index) => (
-                    <SearchResultItem
-                      key={result.id}
-                      result={result}
-                      channelDisplayName={getResultChannelLabel(result)}
-                      onSelect={res => handleBackendResultSelect(res, index + 1)}
-                      onPreview={handleFilePreview}
-                      onItemMouseDown={handleItemMouseDown}
-                      onItemMouseEnter={handleTicketMouseEnter}
-                      onItemMouseLeave={handleTicketMouseLeave}
-                      isSelected={contextItems.some(c => c.id === `${result.type}-${result.id}`)}
-                      mergeMode={deskMergeMode && !!getDeskTicketId(result)}
-                      isMergeSelected={selectedMergeTickets.has(
-                        result.searchContext?.ticketId || '',
-                      )}
-                      onToggleSelect={handleToggleDeskMergeSelect}
-                    />
-                  ))}
-                  {isScreenAll && hiddenCount > 0 && sectionTab && (
-                    <button
-                      onClick={() => handleSeeMoreNavigate(sectionTab)}
-                      className={`w-full px-2 py-1.5 mt-1 text-sm text-muted-foreground rounded-sm text-left transition-colors ${!isMobile && 'hover:text-foreground hover:bg-accent'}`}
-                      style={{
-                        WebkitTapHighlightColor: 'transparent',
-                        userSelect: 'none',
-                      }}
-                      data-track-category='SEARCH'
-                      data-track-name='SEE_MORE_SECTION'
-                      data-track-metadata={JSON.stringify({ tab: sectionTab })}
-                    >
-                      See {hiddenCount} more
-                    </button>
-                  )}
-                </Command.Group>
-              </div>
-            );
-          })
-      )}
+              return (
+                <div key={groupKey} className='mb-4'>
+                  <Command.Group
+                    heading={
+                      isScreenAll
+                        ? getGroupLabel(groupKey)
+                        : `${getGroupLabel(groupKey)} (${displayCount})`
+                    }
+                    className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
+                  >
+                    {displayItems.map((result, index) => (
+                      <SearchResultItem
+                        key={result.id}
+                        result={result}
+                        channelDisplayName={getResultChannelLabel(result)}
+                        onSelect={res => handleBackendResultSelect(res, index + 1)}
+                        onPreview={handleFilePreview}
+                        onItemMouseDown={handleItemMouseDown}
+                        onItemMouseEnter={handleTicketMouseEnter}
+                        onItemMouseLeave={handleTicketMouseLeave}
+                        isSelected={contextItems.some(c => c.id === `${result.type}-${result.id}`)}
+                        mergeMode={deskMergeMode && !!getDeskTicketId(result)}
+                        isMergeSelected={selectedMergeTickets.has(
+                          result.searchContext?.ticketId || '',
+                        )}
+                        onToggleSelect={handleToggleDeskMergeSelect}
+                      />
+                    ))}
+                    {isScreenAll && hiddenCount > 0 && sectionTab && (
+                      <button
+                        onClick={() => handleSeeMoreNavigate(sectionTab)}
+                        className={`w-full px-2 py-1.5 mt-1 text-sm text-muted-foreground rounded-sm text-left transition-colors ${!isMobile && 'hover:text-foreground hover:bg-accent'}`}
+                        style={{
+                          WebkitTapHighlightColor: 'transparent',
+                          userSelect: 'none',
+                        }}
+                        data-track-category='SEARCH'
+                        data-track-name='SEE_MORE_SECTION'
+                        data-track-metadata={JSON.stringify({ tab: sectionTab })}
+                      >
+                        See {hiddenCount} more
+                      </button>
+                    )}
+                  </Command.Group>
+                </div>
+              );
+            })}
 
       {/* Infinite scroll trigger and loading indicator */}
       {paginationState[activeTab].hasMore && (
@@ -2433,42 +2451,34 @@ const ChannelCommandMenu = ({
       {includeUsers && renderSearchUsersSection()}
 
       {/* 2. Group DMs (from local channels) */}
-      {(() => {
-        const groupDMs =
-          groupedChannels['direct-messages']?.filter(({ channel }) =>
-            isGroupDMChannel(channel.scopeType),
-          ) || [];
-        return (
-          (activeTab === TabType.ALL || activeTab === TabType.CHANNELS) &&
-          showGroupedLocalResults &&
-          groupDMs.length > 0 && (
-            <div className='mb-4'>
-              <Command.Group
-                heading={getCategoryLabel(ChannelCategory.GROUP_DMS)}
-                className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
-              >
-                {groupDMs.map(({ channel }, index) => {
-                  const unreadCount = unreadCounts[channel.id] ?? 0;
-                  return (
-                    <ChannelCommandItem
-                      key={channel.id}
-                      channel={channel}
-                      currentUserID={currentUserID}
-                      unreadCount={unreadCount}
-                      onSelect={displayName => {
-                        void handleChannelSelect(channel, displayName, index + 1);
-                      }}
-                      onItemMouseDown={handleItemMouseDown}
-                      getChannelIcon={getChannelIcon}
-                      isSelected={contextItems.some(c => c.id === `channel-${channel.id}`)}
-                    />
-                  );
-                })}
-              </Command.Group>
-            </div>
-          )
-        );
-      })()}
+      {(activeTab === TabType.ALL || activeTab === TabType.CHANNELS) &&
+        showGroupedLocalResults &&
+        localGroupDMs.length > 0 && (
+          <div className='mb-4'>
+            <Command.Group
+              heading={getCategoryLabel(ChannelCategory.GROUP_DMS)}
+              className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
+            >
+              {localGroupDMs.map(({ channel }, index) => {
+                const unreadCount = unreadCounts[channel.id] ?? 0;
+                return (
+                  <ChannelCommandItem
+                    key={channel.id}
+                    channel={channel}
+                    currentUserID={currentUserID}
+                    unreadCount={unreadCount}
+                    onSelect={displayName => {
+                      void handleChannelSelect(channel, displayName, index + 1);
+                    }}
+                    onItemMouseDown={handleItemMouseDown}
+                    getChannelIcon={getChannelIcon}
+                    isSelected={contextItems.some(c => c.id === `channel-${channel.id}`)}
+                  />
+                );
+              })}
+            </Command.Group>
+          </div>
+        )}
 
       {/* 3. Channels (from local channels) */}
       {includeChannels && renderSearchChannelsSection()}
@@ -2546,7 +2556,7 @@ const ChannelCommandMenu = ({
   // Starred always leads; a strong user/channel match then becomes the default
   // Enter target. `hasStrongUserMatch`/`hasStrongChannelMatch` already exclude
   // from:/in:/with: chips, where backend results lead instead.
-  const canHoist = activeTab === TabType.ALL && !mentionSearchType;
+  const canHoist = activeTab === TabType.ALL && !isFlatAllView && !mentionSearchType;
   const hoistStarred =
     canHoist && !hasFromOrInFilter && !hasWithFilter && searchText.trim().length > 0;
   const hoistUser = canHoist && hasStrongUserMatch;
