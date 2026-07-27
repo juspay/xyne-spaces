@@ -119,6 +119,30 @@ const prefixedKanbanIdentityValues = (id: string): string[] => [
   `userGroup:${id}`,
 ];
 
+// Sentinel value in the assignee filter meaning "tickets with no assignee".
+export const UNASSIGNED_FILTER_VALUE = 'unassigned';
+
+// Marker entry in the assignee filter meaning "exclude the selected assignees
+// instead of matching them". It lives inside the ids array so it survives every
+// transport (query args, saved views, counts requests) without schema changes.
+export const ASSIGNEE_INVERT_MARKER = '!invert';
+
+export interface ParsedAssigneeFilter {
+  inverted: boolean;
+  includeUnassigned: boolean;
+  ids: string[];
+}
+
+export const parseAssigneeFilter = (values: readonly string[]): ParsedAssigneeFilter => {
+  const inverted = values.includes(ASSIGNEE_INVERT_MARKER);
+  const rest = values.filter(value => value !== ASSIGNEE_INVERT_MARKER);
+  return {
+    inverted,
+    includeUnassigned: rest.includes(UNASSIGNED_FILTER_VALUE),
+    ids: rest.filter(value => value !== UNASSIGNED_FILTER_VALUE),
+  };
+};
+
 const toActualFieldValueQueryValue = (
   value: string | number | boolean,
 ): string | number | boolean =>
@@ -269,7 +293,40 @@ const applyKanbanTicketPageConditions = (
   }
 
   if (filters?.assignee?.length) {
-    query = query.where('assignedTo', 'IN', filters.assignee.flatMap(prefixedKanbanIdentityValues));
+    const { inverted, includeUnassigned, ids } = parseAssigneeFilter(filters.assignee);
+    const prefixedIds = ids.flatMap(prefixedKanbanIdentityValues);
+    if (prefixedIds.length || includeUnassigned) {
+      if (!inverted) {
+        query = query.where((helpers: any) =>
+          helpers.or(
+            ...(prefixedIds.length ? [helpers.cmp('assignedTo', 'IN', prefixedIds)] : []),
+            ...(includeUnassigned
+              ? [helpers.cmp('assignedTo', 'IS', null), helpers.cmp('assignedTo', '')]
+              : []),
+          ),
+        );
+      } else if (includeUnassigned) {
+        // Complement including "unassigned": the ticket must be assigned to
+        // someone outside the selected set.
+        query = query.where((helpers: any) =>
+          helpers.and(
+            ...(prefixedIds.length ? [helpers.cmp('assignedTo', 'NOT IN', prefixedIds)] : []),
+            helpers.cmp('assignedTo', 'IS NOT', null),
+            helpers.cmp('assignedTo', '!=', ''),
+          ),
+        );
+      } else {
+        // Complement of the selected users — unassigned tickets qualify too
+        // (NOT IN drops NULL rows, so include them explicitly).
+        query = query.where((helpers: any) =>
+          helpers.or(
+            helpers.cmp('assignedTo', 'NOT IN', prefixedIds),
+            helpers.cmp('assignedTo', 'IS', null),
+            helpers.cmp('assignedTo', ''),
+          ),
+        );
+      }
+    }
   }
 
   if (filters?.createdBy?.length) {

@@ -87,7 +87,10 @@ type UseKanbanTicketsPageResult = {
 };
 
 const DEFAULT_PAGE_SIZE = 20;
+const MINUTE_MS = 60 * 1000;
 const VESPA_MISSING_DYNAMIC_FIELD_VALUE = '__VESPA_MISSING__';
+
+const ceilToMinute = (timestamp: number): number => Math.ceil(timestamp / MINUTE_MS) * MINUTE_MS;
 const MISSING_FORM_FIELD_GROUP_KEYS = new Set(['No Value', 'Unassigned']);
 
 type TicketsState = {
@@ -425,7 +428,7 @@ export const useKanbanTicketsPage = (
     : undefined;
 
   if (options.showOverdueOnly && overdueReferenceTimeRef.current === null) {
-    overdueReferenceTimeRef.current = Date.now();
+    overdueReferenceTimeRef.current = ceilToMinute(Date.now());
   } else if (!options.showOverdueOnly && overdueReferenceTimeRef.current !== null) {
     overdueReferenceTimeRef.current = null;
   }
