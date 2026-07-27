@@ -1,18 +1,18 @@
 import { ReactElement } from 'react';
 import type { ActivityWithRelated } from '../../types/activity';
 import {
-  Ticket,
-  Clock,
-  SquareKanban,
+  ClockDefault,
+  KanbanBoard,
   UserPlus,
   GitPullRequest,
-  GitMerge,
-  GitPullRequestClosed,
-  ListTree,
-  Link2,
-  FileWarning,
+  Merge,
+  GitPullRequestCancel,
+  Subtask,
+  LinkHorizontal,
+  File02ExclamationMark,
   AlertTriangle,
-} from 'lucide-react';
+  TicketToken,
+} from '@xyne/icons';
 import { ActivityItemCard } from './ActivityItemCard';
 import { useUser } from '../../hooks/useUsers';
 import { getUserDisplayName } from '../../utils/userDisplayName';
@@ -33,147 +33,147 @@ const getActivityConfig = (actorAction: string): ActivityConfig => {
   switch (actorAction) {
     case 'ticket_status':
       return {
-        icon: <Ticket className='w-4 h-4 text-green-600' />,
+        icon: <TicketToken className='size-3 text-green-600' />,
         badgeColor: 'bg-green-100',
         description: 'updated status of ticket in',
         label: 'Status',
       };
     case 'ticket_eta':
       return {
-        icon: <Clock className='w-4 h-4 text-amber-600' />,
+        icon: <ClockDefault className='size-3 text-amber-600' />,
         badgeColor: 'bg-amber-100',
         description: 'updated due date of ticket in',
         label: 'Due Date',
       };
     case 'ticket_board':
       return {
-        icon: <SquareKanban className='w-4 h-4 text-purple-600' />,
+        icon: <KanbanBoard className='size-3 text-purple-600' />,
         badgeColor: 'bg-purple-100',
         description: 'moved ticket to another board in',
         label: 'Board',
       };
     case 'ticket_assigned_to':
       return {
-        icon: <UserPlus className='w-4 h-4 text-blue-600' />,
+        icon: <UserPlus className='size-3 text-blue-600' />,
         badgeColor: 'bg-blue-100',
         description: 'changed assignee of ticket in',
         label: 'Assignee',
       };
     case 'ticket_priority':
       return {
-        icon: <AlertTriangle className='w-4 h-4 text-orange-600' />,
+        icon: <AlertTriangle className='size-3 text-orange-600' />,
         badgeColor: 'bg-orange-100',
         description: 'updated priority of ticket in',
         label: 'Priority',
       };
     case 'ticket_user_group':
       return {
-        icon: <UserPlus className='w-4 h-4 text-indigo-600' />,
+        icon: <UserPlus className='size-3 text-indigo-600' />,
         badgeColor: 'bg-indigo-100',
         description: 'changed team of ticket in',
         label: 'Team',
       };
     case 'ticket_title':
       return {
-        icon: <FileWarning className='w-4 h-4 text-cyan-600' />,
+        icon: <File02ExclamationMark className='size-3 text-cyan-600' />,
         badgeColor: 'bg-cyan-100',
         description: 'renamed ticket in',
         label: 'Title',
       };
     case 'ticket_description':
       return {
-        icon: <FileWarning className='w-4 h-4 text-teal-600' />,
+        icon: <File02ExclamationMark className='size-3 text-teal-600' />,
         badgeColor: 'bg-teal-100',
         description: 'updated description of ticket in',
         label: 'Description',
       };
     case 'ticket_rca_created':
       return {
-        icon: <AlertTriangle className='w-4 h-4 text-red-600' />,
+        icon: <AlertTriangle className='size-3 text-red-600' />,
         badgeColor: 'bg-red-100',
         description: 'added an RCA to ticket in',
         label: 'RCA Added',
       };
     case 'ticket_rca_updated':
       return {
-        icon: <AlertTriangle className='w-4 h-4 text-orange-600' />,
+        icon: <AlertTriangle className='size-3 text-orange-600' />,
         badgeColor: 'bg-orange-100',
         description: 'updated the RCA of ticket in',
         label: 'RCA Updated',
       };
     case 'ticket_subticket_added':
       return {
-        icon: <ListTree className='w-4 h-4 text-emerald-600' />,
+        icon: <Subtask className='size-3 text-emerald-600' />,
         badgeColor: 'bg-emerald-100',
         description: 'added a sub-ticket to ticket in',
         label: 'Sub-ticket Added',
       };
     case 'ticket_reference_added':
       return {
-        icon: <Link2 className='w-4 h-4 text-sky-600' />,
+        icon: <LinkHorizontal className='size-3 text-sky-600' />,
         badgeColor: 'bg-sky-100',
         description: 'linked a related ticket in',
         label: 'Related Ticket Linked',
       };
     case 'ticket_reference_removed':
       return {
-        icon: <Link2 className='w-4 h-4 text-slate-600' />,
+        icon: <LinkHorizontal className='size-3 text-slate-600' />,
         badgeColor: 'bg-slate-100',
         description: 'unlinked a related ticket in',
         label: 'Related Ticket Unlinked',
       };
     case 'ticket_multi_updated':
       return {
-        icon: <Ticket className='w-4 h-4 text-muted-foreground' />,
+        icon: <TicketToken className='size-3 text-muted-foreground' />,
         badgeColor: 'bg-muted',
         description: 'made multiple changes to ticket in',
         label: 'Multiple Changes',
       };
     case 'ticket_pr_created':
       return {
-        icon: <GitPullRequest className='w-4 h-4 text-blue-600' />,
+        icon: <GitPullRequest className='size-3 text-blue-600' />,
         badgeColor: 'bg-blue-100',
         description: 'raised a PR for ticket in',
         label: 'PR Raised',
       };
     case 'ticket_pr_updated':
       return {
-        icon: <GitPullRequest className='w-4 h-4 text-orange-600' />,
+        icon: <GitPullRequest className='size-3 text-orange-600' />,
         badgeColor: 'bg-orange-100',
         description: 'updated a PR for ticket in',
         label: 'PR Updated',
       };
     case 'ticket_pr_merged':
       return {
-        icon: <GitMerge className='w-4 h-4 text-green-600' />,
+        icon: <Merge className='size-3 text-green-600' />,
         badgeColor: 'bg-green-100',
         description: 'merged a PR for ticket in',
         label: 'PR Merged',
       };
     case 'ticket_pr_declined':
       return {
-        icon: <GitPullRequestClosed className='w-4 h-4 text-red-600' />,
+        icon: <GitPullRequestCancel className='size-3 text-red-600' />,
         badgeColor: 'bg-red-100',
         description: 'declined a PR for ticket in',
         label: 'PR Declined',
       };
     case 'ticket_pr_reviewer_assigned':
       return {
-        icon: <GitPullRequest className='w-4 h-4 text-blue-600' />,
+        icon: <GitPullRequest className='size-3 text-blue-600' />,
         badgeColor: 'bg-blue-100',
         description: 'assigned you as PR reviewer for ticket',
         label: 'PR Reviewer Assigned',
       };
     case 'ticket_qa_assigned':
       return {
-        icon: <UserPlus className='w-4 h-4 text-green-600' />,
+        icon: <UserPlus className='size-3 text-green-600' />,
         badgeColor: 'bg-green-100',
         description: 'assigned you as QA for ticket',
         label: 'QA Assigned',
       };
     default:
       return {
-        icon: <Ticket className='w-4 h-4 text-muted-foreground' />,
+        icon: <TicketToken className='size-3 text-muted-foreground' />,
         badgeColor: 'bg-muted',
         description: 'updated ticket in',
         label: 'Ticket',
@@ -209,7 +209,7 @@ export const TicketUpdateActivity = ({
   const isPRAction = activity.actorAction.startsWith('ticket_pr_');
   const expandedContent = (
     <div className='flex flex-col gap-1 mt-2'>
-      <div className='text-sm text-foreground font-medium break-words whitespace-normal'>
+      <div className='text-sm font-medium break-words whitespace-normal'>
         {' '}
         {isPRAction ? config.label.toLowerCase() : `${config.label} updated`} for ticket &ldquo;
         {ticket.title}&rdquo;
@@ -221,8 +221,10 @@ export const TicketUpdateActivity = ({
   );
 
   const condensedContent = (
-    <span className='text-sm text-foreground'>
-      <span className='font-semibold'>{ticketXyneId}</span>
+    <span className='text-sm'>
+      <span className={activity.isRead ? 'text-muted-foreground' : 'font-semibold'}>
+        {ticketXyneId}
+      </span>
       <span className='text-muted-foreground'>
         {' '}
         {isPRAction ? config.label.toLowerCase() : `${config.label.toLowerCase()} updated`}

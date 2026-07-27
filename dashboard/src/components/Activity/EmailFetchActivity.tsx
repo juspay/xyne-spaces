@@ -1,5 +1,5 @@
 import { ReactElement } from 'react';
-import { Mail, AlertTriangle } from 'lucide-react';
+import { EnvelopeDefault, AlertTriangle } from '@xyne/icons';
 import type { ActivityWithRelated } from '../../types/activity';
 import { ActivityItemCard } from './ActivityItemCard';
 import { useUser } from '../../hooks/useUsers';
@@ -21,11 +21,11 @@ export const EmailFetchActivity = ({
   const targetPath = channelId ? `/support/${channelId}` : '';
 
   const badgeIcon = isFailure ? (
-    <AlertTriangle className='w-4 h-4 text-destructive' />
+    <AlertTriangle className='size-3 text-destructive' />
   ) : (
-    <Mail className='w-4 h-4 text-primary' />
+    <EnvelopeDefault className='size-3 text-primary' />
   );
-  const badgeColorClass = isFailure ? 'bg-destructive/10' : 'bg-primary/10';
+  const badgeColorClass = isFailure ? 'bg-red-100' : 'bg-muted';
 
   const description = isFailure ? 'inbox refresh failed' : 'refreshed the inbox';
   const detail = isFailure

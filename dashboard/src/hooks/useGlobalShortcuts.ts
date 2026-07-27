@@ -1,6 +1,7 @@
 import { useShortcutById } from '../shortcuts';
-import type { ImperativePanelHandle } from 'react-resizable-panels';
+import type { PanelImperativeHandle } from 'react-resizable-panels';
 import type { RefObject } from 'react';
+import { CHAT_SIDEBAR_KEYBOARD_STEP } from '../routes/ChatScreen/chatSidebarWidth';
 import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import { useCallback } from 'react';
 import { useSelector } from '@xstate/react';
@@ -8,7 +9,7 @@ import { roomActor } from '../machines/roomMachine';
 import { browserPanelActor } from '../machines/browserPanelMachine';
 
 interface UseGlobalShortcutsProps {
-  leftPanelRef: RefObject<ImperativePanelHandle | null>;
+  leftPanelRef: RefObject<PanelImperativeHandle | null>;
 }
 
 /**
@@ -29,19 +30,23 @@ export const useGlobalShortcuts = ({ leftPanelRef }: UseGlobalShortcutsProps): v
   }>();
   const isChatOpen = useSelector(roomActor, state => state.context.isChatOpen);
 
+  // The top-level panel is percentage-sized; the ChatScreen sidebar is pixel-pinned,
+  // so each gets its own step.
   const resizeLeftPanel = useCallback(
-    (delta: number) => {
+    (percentDelta: number) => {
       if (leftPanelRef.current) {
-        const currentSize = leftPanelRef.current.getSize();
-        const newSize = Math.min(80, Math.max(0, currentSize + delta));
-        leftPanelRef.current.resize(newSize);
+        const { asPercentage } = leftPanelRef.current.getSize();
+        const newSize = Math.min(80, Math.max(0, asPercentage + percentDelta));
+        leftPanelRef.current.resize(`${newSize}%`);
         return;
       }
 
       // If the top-level panel isn't present (e.g., WebView closed), forward to ChatScreen panel
       window.dispatchEvent(
         new CustomEvent('chat-resize-left-panel', {
-          detail: { delta },
+          detail: {
+            pixelDelta: Math.sign(percentDelta) * CHAT_SIDEBAR_KEYBOARD_STEP,
+          },
         }),
       );
     },

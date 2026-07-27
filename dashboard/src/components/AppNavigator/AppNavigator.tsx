@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, ArrowRight, SearchBig } from '@xyne/icons';
 import { invokeShortcut } from '../../shortcuts';
 import { cn } from '../../utils/classNames';
+import { APP_DRAG_STYLE, APP_NO_DRAG_STYLE } from '../../utils/electronApp';
 
 const buttonClass = cn(
   'size-7 flex items-center justify-center rounded-[10px] border border-transparent transition-colors',
@@ -18,8 +19,8 @@ const AppNavigator = (): ReactElement => {
   const navigate = useNavigate();
 
   return (
-    <div className='h-full w-full flex items-center justify-end gap-2 px-4'>
-      <div className='flex items-center'>
+    <div className='h-full w-full flex items-center justify-end gap-2 px-4' style={APP_DRAG_STYLE}>
+      <div className='flex items-center' style={APP_NO_DRAG_STYLE}>
         <button
           type='button'
           aria-label='Back'
@@ -46,6 +47,7 @@ const AppNavigator = (): ReactElement => {
         aria-label='Search'
         onClick={() => invokeShortcut('mod+k')}
         className={buttonClass}
+        style={APP_NO_DRAG_STYLE}
         data-track-category='APP_NAVIGATOR'
         data-track-name='OPEN_SEARCH'
       >

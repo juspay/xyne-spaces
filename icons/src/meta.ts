@@ -588,6 +588,7 @@ export const ICON_META: IconMeta[] = [
   { component: "MapPinArea", name: "map-pin-area", section: "Navigation", category: "navigation" },
   { component: "MapPinUser", name: "map-pin-user", section: "Navigation", category: "navigation" },
   { component: "MapTreasure", name: "map-treasure", section: "Navigation", category: "navigation" },
+  { component: "MarkAsRead", name: "mark-as-read", section: "Communication", category: "communication" },
   { component: "Markdown", name: "markdown", section: "Development", category: "development" },
   { component: "MartiniGlass", name: "martini-glass", section: "Food", category: "food" },
   { component: "Mastodon", name: "mastodon", section: "Apps & Social", category: "apps-social" },

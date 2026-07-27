@@ -1,7 +1,7 @@
 import { ReactElement } from 'react';
 import { Activity } from '@xyne/shared';
 import { useQuery } from '../../hooks/useQuery';
-import { Ticket } from 'lucide-react';
+import { TicketToken } from '@xyne/icons';
 import { format } from 'date-fns';
 import { queries } from '../../zero/queries';
 import { ActivityItemCard } from './ActivityItemCard';
@@ -37,7 +37,7 @@ export const EtaActivity = ({ activity, isExpanded }: EtaActivityProps): ReactEl
 
   const expandedContent = (
     <div className='flex flex-col gap-1 mt-2'>
-      <div className='text-sm text-foreground font-medium'>
+      <div className='text-sm font-medium'>
         {isWarning
           ? `Ticket ${ticketXyneId} is due today. Please ensure it's completed or updated.`
           : isStageBreach
@@ -59,8 +59,8 @@ export const EtaActivity = ({ activity, isExpanded }: EtaActivityProps): ReactEl
       actorName='Xyne'
       channelId={ticket?.conversation?.channelId}
       badgeIcon={
-        <Ticket
-          className={`w-4 h-4 ${isWarning ? 'text-yellow-600' : isStageBreach ? 'text-orange-600' : 'text-red-600'}`}
+        <TicketToken
+          className={`size-3 ${isWarning ? 'text-yellow-600' : isStageBreach ? 'text-orange-600' : 'text-red-600'}`}
         />
       }
       badgeColorClass={isWarning ? 'bg-yellow-100' : isStageBreach ? 'bg-orange-100' : 'bg-red-100'}
@@ -73,8 +73,10 @@ export const EtaActivity = ({ activity, isExpanded }: EtaActivityProps): ReactEl
       {isExpanded ? (
         expandedContent
       ) : (
-        <span className='text-sm text-foreground'>
-          <span className='font-semibold'>{ticketXyneId}</span>
+        <span className='text-sm'>
+          <span className={activity.isRead ? 'text-muted-foreground' : 'font-semibold'}>
+            {ticketXyneId}
+          </span>
           <span className='text-muted-foreground'>
             {isWarning
               ? ' is due today'

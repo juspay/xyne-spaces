@@ -13,7 +13,6 @@ interface XyneAIInputSectionProps extends XyneAIInputBoxProps {
   contextSelections: ContextSelections;
   contextPanelPosition?: 'top' | 'bottom';
   compactToolbar?: boolean;
-  tightToolbar?: boolean;
 }
 
 /**
@@ -29,7 +28,6 @@ export const XyneAIInputSection = forwardRef<XyneAIInputBoxHandle, XyneAIInputSe
       contextSelections,
       contextPanelPosition = 'bottom',
       compactToolbar = false,
-      tightToolbar = false,
       ...inputBoxProps
     },
     ref,
@@ -69,9 +67,11 @@ export const XyneAIInputSection = forwardRef<XyneAIInputBoxHandle, XyneAIInputSe
           ref={ref}
           {...inputBoxProps}
           compactToolbar={compactToolbar}
-          tightToolbar={tightToolbar}
           onCloseContextModal={onCloseContextModal}
           isContextModalOpen={showContextModal}
+          // The inline picker toggles context through the same wholesale-replace
+          // contract the old modal confirmed through.
+          onContextSelectionsChange={onConfirmContext}
         />
       </div>
     );

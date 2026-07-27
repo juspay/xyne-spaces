@@ -6,6 +6,8 @@ import { ConversationTabContext } from './ConversationTabContext';
 import { useRouteContext } from '../../hooks/useRouteContext';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { useGetChannelUserStatus } from '@xyne/shared/hooks';
+import { DatePill } from './DatePill';
+import { formatDatePill } from '../../utils/dateUtils';
 
 interface PinListProps {
   channelId: string;
@@ -39,23 +41,33 @@ const PinListV2: React.FC<PinListProps> = ({ channelId }) => {
     });
   };
 
-  return (
-    <div className='overflow-auto no-scrollbar p-6 bg-background h-full'>
-      {/* Header */}
-      <div className='pb-4'>
-        <h2 className='text-lg font-semibold text-foreground'>Pinned messages</h2>
-        <p className='text-sm text-muted-foreground'>Important messages saved for later</p>
-      </div>
+  // Newest pins first, so the date pills read Today → older down the list
+  const sortedPins = pinned
+    .filter(conv => conv.initialMessage !== undefined)
+    .sort(
+      (a, b) =>
+        new Date(b.initialMessage!.createdAt).getTime() -
+        new Date(a.initialMessage!.createdAt).getTime(),
+    );
 
+  return (
+    // No horizontal padding — the bubble's own px-4 keeps pins aligned with channel messages
+    <div className='overflow-auto no-scrollbar py-4 bg-background h-full'>
       {/* List */}
-      <div className='space-y-4'>
-        {pinned.map(conv => {
+      <div className='space-y-8'>
+        {sortedPins.map((conv, index) => {
           const msg = conv.initialMessage;
 
           if (msg === undefined) return null;
 
+          const prevMsg = sortedPins[index - 1]?.initialMessage;
+          const showDatePill =
+            prevMsg === undefined ||
+            new Date(msg.createdAt).toDateString() !== new Date(prevMsg.createdAt).toDateString();
+
           return (
-            <div key={conv.conversationId}>
+            <div key={conv.conversationId} className={showDatePill && index > 0 ? 'pt-6' : ''}>
+              {showDatePill && <DatePill dateText={formatDatePill(msg.createdAt)} />}
               <button
                 onClick={() => handleOpenOriginalMessage(conv.conversationId)}
                 className='w-full text-left block rounded-xl hover:bg-muted transition'

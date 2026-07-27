@@ -18,11 +18,16 @@ import { useWalkthrough } from '../../../hooks/useWalkthrough';
 import { DirectMessagesIcon } from '../../icons';
 import AppNavigator from '../../AppNavigator/AppNavigator';
 import {
-  PanelGroup,
+  ResizableGroup,
   Panel,
-  PanelResizeHandle,
-  type ImperativePanelHandle,
-} from 'react-resizable-panels';
+  Separator,
+  type PanelImperativeHandle,
+} from '../../ui/Resizable/Resizable';
+import {
+  DM_SIDEBAR_DEFAULT_WIDTH,
+  DM_SIDEBAR_MAX_WIDTH,
+  DM_SIDEBAR_MIN_WIDTH,
+} from './dmSidebarWidth';
 import { useUsers } from '../../../hooks/useUsers';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import Button from '../../ui/Button';
@@ -137,7 +142,7 @@ const DmsPage = (): ReactElement => {
   const { channelId } = useParams<{ channelId: string }>();
   const isOnIndexRoute = usePath() === '/chat/dm';
 
-  const dmPanelRef = useRef<ImperativePanelHandle>(null);
+  const dmPanelRef = useRef<PanelImperativeHandle>(null);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const [showAddDmForm, setShowAddDmForm] = useState(false);
   const [activeTab, setActiveTab] = useState<DmFilterTab>('all');
@@ -629,14 +634,21 @@ const DmsPage = (): ReactElement => {
   // Desktop view - two-panel layout with resizable panels
   return (
     <div className='flex h-full w-full md:rounded-2xl overflow-hidden shadow-md'>
-      <PanelGroup
-        direction='horizontal'
+      <ResizableGroup
+        orientation='horizontal'
         className='flex align-top h-full'
         autoSaveId='dm-screen-resize'
       >
         {/* LEFT PANEL - DM List */}
-        <Panel ref={dmPanelRef} defaultSize={20} minSize={15} maxSize={40}>
-          <div className='flex flex-col text-foreground border-r border-border h-full'>
+        <Panel
+          id='dm-sidebar'
+          panelRef={dmPanelRef}
+          defaultSize={DM_SIDEBAR_DEFAULT_WIDTH}
+          minSize={DM_SIDEBAR_MIN_WIDTH}
+          maxSize={DM_SIDEBAR_MAX_WIDTH}
+          groupResizeBehavior='preserve-pixel-size'
+        >
+          <div className='flex flex-col text-foreground h-full'>
             {/* Top navigator spacer — matches ChatDirectory; keeps the panel transparent so the wallpaper shows through */}
             <div className='w-full h-[52px] shrink-0'>
               <AppNavigator />
@@ -766,13 +778,13 @@ const DmsPage = (): ReactElement => {
         </Panel>
 
         {/* RESIZE HANDLE */}
-        <PanelResizeHandle className='w-[2px] transition-colors cursor-col-resize flex items-center justify-center group'>
+        <Separator className='w-[2px] transition-colors cursor-col-resize flex items-center justify-center group'>
           <div className='w-[2px] h-full bg-sidebar-divider group-hover:bg-primary group-active:bg-primary'></div>
-        </PanelResizeHandle>
+        </Separator>
 
         {/* RIGHT PANEL - Chat View */}
-        <Panel>
-          <div className='flex-1 flex flex-col bg-background relative h-full'>
+        <Panel id='dm-content'>
+          <div className='flex-1 flex flex-col bg-background relative h-full rounded-2xl'>
             <div className='flex-1 h-full overflow-hidden flex items-center justify-center'>
               {isOnIndexRoute ? (
                 <div className='max-w-full max-h-full flex items-center justify-center'>
@@ -786,7 +798,7 @@ const DmsPage = (): ReactElement => {
             </div>
           </div>
         </Panel>
-      </PanelGroup>
+      </ResizableGroup>
 
       {/* Render the Dialog and AddDmForm component */}
       <Dialog open={showAddDmForm} onOpenChange={setShowAddDmForm}>

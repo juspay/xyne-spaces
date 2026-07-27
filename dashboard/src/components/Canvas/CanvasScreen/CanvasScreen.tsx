@@ -50,6 +50,7 @@ import { DocumentNotFoundIcon } from '../../icons';
 import { useUsers } from '../../../hooks/useUsers';
 import { type ParticipantItem } from '../CanvasParticipantsTray';
 import { cn } from '../../../utils/classNames';
+import { APP_DRAG_STYLE, APP_NO_DRAG_STYLE } from '../../../utils/electronApp';
 import { formatDate, formatRelativeTime, formatTimeAmPm } from '../../../utils/dateUtils';
 
 import type {
@@ -1007,9 +1008,11 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
       <main className='flex-1 overflow-hidden flex flex-col'>
         {isCreating || selectedCanvas ? (
           <>
-            {/* Canvas Header */}
+            {/* Canvas Header — Electron window-drag region; interactive
+                controls below opt back out with APP_NO_DRAG_STYLE. */}
             <div
               className='sticky top-0 z-20 flex shrink-0 flex-col bg-background'
+              style={APP_DRAG_STYLE}
               data-testid='canvas-header'
             >
               <div className='flex flex-col px-3 pt-2'>
@@ -1024,6 +1027,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                       onClick={handleLeaveCanvas}
                       aria-label='Go back'
                       className='md:hidden'
+                      style={APP_NO_DRAG_STYLE}
                       data-track-category='CANVAS'
                       data-track-name='Go_Back_From_Canvas'
                       data-track-metadata={JSON.stringify({ canvasId: selectedCanvas?.id })}
@@ -1038,6 +1042,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                         aria-label='Canvas title'
                         value={currentTitle}
                         data-testid='canvas-title-input'
+                        style={APP_NO_DRAG_STYLE}
                         onChange={e => {
                           const newTitle = e.target.value;
                           setCurrentTitle(newTitle);
@@ -1057,7 +1062,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                   </div>
 
                   {/* Actions */}
-                  <div className='flex shrink-0 items-center gap-3'>
+                  <div className='flex shrink-0 items-center gap-3' style={APP_NO_DRAG_STYLE}>
                     {/* Approve to Knowledge Base Button (Only for Knowledge Canvases) */}
                     {isKnowledgeCanvas && selectedCanvas?.id && (
                       <div>

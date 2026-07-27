@@ -168,7 +168,7 @@ function InvocationItem({ invocation, children }: InvocationItemProps): ReactEle
   return (
     // Subagents get a distinct bordered card so a nested LLM run reads as more
     // than a plain tool row; ordinary tools stay borderless.
-    <div className={isSubagent ? `group rounded-md border px-1.5 ${activityAccent.card}` : 'group'}>
+    <div className={isSubagent ? `group border px-1.5 ${activityAccent.card}` : 'group'}>
       <button
         onClick={() => setExpanded(!expanded)}
         className='flex w-full items-center gap-2 py-1 text-left transition-colors hover:text-foreground'

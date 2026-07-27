@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react';
 import type { ElectronAPI } from '../types/electron';
 import type { NavigateFunction } from 'react-router-dom';
 
@@ -38,6 +39,23 @@ export const isElectronApp = (): boolean => {
 
   return false;
 };
+
+/**
+ * `-webkit-app-region` drag regions let users move (and double-click to zoom) the
+ * frameless Electron window by dragging app chrome such as the top nav strip, the
+ * sidebar's traffic-light spacer and the conversation header. Mark interactive
+ * children with {@link APP_NO_DRAG_STYLE} so clicks still work inside a drag region.
+ *
+ * These are computed once and left empty on the web, where `-webkit-app-region`
+ * has no effect but the empty style keeps text selection / pointer behaviour clean.
+ */
+export const APP_DRAG_STYLE: CSSProperties = isElectronApp()
+  ? ({ WebkitAppRegion: 'drag' } as CSSProperties)
+  : {};
+
+export const APP_NO_DRAG_STYLE: CSSProperties = isElectronApp()
+  ? ({ WebkitAppRegion: 'no-drag' } as CSSProperties)
+  : {};
 
 export const isStandaloneWindow = (): boolean => {
   if (typeof window === 'undefined') {

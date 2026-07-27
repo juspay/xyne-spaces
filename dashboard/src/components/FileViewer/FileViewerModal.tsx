@@ -10,7 +10,7 @@ import { usePlatform } from '../../hooks/usePlatform';
 import { useShortcut, useScope } from '../../shortcuts';
 import { cn } from '../../utils/classNames';
 import { useSelector } from '@xstate/react';
-import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels';
+import { ResizableGroup, Panel, Separator } from '../ui/Resizable/Resizable';
 import ThreadMessages from '../Chat/ThreadPannel';
 import { ChatBubble } from '../Chat/ChatBubble/ChatBubble';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
@@ -1627,9 +1627,9 @@ const AttachmentGalleryModalInner: React.FC = () => {
           <div className={cn('absolute inset-0', isVideo ? 'bg-black' : 'bg-background')}>
             {showThreadPanel ? (
               // Side-by-side layout with thread panel
-              <PanelGroup direction='horizontal' className='h-full w-full'>
+              <ResizableGroup orientation='horizontal' className='h-full w-full'>
                 {/* Attachment panel - 70% default, min 30%, resizable */}
-                <Panel defaultSize={70} minSize={30}>
+                <Panel defaultSize='70%' minSize='30%'>
                   <div
                     className={cn(
                       'h-full relative',
@@ -1658,15 +1658,15 @@ const AttachmentGalleryModalInner: React.FC = () => {
                 </Panel>
 
                 {/* Resize handle */}
-                <PanelResizeHandle className='w-1 hover:bg-blue-50 active:bg-blue-100 transition-colors cursor-col-resize flex items-center justify-center z-20'>
+                <Separator className='w-1 hover:bg-blue-50 active:bg-blue-100 transition-colors cursor-col-resize flex items-center justify-center z-20'>
                   <div className='w-[1px] h-full bg-border'></div>
-                </PanelResizeHandle>
+                </Separator>
 
                 {/* Thread panel - 30% default, min 20%, max 40%, resizable */}
-                <Panel defaultSize={30} minSize={20} maxSize={40}>
+                <Panel defaultSize='30%' minSize='20%' maxSize='40%'>
                   {renderThreadPanel()}
                 </Panel>
-              </PanelGroup>
+              </ResizableGroup>
             ) : (
               // Full attachment viewer when no thread
               <div

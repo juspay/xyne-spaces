@@ -76,12 +76,13 @@
     --nav-search-btn-bg: #c5dbf0;
     --nav-search-btn-text: #445e7e;
     --chat-mobile-my-bubble: #e4e8f4;
-    --mention-color: #1264a3;
-    --mention-hover-color: #113f67;
-    --mention-bg: #e5f1fe;
-    --mention-current-user-bg: #fef3c7;
-    --mention-channel-bg: rgba(29, 155, 209, 0.1);
-    --mention-channel-hover-bg: rgba(4, 55, 77, 0.1);
+    --mention-color: #3b82f6;
+    --mention-hover-color: #2563eb;
+    --mention-bg: rgba(59, 130, 246, 0.1);
+    --mention-current-user-bg: rgba(244, 155, 53, 0.1);
+    --mention-current-user-color: #f49b35;
+    --mention-channel-bg: rgba(59, 130, 246, 0.1);
+    --mention-channel-hover-bg: rgba(59, 130, 246, 0.18);
     --mention-group-color: #3d74b6;
     --search-result-highlight-bg: #fde68a;
     --search-result-active-bg: #fb923c;
@@ -199,12 +200,13 @@
     --nav-search-btn-bg: #5382a6;
     --nav-search-btn-text: #e1e8f0;
     --chat-mobile-my-bubble: #e4e8f4;
-    --mention-color: #1264a3;
-    --mention-hover-color: #113f67;
-    --mention-bg: #e5f1fe;
-    --mention-current-user-bg: #fef3c7;
-    --mention-channel-bg: rgba(29, 155, 209, 0.1);
-    --mention-channel-hover-bg: rgba(4, 55, 77, 0.1);
+    --mention-color: #3b82f6;
+    --mention-hover-color: #2563eb;
+    --mention-bg: rgba(59, 130, 246, 0.1);
+    --mention-current-user-bg: rgba(244, 155, 53, 0.1);
+    --mention-current-user-color: #f49b35;
+    --mention-channel-bg: rgba(59, 130, 246, 0.1);
+    --mention-channel-hover-bg: rgba(59, 130, 246, 0.18);
     --mention-group-color: #3d74b6;
     --search-result-highlight-bg: #fde68a;
     --search-result-active-bg: #fb923c;
@@ -319,13 +321,13 @@
     --nav-search-btn-bg: rgba(255, 255, 255, 0.08);
     --nav-search-btn-text: #b0b4ba;
     --chat-mobile-my-bubble: #212225;
-    --mention-color: #3d9df2;
-    --mention-hover-color: #7dc0f7;
-    --mention-bg: rgba(61, 157, 242, 0.15);
-    --mention-current-user-bg: rgba(254, 199, 80, 0.2);
-    --mention-current-user-color: #fec750;
-    --mention-channel-bg: rgba(96, 165, 250, 0.1);
-    --mention-channel-hover-bg: rgba(96, 165, 250, 0.15);
+    --mention-color: #88c2ff;
+    --mention-hover-color: #a9d4ff;
+    --mention-bg: rgba(82, 156, 232, 0.11);
+    --mention-current-user-bg: rgba(244, 155, 53, 0.1);
+    --mention-current-user-color: #f49b35;
+    --mention-channel-bg: rgba(82, 156, 232, 0.11);
+    --mention-channel-hover-bg: rgba(82, 156, 232, 0.2);
     --mention-group-color: #60a5fa;
     --search-result-highlight-bg: rgba(250, 204, 21, 0.35);
     --search-result-active-bg: rgba(251, 146, 60, 0.75);
@@ -399,6 +401,30 @@
   }
   .scrollbar-none::-webkit-scrollbar {
     display: none;
+  }
+
+  /* Custom scrollbars app-wide, every theme: transparent rails + subtle thumb.
+     Forcing a width switches WebKit off native scrollbars so the transparent
+     track actually applies. Opt-out utilities (.no-scrollbar, .scrollbar-none)
+     win via higher class specificity. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border)) transparent;
+  }
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track,
+  ::-webkit-scrollbar-track-piece,
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-border rounded-full;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-muted-foreground;
   }
 
   html,
@@ -741,7 +767,7 @@
   }
 
   .chat-input-field pre::-webkit-scrollbar-track {
-    @apply bg-muted rounded;
+    @apply bg-transparent rounded;
   }
 
   .chat-input-field pre::-webkit-scrollbar-thumb {
@@ -847,7 +873,7 @@
   }
 
   .chat-input-field .ProseMirror::-webkit-scrollbar-track {
-    @apply bg-muted rounded;
+    @apply bg-transparent rounded;
   }
 
   .chat-input-field .ProseMirror::-webkit-scrollbar-thumb {
@@ -1120,8 +1146,10 @@ span.chat-input-group-mention[data-mention-type="group"]:hover {
   position: relative !important;
   display: inline !important;
   white-space: nowrap !important;
-  color: #1264a3 !important;
-  background-color: #fef3c7 !important;
+  /* @channel / @here include the current user, so they use the current-user
+     mention colors (falls back to the base mention color where unset). */
+  color: var(--mention-current-user-color, var(--mention-color)) !important;
+  background-color: var(--mention-current-user-bg) !important;
   padding: 2px 6px !important;
   border-radius: 4px !important;
   text-decoration: none !important;
@@ -1133,9 +1161,17 @@ span.chat-input-group-mention[data-mention-type="group"]:hover {
 .chat-input-special-mention:hover,
 .chat-input-field .chat-input-special-mention:hover,
 .chat-input-field .ProseMirror .chat-input-special-mention:hover,
-.ProseMirror .chat-input-special-mention:hover {
-  color: #1264a3 !important;
-  background-color: #fef3c7 !important;
+.chat-input-field .ProseMirror span[data-mention-type="channel"]:hover,
+.chat-input-field .ProseMirror span[data-mention-type="here"]:hover,
+.ProseMirror .chat-input-special-mention:hover,
+.ProseMirror span[data-mention-type="channel"]:hover,
+.ProseMirror span[data-mention-type="here"]:hover,
+span[data-mention-type="channel"].chat-input-special-mention:hover,
+span[data-mention-type="here"].chat-input-special-mention:hover,
+span.chat-input-special-mention[data-mention-type="channel"]:hover,
+span.chat-input-special-mention[data-mention-type="here"]:hover {
+  color: var(--mention-current-user-color, var(--mention-color)) !important;
+  background-color: var(--mention-current-user-bg) !important;
 }
 
 @layer utilities {
@@ -1613,6 +1649,12 @@ span.chat-input-group-mention[data-mention-type="group"]:hover {
   @apply mt-2;
 }
 
+/* The UA/preflight default `bolder` resolves to 700 against the 400 base.
+   Pin to 600 so message bold matches the AI answer's `.bot-markdown-content`. */
+.jp-message-html :is(strong, b) {
+  font-weight: 600;
+}
+
 .jp-message-html .search-result-highlight {
   background-color: var(--search-result-highlight-bg);
   padding-left: 0;
@@ -1629,7 +1671,7 @@ span.chat-input-group-mention[data-mention-type="group"]:hover {
 
 .jp-message-html strong code:not(pre code),
 .jp-message-html code:not(pre code) strong {
-  @apply font-bold;
+  @apply font-semibold;
 }
 .jp-message-html code:not(pre code):has(+ :is(strong, em, s) code:not(pre code)) {
   @apply border-r-0 rounded-r-none pr-0;
@@ -1683,7 +1725,7 @@ span.chat-input-group-mention[data-mention-type="group"]:hover {
 }
 
 .jp-message-html pre::-webkit-scrollbar-track {
-  background: hsl(var(--muted));
+  background: transparent;
   border-radius: 4px;
 }
 
@@ -2935,7 +2977,7 @@ img.inline-emoji,
 }
 
 [data-theme="midnight"] .chat-input-field pre::-webkit-scrollbar-track {
-  background: #1e293b;
+  background: transparent;
 }
 
 [data-theme="midnight"] .chat-input-field pre::-webkit-scrollbar-thumb {
@@ -2947,7 +2989,7 @@ img.inline-emoji,
 }
 
 [data-theme="midnight"] .chat-input-field .ProseMirror::-webkit-scrollbar-track {
-  background: #1f2937;
+  background: transparent;
 }
 
 [data-theme="midnight"] .chat-input-field .ProseMirror::-webkit-scrollbar-thumb {
@@ -2985,7 +3027,7 @@ img.inline-emoji,
 }
 
 [data-theme="midnight"] .jp-message-html pre::-webkit-scrollbar-track {
-  background: #1f2937;
+  background: transparent;
 }
 
 [data-theme="midnight"] .jp-message-html pre::-webkit-scrollbar-thumb {
@@ -3023,7 +3065,7 @@ img.inline-emoji,
 [data-theme="midnight"] .ProseMirror span[data-mention],
 [data-theme="midnight"] span[data-mention].chat-input-mention,
 [data-theme="midnight"] span.chat-input-mention[data-mention] {
-  color: #3d9df2 !important;
+  color: #88c2ff !important;
 }
 
 [data-theme="midnight"] .chat-input-field .chat-input-mention:hover,
@@ -3034,7 +3076,7 @@ img.inline-emoji,
 [data-theme="midnight"] .ProseMirror span[data-mention]:hover,
 [data-theme="midnight"] span[data-mention].chat-input-mention:hover,
 [data-theme="midnight"] span.chat-input-mention[data-mention]:hover {
-  color: #7dc0f7 !important;
+  color: #a9d4ff !important;
 }
 
 [data-theme="midnight"] .chat-input-field .chat-input-group-mention,
@@ -3059,14 +3101,6 @@ img.inline-emoji,
 [data-theme="midnight"] span.chat-input-group-mention[data-mention-type="group"]:hover {
   color: #6ee7b7 !important;
   background-color: #065f46 !important;
-}
-
-[data-theme="midnight"] .chat-input-special-mention,
-[data-theme="midnight"] .chat-input-field .chat-input-special-mention,
-[data-theme="midnight"] .chat-input-field .ProseMirror .chat-input-special-mention,
-[data-theme="midnight"] .ProseMirror .chat-input-special-mention {
-  color: #60a5fa !important;
-  background-color: #451a03 !important;
 }
 
 [data-theme="midnight"] .mention-text {

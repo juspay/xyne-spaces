@@ -575,6 +575,7 @@ export { MapPin02Area } from "./icons/map-pin-02-area.js";
 export { MapPinArea } from "./icons/map-pin-area.js";
 export { MapPinUser } from "./icons/map-pin-user.js";
 export { MapTreasure } from "./icons/map-treasure.js";
+export { MarkAsRead } from "./icons/mark-as-read.js";
 export { Markdown } from "./icons/markdown.js";
 export { MartiniGlass } from "./icons/martini-glass.js";
 export { Mastodon } from "./icons/mastodon.js";

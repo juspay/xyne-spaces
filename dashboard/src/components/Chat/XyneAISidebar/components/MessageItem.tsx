@@ -341,12 +341,7 @@ const ImageWithDownload = ({
 
   return (
     <div className='relative inline-block max-w-full group'>
-      <img
-        src={src}
-        alt={alt}
-        className={className || 'max-w-full h-auto rounded-lg'}
-        loading='lazy'
-      />
+      <img src={src} alt={alt} className={className || 'max-w-full h-auto'} loading='lazy' />
       <button
         onClick={handleDownload}
         className='absolute top-2 right-2 p-1.5 rounded-md bg-background/90 backdrop-blur-sm border border-border shadow-sm opacity-0 group-hover:opacity-100 transition-all duration-200 hover:bg-background z-10'
@@ -752,7 +747,7 @@ const AttachmentImagePreview = ({
 
   if (isLoading) {
     return (
-      <div className='relative rounded-lg overflow-hidden border border-border bg-card max-w-[300px] h-[150px] flex items-center justify-center'>
+      <div className='relative overflow-hidden border border-border bg-card max-w-[300px] h-[150px] flex items-center justify-center'>
         <Loader2 size={24} className='animate-spin text-muted-foreground' />
       </div>
     );
@@ -760,14 +755,14 @@ const AttachmentImagePreview = ({
 
   if (error || !imageUrl) {
     return (
-      <div className='relative rounded-lg overflow-hidden border border-border bg-card max-w-[300px] p-4 text-center'>
+      <div className='relative overflow-hidden border border-border bg-card max-w-[300px] p-4 text-center'>
         <span className='text-sm text-muted-foreground'>{error || 'Image unavailable'}</span>
       </div>
     );
   }
 
   return (
-    <div className='relative group/image rounded-lg overflow-hidden border border-border bg-card max-w-[300px]'>
+    <div className='relative group/image overflow-hidden border border-border bg-card max-w-[300px]'>
       <img src={imageUrl} alt={displayName} className='w-full h-auto' loading='lazy' />
       {/* Download button overlay */}
       <button
@@ -931,7 +926,7 @@ export const AttachmentPreview = ({
   }
 
   return (
-    <div className='flex items-center gap-2 p-2 rounded-lg bg-card border border-border'>
+    <div className='flex items-center gap-2 p-2 bg-card border border-border'>
       {attachmentId ? (
         // File attachment with ID - clickable download
         <button
@@ -987,7 +982,7 @@ const SelectionContextPreview = ({
     <button
       type='button'
       onClick={onClick}
-      className='flex items-center gap-2 p-2 rounded-lg bg-muted border border-border hover:bg-accent transition-colors w-full text-left'
+      className='flex items-center gap-2 p-2 bg-muted border border-border hover:bg-accent transition-colors w-full text-left'
       title={`From canvas: ${selection.canvasTitle || 'Untitled'}`}
       data-track-category='XyneAI'
       data-track-name='SELECTION_CONTEXT_CLICK'
@@ -1171,14 +1166,8 @@ export const MessageItem = React.memo(
 
     return (
       <div
-        className={`group/message flex gap-3 ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}
+        className={`group/message flex ${message.type === 'user' ? 'justify-end gap-3' : 'justify-start'}`}
       >
-        {message.type === 'bot' && (
-          <div className='flex-shrink-0 mt-2.5'>
-            <img src='/svgs/icons/ai-bot-gradient-star.svg' alt='AI' width='16' height='16' />
-          </div>
-        )}
-
         {/* Edit button for user messages - appears on hover to the left of the bubble */}
         {message.type === 'user' && (onEditSubmit || onEditMobile) && !isEditing && (
           <button
@@ -1218,9 +1207,9 @@ export const MessageItem = React.memo(
             className={`${
               message.type === 'user'
                 ? isEditing
-                  ? 'rounded-2xl bg-muted p-3'
-                  : 'flex flex-col items-start gap-3 p-2 [border-radius:16px_4px_16px_16px] bg-[var(--chat-mobile-my-bubble)] text-foreground md:block md:rounded-2xl md:bg-muted md:text-foreground md:px-4 md:py-2 md:w-fit'
-                : 'rounded-2xl bg-transparent text-foreground max-w-full'
+                  ? 'rounded-2xl bg-accent p-3'
+                  : 'flex flex-col items-start gap-3 px-5 py-3 [border-radius:16px_16px_4px_16px] bg-accent text-foreground md:block md:w-fit'
+                : 'bg-transparent text-foreground max-w-full'
             }`}
           >
             {message.type === 'user' && isEditing ? (
@@ -1381,7 +1370,7 @@ export const MessageItem = React.memo(
 
           {/* Error display for bot messages */}
           {message.type === 'bot' && message.errorInfo && (
-            <div className='mt-3 rounded-lg border border-destructive/20 bg-destructive/5 p-3'>
+            <div className='mt-3 border border-destructive/20 bg-destructive/5 p-3'>
               <div className='flex items-start gap-2'>
                 <AlertTriangle size={14} className='mt-0.5 shrink-0 text-destructive' />
                 <div className='flex-1 min-w-0'>

@@ -8,24 +8,18 @@ import {
   forwardRef,
   useImperativeHandle,
 } from 'react';
+import { Microscope } from 'lucide-react';
 import {
-  ArrowUp,
-  X,
-  Plus,
-  FileText,
-  Lock,
-  Globe,
-  File,
-  Ticket,
-  Phone,
-  Mic,
-  Microscope,
-  Hash,
-  BookOpen,
-  ChevronRight,
   ArrowLeft,
-  Folder,
-} from 'lucide-react';
+  ArrowUp,
+  ChevronRight,
+  FileDefault,
+  FileText,
+  FolderDefault,
+  Globe,
+  Notebook,
+  PlusDefault,
+} from '@xyne/icons';
 import { useEditor, EditorContent } from '@tiptap/react';
 import { Mark } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
@@ -47,6 +41,8 @@ import { VoiceInput } from '../../../ui/InputBox/VoiceInput';
 import type { VoiceInputHandle } from '../../../ui/InputBox/VoiceInput';
 import { StopIcon } from './StopIcon';
 import { AgentSelector } from './AgentSelector';
+import { ContextPillRow } from './ContextPillRow';
+import { CONTEXT_PICKER_TOGGLE_ATTR } from './ContextPicker';
 import { ModelSelector } from './ModelSelector';
 import type { ClawAgentModel } from '../../../../services/clawAgentModelsService';
 import type { AgentOption } from './AgentSelector';
@@ -68,11 +64,6 @@ import { useNavigate } from 'react-router-dom';
 import { xyneAIActor } from '../../../../machines/xyneAIMachine';
 import { DANGEROUS_EXTENSIONS } from '@xyne/shared';
 
-// Hash icon component
-const HashIcon = ({ className = '' }: { className?: string }): ReactElement => (
-  <Hash className={className} size={16} />
-);
-
 import type { UserActivity } from '../../../../hooks/useUserActivity';
 import type { UserTag } from '../utils/XyneAITypes';
 import { useMentionSearch } from '../../../../hooks/useMentionSearch';
@@ -82,10 +73,15 @@ import type {
   SelectedCanvas,
   SelectedTranscript,
   SelectedRecording,
+  ContextSelections,
 } from './ContextPickerPanel';
+import type { Channel } from '@xyne/shared';
+import { ChannelVisibility } from '@xyne/shared';
+import type { DisplaySearchResult } from '../../../../types/search';
+import { TabType } from '../../ChatDirectory/ChannelCommandMenu.types';
 
 // Browser context interface
-interface BrowserContext {
+export interface BrowserContext {
   type: 'browser';
   text: string;
   url: string;
@@ -133,6 +129,13 @@ export interface XyneAIInputBoxProps {
   onOpenContextModal?: () => void;
   onCloseContextModal?: () => void;
   isContextModalOpen?: boolean;
+  /**
+   * Replaces the attached context wholesale — the inline picker toggles items
+   * by building the next ContextSelections from current props and pushing it
+   * up. Same contract (and typically the same handler) as
+   * XyneAIInputSection's onConfirmContext.
+   */
+  onContextSelectionsChange?: (selections: ContextSelections) => void;
   selectedTickets?: SelectedTicket[];
   onRemoveTicket?: (id: string) => void;
   selectedCanvases?: SelectedCanvas[];
@@ -185,7 +188,6 @@ export interface XyneAIInputBoxProps {
   /** Replace the selected file set (id = each file's Vespa docId / fileId UUID). */
   onFileScopesChange?: (fileScopes: { id: string; name: string }[]) => void;
   compactToolbar?: boolean;
-  tightToolbar?: boolean;
 }
 
 // Interface for the XyneAIInputBox imperative API (matches InputBoxHandle pattern)
@@ -231,6 +233,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       onAddChannel,
       nonDMChannels = EMPTY_NON_DM_CHANNELS,
       onOpenContextModal,
+      onContextSelectionsChange,
       onCloseContextModal,
       isContextModalOpen = false,
       selectedTickets = EMPTY_TICKETS,
@@ -269,10 +272,13 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       collectionsList: collectionsListProp = [],
       agentKbGrants,
       compactToolbar = false,
-      tightToolbar = false,
     },
     ref,
   ): ReactElement => {
+    // Inline context picker rendered in the card above the composer, toggled by
+    // the toolbar "/" button.
+    const [showContextPicker, setShowContextPicker] = useState(false);
+
     const collectionDropdownRef = useRef<HTMLDivElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const hasAutoFocusedRef = useRef(false);
@@ -875,18 +881,30 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
             }
           }
 
-          // Cmd+/ (Mac) or Ctrl+/ (others) → open the context modal
+          // Cmd+Shift+Option+/ (Mac) or Ctrl+Shift+Alt+/ (others) → toggle the
+          // inline context picker. Matched on event.code — with Shift/Option
+          // held, event.key is whatever character the layout produces ('?',
+          // '¿', …), but the physical slash key is always code 'Slash'.
+          // Opening moves focus into the picker's own search field (it
+          // autofocuses), so continued typing filters there, not here.
           if (
-            event.key === '/' &&
-            !isContextModalOpenRef.current &&
+            event.code === 'Slash' &&
+            event.shiftKey &&
+            event.altKey &&
             (event.ctrlKey || event.metaKey)
           ) {
             event.preventDefault();
-            onOpenContextModalRef.current?.();
+            setShowContextPicker(prev => !prev);
             return true;
           }
 
-          // Escape closes the context modal when it's open
+          // Escape closes the inline picker (when focus is still in the editor)
+          // or the legacy context modal.
+          if (event.key === 'Escape' && showContextPicker) {
+            event.preventDefault();
+            setShowContextPicker(false);
+            return true;
+          }
           if (event.key === 'Escape' && isContextModalOpenRef.current) {
             event.preventDefault();
             onCloseContextModalRef.current?.();
@@ -1460,8 +1478,140 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       }
     }, [editor, inputValue, extractUserMentionsFromEditor, onUserTagsChange]);
 
+    // ── Inline picker → attached context ─────────────────────────────────
+    // Toggles rebuild the full ContextSelections from current props and push
+    // it up through onContextSelectionsChange (the sidebar's confirm handler),
+    // so the pills, the picker's check badges, and submit all read one source.
+    // Caps mirror ContextPickerPanel: 5 channels, 5 other items.
+    const currentSelections = (): ContextSelections => ({
+      channels: selectedChannels,
+      tickets: selectedTickets,
+      canvases: selectedCanvases,
+      transcripts: selectedTranscripts,
+      recordings: selectedRecordings,
+    });
+
+    const handlePickerToggleChannel = (channel: Channel, displayName: string): void => {
+      const next = currentSelections();
+      if (selectedChannels.some(c => c.id === channel.id)) {
+        next.channels = selectedChannels.filter(c => c.id !== channel.id);
+      } else {
+        if (selectedChannels.length >= 5) {
+          toast.error('Maximum 5 channels can be selected', { duration: 2000 });
+          return;
+        }
+        next.channels = [
+          ...selectedChannels,
+          {
+            id: channel.id,
+            name: displayName,
+            isPrivate: channel.visibility === ChannelVisibility.PRIVATE,
+          },
+        ];
+      }
+      onContextSelectionsChange?.(next);
+    };
+
+    const handlePickerToggleResult = (result: DisplaySearchResult, tab: TabType): void => {
+      // Same raw-id + title conventions as ContextPickerPanel: attachment id
+      // wins for dedupe, and Vespa's <hi> highlight tags never reach a pill.
+      const rawId = result.searchContext?.attachmentId ?? result.id;
+      const title = (result.title || '').replace(/<[^>]*>/g, '');
+      const next = currentSelections();
+
+      const toggle = <T extends { id: string }>(list: T[], make: () => T): T[] | null => {
+        if (list.some(item => item.id === rawId)) return list.filter(item => item.id !== rawId);
+        const nonChannelCount =
+          selectedTickets.length +
+          selectedCanvases.length +
+          selectedTranscripts.length +
+          selectedRecordings.length;
+        if (nonChannelCount >= 5) {
+          toast.error('Maximum 5 context items can be selected', { duration: 2000 });
+          return null;
+        }
+        return [...list, make()];
+      };
+
+      if (tab === TabType.TICKETS) {
+        const xyneId = result.searchContext?.xyneId;
+        const status = result.searchContext?.ticketStatus;
+        const toggled = toggle(selectedTickets, () => ({
+          id: rawId,
+          title,
+          ...(xyneId ? { xyneId } : {}),
+          ...(status ? { status } : {}),
+        }));
+        if (!toggled) return;
+        next.tickets = toggled;
+      } else if (tab === TabType.CANVAS) {
+        const toggled = toggle(selectedCanvases, () => ({ id: rawId, title }));
+        if (!toggled) return;
+        next.canvases = toggled;
+      } else if (tab === TabType.CALL) {
+        const toggled = toggle(selectedTranscripts, () => ({ id: rawId, title }));
+        if (!toggled) return;
+        next.transcripts = toggled;
+      } else if (tab === TabType.RECORDING) {
+        const toggled = toggle(selectedRecordings, () => ({ id: rawId, title }));
+        if (!toggled) return;
+        next.recordings = toggled;
+      } else {
+        return;
+      }
+      onContextSelectionsChange?.(next);
+    };
+
+    const closeContextPicker = (reason: 'key' | 'outside' = 'key'): void => {
+      setShowContextPicker(false);
+      // Only steal focus back on a keyboard dismissal — after an outside click
+      // focus already belongs wherever the user clicked.
+      if (reason === 'key') editor?.commands.focus();
+    };
+
+    // Gutter lives on the composer-container in the parent (see the Figma
+    // frame: composer-container owns px/pb, composer is w-full).
     return (
-      <div className={`px-4 ${isMobile ? '' : 'mb-4'} relative`}>
+      <div className='relative w-full'>
+        <ContextPillRow
+          isOnboarding={isOnboarding}
+          isMobile={isMobile}
+          showContextPicker={showContextPicker}
+          onCloseContextPicker={closeContextPicker}
+          onPickerToggleChannel={handlePickerToggleChannel}
+          onPickerToggleResult={handlePickerToggleResult}
+          threadInfo={activeThreadInfo}
+          onThreadClick={handleThreadPillClick}
+          onRemoveThread={handleRemoveThreadInfo}
+          canvasInfo={activeCanvasInfo}
+          onCanvasInfoClick={handleCanvasPillClick}
+          onRemoveCanvasInfo={handleRemoveCanvasInfo}
+          selectionInfos={activeSelectionInfos}
+          onSelectionClick={handleSelectionPillClick}
+          onRemoveSelection={handleRemoveSelectionInfo}
+          browserContext={browserContext}
+          onBrowserContextClick={handleBrowserContextClick}
+          onRemoveBrowserContext={handleRemoveBrowserContext}
+          channels={selectedChannels}
+          {...(onRemoveChannel && { onRemoveChannel })}
+          fileScopes={fileScopes}
+          {...(onFileScopesChange && { onFileScopesChange })}
+          collections={selectedCollections}
+          onRemoveCollection={handleRemoveCollection}
+          attachments={selectedAttachments}
+          onRemoveAttachment={handleRemoveAttachment}
+          tickets={selectedTickets}
+          {...(onRemoveTicket && { onRemoveTicket })}
+          canvases={selectedCanvases}
+          {...(onRemoveCanvas && { onRemoveCanvas })}
+          transcripts={selectedTranscripts}
+          {...(onRemoveTranscript && { onRemoveTranscript })}
+          recordings={selectedRecordings}
+          {...(onRemoveRecording && { onRemoveRecording })}
+          activities={selectedActivities}
+          {...(onActivitiesChange && { onActivitiesChange })}
+        />
+
         {/* MentionSelector for "@" trigger in editor (user mentions) */}
         <MentionSelector
           editor={editor}
@@ -1481,447 +1631,40 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
           className={isVoiceRecording ? 'xyne-voice-border-wrap' : undefined}
           style={isVoiceRecording && isMobile ? { borderRadius: '28px' } : undefined}
         >
+          {/* Chrome mirrors the channel composer (ui/InputBox/InputBox.tsx) so
+              the two inputs read as the same control. Focus is CSS-driven here
+              (focus-within) rather than the channel composer's isFocused state
+              — same visual, one less render per focus change. */}
           <div
-            className={`bg-card border border-input focus-within:border-ring ${isMobile ? 'rounded-[26px]' : 'rounded-2xl'} py-2 px-2 flex flex-col gap-3 transition-colors relative`}
+            className={`
+            overflow-hidden transition-all flex flex-col relative
+            ${isMobile ? 'bg-muted rounded-[26px] text-foreground shadow-sm' : 'bg-card rounded-2xl border border-input focus-within:border-ring text-foreground shadow-none'}
+          `}
           >
-            {/* Selector Buttons and Pills Row */}
-            {!isOnboarding && (
-              <div
-                className='flex items-center gap-2 overflow-x-auto flex-nowrap min-w-0 pb-2'
-                style={{
-                  scrollbarWidth: 'thin',
-                  scrollbarColor: 'hsl(var(--border)) transparent',
-                }}
-              >
-                {/* "/" Button to open unified context modal */}
-                <button
-                  type='button'
-                  onClick={() => onOpenContextModal?.()}
-                  className={`flex h-7 py-1 px-2 justify-center items-center gap-2 ${isMobile ? 'rounded-full' : 'rounded-lg'} border border-border hover:bg-muted transition-all duration-200 ease-in-out flex-shrink-0`}
-                  aria-label='Add context'
-                  title={`Add context (${isMac ? '⌘' : 'Ctrl+'}/)`}
-                  data-track-category='XyneAI'
-                  data-track-name='OPEN_CONTEXT_MODAL'
-                >
-                  <span className='text-muted-foreground font-semibold text-sm'>/</span>
-                </button>
-
-                {/* Collection Button to open collection selector */}
-                <button
-                  type='button'
-                  onClick={() => {
-                    setShowCollectionDropdown(true);
-                    setCollectionSearchQuery('');
-                  }}
-                  className={`flex h-7 py-1 px-2 justify-center items-center gap-2 ${isMobile ? 'rounded-full' : 'rounded-lg'} border border-border hover:bg-muted transition-all duration-200 ease-in-out flex-shrink-0`}
-                  aria-label='Select collections'
-                  title='Select collections'
-                  data-track-category='XyneAI'
-                  data-track-name='OPEN_COLLECTION_SELECTOR'
-                >
-                  <BookOpen className='w-4 h-4 text-muted-foreground' />
-                </button>
-
-                {/* Thread Context Pill */}
-                {activeThreadInfo && (
-                  <div
-                    className={`flex h-7 py-1 ${isMobile ? 'px-1' : 'px-2'} justify-center items-center ${isMobile ? 'gap-[4px]' : 'gap-2'} rounded-lg border border-border flex-shrink-0`}
-                  >
-                    <button
-                      type='button'
-                      onClick={handleThreadPillClick}
-                      className='flex items-center gap-1 cursor-pointer hover:bg-accent transition-colors bg-transparent border-0 p-0'
-                      aria-label={`Navigate to thread from ${activeThreadInfo.senderName}`}
-                      data-track-category='XYNE_AI'
-                      data-track-name='ClickThreadContextPill'
-                      data-track-metadata={JSON.stringify({ thread: activeThreadInfo })}
-                    >
-                      <span className="text-foreground font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[200px] truncate">
-                        {activeThreadInfo.senderName} • {activeThreadInfo.previewText}
-                      </span>
-                    </button>
-                    <button
-                      type='button'
-                      onClick={handleRemoveThreadInfo}
-                      className='hover:bg-accent rounded p-0.5 transition-colors flex-shrink-0'
-                      aria-label='Remove thread context'
-                      data-track-category='XYNE_AI'
-                      data-track-name='RemoveThreadContext'
-                      data-track-metadata={JSON.stringify({ thread: activeThreadInfo })}
-                    >
-                      <X className='w-3 h-3' />
-                    </button>
-                  </div>
-                )}
-
-                {/* Canvas Context Pill */}
-                {activeCanvasInfo && (
-                  <div
-                    className={`flex h-7 py-1 ${isMobile ? 'px-1' : 'px-2'} justify-center items-center ${isMobile ? 'gap-[4px]' : 'gap-2'} rounded-lg border border-border flex-shrink-0`}
-                  >
-                    <button
-                      type='button'
-                      onClick={handleCanvasPillClick}
-                      className='flex items-center gap-1 cursor-pointer hover:bg-accent transition-colors bg-transparent border-0 p-0'
-                      aria-label={`Navigate to canvas: ${activeCanvasInfo.title || 'Untitled Canvas'}`}
-                      data-track-category='XYNE_AI'
-                      data-track-name='ClickCanvasContextPill'
-                      data-track-metadata={JSON.stringify({
-                        canvasId: activeCanvasInfo.canvasId,
-                      })}
-                    >
-                      <FileText className='w-3.5 h-3.5 text-muted-foreground' />
-                      <span className="text-foreground font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[200px] truncate">
-                        {activeCanvasInfo.title || 'Untitled Canvas'}
-                      </span>
-                    </button>
-                    <button
-                      type='button'
-                      onClick={handleRemoveCanvasInfo}
-                      className='hover:bg-secondary rounded p-0.5 transition-colors flex-shrink-0'
-                      aria-label='Remove canvas context'
-                      data-track-category='XYNE_AI'
-                      data-track-name='RemoveCanvasContext'
-                      data-track-metadata={JSON.stringify({
-                        canvasId: activeCanvasInfo.canvasId,
-                      })}
-                    >
-                      <X className='w-3 h-3' />
-                    </button>
-                  </div>
-                )}
-
-                {/* Selection Context Pills (multiple) */}
-                {activeSelectionInfos.map((selection, index) => (
-                  <div
-                    key={`${selection.canvasId}-${index}`}
-                    className={`flex h-7 py-1 ${isMobile ? 'px-1' : 'px-2'} justify-center items-center ${isMobile ? 'gap-[4px]' : 'gap-2'} rounded-lg border border-border bg-muted/50 flex-shrink-0`}
-                  >
-                    <button
-                      type='button'
-                      onClick={() => handleSelectionPillClick(selection)}
-                      className='flex items-center gap-1 cursor-pointer hover:bg-muted transition-colors bg-transparent border-0 p-0'
-                      aria-label={`Navigate to canvas with selection: ${selection.preview}`}
-                      data-track-category='XYNE_AI'
-                      data-track-name='ClickSelectionContextPill'
-                      data-track-metadata={JSON.stringify({
-                        canvasId: selection.canvasId,
-                      })}
-                    >
-                      <FileText className='w-3.5 h-3.5 text-primary' />
-                      <span className="text-primary font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[150px] truncate">
-                        {selection.preview}
-                      </span>
-                    </button>
-                    <button
-                      type='button'
-                      onClick={() => handleRemoveSelectionInfo(index)}
-                      className='hover:bg-muted rounded p-0.5 transition-colors flex-shrink-0'
-                      aria-label='Remove selection context'
-                      data-track-category='XYNE_AI'
-                      data-track-name='RemoveSelectionContext'
-                      data-track-metadata={JSON.stringify({
-                        canvasId: selection.canvasId,
-                      })}
-                    >
-                      <X className='w-3 h-3 text-primary' />
-                    </button>
-                  </div>
-                ))}
-
-                {/* Browser Context Pill */}
-                {browserContext && (
-                  <div
-                    className={`flex h-7 py-1 ${isMobile ? 'px-1' : 'px-2'} justify-center items-center ${isMobile ? 'gap-[4px]' : 'gap-2'} rounded-lg border border-border bg-muted/50 flex-shrink-0`}
-                  >
-                    <button
-                      type='button'
-                      onClick={handleBrowserContextClick}
-                      className='flex items-center gap-1 cursor-pointer hover:bg-muted transition-colors bg-transparent border-0 p-0 rounded px-1'
-                      aria-label={`Open ${browserContext.domain}`}
-                      title={`${browserContext.title}\n${browserContext.url}`}
-                      data-track-category='XYNE_AI'
-                      data-track-name='ClickBrowserContextPill'
-                      data-track-metadata={JSON.stringify({
-                        url: browserContext.url,
-                        domain: browserContext.domain,
-                      })}
-                    >
-                      <Globe className='w-3.5 h-3.5 text-primary flex-shrink-0' />
-                      <span className="text-foreground font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[200px] truncate">
-                        {browserContext.text.slice(0, 50)}
-                        {browserContext.text.length > 50 ? '...' : ''} • {browserContext.domain}
-                      </span>
-                    </button>
-                    <button
-                      type='button'
-                      onClick={handleRemoveBrowserContext}
-                      className='hover:bg-muted rounded p-0.5 transition-colors flex-shrink-0'
-                      aria-label='Remove browser context'
-                      data-track-category='XYNE_AI'
-                      data-track-name='RemoveBrowserContext'
-                      data-track-metadata={JSON.stringify({ url: browserContext.url })}
-                    >
-                      <X className='w-3 h-3 text-primary' />
-                    </button>
-                  </div>
-                )}
-
-                {/* Channel Pills */}
-                {selectedChannels.map(channel => (
-                  <div
-                    key={channel.id}
-                    className={`flex h-7 py-1 ${isMobile ? 'px-1' : 'px-2'} justify-center items-center ${isMobile ? 'gap-[4px]' : 'gap-2'} rounded-lg border border-border flex-shrink-0`}
-                  >
-                    <div className='flex items-center gap-1'>
-                      <div className='flex-shrink-0'>
-                        {channel.isPrivate ? (
-                          <Lock className='h-3.5 w-3.5 text-muted-foreground' />
-                        ) : (
-                          <HashIcon />
-                        )}
-                      </div>
-                      <span className="text-foreground font-['Inter'] text-sm font-[450] whitespace-nowrap">
-                        {channel.name}
-                      </span>
-                    </div>
-                    {/* Show X button for all channels */}
-                    <button
-                      onClick={() => onRemoveChannel?.(channel.id)}
-                      className='hover:bg-muted rounded p-0.5 transition-colors flex-shrink-0'
-                      aria-label={`Remove ${channel.name}`}
-                      data-track-category='XyneAI'
-                      data-track-name='REMOVE_CHANNEL'
-                      data-track-metadata={JSON.stringify({ channelId: channel.id })}
-                    >
-                      <X className='w-3 h-3' />
-                    </button>
-                  </div>
-                ))}
-
-                {/* File Scope Pills — narrow Ask AI to specific file(s) */}
-                {fileScopes.map(fs => (
-                  <div
-                    key={`fs-${fs.id}`}
-                    className={`flex h-7 py-1 ${isMobile ? 'px-1' : 'px-2'} justify-center items-center ${isMobile ? 'gap-[4px]' : 'gap-2'} rounded-lg border border-border flex-shrink-0`}
-                  >
-                    <div className='flex items-center gap-1'>
-                      <div className='flex-shrink-0'>
-                        <FileText className='w-3.5 h-3.5 text-[#7C3AED]' />
-                      </div>
-                      <span className="text-foreground font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[160px] truncate">
-                        {fs.name}
-                      </span>
-                    </div>
-                    {onFileScopesChange && (
-                      <button
-                        onClick={() => onFileScopesChange(fileScopes.filter(f => f.id !== fs.id))}
-                        className='hover:bg-muted rounded p-0.5 transition-colors flex-shrink-0'
-                        aria-label={`Remove file scope ${fs.name}`}
-                        data-track-category='XyneAI'
-                        data-track-name='REMOVE_FILE_SCOPE'
-                      >
-                        <X className='w-3 h-3' />
-                      </button>
-                    )}
-                  </div>
-                ))}
-
-                {/* Collection Pills */}
-                {selectedCollections.map(collection => (
-                  <div
-                    key={collection.id}
-                    className={`flex h-7 py-1 ${isMobile ? 'px-1' : 'px-2'} justify-center items-center ${isMobile ? 'gap-[4px]' : 'gap-2'} rounded-lg border border-border flex-shrink-0`}
-                  >
-                    <div className='flex items-center gap-1'>
-                      <div className='flex-shrink-0'>
-                        <BookOpen className='w-3.5 h-3.5 text-[#7C3AED]' />
-                      </div>
-                      <span className="text-foreground font-['Inter'] text-sm font-[450] whitespace-nowrap">
-                        {collection.name}
-                      </span>
-                    </div>
-                    <button
-                      onClick={() => handleRemoveCollection(collection.id)}
-                      className='hover:bg-muted rounded p-0.5 transition-colors flex-shrink-0'
-                      aria-label={`Remove ${collection.name}`}
-                      data-track-category='XyneAI'
-                      data-track-name='REMOVE_COLLECTION'
-                    >
-                      <X className='w-3 h-3' />
-                    </button>
-                  </div>
-                ))}
-
-                {/* Attachment Pills */}
-                {selectedAttachments.map(attachment => (
-                  <div
-                    key={attachment.id}
-                    className='flex h-7 py-1 px-2 justify-center items-center gap-2 rounded-lg border border-border bg-muted flex-shrink-0'
-                  >
-                    <div className='flex items-center gap-1'>
-                      <div className='flex-shrink-0'>
-                        <FileText className='w-3.5 h-3.5 text-muted-foreground' />
-                      </div>
-                      <span className="text-foreground font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[120px] truncate">
-                        {attachment.name}
-                      </span>
-                    </div>
-                    <button
-                      onClick={() => handleRemoveAttachment(attachment.id)}
-                      className='hover:bg-muted rounded p-0.5 transition-colors flex-shrink-0'
-                      aria-label={`Remove ${attachment.name}`}
-                      data-track-category='XyneAI'
-                      data-track-name='REMOVE_ATTACHMENT'
-                      data-track-metadata={JSON.stringify({ attachmentId: attachment.id })}
-                    >
-                      <X className='w-3 h-3' />
-                    </button>
-                  </div>
-                ))}
-
-                {/* Ticket Context Pills */}
-                {selectedTickets.map(ticket => (
-                  <div
-                    key={ticket.id}
-                    className='flex h-7 py-1 px-2 justify-center items-center gap-2 rounded-lg border border-border bg-card flex-shrink-0'
-                  >
-                    <div className='flex items-center gap-1'>
-                      <div className='flex-shrink-0'>
-                        <Ticket className='w-3.5 h-3.5 text-muted-foreground' />
-                      </div>
-                      <span className="text-foreground font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[120px] truncate">
-                        {ticket.xyneId ? `${ticket.xyneId}` : ticket.title}
-                      </span>
-                    </div>
-                    <button
-                      onClick={() => onRemoveTicket?.(ticket.id)}
-                      className='hover:bg-accent rounded p-0.5 transition-colors flex-shrink-0'
-                      aria-label={`Remove ticket ${ticket.title}`}
-                      data-track-category='XyneAI'
-                      data-track-name='REMOVE_TICKET'
-                      data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
-                    >
-                      <X className='w-3 h-3' />
-                    </button>
-                  </div>
-                ))}
-
-                {/* Canvas Pills */}
-                {selectedCanvases.map(canvas => (
-                  <div
-                    key={canvas.id}
-                    className='flex h-7 py-1 px-2 justify-center items-center gap-2 rounded-lg border border-border bg-card flex-shrink-0'
-                  >
-                    <div className='flex items-center gap-1'>
-                      <div className='flex-shrink-0'>
-                        <FileText className='w-3.5 h-3.5 text-muted-foreground' />
-                      </div>
-                      <span className="text-foreground font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[120px] truncate">
-                        {canvas.title}
-                      </span>
-                    </div>
-                    <button
-                      onClick={() => onRemoveCanvas?.(canvas.id)}
-                      className='hover:bg-accent rounded p-0.5 transition-colors flex-shrink-0'
-                      aria-label={`Remove canvas ${canvas.title}`}
-                      data-track-category='XyneAI'
-                      data-track-name='REMOVE_CANVAS'
-                      data-track-metadata={JSON.stringify({ canvasId: canvas.id })}
-                    >
-                      <X className='w-3 h-3' />
-                    </button>
-                  </div>
-                ))}
-
-                {/* Transcript Pills */}
-                {selectedTranscripts.map(transcript => (
-                  <div
-                    key={transcript.id}
-                    className='flex h-7 py-1 px-2 justify-center items-center gap-2 rounded-lg border border-border bg-card flex-shrink-0'
-                  >
-                    <div className='flex items-center gap-1'>
-                      <div className='flex-shrink-0'>
-                        <Phone className='w-3.5 h-3.5 text-muted-foreground' />
-                      </div>
-                      <span className="text-foreground font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[120px] truncate">
-                        {transcript.title}
-                      </span>
-                    </div>
-                    <button
-                      onClick={() => onRemoveTranscript?.(transcript.id)}
-                      className='hover:bg-accent rounded p-0.5 transition-colors flex-shrink-0'
-                      aria-label={`Remove transcript ${transcript.title}`}
-                      data-track-category='XyneAI'
-                      data-track-name='REMOVE_TRANSCRIPT'
-                      data-track-metadata={JSON.stringify({ transcriptId: transcript.id })}
-                    >
-                      <X className='w-3 h-3' />
-                    </button>
-                  </div>
-                ))}
-
-                {/* Recording Pills */}
-                {selectedRecordings.map(recording => (
-                  <div
-                    key={recording.id}
-                    className='flex h-7 py-1 px-2 justify-center items-center gap-2 rounded-lg border border-border bg-card flex-shrink-0'
-                  >
-                    <div className='flex items-center gap-1'>
-                      <div className='flex-shrink-0'>
-                        <Mic className='w-3.5 h-3.5 text-muted-foreground' />
-                      </div>
-                      <span className="text-foreground font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[120px] truncate">
-                        {recording.title}
-                      </span>
-                    </div>
-                    <button
-                      onClick={() => onRemoveRecording?.(recording.id)}
-                      className='hover:bg-accent rounded p-0.5 transition-colors flex-shrink-0'
-                      aria-label={`Remove recording ${recording.title}`}
-                      data-track-category='XyneAI'
-                      data-track-name='REMOVE_RECORDING'
-                      data-track-metadata={JSON.stringify({ recordingId: recording.id })}
-                    >
-                      <X className='w-3 h-3' />
-                    </button>
-                  </div>
-                ))}
-
-                {/* Activity Pills */}
-                {selectedActivities.length > 0 && (
-                  <div className='flex h-7 py-1 px-2 justify-center items-center gap-2 rounded-lg border border-border bg-background flex-shrink-0'>
-                    <div className='flex items-center gap-1'>
-                      <span className="text-foreground font-['Inter'] text-sm font-[450] whitespace-nowrap">
-                        {selectedActivities.length}{' '}
-                        {selectedActivities.length === 1 ? 'activity' : 'activities'}
-                      </span>
-                    </div>
-                    <button
-                      onClick={() => onActivitiesChange?.([])}
-                      className='hover:bg-accent rounded p-0.5 transition-colors flex-shrink-0'
-                      aria-label='Remove all activities'
-                      data-track-category='XYNE_AI'
-                      data-track-name='RemoveAllActivities'
-                      data-track-metadata={JSON.stringify({
-                        activityCount: selectedActivities.length,
-                      })}
-                    >
-                      <X className='w-3 h-3' />
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
-
             {/* Input Area - Text only */}
-            <div className='relative'>
+            <div className='relative pt-1 pb-1 px-3'>
+              {/* `[&_p.is-editor-empty:before]:hidden` kills the Placeholder
+                  extension's pseudo-element. global.css styles it as a
+                  `float:left; height:0` box, so it paints at the TOP of the
+                  line box while the caret sits centred in the 24px leading —
+                  they never line up. The channel composer solves it the same
+                  way: hide the pseudo, overlay a real flex-centred div. */}
               <EditorContent
                 editor={editor}
-                className={`bg-transparent outline-none text-foreground p-2 placeholder:text-muted-foreground text-sm font-['Inter'] ${isVoiceRecording && !inputValue ? 'invisible' : ''}`}
+                className={`chat-input-field bg-transparent outline-none text-foreground text-sm leading-6 font-['Inter'] [&_p.is-editor-empty:before]:hidden ${isVoiceRecording && !inputValue ? 'invisible' : ''}`}
               />
+              {!inputValue &&
+                !isVoiceRecording &&
+                !editor?.isActive('codeBlock') &&
+                !editor?.isActive('bulletList') &&
+                !editor?.isActive('orderedList') &&
+                !editor?.isActive('blockquote') && (
+                  <div className='absolute inset-0 px-3 py-2 flex items-center h-fit my-auto pointer-events-none select-none text-muted-foreground text-[14px] leading-6'>
+                    Ask Xyne AI
+                  </div>
+                )}
               {isVoiceRecording && !inputValue && (
-                <div className='absolute inset-0 p-2 pointer-events-none select-none flex items-center gap-3'>
+                <div className='absolute inset-0 px-3 py-2 pointer-events-none select-none flex items-center gap-3'>
                   <div className='flex items-end gap-[3px]' style={{ height: 18 }}>
                     {([0, 120, 60, 180, 90] as const).map((delay, i) => (
                       <div
@@ -1941,7 +1684,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
               <div
                 className={`flex items-center ${
                   compactToolbar ? 'flex-wrap gap-2' : 'justify-between gap-2'
-                } px-2`}
+                } px-2 pb-2 pt-1`}
               >
                 <div
                   className={`flex items-center ${
@@ -1961,15 +1704,48 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                   <button
                     type='button'
                     onClick={handleAttachFiles}
-                    className={`rounded-lg hover:bg-accent transition-colors shrink-0 ${
-                      tightToolbar ? 'p-1 -ml-1' : 'p-1.5 -ml-1.5'
-                    }`}
+                    className={`flex items-center justify-center rounded hover:bg-accent transition-all duration-200 ease-in-out shrink-0 p-1.5`}
                     aria-label='Attach files'
                     title='Attach files'
                     data-track-category='XyneAI'
                     data-track-name='ATTACH_FILES'
                   >
-                    <Plus className='w-4 h-4 text-muted-foreground' />
+                    <PlusDefault className='w-4 h-4 text-muted-foreground' />
+                  </button>
+
+                  {/* "/" Button toggles the inline context picker in the card
+                      above. The ⌘/ shortcut still opens the old modal. */}
+                  <button
+                    type='button'
+                    onClick={() => setShowContextPicker(prev => !prev)}
+                    className={`flex items-center justify-center rounded hover:bg-accent transition-all duration-200 ease-in-out shrink-0 p-1.5`}
+                    aria-label='Add context'
+                    title={`Add context (${isMac ? '⌘⇧⌥' : 'Ctrl+Shift+Alt+'}/)`}
+                    // Spared by the picker's outside-click handler, so this
+                    // button toggles instead of close-then-reopen.
+                    {...{ [CONTEXT_PICKER_TOGGLE_ATTR]: '' }}
+                    data-track-category='XyneAI'
+                    data-track-name='OPEN_CONTEXT_MODAL'
+                  >
+                    <span className='w-4 h-4 leading-4 text-center text-muted-foreground font-semibold text-sm'>
+                      /
+                    </span>
+                  </button>
+
+                  {/* Knowledge-base / collection selector */}
+                  <button
+                    type='button'
+                    onClick={() => {
+                      setShowCollectionDropdown(true);
+                      setCollectionSearchQuery('');
+                    }}
+                    className={`flex items-center justify-center rounded hover:bg-accent transition-all duration-200 ease-in-out shrink-0 p-1.5`}
+                    aria-label='Select collections'
+                    title='Select collections'
+                    data-track-category='XyneAI'
+                    data-track-name='OPEN_COLLECTION_SELECTOR'
+                  >
+                    <Notebook className='w-4 h-4 text-muted-foreground' />
                   </button>
 
                   {/* Divider line */}
@@ -1985,11 +1761,9 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                         }
                       }}
                       disabled={!webSearchAccessible}
-                      className={`rounded-lg transition-colors shrink-0 ${
-                        tightToolbar ? 'p-1' : 'p-1.5'
-                      } ${
+                      className={`flex items-center justify-center rounded transition-all duration-200 ease-in-out shrink-0 p-1.5 ${
                         webSearchEnabled
-                          ? 'bg-muted text-status-success hover:bg-accent'
+                          ? 'bg-accent text-status-success'
                           : 'hover:bg-accent text-muted-foreground'
                       } ${!webSearchAccessible ? 'opacity-50 cursor-not-allowed' : ''}`}
                       aria-label={
@@ -2027,11 +1801,9 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                         }
                       }}
                       disabled={!deepResearchAccessible}
-                      className={`rounded-lg transition-colors shrink-0 ${
-                        tightToolbar ? 'p-1' : 'p-1.5'
-                      } ${
+                      className={`flex items-center justify-center rounded transition-all duration-200 ease-in-out shrink-0 p-1.5 ${
                         deepResearchEnabled
-                          ? 'bg-muted text-status-pending hover:bg-accent'
+                          ? 'bg-accent text-status-pending'
                           : 'hover:bg-accent text-muted-foreground'
                       } ${!deepResearchAccessible ? 'opacity-50 cursor-not-allowed' : ''}`}
                       aria-label={
@@ -2064,11 +1836,9 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                     <button
                       type='button'
                       onClick={onCreateCanvasToggle}
-                      className={`rounded-lg transition-colors shrink-0 ${
-                        tightToolbar ? 'p-1' : 'p-1.5'
-                      } ${
+                      className={`flex items-center justify-center rounded transition-all duration-200 ease-in-out shrink-0 p-1.5 ${
                         createCanvasEnabled
-                          ? 'bg-muted text-primary hover:bg-accent'
+                          ? 'bg-accent text-primary'
                           : 'hover:bg-accent text-muted-foreground'
                       }`}
                       aria-label={createCanvasEnabled ? 'Disable create canvas' : 'Create canvas'}
@@ -2077,7 +1847,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                       data-track-name='TOGGLE_CREATE_CANVAS'
                       data-track-metadata={JSON.stringify({ enabled: createCanvasEnabled })}
                     >
-                      <File className='w-4 h-4' />
+                      <FileDefault className='w-4 h-4' />
                     </button>
                   )}
                   {/* Agent selector */}
@@ -2117,9 +1887,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                   <button
                     onClick={isStreaming ? onAbort : onSubmit}
                     disabled={!isStreaming && !inputValue.trim()}
-                    className={`rounded-full transition-colors shrink-0 ${
-                      tightToolbar ? 'p-1.5' : 'p-2'
-                    } ${
+                    className={`rounded-full transition-colors shrink-0 p-2 ${
                       isStreaming
                         ? 'bg-primary text-primary-foreground hover:bg-primary/90'
                         : inputValue.trim()
@@ -2197,7 +1965,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                         data-track-category='XyneAI'
                         data-track-name='OPEN_KB_FOLDER'
                       >
-                        <Folder className='w-4 h-4 text-[#7C3AED] flex-shrink-0' />
+                        <FolderDefault className='w-4 h-4 text-[#7C3AED] flex-shrink-0' />
                         <span className='flex-1 truncate'>{folder.name}</span>
                         <ChevronRight className='w-4 h-4 text-muted-foreground flex-shrink-0' />
                       </button>
@@ -2254,7 +2022,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                         data-track-name='SELECT_COLLECTION'
                         data-track-metadata={JSON.stringify({ collectionId: collection.id })}
                       >
-                        <BookOpen className='w-4 h-4 text-[#7C3AED] flex-shrink-0' />
+                        <Notebook className='w-4 h-4 text-[#7C3AED] flex-shrink-0' />
                         <span className='flex-1 truncate'>{collection.name}</span>
                         {isSelected && <span className='text-xs text-[#7C3AED]'>Selected</span>}
                         <ChevronRight className='w-4 h-4 text-muted-foreground flex-shrink-0' />
