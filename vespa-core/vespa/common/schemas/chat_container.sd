@@ -1,0 +1,226 @@
+schema chat_container {
+    document chat_container {
+        # channel id
+        field docId type string {
+            indexing: attribute | summary
+        }
+
+        field docType type string {
+            indexing: attribute | summary
+            attribute: fast-search
+            match: exact
+        }
+
+        field orgId type string {
+            indexing: attribute | summary
+            attribute: fast-search
+            match: exact
+        }
+
+        field workspaceId type string {
+            indexing: attribute | summary
+            attribute: fast-search
+            match: exact
+        }
+
+        field channelName type string {
+            indexing: attribute | summary
+        }
+
+        # Channel scope type
+        field scopeType type string {
+            indexing: attribute | summary
+            attribute: fast-search
+            match: exact
+        }
+
+        # Channel visibility
+        field visibility type string {
+            indexing: attribute | summary
+            attribute: fast-search
+            match: exact
+        }
+
+        # dm
+        field isIm type bool {
+            indexing: attribute | summary
+        }
+        # group dm
+        field isMpim type bool {
+            indexing: attribute | summary
+        }
+
+        field permissions type array<string> {
+            indexing: attribute | summary
+            attribute: fast-search
+        }
+
+        field isPrivate type bool {
+            indexing: attribute | summary
+             attribute: fast-search
+        }
+
+        # Channel creator name
+        field createdBy type string {
+            indexing: attribute | summary
+        }
+
+        # Channel owner userId
+        field ownerId type string {
+            indexing: attribute | summary
+        }
+
+        # Project linkage
+        field projectId type string {
+            indexing: index | attribute | summary
+            attribute: fast-search
+            match: exact
+        }
+
+        # Additional metadata for future extensions
+        field metadata type string {
+            indexing: attribute | summary
+        }
+
+        # Last activity tracking
+        field lastActivityAt type long {
+            indexing: attribute | summary
+            attribute: fast-search
+        }
+
+        field createdAt type long {
+            indexing: attribute | summary
+            attribute: fast-search
+        }
+
+        field updatedAt type long {
+            indexing: attribute | summary
+            attribute: fast-search
+        }
+
+        field lastSyncedAt type long {
+            indexing: attribute | summary
+            attribute: fast-search
+        }
+
+        field topic type string {
+            indexing: index | attribute | summary
+            index: enable-bm25
+        }
+
+        field description type string {
+            indexing: index | attribute | summary
+            index: enable-bm25
+        }
+
+        field isArchived type bool {
+            indexing: attribute | summary
+        }
+
+        # participant member count in channel
+        field memberCount type int {
+            indexing: attribute | summary
+        }
+
+        field entityTypes type array<string> {
+            indexing: attribute | summary
+            attribute: fast-search
+        }
+    }
+
+    field channelName_fuzzy type string {
+        indexing: input channelName | index
+        index: enable-bm25
+        match {
+            gram
+            gram-size: 3
+        }
+    }
+
+    field chunk_embeddings type tensor<bfloat16>(v[DIMS]) {
+        indexing: (input channelName || "") . " " . (input topic || "") . " " . (input description || "") | embed hf-embedder | attribute | index
+        attribute {
+            distance-metric: angular
+        }
+    }
+
+    fieldset default {
+        fields: channelName, topic, description
+    }
+
+    rank-profile initial {
+      inputs {
+        query(e) tensor<bfloat16>(v[DIMS])
+        query(alpha) double: 0.5
+      }
+
+      rank-properties {
+        nativeFieldMatch.firstOccurrenceImportance: 0
+      }
+
+      function lexical_score() {
+        expression: 4 * nativeRank(topic)
+      }
+
+      function fuzzy_lexical_score() {
+        expression: 4 * nativeRank(channelName_fuzzy)
+      }
+
+      function vector_score() {
+        expression: closeness(field, chunk_embeddings)
+      }
+
+      function combined_nativeRank() {
+        expression: nativeRank(topic, description)
+      }
+    }
+
+    rank-profile unified inherits initial {
+      first-phase {
+        expression: lexical_score
+      }
+      match-features {
+        combined_nativeRank
+        lexical_score
+      }
+    }
+
+    rank-profile default_native inherits unified {
+      first-phase {
+        expression: query(alpha) * vector_score + (1 - query(alpha)) * lexical_score
+      }
+      match-features {
+        combined_nativeRank
+        lexical_score
+        vector_score
+      }
+    }
+
+    rank-profile default_fuzzy inherits unified {
+      first-phase {
+        expression: query(alpha) * vector_score + (1 - query(alpha)) * fuzzy_lexical_score
+      }
+      match-features {
+        combined_nativeRank
+        lexical_score
+        vector_score
+      }
+    }
+
+
+  document-summary lean {
+    summary docId {}
+    summary docType {}
+    summary channelName {}
+    summary description {}
+    summary topic {}
+    summary memberCount {}
+    summary isIm {}
+    summary isMpim {}
+    summary isPrivate {}
+    summary createdAt {}
+    summary permissions {}
+    summary entityTypes {}
+  }
+
+}

@@ -44,6 +44,16 @@ COMPOSE_CMD="podman compose"
 echo -e "${BLUE}🚢 Starting containers...${NC}"
 $COMPOSE_CMD -f docker-compose.dev.yml up -d postgres redis livekit fake-gcs ysweet transcription-agent victoriametrics grafana otel-collector superposition
 
+# Vespa lives in its own compose file. Set SKIP_VESPA=1 to leave search out.
+VESPA_COMPOSE="vespa-core/deployment/docker-compose.dev.yml"
+# -p keeps Vespa in the same compose project as the rest of the stack; without it
+# compose names the project after the compose file's parent dir ("deployment").
+VESPA_PROJECT="${COMPOSE_PROJECT_NAME:-$(basename "$PWD")}"
+if [ "${SKIP_VESPA:-0}" != "1" ] && [ -f "$VESPA_COMPOSE" ]; then
+    echo -e "${BLUE}🔎 Starting Vespa...${NC}"
+    $COMPOSE_CMD -p "$VESPA_PROJECT" -f "$VESPA_COMPOSE" up -d || echo -e "${YELLOW}⚠️  Vespa failed to start (continuing)${NC}"
+fi
+
 # --- STEP 4: Wait for Services ---
 
 # Wait for Postgres
@@ -99,6 +109,18 @@ cd ..
 # --- STEP 7: Start Zero Cache ---
 echo -e "${BLUE}🚀 Starting Zero Cache...${NC}"
 $COMPOSE_CMD -f docker-compose.dev.yml up -d zero-cache
+
+# --- STEP 8: Deploy Vespa schemas ---
+# Non-fatal: needs bun + the vespa CLI. Retry with `npm run services:vespa`.
+if [ "${SKIP_VESPA:-0}" != "1" ] && [ -f "$VESPA_COMPOSE" ]; then
+    echo -e "${BLUE}🔎 Deploying Vespa schemas...${NC}"
+    if DOCKER_COMPOSE="$COMPOSE_CMD" CONTAINER_CLI="podman" bash vespa-core/scripts/deploy-dev.sh; then
+        echo -e "${GREEN}✓ Vespa schemas deployed${NC}"
+    else
+        echo -e "${YELLOW}⚠️  Vespa schema deploy failed — needs bun + vespa CLI.${NC}"
+        echo -e "${YELLOW}   Retry with: npm run services:vespa${NC}"
+    fi
+fi
 
 echo ""
 echo -e "${GREEN}========================================${NC}"

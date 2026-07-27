@@ -1,0 +1,151 @@
+<services version="1.0">
+    <!-- Local dev topology: ONE container cluster serving both feed and query.
+         Prod splits these into two clusters (feed=8080, query=8081) to isolate the
+         GPU embedder; on a laptop that second cluster costs a whole extra JVM plus a
+         duplicate ONNX runtime, so here both HTTP servers live on one cluster.
+         The cluster keeps the id "feed" so <document-processing cluster="feed"/>
+         below still resolves, and both 8080/8081 endpoints stay available. -->
+    <container id="feed" version="1.0">
+        <!-- https://docs.vespa.ai/en/onnx.html#using-optimum-to-export-models-to-onnx-format -->
+        <!-- gpu-device -1 = CPU. Prod uses 0; on a dev box that just fails over to CPU
+             after a failed CUDA session attempt. Single-threaded ONNX keeps native
+             memory and thread count down. -->
+        <component id="hf-embedder" type="hugging-face-embedder">
+            <transformer-model path="models/model.onnx" />
+            <tokenizer-model path="models/tokenizer.json" />
+            <onnx-gpu-device>0</onnx-gpu-device>
+            <onnx-execution-mode>parallel</onnx-execution-mode>
+            <!-- One thread each: onnxruntime otherwise sizes its pools off the core
+                 count, and there are two embedder instances in this cluster. -->
+            <onnx-interop-threads>1</onnx-interop-threads>
+            <onnx-intraop-threads>1</onnx-intraop-threads>
+        </component>
+
+        <!-- Local dev has no batch proxy to route to, so file uses the same local model -->
+        <component id="embed-file" type="hugging-face-embedder">
+            <transformer-model path="models/model.onnx" />
+            <tokenizer-model path="models/tokenizer.json" />
+            <onnx-gpu-device>0</onnx-gpu-device>
+            <onnx-execution-mode>parallel</onnx-execution-mode>
+            <!-- One thread each: onnxruntime otherwise sizes its pools off the core
+                 count, and there are two embedder instances in this cluster. -->
+            <onnx-interop-threads>1</onnx-interop-threads>
+            <onnx-intraop-threads>1</onnx-intraop-threads>
+        </component>
+
+        <!-- Container-level threadpool - small, to cap concurrent embedder work -->
+        <config name="container.handler.threadpool">
+            <!-- corePoolSize==maxthreads gives a fixed-size pool (recommended) -->
+            <corePoolSize>4</corePoolSize>
+            <maxthreads>4</maxthreads>
+        </config>
+
+        <!-- All /document/v1 traffic and doc-processing lives here -->
+        <document-api />
+
+        <!-- Just enable document-processing; don't put <threadpool> here -->
+        <document-processing />
+
+        <!-- Search with a minimal threadpool; dev has no query concurrency to serve -->
+        <search>
+            <threadpool>
+                <threads>1</threads>   <!-- per vCPU -->
+                <queue>25</queue>
+            </threadpool>
+        </search>
+
+        <!-- Both endpoints on the one cluster, so the backend's feed/query split works.
+             Port 8080 is container-internal; docker-compose.dev.yml publishes it on 8082
+             because y-sweet owns host port 8080. -->
+        <http>
+            <server port="8080" id="feed" />
+            <server port="8081" id="query" />
+        </http>
+
+        <nodes>
+            <!-- One cluster instead of two: 25% of node memory total, not 2x25%.
+                 SerialGC avoids G1's concurrent GC threads and region metadata on a
+                 heap this small. ONNX allocates off-heap, so leave the rest free. -->
+            <jvm allocated-memory="25%" gc-options="-XX:+UseSerialGC" />
+            <node hostalias="node1"/>
+        </nodes>
+    </container>
+
+    <!-- Cluster controller for content cluster -->
+    <!-- Only the content cluster needs a cluster controller -->
+    <admin version="2.0">
+        <adminserver hostalias="node1" />
+        <cluster-controllers>
+            <cluster-controller hostalias="node1" />
+        </cluster-controllers>
+    </admin>
+
+    <content id="my_content" version="1.0">
+        <engine>
+            <proton>
+                <resource-limits>
+                    <disk>0.90</disk>
+                    <memory>0.85</memory>
+                </resource-limits>
+                <tuning>
+                    <searchnode>
+                        <!-- Dev-sized thread counts; prod uses 32/8 -->
+                        <requestthreads>
+                            <search>4</search>
+                            <persearch>1</persearch>
+                            <summary>2</summary>
+                        </requestthreads>
+                        <feeding>
+                            <concurrency>0.2</concurrency>
+                            <niceness>0.5</niceness>
+                        </feeding>
+                        <flushstrategy>
+                            <native>
+                                <total>
+                                    <!-- 256 MB (prod: 8 GB). Flushes to disk sooner,
+                                         so proton holds far less in memory. -->
+                                    <maxmemorygain>268435456</maxmemorygain>
+                                    <diskbloatfactor>0.2</diskbloatfactor>
+                                </total>
+                            </native>
+                        </flushstrategy>
+                        <!-- Summary cache defaults to 5% of node memory; 32 MB is plenty
+                             for dev-sized corpora. -->
+                        <summary>
+                            <store>
+                                <cache>
+                                    <maxsize>33554432</maxsize>
+                                </cache>
+                            </store>
+                        </summary>
+                    </searchnode>
+                </tuning>
+            </proton>
+        </engine>
+
+        <redundancy reply-after="1">1</redundancy>
+
+        <documents>
+            <document type="chat_message" mode="index" />
+            <document type="chat_attachment" mode="index" global="true" />
+            <document type="chat_container" mode="index" global="true" />
+            <document type="project" mode="index" global="true" />
+            <document type="user" mode="index" />
+            <document type="mail" mode="index" />
+            <document type="mail_attachment" mode="index" />
+            <document type="ticket" mode="index" />
+            <document type="call" mode="index" />
+            <document type="file" mode="index" />
+            <document type="memory" mode="index" />
+            <document type="sam_transcript" mode="index" />
+            <document type="app" mode="index" />
+
+            <!-- Route document indexing/processing through the container cluster above -->
+            <document-processing cluster="feed" />
+        </documents>
+
+        <nodes>
+            <node distribution-key="0" hostalias="node1" />
+        </nodes>
+    </content>
+</services>

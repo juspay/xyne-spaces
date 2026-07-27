@@ -1,0 +1,177 @@
+schema sam_transcript {
+  document sam_transcript {
+    field docId type string {
+      indexing: attribute | summary
+    }
+
+    field docType type string {
+      indexing: attribute | summary
+      attribute: fast-search
+      match: exact
+    }
+
+    field orgId type string {
+      indexing: attribute | summary
+      attribute: fast-search
+      match: exact
+    }
+
+    field workspaceId type string {
+      indexing: attribute | summary
+      attribute: fast-search
+      match: exact
+    }
+
+    field meetCode type string {
+      indexing: index | attribute | summary
+      index: enable-bm25
+    }
+
+    field participants type array<string> {
+      indexing: index | attribute | summary
+      index: enable-bm25
+    }
+
+    field platform type string {
+      indexing: attribute | summary
+    }
+
+    field type type string {
+      indexing: attribute | summary
+    }
+
+    field duration type string {
+      indexing: attribute | summary
+    }
+
+    field meetingSummary type string {
+      indexing: index | attribute | summary
+      index: enable-bm25
+    }
+
+    field chapters type string {
+      indexing: index | attribute | summary
+      index: enable-bm25
+    }
+
+    field actionItems type string {
+      indexing: index | attribute | summary
+      index: enable-bm25
+    }
+
+    field dateTime type double {
+      indexing: attribute | summary
+      attribute: fast-search
+    }
+
+    field merchants type array<string> {
+      indexing: index | attribute | summary
+      index: enable-bm25
+    }
+
+    field others type string {
+      indexing: index | attribute | summary
+      index: enable-bm25
+    }
+
+    field qna type string {
+      indexing: index | attribute | summary
+      index: enable-bm25
+    }
+  }
+
+  field meetingSummary_embeddings type tensor<bfloat16>(v[DIMS]) {
+    indexing: input meetingSummary | embed hf-embedder | attribute | index
+    attribute {
+      distance-metric: angular
+    }
+  }
+
+  field chapters_embeddings type tensor<bfloat16>(v[DIMS]) {
+    indexing: input chapters | embed hf-embedder | attribute | index
+    attribute {
+      distance-metric: angular
+    }
+  }
+
+  field actionItems_embeddings type tensor<bfloat16>(v[DIMS]) {
+    indexing: input actionItems | embed hf-embedder | attribute | index
+    attribute {
+      distance-metric: angular
+    }
+  }
+
+  field others_embeddings type tensor<bfloat16>(v[DIMS]) {
+    indexing: input others | embed hf-embedder | attribute | index
+    attribute {
+      distance-metric: angular
+    }
+  }
+
+  field qna_embeddings type tensor<bfloat16>(v[DIMS]) {
+    indexing: input qna | embed hf-embedder | attribute | index
+    attribute {
+      distance-metric: angular
+    }
+  }
+
+  fieldset default {
+    fields: meetingSummary, chapters, actionItems, others, qna, meetCode, participants, merchants
+  }
+
+  rank-profile initial {
+    inputs {
+      query(e) tensor<bfloat16>(v[DIMS])
+      query(alpha) double: 0.5
+    }
+
+    rank-properties {
+      nativeFieldMatch.firstOccurrenceImportance: 0
+    }
+
+    function lexical_score() {
+      expression: 4 * nativeRank(meetingSummary)
+    }
+
+    function vector_score() {
+      expression: max(max(max(max(closeness(field, meetingSummary_embeddings), closeness(field, chapters_embeddings)), closeness(field, actionItems_embeddings)), closeness(field, others_embeddings)), closeness(field, qna_embeddings))
+    }
+
+    function combined_nativeRank() {
+      expression: nativeRank(meetingSummary, chapters, actionItems)
+    }
+  }
+
+  rank-profile unified inherits initial {
+    first-phase {
+      expression: lexical_score
+    }
+    match-features {
+      combined_nativeRank
+      lexical_score
+    }
+  }
+
+  rank-profile default_native inherits unified {
+    first-phase {
+      expression: query(alpha) * vector_score + (1 - query(alpha)) * lexical_score
+    }
+    match-features {
+      combined_nativeRank
+      lexical_score
+      vector_score
+    }
+  }
+
+  
+  document-summary lean {
+    summary docId {}
+    summary docType {}
+    summary meetCode {}
+    summary platform {}
+    summary type {}
+    summary duration {}
+    summary meetingSummary {}
+    summary dateTime {}
+  }
+}
