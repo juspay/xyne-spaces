@@ -9,6 +9,11 @@ import { Menu } from '@base-ui/react/menu';
 import { cn } from '../../utils/classNames';
 import { attachmentViewerActor } from '../../machines/attachmentViewerMachine';
 import { useSelector } from '@xstate/react';
+import {
+  clearVideoPosition,
+  getVideoPosition,
+  saveVideoPosition,
+} from '../../utils/videoPlaybackPositions';
 
 interface VideoViewerProps extends BaseViewerProps {
   attachmentId?: string;
@@ -17,6 +22,7 @@ interface VideoViewerProps extends BaseViewerProps {
   onExpand?: () => void;
   menuContent?: React.ReactNode;
   initialTime?: number;
+  autoPlay?: boolean;
 }
 
 const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
@@ -28,7 +34,8 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
       height,
       onExpand,
       menuContent,
-      initialTime = 0,
+      initialTime,
+      autoPlay = false,
       disableGestures,
       onInteractionStateChange,
     },
@@ -139,32 +146,66 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
       }
     }, [activeGalleryAttachmentId, attachmentId]);
 
-    // Auto-play video when component mounts and video is ready
-    useEffect(() => {
-      if (videoRef.current) {
-        const attemptAutoPlay = (): void => {
-          // GUARD: Do not auto-play if there's a modal open and this isn't the active attachment
-          if (
-            activeGalleryAttachmentId &&
-            attachmentId &&
-            activeGalleryAttachmentId !== attachmentId
-          ) {
-            return;
-          }
+    const positionKey = attachmentId;
+    const lastKnownRef = useRef<{ key: string | undefined; time: number; duration: number }>({
+      key: positionKey,
+      time: 0,
+      duration: 0,
+    });
+    const savedTimeRef = useRef(0);
+    const hasAppliedStartTimeRef = useRef(false);
+    const hasAutoPlayedRef = useRef(false);
 
-          if (videoRef.current && videoRef.current.paused) {
-            // Seek to initial time if provided before playing
-            if (initialTime > 0) {
-              videoRef.current.currentTime = initialTime;
-            }
-            videoRef.current.play().catch(() => {
-              setShowControls(true);
-            });
-          }
-        };
-        attemptAutoPlay();
+    useEffect(() => {
+      hasAppliedStartTimeRef.current = false;
+      hasAutoPlayedRef.current = false;
+      savedTimeRef.current = 0;
+      lastKnownRef.current = { key: positionKey, time: 0, duration: 0 };
+    }, [streamUrl, positionKey]);
+
+    useEffect((): (() => void) => {
+      return (): void => {
+        const { key, time, duration } = lastKnownRef.current;
+        saveVideoPosition(key, time, duration);
+      };
+    }, [positionKey]);
+
+    const applyStartTime = (): void => {
+      const video = videoRef.current;
+      if (!video || hasAppliedStartTimeRef.current) {
+        return;
       }
-    }, [streamUrl, initialTime, activeGalleryAttachmentId, attachmentId]);
+      hasAppliedStartTimeRef.current = true;
+
+      const resumeFrom =
+        initialTime !== undefined && initialTime > 0
+          ? initialTime
+          : (getVideoPosition(positionKey) ?? 0);
+
+      if (resumeFrom <= 0) {
+        return;
+      }
+      if (isFinite(video.duration) && resumeFrom >= video.duration) {
+        return;
+      }
+      video.currentTime = resumeFrom;
+      setCurrentTime(resumeFrom);
+    };
+
+    const maybeAutoPlay = (): void => {
+      const video = videoRef.current;
+      if (!autoPlay || hasAutoPlayedRef.current || !video || !video.paused) {
+        return;
+      }
+      // Don't steal playback while a different attachment is open in the modal.
+      if (activeGalleryAttachmentId && attachmentId && activeGalleryAttachmentId !== attachmentId) {
+        return;
+      }
+      hasAutoPlayedRef.current = true;
+      video.play().catch(() => {
+        setShowControls(true);
+      });
+    };
 
     // Handle play/pause
     const togglePlay = useCallback((e?: React.MouseEvent): void => {
@@ -245,9 +286,15 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
       setError(null);
     };
 
+    const handleLoadedMetadata = (): void => {
+      applyStartTime();
+    };
+
     const handleCanPlay = (): void => {
       setIsLoading(false);
       setError(null);
+      applyStartTime();
+      maybeAutoPlay();
     };
 
     const handlePlay = (): void => {
@@ -256,12 +303,35 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
 
     const handlePause = (): void => {
       setIsPlaying(false);
+      const video = videoRef.current;
+      if (video) {
+        savedTimeRef.current = video.currentTime;
+        saveVideoPosition(positionKey, video.currentTime, video.duration);
+      }
+    };
+
+    const handleEnded = (): void => {
+      setIsPlaying(false);
+      lastKnownRef.current = { key: positionKey, time: 0, duration: 0 };
+      clearVideoPosition(positionKey);
     };
 
     const handleTimeUpdate = (): void => {
-      if (videoRef.current) {
-        setCurrentTime(videoRef.current.currentTime);
-        attachmentViewerActor.send({ type: 'SET_VIDEO_TIME', time: videoRef.current.currentTime });
+      const video = videoRef.current;
+      if (!video) {
+        return;
+      }
+      setCurrentTime(video.currentTime);
+      attachmentViewerActor.send({ type: 'SET_VIDEO_TIME', time: video.currentTime });
+
+      lastKnownRef.current = {
+        key: positionKey,
+        time: video.currentTime,
+        duration: video.duration,
+      };
+      if (Math.abs(video.currentTime - savedTimeRef.current) >= 1) {
+        savedTimeRef.current = video.currentTime;
+        saveVideoPosition(positionKey, video.currentTime, video.duration);
       }
     };
 
@@ -454,14 +524,15 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
           }}
           onClick={togglePlay}
           onLoadStart={handleLoadStart}
+          onLoadedMetadata={handleLoadedMetadata}
           onCanPlay={handleCanPlay}
           onPlay={handlePlay}
           onPause={handlePause}
+          onEnded={handleEnded}
           onTimeUpdate={handleTimeUpdate}
           onDurationChange={handleDurationChange}
           onError={handleError}
           preload='metadata'
-          autoPlay
           playsInline
           controls={false}
           data-track-category='VIDEO_PLAYER'

@@ -9,6 +9,7 @@ export interface AttachmentRef {
   fileSize: number;
   initialTime?: number;
   initialPage?: number;
+  autoPlay?: boolean;
   thumbnailUrl?: string | null;
 
   // Thread context
