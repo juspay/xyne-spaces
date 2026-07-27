@@ -109,8 +109,9 @@ const SlideContent: React.FC<{
   isActive: boolean;
   disableGestures?: boolean;
   initialTime?: number | undefined;
+  autoPlay?: boolean;
   onInteractionStateChange?: (state: ZoomState) => void;
-}> = ({ file, isActive, disableGestures, initialTime, onInteractionStateChange }) => {
+}> = ({ file, isActive, disableGestures, initialTime, autoPlay, onInteractionStateChange }) => {
   const [fileData, setFileData] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -171,6 +172,7 @@ const SlideContent: React.FC<{
             source={null}
             fileName={file.fileName}
             attachmentId={file.attachmentId}
+            autoPlay={Boolean(autoPlay)}
             {...(initialTime !== undefined && { initialTime })}
             {...(isCarouselMode && { disableGestures: true })}
             {...(isCarouselMode && onInteractionStateChange && { onInteractionStateChange })}
@@ -1062,6 +1064,7 @@ const AttachmentGalleryModalInner: React.FC = () => {
   const currentFileSize = currentFile?.fileSize ?? currentAttachment?.fileSize ?? 0;
   const currentAttachmentId = currentFile?.attachmentId ?? currentAttachment?.attachmentId;
   const initialTime = currentAttachment?.initialTime;
+  const shouldAutoPlayVideo = currentAttachment?.autoPlay ?? false;
 
   const fileType = detectFileType(currentMimeType, currentFileName);
   const isVideo = fileType?.displayName === 'Video';
@@ -1169,6 +1172,7 @@ const AttachmentGalleryModalInner: React.FC = () => {
               fileName={currentFileName}
               attachmentId={currentAttachmentId}
               onExpand={() => attachmentViewerActor.send({ type: 'CLOSE' })}
+              autoPlay={shouldAutoPlayVideo}
               {...(initialTime !== undefined && { initialTime })}
             />
           </div>
@@ -1352,6 +1356,7 @@ const AttachmentGalleryModalInner: React.FC = () => {
                 {...(disableCarouselGestures && { disableGestures: true })}
                 // Pass initialTime to active video
                 initialTime={initialTime}
+                autoPlay={index === currentFileIndex && shouldAutoPlayVideo}
                 {...(index === currentFileIndex && {
                   onInteractionStateChange: (state: ZoomState) => {
                     activeSlideZoomStateRef.current = state;
