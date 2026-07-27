@@ -12,7 +12,6 @@ import { jwtService } from '../services/jwtService';
 import { config } from '@/config/env';
 import jwt from 'jsonwebtoken';
 import { getFrontendUrl, resolveConfiguredOAuthRedirectUrl } from '@/utils/publicUrls';
-import { persistCalendarOAuthCredentials } from '@/services/calendarTokenRefresh';
 import { jwtVerify, createRemoteJWKSet } from 'jose';
 import { WorkspaceType } from '@xyne/shared';
 import {
@@ -105,15 +104,8 @@ export class MicrosoftAuthController {
     );
   }
 
-  private getMicrosoftAuthScopes(connectCalendar?: boolean): string[] {
-    return [
-      'openid',
-      'email',
-      'profile',
-      'User.Read',
-      'offline_access',
-      ...(connectCalendar ? ['Calendars.Read'] : []),
-    ];
+  private getMicrosoftAuthScopes(): string[] {
+    return ['openid', 'email', 'profile', 'User.Read', 'offline_access'];
   }
 
   private getAccessTokenExpiry(token: Record<string, unknown>): Date | undefined {
@@ -138,37 +130,6 @@ export class MicrosoftAuthController {
     }
 
     return undefined;
-  }
-
-  private async persistMicrosoftCalendarCredentials(
-    email: string,
-    refreshToken: string | null | undefined,
-    accessToken: string | null | undefined,
-    accessTokenExpiry?: Date,
-    ownerUserId?: string,
-  ): Promise<boolean> {
-    const sourceId = await persistCalendarOAuthCredentials({
-      provider: AuthProvider.MICROSOFT,
-      email,
-      refreshToken,
-      accessToken,
-      accessTokenExpiry,
-      ownerUserId,
-    });
-
-    if (!sourceId) {
-      logger.warn('[MicrosoftAuth] Calendar reauth did not include a refresh token', {
-        email,
-      });
-      return false;
-    }
-
-    logger.info('[MicrosoftAuth] Calendar credentials persisted', {
-      email,
-      sourceId,
-      ownerUserId,
-    });
-    return true;
   }
 
   initiateLogin = async (req: Request, res: Response): Promise<void> => {
@@ -211,7 +172,6 @@ export class MicrosoftAuthController {
         // Get invitationId from query (for invitation flow)
         const invitationId = req.query.invitationId as string | undefined;
 
-        const connectCalendar = req.query.connectCalendar === 'true';
         const enterpriseLogin = req.query.enterpriseLogin === 'true';
 
         const state = await oauthStateServiceV2.generateState(
@@ -221,7 +181,6 @@ export class MicrosoftAuthController {
           'microsoft',
           undefined,
           invitationId,
-          connectCalendar,
           enterpriseLogin,
         );
 
@@ -233,7 +192,7 @@ export class MicrosoftAuthController {
 
         const authorizationUri = this.oauthClient.authorizeURL({
           redirect_uri: redirectUri,
-          scope: this.getMicrosoftAuthScopes(connectCalendar),
+          scope: this.getMicrosoftAuthScopes(),
           state,
           code_challenge: codeChallenge,
           code_challenge_method: 'S256',
@@ -355,7 +314,7 @@ export class MicrosoftAuthController {
         const tokenParams = {
           code: code as string,
           redirect_uri: redirectUri,
-          scope: this.getMicrosoftAuthScopes(peekedState?.connectCalendar).join(' '),
+          scope: this.getMicrosoftAuthScopes().join(' '),
           code_verifier: codeVerifier,
         };
 
@@ -448,7 +407,6 @@ export class MicrosoftAuthController {
             picture: microsoftUserData.picture,
             provider: AuthProvider.MICROSOFT,
             refreshToken: refreshToken ?? null,
-            connectCalendar: peekedState?.connectCalendar,
           }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
             httpOnly: true,
             secure: isProduction,
@@ -538,17 +496,6 @@ export class MicrosoftAuthController {
           }
         }
 
-        let calendarReauthRequired = false;
-        if (peekedState?.connectCalendar) {
-          calendarReauthRequired = !(await this.persistMicrosoftCalendarCredentials(
-            microsoftUserData.email,
-            refreshToken,
-            accessToken,
-            accessTokenExpiry,
-            user.id,
-          ));
-        }
-
         // Handle mobile platform: redirect to app deep link with token
         if (resolvedPlatform === 'mobile') {
           const mobileParams = new URLSearchParams({
@@ -590,7 +537,6 @@ export class MicrosoftAuthController {
           refreshToken: refreshToken ?? null,
           accessToken: accessToken ?? null,
           accessTokenExpiry: accessTokenExpiry?.toISOString(),
-          connectCalendar: peekedState?.connectCalendar,
         }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
           ...cookieOptions,
           maxAge: 10 * 60 * 1000, // 10 minutes pending auth window
@@ -614,19 +560,6 @@ export class MicrosoftAuthController {
 
         // Redirect to frontend with success
         const frontendUrl = peekedState?.redirectTo ?? getFrontendUrl(req);
-
-        // If this was a "connect calendar" re-auth, redirect straight to the calls page
-        if (peekedState?.connectCalendar && user.workspaceId) {
-          const params = new URLSearchParams({
-            tab: 'upcoming',
-            syncCalendar: 'true',
-          });
-          if (calendarReauthRequired) {
-            params.set('calendarReauthRequired', 'true');
-          }
-          res.redirect(`${frontendUrl}/${user.workspaceId}/calls?${params.toString()}`);
-          return;
-        }
 
         const params = new URLSearchParams({
           success: 'true',
@@ -768,7 +701,7 @@ export class MicrosoftAuthController {
       const tokenResult = await this.oauthClient.getToken({
         code,
         redirect_uri: redirectUri,
-        scope: this.getMicrosoftAuthScopes(stateData.connectCalendar).join(' '),
+        scope: this.getMicrosoftAuthScopes().join(' '),
         ...( codeVerifier ? { code_verifier: codeVerifier } : {}),
       } as Parameters<typeof this.oauthClient.getToken>[0]);
       const { token } = tokenResult;
@@ -960,17 +893,6 @@ export class MicrosoftAuthController {
           }
         }
 
-        let calendarReauthRequired = false;
-        if (stateData.connectCalendar) {
-          calendarReauthRequired = !(await this.persistMicrosoftCalendarCredentials(
-            email,
-            refreshToken,
-            accessToken,
-            accessTokenExpiry,
-            user.id,
-          ));
-        }
-
         const cookieOptions = {
           httpOnly: true,
           secure: isProduction,
@@ -1014,7 +936,6 @@ export class MicrosoftAuthController {
           refreshToken: refreshToken ?? null,
           accessToken,
           accessTokenExpiry: accessTokenExpiry?.toISOString(),
-          connectCalendar: stateData.connectCalendar,
         }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
           httpOnly: true,
           secure: isProduction,
@@ -1033,7 +954,6 @@ export class MicrosoftAuthController {
           picture: user.picture ?? undefined,
           workspaces,
           userExistsButRemoved: false,
-          ...(stateData.connectCalendar ? { connectCalendar: true, workspaceId, calendarReauthRequired } : {}),
         });
         return;
       }
@@ -1096,7 +1016,6 @@ export class MicrosoftAuthController {
         refreshToken: refreshToken ?? null,
         accessToken,
         accessTokenExpiry: accessTokenExpiry?.toISOString(),
-        connectCalendar: stateData.connectCalendar,
       }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
         httpOnly: true,
         secure: isProduction,
@@ -1195,7 +1114,7 @@ export class MicrosoftAuthController {
         client_id: this.clientId!,
         code,
         redirect_uri: redirectUri,
-        scope: this.getMicrosoftAuthScopes(req.body?.connectCalendar === true).join(' '),
+        scope: this.getMicrosoftAuthScopes().join(' '),
         code_verifier: codeVerifier,
       });
 
@@ -1353,7 +1272,6 @@ export class MicrosoftAuthController {
         accessTokenExpiry: mobileExpiresIn
           ? new Date(Date.now() + mobileExpiresIn * 1000).toISOString()
           : undefined,
-        connectCalendar: req.body?.connectCalendar === true,
       }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
         ...cookieOptions,
         maxAge: 10 * 60 * 1000, // 10 minutes pending auth window

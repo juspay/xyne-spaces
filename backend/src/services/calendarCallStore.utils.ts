@@ -52,7 +52,7 @@ export function normalizeCalendarOwnerEmail(email: string): string {
 export function buildCalendarExternalId(
   provider: ExternalCalendarProvider,
   userId: string,
-  eventId: string,
+  eventId: string
 ): string {
   const prefix = provider === 'google' ? 'gcal' : 'mscal';
   return `${prefix}__${userId}__${eventId}`;
@@ -60,7 +60,7 @@ export function buildCalendarExternalId(
 
 export function buildCalendarExternalIdPrefix(
   provider: ExternalCalendarProvider,
-  userId: string,
+  userId: string
 ): string {
   const prefix = provider === 'google' ? 'gcal' : 'mscal';
   return `${prefix}__${userId}__`;
@@ -70,7 +70,7 @@ export function buildCalendarExternalIdPrefix(
 
 export async function upsertExternalCalendarCall(
   data: ExternalCalendarCallData,
-  now: Date,
+  now: Date
 ): Promise<void> {
   await repositories.calls.upsertExternalCalendarCall({
     externalId: data.externalId,
@@ -101,7 +101,7 @@ export async function cancelRemovedExternalCalendarCalls(
   callOrigin: CallOrigin,
   fetchedExternalIds: Set<string>,
   logPrefix: string,
-  timeRange?: CalendarSyncTimeRange,
+  timeRange?: CalendarSyncTimeRange
 ): Promise<void> {
   try {
     const existing = await repositories.calls.findExternalCalendarCalls({
@@ -111,16 +111,16 @@ export async function cancelRemovedExternalCalendarCalls(
       timeRange,
     });
 
-    const toCancel = existing.filter(c => !fetchedExternalIds.has(c.externalId));
+    const toCancel = existing.filter((c) => !fetchedExternalIds.has(c.externalId));
 
     if (toCancel.length > 0) {
-      await repositories.calls.cancelByIds(toCancel.map(c => c.id));
-      logger.info(`[${logPrefix}] Cancelled ${toCancel.length} removed event(s)`);
+      await repositories.calls.cancelByIds(toCancel.map((c) => c.id));
+      logger.info(`${logPrefix} Cancelled ${toCancel.length} removed event(s)`);
     }
   } catch (err) {
     logger.error(
-      `[${logPrefix}] Failed to cancel removed events:`,
-      err instanceof Error ? err.message : err,
+      `${logPrefix} Failed to cancel removed events:`,
+      err instanceof Error ? err.message : err
     );
   }
 }

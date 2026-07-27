@@ -16,7 +16,8 @@ import { MicrosoftCalendarSubscriptionService } from '@/services/microsoftCalend
 import { redisService } from '@/services/redisService';
 
 const router = Router();
-const TAG = '[CalendarWebhook]';
+const GOOGLE_TAG = '[CALENDAR_SYNC][GOOGLE][WEBHOOK]';
+const MICROSOFT_TAG = '[CALENDAR_SYNC][MICROSOFT][WEBHOOK]';
 const GOOGLE_WEBHOOK_COALESCE_WINDOW_SECONDS = 15;
 const GOOGLE_WEBHOOK_COALESCED_JOB_DELAY_MS = GOOGLE_WEBHOOK_COALESCE_WINDOW_SECONDS * 1000;
 
@@ -24,16 +25,10 @@ async function shouldEnqueueGoogleSyncImmediately(channelId: string): Promise<bo
   try {
     const redis = redisService.getClient();
     const key = `calendar:webhook:google:${channelId}:sync-coalesce`;
-    const result = await redis.set(
-      key,
-      '1',
-      'EX',
-      GOOGLE_WEBHOOK_COALESCE_WINDOW_SECONDS,
-      'NX',
-    );
+    const result = await redis.set(key, '1', 'EX', GOOGLE_WEBHOOK_COALESCE_WINDOW_SECONDS, 'NX');
     return result === 'OK';
   } catch (err) {
-    logger.warn(`${TAG} Google webhook coalescing unavailable, allowing immediate enqueue`, {
+    logger.warn(`${GOOGLE_TAG} Webhook coalescing unavailable, allowing immediate enqueue`, {
       channelId,
       error: err instanceof Error ? err.message : String(err),
     });
@@ -46,7 +41,7 @@ async function shouldEnqueueGoogleSyncImmediately(channelId: string): Promise<bo
 // ============================================================================
 
 router.post('/google-calendar', async (req: Request, res: Response) => {
-  logger.info(`${TAG} [DEBUG] Google webhook HIT`, {
+  logger.info(`${GOOGLE_TAG} [DEBUG] Webhook HIT`, {
     ip: req.ip,
     headers: {
       'x-goog-channel-id': req.headers['x-goog-channel-id'],
@@ -67,14 +62,14 @@ router.post('/google-calendar', async (req: Request, res: Response) => {
     const messageNumber = req.headers['x-goog-message-number'] as string;
     const channelToken = req.headers['x-goog-channel-token'] as string | undefined;
 
-    logger.info(`${TAG} Google Calendar webhook received`, {
+    logger.info(`${GOOGLE_TAG} Webhook received`, {
       channelId,
       resourceState,
       messageNumber,
     });
 
     if (!channelId || !resourceId) {
-      logger.error(`${TAG} Missing required headers`, { channelId, resourceId });
+      logger.error(`${GOOGLE_TAG} Missing required headers`, { channelId, resourceId });
       res.status(400).send('Missing required Google Calendar webhook headers');
       return;
     }
@@ -82,20 +77,20 @@ router.post('/google-calendar', async (req: Request, res: Response) => {
     const subscription = await GoogleCalendarWatchService.findSubscriptionByChannel(channelId);
 
     if (!subscription) {
-      logger.error(`${TAG} No subscription found for channel`, { channelId });
+      logger.error(`${GOOGLE_TAG} No subscription found for channel`, { channelId });
       res.status(404).send('Unknown Google Calendar channel');
       return;
     }
 
     const creds = parseCalendarCredentials(subscription.credentials);
     if (!creds?.resourceId) {
-      logger.error(`${TAG} Subscription missing stored resource ID`, { channelId });
+      logger.error(`${GOOGLE_TAG} Subscription missing stored resource ID`, { channelId });
       res.status(403).send('Invalid Google Calendar channel');
       return;
     }
 
     if (creds.resourceId !== resourceId) {
-      logger.error(`${TAG} Resource ID mismatch`, {
+      logger.error(`${GOOGLE_TAG} Resource ID mismatch`, {
         channelId,
         expected: creds.resourceId,
         received: resourceId,
@@ -106,7 +101,7 @@ router.post('/google-calendar', async (req: Request, res: Response) => {
 
     if (creds.channelToken) {
       if (creds.channelToken !== channelToken) {
-        logger.error(`${TAG} Channel token mismatch`, {
+        logger.error(`${GOOGLE_TAG} Channel token mismatch`, {
           channelId,
           hasToken: Boolean(channelToken),
         });
@@ -114,7 +109,7 @@ router.post('/google-calendar', async (req: Request, res: Response) => {
         return;
       }
     } else {
-      logger.warn(`${TAG} Tokenless Google Calendar webhook accepted via legacy resourceId validation`, {
+      logger.warn(`${GOOGLE_TAG} Tokenless webhook accepted via legacy resourceId validation`, {
         channelId,
         email: subscription.displayName,
       });
@@ -124,25 +119,28 @@ router.post('/google-calendar', async (req: Request, res: Response) => {
 
     switch (resourceState) {
       case 'sync':
-        logger.info(`${TAG} Sync notification received`, { channelId, email: subscription.displayName });
+        logger.info(`${GOOGLE_TAG} Sync notification received`, {
+          channelId,
+          email: subscription.displayName,
+        });
         break;
 
       case 'exists':
       case 'not_exists':
-        logger.info(`${TAG} Event change detected`, {
+        logger.info(`${GOOGLE_TAG} Event change detected`, {
           channelId,
           email: subscription.displayName,
           resourceState,
         });
 
         if (await shouldEnqueueGoogleSyncImmediately(channelId)) {
-          logger.info(`${TAG} Enqueuing immediate Google Calendar sync`, {
+          logger.info(`${GOOGLE_TAG} Enqueuing immediate incremental sync`, {
             channelId,
             sourceId: subscription.id,
           });
           await googleCalendarSyncQueue.enqueueIncrementalSync(subscription.id);
         } else {
-          logger.warn(`${TAG} Google Calendar webhook burst coalesced`, {
+          logger.warn(`${GOOGLE_TAG} Webhook burst coalesced`, {
             channelId,
             sourceId: subscription.id,
             delayMs: GOOGLE_WEBHOOK_COALESCED_JOB_DELAY_MS,
@@ -155,11 +153,11 @@ router.post('/google-calendar', async (req: Request, res: Response) => {
         break;
 
       default:
-        logger.warn(`${TAG} Unknown resource state`, { resourceState, channelId });
+        logger.warn(`${GOOGLE_TAG} Unknown resource state`, { resourceState, channelId });
     }
   } catch (error) {
-    logger.error(`${TAG} Error handling Google Calendar webhook`, {
-      error: error,
+    logger.error(`${GOOGLE_TAG} Error handling webhook`, {
+      error: error instanceof Error ? error.message : String(error),
     });
     if (!res.headersSent) {
       res.status(500).send('Google Calendar webhook failed');
@@ -175,7 +173,7 @@ router.get('/microsoft-calendar', (req: Request, res: Response) => {
   const validationToken = req.query.validationToken as string;
 
   if (validationToken) {
-    logger.info(`${TAG} Microsoft webhook validation (GET)`);
+    logger.info(`${MICROSOFT_TAG} Webhook validation (GET)`);
     res.status(200).type('text/plain').send(validationToken);
   } else {
     res.status(400).send('Missing validationToken');
@@ -186,7 +184,7 @@ router.post('/microsoft-calendar', async (req: Request, res: Response) => {
   try {
     const validationToken = req.query.validationToken as string;
     if (validationToken) {
-      logger.info(`${TAG} Microsoft webhook validation (POST)`);
+      logger.info(`${MICROSOFT_TAG} Webhook validation (POST)`);
       res.status(200).type('text/plain').send(validationToken);
       return;
     }
@@ -198,8 +196,8 @@ router.post('/microsoft-calendar', async (req: Request, res: Response) => {
         const jsonString = payload.toString('utf-8');
         payload = JSON.parse(jsonString);
       } catch (parseErr) {
-        logger.error(`${TAG} Failed to parse Buffer payload`, {
-          error: parseErr,
+        logger.error(`${MICROSOFT_TAG} Failed to parse Buffer payload`, {
+          error: parseErr instanceof Error ? parseErr.message : String(parseErr),
           preview: payload.slice(0, 100).toString('hex'),
         });
         res.status(202).send('Accepted');
@@ -208,7 +206,7 @@ router.post('/microsoft-calendar', async (req: Request, res: Response) => {
     }
 
     if (!payload || !Array.isArray(payload.value)) {
-      logger.error(`${TAG} Invalid notification payload`, {
+      logger.error(`${MICROSOFT_TAG} Invalid notification payload`, {
         bodyType: typeof req.body,
         isBuffer: Buffer.isBuffer(req.body),
         bodyKeys: payload ? Object.keys(payload).slice(0, 10) : 'null',
@@ -223,8 +221,8 @@ router.post('/microsoft-calendar', async (req: Request, res: Response) => {
       await processMicrosoftNotification(notification);
     }
   } catch (error) {
-    logger.error(`${TAG} Error handling Microsoft Calendar webhook`, {
-      error: error,
+    logger.error(`${MICROSOFT_TAG} Error handling webhook`, {
+      error: error instanceof Error ? error.message : String(error),
     });
   }
 });
@@ -253,20 +251,21 @@ async function processMicrosoftNotification(notification: MicrosoftNotification)
     const { subscriptionId, clientState } = notification;
 
     if (!subscriptionId) {
-      logger.error(`${TAG} Notification missing subscriptionId`);
+      logger.error(`${MICROSOFT_TAG} Notification missing subscriptionId`);
       return;
     }
 
-    const subscription = await MicrosoftCalendarSubscriptionService.findSubscriptionByMsSubscriptionId(subscriptionId);
+    const subscription =
+      await MicrosoftCalendarSubscriptionService.findSubscriptionByMsSubscriptionId(subscriptionId);
 
     if (!subscription) {
-      logger.error(`${TAG} No subscription found`, { subscriptionId });
+      logger.error(`${MICROSOFT_TAG} No subscription found`, { subscriptionId });
       return;
     }
 
     const creds = parseCalendarCredentials(subscription.credentials);
     if (creds?.clientState && creds.clientState !== clientState) {
-      logger.error(`${TAG} ClientState mismatch`, {
+      logger.error(`${MICROSOFT_TAG} ClientState mismatch`, {
         subscriptionId,
         expected: creds.clientState.substring(0, 8) + '...',
         received: clientState?.substring(0, 8) + '...',
@@ -274,46 +273,59 @@ async function processMicrosoftNotification(notification: MicrosoftNotification)
       return;
     }
 
-    logger.info(`${TAG} Processing Microsoft notification`, {
+    logger.info(`${MICROSOFT_TAG} Processing notification`, {
       subscriptionId,
+      sourceId: subscription.id,
       email: subscription.displayName,
       changeType: notification.changeType,
     });
 
     await microsoftCalendarSyncQueue.enqueueIncrementalSync(subscription.id);
   } catch (error) {
-    logger.error(`${TAG} Error processing Microsoft notification`, {
-      error: error,
+    logger.error(`${MICROSOFT_TAG} Error processing notification`, {
+      error: error instanceof Error ? error.message : String(error),
     });
   }
 }
 
 async function processMicrosoftLifecycleNotification(
-  notification: MicrosoftNotification,
+  notification: MicrosoftNotification
 ): Promise<void> {
   const { subscriptionId, lifecycleEvent } = notification;
 
-  logger.info(`${TAG} Microsoft lifecycle notification`, {
+  logger.info(`${MICROSOFT_TAG} Lifecycle notification`, {
     subscriptionId,
     lifecycleEvent,
   });
 
   if (!subscriptionId) return;
 
-  const subscription = await MicrosoftCalendarSubscriptionService.findSubscriptionByMsSubscriptionId(subscriptionId);
+  const subscription =
+    await MicrosoftCalendarSubscriptionService.findSubscriptionByMsSubscriptionId(subscriptionId);
 
   if (!subscription) {
-    logger.warn(`${TAG} Lifecycle notification for unknown subscription`, { subscriptionId });
+    logger.warn(`${MICROSOFT_TAG} Lifecycle notification for unknown subscription`, {
+      subscriptionId,
+    });
     return;
   }
+
+  logger.info(`${MICROSOFT_TAG} Lifecycle subscription resolved`, {
+    subscriptionId,
+    sourceId: subscription.id,
+    email: subscription.displayName,
+    lifecycleEvent,
+  });
 
   switch (lifecycleEvent) {
     case 'reauthorizationRequired':
       try {
         await MicrosoftCalendarSubscriptionService.renewSubscriptionForSource(subscription.id);
-        logger.info(`${TAG} Subscription reauthorized`, { email: subscription.displayName });
+        logger.info(`${MICROSOFT_TAG} Subscription reauthorized`, {
+          email: subscription.displayName,
+        });
       } catch (err) {
-        logger.error(`${TAG} Failed to reauthorize subscription`, {
+        logger.error(`${MICROSOFT_TAG} Failed to reauthorize subscription`, {
           email: subscription.displayName,
           error: err,
         });
@@ -323,15 +335,17 @@ async function processMicrosoftLifecycleNotification(
       break;
 
     case 'subscriptionRemoved':
-      logger.warn(`${TAG} Subscription removed by system`, { email: subscription.displayName });
+      logger.warn(`${MICROSOFT_TAG} Subscription removed by system`, {
+        email: subscription.displayName,
+      });
 
       await repositories.externalSources.markMicrosoftSubscriptionExpired(subscription.id);
 
       try {
         await MicrosoftCalendarSubscriptionService.createSubscriptionForSource(subscription.id);
-        logger.info(`${TAG} Subscription recreated`, { email: subscription.displayName });
+        logger.info(`${MICROSOFT_TAG} Subscription recreated`, { email: subscription.displayName });
       } catch (err) {
-        logger.error(`${TAG} Failed to recreate subscription`, {
+        logger.error(`${MICROSOFT_TAG} Failed to recreate subscription`, {
           email: subscription.displayName,
           error: err,
         });
@@ -339,12 +353,14 @@ async function processMicrosoftLifecycleNotification(
       break;
 
     case 'missed':
-      logger.warn(`${TAG} Notifications missed, enqueuing incremental sync`, { email: subscription.displayName });
+      logger.warn(`${MICROSOFT_TAG} Notifications missed, enqueuing incremental sync`, {
+        email: subscription.displayName,
+      });
       await microsoftCalendarSyncQueue.enqueueIncrementalSync(subscription.id);
       break;
 
     default:
-      logger.warn(`${TAG} Unknown lifecycle event`, { lifecycleEvent });
+      logger.warn(`${MICROSOFT_TAG} Unknown lifecycle event`, { lifecycleEvent });
   }
 }
 

@@ -10,7 +10,6 @@ import { oauthStateServiceV2 } from '../services/oauthStateServiceV2';
 import { pkceServiceV2 } from '../services/pkceServiceV2';
 import { MicrosoftAuthController } from './microsoftAuthController';
 import { channelService } from '../services/channelService';
-import { persistCalendarOAuthCredentials } from '@/services/calendarTokenRefresh';
 import { WorkspaceJoinPolicy, WorkspaceType } from '@xyne/shared';
 import type { WorkspaceJoinPolicy as WorkspaceJoinPolicyValue, WorkspaceType as WorkspaceTypeValue } from '@xyne/shared';
 
@@ -94,47 +93,6 @@ export class AuthV2Controller {
       logger.error(`[ensureSelfDmForUser] Failed to ensure self-DM for user ${userId}:`, error);
       return null;
     }
-  }
-
-  private normalizeCalendarAuthProvider(provider: string | AuthProvider): AuthProvider | null {
-    const normalized = provider.toUpperCase();
-    if (normalized === AuthProvider.GOOGLE) return AuthProvider.GOOGLE;
-    if (normalized === AuthProvider.MICROSOFT) return AuthProvider.MICROSOFT;
-    return null;
-  }
-
-  private async persistOAuthCalendarCredentials(
-    provider: AuthProvider,
-    email: string,
-    refreshToken: string | null | undefined,
-    accessToken: string | null | undefined,
-    accessTokenExpiry?: Date,
-    ownerUserId?: string,
-  ): Promise<boolean> {
-    const sourceId = await persistCalendarOAuthCredentials({
-      provider,
-      email,
-      refreshToken,
-      accessToken,
-      accessTokenExpiry,
-      ownerUserId,
-    });
-
-    if (!sourceId) {
-      logger.warn('[AuthV2] Calendar reauth did not include a refresh token', {
-        provider,
-        email,
-      });
-      return false;
-    }
-
-    logger.info('[AuthV2] Calendar credentials persisted', {
-      provider,
-      email,
-      sourceId,
-      ownerUserId,
-    });
-    return true;
   }
 
   /**
@@ -284,7 +242,6 @@ export class AuthV2Controller {
       logger.info(`[${requestId}] Detected platform: ${platform}`);
 
       const isNy = req.query.isNy === 'true';
-      const connectCalendar = req.query.connectCalendar === 'true';
       const enterpriseLogin = req.query.enterpriseLogin === 'true';
 
       const codeVerifier = pkceServiceV2.generateCodeVerifier();
@@ -310,8 +267,16 @@ export class AuthV2Controller {
 
       // Get invitationId from query (for invitation flow)
       const invitationId = req.query.invitationId as string | undefined;
-      
-      const state = await oauthStateServiceV2.generateState(platform, codeChallenge, validatedRedirectTo, undefined, isNy, invitationId, connectCalendar, enterpriseLogin);
+
+      const state = await oauthStateServiceV2.generateState(
+        platform,
+        codeChallenge,
+        validatedRedirectTo,
+        undefined,
+        isNy,
+        invitationId,
+        enterpriseLogin,
+      );
 
       await pkceServiceV2.storeVerifier(state, codeVerifier);
 
@@ -321,12 +286,7 @@ export class AuthV2Controller {
 
       const authUrl = this.getGoogleClient(isNy).generateAuthUrl({
         access_type: 'offline',
-        scope: [
-          'openid',
-          'email',
-          'profile',
-          ...(connectCalendar ? ['https://www.googleapis.com/auth/calendar.readonly'] : []),
-        ],
+        scope: ['openid', 'email', 'profile'],
         prompt: 'consent',
         redirect_uri: redirectUri,
         state,
@@ -505,7 +465,6 @@ export class AuthV2Controller {
         refreshToken: refresh_token,
         accessToken: access_token,
         accessTokenExpiry: accessTokenExpiry?.toISOString(),
-        connectCalendar: stateData.connectCalendar,
       }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
         httpOnly: true,
         secure: isProduction,
@@ -543,7 +502,7 @@ export class AuthV2Controller {
         const workspaceId = workspaces[0]!.id;
         logger.info(`[${requestId}] Single workspace detected - auto-logging in to ${workspaceId}`);
 
-        const { workspaceUser, sessionId, jwtToken } = await this.performSingleWorkspaceAutoLogin(
+        const { sessionId, jwtToken } = await this.performSingleWorkspaceAutoLogin(
           googleUserData,
           workspaceId,
           refresh_token,
@@ -551,18 +510,6 @@ export class AuthV2Controller {
           req,
           'web'
         );
-
-        let calendarReauthRequired = false;
-        if (stateData.connectCalendar) {
-          calendarReauthRequired = !(await this.persistOAuthCalendarCredentials(
-            AuthProvider.GOOGLE,
-            googleUserData.email,
-            refresh_token,
-            access_token,
-            accessTokenExpiry,
-            workspaceUser.id,
-          ));
-        }
 
         // Set workspace cookies
         // NOTE: sameSite must be 'lax' (not 'strict') for OAuth callback
@@ -593,19 +540,6 @@ export class AuthV2Controller {
 
         logger.info(`[${requestId}] Auto-login complete - redirecting to dashboard with cookies`);
         logger.info(`[${requestId}] Cookies set: xyne_last_workspace=${workspaceId}, xyne_ws_${workspaceId}_token=<JWT>`);
-
-        // If this was a "connect calendar" re-auth, redirect straight to the calls page
-        if (stateData.connectCalendar) {
-          const params = new URLSearchParams({
-            tab: 'upcoming',
-            syncCalendar: 'true',
-          });
-          if (calendarReauthRequired) {
-            params.set('calendarReauthRequired', 'true');
-          }
-          res.redirect(`${getFrontendUrl(req)}/${workspaceId}/calls?${params.toString()}`);
-          return;
-        }
 
         // Include user data and autoLoginWorkspace in redirect
         // Frontend will call loginWorkspace which will find the session from cookies
@@ -894,7 +828,7 @@ export class AuthV2Controller {
         const workspaceId = workspaces[0]!.id;
         logger.info(`[${requestId}] Single workspace detected - auto-logging in to ${workspaceId}`);
 
-        const { workspaceUser, sessionId, jwtToken } = await this.performSingleWorkspaceAutoLogin(
+        const { sessionId, jwtToken } = await this.performSingleWorkspaceAutoLogin(
           googleUserData,
           workspaceId,
           refresh_token,
@@ -902,18 +836,6 @@ export class AuthV2Controller {
           req,
           'electron'
         );
-
-        let calendarReauthRequired = false;
-        if (stateData.connectCalendar) {
-          calendarReauthRequired = !(await this.persistOAuthCalendarCredentials(
-            AuthProvider.GOOGLE,
-            googleUserData.email,
-            refresh_token,
-            access_token,
-            accessTokenExpiry,
-            workspaceUser.id,
-          ));
-        }
 
         // Set workspace cookies using electron cookie options
         const cookieBase = {
@@ -941,7 +863,6 @@ export class AuthV2Controller {
         logger.info(`[${requestId}] Electron auto-login complete - cookies set: user_session_id`);
 
         // Return JSON with workspaces (Electron expects this for renderer to handle)
-        // If this was a calendar re-auth, include a flag so the Electron app navigates back to calls.
         res.status(200).json({
           success: true,
           email: googleUserData.email,
@@ -949,7 +870,6 @@ export class AuthV2Controller {
           picture: googleUserData.picture,
           workspaces,
           userExistsButRemoved,
-          ...(stateData.connectCalendar ? { connectCalendar: true, workspaceId, calendarReauthRequired } : {}),
         });
         return;
       }
@@ -964,7 +884,6 @@ export class AuthV2Controller {
         refreshToken: refresh_token,
         accessToken: access_token,
         accessTokenExpiry: accessTokenExpiry?.toISOString(),
-        connectCalendar: stateData.connectCalendar,
       }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
         httpOnly: true,
         secure: isProduction,
@@ -1291,7 +1210,6 @@ export class AuthV2Controller {
       let pendingRefreshToken: string | undefined;
       let pendingAccessToken: string | undefined;
       let pendingAccessTokenExpiry: Date | undefined;
-      let pendingConnectCalendar = false;
 
       if (pendingAuthCookie) {
         const parsed = this.parsePendingAuthCookie(pendingAuthCookie);
@@ -1310,7 +1228,6 @@ export class AuthV2Controller {
           pendingRefreshToken = parsed.pendingRefreshToken;
           pendingAccessToken = parsed.pendingAccessToken;
           pendingAccessTokenExpiry = parsed.pendingAccessTokenExpiry;
-          pendingConnectCalendar = parsed.connectCalendar;
         } else {
           res.status(401).json({
             error: 'Invalid auth data',
@@ -1417,19 +1334,6 @@ export class AuthV2Controller {
         }
       }
 
-      const calendarAuthProvider = this.normalizeCalendarAuthProvider(provider);
-      let calendarReauthRequired = false;
-      if (pendingConnectCalendar && calendarAuthProvider) {
-        calendarReauthRequired = !(await this.persistOAuthCalendarCredentials(
-          calendarAuthProvider,
-          oauthUserData.email,
-          pendingRefreshToken,
-          pendingAccessToken,
-          pendingAccessTokenExpiry,
-          workspaceUser.id,
-        ));
-      }
-
       const token = jwtService.generateToken({
         sub: workspaceUser.id,
         email: workspaceUser.email,
@@ -1500,7 +1404,6 @@ export class AuthV2Controller {
         },
         isNewUser,
         selfDmChannelId,
-        ...(pendingConnectCalendar ? { connectCalendar: true, calendarReauthRequired } : {}),
       });
     } catch (error) {
       logger.error('Error logging into workspace:', error);
@@ -1947,7 +1850,6 @@ export class AuthV2Controller {
     pendingRefreshToken: string | undefined;
     pendingAccessToken: string | undefined;
     pendingAccessTokenExpiry: Date | undefined;
-    connectCalendar: boolean;
   } | null {
     try {
       const decoded = jwt.verify(cookie, process.env.JWT_SECRET!) as {
@@ -1960,7 +1862,6 @@ export class AuthV2Controller {
         refreshToken?: string | null;
         accessToken?: string | null;
         accessTokenExpiry?: string | null;
-        connectCalendar?: boolean;
       };
       if (!decoded?.email) throw new Error('Invalid JWT payload');
       const pendingAccessTokenExpiry = decoded.accessTokenExpiry
@@ -1981,7 +1882,6 @@ export class AuthV2Controller {
           pendingAccessTokenExpiry && !Number.isNaN(pendingAccessTokenExpiry.getTime())
             ? pendingAccessTokenExpiry
             : undefined,
-        connectCalendar: decoded.connectCalendar === true,
       };
     } catch {
       return null;

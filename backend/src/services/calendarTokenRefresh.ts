@@ -8,6 +8,7 @@
 
 import { AuthProvider } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
+import { logger } from '@/utils/logger';
 import {
   getCalendarSourceType,
   parseCalendarCredentials,
@@ -28,13 +29,10 @@ export interface CalendarCredentials {
 }
 
 function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function fetchTokenWithRetry(
-  url: string,
-  initFactory: () => RequestInit,
-): Promise<Response> {
+async function fetchTokenWithRetry(url: string, initFactory: () => RequestInit): Promise<Response> {
   let lastError: unknown;
 
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -55,7 +53,9 @@ async function fetchTokenWithRetry(
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
-async function refreshGoogleToken(refreshToken: string): Promise<{ accessToken: string; accessTokenExpiry: Date }> {
+async function refreshGoogleToken(
+  refreshToken: string
+): Promise<{ accessToken: string; accessTokenExpiry: Date }> {
   const clientId = process.env.GOOGLE_CLIENT_ID;
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
 
@@ -87,7 +87,9 @@ async function refreshGoogleToken(refreshToken: string): Promise<{ accessToken: 
   };
 }
 
-async function refreshMicrosoftToken(refreshToken: string): Promise<{ accessToken: string; accessTokenExpiry: Date }> {
+async function refreshMicrosoftToken(
+  refreshToken: string
+): Promise<{ accessToken: string; accessTokenExpiry: Date }> {
   const clientId = process.env.MICROSOFT_CLIENT_ID;
   const clientSecret = process.env.MICROSOFT_CLIENT_SECRET;
   const tenantId = process.env.MICROSOFT_TENANT_ID || 'common';
@@ -109,7 +111,7 @@ async function refreshMicrosoftToken(refreshToken: string): Promise<{ accessToke
         scope: 'openid email profile User.Read Calendars.Read offline_access',
       }),
       signal: AbortSignal.timeout(15_000),
-    }),
+    })
   );
 
   if (!res.ok) {
@@ -130,9 +132,15 @@ function toCalendarProvider(provider: AuthProvider): CalendarProvider {
   throw new Error(`Unsupported calendar provider: ${provider}`);
 }
 
+function tokenLogTag(provider: AuthProvider): string {
+  return provider === AuthProvider.GOOGLE
+    ? '[CALENDAR_SYNC][GOOGLE][TOKEN]'
+    : '[CALENDAR_SYNC][MICROSOFT][TOKEN]';
+}
+
 async function readStoredCalendarSource(
   provider: AuthProvider,
-  params: { ownerUserId?: string; sourceId?: string },
+  params: { ownerUserId?: string; sourceId?: string }
 ) {
   const sourceType = getCalendarSourceType(toCalendarProvider(provider));
   const db = DatabaseClient.getInstance();
@@ -153,7 +161,7 @@ async function readStoredCalendarSource(
 
 function buildCredentials(
   tokens: { refreshToken: string; accessToken?: string; accessTokenExpiry?: Date },
-  existingCreds: CalendarSourceCredentials | null,
+  existingCreds: CalendarSourceCredentials | null
 ): CalendarSourceCredentials {
   return {
     refreshToken: tokens.refreshToken,
@@ -180,7 +188,7 @@ async function persistCalendarCredentials(
     accessToken?: string;
     accessTokenExpiry?: Date;
     ownerUserId: string;
-  },
+  }
 ): Promise<string> {
   const db = DatabaseClient.getInstance();
   const sourceType = getCalendarSourceType(toCalendarProvider(params.provider));
@@ -252,7 +260,7 @@ export async function persistCalendarOAuthCredentials(params: {
 
 export async function getCalendarCredentialsBySourceId(
   sourceId: string,
-  provider: AuthProvider,
+  provider: AuthProvider
 ): Promise<CalendarCredentials | null> {
   const source = await readStoredCalendarSource(provider, { sourceId });
 
@@ -270,6 +278,11 @@ export async function getCalendarCredentialsBySourceId(
         new Date(creds.accessTokenExpiry).getTime() - Date.now() < TOKEN_REFRESH_BUFFER_MS;
 
       if (isExpired) {
+        logger.info(`${tokenLogTag(provider)} Refreshing access token`, {
+          sourceId: source.id,
+          userId: resolvedUserId,
+          email: source.displayName,
+        });
         const refreshed = await (provider === AuthProvider.GOOGLE
           ? refreshGoogleToken(creds.refreshToken)
           : refreshMicrosoftToken(creds.refreshToken));
@@ -281,6 +294,12 @@ export async function getCalendarCredentialsBySourceId(
           accessToken,
           accessTokenExpiry: refreshed.accessTokenExpiry,
           ownerUserId: resolvedUserId,
+        });
+        logger.info(`${tokenLogTag(provider)} Access token refreshed`, {
+          sourceId: source.id,
+          userId: resolvedUserId,
+          email: source.displayName,
+          accessTokenExpiry: refreshed.accessTokenExpiry,
         });
       }
 

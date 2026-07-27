@@ -20,6 +20,8 @@ import {
   type CalendarSyncTimeRange,
 } from './calendarCallStore.utils';
 
+const TAG = '[CALENDAR_SYNC][GOOGLE][STORE]';
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface GCalDateTime {
@@ -67,7 +69,7 @@ function parseGCalDateTime(dt?: GCalDateTime): Date | undefined {
 
 function resolveRoomLink(event: GCalEvent): string | undefined {
   if (event.hangoutLink) return event.hangoutLink;
-  const videoEntry = event.conferenceData?.entryPoints?.find(e => e.entryPointType === 'video');
+  const videoEntry = event.conferenceData?.entryPoints?.find((e) => e.entryPointType === 'video');
   if (videoEntry?.uri) return videoEntry.uri;
   return event.htmlLink;
 }
@@ -77,7 +79,7 @@ function resolveRoomLink(event: GCalEvent): string | undefined {
 export async function storeGCalEventAsCall(
   event: GCalEvent,
   userId: string,
-  userEmail: string,
+  userEmail: string
 ): Promise<void> {
   if (!event.id) return;
 
@@ -93,13 +95,15 @@ export async function storeGCalEventAsCall(
   const organizer: CalendarOrganizer | null = event.organizer
     ? {
         ...(event.organizer.email !== undefined && { email: event.organizer.email }),
-        ...(event.organizer.displayName !== undefined && { displayName: event.organizer.displayName }),
+        ...(event.organizer.displayName !== undefined && {
+          displayName: event.organizer.displayName,
+        }),
         ...(event.organizer.self !== undefined && { self: event.organizer.self }),
       }
     : null;
 
   const attendees = (event.attendees ?? []).filter(
-    a => !organizerEmail || a.email !== organizerEmail,
+    (a) => !organizerEmail || a.email !== organizerEmail
   );
 
   await upsertExternalCalendarCall(
@@ -127,7 +131,7 @@ export async function storeGCalEventAsCall(
         attendees: attendees as unknown as Prisma.InputJsonArray,
       } satisfies Prisma.InputJsonObject,
     },
-    now,
+    now
   );
 }
 
@@ -135,7 +139,7 @@ export async function storeGCalEventsAsCallsForUser(
   events: GCalEvent[],
   userId: string,
   userEmail: string,
-  options?: { isFullSync?: boolean; timeRange?: CalendarSyncTimeRange; skipCancelRemoved?: boolean },
+  options?: { isFullSync?: boolean; timeRange?: CalendarSyncTimeRange; skipCancelRemoved?: boolean }
 ): Promise<void> {
   const isFullSync = options?.isFullSync ?? false;
   const eventsToStore = events.slice(0, MAX_CALENDAR_EVENTS_PER_SYNC);
@@ -143,19 +147,26 @@ export async function storeGCalEventsAsCallsForUser(
 
   if (hitStoreCap) {
     logger.warn(
-      `[GOOGLE_CALENDAR_STORE] Capping store batch for ${userEmail}: ${events.length} -> ${eventsToStore.length}`,
+      `${TAG} Capping store batch for ${userEmail}: ${events.length} -> ${eventsToStore.length}`
     );
   }
 
-  logger.info(`[GOOGLE_CALENDAR_STORE] Storing ${eventsToStore.length} event(s) for ${userEmail} (fullSync=${isFullSync})`);
+  logger.info(
+    `${TAG} Storing ${eventsToStore.length} event(s) for ${userEmail} (fullSync=${isFullSync})`,
+    {
+      userId,
+      eventCount: eventsToStore.length,
+      isFullSync,
+    }
+  );
 
   for (const event of eventsToStore) {
     try {
       await storeGCalEventAsCall(event, userId, userEmail);
     } catch (err) {
       logger.error(
-        `[GOOGLE_CALENDAR_STORE] Failed to store event "${event.summary}" for ${userEmail}:`,
-        err instanceof Error ? err.message : err,
+        `${TAG} Failed to store event "${event.summary}" for ${userEmail}:`,
+        err instanceof Error ? err.message : err
       );
     }
   }
@@ -163,18 +174,20 @@ export async function storeGCalEventsAsCallsForUser(
   if (isFullSync && !options?.skipCancelRemoved && !hitStoreCap) {
     const externalIdPrefix = buildCalendarExternalIdPrefix('google', userId);
     const fetchedExternalIds = new Set(
-      eventsToStore.filter(e => e.id).map(e => buildCalendarExternalId('google', userId, e.id!)),
+      eventsToStore.filter((e) => e.id).map((e) => buildCalendarExternalId('google', userId, e.id!))
     );
     await cancelRemovedExternalCalendarCalls(
       externalIdPrefix,
       CallOrigin.GOOGLE_CALENDAR,
       fetchedExternalIds,
-      'GOOGLE_CALENDAR_STORE',
-      options?.timeRange,
+      TAG,
+      options?.timeRange
     );
   } else if (isFullSync && options?.skipCancelRemoved) {
-    logger.warn(`[GOOGLE_CALENDAR_STORE] Skipping removed-event cancellation because sync result was truncated upstream`);
+    logger.warn(
+      `${TAG} Skipping removed-event cancellation because sync result was truncated upstream`
+    );
   } else if (isFullSync && hitStoreCap) {
-    logger.warn(`[GOOGLE_CALENDAR_STORE] Skipping removed-event cancellation because store batch hit cap`);
+    logger.warn(`${TAG} Skipping removed-event cancellation because store batch hit cap`);
   }
 }

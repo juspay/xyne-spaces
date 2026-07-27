@@ -11,17 +11,21 @@ import { logger } from '@/utils/logger';
 const TAG = '[PubSubWatchService]';
 const RENEWAL_BATCH_SIZE = 10;
 
+function watchTag(type: string): string {
+  if (type === 'google-calendar') return '[CALENDAR_SYNC][GOOGLE][WATCH]';
+  if (type === 'microsoft-calendar') return '[CALENDAR_SYNC][MICROSOFT][WATCH]';
+  return TAG;
+}
+
 export class PubSubWatchService {
   private providers = new Map<string, BaseWatchProvider>();
 
   register(provider: BaseWatchProvider): void {
     if (this.providers.has(provider.name)) {
-      throw new Error(
-        `Provider already registered: ${provider.name}`
-      );
+      throw new Error(`Provider already registered: ${provider.name}`);
     }
     this.providers.set(provider.name, provider);
-    logger.info(`${TAG} Registered provider`, {
+    logger.info(`${watchTag(provider.name)} Registered provider`, {
       name: provider.name,
       platform: provider.platform,
     });
@@ -35,12 +39,9 @@ export class PubSubWatchService {
     return provider;
   }
 
-  async setupSubscription(
-    type: string,
-    subscription: SubscriptionRecord
-  ): Promise<WatchResult> {
+  async setupSubscription(type: string, subscription: SubscriptionRecord): Promise<WatchResult> {
     const provider = this.getProvider(type);
-    logger.info(`${TAG} Setting up watch`, {
+    logger.info(`${watchTag(type)} Setting up watch`, {
       type,
       id: subscription.id,
       email: subscription.email,
@@ -48,7 +49,7 @@ export class PubSubWatchService {
 
     try {
       const result = await provider.setupSubscription(subscription);
-      logger.info(`${TAG} Watch setup complete`, {
+      logger.info(`${watchTag(type)} Watch setup complete`, {
         type,
         id: subscription.id,
         email: subscription.email,
@@ -58,7 +59,7 @@ export class PubSubWatchService {
       return result;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      logger.error(`${TAG} Watch setup failed`, {
+      logger.error(`${watchTag(type)} Watch setup failed`, {
         type,
         id: subscription.id,
         email: subscription.email,
@@ -68,12 +69,9 @@ export class PubSubWatchService {
     }
   }
 
-  async renewSubscription(
-    type: string,
-    subscription: SubscriptionRecord
-  ): Promise<WatchResult> {
+  async renewSubscription(type: string, subscription: SubscriptionRecord): Promise<WatchResult> {
     const provider = this.getProvider(type);
-    logger.info(`${TAG} Renewing watch`, {
+    logger.info(`${watchTag(type)} Renewing watch`, {
       type,
       id: subscription.id,
       email: subscription.email,
@@ -81,7 +79,7 @@ export class PubSubWatchService {
 
     try {
       const result = await provider.renewSubscription(subscription);
-      logger.info(`${TAG} Watch renewed`, {
+      logger.info(`${watchTag(type)} Watch renewed`, {
         type,
         id: subscription.id,
         email: subscription.email,
@@ -91,7 +89,7 @@ export class PubSubWatchService {
       return result;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      logger.error(`${TAG} Watch renewal failed`, {
+      logger.error(`${watchTag(type)} Watch renewal failed`, {
         type,
         id: subscription.id,
         email: subscription.email,
@@ -101,12 +99,9 @@ export class PubSubWatchService {
     }
   }
 
-  async stopSubscription(
-    type: string,
-    subscription: SubscriptionRecord
-  ): Promise<void> {
+  async stopSubscription(type: string, subscription: SubscriptionRecord): Promise<void> {
     const provider = this.getProvider(type);
-    logger.info(`${TAG} Stopping watch`, {
+    logger.info(`${watchTag(type)} Stopping watch`, {
       type,
       id: subscription.id,
       email: subscription.email,
@@ -114,14 +109,14 @@ export class PubSubWatchService {
 
     try {
       await provider.stopSubscription(subscription);
-      logger.info(`${TAG} Watch stopped`, {
+      logger.info(`${watchTag(type)} Watch stopped`, {
         type,
         id: subscription.id,
         email: subscription.email,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      logger.error(`${TAG} Watch stop failed`, {
+      logger.error(`${watchTag(type)} Watch stop failed`, {
         type,
         id: subscription.id,
         email: subscription.email,
@@ -142,7 +137,7 @@ export class PubSubWatchService {
     const provider = this.getProvider(type);
     const cutoff = new Date(Date.now() + withinMs);
 
-    logger.info(`${TAG} Starting renewal cycle`, { type, cutoff });
+    logger.info(`${watchTag(type)} Starting renewal cycle`, { type, cutoff });
 
     const expiring = await provider.findExpiring(cutoff);
     let renewed = 0;
@@ -160,13 +155,13 @@ export class PubSubWatchService {
           try {
             await provider.markError(sub.id, message);
             deactivated++;
-            logger.error(`${TAG} Permanent auth failure, deactivated`, {
+            logger.error(`${watchTag(type)} Permanent auth failure, deactivated`, {
               type,
               email: sub.email,
               error: message,
             });
           } catch (deactivateErr) {
-            logger.error(`${TAG} Failed to deactivate after auth error`, {
+            logger.error(`${watchTag(type)} Failed to deactivate after auth error`, {
               type,
               email: sub.email,
               error: deactivateErr,
@@ -174,7 +169,7 @@ export class PubSubWatchService {
           }
         } else {
           failed++;
-          logger.error(`${TAG} Renewal failed (will retry next cycle)`, {
+          logger.error(`${watchTag(type)} Renewal failed (will retry next cycle)`, {
             type,
             email: sub.email,
             error: message,
@@ -188,7 +183,7 @@ export class PubSubWatchService {
       await Promise.all(batch.map(renewOne));
     }
 
-    logger.info(`${TAG} Renewal cycle complete`, {
+    logger.info(`${watchTag(type)} Renewal cycle complete`, {
       type,
       total: expiring.length,
       renewed,
