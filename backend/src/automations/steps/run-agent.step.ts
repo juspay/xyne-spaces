@@ -8,13 +8,21 @@ import { automationContextStorage } from '../engine/automation-context-storage';
 import { OutputSchemaSchema, assertMatchesSchema } from '../engine/declared-schema';
 import { clawClient } from '../services/claw-client';
 import { config } from '@/config/env';
+import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 
 const DEFAULT_MAX_RETRIES = 3;
 const AGENT_RESULT_LOG_LIMIT = 2_000;
 
 const RunAgentConfigSchema = z.object({
-  agentSlug: variableRef(z.string().min(1).describe('Claw agent slug')),
+  agentSlug: variableRef(z.string().min(1).describe('Claw agent slug (display/logging only)')),
+  spacesAppId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      'Spaces app id of the claw agent — the globally-unique webhook routing key. Saved by the builder; when absent (legacy configs) it is resolved from agentSlug at run time.',
+    ),
   prompt: variableRef(z.string().min(1).describe('Prompt for the agent')),
   outputSchema: OutputSchemaSchema.default({}).describe(
     'Expected output shape: keys must be present in the agent response; extra fields are kept but not validated.',
@@ -62,7 +70,8 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
 
     const agentSlug = cfg.agentSlug as string;
     const prompt = cfg.prompt as string;
-    const runUserId = await resolveRunUserId(agentSlug, context.automation.createdById);
+    const spacesAppId = await resolveSpacesAppId(cfg, agentSlug, context.automation.workspaceId);
+    const runUserId = await resolveRunUserId(spacesAppId, context.automation.createdById);
     const visibleContext = resolveVisibleConversationContext(context);
 
     logger.info(
@@ -72,6 +81,7 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
     try {
       await clawClient.runAgent({
         sessionId,
+        spacesAppId,
         agentSlug,
         task: prompt,
         userId: runUserId,
@@ -157,7 +167,8 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
       validationError,
       cfg.outputSchema ?? {},
     );
-    const runUserId = await resolveRunUserId(agentSlug, context.automation.createdById);
+    const spacesAppId = await resolveSpacesAppId(cfg, agentSlug, context.automation.workspaceId);
+    const runUserId = await resolveRunUserId(spacesAppId, context.automation.createdById);
     const callbackUrl = buildCallbackUrl(store.runId, stepName);
     const visibleContext = resolveVisibleConversationContext(context);
 
@@ -168,6 +179,7 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
     try {
       await clawClient.runAgent({
         sessionId: retrySessionId,
+        spacesAppId,
         agentSlug,
         task: retryPrompt,
         userId: runUserId,
@@ -213,16 +225,88 @@ function buildCallbackUrl(executionId: string, stepName: string): string {
   return `${config.xyneClaw.callbackUrl.replace(/\/$/, '')}/api/internal/automations/claw-callback/${encodeURIComponent(executionId)}/${encodeURIComponent(stepName)}`;
 }
 
-async function resolveRunUserId(agentSlug: string, fallbackUserId: string): Promise<string> {
+const AGENT_LIST_CACHE_TTL_MS = 60_000;
+let agentListCache: { agents: Awaited<ReturnType<typeof clawClient.listAgents>>; fetchedAt: number } | null = null;
+
+async function listAgentsCached(): Promise<Awaited<ReturnType<typeof clawClient.listAgents>>> {
+  if (agentListCache && Date.now() - agentListCache.fetchedAt < AGENT_LIST_CACHE_TTL_MS) {
+    return agentListCache.agents;
+  }
+  const agents = await clawClient.listAgents();
+  agentListCache = { agents, fetchedAt: Date.now() };
+  return agents;
+}
+
+async function resolveSpacesAppId(
+  cfg: z.infer<typeof RunAgentConfigSchema>,
+  agentSlug: string,
+  workspaceId: string,
+): Promise<string> {
+  const configured = (cfg.spacesAppId ?? '').trim();
+  if (configured) {
+    if (await appBelongsToWorkspace(configured, workspaceId)) return configured;
+    throw new Error(
+      `[RUN_AGENT] configured spacesAppId ${configured} for agent "${agentSlug}" does not belong to workspace ${workspaceId} — re-select the agent in the automation builder`,
+    );
+  }
+
+  const agents = await listAgentsCached();
+  const candidates = agents.filter(a => a.slug === agentSlug && a.spacesAppId);
+  if (candidates.length === 0) {
+    throw new Error(
+      `[RUN_AGENT] agent "${agentSlug}" not found in the claw catalog (disabled, deleted, or never published as a Spaces app)`,
+    );
+  }
+  if (candidates.length === 1) return candidates[0].spacesAppId as string;
+
+  const candidateIds = candidates.map(a => a.spacesAppId as string);
+  const apps = await db.apps.findMany({
+    where: { id: { in: candidateIds } },
+    select: { id: true, workspaceId: true, orgId: true },
+  });
+  const inWorkspace = apps.filter(a => a.workspaceId === workspaceId);
+  if (inWorkspace.length === 1) return inWorkspace[0].id;
+
+  const wsOrgs = await db.workspaceOrganization.findMany({
+    where: { workspaceId, leftAt: null },
+    select: { orgId: true },
+  });
+  const orgIds = new Set(wsOrgs.map(w => w.orgId));
+  const inOrg = apps.filter(a => orgIds.has(a.orgId));
+  if (inOrg.length === 1) return inOrg[0].id;
+
+  throw new Error(
+    `[RUN_AGENT] agent slug "${agentSlug}" matches ${candidates.length} agents across orgs and workspace ${workspaceId} does not disambiguate — re-select the agent in the builder so the config pins its spacesAppId`,
+  );
+}
+
+async function appBelongsToWorkspace(appId: string, workspaceId: string): Promise<boolean> {
+  const app = await db.apps.findUnique({
+    where: { id: appId },
+    select: { workspaceId: true, orgId: true },
+  });
+  if (!app) return false;
+  if (app.workspaceId === workspaceId) return true;
+  const member = await db.workspaceOrganization.findFirst({
+    where: { workspaceId, orgId: app.orgId, leftAt: null },
+    select: { id: true },
+  });
+  return Boolean(member);
+}
+
+async function resolveRunUserId(spacesAppId: string, fallbackUserId: string): Promise<string> {
   try {
-    const agent = await clawClient.getAgentBySlug(agentSlug);
-    if (agent?.spacesAppUserId) return agent.spacesAppUserId;
+    const install = await db.installedApps.findFirst({
+      where: { appId: spacesAppId },
+      select: { userId: true },
+    });
+    if (install?.userId) return install.userId;
     logger.info(
-      `[RUN_AGENT] agent "${agentSlug}" has no spacesAppUserId — attributing to automation creator ${fallbackUserId}`,
+      `[RUN_AGENT] app ${spacesAppId} has no installation — attributing to automation creator ${fallbackUserId}`,
     );
   } catch (err) {
     logger.warn(
-      `[RUN_AGENT] failed to fetch agent "${agentSlug}" for userId resolution; falling back to creator:`,
+      `[RUN_AGENT] failed to resolve app user for ${spacesAppId}; falling back to creator:`,
       err,
     );
   }

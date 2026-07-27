@@ -16,11 +16,13 @@ export interface ClawAgent {
   enabled: boolean;
   isDefault: boolean;
   color: string;
+  spacesAppId?: string | null;
   spacesAppUserId?: string | null;
 }
 
 export interface RunAgentRequest {
   sessionId: string;
+  spacesAppId: string;
   agentSlug: string;
   task: string;
   userId: string;
@@ -47,32 +49,6 @@ class ClawClient {
 
   private get s2sHeaders(): Record<string, string> {
     return this.s2sKey ? { 'x-s2s-key': this.s2sKey } : {};
-  }
-
-  async getAgentBySlug(slug: string): Promise<ClawAgent | null> {
-    const url = `${this.authUrl}/claw/api/v1/agents/${encodeURIComponent(slug)}`;
-    let res: Response;
-    try {
-      res = await fetch(url, {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json', ...this.s2sHeaders },
-        signal: AbortSignal.timeout(15_000),
-      });
-    } catch (err) {
-      throw new Error(
-        `[claw-client] getAgentBySlug: failed to reach claw-auth at ${url}: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-    if (res.status === 404) return null;
-    if (!res.ok) {
-      const body = await safeReadText(res);
-      throw new Error(`[claw-client] getAgentBySlug: HTTP ${res.status} — ${body}`);
-    }
-    const json = (await res.json()) as { success: boolean; data?: ClawAgent; error?: string };
-    if (!json.success || !json.data) {
-      throw new Error(`[claw-client] getAgentBySlug: bad response shape — ${JSON.stringify(json)}`);
-    }
-    return json.data;
   }
 
   async listAgents(): Promise<ClawAgent[]> {
@@ -103,16 +79,9 @@ class ClawClient {
   }
 
   async runAgent(req: RunAgentRequest): Promise<RunAgentResponse> {
-    const agent = await this.getAgentBySlug(req.agentSlug);
-    if (!agent) {
-      throw new Error(`[claw-client] runAgent: agent "${req.agentSlug}" not found`);
-    }
-    if (!agent.enabled) {
-      throw new Error(`[claw-client] runAgent: agent "${req.agentSlug}" is disabled`);
-    }
-    const signingSecret = await resolveAgentSigningSecret(agent);
+    const signingSecret = await resolveAppSigningSecret(req.spacesAppId, req.agentSlug);
 
-    const url = `${config.xyneClaw.clawAuthCallbackUrlAutomation.replace(/\/$/, '')}/${encodeURIComponent(req.agentSlug)}`;
+    const url = `${config.xyneClaw.clawAuthCallbackUrlAutomation.replace(/\/$/, '')}/app/${encodeURIComponent(req.spacesAppId)}`;
     const payload = {
       sessionId: req.sessionId,
       task: req.task,
@@ -146,7 +115,7 @@ class ClawClient {
     const json = (await res.json().catch(() => ({}))) as RunAgentResponse;
     if (!res.ok || !json.success) {
       logger.warn(
-        `[claw-client] runAgent rejected — sessionId=${req.sessionId} agentSlug=${req.agentSlug} status=${res.status} error=${json.error ?? '∅'}`,
+        `[claw-client] runAgent rejected — sessionId=${req.sessionId} agentSlug=${req.agentSlug} spacesAppId=${req.spacesAppId} status=${res.status} error=${json.error ?? '∅'}`,
       );
       throw new Error(
         `[claw-client] runAgent: claw rejected the run (HTTP ${res.status}, error=${json.error ?? 'unknown'})`,
@@ -156,25 +125,17 @@ class ClawClient {
   }
 }
 
-async function resolveAgentSigningSecret(agent: ClawAgent): Promise<string> {
-  if (!agent.spacesAppUserId) {
-    throw new Error(
-      `[claw-client] runAgent: agent "${agent.slug}" has no spacesAppUserId; cannot sign webhook`,
-    );
-  }
-
-  // Signing secret is app-level now (apps.signingSecret); the per-install column is deprecated.
-  const installedApp = await db.installedApps.findFirst({
-    where: { userId: agent.spacesAppUserId },
-    select: { app: { select: { signingSecret: true } } },
+async function resolveAppSigningSecret(spacesAppId: string, agentSlug: string): Promise<string> {
+  const app = await db.apps.findUnique({
+    where: { id: spacesAppId },
+    select: { signingSecret: true },
   });
-  if (!installedApp?.app?.signingSecret) {
+  if (!app?.signingSecret) {
     throw new Error(
-      `[claw-client] runAgent: no app signing secret for agent "${agent.slug}" app user ${agent.spacesAppUserId}`,
+      `[claw-client] runAgent: no app signing secret for agent "${agentSlug}" (spacesAppId=${spacesAppId})`,
     );
   }
-
-  return decrypt(installedApp.app.signingSecret);
+  return decrypt(app.signingSecret);
 }
 
 async function safeReadText(res: Response): Promise<string> {
