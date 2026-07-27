@@ -1,0 +1,346 @@
+schema file {
+  
+  struct chunk_meta {
+    field chunk_index type int {}
+    field page_numbers type array<int> {}
+    field block_labels type array<string> {}
+  }
+
+  document file {
+
+    field docId type string {
+      indexing: attribute | summary
+      # Unique document identifier in Vespa
+    }
+
+    field docType type string {
+      indexing: attribute | summary
+      attribute: fast-search
+      match: exact
+    }
+
+    field orgId type string {
+      indexing: attribute | summary
+      attribute: fast-search
+      match: exact
+    }
+
+    field workspaceId type string {
+      indexing: attribute | summary
+      attribute: fast-search
+      match: exact
+    }
+
+    field ownerId type string {
+      indexing: attribute | summary
+    }
+
+    field permissions type array<string> {
+      indexing: attribute | summary
+    }
+    
+    field subApp type string {
+      indexing: attribute | summary
+      attribute: fast-search
+      match: exact
+    }
+
+    field fileName type string {
+      indexing: attribute | summary | index
+      attribute: fast-search
+      index { enable-bm25 }
+    }
+
+    field description type string {
+      indexing: index | summary | attribute
+      index { enable-bm25 }
+    }
+    
+    field chunks type array<string> {
+      indexing: index | summary
+      index { enable-bm25 }
+      summary {
+        select-elements-by: best_chunks
+      }
+    }
+
+    field chunks_pos type array<long> {
+      indexing: attribute | summary
+    }
+
+    field image_chunks type array<string> {
+      indexing: index | summary
+      index { enable-bm25 }
+      summary {
+        select-elements-by: best_image_chunks
+      }
+    }
+
+    field image_chunks_pos type array<long> {
+      indexing: attribute | summary
+    }
+
+    field metadata type string {
+      indexing: attribute | summary
+    }
+    
+    field createdBy type string {
+      indexing: attribute | summary
+      attribute: fast-search
+    }
+  
+    field createdAt type long {
+      indexing: attribute | summary
+      attribute: fast-search
+    }
+
+    field updatedAt type long {
+      indexing: attribute | summary
+      attribute: fast-search
+    }
+
+    field mimeType type string {
+      indexing: attribute | summary
+    }
+
+    field urlOriginal type string {
+      indexing: attribute | summary
+    }
+
+    field urlInternal type string {
+      indexing: attribute | summary
+    }
+    
+    field chunks_map type array<chunk_meta> {
+      indexing: summary
+      struct-field chunk_index { indexing: attribute | summary }
+    }
+     field documentOutline type string {
+      indexing: summary
+    }
+
+    field fileSize type long {
+      indexing: attribute | summary
+    }
+
+    field isPrivate type bool {
+      indexing: attribute | summary
+    }
+
+    field channelRef type reference<chat_container> {
+      indexing: attribute
+    }
+
+    field clId type string {
+      indexing: attribute | summary
+      attribute: fast-search
+      # Knowledge base ID for folder-level queries
+    }
+
+    field clFd type string {
+      indexing: attribute | summary
+      attribute: fast-search
+      # Parent folder ID for hierarchical queries (clfd-xxx)
+    }
+
+     field projectId type string {
+      indexing: attribute | summary
+      attribute: fast-search
+    }
+
+
+    field isRelated type bool {
+      indexing: attribute | summary
+    }
+
+    field slideUrl type array<string> {
+      indexing: attribute | summary
+    }
+
+    field conversationId type string {
+      indexing: attribute | summary
+      attribute: fast-search
+    }
+    
+    field messageId type string {
+      indexing: attribute | summary
+      attribute: fast-search
+    }
+
+    field ticketId type string {
+      indexing: attribute | summary
+      attribute: fast-search
+    }
+
+    struct entity_tags {
+      field people type array<string> {}
+      field merchants type array<string> {}
+      field productSpecs type array<string> {}
+    }
+
+    field tags type entity_tags {
+      indexing: summary
+    }
+
+    field callType type string {
+      indexing: attribute | summary
+      attribute: fast-search
+      match: exact
+    }
+
+  }
+  # Vector embeddings
+  field chunk_embeddings type tensor<bfloat16>(p{}, v[DIMS]) {
+    indexing: input chunks | embed embed-file | attribute | index
+    attribute { distance-metric: angular }
+  }
+
+  field image_chunk_embeddings type tensor<bfloat16>(p{}, v[DIMS]) {
+    indexing: input image_chunks | embed embed-file | attribute | index
+    attribute { distance-metric: angular }
+  }
+  
+  import field channelRef.docId as channelId {}
+  import field channelRef.permissions as channelPermissions {}
+  
+  fieldset default {
+    fields: fileName , description , chunks , image_chunks
+  }
+
+   rank-profile initial {
+     inputs {
+       query(e) tensor<bfloat16>(v[DIMS])
+       query(alpha) double: 0.5
+       query(chunk_limit) double: 5
+     }
+
+     rank-properties {
+       nativeFieldMatch.firstOccurrenceImportance: 0
+     }
+
+     function lexical_score() {
+       expression: 4 * nativeRank(fileName)
+     }
+
+     function vector_score() {
+       expression: max(closeness(field, chunk_embeddings), closeness(field, image_chunk_embeddings))
+     }
+
+     function chunk_scores() {
+       expression: elementwise(bm25(chunks), x, double)
+     }
+
+     function image_chunk_scores() {
+       expression: elementwise(bm25(image_chunks), x, double)
+     }
+
+     function best_chunks() {
+       expression: top(query(chunk_limit), chunk_scores)
+     }
+
+     function best_image_chunks() {
+       expression: top(query(chunk_limit), image_chunk_scores)
+     }
+
+     function combined_nativeRank() {
+       expression: nativeRank(fileName, chunks)
+     }
+
+     summary-features {
+       best_chunks
+       best_image_chunks
+       chunk_scores
+       image_chunk_scores
+     }
+   }
+
+  rank-profile unified inherits initial {
+    first-phase {
+      expression: lexical_score
+    }
+    match-features {
+      combined_nativeRank
+      lexical_score
+      chunk_scores
+      image_chunk_scores
+      bm25(chunks)
+      closeness(field, chunk_embeddings)
+    }
+  }
+
+  rank-profile default_native inherits unified {
+    first-phase {
+      expression: query(alpha) * vector_score + (1 - query(alpha)) * lexical_score
+    }
+    match-features {
+      combined_nativeRank
+      lexical_score
+      vector_score
+      chunk_scores
+      image_chunk_scores
+      bm25(chunks)
+      closeness(field, chunk_embeddings)
+    }
+  }
+
+
+  rank-profile default_fuzzy inherits unified {
+    first-phase {
+      expression: query(alpha) * vector_score + (1 - query(alpha)) * lexical_score
+    }
+    match-features {
+      combined_nativeRank
+      lexical_score
+      vector_score
+      chunk_scores
+      image_chunk_scores
+      bm25(chunks)
+      closeness(field, chunk_embeddings)
+    }
+  }
+
+  document-summary default {
+    summary fileName {
+      bolding: on
+    }
+    summary description {
+      bolding: on
+    }
+    summary chunks {
+      source: chunks
+      select-elements-by: best_chunks
+    }
+    summary image_chunks {
+      source: image_chunks
+      select-elements-by: best_image_chunks
+    }
+    summary channelId {}
+    summary channelPermissions {}
+  }
+
+  document-summary lean {
+    summary docId {}
+    summary docType {}
+    summary fileName {
+      bolding: on
+    }
+    summary description {}
+    summary ownerId {}
+    summary permissions {}
+    summary isPrivate {}
+    summary createdAt {}
+    summary urlOriginal {}
+    summary urlInternal {}
+    summary subApp {}
+    summary conversationId {}
+    summary channelId {}
+    summary messageId {}
+    summary ticketId {}
+    summary callType {}
+  }
+
+  document-summary embeddings {
+    summary chunk_embeddings {}
+    summary image_chunk_embeddings {}
+  }
+}

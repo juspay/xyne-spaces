@@ -1,0 +1,206 @@
+schema user {
+    document user {
+
+        # user id
+        field docId type string {
+          indexing: attribute | summary
+        }
+
+       field docType type string {
+        	indexing: attribute | summary
+        	attribute: fast-search
+        	match: exact
+        }
+
+        field orgId type string {
+            indexing: attribute | summary
+            attribute: fast-search
+            match: exact
+        }
+
+        field workspaceId type string {
+            indexing: attribute | summary
+            attribute: fast-search
+            match: exact
+        }
+				
+        field name type string {
+            indexing:  index | attribute | summary
+        }
+
+        # primary email
+        field email type string {
+            indexing: index | attribute | summary
+        }
+
+		field status type string {
+            indexing: attribute | summary
+        }
+
+		field userGroupIds type array<string> {
+            indexing: attribute | summary
+        }
+
+
+        field photoLink type string {
+            indexing: attribute | summary
+        }
+
+        field language type string {
+            indexing: attribute | summary
+        }
+
+        # from the organization object
+        field orgName type string {
+            indexing: attribute | summary
+        }
+
+
+        field orgLocation type string {
+            indexing: attribute | summary
+        }
+
+        field orgDescription type string {
+            indexing: attribute | summary
+        }
+
+        field isAdmin type bool {
+            indexing: attribute | summary
+        }
+
+
+        field createdAt type long {
+            indexing: summary | attribute
+            attribute: fast-search
+        }
+
+        field lastLoggedIn type long {
+            indexing: summary | attribute
+            attribute: fast-search
+        }
+
+        # added for permissions filtering
+        field owner type string {
+            indexing: index | attribute | summary
+            match: exact
+        }
+
+        # NEW: Personalization weights (WeightedSet for easier retrieval)
+        field channelWeights type tensor<float>(key{}) {
+            indexing: summary | attribute
+        }
+        
+        field userWeights type tensor<float>(key{}) {
+            indexing: summary | attribute
+        }
+
+        field channelTimestamps type tensor<float>(key{}) {
+            indexing: summary | attribute
+        }
+        
+        field userTimestamps type tensor<float>(key{}) {
+            indexing: summary | attribute
+        }
+        
+        field personalizationLastUpdated type long {
+            indexing: attribute | summary
+        }
+    }
+
+    # Fuzzy matching for the 'name' field
+    field name_fuzzy type string {
+        indexing: input name | index | attribute
+        index {
+            enable-bm25
+        }
+        match {
+            gram
+            gram-size: 3
+        }
+    }
+
+    # Fuzzy matching for the 'email' field
+    field email_fuzzy type string {
+        indexing: input email | index | attribute
+        index {
+            enable-bm25
+        }
+        match {
+            gram
+            gram-size: 3
+        }
+    }
+
+    document-summary autocomplete {
+        summary name {
+            source: name
+        }
+        summary email {
+            source: email
+        }
+        summary photoLink {
+            source: photoLink
+        }
+    }
+
+    fieldset autocomplete {
+        fields: name, email, photoLink
+    }
+
+    fieldset default {
+        fields: name, email, photoLink, name_fuzzy , email_fuzzy
+    }
+
+    rank-profile initial {
+      inputs {
+        query(e) tensor<bfloat16>(v[DIMS])
+      }
+
+      rank-properties {
+        nativeFieldMatch.firstOccurrenceImportance: 0
+      }
+
+      function lexical_score() {
+        expression: 4 * nativeRank(name)
+      }
+
+      function fuzzy_lexical_score() {
+        expression: 4 * nativeRank(name_fuzzy)
+      }
+
+      function combined_nativeRank() {
+        expression: nativeRank(name, email)
+      }
+    }
+
+    rank-profile unified inherits initial {
+      first-phase {
+        expression: lexical_score
+      }
+      match-features {
+        combined_nativeRank
+        lexical_score
+      }
+    }
+    
+
+    rank-profile default_native inherits unified {
+      first-phase {
+        expression: lexical_score
+      }
+      match-features {
+        combined_nativeRank
+        lexical_score
+      }
+    }
+
+  document-summary lean {
+    summary docId {}
+    summary docType {}
+    summary name {}
+    summary email {}
+    summary createdAt {}
+  }
+
+    #
+}

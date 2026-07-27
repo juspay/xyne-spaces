@@ -1,0 +1,240 @@
+schema call {
+  document call {
+    field docId type string {
+      indexing: attribute | summary
+      attribute: fast-search
+      match: exact
+    }
+
+    field docType type string {
+      indexing: attribute | summary
+      attribute: fast-search
+      match: exact
+    }
+
+    field orgId type string {
+      indexing: attribute | summary
+      attribute: fast-search
+      match: exact
+    }
+
+    field workspaceId type string {
+      indexing: attribute | summary
+      attribute: fast-search
+      match: exact
+    }
+
+    field callId type string {
+      indexing: attribute | summary
+      attribute: fast-search
+      match: exact
+    }
+
+    field externalId type string {
+      indexing: attribute | summary
+      attribute: fast-search
+      match: exact
+    }
+
+    field channelId type string {
+      indexing: attribute | summary
+      attribute: fast-search
+      match: exact
+    }
+
+    field channelRef type reference<chat_container> {
+      indexing: attribute
+    }
+
+    field createdByUserId type string {
+      indexing: attribute | summary
+      attribute: fast-search
+      match: exact
+    }
+
+    field roomLink type string {
+      indexing: summary
+    }
+
+    field callType type string {
+      indexing: attribute | summary
+      attribute: fast-search
+      match: exact
+    }
+
+    field userIds type array<string> {
+      indexing: attribute | summary
+      attribute: fast-search
+    }
+
+    field participantResponses type array<string> {
+      indexing: attribute | summary
+      attribute: fast-search
+    }
+
+    field title type string {
+      indexing: index | attribute | summary
+    }
+
+    field displayTitle type string {
+      indexing: index | attribute | summary
+    }
+
+    field channelName type string {
+      indexing: index | attribute | summary
+    }
+
+    field participantNames type array<string> {
+      indexing: index | attribute | summary
+    }
+
+    field participantEmails type array<string> {
+      indexing: index | attribute | summary
+    }
+
+    field callOrigin type string {
+      indexing: attribute | summary
+      attribute: fast-search
+      match: exact
+    }
+
+    field status type string {
+      indexing: attribute | summary
+      attribute: fast-search
+      match: exact
+    }
+
+    field startsAtTimestamp type long {
+      indexing: attribute | summary
+    }
+
+    field endsAtTimestamp type long {
+      indexing: attribute | summary
+    }
+
+    field startedAtTimestamp type long {
+      indexing: attribute | summary
+    }
+
+    field endedAtTimestamp type long {
+      indexing: attribute | summary
+    }
+
+    field recurringSeriesId type string {
+      indexing: attribute | summary
+      attribute: fast-search
+      match: exact
+    }
+
+    field hasTranscript type bool {
+      indexing: attribute | summary
+    }
+  }
+
+  import field channelRef.permissions as permissions {}
+
+  field title_embeddings type tensor<bfloat16>(v[DIMS]) {
+    indexing: input title | embed hf-embedder | attribute | index
+    attribute {
+      distance-metric: angular
+    }
+  }
+
+  field title_fuzzy type string {
+    indexing: input title | tokenize | lowercase | index | summary
+    match {
+      gram
+      gram-size: 3
+    }
+  }
+
+  fieldset default {
+    fields: title, title_fuzzy
+  }
+
+  rank-profile initial {
+    inputs {
+      query(e) tensor<bfloat16>(v[DIMS])
+      query(alpha) double: 0.5
+    }
+
+    rank-properties {
+      nativeFieldMatch.firstOccurrenceImportance: 0
+    }
+
+    function lexical_score() {
+      expression: 4 * nativeRank(title)
+    }
+
+    function fuzzy_lexical_score() {
+      expression: 4 * nativeRank(title_fuzzy)
+    }
+
+    function vector_score() {
+      expression: closeness(field, title_embeddings)
+    }
+
+    function combined_nativeRank() {
+      expression: nativeRank(title) + nativeRank(title_fuzzy)
+    }
+  }
+
+  rank-profile unified inherits initial {
+    first-phase {
+      expression: lexical_score
+    }
+    match-features {
+      combined_nativeRank
+      lexical_score
+    }
+  }
+
+
+  rank-profile default_native inherits unified {
+    first-phase {
+      expression: query(alpha) * vector_score + (1 - query(alpha)) * lexical_score
+    }
+    match-features {
+      combined_nativeRank
+      lexical_score
+      vector_score
+    }
+  }
+
+  rank-profile default_fuzzy inherits unified {
+    first-phase {
+      expression: query(alpha) * vector_score + (1 - query(alpha)) * fuzzy_lexical_score
+    }
+    match-features {
+      combined_nativeRank
+      lexical_score
+      vector_score
+    }
+  }
+
+  document-summary lean {
+    summary docId {}
+    summary docType {}
+    summary callId {}
+    summary externalId {}
+    summary channelId {}
+    summary createdByUserId {}
+    summary roomLink {}
+    summary callType {}
+    summary userIds {}
+    summary participantResponses {}
+    summary title {}
+    summary displayTitle {}
+    summary channelName {}
+    summary participantNames {}
+    summary participantEmails {}
+    summary callOrigin {}
+    summary status {}
+    summary startsAtTimestamp {}
+    summary endsAtTimestamp {}
+    summary startedAtTimestamp {}
+    summary endedAtTimestamp {}
+    summary recurringSeriesId {}
+    summary hasTranscript {}
+  }
+}

@@ -1,0 +1,222 @@
+schema chat_attachment {
+  document chat_attachment {
+    field docId type string {
+      indexing: attribute | summary
+    }
+
+    field docType type string {
+      indexing: attribute | summary
+      attribute: fast-search
+      match: exact
+    }
+
+    field orgId type string {
+      indexing: attribute | summary
+      attribute: fast-search
+      match: exact
+    }
+
+    field workspaceId type string {
+      indexing: attribute | summary
+      attribute: fast-search
+      match: exact
+    }
+
+    field messageId type string {
+      indexing: attribute | summary
+      attribute: fast-search
+    }
+
+    field filename type string {
+      indexing: index | summary
+      index: enable-bm25
+    }
+
+    field mimeType type string {
+      indexing: attribute | summary
+    }
+
+    field fileType type string {
+      indexing: attribute | summary
+    }
+
+    field size type long {
+      indexing: attribute | summary
+    }
+
+    field channelRef type reference<chat_container> {
+      indexing: attribute
+    }
+
+    field url type string {
+      indexing: attribute | summary
+    }
+
+    field urlPrivate type string {
+      indexing: attribute | summary
+    }
+
+    field urlPrivateDownload type string {
+      indexing: attribute | summary
+    }
+
+    field thumbnailUrl type string {
+      indexing: attribute | summary
+    }
+
+    field createdAt type long {
+      indexing: attribute | summary
+      attribute: fast-search
+    }
+
+    field userId type string {
+      indexing: attribute | summary
+    }
+
+    field dimensions type tensor<int8>(x[2]) {
+      indexing: attribute | summary
+    }
+
+    field duration type long {
+      indexing: attribute | summary
+    }
+
+    field metadata type string {
+      indexing: attribute | summary
+    }
+
+    field chunks type array<string> {
+      indexing: index | summary
+      index: enable-bm25
+    }
+  }
+
+  import field channelRef.permissions as permissions {}
+  import field channelRef.channelName as  channelName {}
+  import field channelRef.docId as channelId {}
+  field chunk_embeddings type tensor<bfloat16>(p{}, v[DIMS]) {
+    indexing: input chunks | embed hf-embedder | attribute | index
+    attribute {
+      distance-metric: angular
+    }
+  }
+
+  field filename_fuzzy type string {
+    indexing: input filename | index
+    index: enable-bm25
+    match {
+      gram
+      gram-size: 3
+    }
+  }
+
+  fieldset default {
+    fields: filename, chunks, messageId
+  }
+
+  fieldset autocomplete {
+    fields: filename
+  }
+  
+
+  rank-profile initial {
+    inputs {
+      query(e) tensor<bfloat16>(v[DIMS])
+      query(alpha) double: 0.5
+    }
+
+    rank-properties {
+      nativeFieldMatch.firstOccurrenceImportance: 0
+    }
+
+    function lexical_score() {
+      expression: 4 * nativeRank(filename)
+    }
+
+    function fuzzy_lexical_score() {
+      expression: 4 * nativeRank(filename_fuzzy)
+    }
+
+    function vector_score() {
+      expression: closeness(field, chunk_embeddings)
+    }
+
+    function chunk_scores() {
+      expression: elementwise(bm25(chunks), x, double)
+    }
+
+    function combined_nativeRank() {
+      expression: nativeRank(filename, chunks)
+    }
+  }
+
+  rank-profile unified inherits initial {
+    first-phase {
+      expression: lexical_score
+    }
+    match-features {
+      combined_nativeRank
+      lexical_score
+      chunk_scores
+    }
+  }
+
+  rank-profile default_native inherits unified {
+    first-phase {
+      expression: query(alpha) * vector_score + (1 - query(alpha)) * lexical_score
+    }
+    match-features {
+      combined_nativeRank
+      lexical_score
+      vector_score
+      chunk_scores
+    }
+  }
+
+  rank-profile default_fuzzy inherits unified {
+    first-phase {
+      expression: query(alpha) * vector_score + (1 - query(alpha)) * fuzzy_lexical_score
+    }
+    match-features {
+      combined_nativeRank
+      lexical_score
+      vector_score
+      chunk_scores
+    }
+  }
+
+  document-summary default {
+    summary filename {}
+    summary dimensions {}
+    summary chunks_summary {
+      source: chunks
+      bolding: on
+    }
+  }
+  document-summary autocomplete {
+    summary filename {
+      source: filename
+    }
+    summary fileType {
+      source: fileType
+    }
+    summary docId {
+      source: docId
+    }
+  }
+
+  document-summary lean {
+    summary docId {}
+    summary docType {}
+    summary filename {}
+    summary mimeType {}
+    summary size {}
+    summary createdAt {}
+    summary userId {}
+    summary messageId {}
+    # imported from channelRef
+    summary channelId {}
+    summary channelName {}
+    summary permissions {}
+  }
+}
