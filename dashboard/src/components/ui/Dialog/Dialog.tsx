@@ -31,6 +31,9 @@ export interface DialogProps {
   onPointerDownOutside?: React.ComponentPropsWithoutRef<
     typeof DialogPrimitive.Content
   >['onPointerDownOutside'];
+  onInteractOutside?: React.ComponentPropsWithoutRef<
+    typeof DialogPrimitive.Content
+  >['onInteractOutside'];
   testId?: string;
 }
 
@@ -64,6 +67,7 @@ export const Dialog = ({
   onOpenAutoFocus,
   onEscapeKeyDown,
   onPointerDownOutside,
+  onInteractOutside,
   testId,
 }: DialogProps): React.ReactElement => {
   const [isMobile, setIsMobile] = useState(false);
@@ -138,7 +142,9 @@ export const Dialog = ({
             const target = (event.detail?.originalEvent?.target ?? null) as Element | null;
             if (target?.closest?.('[data-sonner-toast], [data-sonner-toaster]')) {
               event.preventDefault();
+              return;
             }
+            onInteractOutside?.(event);
           }}
           {...(onEscapeKeyDown && { onEscapeKeyDown })}
           {...(onPointerDownOutside && { onPointerDownOutside })}

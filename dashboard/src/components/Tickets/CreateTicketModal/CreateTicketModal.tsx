@@ -84,8 +84,12 @@ import {
   hasCreateTicketFlag,
   parseAssignee,
   readCreateTicketPrefillFromUrl,
+  serializeDynamicFields,
+  snapshotTicketForm,
   TAG_COLORS,
+  ticketFormSnapshotsEqual,
   writeCreateTicketFields,
+  type TicketFormSnapshot,
 } from './createTicket.utils';
 import { DatePicker } from '../../ui/DatePicker/DatePicker';
 import { TextShimmer } from './ShimmerText';
@@ -275,6 +279,14 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   const [dynamicFieldErrors, setDynamicFieldErrors] = useState<Record<string, string>>({});
 
   const hasPopulatedDeployedCommitId = useRef(false);
+  const seedSnapshotRef = useRef<TicketFormSnapshot | null>(null);
+  const baselineAttachmentCountRef = useRef<number | null>(null);
+  const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
+
+  const markAutoApplied = useCallback((patch: Partial<TicketFormSnapshot>): void => {
+    if (!seedSnapshotRef.current) return;
+    seedSnapshotRef.current = { ...seedSnapshotRef.current, ...patch };
+  }, []);
   // Prefilled subtickets (used by proactive nudge review flow)
   const [subTickets, setSubTickets] = useState<SubTicketDraft[]>([]);
   const [editingSubTicketIndex, setEditingSubTicketIndex] = useState<number | null>(null);
@@ -302,7 +314,10 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   // Load attachments based on source
   useEffect(() => {
     const loadAttachments = () => {
-      if (!isOpen) return;
+      if (!isOpen) {
+        baselineAttachmentCountRef.current = null;
+        return;
+      }
 
       if (!isFromTicketsTab) {
         // Load from DraftProvider (DB-backed)
@@ -312,12 +327,18 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
             sourceConversation?.conversationId ?? null,
           );
           setAttachmentsMap(map);
+          if (baselineAttachmentCountRef.current === null) {
+            baselineAttachmentCountRef.current = map.size;
+          }
         } catch (error) {
           console.error('Failed to load attachments:', error);
         }
       } else {
         // For tickets tab, local state only
         setAttachmentsMap(new Map());
+        if (baselineAttachmentCountRef.current === null) {
+          baselineAttachmentCountRef.current = 0;
+        }
       }
     };
 
@@ -502,8 +523,9 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   useEffect(() => {
     if (formValues?.boardId) {
       form.setFieldValue('dynamicFields', {});
+      markAutoApplied({ dynamicFields: serializeDynamicFields({}) });
     }
-  }, [formValues?.boardId, form]);
+  }, [formValues?.boardId, form, markAutoApplied]);
 
   useEffect(() => {
     if (!selectedBoard) return;
@@ -512,7 +534,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       ? BaseTicketType.Release
       : BaseTicketType.Fix;
     form.setFieldValue('ticketType', ticketType);
-  }, [selectedBoard, form]);
+    markAutoApplied({ ticketType });
+  }, [selectedBoard, form, markAutoApplied]);
 
   useEffect(() => {
     if (!isOpen || resolvedFormFields.length === 0) return;
@@ -537,10 +560,12 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         );
 
         if (response.data?.latestCommitId) {
-          form.setFieldValue('dynamicFields', {
+          const nextDynamicFields = {
             ...formValues?.dynamicFields,
             deployedCommitId: response.data.latestCommitId,
-          });
+          };
+          form.setFieldValue('dynamicFields', nextDynamicFields);
+          markAutoApplied({ dynamicFields: serializeDynamicFields(nextDynamicFields) });
           hasPopulatedDeployedCommitId.current = true;
         }
       } catch (error) {
@@ -549,7 +574,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     };
 
     void fetchLatestDeployedCommitId();
-  }, [isOpen, resolvedFormFields, selectedBoard, form, formValues?.dynamicFields]);
+  }, [isOpen, resolvedFormFields, selectedBoard, form, formValues?.dynamicFields, markAutoApplied]);
   const {
     duplicateCheck,
     // duplicateCandidate,
@@ -724,6 +749,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       form.reset();
       setHasTitleBeenGenerated(false); // Reset flag when modal opens
       hasPopulatedDeployedCommitId.current = false;
+      seedSnapshotRef.current = null;
+      setShowDiscardConfirm(false);
       setSubTickets(normalizeSubTicketDrafts(initialSubTickets));
       setEditingSubTicketIndex(null);
       setEditingSubTicketTitle('');
@@ -758,6 +785,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         }
       }
       resetDuplicateState();
+      seedSnapshotRef.current = snapshotTicketForm(form.state.values);
     }
   }, [
     isOpen,
@@ -799,9 +827,10 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       const currentBoardId = form.getFieldValue('boardId');
       if (currentBoardId && !boards.some(board => board.id === currentBoardId)) {
         form.setFieldValue('boardId', '');
+        markAutoApplied({ boardId: '' });
       }
     }
-  }, [boards, form]);
+  }, [boards, form, markAutoApplied]);
 
   // Auto-select first board when board suggestion returns null (test env only — in prod
   // the user picks a board explicitly if no suggestion is available).
@@ -812,8 +841,9 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     const firstBoard = boards?.[0];
     if (firstBoard) {
       form.setFieldValue('boardId', firstBoard.id);
+      markAutoApplied({ boardId: firstBoard.id });
     }
-  }, [isCheckingBoard, boardSuggestion, boards, form]);
+  }, [isCheckingBoard, boardSuggestion, boards, form, markAutoApplied]);
 
   // Auto-generate title when modal opens with a description but no title
   useEffect(() => {
@@ -840,12 +870,14 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   useEffect(() => {
     if (generatedTitle && !form.getFieldValue('title')) {
       form.setFieldValue('title', generatedTitle);
+      markAutoApplied({ title: generatedTitle.trim() });
     }
     // Only set generated ticket type for non-release boards
     if (generatedTicketType && !isReleaseBoard(selectedBoard?.boardType)) {
       form.setFieldValue('ticketType', generatedTicketType);
+      markAutoApplied({ ticketType: generatedTicketType });
     }
-  }, [form, generatedTitle, generatedTicketType, selectedBoard?.boardType]);
+  }, [form, generatedTitle, generatedTicketType, selectedBoard?.boardType, markAutoApplied]);
 
   // File handling functions
   const handleModalDragOver = (e: DragEvent<HTMLDivElement>): void => {
@@ -1294,15 +1326,61 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     }
   };
 
-  // Clear attachments when modal closes
   const handleClose = (): void => {
-    void clearFiles();
+    if (isFromTicketsTab) {
+      void clearFiles();
+    }
     setExcludedChatAttachmentIds(new Set());
     setEditingSubTicketIndex(null);
     setEditingSubTicketTitle('');
     setEditingSubTicketDescription('');
     resetDuplicateState();
     onClose();
+  };
+
+  const hasUnsavedChanges = (): boolean => {
+    const seed = seedSnapshotRef.current;
+    if (!seed) return false;
+
+    if (!ticketFormSnapshotsEqual(snapshotTicketForm(form.state.values), seed)) return true;
+
+    const seededSubTickets = normalizeSubTicketDrafts(initialSubTickets);
+    if (JSON.stringify(normalizeSubTicketDrafts(subTickets)) !== JSON.stringify(seededSubTickets)) {
+      return true;
+    }
+
+    if (editingSubTicketIndex !== null) {
+      const editing = subTickets[editingSubTicketIndex];
+      if (
+        editingSubTicketTitle.trim() !== (editing?.title ?? '').trim() ||
+        editingSubTicketDescription.trim() !== (editing?.description ?? '').trim()
+      ) {
+        return true;
+      }
+    }
+
+    if (isFromTicketsTab) {
+      if (ticketLocalFiles.length > 0) return true;
+    } else if (attachmentsMap.size > (baselineAttachmentCountRef.current ?? 0)) {
+      return true;
+    }
+    const seededExclusions = standaloneSeed?.excludedChatAttachmentIds?.length ?? 0;
+    if (excludedChatAttachmentIds.size !== seededExclusions) return true;
+
+    return false;
+  };
+
+  const requestClose = (): void => {
+    if (hasUnsavedChanges()) {
+      setShowDiscardConfirm(true);
+      return;
+    }
+    handleClose();
+  };
+
+  const handleConfirmDiscard = (): void => {
+    setShowDiscardConfirm(false);
+    handleClose();
   };
 
   const canPopOut = !standalone && !ticketSequence;
@@ -1701,7 +1779,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           <Button
             variant='ghost'
             size='icon'
-            onClick={onClose}
+            onClick={requestClose}
             disabled={form.state.isSubmitting}
             className='size-6 '
             data-track-category='Tickets'
@@ -2757,6 +2835,49 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           </div>
         </div>
       </form>
+
+      {showDiscardConfirm && (
+        <Dialog
+          open={true}
+          onOpenChange={open => {
+            if (!open) setShowDiscardConfirm(false);
+          }}
+          title='Discard this ticket?'
+          description='The details you have filled in will be lost.'
+          zIndexClassName='z-[60]'
+          className='max-w-sm rounded-xl border border-border'
+          testId='discard-ticket-confirm'
+        >
+          <div className='p-5'>
+            <h2 className='text-[15px] font-semibold text-foreground mb-1.5'>
+              Discard this ticket?
+            </h2>
+            <p className='text-[13px] leading-5 text-muted-foreground mb-5'>
+              You have unsaved details. Closing now will lose everything you have filled in.
+            </p>
+            <div className='flex justify-end gap-2'>
+              <Button
+                type='button'
+                variant='secondary'
+                onClick={() => setShowDiscardConfirm(false)}
+                data-track-category='Tickets'
+                data-track-name='KeepEditingCreateTicket'
+              >
+                Keep editing
+              </Button>
+              <Button
+                type='button'
+                variant='destructive'
+                onClick={handleConfirmDiscard}
+                data-track-category='Tickets'
+                data-track-name='DiscardCreateTicket'
+              >
+                Discard
+              </Button>
+            </div>
+          </div>
+        </Dialog>
+      )}
     </div>
   );
 
@@ -2771,7 +2892,18 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   return (
     <Dialog
       open={isOpen}
-      onOpenChange={handleClose}
+      onOpenChange={open => {
+        if (!open) requestClose();
+      }}
+      onInteractOutside={event => {
+        if (event.detail.originalEvent.type === 'focusin') return;
+        event.preventDefault();
+        requestClose();
+      }}
+      onEscapeKeyDown={event => {
+        event.preventDefault();
+        requestClose();
+      }}
       title='Create Ticket'
       description='Create and edit ticket details before submitting.'
       {...(!isMobile ? { focusRef: titleInputRef } : {})}
