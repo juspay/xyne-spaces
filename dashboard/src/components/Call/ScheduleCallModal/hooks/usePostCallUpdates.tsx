@@ -69,6 +69,18 @@ export function usePostCallUpdates({ channels, participantCount }: UsePostCallUp
     }
   }, [showPostCallUpdates, postCallUpdates, resetPostCallUpdates]);
 
+  const didInitRef = useRef(false);
+  useEffect(() => {
+    if (!didInitRef.current) {
+      didInitRef.current = true;
+      return;
+    }
+    if (!postCallUpdates) return;
+
+    setChannelPickerOpen(true);
+    channelInputRef.current?.focus();
+  }, [postCallUpdates]);
+
   return {
     channelComboboxItems,
     channelInputRef,

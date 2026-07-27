@@ -15,6 +15,7 @@ import {
   isMissedCallForUser,
   isExternalCalendarEvent,
   isExternalCalendarEventForUser,
+  isScheduledCallJoinable,
   shouldShowInCallLists,
   shouldShowInScheduledList,
   type Call,
@@ -152,23 +153,16 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
 
     const now = Date.now();
 
-    // Build sets of active externalIds and series IDs so we can exclude
-    // scheduled calls that are already live (handles Zero replication lag
-    // where the call is ACTIVE in userCallHistory but still SCHEDULED in
-    // userScheduledCalls).
-    const activeExternalIds = new Set(activeCalls?.map(c => c.externalId) ?? []);
-    const activeSeriesIds = new Set(
-      activeCalls?.map(c => c.recurringSeriesId).filter((id): id is string => !!id) ?? [],
-    );
+    // Match only the live occurrence. Matching by recurringSeriesId would hide
+    // every future occurrence because the whole series shares that ID.
+    const activeCallIds = new Set(activeCalls?.map(call => call.id) ?? []);
+    const activeExternalIds = new Set(activeCalls?.map(call => call.externalId) ?? []);
 
     const filtered = scheduledCallRows.filter(call => {
       if (call.status === CallStatus.ACTIVE) {
         return false;
       }
-      if (activeExternalIds.has(call.externalId)) {
-        return false;
-      }
-      if (call.recurringSeriesId && activeSeriesIds.has(call.recurringSeriesId)) {
+      if (activeCallIds.has(call.id) || activeExternalIds.has(call.externalId)) {
         return false;
       }
       if (!shouldShowInScheduledList(call)) {
@@ -212,19 +206,14 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
   const calendarScheduledCalls = useMemo(() => {
     if (!scheduledCallRows) return undefined;
 
-    const activeExternalIds = new Set(activeCalls?.map(c => c.externalId) ?? []);
-    const activeSeriesIds = new Set(
-      activeCalls?.map(c => c.recurringSeriesId).filter((id): id is string => !!id) ?? [],
-    );
+    const activeCallIds = new Set(activeCalls?.map(call => call.id) ?? []);
+    const activeExternalIds = new Set(activeCalls?.map(call => call.externalId) ?? []);
 
     const filtered = scheduledCallRows.filter(call => {
       if (call.status === CallStatus.ACTIVE) {
         return false;
       }
-      if (activeExternalIds.has(call.externalId)) {
-        return false;
-      }
-      if (call.recurringSeriesId && activeSeriesIds.has(call.recurringSeriesId)) {
+      if (activeCallIds.has(call.id) || activeExternalIds.has(call.externalId)) {
         return false;
       }
       const currentUserParticipant = getCurrentUserParticipant(call);
@@ -427,10 +416,16 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
   };
 
   const handleCallRowClick = (call: Call): void => {
-    // For scheduled calls, always join (even if not started yet)
     if (call.status === CallStatus.SCHEDULED) {
+      if (!isScheduledCallJoinable(call)) {
+        toast.info('Call has not started yet', {
+          description: 'You can join at the scheduled start time.',
+          duration: 3000,
+        });
+        return;
+      }
       handleJoinCall(call);
-    } else if (call.status === CallStatus.ACTIVE) {
+    } else if (call.status === CallStatus.ACTIVE || call.status === CallStatus.IN_PROGRESS) {
       // For active/in-progress calls, join them
       handleJoinCall(call);
     } else {
