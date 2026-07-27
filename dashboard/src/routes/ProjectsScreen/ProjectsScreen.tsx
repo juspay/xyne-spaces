@@ -1,6 +1,11 @@
 import { ReactElement } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
-import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels';
+import { ResizableGroup, Panel, Separator } from '../../components/ui/Resizable/Resizable';
+import {
+  PROJECTS_SIDEBAR_DEFAULT_WIDTH,
+  PROJECTS_SIDEBAR_MAX_WIDTH,
+  PROJECTS_SIDEBAR_MIN_WIDTH,
+} from './projectsSidebarWidth';
 import { ProjectSidebar } from '../../components/Project';
 import { queries } from '../../zero/queries';
 import { usePlatform } from '../../hooks/usePlatform';
@@ -27,28 +32,34 @@ const ProjectsScreen = (): ReactElement => {
       data-component='ProjectsScreen'
     >
       {isWideScreen ? (
-        <PanelGroup
-          direction='horizontal'
+        <ResizableGroup
+          orientation='horizontal'
           className='flex align-top h-full'
           autoSaveId='projects-screen-resize'
         >
           {/* LEFT PANEL (Sidebar) */}
-          <Panel defaultSize={20} minSize={15} maxSize={40}>
+          <Panel
+            id='projects-sidebar'
+            defaultSize={PROJECTS_SIDEBAR_DEFAULT_WIDTH}
+            minSize={PROJECTS_SIDEBAR_MIN_WIDTH}
+            maxSize={PROJECTS_SIDEBAR_MAX_WIDTH}
+            groupResizeBehavior='preserve-pixel-size'
+          >
             <aside className='w-full h-full'>
               <ProjectSidebar projects={projects} persons={users} userGroups={userGroups} />
             </aside>
           </Panel>
 
           {/* RESIZE HANDLE */}
-          <PanelResizeHandle className='w-[2px] transition-colors cursor-col-resize flex items-center justify-center group'>
+          <Separator className='w-[2px] transition-colors cursor-col-resize flex items-center justify-center group'>
             <div
               id='panel-resize-divider'
               className='w-[2px] h-full bg-sidebar-divider group-hover:bg-primary group-active:bg-primary'
             ></div>
-          </PanelResizeHandle>
+          </Separator>
 
           {/* RIGHT PANEL (Content View) */}
-          <Panel>
+          <Panel id='projects-content'>
             <main
               data-id='projects-content-view'
               className='flex-1 h-full overflow-hidden relative flex flex-col rounded-2xl border border-border bg-background'
@@ -58,7 +69,7 @@ const ProjectsScreen = (): ReactElement => {
               </div>
             </main>
           </Panel>
-        </PanelGroup>
+        </ResizableGroup>
       ) : (
         // Narrow screen: Overlay pattern
         <>

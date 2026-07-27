@@ -4,9 +4,9 @@ import {
   ChatDefault,
   FolderDefault,
   PinDefault,
-  FileText,
+  File02Text,
   LinkChainSlant,
-  KanbanBoard,
+  TicketToken,
 } from '@xyne/icons';
 import { useCanReadTicket } from '../../../hooks/usePermissions';
 import { ChannelScopeType } from '@xyne/shared';
@@ -38,7 +38,7 @@ const STATIC_TABS: ConversationTabListType[] = [
   {
     label: 'Canvas',
     value: 'canvas',
-    icon: <FileText size={14} />,
+    icon: <File02Text size={14} />,
   },
   {
     label: 'Links',
@@ -51,7 +51,7 @@ const STATIC_TABS: ConversationTabListType[] = [
 const TICKETS_TAB: ConversationTabListType = {
   label: 'Tickets',
   value: 'tickets',
-  icon: <KanbanBoard size={14} />,
+  icon: <TicketToken size={14} />,
 };
 
 // Stable references — a fresh `[...STATIC_TABS, TICKETS_TAB]` and fresh

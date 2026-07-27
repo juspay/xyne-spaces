@@ -9,6 +9,10 @@ interface CheckboxProps {
       while keeping the checked glyph/fill visible so the current value still reads clearly. */
   disabled?: boolean;
   size?: 'sm' | 'md';
+  /** Constrain the label to a single line and ellipsize it, letting the control
+      shrink below its content width. For tight flex rows (e.g. composer footers)
+      where a long label would otherwise push siblings out of the container. */
+  truncateLabel?: boolean;
 }
 
 export function Checkbox({
@@ -18,6 +22,7 @@ export function Checkbox({
   indeterminate = false,
   disabled = false,
   size = 'md',
+  truncateLabel = false,
 }: CheckboxProps): ReactElement {
   const sm = size === 'sm';
   const inputRef = useRef<HTMLInputElement>(null);
@@ -28,9 +33,9 @@ export function Checkbox({
 
   return (
     <label
-      className={`group inline-flex items-center gap-2 select-none w-fit ${
-        disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'
-      }`}
+      className={`group inline-flex items-center gap-2 select-none ${
+        truncateLabel ? 'min-w-0 max-w-full' : 'w-fit'
+      } ${disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
     >
       {/* Custom checkbox box — both "checked" and "indeterminate" share the
           filled-primary look (Gmail/Outlook convention); the glyph inside
@@ -89,9 +94,10 @@ export function Checkbox({
       {/* Label text */}
       {label && (
         <span
-          className={
+          className={`${
             sm ? 'text-xs text-muted-foreground' : 'text-[13px] font-medium text-foreground'
-          }
+          } ${truncateLabel ? 'truncate' : ''}`}
+          {...(truncateLabel && { title: label })}
         >
           {label}
         </span>

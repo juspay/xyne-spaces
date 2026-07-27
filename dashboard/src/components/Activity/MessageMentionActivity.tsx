@@ -1,7 +1,7 @@
 import { ReactElement } from 'react';
 import type { ActivityWithRelated } from '../../types/activity';
 import { MessageBubble } from '../ui/MessageBubble/MessageBubble';
-import { AtSign } from 'lucide-react';
+import { AtMark } from '@xyne/icons';
 import { ActivityItemCard } from './ActivityItemCard';
 import { RenderMessageWithHTML } from '../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { useUser } from '../../hooks/useUsers';
@@ -36,7 +36,7 @@ export const MessageMentionActivity = ({
       actorId={sender.id}
       actorName={getUserDisplayName(sender)}
       channelId={message.conversation?.channelId}
-      badgeIcon={<AtSign className='w-4 h-4 text-primary' />}
+      badgeIcon={<AtMark className='size-3 text-primary' />}
       badgeColorClass='bg-muted'
       description={<span className='text-muted-foreground text-sm'>mentioned you in</span>}
       targetPath={targetPath}

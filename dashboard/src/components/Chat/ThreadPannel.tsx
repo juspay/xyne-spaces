@@ -60,7 +60,13 @@ import { useScope } from '../../shortcuts';
 import { useShareableOrigin } from '../../hooks/useShareableOrigin';
 import GlobalCommandMenu from '../GlobalCommandMenu/GlobalCommandMenu';
 import type { ContextItem } from './ThreadContextPanel/ThreadContextPanel.types';
-import { isElectronApp, isStandaloneWindow, standaloneNavigate } from '../../utils/electronApp';
+import {
+  isElectronApp,
+  isStandaloneWindow,
+  standaloneNavigate,
+  APP_DRAG_STYLE,
+  APP_NO_DRAG_STYLE,
+} from '../../utils/electronApp';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { useZero } from '../../hooks/useZero';
 import { logger, Event } from '../../utils/logger';
@@ -139,6 +145,14 @@ export const ThreadMessages = ({
 
   const outletContext = useOutletContext<{ onClose?: () => void } | null>();
   const resolvedOnClose = onClose ?? outletContext?.onClose;
+
+  // Restore Electron window dragging on the thread header — but ONLY when this is the
+  // real thread panel (route-mounted or ChatView split view). Those sites pass no
+  // `onClose` prop (they derive it from the outlet context), whereas the search/call
+  // sidebars pass an explicit `onClose` and preview cards pass `previewCardMode`; those
+  // must never move the OS window. Attachment/citation/ticket modals suppress this
+  // header entirely (hideHeader / underTicketView), so they are excluded already.
+  const isDraggableThreadPanel = onClose === undefined && !previewCardMode;
 
   const channelId = propChannelId || paramChannelId;
   const conversationId = propConversationId || paramConversationId;
@@ -666,6 +680,10 @@ export const ThreadMessages = ({
     );
   };
 
+  // Icon actions sit muted at rest and come up to full strength on hover —
+  // matches ConversationHeader's action row.
+  const actionIconClass = 'text-muted-foreground hover:text-foreground';
+
   const showBreadcrumb = (isFocusedThread || showChannelLink) && !isStandaloneWindow() && !!channel;
   const focusedChannelBreadcrumb = showBreadcrumb ? (
     <Tooltip content={`Open ${isDmThread ? '' : '#'}${channelDisplayName}`}>
@@ -676,6 +694,7 @@ export const ThreadMessages = ({
         data-track-category='THREAD_PANEL'
         data-track-name='OPEN_IN_CHANNEL_FROM_FOCUS'
         className='group/chan flex shrink-0 items-center gap-1 max-w-[180px] rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
+        style={APP_NO_DRAG_STYLE}
       >
         {!isDmThread && (
           <Hash className='size-3.5 shrink-0 opacity-60 transition-opacity group-hover/chan:opacity-100' />
@@ -905,6 +924,8 @@ export const ThreadMessages = ({
       >
         {/* Drag and Drop Overlay */}
         <DragAndDropOverlay isVisible={isDragging} />
+        {/* pt-3 only (not py-3): a second padded header always follows this one, and its
+            own pt-3 supplies the 12px below — py-3 here would double it to 24px. */}
         {showHeader && (
           <div className='flex gap-2 items-center justify-between w-full pl-2 pr-3 pt-3'>
             <div className='flex gap-2 items-center min-w-0'>
@@ -920,12 +941,16 @@ export const ThreadMessages = ({
                   conversationId={derivedConversationId}
                   {...(conversation && { conversation })}
                   variant='icon-only'
-                  className='h-7 w-7 rounded-lg flex items-center justify-center transition-colors hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50'
+                  className={cn(
+                    'h-7 w-7 rounded-lg flex items-center justify-center transition-colors hover:bg-accent dark:hover:bg-accent/50',
+                    actionIconClass,
+                  )}
                 />
               </Tooltip>
             )}
           </div>
         )}
+        {/* pt-3 only — the tabs header below supplies the 12px gap. See note above. */}
         {derivedTicketId && ticket && !simpleView && (
           <div className='flex justify-between items-center w-full pl-2 pr-3 pt-3 gap-4'>
             <div className='flex gap-2 items-center min-w-0 flex-1'>
@@ -981,11 +1006,14 @@ export const ThreadMessages = ({
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <button
-                    className='flex items-center justify-center p-[8px] rounded-[8px] size-[28px] hover:bg-accent transition-colors text-foreground shrink-0'
+                    className={cn(
+                      'flex items-center justify-center rounded-lg size-7 hover:bg-accent transition-colors shrink-0',
+                      actionIconClass,
+                    )}
                     title='More'
                     data-testid='thread-more-options-button'
                   >
-                    <ThreeDotsMenuVertical size={16} className='opacity-60' />
+                    <ThreeDotsMenuVertical size={16} />
                   </button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent
@@ -1040,7 +1068,7 @@ export const ThreadMessages = ({
                 <Tooltip content='Close'>
                   <Button
                     onClick={resolvedOnClose ?? handleCloseTicketDetailsThread}
-                    className='h-7 w-7 rounded-lg'
+                    className={cn('h-7 w-7 rounded-lg', actionIconClass)}
                     variant='ghost'
                     size='sm'
                     aria-label='Close Thread Panel'
@@ -1061,7 +1089,7 @@ export const ThreadMessages = ({
             className='flex-1 flex flex-col h-full overflow-hidden'
           >
             {/* Header with title, close button, and tabs */}
-            <div className='w-full pl-2 pr-3 pt-3 pb-3'>
+            <div className='w-full pl-2 pr-3 py-3'>
               <div className='relative flex justify-between w-full'>
                 {/* Tabs List */}
                 <div className='overflow-x-auto no-scrollbar'>
@@ -1217,7 +1245,10 @@ export const ThreadMessages = ({
           <>
             {/* Header with tabs for simpleView, or simple header for regular view */}
             {!hideHeader && (
-              <div className='flex justify-between items-center w-full pl-2 pr-3 pt-3 gap-4'>
+              <div
+                className='flex justify-between items-center w-full pl-2 pr-3 pt-3 gap-4'
+                style={isDraggableThreadPanel ? APP_DRAG_STYLE : undefined}
+              >
                 {/* Title */}
                 <div className='flex items-center gap-2 min-w-0 flex-1'>
                   {isStandaloneWindow() && (
@@ -1225,7 +1256,8 @@ export const ThreadMessages = ({
                       <Button
                         variant='ghost'
                         size='sm'
-                        className='h-7 w-7 rounded-lg text-muted-foreground shrink-0'
+                        className={cn('h-7 w-7 rounded-lg shrink-0', actionIconClass)}
+                        style={APP_NO_DRAG_STYLE}
                         onClick={() => void navigate(`/newWindow/chat/dir/${derivedChannelId}`)}
                         aria-label='Back to channel'
                       >
@@ -1249,7 +1281,7 @@ export const ThreadMessages = ({
                 </div>
 
                 {/* Actions */}
-                <div className='flex items-center gap-1 shrink-0'>
+                <div className='flex items-center gap-1 shrink-0' style={APP_NO_DRAG_STYLE}>
                   {/* Ask AI */}
                   {!isStandaloneWindow() && (
                     <Tooltip content='Ask AI Conversation'>
@@ -1289,11 +1321,14 @@ export const ThreadMessages = ({
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <button
-                        className='flex items-center justify-center p-[8px] rounded-[8px] size-[28px] hover:bg-accent transition-colors text-foreground shrink-0'
+                        className={cn(
+                          'flex items-center justify-center rounded-lg size-7 hover:bg-accent transition-colors shrink-0',
+                          actionIconClass,
+                        )}
                         title='More'
                         data-testid='thread-more-options-button'
                       >
-                        <ThreeDotsMenuVertical size={16} className='opacity-60' />
+                        <ThreeDotsMenuVertical size={16} />
                       </button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent
@@ -1357,7 +1392,7 @@ export const ThreadMessages = ({
                       <Button
                         variant='ghost'
                         size='sm'
-                        className='h-7 w-7 rounded-lg'
+                        className={cn('h-7 w-7 rounded-lg', actionIconClass)}
                         onClick={resolvedOnClose ?? handleCloseTicketDetailsThread}
                         aria-label='Close thread panel'
                         data-track-category='THREAD_PANEL'

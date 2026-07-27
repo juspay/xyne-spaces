@@ -1,6 +1,6 @@
 import { ReactElement } from 'react';
 import type { ActivityWithRelated } from '../../types/activity';
-import { Ticket } from 'lucide-react';
+import { TicketToken } from '@xyne/icons';
 import { useUser } from '../../hooks/useUsers';
 import { getUserDisplayName } from '../../utils/userDisplayName';
 import { ActivityItemCard } from './ActivityItemCard';
@@ -67,8 +67,10 @@ export const GroupedTicketActivity = ({
       : labels[0] || 'fields';
 
   const content = (
-    <span className='text-sm text-foreground'>
-      <span className='font-semibold'>{ticketXyneId}</span>
+    <span className='text-sm'>
+      <span className={first.isRead ? 'text-muted-foreground' : 'font-semibold'}>
+        {ticketXyneId}
+      </span>
       <span className='text-muted-foreground'> {labelList} updated</span>
     </span>
   );
@@ -84,7 +86,7 @@ export const GroupedTicketActivity = ({
       actorId={actorId}
       actorName={actorName}
       channelId={ticket.channelId}
-      badgeIcon={<Ticket className='w-4 h-4 text-muted-foreground' />}
+      badgeIcon={<TicketToken className='size-3 text-muted-foreground' />}
       badgeColorClass='bg-muted'
       description={<span className='text-muted-foreground text-sm'>updated ticket in</span>}
       targetPath={targetPath}

@@ -97,9 +97,10 @@ export type XyneAIEvent =
   | { type: 'CLEAR_SELECTIONS'; canvasId?: string }
   | { type: 'REMOVE_SELECTION'; canvasId: string; selectionIndex: number };
 
-// Interface for panel handle (to avoid importing react-resizable-panels here)
+// Interface for panel handle (to avoid importing react-resizable-panels here).
+// Sizes are strings so units are explicit — a bare number means pixels.
 interface PanelHandle {
-  resize: (size: number) => void;
+  resize: (size: number | string) => void;
 }
 
 // Panel refs interface

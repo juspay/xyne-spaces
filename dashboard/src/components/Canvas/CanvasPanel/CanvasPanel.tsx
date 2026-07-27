@@ -32,11 +32,16 @@ import { v4 as uuidv4 } from 'uuid';
 import { toast } from 'sonner';
 import type { ReadonlyJSONValue } from '@rocicorp/zero';
 import {
-  PanelGroup,
+  ResizableGroup,
   Panel,
-  PanelResizeHandle,
-  type ImperativePanelHandle,
-} from 'react-resizable-panels';
+  Separator,
+  type PanelImperativeHandle,
+} from '../../ui/Resizable/Resizable';
+import {
+  CANVAS_SIDEBAR_DEFAULT_WIDTH,
+  CANVAS_SIDEBAR_MAX_WIDTH,
+  CANVAS_SIDEBAR_MIN_WIDTH,
+} from './canvasSidebarWidth';
 import AppNavigator from '../../AppNavigator/AppNavigator';
 import { cn } from '../../../utils/classNames';
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -54,7 +59,7 @@ const CanvasPanel = (): ReactElement => {
 
   const isOnIndexRoute = usePath() === '/chat/canvas';
 
-  const canvasPanelRef = useRef<ImperativePanelHandle>(null);
+  const canvasPanelRef = useRef<PanelImperativeHandle>(null);
   const deletedCanvasIdsRef = useRef<Set<string>>(new Set());
   const {
     filter: activeFilter,
@@ -410,30 +415,37 @@ const CanvasPanel = (): ReactElement => {
   // Desktop view - two-panel layout with resizable panels
   return (
     <div className='flex h-full w-full overflow-hidden'>
-      <PanelGroup
-        direction='horizontal'
+      <ResizableGroup
+        orientation='horizontal'
         className='flex align-top h-full'
         autoSaveId='canvas-screen-resize'
       >
         {/* LEFT PANEL - Canvas List */}
-        <Panel ref={canvasPanelRef} defaultSize={30} minSize={25} maxSize={45}>
+        <Panel
+          id='canvas-sidebar'
+          panelRef={canvasPanelRef}
+          defaultSize={CANVAS_SIDEBAR_DEFAULT_WIDTH}
+          minSize={CANVAS_SIDEBAR_MIN_WIDTH}
+          maxSize={CANVAS_SIDEBAR_MAX_WIDTH}
+          groupResizeBehavior='preserve-pixel-size'
+        >
           {renderLeftPanel()}
         </Panel>
 
         {/* RESIZE HANDLE */}
-        <PanelResizeHandle className='w-[2px] transition-colors cursor-col-resize flex items-center justify-center group'>
+        <Separator className='w-[2px] transition-colors cursor-col-resize flex items-center justify-center group'>
           <div className='w-[2px] h-full bg-sidebar-divider group-hover:bg-primary group-active:bg-primary'></div>
-        </PanelResizeHandle>
+        </Separator>
 
         {/* RIGHT PANEL - Detail View */}
-        <Panel>
+        <Panel id='canvas-content'>
           <div className='flex-1 flex flex-col bg-background relative h-full overflow-hidden rounded-2xl border border-border'>
             <div className='flex-1 h-full overflow-hidden'>
               {isOnIndexRoute ? renderPlaceholder() : <Outlet />}
             </div>
           </div>
         </Panel>
-      </PanelGroup>
+      </ResizableGroup>
     </div>
   );
 };

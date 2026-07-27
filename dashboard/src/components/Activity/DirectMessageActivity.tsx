@@ -1,12 +1,12 @@
 import { ReactElement } from 'react';
 import type { ActivityWithRelated } from '../../types/activity';
 import { MessageBubble } from '../ui/MessageBubble/MessageBubble';
-import { MessageCircle } from 'lucide-react';
 import { ActivityItemCard } from './ActivityItemCard';
 import { RenderMessageWithHTML } from '../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { useUser } from '../../hooks/useUsers';
 import { useRouteContext } from '../../hooks/useRouteContext';
 import { getUserDisplayName } from '../../utils/userDisplayName';
+import { ChatDefault } from '@xyne/icons';
 
 export const DirectMessageActivity = ({
   activity,
@@ -34,7 +34,7 @@ export const DirectMessageActivity = ({
       actorId={sender.id}
       actorName={getUserDisplayName(sender)}
       channelId={message.conversation?.channelId}
-      badgeIcon={<MessageCircle className='w-4 h-4 text-emerald-500' />}
+      badgeIcon={<ChatDefault className='size-3 text-emerald-500' />}
       badgeColorClass='bg-muted'
       description={<span className='text-muted-foreground text-sm'>sent you a DM in</span>}
       targetPath={targetPath}

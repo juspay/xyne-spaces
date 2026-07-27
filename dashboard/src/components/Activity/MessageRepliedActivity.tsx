@@ -1,12 +1,12 @@
 import { ReactElement } from 'react';
 import type { ActivityWithRelated } from '../../types/activity';
 import { MessageBubble } from '../ui/MessageBubble/MessageBubble';
-import { MessageCircleMore } from 'lucide-react';
 import { ActivityItemCard } from './ActivityItemCard';
 import { RenderMessageWithHTML } from '../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { useUser } from '../../hooks/useUsers';
 import { useRouteContext } from '../../hooks/useRouteContext';
 import { getUserDisplayName } from '../../utils/userDisplayName';
+import { ChatTyping } from '@xyne/icons';
 
 export const MessageRepliedActivity = ({
   activity,
@@ -32,7 +32,7 @@ export const MessageRepliedActivity = ({
       actorId={sender.id}
       actorName={getUserDisplayName(sender)}
       channelId={message.conversation?.channelId}
-      badgeIcon={<MessageCircleMore className='text-yellow-600' />}
+      badgeIcon={<ChatTyping className='size-3 text-yellow-600' />}
       badgeColorClass='bg-muted'
       description={<span className='text-muted-foreground text-sm'>replied in</span>}
       targetPath={targetPath}

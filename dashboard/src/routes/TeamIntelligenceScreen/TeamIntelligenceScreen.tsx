@@ -3,7 +3,12 @@ import TeamIntelligenceSidebar from '@/components/TeamIntelligence/TeamIntellige
 import { getDateRange, TimeRange } from '@/utils/teamIntelligenceUtils';
 import { useWindowWidth } from '@/hooks/useWindowWidth';
 import React, { ReactElement, useEffect, useMemo, useState } from 'react';
-import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
+import { Panel, ResizableGroup, Separator } from '../../components/ui/Resizable/Resizable';
+import {
+  TEAM_INTELLIGENCE_SIDEBAR_DEFAULT_WIDTH,
+  TEAM_INTELLIGENCE_SIDEBAR_MAX_WIDTH,
+  TEAM_INTELLIGENCE_SIDEBAR_MIN_WIDTH,
+} from './teamIntelligenceSidebarWidth';
 import { Outlet } from 'react-router-dom';
 import Drawer from '@/components/ui/Drawer';
 
@@ -127,27 +132,37 @@ function DesktopLayout({
   dateRange,
 }: LayoutProps): ReactElement {
   return (
-    <PanelGroup
-      direction='horizontal'
+    <ResizableGroup
+      orientation='horizontal'
       className='flex-1 overflow-hidden'
       autoSaveId='team-intelligence-panel-layout'
+      panelIds={isSidebarOpen ? ['sidebar', 'main'] : ['main']}
     >
       {isSidebarOpen ? (
         <React.Fragment>
-          <Panel defaultSize={20} minSize={16} maxSize={25} id='sidebar' order={1}>
+          <Panel
+            id='sidebar'
+            defaultSize={TEAM_INTELLIGENCE_SIDEBAR_DEFAULT_WIDTH}
+            minSize={TEAM_INTELLIGENCE_SIDEBAR_MIN_WIDTH}
+            maxSize={TEAM_INTELLIGENCE_SIDEBAR_MAX_WIDTH}
+            groupResizeBehavior='preserve-pixel-size'
+          >
             <TeamIntelligenceSidebar
               isSidebarOpen={isSidebarOpen}
               setIsSidebarOpen={setIsSidebarOpen}
               showCollapseButton={true}
             />
           </Panel>
-          <PanelResizeHandle className='w-[2px] transition-colors cursor-col-resize flex items-center justify-center group'>
+          <Separator className='w-[2px] transition-colors cursor-col-resize flex items-center justify-center group'>
             <div className='w-[2px] h-full bg-sidebar-divider group-hover:bg-primary group-active:bg-primary' />
-          </PanelResizeHandle>
+          </Separator>
         </React.Fragment>
       ) : null}
 
-      <Panel defaultSize={80} minSize={75} maxSize={84} id='main' order={2}>
+      {/* No size constraints — the pixel-pinned sidebar takes its width and this panel
+          grows to fill the rest. A percentage min/max here would fight the pin and
+          force the sidebar to scale with the window again. */}
+      <Panel id='main'>
         <div className='h-full flex flex-col overflow-auto no-scrollbar bg-background'>
           <div className='sticky top-0 w-full z-20 border-b border-sidebar-divider'>
             <TeamIntelligenceHeader
@@ -162,7 +177,7 @@ function DesktopLayout({
           />
         </div>
       </Panel>
-    </PanelGroup>
+    </ResizableGroup>
   );
 }
 

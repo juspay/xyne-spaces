@@ -43,7 +43,7 @@ export const Switch: React.FC<SwitchProps> = ({
           disabled && 'opacity-50 cursor-not-allowed',
           isDesk
             ? cn('h-[18px] w-[28px] p-0.5', checked ? 'bg-desk-accent' : 'bg-desk-switch-off')
-            : cn('h-5 w-9', checked ? 'bg-primary' : 'bg-muted'),
+            : cn('h-5 w-9 p-[3px]', checked ? 'bg-primary' : 'bg-muted'),
         )}
       >
         <span
@@ -56,7 +56,7 @@ export const Switch: React.FC<SwitchProps> = ({
                 )
               : cn(
                   'h-3.5 w-3.5 bg-background shadow-sm',
-                  checked ? 'translate-x-5' : 'translate-x-0.5',
+                  checked ? 'translate-x-4' : 'translate-x-0',
                 ),
           )}
         />

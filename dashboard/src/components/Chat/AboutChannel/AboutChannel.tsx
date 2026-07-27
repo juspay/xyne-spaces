@@ -231,7 +231,7 @@ const AboutChannel = ({
   }, [isEditingName]);
 
   return (
-    <div className='flex flex-col h-full bg-muted'>
+    <div className='flex flex-col h-full'>
       <div className='p-4 overflow-y-auto'>
         {/* Channel Name */}
         {canRename && (

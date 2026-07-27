@@ -227,11 +227,14 @@ export const ActivityItemCard = ({
       role='button'
       onClick={handleClick}
       className={cn(
-        'group flex w-full items-start gap-3 p-4 text-left transition-colors duration-150 h-auto rounded-none border-b border-border border-l-4',
+        'group flex w-full font-normal items-start gap-3 px-3 pt-2.5 pb-2 text-left transition-colors duration-150 h-auto rounded-[14px] border border-transparent',
         // Selection highlight is driven by the `data-selected` attribute that
         // ActivityListView stamps imperatively (no render needed to update).
-        'border-l-transparent data-[selected]:border-l-foreground',
-        !activity.isRead ? 'bg-accent hover:!bg-accent/50' : 'bg-card hover:!bg-muted/30',
+        // Active row gets a raised card surface; hover previews the same
+        // treatment; inactive rows stay transparent (unread state is shown by
+        // the count badge, not a row background).
+        'bg-transparent hover:!bg-card hover:border-border hover:shadow-sm',
+        'data-[selected]:bg-card data-[selected]:border-border data-[selected]:shadow-sm',
         className,
       )}
       data-activity-id={activity.id}
@@ -243,7 +246,7 @@ export const ActivityItemCard = ({
         isRead: activity.isRead,
       })}
     >
-      <div className='relative flex-shrink-0'>
+      <div className={cn('relative flex-shrink-0', activity.isRead ? 'opacity-70' : '')}>
         <UserHoverWrapper userId={actorId}>
           <button
             onClick={e => e.stopPropagation()}
@@ -255,7 +258,7 @@ export const ActivityItemCard = ({
             <UserAvatar userId={actorId} size={AvatarSize.REGULAR} showActiveStatus={false} />
             <div
               className={cn(
-                'absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-muted border-[0.5px] p-1',
+                'absolute -bottom-1 -right-1 flex size-5 [&_svg]:size-3.5 [&_span]:text-xs leading-none items-center justify-center rounded-full bg-muted border-[0.5px]',
                 badgeColorClass,
               )}
             >
@@ -267,13 +270,24 @@ export const ActivityItemCard = ({
 
       <div className='flex flex-1 flex-col min-w-0 overflow-hidden'>
         <div className='flex w-full items-start justify-between gap-2 flex-wrap'>
-          <div className='flex flex-wrap items-baseline gap-x-1.5 text-sm leading-snug min-w-0 flex-1'>
+          <div
+            className={cn(
+              'text-sm leading-snug min-w-0 flex-1 truncate',
+              // Sets the color the truncation ellipsis is drawn in (text-overflow
+              // paints the "…" from THIS element's color, not the clipped child's),
+              // so the ellipsis matches the muted/foreground title state.
+              activity.isRead ? 'text-muted-foreground' : 'text-foreground',
+            )}
+          >
             {isMobile ? (
-              <span className='font-semibold text-foreground'>{actorName}</span>
+              <span className={activity.isRead ? undefined : 'font-semibold'}>{actorName}</span>
             ) : (
               <UserHoverWrapper userId={actorId}>
                 <button
-                  className='font-semibold text-foreground hover:underline flex-shrink-0'
+                  className={cn(
+                    'hover:underline flex-shrink-0',
+                    !activity.isRead && 'font-semibold',
+                  )}
                   onClick={e => e.stopPropagation()}
                   data-track-category='ACTIVITY'
                   data-track-name='VIEW_USER_PROFILE'
@@ -284,14 +298,19 @@ export const ActivityItemCard = ({
               </UserHoverWrapper>
             )}
 
-            <span className='text-muted-foreground flex-shrink-0'>{description}</span>
+            {/* Description children (the `description` prop) set their own
+                text-muted-foreground; on unread we override them to foreground via
+                the child selector. Read + the container's color handle the rest. */}
+            <span className={cn('ml-1.5', !activity.isRead && '*:text-foreground')}>
+              {description}
+            </span>
 
             {actorAction !== 'paused_from_assignment' &&
               actorAction !== 'resumed_from_assignment' &&
               actorAction !== 'workflow_question' &&
               channelId &&
               (isMobile ? (
-                <span className='font-semibold text-foreground'>
+                <span className={cn('ml-1.5', !activity.isRead && 'font-semibold')}>
                   {`#${channel ? channelDisplayName : 'Unknown Channel'}`}
                 </span>
               ) : (
@@ -302,9 +321,25 @@ export const ActivityItemCard = ({
                     subtitle: channel?.description || 'Channel',
                   }}
                 >
-                  <button
-                    className='font-semibold text-foreground hover:underline cursor-pointer text-left whitespace-normal'
+                  {/* Rendered as a <span role="button">, not a <button>: the title
+                      line truncates via the container's text-overflow ellipsis, which
+                      can only cut through inline text. A <button> is an atomic
+                      inline-level box whose text is isolated from the parent's inline
+                      formatting context, so it can't be ellipsized — it gets clipped
+                      whole and leaves empty space. A span is real inline text. */}
+                  <span
+                    role='button'
+                    tabIndex={0}
+                    className={cn(
+                      'hover:underline cursor-pointer text-left ml-1.5',
+                      activity.isRead ? 'font-normal' : 'font-semibold',
+                    )}
                     onClick={e => e.stopPropagation()}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.stopPropagation();
+                      }
+                    }}
                     data-track-category='ACTIVITY'
                     data-track-name='VIEW_CHANNEL'
                     data-track-metadata={JSON.stringify({
@@ -314,7 +349,7 @@ export const ActivityItemCard = ({
                     })}
                   >
                     {`#${channel ? channelDisplayName : 'Unknown Channel'}`}
-                  </button>
+                  </span>
                 </GenericMentionHoverPopover>
               ))}
           </div>
@@ -364,7 +399,7 @@ export const ActivityItemCard = ({
                 </Tooltip>
               ))}
             {showUnreadDot && !activity.isRead && (
-              <span className='h-1.5 w-1.5 rounded-full bg-primary flex-shrink-0' />
+              <span className='h-2.5 w-2.5 rounded-full bg-primary flex-shrink-0' />
             )}
             {getTimestampDisplay(activityTimestamp)}
           </span>
@@ -373,7 +408,20 @@ export const ActivityItemCard = ({
         {/* Content Body */}
         <div
           className={cn(
-            'mt-px w-full text-foreground',
+            'mt-px w-full',
+            // Read: mute the whole preview. Message bodies rendered via
+            // RenderMessageWithHTML set their own color on `.jp-message-html`
+            // (`@apply text-foreground` in global.css), which breaks the inherited
+            // muted color — so override just that wrapper from here. The
+            // descendant selector wins on specificity (0,2,0 vs 0,1,0) with no
+            // !important, leaving inline-code colors (self-styled) intact.
+            // Mentions colour themselves (some with !important), so inheritance
+            // can't dim them — fade them with opacity instead (no specificity /
+            // !important battle). [data-mention] = user/group/@channel/@here;
+            // [data-channel-mention] = #channel links.
+            activity.isRead
+              ? 'text-muted-foreground [&_.jp-message-html]:text-muted-foreground [&_[data-mention]]:opacity-60 [&_[data-channel-mention]]:opacity-60'
+              : 'text-foreground',
             isExpanded
               ? 'whitespace-normal break-normal'
               : 'line-clamp-1 break-normal whitespace-normal',

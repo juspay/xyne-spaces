@@ -7,7 +7,7 @@ import {
   GitBranch,
   UserThree,
   FolderDefault,
-  InboxDefault,
+  Hashtag,
   PhoneDefault,
   NotificationBellOn,
   ChatDefault,
@@ -51,7 +51,7 @@ export interface NavigationItem {
 // order they should appear in the rail, followed by everything that lives in
 // the "More" menu by default. Toggling is handled per-path by useToolbarItems.
 export const NAVIGATION_ITEMS: NavigationItem[] = [
-  { path: '/chat/dir', label: 'Chat', icon: InboxDefault },
+  { path: '/chat/dir', label: 'Chat', icon: Hashtag },
   { path: '/chat/dm', label: 'DMs', icon: ChatDefault },
   { path: '/chat/activity', label: 'Activity', icon: NotificationBellOn },
   { path: '/calls', label: 'Calls', icon: PhoneDefault },

@@ -20,7 +20,6 @@ interface ConversationHistoryProps {
   selectedAgentSlug?: string | null;
   agents?: AgentOption[];
   onSelectAgent?: (slug: string | null) => void;
-  selectedAgentColor?: string | null;
   isLoading?: boolean;
   onClose?: () => void;
   agentSelectorDisabled?: boolean;
@@ -77,7 +76,6 @@ export const ConversationHistory = ({
   selectedAgentSlug,
   agents,
   onSelectAgent,
-  selectedAgentColor,
   isLoading = false,
   agentSelectorDisabled = false,
 }: ConversationHistoryProps): ReactElement => {
@@ -91,17 +89,7 @@ export const ConversationHistory = ({
   };
 
   return (
-    <div
-      className='flex-1 overflow-hidden flex flex-col bg-background h-full rounded-xl border'
-      style={{
-        ...(selectedAgentColor
-          ? {
-              boxShadow: `inset 0 0 120px -20px ${selectedAgentColor}30`,
-              borderColor: selectedAgentColor,
-            }
-          : {}),
-      }}
-    >
+    <div className='flex-1 overflow-hidden flex flex-col h-full'>
       {/* Header */}
       <div className='p-4 flex items-center justify-between gap-2 self-stretch border-border flex-shrink-0'>
         {isSearchExpanded ? (

@@ -1,6 +1,6 @@
 import { ReactElement, useRef, useEffect } from 'react';
 import useMeasure from '../../../hooks/useMeasure';
-import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels';
+import { ResizableGroup, Panel, Separator } from '../../ui/Resizable/Resizable';
 import {
   Navigate,
   Outlet,
@@ -186,10 +186,11 @@ const ChatView = (): ReactElement => {
   // (overlay vs side-by-side). Original 700 px threshold restored.
   const shouldStack = bounds.width < 700 || shouldStackThreadFromParent;
 
-  const defaultConversationPannelSize = 50;
-  const minConversationPannelSize = 25;
-  const defaultSecondaryPanelSize = 50;
-  const minSecondaryPanelSize = 40;
+  // Percentages — bare numbers are read as pixels by react-resizable-panels.
+  const defaultConversationPannelSize = '50%';
+  const minConversationPannelSize = '25%';
+  const defaultSecondaryPanelSize = '50%';
+  const minSecondaryPanelSize = '40%';
 
   if (channelId === undefined) {
     void navigate('/chat', { replace: true });
@@ -321,20 +322,31 @@ const ChatView = (): ReactElement => {
             </div>
           </>
         ) : (
-          <PanelGroup
-            direction='horizontal'
+          <ResizableGroup
+            orientation='horizontal'
             className='h-full'
             autoSaveId={`${channelId}-thread-summary`}
           >
-            <Panel defaultSize={defaultConversationPannelSize} minSize={minConversationPannelSize}>
+            <Panel
+              id='chat-thread'
+              defaultSize={defaultConversationPannelSize}
+              minSize={minConversationPannelSize}
+            >
               <div className='h-full animate-slide-in-from-right'>
                 <ThreadMessages channelId={channelId} conversationId={conversationId} />
               </div>
             </Panel>
-            <PanelResizeHandle className='w-1 hover:bg-blue-50 active:bg-blue-100 transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
-              <div id='panel-resize-divider' className='w-[1px] h-full bg-border'></div>
-            </PanelResizeHandle>
-            <Panel defaultSize={defaultSecondaryPanelSize} minSize={minSecondaryPanelSize}>
+            <Separator className='w-[2px] transition-colors cursor-col-resize flex items-center justify-center group'>
+              <div
+                id='panel-resize-divider'
+                className='w-[2px] h-full bg-border group-hover:bg-primary group-active:bg-primary'
+              ></div>
+            </Separator>
+            <Panel
+              id='chat-thread-summary'
+              defaultSize={defaultSecondaryPanelSize}
+              minSize={minSecondaryPanelSize}
+            >
               <div className='h-full bg-muted animate-slide-in-from-right'>
                 <ThreadSummary
                   conversationId={conversationId}
@@ -344,7 +356,7 @@ const ChatView = (): ReactElement => {
                 />
               </div>
             </Panel>
-          </PanelGroup>
+          </ResizableGroup>
         )
       ) : (
         // Normal mode (including channel summary) — ConversationPanelV2 is ALWAYS
@@ -355,21 +367,27 @@ const ChatView = (): ReactElement => {
         // can flip at any width (panel resize, browser panel open/close, window
         // resize) without ever remounting ConversationPanelV2 or ChatListV3.
         <>
-          <PanelGroup
-            direction='horizontal'
+          <ResizableGroup
+            orientation='horizontal'
             className='h-full'
             autoSaveId={
               isChannelSummaryActive && channelId
                 ? `${channelId}-channel-summary`
                 : channelId || null
             }
+            panelIds={[
+              ...(isCanvasFullscreen ? [] : ['chat-conv-panel']),
+              ...(showSecondaryPanel && !shouldStack && !shouldStackThreadFromParent
+                ? ['chat-secondary-panel']
+                : []),
+            ]}
           >
             {/* Conversation Panel — stable position forever */}
             {!isCanvasFullscreen && (
               <Panel
                 id='chat-conv-panel'
                 defaultSize={
-                  showSecondaryPanel && !shouldStack ? defaultConversationPannelSize : 100
+                  showSecondaryPanel && !shouldStack ? defaultConversationPannelSize : '100%'
                 }
                 minSize={minConversationPannelSize}
               >
@@ -390,19 +408,23 @@ const ChatView = (): ReactElement => {
             {showSecondaryPanel && !shouldStack && !shouldStackThreadFromParent && (
               <>
                 {!isCanvasFullscreen && (
-                  <PanelResizeHandle className='w-1 hover:bg-blue-50 active:bg-blue-100 transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
-                    <div id='panel-resize-divider' className='w-[1px] h-full bg-border'></div>
-                  </PanelResizeHandle>
+                  <Separator className='w-[2px] transition-colors cursor-col-resize flex items-center justify-center group'>
+                    <div
+                      id='panel-resize-divider'
+                      className='w-[2px] h-full bg-border group-hover:bg-primary group-active:bg-primary'
+                    ></div>
+                  </Separator>
                 )}
                 <Panel
-                  defaultSize={isCanvasFullscreen ? 100 : defaultSecondaryPanelSize}
-                  minSize={isCanvasFullscreen ? 100 : minSecondaryPanelSize}
+                  id='chat-secondary-panel'
+                  defaultSize={isCanvasFullscreen ? '100%' : defaultSecondaryPanelSize}
+                  minSize={isCanvasFullscreen ? '100%' : minSecondaryPanelSize}
                 >
                   <div className='h-full'>{secondaryPanelContent}</div>
                 </Panel>
               </>
             )}
-          </PanelGroup>
+          </ResizableGroup>
 
           {/* Overlay secondary panel — slides over chat when viewport is narrow */}
           {showSecondaryPanel && shouldStack && !shouldStackThreadFromParent && (

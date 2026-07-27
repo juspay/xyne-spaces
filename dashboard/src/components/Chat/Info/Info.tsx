@@ -251,6 +251,15 @@ const Info = ({
   const headerLinkContainerStyle =
     'flex items-center flex-col gap-y-2 border border-border p-[12px] min-w-[98px] rounded-[10px] cursor-pointer flex-1 text-muted-foreground';
 
+  // Pill-style tab trigger, matching the ConversationHeader channel tabs.
+  const tabTriggerClass = (value: ChannelTab): string =>
+    cn(
+      'flex items-center justify-center gap-2 px-2.5 py-1.5 rounded-lg text-sm font-medium tracking-[-0.28px] transition-colors duration-100 cursor-pointer',
+      activeTab === value
+        ? 'bg-muted text-foreground'
+        : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+    );
+
   return (
     <div
       ref={popoverContainerRef}
@@ -395,67 +404,27 @@ const Info = ({
         onValueChange={value => setActiveTab(value as ChannelTab)}
         className='flex-1 min-h-0 flex flex-col'
       >
-        <Tabs.List className='flex items-center justify-center border-b border-border px-4 shrink-0'>
-          <Tabs.Trigger
-            value='about'
-            className={cn(
-              'px-4 py-2 text-sm transition-all duration-100 border-b-2',
-              activeTab === 'about'
-                ? 'border-primary text-primary'
-                : 'border-transparent text-muted-foreground hover:text-foreground',
-            )}
-          >
+        <Tabs.List className='flex items-center justify-start gap-0.5 px-4 py-2 shrink-0 overflow-x-auto no-scrollbar'>
+          <Tabs.Trigger value='about' className={tabTriggerClass('about')}>
             About
           </Tabs.Trigger>
           {!isDM && (
-            <Tabs.Trigger
-              value='members'
-              className={cn(
-                'px-4 py-2 flex items-center gap-2 text-sm transition-all duration-100 border-b-2',
-                activeTab === 'members'
-                  ? 'border-primary text-primary'
-                  : 'border-transparent text-muted-foreground hover:text-foreground',
-              )}
-            >
+            <Tabs.Trigger value='members' className={tabTriggerClass('members')}>
               Members {channel.channelStats?.participantCount || 0}
             </Tabs.Trigger>
           )}
           {isParticipant && !isSelfDM && (isDM || isGroupDM || !!channelUserStatus) && (
-            <Tabs.Trigger
-              value='notifications'
-              className={cn(
-                'px-4 py-2 flex items-center gap-2 text-sm transition-all duration-100 border-b-2',
-                activeTab === 'notifications'
-                  ? 'border-primary text-primary'
-                  : 'border-transparent text-muted-foreground hover:text-foreground',
-              )}
-            >
+            <Tabs.Trigger value='notifications' className={tabTriggerClass('notifications')}>
               Notifications
             </Tabs.Trigger>
           )}
           {isDefaultChannel && (
-            <Tabs.Trigger
-              value='settings'
-              className={cn(
-                'px-4 py-2 text-sm transition-all duration-100 border-b-2',
-                activeTab === 'settings'
-                  ? 'border-primary text-primary'
-                  : 'border-transparent text-muted-foreground hover:text-foreground',
-              )}
-            >
+            <Tabs.Trigger value='settings' className={tabTriggerClass('settings')}>
               Settings
             </Tabs.Trigger>
           )}
           {isDefaultChannel && (
-            <Tabs.Trigger
-              value='ai-features'
-              className={cn(
-                'px-4 py-2 text-sm transition-all duration-100 border-b-2',
-                activeTab === 'ai-features'
-                  ? 'border-primary text-primary'
-                  : 'border-transparent text-muted-foreground hover:text-foreground',
-              )}
-            >
+            <Tabs.Trigger value='ai-features' className={tabTriggerClass('ai-features')}>
               AI Preference
             </Tabs.Trigger>
           )}
@@ -477,7 +446,7 @@ const Info = ({
         {!isDM && (
           <Tabs.Content
             value='members'
-            className='outline-none flex-1 min-h-0 rounded-b-lg overflow-hidden bg-muted'
+            className='outline-none flex-1 min-h-0 rounded-b-lg overflow-hidden'
           >
             <ChannelMembers
               channel={channel}
@@ -498,10 +467,7 @@ const Info = ({
           </Tabs.Content>
         )}
         {isDefaultChannel && (
-          <Tabs.Content
-            value='ai-features'
-            className='outline-none flex-1 min-h-0 overflow-y-auto bg-muted'
-          >
+          <Tabs.Content value='ai-features' className='outline-none flex-1 min-h-0 overflow-y-auto'>
             <div className='flex flex-col gap-3 p-4'>
               <div className='flex flex-col gap-0.5'>
                 <div className='text-[15px] font-semibold text-foreground'>Call settings</div>
@@ -925,10 +891,10 @@ const ChannelMembers = ({
   }, [accumulatedParticipants, searchQuery, searchResults, usersById]);
 
   return (
-    <div className='relative bg-muted h-full min-h-0 flex flex-col'>
+    <div className='relative h-full min-h-0 flex flex-col'>
       <div className='shrink-0 z-10 p-4'>
         <div className='relative'>
-          <Search className='text-muted-foreground absolute left-3 top-1/2 size-4 -translate-y-1/2 pointer-events-none' />
+          <Search className='text-muted-foreground absolute left-3 top-1/2 size-5 -translate-y-1/2 pointer-events-none' />
           <Input
             ref={searchInputRef}
             type='text'
@@ -936,12 +902,12 @@ const ChannelMembers = ({
             autoFocus={!isMobile}
             value={searchQuery}
             onChange={handleSearchChange}
-            className='placeholder:text-muted-foreground text-foreground px-10 rounded-[8px] border border-border focus:outline-none focus:ring-1 focus:ring-primary focus:border-transparent'
+            className='h-[52px] rounded-[12px] pl-10 pr-3 text-base md:text-base placeholder:text-muted-foreground text-foreground border border-border focus:outline-none focus:ring-1 focus:ring-primary focus:border-transparent'
           />
         </div>
       </div>
       <Virtuoso
-        className='flex-1 min-h-0'
+        className='flex-1 min-h-0 thin-scrollbar'
         style={{ height: '100%' }}
         data={filteredParticipants}
         {...(!searchQuery &&

@@ -75,11 +75,11 @@ import { useIsInPanelWebview } from '../hooks/useIsInPanelWebview';
 import { roomActor } from '../machines/roomMachine';
 import ChatView from '../components/Chat/ChatView/ChatView';
 import {
-  PanelGroup,
+  ResizableGroup,
   Panel,
-  PanelResizeHandle,
-  ImperativePanelHandle,
-} from 'react-resizable-panels';
+  Separator,
+  type PanelImperativeHandle,
+} from '../components/ui/Resizable/Resizable';
 import WebView from '../components/WebView/WebView';
 import { useSelector } from '@xstate/react';
 import { webviewActor, setPanelRefs } from '../machines/webviewMachine';
@@ -184,6 +184,7 @@ import { WorkspaceManagementScreen } from './WorkspaceManagementScreen';
 import OrganisationsScreen from './OrganisationsScreen/OrganisationsScreen';
 import { AcceptInvitation } from './InvitationScreen/AcceptInvitation';
 import NoOrganizationAccessScreen from './NoOrganizationAccessScreen/NoOrganizationAccessScreen';
+import SystemPalette from './SystemPalette/SystemPalette';
 import DashboardCreation from './DashboardCreation/DashboardCreation';
 import QueryDashboardScreen from '../components/AnalyticsDashboard/QueryDashboardScreen';
 import { DynamicDashboardPanel, DynamicDashboardScreen } from '../components/DynamicDashboard';
@@ -281,15 +282,15 @@ const WorkspaceRedirect = (): ReactElement => {
 
 const AppRoot = (): ReactElement => {
   // Create panel refs for WebView
-  const leftPanelRef = useRef<ImperativePanelHandle>(null);
-  const rightPanelRef = useRef<ImperativePanelHandle>(null);
+  const leftPanelRef = useRef<PanelImperativeHandle>(null);
+  const rightPanelRef = useRef<PanelImperativeHandle>(null);
 
   // Create panel refs for XyneAI
-  const xyneAILeftPanelRef = useRef<ImperativePanelHandle>(null);
-  const xyneAIRightPanelRef = useRef<ImperativePanelHandle>(null);
+  const xyneAILeftPanelRef = useRef<PanelImperativeHandle>(null);
+  const xyneAIRightPanelRef = useRef<PanelImperativeHandle>(null);
 
-  const browserPanelLeftRef = useRef<ImperativePanelHandle>(null);
-  const browserPanelRightRef = useRef<ImperativePanelHandle>(null);
+  const browserPanelLeftRef = useRef<PanelImperativeHandle>(null);
+  const browserPanelRightRef = useRef<PanelImperativeHandle>(null);
 
   const navigate = useNavigate();
 
@@ -341,8 +342,8 @@ const AppRoot = (): ReactElement => {
   useEffect(() => {
     if (isXyneDebuggerOpen) return;
     const rafId = window.requestAnimationFrame(() => {
-      globalXyneAIPanelRefs.right.current?.resize(XYNE_AI_PANEL_DEFAULT_SIZE);
-      globalXyneAIPanelRefs.left.current?.resize(100 - XYNE_AI_PANEL_DEFAULT_SIZE);
+      globalXyneAIPanelRefs.right.current?.resize(`${XYNE_AI_PANEL_DEFAULT_SIZE}%`);
+      globalXyneAIPanelRefs.left.current?.resize(`${100 - XYNE_AI_PANEL_DEFAULT_SIZE}%`);
     });
     return () => window.cancelAnimationFrame(rafId);
   }, [isXyneDebuggerOpen]);
@@ -550,12 +551,16 @@ const AppRoot = (): ReactElement => {
                 ) : isXyneAIDrawerOpen && !isMobile && !isOnAIPage ? (
                   // XyneAI is open on desktop - show panel layout with XyneAI
                   <div className='flex flex-col h-screen'>
-                    <PanelGroup
-                      direction='horizontal'
+                    <ResizableGroup
+                      orientation='horizontal'
                       className='flex-1 no-scrollbar overflow-auto'
                       autoSaveId='app-root-xyneai'
                     >
-                      <Panel ref={xyneAILeftPanelRef} defaultSize={65}>
+                      <Panel
+                        id='app-root-content'
+                        panelRef={xyneAILeftPanelRef}
+                        defaultSize={`${100 - XYNE_AI_PANEL_DEFAULT_SIZE}%`}
+                      >
                         <div className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}>
                           <AppSidebar />
                           <main className='flex-1 no-scrollbar overflow-auto'>
@@ -564,14 +569,18 @@ const AppRoot = (): ReactElement => {
                           </main>
                         </div>
                       </Panel>
-                      <PanelResizeHandle className='w-1 hover:bg-sidebar-divider active:bg-sidebar-divider transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
-                        <div className='w-0.5 h-8 bg-transparent group-hover:bg-sidebar-divider group-active:bg-sidebar-divider transition-colors duration-200 rounded-full'></div>
-                      </PanelResizeHandle>
+                      <Separator className='w-[2px] transition-colors cursor-col-resize flex items-center justify-center group'>
+                        <div
+                          id='panel-resize-divider'
+                          className='w-[2px] h-full bg-transparent group-hover:bg-primary group-active:bg-primary'
+                        ></div>
+                      </Separator>
                       <Panel
-                        ref={xyneAIRightPanelRef}
-                        defaultSize={XYNE_AI_PANEL_DEFAULT_SIZE}
-                        maxSize={isXyneDebuggerOpen ? 55 : 50}
-                        minSize={isXyneDebuggerOpen ? XYNE_AI_PANEL_MIN_SIZE : 25}
+                        id='app-root-xyneai'
+                        panelRef={xyneAIRightPanelRef}
+                        defaultSize={`${XYNE_AI_PANEL_DEFAULT_SIZE}%`}
+                        maxSize={isXyneDebuggerOpen ? '55%' : '50%'}
+                        minSize={isXyneDebuggerOpen ? `${XYNE_AI_PANEL_MIN_SIZE}%` : '25%'}
                       >
                         <XyneAISidebarZIndexShell>
                           <XyneAISidebar
@@ -588,7 +597,7 @@ const AppRoot = (): ReactElement => {
                           />
                         </XyneAISidebarZIndexShell>
                       </Panel>
-                    </PanelGroup>
+                    </ResizableGroup>
                   </div>
                 ) : browserPanelState === 'open' ||
                   webviewState === 'closed' ||
@@ -598,18 +607,23 @@ const AppRoot = (): ReactElement => {
                   // remounting (and losing scroll position) when the browser panel
                   // opens or closes.
                   <div className='flex flex-col h-screen'>
-                    <PanelGroup
-                      direction='horizontal'
+                    <ResizableGroup
+                      orientation='horizontal'
                       className='flex-1 no-scrollbar overflow-auto'
                       autoSaveId='app-root-browser'
+                      panelIds={
+                        browserPanelState === 'open' && !location.pathname.endsWith('/browser')
+                          ? ['app-root-left', 'app-root-browser']
+                          : ['app-root-left']
+                      }
                     >
                       <Panel
                         id='app-root-left'
-                        ref={browserPanelLeftRef}
+                        panelRef={browserPanelLeftRef}
                         defaultSize={
                           browserPanelState === 'open' && !location.pathname.endsWith('/browser')
-                            ? 65
-                            : 100
+                            ? '65%'
+                            : '100%'
                         }
                       >
                         <div className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}>
@@ -622,27 +636,32 @@ const AppRoot = (): ReactElement => {
                       </Panel>
                       {browserPanelState === 'open' && !location.pathname.endsWith('/browser') && (
                         <>
-                          <PanelResizeHandle className='w-1 hover:bg-sidebar-divider active:bg-sidebar-divider transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
+                          <Separator className='w-1 hover:bg-sidebar-divider active:bg-sidebar-divider transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
                             <div className='w-0.5 h-8 bg-transparent group-hover:bg-sidebar-divider group-active:bg-sidebar-divider transition-colors duration-200 rounded-full'></div>
-                          </PanelResizeHandle>
-                          <Panel ref={browserPanelRightRef} defaultSize={35} maxSize={50}>
+                          </Separator>
+                          <Panel
+                            id='app-root-browser'
+                            panelRef={browserPanelRightRef}
+                            defaultSize='35%'
+                            maxSize='50%'
+                          >
                             <div className='h-full'>
                               <BrowserPanel />
                             </div>
                           </Panel>
                         </>
                       )}
-                    </PanelGroup>
+                    </ResizableGroup>
                   </div>
                 ) : (
                   // WebView is open - show panel layout with WebView
                   <div className='flex flex-col h-screen'>
-                    <PanelGroup
-                      direction='horizontal'
+                    <ResizableGroup
+                      orientation='horizontal'
                       className='flex-1 overflow-hidden'
                       autoSaveId='app-root'
                     >
-                      <Panel ref={leftPanelRef} defaultSize={50}>
+                      <Panel id='app-root-left' panelRef={leftPanelRef} defaultSize='50%'>
                         <div className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}>
                           <AppSidebar />
                           <main className='flex-1 no-scrollbar overflow-auto'>
@@ -651,13 +670,13 @@ const AppRoot = (): ReactElement => {
                           </main>
                         </div>
                       </Panel>
-                      <PanelResizeHandle className='w-2 hover:bg-sidebar-divider active:bg-sidebar-divider transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
+                      <Separator className='w-2 hover:bg-sidebar-divider active:bg-sidebar-divider transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
                         <div className='w-0.5 h-8 bg-transparent group-hover:bg-sidebar-divider group-active:bg-sidebar-divider transition-colors duration-200 rounded-full'></div>
-                      </PanelResizeHandle>
-                      <Panel ref={rightPanelRef} defaultSize={50}>
+                      </Separator>
+                      <Panel id='app-root-webview' panelRef={rightPanelRef} defaultSize='50%'>
                         <WebView />
                       </Panel>
-                    </PanelGroup>
+                    </ResizableGroup>
                   </div>
                 )}
                 {/* Global overlays and IPC handlers — skipped in the panel
@@ -1482,6 +1501,10 @@ export const router = createBrowserRouter([
       {
         path: '/launch',
         element: <LaunchScreen />,
+      },
+      {
+        path: '/system',
+        element: <SystemPalette />,
       },
     ],
   },

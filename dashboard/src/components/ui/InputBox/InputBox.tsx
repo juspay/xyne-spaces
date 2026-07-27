@@ -205,6 +205,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     const [selectedFile, setSelectedFile] = useState<File | UploadedFile | null>(null);
     const [isViewerOpen, setIsViewerOpen] = useState(false);
 
+    const alsoSendToChannelLabel = isDMThread ? 'Send as direct message' : 'Send to channel';
+
     // Activity bar rotation: the human typing indicator and the agent pill share ONE
     // slot above the input. When both are active they can't fit together, so flip
     // between them every 2s. When only one is active it simply stays shown.
@@ -1576,15 +1578,17 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
               </>
             )}
 
-            {/* Show checkbox for "also send to channel" functionality */}
-            {onAlsoSendToChannelChange && (
+            {/* "Send to channel" — on desktop this lives inline in the footer actions
+                row beside the formatting (Aa) toggle; on mobile there is no footer row
+                (MobileEditor owns the actions), so it keeps its own row here. */}
+            {onAlsoSendToChannelChange && isMobile && (
               <div className='flex items-center px-3 py-1'>
                 <Checkbox
                   size='sm'
                   checked={alsoSendToChannelChecked ?? false}
                   onChange={onAlsoSendToChannelChange}
                   disabled={disabled || isSending}
-                  label={`Also send ${isDMThread ? 'as direct message' : 'to channel'}`}
+                  label={alsoSendToChannelLabel}
                 />
               </div>
             )}
@@ -1603,8 +1607,12 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
 
             {/* Desktop Footer Actions */}
             {!isMobile && (
-              <div className='flex items-center justify-between px-2 pb-2 pt-1'>
-                <div className='flex items-center gap-1'>
+              <div className='flex items-center justify-between gap-2 px-2 pb-2 pt-1'>
+                {/* min-w-0 lets this group shrink below its content width so the
+                    "Send to channel" label ellipsizes instead of pushing the send
+                    controls out of the row. The icon buttons keep their size via
+                    min-width:auto (fixed-size svg children). */}
+                <div className='flex min-w-0 items-center gap-1'>
                   {features.fileAttachments && (
                     <DropdownMenu open={isPlusMenuOpen} onOpenChange={setIsPlusMenuOpen}>
                       <DropdownMenuTrigger asChild>
@@ -1744,10 +1752,23 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                     </Tooltip>
                   )}
 
+                  {onAlsoSendToChannelChange && (
+                    <div className='flex min-w-0 items-center pl-1'>
+                      <Checkbox
+                        size='sm'
+                        truncateLabel
+                        checked={alsoSendToChannelChecked ?? false}
+                        onChange={onAlsoSendToChannelChange}
+                        disabled={disabled || isSending}
+                        label={alsoSendToChannelLabel}
+                      />
+                    </div>
+                  )}
+
                   {bottomLeftSlot}
                 </div>
 
-                <div className='flex items-center gap-2'>
+                <div className='flex shrink-0 items-center gap-2'>
                   {onCancel && (
                     <Tooltip
                       content='Cancel editing'

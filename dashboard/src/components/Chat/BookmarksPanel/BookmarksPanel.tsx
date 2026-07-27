@@ -12,11 +12,16 @@ import {
 } from '../utils/bookmarkUtils';
 import { cn } from '../../../utils/classNames';
 import {
-  PanelGroup,
+  ResizableGroup,
   Panel,
-  PanelResizeHandle,
-  type ImperativePanelHandle,
-} from 'react-resizable-panels';
+  Separator,
+  type PanelImperativeHandle,
+} from '../../ui/Resizable/Resizable';
+import {
+  BOOKMARKS_SIDEBAR_DEFAULT_WIDTH,
+  BOOKMARKS_SIDEBAR_MAX_WIDTH,
+  BOOKMARKS_SIDEBAR_MIN_WIDTH,
+} from './bookmarksSidebarWidth';
 import { usePlatform } from '../../../hooks/usePlatform';
 import AppNavigator from '../../AppNavigator/AppNavigator';
 
@@ -93,7 +98,7 @@ const BookmarksPanel = (): ReactElement => {
 
   const isOnIndexRoute = pathWithoutWorkspace === '/chat/bookmarks';
 
-  const bookmarksPanelRef = useRef<ImperativePanelHandle>(null);
+  const bookmarksPanelRef = useRef<PanelImperativeHandle>(null);
   const bookmarkListRef = useRef<HTMLDivElement>(null);
 
   const { bookmarks } = useUserBookmarks();
@@ -380,23 +385,30 @@ const BookmarksPanel = (): ReactElement => {
   // Desktop view - two-panel layout with resizable panels
   return (
     <div className='flex h-full w-full overflow-hidden'>
-      <PanelGroup
-        direction='horizontal'
+      <ResizableGroup
+        orientation='horizontal'
         className='flex align-top h-full'
         autoSaveId='bookmarks-screen-resize'
       >
         {/* LEFT PANEL - Bookmarks List */}
-        <Panel ref={bookmarksPanelRef} defaultSize={20} minSize={15} maxSize={40}>
+        <Panel
+          id='bookmarks-sidebar'
+          panelRef={bookmarksPanelRef}
+          defaultSize={BOOKMARKS_SIDEBAR_DEFAULT_WIDTH}
+          minSize={BOOKMARKS_SIDEBAR_MIN_WIDTH}
+          maxSize={BOOKMARKS_SIDEBAR_MAX_WIDTH}
+          groupResizeBehavior='preserve-pixel-size'
+        >
           {renderLeftPanel()}
         </Panel>
 
         {/* RESIZE HANDLE */}
-        <PanelResizeHandle className='w-[2px] transition-colors cursor-col-resize flex items-center justify-center group'>
+        <Separator className='w-[2px] transition-colors cursor-col-resize flex items-center justify-center group'>
           <div className='w-[2px] h-full bg-sidebar-divider group-hover:bg-primary group-active:bg-primary'></div>
-        </PanelResizeHandle>
+        </Separator>
 
         {/* RIGHT PANEL - Detail View */}
-        <Panel>
+        <Panel id='bookmarks-content'>
           <div className='flex-1 flex flex-col bg-background relative h-full'>
             <div className='flex-1 h-full overflow-hidden flex items-center justify-center'>
               {isOnIndexRoute ? (
@@ -415,7 +427,7 @@ const BookmarksPanel = (): ReactElement => {
             </div>
           </div>
         </Panel>
-      </PanelGroup>
+      </ResizableGroup>
     </div>
   );
 };

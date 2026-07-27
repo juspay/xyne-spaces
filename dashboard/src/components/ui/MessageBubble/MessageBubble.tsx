@@ -26,7 +26,7 @@ import { useQuery } from '../../../hooks/useQuery';
 import UserAvatar from '../../UserAvatar/UserAvatar';
 import { UserHoverWrapper } from '../UserMentionPopover/UserMentionPopover';
 import MessageAttachment from '../../Chat/MessageAttachment/MessageAttachment';
-import { FilePill } from '../files';
+import { FilePill, HtmlPreviewCard } from '../files';
 import { useReactions } from '../../../hooks/useReaction';
 import { MessageBubbleProps } from './MessageBubble.types';
 import { useAuth } from '../../../hooks/useAuth';
@@ -117,6 +117,13 @@ const hasDocumentThumbnail = (attachment: AttachmentType): boolean => {
   return isPreviewableDocument(attachment.mimetype) && !!attachment.thumbnailUrl;
 };
 
+// HTML gets its own card that renders a glimpse of the document. `mimetype` is
+// derived from the OS extension map at upload time and is not guaranteed, so
+// the filename is checked too.
+const isHtmlAttachment = (attachment: AttachmentType): boolean => {
+  return attachment.mimetype === 'text/html' || /\.html?$/i.test(attachment.originalFilename);
+};
+
 function InlineVideoPreview({
   callId,
   recordingId,
@@ -203,9 +210,15 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
   const videoAttachments = activeAttachments.filter(a => a.mimetype.startsWith('video/'));
   const imageAttachments = activeAttachments.filter(a => a.mimetype.startsWith('image/'));
 
+  // HTML renders its own preview card, so it is pulled out before the pill
+  // split below — otherwise it would count as a non-previewable file and demote
+  // every sibling attachment to a pill.
+  const htmlAttachments = activeAttachments.filter(a => isHtmlAttachment(a));
+
   // Files - separate into those with thumbnails (PDFs, Office docs) and those without
   const fileAttachments = activeAttachments.filter(
-    a => !a.mimetype.startsWith('image/') && !a.mimetype.startsWith('video/'),
+    a =>
+      !a.mimetype.startsWith('image/') && !a.mimetype.startsWith('video/') && !isHtmlAttachment(a),
   );
 
   const previewableFiles = fileAttachments.filter(a => hasDocumentThumbnail(a));
@@ -353,6 +366,21 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
             </div>
           )}
 
+          {/* HTML files - render a glimpse of the document */}
+          {htmlAttachments.length > 0 && (
+            <div className='flex flex-col gap-2'>
+              {htmlAttachments.map(attachment => (
+                <HtmlPreviewCard
+                  key={attachment.id}
+                  attachmentId={attachment.id}
+                  fileName={attachment.originalFilename}
+                  fileSize={attachment.size}
+                  onOpen={() => handleFileClick(attachment)}
+                />
+              ))}
+            </div>
+          )}
+
           {/* Non-previewable files - use FilePill component */}
           {/* If useFilePillForAllFiles is true, show ALL files in FilePill format */}
           {(useFilePillForAllFiles ? fileAttachments : nonPreviewableFiles).length > 0 && (
@@ -453,7 +481,7 @@ const getMessageBubbleClassName = (
       variant !== 'pinned' &&
       !isPinned &&
       !isShowInChannel && ['bg-blue-50/90 rounded-sm message-bookmarked-bg'],
-    variant === 'pinned' && 'bg-background border border-border shadow-sm rounded-xl',
+    variant === 'pinned' && 'bg-background rounded-xl',
     isHighlighted && 'highlight-message',
     isXyneBot && 'pt-5',
     isPrivateSystemNotice && 'bg-muted pt-3',

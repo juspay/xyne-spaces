@@ -30,9 +30,10 @@ export type WebviewEvent =
   | { type: 'REMOVE_TAB'; url: string }
   | { type: 'SWITCH_TAB'; url: string };
 
-// Interface for panel handle (to avoid importing react-resizable-panels here)
+// Interface for panel handle (to avoid importing react-resizable-panels here).
+// Sizes are strings so units are explicit — a bare number means pixels.
 interface PanelHandle {
-  resize: (size: number) => void;
+  resize: (size: number | string) => void;
 }
 
 // Panel refs interface
@@ -131,12 +132,12 @@ export const webviewMachine = setup({
     }),
     // Panel resizing actions
     resizeToDefault: () => {
-      globalPanelRefs.left.current?.resize(50);
-      globalPanelRefs.right.current?.resize(50);
+      globalPanelRefs.left.current?.resize('50%');
+      globalPanelRefs.right.current?.resize('50%');
     },
     resizeToMinimised: () => {
-      globalPanelRefs.left.current?.resize(100);
-      globalPanelRefs.right.current?.resize(0);
+      globalPanelRefs.left.current?.resize('100%');
+      globalPanelRefs.right.current?.resize('0%');
     },
     // Browser navigation actions
     openUrlInNewTab: ({ event }) => {

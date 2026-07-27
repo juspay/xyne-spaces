@@ -1,6 +1,6 @@
 import { ReactElement } from 'react';
 import type { ActivityWithRelated } from '../../types/activity';
-import { Share2 } from 'lucide-react';
+import { Share01 } from '@xyne/icons';
 import { ActivityItemCard } from './ActivityItemCard';
 import { useUser } from '../../hooks/useUsers';
 import { getUserDisplayName } from '../../utils/userDisplayName';
@@ -47,7 +47,7 @@ export const CanvasSharedActivity = ({
       actorId={sender?.id ?? actorId}
       actorName={getUserDisplayName(sender)}
       channelId={activity.channelId ?? undefined}
-      badgeIcon={<Share2 className='w-4 h-4 text-primary' />}
+      badgeIcon={<Share01 className='size-3 text-primary' />}
       badgeColorClass='bg-muted'
       description={<span className='text-muted-foreground text-sm'>{descriptionText}</span>}
       targetPath={targetPath}

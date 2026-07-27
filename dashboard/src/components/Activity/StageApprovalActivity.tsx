@@ -1,5 +1,5 @@
 import { ReactElement } from 'react';
-import { ClipboardCheck, CheckCircle2, XCircle } from 'lucide-react';
+import { ClipboardCheck, CheckTickCircle, MultipleCrossCancelCircle } from '@xyne/icons';
 import type { ActivityWithRelated } from '../../types/activity';
 import { ActivityItemCard } from './ActivityItemCard';
 import { useUser } from '../../hooks/useUsers';
@@ -30,21 +30,21 @@ const variantPresentation = (
   switch (variant) {
     case 'requested':
       return {
-        icon: <ClipboardCheck className='w-4 h-4 text-blue-600' />,
+        icon: <ClipboardCheck className='size-3 text-blue-600' />,
         badgeBg: 'bg-blue-100',
         verb: 'requested your approval for stage change on',
         preposition: 'in',
       };
     case 'approved':
       return {
-        icon: <CheckCircle2 className='w-4 h-4 text-green-600' />,
+        icon: <CheckTickCircle className='size-3 text-green-600' />,
         badgeBg: 'bg-green-100',
         verb: 'approved your stage change on',
         preposition: 'in',
       };
     case 'rejected':
       return {
-        icon: <XCircle className='w-4 h-4 text-red-600' />,
+        icon: <MultipleCrossCancelCircle className='size-3 text-red-600' />,
         badgeBg: 'bg-red-100',
         verb: 'rejected your stage change on',
         preposition: 'in',
@@ -87,9 +87,7 @@ export const StageApprovalActivity = ({
 
   const expandedContent = (
     <div className='flex flex-col gap-1 mt-2'>
-      <div className='text-sm text-foreground font-medium break-words whitespace-normal'>
-        {headline}
-      </div>
+      <div className='text-sm font-medium break-words whitespace-normal'>{headline}</div>
       <div className='text-xs text-muted-foreground break-words whitespace-normal'>
         Ticket ID: <span className='font-mono'>{ticketXyneId}</span>
       </div>
@@ -97,8 +95,10 @@ export const StageApprovalActivity = ({
   );
 
   const condensedContent = (
-    <span className='text-sm text-foreground'>
-      <span className='font-semibold'>{ticketXyneId}</span>
+    <span className='text-sm'>
+      <span className={activity.isRead ? 'text-muted-foreground' : 'font-semibold'}>
+        {ticketXyneId}
+      </span>
       <span className='text-muted-foreground'>
         {variant === 'requested'
           ? ' awaiting your approval'

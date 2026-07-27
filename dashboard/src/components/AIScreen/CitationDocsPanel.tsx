@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactElement, type ReactNode } from 'react';
-import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
+import { Panel, ResizableGroup, Separator } from '../ui/Resizable/Resizable';
 import { X } from 'lucide-react';
 import { cn } from '../../utils/classNames';
 import PdfViewer from '../FileViewer/PdfViewer';
@@ -185,15 +185,19 @@ export function ChatWithCitationDocs({ children }: { children: ReactNode }): Rea
   const hasDocs = !!ctx && ctx.docs.length > 0;
   if (!hasDocs) return <>{children}</>;
   return (
-    <PanelGroup direction='horizontal' autoSaveId='ai-citation-docs' className='h-full w-full'>
-      <Panel defaultSize={55} minSize={30} className='min-w-0'>
+    <ResizableGroup
+      orientation='horizontal'
+      autoSaveId='ai-citation-docs'
+      className='h-full w-full'
+    >
+      <Panel id='ai-chat' defaultSize='55%' minSize='30%' className='min-w-0'>
         {children}
       </Panel>
-      <PanelResizeHandle className='w-px bg-border transition-colors hover:bg-primary/40 data-[resize-handle-state=drag]:bg-primary/60' />
-      <Panel defaultSize={45} minSize={25} className='min-w-0'>
+      <Separator className='w-px bg-border transition-colors hover:bg-primary/40 active:bg-primary/60' />
+      <Panel id='ai-citation-docs' defaultSize='45%' minSize='25%' className='min-w-0'>
         <CitationDocsPanel />
       </Panel>
-    </PanelGroup>
+    </ResizableGroup>
   );
 }
 

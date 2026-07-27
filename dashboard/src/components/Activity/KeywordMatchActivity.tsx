@@ -1,11 +1,11 @@
 import { ReactElement } from 'react';
 import type { ActivityWithRelated } from '../../types/activity';
 import { MessageBubble } from '../ui/MessageBubble/MessageBubble';
-import { Hash } from 'lucide-react';
 import { ActivityItemCard } from './ActivityItemCard';
 import { RenderMessageWithHTML } from '../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { useUser } from '../../hooks/useUsers';
 import { useRouteContext } from '../../hooks/useRouteContext';
+import { Hashtag } from '@xyne/icons';
 
 export const KeywordMatchActivity = ({
   activity,
@@ -35,7 +35,7 @@ export const KeywordMatchActivity = ({
       actorId={sender.id}
       actorName={sender.name}
       channelId={message.conversation?.channelId}
-      badgeIcon={<Hash className='w-4 h-4 text-primary' />}
+      badgeIcon={<Hashtag className='size-3 text-primary' />}
       badgeColorClass='bg-muted'
       description={<span className='text-muted-foreground text-sm'>matched a keyword in</span>}
       targetPath={targetPath}

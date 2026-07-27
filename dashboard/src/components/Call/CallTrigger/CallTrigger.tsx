@@ -118,7 +118,9 @@ export const CallTrigger: React.FC<CallTriggerProps> = ({
           className={cn(
             'flex items-center justify-center transition-colors',
             // Desktop default: matches the other header action buttons (28px ghost)
-            !isMobile && !usesCustomTriggerStyle && 'h-7 w-7 rounded-lg hover:bg-muted',
+            !isMobile &&
+              !usesCustomTriggerStyle &&
+              'h-7 w-7 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground',
             // Desktop custom trigger: keep the bordered pill
             !isMobile &&
               usesCustomTriggerStyle &&
@@ -133,7 +135,9 @@ export const CallTrigger: React.FC<CallTriggerProps> = ({
             hasActiveCallInChannel &&
               !isUserInCurrentChannelCall &&
               !isMobile &&
-              'bg-status-success text-background hover:opacity-90 border border-status-success',
+              // hover:text-background pins the glyph against the default
+              // branch's hover:text-foreground (twMerge: last one wins).
+              'bg-status-success text-background hover:text-background hover:opacity-90 border border-status-success',
             isAlone || isNotMember ? 'opacity-50 cursor-not-allowed' : '',
             className,
           )}

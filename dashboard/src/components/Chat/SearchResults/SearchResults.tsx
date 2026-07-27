@@ -1,6 +1,6 @@
 import { ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels';
+import { ResizableGroup, Panel, Separator } from '../../ui/Resizable/Resizable';
 import {
   FileText,
   GitCompare,
@@ -1577,23 +1577,32 @@ function MobileLayout({ selectedPanel, onClose, resultsColumn }: LayoutProps): R
 
 function DesktopLayout({ selectedPanel, onClose, resultsColumn }: LayoutProps): ReactElement {
   return (
-    <PanelGroup direction='horizontal' className='h-full' autoSaveId='search-results-thread'>
-      <Panel defaultSize={selectedPanel ? 60 : 100} minSize={selectedPanel ? 30 : 100}>
+    <ResizableGroup
+      orientation='horizontal'
+      className='h-full'
+      autoSaveId='search-results-thread'
+      panelIds={selectedPanel ? ['search-results', 'search-side-panel'] : ['search-results']}
+    >
+      <Panel
+        id='search-results'
+        defaultSize={selectedPanel ? '60%' : '100%'}
+        minSize={selectedPanel ? '30%' : '100%'}
+      >
         <div className='h-full'>{resultsColumn}</div>
       </Panel>
       {selectedPanel && (
         <>
-          <PanelResizeHandle className='w-1 hover:bg-blue-50 active:bg-blue-100 transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
+          <Separator className='w-1 hover:bg-blue-50 active:bg-blue-100 transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
             <div className='w-[1px] h-full bg-border' />
-          </PanelResizeHandle>
-          <Panel defaultSize={40} minSize={25}>
+          </Separator>
+          <Panel id='search-side-panel' defaultSize='40%' minSize='25%'>
             <div className='h-full animate-slide-in-from-right'>
               <SearchResultsSidePanel panel={selectedPanel} onClose={onClose} />
             </div>
           </Panel>
         </>
       )}
-    </PanelGroup>
+    </ResizableGroup>
   );
 }
 

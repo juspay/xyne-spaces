@@ -1,6 +1,6 @@
 import { ReactElement } from 'react';
 import type { ActivityWithRelated } from '../../types/activity';
-import { UserPlus } from 'lucide-react';
+import { UserPlus } from '@xyne/icons';
 import { ActivityItemCard } from './ActivityItemCard';
 import { useUser } from '../../hooks/useUsers';
 import { getUserDisplayName } from '../../utils/userDisplayName';
@@ -43,7 +43,7 @@ export const TicketAssignmentActivity = ({
 
   const expandedContent = (
     <div className='flex flex-col gap-1 mt-2'>
-      <div className='text-sm text-foreground font-medium break-words whitespace-normal'>
+      <div className='text-sm font-medium break-words whitespace-normal'>
         {isRecipientAssigned ? (
           <>You have been assigned to ticket &ldquo;{ticket.title}&rdquo;</>
         ) : (
@@ -59,8 +59,10 @@ export const TicketAssignmentActivity = ({
   );
 
   const condensedContent = (
-    <span className='text-sm text-foreground'>
-      <span className='font-semibold'>{ticketXyneId}</span>
+    <span className='text-sm'>
+      <span className={activity.isRead ? 'text-muted-foreground' : 'font-semibold'}>
+        {ticketXyneId}
+      </span>
       <span className='text-muted-foreground'>
         {isRecipientAssigned ? ' assigned to you' : ` assigned to ${assignedUserName}`}
       </span>
@@ -79,7 +81,7 @@ export const TicketAssignmentActivity = ({
       actorId={actorId}
       actorName={actorName}
       channelId={ticket.channelId}
-      badgeIcon={<UserPlus className='w-4 h-4 text-blue-600' />}
+      badgeIcon={<UserPlus className='size-3 text-blue-600' />}
       badgeColorClass='bg-blue-100'
       description={description}
       targetPath={targetPath}
