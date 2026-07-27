@@ -17,7 +17,7 @@ import {
   useRef,
   useMemo,
 } from 'react';
-import { useNavigate, useOutlet } from 'react-router-dom';
+import { useLocation, useNavigate, useOutlet } from 'react-router-dom';
 import { Virtuoso } from 'react-virtuoso';
 import { useAuth } from '../../hooks/useAuth';
 import { useCallHistory } from './useCallHistory';
@@ -47,8 +47,6 @@ import { useZero } from '../../hooks/useZero';
 import { cn } from '../../utils/classNames';
 import { isSameDay } from '../../utils/dateUtils';
 import { mutators } from '../../zero/mutators';
-import axios from 'axios';
-import { API_BASE_URL } from '../../config';
 import { CallCard } from './CallCard';
 import {
   Call,
@@ -73,6 +71,7 @@ import { getUserDisplayName } from '../../utils/userDisplayName';
 import { MentionType, TabType } from '../../components/Chat/ChatDirectory/ChannelCommandMenu.types';
 import { type InitialQueryData } from '../../components/Chat/ChatDirectory/LexicalSearchInput';
 import { CallHistorySearchPanel } from './CallHistorySearchPanel';
+import { useCalendarSync } from '../../hooks/useCalendarSync';
 
 interface EmptyStateProps {
   icon: LucideIcon;
@@ -212,8 +211,11 @@ function mapVespaCallResultToCall(result: DisplaySearchResult, workspaceId: stri
 const CallHistoryScreen = (): ReactElement => {
   const { isMobile } = usePlatform();
   const { user } = useAuth();
+  const location = useLocation();
   const navigate = useNavigate();
   const outlet = useOutlet();
+  const { calendarProvider, isSyncing, syncMessage, reauthCountdown, syncCalendar } =
+    useCalendarSync(user?.id);
 
   const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
   const [scheduleInitialTime, setScheduleInitialTime] = useState<{
@@ -226,18 +228,6 @@ const CallHistoryScreen = (): ReactElement => {
   const [calendarSubView, setCalendarSubView] = useState<'month' | 'week' | 'day'>(() =>
     isMobile ? 'day' : 'week',
   );
-  const [calendarProvider, setCalendarProvider] = useState<'GOOGLE' | 'MICROSOFT' | null>(null);
-  const [pendingAutoSync, setPendingAutoSync] = useState(false);
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [syncMessage, setSyncMessage] = useState<{
-    text: string;
-    ok: boolean;
-    reauth?: boolean;
-  } | null>(null);
-  const [reauthCountdown, setReauthCountdown] = useState<{
-    count: number;
-    loginUrl: string;
-  } | null>(null);
   const [currentMonthStart, setCurrentMonthStart] = useState(() => {
     const d = new Date();
     d.setDate(1);
@@ -536,88 +526,6 @@ const CallHistoryScreen = (): ReactElement => {
   }, [isLoading]);
 
   const showRecentCallsLoader = isLoading || (showMinLoader && (calls?.length ?? 0) === 0);
-
-  // Fetch the current user's calendar provider once on mount.
-  // If syncCalendar=true is in the URL (returning from connect-calendar OAuth),
-  // strip the param and set pendingAutoSync so we fire sync once the provider is known.
-  useEffect(() => {
-    if (!user?.id) return;
-    const params = new URLSearchParams(location.search);
-    if (params.get('syncCalendar') === 'true') {
-      params.delete('syncCalendar');
-      void navigate(`${location.pathname}?${params.toString()}`, { replace: true });
-      setPendingAutoSync(true);
-    }
-    axios
-      .get<{ success: boolean; provider: 'GOOGLE' | 'MICROSOFT' | null }>(
-        `${API_BASE_URL}/calendar/sync/provider`,
-        { withCredentials: true },
-      )
-      .then(res => {
-        if (res.data.success) setCalendarProvider(res.data.provider);
-      })
-      .catch(() => {
-        // non-critical — button just won't show
-      });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id]);
-
-  // Tick the reauth countdown down every second, then redirect
-  useEffect(() => {
-    if (!reauthCountdown) return;
-    if (reauthCountdown.count === 0) {
-      const isElectron = typeof window.electronAPI?.openExternal === 'function';
-      if (isElectron && window.electronAPI) {
-        window.electronAPI.openExternal(reauthCountdown.loginUrl);
-      } else {
-        window.location.href = reauthCountdown.loginUrl;
-      }
-      return;
-    }
-    const timer = setTimeout(() => {
-      setReauthCountdown(prev => (prev ? { ...prev, count: prev.count - 1 } : null));
-    }, 1000);
-    return () => clearTimeout(timer);
-  }, [reauthCountdown]);
-
-  // Fire the auto-sync once calendarProvider is loaded after OAuth redirect
-  useEffect(() => {
-    if (!pendingAutoSync || !calendarProvider) return;
-    setPendingAutoSync(false);
-    void handleCalendarSync(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingAutoSync, calendarProvider]);
-
-  const handleCalendarSync = async (isRetry = false) => {
-    if (!calendarProvider || isSyncing) return;
-    setIsSyncing(true);
-    setSyncMessage(null);
-    try {
-      const provider = calendarProvider === 'GOOGLE' ? 'google' : 'microsoft';
-      await axios.post(`${API_BASE_URL}/calendar/sync/${provider}`, {}, { withCredentials: true });
-      setSyncMessage({ text: 'Synced!', ok: true });
-      setIsSyncing(false);
-      setTimeout(() => setSyncMessage(null), 3000);
-    } catch (error) {
-      setIsSyncing(false);
-      const shouldReauthorize =
-        !isRetry && axios.isAxiosError(error) && error.response?.status === 500;
-
-      if (shouldReauthorize) {
-        const isElectron = typeof window.electronAPI?.openExternal === 'function';
-        const platformParam = isElectron ? '&platform=electron' : '';
-        const loginUrl =
-          calendarProvider === 'MICROSOFT'
-            ? `${API_BASE_URL}/v2/auth/microsoft/login?connectCalendar=true${platformParam}`
-            : `${API_BASE_URL}/v2/auth/login?connectCalendar=true${platformParam}`;
-        setSyncMessage({ text: '', ok: false, reauth: true });
-        setReauthCountdown({ count: 5, loginUrl });
-        return;
-      }
-      setSyncMessage({ text: 'Unable to sync', ok: false });
-      setTimeout(() => setSyncMessage(null), 3000);
-    }
-  };
 
   const endedCallsCount = calls?.filter(c => c.status === CallStatus.ENDED).length ?? 0;
 
@@ -976,7 +884,7 @@ const CallHistoryScreen = (): ReactElement => {
             syncMessage={syncMessage}
             reauthCountdown={reauthCountdown}
             onCalendarSync={() => {
-              void handleCalendarSync();
+              syncCalendar();
             }}
             callMentionSearchType={callMentionSearchType}
             callMentionSearchQuery={callMentionSearchQuery}

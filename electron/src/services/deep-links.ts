@@ -411,24 +411,6 @@ function exchangeAuthCode(code: string, state: string, invitationId: string | nu
             const responseBody = await parseResponseBody(response);
             Logger.info(EnrollmentEvent.AUTH_EXCHANGE_SUCCESS);
 
-            // If this was a calendar re-auth, navigate straight to the calls page
-            // without triggering the full auth:success flow (user is already logged in).
-            // Use window.location.href (full reload) instead of 'navigate-to' IPC because
-            // the new session cookies set above cause authMachine to briefly reset, which
-            // unmounts NotificationHandler (the navigate-to listener) before it fires.
-            if (responseBody.connectCalendar && responseBody.workspaceId) {
-              const callsPath = `/${responseBody.workspaceId}/calls?tab=upcoming&syncCalendar=true`;
-              log.info('[exchangeAuthCode] connectCalendar — navigating to calls page:', callsPath);
-              mainWindow?.show();
-              mainWindow?.webContents.executeJavaScript(
-                `window.location.href = ${JSON.stringify(callsPath)}`
-              ).catch((err: Error) => {
-                log.error('[exchangeAuthCode] Failed to navigate to calls page:', err);
-              });
-              resolve();
-              return;
-            }
-
             // If the backend signals a pending invitation, navigate the renderer to the
             // in-app accept page. The accept page calls acceptInvitation + loginWorkspace
             // which sets JWT cookies; the subsequent full-page reload completes auth normally.

@@ -22,7 +22,7 @@ import { parseCalendarCredentials } from '@/database/repositories/externalSource
 import { v4 as uuidv4 } from 'uuid';
 import { config } from '@/config/env';
 
-const TAG = '[GoogleCalendarWatch]';
+const TAG = '[CALENDAR_SYNC][GOOGLE][WATCH]';
 
 function getWebhookUrl(): string {
   const baseUrl = config.backendUrl || 'http://localhost:3000';
@@ -54,7 +54,7 @@ export class GoogleCalendarWatchService {
     const channelToken = uuidv4();
     const address = getWebhookUrl();
 
-    logger.info(`${TAG} Setting up calendar watch`, { email, channelId });
+    logger.info(`${TAG} Setting up calendar watch`, { sourceId, email, channelId });
 
     const response = await calendar.events.watch({
       calendarId: 'primary',
@@ -78,7 +78,7 @@ export class GoogleCalendarWatchService {
     }
     const expirationDate = new Date(expirationMs);
 
-    const existing = source ?? await repositories.externalSources.findById(sourceId);
+    const existing = source ?? (await repositories.externalSources.findById(sourceId));
 
     if (existing) {
       const existingCreds = parseCalendarCredentials(existing.credentials);
@@ -87,6 +87,7 @@ export class GoogleCalendarWatchService {
           await stopChannel(oauth2Client, existing.externalIdentifier, existingCreds.resourceId);
         } catch (err) {
           logger.warn(`${TAG} Failed to stop old channel during setup`, {
+            sourceId,
             email,
             oldChannelId: existing.externalIdentifier,
             error: err instanceof Error ? err.message : String(err),
@@ -107,6 +108,7 @@ export class GoogleCalendarWatchService {
     });
 
     logger.info(`${TAG} Calendar watch setup complete`, {
+      sourceId,
       email,
       channelId,
       resourceId,
@@ -141,6 +143,7 @@ export class GoogleCalendarWatchService {
         await stopChannel(oauth2Client, subscription.externalIdentifier, resourceId);
       } catch (err) {
         logger.warn(`${TAG} Failed to stop channel via API`, {
+          sourceId,
           email,
           error: err instanceof Error ? err.message : String(err),
         });
@@ -155,7 +158,7 @@ export class GoogleCalendarWatchService {
   static async updateSyncStateBySourceId(
     sourceId: string,
     syncToken?: string | null,
-    isActive?: boolean,
+    isActive?: boolean
   ): Promise<void> {
     await repositories.externalSources.updateCalendarSyncStateById(sourceId, {
       syncToken,
@@ -169,10 +172,7 @@ export class GoogleCalendarWatchService {
 }
 
 function createOAuth2Client(accessToken: string, refreshToken: string): OAuth2Client {
-  const client = new OAuth2Client(
-    process.env.GOOGLE_CLIENT_ID,
-    process.env.GOOGLE_CLIENT_SECRET,
-  );
+  const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID, process.env.GOOGLE_CLIENT_SECRET);
   client.setCredentials({
     access_token: accessToken,
     refresh_token: refreshToken,
@@ -183,7 +183,7 @@ function createOAuth2Client(accessToken: string, refreshToken: string): OAuth2Cl
 async function stopChannel(
   oauth2Client: OAuth2Client,
   channelId: string,
-  resourceId: string,
+  resourceId: string
 ): Promise<void> {
   const calendar = google.calendar({
     version: 'v3',

@@ -8,6 +8,8 @@
 import { type GCalEvent, type GCalListResponse } from '@/services/googleCalendarCallStore';
 import { logger } from '@/utils/logger';
 
+const TAG = '[CALENDAR_SYNC][GOOGLE][API]';
+
 interface CalendarFetchResult<TEvent> {
   events: TEvent[];
   truncated: boolean;
@@ -41,7 +43,7 @@ export async function fetchGoogleEventsInRange(
   accessToken: string,
   timeMin: Date,
   timeMax: Date,
-  maxEvents?: number,
+  maxEvents?: number
 ): Promise<CalendarFetchResult<GCalEvent>> {
   const events: GCalEvent[] = [];
   let pageToken: string | undefined;
@@ -62,7 +64,7 @@ export async function fetchGoogleEventsInRange(
       {
         headers: { Authorization: `Bearer ${accessToken}` },
         signal: AbortSignal.timeout(30_000),
-      },
+      }
     );
 
     if (!res.ok) {
@@ -85,7 +87,7 @@ export async function fetchGoogleEventsInRange(
 export async function fetchGoogleIncrementalChanges(
   accessToken: string,
   syncToken: string,
-  options?: { maxEvents?: number; pageToken?: string },
+  options?: { maxEvents?: number; pageToken?: string }
 ): Promise<GoogleIncrementalChangesResult> {
   const params = new URLSearchParams({
     syncToken,
@@ -99,7 +101,7 @@ export async function fetchGoogleIncrementalChanges(
     {
       headers: { Authorization: `Bearer ${accessToken}` },
       signal: AbortSignal.timeout(30_000),
-    },
+    }
   );
 
   if (res.status === 410) {
@@ -123,7 +125,7 @@ export async function fetchGoogleIncrementalChanges(
 
 export async function fetchAllGoogleEventsForBaseline(
   accessToken: string,
-  maxEvents?: number,
+  maxEvents?: number
 ): Promise<{ events: GCalEvent[]; nextSyncToken: string; truncated: boolean }> {
   const events: GCalEvent[] = [];
   let pageToken: string | undefined;
@@ -146,7 +148,7 @@ export async function fetchAllGoogleEventsForBaseline(
       {
         headers: { Authorization: `Bearer ${accessToken}` },
         signal: AbortSignal.timeout(30_000),
-      },
+      }
     );
 
     if (!res.ok) {
@@ -158,7 +160,7 @@ export async function fetchAllGoogleEventsForBaseline(
     const pageItems = page.items ?? [];
     totalEvents += pageItems.length;
 
-    const filtered = pageItems.filter(e => {
+    const filtered = pageItems.filter((e) => {
       const start = e.start?.dateTime ?? e.start?.date;
       if (!start) return true;
       return new Date(start) >= cutoff;
@@ -178,7 +180,7 @@ export async function fetchAllGoogleEventsForBaseline(
   }
 
   logger.info(
-    `[GOOGLE_CALENDAR] Baseline fetch: ${totalEvents} total, ${eligibleEvents} after time filter, ${events.length} selected`,
+    `${TAG} Baseline fetch: ${totalEvents} total, ${eligibleEvents} after time filter, ${events.length} selected`
   );
 
   return { events, nextSyncToken, truncated };

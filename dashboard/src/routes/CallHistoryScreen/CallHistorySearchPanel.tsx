@@ -12,14 +12,14 @@ import {
   type InitialQueryData,
 } from '../../components/Chat/ChatDirectory/LexicalSearchInput';
 import { GoogleCalendarIcon, MicrosoftIcon } from './CalendarIcons';
-
-type CalendarProvider = 'GOOGLE' | 'MICROSOFT' | null;
+import type { CalendarProvider } from '../../services/clients/calendarApi';
+import type { CalendarReauthCountdown, CalendarSyncMessage } from '../../utils/calendarSync';
 
 interface CallHistorySearchPanelProps {
-  calendarProvider: CalendarProvider;
+  calendarProvider: CalendarProvider | null;
   isSyncing: boolean;
-  syncMessage: { text: string; ok: boolean; reauth?: boolean } | null;
-  reauthCountdown: { count: number; loginUrl: string } | null;
+  syncMessage: CalendarSyncMessage | null;
+  reauthCountdown: CalendarReauthCountdown | null;
   onCalendarSync: () => void;
   callMentionSearchType: MentionType | null;
   callMentionSearchQuery: string;
@@ -112,7 +112,7 @@ export function CallHistorySearchPanel({
                 {reauthCountdown ? (
                   <>
                     <span className='md:hidden'>{`Redirecting in ${reauthCountdown.count}s…`}</span>
-                    <span className='hidden md:inline'>{`Need calendar access, redirecting to login in ${reauthCountdown.count}s…`}</span>
+                    <span className='hidden md:inline'>{`Need calendar access, redirecting for authorization in ${reauthCountdown.count}s…`}</span>
                   </>
                 ) : syncMessage ? (
                   syncMessage.text
