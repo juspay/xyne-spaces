@@ -2,7 +2,10 @@ import { createVespaService, type VespaDependencies } from 'vespa/src';
 import { logger } from '@/utils/logger';
 import { Request, Response } from 'express';
 import config from 'vespa/src/config';
-import { transformVespaResults } from './resultTransform';
+import {
+  transformVespaResults,
+  type TransformedSearchResult,
+} from './resultTransform';
 import { db } from '@/database/client';
 import { VALID_DOC_TYPES } from '@/utils/idValidator';
 import { MatchFeatures, RankProfile, SubApp, VespaDocType, VespaSearchHit, fileSchema } from '@/vespa/src/types';
@@ -79,6 +82,53 @@ function parseVespaResults(children: any[]): { grouped: boolean; groups?: any[];
 }
 
 const MAX_FILTER_VALUES = 50;
+const MAX_VESPA_RESULT_WINDOW = 1000;
+
+/**
+ * Keep every non-mail hit, but only the highest-ranked mail hit for each Desk
+ * conversation. Vespa returns hits in relevance order, so retaining the first
+ * mail for a thread preserves the correct representative.
+ */
+function dedupeMailHits(hits: VespaSearchHit[]): VespaSearchHit[] {
+  const seenMailThreads = new Set<string>();
+
+  return hits.filter(hit => {
+    if (hit.fields?.docType !== VespaDocType.MAIL) return true;
+
+    const threadId = (hit.fields as { threadId?: string }).threadId?.trim();
+    if (!threadId) return true;
+    if (seenMailThreads.has(threadId)) return false;
+
+    seenMailThreads.add(threadId);
+    return true;
+  });
+}
+
+/**
+ * Lean Vespa summaries do not always include threadId. After transformation,
+ * Desk mail results have their authoritative Postgres conversationId, so use
+ * that as the final mail-only deduplication key.
+ */
+function dedupeMailResults(
+  results: TransformedSearchResult[],
+): TransformedSearchResult[] {
+  const seenMailConversations = new Set<string>();
+
+  return results.filter(result => {
+    const searchContext = result.searchContext;
+    if (!searchContext?.mailId) return true;
+
+    const conversationKey =
+      searchContext.conversationId ??
+      searchContext.ticketId ??
+      searchContext.xyneId;
+    if (!conversationKey) return true;
+    if (seenMailConversations.has(conversationKey)) return false;
+
+    seenMailConversations.add(conversationKey);
+    return true;
+  });
+}
 
 class ValidationError extends Error {
   readonly statusCode = 400;
@@ -828,7 +878,16 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
 
     const isMailOnlySearch =
       searchApps.length === 1 && searchApps[0].trim().toLowerCase() === 'mail';
+    const effectiveGroupBy =
+      options.groupBy === undefined ? 'docType' : options.groupBy;
+    const isFlatMultiAppMailSearch =
+      effectiveGroupBy === '' &&
+      searchApps.length > 1 &&
+      searchApps.some(app => app.trim().toLowerCase() === 'mail');
     const mailGroupOffset = isMailOnlySearch
+      ? Math.max(Number(offset) || 0, 0)
+      : 0;
+    const flatSearchOffset = isFlatMultiAppMailSearch
       ? Math.max(Number(offset) || 0, 0)
       : 0;
 
@@ -838,6 +897,18 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
     if (isMailOnlySearch && mailGroupOffset > 0) {
       options.offset = 0;
       options.limit = mailGroupOffset + effectiveLimit;
+    }
+
+    // For flat All-tab searches, fetch from the start so mail threads can be
+    // deduplicated consistently across pages. Over-fetch to compensate for
+    // conversations that have several matching mail documents.
+    if (isFlatMultiAppMailSearch) {
+      const requestedUniquePrefix = flatSearchOffset + effectiveLimit;
+      options.offset = 0;
+      options.limit = Math.min(
+        MAX_VESPA_RESULT_WINDOW,
+        requestedUniquePrefix * 4,
+      );
     }
 
     // Call vespa search
@@ -871,17 +942,21 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       const groupedResults = await Promise.all(
         pageGroups.map(async (group) => {
           // Attach matchfeatures to each hit's fields before transformation
-          const hitsWithMatchFeatures = group.hits.map((hit: VespaSearchHit) => ({
-            ...hit,
-            fields: {
-              ...hit.fields,
-              matchfeatures: matchFeaturesMap.get(hit.fields?.docId) || null
-            }
-          }));
-          const transformedHits = await transformVespaResults(
-            hitsWithMatchFeatures,
-            db,
-            wantDebugInfo,
+          const hitsWithMatchFeatures = dedupeMailHits(
+            group.hits.map((hit: VespaSearchHit) => ({
+              ...hit,
+              fields: {
+                ...hit.fields,
+                matchfeatures: matchFeaturesMap.get(hit.fields?.docId) || null
+              }
+            })),
+          );
+          const transformedHits = dedupeMailResults(
+            await transformVespaResults(
+              hitsWithMatchFeatures,
+              db,
+              wantDebugInfo,
+            ),
           );
           return {
             groupBy: group.groupBy,
@@ -907,18 +982,25 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       // Return flat results (backward compatible)
       // flat results will have matchFeatures returned by vespa.
       // No need to add.
-      const hits = parsedResults.hits || [];
-      const transformedResults = await transformVespaResults(
-        hits,
-        db,
-        wantDebugInfo,
+      const transformedResults = dedupeMailResults(
+        await transformVespaResults(
+          dedupeMailHits(parsedResults.hits || []),
+          db,
+          wantDebugInfo,
+        ),
       );
+      const pageResults = isFlatMultiAppMailSearch
+        ? transformedResults.slice(
+            flatSearchOffset,
+            flatSearchOffset + effectiveLimit,
+          )
+        : transformedResults;
 
       res.json({
         success: true,
         data: {
           grouped: false,
-          results: transformedResults,
+          results: pageResults,
           totalCount: results.root.fields?.totalCount || 0,
           offset: Number(offset),
           limit: effectiveLimit,
