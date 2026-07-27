@@ -155,6 +155,8 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
     const savedTimeRef = useRef(0);
     const hasAppliedStartTimeRef = useRef(false);
     const hasAutoPlayedRef = useRef(false);
+    const retryResumeRef = useRef<{ time: number; wasPlaying: boolean } | null>(null);
+    const isSeekingRef = useRef(false);
 
     useEffect(() => {
       hasAppliedStartTimeRef.current = false;
@@ -177,8 +179,12 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
       }
       hasAppliedStartTimeRef.current = true;
 
-      const resumeFrom =
-        initialTime !== undefined && initialTime > 0
+      const retryResume = retryResumeRef.current;
+      retryResumeRef.current = null;
+
+      const resumeFrom = retryResume
+        ? retryResume.time
+        : initialTime !== undefined && initialTime > 0
           ? initialTime
           : (getVideoPosition(positionKey) ?? 0);
 
@@ -190,6 +196,13 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
       }
       video.currentTime = resumeFrom;
       setCurrentTime(resumeFrom);
+
+      if (retryResume?.wasPlaying) {
+        hasAutoPlayedRef.current = true;
+        video.play().catch(() => {
+          setShowControls(true);
+        });
+      }
     };
 
     const maybeAutoPlay = (): void => {
@@ -306,6 +319,11 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
       const video = videoRef.current;
       if (video) {
         savedTimeRef.current = video.currentTime;
+        lastKnownRef.current = {
+          key: positionKey,
+          time: video.currentTime,
+          duration: video.duration,
+        };
         saveVideoPosition(positionKey, video.currentTime, video.duration);
       }
     };
@@ -314,6 +332,24 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
       setIsPlaying(false);
       lastKnownRef.current = { key: positionKey, time: 0, duration: 0 };
       clearVideoPosition(positionKey);
+    };
+
+    const handleSeeking = (): void => {
+      isSeekingRef.current = true;
+    };
+
+    const handleSeeked = (): void => {
+      isSeekingRef.current = false;
+      const video = videoRef.current;
+      if (video) {
+        savedTimeRef.current = video.currentTime;
+        lastKnownRef.current = {
+          key: positionKey,
+          time: video.currentTime,
+          duration: video.duration,
+        };
+        saveVideoPosition(positionKey, video.currentTime, video.duration);
+      }
     };
 
     const handleTimeUpdate = (): void => {
@@ -329,7 +365,7 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
         time: video.currentTime,
         duration: video.duration,
       };
-      if (Math.abs(video.currentTime - savedTimeRef.current) >= 1) {
+      if (!isSeekingRef.current && Math.abs(video.currentTime - savedTimeRef.current) >= 1) {
         savedTimeRef.current = video.currentTime;
         saveVideoPosition(positionKey, video.currentTime, video.duration);
       }
@@ -359,6 +395,12 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
         // Keep loading spinner visible during retries
         setIsLoading(true);
         setError(null);
+
+        const video = videoRef.current;
+        if (video && video.currentTime > 0) {
+          retryResumeRef.current = { time: video.currentTime, wasPlaying: !video.paused };
+        }
+        hasAppliedStartTimeRef.current = false;
 
         // Exponential back-off: 2 s, 3 s, 4.5 s … capped at 15 s
         const delay = Math.min(2000 * Math.pow(1.5, retryCountRef.current - 1), 15_000);
@@ -529,6 +571,8 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
           onPlay={handlePlay}
           onPause={handlePause}
           onEnded={handleEnded}
+          onSeeking={handleSeeking}
+          onSeeked={handleSeeked}
           onTimeUpdate={handleTimeUpdate}
           onDurationChange={handleDurationChange}
           onError={handleError}

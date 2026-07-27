@@ -98,6 +98,7 @@ export const attachmentViewerMachine = createMachine(
                 status: () => 'loading',
                 error: null,
                 retryCount: 0,
+                currentVideoTime: () => undefined,
               }),
             ],
           },
