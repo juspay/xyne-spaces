@@ -16,6 +16,14 @@ import { pubSubWatchService } from '../index';
 
 const TAG = '[WatchRenewalQueue]';
 
+function renewalTag(providerType: string): string {
+  if (providerType === 'google-calendar') return '[CALENDAR_SYNC][GOOGLE][WATCH_RENEWAL]';
+  if (providerType === 'microsoft-calendar') {
+    return '[CALENDAR_SYNC][MICROSOFT][WATCH_RENEWAL]';
+  }
+  return TAG;
+}
+
 type RenewalConfig = { cron: string; defaultCron: string; withinMs: number };
 type RenewalJobData = { providerType: string };
 
@@ -68,14 +76,14 @@ class WatchRenewalQueue {
   }> {
     const config = RENEWAL_CONFIGS[providerType];
     if (!config) {
-      logger.warn(`${TAG} No renewal config for provider`, { providerType });
+      logger.warn(`${renewalTag(providerType)} No renewal config for provider`, { providerType });
       return { renewed: 0, failed: 0, deactivated: 0 };
     }
 
     try {
       return await pubSubWatchService.renewAllExpiring(providerType, config.withinMs);
     } catch (err) {
-      logger.error(`${TAG} Unexpected error renewing provider`, {
+      logger.error(`${renewalTag(providerType)} Unexpected error renewing provider`, {
         providerType,
         error: err,
       });
@@ -89,10 +97,10 @@ class WatchRenewalQueue {
 
     queue.process('renew-provider', async (job) => {
       const { providerType } = job.data as RenewalJobData;
-      logger.info(`${TAG} Starting provider renewal`, { providerType });
+      logger.info(`${renewalTag(providerType)} Starting provider renewal`, { providerType });
       const startedAt = Date.now();
       const result = await this.runProviderRenewal(providerType);
-      logger.info(`${TAG} Provider renewal complete`, {
+      logger.info(`${renewalTag(providerType)} Provider renewal complete`, {
         providerType,
         durationMs: Date.now() - startedAt,
         result,
@@ -140,7 +148,9 @@ class WatchRenewalQueue {
     for (const providerType of registeredTypes) {
       const config = RENEWAL_CONFIGS[providerType];
       if (!config) {
-        logger.warn(`${TAG} Skipping provider without renewal config`, { providerType });
+        logger.warn(`${renewalTag(providerType)} Skipping provider without renewal config`, {
+          providerType,
+        });
         continue;
       }
 
@@ -152,22 +162,25 @@ class WatchRenewalQueue {
           {
             repeat: { cron: config.cron },
             jobId,
-          },
+          }
         );
       } catch (err) {
-        logger.error(`${TAG} Failed to register provider cron, falling back to default`, {
-          providerType,
-          cron: config.cron,
-          defaultCron: config.defaultCron,
-          error: err,
-        });
+        logger.error(
+          `${renewalTag(providerType)} Failed to register provider cron, falling back to default`,
+          {
+            providerType,
+            cron: config.cron,
+            defaultCron: config.defaultCron,
+            error: err instanceof Error ? err.message : String(err),
+          }
+        );
         await queue.add(
           'renew-provider',
           { providerType },
           {
             repeat: { cron: config.defaultCron },
             jobId,
-          },
+          }
         );
       }
 
@@ -181,16 +194,14 @@ class WatchRenewalQueue {
           {
             delay: 30_000,
             jobId: `watch-renewal-${providerType}-initial`,
-          },
+          }
         );
       }
     }
 
     this.workerInitialized = true;
     logger.info(
-      `${TAG} Queue initialized, providers: [${pubSubWatchService
-        .getRegisteredTypes()
-        .join(', ')}]`
+      `${TAG} Queue initialized, providers: [${pubSubWatchService.getRegisteredTypes().join(', ')}]`
     );
   }
 

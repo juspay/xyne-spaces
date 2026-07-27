@@ -21,6 +21,8 @@ import {
   type CalendarSyncTimeRange,
 } from './calendarCallStore.utils';
 
+const TAG = '[CALENDAR_SYNC][MICROSOFT][STORE]';
+
 // ─── Types (re-exported so the queue file doesn't need its own copies) ────────
 
 export interface MSCalAttendee {
@@ -61,7 +63,7 @@ export interface MSCalListResponse {
 
 function parseMSCalDateTime(dt?: MSCalDateTime): Date | undefined {
   if (!dt?.dateTime) return undefined;
-  const raw = /[Z+\-]\d*$/.test(dt.dateTime) ? dt.dateTime : dt.dateTime + 'Z';
+  const raw = /[Z+-]\d*$/.test(dt.dateTime) ? dt.dateTime : dt.dateTime + 'Z';
   const d = new Date(raw);
   return isNaN(d.getTime()) ? undefined : d;
 }
@@ -93,7 +95,7 @@ function mapMsResponse(response?: string): string {
 export async function storeMsCalEventAsCall(
   event: MSCalEvent,
   userId: string,
-  userEmail: string,
+  userEmail: string
 ): Promise<void> {
   const calendarOwnerEmail = normalizeCalendarOwnerEmail(userEmail);
   const externalId = buildCalendarExternalId('microsoft', userId, event.id);
@@ -109,8 +111,8 @@ export async function storeMsCalEventAsCall(
   const organizerEmail = event.organizer?.emailAddress?.address;
 
   const attendees = (event.attendees ?? [])
-    .filter(a => !organizerEmail || a.emailAddress?.address !== organizerEmail)
-    .map(a => ({
+    .filter((a) => !organizerEmail || a.emailAddress?.address !== organizerEmail)
+    .map((a) => ({
       email: a.emailAddress?.address,
       displayName: a.emailAddress?.name,
       responseStatus: mapMsResponse(a.status?.response),
@@ -118,8 +120,12 @@ export async function storeMsCalEventAsCall(
 
   const organizer: CalendarOrganizer | null = event.organizer?.emailAddress
     ? {
-        ...(event.organizer.emailAddress.address !== undefined && { email: event.organizer.emailAddress.address }),
-        ...(event.organizer.emailAddress.name !== undefined && { displayName: event.organizer.emailAddress.name }),
+        ...(event.organizer.emailAddress.address !== undefined && {
+          email: event.organizer.emailAddress.address,
+        }),
+        ...(event.organizer.emailAddress.name !== undefined && {
+          displayName: event.organizer.emailAddress.name,
+        }),
       }
     : null;
 
@@ -146,7 +152,7 @@ export async function storeMsCalEventAsCall(
         attendees: attendees as unknown as Prisma.InputJsonArray,
       } satisfies Prisma.InputJsonObject,
     },
-    now,
+    now
   );
 }
 
@@ -154,7 +160,7 @@ export async function storeMsCalEventsAsCallsForUser(
   events: MSCalEvent[],
   userId: string,
   userEmail: string,
-  options?: { isFullSync?: boolean; timeRange?: CalendarSyncTimeRange; skipCancelRemoved?: boolean },
+  options?: { isFullSync?: boolean; timeRange?: CalendarSyncTimeRange; skipCancelRemoved?: boolean }
 ): Promise<void> {
   const isFullSync = options?.isFullSync ?? false;
   const eventsToStore = events.slice(0, MAX_CALENDAR_EVENTS_PER_SYNC);
@@ -162,11 +168,18 @@ export async function storeMsCalEventsAsCallsForUser(
 
   if (hitStoreCap) {
     logger.warn(
-      `[MICROSOFT_CALENDAR_STORE] Capping store batch for ${userEmail}: ${events.length} -> ${eventsToStore.length}`,
+      `${TAG} Capping store batch for ${userEmail}: ${events.length} -> ${eventsToStore.length}`
     );
   }
 
-  logger.info(`[MICROSOFT_CALENDAR_STORE] Storing ${eventsToStore.length} event(s) for ${userEmail} (fullSync=${isFullSync})`);
+  logger.info(
+    `${TAG} Storing ${eventsToStore.length} event(s) for ${userEmail} (fullSync=${isFullSync})`,
+    {
+      userId,
+      eventCount: eventsToStore.length,
+      isFullSync,
+    }
+  );
 
   for (const event of eventsToStore) {
     try {
@@ -178,8 +191,8 @@ export async function storeMsCalEventsAsCallsForUser(
       await storeMsCalEventAsCall(event, userId, userEmail);
     } catch (err) {
       logger.error(
-        `[MICROSOFT_CALENDAR_STORE] Failed to store event "${event.subject}" for ${userEmail}:`,
-        err instanceof Error ? err.message : err,
+        `${TAG} Failed to store event "${event.subject}" for ${userEmail}:`,
+        err instanceof Error ? err.message : err
       );
     }
   }
@@ -187,18 +200,20 @@ export async function storeMsCalEventsAsCallsForUser(
   if (isFullSync && !options?.skipCancelRemoved && !hitStoreCap) {
     const externalIdPrefix = buildCalendarExternalIdPrefix('microsoft', userId);
     const fetchedExternalIds = new Set(
-      eventsToStore.map(e => buildCalendarExternalId('microsoft', userId, e.id)),
+      eventsToStore.map((e) => buildCalendarExternalId('microsoft', userId, e.id))
     );
     await cancelRemovedExternalCalendarCalls(
       externalIdPrefix,
       CallOrigin.MICROSOFT_CALENDAR,
       fetchedExternalIds,
-      'MICROSOFT_CALENDAR_STORE',
-      options?.timeRange,
+      TAG,
+      options?.timeRange
     );
   } else if (isFullSync && options?.skipCancelRemoved) {
-    logger.warn(`[MICROSOFT_CALENDAR_STORE] Skipping removed-event cancellation because sync result was truncated upstream`);
+    logger.warn(
+      `${TAG} Skipping removed-event cancellation because sync result was truncated upstream`
+    );
   } else if (isFullSync && hitStoreCap) {
-    logger.warn(`[MICROSOFT_CALENDAR_STORE] Skipping removed-event cancellation because store batch hit cap`);
+    logger.warn(`${TAG} Skipping removed-event cancellation because store batch hit cap`);
   }
 }

@@ -18,7 +18,7 @@ import { parseCalendarCredentials } from '@/database/repositories/externalSource
 import { v4 as uuidv4 } from 'uuid';
 import { config } from '@/config/env';
 
-const TAG = '[MSCalendarSubscription]';
+const TAG = '[CALENDAR_SYNC][MICROSOFT][WATCH]';
 const DEFAULT_SUBSCRIPTION_TTL_MINUTES = 4190;
 
 function getNotificationUrl(): string {
@@ -67,7 +67,7 @@ export class MicrosoftCalendarSubscriptionService {
     const expirationDateTime = new Date(Date.now() + getSubscriptionTtlMs());
     const notificationUrl = getNotificationUrl();
 
-    logger.info(`${TAG} Creating subscription`, { email });
+    logger.info(`${TAG} Creating subscription`, { sourceId, email });
 
     const response = await fetch('https://graph.microsoft.com/v1.0/subscriptions', {
       method: 'POST',
@@ -108,6 +108,7 @@ export class MicrosoftCalendarSubscriptionService {
           await deleteSubscriptionApi(credentials.accessToken, existing.externalIdentifier);
         } catch (err) {
           logger.warn(`${TAG} Failed to delete old subscription during setup`, {
+            sourceId,
             email,
             oldSubId: existing.externalIdentifier,
             error: err instanceof Error ? err.message : String(err),
@@ -127,6 +128,7 @@ export class MicrosoftCalendarSubscriptionService {
     });
 
     logger.info(`${TAG} Subscription created`, {
+      sourceId,
       email,
       subscriptionId,
       expiration: actualExpiration.toISOString(),
@@ -151,7 +153,11 @@ export class MicrosoftCalendarSubscriptionService {
 
     const newExpiration = new Date(Date.now() + getSubscriptionTtlMs());
 
-    logger.info(`${TAG} Renewing subscription`, { email, subscriptionId: subscription.externalIdentifier });
+    logger.info(`${TAG} Renewing subscription`, {
+      sourceId,
+      email,
+      subscriptionId: subscription.externalIdentifier,
+    });
 
     const response = await fetch(
       `https://graph.microsoft.com/v1.0/subscriptions/${subscription.externalIdentifier}`,
@@ -165,12 +171,13 @@ export class MicrosoftCalendarSubscriptionService {
           expirationDateTime: newExpiration.toISOString(),
         }),
         signal: AbortSignal.timeout(15_000),
-      },
+      }
     );
 
     if (!response.ok) {
       const text = await response.text();
       logger.warn(`${TAG} Renewal failed, recreating subscription`, {
+        sourceId,
         email,
         status: response.status,
         error: text,
@@ -185,9 +192,13 @@ export class MicrosoftCalendarSubscriptionService {
     const actualExpiration = parseGraphExpiration(data.expirationDateTime);
     const creds = parseCalendarCredentials(subscription.credentials);
 
-    await repositories.externalSources.renewMicrosoftSubscription(subscription.id, actualExpiration);
+    await repositories.externalSources.renewMicrosoftSubscription(
+      subscription.id,
+      actualExpiration
+    );
 
     logger.info(`${TAG} Subscription renewed`, {
+      sourceId,
       email,
       subscriptionId: subscription.externalIdentifier,
       expiration: actualExpiration.toISOString(),
@@ -215,6 +226,7 @@ export class MicrosoftCalendarSubscriptionService {
         await deleteSubscriptionApi(credentials.accessToken, subscription.externalIdentifier);
       } catch (err) {
         logger.warn(`${TAG} Failed to delete subscription via API`, {
+          sourceId,
           email,
           error: err instanceof Error ? err.message : String(err),
         });
@@ -229,7 +241,7 @@ export class MicrosoftCalendarSubscriptionService {
   static async updateSyncStateBySourceId(
     sourceId: string,
     syncToken?: string | null,
-    isActive?: boolean,
+    isActive?: boolean
   ): Promise<void> {
     await repositories.externalSources.updateCalendarSyncStateById(sourceId, {
       syncToken,
