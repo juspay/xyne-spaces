@@ -42,13 +42,15 @@ export class AttachmentController {
     const supportedAttachments = attachments.filter(att => isSupportedMimeType(att.mimetype));
 
     for (const attachment of supportedAttachments) {
-      vespaQueue.addJob({
+      const base: Parameters<typeof vespaQueue.addJob>[0] = {
         schema: fileSchema,
         jobType: "feed",
         docId: attachment.id,
         app: SubApp.CHAT_ATTACHMENT,
         ...(workspaceId ? { workspaceId } : {}),
-      }).catch(async (error: any) => {
+      };
+
+      const logEnqueueFailure = async (error: any) => {
         logger.error(`[AttachmentController] Error queuing Vespa job for attachment ${attachment.id}:`, error);
         // Log failed insertion to Postgres
         try {
@@ -71,7 +73,17 @@ export class AttachmentController {
         } catch (dbError) {
           logger.error('Failed to log Vespa insertion error to database:', dbError);
         }
-      });
+      };
+
+      // Job A — name-only feed (highest priority): makes the file searchable by
+      // name in cmd+K within seconds, before the slow content parse finishes.
+      // Gated by FILE_NAME_ONLY_FEED_ENABLED.
+      if (config.fileNameOnlyFeed.enabled) {
+        vespaQueue.addJob({ ...base, nameOnly: true }).catch(logEnqueueFailure);
+      }
+      // Job B — full-content feed: today's heavy parse + insert, enriches the
+      // same docId with content.
+      vespaQueue.addJob(base).catch(logEnqueueFailure);
     }
   }
 

@@ -1195,6 +1195,11 @@ export const mapFile = async (
     image_chunks_pos: string[];
     documentOutline?: string;
   },
+  // When true, skip the GCS-download + FileProcessor content extraction and
+  // return the file with empty chunks. Used by the high-priority name-only feed
+  // so the file becomes searchable by name immediately; a later full feed fills
+  // in content on the same docId.
+  metadataOnly?: boolean,
 ): Promise<VespaFileDocument> => {
   // Resolve channel from conversation
   let channelRef: string | undefined;
@@ -1255,6 +1260,9 @@ export const mapFile = async (
       image_chunks: override.image_chunks,
       image_chunks_pos: override.image_chunks_pos,
     };
+  } else if (metadataOnly) {
+    // Name-only feed: leave chunks empty and skip the GCS-download + parse.
+    logger.info(`[Mapper] metadataOnly feed for file ${args.id} (${args.originalFilename}); skipping content extraction`);
   } else
   try {
     if (args.url) {
@@ -1464,7 +1472,10 @@ export const mapBySchema = async (
   jobType: VespaJobType,
   app?: SubApp,
   workspaceId?: string,
-  orgId?: string
+  orgId?: string,
+  // Forwarded to mapFile for chat/ticket attachments: insert metadata only,
+  // skipping content extraction (used by the name-only feed).
+  metadataOnly?: boolean,
 ): Promise<InsertDocument | Partial<InsertDocument>> => {
   const docType = schemaToDocType[schemaName];
   if (!docType) {
@@ -1498,7 +1509,7 @@ export const mapBySchema = async (
             return mapCollection(args as CollectionItem);
           case SubApp.CHAT_ATTACHMENT:
           case SubApp.TICKET_ATTACHMENT:
-            return mapFile(args as InsertValue<MessageAttachmentsSchema>, workspaceId, orgId);
+            return mapFile(args as InsertValue<MessageAttachmentsSchema>, workspaceId, orgId, undefined, metadataOnly);
           default:
             throw new Error(`No mapper defined for sub-app: ${app}`);
         }
@@ -1615,6 +1626,9 @@ export const fetchAndMapBySchema = async (
   app?: SubApp,
   workspaceId?: string,
   orgId?: string,
+  // When true, map file metadata only (skip content extraction). Only meaningful
+  // for the `file` schema; ignored by other schemas.
+  metadataOnly?: boolean,
 ): Promise<InsertDocument | Partial<InsertDocument>> => {
 
   if (jobType === 'delete') {
@@ -1645,7 +1659,7 @@ export const fetchAndMapBySchema = async (
     throw new Error(`Data not found for ${schema}/${docId}`);
   }
 
-  return await mapBySchema(schema, rawData, jobType, app, workspaceId, orgId);
+  return await mapBySchema(schema, rawData, jobType, app, workspaceId, orgId, metadataOnly);
 }
 
 

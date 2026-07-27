@@ -1738,16 +1738,23 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     const supportedAttachments = attachments.filter(att => isSupportedMimeType(att.mimetype));
 
     for (const attachment of supportedAttachments) {
+      const base: Parameters<typeof vespaQueue.addJob>[0] = {
+        schema: fileSchema,
+        docId: attachment.id,
+        jobType: 'feed',
+        userId: attachment.createdBy,
+        workspaceId: this.ctx.workspaceId,
+        app: SubApp.CHAT_ATTACHMENT,
+      };
       try {
-        await vespaQueue.addJob({
-          schema: fileSchema,
-          docId: attachment.id,
-          jobType: 'feed',
-          userId: attachment.createdBy,
-          workspaceId: this.ctx.workspaceId,
-          app: SubApp.CHAT_ATTACHMENT,
-        });
-        logger.info(`[MessagesSideEffectHandler] Queued Vespa indexing for attachment ${attachment.id} in message ${messageId}`);
+        // Name-only feed first (highest priority) so the file is searchable by
+        // name in cmd+K within seconds; the full-content feed enriches the same
+        // docId once the slow parse completes. Gated by FILE_NAME_ONLY_FEED_ENABLED.
+        if (config.fileNameOnlyFeed.enabled) {
+          await vespaQueue.addJob({ ...base, nameOnly: true });
+        }
+        await vespaQueue.addJob(base);
+        logger.info(`[MessagesSideEffectHandler] Queued Vespa indexing (${config.fileNameOnlyFeed.enabled ? 'name-only + full' : 'full'}) for attachment ${attachment.id} in message ${messageId}`);
       } catch (error) {
         logger.error(`[MessagesSideEffectHandler] Failed to queue Vespa job for attachment ${attachment.id}:`, error);
       }
