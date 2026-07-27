@@ -39,7 +39,7 @@ class CallSideEffectService {
 
         const call = await db.call.findUnique({
             where: { id: callId },
-            select: { externalId: true, channelId: true, callType: true }
+            select: { externalId: true, channelId: true, callType: true, callOrigin: true }
         });
 
         if (!call) {
@@ -52,7 +52,10 @@ class CallSideEffectService {
             select: { scopeType: true }
         });
 
-        if (channel?.scopeType === ChannelScopeType.DEFAULT) {
+        // Only suppress for whole-channel broadcast calls in a DEFAULT-scope channel.
+        // Thread/conversation calls (CallOrigin.CONVERSATION) are targeted invites and
+        // must still notify the invited participants even inside a DEFAULT channel.
+        if (channel?.scopeType === ChannelScopeType.DEFAULT && call.callOrigin === CallOrigin.CHANNEL) {
             this.logger.info(`Skipping missed call notifications for DEFAULT scope channel: ${call.channelId}`);
             return;
         }
@@ -163,7 +166,7 @@ class CallSideEffectService {
 
             const call = await db.call.findUnique({
                 where: { id: callId },
-                select: { externalId: true, callType: true, roomLink: true, channelId: true }
+                select: { externalId: true, callType: true, roomLink: true, channelId: true, callOrigin: true }
             });
 
             if (!call) {
@@ -179,7 +182,11 @@ class CallSideEffectService {
                 select: { scopeType: true }
             });
 
-            if (channel?.scopeType === ChannelScopeType.DEFAULT) {
+            // Only suppress for whole-channel broadcast calls in a DEFAULT-scope channel.
+            // Thread/conversation calls (CallOrigin.CONVERSATION) are targeted invites (e.g.
+            // calling someone from within a message thread) and must still send the
+            // INCOMING_CALL push to the invited participant even inside a DEFAULT channel.
+            if (channel?.scopeType === ChannelScopeType.DEFAULT && call.callOrigin === CallOrigin.CHANNEL) {
                 this.logger.info(`Skipping side effects for DEFAULT scope channel: ${call.channelId}`);
                 return;
             }
