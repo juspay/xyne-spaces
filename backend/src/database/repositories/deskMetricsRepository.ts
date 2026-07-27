@@ -54,8 +54,9 @@ export class DeskMetricsRepository {
     timeRange?: string;
     frtStageNames: string[];
     assigneeId?: string | null;
+    customFieldFilter?: { keys: string[]; perKeyFilters?: Record<string, { values?: string[]; textTerms?: string[] }> };
   }): Promise<DeskMetricsResponse> {
-    const { channelId, frtStageNames, assigneeId } = params;
+    const { channelId, frtStageNames, assigneeId, customFieldFilter } = params;
     const db = this.getDbInstance();
     const { gte, lte } = this.resolveRange(params.timeRange);
 
@@ -98,13 +99,50 @@ export class DeskMetricsRepository {
     })();
 
     const resolvedAtSql = Prisma.sql`
-      (SELECT MIN(ta."timestamp") FROM "public"."ticket_activities" ta
+      (SELECT MAX(ta."timestamp") FROM "public"."ticket_activities" ta
         WHERE ta."ticketId" = c."ticketId" AND ${resolvedPredicate})`;
 
-    // Cohort: tickets created in range. Optionally filtered by current assignee.
+    // Cohort: tickets created in range. Optionally filtered by assignee and/or custom field.
     const assigneeJoin = assigneeId
       ? Prisma.sql`JOIN "public"."tickets" tf ON tf.id = ta."ticketId" AND tf."assignedTo" = ${assigneeId}`
       : Prisma.sql``;
+
+    let customFieldExists: Prisma.Sql = Prisma.sql``;
+    if (customFieldFilter && customFieldFilter.keys.length > 0) {
+      // Value conditions — OR across keys that have values/terms selected
+      const valueConditions: Prisma.Sql[] = [];
+      for (const key of customFieldFilter.keys) {
+        const kf = customFieldFilter.perKeyFilters?.[key];
+        const hasValues = kf?.values && kf.values.length > 0;
+        const hasTerms = kf?.textTerms && kf.textTerms.length > 0;
+        if (!hasValues && !hasTerms) continue;
+        const fieldNameMatch = Prisma.sql`COALESCE(gf."fieldName", ff."fieldName") = ${key}`;
+        const fieldCol = Prisma.sql`COALESCE(fev."actualFieldValue"#>>'{}', NULLIF(fev."fieldValue", ''))`;
+        let valueCondition: Prisma.Sql;
+        if (hasTerms) {
+          // OR across all text terms within this field
+          valueCondition = kf!.textTerms!
+            .map(t => Prisma.sql`${fieldCol} ILIKE ${'%' + t + '%'}`)
+            .reduce((or, c, i) => i === 0 ? c : Prisma.sql`${or} OR ${c}`);
+        } else {
+          valueCondition = Prisma.sql`${fieldCol} IN (${Prisma.join(kf!.values!)})`;
+        }
+        valueConditions.push(Prisma.sql`(${fieldNameMatch} AND (${valueCondition}))`);
+      }
+      // Single EXISTS: field-level pre-filter (fieldName IN keys) + optional value-level AND
+      const valueClause = valueConditions.length > 0
+        ? Prisma.sql`AND (${valueConditions.reduce((or, c, i) => i === 0 ? c : Prisma.sql`${or} OR ${c}`)})`
+        : Prisma.sql``;
+      customFieldExists = Prisma.sql`AND EXISTS (
+          SELECT 1 FROM "public"."form_entity_values" fev
+          LEFT JOIN "public"."global_fields" gf ON gf.id = fev."fieldId"
+          LEFT JOIN "public"."form_fields" ff ON ff.id = fev."fieldId"
+          WHERE fev."entityId" = ta."ticketId"
+            AND fev."entityType" = 'TICKET'
+            AND COALESCE(gf."fieldName", ff."fieldName") IN (${Prisma.join(customFieldFilter.keys)})
+            ${valueClause}
+        )`;
+    }
 
     const cohortCte = Prisma.sql`
       cohort AS (
@@ -114,6 +152,7 @@ export class DeskMetricsRepository {
         WHERE ta."channelId" = ${channelId}
           AND ta."activityType" = 'TICKET_CREATED'
           AND ta."timestamp" >= ${gte} AND ta."timestamp" <= ${lte}
+          ${customFieldExists}
       )`;
 
     const frtStop = frtStopSql();
@@ -121,11 +160,11 @@ export class DeskMetricsRepository {
       await Promise.all([
         this.frtRtAggregates(db, cohortCte, frtStop, resolvedAtSql),
         this.ticketRows(db, cohortCte, frtStop, resolvedAtSql),
-        this.emailRepliesCount(db, channelId, gte, lte, assigneeId),
+        this.emailRepliesCount(db, channelId, gte, lte, assigneeId, customFieldExists),
         this.stageCounts(db, cohortCte),
         this.priorityBreakdown(db, cohortCte),
-        this.csatStats(db, channelId, gte, lte, assigneeId),
-        this.trendByDay(db, channelId, gte, lte, resolvedPredicate, assigneeId),
+        this.csatStats(db, channelId, gte, lte, assigneeId, customFieldExists),
+        this.trendByDay(db, channelId, gte, lte, resolvedPredicate, assigneeId, customFieldExists),
       ]);
 
     return {
@@ -247,7 +286,7 @@ export class DeskMetricsRepository {
           SELECT DISTINCT ON (fev."entityId", COALESCE(gf."fieldName", ff."fieldName"))
             fev."entityId" AS ticket_id,
             COALESCE(gf."fieldName", ff."fieldName") AS field_name,
-            COALESCE(NULLIF(fev."fieldValue", ''), fev."actualFieldValue"#>>'{}') AS field_value
+            COALESCE(fev."actualFieldValue"#>>'{}', NULLIF(fev."fieldValue", '')) AS field_value
           FROM "public"."form_entity_values" fev
           LEFT JOIN "public"."global_fields" gf ON gf.id = fev."fieldId"
           LEFT JOIN "public"."form_fields" ff ON ff.id = fev."fieldId"
@@ -308,13 +347,14 @@ export class DeskMetricsRepository {
     });
   }
 
-  /** Count email replies sent in range, optionally scoped to tickets assigned to assigneeId. */
+  /** Count email replies sent in range, optionally scoped to tickets assigned to assigneeId and/or matching a custom field. */
   private async emailRepliesCount(
     db: ReturnType<DeskMetricsRepository['getDbInstance']>,
     channelId: string,
     gte: Date,
     lte: Date,
     assigneeId?: string | null,
+    customFieldExists: Prisma.Sql = Prisma.sql``,
   ): Promise<number> {
     const assigneeFilter = assigneeId
       ? Prisma.sql`AND EXISTS (SELECT 1 FROM "public"."tickets" t WHERE t.id = ta."ticketId" AND t."assignedTo" = ${assigneeId})`
@@ -327,6 +367,7 @@ export class DeskMetricsRepository {
           AND ta."activityType" = 'EMAIL_SENT'
           AND ta."timestamp" >= ${gte} AND ta."timestamp" <= ${lte}
           ${assigneeFilter}
+          ${customFieldExists}
       `,
     );
     return rows[0]?.count ?? 0;
@@ -374,6 +415,7 @@ export class DeskMetricsRepository {
     gte: Date,
     lte: Date,
     assigneeId?: string | null,
+    customFieldExists: Prisma.Sql = Prisma.sql``,
   ): Promise<{ avgScore: number | null; good: number; bad: number }> {
     const assigneeFilter = assigneeId
       ? Prisma.sql`AND EXISTS (SELECT 1 FROM "public"."tickets" t WHERE t.id = ta."ticketId" AND t."assignedTo" = ${assigneeId})`
@@ -391,6 +433,7 @@ export class DeskMetricsRepository {
           AND ta."activityType" = 'CSAT_RECEIVED'
           AND ta."timestamp" >= ${gte} AND ta."timestamp" <= ${lte}
           ${assigneeFilter}
+          ${customFieldExists}
       `,
     );
     return {
@@ -407,15 +450,16 @@ export class DeskMetricsRepository {
     lte: Date,
     resolvedPredicate: Prisma.Sql,
     assigneeId?: string | null,
+    customFieldExists: Prisma.Sql = Prisma.sql``,
   ): Promise<Array<{ date: string; opened: number; closed: number }>> {
     const rangeDays = (lte.getTime() - gte.getTime()) / DAY_MS;
     const hourly = rangeDays <= 1;
     const bucketFn = hourly
-      ? Prisma.sql`to_char(date_trunc('hour', ta."timestamp" AT TIME ZONE 'UTC'), 'YYYY-MM-DD HH24:00')`
-      : Prisma.sql`to_char(date_trunc('day', ta."timestamp" AT TIME ZONE 'UTC'), 'YYYY-MM-DD')`;
+      ? Prisma.sql`to_char(date_trunc('hour', (ta."timestamp" AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Kolkata'), 'YYYY-MM-DD HH24:00')`
+      : Prisma.sql`to_char(date_trunc('day',  (ta."timestamp" AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Kolkata'), 'YYYY-MM-DD')`;
     const bucketFnR = hourly
-      ? Prisma.sql`to_char(date_trunc('hour', r.first_resolved AT TIME ZONE 'UTC'), 'YYYY-MM-DD HH24:00')`
-      : Prisma.sql`to_char(date_trunc('day', r.first_resolved AT TIME ZONE 'UTC'), 'YYYY-MM-DD')`;
+      ? Prisma.sql`to_char(date_trunc('hour', (r.first_resolved AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Kolkata'), 'YYYY-MM-DD HH24:00')`
+      : Prisma.sql`to_char(date_trunc('day',  (r.first_resolved AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Kolkata'), 'YYYY-MM-DD')`;
 
     const assigneeFilter = assigneeId
       ? Prisma.sql`AND EXISTS (SELECT 1 FROM "public"."tickets" t WHERE t.id = ta."ticketId" AND t."assignedTo" = ${assigneeId})`
@@ -430,6 +474,7 @@ export class DeskMetricsRepository {
             AND ta."activityType" = 'TICKET_CREATED'
             AND ta."timestamp" >= ${gte} AND ta."timestamp" <= ${lte}
             ${assigneeFilter}
+            ${customFieldExists}
           GROUP BY 1
         `,
       ),
@@ -437,10 +482,11 @@ export class DeskMetricsRepository {
         Prisma.sql`
           SELECT ${bucketFnR} AS day, COUNT(*)::int AS count
           FROM (
-            SELECT ta."ticketId", MIN(ta."timestamp") AS first_resolved
+            SELECT ta."ticketId", MAX(ta."timestamp") AS first_resolved
             FROM "public"."ticket_activities" ta
             WHERE ta."channelId" = ${channelId} AND ${resolvedPredicate}
               ${assigneeFilter}
+              ${customFieldExists}
             GROUP BY ta."ticketId"
           ) r
           WHERE r.first_resolved >= ${gte} AND r.first_resolved <= ${lte}
@@ -453,16 +499,37 @@ export class DeskMetricsRepository {
     const closed = new Map(closedRows.map(r => [r.day, r.count]));
 
     // Fill all buckets so the chart has no gaps
-    const stepMs = hourly ? 60 * 60 * 1000 : DAY_MS;
     const buckets: string[] = [];
-    for (let t = gte.getTime(); t <= lte.getTime(); t += stepMs) {
-      const d = new Date(t);
-      if (hourly) {
-        buckets.push(
-          `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')} ${String(d.getUTCHours()).padStart(2, '0')}:00`,
-        );
-      } else {
-        buckets.push(d.toISOString().slice(0, 10));
+    const HOUR_MS = 60 * 60 * 1000;
+    const IST_TZ = 'Asia/Kolkata';
+    const toISTDateStr = (ms: number): string =>
+      new Date(ms).toLocaleDateString('en-CA', { timeZone: IST_TZ }); // → 'YYYY-MM-DD'
+    const toISTHourStr = (ms: number): string => {
+      const d = new Date(ms);
+      const date = d.toLocaleDateString('en-CA', { timeZone: IST_TZ });
+      const hour = d.toLocaleTimeString('en-GB', { timeZone: IST_TZ, hour: '2-digit', minute: '2-digit' }).slice(0, 2);
+      return `${date} ${hour}:00`;
+    };
+    const floorToISTDay = (ms: number): number =>
+      new Date(`${toISTDateStr(ms)}T00:00:00+05:30`).getTime();
+    const floorToISTHour = (ms: number): number => {
+      const d = new Date(ms);
+      const date = d.toLocaleDateString('en-CA', { timeZone: IST_TZ });
+      const hour = d.toLocaleTimeString('en-GB', { timeZone: IST_TZ, hour: '2-digit', minute: '2-digit' }).slice(0, 2);
+      return new Date(`${date}T${hour}:00:00+05:30`).getTime();
+    };
+
+    if (hourly) {
+      const startHour = floorToISTHour(gte.getTime());
+      const endHour   = floorToISTHour(lte.getTime());
+      for (let t = startHour; t <= endHour; t += HOUR_MS) {
+        buckets.push(toISTHourStr(t));
+      }
+    } else {
+      const startDay = floorToISTDay(gte.getTime());
+      const endDay   = floorToISTDay(lte.getTime());
+      for (let t = startDay; t <= endDay; t += DAY_MS) {
+        buckets.push(toISTDateStr(t));
       }
     }
 

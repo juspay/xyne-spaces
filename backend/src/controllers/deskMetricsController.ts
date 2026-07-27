@@ -88,6 +88,46 @@ export class DeskMetricsController {
       const timeRange = rawTimeRange;
       const assigneeId = typeof req.query.assigneeId === 'string' ? req.query.assigneeId : null;
 
+      const parseJsonStringArray = (raw: string): string[] => {
+        try {
+          const parsed: unknown = JSON.parse(raw);
+          if (!Array.isArray(parsed)) return [];
+          return parsed.filter((v): v is string => typeof v === 'string');
+        } catch {
+          return [];
+        }
+      };
+      const rawKeys = typeof req.query.customFieldKeys === 'string' ? req.query.customFieldKeys : '';
+      const customFieldKeys = parseJsonStringArray(rawKeys);
+
+      const parsePerKeyFilters = (raw: string): Record<string, { values?: string[]; textTerms?: string[] }> => {
+        try {
+          const parsed = JSON.parse(raw) as Record<string, unknown>;
+          if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
+          const result: Record<string, { values?: string[]; textTerms?: string[] }> = {};
+          for (const [k, v] of Object.entries(parsed)) {
+            if (typeof v !== 'object' || v === null) continue;
+            const entry: { values?: string[]; textTerms?: string[] } = {};
+            const vals = (v as Record<string, unknown>)['values'];
+            const textTerms = (v as Record<string, unknown>)['textTerms'];
+            if (Array.isArray(vals) && vals.every(x => typeof x === 'string')) entry.values = vals as string[];
+            if (Array.isArray(textTerms)) {
+              const terms = textTerms.filter((x): x is string => typeof x === 'string' && x.trim().length > 0).map(x => x.trim());
+              if (terms.length > 0) entry.textTerms = terms;
+            }
+            result[k] = entry;
+          }
+          return result;
+        } catch { return {}; }
+      };
+
+      const rawPerKey = typeof req.query.customFieldPerKeyFilters === 'string' ? req.query.customFieldPerKeyFilters : '';
+      const perKeyFilters = rawPerKey ? parsePerKeyFilters(rawPerKey) : {};
+      const customFieldFilter =
+        customFieldKeys.length > 0
+          ? { keys: customFieldKeys, ...(Object.keys(perKeyFilters).length > 0 ? { perKeyFilters } : {}) }
+          : undefined;
+
       const frtStageNames: string[] = (() => {
         try {
           const parsed: unknown = JSON.parse(preference.frtStageNames ?? '[]');
@@ -102,6 +142,7 @@ export class DeskMetricsController {
         timeRange,
         frtStageNames,
         assigneeId,
+        customFieldFilter,
       });
 
       res.json(metrics);
