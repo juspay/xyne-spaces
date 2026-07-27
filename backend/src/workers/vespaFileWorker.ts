@@ -202,13 +202,21 @@ export class VespaFileWorker {
 			`[VESPA_FILE_WORKER] Processing ${jobType} job for ${schema}/${docId} (Job ID: ${job.id})`
 		);
 
+		if (job.data.nameOnly) {
+			logger.info(
+				`[VESPA_FILE_WORKER] NAME-ONLY feed for ${schema}/${docId} (Job ID: ${job.id}, priority: ${job.opts?.priority}) — inserting file name/metadata only, skipping content parse`
+			);
+		}
+
 		try {
 			// Route PDFs (collections + chat/ticket attachments) into the async OCR
 			// scheduler (if enabled). When routed, the scheduler owns processing —
-			// skip synchronous parsing.
+			// skip synchronous parsing. The name-only feed never parses content, so
+			// it must not be routed to the scheduler.
 			if (
 				jobType === 'feed' &&
 				schema === fileSchema &&
+				!job.data.nameOnly &&
 				(app === SubApp.COLLECTIONS ||
 					app === SubApp.CHAT_ATTACHMENT ||
 					app === SubApp.TICKET_ATTACHMENT)
@@ -269,8 +277,18 @@ export class VespaFileWorker {
 					) as Partial<InsertDocument>;
 				}
 			} else {
-				logger.info(`[VESPA_FILE_WORKER] Fetching data from database for ${schema}/${docId}`);
-				mappedData = await fetchAndMapBySchema(schema, docId, jobType, app, job.data.workspaceId, job.data.orgId);
+				logger.info(
+					`[VESPA_FILE_WORKER] Fetching data from database for ${schema}/${docId}${job.data.nameOnly ? ' (name-only)' : ''}`
+				);
+				mappedData = await fetchAndMapBySchema(
+					schema,
+					docId,
+					jobType,
+					app,
+					job.data.workspaceId,
+					job.data.orgId,
+					job.data.nameOnly,
+				);
 			}
 
 			const handlers: Record<VespaJobType, () => Promise<void>> = {
@@ -286,8 +304,10 @@ export class VespaFileWorker {
 
 			await handler();
 
-			// Mark as completed after successful feed
-			if (jobType === 'feed' && schema === fileSchema) {
+			// Mark as completed after successful feed. The name-only feed indexes just
+			// the file name (content not yet parsed), so it must not flip the status
+			// to COMPLETED — the later full feed does that.
+			if (jobType === 'feed' && schema === fileSchema && !job.data.nameOnly) {
 				await this.updateCollectionItemStatus(docId, app, IngestionStatus.COMPLETED);
 			}
 

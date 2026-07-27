@@ -381,6 +381,13 @@ const envSchema = Joi.object({
   KB_INGESTION_QUEUE_PRIORITY: Joi.number().default(2),
   KB_INGESTION_OCR_PRIORITY: Joi.number().default(200),
   ATTACHMENT_OCR_PRIORITY: Joi.number().default(100),
+  // Name-only file feed: insert just the file name first (highest priority) so it
+  // is searchable in cmd+K within seconds, then a full feed enriches the same doc
+  // with parsed content. FILE_NAME_ONLY_FEED_ENABLED gates the two-job behavior;
+  // FILE_NAME_ONLY_FEED_PRIORITY is the BullMQ priority for the name-only job
+  // (lower = higher; delete=1, so 1 puts it at the top).
+  FILE_NAME_ONLY_FEED_ENABLED: Joi.boolean().default(true),
+  FILE_NAME_ONLY_FEED_PRIORITY: Joi.number().default(1),
   // Staging on the LOCAL filesystem (a tmp folder in the container). Single-pod only.
   DOCLING_ASYNC_STORAGE_ROOT: Joi.string().default('/tmp/docling-async'),
   DOCLING_KEEP_TEMP_RESULTS: Joi.boolean().default(false),
@@ -830,6 +837,10 @@ export const config = {
     queuePriority: envVars.KB_INGESTION_QUEUE_PRIORITY as number,
     ocrPriority: envVars.KB_INGESTION_OCR_PRIORITY as number,
     attachmentOcrPriority: envVars.ATTACHMENT_OCR_PRIORITY as number,
+  },
+  fileNameOnlyFeed: {
+    enabled: envVars.FILE_NAME_ONLY_FEED_ENABLED as boolean,
+    queuePriority: envVars.FILE_NAME_ONLY_FEED_PRIORITY as number,
   },
   doclingScheduler: {
     enabled: envVars.DOCLING_ASYNC_SCHEDULER_ENABLED as boolean,
