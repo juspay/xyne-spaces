@@ -9,6 +9,7 @@ export interface AttachmentRef {
   fileSize: number;
   initialTime?: number;
   initialPage?: number;
+  autoPlay?: boolean;
   thumbnailUrl?: string | null;
 
   // Thread context
@@ -97,6 +98,7 @@ export const attachmentViewerMachine = createMachine(
                 status: () => 'loading',
                 error: null,
                 retryCount: 0,
+                currentVideoTime: () => undefined,
               }),
             ],
           },
