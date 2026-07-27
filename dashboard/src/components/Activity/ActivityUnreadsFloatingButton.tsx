@@ -14,7 +14,7 @@ export const ActivityUnreadsFloatingButton = ({
 }: ActivityUnreadsFloatingButtonProps): ReactElement => (
   <div className='pointer-events-none absolute bottom-[calc(85px+env(safe-area-inset-bottom))] right-4 z-40 min-[700px]:bottom-4'>
     {isActive ? (
-      <div className='pointer-events-auto flex items-center overflow-hidden rounded-full bg-action-primary text-action-primary-foreground shadow-[0_2px_8px_rgba(0,0,0,0.12)]'>
+      <div className='pointer-events-auto flex items-center overflow-hidden rounded-full bg-primary text-action-primary-foreground shadow-[0_2px_8px_rgba(0,0,0,0.12)]'>
         <button
           type='button'
           onClick={onActivate}
@@ -45,7 +45,7 @@ export const ActivityUnreadsFloatingButton = ({
         onClick={onActivate}
         aria-pressed='false'
         aria-label='Show unreads only'
-        className='pointer-events-auto rounded-full border border-action-primary bg-action-primary px-4 py-2.5 text-[15px] font-semibold text-action-primary-foreground shadow-[0_2px_8px_rgba(0,0,0,0.1)] transition-colors hover:bg-action-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-action-primary/40 min-[700px]:px-3 min-[700px]:py-2 min-[700px]:text-sm'
+        className='pointer-events-auto rounded-full bg-primary px-4 py-2.5 text-[15px] font-semibold text-action-primary-foreground shadow-[0_2px_8px_rgba(0,0,0,0.1)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-action-primary/40 min-[700px]:px-3 min-[700px]:py-2 min-[700px]:text-sm'
         data-testid='activity-unread-toggle'
         data-track-category='ACTIVITY'
         data-track-name='UNREAD_FILTER_TOGGLE'

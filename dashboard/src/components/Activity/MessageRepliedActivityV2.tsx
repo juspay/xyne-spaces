@@ -1,13 +1,13 @@
 import { ReactElement } from 'react';
 import type { ActivityWithRelated } from '../../types/activity';
 import { MessageBubble } from '../ui/MessageBubble/MessageBubble';
-import { MessageCircleMore } from 'lucide-react';
 import { ActivityItemCard } from './ActivityItemCard';
 import { RenderMessageWithHTML } from '../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { useUser } from '../../hooks/useUsers';
 import { getUserDisplayName } from '../../utils/userDisplayName';
 import { useRouteContext } from '../../hooks/useRouteContext';
 import { parseRepliesMd, RepliesData } from '@xyne/shared';
+import { ChatTyping } from '@xyne/icons';
 
 export const MessageRepliedActivityV2 = ({
   activity,
@@ -84,7 +84,7 @@ export const MessageRepliedActivityV2 = ({
       actorId={activity.actorId} // Most recent replier
       actorName={getUserDisplayName(actorUser)}
       channelId={conversation.channelId}
-      badgeIcon={<MessageCircleMore className='text-yellow-600' />}
+      badgeIcon={<ChatTyping className='size-3 text-yellow-600' />}
       badgeColorClass='bg-accent'
       description={<span className='text-muted-foreground text-sm'>{descriptionText}</span>}
       targetPath={targetPath}

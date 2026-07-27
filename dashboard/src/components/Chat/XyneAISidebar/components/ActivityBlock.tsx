@@ -237,8 +237,8 @@ export function ActivityBlock({
       style={{ transition: 'grid-template-rows 220ms ease-out, opacity 180ms ease-out' }}
     >
       <div className='overflow-hidden'>
-        {/* pt matches the assistant logo's `mt-2.5` in MessageItem so the header
-            line (loader/chevron) sits centered with the Xyne logo beside it. */}
+        {/* Leading pt kept from when this aligned with the (now removed)
+            assistant logo — it still sets the block's top spacing. */}
         <div className='pb-1 pt-2.5'>
           <button
             type='button'

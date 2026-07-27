@@ -334,6 +334,12 @@ const ChatListV4: React.FC<ChatListProps> = ({
       [combinedMessages],
     ),
     overscan: 8,
+    // Reserve space below the last item for the typing/agent activity bar that
+    // overlays the bottom of the list (h-5 chip above the input, translated up).
+    // paddingEnd is baked into getTotalSize(), so scrollToEnd()/isAtEnd() and the
+    // anchorTo:'end' prepend adjustment all account for it — no per-frame cost,
+    // it's a constant added to the sized container.
+    paddingEnd: 28,
     anchorTo: 'end',
     followOnAppend: 'auto',
     scrollEndThreshold: 80,

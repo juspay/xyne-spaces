@@ -3,7 +3,7 @@ import type { ActivityWithRelated } from '../../types/activity';
 import { ActivityItemCard } from './ActivityItemCard';
 import { useUser } from '../../hooks/useUsers';
 import { getUserDisplayName } from '../../utils/userDisplayName';
-import { CalendarClock, Bell, CalendarCheck, CalendarX } from 'lucide-react';
+import { CalendarTimer, NotificationBellOn, CalendarCheck, CalendarCancel } from '@xyne/icons';
 
 export const ScheduledCallActivity = ({
   activity,
@@ -37,12 +37,12 @@ export const ScheduledCallActivity = ({
   );
 
   const Icon = isReminder
-    ? Bell
+    ? NotificationBellOn
     : isMeetingAccepted
       ? CalendarCheck
       : isMeetingDeclined
-        ? CalendarX
-        : CalendarClock;
+        ? CalendarCancel
+        : CalendarTimer;
   const iconColor = isReminder
     ? 'text-amber-500'
     : isUpdated
@@ -59,7 +59,7 @@ export const ScheduledCallActivity = ({
       actorId={actor.id}
       actorName={getUserDisplayName(actor)}
       channelId={activity.channelId ?? undefined}
-      badgeIcon={<Icon className={`w-4 h-4 ${iconColor}`} />}
+      badgeIcon={<Icon className={`size-3 ${iconColor}`} />}
       badgeColorClass='bg-muted'
       description={description}
       targetPath={targetPath}
@@ -67,7 +67,7 @@ export const ScheduledCallActivity = ({
       actorAction={activity.actorAction}
       className='flex items-start'
     >
-      <div className='text-foreground text-sm line-clamp-1 truncate whitespace-normal break-all'>
+      <div className='text-sm line-clamp-1 truncate whitespace-normal break-all'>
         {isReminder
           ? 'Your call is starting in 10 min'
           : isUpdated

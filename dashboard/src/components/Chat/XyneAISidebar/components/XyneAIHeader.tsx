@@ -3,7 +3,7 @@ import {
   ThreeDotsMenuVertical,
   PencilEditBox,
   MultipleCrossCancelDefault,
-  ChevronDown,
+  ReminderAnticlockwise,
   ClockDefault,
   Activity,
   Settings01,
@@ -17,7 +17,9 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from '../../../ui/dropdown-menu';
+import { Button } from '../../../ui/Button/Button';
 import { xyneAIActor } from '../../../../machines/xyneAIMachine';
+import { APP_DRAG_STYLE, APP_NO_DRAG_STYLE } from '../../../../utils/electronApp';
 import { SettingsModal } from './SettingsModal';
 import { AgentInfoModal } from './AgentInfoModal';
 import type { AccessibleClawAgent } from '../../../../services/clawAgentListService';
@@ -69,8 +71,10 @@ export const XyneAIHeader = ({
   // The consolidated overflow menu — every action that used to live as its own
   // header button now renders as a DropdownMenuItem here. Reused by both the
   // desktop and mobile render paths so they stay in sync.
+  // `includeHistory` is false on desktop, where chat history has its own header
+  // button; mobile has no such button, so it keeps the menu item.
   const showMemoriesAndActivity = !hideMemoriesAndActivity && !isCompact;
-  const overflowMenuItems: ReactNode = (
+  const buildOverflowMenuItems = (includeHistory: boolean): ReactNode => (
     <>
       {selectedAgent && (
         <DropdownMenuItem
@@ -83,7 +87,7 @@ export const XyneAIHeader = ({
           <span className='flex-1'>Agent info</span>
         </DropdownMenuItem>
       )}
-      {!hideHistory && (
+      {includeHistory && !hideHistory && (
         <DropdownMenuItem
           className='gap-2'
           onClick={onShowHistory}
@@ -158,7 +162,7 @@ export const XyneAIHeader = ({
                 onCloseAutoFocus={e => e.preventDefault()}
                 className='min-w-[180px]'
               >
-                {overflowMenuItems}
+                {buildOverflowMenuItems(true)}
               </DropdownMenuContent>
             </DropdownMenu>
             <button
@@ -195,70 +199,95 @@ export const XyneAIHeader = ({
     );
   }
 
+  // Same recipe as ConversationHeader's action buttons so the two headers'
+  // icons carry identical weight: muted at rest, full strength on hover
+  // (see ConversationHeader.tsx).
   const headerButtonClass =
-    'flex items-center justify-center p-[8px] rounded-[8px] size-[28px] hover:bg-accent transition-colors text-foreground shrink-0';
+    'h-7 w-7 rounded-lg shrink-0 text-muted-foreground hover:text-foreground';
 
   return (
     <>
-      <div className='min-h-14 py-3 pr-3 flex items-center gap-[4px] self-stretch border-border'>
-        {/* Left: title + chevron */}
-        <div className='flex-1 min-w-0 px-[12px] flex items-center gap-[6px]'>
+      {/* Padding mirrors ConversationHeader so the two titles line up across
+          the panel split (see ConversationHeader.tsx). */}
+      <div
+        className='shrink-0 pl-2 pr-3 py-3 flex items-center justify-between gap-6 self-stretch border-border'
+        style={APP_DRAG_STYLE}
+      >
+        {/* Left: title */}
+        <div className='flex-1 min-w-0 px-1.5 flex items-center gap-2'>
           {!hideTitle && (
-            <>
-              <span
-                className={`min-w-0 whitespace-nowrap text-foreground font-bold font-['Inter'] tracking-[-0.32px] leading-[28px] ${
-                  isTight ? 'text-sm' : 'text-base'
-                }`}
-              >
-                {title}
-              </span>
-              <ChevronDown size={16} className='shrink-0 opacity-60' />
-            </>
+            <span
+              className={`min-w-0 whitespace-nowrap text-foreground font-semibold font-['Inter'] tracking-[-0.32px] leading-[28px] ${
+                isTight ? 'text-sm' : 'text-base'
+              }`}
+            >
+              {title}
+            </span>
           )}
         </div>
 
-        {/* Right: overflow menu, new chat, close */}
-        <div className='flex items-center gap-[4px]'>
-          {/* Overflow menu */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                className={headerButtonClass}
-                title='More'
-                data-track-category='XyneAI'
-                data-track-name='OPEN_HEADER_MENU_DESKTOP'
-              >
-                <ThreeDotsMenuVertical size={16} className='opacity-60' />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent
-              align='end'
-              onCloseAutoFocus={e => e.preventDefault()}
-              className='min-w-[180px]'
-            >
-              {overflowMenuItems}
-            </DropdownMenuContent>
-          </DropdownMenu>
+        {/* Right: new chat, history, overflow menu, close */}
+        <div className='flex items-center gap-[4px]' style={APP_NO_DRAG_STYLE}>
           {/* New Chat */}
-          <button
+          <Button
+            variant='ghost'
+            size='sm'
             onClick={onNewChat}
             className={headerButtonClass}
             title='New chat'
             data-track-category='XyneAI'
             data-track-name='NEW_CHAT_DESKTOP'
           >
-            <PencilEditBox size={16} className='opacity-60' />
-          </button>
+            <PencilEditBox size={16} />
+          </Button>
+          {/* Chat history */}
+          {!hideHistory && (
+            <Button
+              variant='ghost'
+              size='sm'
+              onClick={onShowHistory}
+              className={headerButtonClass}
+              title='Chat history'
+              data-track-category='XyneAI'
+              data-track-name='SHOW_HISTORY'
+            >
+              <ReminderAnticlockwise size={16} />
+            </Button>
+          )}
+          {/* Overflow menu */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant='ghost'
+                size='sm'
+                className={headerButtonClass}
+                title='More'
+                data-track-category='XyneAI'
+                data-track-name='OPEN_HEADER_MENU_DESKTOP'
+              >
+                <ThreeDotsMenuVertical size={16} />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align='end'
+              onCloseAutoFocus={e => e.preventDefault()}
+              className='min-w-[180px]'
+            >
+              {buildOverflowMenuItems(false)}
+            </DropdownMenuContent>
+          </DropdownMenu>
           {/* Close */}
-          <button
+          <Button
+            variant='ghost'
+            size='sm'
             onClick={handleClose}
             className={headerButtonClass}
             title='Close'
             data-track-category='XyneAI'
             data-track-name='CLOSE_DESKTOP'
           >
-            <MultipleCrossCancelDefault size={16} className='opacity-60' />
-          </button>
+            <MultipleCrossCancelDefault size={16} />
+          </Button>
         </div>
       </div>
 

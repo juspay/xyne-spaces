@@ -1,6 +1,6 @@
 import { ReactElement, useRef } from 'react';
 import useMeasure from '../../../hooks/useMeasure';
-import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels';
+import { ResizableGroup, Panel, Separator } from '../../ui/Resizable/Resizable';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
@@ -86,21 +86,25 @@ const TicketView = (): ReactElement => {
             </div>
           </>
         ) : (
-          <PanelGroup direction='horizontal' className='h-full' autoSaveId={ticketId}>
-            <Panel defaultSize={defaultTicketDetailSize} minSize={minTicketDetailSize}>
+          <ResizableGroup orientation='horizontal' className='h-full' autoSaveId={ticketId}>
+            <Panel
+              id='ticket-detail'
+              defaultSize={`${defaultTicketDetailSize}%`}
+              minSize={`${minTicketDetailSize}%`}
+            >
               <TicketDetails ticketId={ticketId} />
             </Panel>
 
-            <PanelResizeHandle className='w-1 hover:bg-blue-50 active:bg-blue-100 transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
+            <Separator className='w-1 hover:bg-blue-50 active:bg-blue-100 transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
               <div id='panel-resize-divider' className='w-[1px] h-full bg-border'></div>
-            </PanelResizeHandle>
+            </Separator>
 
-            <Panel defaultSize={47} minSize={40}>
+            <Panel id='ticket-thread' defaultSize='47%' minSize='40%'>
               <div className='h-full'>
                 <ThreadMessages showHeader={true} />
               </div>
             </Panel>
-          </PanelGroup>
+          </ResizableGroup>
         )}
       </div>
     </div>

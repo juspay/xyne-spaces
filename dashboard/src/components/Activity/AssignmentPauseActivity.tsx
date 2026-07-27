@@ -1,10 +1,9 @@
 import { ReactElement } from 'react';
 import type { ActivityWithRelated } from '../../types/activity';
-import { PauseCircle, PlayCircle } from 'lucide-react';
 import { ActivityItemCard } from './ActivityItemCard';
 import { useUser } from '../../hooks/useUsers';
 import { getUserDisplayName, isUserDeactivated } from '../../utils/userDisplayName';
-
+import { PauseCircle, PlayCircle } from '@xyne/icons';
 export const AssignmentPauseActivity = ({
   activity,
   isExpanded,
@@ -28,9 +27,9 @@ export const AssignmentPauseActivity = ({
 
   // Determine badge icon and text based on action type
   const badgeIcon = isPaused ? (
-    <PauseCircle className='w-4 h-4 text-muted-foreground' />
+    <PauseCircle className='size-3 text-muted-foreground' />
   ) : (
-    <PlayCircle className='w-4 h-4 text-green-600' />
+    <PlayCircle className='size-3 text-green-600' />
   );
 
   const badgeColorClass = isPaused ? 'bg-muted' : 'bg-green-100';
@@ -58,11 +57,13 @@ export const AssignmentPauseActivity = ({
     >
       {isExpanded ? (
         <div className='flex flex-col gap-1 mt-2'>
-          <div className='text-sm text-foreground font-medium'>{expandedText}</div>
+          <div className='text-sm font-medium'>{expandedText}</div>
         </div>
       ) : (
-        <span className='text-sm text-foreground'>
-          <span className='font-semibold'>{userName}</span>
+        <span className='text-sm'>
+          <span className={activity.isRead ? 'text-muted-foreground' : 'font-semibold'}>
+            {userName}
+          </span>
           <span className='text-muted-foreground'>{collapsedSuffix}</span>
         </span>
       )}

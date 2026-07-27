@@ -11,7 +11,7 @@ import { ReactElement, useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Virtuoso } from 'react-virtuoso';
 import { v4 as uuidv4 } from 'uuid';
-import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels';
+import { ResizableGroup, Panel, Separator } from '../../components/ui/Resizable/Resizable';
 import { recordingService } from '../../services/Recording/recordingService';
 import { canvasService } from '../../services/Canvas/canvasService';
 import { useZero } from '../../hooks/useZero';
@@ -740,37 +740,37 @@ export default function RecordingsScreen(): ReactElement {
             <div className='flex-1 min-h-0 flex flex-col'>
               {activeLayout === 'split' && notesCanvasId ? (
                 /* Split view — transcript + notes side-by-side */
-                <PanelGroup direction='horizontal' autoSaveId='recording-split-v3'>
-                  <Panel defaultSize={40} minSize={32}>
+                <ResizableGroup orientation='horizontal' autoSaveId='recording-split-v3'>
+                  <Panel id='recording-transcript' defaultSize='40%' minSize='32%'>
                     <ActiveRecordingView
                       transcripts={transcripts}
                       startTime={startTime}
                       isPaused={recordingStatus === 'paused'}
                     />
                   </Panel>
-                  <PanelResizeHandle className='group relative w-2 flex-shrink-0 bg-border/40 transition-colors hover:bg-border'>
+                  <Separator className='group relative w-2 flex-shrink-0 bg-border/40 transition-colors hover:bg-border'>
                     <div className='absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-border transition-colors group-hover:bg-primary/50' />
                     <div className='absolute left-1/2 top-1/2 h-8 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-muted-foreground/30 opacity-80 transition-colors group-hover:bg-primary/50' />
-                  </PanelResizeHandle>
-                  <Panel defaultSize={60} minSize={40}>
+                  </Separator>
+                  <Panel id='recording-notes' defaultSize='60%' minSize='40%'>
                     <RecordingCanvasPane channelId={channelId} notesCanvasId={notesCanvasId} />
                   </Panel>
-                </PanelGroup>
+                </ResizableGroup>
               ) : activeLayout === 'split' && !hasCanvas ? (
                 /* Split view loading — show transcript + skeleton/fallback for notes */
-                <PanelGroup direction='horizontal' autoSaveId='recording-split-v3'>
-                  <Panel defaultSize={40} minSize={25}>
+                <ResizableGroup orientation='horizontal' autoSaveId='recording-split-v3'>
+                  <Panel id='recording-transcript' defaultSize='40%' minSize='25%'>
                     <ActiveRecordingView
                       transcripts={transcripts}
                       startTime={startTime}
                       isPaused={recordingStatus === 'paused'}
                     />
                   </Panel>
-                  <PanelResizeHandle className='group relative w-2 flex-shrink-0 bg-border/40 transition-colors hover:bg-border'>
+                  <Separator className='group relative w-2 flex-shrink-0 bg-border/40 transition-colors hover:bg-border'>
                     <div className='absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-border transition-colors group-hover:bg-primary/50' />
                     <div className='absolute left-1/2 top-1/2 h-8 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-muted-foreground/30 opacity-80 transition-colors group-hover:bg-primary/50' />
-                  </PanelResizeHandle>
-                  <Panel defaultSize={60} minSize={25}>
+                  </Separator>
+                  <Panel id='recording-notes' defaultSize='60%' minSize='25%'>
                     {canvasCreationFailed ? (
                       <CanvasCreationFallback
                         onRetry={() => void handleCreateCanvas()}
@@ -782,7 +782,7 @@ export default function RecordingsScreen(): ReactElement {
                       <CanvasPaneSkeleton />
                     )}
                   </Panel>
-                </PanelGroup>
+                </ResizableGroup>
               ) : activeLayout === 'notes' && notesCanvasId ? (
                 /* Notes-only view — canvas with transcript preview at bottom */
                 <div className='relative flex-1 flex flex-col min-h-0'>

@@ -132,7 +132,7 @@ export const MentionText: React.FC<MentionTextProps> = props => {
           tabIndex={0}
           onClick={handleChannelClick}
           onKeyDown={handleKeyDown}
-          className='text-[color:var(--mention-color)] bg-[var(--mention-channel-bg)] hover:bg-[var(--mention-channel-hover-bg)] font-normal cursor-pointer no-underline transition-colors duration-200 inline whitespace-nowrap leading-inherit align-baseline hover:text-[color:var(--mention-hover-color)]'
+          className='text-[color:var(--mention-color)] bg-[var(--mention-channel-bg)] hover:bg-[var(--mention-channel-hover-bg)] px-1 py-[2px] rounded-[4px] font-normal cursor-pointer no-underline transition-colors duration-200 inline whitespace-nowrap leading-inherit align-baseline hover:text-[color:var(--mention-hover-color)]'
         >
           {props.isPrivate ? <Lock className='h-3 w-3 inline-block mr-0.5 mb-1' /> : '#'}
           {props.channelName}

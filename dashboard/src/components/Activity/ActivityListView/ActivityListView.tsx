@@ -1,30 +1,20 @@
-import { ReactElement, useState, useMemo, useCallback, useEffect, useRef } from 'react';
-import { Link, Outlet, useLocation, useParams } from 'react-router-dom';
+import {
+  ComponentType,
+  ReactElement,
+  useState,
+  useMemo,
+  useCallback,
+  useEffect,
+  useRef,
+} from 'react';
+import { Outlet, useLocation, useParams } from 'react-router-dom';
 import { queries } from '../../../zero/queries';
 import { useZero } from '../../../hooks/useZero';
-import {
-  Bell,
-  AtSign,
-  Smile,
-  ArrowLeft,
-  LucideIcon,
-  CheckCircle,
-  Info,
-  Reply,
-  FoldVertical,
-  Fullscreen,
-  Users,
-  Ticket,
-  MoreVertical,
-  FileText,
-  Phone,
-} from 'lucide-react';
 import { ActivityItem } from '../ActivityItem';
 import { NofocusRefProvider } from '../ActivityItemCard';
 import { GroupedTicketActivity } from '../GroupedTicketActivity';
 import * as Tabs from '@radix-ui/react-tabs';
 import * as Switch from '@radix-ui/react-switch';
-import { Badge } from '../../ui/Badge';
 import { cn } from '../../../utils/classNames';
 import type { ActivityWithRelated } from '../../../types/activity';
 import { ActivityClassification } from '@xyne/shared';
@@ -39,21 +29,42 @@ import { Skeleton } from '../../ui/Skeleton';
 import { useShortcut } from '../../../shortcuts';
 import { extractUserMentions } from '../../../utils/mentionParser';
 import {
-  PanelGroup,
+  ResizableGroup,
   Panel,
-  PanelResizeHandle,
-  type ImperativePanelHandle,
-} from 'react-resizable-panels';
+  Separator,
+  type PanelImperativeHandle,
+} from '../../ui/Resizable/Resizable';
+import {
+  ACTIVITY_SIDEBAR_DEFAULT_WIDTH,
+  ACTIVITY_SIDEBAR_MAX_WIDTH,
+  ACTIVITY_SIDEBAR_MIN_WIDTH,
+} from './activitySidebarWidth';
 import { usePlatform } from '../../../hooks/usePlatform';
-import { useLastVisitedChannel } from '../../../hooks/useLastVisitedChannel';
 import { mutators } from '../../../zero/mutators';
-import Button from '../../ui/Button';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { logger, Event } from '../../../utils/logger';
 import { dataLoadDuration, safeRecordMetric } from '../../../services/otel';
 import { useSelector } from '@xstate/react';
 import { stateMachineActor } from '../../../machines/stateMachine';
 import { ActivityUnreadsFloatingButton } from '../ActivityUnreadsFloatingButton';
+import AppNavigator from '../../AppNavigator/AppNavigator';
+import {
+  MarkAsRead,
+  ThreeDotsMenuVertical,
+  AtMark,
+  TicketToken,
+  File02Text,
+  FaceSmile,
+  UserTwo,
+  CheckTickCircleBroken,
+  InformationCircle,
+  ArrowTurnUpLeft,
+  PhoneDefault,
+  AlignVerticalCenter,
+  SpatialScreen,
+  NotificationBellOn,
+} from '@xyne/icons';
+import { Tooltip } from '../../ui/Tooltip/Tooltip';
 
 type ActivityTab =
   | 'all'
@@ -70,7 +81,9 @@ type ActivityTab =
 type TabConfig = {
   value: ActivityTab;
   label: string;
-  Icon?: LucideIcon;
+  // Widened from LucideIcon so both lucide and @xyne/icons (Pika) components
+  // fit — the render site only ever passes className.
+  Icon?: ComponentType<{ className?: string }>;
   filter: (activity: ActivityWithRelated) => boolean;
 };
 
@@ -113,20 +126,20 @@ const TABS: TabConfig[] = [
   {
     value: 'your_mentions',
     label: 'Your Mentions',
-    Icon: AtSign,
+    Icon: AtMark,
     filter: activity => activity.actorAction === 'mentioned_user',
   },
   {
     value: 'replies',
     label: 'Replies',
-    Icon: Reply,
+    Icon: ArrowTurnUpLeft,
     // added to maintain backward compat for now, to be deprecated
     filter: activity => activity.actorAction === 'replied' || activity.actorAction === 'replied_v2',
   },
   {
     value: 'reactions',
     label: 'Reactions',
-    Icon: Smile,
+    Icon: FaceSmile,
     // added to maintain backward compat for now, to be deprecated
     filter: activity =>
       activity.actorAction === 'added' ||
@@ -136,7 +149,7 @@ const TABS: TabConfig[] = [
   {
     value: 'tickets',
     label: 'Tickets',
-    Icon: Ticket,
+    Icon: TicketToken,
     filter: activity =>
       activity.actorAction === 'eta_warning' ||
       activity.actorAction === 'eta_breach' ||
@@ -146,7 +159,7 @@ const TABS: TabConfig[] = [
   {
     value: 'canvas',
     label: 'Canvas',
-    Icon: FileText,
+    Icon: File02Text,
     filter: activity =>
       activity.actorAction === 'canvas_shared' ||
       activity.actorAction === 'canvas_role_changed' ||
@@ -156,19 +169,19 @@ const TABS: TabConfig[] = [
   {
     value: 'calls',
     label: 'Calls',
-    Icon: Phone,
+    Icon: PhoneDefault,
     filter: isCallActivity,
   },
   {
     value: 'group_mentions',
     label: 'Group Mentions',
-    Icon: Users,
+    Icon: UserTwo,
     filter: activity => activity.actorAction === 'group_mention',
   },
   {
     value: 'actionable',
     label: 'Actionable',
-    Icon: CheckCircle,
+    Icon: CheckTickCircleBroken,
     filter: (activity): boolean => {
       const classification = activity.classification ?? ActivityClassification.PENDING;
       return classification === ActivityClassification.ACTIONABLE;
@@ -177,7 +190,7 @@ const TABS: TabConfig[] = [
   {
     value: 'fyi',
     label: 'FYI',
-    Icon: Info,
+    Icon: InformationCircle,
     filter: (activity): boolean => {
       const classification = activity.classification ?? ActivityClassification.PENDING;
       return classification === ActivityClassification.FYI;
@@ -191,13 +204,12 @@ const ActivityListView = (): ReactElement => {
   const { isMobile } = usePlatform();
   const location = useLocation();
   const { workspaceId } = useParams<{ workspaceId?: string }>();
-  const lastVisitedChannelId = useLastVisitedChannel(workspaceId ?? '');
   const pathWithoutWorkspace = workspaceId
     ? location.pathname.slice(`/${workspaceId}`.length)
     : location.pathname;
   const isOnIndexRoute = pathWithoutWorkspace === '/chat/activity';
 
-  const activityPanelRef = useRef<ImperativePanelHandle>(null);
+  const activityPanelRef = useRef<PanelImperativeHandle>(null);
   const activityVirtuosoRef = useRef<VirtuosoHandle>(null);
 
   // All hooks must be called before any conditional returns
@@ -812,11 +824,17 @@ const ActivityListView = (): ReactElement => {
               components={{ Footer: () => <div className='h-16' aria-hidden='true' /> }}
               itemsRendered={restoreSelectedRow}
               itemContent={(_, item) => {
-                if (item.type === 'single') {
-                  return <ActivityItem activity={item.activity} isExpanded={isExpanded} />;
-                }
+                // px wraps each row (not the scroller) and pb creates the 8px
+                // row gap — padding is used instead of margin so Virtuoso's
+                // item measurement includes it.
                 return (
-                  <GroupedTicketActivity activities={item.activities} isExpanded={isExpanded} />
+                  <div className='px-3 pb-3'>
+                    {item.type === 'single' ? (
+                      <ActivityItem activity={item.activity} isExpanded={isExpanded} />
+                    ) : (
+                      <GroupedTicketActivity activities={item.activities} isExpanded={isExpanded} />
+                    )}
+                  </div>
                 );
               }}
             />
@@ -827,7 +845,7 @@ const ActivityListView = (): ReactElement => {
 
     return (
       <div className='flex-1 flex flex-col items-center justify-center text-muted-foreground px-4 py-8'>
-        <Bell className='w-16 h-16 mb-4' />
+        <NotificationBellOn className='w-16 h-16 mb-4' />
         <p className='text-base font-medium'>
           {showUnreadOnly ? 'No unread activities' : 'No activities yet'}
         </p>
@@ -840,243 +858,245 @@ const ActivityListView = (): ReactElement => {
 
   // Render the left panel content (exact same UI)
   const renderLeftPanel = (): ReactElement => (
-    <div
-      data-id='activity-list-view'
-      className='relative h-full bg-background flex flex-col max-w-full overflow-hidden'
-    >
-      <div className='px-4 py-4 flex items-center justify-between gap-2'>
-        <div className='flex items-center gap-2'>
-          {!isMobile && (
-            <Link
-              to={lastVisitedChannelId ? `/chat/dir/${lastVisitedChannelId}` : '/chat/dir'}
-              className='p-1 rounded-md text-foreground hover:text-muted-foreground hover:bg-accent transition-colors duration-200'
-              aria-label='Go back'
-            >
-              <ArrowLeft size={20} />
-            </Link>
-          )}
-          <h2
-            className='text-xl font-semibold text-foreground truncate'
-            data-testid='activity-heading'
-          >
-            Activity
-          </h2>
+    <div className={cn('h-full w-full flex flex-col', isMobile && 'bg-sidebar')}>
+      {!isMobile && (
+        <div className='w-full h-[52px] shrink-0'>
+          <AppNavigator />
         </div>
-        <div className='flex items-center gap-4'>
-          {/* Mark as Read Button */}
-          <Button
-            variant='outline'
-            onClick={markActiveTabUnread}
-            data-track-category='ACTIVITY'
-            data-track-name={`MARK_TAB_READ`}
-            data-track-metadata={JSON.stringify({
-              tab: activeTab,
-              action: 'mark_all_as_read',
-            })}
-            className='flex items-center justify-between gap-2 border border-border rounded-lg !p-2 transition-all duration-100 text-primary'
-          >
-            <div className='text-xs font-medium text-muted-foreground'>Mark as read</div>
-          </Button>
-
-          {/* 3-dot menu with Actionable Toggle and View Toggle (Desktop & Mobile) */}
-          <div className='relative' ref={mobileMenuRef}>
-            <button
-              onClick={() => setShowMobileMenu(!showMobileMenu)}
-              className='p-2 rounded-md hover:bg-accent transition-colors duration-200'
-              aria-label='More options'
-              data-track-category='ACTIVITY'
-              data-track-name='TOGGLE_MOBILE_MENU'
-              data-track-metadata={JSON.stringify({ menuState: !showMobileMenu })}
-              data-testid='activity-more-options-btn'
-            >
-              <MoreVertical size={20} className='text-muted-foreground' />
-            </button>
-
-            {showMobileMenu && (
-              <div className='absolute right-0 top-full mt-1 bg-popover border border-border rounded-lg shadow-lg py-1 min-w-[200px] z-50'>
-                {/* Actionable Toggle */}
-                <div className='px-4 py-2 flex items-center justify-between'>
-                  <span className='text-sm font-medium text-muted-foreground'>Actionable</span>
-                  <Switch.Root
-                    checked={actionableToggle}
-                    onCheckedChange={handleActionableToggle}
-                    data-track-category='ACTIVITY'
-                    data-track-name='ACTIONABLE_FILTER_TOGGLE'
-                    data-track-metadata={JSON.stringify({
-                      filter_value: !actionableToggle,
-                    })}
-                    data-testid='activity-actionable-toggle'
-                    className={cn(
-                      'relative inline-flex h-5 w-9 items-center rounded-full',
-                      'bg-muted transition-colors duration-200',
-                      'data-[state=checked]:bg-primary',
-                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
-                    )}
-                  >
-                    <Switch.Thumb
-                      className={cn(
-                        'block h-4 w-4 rounded-full bg-background shadow-sm',
-                        'transition-transform duration-200',
-                        'translate-x-0.5 data-[state=checked]:translate-x-4',
-                      )}
-                    />
-                  </Switch.Root>
-                </div>
-
-                {/* Divider */}
-                <div className='border-t border-border my-1'></div>
-
-                {/* Condensed View */}
-                <button
-                  onClick={() => {
-                    handleViewModeChange('condensed');
-                    setShowMobileMenu(false);
-                  }}
-                  className={cn(
-                    'w-full px-4 py-2 flex items-center gap-2 text-sm text-muted-foreground hover:bg-accent transition-colors',
-                    active === 'condensed' && 'bg-accent',
-                  )}
-                  data-track-category='ACTIVITY'
-                  data-track-name='CHANGE_VIEW_CONDENSED'
-                  data-testid='activity-view-condensed-btn'
-                >
-                  <FoldVertical className='h-4 w-4' />
-                  <span>Condensed</span>
-                </button>
-
-                {/* Detailed View */}
-                <button
-                  onClick={() => {
-                    handleViewModeChange('detailed');
-                    setShowMobileMenu(false);
-                  }}
-                  className={cn(
-                    'w-full px-4 py-2 flex items-center gap-2 text-sm text-muted-foreground hover:bg-accent transition-colors',
-                    active === 'detailed' && 'bg-accent',
-                  )}
-                  data-track-category='ACTIVITY'
-                  data-track-name='CHANGE_VIEW_DETAILED'
-                  data-testid='activity-view-detailed-btn'
-                >
-                  <Fullscreen className='h-4 w-4' />
-                  <span>Detailed</span>
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
+      )}
       <div
-        style={{
-          flex: 1,
-          display: 'flex',
-          flexDirection: 'column',
-          overflow: 'hidden',
-          minHeight: 0,
-        }}
+        data-id='activity-list-view'
+        className={cn(
+          'relative flex-1 min-h-0 flex flex-col gap-2 max-w-full overflow-hidden pt-3',
+          !isMobile && 'border-t border-border',
+        )}
       >
-        <Tabs.Root
-          value={activeTab}
-          onValueChange={handleTabChange}
-          style={{ display: 'flex', flexDirection: 'column', height: '100%', flex: 1 }}
-        >
-          <div className='overflow-x-auto border-b border-border no-scrollbar px-4'>
-            <Tabs.List
-              className='flex items-center sm:justify-start min-w-max'
-              data-testid='activity-tabs-list'
-            >
-              {visibleTabs.map(tab => {
-                const count = activityCounts[tab.value];
-                const IconComponent = tab.Icon;
-                const showLabelByDefault =
-                  tab.value === 'all' || isMobile || showActionableTabs || activeTab === tab.value;
+        <div className='flex items-center justify-between gap-2 px-3'>
+          <div className='flex items-center gap-2'>
+            <h2 className='font-bold text-foreground truncate' data-testid='activity-heading'>
+              Activity
+            </h2>
+          </div>
+          <div className='flex items-center'>
+            {/* Mark as Read Button */}
+            <Tooltip content='Mark as read' side='bottom' delayDuration={500}>
+              <button
+                type='button'
+                onClick={markActiveTabUnread}
+                aria-label='Mark as read'
+                data-track-category='ACTIVITY'
+                data-track-name={`MARK_TAB_READ`}
+                data-track-metadata={JSON.stringify({
+                  tab: activeTab,
+                  action: 'mark_all_as_read',
+                })}
+                className='p-2 flex items-center justify-center rounded-lg border border-transparent transition-colors text-muted-foreground hover:text-foreground hover:bg-accent hover:border-border'
+              >
+                <MarkAsRead size={16} />
+              </button>
+            </Tooltip>
 
-                return (
-                  <Tabs.Trigger key={tab.value} value={tab.value} asChild>
-                    <button
-                      aria-label={tab.label}
+            {/* 3-dot menu with Actionable Toggle and View Toggle (Desktop & Mobile) */}
+            <div className='relative' ref={mobileMenuRef}>
+              <button
+                onClick={() => setShowMobileMenu(!showMobileMenu)}
+                className='p-2 flex items-center justify-center rounded-lg border border-transparent transition-colors text-muted-foreground hover:text-foreground hover:bg-accent hover:border-border'
+                aria-label='More options'
+                data-track-category='ACTIVITY'
+                data-track-name='TOGGLE_MOBILE_MENU'
+                data-track-metadata={JSON.stringify({ menuState: !showMobileMenu })}
+                data-testid='activity-more-options-btn'
+              >
+                <ThreeDotsMenuVertical size={16} />
+              </button>
+
+              {showMobileMenu && (
+                <div className='absolute right-0 top-full mt-1 bg-popover border border-border rounded-lg shadow-lg py-1 min-w-[200px] z-50'>
+                  {/* Actionable Toggle */}
+                  <div className='px-4 py-2 flex items-center justify-between'>
+                    <span className='text-sm font-medium text-muted-foreground'>Actionable</span>
+                    <Switch.Root
+                      checked={actionableToggle}
+                      onCheckedChange={handleActionableToggle}
                       data-track-category='ACTIVITY'
-                      data-track-name={`TAB_CHANGE`}
-                      data-track-metadata={JSON.stringify({ tab: tab.value })}
+                      data-track-name='ACTIONABLE_FILTER_TOGGLE'
+                      data-track-metadata={JSON.stringify({
+                        filter_value: !actionableToggle,
+                      })}
+                      data-testid='activity-actionable-toggle'
                       className={cn(
-                        'group mx-0.5 px-2 py-2 flex items-center transition-all duration-300 ease-in-out cursor-pointer sm:px-3 justify-start rounded-t-md hover:bg-accent focus-visible:bg-accent focus-visible:outline-none',
-                        activeTab === tab.value
-                          ? 'border-b-2 border-primary bg-accent/50'
-                          : 'border-b-2 border-transparent',
+                        'relative inline-flex h-5 w-9 items-center rounded-full',
+                        'bg-muted transition-colors duration-200',
+                        'data-[state=checked]:bg-primary',
+                        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
                       )}
                     >
-                      {IconComponent && (
-                        <span
-                          className={cn(
-                            'size-4 flex items-center justify-center shrink-0',
-                            activeTab === tab.value ? 'text-primary' : 'text-muted-foreground',
-                          )}
-                        >
-                          <IconComponent className='w-4 h-4' />
-                        </span>
-                      )}
-                      <span
+                      <Switch.Thumb
                         className={cn(
-                          'grid overflow-hidden text-xs sm:text-sm font-medium transition-[grid-template-columns,opacity,margin] duration-500 ease-in-out',
-                          activeTab === tab.value ? 'text-primary' : 'text-muted-foreground',
-                          showLabelByDefault
-                            ? 'grid-cols-[1fr] opacity-100 ml-2'
-                            : 'grid-cols-[0fr] opacity-0 ml-0 group-hover:grid-cols-[1fr] group-hover:opacity-100 group-hover:ml-2 group-focus-visible:grid-cols-[1fr] group-focus-visible:opacity-100 group-focus-visible:ml-2',
+                          'block h-4 w-4 rounded-full bg-background shadow-sm',
+                          'transition-transform duration-200',
+                          'translate-x-0.5 data-[state=checked]:translate-x-4',
+                        )}
+                      />
+                    </Switch.Root>
+                  </div>
+
+                  {/* Divider */}
+                  <div className='border-t border-border my-1'></div>
+
+                  {/* Condensed View */}
+                  <button
+                    onClick={() => {
+                      handleViewModeChange('condensed');
+                      setShowMobileMenu(false);
+                    }}
+                    className={cn(
+                      'w-full px-4 py-2 flex items-center gap-2 text-sm text-muted-foreground hover:bg-accent transition-colors',
+                      active === 'condensed' && 'bg-accent',
+                    )}
+                    data-track-category='ACTIVITY'
+                    data-track-name='CHANGE_VIEW_CONDENSED'
+                    data-testid='activity-view-condensed-btn'
+                  >
+                    <AlignVerticalCenter className='h-4 w-4' />
+                    <span>Condensed</span>
+                  </button>
+
+                  {/* Detailed View */}
+                  <button
+                    onClick={() => {
+                      handleViewModeChange('detailed');
+                      setShowMobileMenu(false);
+                    }}
+                    className={cn(
+                      'w-full px-4 py-2 flex items-center gap-2 text-sm text-muted-foreground hover:bg-accent transition-colors',
+                      active === 'detailed' && 'bg-accent',
+                    )}
+                    data-track-category='ACTIVITY'
+                    data-track-name='CHANGE_VIEW_DETAILED'
+                    data-testid='activity-view-detailed-btn'
+                  >
+                    <SpatialScreen className='h-4 w-4' />
+                    <span>Detailed</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div
+          style={{
+            flex: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+            minHeight: 0,
+          }}
+        >
+          <Tabs.Root
+            value={activeTab}
+            onValueChange={handleTabChange}
+            style={{ display: 'flex', flexDirection: 'column', height: '100%', flex: 1 }}
+          >
+            <div className='overflow-x-auto no-scrollbar'>
+              <Tabs.List
+                className='flex items-center sm:justify-start min-w-max gap-0.5 px-3'
+                data-testid='activity-tabs-list'
+              >
+                {visibleTabs.map(tab => {
+                  const count = activityCounts[tab.value];
+                  const IconComponent = tab.Icon;
+                  const showLabelByDefault =
+                    tab.value === 'all' ||
+                    isMobile ||
+                    showActionableTabs ||
+                    activeTab === tab.value;
+
+                  return (
+                    <Tabs.Trigger key={tab.value} value={tab.value} asChild>
+                      <button
+                        aria-label={tab.label}
+                        data-track-category='ACTIVITY'
+                        data-track-name={`TAB_CHANGE`}
+                        data-track-metadata={JSON.stringify({ tab: tab.value })}
+                        className={cn(
+                          'group px-2 py-2 flex items-center transition-all duration-300 ease-in-out cursor-pointer select-none sm:px-3 justify-start rounded-lg hover:bg-foreground/[6%] focus-visible:bg-foreground/[6%] focus-visible:outline-none',
+                          activeTab === tab.value
+                            ? 'bg-foreground/[6%]'
+                            : 'bg-sidebar-accent-foreground/50',
                         )}
                       >
-                        <span className='min-w-0 overflow-hidden whitespace-nowrap'>
-                          {tab.label}
-                        </span>
-                      </span>
-                      {count > 0 && tab.value === 'all' && (
-                        <Badge
-                          className={cn(
-                            'ml-2 h-3.5 text-[9px] px-1 leading-none shrink-0 sm:h-5 sm:text-xs sm:px-1.5 bg-primary',
-                            count > 99 && 'sm:text-[10px]',
-                          )}
-                        >
-                          {count > 99 ? '99+' : count}
-                        </Badge>
-                      )}
-                      {count > 0 && tab.value !== 'all' && (
+                        {IconComponent && (
+                          <span
+                            className={cn(
+                              'size-4 flex items-center justify-center shrink-0',
+                              activeTab === tab.value
+                                ? 'text-sidebar-accent-foreground'
+                                : 'text-muted-foreground',
+                            )}
+                          >
+                            <IconComponent className='w-4 h-4' />
+                          </span>
+                        )}
                         <span
                           className={cn(
-                            'ml-1.5 shrink-0 text-xs font-medium tabular-nums',
-                            activeTab === tab.value ? 'text-primary' : 'text-muted-foreground',
+                            'grid overflow-hidden text-xs sm:text-sm font-medium transition-[grid-template-columns,opacity,margin] duration-300 ease-in-out',
+                            activeTab === tab.value
+                              ? 'text-sidebar-accent-foreground'
+                              : 'text-muted-foreground',
+                            IconComponent ? 'ml-2' : null,
+                            showLabelByDefault
+                              ? 'grid-cols-[1fr] opacity-100'
+                              : 'grid-cols-[0fr] opacity-0 ml-0',
                           )}
                         >
-                          {count > 99 ? '99+' : count}
+                          <span className='min-w-0 overflow-hidden whitespace-nowrap text-sm font-medium'>
+                            {tab.label}
+                          </span>
                         </span>
-                      )}
-                    </button>
-                  </Tabs.Trigger>
-                );
-              })}
-            </Tabs.List>
-          </div>
+                        {count > 0 && (
+                          <span
+                            className={cn(
+                              'ml-1.5 shrink-0 text-[0.625rem] px-1 rounded-md font-bold tabular-nums transition-colors',
+                              activeTab === tab.value
+                                ? 'bg-sidebar-primary text-sidebar-primary-foreground'
+                                : 'bg-foreground/[6%] text-muted-foreground',
+                            )}
+                          >
+                            {count > 99 ? '99+' : count}
+                          </span>
+                        )}
+                      </button>
+                    </Tabs.Trigger>
+                  );
+                })}
+              </Tabs.List>
+            </div>
 
-          <Tabs.Content
-            value={activeTab}
-            style={{
-              flex: 1,
-              display: 'flex',
-              flexDirection: 'column',
-              minHeight: 0,
-              position: 'relative',
-            }}
-            className='focus-visible:outline-none'
-          >
-            {renderActivityList(groupedActivities)}
-          </Tabs.Content>
-        </Tabs.Root>
+            <Tabs.Content
+              value={activeTab}
+              style={{
+                flex: 1,
+                display: 'flex',
+                flexDirection: 'column',
+                minHeight: 0,
+                position: 'relative',
+                marginTop: 16,
+              }}
+              className='focus-visible:outline-none'
+            >
+              {renderActivityList(groupedActivities)}
+            </Tabs.Content>
+          </Tabs.Root>
+        </div>
+
+        <ActivityUnreadsFloatingButton
+          isActive={showUnreadOnly}
+          onActivate={() => handleUnreadToggle(true)}
+          onDeactivate={() => handleUnreadToggle(false)}
+        />
       </div>
-
-      <ActivityUnreadsFloatingButton
-        isActive={showUnreadOnly}
-        onActivate={() => handleUnreadToggle(true)}
-        onDeactivate={() => handleUnreadToggle(false)}
-      />
     </div>
   );
 
@@ -1097,29 +1117,36 @@ const ActivityListView = (): ReactElement => {
 
   // Desktop view - two-panel layout with resizable panels
   return (
-    <div className='flex h-full w-full md:rounded-2xl overflow-hidden shadow-md'>
-      <PanelGroup
-        direction='horizontal'
+    <div className='flex h-full w-full'>
+      <ResizableGroup
+        orientation='horizontal'
         className='flex align-top h-full'
         autoSaveId='activity-screen-resize'
       >
         {/* LEFT PANEL - Activity List */}
-        <Panel ref={activityPanelRef} defaultSize={20} minSize={30} maxSize={45}>
+        <Panel
+          id='activity-sidebar'
+          panelRef={activityPanelRef}
+          defaultSize={ACTIVITY_SIDEBAR_DEFAULT_WIDTH}
+          minSize={ACTIVITY_SIDEBAR_MIN_WIDTH}
+          maxSize={ACTIVITY_SIDEBAR_MAX_WIDTH}
+          groupResizeBehavior='preserve-pixel-size'
+        >
           {renderLeftPanel()}
         </Panel>
 
         {/* RESIZE HANDLE */}
-        <PanelResizeHandle className='w-[2px] transition-colors cursor-col-resize flex items-center justify-center group'>
+        <Separator className='w-[2px] transition-colors cursor-col-resize flex items-center justify-center group'>
           <div className='w-[2px] h-full bg-sidebar-divider group-hover:bg-primary group-active:bg-primary'></div>
-        </PanelResizeHandle>
+        </Separator>
 
         {/* RIGHT PANEL - Detail View */}
-        <Panel>
-          <div className='flex-1 flex flex-col bg-background relative h-full'>
+        <Panel id='activity-content'>
+          <div className='flex-1 flex flex-col bg-background relative h-full rounded-2xl'>
             <div className='flex-1 h-full overflow-hidden flex items-center justify-center'>
               {isOnIndexRoute ? (
                 <div className='flex flex-col items-center justify-center p-8 text-center'>
-                  <Bell className='text-muted-foreground mb-4' size={64} />
+                  <NotificationBellOn className='text-muted-foreground mb-4' size={64} />
                   <h3
                     className='text-xl font-medium text-foreground mb-2'
                     data-testid='select-activity-heading'
@@ -1138,7 +1165,7 @@ const ActivityListView = (): ReactElement => {
             </div>
           </div>
         </Panel>
-      </PanelGroup>
+      </ResizableGroup>
     </div>
   );
 };

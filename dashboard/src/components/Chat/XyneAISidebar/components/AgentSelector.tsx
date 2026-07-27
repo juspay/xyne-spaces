@@ -1,5 +1,5 @@
 import { ReactElement, useEffect, useMemo, useState } from 'react';
-import { ChevronDown, Bot, Search } from 'lucide-react';
+import { ChevronDown, Bot, SearchDefault } from '@xyne/icons';
 import { Popover } from '../../../ui/Popover';
 import { cn } from '../../../../utils/classNames';
 import { usePlatform } from '../../../../hooks/usePlatform';
@@ -81,17 +81,18 @@ export const AgentSelector = ({
     <button
       disabled={disabled}
       className={cn(
-        'flex items-center gap-1.5 rounded-lg transition-colors border',
-        isMobileCompact ? 'px-2 py-1.5 text-sm' : compact ? 'px-2 py-1.5 text-sm' : 'px-3 py-2',
+        // Borderless surface/primary pill — see Figma node 1655:24608.
+        'flex items-center gap-1 rounded-lg transition-colors bg-card',
+        isMobileCompact ? 'h-7 px-1.5 text-sm' : compact ? 'h-7 px-1.5 text-sm' : 'px-3 py-2',
         disabled ? 'cursor-not-allowed opacity-60' : 'hover:bg-accent cursor-pointer',
       )}
-      style={{
-        borderColor: selectedAgent?.color ?? undefined,
-      }}
       data-track-category='XyneAI'
       data-track-name='OPEN_AGENT_SELECTOR'
     >
-      {selectedAgent ? (
+      {/* The frame shows label + chevron only, so the generic Bot fallback is
+          gone. The colour dot stays for a selected agent — that's the only cue
+          for which agent is active, and the frame depicts the unselected state. */}
+      {selectedAgent && (
         <span
           className={cn(
             'inline-block rounded-full shrink-0',
@@ -103,14 +104,11 @@ export const AgentSelector = ({
             ...(selectedAgent.color ? { backgroundColor: selectedAgent.color } : {}),
           }}
         />
-      ) : (
-        <Bot className={cn(compact ? 'w-3.5 h-3.5' : 'w-4 h-4', 'text-primary shrink-0')} />
       )}
-      <span className='text-foreground font-medium'>{displayLabel}</span>
+      <span className='text-muted-foreground font-medium'>{displayLabel}</span>
       <ChevronDown
         className={cn(
-          'text-muted-foreground transition-transform shrink-0',
-          compact ? 'w-3.5 h-3.5' : 'w-4 h-4',
+          'text-muted-foreground transition-transform shrink-0 w-4 h-4',
           open && 'rotate-180',
         )}
       />
@@ -133,7 +131,7 @@ export const AgentSelector = ({
         {/* Search bar */}
         <div className='sticky top-0 z-10 bg-popover border-b border-border px-2.5 py-2'>
           <div className='flex items-center gap-2 rounded-md bg-muted px-2.5 py-1.5'>
-            <Search size={14} className='text-muted-foreground shrink-0' />
+            <SearchDefault size={14} className='text-muted-foreground shrink-0' />
             <input
               type='text'
               value={query}

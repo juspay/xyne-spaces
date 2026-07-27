@@ -41,7 +41,7 @@ export const ThreadCallButton = ({
           <Button
             variant='ghost'
             size='sm'
-            className='h-7 w-7 rounded-lg'
+            className='h-7 w-7 rounded-lg text-muted-foreground hover:text-foreground'
             data-testid={testId}
             {...(trackCategory && { 'data-track-category': trackCategory })}
             {...(trackName && { 'data-track-name': trackName })}

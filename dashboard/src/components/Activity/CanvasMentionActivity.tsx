@@ -1,6 +1,6 @@
 import { ReactElement } from 'react';
 import type { ActivityWithRelated } from '../../types/activity';
-import { AtSign } from 'lucide-react';
+import { AtMark } from '@xyne/icons';
 import { ActivityItemCard } from './ActivityItemCard';
 import { useUser } from '../../hooks/useUsers';
 import { getUserDisplayName } from '../../utils/userDisplayName';
@@ -34,7 +34,7 @@ export const CanvasMentionActivity = ({
       actorId={sender?.id ?? actorId}
       actorName={getUserDisplayName(sender)}
       channelId={activity.channelId ?? undefined}
-      badgeIcon={<AtSign className='w-4 h-4 text-primary' />}
+      badgeIcon={<AtMark className='size-3 text-primary' />}
       badgeColorClass='bg-muted'
       description={<span className='text-muted-foreground text-sm'>mentioned you in</span>}
       targetPath={targetPath}

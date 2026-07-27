@@ -81,7 +81,7 @@ const ReplyLayoutV2: React.FC<{
             {'1 draft'}
           </div>
         ) : (
-          <span className='font-medium text-primary'>
+          <span className='font-medium text-foreground'>
             {replies.replyCount} {replies.replyCount === 1 ? 'reply' : 'replies'}{' '}
             {draft && !isThreadOpen && ' and 1 draft'}
           </span>

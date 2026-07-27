@@ -585,9 +585,6 @@ const XyneAISidebar = ({
     : isV2
       ? (accessibleAgents.find(a => a.slug === 'ask-ai') ?? null)
       : null;
-  // Don't apply color effect for Ask AI (default agent) - only for custom claw agents
-  const selectedAgentColor =
-    selectedAgent && selectedAgent.slug !== 'ask-ai' ? selectedAgent.color : null;
   const selectedAgentName = selectedAgent?.name ?? null;
 
   // Ask AI v2 context-picker scope: when a claw agent is active, narrow the
@@ -1753,15 +1750,9 @@ const XyneAISidebar = ({
             : 'h-full'
           : isMobile
             ? 'h-[95vh] pb-4'
-            : 'h-full rounded-xl',
+            : 'h-full rounded-2xl',
       )}
       style={{
-        ...(selectedAgentColor
-          ? {
-              boxShadow: `inset 0 0 120px -20px ${selectedAgentColor}30`,
-              borderColor: selectedAgentColor,
-            }
-          : {}),
         gridTemplateColumns: showInlineDebugger
           ? `minmax(0, 1fr) 8px ${debuggerWidth}px`
           : 'minmax(0, 1fr)',
@@ -1806,7 +1797,6 @@ const XyneAISidebar = ({
             selectedAgentSlug={effectiveAgentSlug}
             agents={accessibleAgents}
             onSelectAgent={handleSelectAgentFromHistory}
-            selectedAgentColor={selectedAgentColor}
           />
         ) : showUserActivityPanel ? (
           <UserActivityPanel
@@ -1857,7 +1847,7 @@ const XyneAISidebar = ({
             )}
 
             {hasBackgroundStreamingElsewhere ? (
-              <div className='flex-shrink-0 border-b border-border bg-muted/35 px-4 py-2 text-xs text-muted-foreground flex flex-wrap items-center gap-x-2 gap-y-1'>
+              <div className='flex-shrink-0 border-b border-border bg-muted/35 px-3 py-2 text-xs text-muted-foreground flex flex-wrap items-center gap-x-2 gap-y-1'>
                 <span>Another chat is still generating.</span>
                 <button
                   type='button'
@@ -1902,7 +1892,7 @@ const XyneAISidebar = ({
             <div className='min-h-0 flex-1 overflow-hidden'>
               <div className='flex h-full min-h-0 flex-col overflow-y-auto overflow-x-hidden'>
                 {isLoadingConversation ? (
-                  <div className='px-4 py-4'>
+                  <div className='px-3 py-4'>
                     <div className='space-y-4'>
                       <div className='flex justify-end'>
                         <div className='h-12 w-3/4 animate-pulse rounded-xl bg-muted' />
@@ -1936,7 +1926,7 @@ const XyneAISidebar = ({
                       />
                     </AILandingHeroErrorBoundary>
                   ) : aiOnboarding.isActive ? (
-                    <div className='flex h-full flex-col px-4 py-6'>
+                    <div className='flex h-full flex-col px-3 py-6'>
                       <div className='flex items-start gap-2'>
                         <div className='mt-0.5 flex-shrink-0'>
                           <XyneAIStar size={18} />
@@ -1970,7 +1960,7 @@ const XyneAISidebar = ({
                       className={cn(
                         'py-4',
                         aiOnboarding.isActive && 'bot-markdown-content',
-                        isFullscreen ? 'w-full max-w-2xl px-4' : 'px-4',
+                        isFullscreen ? 'w-full max-w-2xl px-4' : 'px-3',
                       )}
                     >
                       <div className='max-w-full space-y-4'>
@@ -2115,7 +2105,7 @@ const XyneAISidebar = ({
             </div>
 
             {aiOnboarding.isActive && onboardingAnsweredCount >= 3 && (
-              <div className='px-4 py-2'>
+              <div className='px-3 py-2'>
                 <button
                   onClick={completeOnboarding}
                   className='w-full rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90'
@@ -2127,8 +2117,14 @@ const XyneAISidebar = ({
               </div>
             )}
 
+            {/* composer-container — owns the gutter around the composer */}
             {!(isFullscreen && messages.length === 0) && (
-              <div className={cn(isFullscreen && 'flex justify-center px-4 pb-6')}>
+              <div
+                className={cn(
+                  isFullscreen ? 'flex justify-center px-4 pb-6' : 'px-3',
+                  !isFullscreen && !isMobile && 'pb-3',
+                )}
+              >
                 <div className={cn(isFullscreen && 'w-full max-w-2xl')}>
                   <XyneAIInputSection
                     ref={xyneAIInputRef}
@@ -2140,7 +2136,6 @@ const XyneAISidebar = ({
                     agents={isV2 ? accessibleAgents : []}
                     {...(isV2 ? { onSelectAgent: handleSelectAgent } : {})}
                     compactToolbar={isCompactSidebar}
-                    tightToolbar={isTightSidebar}
                     {...sharedInputSectionProps}
                     kbCollectionId={kbCollectionIdProp}
                     kbOpenNonce={kbOpenNonce}

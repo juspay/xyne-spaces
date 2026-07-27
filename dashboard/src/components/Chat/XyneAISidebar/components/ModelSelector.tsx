@@ -1,5 +1,5 @@
 import { ReactElement, useMemo, useState } from 'react';
-import { ChevronDown, Sparkles } from 'lucide-react';
+import { ChevronDown, SparkleAi02 } from '@xyne/icons';
 import { Popover } from '../../../ui/Popover';
 import { cn } from '../../../../utils/classNames';
 import { usePlatform } from '../../../../hooks/usePlatform';
@@ -66,13 +66,13 @@ export const ModelSelector = ({
       title={selected?.id ?? (defaultModel ? `Agent default (${defaultModel})` : 'Agent default')}
       className={cn(
         'flex items-center gap-1.5 rounded-lg transition-colors border border-border',
-        compact ? 'px-2 py-1.5 text-sm' : 'px-3 py-2',
+        compact ? 'h-7 px-2 text-sm' : 'px-3 py-2',
         disabled ? 'cursor-not-allowed opacity-60' : 'hover:bg-accent cursor-pointer',
       )}
       data-track-category='XyneAI'
       data-track-name='OPEN_MODEL_SELECTOR'
     >
-      <Sparkles className={cn(compact ? 'w-3.5 h-3.5' : 'w-4 h-4', 'text-primary shrink-0')} />
+      <SparkleAi02 className={cn(compact ? 'w-3.5 h-3.5' : 'w-4 h-4', 'text-primary shrink-0')} />
       {!isMobileCompact && (
         <span className='text-foreground font-medium truncate'>{displayText}</span>
       )}

@@ -8,11 +8,16 @@ import { useIsInPanelWebview } from '../../hooks/useIsInPanelWebview';
 import { useResizablePanel } from '../../hooks/useResizablePanel';
 import { useAllVisibleChannels } from '../../hooks/useChannels';
 import {
-  PanelGroup,
+  ResizableGroup,
   Panel,
-  PanelResizeHandle,
-  type ImperativePanelHandle,
-} from 'react-resizable-panels';
+  Separator,
+  type PanelImperativeHandle,
+} from '../../components/ui/Resizable/Resizable';
+import {
+  CHAT_SIDEBAR_DEFAULT_WIDTH,
+  CHAT_SIDEBAR_MAX_WIDTH,
+  CHAT_SIDEBAR_MIN_WIDTH,
+} from './chatSidebarWidth';
 import { useUserChannelStatuses } from '../../hooks/useChannels';
 import { TypingStateProvider } from '../../contexts/TypingStateContext';
 import { cn } from '../../utils/classNames';
@@ -46,15 +51,18 @@ const ChatScreen = ({ shouldStackThread = false }: ChatScreenProps): ReactElemen
   // isWideScreen false → triggering a second remount of ConversationPanelV2 /
   // ChatListV3 and losing scroll position a second time.
   const isWideScreen = !isMobile || measuredWideScreen;
-  const chatSidebarPanelRef = useRef<ImperativePanelHandle>(null);
+  const chatSidebarPanelRef = useRef<PanelImperativeHandle>(null);
 
   // Listen for resize events from global shortcuts
   const handleResizeEvent = useCallback((event: Event) => {
-    const customEvent = event as CustomEvent<{ delta: number }>;
+    const customEvent = event as CustomEvent<{ pixelDelta: number }>;
     if (chatSidebarPanelRef.current) {
-      const currentSize = chatSidebarPanelRef.current.getSize();
-      const newSize = Math.min(30, Math.max(15, currentSize + customEvent.detail.delta));
-      chatSidebarPanelRef.current.resize(newSize);
+      const { inPixels } = chatSidebarPanelRef.current.getSize();
+      const nextWidth = Math.min(
+        CHAT_SIDEBAR_MAX_WIDTH,
+        Math.max(CHAT_SIDEBAR_MIN_WIDTH, inPixels + customEvent.detail.pixelDelta),
+      );
+      chatSidebarPanelRef.current.resize(`${nextWidth}px`);
     }
   }, []);
 
@@ -99,16 +107,25 @@ const ChatScreen = ({ shouldStackThread = false }: ChatScreenProps): ReactElemen
         data-component='ChatScreen'
       >
         {isWideScreen ? (
-          <PanelGroup
-            direction='horizontal'
+          <ResizableGroup
+            orientation='horizontal'
             className='flex align-top h-full'
             autoSaveId='chat-screen-resize'
           >
-            {/* Sidebar — mobile shows only on directory root, desktop always (collapsed on full-screen) */}
+            {/* Sidebar — mobile shows only on directory root, desktop always (collapsed on
+                full-screen). Sized in pixels + `preserve-pixel-size` so it keeps its width
+                when the group shrinks (Ask AI opening, window resize) instead of scaling. */}
             {isMobile ? (
               pathnameWithoutWorkspace === '/chat/dir' ||
               pathnameWithoutWorkspace === '/chat/dir/' ? (
-                <Panel ref={chatSidebarPanelRef} defaultSize={20} minSize={15} maxSize={30}>
+                <Panel
+                  id='chat-sidebar'
+                  panelRef={chatSidebarPanelRef}
+                  defaultSize={CHAT_SIDEBAR_DEFAULT_WIDTH}
+                  minSize={CHAT_SIDEBAR_MIN_WIDTH}
+                  maxSize={CHAT_SIDEBAR_MAX_WIDTH}
+                  groupResizeBehavior='preserve-pixel-size'
+                >
                   <aside className='w-full h-full'>
                     <MobileChatDirectory
                       channelData={channelData}
@@ -119,10 +136,12 @@ const ChatScreen = ({ shouldStackThread = false }: ChatScreenProps): ReactElemen
               ) : null
             ) : (
               <Panel
-                ref={chatSidebarPanelRef}
-                defaultSize={20}
-                minSize={15}
-                maxSize={30}
+                id='chat-sidebar'
+                panelRef={chatSidebarPanelRef}
+                defaultSize={CHAT_SIDEBAR_DEFAULT_WIDTH}
+                minSize={CHAT_SIDEBAR_MIN_WIDTH}
+                maxSize={CHAT_SIDEBAR_MAX_WIDTH}
+                groupResizeBehavior='preserve-pixel-size'
                 collapsible
                 collapsedSize={0}
               >
@@ -136,7 +155,7 @@ const ChatScreen = ({ shouldStackThread = false }: ChatScreenProps): ReactElemen
             )}
 
             {/* RESIZE HANDLE — hidden on full-screen pages where the sidebar is collapsed */}
-            <PanelResizeHandle
+            <Separator
               className={cn(
                 'w-[2px] transition-colors cursor-col-resize flex items-center justify-center group',
                 isFullScreenPage && 'hidden',
@@ -144,11 +163,11 @@ const ChatScreen = ({ shouldStackThread = false }: ChatScreenProps): ReactElemen
             >
               <div
                 id='panel-resize-divider'
-                className='w-[2px] h-full bg-sidebar-divider group-hover:bg-primary group-active:bg-primary'
+                className='w-[2px] h-full bg-transparent group-hover:bg-primary group-active:bg-primary'
               ></div>
-            </PanelResizeHandle>
+            </Separator>
 
-            <Panel defaultSize={80} minSize={30}>
+            <Panel id='chat-main' minSize='30%'>
               <main
                 data-id='conversation-view'
                 className={cn(
@@ -159,6 +178,7 @@ const ChatScreen = ({ shouldStackThread = false }: ChatScreenProps): ReactElemen
                   !pathnameWithoutWorkspace.startsWith('/chat/dm') &&
                     !pathnameWithoutWorkspace.startsWith('/chat/bookmarks') &&
                     !pathnameWithoutWorkspace.startsWith('/chat/canvas') &&
+                    !pathnameWithoutWorkspace.startsWith('/chat/activity') &&
                     'border border-border bg-background',
                 )}
               >
@@ -167,7 +187,7 @@ const ChatScreen = ({ shouldStackThread = false }: ChatScreenProps): ReactElemen
                 </div>
               </main>
             </Panel>
-          </PanelGroup>
+          </ResizableGroup>
         ) : (
           // Narrow screen: overlay pattern
           <>

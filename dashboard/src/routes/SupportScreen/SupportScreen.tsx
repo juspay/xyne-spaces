@@ -64,7 +64,12 @@ import {
 import React, { ReactElement, useMemo, useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels';
+import { ResizableGroup, Panel, Separator } from '../../components/ui/Resizable/Resizable';
+import {
+  SUPPORT_SIDEBAR_DEFAULT_WIDTH,
+  SUPPORT_SIDEBAR_MAX_WIDTH,
+  SUPPORT_SIDEBAR_MIN_WIDTH,
+} from './supportSidebarWidth';
 import { useHasResourceAccess } from '../../hooks/usePermissions';
 import { cn } from '../../utils/classNames';
 import { logger, Event } from '../../utils/logger';
@@ -1946,14 +1951,27 @@ const SupportScreen = (): ReactElement => {
 
   return (
     <div data-testid='support-page' className='h-full flex flex-col relative overflow-hidden'>
-      <PanelGroup
-        direction='horizontal'
+      <ResizableGroup
+        orientation='horizontal'
         className='flex-1 overflow-hidden'
         autoSaveId='support-panel-layout'
+        panelIds={
+          ticketId
+            ? ['ticket-detail']
+            : isSidebarOpen && !isSettingsOpen
+              ? ['sidebar', 'main']
+              : ['main']
+        }
       >
         {isSidebarOpen && !isSettingsOpen && !ticketId && (
           <>
-            <Panel defaultSize={16} minSize={12} maxSize={25} id='sidebar' order={1}>
+            <Panel
+              id='sidebar'
+              defaultSize={SUPPORT_SIDEBAR_DEFAULT_WIDTH}
+              minSize={SUPPORT_SIDEBAR_MIN_WIDTH}
+              maxSize={SUPPORT_SIDEBAR_MAX_WIDTH}
+              groupResizeBehavior='preserve-pixel-size'
+            >
               <div
                 className={cn('h-full w-full flex flex-col outline-none', isMobile && 'bg-sidebar')}
               >
@@ -2057,13 +2075,16 @@ const SupportScreen = (): ReactElement => {
                 </div>
               </div>
             </Panel>
-            <PanelResizeHandle className='w-[2px] transition-colors cursor-col-resize flex items-center justify-center group'>
+            <Separator className='w-[2px] transition-colors cursor-col-resize flex items-center justify-center group'>
               <div className='w-[2px] h-full bg-sidebar-divider group-hover:bg-primary group-active:bg-primary'></div>
-            </PanelResizeHandle>
+            </Separator>
           </>
         )}
+        {/* `main` has no size constraints — the pixel-pinned sidebar takes its width and
+            this panel grows to fill the rest. A percentage min/max here would fight the
+            pin and force the sidebar to scale with the window again. */}
         {!ticketId && (
-          <Panel defaultSize={84} minSize={75} order={2}>
+          <Panel id='main'>
             <div className='h-full flex flex-col relative bg-background'>
               {deskView !== 'tickets' && selectedChannelId && (
                 <div className='absolute inset-0 z-30 bg-background'>
@@ -2995,7 +3016,7 @@ const SupportScreen = (): ReactElement => {
           </Panel>
         )}
         {ticketId && (
-          <Panel defaultSize={100} minSize={100} order={3}>
+          <Panel id='ticket-detail' defaultSize='100%' minSize='100%'>
             <div className='h-full overflow-hidden bg-background'>
               <SupportTicketDetail
                 ticketFilter={ticketFilter}
@@ -3005,7 +3026,7 @@ const SupportScreen = (): ReactElement => {
             </div>
           </Panel>
         )}
-      </PanelGroup>
+      </ResizableGroup>
 
       {/* Channel Info Modal */}
       {isInfoOpen && selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID && (
@@ -3923,12 +3944,18 @@ export const SupportTicketDetail = ({
 
   return (
     <div className='h-full flex flex-col overflow-hidden'>
-      <PanelGroup
-        direction='horizontal'
+      <ResizableGroup
+        orientation='horizontal'
         className='flex-1 overflow-hidden'
         autoSaveId='support-ticket-detail'
+        panelIds={isRightPanelOpen ? ['ticket-main', 'ticket-side-panel'] : ['ticket-main']}
       >
-        <Panel defaultSize={65} minSize={30} maxSize={70}>
+        <Panel
+          id='ticket-main'
+          defaultSize={isRightPanelOpen ? '65%' : '100%'}
+          minSize={isRightPanelOpen ? '30%' : '100%'}
+          maxSize={isRightPanelOpen ? '70%' : '100%'}
+        >
           <div className='h-full flex flex-col overflow-hidden relative'>
             <div className='w-full px-6 py-4 flex flex-col gap-2.5 flex-shrink-0 sticky top-0 bg-background z-10 border-b border-border'>
               <div className='flex flex-wrap items-center gap-2 min-w-0 overflow-hidden'>
@@ -4566,10 +4593,10 @@ export const SupportTicketDetail = ({
         {isRightPanelOpen && (
           <>
             {' '}
-            <PanelResizeHandle className='w-1 hover:bg-blue-50 active:bg-blue-100 transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
+            <Separator className='w-1 hover:bg-blue-50 active:bg-blue-100 transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
               <div className='w-[1px] h-full bg-border'></div>
-            </PanelResizeHandle>
-            <Panel defaultSize={35} minSize={30} maxSize={70}>
+            </Separator>
+            <Panel id='ticket-side-panel' defaultSize='35%' minSize='30%' maxSize='70%'>
               <div
                 className='h-full flex flex-col overflow-hidden relative'
                 ref={dragAndDropAreaRef}
@@ -4884,7 +4911,7 @@ export const SupportTicketDetail = ({
             mounted in AppRoot. SupportScreen tells it which ticket via
             useAskAiTicketContext above; the EmailComposer's Ask AI button
             opens it via xyneAIActor.send('OPEN'). */}
-      </PanelGroup>
+      </ResizableGroup>
     </div>
   );
 };

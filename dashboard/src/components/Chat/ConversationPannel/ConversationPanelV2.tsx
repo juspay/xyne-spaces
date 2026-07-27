@@ -23,7 +23,7 @@ import PinListV2 from '../PinListV2';
 import { ThreadMessages } from '../ThreadPannel';
 import KanbanBoardScreen from '../../../routes/KanbanBoardScreen';
 import CanvasTab from '../../Canvas/CanvasTab';
-import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
+import { Panel, ResizableGroup, Separator } from '../../ui/Resizable/Resizable';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { TicketDetails } from '../../Tickets/TicketDetails/TicketDetails';
@@ -50,21 +50,21 @@ const ExpandedTicketView = ({
   conversationId: string;
 }): ReactElement => {
   return (
-    <PanelGroup direction='horizontal'>
-      <Panel minSize={60}>
+    <ResizableGroup orientation='horizontal'>
+      <Panel minSize='60%'>
         <TicketDetails ticketId={ticketId} expandedView={true} />
       </Panel>
-      <PanelResizeHandle className='w-1 hover:bg-sidebar-divider active:bg-sidebar-divider transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
+      <Separator className='w-1 hover:bg-sidebar-divider active:bg-sidebar-divider transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
         <div id='panel-resize-divider' className='w-[1px] h-full bg-border'></div>
-      </PanelResizeHandle>
-      <Panel minSize={40}>
+      </Separator>
+      <Panel minSize='40%'>
         <ThreadMessages
           channelId={channelId}
           conversationId={conversationId}
           underTicketView={true}
         />
       </Panel>
-    </PanelGroup>
+    </ResizableGroup>
   );
 };
 

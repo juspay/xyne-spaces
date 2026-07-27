@@ -102,6 +102,9 @@ export async function createMainWindow(): Promise<BrowserWindow> {
     show: false,
     title: config.window.title,
     titleBarStyle: 'hiddenInset',
+    // Align the macOS traffic lights with the AppNavigator icons on the 52px
+    // top bar (nudged down 2px past the centered 18px for a visual match).
+    trafficLightPosition: { x: 19, y: 20 },
     icon: iconPath,
     webPreferences: {
       nodeIntegration: false,

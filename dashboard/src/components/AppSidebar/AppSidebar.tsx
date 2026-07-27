@@ -28,7 +28,6 @@ import {
   GridDashboard01,
   QuestionMarkCircle,
   AlertCircle,
-  Headphones,
   TicketToken,
 } from '@xyne/icons';
 
@@ -54,6 +53,7 @@ import { useKeyboard } from '../../contexts/KeyboardContext';
 import { useAILandingDefault } from '../../hooks/useAILandingDefault';
 import XyneAISidebarIcon from '../icons/xyne-ai/XyneAISidebarIcon';
 import { cn } from '../../utils/classNames';
+import { APP_DRAG_STYLE } from '../../utils/electronApp';
 import { ErrorReportModal } from '../ErrorReportModal/ErrorReportModal';
 import { isDMChannel } from '../Chat/ChatDirectory/ChatDirectory.utils';
 import { SupportRail } from './SupportRail';
@@ -166,6 +166,7 @@ const AppSidebar = (): ReactElement => {
     if (pathname.startsWith('/chat/dir')) return '/chat/dir';
     if (pathname.startsWith('/chat/dm')) return '/chat/dm';
     if (pathname.startsWith('/chat/activity')) return '/chat/activity';
+    if (pathname.startsWith('/chat/canvas')) return '/chat/canvas';
     if (pathname.startsWith('/chat/drafts')) return '/chat/drafts';
     if (pathname.startsWith('/chat/sent')) return '/chat/sent';
     if (pathname.startsWith('/chat/scheduled')) return '/chat/scheduled';
@@ -354,7 +355,9 @@ const AppSidebar = (): ReactElement => {
 
   return (
     <aside className='h-full w-[60px] flex flex-col bg-sidebar'>
-      <div className='w-full h-[52px] shrink-0' />
+      {/* Top spacer aligns with the header strip / macOS traffic lights; make it a
+          drag region so the window can be moved by its top-left corner in Electron. */}
+      <div className='w-full h-[52px] shrink-0' style={APP_DRAG_STYLE} />
       <div className='flex-1 min-h-0 p-3 flex flex-col items-center justify-between border-t border-r border-border'>
         <WorkspaceSwitcher />
         <div className='flex-1 mt-5 space-y-8 overflow-y-auto scrollbar-none min-h-0 pr-2 -mr-2'>
@@ -536,7 +539,7 @@ const AppSidebar = (): ReactElement => {
                     : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
                 )}
               >
-                <Headphones size={16} />
+                <QuestionMarkCircle size={16} />
               </button>
             }
           >

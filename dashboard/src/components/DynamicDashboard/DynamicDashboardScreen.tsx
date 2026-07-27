@@ -2,7 +2,7 @@ import { ReactElement, useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
+import { Panel, ResizableGroup, Separator } from '../ui/Resizable/Resizable';
 import { LayoutDashboard, MoreVertical, Plus, Share, Sparkles } from 'lucide-react';
 import { DashboardRole } from '@xyne/shared';
 import { getApiErrorMessage } from '../../utils/apiError';
@@ -234,16 +234,16 @@ const DynamicDashboardScreen = (): ReactElement => {
 
   return (
     <div className='flex h-full min-w-0'>
-      <PanelGroup
-        direction='horizontal'
+      <ResizableGroup
+        orientation='horizontal'
         autoSaveId='dynamic-dashboard-chat'
         className='flex flex-1 min-w-0 h-full'
+        panelIds={canShare && chatOpen ? ['dashboard-main', 'dashboard-chat'] : ['dashboard-main']}
       >
         <Panel
           id='dashboard-main'
-          order={1}
-          defaultSize={65}
-          minSize={50}
+          defaultSize='65%'
+          minSize='50%'
           className='flex flex-col min-w-0 bg-white md:rounded-2xl overflow-hidden shadow-md'
         >
           <div className='flex items-center justify-between gap-3 h-12 px-4 border-b border-xyne-gray-200 shrink-0'>
@@ -369,15 +369,14 @@ const DynamicDashboardScreen = (): ReactElement => {
 
         {canShare && chatOpen && (
           <>
-            <PanelResizeHandle className='w-1 hover:bg-sidebar-divider active:bg-sidebar-divider transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
+            <Separator className='w-1 hover:bg-sidebar-divider active:bg-sidebar-divider transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
               <div className='w-0.5 h-8 bg-transparent group-hover:bg-sidebar-divider group-active:bg-sidebar-divider transition-colors duration-200 rounded-full' />
-            </PanelResizeHandle>
+            </Separator>
             <Panel
               id='dashboard-chat'
-              order={2}
-              defaultSize={35}
-              minSize={25}
-              maxSize={50}
+              defaultSize='35%'
+              minSize='25%'
+              maxSize='50%'
               className='min-w-0 pl-2'
             >
               <DashboardEditChat
@@ -402,7 +401,7 @@ const DynamicDashboardScreen = (): ReactElement => {
             </Panel>
           </>
         )}
-      </PanelGroup>
+      </ResizableGroup>
 
       <Dialog
         open={shareOpen}

@@ -112,7 +112,9 @@ function stripHtmlTags(html: string): string {
   div.innerHTML = html;
   return div.textContent || html;
 }
-const ChannelCommandItem = ({
+// Exported so the Ask AI inline context picker (XyneAISidebar/ContextPicker)
+// renders channel rows with this exact component instead of a copy.
+export const ChannelCommandItem = ({
   channel,
   currentUserID,
   unreadCount,

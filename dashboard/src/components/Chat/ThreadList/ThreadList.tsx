@@ -39,6 +39,12 @@ type ThreadListProps = {
   matchedMessageId?: string | null;
 };
 
+/** Space reserved below the last message for the typing / agent-activity bar, which
+    overlays the top edge of the composer. Mirrors the virtualizer `paddingEnd` in
+    ChatListV4. Applied as padding-bottom on the scroll container, so scroll-to-bottom
+    (`scrollHeight - clientHeight`) naturally lands with the last message clear of it. */
+const ACTIVITY_BAR_PADDING = 28;
+
 const ThreadList = ({
   channelId,
   conversationId,
@@ -302,7 +308,10 @@ const ThreadList = ({
     if (!container || !content) return;
 
     const recomputeOverflow = (): void => {
-      const overflow = container.scrollHeight > container.clientHeight + 8;
+      // Discount the reserved activity-bar padding so "does the content overflow"
+      // keeps its original meaning — otherwise every short thread would report
+      // overflow purely because of the padding and switch on the jump FAB.
+      const overflow = container.scrollHeight > container.clientHeight + 8 + ACTIVITY_BAR_PADDING;
       setHasOverflow(overflow);
       if (!overflow) {
         setIsNearBottom(true);
@@ -393,6 +402,7 @@ const ThreadList = ({
           data-component='ThreadList'
           ref={scrollContainerRef}
           className='h-full overflow-auto no-scrollbar pt-4'
+          style={{ paddingBottom: ACTIVITY_BAR_PADDING }}
         >
           <div ref={scrollContentRef}>
             {messagesWithSeparators.map((item, index) => {
@@ -518,6 +528,7 @@ const ThreadList = ({
         data-component='ThreadList'
         ref={scrollContainerRef}
         className='h-full overflow-auto no-scrollbar pt-4'
+        style={{ paddingBottom: ACTIVITY_BAR_PADDING }}
       >
         <div ref={scrollContentRef}>
           {visibleMessages.map((threadMessage, index) => {
