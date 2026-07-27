@@ -14,7 +14,63 @@ export const FILTER_LABELS: Record<RecentCallFilter, string> = {
   missed: 'Missed Calls',
 };
 
-export type Call = QueryResultType<typeof queries.userCallHistory>[number];
+export type CallParticipant = QueryResultType<typeof queries.callParticipantsByCallId>[number];
+export type CallParticipants = readonly CallParticipant[] | undefined;
+export type Call = Omit<
+  QueryResultType<typeof queries.userCallHistoryV2>[number],
+  'participants'
+> & {
+  participants?: CallParticipants;
+};
+export type CallParticipantPreviewEntry = {
+  readonly userId: string;
+  readonly hasJoined: boolean;
+};
+type CallParticipantPreviewInput =
+  | string
+  | readonly CallParticipantPreviewEntry[]
+  | null
+  | undefined;
+
+function isCallParticipantPreviewEntries(
+  value: unknown,
+): value is readonly CallParticipantPreviewEntry[] {
+  return Array.isArray(value);
+}
+
+function parseParticipantPreviewEntries(
+  participantPreviewUserIds: CallParticipantPreviewInput,
+): readonly CallParticipantPreviewEntry[] | null {
+  if (typeof participantPreviewUserIds === 'string') {
+    try {
+      const parsed = JSON.parse(participantPreviewUserIds) as unknown;
+      if (!isCallParticipantPreviewEntries(parsed)) return null;
+
+      return parsed
+        .map(normalizeParticipantPreviewEntry)
+        .filter((entry): entry is CallParticipantPreviewEntry => entry !== null);
+    } catch {
+      return null;
+    }
+  }
+
+  if (!isCallParticipantPreviewEntries(participantPreviewUserIds)) return null;
+
+  return participantPreviewUserIds
+    .map(normalizeParticipantPreviewEntry)
+    .filter((entry): entry is CallParticipantPreviewEntry => entry !== null);
+}
+
+function normalizeParticipantPreviewEntry(value: unknown): CallParticipantPreviewEntry | null {
+  if (value && typeof value === 'object' && 'userId' in value && typeof value.userId === 'string') {
+    return {
+      userId: value.userId,
+      hasJoined: 'hasJoined' in value && value.hasJoined === true,
+    };
+  }
+
+  return null;
+}
 
 export function isGoogleCalendarCall(
   call: { callOrigin?: string } | Record<string, unknown>,
@@ -78,27 +134,96 @@ export interface CallStatusInfo {
 }
 
 // Get all participant user objects (excluding nulls)
-export function getParticipantUsers(participants: Call['participants'], allUsers: User[]): User[] {
+export function getParticipantUsers(participants: CallParticipants, allUsers: User[]): User[] {
   const participantUserIds = (participants || []).map(p => p.userId);
   return allUsers.filter(u => participantUserIds.includes(u.id));
 }
 
+export function getParticipantDisplayData(
+  participants: CallParticipants,
+  allUsers: User[],
+  currentUserId: string | undefined,
+): { userIds: string[]; displayNames: string[] } {
+  const otherParticipants = getOtherParticipants(participants, currentUserId);
+  const usersById = new Map(allUsers.map(user => [user.id, user]));
+
+  const userIds: string[] = [];
+  const displayNames = otherParticipants.map(participant => {
+    if (participant.isExternal) {
+      return participant.displayName || participant.email || 'Guest';
+    }
+
+    userIds.push(participant.userId);
+    const user = usersById.get(participant.userId);
+    return user?.name || user?.email || 'Unknown';
+  });
+
+  return { userIds, displayNames };
+}
+
+export function getCallParticipantCount(call: {
+  status?: CallStatus | string | null | undefined;
+  participantCount?: number | null | undefined;
+  participants?: readonly unknown[] | null | undefined;
+}): number {
+  if (call.status === CallStatus.ACTIVE) {
+    return call.participants?.length ?? call.participantCount ?? 0;
+  }
+
+  return call.participantCount ?? call.participants?.length ?? 0;
+}
+
+export function getPreviewParticipantUserIds(
+  participantPreviewUserIds: CallParticipantPreviewInput,
+  currentUserId: string | undefined,
+): string[] {
+  const previewEntries = parseParticipantPreviewEntries(participantPreviewUserIds);
+  const previewUserIds = previewEntries ? previewEntries.map(entry => entry.userId) : [];
+  const displayUserIds = previewUserIds.filter(userId => userId !== currentUserId);
+
+  return displayUserIds;
+}
+
+export function getPreviewParticipantUsers(
+  participantPreviewUserIds: CallParticipantPreviewInput,
+  allUsers: User[],
+  currentUserId: string | undefined,
+): User[] {
+  const previewUserIds = getPreviewParticipantUserIds(participantPreviewUserIds, currentUserId);
+  const usersById = new Map(allUsers.map(user => [user.id, user]));
+  return previewUserIds
+    .map(userId => usersById.get(userId))
+    .filter((user): user is User => Boolean(user));
+}
+
+export function hasPreviewParticipantJoined(
+  participantPreviewUserIds: CallParticipantPreviewInput,
+  currentUserId: string | undefined,
+): boolean {
+  const previewEntries = parseParticipantPreviewEntries(participantPreviewUserIds);
+  if (previewEntries) {
+    return previewEntries.some(entry => entry.userId !== currentUserId && entry.hasJoined);
+  }
+
+  return false;
+}
+
 // Check if any participant joined the call
-export function hasAnyoneJoined(participants: Call['participants']): boolean {
+export function hasAnyoneJoined(participants: CallParticipants): boolean {
   return (participants || []).some(
     p => p.response === InvitationResponse.ACCEPTED || p.response === InvitationResponse.LEFT,
   );
 }
 
-export function hasJoinedExternalParticipant(participants: Call['participants']): boolean {
+export function hasJoinedExternalParticipant(participants: CallParticipants): boolean {
   return hasJoinedExternalCallParticipant(participants);
 }
 
 // Get other participants (excluding current user)
 export function getOtherParticipants(
-  participants: Call['participants'],
+  participants: CallParticipants,
   currentUserId: string | undefined,
-): NonNullable<Call['participants']> {
+): CallParticipant[] {
   return participants?.filter(p => p.userId !== currentUserId) || [];
 }
 
@@ -142,9 +267,10 @@ export function isMissedCallForUser(call: Call, userId: string | undefined): boo
 
   const hasCurrentUserJoined = currentUserParticipant.response === InvitationResponse.ACCEPTED;
   const userJoinedandLeft = currentUserParticipant.response === InvitationResponse.LEFT;
-  const anyoneJoined = (call.participants || []).some(
-    p => p.response === InvitationResponse.ACCEPTED || p.response === InvitationResponse.LEFT,
-  );
+  const otherParticipants = call.participants?.filter(p => p.userId !== userId);
+  const anyoneJoined =
+    hasPreviewParticipantJoined(call.participantPreviewUserIds, userId) ||
+    hasAnyoneJoined(otherParticipants);
 
   return getCallStatus(call, isOutgoingCall, hasCurrentUserJoined, userJoinedandLeft, anyoneJoined)
     .isMissedCall;
@@ -165,7 +291,7 @@ export function getStatusText(
 
 // Get call title from participant names
 export function getCallTitleFromParticipants(
-  participants: Call['participants'],
+  participants: CallParticipants,
   allUsers: User[],
   currentUserId: string | undefined,
 ): string {

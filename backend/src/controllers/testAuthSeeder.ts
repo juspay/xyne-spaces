@@ -256,6 +256,7 @@ export class TestAuthSeeder {
           transcript: s.transcript,
           aiSummary: s.aiSummary,
           lastActivityAt: s.endedAt ?? s.startedAt,
+          participantCount: 1,
         },
       });
 

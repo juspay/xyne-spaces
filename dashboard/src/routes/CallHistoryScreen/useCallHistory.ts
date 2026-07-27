@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useZero } from '../../hooks/useZero';
 import { QueryResultType } from '@rocicorp/zero';
@@ -11,11 +11,14 @@ import { toast } from 'sonner';
 import { usePlatform } from '../../hooks/usePlatform';
 import { type User } from '../../machines/stateMachine';
 import {
+  getCallParticipantCount,
   isMissedCallForUser,
   isExternalCalendarEvent,
   isExternalCalendarEventForUser,
   shouldShowInCallLists,
   shouldShowInScheduledList,
+  type Call,
+  type CallParticipants,
 } from './callHistoryItem.utils';
 import { useAllChannels } from '../../hooks/useChannels';
 import { useActiveCalls } from '../../hooks/useCalls';
@@ -26,17 +29,20 @@ import { blobToBase64 } from '../../services/clients/fileFetchService';
 import { logger, Event as Logger } from '../../utils/logger';
 import { usePaginatedCalls } from '../../hooks/usePaginatedCalls';
 import { EditCallData } from '../../components/Call/ScheduleCallModal/ScheduleCallModal';
+import { useQuery } from '@xyne/shared/hooks';
 
-type CallHistoryResult = QueryResultType<typeof queries.userCallHistory>;
-type ScheduledCallsResult = QueryResultType<typeof queries.userScheduledCalls>;
-type Call = CallHistoryResult[number];
-type ScheduledCall = ScheduledCallsResult[number];
+type ScheduledCall = Omit<
+  QueryResultType<typeof queries.userScheduledCallsV2>[number],
+  'participants'
+> & {
+  participants?: CallParticipants;
+};
 
 interface UseCallHistoryReturn {
   calls: Call[] | undefined;
   scheduledCalls: ScheduledCall[] | undefined;
   calendarScheduledCalls: ScheduledCall[] | undefined;
-  missedCalls: QueryResultType<typeof queries.userCallHistory>;
+  missedCalls: Call[];
   isLoading: boolean;
   isScheduledCallsLoading: boolean;
   queryDetails: ReturnType<typeof useCachedQuery>[1];
@@ -93,12 +99,13 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
     queryDetails,
   } = usePaginatedCalls();
 
-  const [allScheduledCalls, scheduledQueryDetails] = useCachedQuery(queries.userScheduledCalls());
+  const [allScheduledCalls, scheduledQueryDetails] = useCachedQuery(queries.userScheduledCallsV2());
 
   // Toggle for showing channel calls (calls in channels the user is a member of but wasn't invited to)
   const [showChannelCalls, setShowChannelCalls] = useState(false);
 
-  const calls = accumulatedCalls;
+  const calls = accumulatedCalls as Call[] | undefined;
+  const scheduledCallRows = allScheduledCalls as ScheduledCall[] | undefined;
   const [selectedCall, setSelectedCall] = useState<Call | null>(null);
   const [isParticipantsModalOpen, setIsParticipantsModalOpen] = useState(false);
   const [selectedUsers, setSelectedUsers] = useState<User[]>([]);
@@ -108,12 +115,23 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
     subtitle: string;
   }>({ title: '', subtitle: '' });
   const [pendingCall, setPendingCall] = useState<Call | null>(null);
+  const [pendingCallParticipants, setPendingCallParticipants] = useState<CallParticipants | null>(
+    null,
+  );
   const [isJoiningCall, setIsJoiningCall] = useState(false); // Track if joining vs initiating
   const [callIdToJoin, setCallIdToJoin] = useState<string | null>(null); // Store the active call's externalId
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [deleteModalCall, setDeleteModalCall] = useState<ScheduledCall | null>(null);
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [editModalCall, setEditModalCall] = useState<EditCallData | null>(null);
+  const [fullParticipantAction, setFullParticipantAction] = useState<{
+    call: Call;
+    action: 'restart' | 'edit';
+  } | null>(null);
+  const [actionParticipants, actionParticipantsDetails] = useQuery(
+    queries.callParticipantsByCallId({ callId: fullParticipantAction?.call.id ?? '' }),
+    { enabled: Boolean(fullParticipantAction) },
+  );
   const navigate = useNavigate();
 
   const { isMobile } = usePlatform();
@@ -122,10 +140,15 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
   const channels = useAllChannels();
 
   // Get active calls to check if channel has ongoing call
-  const activeCalls = useActiveCalls();
+  const activeCalls = useActiveCalls() as Call[];
+  const getCurrentUserParticipant = (call: {
+    participants?: CallParticipants;
+  }): NonNullable<CallParticipants>[number] | undefined =>
+    call.participants?.find(p => p.userId === userId);
+
   // Filter scheduled calls to only show those that haven't ended yet.
   const scheduledCalls = useMemo(() => {
-    if (!allScheduledCalls) return undefined;
+    if (!scheduledCallRows) return undefined;
 
     const now = Date.now();
 
@@ -138,7 +161,7 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
       activeCalls?.map(c => c.recurringSeriesId).filter((id): id is string => !!id) ?? [],
     );
 
-    const filtered = allScheduledCalls.filter(call => {
+    const filtered = scheduledCallRows.filter(call => {
       if (call.status === CallStatus.ACTIVE) {
         return false;
       }
@@ -159,12 +182,8 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
         return false;
       }
       // Exclude calls the current user has hidden
-      if (
-        userId &&
-        call.participants?.some(
-          p => p.userId === userId && p.meetingStatus === MeetingStatus.HIDDEN,
-        )
-      ) {
+      const currentUserParticipant = getCurrentUserParticipant(call);
+      if (userId && currentUserParticipant?.meetingStatus === MeetingStatus.HIDDEN) {
         return false;
       }
       // Only show calls where the user is an actual participant. This filters out
@@ -175,7 +194,7 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
       const isExternalCalendarCall = isExternalCalendarEvent(call);
       const isParticipant = isExternalCalendarCall
         ? isExternalCalendarEventForUser(call, userId)
-        : call.participants?.some(p => p.userId === userId);
+        : Boolean(currentUserParticipant);
       if (!isParticipant) return false;
       return true;
     });
@@ -188,17 +207,17 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
     });
 
     return filtered;
-  }, [allScheduledCalls, activeCalls, userId]);
+  }, [scheduledCallRows, activeCalls, userId]);
 
   const calendarScheduledCalls = useMemo(() => {
-    if (!allScheduledCalls) return undefined;
+    if (!scheduledCallRows) return undefined;
 
     const activeExternalIds = new Set(activeCalls?.map(c => c.externalId) ?? []);
     const activeSeriesIds = new Set(
       activeCalls?.map(c => c.recurringSeriesId).filter((id): id is string => !!id) ?? [],
     );
 
-    const filtered = allScheduledCalls.filter(call => {
+    const filtered = scheduledCallRows.filter(call => {
       if (call.status === CallStatus.ACTIVE) {
         return false;
       }
@@ -208,12 +227,8 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
       if (call.recurringSeriesId && activeSeriesIds.has(call.recurringSeriesId)) {
         return false;
       }
-      if (
-        userId &&
-        call.participants?.some(
-          p => p.userId === userId && p.meetingStatus === MeetingStatus.HIDDEN,
-        )
-      ) {
+      const currentUserParticipant = getCurrentUserParticipant(call);
+      if (userId && currentUserParticipant?.meetingStatus === MeetingStatus.HIDDEN) {
         return false;
       }
 
@@ -221,7 +236,7 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
         return isExternalCalendarEventForUser(call, userId);
       }
 
-      return call.participants?.some(p => p.userId === userId) ?? false;
+      return Boolean(currentUserParticipant);
     });
 
     filtered.sort((a, b) => {
@@ -231,7 +246,7 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
     });
 
     return filtered;
-  }, [allScheduledCalls, activeCalls, userId]);
+  }, [scheduledCallRows, activeCalls, userId]);
 
   const recentCalls = useMemo(() => {
     const baseCalls = calls;
@@ -245,19 +260,26 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
     // (call ended before endsAt) where the call leaves userCallHistory but the
     // cumulative accumulator still holds an ACTIVE entry.
     const activeCallExternalIds = new Set(activeCalls?.map(c => c.externalId) ?? []);
-    const scheduledCallIds = new Set(allScheduledCalls?.map(c => c.id) ?? []);
+    const scheduledCallIds = new Set(scheduledCallRows?.map(c => c.id) ?? []);
 
     // Get active scheduled calls that have started
     const activeScheduledCalls =
-      allScheduledCalls?.filter(
+      scheduledCallRows?.filter(
         call =>
           call.status === CallStatus.ACTIVE ||
           (call.startsAt && new Date(call.startsAt).getTime() <= now),
       ) || [];
 
-    // Combine base calls with active scheduled calls, filtering out stale ACTIVE entries
+    const activeCallIds = new Set(activeCalls?.map(call => call.id) ?? []);
+
+    // Combine history rows with active calls from roomActor. userCallHistory intentionally
+    // excludes ACTIVE rows so live calls can use userActiveCalls, which carries all participants.
     // External calendar events are excluded from main call lists — they appear only in Calendar view
-    let allCalls = [...baseCalls, ...activeScheduledCalls]
+    let allCalls = [
+      ...(activeCalls ?? []),
+      ...baseCalls.filter(call => !activeCallIds.has(call.id)),
+      ...activeScheduledCalls.filter(call => !activeCallIds.has(call.id)),
+    ]
       .filter(call => {
         if (call.status === CallStatus.ACTIVE) {
           // Call has reverted to SCHEDULED (ended before endsAt) — stale accumulator entry
@@ -275,7 +297,7 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
     if (!showChannelCalls) {
       allCalls = allCalls.filter(call => {
         if (isExternalCalendarEvent(call)) return true;
-        const userParticipant = call.participants?.find(p => p.userId === userId);
+        const userParticipant = getCurrentUserParticipant(call);
         return !!userParticipant;
       });
     }
@@ -314,8 +336,14 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
     });
   };
 
-  const initiateCall = (call: Call): void => {
-    const participantUserIds = call.participants?.map(p => p.userId) || [];
+  const hasOnlyParticipantPreview = (call: Call): boolean => {
+    if (call.status === CallStatus.ACTIVE) return false;
+    if (call.participantCount === null || call.participantCount === undefined) return true;
+    return getCallParticipantCount(call) > (call.participants?.length ?? 0);
+  };
+
+  const initiateCall = (call: Call, participants = call.participants): void => {
+    const participantUserIds = participants?.map(p => p.userId) || [];
 
     roomActor.send({
       type: 'INITIATE_CALL',
@@ -339,7 +367,7 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
     joinCall(call.externalId);
   };
 
-  const handleRestartCall = (call: Call): void => {
+  const continueRestartCall = (call: Call, participants = call.participants): void => {
     // If user is in any call, show toast instead of allowing restart
     if (isInCall) {
       toast.info('Already in a call', {
@@ -357,6 +385,7 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
     if (activeCallInChannel) {
       // Show modal to join the ongoing call
       setPendingCall(call);
+      setPendingCallParticipants(participants ?? null);
       setIsJoiningCall(true);
       setCallIdToJoin(activeCallInChannel.externalId);
       setConfirmModalConfig({
@@ -374,6 +403,7 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
     // If DEFAULT channel, show confirmation modal
     if (isDefaultChannel) {
       setPendingCall(call);
+      setPendingCallParticipants(participants ?? null);
       setIsJoiningCall(false);
       setConfirmModalConfig({
         title: 'Start a call in this channel?',
@@ -384,7 +414,16 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
     }
 
     // For DM/Group DM, proceed directly
-    initiateCall(call);
+    initiateCall(call, participants);
+  };
+
+  const handleRestartCall = (call: Call): void => {
+    if (hasOnlyParticipantPreview(call)) {
+      setFullParticipantAction({ call, action: 'restart' });
+      return;
+    }
+
+    continueRestartCall(call);
   };
 
   const handleCallRowClick = (call: Call): void => {
@@ -480,9 +519,10 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
         joinCall(callIdToJoin);
       } else {
         // Initiate a new call
-        initiateCall(pendingCall);
+        initiateCall(pendingCall, pendingCallParticipants ?? pendingCall.participants);
       }
       setPendingCall(null);
+      setPendingCallParticipants(null);
       setIsJoiningCall(false);
       setCallIdToJoin(null);
     }
@@ -491,6 +531,7 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
   const closeConfirmModal = (): void => {
     setShowConfirmModal(false);
     setPendingCall(null);
+    setPendingCallParticipants(null);
     setIsJoiningCall(false);
     setCallIdToJoin(null);
   };
@@ -533,25 +574,51 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
     setDeleteModalCall(null);
   };
 
-  const handleEditClick = (call: Call): void => {
+  const buildEditCallData = (call: Call, participants = call.participants ?? []): EditCallData => ({
+    id: call.id,
+    externalId: call.externalId,
+    title: call.title ?? '',
+    startsAt: call.startsAt!,
+    endsAt: call.endsAt!,
+    participants: [...participants],
+    channelId: call.channelId,
+    recurringSeriesId: call.recurringSeriesId,
+    callUpdatesChannel: call.callUpdatesChannel ?? null,
+  });
+
+  const openEditModal = (call: Call, participants = call.participants ?? []): void => {
     setEditModalCall({
-      id: call.id,
-      externalId: call.externalId,
-      title: call.title ?? '',
-      startsAt: call.startsAt!,
-      endsAt: call.endsAt!,
-      participants: [...(call.participants ?? [])],
-      channelId: call.channelId,
-      recurringSeriesId: call.recurringSeriesId,
-      callUpdatesChannel: call.callUpdatesChannel ?? null,
+      ...buildEditCallData(call, participants),
     });
     setEditModalOpen(true);
+  };
+
+  const handleEditClick = (call: Call): void => {
+    if (hasOnlyParticipantPreview(call)) {
+      setFullParticipantAction({ call, action: 'edit' });
+      return;
+    }
+
+    openEditModal(call);
   };
 
   const closeEditModal = (): void => {
     setEditModalOpen(false);
     setEditModalCall(null);
   };
+
+  useEffect(() => {
+    if (!fullParticipantAction || !actionParticipants) return;
+    if (actionParticipantsDetails.type !== 'complete') return;
+
+    if (fullParticipantAction.action === 'restart') {
+      continueRestartCall(fullParticipantAction.call, actionParticipants);
+    } else {
+      openEditModal(fullParticipantAction.call, actionParticipants);
+    }
+
+    setFullParticipantAction(null);
+  }, [actionParticipants, actionParticipantsDetails.type, fullParticipantAction]);
 
   const handleDeleteConfirm = (cancelEntireSeries: boolean): void => {
     if (!deleteModalCall) return;

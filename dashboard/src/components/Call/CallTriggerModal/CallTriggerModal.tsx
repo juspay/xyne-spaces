@@ -5,8 +5,6 @@ import { Drawer } from '../../ui/Drawer/Drawer';
 import { cn } from '../../../utils/classNames';
 import { ChannelScopeType } from '@xyne/shared';
 import { CallTrigger } from '../CallTrigger/CallTrigger';
-import { useCachedQuery } from '../../../hooks/useCachedQuery';
-import { queries } from '../../../zero/queries';
 import { useSelector } from '@xstate/react';
 import { roomActor } from '../../../machines/roomMachine';
 import { Badge } from '../../ui/Badge/Badge';
@@ -28,6 +26,8 @@ export interface CallData {
   createdByUserId?: string;
   channelId?: string;
   startedAt?: number;
+  participantCount?: number | null;
+  participantPreviewUserIds?: string | null;
   participants?: readonly CallParticipant[];
   callOrigin?: CallOrigin;
 }
@@ -78,12 +78,15 @@ export const CallTriggerModal: React.FC<CallTriggerModalProps> = ({
       isInCall,
     });
 
-  const [activeCalls] = useCachedQuery(queries.activeCallsInChannel({ channelId }));
+  const activeCalls = useSelector(roomActor, state => state.context.activeCalls);
   const currentCallId = useSelector(roomActor, state => state.context.externalId);
 
   const validActiveCalls = useMemo(
-    () => (activeCalls && Array.isArray(activeCalls) ? (activeCalls as CallData[]) : []),
-    [activeCalls],
+    () =>
+      activeCalls && Array.isArray(activeCalls)
+        ? (activeCalls as CallData[]).filter(call => call.channelId === channelId)
+        : [],
+    [activeCalls, channelId],
   );
 
   const hasActiveCalls = validActiveCalls.length > 0;

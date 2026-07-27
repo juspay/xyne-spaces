@@ -37,6 +37,7 @@ interface ParticipantLike {
 }
 
 interface CallLike {
+  id?: string;
   externalId?: string;
   participants?: ReadonlyArray<ParticipantLike>;
 }
@@ -51,14 +52,6 @@ function findCall(activeCalls: unknown, callId: string): CallLike | null {
 function resolveUserResponse(call: CallLike | null, userId: string | undefined): string | null {
   if (!call || !userId) return null;
   return call.participants?.find(p => p.userId === userId)?.response ?? null;
-}
-
-function resolveUserParticipant(
-  call: CallLike | null,
-  userId: string | undefined,
-): ParticipantLike | null {
-  if (!call || !userId) return null;
-  return call.participants?.find(p => p.userId === userId) ?? null;
 }
 
 const CONSUMED_AUTO_JOIN_REQUEST_TTL_MS = 10 * 60 * 1000;
@@ -150,7 +143,7 @@ export function useAutoJoinOnAccept({
 
   const activeCalls = useSelector(roomActor, state => state.context.activeCalls);
   const call = findCall(activeCalls, callId);
-  const participant = resolveUserParticipant(call, userId);
+  const participant = call?.participants?.find(p => p.userId === userId) ?? null;
   const currentResponse = participant?.response ?? null;
   const requestKey = getAutoJoinRequestKey(callId, userId, participant);
   const pendingRequestKeyRef = useRef<string | null>(null);
@@ -199,7 +192,6 @@ export function useGlobalAutoJoinOnAccept(userId: string | undefined): void {
   const prevResponsesRef = useRef<Map<string, string | null>>(new Map());
   const pendingRequestKeysRef = useRef<Map<string, string>>(new Map());
   const pendingAutoJoinCallIdRef = useRef<string | null>(null);
-
   useEffect(() => {
     const pendingCallId = pendingAutoJoinCallIdRef.current;
     if (!pendingCallId || isRoomBusy) return;
@@ -218,7 +210,7 @@ export function useGlobalAutoJoinOnAccept(userId: string | undefined): void {
       if (!callId) return;
       activeCallIds.add(callId);
 
-      const participant = resolveUserParticipant(call, userId);
+      const participant = call.participants?.find(p => p.userId === userId) ?? null;
       const currentResponse = participant?.response ?? null;
       const previousResponse = prevResponsesRef.current.get(callId) ?? null;
       const requestKey = getAutoJoinRequestKey(callId, userId, participant);

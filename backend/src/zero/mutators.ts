@@ -138,11 +138,68 @@ import {
   unifiedDMService,
   unifiedBotUserService,
 } from '@/bots/unified/index.js';
+
 import { z } from 'zod';
 import { generateKeyBetween } from 'fractional-indexing';
 import { zql } from './queries';
 import vespaClient from '@/vespa/client';
 import { fileSchema } from '@/vespa/src/types';
+
+function sortCallParticipantsForPreview<T extends {
+  id: string;
+  invitedAt: number;
+  isExternal?: boolean;
+  respondedAt?: number | null;
+  joinedAt?: number | null;
+}>(left: T, right: T): number {
+  const leftJoined = left.joinedAt != null;
+  const rightJoined = right.joinedAt != null;
+
+  if (leftJoined !== rightJoined) {
+    return leftJoined ? -1 : 1;
+  }
+
+  if (leftJoined && rightJoined) {
+    return (
+      (left.joinedAt ?? Number.POSITIVE_INFINITY) -
+        (right.joinedAt ?? Number.POSITIVE_INFINITY) ||
+      (left.respondedAt ?? Number.POSITIVE_INFINITY) -
+        (right.respondedAt ?? Number.POSITIVE_INFINITY) ||
+      left.invitedAt - right.invitedAt ||
+      left.id.localeCompare(right.id)
+    );
+  }
+
+  return (
+    (left.respondedAt ?? Number.POSITIVE_INFINITY) -
+      (right.respondedAt ?? Number.POSITIVE_INFINITY) ||
+    left.invitedAt - right.invitedAt ||
+    left.id.localeCompare(right.id)
+  );
+}
+
+async function updateCallParticipantPreview(
+  tx: Transaction<Schema>,
+  callId: string,
+): Promise<void> {
+  const participants = await tx.run(zql.call_participants.where('callId', callId));
+  const sortedParticipants = participants.sort(sortCallParticipantsForPreview);
+  const participantPreviewUserIds = JSON.stringify(
+    sortedParticipants
+      .filter(participant => !participant.isExternal)
+      .slice(0, 4)
+      .map(participant => ({
+        userId: participant.userId,
+        hasJoined: participant.joinedAt !== null,
+      })),
+  );
+
+  await tx.mutate.calls.update({
+    id: callId,
+    participantCount: participants.length,
+    participantPreviewUserIds,
+  });
+}
 
 const storageService = getStorageService();
 
@@ -4464,6 +4521,9 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               endedAt: now,
               updatedAt: now,
             });
+            if (scheduleStatus === CallStatus.ENDED) {
+              await updateCallParticipantPreview(tx, call.id);
+            }
 
             // Update system message with final call summary
             const callMetadata = call.metadata as { systemMessageId?: string } | null;

@@ -1,25 +1,35 @@
 import { ReactElement, useMemo } from 'react';
-import { QueryResultType } from '@rocicorp/zero';
 import Avatar from '../../components/ui/Avatar/Avatar';
 import { Button } from '../../components/ui/Button/Button';
 import { Dialog } from '../../components/ui/Dialog/Dialog';
 import { queries } from '../../zero/queries';
 import { useUsers } from '../../hooks/useUsers';
-
-type Call = QueryResultType<typeof queries.userCallHistory>[number];
+import { useCachedQuery } from '../../hooks/useCachedQuery';
+import { type Call } from './callHistoryItem.utils';
+import { CallStatus } from '@xyne/shared';
 
 interface CallParticipantsContentProps {
   call: Call;
+  isOpen: boolean;
   currentUserId: string | undefined;
   onClose: () => void;
 }
 
 function CallParticipantsContent({
   call,
+  isOpen,
   currentUserId,
   onClose,
 }: CallParticipantsContentProps): ReactElement {
-  const allParticipants = call.participants || [];
+  const hasFullParticipants =
+    call.status === CallStatus.ACTIVE ||
+    (call.participantCount !== null &&
+      call.participantCount !== undefined &&
+      call.participantCount <= (call.participants?.length ?? 0));
+  const [fullParticipants] = useCachedQuery(queries.callParticipantsByCallId({ callId: call.id }), {
+    enabled: isOpen && !hasFullParticipants,
+  });
+  const allParticipants = fullParticipants ?? call.participants ?? [];
 
   const allUsers = useUsers();
   const usersById = useMemo(() => {
@@ -98,7 +108,12 @@ export function ParticipantsModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <CallParticipantsContent call={call} currentUserId={currentUserId} onClose={onClose} />
+      <CallParticipantsContent
+        call={call}
+        isOpen={isOpen}
+        currentUserId={currentUserId}
+        onClose={onClose}
+      />
     </Dialog>
   );
 }

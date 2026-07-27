@@ -113,6 +113,7 @@ import queriesEntityTypeBackfillRoutes from '@/routes/queriesEntityTypeBackfill'
 import onCallSetNumbersBackfillRoutes from '@/routes/onCallSetNumbersBackfill';
 import ticketDuplicateBackfillRoutes from '@/routes/ticketDuplicateBackfill';
 import conversationParticipantBackfillRoutes from '@/routes/conversationParticipantBackfill';
+import callParticipantCountBackfillRoutes from '@/routes/callParticipantCountBackfill';
 import formFieldSequenceBackfillRoutes from '@/routes/formFieldSequenceBackfill';
 import dualWriteSequenceNumberBackfillRoutes from '@/routes/dualWriteSequenceNumberBackfill';
 import dmChannelProjectBackfillRoutes from '@/routes/dmChannelProjectBackfill';
@@ -443,6 +444,8 @@ export class App {
     this.app.use('/api/admin/desk-metrics-backfill', deskMetricsBackfillRoutes);
     this.app.use('/migrate/api/admin/desk-metrics-backfill', deskMetricsBackfillRoutes);
     this.app.use('/api/admin/conversation-participant-backfill', conversationParticipantBackfillRoutes);
+    this.app.use('/api/admin/call-participant-count-backfill', callParticipantCountBackfillRoutes);
+    this.app.use('/migrate/api/admin/call-participant-count-backfill', callParticipantCountBackfillRoutes);
     this.app.use('/migrate/api/admin/form-field-sequence-backfill', formFieldSequenceBackfillRoutes);
     this.app.use('/api/admin/form-field-sequence-backfill', formFieldSequenceBackfillRoutes);
     // Dual-write sequence number backfill (same handler, new router)

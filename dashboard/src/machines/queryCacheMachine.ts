@@ -26,7 +26,7 @@ export type {
 } from '@xyne/shared/machines';
 
 // Dashboard-specific call history types (used by usePaginatedCalls)
-export type CallHistoryEntry = QueryResultType<typeof queries.userCallHistory>[number];
+export type CallHistoryEntry = QueryResultType<typeof queries.userCallHistoryV2>[number];
 
 import {
   setupQueryCachePersistence as _setupPersistence,

@@ -17,7 +17,7 @@ import type { Context } from '../zero/schema.js';
 
 export type Conversation = QueryResultType<typeof queries.channelConversationsPaginatedV3>[number];
 
-export type CallHistoryEntry = QueryResultType<typeof queries.userCallHistory>[number];
+export type CallHistoryEntry = QueryResultType<typeof queries.userCallHistoryV2>[number];
 export type RecordingEntry = QueryResultType<typeof queries.userRecordings>[number];
 
 export const CALL_HISTORY_KEY = 'callHistory';
@@ -490,7 +490,7 @@ export const getChannelConversationsQueryHash = (context: { userID: string }): s
  */
 export const getCallHistoryQueryHash = (): string => {
   try {
-    const query = queries.userCallHistory.fn({
+    const query = queries.userCallHistoryV2.fn({
       args: { limit: 1, start: null },
       ctx: {} as Context,
     });
