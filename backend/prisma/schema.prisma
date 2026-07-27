@@ -3244,6 +3244,8 @@ model Call {
   updatedAt        DateTime    @updatedAt
   metadata         Json?       // LiveKit room config, max participants, etc.
   callUpdatesChannel String?   // Non-null = post call updates to this channel (Case 3); null = no broadcast
+  participantCount Int?        // Denormalized total CallParticipant rows; nullable until backfilled
+  participantPreviewUserIds String? // Stringified JSON: list of { userId: string , hasJoined: boolean }
 
   // Relations
   channel      Channel?          @relation(fields: [channelId], references: [id])

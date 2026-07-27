@@ -2195,6 +2195,13 @@ export const queries = defineQueries({
       .related('participants');
   }),
 
+  userScheduledCallsV2: defineQuery(({ ctx }) => {
+    return zql.calls
+      .where('status', CallStatus.SCHEDULED)
+      .orderBy('startsAt', 'asc')
+      .related('participants', p => p.where('userId', ctx.userID));
+  }),
+
   userCallHistory: defineQuery(
     z.object({
       limit: z.number(),
@@ -2214,6 +2221,41 @@ export const queries = defineQueries({
       }
 
       return query.limit(limit).related('participants');
+    },
+  ),
+
+  userCallHistoryV2: defineQuery(
+    z.object({
+      limit: z.number(),
+      start: z.object({ id: z.string(), startedAt: z.number() }).nullable(),
+    }),
+    ({ ctx, args: { limit, start } }) => {
+      let query = zql.calls
+        .where(helpers => helpers.cmp('callType', 'NOT IN', [CallType.HEADLESS]))
+        .where(helpers =>
+          helpers.cmp('status', 'NOT IN', [
+            CallStatus.ACTIVE,
+            CallStatus.SCHEDULED,
+            CallStatus.CANCELLED,
+          ]),
+        )
+        .orderBy('startedAt', 'desc')
+        .orderBy('id', 'desc');
+
+      if (start) {
+        query = query.start({ id: start.id, startedAt: start.startedAt }, { inclusive: false });
+      }
+
+      return query
+        .limit(limit)
+        .related('participants', p => p.where('userId', ctx.userID));
+    },
+  ),
+
+  callParticipantsByCallId: defineQuery(
+    z.object({ callId: z.string() }),
+    ({ args: { callId } }) => {
+      return zql.call_participants.where('callId', callId).orderBy('invitedAt', 'asc');
     },
   ),
 

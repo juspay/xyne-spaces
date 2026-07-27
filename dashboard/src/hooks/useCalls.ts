@@ -12,7 +12,7 @@ import { formatElapsedTime } from '../utils/recordingUtils';
 type ActiveCallWithRelations = QueryResultType<typeof queries.userActiveCalls>[number];
 
 // Type for call participants
-type CallParticipants = NonNullable<ActiveCallWithRelations['participants']>;
+type CallParticipants = Readonly<QueryResultType<typeof queries.callParticipantsByCallId>>;
 
 /**
  * Utility function to filter accepted participants
@@ -86,6 +86,7 @@ export const formatParticipantText = <
 >(
   participants: readonly T[] | T[],
   userMap: Map<string, { id: string; name?: string; displayName?: string | null }>,
+  totalCount = participants.length,
 ): string => {
   // Helper function to extract the first name from a full name
   const getFirstName = (fullName: string | undefined): string => {
@@ -100,7 +101,7 @@ export const formatParticipantText = <
     return getFirstName(user?.displayName || user?.name);
   };
 
-  const count = participants.length;
+  const count = totalCount;
   if (count === 0) return '';
 
   if (count === 1) {
@@ -167,7 +168,7 @@ export const useCallParticipants = (externalId: string) => {
   const activeCall = useActiveCall(externalId);
 
   return useMemo(() => {
-    return activeCall?.participants || [];
+    return activeCall?.participants ?? [];
   }, [activeCall?.participants]);
 };
 

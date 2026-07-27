@@ -84,8 +84,10 @@ export const useCallActions = ({
 
   // Check cross-device active status via DB participant record
   const { userID } = useAuthContextValues();
-  const channelCallParticipants = currentChannelCall?.participants ?? [];
-  const isUserInChannelCallElsewhere = isUserActiveInCall(channelCallParticipants, userID);
+  const isUserInChannelCallElsewhere = isUserActiveInCall(
+    currentChannelCall?.participants ?? [],
+    userID,
+  );
 
   // Watch for machine state changes and execute pending action when idle
   useEffect(() => {

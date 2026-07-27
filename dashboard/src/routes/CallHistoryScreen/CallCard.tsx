@@ -17,11 +17,14 @@ import Button from '../../components/ui/Button';
 import { formatRelativeTimestamp } from '../../utils/dateUtils';
 import {
   Call,
+  getParticipantDisplayData,
+  getCallParticipantCount,
   getCallStatus,
   getOtherParticipants,
-  getParticipantUsers,
+  getPreviewParticipantUsers,
   getStatusText,
   hasAnyoneJoined,
+  hasPreviewParticipantJoined,
   isScheduledCallJoinable,
 } from './callHistoryItem.utils';
 import { cn } from '../../utils/classNames';
@@ -80,11 +83,29 @@ export const CallCard = ({
   const userJoinedandLeft = currentUserParticipant?.response === InvitationResponse.LEFT;
 
   const otherParticipants = getOtherParticipants(call.participants, currentUserId);
+  const participantCount = getCallParticipantCount(call);
+  const otherParticipantCount = Math.max(
+    participantCount - (currentUserParticipant ? 1 : 0),
+    otherParticipants.length,
+  );
   const allUsersData = useUsers();
 
-  const participantUsers = getParticipantUsers(otherParticipants, allUsersData);
-  const userIds = participantUsers.map(u => u.id);
-  const primaryUser = participantUsers[0];
+  const participantUsers = getPreviewParticipantUsers(
+    call.participantPreviewUserIds,
+    allUsersData,
+    currentUserId,
+  );
+  const fallbackParticipantData = getParticipantDisplayData(
+    call.participants,
+    allUsersData,
+    currentUserId,
+  );
+  const userIds =
+    participantUsers.length > 0 ? participantUsers.map(u => u.id) : fallbackParticipantData.userIds;
+  const participantDisplayNames =
+    participantUsers.length > 0
+      ? participantUsers.map(user => user.name || user.email || 'Unknown')
+      : fallbackParticipantData.displayNames;
 
   const isCallJoinable = isScheduledCallJoinable(call);
   const isActiveState = call.status === CallStatus.ACTIVE;
@@ -101,7 +122,9 @@ export const CallCard = ({
       : 'Go to Call message';
 
   // Determine call status
-  const anyoneJoined = hasAnyoneJoined(otherParticipants);
+  const anyoneJoined =
+    hasPreviewParticipantJoined(call.participantPreviewUserIds, currentUserId) ||
+    hasAnyoneJoined(otherParticipants);
   const callStatus = getCallStatus(
     call,
     isOutgoingCall,
@@ -151,21 +174,18 @@ export const CallCard = ({
       );
     }
 
-    const primaryUserDisplay = primaryUser?.name || primaryUser?.email || 'Unknown';
+    const primaryUserDisplay = participantDisplayNames[0] || 'Unknown';
 
     return (
       <>
         {primaryUserDisplay}
-        {participantUsers.length > 1 && (
+        {otherParticipantCount > 1 && (
           <span>
             {', '}
-            {participantUsers
-              .slice(1, 2)
-              .map(u => u?.name || u?.email || 'Unknown')
-              .join(', ')}
-            {participantUsers.length > 2 && (
+            {participantDisplayNames.slice(1, 2).join(', ')}
+            {otherParticipantCount > 2 && (
               <span className='ml-1 whitespace-nowrap'>
-                + {participantUsers.length - 2} other{participantUsers.length - 2 > 1 ? 's' : ''}
+                + {otherParticipantCount - 2} other{otherParticipantCount - 2 > 1 ? 's' : ''}
               </span>
             )}
           </span>
@@ -318,9 +338,9 @@ export const CallCard = ({
                     </AvatarStackItem>
                   ))}
               </div>
-              {userIds.length > MAX_AVATARS_TO_SHOW && (
+              {otherParticipantCount > MAX_AVATARS_TO_SHOW && (
                 <span className='text-xs text-muted-foreground tabular-nums'>
-                  +{userIds.length - MAX_AVATARS_TO_SHOW}
+                  +{otherParticipantCount - MAX_AVATARS_TO_SHOW}
                 </span>
               )}
             </div>
