@@ -370,6 +370,7 @@ export interface MerchantTicketListItem {
   conversationId: string;
   channelId: string;
   boardId?: string | null;
+  projectId?: string;
   senderEmail?: string;
   senderName?: string;
 }
