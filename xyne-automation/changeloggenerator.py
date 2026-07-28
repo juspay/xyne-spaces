@@ -3,16 +3,16 @@ import csv
 import sys
 import re
 
-# Bitbucket PR base URL
-REPO_BASE_URL = "https://bitbucket.example.com/projects/XYNE/repos/xyne-spaces/pull-requests"
+# GitHub PR base URL
+REPO_BASE_URL = "https://github.com/juspay/xyne-spaces-test/pull"
 
 
 def extract_pr_number(message):
-    """Extract PR number from commit message looking for patterns like (#123)"""
+    """Extract GitHub PR number from commit messages."""
     match = re.search(r'\(#(\d+)\)', message)
     if match:
         return match.group(1)
-    match = re.search(r'(?:PR|Pull Request)\s*#(\d+)', message, re.IGNORECASE)
+    match = re.search(r'\b(?:PR|Pull request|Merge pull request)\s*#(\d+)', message, re.IGNORECASE)
     if match:
         return match.group(1)
     return None
@@ -22,7 +22,7 @@ def generate_pr_link(pr_number):
     """Generate PR link URL"""
     if not pr_number:
         return ""
-    return f"{REPO_BASE_URL}/{pr_number}/overview"
+    return f"{REPO_BASE_URL}/{pr_number}"
 
 
 def generate_changelog(prev_commit, output_file="changelog.csv"):
