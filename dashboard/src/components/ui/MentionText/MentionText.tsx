@@ -154,7 +154,10 @@ export const MentionText: React.FC<MentionTextProps> = props => {
     }
 
     return (
-      <UserHoverWrapper userId={props.userId}>
+      <UserHoverWrapper
+        userId={props.userId}
+        preserveThreadRoute={props.preserveThreadRoute ?? false}
+      >
         <span
           className={`${isCurrentUser ? 'bg-[var(--mention-current-user-bg)] text-[color:var(--mention-current-user-color,var(--mention-color))]' : 'bg-[var(--mention-bg)] text-[color:var(--mention-color)]'} px-1 py-[2px] rounded-[4px] font-normal cursor-pointer no-underline transition-colors duration-200 inline whitespace-nowrap leading-inherit align-baseline hover:text-[color:var(--mention-hover-color)]`}
         >

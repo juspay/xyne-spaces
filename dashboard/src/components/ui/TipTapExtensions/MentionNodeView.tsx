@@ -13,6 +13,7 @@ interface MentionStorage {
   groupActions?: GroupMentionAction[];
   onUserAction?: (userId: string, action: UserMentionActionType) => void;
   onGroupAction?: (groupId: string, action: GroupMentionActionType) => void;
+  preserveThreadRoute?: boolean;
 }
 
 interface EditorStorage {
@@ -34,6 +35,7 @@ export function MentionNodeView({ node, editor }: NodeViewProps): React.JSX.Elem
   const groupActions = storage?.groupActions;
   const onUserAction = storage?.onUserAction;
   const onGroupAction = storage?.onGroupAction;
+  const preserveThreadRoute = storage?.preserveThreadRoute ?? false;
 
   return (
     <NodeViewWrapper as='span' className='mention-node-wrapper inline'>
@@ -82,6 +84,7 @@ export function MentionNodeView({ node, editor }: NodeViewProps): React.JSX.Elem
             })}
             {...(userActions !== undefined && { userActions })}
             {...(onUserAction !== undefined && { onUserAction })}
+            preserveThreadRoute={preserveThreadRoute}
           />
         )}
       </span>

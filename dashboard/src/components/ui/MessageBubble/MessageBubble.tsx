@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import Tooltip from '../Tooltip/Tooltip';
 import { AvatarSize } from '../../UserAvatar/UserAvatar';
 import * as Popover from '@radix-ui/react-popover';
@@ -645,6 +645,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const originalSender = useUser(forwardedMessageData?.originalSenderId || '');
   const isMe = user?.id === message.senderId;
   const { baseRoute } = useRouteContext();
+  const location = useLocation();
   const actionableCount = useMemo(
     () => (message.nudgeCounts ?? []).reduce((sum, row) => sum + row.nudgeCount, 0),
     [message.nudgeCounts],
@@ -659,7 +660,16 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
       onUserClick(userId);
       return;
     }
-    void navigate(`${baseRoute}/${channelId}/profile/${userId}`);
+    const isFocusThread = new URLSearchParams(location.search).get('focusThread') === '1';
+    const messageConversationId = conversation?.conversationId || message.conversationId;
+    const threadSegment =
+      (context === 'thread' || isFocusThread) && messageConversationId
+        ? `/${messageConversationId}`
+        : '';
+    const focusThreadSearch = isFocusThread ? '?focusThread=1' : '';
+    void navigate(
+      `${baseRoute}/${channelId}${threadSegment}/profile/${userId}${focusThreadSearch}`,
+    );
   };
 
   const handleTimestampClick = (e: React.MouseEvent | React.KeyboardEvent): void => {
@@ -859,7 +869,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     showActiveStatus={false}
                   />
                 ) : (
-                  <UserHoverWrapper userId={sender.id}>
+                  <UserHoverWrapper userId={sender.id} preserveThreadRoute={context === 'thread'}>
                     <UserAvatar
                       userId={sender.id}
                       size={AvatarSize.REGULAR}
@@ -965,7 +975,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     showActiveStatus={false}
                   />
                 ) : (
-                  <UserHoverWrapper userId={sender.id}>
+                  <UserHoverWrapper userId={sender.id} preserveThreadRoute={context === 'thread'}>
                     <UserAvatar
                       userId={sender.id}
                       size={AvatarSize.REGULAR}
@@ -1059,7 +1069,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   </span>
                 ) : (
                   <span className='flex items-center gap-1'>
-                    <UserHoverWrapper userId={sender.id}>
+                    <UserHoverWrapper userId={sender.id} preserveThreadRoute={context === 'thread'}>
                       <div className='flex items-center gap-1.5'>
                         <Button
                           variant='ghost'
@@ -1269,6 +1279,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                           <RenderMessageWithHTML
                             message={DOMPurify.sanitize(forwardedMessageData.optionalText)}
                             showEdited={message.edited}
+                            preserveThreadRoute={context === 'thread'}
                           />
                         </div>
                       )}
@@ -1345,6 +1356,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                               <RenderMessageWithHTML
                                 message={resolvedForwardedContent}
                                 showEdited={false}
+                                preserveThreadRoute={context === 'thread'}
                               />
                             </div>
                           )}
@@ -1400,6 +1412,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                             isSystemMessage={isSystemMessage}
                             messageId={message.messageId}
                             conversationId={message.conversationId}
+                            preserveThreadRoute={context === 'thread'}
                           />
                         </div>
                       )}

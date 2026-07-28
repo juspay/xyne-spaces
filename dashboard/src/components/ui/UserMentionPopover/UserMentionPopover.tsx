@@ -6,7 +6,7 @@ import { Button } from '../Button/Button';
 import { UserHoverWrapperProps } from './types';
 import { useAuth } from '../../../hooks/useAuth';
 import { channelService } from '../../../services/Chat/channelService';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useUser } from '../../../hooks/useUsers';
 import { useTypingState } from '../../../contexts/TypingStateContext';
@@ -21,7 +21,11 @@ import { useRouteContext } from '../../../hooks/useRouteContext';
  * UserHoverWrapper Component
  * Wraps any element to show user popover on hover with avatar and message button
  */
-const UserHoverWrapperInner: React.FC<UserHoverWrapperProps> = ({ userId, children }) => {
+const UserHoverWrapperInner: React.FC<UserHoverWrapperProps> = ({
+  userId,
+  children,
+  preserveThreadRoute = false,
+}) => {
   const { user: currentUser } = useAuth();
   const navigate = useNavigate();
   const { hasTyped } = useTypingState();
@@ -29,7 +33,8 @@ const UserHoverWrapperInner: React.FC<UserHoverWrapperProps> = ({ userId, childr
   const user = useUser(userId);
   const [dmChannelId, setDmChannelId] = useState<string | null>(null);
   const { baseRoute } = useRouteContext();
-  const { channelId } = useParams<{ channelId: string }>();
+  const { channelId, conversationId } = useParams<{ channelId: string; conversationId?: string }>();
+  const location = useLocation();
   const shouldTriggerCallRef = useRef(false);
 
   // Don't show hover card when user has typed (until they move cursor)
@@ -111,7 +116,13 @@ const UserHoverWrapperInner: React.FC<UserHoverWrapperProps> = ({ userId, childr
 
   const handleProfileClick = (): void => {
     if (channelId) {
-      void navigate(`${baseRoute}/${channelId}/profile/${userId}`);
+      const isFocusThread = new URLSearchParams(location.search).get('focusThread') === '1';
+      const threadSegment =
+        (isFocusThread || preserveThreadRoute) && conversationId ? `/${conversationId}` : '';
+      const focusThreadSearch = isFocusThread ? '?focusThread=1' : '';
+      void navigate(
+        `${baseRoute}/${channelId}${threadSegment}/profile/${userId}${focusThreadSearch}`,
+      );
     }
   };
 
@@ -237,6 +248,14 @@ const UserHoverWrapperInner: React.FC<UserHoverWrapperProps> = ({ userId, childr
   );
 };
 
-export const UserHoverWrapper: React.FC<UserHoverWrapperProps> = ({ userId, children }) => {
-  return <UserHoverWrapperInner userId={userId}>{children}</UserHoverWrapperInner>;
+export const UserHoverWrapper: React.FC<UserHoverWrapperProps> = ({
+  userId,
+  children,
+  preserveThreadRoute = false,
+}) => {
+  return (
+    <UserHoverWrapperInner userId={userId} preserveThreadRoute={preserveThreadRoute}>
+      {children}
+    </UserHoverWrapperInner>
+  );
 };

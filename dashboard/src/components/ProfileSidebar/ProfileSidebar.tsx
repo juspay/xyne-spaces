@@ -1,5 +1,5 @@
 import React from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useUser } from '../../hooks/useUsers';
 import { useAuthContextValues } from '../../hooks/useAuth';
 import UserProfile from '../ui/UserProfile/UserProfile';
@@ -15,7 +15,12 @@ interface ProfileSidebarProps {
 
 export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({ className }) => {
   const navigate = useNavigate();
-  const { channelId, userId } = useParams<{ channelId?: string; userId: string }>();
+  const { channelId, conversationId, userId } = useParams<{
+    channelId?: string;
+    conversationId?: string;
+    userId: string;
+  }>();
+  const location = useLocation();
   const context = useAuthContextValues();
   const { baseRoute } = useRouteContext();
 
@@ -26,7 +31,10 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({ className }) => 
 
   const handleClose = (): void => {
     if (channelId) {
-      void navigate(`${baseRoute}/${channelId}`);
+      const threadSegment = conversationId ? `/${conversationId}` : '';
+      const isFocusThread = new URLSearchParams(location.search).get('focusThread') === '1';
+      const focusThreadSearch = isFocusThread ? '?focusThread=1' : '';
+      void navigate(`${baseRoute}/${channelId}${threadSegment}${focusThreadSearch}`);
     } else {
       void navigate(baseRoute);
     }
