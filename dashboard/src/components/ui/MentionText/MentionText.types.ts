@@ -34,6 +34,7 @@ interface BaseMentionTextProps {
   onUserAction?: (userId: string, action: UserMentionActionType) => void;
   onGroupAction?: (groupId: string, action: GroupMentionActionType) => void;
   hoverHandlers?: MentionHoverHandlers;
+  preserveThreadRoute?: boolean;
 }
 
 export type UserMentionProps = BaseMentionTextProps & {

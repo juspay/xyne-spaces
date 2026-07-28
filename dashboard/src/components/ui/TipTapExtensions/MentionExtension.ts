@@ -20,6 +20,7 @@ export interface MentionOptions {
   groupActions?: GroupMentionAction[];
   onUserAction?: (userId: string, action: UserMentionActionType) => void;
   onGroupAction?: (groupId: string, action: GroupMentionActionType) => void;
+  preserveThreadRoute?: boolean;
 }
 
 export type MentionPluginState = BaseSelectorPluginState<MentionResult>;
@@ -361,6 +362,7 @@ export const MentionExtension = Node.create<MentionOptions>({
       groupActions: this.options.groupActions,
       onUserAction: this.options.onUserAction,
       onGroupAction: this.options.onGroupAction,
+      preserveThreadRoute: this.options.preserveThreadRoute,
     };
   },
 

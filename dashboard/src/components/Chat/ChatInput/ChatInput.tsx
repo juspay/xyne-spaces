@@ -955,6 +955,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
                 emojiPicker: true,
               }}
               blockedExtensions={[...BLOCKED_EXTENSIONS]}
+              preserveThreadRoute={!!conversationId}
               {...(conversationId &&
                 !messageId && {
                   onAlsoSendToChannelChange: handleAlsoSendToChannelChange,
