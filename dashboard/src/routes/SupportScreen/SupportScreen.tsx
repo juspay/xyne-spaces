@@ -51,6 +51,7 @@ import {
   UserPlus,
   Info as InfoIcon,
   Ticket as TicketIcon,
+  Tag as TagIcon,
 } from 'lucide-react';
 import {
   ChannelVisibility,
@@ -96,6 +97,7 @@ import {
   PrioritySubmenu,
   UserSubmenu,
   AICategorySubmenu,
+  GeneratedTagsSubmenu,
   UserGroupSubmenu,
   StagesSubmenu,
   DynamicFieldSubmenu,
@@ -112,6 +114,7 @@ import {
 } from '../../utils/board/dynamicFieldFilters';
 import { dynamicColumnKey } from '../../components/Tickets/TicketTable/dynamicFieldColumns';
 import { useDeskTableColumns, DESK_TABLE_BUILTIN_COLUMNS } from './useDeskTableColumns';
+import { tagsConfigApi } from '../../api/tagsConfigApi';
 import {
   CalendarView,
   PRESETS,
@@ -683,6 +686,28 @@ const SupportScreen = (): ReactElement => {
     [deskDynamicFields, selectedColumnKeys],
   );
 
+  const [tagFilterConversationIds, setTagFilterConversationIds] = useState<string[] | null>(null);
+
+  useEffect(() => {
+    if (!selectedChannelId || !filters.generatedTags || filters.generatedTags.length === 0) {
+      setTagFilterConversationIds(null);
+      return;
+    }
+    setTagFilterConversationIds([]); // [] during loading → shows 0 while waiting, not all tickets
+    let cancelled = false;
+    tagsConfigApi
+      .filterConversationsByTags(selectedChannelId, filters.generatedTags)
+      .then(ids => {
+        if (!cancelled) setTagFilterConversationIds(ids);
+      })
+      .catch(() => {
+        if (!cancelled) setTagFilterConversationIds([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedChannelId, filters.generatedTags]);
+
   // Build the filter args once — reused by both the kanban query and the list view.
   // "My Tickets" toggle is the assignee fallback when the explicit assignee filter is empty.
   const ticketFilter = useMemo(
@@ -697,6 +722,10 @@ const SupportScreen = (): ReactElement => {
       stageName: filters.stages && filters.stages.length > 0 ? filters.stages : undefined,
       aiCategory:
         filters.aiCategory && filters.aiCategory.length > 0 ? filters.aiCategory : undefined,
+      conversationIdWhitelist:
+        filters.generatedTags && filters.generatedTags.length > 0
+          ? (tagFilterConversationIds ?? [])
+          : undefined,
       hasAiDraft: filters.hasAiDraft === true ? true : undefined,
       userGroups:
         filters.userGroups && filters.userGroups.length > 0 ? filters.userGroups : undefined,
@@ -704,7 +733,7 @@ const SupportScreen = (): ReactElement => {
       lastEmailAtEnd: filters.lastEmailAtEnd,
       dynamicFieldFilters: toDynamicFieldQueryFilters(dynamicFieldEntries),
     }),
-    [filters, userID, dynamicFieldEntries],
+    [filters, userID, dynamicFieldEntries, tagFilterConversationIds],
   );
 
   const availablePriorities = useMemo(() => Object.values(TicketPriority), []);
@@ -771,6 +800,7 @@ const SupportScreen = (): ReactElement => {
     filters.assigned ||
     filters.hasAiDraft === true ||
     (filters.aiCategory && filters.aiCategory.length > 0) ||
+    (filters.generatedTags && filters.generatedTags.length > 0) ||
     (filters.userGroups && filters.userGroups.length > 0) ||
     filters.lastEmailAtStart !== undefined ||
     filters.lastEmailAtEnd !== undefined ||
@@ -849,6 +879,7 @@ const SupportScreen = (): ReactElement => {
   const filterMenuItems = useMemo(
     () => [
       { id: 'aiCategory', label: 'AI Category', icon: Sparkles },
+      { id: 'generatedTags', label: 'AI Tags', icon: TagIcon },
       { id: 'userGroups', label: 'User Groups', icon: Users },
       { id: 'date', label: 'Date', icon: CalendarDays },
       ...deskDynamicFields.map(field => ({
@@ -885,6 +916,14 @@ const SupportScreen = (): ReactElement => {
             selectedCategories={filters.aiCategory || []}
             onChange={(categories: string[]) => handleFilterChange('aiCategory', categories)}
             availableCategories={availableAiCategories}
+          />
+        );
+      case 'generatedTags':
+        return (
+          <GeneratedTagsSubmenu
+            selectedTags={filters.generatedTags || []}
+            onChange={(tags: string[]) => handleFilterChange('generatedTags', tags)}
+            channelId={selectedChannelId}
           />
         );
       case 'userGroups':
@@ -2530,6 +2569,10 @@ const SupportScreen = (): ReactElement => {
                                   const isFilterActive =
                                     (item.id === 'aiCategory' &&
                                       !!(filters.aiCategory && filters.aiCategory.length > 0)) ||
+                                    (item.id === 'generatedTags' &&
+                                      !!(
+                                        filters.generatedTags && filters.generatedTags.length > 0
+                                      )) ||
                                     (item.id === 'userGroups' &&
                                       !!(filters.userGroups && filters.userGroups.length > 0)) ||
                                     ('dynamicFieldId' in item &&
@@ -3234,6 +3277,7 @@ type SupportTicketDetailProps = {
     priority: TicketPriority[] | undefined;
     stageName: string[] | undefined;
     aiCategory: string[] | undefined;
+    conversationIdWhitelist: string[] | undefined;
     hasAiDraft: boolean | undefined;
     userGroups: string[] | undefined;
     lastEmailAtStart: number | undefined;
@@ -3649,11 +3693,13 @@ export const SupportTicketDetail = ({
   const navigateAdjacent = async (dir: 'forward' | 'backward'): Promise<void> => {
     if (!cursorStart || !channelId) return;
     try {
+      const { conversationIdWhitelist: _ciw, ...restTicketFilter } = ticketFilter;
       const result = (await zero.run(
         queries.supportTicketsPageV3({
           channelId,
           isMember,
-          ...ticketFilter,
+          ...restTicketFilter,
+          ...(_ciw !== undefined ? { conversationIds: _ciw } : {}),
           limit: 1,
           start: cursorStart,
           dir,

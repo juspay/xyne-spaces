@@ -1101,6 +1101,7 @@ export const queries = defineQueries({
       priority: z.array(z.nativeEnum(TicketPriority)).optional(),
       stageName: z.array(z.string()).optional(),
       aiCategory: z.array(z.string()).optional(),
+      conversationIds: z.array(z.string()).optional(),
       hasAiDraft: z.boolean().optional(),
       userGroups: z.array(z.string()).optional(),
       lastEmailAtStart: z.number().optional(),
@@ -1108,7 +1109,7 @@ export const queries = defineQueries({
       dynamicFieldFilters: supportDynamicFieldFiltersSchema,
       formEntityValueFieldIds: z.array(z.string()).optional(),
     }),
-    ({ ctx, args: { channelId, merchantMid, assignedTo, priority, stageName, aiCategory, hasAiDraft, userGroups, lastEmailAtStart, lastEmailAtEnd, dynamicFieldFilters, formEntityValueFieldIds } }) => {
+    ({ ctx, args: { channelId, merchantMid, assignedTo, priority, stageName, aiCategory, conversationIds, hasAiDraft, userGroups, lastEmailAtStart, lastEmailAtEnd, dynamicFieldFilters, formEntityValueFieldIds } }) => {
       let query = zql.tickets.where('channelId', channelId);
       query = query.where('isArchived', false);
 
@@ -1130,6 +1131,10 @@ export const queries = defineQueries({
 
       if (aiCategory && aiCategory.length > 0) {
         query = query.where(({ or, cmp }) => or(...aiCategory.map((c) => cmp('aiCategory', c))));
+      }
+
+      if (conversationIds !== undefined) {
+        query = query.where('conversationId', 'IN', conversationIds.length > 0 ? conversationIds : ['']);
       }
 
       if (hasAiDraft) {
@@ -1245,6 +1250,7 @@ export const queries = defineQueries({
       priority: z.array(z.nativeEnum(TicketPriority)).optional(),
       stageName: z.array(z.string()).optional(),
       aiCategory: z.array(z.string()).optional(),
+      conversationIds: z.array(z.string()).optional(),
       hasAiDraft: z.boolean().optional(),
       mailboxFolder: z.enum(['inbox', 'all', 'starred', 'spam']).optional(),
       userGroups: z.array(z.string()).optional(),
@@ -1255,7 +1261,7 @@ export const queries = defineQueries({
       start: z.object({ id: z.string(), lastEmailAt: z.number() }).nullable(),
       dir: z.literal('forward').or(z.literal('backward')),
     }),
-    ({ ctx, args: { channelId, assignedTo, priority, stageName, aiCategory, hasAiDraft, mailboxFolder, userGroups, lastEmailAtStart, lastEmailAtEnd, dynamicFieldFilters, limit, start, dir } }) => {
+    ({ ctx, args: { channelId, assignedTo, priority, stageName, aiCategory, conversationIds, hasAiDraft, mailboxFolder, userGroups, lastEmailAtStart, lastEmailAtEnd, dynamicFieldFilters, limit, start, dir } }) => {
       let query = zql.tickets.where('channelId', channelId);
       query = query.where('isArchived', false);
 
@@ -1273,6 +1279,10 @@ export const queries = defineQueries({
 
       if (aiCategory && aiCategory.length > 0) {
         query = query.where(({ or, cmp }) => or(...aiCategory.map((c) => cmp('aiCategory', c))));
+      }
+
+      if (conversationIds !== undefined) {
+        query = query.where('conversationId', 'IN', conversationIds.length > 0 ? conversationIds : ['']);
       }
 
       if (hasAiDraft) {

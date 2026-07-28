@@ -25,6 +25,7 @@ export interface TicketFilters {
   stages?: string[];
   ticketTypes?: string[];
   aiCategory?: string[]; // AI classification categories (e.g. "Mandate", "Refund")
+  generatedTags?: string[]; // AI-generated tags in "category:tag" format (e.g. "priority:high")
   hasAiDraft?: boolean; // filter to show only tickets with AI-generated email drafts
   // Dynamic form fields: fieldId -> filter value
   // For SELECT fields: string array of selected values

@@ -14,6 +14,17 @@ export type TagCategories = Record<string, TagCategoryConfig>;
 
 export type CategoryCatalogEntry = TagCategoryConfig & { name: string };
 
+export interface GeneratedTagPreviewItem {
+  category: string;
+  tag: string;
+  reason?: string | null;
+}
+
+export interface ChannelGeneratedTagItem {
+  category: string;
+  tag: string;
+}
+
 export const tagsConfigApi = {
   getConfig: async (channelId: string): Promise<TagCategories> => {
     const res = await apiInstance.get<{ categories: TagCategories }>(
@@ -36,5 +47,32 @@ export const tagsConfigApi = {
       { params: { sourceType } },
     );
     return res.data.catalog;
+  },
+
+  previewTagGeneration: async (
+    channelId: string,
+    subject: string,
+    body: string,
+  ): Promise<GeneratedTagPreviewItem[]> => {
+    const res = await apiInstance.post<{ tags: GeneratedTagPreviewItem[] }>(
+      `/channels/${channelId}/tags-config/preview`,
+      { subject, body },
+    );
+    return res.data.tags;
+  },
+
+  getAllGeneratedTags: async (channelId: string): Promise<ChannelGeneratedTagItem[]> => {
+    const res = await apiInstance.get<{ tags: ChannelGeneratedTagItem[] }>(
+      `/channels/${channelId}/tags-config/all-generated-tags`,
+    );
+    return res.data.tags;
+  },
+
+  filterConversationsByTags: async (channelId: string, tags: string[]): Promise<string[]> => {
+    const res = await apiInstance.get<{ conversationIds: string[] }>(
+      `/channels/${channelId}/tags-config/conversations-by-tags`,
+      { params: { tags } },
+    );
+    return res.data.conversationIds;
   },
 };

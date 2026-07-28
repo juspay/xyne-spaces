@@ -12,6 +12,8 @@ import { ChannelParticipantRepository } from '@/database/repositories/channelPar
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { EmailClassificationRepository } from '@/database/repositories/emailClassificationRepository';
 import { EmailRepository } from '@/database/repositories/emailRepository';
+import { generateLlmTags } from '@/tags/generators/llm';
+import { tagRepository } from '@/database/repositories/tagRepository';
 
 export class DeskTagsConfigController {
   private channelParticipantRepo = new ChannelParticipantRepository();
@@ -113,6 +115,116 @@ export class DeskTagsConfigController {
     } catch (error) {
       logger.error('[DESK-TAGS-CONFIG] Failed to update config', { channelId, error });
       res.status(500).json({ error: 'Failed to update tag generation config' });
+    }
+  };
+
+  /**
+   * POST /api/channels/:channelId/tags-config/preview
+   * Runs tag generation against the channel's current config on a synthetic email
+   * (subject + body provided by the caller). Does not persist any tags.
+   * ACL: channel member (read-only operation).
+   */
+  previewTagGeneration = async (req: Request, res: Response): Promise<void> => {
+    const { channelId } = req.params;
+    const userId = await this.assertAccess(req, res, channelId);
+    if (!userId) return;
+
+    const workspaceId = req.user?.workspaceId;
+    if (!workspaceId) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { subject, body } = req.body as { subject?: unknown; body?: unknown };
+    if (typeof subject !== 'string' || !subject.trim()) {
+      res.status(400).json({ error: 'subject is required' });
+      return;
+    }
+    if (typeof body !== 'string' || !body.trim()) {
+      res.status(400).json({ error: 'body is required' });
+      return;
+    }
+
+    try {
+      const configRow = await tagService.getConfig(deskEmailConfigKey(channelId));
+      const parsed = configRow ? TagsConfigShapeSchema.safeParse(configRow.config) : null;
+      const allCategories =
+        parsed?.success ? parsed.data.categories : DEFAULT_DESK_EMAIL_CONFIG.categories;
+
+      // Only LLM categories produce output — manual categories are skip-listed in the pipeline.
+      const llmCategories = Object.fromEntries(
+        Object.entries(allCategories).filter(([, cfg]) => cfg.method === 'llm'),
+      );
+
+      if (Object.keys(llmCategories).length === 0) {
+        res.status(200).json({ tags: [] });
+        return;
+      }
+
+      const context = `Subject: ${subject.trim()}\n\n${body.trim()}`;
+
+      const tags = await generateLlmTags(context, llmCategories, workspaceId);
+      res.status(200).json({ tags });
+    } catch (error) {
+      logger.error('[DESK-TAGS-CONFIG] previewTagGeneration failed', { channelId, error });
+      res.status(500).json({ error: 'Tag generation preview failed' });
+    }
+  };
+
+  /**
+   * GET /api/channels/:channelId/tags-config/all-generated-tags
+   * Returns all distinct category:tag pairs that exist for this channel (capped at 500).
+   * ACL: channel member.
+   */
+  getAllGeneratedTags = async (req: Request, res: Response): Promise<void> => {
+    const { channelId } = req.params;
+    const userId = await this.assertAccess(req, res, channelId);
+    if (!userId) return;
+
+    try {
+      const rows = await tagRepository.findDistinctTagsByConfigKey(deskEmailConfigKey(channelId));
+      res.status(200).json({ tags: rows.map(r => ({ category: r.tagCategory, tag: r.tag })) });
+    } catch (error) {
+      logger.error('[DESK-TAGS-CONFIG] getAllGeneratedTags failed', { channelId, error });
+      res.status(500).json({ error: 'Failed to load generated tags' });
+    }
+  };
+
+  /**
+   * GET /api/channels/:channelId/tags-config/conversations-by-tags?tags[]=priority:high
+   * Returns conversationIds of tickets where any email in the conversation carries
+   * any of the requested category:tag values (OR semantics across all emails in the thread).
+   * ACL: channel member.
+   */
+  filterConversationsByTags = async (req: Request, res: Response): Promise<void> => {
+    const { channelId } = req.params;
+    const userId = await this.assertAccess(req, res, channelId);
+    if (!userId) return;
+
+    const rawTags = req.query['tags'];
+    const generatedTags: string[] = Array.isArray(rawTags)
+      ? (rawTags as string[]).filter(t => typeof t === 'string' && t.includes(':'))
+      : typeof rawTags === 'string' && rawTags.includes(':')
+        ? [rawTags]
+        : [];
+
+    if (generatedTags.length === 0) {
+      res.status(400).json({ error: 'At least one tag in "category:value" format is required' });
+      return;
+    }
+
+    logger.info('[DESK-TAGS-CONFIG] filterConversationsByTags entered', { channelId, generatedTags });
+
+    try {
+      const conversationIds = await tagRepository.findConversationIdsByEmailTags(
+        channelId,
+        generatedTags,
+      );
+      logger.info('[DESK-TAGS-CONFIG] filterConversationsByTags success', { channelId, count: conversationIds.length });
+      res.status(200).json({ conversationIds });
+    } catch (error) {
+      logger.error('[DESK-TAGS-CONFIG] filterConversationsByTags failed', { channelId, generatedTags, error });
+      res.status(500).json({ error: 'Failed to filter conversations by tags' });
     }
   };
 
