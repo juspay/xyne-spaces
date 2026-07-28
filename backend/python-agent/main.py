@@ -26,7 +26,6 @@ from orchestration import CleanupManager, ParticipantTracker, RoomLifecycle
 from domain import CallContext
 from events import EventBus
 from modules import MultiUserTranscriber
-from modules.realtime_identifier import RealtimeIdentifier
 from tools import create_ticket_creation_tool, create_get_my_tickets_tool, create_invite_user_tool
 from health_server import start_health_server
 import tempfile
@@ -52,6 +51,8 @@ if _mp.current_process().name == "MainProcess":
     logger.info(f"Connecting to LiveKit at: {config.livekit_url}")
     logger.info(f"Azure OpenAI STT Endpoint: {config.azure_stt_endpoint}")
     logger.info(f"Azure OpenAI STT Model: {config.azure_stt_model}")
+    logger.info(f"STT Provider: {config.stt_provider}")
+    logger.info(f"Diarization Enabled: {config.diarization_enabled}")
     logger.info(f"Environment: {config.node_env} (development mode: {config.is_development})")
 
 
@@ -116,7 +117,7 @@ async def entrypoint(ctx: JobContext):
             os.chmod(credentials_file, 0o600)
             
             # Set environment variable to file path for Google SDK auto-discovery
-            # os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = credentials_file
+            os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = credentials_file
             logger.info(f"[Google STT] Credentials file created at {credentials_file}")
             
         except json.JSONDecodeError as e:
@@ -140,7 +141,7 @@ async def entrypoint(ctx: JobContext):
     if safe_call_id != call_id:
         logger.warning(f"room_name_sanitized | original={call_id}, sanitized={safe_call_id}")
 
-    logger.info(f"agent_starting | node_env={config.node_env}")
+    logger.info(f"agent_starting | node_env={config.node_env}, diarization_enabled={config.diarization_enabled}")
 
     # Initialize conversation store (Redis-backed, without OpenAI client yet)
     conversation_store = None
@@ -177,11 +178,12 @@ async def entrypoint(ctx: JobContext):
     # Initialize modules
     event_bus = EventBus()
     
-    # Initialize MultiUserTranscriber with built-in STT (replaces EarModule)
-    # Supports Azure OpenAI Whisper, Google Cloud STT, and Deepgram STT
+    # Initialize MultiUserTranscriber with configured STT provider
+    # Supports Azure OpenAI Whisper, Google Cloud STT, Deepgram STT, and Chutes.ai Whisper
     multi_user_transcriber = MultiUserTranscriber(
         ctx=ctx,
         event_bus=event_bus,
+        stt_provider=config.stt_provider,
         azure_endpoint=config.azure_stt_endpoint,
         azure_api_key=config.azure_stt_api_key,
         azure_api_version=config.azure_stt_api_version,
@@ -193,6 +195,8 @@ async def entrypoint(ctx: JobContext):
         deepgram_api_key=config.deepgram_api_key,
         deepgram_model=config.deepgram_model,
         deepgram_language=config.deepgram_language,
+        chutes_stt_base_url=config.chutes_stt_base_url,
+        chutes_stt_api_key=config.chutes_stt_api_key,
         vad_activation_threshold=config.vad_activation_threshold,
         vad_min_speech_duration=config.vad_min_speech_duration,
         vad_min_silence_duration=config.vad_min_silence_duration,
@@ -220,7 +224,7 @@ async def entrypoint(ctx: JobContext):
         gcs_provider = GCSBucketProvider(
             project_id=config.gcs_project_id,
             bucket_name=config.gcs_bucket_name,
-            credentials_file=config.gcs_credentials_file,
+            credentials_path=config.gcs_credentials_path,
         )
         bucket = gcs_provider.get_bucket()
         if bucket:
@@ -240,16 +244,21 @@ async def entrypoint(ctx: JobContext):
         base_load_backoff_cap_s=config.transcript_base_load_backoff_cap_s,
     )
 
-    # Initialize identified transcript storage (parallel to primary, written with real names)
-    identified_storage = TranscriptionStorage(
-        call_id=f"{call_id}_identified",
-        safe_call_id=f"{safe_call_id}_identified",
-        bucket=bucket,
-        use_buffer=use_buffer,
-        flush_every_n=config.transcript_flush_every_n,
-        base_load_max_retries=config.transcript_base_load_max_retries,
-        base_load_backoff_cap_s=config.transcript_base_load_backoff_cap_s,
-    )
+    identified_storage = None
+    if config.diarization_enabled:
+        # Initialize identified transcript storage (parallel to primary, written with real names)
+        identified_storage = TranscriptionStorage(
+            call_id=f"{call_id}_identified",
+            safe_call_id=f"{safe_call_id}_identified",
+            bucket=bucket,
+            use_buffer=use_buffer,
+            flush_every_n=config.transcript_flush_every_n,
+            base_load_max_retries=config.transcript_base_load_max_retries,
+            base_load_backoff_cap_s=config.transcript_base_load_backoff_cap_s,
+        )
+        logger.info("identified_transcript_storage_initialized | diarization_enabled=true")
+    else:
+        logger.info("identified_transcript_storage_skipped | DIARIZATION_ENABLED=false")
 
     # Initialize AI Session Manager
     ai_manager = AISessionManager(
@@ -293,12 +302,16 @@ async def entrypoint(ctx: JobContext):
     event_bus.subscribe("TRANSCRIPTION", transcription_handler.handle)
     logger.info(f"event_bus_subscribed | event=TRANSCRIPTION, handler=transcription_handler")
 
-    # Subscribe to identified transcription events → second storage (real names)
-    async def handle_identified_transcription(data: dict):
-        await identified_storage.write(data)
+    if identified_storage is not None:
+        storage_for_identified_transcripts = identified_storage
+        # Subscribe to identified transcription events → second storage (real names)
+        async def handle_identified_transcription(data: dict):
+            await storage_for_identified_transcripts.write(data)
 
-    event_bus.subscribe("IDENTIFIED_TRANSCRIPTION", handle_identified_transcription)
-    logger.info(f"event_bus_subscribed | event=IDENTIFIED_TRANSCRIPTION, handler=identified_storage")
+        event_bus.subscribe("IDENTIFIED_TRANSCRIPTION", handle_identified_transcription)
+        logger.info(f"event_bus_subscribed | event=IDENTIFIED_TRANSCRIPTION, handler=identified_storage")
+    else:
+        logger.info("event_bus_subscription_skipped | event=IDENTIFIED_TRANSCRIPTION, reason=diarization_disabled")
 
     # Subscribe to AI action events (for frontend popup triggers like invite user)
     async def handle_ai_action(data: dict):
@@ -386,19 +399,25 @@ async def entrypoint(ctx: JobContext):
             stt_model_override = room_metadata.get("sttModel")
             if stt_model_override:
                 multi_user_transcriber.set_stt_model_override(stt_model_override)
-                logger.info(f"[STT Selection] User selected: {stt_model_override}")
+                if config.stt_provider != "chutes":
+                    logger.info(f"[STT Selection] User selected: {stt_model_override}")
 
-            # Fetch voiceprints at runtime from backend (avoids 64 KB LiveKit metadata limit
-            # and always reflects the latest enrollments for large orgs).
-            voiceprints = await webhook.fetch_voiceprints()
-            if voiceprints:
-                identifier = RealtimeIdentifier(voiceprints)
-                multi_user_transcriber._identifier = identifier
-                logger.info(
-                    f"realtime_identification_enabled | voiceprints={len(voiceprints)}"
-                )
+            if config.diarization_enabled:
+                # Fetch voiceprints at runtime from backend (avoids 64 KB LiveKit metadata limit
+                # and always reflects the latest enrollments for large orgs).
+                logger.info("realtime_identification_setup_started | fetching_voiceprints=true")
+                voiceprints = await webhook.fetch_voiceprints()
+                if voiceprints:
+                    from modules.realtime_identifier import RealtimeIdentifier
+                    identifier = RealtimeIdentifier(voiceprints)
+                    multi_user_transcriber._identifier = identifier
+                    logger.info(
+                        f"realtime_identification_enabled | voiceprints={len(voiceprints)}"
+                    )
+                else:
+                    logger.info("realtime_identification_disabled | no voiceprints enrolled")
             else:
-                logger.info("realtime_identification_disabled | no voiceprints enrolled")
+                logger.info("realtime_identification_skipped | DIARIZATION_ENABLED=false")
     except Exception as e:
         logger.warning(f"room_context_load_failed | error={e}")
     
@@ -477,7 +496,7 @@ async def entrypoint(ctx: JobContext):
         webhook=webhook,
         room=ctx.room,
         conversation_store=conversation_store,
-        additional_storages=[identified_storage],
+        additional_storages=[identified_storage] if identified_storage is not None else [],
     )
     
     # Initialize room lifecycle manager
@@ -492,7 +511,7 @@ async def entrypoint(ctx: JobContext):
     
     # Update cleanup manager with stt_tasks reference (empty for MultiUserTranscriber)
     cleanup_manager.stt_tasks = room_lifecycle.get_stt_tasks()
-
+    
     # Register all room event handlers
     room_lifecycle.register_handlers()
     

@@ -253,7 +253,7 @@ class TranscriptionStorage:
     ):
         """
         Initialize transcription storage.
-
+        
         Args:
             call_id: Original call/room ID
             safe_call_id: Sanitized call ID for filesystem
