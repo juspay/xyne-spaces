@@ -403,12 +403,12 @@ function parseField(value, type, field) {
         return void 0;
       }
       const textValue = value === null ? "null" : value.trim();
-      if (textValue.toLowerCase() === "null") {
-        return "null";
-      }
       if (field === "metrics_type") {
         const metricType = textValue.toLowerCase();
         return REPORT_METRIC_TYPES.has(metricType) ? metricType : void 0;
+      }
+      if (textValue.toLowerCase() === "null") {
+        return "null";
       }
       if (field === "party_id") {
         const partyId = textValue.toLowerCase();
