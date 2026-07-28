@@ -90,7 +90,7 @@
     "@types/web-push": "^3.6.4",
     "@types/yauzl": "^2.10.3",
     "@xyne/shared": "file:../shared",
-    "@xyne/vespa-ts": "^1.5.0",
+    "@xyne/vespa-ts": "1.6.0",
     "@y-sweet/sdk": "^0.9.1",
     "agentic-framework": "file:../framework",
     "archiver": "^7.0.1",

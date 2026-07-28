@@ -61,7 +61,6 @@ python-agent/transcriptions/*
 scripts/seed-random-users.ts
 
 # Package files (as requested - note: package.json is typically tracked)
-package-lock.json
 package.json
 
 *.rdb
