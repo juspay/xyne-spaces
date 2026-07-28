@@ -22,6 +22,7 @@ export interface SupportTicketTableProps {
     assignedTo: string[] | undefined;
     priority: TicketPriority[] | undefined;
     stageName: string[] | undefined;
+    conversationIdWhitelist: string[] | undefined;
     userGroups: string[] | undefined;
     lastEmailAtStart: number | undefined;
     lastEmailAtEnd: number | undefined;
@@ -61,11 +62,15 @@ export const SupportTicketTable = ({
     [dynamicFieldColumns],
   );
 
+  const { conversationIdWhitelist, ...restTicketFilter } = ticketFilter;
   const [supportTickets, supportTicketsDetails] = useCachedQuery(
     queries.supportTicketsFilteredV3({
       channelId,
       isMember,
-      ...ticketFilter,
+      ...restTicketFilter,
+      ...(conversationIdWhitelist !== undefined
+        ? { conversationIds: conversationIdWhitelist }
+        : {}),
       formEntityValueFieldIds: displayFieldIds,
     }),
     { enabled: !!channelId },
@@ -80,6 +85,7 @@ export const SupportTicketTable = ({
         a: ticketFilter.assignedTo ?? null,
         p: ticketFilter.priority ?? null,
         s: ticketFilter.stageName ?? null,
+        ci: ticketFilter.conversationIdWhitelist ?? null,
         g: ticketFilter.userGroups ?? null,
         ds: ticketFilter.lastEmailAtStart ?? null,
         de: ticketFilter.lastEmailAtEnd ?? null,
@@ -91,6 +97,7 @@ export const SupportTicketTable = ({
       ticketFilter.assignedTo,
       ticketFilter.priority,
       ticketFilter.stageName,
+      ticketFilter.conversationIdWhitelist,
       ticketFilter.userGroups,
       ticketFilter.lastEmailAtStart,
       ticketFilter.lastEmailAtEnd,

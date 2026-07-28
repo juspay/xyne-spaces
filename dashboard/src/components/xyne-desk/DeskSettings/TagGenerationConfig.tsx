@@ -11,11 +11,15 @@ import { TAG_FORMAT_REGEX, TAG_FORMAT_MESSAGE, findDuplicateTags } from '@xyne/s
 import { TagChipInput } from '../../ui/TagChipInput/TagChipInput';
 import { useCategoryCatalog } from '../../../hooks/useCategoryCatalog';
 import { tagsApi } from '../../../api/tagsApi';
+import { tagsConfigApi } from '../../../api/tagsConfigApi';
 import type {
   CategoryCatalogEntry,
   TagCategories,
   TagCategoryConfig,
+  GeneratedTagPreviewItem,
 } from '../../../api/tagsConfigApi';
+import { TestClassificationForm } from './TestClassificationForm';
+import { TagChip, CategoryLabel } from '../../tags/TagsBadge';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -90,6 +94,7 @@ export interface TagGenerationConfigProps {
   error: string | null;
   saveCategories: (next: TagCategories) => Promise<void>;
   sourceType?: string;
+  channelId?: string | undefined;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -103,12 +108,20 @@ export const TagGenerationConfig: React.FC<TagGenerationConfigProps> = ({
   error,
   saveCategories,
   sourceType = 'desk-email',
+  channelId,
 }) => {
   const [editingName, setEditingName] = useState<string | null>(null);
   const [form, setForm] = useState<CategoryFormState | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
   const [nameFormatError, setNameFormatError] = useState<string | null>(null);
   const [showNameSuggestions, setShowNameSuggestions] = useState(false);
+
+  // ── Preview state ──────────────────────────────────────────────────────────
+  const [testSubject, setTestSubject] = useState('');
+  const [testBody, setTestBody] = useState('');
+  const [previewResult, setPreviewResult] = useState<GeneratedTagPreviewItem[] | null>(null);
+  const [isPreviewing, setIsPreviewing] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
 
   // ── Category-name autocomplete ─────────────────────────────────────────────
   const isAdding = editingName === '__new__';
@@ -254,11 +267,32 @@ export const TagGenerationConfig: React.FC<TagGenerationConfigProps> = ({
     }
   };
 
+  // ── Preview handler ────────────────────────────────────────────────────────
+  const handleRunPreview = async () => {
+    if (!channelId) return;
+    setPreviewResult(null);
+    setPreviewError(null);
+    if (!hasLlmCategories) {
+      setPreviewError('At least one LLM category is required to test tag generation.');
+      return;
+    }
+    setIsPreviewing(true);
+    try {
+      const tags = await tagsConfigApi.previewTagGeneration(channelId, testSubject, testBody);
+      setPreviewResult(tags);
+    } catch {
+      setPreviewError('Tag generation preview failed. Please try again.');
+    } finally {
+      setIsPreviewing(false);
+    }
+  };
+
   // ── Render ─────────────────────────────────────────────────────────────────
 
   const fieldDisabled = !canManage || isSaving;
   const categoryEntries = Object.entries(categories);
   const showBlacklistAndCount = form?.method !== 'manual';
+  const hasLlmCategories = Object.values(categories).some(c => c.method === 'llm');
 
   return (
     <div className='flex flex-col gap-[16px]'>
@@ -591,6 +625,45 @@ export const TagGenerationConfig: React.FC<TagGenerationConfigProps> = ({
           </div>
         )}
       </div>
+
+      {channelId && (
+        <TestClassificationForm
+          title='Test tag generation'
+          subjectValue={testSubject}
+          onSubjectChange={setTestSubject}
+          bodyValue={testBody}
+          onBodyChange={setTestBody}
+          isPreviewing={isPreviewing}
+          onRunPreview={() => void handleRunPreview()}
+        >
+          {previewError && <div className='text-sm text-destructive'>{previewError}</div>}
+          {previewResult !== null && previewResult.length === 0 && (
+            <div className='text-sm text-desk-helper'>No tags generated for this email.</div>
+          )}
+          {previewResult !== null && previewResult.length > 0 && (
+            <div className='flex flex-col gap-[8px]'>
+              {Object.entries(
+                previewResult.reduce<Record<string, GeneratedTagPreviewItem[]>>((acc, item) => {
+                  (acc[item.category] ??= []).push(item);
+                  return acc;
+                }, {}),
+              ).map(([category, items]) => (
+                <div key={category} className='flex flex-wrap items-center gap-[6px]'>
+                  <CategoryLabel name={category} color={categories[category]?.color} />
+                  {items.map(item => (
+                    <TagChip
+                      key={`${item.category}:${item.tag}`}
+                      tag={item.tag}
+                      color={categories[item.category]?.color}
+                      reason={item.reason}
+                    />
+                  ))}
+                </div>
+              ))}
+            </div>
+          )}
+        </TestClassificationForm>
+      )}
     </div>
   );
 };

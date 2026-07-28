@@ -9,5 +9,6 @@ export { DynamicFieldSubmenu } from './DynamicFieldSubmenu/DynamicFieldSubmenu';
 export { TicketTypeSubmenu } from './TicketTypeSubmenu/TicketTypeSubmenu';
 export { SourceChannelsSubmenu } from './SourceChannelsSubmenu/SourceChannelsSubmenu';
 export { AICategorySubmenu } from './AICategorySubmenu/AICategorySubmenu';
+export { GeneratedTagsSubmenu } from './GeneratedTagsSubmenu/GeneratedTagsSubmenu';
 export { RoleSubmenu } from './RoleSubmenu/RoleSubmenu';
 export type { RoleAssignmentValue } from './RoleSubmenu/RoleSubmenu';

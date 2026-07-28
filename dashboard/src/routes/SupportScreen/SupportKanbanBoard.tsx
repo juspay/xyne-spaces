@@ -58,6 +58,7 @@ export interface SupportKanbanBoardProps {
     priority: TicketPriority[] | undefined;
     stageName: string[] | undefined;
     aiCategory: string[] | undefined;
+    conversationIdWhitelist: string[] | undefined;
     hasAiDraft: boolean | undefined;
     userGroups: string[] | undefined;
     lastEmailAtStart: number | undefined;
@@ -97,11 +98,15 @@ export const SupportKanbanBoard = ({
   // Channel-scoped tickets. Gated on channelId only (NOT boardId), so it loads
   // immediately on first kanban visit; the board id is then derived from the
   // first row below.
+  const { conversationIdWhitelist, ...restTicketFilter } = ticketFilter;
   const [supportTickets, supportTicketsDetails] = useCachedQuery(
     queries.supportTicketsFilteredV3({
       channelId,
       isMember,
-      ...ticketFilter,
+      ...restTicketFilter,
+      ...(conversationIdWhitelist !== undefined
+        ? { conversationIds: conversationIdWhitelist }
+        : {}),
     }),
     { enabled: !!channelId },
   );
@@ -117,6 +122,7 @@ export const SupportKanbanBoard = ({
         p: ticketFilter.priority ?? null,
         s: ticketFilter.stageName ?? null,
         ac: ticketFilter.aiCategory ?? null,
+        ci: ticketFilter.conversationIdWhitelist ?? null,
         ad: ticketFilter.hasAiDraft ?? null,
         g: ticketFilter.userGroups ?? null,
         ds: ticketFilter.lastEmailAtStart ?? null,
@@ -129,6 +135,7 @@ export const SupportKanbanBoard = ({
       ticketFilter.priority,
       ticketFilter.stageName,
       ticketFilter.aiCategory,
+      ticketFilter.conversationIdWhitelist,
       ticketFilter.hasAiDraft,
       ticketFilter.userGroups,
       ticketFilter.lastEmailAtStart,

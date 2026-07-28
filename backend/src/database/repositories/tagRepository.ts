@@ -1,5 +1,6 @@
 import { DatabaseClient } from '../client';
 import { Prisma, Tag, TagMethod, TagsConfig } from '@prisma/client';
+import { logger } from '../../utils/logger';
 
 export type TxClient = Prisma.TransactionClient;
 
@@ -148,6 +149,67 @@ export class TagRepository {
       where: { id },
       data: { isDeleted: true, updatedAt: new Date(), ...(updatedBy !== undefined ? { updatedBy } : {}) },
     });
+  }
+
+  /**
+   * Returns all distinct (tagCategory, tag) pairs for a configKey (capped at 500).
+   * Used by the "AI Tags" filter submenu to list all tags that actually exist for a channel.
+   */
+  async findDistinctTagsByConfigKey(
+    configKey: string,
+  ): Promise<{ tagCategory: string; tag: string }[]> {
+    return this.client().tag.findMany({
+      where: { configKey, sourceType: 'desk-email', isDeleted: false },
+      distinct: ['tagCategory', 'tag'],
+      select: { tagCategory: true, tag: true },
+      orderBy: [{ tagCategory: 'asc' }, { tag: 'asc' }],
+      take: 500,
+    });
+  }
+
+  /**
+   * Returns conversationIds of tickets where any email in the conversation carries
+   * any of the given "category:tag" values (OR semantics).
+   */
+  async findConversationIdsByEmailTags(
+    channelId: string,
+    generatedTags: string[],
+  ): Promise<string[]> {
+    if (generatedTags.length === 0) return [];
+
+    logger.info('[TAG-REPO] findConversationIdsByEmailTags entered', { channelId, generatedTags });
+
+    const pairs = generatedTags
+      .map(t => t.split(':'))
+      .filter(parts => parts.length >= 2)
+      .map(([category, ...rest]) => ({ category, tag: rest.join(':') }));
+
+    if (pairs.length === 0) return [];
+
+    const conditions = pairs.map(
+      ({ category, tag }) => Prisma.sql`(t."tagCategory" = ${category} AND t.tag = ${tag})`,
+    );
+    const whereClause = Prisma.join(conditions, ' OR ');
+
+    const rows = await this.db.$queryRaw<{ conversationId: string }[]>`
+      SELECT e."conversationId", MAX(e."createdAt") AS latest
+      FROM public.emails e
+      WHERE e."channelId" = ${channelId}
+        AND EXISTS (
+          SELECT 1 FROM non_zero.tags t
+          WHERE t."sourceId" = e.id
+            AND t."sourceType" = 'desk-email'
+            AND t."isDeleted" = false
+            AND (${whereClause})
+        )
+      GROUP BY e."conversationId"
+      ORDER BY latest DESC
+      LIMIT 1000
+    `;
+
+    logger.info('[TAG-REPO] findConversationIdsByEmailTags success', { channelId, count: rows.length });
+
+    return rows.map(r => r.conversationId);
   }
 }
 
