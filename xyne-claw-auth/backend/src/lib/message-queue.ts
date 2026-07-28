@@ -97,6 +97,15 @@ export interface QueuedMessage {
   resultForwardUrl?: string;
   resolveMentions?: boolean;
   /**
+   * True when this run's user ChatMessage was ALREADY persisted on its original
+   * dispatch — set by the lock-contention re-queue (a run that dispatched, hit
+   * "session_locked", and is retried). The drain re-dispatch must then pass
+   * __skipUserMessagePersist so the retry does NOT create a duplicate user row
+   * (which would surface as a second root message → a branch). Absent for a
+   * proactively-queued mention that never dispatched (it SHOULD persist on drain).
+   */
+  alreadyPersisted?: boolean;
+  /**
    * Digital-Twin FIFO scope (= mentionedUserId / twin owner). Drives per-user
    * key selection in enqueueMessage; the matching drain must pass the same
    * value. Absent for conversation/automation messages (2-part key).
@@ -153,6 +162,32 @@ export async function tryAcquireSlot(conversationId: string, agentSlug: string, 
       error: err instanceof Error ? err.message : String(err),
     });
     return `failopen-${Date.now()}`;
+  }
+}
+
+/**
+ * Non-destructive check: is a run currently active for this conversation?
+ * Reads the busy marker WITHOUT acquiring it — used by paths that must REFUSE
+ * (not queue) when a run is in flight, e.g. plan-approval (approving mid-run
+ * dispatches a second run that races the active one at the runtime session lock
+ * → one dies "session_locked" and re-fires as a duplicate turn / branch).
+ *
+ * Fail-open (returns false on Redis error): an infra outage must not block every
+ * approval — the runtime session lock is still the last line of defence.
+ */
+export async function isSlotBusy(conversationId: string, agentSlug: string, userScopeId?: string): Promise<boolean> {
+  if (!conversationId || !agentSlug) return false;
+  try {
+    const redis = redisService.getConnection();
+    const v = await redis.get(busyKey(conversationId, agentSlug, userScopeId));
+    return v != null;
+  } catch (err) {
+    log.warn("isSlotBusy failed — assuming not busy (fail-open)", {
+      conversationId,
+      agentSlug,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return false;
   }
 }
 

@@ -1574,6 +1574,14 @@ interface Props {
   // `/goal status` still work (they start with `/` and bypass the wrap).
   draftAutoGoal: boolean;
   onDraftAutoGoalChange: (v: boolean) => void;
+  // Plan mode opt-in (agent.config.planMode). When on, non-twin thread mentions
+  // propose a plan and wait for the user's approval before doing multi-step work.
+  draftPlanMode: boolean;
+  onDraftPlanModeChange: (v: boolean) => void;
+  // Editable plan-mode primer (agent.config.planModePrompt) — how the agent scopes
+  // a plan. Pre-filled with the default; only shown/saved when plan mode is on.
+  draftPlanModePrompt: string;
+  onDraftPlanModePromptChange: (v: string) => void;
 
   // Dialog callbacks
   onOpenSkillPicker: () => void;
@@ -1712,6 +1720,10 @@ export function AgentDetailLeftColumn({
   onDraftAutoToolCitationsChange,
   draftAutoGoal,
   onDraftAutoGoalChange,
+  draftPlanMode,
+  onDraftPlanModeChange,
+  draftPlanModePrompt,
+  onDraftPlanModePromptChange,
   draftOutputFormatEnabled,
   onDraftOutputFormatEnabledChange,
   draftOutputType,
@@ -2535,7 +2547,7 @@ export function AgentDetailLeftColumn({
         label="Behaviour"
         tech="rules & autonomy"
         subtitle="extra rules applied on every turn"
-        summary={behaviorCount > 0 || draftSuggestGoal || draftAutoGoal ? "Customised" : "Defaults"}
+        summary={behaviorCount > 0 || draftSuggestGoal || draftAutoGoal || draftPlanMode ? "Customised" : "Defaults"}
         open={activeTab === "behavior"}
         onToggle={() => toggleSection("behavior")}
       />
@@ -2778,6 +2790,58 @@ export function AgentDetailLeftColumn({
               <span className="text-[12px] text-xyne-fg-primary">{draftAutoGoal ? "On" : "Off"}</span>
             </label>
           </div>
+        </div>
+      )}
+
+      {/* Plan mode opt-in (agent.config.planMode). When on, a non-twin thread
+          mention or DM that needs multi-step work makes the agent PROPOSE a plan
+          (read-only) and STOP for the user's approval; on approve it executes.
+          Trivial asks skip the approval prompt. Off = act immediately (today's
+          behavior). Show when canEdit OR already on. */}
+      {(canEdit || draftPlanMode) && (
+        <div className="rounded-xl border border-xyne-border bg-xyne-surface p-4">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0 flex-1">
+              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-xyne-fg-tertiary">Plan Mode</div>
+              <p className="text-[12px] leading-relaxed text-xyne-fg-secondary">
+                For multi-step requests in threads and DMs, the agent proposes a plan and waits for approval before doing the work — you pick which steps to keep, then it runs.
+                {" "}
+                <span className="text-xyne-fg-tertiary">Trivial one-step asks run without a prompt. Off = act immediately (default). Twin (@user) flows are never affected.</span>
+              </p>
+            </div>
+            <label className="flex shrink-0 items-center gap-2 select-none">
+              <input
+                type="checkbox"
+                checked={draftPlanMode}
+                onChange={(e) => onDraftPlanModeChange(e.target.checked)}
+                disabled={!canEdit}
+                className="h-4 w-4 cursor-pointer accent-xyne-accent disabled:cursor-not-allowed disabled:opacity-60"
+                aria-label="Enable Plan Mode"
+              />
+              <span className="text-[12px] text-xyne-fg-primary">{draftPlanMode ? "On" : "Off"}</span>
+            </label>
+          </div>
+          {/* Editable plan-mode primer (agent.config.planModePrompt) — how the agent
+              scopes a plan. Only shown/saved when plan mode is on; a value equal to
+              the default is not persisted. Guidance ONLY — the propose→approve gate
+              and propose-plan contract are enforced by the tool palette, not this text. */}
+          {draftPlanMode && (
+            <div className="mt-3 border-t border-xyne-border-subtle pt-3">
+              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-xyne-fg-tertiary">
+                Plan-mode prompt <span className="font-normal normal-case text-xyne-fg-tertiary">(optional)</span>
+              </div>
+              <p className="mb-2 text-[12px] leading-relaxed text-xyne-fg-secondary">
+                System prompt the agent follows while it scopes a plan — pre-filled with the default; edit only if you need custom guidance on HOW it plans. The propose-then-approve gate and the propose-plan contract are always enforced regardless of this text.
+              </p>
+              <textarea
+                value={draftPlanModePrompt}
+                onChange={(e) => onDraftPlanModePromptChange(e.target.value)}
+                disabled={!canEdit}
+                rows={10}
+                className="w-full resize-y rounded-md border border-xyne-border-subtle bg-xyne-surface px-2.5 py-2 font-mono text-[12px] leading-relaxed text-xyne-fg-primary placeholder:text-xyne-fg-muted focus:border-xyne-border focus:outline-none disabled:opacity-60"
+              />
+            </div>
+          )}
         </div>
       )}
 

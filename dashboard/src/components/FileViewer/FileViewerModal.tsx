@@ -10,8 +10,7 @@ import { usePlatform } from '../../hooks/usePlatform';
 import { useShortcut, useScope } from '../../shortcuts';
 import { cn } from '../../utils/classNames';
 import { useSelector } from '@xstate/react';
-import { ResizableGroup, Panel, Separator } from '../ui/Resizable/Resizable';
-import ThreadMessages from '../Chat/ThreadPannel';
+import { PreviewSplitDialog, PreviewThreadPanel } from '../ui/PreviewSplitDialog';
 import { ChatBubble } from '../Chat/ChatBubble/ChatBubble';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { useGetChannelUserStatus } from '../../hooks/useChannels';
@@ -1524,180 +1523,99 @@ const AttachmentGalleryModalInner: React.FC = () => {
   // Render thread panel content
   const renderThreadPanel = (): JSX.Element => {
     const hasParentMessage = !!currentAttachment?.parentMessage;
+    const isLoadingThread =
+      (shouldQueryThread && !threadDataLoaded) || state.value === 'waitingForData';
 
-    // Show synthetic message bubble while thread data is loading
-    if ((shouldQueryThread && !threadDataLoaded) || state.value === 'waitingForData') {
-      return (
-        <div className='flex flex-col h-full w-full border-l border-border bg-background z-10 min-w-0'>
-          {/* Thread header with close button */}
-          <div className='flex items-center justify-between p-4 border-b border-border h-14 flex-shrink-0'>
-            <h3 className='font-semibold text-foreground'>Thread</h3>
-            <button
-              onClick={() => attachmentViewerActor.send({ type: 'CLOSE' })}
-              data-track-category='FILE_VIEWER'
-              data-track-name='CloseThreadPanel'
-              className='p-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors'
-              aria-label='Close'
-            >
-              <X className='h-5 w-5' />
-            </button>
+    // While loading: a synthetic parent-message bubble if we have one, else a spinner.
+    const loading = isLoadingThread ? (
+      hasParentMessage ? (
+        renderSyntheticMessageBubble()
+      ) : (
+        <div className='flex-1 flex items-center justify-center'>
+          <div className='flex flex-col items-center gap-3'>
+            <div className='animate-spin rounded-full h-6 w-6 border-b-2 border-primary'></div>
+            <div className='text-muted-foreground text-sm'>Loading thread...</div>
           </div>
-          {/* Show synthetic message if available, otherwise fallback to loading state */}
-          {hasParentMessage ? (
-            renderSyntheticMessageBubble()
-          ) : (
-            <div className='flex-1 flex items-center justify-center'>
-              <div className='flex flex-col items-center gap-3'>
-                <div className='animate-spin rounded-full h-6 w-6 border-b-2 border-primary'></div>
-                <div className='text-muted-foreground text-sm'>Loading thread...</div>
-              </div>
-            </div>
-          )}
         </div>
-      );
-    }
+      )
+    ) : null;
 
     return (
-      <div className='flex flex-col h-full w-full border-l border-border bg-background z-10 min-w-0'>
-        {/* Thread header with close button */}
-        <div className='flex items-center justify-between p-4 border-b border-border h-14 flex-shrink-0'>
-          <h3 className='font-semibold text-foreground'>Thread</h3>
-          <button
-            onClick={() => attachmentViewerActor.send({ type: 'CLOSE' })}
-            data-track-category='FILE_VIEWER'
-            data-track-name='CloseThreadPanel'
-            className='p-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors'
-            aria-label='Close'
-          >
-            <X className='h-5 w-5' />
-          </button>
-        </div>
-        {/* Thread messages without header */}
-        <div className='flex-1 overflow-hidden min-w-0'>
-          <ThreadMessages
-            {...(currentAttachment?.channelId && { channelId: currentAttachment.channelId })}
-            {...(currentAttachment?.conversationId && {
-              conversationId: currentAttachment.conversationId,
-            })}
-            {...(threadMessages && threadMessages.length > 0 ? { threadMessages } : {})}
-            hideHeader={true}
-            disableAskAI={true}
-          />
-        </div>
-      </div>
+      <PreviewThreadPanel
+        onClose={() => attachmentViewerActor.send({ type: 'CLOSE' })}
+        {...(currentAttachment?.channelId ? { channelId: currentAttachment.channelId } : {})}
+        {...(currentAttachment?.conversationId
+          ? { conversationId: currentAttachment.conversationId }
+          : {})}
+        {...(threadMessages && threadMessages.length > 0 ? { threadMessages } : {})}
+        {...(loading ? { loading } : {})}
+      />
     );
   };
 
-  return (
-    <Dialog.Root
-      open={isOpen}
-      onOpenChange={() => {
-        attachmentViewerActor.send({ type: 'CLOSE' });
-      }}
+  // The attachment itself — the left/main panel. Identical whether or not the
+  // thread panel is shown; the floating bar only carries the close button when
+  // there is no thread panel to carry it (full-view mode).
+  const attachmentPanel = (
+    <div
+      className={cn(
+        'h-full w-full relative',
+        isImage
+          ? 'overflow-hidden before:absolute before:inset-0 before:bg-black/80 before:z-0 before:backdrop-blur-md bg-black/30'
+          : isPdf
+            ? 'bg-background'
+            : isVideo
+              ? 'overflow-hidden bg-black'
+              : 'overflow-auto bg-background',
+      )}
     >
-      <Dialog.Portal>
-        <Dialog.Overlay className='fixed inset-0 flex items-center justify-center bg-black/80 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 z-[50]' />
-        <Dialog.Content
-          data-prevent-drawer='true'
-          className={cn(
-            'fixed z-[50] bg-black focus:outline-none data-[state=closed]:fade-out transition-all ease-in-out duration-300 data-[state=open]:fade-in overflow-hidden',
-            isMobile ? 'inset-0 w-screen h-screen' : 'inset-0 m-auto w-[95vw] h-[95vh] rounded-2xl',
-          )}
-          style={{
-            backgroundImage: backgroundImageUrl ? `url(${backgroundImageUrl})` : undefined,
-            backgroundSize: 'cover',
-            backgroundPosition: 'center',
-            backgroundRepeat: 'no-repeat',
-          }}
-          onInteractOutside={() => {
-            attachmentViewerActor.send({ type: 'CLOSE' });
-          }}
-          onEscapeKeyDown={event => {
-            // Escape closes the find bar first; only a second Escape closes the
-            // whole gallery. Radix would otherwise dismiss the dialog outright.
-            if (search?.isOpen) {
-              event.preventDefault();
-              search.close();
-            }
-          }}
-          onMouseEnter={() => setIsHovered(true)}
-          onMouseLeave={() => setIsHovered(false)}
-          onTouchStart={e => e.stopPropagation()}
-        >
-          <div className={cn('absolute inset-0', isVideo ? 'bg-black' : 'bg-background')}>
-            {showThreadPanel ? (
-              // Side-by-side layout with thread panel
-              <ResizableGroup orientation='horizontal' className='h-full w-full'>
-                {/* Attachment panel - 70% default, min 30%, resizable */}
-                <Panel defaultSize='70%' minSize='30%'>
-                  <div
-                    className={cn(
-                      'h-full relative',
-                      isImage
-                        ? 'overflow-hidden before:absolute before:inset-0 before:bg-black/80 before:z-0 before:backdrop-blur-md bg-black/30'
-                        : isPdf
-                          ? 'bg-background'
-                          : isVideo
-                            ? 'overflow-hidden bg-black'
-                            : 'overflow-auto bg-background',
-                    )}
-                  >
-                    {/* Floating top bar - no close button when thread visible */}
-                    {renderFloatingTopBar(false)}
-                    <FileSearchControls />
-                    <div
-                      className={cn(
-                        'relative z-10 h-full w-full flex',
-                        isPdf ? '' : 'items-center justify-center',
-                      )}
-                    >
-                      {renderMainContent()}
-                    </div>
-                    {renderNavigationArrows()}
-                  </div>
-                </Panel>
+      {renderFloatingTopBar(!showThreadPanel)}
+      <FileSearchControls />
+      <div
+        className={cn(
+          'relative z-10 h-full w-full flex',
+          isPdf ? '' : 'items-center justify-center',
+        )}
+      >
+        {renderMainContent()}
+      </div>
+      {renderNavigationArrows()}
+    </div>
+  );
 
-                {/* Resize handle */}
-                <Separator className='w-1 hover:bg-blue-50 active:bg-blue-100 transition-colors cursor-col-resize flex items-center justify-center z-20'>
-                  <div className='w-[1px] h-full bg-border'></div>
-                </Separator>
-
-                {/* Thread panel - 30% default, min 20%, max 40%, resizable */}
-                <Panel defaultSize='30%' minSize='20%' maxSize='40%'>
-                  {renderThreadPanel()}
-                </Panel>
-              </ResizableGroup>
-            ) : (
-              // Full attachment viewer when no thread
-              <div
-                className={cn(
-                  'relative w-full h-full',
-                  isImage
-                    ? 'overflow-hidden before:absolute before:inset-0 before:bg-black/80 before:z-0 before:backdrop-blur-md bg-black/30'
-                    : isPdf
-                      ? 'bg-background'
-                      : isVideo
-                        ? 'overflow-hidden bg-black'
-                        : 'overflow-auto bg-background',
-                )}
-              >
-                {renderFloatingTopBar(true)}
-                <FileSearchControls />
-                <div
-                  className={cn(
-                    'relative z-10 h-full w-full flex',
-                    isPdf ? '' : 'items-center justify-center',
-                  )}
-                >
-                  {renderMainContent()}
-                </div>
-                {renderNavigationArrows()}
-              </div>
-            )}
-          </div>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+  // Shared preview shell (also used by the plan preview). It owns the dialog,
+  // the resize group, and the resize-aware dismiss guard; we just hand it the
+  // attachment as the main panel and the thread as the (optional) side panel.
+  return (
+    <PreviewSplitDialog
+      open={isOpen}
+      onClose={() => attachmentViewerActor.send({ type: 'CLOSE' })}
+      idPrefix='attachment-viewer'
+      isMobile={isMobile}
+      left={attachmentPanel}
+      right={showThreadPanel ? renderThreadPanel() : undefined}
+      preventDrawer
+      overlayClassName='flex items-center justify-center bg-black/80'
+      contentClassName='bg-black data-[state=closed]:fade-out transition-all ease-in-out duration-300 data-[state=open]:fade-in'
+      contentStyle={{
+        backgroundImage: backgroundImageUrl ? `url(${backgroundImageUrl})` : undefined,
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+        backgroundRepeat: 'no-repeat',
+      }}
+      bodyClassName={isVideo ? 'bg-black' : 'bg-background'}
+      onEscapeKeyDown={event => {
+        // Escape closes the find bar first; only a second Escape closes the whole
+        // gallery. Radix would otherwise dismiss the dialog outright.
+        if (search?.isOpen) {
+          event.preventDefault();
+          search.close();
+        }
+      }}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+      onTouchStart={e => e.stopPropagation()}
+    />
   );
 };
 

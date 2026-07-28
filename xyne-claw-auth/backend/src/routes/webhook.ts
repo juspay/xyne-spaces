@@ -76,6 +76,17 @@ import { renderAttachmentsToPdf } from "../lib/result-pdf.js";
 import { renderMarkdownToHtml } from "../lib/result-html.js";
 import { sendStoredExternalResultCallback, type ExternalResultCallbackConfig } from "../surfaces/external-api/delivery.js";
 import { deliverSlackResult, type SlackDeliveryTarget } from "../surfaces/slack/delivery.js";
+import {
+  getActivePlanCard,
+  setActivePlanCard,
+  clearActivePlanCard,
+  setPlanExecMeta,
+  getPlanExecMeta,
+  clearPlanExecMeta,
+  normalizePlanTitle,
+  filterToApprovedTitles,
+} from "../lib/session-context.js";
+import { emitAgentWorkingSignal } from "../surfaces/spaces/client.js";
 import JSZip from "jszip";
 import { buildWriteApprovalFlow, buildTwinApprovalFlow, buildUserQuestionFlow, buildPromoteProviderFlow, buildGoalSuggestionFlow, buildPlanFlow, isTwinDelivery } from "xyne-claw-shared";
 import type { TwinDelivery } from "xyne-claw-shared";
@@ -1079,9 +1090,15 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
   //   parser unchanged. Failure to load the config is non-fatal: we just
   //   fall through to ordinary slash-command handling.
   let autoGoalEnabled = false;
+  // Plan mode: when agent.config.planMode === true, non-twin thread mentions
+  // start in plan mode (the agent proposes a plan and awaits approval before
+  // executing). Read alongside autoGoal so it is visible where the
+  // dispatchPayload + sessionContext are assembled below. Default OFF.
+  let planModeEnabled = false;
   try {
     const cfgRow = await agentRepository.findBySlug(agent.slug, agent.orgId ?? undefined);
     autoGoalEnabled = ((cfgRow?.config ?? {}) as Record<string, unknown>)["autoGoal"] === true;
+    planModeEnabled = ((cfgRow?.config ?? {}) as Record<string, unknown>)["planMode"] === true;
   } catch (err) {
     log.warn("autoGoal config lookup failed — treating as off", {
       error: err instanceof Error ? err.message : String(err),
@@ -2043,6 +2060,14 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       // `/compact` — force a one-shot compaction of the resumed session
       // before this turn so the thread continues with a smaller context.
       ...(compactBeforeRun ? { compactBeforeRun: true } : {}),
+      // Plan mode: only a non-twin interactive thread mention on a planMode
+      // agent starts in plan mode (agent proposes a plan and stops for approval).
+      // Gated on eventType !== "USER_MENTIONED" (INVARIANT B: twin never plans)
+      // and on the planMode opt-in (INVARIANT A: unchanged when off). This
+      // /webhook path only serves interactive mentions (USER_MENTIONED /
+      // APP_MENTIONED / DIRECT_MESSAGE); scheduled/automation runs arrive via the
+      // separate S2S handler and must NOT be configured with planMode.
+      ...(planModeEnabled && eventType !== "USER_MENTIONED" ? { mode: "plan" as const } : {}),
     };
 
     // progressMessageId is the ONLY session field not knowable pre-dispatch — it's
@@ -2074,6 +2099,10 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       ...(userSpacesWorkspaceId ? { workspaceId: userSpacesWorkspaceId } : {}),
       ...(twinWorkspaceId ? { workspaceId: twinWorkspaceId } : {}),
       ...(resultForwardUrl ? { resultForwardUrl } : {}),
+      // Plan mode (see dispatchPayload): 'plan' only when the agent opts in AND
+      // this is a non-twin interactive mention. Absent ⇒ 'auto' (today's flow).
+      // The plan-approval flow-action flips this to 'auto' for Turn 2.
+      ...(planModeEnabled && eventType !== "USER_MENTIONED" ? { mode: "plan" as const } : {}),
     };
 
     // ── Per-user twin FIFO gate ───────────────────────────────────────────────
@@ -2524,6 +2553,11 @@ async function redispatchQueuedMessage(msg: QueuedMessage): Promise<void> {
       progressUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`,
       channelId: msg.channelId,
       ...(msg.context ? { context: msg.context } : {}),
+      // A lock-contention retry already persisted its user message on the first
+      // dispatch — skip re-persisting so the retry doesn't create a duplicate
+      // root user row (branch). Proactively-queued mentions leave this unset and
+      // persist normally on drain.
+      ...(msg.alreadyPersisted ? { __skipUserMessagePersist: true } : {}),
       fastMode: fastModeEnabled,
     }),
   });
@@ -3178,6 +3212,10 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     // mandatory twin_deliver tool (react and/or reply, and where). Absent when
     // the model never delivered — claw-auth then stays silent (fail-closed).
     twinDelivery?: TwinDelivery;
+    // Plan mode: set by claw's propose-plan terminal tool when a plan-mode
+    // Turn 1 finishes. Renders the plan card in the thread (proposed → Approve
+    // gate, or trivial → auto-execute Turn 2). Wire contract, never for twin.
+    pendingPlan?: { title: string; desc?: string; document?: string; todos: Array<{ id: string; title: string }>; trivial: boolean };
   };
 
   const sessionId = payload.sessionId ?? "";
@@ -3960,6 +3998,261 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       // UI reads chat_attachments).
       .then((msg) => persistCallbackAttachments(msg.id, runOwnerId, payload.attachments))
       .catch((e) => log.warn("Failed to save assistant ChatMessage", { error: e instanceof Error ? e.message : String(e) }));
+  }
+
+  // ── Plan mode Turn 1: post the plan card and short-circuit ──
+  // claw's propose-plan terminal tool ends the turn with an EMPTY result plus a
+  // `pendingPlan`. Handle it HERE — BEFORE the empty-result "Sorry" notice below
+  // (which would otherwise fire and return) and before the normal text-posting
+  // path (which would run heavy citation/mention logic and could post an empty
+  // message). NEVER for twin (responseMode "approval"); requires the run to have
+  // been dispatched in plan mode (ctx.mode === "plan"). Fail-open. Short-circuits
+  // with `return` so nothing else posts. The session is intentionally NOT deleted
+  // — it stays alive (carrying planMessageId) so flow-action.ts's plan-approval
+  // branch can read it when the user approves (non-trivial), and so Turn 2's
+  // todo-write updates the SAME card (trivial + on approval).
+  const pendingPlan = payload.pendingPlan;
+  if (
+    pendingPlan &&
+    pendingPlan.todos?.length &&
+    ctx.responseMode === "conversation" &&
+    ctx.mode === "plan"
+  ) {
+    const token = ctx.appToken;
+    try {
+      const planTodos = pendingPlan.todos; // [{ id, title }]
+      const trivial = pendingPlan.trivial === true;
+      const phase = trivial ? "executing" : "proposed";
+      // Trivial plans auto-approve now — stamp the decision time ONCE and reuse it
+      // for the initial executing card AND the durable exec meta, so Turn 2's live
+      // renders keep the same "Auto-approved · <time>" footer. (Ignored for the
+      // proposed path — a rejected/approved time is stamped later at decision.)
+      const planApprovedAt = new Date().toISOString();
+
+      // Bug 5+4: persist the plan as an assistant transcript row (chat_messages).
+      // The interactive card only exists in Spaces; the claw chat reads
+      // chat_messages and renders assistant content as MARKDOWN, so without this
+      // the plan turn shows NOTHING under the user's query and the next turn's
+      // user row (a second consecutive user message) groups as a sibling BRANCH
+      // instead of chaining linearly. A markdown summary row fixes both, and the
+      // run's tool calls pair to it by chronology so they render too.
+      if (ctx.conversationId && ctx.agentSlug && ctx.agentOrgId) {
+        try {
+          const numbered = planTodos.map((t, i) => `${i + 1}. ${t.title}`).join("\n");
+          const summary = trivial
+            ? `**📋 Plan — auto-approved**\n\n${numbered}\n\n_Trivial request — running it now._`
+            : `**📋 Proposed a plan**\n\n${numbered}\n\n_Review and approve it to start._`;
+          const parentId = await chatMessageRepository
+            .latestMessageId(ctx.conversationId, ctx.agentSlug)
+            .catch(() => null);
+          await chatMessageRepository.create({
+            conversationId: ctx.conversationId,
+            agentSlug: ctx.agentSlug,
+            userId: runOwnerId,
+            orgId: ctx.agentOrgId,
+            ...(parentId ? { parentId } : {}),
+            role: "assistant",
+            content: summary,
+            status: "completed",
+            ...(payload.reasoning ? { reasoning: payload.reasoning } : {}),
+          });
+        } catch (e) {
+          log.warn("Failed to persist plan assistant transcript row (non-fatal)", {
+            error: e instanceof Error ? e.message : String(e),
+          });
+        }
+      }
+
+      // Bug 8: a prior proposed card in this thread is now stale (the agent
+      // re-planned). Grey it out + disable its Approve button so a superseded
+      // plan can't be run. Best-effort; the new card posts regardless.
+      if (ctx.conversationId && ctx.agentSlug) {
+        const prevCard = await getActivePlanCard(ctx.conversationId, ctx.agentSlug).catch(() => null);
+        if (prevCard?.messageId) {
+          try {
+            const supersededFlow = withSpacesAppId(
+              buildPlanFlow(prevCard.todos, {
+                title: prevCard.title ?? "Plan",
+                ...(prevCard.desc ? { desc: prevCard.desc } : {}),
+                ...(prevCard.document ? { document: prevCard.document } : {}),
+                phase: "proposed",
+                superseded: true,
+                data: {
+                  actionType: "plan-approval",
+                  agentSlug: ctx.agentSlug,
+                  conversationId: ctx.conversationId,
+                  channelId: ctx.channelId,
+                  userId: ctx.senderId,
+                },
+              }),
+              ctx.spacesAppId,
+            );
+            await spacesAppFetch(
+              "/chat/updateMessage",
+              { messageId: prevCard.messageId, flowJSON: supersededFlow, userId: ctx.spacesAppUserId, channelId: ctx.channelId },
+              token,
+            );
+          } catch (e) {
+            log.warn("Failed to supersede prior plan card (non-fatal)", {
+              error: e instanceof Error ? e.message : String(e),
+            });
+          }
+        }
+      }
+
+      const flow = withSpacesAppId(
+        buildPlanFlow(planTodos, {
+          title: pendingPlan.title,
+          ...(pendingPlan.desc ? { desc: pendingPlan.desc } : {}),
+          ...(pendingPlan.document ? { document: pendingPlan.document } : {}),
+          phase,
+          // Bug 1: trivial plans skipped the approval gate — flag it so the card
+          // shows an "Auto-approved" chip instead of a plain "Approved" one, plus
+          // the decision time for the audit footer.
+          ...(trivial ? { autoApproved: true, approvedAt: planApprovedAt } : {}),
+          ...(phase === "proposed"
+            ? {
+                data: {
+                  actionType: "plan-approval",
+                  agentSlug: ctx.agentSlug,
+                  conversationId: ctx.conversationId,
+                  channelId: ctx.channelId,
+                  userId: ctx.senderId,
+                },
+              }
+            : {}),
+        }),
+        ctx.spacesAppId,
+      );
+
+      const planResp = (await spacesAppFetch(
+        "/chat/postMessage",
+        {
+          channelId: ctx.channelId,
+          conversationId: ctx.conversationId,
+          flow,
+          userId: ctx.spacesAppUserId,
+        },
+        token,
+      )) as { messageId?: string; id?: string; data?: { messageId?: string; id?: string } };
+      const planMessageId = planResp?.messageId ?? planResp?.id ?? planResp?.data?.messageId ?? planResp?.data?.id;
+      if (planMessageId) {
+        // Persist so Turn 2's todo-write updates THIS same card in place, and so
+        // flow-action.ts's plan-approval can carry it forward.
+        await setSession(sessionId, { ...ctx, planMessageId }).catch(() => {});
+      } else {
+        // No messageId in the postMessage response → Turn 2's todo-write can't
+        // update this card in place and will post a NEW one (duplicate). Surface
+        // it so a Spaces API contract change is caught instead of failing silently.
+        log.warn(`Plan card posted but no messageId returned — Turn 2 may post a duplicate card (conv=${ctx.conversationId})`, { planResp });
+      }
+      log.info(`Posted plan card (${phase}) in thread ${ctx.conversationId}`);
+
+      // Bug 8: track the active proposed card so the NEXT re-plan can supersede
+      // it; a trivial/auto-run plan leaves nothing to approve, so clear instead.
+      if (ctx.conversationId && ctx.agentSlug) {
+        if (!trivial && planMessageId) {
+          await setActivePlanCard(ctx.conversationId, ctx.agentSlug, {
+            messageId: planMessageId,
+            todos: planTodos,
+            ...(pendingPlan.title ? { title: pendingPlan.title } : {}),
+            ...(pendingPlan.desc ? { desc: pendingPlan.desc } : {}),
+            ...(pendingPlan.document ? { document: pendingPlan.document } : {}),
+          }).catch(() => {});
+          // Fresh proposal awaiting approval: reset any prior run's exec meta so
+          // stale approvedTitles/autoApproved can't leak into this plan. The
+          // approve flow-action writes the real meta before it dispatches Turn 2.
+          await clearPlanExecMeta(ctx.conversationId, ctx.agentSlug).catch(() => {});
+        } else {
+          await clearActivePlanCard(ctx.conversationId, ctx.agentSlug).catch(() => {});
+        }
+      }
+
+      // Trivial plan: skip the user gate — auto-dispatch Turn 2 (auto mode)
+      // immediately. Mirrors the flow-action.ts plan-approval dispatch shape.
+      if (trivial) {
+        // Conversation-mode run owner == sender (see runOwnerId derivation).
+        const planRunOwnerId = ctx.senderId;
+        const task =
+          "Execute this approved plan:\n" +
+          planTodos.map((t, i) => `${i + 1}. ${t.title}`).join("\n");
+        const fastModeEnabled = await resolveFastMode(
+          ctx.conversationId,
+          ctx.agentSlug ?? "",
+          undefined,
+        ).catch(() => false);
+        const dispatchPayload: Record<string, unknown> = {
+          userId: planRunOwnerId,
+          task,
+          conversationId: ctx.conversationId,
+          channelId: ctx.channelId,
+          agentSlug: ctx.agentSlug,
+          orgId: ctx.agentOrgId,
+          callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
+          // Required for Turn 2's todo-write progress to reach /webhook/progress
+          // and advance the plan card live — without it postProgress no-ops (see
+          // the flow-action.ts plan-approval dispatch for the full rationale).
+          progressUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`,
+          mode: "auto",
+          planContinuation: true,
+          fastMode: fastModeEnabled,
+        };
+        // Deterministic plan facts for Turn 2's live render, written BEFORE
+        // dispatch so the very first todo-write sees them: trivial ⇒ auto-approved
+        // chip; approvedTitles = every todo (nothing was rejected in a trivial run).
+        if (ctx.conversationId && ctx.agentSlug) {
+          await setPlanExecMeta(ctx.conversationId, ctx.agentSlug, {
+            autoApproved: true,
+            approvedTitles: planTodos.map((t) => normalizePlanTitle(t.title)),
+            approvedAt: planApprovedAt,
+            ...(pendingPlan.title ? { title: pendingPlan.title } : {}),
+            ...(pendingPlan.desc ? { desc: pendingPlan.desc } : {}),
+            ...(pendingPlan.document ? { document: pendingPlan.document } : {}),
+          }).catch(() => {});
+        }
+        const runRes = await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+          },
+          body: JSON.stringify(dispatchPayload),
+        });
+        const runBody = (await runRes.json().catch(() => null)) as { success?: boolean; sessionId?: string } | null;
+        if (runBody?.success && runBody.sessionId) {
+          // Register Turn 2's session so its /result resolves agent context and
+          // its todo-write updates the SAME plan card (carry planMessageId). The
+          // "Auto-approved" chip is driven by the durable plan-exec meta set
+          // above (deterministic, race-free), not a session flag.
+          await setSession(runBody.sessionId, {
+            ...ctx,
+            task,
+            mode: "auto",
+            pendingPlan: { todos: planTodos },
+            ...(planMessageId ? { planMessageId } : {}),
+          }).catch(() => {});
+          // Light the "working" pill immediately — Turn 2 was dispatched DIRECT to
+          // /internal/run (bypassing the normal mention path that posts this), so
+          // without it the indicator only appears on the first tool-call tick.
+          void emitAgentWorkingSignal({
+            conversationId: ctx.conversationId,
+            channelId: ctx.channelId,
+            agentSlug: ctx.agentSlug,
+            spacesAppUserId: ctx.spacesAppUserId,
+            appToken: ctx.appToken,
+            toolLabel: "Starting the plan…",
+          });
+          log.info(`Auto-dispatched trivial plan Turn 2 session=${runBody.sessionId} conv=${ctx.conversationId}`);
+        } else {
+          log.warn(`Trivial plan Turn 2 dispatch failed conv=${ctx.conversationId}`, { runBody });
+        }
+      }
+    } catch (err) {
+      log.warn("Failed to post/dispatch plan card (non-fatal)", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+    return;
   }
 
   // Notify user if result is empty (but not if copilot has pendingResponses)
@@ -4908,10 +5201,70 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
 // todo-writes can't double-post the card before planMessageId is stored.
 const planRenderQueue = new Map<string, Promise<void>>();
 
-async function doRenderPlanCard(sessionId: string, todos: Todo[]): Promise<void> {
-  const ctx = await getSession(sessionId);
+async function doRenderPlanCard(
+  sessionId: string,
+  todos: Todo[],
+  conversationId?: string | null,
+  agentSlug?: string | null,
+): Promise<void> {
+  // Resolve via the SAME robust path every other /webhook/progress branch uses
+  // (sessionId → recovery → conversationId+agentSlug conv-index), not a bare
+  // getSession(sessionId). Plan mode splits work across Turn-1 and Turn-2
+  // sessions and seeds planMessageId on the Turn-2 session only after dispatch;
+  // the conv-index still carries planMessageId (from Turn 1 or Turn 2), so a
+  // first-todo-write that races the seed still updates the SAME card instead of
+  // being dropped by a momentary getSession miss.
+  const ctx = await resolveSessionContext(sessionId, conversationId ?? null, agentSlug ?? null);
   if (!ctx || ctx.responseMode !== "conversation" || !ctx.channelId || !ctx.appToken) return;
-  const flow = buildPlanFlow(todos, { title: "Plan" });
+
+  // Deterministic per-conversation plan facts, written BEFORE Turn 2 dispatched
+  // (so they're present even for the first todo-write): whether the plan was
+  // auto-approved (chip), and the whitelist of approved todo titles (reject
+  // filter). Absent for auto-mode agents (no approval), so those are untouched.
+  const execMeta = await getPlanExecMeta(
+    ctx.conversationId ?? conversationId ?? "",
+    ctx.agentSlug ?? agentSlug ?? "",
+  ).catch(() => null);
+
+  // Reject filter: keep ONLY todos the user approved (matched by normalized
+  // title — Turn 2's model regenerates ids). A re-added rejected/hallucinated
+  // todo is dropped so it can never render; falls back to unfiltered only if the
+  // whitelist matched nothing (titles diverged entirely) to avoid a blank card.
+  const renderTodos = execMeta?.approvedTitles?.length
+    ? filterToApprovedTitles(todos, execMeta.approvedTitles)
+    : todos;
+  if (renderTodos.length !== todos.length) {
+    clog.info(
+      `[plan] reject-filter: ${todos.length} → ${renderTodos.length} todos (dropped non-approved) conv=${ctx.conversationId}`,
+    );
+  }
+
+  // Live todo cards are always in execution (auto mode). Pick the phase so the
+  // PlanNode renders the executing/done layout (buildPlanFlow maps the internal
+  // Todo status → the component's exec status). Once every todo is
+  // completed/failed the card flips to the terminal 'done' layout.
+  const allDone =
+    renderTodos.length > 0 && renderTodos.every((t) => t.status === "completed" || t.status === "failed");
+  const phase = allDone ? "done" : "executing";
+  // Auto-approved chip: read from the durable exec meta (deterministic; not the
+  // racy Turn-2 session flag) so a trivial plan's card shows "Auto-approved" on
+  // every render including the first.
+  const flow = buildPlanFlow(renderTodos, {
+    // Preserve the approved plan's real title/desc across Turn 2 updates instead
+    // of overwriting them with the generic "Plan" (execMeta is set at approve/
+    // trivial time). Falls back to "Plan" for auto-mode cards (no plan approval).
+    title: execMeta?.title?.trim() || "Plan",
+    ...(execMeta?.desc ? { desc: execMeta.desc } : {}),
+    // Preserve the detailed markdown plan across every live todo-write render so
+    // the expanded view keeps its document as the plan executes.
+    ...(execMeta?.document ? { document: execMeta.document } : {}),
+    phase,
+    ...(execMeta?.autoApproved ? { autoApproved: true } : {}),
+    ...(execMeta?.approvedByName ? { approvedBy: execMeta.approvedByName } : {}),
+    // Preserve the ONE-TIME approve timestamp across every live update (never
+    // re-stamped per render), so the audit footer's "· <time>" stays stable.
+    ...(execMeta?.approvedAt ? { approvedAt: execMeta.approvedAt } : {}),
+  });
   if (!ctx.planMessageId) {
     // postMessage takes the partial `flow` field; chatController wraps it.
     // Include conversationId so the card lands IN THE THREAD (channelId alone
@@ -4934,9 +5287,14 @@ async function doRenderPlanCard(sessionId: string, todos: Todo[]): Promise<void>
   }
 }
 
-function renderPlanCard(sessionId: string, todos: Todo[]): Promise<void> {
+function renderPlanCard(
+  sessionId: string,
+  todos: Todo[],
+  conversationId?: string | null,
+  agentSlug?: string | null,
+): Promise<void> {
   const prev = planRenderQueue.get(sessionId) ?? Promise.resolve();
-  const next = prev.catch(() => {}).then(() => doRenderPlanCard(sessionId, todos));
+  const next = prev.catch(() => {}).then(() => doRenderPlanCard(sessionId, todos, conversationId, agentSlug));
   planRenderQueue.set(sessionId, next);
   void next.finally(() => {
     if (planRenderQueue.get(sessionId) === next) planRenderQueue.delete(sessionId);
@@ -4999,7 +5357,7 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
     // too (normal tool-progress events do this below; plan events return early).
     void touchRunRecovery(sessionId).catch(() => {});
     const todos = ((req.body as { todos?: unknown }).todos ?? []) as Todo[];
-    renderPlanCard(sessionId, todos).catch((e) =>
+    renderPlanCard(sessionId, todos, conversationId, agentSlug).catch((e) =>
       clog.warn(`[webhook/progress] renderPlanCard failed for ${sessionId}:`, e instanceof Error ? e.message : e),
     );
     return;

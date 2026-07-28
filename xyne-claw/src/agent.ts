@@ -253,6 +253,8 @@ export class QuotaExhaustedError extends Error {
 
 type DebugEventKind =
   | "session_start"
+  | "session_tools"
+  | "mode_switch"
   | "session_prompt"
   | "stream_rate"
   | "thinking"
@@ -1330,6 +1332,15 @@ export interface RunTaskOptions {
    *  the model to call the tool and, if it never does, leaves this undefined so
    *  the caller stays silent (fail-closed) instead of posting raw assistant text. */
   twinDeliverRef?: import("./twin-deliver.js").TwinDeliverRef | undefined;
+  /** Plan/auto mode of this run (agent.config.planMode). Debug-telemetry only —
+   *  emitted in the session_tools event so the pipeline UI shows which mode a run
+   *  executed in. Behavior is driven by the tool palette / prompt assembled in
+   *  run.ts, not by this field. */
+  mode?: "plan" | "auto" | undefined;
+  /** True when this is the auto-mode execution turn dispatched right after a plan
+   *  was approved (or a trivial plan auto-continued). Debug-telemetry only —
+   *  emits a mode_switch (plan→auto) event at session start. */
+  planContinuation?: boolean | undefined;
   /** Opt-in citation reflection (agentConfig.citationReflection). When true and
    *  the run pulled citeable sources (a tool result carried [clf-…#n] tokens)
    *  yet the final prose cites none, runTask nudges the model once to rewrite
@@ -1417,6 +1428,8 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     modelSettings,
     structuredOutputRef,
     twinDeliverRef,
+    mode,
+    planContinuation,
     citationReflection,
     autoToolCitations,
     isRegenerate,
@@ -2147,7 +2160,24 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     task,
     context: context ?? null,
     systemPromptOverride: Boolean(systemPromptOverride),
+    mode: mode ?? "auto",
   }, { at: debugStartedIso });
+
+  // Debug telemetry: the tool palette this run actually got, plus the mode. Lets
+  // the pipeline UI show, at a glance, which tools were available (and, in plan
+  // mode, that it's the read-only propose-plan palette).
+  pushDebugEvent("session_tools", {
+    mode: mode ?? "auto",
+    toolCount: customToolNames.length,
+    tools: customToolNames,
+  });
+
+  // Debug telemetry: this run is the auto-mode execution turn that followed a
+  // plan approval (or a trivial plan's auto-continue) — record the plan→auto
+  // transition explicitly so the two turns read as one flow in the UI.
+  if (planContinuation) {
+    pushDebugEvent("mode_switch", { from: "plan", to: "auto", reason: "plan_approved" });
+  }
 
   const reportProgress = createProgressReporter(progressUrl, sessionId ?? conversationId ?? "unknown", progressMeta);
 

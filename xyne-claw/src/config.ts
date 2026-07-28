@@ -37,7 +37,7 @@ export const PATHS = {
   agentDir: process.env["XYNE_CLAW_AGENT_DIR"] ?? "",
 } as const;
 
-const litellmModel = process.env["LITELLM_MODEL"]?.trim() || "claude-sonnet-4-20250514";
+const litellmModel = process.env["LITELLM_MODEL"]?.trim() || "kimi-latest";
 const litellmFastModel = process.env["LITELLM_FAST_MODEL"]?.trim() || litellmModel;
 
 export const LITELLM = {
@@ -78,5 +78,10 @@ export const HINDSIGHT = {
   url: process.env["HINDSIGHT_URL"] ?? "",
   tenant: process.env["HINDSIGHT_TENANT"] ?? "default",
   apiKey: process.env["HINDSIGHT_API_KEY"] ?? "",
-  enabled: Boolean(process.env["HINDSIGHT_URL"]),
+  // Mirror claw-auth's gate (memoryCronService.ts): MEMORY_PROVIDER alone also
+  // enables memory (e.g. MEMORY_PROVIDER=stub in dev). Previously only
+  // HINDSIGHT_URL counted here, so a deployment configured via MEMORY_PROVIDER
+  // could retain memories through claw-auth while every memory-search call on
+  // this pod returned "not configured" — a silent split-brain.
+  enabled: Boolean(process.env["HINDSIGHT_URL"] || process.env["MEMORY_PROVIDER"]),
 } as const;

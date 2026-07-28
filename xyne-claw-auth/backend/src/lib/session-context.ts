@@ -113,6 +113,20 @@ export interface SessionContext {
    * requires the user to start a new conversation.
    */
   escalatedProvider?: string;
+  /**
+   * Plan/auto mode gate (distinct from responseMode). 'plan' = the agent
+   * proposed a plan and is awaiting approval; 'auto' = normal execution
+   * (today's behavior). Absent ⇒ 'auto'. Set to 'plan' at dispatch when
+   * agent.config.planMode is on AND the event is a non-twin thread mention;
+   * flipped to 'auto' by the plan-approval flow-action for Turn 2.
+   */
+  mode?: 'plan' | 'auto';
+  /**
+   * The approved plan carried into Turn 2 (auto) after the user approves —
+   * the subset of todos they kept. Read by the plan-approval dispatch to build
+   * Turn 2's task, and lets claw emit a mode_switch debug event.
+   */
+  pendingPlan?: { todos: { id: string; title: string }[] };
 }
 
 const SESSION_TTL = 86400;
@@ -140,6 +154,143 @@ export function convKey(conversationId: string, agentSlug: string, userScopeId?:
 
 export function automationRunDedupKey(conversationId: string, agentSlug: string): string {
   return `automation-run-dedup:${conversationId}:${agentSlug}`;
+}
+
+// ── Active proposed-plan card (conversation-scoped) ─────────────────────────
+// Tracks the LIVE, still-awaiting-approval plan card for a (conversation, agent)
+// so a follow-up "revise the plan" turn can grey-out + disable the previous card
+// before posting the new one. Deliberately NOT stored on SessionContext: each
+// plan-mode turn mints a fresh sessionId and the conv-index is overwritten at
+// dispatch, so the prior card's id would be lost. This dedicated key survives
+// sessionId churn across re-plans. Cleared once the plan is approved / trivially
+// auto-run (no proposal is left dangling).
+const PLAN_CARD_PREFIX = "plan-active-card:";
+
+export interface ActivePlanCard {
+  messageId: string;
+  todos: { id: string; title: string }[];
+  title?: string;
+  desc?: string;
+  /** Detailed markdown plan — preserved so a superseded card keeps its document. */
+  document?: string;
+}
+
+function planCardKey(conversationId: string, agentSlug: string): string {
+  return `${PLAN_CARD_PREFIX}${conversationId}:${agentSlug}`;
+}
+
+export async function setActivePlanCard(
+  conversationId: string,
+  agentSlug: string,
+  card: ActivePlanCard,
+): Promise<void> {
+  const redis = redisService.getConnection();
+  await redis.set(planCardKey(conversationId, agentSlug), JSON.stringify(card), "EX", SESSION_TTL);
+}
+
+export async function getActivePlanCard(
+  conversationId: string,
+  agentSlug: string,
+): Promise<ActivePlanCard | null> {
+  const redis = redisService.getConnection();
+  const raw = await redis.get(planCardKey(conversationId, agentSlug));
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as ActivePlanCard;
+  } catch {
+    return null;
+  }
+}
+
+export async function clearActivePlanCard(conversationId: string, agentSlug: string): Promise<void> {
+  const redis = redisService.getConnection();
+  await redis.del(planCardKey(conversationId, agentSlug)).catch(() => {});
+}
+
+// ── Plan execution meta (conversation-scoped, deterministic) ────────────────
+// The facts Turn 2's live plan-card render needs, written by the approve/trivial
+// path BEFORE Turn 2 is dispatched, so they are already present when Turn 2's
+// FIRST todo-write arrives (the Turn-2 SessionContext is only seeded AFTER
+// dispatch, so reading these off the session would race the first render):
+//   - autoApproved: the plan skipped the user gate (trivial) → "Auto-approved" chip.
+//   - approvedTitles: normalized titles of the todos the user KEPT → a whitelist
+//     so a re-added rejected todo can never render (the model may re-emit dropped
+//     steps in todo-write; the flow-JSON approval is correct, this makes the live
+//     render correct too, deterministically, on every todo-write).
+// Keyed per (conversation, agent); reset on each new proposal; TTL-cleaned.
+const PLAN_EXEC_META_PREFIX = "plan-exec-meta:";
+
+export interface PlanExecMeta {
+  autoApproved: boolean;
+  approvedTitles: string[];
+  /** Display name of the human who approved (absent when autoApproved). */
+  approvedByName?: string;
+  /** ISO timestamp of the approve/trivial decision — stamped ONCE before Turn 2
+   *  dispatch and preserved across every live todo-write render (never re-stamped),
+   *  so the audit footer shows a stable "· <time>". */
+  approvedAt?: string;
+  /** The approved plan's title/desc, so Turn 2's card render preserves them
+   *  instead of falling back to the generic "Plan". */
+  title?: string;
+  desc?: string;
+  /** The detailed markdown plan, so Turn 2's live renders keep the expanded-view
+   *  document (authored once at propose time). */
+  document?: string;
+}
+
+function planExecMetaKey(conversationId: string, agentSlug: string): string {
+  return `${PLAN_EXEC_META_PREFIX}${conversationId}:${agentSlug}`;
+}
+
+/** Normalize a todo title for stable matching (approved-set whitelist). Turn 2's
+ *  model regenerates todo ids, so titles — not ids — are the reliable key. */
+export function normalizePlanTitle(title: string): string {
+  return title.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+/**
+ * Deterministic reject filter: keep ONLY the todos whose normalized title is in
+ * the approved set, so a rejected/hallucinated todo the model re-adds can never
+ * render. `approvedTitles` are already normalized. Returns the ORIGINAL list
+ * unchanged when the approved set is empty (no plan approval) OR when nothing
+ * matched (the model rephrased every title) — so the card never renders blank.
+ */
+export function filterToApprovedTitles<T extends { title: string }>(
+  todos: T[],
+  approvedTitles: string[],
+): T[] {
+  if (!approvedTitles.length) return todos;
+  const allow = new Set(approvedTitles);
+  const kept = todos.filter((t) => allow.has(normalizePlanTitle(t.title)));
+  return kept.length > 0 ? kept : todos;
+}
+
+export async function setPlanExecMeta(
+  conversationId: string,
+  agentSlug: string,
+  meta: PlanExecMeta,
+): Promise<void> {
+  const redis = redisService.getConnection();
+  await redis.set(planExecMetaKey(conversationId, agentSlug), JSON.stringify(meta), "EX", SESSION_TTL);
+}
+
+export async function getPlanExecMeta(
+  conversationId: string,
+  agentSlug: string,
+): Promise<PlanExecMeta | null> {
+  const redis = redisService.getConnection();
+  const raw = await redis.get(planExecMetaKey(conversationId, agentSlug));
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as PlanExecMeta;
+  } catch {
+    return null;
+  }
+}
+
+export async function clearPlanExecMeta(conversationId: string, agentSlug: string): Promise<void> {
+  const redis = redisService.getConnection();
+  await redis.del(planExecMetaKey(conversationId, agentSlug)).catch(() => {});
 }
 
 /**
