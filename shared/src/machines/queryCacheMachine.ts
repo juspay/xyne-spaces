@@ -18,7 +18,7 @@ import type { Context } from '../zero/schema.js';
 export type Conversation = QueryResultType<typeof queries.channelConversationsPaginatedV3>[number];
 
 export type ThreadConversation = NonNullable<
-  QueryResultType<typeof queries.threadConversation>
+  QueryResultType<typeof queries.threadConversationV2>
 >;
 export type CallHistoryEntry = QueryResultType<typeof queries.userCallHistoryV2>[number];
 export type RecordingEntry = QueryResultType<typeof queries.userRecordings>[number];
@@ -552,7 +552,7 @@ export const getThreadConversationQueryHash = (context: {
   userID: string;
 }): string => {
   try {
-    const query = queries.threadConversation.fn({
+    const query = queries.threadConversationV2.fn({
       args: { conversationId: "__dummy__" },
       ctx: context as Context,
     });

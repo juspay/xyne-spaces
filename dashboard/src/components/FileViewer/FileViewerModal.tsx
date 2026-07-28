@@ -930,7 +930,7 @@ const AttachmentGalleryModalInner: React.FC = () => {
 
   const threadConversationQuery = useMemo(
     () =>
-      queries.threadConversation({
+      queries.threadConversationV2({
         conversationId: currentAttachment?.conversationId ?? ' ',
         ...(threadChannelId ? { channelId: threadChannelId, isMember } : {}),
       }),
