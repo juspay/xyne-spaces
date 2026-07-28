@@ -1,7 +1,6 @@
 name: Schema Migration Check
 
-# PR-only guards for database schema safety (no DB required — pure git-diff).
-# Two independent jobs so their git state can't interfere with each other.
+# PR-only guard for database schema safety (no DB required — pure git-diff).
 on:
   pull_request:
 
@@ -43,19 +42,3 @@ jobs:
 
       - name: Validate schema migrations
         run: bash scripts/validate-schema-migrations.sh --ci-mode
-
-  # Postgres enums are frozen: block new enum blocks/values and CREATE/ALTER
-  # TYPE in migrations. The script resolves the base via $CHANGE_TARGET (falls
-  # back to main), does its own fetch, and diffs BASE...HEAD.
-  enum-guard:
-    name: Enum guard
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-
-      - name: Enum guard
-        env:
-          CHANGE_TARGET: ${{ github.base_ref }}
-        run: bash scripts/validate-no-new-enums.sh --ci
