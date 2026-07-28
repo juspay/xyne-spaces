@@ -24,6 +24,13 @@ import { StatusIndicator } from '../../ui/StatusIndicator';
 interface SearchResultItemProps {
   result: DisplaySearchResult;
   channelDisplayName?: string | undefined;
+  /**
+   * Channel the result belongs to, resolved by the parent against its existing
+   * `allChannels` lookup (no per-row lookup here). `icon` is whatever the parent's
+   * shared `getChannelIcon` returns — hashtag / lock / DM avatar — so the tag
+   * follows the same public-vs-private logic as every other channel glyph.
+   */
+  channelTag?: { name: string; icon: ReactElement } | undefined;
   onSelect: (result: DisplaySearchResult) => Promise<void> | void;
   onPreview?: (result: DisplaySearchResult) => void;
   isSelected?: boolean;
@@ -118,7 +125,7 @@ const UserSearchResultItem = ({
       data-item-label={result.title}
       onSelect={() => void onSelect(result)}
       onMouseDownCapture={handleMouseDown}
-      className='flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1.5'
+      className='flex items-center gap-3 p-3 rounded-lg cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1.5'
     >
       <Avatar userId={result.id} size='xs' />
       <div className='flex-1 min-w-0 flex items-center gap-2'>
@@ -151,7 +158,7 @@ const UserSearchResultItem = ({
 
 const SearchResultItem = ({
   result,
-  channelDisplayName,
+  channelTag,
   onSelect,
   onPreview,
   isSelected = false,
@@ -217,7 +224,7 @@ const SearchResultItem = ({
             onMouseDownCapture={handleMouseDown}
             onMouseEnter={handleMouseEnter}
             onMouseLeave={handleMouseLeave}
-            className='flex flex-col gap-0.5 px-3 py-2.5 rounded-lg cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1.5'
+            className='flex flex-col gap-0.5 p-3 rounded-lg cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1.5'
           >
             <div className='flex items-start gap-1.5'>
               {mergeMode && (
@@ -276,7 +283,7 @@ const SearchResultItem = ({
           data-item-label={itemLabel}
           onSelect={() => void onSelect(result)}
           onMouseDownCapture={handleMouseDown}
-          className='flex flex-col gap-0.5 px-3 py-2.5 rounded-lg cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1.5'
+          className='flex flex-col gap-0.5 p-3 rounded-lg cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1.5'
         >
           <div className='flex items-center gap-1.5'>
             {result.avatar ? <UserAvatar userId={result.avatar} /> : getResultIcon(result)}
@@ -301,7 +308,9 @@ const SearchResultItem = ({
       );
     }
 
-    case 'ticket':
+    case 'ticket': {
+      // Single line: icon | ticketId | · | title | channel. Only the title truncates.
+      const ticketId = result.searchContext?.xyneId;
       return (
         <Command.Item
           key={result.id}
@@ -313,38 +322,43 @@ const SearchResultItem = ({
           onMouseDownCapture={handleMouseDown}
           onMouseEnter={handleMouseEnter}
           onMouseLeave={handleMouseLeave}
-          className='group flex flex-col gap-2 px-3 py-2.5 rounded-lg cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1.5'
+          className='flex w-full items-center gap-3 h-10 p-3 rounded-lg cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1.5'
         >
-          <div className='flex items-center gap-2'>
-            {getResultIcon(result)}
-            <div className='flex-1 min-w-0'>
-              <div className='text-[15px] leading-[1.2] tracking-[-0.1px] text-foreground truncate'>
-                <RenderMessageWithHTML message={result.title} />
-              </div>
-              {(result.subtitle || result.metadata.timestamp) && (
-                <div className='flex items-start justify-between gap-2 text-xs text-muted-foreground'>
-                  {result.subtitle && (
-                    <div className='min-w-0 line-clamp-2'>
-                      <RenderMessageWithHTML message={result.subtitle} />
-                    </div>
-                  )}
-                  {result.metadata.timestamp && (
-                    <span className='ml-auto shrink-0 whitespace-nowrap'>
-                      {utcToIst(result.metadata.timestamp)}
-                    </span>
-                  )}
-                </div>
-              )}
-            </div>
-            {isSelected && <SelectedBadge />}
+          <span className='flex shrink-0 items-center'>{getResultIcon(result)}</span>
+          <div className='flex flex-1 items-center gap-1.5 min-w-0'>
+            {ticketId && (
+              <>
+                <span className='shrink-0 whitespace-nowrap text-[15px] leading-[1.2] tracking-[-0.1px] text-muted-foreground'>
+                  {ticketId}
+                </span>
+                <span className='shrink-0 text-[14px] font-medium leading-[1.2] tracking-[-0.28px] text-muted-foreground'>
+                  ·
+                </span>
+              </>
+            )}
+            <span className='min-w-0 *:truncate text-[15px] leading-[1.2] tracking-[-0.1px] text-foreground'>
+              <RenderMessageWithHTML message={result.title} />
+            </span>
+            {/* The channel tag sits inside this group, not beside it: the design hugs it to
+                the truncated title (sharing the group's 6px gap) rather than flushing it to
+                the right edge of the row. */}
+            {channelTag && (
+              <span className='flex grow items-center gap-1 text-muted-foreground overflow-hidden'>
+                <span className='flex h-4 w-4 shrink-0 items-center justify-center'>
+                  {channelTag.icon}
+                </span>
+                <span className='text-[14px] font-medium leading-[1.2] tracking-[-0.28px] truncate'>
+                  {channelTag.name}
+                </span>
+              </span>
+            )}
           </div>
+          {isSelected && <SelectedBadge />}
         </Command.Item>
       );
+    }
 
     case 'attachment': {
-      const subtitle = channelDisplayName
-        ? `File uploaded in ${channelDisplayName}`
-        : result.subtitle;
       return (
         <Command.Item
           key={result.id}
@@ -354,24 +368,13 @@ const SearchResultItem = ({
           data-item-label={itemLabel}
           onSelect={() => void onSelect(result)}
           onMouseDownCapture={handleMouseDown}
-          className='flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1.5'
+          className='flex w-full items-center gap-3 h-10 p-3 rounded-lg cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1.5'
         >
-          {getResultIcon(result)}
-          <div className='flex-1 min-w-0'>
-            <div className='text-[15px] leading-[1.2] tracking-[-0.1px] text-foreground truncate'>
-              {' '}
+          <span className='flex shrink-0 items-center'>{getResultIcon(result)}</span>
+          <div className='flex flex-1 items-center gap-1.5 min-w-0'>
+            <span className='min-w-0 *:truncate text-[15px] leading-[1.2] tracking-[-0.1px] text-foreground'>
               <RenderMessageWithHTML message={result.title} />
-            </div>
-            <div className='flex items-center justify-between gap-2 text-xs text-muted-foreground'>
-              <span className='truncate'>
-                {channelDisplayName ? subtitle : <RenderMessageWithHTML message={subtitle} />}
-              </span>
-              {result.metadata.timestamp && (
-                <span className='shrink-0 whitespace-nowrap'>
-                  {utcToIst(result.metadata.timestamp)}
-                </span>
-              )}
-            </div>
+            </span>
           </div>
           {isSelected && <SelectedBadge />}
           {!isSelected &&
@@ -383,7 +386,7 @@ const SearchResultItem = ({
                   e.stopPropagation();
                   onPreview(result);
                 }}
-                className='p-1.5 text-muted-foreground hover:text-accent-foreground hover:bg-accent rounded transition-colors'
+                className='p-1.5 text-muted-foreground hover:text-accent-foreground hover:bg-accent rounded transition-colors focus-visible:outline-none focus-visible:ring-0'
                 title='Preview file'
                 data-track-category='GLOBAL_SEARCH'
                 data-track-name='PREVIEW_SEARCH_RESULT'
@@ -409,7 +412,7 @@ const SearchResultItem = ({
           data-item-label={itemLabel}
           onSelect={() => void onSelect(result)}
           onMouseDownCapture={handleMouseDown}
-          className='flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1.5'
+          className='flex items-center gap-3 p-3 rounded-lg cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1.5'
         >
           {getResultIcon(result)}
           <div className='flex-1 min-w-0'>
