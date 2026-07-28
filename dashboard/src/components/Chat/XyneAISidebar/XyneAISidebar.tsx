@@ -120,6 +120,15 @@ interface XyneAISidebarProps {
   // The input box re-attaches the KB collection chip on every bump.
   kbOpenNonce?: number;
   visible?: boolean;
+  // Locks the sidebar to one Claw agent instead of the app-wide selected-agent store (for embedded/isolated instances).
+  forcedAgentSlug?: string | null;
+  // Seed text for the input box; bump autoSendNonce to submit it as a real message.
+  initialQuery?: string;
+  autoSendNonce?: number;
+  // Reports whether the active conversation is streaming, so an embedding caller can mute its own controls.
+  onStreamingChange?: (isStreaming: boolean) => void;
+  // Reports the latest completed bot message's final text (no reasoning), for embedding callers.
+  onFinalResponse?: (content: string) => void;
 }
 
 const XyneAISidebar = ({
@@ -137,6 +146,11 @@ const XyneAISidebar = ({
   kbDocName: kbDocNameProp,
   kbOpenNonce,
   visible = true,
+  forcedAgentSlug,
+  initialQuery,
+  autoSendNonce,
+  onStreamingChange,
+  onFinalResponse,
 }: XyneAISidebarProps): ReactElement => {
   const isFullscreen = variant === 'fullscreen';
   const [inputValue, setInputValue] = useState('');
@@ -221,6 +235,16 @@ const XyneAISidebar = ({
   useEffect(() => {
     setFileScopes(kbDocIdProp ? [{ id: kbDocIdProp, name: kbDocNameProp || 'this file' }] : []);
   }, [kbDocIdProp, kbDocNameProp, kbOpenNonce]);
+  // Bumping autoSendNonce seeds inputValue from initialQuery; submitted once seeded (see effect near handleSubmit).
+  const autoSendPendingQueryRef = useRef<string | null>(null);
+  const lastAutoSendNonceRef = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    if (autoSendNonce === undefined || autoSendNonce === lastAutoSendNonceRef.current) return;
+    if (!initialQuery?.trim()) return;
+    lastAutoSendNonceRef.current = autoSendNonce;
+    autoSendPendingQueryRef.current = initialQuery;
+    setInputValue(initialQuery);
+  }, [autoSendNonce, initialQuery]);
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
   const [deepResearchEnabled, setDeepResearchEnabled] = useState(false);
   const [createCanvasEnabled, setCreateCanvasEnabled] = useState(false);
@@ -259,6 +283,18 @@ const XyneAISidebar = ({
     () => messages.some((m: Message) => m.isStreaming),
     [messages],
   );
+
+  useEffect(() => {
+    onStreamingChange?.(isActiveSessionStreaming);
+  }, [isActiveSessionStreaming, onStreamingChange]);
+
+  useEffect(() => {
+    if (!onFinalResponse) return;
+    const lastBot = [...messages].reverse().find((m: Message) => m.type === 'bot');
+    if (lastBot && !lastBot.isStreaming && lastBot.content) {
+      onFinalResponse(lastBot.content);
+    }
+  }, [messages, onFinalResponse]);
 
   // Per-render render-precompute hoisted out of the inline IIFE in JSX.
   // Two O(n) passes over `messages` and `displayMessages` that the JSX used to
@@ -549,8 +585,20 @@ const XyneAISidebar = ({
   const webSearchAccessible = configData?.webSearchAccessible ?? false;
   const deepResearchAccessible = configData?.deepResearchAccessible ?? false;
 
-  // Global agent selector state (sidebar scope)
-  const { selectedAgentSlug, setSelectedAgentSlug } = useSelectedAgent();
+  // When forcedAgentSlug is set, reads/writes bypass the app-wide agent-selector store.
+  const isAgentForced = forcedAgentSlug !== undefined;
+  const {
+    selectedAgentSlug: globalSelectedAgentSlug,
+    setSelectedAgentSlug: setGlobalSelectedAgentSlug,
+  } = useSelectedAgent();
+  const selectedAgentSlug = isAgentForced ? forcedAgentSlug : globalSelectedAgentSlug;
+  const setSelectedAgentSlug = useCallback(
+    (slug: string | null) => {
+      if (isAgentForced) return;
+      setGlobalSelectedAgentSlug(slug);
+    },
+    [isAgentForced, setGlobalSelectedAgentSlug],
+  );
   const { data: accessibleAgents = [] } = useQuery({
     queryKey: ['accessible-claw-agents'],
     queryFn: fetchAccessibleClawAgents,
@@ -639,6 +687,7 @@ const XyneAISidebar = ({
     deepResearchEnabled: deepResearchAccessible ? deepResearchEnabled : false,
     createCanvasEnabled,
     isV2,
+    suppressCompletionToast: isAgentForced,
     channelId: channelId || undefined, // Pass channelId for thread ID construction
     ticketIds: selectedTickets.map(t => t.id),
     canvasIds: selectedCanvases.map(c => c.id),
@@ -658,7 +707,10 @@ const XyneAISidebar = ({
   // This is triggered when XyneAI is invoked from "Ask AI" button
   useEffect(() => {
     if (startFreshChat) {
-      xyneAIActor.send({ type: 'SET_FOCUS_SESSION', sessionId: null });
+      // A forced-agent instance must not mutate the global xyneAIActor shared with the main sidebar.
+      if (!isAgentForced) {
+        xyneAIActor.send({ type: 'SET_FOCUS_SESSION', sessionId: null });
+      }
 
       // Reset to fresh state (keeps threadInfo but clears messages/conversation)
       setMessages([]);
@@ -680,7 +732,7 @@ const XyneAISidebar = ({
 
       // Only reset the flag in the machine for non-KB instances (AppRoot sidebar)
       // KB inline sidebar doesn't use xstate, so skip this
-      if (channelId !== null) {
+      if (channelId !== null && !isAgentForced) {
         // Only update the xstate machine in sidebar mode (fullscreen manages its own lifecycle)
         if (!isFullscreen) {
           xyneAIActor.send({
@@ -693,12 +745,17 @@ const XyneAISidebar = ({
         }
       }
     }
-  }, [startFreshChat, channelId, threadInfo, canvasInfo, isFullscreen]);
+  }, [startFreshChat, channelId, threadInfo, canvasInfo, isFullscreen, isAgentForced]);
 
   // Scroll to bottom function
   const scrollToBottom = useCallback((): void => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, []);
+    // Forced/embedded instances sit inside a scrollable settings panel; 'nearest' keeps the
+    // scroll contained to this chat box instead of dragging the ancestor panel into view.
+    messagesEndRef.current?.scrollIntoView({
+      behavior: 'smooth',
+      ...(isAgentForced && { block: 'nearest' }),
+    });
+  }, [isAgentForced]);
 
   // AI Onboarding: derive answered count and visible suggestions from messages
   // No context dispatches — avoids re-renders that interfere with streaming
@@ -1637,6 +1694,17 @@ const XyneAISidebar = ({
     kbCollectionIdProp,
   ]);
 
+  // Submits once the auto-send seed effect above has landed in inputValue (handleSubmit closes over it).
+  useEffect(() => {
+    if (
+      autoSendPendingQueryRef.current !== null &&
+      inputValue === autoSendPendingQueryRef.current
+    ) {
+      autoSendPendingQueryRef.current = null;
+      void handleSubmit();
+    }
+  }, [inputValue, handleSubmit]);
+
   const hasBackgroundStreamingElsewhere = useMemo(() => {
     if (streamingSessionIds.length === 0) return false;
     if (messages.some((m: Message) => m.isStreaming)) return false;
@@ -1795,8 +1863,8 @@ const XyneAISidebar = ({
             }}
             onDeleteConversation={handleDeleteConversation}
             selectedAgentSlug={effectiveAgentSlug}
-            agents={accessibleAgents}
-            onSelectAgent={handleSelectAgentFromHistory}
+            agents={isV2 ? accessibleAgents : []}
+            {...(isV2 && !isAgentForced ? { onSelectAgent: handleSelectAgentFromHistory } : {})}
           />
         ) : showUserActivityPanel ? (
           <UserActivityPanel
@@ -1819,7 +1887,7 @@ const XyneAISidebar = ({
                 title={isFullscreen ? 'Xyne AI' : selectedAgentName || 'Ask AI'}
                 selectedAgent={selectedAgent}
                 onShowDebugger={
-                  isV2
+                  isV2 && !isAgentForced
                     ? () => {
                         setDebugTurnIndex(null);
                         setDebugSessionId(null);
@@ -1835,6 +1903,7 @@ const XyneAISidebar = ({
                       hideHistory: true,
                     }
                   : {})}
+                {...(isAgentForced ? { hideTitle: true } : {})}
                 {...(onClose !== undefined
                   ? {
                       onClose: () => {
@@ -1919,7 +1988,9 @@ const XyneAISidebar = ({
                             contextPanelPosition='top'
                             selectedAgentSlug={effectiveAgentSlug}
                             agents={isV2 ? accessibleAgents : []}
-                            {...(isV2 ? { onSelectAgent: handleSelectAgent } : {})}
+                            {...(isV2 && !isAgentForced
+                              ? { onSelectAgent: handleSelectAgent }
+                              : {})}
                             {...sharedInputSectionProps}
                           />
                         }
@@ -2134,7 +2205,7 @@ const XyneAISidebar = ({
                     contextPanelPosition='bottom'
                     selectedAgentSlug={effectiveAgentSlug}
                     agents={isV2 ? accessibleAgents : []}
-                    {...(isV2 ? { onSelectAgent: handleSelectAgent } : {})}
+                    {...(isV2 && !isAgentForced ? { onSelectAgent: handleSelectAgent } : {})}
                     compactToolbar={isCompactSidebar}
                     {...sharedInputSectionProps}
                     kbCollectionId={kbCollectionIdProp}

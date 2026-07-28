@@ -1,6 +1,7 @@
-import React from 'react';
-import { Bot, Sparkles } from 'lucide-react';
+import React, { useState } from 'react';
+import { Bot, Plus, Sparkles } from 'lucide-react';
 import type { ChannelClawAgent } from '../../../hooks/useChannelClawAgents';
+import { AddAgentModal } from './AddAgentModal';
 import {
   Select,
   SelectContent,
@@ -11,6 +12,7 @@ import {
 } from '../../ui/Select/Select';
 
 const DEFAULT_AGENT_OPTION = '__default__';
+const ADD_AGENT_OPTION = '__add_agent__';
 
 export interface AutoDraftAgentPickerProps {
   value: string | null;
@@ -30,10 +32,18 @@ export const AutoDraftAgentPicker: React.FC<AutoDraftAgentPickerProps> = ({
   disabled = false,
   compact = false,
 }) => {
+  const [showAddAgent, setShowAddAgent] = useState(false);
+
   const select = (
     <Select
       value={value ?? DEFAULT_AGENT_OPTION}
-      onValueChange={v => onChange(v === DEFAULT_AGENT_OPTION ? null : v)}
+      onValueChange={v => {
+        if (v === ADD_AGENT_OPTION) {
+          setShowAddAgent(true);
+          return;
+        }
+        onChange(v === DEFAULT_AGENT_OPTION ? null : v);
+      }}
       disabled={disabled}
     >
       <SelectTrigger
@@ -65,12 +75,33 @@ export const AutoDraftAgentPicker: React.FC<AutoDraftAgentPickerProps> = ({
             </span>
           </SelectItem>
         ))}
+        <SelectSeparator />
+        <SelectItem
+          value={ADD_AGENT_OPTION}
+          className='rounded-[8px] text-desk-accent'
+          data-track-category='DeskSettings'
+          data-track-name='AddClawAgent'
+        >
+          <span className='flex items-center gap-2'>
+            <Plus size={14} />
+            <span>Add agent</span>
+          </span>
+        </SelectItem>
       </SelectContent>
     </Select>
   );
 
+  const modal = (
+    <AddAgentModal open={showAddAgent} onOpenChange={setShowAddAgent} onSelectAgent={onChange} />
+  );
+
   if (compact) {
-    return <div className='w-[220px] shrink-0'>{select}</div>;
+    return (
+      <div className='w-[220px] shrink-0'>
+        {select}
+        {modal}
+      </div>
+    );
   }
 
   return (
@@ -91,6 +122,7 @@ export const AutoDraftAgentPicker: React.FC<AutoDraftAgentPickerProps> = ({
           </span>
         )}
       </p>
+      {modal}
     </div>
   );
 };
