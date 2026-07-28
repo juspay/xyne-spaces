@@ -17,6 +17,7 @@ import {
 } from './themes/componentTokens';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { useTheme } from './hooks/useTheme';
+import { useGlassMode } from './hooks/useGlassMode';
 import { ShortcutsProvider } from './shortcuts';
 import { TooltipProvider } from './components/ui/Tooltip';
 import Wallpaper from './components/Wallpaper/Wallpaper';
@@ -36,6 +37,13 @@ import {
 const App = (): ReactElement => {
   // Initialize theme on app load
   const { theme } = useTheme();
+
+  // Resolve whether this window sits on a native OS material (macOS vibrancy /
+  // Windows 11 Mica), mirror it onto `html[data-glass="on"]`, and keep the
+  // material's tint matched to the theme. Reads the theme from `<html
+  // data-theme>` itself rather than taking it from this component's useTheme()
+  // instance — see the note in useGlassMode. No-ops on the web.
+  useGlassMode();
 
   // Listen for Electron logs
   useEffect(() => {

@@ -47,6 +47,7 @@ import { MeetingDetectionToggle } from '../MeetingDetectionToggle';
 import { MenuBarIconToggle } from '../MenuBarIconToggle';
 import { RecordingPillToggle } from '../RecordingPillToggle';
 import { ClawOverlayToggle } from '../ClawOverlayToggle';
+import { GlassEffectToggle } from '../GlassEffectToggle';
 import { UpdateAssignmentStatusModal } from '../../AppSidebar/UpdateAssignmentStatusModal';
 import { VoiceSignatureModal } from '../VoiceSignatureModal/VoiceSignatureModal';
 import HuddleIcon from '../../icons/HuddleIcon';
@@ -179,6 +180,7 @@ const AppearanceSection: FC<{ state: PreferencesState }> = ({ state }) => (
         </button>
       ))}
     </div>
+    <GlassEffectToggle />
   </div>
 );
 

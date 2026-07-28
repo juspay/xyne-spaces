@@ -82,6 +82,36 @@ export interface ElectronAPI {
   getDeviceInfo: () => Promise<unknown>;
   setUserEmail: (email: string) => void;
   getClientSessionId: () => Promise<string>;
+  /**
+   * True only when THIS window carries a native OS material (macOS vibrancy /
+   * Windows 11 Mica) and the desktop is genuinely visible behind it.
+   *
+   * Optional because older desktop builds' preload will not define it, and it
+   * never exists on the web. Callers must treat `undefined` as `false` — see
+   * `hooks/useGlassMode.ts`.
+   */
+  isGlassActive?: () => Promise<boolean>;
+  /**
+   * Matches the OS material's tint to the app theme (macOS `NSAppearance`).
+   * Optional for the same reasons as {@link isGlassActive}.
+   */
+  setGlassAppearance?: (appearance: 'light' | 'dark') => void;
+  /**
+   * Preferences -> Appearance toggle for the native glass effect.
+   *
+   * `supported` is this machine's capability (macOS, or Windows 11 22H2+, and
+   * not under "Reduce transparency"); `enabled` is the user's saved choice.
+   * They are separate so the control can be hidden entirely when unsupported
+   * rather than rendered as a dead switch.
+   *
+   * Optional for the same reasons as {@link isGlassActive}.
+   */
+  glass?: {
+    getSettings: () => Promise<{ supported: boolean; enabled: boolean }>;
+    setEnabled: (enabled: boolean) => void;
+    /** Fires with whether a material is now live. Returns an unsubscribe fn. */
+    onActiveChanged: (callback: (active: boolean) => void) => () => void;
+  };
   toggleCompactMode: () => void;
   getBrowserSettings: () => Promise<{ popups: boolean; openLinksExternally: boolean }>;
   setBrowserSettings: (

@@ -4496,3 +4496,16 @@ img.inline-emoji,
 [data-testid="virtuoso-item-list"] [data-index]:has([data-input-id]) {
   z-index: 10;
 }
+
+[data-theme="midnight"][data-glass="on"] {
+  body {
+    background-color: hsl(var(--background) / 50%);
+  }
+}
+
+[data-theme="classic"][data-glass="on"],
+[data-theme="summer_breeze"][data-glass="on"] {
+  body {
+    background-color: hsl(var(--background) / 15%);
+  }
+}

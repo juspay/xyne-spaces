@@ -5,6 +5,13 @@ import * as path from 'path';
 import { clearAllCookies, clearBrowserTabsData, syncXyneCookiesToBrowserPanel } from '../services/cookies';
 import { showNotification, NotificationData, showCallNotification, closeCallNotification, CallNotificationData } from '../services/notifications';
 import { getMainWindow, loadApp, toggleWindowCompactMode } from '../window/manager';
+import {
+  applyGlassAppearance,
+  isGlassActive,
+  isGlassEnabled,
+  isGlassSupported,
+  setGlassEnabled,
+} from '../window/glass';
 import { setupMTLSIpcHandlers } from './mtls-handlers';
 import { config } from '../app/config';
 import { performHardReload } from '../services/version-checker';
@@ -252,6 +259,70 @@ export function setupIpcHandlers(): void {
 
   ipcMain.handle('logger:get-client-session-id', () => {
     return Logger.getClientSessionId();
+  });
+
+  // Whether THIS webContents is painted on a window carrying an OS material.
+  // Keyed per-sender on purpose: only the main window is created with vibrancy /
+  // Mica. Pop-out windows (`/newWindow/...`, the create-ticket popout), the
+  // browser-panel <webview> and the claw overlay all get plain opaque windows,
+  // so they must answer false and keep rendering the wallpaper — otherwise they
+  // would hide their background and paint onto flat white.
+  ipcMain.handle('glass:is-active', (event: IpcMainInvokeEvent) => {
+    if (!isGlassActive()) {
+      return false;
+    }
+    const mainWindow = getMainWindow();
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      return false;
+    }
+    // Compare the top-level window that owns the sender rather than the
+    // WebContents id directly, so an iframe inside the main window still
+    // resolves to the main window.
+    return BrowserWindow.fromWebContents(event.sender) === mainWindow;
+  });
+
+  // Keeps the OS material's tint in step with the app theme. `themeSource` is
+  // app-global, so only the main window may drive it — a pop-out or the claw
+  // overlay repainting every native menu would be a surprising side effect.
+  ipcMain.on('glass:set-appearance', (event: IpcMainEvent, appearance: unknown) => {
+    if (appearance !== 'light' && appearance !== 'dark') {
+      return;
+    }
+    const mainWindow = getMainWindow();
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      return;
+    }
+    if (BrowserWindow.fromWebContents(event.sender) !== mainWindow) {
+      return;
+    }
+    applyGlassAppearance(mainWindow, appearance);
+  });
+
+  // Capability and preference are reported separately so Preferences can hide
+  // the toggle on machines that cannot do glass at all, while still showing it
+  // unchecked for someone who simply turned it off.
+  ipcMain.handle('glass:get-settings', () => ({
+    supported: isGlassSupported(),
+    enabled: isGlassEnabled(),
+  }));
+
+  ipcMain.on('glass:set-enabled', (event: IpcMainEvent, enabled: unknown) => {
+    const mainWindow = getMainWindow();
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      return;
+    }
+    if (BrowserWindow.fromWebContents(event.sender) !== mainWindow) {
+      return;
+    }
+
+    setGlassEnabled(mainWindow, enabled === true);
+
+    // Tell the renderer what is now live so the wallpaper and html[data-glass]
+    // follow without a reload. Sent even though the renderer updates
+    // optimistically, so main stays the source of truth.
+    if (!mainWindow.webContents.isDestroyed()) {
+      mainWindow.webContents.send('glass:active-changed', isGlassActive());
+    }
   });
 
   ipcMain.handle('error-report:get-native-logs', async (event) => {

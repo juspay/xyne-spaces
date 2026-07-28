@@ -9,6 +9,7 @@ import { setMainWindow as setInterceptorMainWindow } from '../services/request-i
 import { getBundledUIUrl } from '../services/custom-protocol';
 import { browserSettingsService } from '../services/browser-settings';
 import { getCreateOptions, applyPostCreate, track, saveNow } from './window-state';
+import { resolveGlassWindowOptions } from './glass';
 
 import { keychain } from '../keychain';
 import { Logger } from '../services/logger/Logger';
@@ -96,9 +97,15 @@ export async function createMainWindow(options?: { inactive?: boolean }): Promis
   const iconPath = path.join(__dirname, '..', '..', 'assets', 'images', 'xyne.ico');
 
   const createOpts = getCreateOptions();
+  // Platform-branched OS material (macOS vibrancy / Windows 11 Mica). Returns
+  // `{}` — i.e. no behaviour change at all — wherever that isn't available.
+  // Deliberately does NOT set `backgroundColor`: Electron zeroes it itself when
+  // a material is present, and leaves the opaque default when one isn't.
+  const glassOpts = resolveGlassWindowOptions();
 
   mainWindow = new BrowserWindow({
     ...createOpts,
+    ...glassOpts,
     show: false,
     title: config.window.title,
     titleBarStyle: 'hiddenInset',

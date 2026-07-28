@@ -219,6 +219,30 @@ const electronAPI = {
   setUserEmail: (email: string) => ipcRenderer.send('set-user-email', email),
   getClientSessionId: () => ipcRenderer.invoke('logger:get-client-session-id'),
 
+  // True only when THIS window was created with a native OS material (macOS
+  // vibrancy / Windows 11 Mica), meaning the desktop is genuinely visible
+  // behind it and the renderer should drop its wallpaper. Answers false for
+  // pop-out windows, and is absent entirely on the web build.
+  isGlassActive: (): Promise<boolean> => ipcRenderer.invoke('glass:is-active'),
+
+  // Keeps the OS material's tint matched to the app theme. Ignored unless this
+  // is the main window and it actually carries a material.
+  setGlassAppearance: (appearance: 'light' | 'dark') =>
+    ipcRenderer.send('glass:set-appearance', appearance),
+
+  // Preferences -> Appearance toggle. `supported` is the machine's capability
+  // (hide the control when false); `enabled` is the user's saved choice.
+  glass: {
+    getSettings: (): Promise<{ supported: boolean; enabled: boolean }> =>
+      ipcRenderer.invoke('glass:get-settings'),
+    setEnabled: (enabled: boolean) => ipcRenderer.send('glass:set-enabled', enabled),
+    onActiveChanged: (callback: (active: boolean) => void) => {
+      const listener = (_event: unknown, active: boolean) => callback(active);
+      ipcRenderer.on('glass:active-changed', listener);
+      return () => ipcRenderer.removeListener('glass:active-changed', listener);
+    },
+  },
+
   // Browser Settings APIs
   getBrowserSettings: () => ipcRenderer.invoke('get-browser-settings'),
   setBrowserSettings: (settings: any) => ipcRenderer.invoke('set-browser-settings', settings),
