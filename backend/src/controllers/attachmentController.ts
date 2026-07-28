@@ -10,6 +10,7 @@ import { normalizeStoragePath } from '../services/storage/pathUtils';
 import { logger } from '../utils/logger';
 import { setSafeDownloadHeaders } from '../utils/safeAttachmentDownload';
 import { AttachmentEntityType, MessageAttachment } from '@prisma/client';
+import { canvasAuthService } from '../services/canvasAuthService';
 import { uploadFiles } from '../services/fileUploadService';
 import { config } from '../config/env';
 import { vespaQueue } from '@/queues/vespaQueue';
@@ -131,6 +132,26 @@ export class AttachmentController {
         };
       }
       return { ok: true };
+    }
+
+    // 2.5) Canvas attachments carry a synthetic conversationId (`canvas_<id>`)
+    //      and are not backed by a real conversation row. Authorize via canvas
+    //      view access (mirrors CanvasController's edit-access check on upload)
+    //      rather than channel participation.
+    if (attachment.entityType === AttachmentEntityType.CANVAS) {
+      try {
+        await canvasAuthService.requireViewAccess(attachment.entityId, userId);
+        return { ok: true };
+      } catch (error) {
+        logger.warn(
+          `Unauthorized canvas attachment access: user ${userId} -> ${attachment.id} (canvas ${attachment.entityId}): ${error instanceof Error ? error.message : 'denied'}`,
+        );
+        return {
+          ok: false,
+          status: 403,
+          body: { error: 'Forbidden', message: 'You do not have permission to access this attachment' },
+        };
+      }
     }
 
     // 3) Conversation-backed (chat/DM/transcript) attachments — must participate.
