@@ -4552,7 +4552,7 @@ export const SupportTicketDetail = ({
                 </div>
               )}
             </div>
-            <div className='absolute inset-x-0 bottom-0 z-20' ref={composerOverlayRef}>
+            <div className='absolute inset-x-0 bottom-0 z-20 bg-background' ref={composerOverlayRef}>
               {channel?.type === ChannelType.SLACK || channel?.type === ChannelType.APP ? (
                 conversationId ? (
                   <SlackComposer
