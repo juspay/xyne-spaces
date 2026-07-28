@@ -1,0 +1,6 @@
+# pnpm overrides for the committed pnpm-lock.yaml. Keeps transitive dependencies
+# clear of known CVEs; mirror the same fixes in the npm side if package-lock.json
+# ever picks up the vulnerable versions. See docs/dependency-vulnerability-remediation.md.
+overrides:
+  "form-data@2": 2.5.6
+  "tar@7": 7.5.19
