@@ -4,8 +4,15 @@ import { useEffect } from 'react';
 import { queries } from '../zero/queries.js';
 import { QueryResultType } from '@rocicorp/zero';
 import type { Channel } from '../zero/schema.js';
+import { getSyncStorage } from '../platform/syncStorage.js';
 
-// Safe localStorage access for cross-platform compatibility
+// Drafts persist through the platform sync-storage bridge:
+// - Dashboard: localStorage (via the default fallback)
+// - Lotus:     MMKV (registered at boot in appStateMachine)
+// The other safe* helpers below remain localStorage-only because their
+// callers (savedRoutes, lastVisitedChannelId_*) are dashboard-only surfaces.
+const draftStorage = () => getSyncStorage();
+
 const safeGetItem = (key: string): string | null => {
   try {
     if (typeof localStorage !== 'undefined') {
@@ -426,10 +433,8 @@ export const stateMachine = setup({
             [event.lookupId]: { html: event.html, text: event.text, updatedAt: Date.now() },
           };
           try {
-            safeSetItem(DRAFT_STORAGE_KEY, JSON.stringify(updatedDrafts));
-          } catch {
-            safeSetItem(DRAFT_STORAGE_KEY, JSON.stringify(updatedDrafts));
-          }
+            draftStorage().setItem(DRAFT_STORAGE_KEY, JSON.stringify(updatedDrafts));
+          } catch { /* storage unavailable */ }
           return updatedDrafts;
         }
         return context.drafts;
@@ -440,10 +445,8 @@ export const stateMachine = setup({
         if (event.type === 'REMOVE_DRAFT') {
           const { [event.lookupId]: _, ...rest } = context.drafts;
           try {
-            safeSetItem(DRAFT_STORAGE_KEY, JSON.stringify(rest));
-          } catch {
-            safeSetItem(DRAFT_STORAGE_KEY, JSON.stringify(rest));
-          }
+            draftStorage().setItem(DRAFT_STORAGE_KEY, JSON.stringify(rest));
+          } catch { /* storage unavailable */ }
           return rest;
         }
         return context.drafts;
@@ -736,7 +739,7 @@ export const stateMachine = setup({
       }
       return {};
     })(),
-    drafts: JSON.parse(safeGetItem(DRAFT_STORAGE_KEY) || '{}') as DraftMessages,
+    drafts: JSON.parse(draftStorage().getItem(DRAFT_STORAGE_KEY) || '{}') as DraftMessages,
     draftMessages: [],
     delayedMessages: [],
     userPreference: undefined,
