@@ -26,6 +26,7 @@ vi.mock("../repositories/index.js", () => ({
 
 vi.mock("../lib/service-tokens.js", () => ({
   SERVICE_TOKEN_SCOPES: ["agents:read", "runs:read", "runs:write"],
+  agentScope: (slug: string) => `agent:${slug}`,
   generateServiceToken: vi.fn(() => ({
     raw: "xyne_svc_raw-secret",
     hashed: "stored-hash",
@@ -49,6 +50,12 @@ vi.mock("../db.js", () => ({
       findUnique: vi.fn(async (args: { where: { key: string } }) => {
         return state.surface?.key === args.where.key ? state.surface : null;
       }),
+    },
+    agent: {
+      findMany: vi.fn(async (args: { where: { slug: { in: string[] } } }) =>
+        args.where.slug.in
+          .filter((slug) => slug === "euler-doctor")
+          .map((slug) => ({ slug }))),
     },
     surfaceAccessToken: {
       create: vi.fn(async (args: { data: Record<string, unknown> }) => {
@@ -126,6 +133,7 @@ describe("organization service tokens", () => {
       name: "Billing worker",
       userId: "service-user",
       expiresAt: null,
+      allowedAgentSlugs: ["euler-doctor"],
     });
 
     expect(response.status).toBe(201);
@@ -195,5 +203,26 @@ describe("organization service tokens", () => {
     state.tokens = [{ id: "token-2", orgId: "org-2", client: "service" }];
     const response = await request("DELETE", "/org-1/service-tokens/token-2");
     expect(response.status).toBe(404);
+  });
+
+  it("rejects minting without an agent allowlist", async () => {
+    const response = await request("POST", "/org-1/service-tokens", {
+      name: "No scope",
+      userId: "service-user",
+      expiresAt: null,
+    });
+    expect(response.status).toBe(400);
+    expect(String(response.body["error"])).toContain("allowedAgentSlugs");
+  });
+
+  it("rejects unknown agents in the allowlist", async () => {
+    const response = await request("POST", "/org-1/service-tokens", {
+      name: "Bad scope",
+      userId: "service-user",
+      expiresAt: null,
+      allowedAgentSlugs: ["euler-doctor", "ghost-agent"],
+    });
+    expect(response.status).toBe(400);
+    expect(String(response.body["error"])).toContain("ghost-agent");
   });
 });

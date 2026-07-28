@@ -31,6 +31,9 @@ export const TWIN_DELIVER_TOOL_NAME = "twin_deliver";
 const MAX_MESSAGE = 4000;
 const MAX_EMOJI = 32;
 const MAX_REASON = 300;
+// The private "Why?" reasoning can be longer than the reply — it holds several
+// grounded claims, each trailing a `[clf-…#n]` citation token.
+const MAX_REASONING = 6000;
 
 /** Shared ref the tool writes the accepted delivery into (mirrors StructuredOutputRef). */
 export interface TwinDeliverRef {
@@ -112,6 +115,11 @@ export function buildTwinDeliverTool(
       "Reply elsewhere ONLY when it's clearly the right place: set `destination`,",
       "fill the matching id field, and give a one-line `destination_reason`:",
       DEST_DESCRIBE,
+      "",
+      "Also pass `reasoning`: a short PRIVATE note (shown only to the user in a 'Why?'",
+      "panel, NEVER posted) on why you're responding — and back each factual claim with",
+      "the exact [clf-…#n] citation token copied verbatim from the tool result it came from.",
+      "Those [clf-…] tokens go in `reasoning` ONLY — keep them out of `message`.",
     ].join("\n"),
     parameters: Type.Unsafe({
       type: "object",
@@ -128,7 +136,7 @@ export function buildTwinDeliverTool(
         },
         message: {
           type: "string",
-          description: "The reply, written in the user's own first-person voice ('I', 'we') — NO meta-commentary, NO mention of tools/memory/steps. Required for action=reply or react_and_reply.",
+          description: "The reply, written in the user's own first-person voice ('I', 'we') — NO meta-commentary, NO mention of tools/memory/steps, and NO [clf-…] citation tokens (citations go in `reasoning` ONLY, never in the posted reply). Required for action=reply or react_and_reply.",
         },
         destination: {
           type: "string",
@@ -152,6 +160,11 @@ export function buildTwinDeliverTool(
         destination_conversation_id: {
           type: "string",
           description: "The Spaces conversation/thread id to reply in. Required for destination='thread'. Look it up with your Spaces tools.",
+        },
+        reasoning: {
+          type: "string",
+          description:
+            "PRIVATE rationale shown only to the user in a 'Why?' panel — NEVER posted, so this is where you SHOULD ground your claims (your `message` must NOT). 2-4 lines on why you're responding this way. After every concrete fact you rely on (a status, decision, ticket, date, owner), paste the exact [clf-<id>#n] citation token copied VERBATIM from the tool result that told you. Never invent a token. Recommended for reply / react_and_reply.",
         },
       },
       required: ["action"],
@@ -217,6 +230,10 @@ export function buildTwinDeliverTool(
           if (reason) delivery.destinationReason = reason.slice(0, MAX_REASON);
         }
       }
+      // Private cited rationale for the "Why?" panel — applies to any posted
+      // action (react / reply / react_and_reply); `ignore` returned earlier.
+      const reasoning = typeof p["reasoning"] === "string" ? p["reasoning"].trim() : "";
+      if (reasoning) delivery.reasoning = reasoning.slice(0, MAX_REASONING);
 
       ref.value = delivery;
       log.info(
@@ -300,6 +317,8 @@ export function recoverTwinDeliveryFromText(
       if (reason) delivery.destinationReason = reason.slice(0, MAX_REASON);
     }
   }
+  const reasoning = (args["reasoning"] ?? "").trim();
+  if (reasoning) delivery.reasoning = reasoning.slice(0, MAX_REASONING);
   return delivery;
 }
 
@@ -331,9 +350,15 @@ When you're done gathering context, call \`twin_deliver\` EXACTLY ONCE with one 
 You ARE ${you} responding — not an assistant explaining things from memory. Before you draft, ask: what would ${you} ACTUALLY do here?
 - **Would ${you} even reply?** Often the honest answer is a quick react (👍 / ✅) or \`ignore\` — not a paragraph. Don't manufacture a reply just because you can; reserve a written reply for when ${you} would genuinely type one.
 - **Match HOW ${you} reply, not how a helpful bot would** — their length, tone, and habits (see the persona above: usually short, direct, answer-first). ${you} answers in a line or two. Do NOT explain, teach, summarize, or write an essay unless ${you} actually would.
-- **Answer from what ${you} know — but never lecture about it.** Memory grounds your voice and facts; it is NOT material to recite, "cite", or over-justify. Never write "based on my memory / notes / what I know / from what I recall" — just say the thing, the way ${you} would.
+- **Answer from what ${you} know — but never lecture about it.** In the \`message\` you POST, memory grounds your voice and facts; it is NOT material to recite, "cite", or over-justify — never write "based on my memory / notes / what I know / from what I recall", and never paste a \`[clf-…]\` token there; just say the thing, the way ${you} would. (Grounding + citations belong in \`reasoning\`, not the message — see below.)
 - **Would ${you} loop someone in?** If the real move is to @tag the right person, or DM an owner/teammate who'd actually handle it, do that — that's often more authentic than answering everything yourself.
 - When you're not sure ${you} would engage, prefer a light touch (react) or \`ignore\` over a forced, out-of-character explanation. Being *in character* matters more than being thorough.
+
+### Why you're responding — the \`reasoning\` argument (PRIVATE — never posted)
+Along with your delivery, pass a short \`reasoning\` (2-4 lines): why ${you} would respond this way. It is shown to ${you} alone in a private "Why?" panel and is NEVER posted anywhere — so this is the ONE place you SHOULD do the opposite of the \`message\` rule above: **ground your claims**. For every concrete fact you lean on (a status, a decision, who owns something, a ticket, a date), paste the exact \`[clf-…#n]\` citation token from the tool result that told you, right after that fact — copied VERBATIM, never invented.
+- Example \`reasoning\`: "aman asked about ask-ai and ${you} own it [clf-abc123#2]; it's shipping v2 parity this week and defaults to glm-latest [clf-def456#1]."
+- Keep the split clean: the \`message\` stays natural and citation-free (never paste a \`[clf-…]\` token into it); all the grounding lives here in \`reasoning\`.
+- If a point has no citation, still write it — just without a token. Don't pad; this is your rationale, not an essay.
 
 ### Where the reply goes — the \`destination\` argument (reply / react_and_reply only)
 A reply lands in the SAME thread you were mentioned in by DEFAULT — that's right almost every time, and needs no \`destination\`. Send it elsewhere ONLY when ${you} would clearly take it elsewhere, then set \`destination\` + its id field(s) + a one-line \`destination_reason\`. You have Spaces tools (search / lookup) — USE them to find the real channel id / conversation id / user id first; NEVER guess an id. If you can't find the right id, fall back to \`origin_thread\`.

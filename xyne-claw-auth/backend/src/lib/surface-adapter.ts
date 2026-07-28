@@ -1,5 +1,5 @@
 import type { IncomingHttpHeaders } from "node:http";
-import { slackSurfaceAdapter } from "./adapters/slack-surface.js";
+import { slackSurfaceAdapter } from "../surfaces/slack/adapter.js";
 
 export interface NormalizedInboundEvent {
   eventType: "APP_MENTIONED" | "DIRECT_MESSAGE";

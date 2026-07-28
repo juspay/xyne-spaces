@@ -37,6 +37,19 @@ vi.mock("../middleware/require-auth.js", () => ({
       next();
       return;
     }
+    if (req.headers.authorization === "Bearer xyne_svc_real") {
+      req.headers["x-user-id"] = "token-owner";
+      req.headers["x-org-id"] = "org-token";
+      res.locals = res.locals ?? {};
+      res.locals["accessToken"] = {
+        userId: "token-owner",
+        orgId: "org-token",
+        client: "service",
+        scopes: ["runs:write", "agent:agent-a"],
+      };
+      next();
+      return;
+    }
     res.status(401).json({ success: false, error: "Authentication required" });
   }),
   requireUserAuth: vi.fn((req, _res, next) => {
@@ -164,7 +177,7 @@ vi.mock("./webhook.js", () => ({
 
 async function postRun(
   body: Record<string, unknown>,
-  options: { s2s?: boolean } = {},
+  options: { s2s?: boolean; serviceToken?: boolean } = {},
 ): Promise<{ status: number; body: Record<string, unknown> }> {
   const { runRouter } = await import("./run.js");
   return await new Promise((resolve, reject) => {
@@ -175,7 +188,7 @@ async function postRun(
       originalUrl: "/run",
       baseUrl: "",
       headers: {
-        authorization: "Bearer xyne_cli_real",
+        authorization: options.serviceToken ? "Bearer xyne_svc_real" : "Bearer xyne_cli_real",
         ...(options.s2s ? { "x-s2s-key": "s2s-secret" } : {}),
       },
       body,
@@ -356,5 +369,47 @@ describe("/run CLI bearer path", () => {
 
     expect(response).toMatchObject({ status: 400, body: { error: "callbackUrl is not an allowed target" } });
     expect(state.fetchBodies).toHaveLength(0);
+  });
+
+  it("service token: strips non-contract body fields before dispatch", async () => {
+    const response = await postRun({
+      agentSlug: "agent-a",
+      task: "do work",
+      triggerSource: "api",
+      providerOverride: "codex",
+      eventType: "automation",
+      cwd: "/tmp/evil",
+    }, { serviceToken: true });
+
+    expect(response.status).toBe(200);
+    expect(state.fetchBodies).toHaveLength(1);
+    const forwarded = state.fetchBodies[0]!;
+    expect(forwarded["providerOverride"]).toBeUndefined();
+    expect(forwarded["cwd"]).toBeUndefined();
+    // eventType must come from the platform default, not the caller's spoof.
+    expect(forwarded["eventType"]).not.toBe("automation");
+  });
+
+  it("service token: denies agents outside the token's agent scopes", async () => {
+    const response = await postRun({
+      agentSlug: "agent-b",
+      task: "do work",
+      triggerSource: "api",
+    }, { serviceToken: true });
+
+    expect(response.status).toBe(403);
+    expect(String(response.body["error"])).toContain("not scoped");
+    expect(state.fetchBodies).toHaveLength(0);
+  });
+
+  it("service token: allows agents named by an agent scope", async () => {
+    const response = await postRun({
+      agentSlug: "agent-a",
+      task: "do work",
+      triggerSource: "api",
+    }, { serviceToken: true });
+
+    expect(response.status).toBe(200);
+    expect(state.fetchBodies).toHaveLength(1);
   });
 });

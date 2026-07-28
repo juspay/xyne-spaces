@@ -35,7 +35,7 @@ export type LiveEvent =
   // VIEWERS (reloaded tabs, Spaces) stream the answer live instead of seeing it
   // appear all-at-once on `done`. Either/both fields may be present per batch.
   | { type: "delta"; conversationId: string; agentSlug?: string | undefined; userId: string; textDelta?: string; reasoningDelta?: string; ts: number }
-  | { type: "done"; conversationId: string; agentSlug?: string | undefined; userId: string; status: string; ts: number };
+  | { type: "done"; conversationId: string; agentSlug?: string | undefined; userId: string; status: string; followUpsPending?: boolean; ts: number };
 
 // In-process fan-out: each /live SSE handler registers a listener keyed by
 // conversationId. setMaxListeners(0) = unbounded (one per concurrent viewer).

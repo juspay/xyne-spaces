@@ -10,12 +10,12 @@ export const bitbucketAdapter: StdioMcpAdapter = {
   credentialFields: [
     { name: "username", label: "Bitbucket Username", type: "text", placeholder: "your-username" },
     { name: "token", label: "Bitbucket Token", type: "password", placeholder: "Enter your Bitbucket access token" },
-    { name: "baseUrl", label: "Bitbucket Base URL", type: "text", placeholder: "https://bitbucket.example.com", optional: true },
+    { name: "baseUrl", label: "Bitbucket Base URL", type: "text", placeholder: "https://bitbucket.juspay.net", optional: true },
   ],
   buildCommand(credentials) {
     const username = credentials["username"] as string;
     const token = credentials["token"] as string;
-    const baseUrl = (credentials["baseUrl"] as string) || "https://bitbucket.example.com";
+    const baseUrl = (credentials["baseUrl"] as string) || "https://bitbucket.juspay.net";
     return {
       cmd: "npx",
       args: ["-y", "@nexus2520/bitbucket-mcp-server@2.2.0"],
@@ -191,7 +191,7 @@ export async function handleUploadPrScreenshot(
 ): Promise<{ content: string; citations?: Citation[] }> {
   const username = credentials["username"] as string;
   const token = credentials["token"] as string;
-  const baseUrl = ((credentials["baseUrl"] as string) || "https://bitbucket.example.com").replace(/\/+$/, "");
+  const baseUrl = ((credentials["baseUrl"] as string) || "https://bitbucket.juspay.net").replace(/\/+$/, "");
 
   const projectKey = params["projectKey"] as string;
   const repoSlug = params["repoSlug"] as string;
@@ -410,7 +410,7 @@ export async function handleGetPrComments(
 ): Promise<{ content: string; citations?: Citation[] }> {
   const username = credentials["username"] as string;
   const token = credentials["token"] as string;
-  const baseUrl = ((credentials["baseUrl"] as string) || "https://bitbucket.example.com").replace(/\/+$/, "");
+  const baseUrl = ((credentials["baseUrl"] as string) || "https://bitbucket.juspay.net").replace(/\/+$/, "");
 
   const projectKey = params["projectKey"] as string;
   const repoSlug = params["repoSlug"] as string;
@@ -506,7 +506,7 @@ export async function handleGetPrTemplate(
 ): Promise<{ content: string; citations?: Citation[] }> {
   const username = credentials["username"] as string;
   const token = credentials["token"] as string;
-  const baseUrl = ((credentials["baseUrl"] as string) || "https://bitbucket.example.com").replace(/\/+$/, "");
+  const baseUrl = ((credentials["baseUrl"] as string) || "https://bitbucket.juspay.net").replace(/\/+$/, "");
 
   const projectKey = params["projectKey"] as string;
   const repoSlug = params["repoSlug"] as string;

@@ -265,6 +265,8 @@ type DebugEventKind =
   | "auto_retry_end"
   | "citation_reflection"
   | "twin_deliver_reflection"
+  | "follow_up_generation_start"
+  | "follow_up_generation_end"
   | "background_subagents_delivered"
   | "session_end"
   | "session_cancelled"
@@ -1289,11 +1291,17 @@ export interface RunTaskOptions {
   skills?: { slug?: string; name: string; description?: string; content: string; files?: { relativePath: string; content: string; contentType?: string | null }[] }[] | undefined;
   skillTriggers?: import("./subagent-tools.js").SkillTrigger[] | undefined;
   promptInjections?: PromptInjection[] | undefined;
+  /** Task-command contract (routes/run.ts parseTaskCommand): the run may not
+   *  finish until this tool has run — enforced by a post-loop nudge pass. */
+  requiredTool?: { name: string; nudge: string } | undefined;
   /** Digital Twin persona (soul.md, …) folded into the actual system prompt on
    *  both the override and buildSystemPrompt-fallback paths, so it reads as
    *  identity and shows in the debug panel. */
   twinPersona?: string | undefined;
   abortSignal?: AbortSignal | undefined;
+  /** Wall-clock time when the route accepted the run. Debug artifacts use this
+   *  so session restore/setup time remains visible in the timeline. */
+  debugStartedAt?: string | undefined;
   /** Raw Spaces conversation identity for progress callbacks. NOT the same as
    *  `conversationId` (the session key) — claw-auth's conv-keyed index uses the
    *  RAW conversationId + agentSlug, threaded separately so /webhook/progress
@@ -1399,8 +1407,10 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     skills,
     skillTriggers,
     promptInjections,
+    requiredTool,
     twinPersona,
     abortSignal,
+    debugStartedAt,
     progressMeta,
     forceCompactBeforeRun,
     verifyResponsesRef,
@@ -1901,6 +1911,10 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   // log can show llm=Xms tools=Yms retries=N tps=Z.
   const runStartedAt = Date.now();
   const runStartedIso = new Date(runStartedAt).toISOString();
+  const parsedDebugStartedAt = debugStartedAt ? Date.parse(debugStartedAt) : Number.NaN;
+  const debugStartedIso = Number.isFinite(parsedDebugStartedAt)
+    ? new Date(parsedDebugStartedAt).toISOString()
+    : runStartedIso;
   const latency = {
     llmDecodeMs: 0,
     llmWaitMs: 0,
@@ -1957,7 +1971,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   const pushDebugEvent = (kind: DebugEventKind, data: Record<string, unknown> = {}, extras?: Partial<DebugEventRecord>): void => {
     const event: DebugEventRecord = {
       seq: ++debugSeq,
-      at: new Date().toISOString(),
+      at: extras?.at ?? new Date().toISOString(),
       kind,
       ...(extras?.turn != null ? { turn: extras.turn } : {}),
       ...(extras?.llmCall != null ? { llmCall: extras.llmCall } : {}),
@@ -2010,7 +2024,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
         ...(userEmail ? { userEmail } : {}),
         ...(provider ? { provider } : {}),
         inProgress: true,
-        startedAt: runStartedIso,
+        startedAt: debugStartedIso,
         finishedAt: new Date().toISOString(),
         task,
         ...(context ? { context } : {}),
@@ -2133,7 +2147,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     task,
     context: context ?? null,
     systemPromptOverride: Boolean(systemPromptOverride),
-  });
+  }, { at: debugStartedIso });
 
   const reportProgress = createProgressReporter(progressUrl, sessionId ?? conversationId ?? "unknown", progressMeta);
 
@@ -2793,6 +2807,27 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     }
   }
 
+  // Task-command enforcement (/explainer …): the command's contract is that
+  // the run produces its artifact via the named tool, so a loop that settled
+  // without it gets nudged back to work — BEFORE the delivery passes below,
+  // since the artifact must exist before a final answer is deliverable.
+  // Same mechanics as those passes; fail-open after 3 nudges rather than
+  // stranding the run.
+  if (requiredTool && !toolsUsed.includes(requiredTool.name)) {
+    for (let nudge = 0; nudge < 3 && !toolsUsed.includes(requiredTool.name); nudge++) {
+      if (abortSignal?.aborted) break;
+      log.info(`[agent] Task command requires ${requiredTool.name} — nudge ${nudge + 1}/3`);
+      await promptWithAbort(() => session.prompt(`<system>${requiredTool.nudge}</system>`));
+      const rq = session as unknown as { _agentEventQueue?: Promise<void> };
+      if (rq._agentEventQueue) {
+        await withAbort(rq._agentEventQueue);
+      }
+    }
+    if (!toolsUsed.includes(requiredTool.name)) {
+      log.warn(`[agent] Task command: ${requiredTool.name} never ran — delivering without it`);
+    }
+  }
+
   // Structured output (agentConfig.outputFormat): the submit-result tool is the
   // only delivery channel, so if the loop ended without a submission, nudge the
   // model (same mechanics as the reflection pass) up to twice. Fail-open: after
@@ -3019,7 +3054,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
         ...(userName ? { userName } : {}),
         ...(userEmail ? { userEmail } : {}),
         ...(provider ? { provider } : {}),
-        startedAt: runStartedIso,
+        startedAt: debugStartedIso,
         finishedAt: new Date().toISOString(),
         task,
         ...(context ? { context } : {}),
@@ -3176,7 +3211,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
           ...(userEmail ? { userEmail } : {}),
           ...(provider ? { provider } : {}),
           cancelled: true,
-          startedAt: runStartedIso,
+          startedAt: debugStartedIso,
           finishedAt: new Date().toISOString(),
           task,
           ...(context ? { context } : {}),

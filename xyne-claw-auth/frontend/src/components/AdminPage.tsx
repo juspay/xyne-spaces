@@ -1218,7 +1218,7 @@ export function AdminPage({ userId }: Props) {
         <div className="space-y-4">
           <div className="flex gap-2">
             <input value={newAdminId} onChange={(e) => setNewAdminId(e.target.value)}
-              placeholder="User ID or email (e.g. jane.doe@example.com) to grant CLAW_ADMIN"
+              placeholder="User ID or email (e.g. jone.doe@gmail.com) to grant CLAW_ADMIN"
               className="flex-1 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 placeholder-zinc-600 focus:border-purple-500 focus:outline-none"
               onKeyDown={(e) => { if (e.key === "Enter") handleGrant(); }} />
             <button onClick={handleGrant} disabled={!newAdminId.trim()}

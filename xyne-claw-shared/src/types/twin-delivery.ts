@@ -46,6 +46,16 @@ export interface TwinDelivery {
   destination?: TwinReplyDestination;
   /** Why the Twin chose a non-default destination (shown in the approval + logged). */
   destinationReason?: string;
+  /**
+   * PRIVATE rationale for this response — the "Why?" panel content, shown ONLY to
+   * the owner and NEVER posted. Unlike `message` (which stays clean and
+   * citation-free), this SHOULD ground its factual claims: each fact carries the
+   * exact `[clf-<toolCallId>#<n>]` citation token copied verbatim from the tool
+   * result, so claw-auth can bake citation metadata and the frontend can render
+   * clickable source chips (same pipeline as thread-message citations). Absent
+   * when the model provided none. Not applicable to `ignore`.
+   */
+  reasoning?: string;
 }
 
 /**

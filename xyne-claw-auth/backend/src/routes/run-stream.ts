@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { randomUUID } from "node:crypto";
 import { CONFIG } from "../config.js";
-import { requireAuth } from "../middleware/require-auth.js";
+import { requireAuth, requireResultToken } from "../middleware/require-auth.js";
 import { getRequesterId } from "../middleware/agent-acl.js";
 import { prisma } from "../db.js";
 import { chatMessageRepository, agentRunRepository, chatAttachmentRepository } from "../repositories/index.js";
@@ -9,6 +9,14 @@ import { gcsService } from "../services/gcsService.js";
 import { appendCitations, hydrateInvocationIcons } from "../lib/citations.js";
 import { resolveAgentProviderConfigs } from "../lib/agent-provider-config.js";
 import { resolveFastMode } from "../lib/fast-mode.js";
+import {
+  buildFollowUpConversationHistory,
+  buildLateFollowUpInvocations,
+  extractLateFollowUpSessionId,
+  extractFollowUpSuggestions,
+  isInternalFollowUpInvocation,
+  parseLateFollowUpCallback,
+} from "../lib/follow-up-suggestions.js";
 import { consumeClawStream } from "../lib/consume-claw-stream.js";
 import { publishLiveEvent } from "../lib/live-conversation-bus.js";
 import { pushDelta, endDeltaCoalescer } from "../lib/live-delta-coalescer.js";
@@ -44,6 +52,8 @@ interface PendingStream {
     pendingActions?: Array<Record<string, unknown>> | undefined;
     attachments?: StreamAttachment[] | undefined;
     toolInvocations?: unknown;
+    followUpSuggestions?: string[] | undefined;
+    followUpsPending?: boolean | undefined;
   }) => void;
   reject: (error: Error) => void;
   setClosed: () => void;
@@ -144,6 +154,8 @@ type StreamBusEvent =
       pendingActions?: Array<Record<string, unknown>>;
       attachments?: StreamAttachment[];
       toolInvocations?: unknown;
+      followUpSuggestions?: string[];
+      followUpsPending?: boolean;
     };
 
 let _streamSubReady = false;
@@ -178,6 +190,8 @@ function ensureStreamEventsSubscriber(): void {
       ...(msg.pendingActions?.length ? { pendingActions: msg.pendingActions } : {}),
       ...(msg.attachments?.length ? { attachments: msg.attachments } : {}),
       ...(msg.toolInvocations !== undefined ? { toolInvocations: msg.toolInvocations } : {}),
+      ...(msg.followUpSuggestions?.length ? { followUpSuggestions: msg.followUpSuggestions } : {}),
+      ...(msg.followUpsPending === true ? { followUpsPending: true } : {}),
     });
   });
 }
@@ -337,6 +351,7 @@ publicRouter.post("/", requireAuth, async (req: Request, res: Response) => {
       deepResearchEnabled,
       agentConfig,
       additionalInstructions,
+      generateFollowUpSuggestions,
       // Branching: same semantics as the /agent-chat/:slug/chat route.
       isRegenerate,
       isEditUserMessage,
@@ -373,7 +388,13 @@ publicRouter.post("/", requireAuth, async (req: Request, res: Response) => {
     }
     const agentRow = await prisma.agent.findUnique({
       where: { orgId_slug: { orgId: requestOrgId, slug } },
-      select: { id: true, orgId: true, config: true },
+      select: {
+        id: true,
+        orgId: true,
+        name: true,
+        description: true,
+        config: true,
+      },
     }).catch(() => null);
     if (!agentRow) {
       log.warn(`[run-stream/chat] agent org-scoped miss slug=${slug} orgId=${requestOrgId ?? "none"} userId=${userId}`);
@@ -427,20 +448,22 @@ publicRouter.post("/", requireAuth, async (req: Request, res: Response) => {
     // and matches the agent-chat behavior exactly. The query is cheap (a
     // brand-new conversation returns []), and the data is a flat list — no
     // recursive joins.
-    const existingMessages: ChatTreeMessage[] = convId
-      ? (await chatMessageRepository.findByConversation(convId)).map((m) => ({
+    const existingMessageRows = convId
+      ? await chatMessageRepository.findByConversation(convId)
+      : [];
+    const existingMessages: ChatTreeMessage[] = existingMessageRows.map((m) => ({
           id: m.id,
           role: m.role,
           parentId: (m as { parentId?: string | null }).parentId ?? null,
           createdAt: m.createdAt,
-        }))
-      : [];
+        }));
 
     let assistantParentId: string | null = null;
     let createdUserMessageId: string | undefined;
     let piConversationId: string = convId;
     let cloneSourcePiConversationId: string | null = null;
     let cloneBranchMode: "lastUser" | "beforeLastUser" = "lastUser";
+    let followUpHistoryLeafId: string | null = null;
     let userMsg: Awaited<ReturnType<typeof chatMessageRepository.create>> | undefined;
 
     if (isRegenerateFlag && parentUserMessageIdStr) {
@@ -466,6 +489,9 @@ publicRouter.post("/", requireAuth, async (req: Request, res: Response) => {
         log.warn(`[run-stream] regenerate parentUserMessageId=${parentUserMessageIdStr} not persisted (likely an optimistic id from an errored turn); falling back to latest user message ${latestUser.id} conv=${convId} agent=${slug}`);
       }
       assistantParentId = resolvedParentUserMessageId;
+      followUpHistoryLeafId = existingMessages.find(
+        (message) => message.id === resolvedParentUserMessageId,
+      )?.parentId ?? null;
       // Resolve from the existing ASSISTANT being regenerated (when the caller
       // provided it), so the path actually reaches its branch suffix — see
       // /agent-chat for the long-form rationale.
@@ -494,6 +520,7 @@ publicRouter.post("/", requireAuth, async (req: Request, res: Response) => {
         convId,
       );
       cloneBranchMode = "beforeLastUser";
+      followUpHistoryLeafId = requestedParent?.id ?? null;
 
       if (convId && userId) {
         try {
@@ -519,6 +546,13 @@ publicRouter.post("/", requireAuth, async (req: Request, res: Response) => {
         : undefined;
       const lastAssistantMsg = [...existingMessages].reverse().find((m) => m.role === "assistant");
       const userParentId = requestedParent?.id ?? lastAssistantMsg?.id ?? null;
+      followUpHistoryLeafId = existingMessageRows.some(
+        (message) => message.id === userParentId && message.agentSlug === slug,
+      )
+        ? userParentId
+        : [...existingMessageRows].reverse().find(
+            (message) => message.role === "assistant" && message.agentSlug === slug,
+          )?.id ?? null;
       piConversationId = resolvePiConversationIdForPath(existingMessages, userParentId, convId);
 
       if (convId && userId) {
@@ -752,6 +786,8 @@ publicRouter.post("/", requireAuth, async (req: Request, res: Response) => {
       pendingActions?: Array<Record<string, unknown>> | undefined;
       attachments?: StreamAttachment[] | undefined;
       toolInvocations?: unknown;
+      followUpSuggestions?: string[] | undefined;
+      followUpsPending?: boolean | undefined;
     }>((resolve, reject) => {
       let closed = false;
       pendingStreams.set(streamId, {
@@ -799,10 +835,31 @@ publicRouter.post("/", requireAuth, async (req: Request, res: Response) => {
     const internalCallbackUrl = `${CONFIG.internalUrl}/claw/api/v1/internal/run-stream/${streamId}/callback` +
       (assistantMsg ? `?assistantMessageId=${encodeURIComponent(assistantMsg.id)}` : "");
     const internalProgressUrl = `${CONFIG.internalUrl}/claw/api/v1/internal/run-stream/${streamId}/progress`;
+    const incomingAgentConfig = agentConfig && typeof agentConfig === "object" && !Array.isArray(agentConfig)
+      ? agentConfig as Record<string, unknown>
+      : {};
+    const enrichedAgentConfig: Record<string, unknown> = {
+      ...incomingAgentConfig,
+      followUpConversationHistory: buildFollowUpConversationHistory(
+        existingMessageRows.map((message) => ({
+          id: message.id,
+          parentId: (message as { parentId?: string | null }).parentId ?? null,
+          role: message.role,
+          content: message.content,
+          agentSlug: message.agentSlug,
+        })),
+        followUpHistoryLeafId,
+        slug,
+      ),
+      followUpAgentContext: {
+        name: agentRow.name,
+        description: agentRow.description,
+      },
+    };
     const fastModeEnabled = await resolveFastMode(
       convId,
       slug,
-      agentConfig as Record<string, unknown> | undefined,
+      enrichedAgentConfig,
     );
 
     const runRequestBody: Record<string, unknown> = {
@@ -832,8 +889,9 @@ publicRouter.post("/", requireAuth, async (req: Request, res: Response) => {
       researchContext,
       webSearchEnabled,
       deepResearchEnabled,
-      agentConfig,
+      agentConfig: enrichedAgentConfig,
       additionalInstructions,
+      ...(generateFollowUpSuggestions === true ? { generateFollowUpSuggestions: true } : {}),
       __persistedByCaller: true,
       fastMode: fastModeEnabled,
     };
@@ -907,6 +965,8 @@ publicRouter.post("/", requireAuth, async (req: Request, res: Response) => {
           ...(assistantParentId ? { parentId: assistantParentId } : {}),
           ...(result.pendingActions?.length ? { pendingActions: result.pendingActions } : {}),
           ...(result.attachments?.length ? { attachments: result.attachments } : {}),
+          ...(result.followUpSuggestions?.length ? { followUpSuggestions: result.followUpSuggestions } : {}),
+          ...(result.followUpsPending === true ? { followUpsPending: true } : {}),
         })}\n\n`);
         res.end();
       }
@@ -988,6 +1048,8 @@ publicRouter.post("/", requireAuth, async (req: Request, res: Response) => {
         ...(assistantParentId ? { parentId: assistantParentId } : {}),
         ...(result.pendingActions?.length ? { pendingActions: result.pendingActions } : {}),
         ...(result.attachments?.length ? { attachments: result.attachments } : {}),
+        ...(result.followUpSuggestions?.length ? { followUpSuggestions: result.followUpSuggestions } : {}),
+        ...(result.followUpsPending === true ? { followUpsPending: true } : {}),
       })}\n\n`);
       res.end();
     }
@@ -1094,7 +1156,7 @@ internalRouter.post("/:streamId/progress", (req: Request<{ streamId: string }>, 
 
     if (body.toolExecutionStart || body.toolExecutionEnd || body.toolInvocation) {
       const inv = body.toolInvocation as Record<string, unknown> | undefined;
-      if (inv) {
+      if (inv && !isInternalFollowUpInvocation(inv)) {
         // Hydrate the icon data: URI from each citation's iconKey for the wire
         // copy ONLY; persist the original (iconKey, no bytes) below.
         events.push({ event: "invocation", data: hydrateInvocationIcons(inv) });
@@ -1167,6 +1229,13 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
     const pendingActions = Array.isArray(body.pendingActions) ? body.pendingActions : undefined;
     const callbackAttachments = Array.isArray(body.attachments) ? body.attachments as StreamAttachment[] : undefined;
     const toolInvocations = body.toolInvocations;
+    const followUpSuggestions = status === "completed" && rawResult.trim().length > 0
+      ? extractFollowUpSuggestions(body.pendingQuestions)
+      : undefined;
+    const followUpsPending = body["followUpsPending"] === true;
+    log.info(
+      `[follow-ups] callback streamId=${streamId} sessionId=${typeof body.sessionId === "string" ? body.sessionId : ""} pendingQuestions=${Array.isArray(body.pendingQuestions) ? body.pendingQuestions.length : 0} extracted=${followUpSuggestions?.length ?? 0}`,
+    );
     const llmCitations = body.llmCitations;
     const provider = typeof body.provider === "string" ? body.provider : undefined;
     const model = typeof body.model === "string" ? body.model : undefined;
@@ -1277,7 +1346,7 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
     // down the delta coalescer. A late partial write is already a status-guarded
     // no-op (persistRunStreamResult flipped status off "running").
     if (CONFIG.liveToolCallsEnabled && meta?.conversationId && meta.userId) {
-      publishLiveEvent(meta.conversationId, { type: "done", conversationId: meta.conversationId, agentSlug: meta.agentSlug, userId: meta.userId, status, ts: Date.now() });
+      publishLiveEvent(meta.conversationId, { type: "done", conversationId: meta.conversationId, agentSlug: meta.agentSlug, userId: meta.userId, status, ...(followUpsPending ? { followUpsPending: true } : {}), ts: Date.now() });
     }
     if (sessionId) endDeltaCoalescer(sessionId);
 
@@ -1299,6 +1368,8 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
         pendingActions,
         attachments: callbackAttachments && callbackAttachments.length > 0 ? callbackAttachments : undefined,
         toolInvocations,
+        followUpSuggestions,
+        ...(followUpsPending ? { followUpsPending: true } : {}),
       });
     } else if (meta?.conversationId) {
       // Stream lives on another pod (the multi-replica case that returns
@@ -1316,6 +1387,8 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
         ...(pendingActions?.length ? { pendingActions } : {}),
         ...(callbackAttachments?.length ? { attachments: callbackAttachments } : {}),
         ...(toolInvocations !== undefined ? { toolInvocations } : {}),
+        ...(followUpSuggestions?.length ? { followUpSuggestions } : {}),
+        ...(followUpsPending ? { followUpsPending: true } : {}),
       });
     } else {
       log.warn(`[run-stream] callback streamId=${streamId} resolved without local stream or conversationId — no SSE done frame will be sent`);
@@ -1324,6 +1397,71 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
     log.error("[run-stream] callback error:", err);
   }
 });
+
+/**
+ * Persists contextual follow-ups that finish after the main answer callback.
+ * The answer stream is already closed at this point, so conversation history
+ * is the durable delivery channel; the dashboard's bounded reconciliation
+ * picks up the recorder without delaying the answer.
+ */
+internalRouter.post(
+  "/:streamId/callback/follow-ups",
+  requireResultToken((req) => extractLateFollowUpSessionId(req.body)),
+  async (req: Request<{ streamId: string }>, res: Response) => {
+    const parsed = parseLateFollowUpCallback(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ success: false, error: "Invalid follow-up callback payload" });
+      return;
+    }
+    const {
+      sessionId,
+      suggestions,
+      startedAt,
+      completedAt,
+      answerLength,
+      enabledByV2Flag,
+      generationInput,
+      conversationMessageCount,
+      agentContextProvided,
+      agentContextName,
+      agentContextDescription,
+      generationSource,
+      generationModel,
+      failureCode,
+      failureMessage,
+      httpStatus,
+    } = parsed.data;
+    const invocations = buildLateFollowUpInvocations({
+      sessionId,
+      suggestions,
+      startedAt,
+      completedAt,
+      ...(answerLength !== undefined ? { answerLength } : {}),
+      enabledByV2Flag,
+      ...(generationInput !== undefined ? { generationInput } : {}),
+      ...(conversationMessageCount !== undefined ? { conversationMessageCount } : {}),
+      ...(agentContextProvided !== undefined ? { agentContextProvided } : {}),
+      ...(agentContextName !== undefined ? { agentContextName } : {}),
+      ...(agentContextDescription !== undefined ? { agentContextDescription } : {}),
+      ...(generationSource !== undefined ? { generationSource } : {}),
+      ...(generationModel !== undefined ? { generationModel } : {}),
+      ...(failureCode !== undefined ? { failureCode } : {}),
+      ...(failureMessage !== undefined ? { failureMessage } : {}),
+      ...(httpStatus !== undefined ? { httpStatus } : {}),
+    });
+
+    try {
+      for (const invocation of invocations) {
+        await agentRunRepository.appendToolInvocation(sessionId, invocation);
+      }
+      log.info(`[follow-ups] persisted late suggestions streamId=${req.params.streamId} sessionId=${sessionId} count=${suggestions.length}`);
+      res.json({ success: true });
+    } catch (err) {
+      log.warn(`[follow-ups] failed to persist late suggestions sessionId=${sessionId}:`, err instanceof Error ? err.message : String(err));
+      res.status(500).json({ success: false, error: "Failed to persist follow-up suggestions" });
+    }
+  },
+);
 
 // ── SSE transport plumbing ──────────────────────────────────────────────────
 // Consumes claw's SSE stream and dispatches into the same pendingStreams
@@ -1401,13 +1539,19 @@ async function runViaSseTransport(opts: RunViaSseOpts): Promise<void> {
         res.write(`event: run\ndata: ${JSON.stringify({ sessionId, conversationId: convId })}\n\n`);
         startAgentRunOnce(sessionId);
       },
-      onInvocation: (sessionId, toolInvocation) => {
-        stream.sendEvent("invocation", toolInvocation);
-        agentRunRepository.appendToolInvocation(sessionId, toolInvocation as Record<string, unknown>).catch(() => {});
+      onInvocation: async (sessionId, toolInvocation) => {
+        const internalFollowUp = isInternalFollowUpInvocation(toolInvocation);
+        if (!internalFollowUp) stream.sendEvent("invocation", toolInvocation);
+        await agentRunRepository.appendToolInvocation(
+          sessionId,
+          toolInvocation as Record<string, unknown>,
+        );
         // Live tap for VIEWERS (reloaded tabs / Spaces): fan tool calls to the
         // shared live-conversation-bus that GET /agent-chat/:slug/chat/:convId/live
         // reads (same convId + slug as this run — no separate viewer bus needed).
-        if (CONFIG.liveToolCallsEnabled) publishLiveEvent(convId, { type: "invocation", conversationId: convId, agentSlug: slug, userId, toolInvocation, ts: Date.now() });
+        if (CONFIG.liveToolCallsEnabled && !internalFollowUp) {
+          publishLiveEvent(convId, { type: "invocation", conversationId: convId, agentSlug: slug, userId, toolInvocation, ts: Date.now() });
+        }
       },
       onReasoning: (sid, delta) => {
         if (!delta) return;
@@ -1561,7 +1705,9 @@ async function runViaSseTransport(opts: RunViaSseOpts): Promise<void> {
       ...(r["pendingActions"] ? { pendingActions: r["pendingActions"] } : {}),
       ...(r["attachments"] ? { attachments: r["attachments"] } : {}),
       ...(r["toolInvocations"] ? { toolInvocations: r["toolInvocations"] } : {}),
+      ...(r["pendingQuestions"] ? { pendingQuestions: r["pendingQuestions"] } : {}),
       ...(r["toolsUsed"] ? { toolsUsed: r["toolsUsed"] } : {}),
+      ...(r["followUpsPending"] === true ? { followUpsPending: true } : {}),
       ...((r["meta"] as Record<string, unknown> | undefined) ?? {}),
     }),
   });
