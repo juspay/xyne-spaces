@@ -9,6 +9,11 @@ import { getAutomationsBotUserId } from './automations-bot';
 import { logger } from '@/utils/logger';
 import { MessagesSideEffectHandler } from '@/zero/side-effects/tables/messages-handler';
 import { buildUserQueryContext } from '@/utils/queryContext';
+import {
+  agentAttachmentsFromContext,
+  uploadAgentAttachments,
+} from '../services/agent-attachment.service';
+import { removeUnclaimedAutomationDeliveryFiles } from '../services/automation-template.service';
 
 const ReplyOnMessageConfigSchema = z.object({
   conversationId: variableRef(z.string().min(1)),
@@ -49,14 +54,26 @@ export class ReplyOnMessageStep extends BaseActionStep<
       (config.senderId as string | undefined) ??
       (await getAutomationsBotUserId(context.automation.workspaceId));
 
-    const result = await conversationService.addMessageToConversation({
-      conversationId: config.conversationId as string,
-      userId: senderId,
-      content: config.content as string,
-      msgType: isBot ? MessageType.BOT : MessageType.USER,
-      isBot,
-      metadata: { contentFormat: 'markdown' },
+    const uploadedFiles = await uploadAgentAttachments({
+      attachments: agentAttachmentsFromContext(context),
+      automationId: context.automation.id,
     });
+
+    let result: Awaited<ReturnType<typeof conversationService.addMessageToConversation>>;
+    try {
+      result = await conversationService.addMessageToConversation({
+        conversationId: config.conversationId as string,
+        userId: senderId,
+        content: config.content as string,
+        msgType: isBot ? MessageType.BOT : MessageType.USER,
+        isBot,
+        metadata: { contentFormat: 'markdown' },
+        uploadedFiles,
+      });
+    } catch (error) {
+      await removeUnclaimedAutomationDeliveryFiles(uploadedFiles);
+      throw error;
+    }
 
     // Fire the message side-effect so automation-posted mentions create
     // notifications + activities (and unread counts / app-mention events).
