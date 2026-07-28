@@ -61,6 +61,8 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
     setCcEmails,
     twoStepSend,
     setTwoStepSend,
+    autoMergeEmails,
+    setAutoMergeEmails,
   } = form;
 
   const [ccInputValue, setCcInputValue] = useState('');
@@ -360,6 +362,25 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
             onCheckedChange={setTwoStepSend}
             disabled={!canManage}
             aria-label='Toggle two-step send'
+          />
+        </div>
+      )}
+
+      {isEmail && (
+        <div className='flex items-start justify-between gap-4'>
+          <div className='flex flex-col gap-[4px]'>
+            <div className='text-desk-label'>Auto-merge similar emails</div>
+            <div className='text-desk-helper w-full max-w-[500px]'>
+              Merge emails with the same subject and sender into one ticket, or create separate
+              tickets for each thread.
+            </div>
+          </div>
+          <Switch
+            variant='desk'
+            checked={autoMergeEmails}
+            onCheckedChange={setAutoMergeEmails}
+            disabled={!canManage}
+            aria-label='Toggle auto-merge similar emails'
           />
         </div>
       )}

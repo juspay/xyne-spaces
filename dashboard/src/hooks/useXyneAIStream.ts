@@ -60,6 +60,8 @@ interface UseXyneAIStreamParams {
   agentSlug?: string | null;
   /** Per-run model pin from the composer's model picker. Null = agent default. */
   model?: string | null;
+  /** Skip the global "response ready" toast for this stream (embedded/preview instances). */
+  suppressCompletionToast?: boolean;
   setDebugEvents?: React.Dispatch<React.SetStateAction<DebugEventRecord[]>>;
   setDebugArtifactsReadyVersion?: React.Dispatch<React.SetStateAction<number>>;
 }
@@ -121,6 +123,7 @@ export const useXyneAIStream = ({
   activities,
   agentSlug,
   model,
+  suppressCompletionToast,
   setDebugEvents,
   setDebugArtifactsReadyVersion,
 }: UseXyneAIStreamParams) => {
@@ -418,6 +421,7 @@ export const useXyneAIStream = ({
           // v1 resolves its model from env and ignores the pin, so only send it
           // on v2 rather than letting a stale pick ride along invisibly.
           ...(isV2 && model ? { model } : {}),
+          ...(suppressCompletionToast && { suppressCompletionToast: true }),
           version: isV2 ? 'v2' : 'v1',
         },
         allMessages,
@@ -448,6 +452,7 @@ export const useXyneAIStream = ({
       streamSessionKey,
       agentSlug,
       model,
+      suppressCompletionToast,
     ],
   );
 
