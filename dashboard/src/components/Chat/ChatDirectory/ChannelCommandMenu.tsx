@@ -51,7 +51,9 @@ import {
   TYPE_SUGGESTIONS,
   SearchableTypes,
   GROUP_KEY_TO_DOC_TYPE,
+  getRelevantTabs,
 } from './ChannelCommandMenu.types';
+import type { ChannelTriggerType, UserTriggerType } from './MentionPlugin';
 import { loadRecents } from '../../../utils/contextPickerRecents';
 import ThreadContextPanel from '../ThreadContextPanel/ThreadContextPanel';
 import {
@@ -448,25 +450,22 @@ const ChannelCommandMenu = ({
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
   const isFlatAllView = activeTab === TabType.ALL && !isGrouped;
 
-  // Type filter visibility - match tab behavior
-  // type:users/people shows grouped local users (same as USERS tab)
-  // type:channels shows grouped local channels (same as CHANNELS tab)
+  // type:channels shows grouped local channels (same as CHANNELS tab) — used by the
+  // no-search channel browse further down.
   const types = parseTypeFilter(typeFilter);
-  const isUsersType = types.some(t => t === SearchableTypes.USERS || t === SearchableTypes.PEOPLE);
   const isChannelsType = types.includes(SearchableTypes.CHANNELS);
 
-  // Check if user has selected from: or in: or with: mention filters (for reordering results)
-  const hasWithFilter = selectedMentions.some(m => m.prefix === 'with:');
-
-  // Bare @user / #channel mention chips scope the search to message content (like with:),
-  // so the local people/channel quick-switch sections become noise — suppress them.
-  const hasMentionFilter = selectedMentions.some(
-    m => !m.prefix && (m.type === MentionType.USER || m.type === MentionType.CHANNEL),
+  // Category tabs the active filters can narrow to (null = no constraint). Drives which local
+  // quick-switch sections stay relevant — no tab ever moves. `searchText` is raw (with tokens).
+  const relevantTabs = useMemo(
+    () => getRelevantTabs(selectedMentions, searchText),
+    [selectedMentions, searchText],
   );
 
-  const showGroupedLocalResults =
-    (!typeFilter || isChannelsType) && !hasWithFilter && !hasMentionFilter;
-  const showGroupedUsers = (!typeFilter || isUsersType) && !hasWithFilter && !hasMentionFilter;
+  // Show the local People / Channels+DMs sections only when the filters can target that category.
+  // No filter (null) shows both; from:/assignee:/priority:/date/with:/@/# scope to content and hide them.
+  const showGroupedUsers = !relevantTabs || relevantTabs.has(TabType.USERS);
+  const showGroupedLocalResults = !relevantTabs || relevantTabs.has(TabType.CHANNELS);
 
   // Check if user has selected from:/with: or in: mention filters (for reordering results)
   // Only count in: mentions that are CHANNEL type (not USER type from in: combined list)
@@ -502,22 +501,20 @@ const ChannelCommandMenu = ({
   // therefore does NOT steal the default Enter target — Enter targets the user
   // only when the query is clearly naming them.
   const hasStrongUserMatch = useMemo(() => {
-    if (hasFromOrInFilter || hasWithFilter || !showGroupedUsers) return false;
+    if (hasFromOrInFilter || !showGroupedUsers) return false;
     const topUser = rankedLocalUsers[0];
     if (!topUser) return false;
     const q = cleanedSearchText.toLowerCase().trim();
     if (!q) return false;
     return topUser.name.toLowerCase().startsWith(q);
-  }, [hasFromOrInFilter, hasWithFilter, showGroupedUsers, rankedLocalUsers, cleanedSearchText]);
+  }, [hasFromOrInFilter, showGroupedUsers, rankedLocalUsers, cleanedSearchText]);
 
   // Which trigger opened the channel typeahead: '#' acts like Slack's quick
   // switcher (navigate on select, show only regular channels); 'in:' creates a
   // filter chip and includes DMs/Group DMs.
-  const [channelTrigger, setChannelTrigger] = useState<'#' | 'in:' | 'in:#' | 'in:@' | null>(null);
+  const [channelTrigger, setChannelTrigger] = useState<ChannelTriggerType | null>(null);
 
-  const [userTrigger, setUserTrigger] = useState<
-    '@' | 'from:' | 'to:' | 'with:' | 'assignee:' | 'in:@' | null
-  >(null);
+  const [userTrigger, setUserTrigger] = useState<UserTriggerType | null>(null);
   const [selectedMentionIndex, setSelectedMentionIndex] = useState(0);
   // Render-driving mirror of hasNavigatedRef: true once the user engages a specific row this
   // session (ArrowUp/Down or hover). Drives the two-tier highlight (gray resting -> blue active)
@@ -1873,7 +1870,7 @@ const ChannelCommandMenu = ({
   // boosts to the top tier, so the ranking and the Enter target stay aligned.
   const hasStrongChannelMatch = useMemo(() => {
     if (hasStrongUserMatch) return false;
-    if (hasFromOrInFilter || hasWithFilter || !showGroupedLocalResults) return false;
+    if (hasFromOrInFilter || !showGroupedLocalResults) return false;
     const topChannel = groupedChannels['channels']?.[0]?.channel;
     if (!topChannel) return false;
     const q = cleanedSearchText.toLowerCase().trim();
@@ -1882,7 +1879,6 @@ const ChannelCommandMenu = ({
   }, [
     hasStrongUserMatch,
     hasFromOrInFilter,
-    hasWithFilter,
     showGroupedLocalResults,
     groupedChannels,
     cleanedSearchText,
@@ -2490,7 +2486,8 @@ const ChannelCommandMenu = ({
   // Render the local channels for the browse branch (no search text)
   const renderBrowseLocalChannels = () => (
     <>
-      {(activeTab === TabType.ALL || activeTab === TabType.CHANNELS || isChannelsType) &&
+      {showGroupedLocalResults &&
+        (activeTab === TabType.ALL || activeTab === TabType.CHANNELS || isChannelsType) &&
         filteredLocalChannels.length > 0 && (
           <>
             {Object.entries(groupedChannels).map(([category, items]) => {
@@ -2559,8 +2556,7 @@ const ChannelCommandMenu = ({
   // Enter target. `hasStrongUserMatch`/`hasStrongChannelMatch` already exclude
   // from:/in:/with: chips, where backend results lead instead.
   const canHoist = activeTab === TabType.ALL && !isFlatAllView && !mentionSearchType;
-  const hoistStarred =
-    canHoist && !hasFromOrInFilter && !hasWithFilter && searchText.trim().length > 0;
+  const hoistStarred = canHoist && !hasFromOrInFilter && searchText.trim().length > 0;
   const hoistUser = canHoist && hasStrongUserMatch;
   const hoistChannel = canHoist && hasStrongChannelMatch;
 
@@ -4024,41 +4020,37 @@ const ChannelCommandMenu = ({
                 {!showEmptyState && !mentionSearchType && (
                   <>
                     {/* When searching, ordered results: Starred, Users, Group DMs, Channels, Messages, Tickets */}
-                    {/* When from:/in: filter is active, backend results appear first */}
-                    {/* When with: filter is active, only show backend results (no local sections) */}
+                    {/* When a from:/in: chip is active, backend results appear first. Local sections
+                        self-suppress via showGroupedUsers/showGroupedLocalResults when a filter makes
+                        their category irrelevant (e.g. with:/from: → nothing renders). */}
                     {searchText.trim() || typeFilter ? (
                       <>
-                        {/* When from:/in: filter is active, backend results appear first; otherwise local sections appear first */}
-                        {/* with: filter suppresses local sections entirely */}
                         {hasFromOrInFilter ? (
                           <>
                             {backendResults.length > 0 && renderSearchBackendResults()}
-                            {!hasWithFilter && renderSearchLocalSections()}
+                            {renderSearchLocalSections()}
                           </>
                         ) : (
                           <>
                             {/* A section pinned to the top (above) is skipped here to
                             avoid a double-render. */}
-                            {!hasWithFilter &&
-                              renderSearchLocalSections(!hoistStarred, !hoistUser, !hoistChannel)}
+                            {renderSearchLocalSections(!hoistStarred, !hoistUser, !hoistChannel)}
                             {backendResults.length > 0 && renderSearchBackendResults()}
                           </>
                         )}
                       </>
                     ) : (
                       <>
-                        {/* When from:/in: filter is active, backend results appear first; otherwise local channels appear first */}
-                        {/* with: filter suppresses local sections entirely */}
                         {hasFromOrInFilter ? (
                           <>
                             {activeTab !== TabType.CHANNELS &&
                               backendResults.length > 0 &&
                               renderDefaultBackendResults()}
-                            {!hasWithFilter && renderBrowseLocalChannels()}
+                            {renderBrowseLocalChannels()}
                           </>
                         ) : (
                           <>
-                            {!hasWithFilter && renderBrowseLocalChannels()}
+                            {renderBrowseLocalChannels()}
                             {activeTab !== TabType.CHANNELS &&
                               backendResults.length > 0 &&
                               renderDefaultBackendResults()}
