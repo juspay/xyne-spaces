@@ -908,6 +908,10 @@ export const router = createBrowserRouter([
                             element: <ThreadMessages />,
                           },
                           {
+                            path: ':conversationId/profile/:userId',
+                            element: <ProfileSidebar />,
+                          },
+                          {
                             path: ':conversationId/:ticketId',
                             element: <ThreadMessages />,
                           },

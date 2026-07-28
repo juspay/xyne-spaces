@@ -179,6 +179,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       maxFiles = 10,
       onAlsoSendToChannelChange,
       alsoSendToChannelChecked = false,
+      preserveThreadRoute = false,
       isDMThread = false,
       onCreateTicket,
       onTranscriptSelect,
@@ -596,6 +597,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         MentionExtension.configure({
           userActions: [],
           groupActions: [],
+          preserveThreadRoute,
         }),
         ChannelMentionExtension,
         CommandsExtension,

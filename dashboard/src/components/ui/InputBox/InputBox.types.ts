@@ -58,6 +58,7 @@ export interface InputBoxProps {
   maxFiles?: number;
   onAlsoSendToChannelChange?: (checked: boolean) => void;
   alsoSendToChannelChecked?: boolean;
+  preserveThreadRoute?: boolean;
   isDMThread?: boolean;
   onCreateTicket?: (description?: string) => void;
   onCreateCanvas?: (initialContent?: string) => void;

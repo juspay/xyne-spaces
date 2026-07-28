@@ -170,6 +170,7 @@ const ChatView = (): ReactElement => {
   const isThreadActive = !!conversationId;
   const isFocusThread = isThreadActive && searchParams.get('focusThread') === '1';
   const isProfileActive = !!userId;
+  const isThreadProfileActive = isThreadActive && isProfileActive;
   const showSecondaryPanel =
     isThreadActive ||
     isCanvasActive ||
@@ -242,7 +243,7 @@ const ChatView = (): ReactElement => {
     );
   }
 
-  if (isFocusThread) {
+  if (isFocusThread && !isThreadProfileActive) {
     return (
       <div
         ref={chatViewContainerRef}
@@ -392,7 +393,9 @@ const ChatView = (): ReactElement => {
                 minSize={minConversationPannelSize}
               >
                 <div className='h-full'>
-                  {shouldStackThreadFromParent && conversationId ? (
+                  {isThreadProfileActive && isFocusThread && channelId && conversationId ? (
+                    <ThreadMessages channelId={channelId} conversationId={conversationId} />
+                  ) : shouldStackThreadFromParent && conversationId ? (
                     <Outlet />
                   ) : (
                     <ConversationPanelV2

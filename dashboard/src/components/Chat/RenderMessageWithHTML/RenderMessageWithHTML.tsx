@@ -57,6 +57,7 @@ interface RenderMessageWithHTMLProps {
   /** Needed to render embedded FlowScreenManager widgets */
   messageId?: string;
   conversationId?: string;
+  preserveThreadRoute?: boolean;
 }
 
 const MAX_HTML_LENGTH = 100000;
@@ -281,9 +282,11 @@ const CanvasLink = ({
 export function MentionRenderer({
   userId,
   fallbackName,
+  preserveThreadRoute = false,
 }: {
   userId: string;
   fallbackName?: string | undefined;
+  preserveThreadRoute?: boolean;
 }): JSX.Element {
   const context = useAuthContextValues();
   const users = useUsers();
@@ -293,7 +296,7 @@ export function MentionRenderer({
   const isCurrentUser = context.userID === userId;
 
   return (
-    <UserHoverWrapper userId={userId}>
+    <UserHoverWrapper userId={userId} preserveThreadRoute={preserveThreadRoute}>
       <span
         data-mention=''
         data-mention-type='user'
@@ -869,6 +872,7 @@ const parseNode = (
   breakLongLinks = false,
   messageId?: string,
   conversationId?: string,
+  preserveThreadRoute = false,
 ): React.ReactNode | null => {
   if (node.nodeType === Node.TEXT_NODE) {
     const text = node.textContent || '';
@@ -954,6 +958,7 @@ const parseNode = (
         key={`${keyPrefix}-mention-${idx}`}
         userId={userId}
         fallbackName={username}
+        preserveThreadRoute={preserveThreadRoute}
       />
     );
   }
@@ -1110,6 +1115,7 @@ const parseNode = (
       breakLongLinks,
       messageId,
       conversationId,
+      preserveThreadRoute,
     );
     if (parsed !== null) children.push(parsed);
   });
@@ -1359,6 +1365,7 @@ export const RenderMessageWithHTML: React.FC<RenderMessageWithHTMLProps> = ({
   breakLongLinks = false,
   messageId,
   conversationId,
+  preserveThreadRoute = false,
 }): JSX.Element => {
   const navigate = useNavigate();
   const keyPrefix = useMemo<string>(() => Math.random().toString(36).slice(2), []);
@@ -1417,6 +1424,7 @@ export const RenderMessageWithHTML: React.FC<RenderMessageWithHTMLProps> = ({
           breakLongLinks,
           messageId,
           conversationId,
+          preserveThreadRoute,
         );
         if (parsed !== null) nodes.push(parsed);
       });
@@ -1425,7 +1433,15 @@ export const RenderMessageWithHTML: React.FC<RenderMessageWithHTMLProps> = ({
     } catch {
       return [message.replace(/<[^>]*>/g, '')];
     }
-  }, [message, keyPrefix, navigate, breakLongLinks, messageId, conversationId]);
+  }, [
+    message,
+    keyPrefix,
+    navigate,
+    breakLongLinks,
+    messageId,
+    conversationId,
+    preserveThreadRoute,
+  ]);
 
   // Inject (edited) into the last element if it's safe to do so
   const contentWithEdited = useMemo(() => {
