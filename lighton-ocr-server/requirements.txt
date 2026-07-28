@@ -1,0 +1,11 @@
+fastapi==0.109.1
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.20
+python-dotenv>=1.0.0
+httpx>=0.26.0
+redis>=5.0.0
+pillow>=10.4,<11.0
+pymupdf>=1.24
+tokenizers>=0.15.0
+huggingface_hub>=0.23.0
+typing-extensions>=4.8.0

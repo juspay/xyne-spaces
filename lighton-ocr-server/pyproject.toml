@@ -1,0 +1,102 @@
+[project]
+name = "lighton-ocr-server"
+version = "0.1.0"
+requires-python = ">=3.9"
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+src = ["src", "tests"]
+extend-exclude = [
+  ".git",
+  ".mypy_cache",
+  ".pytest_cache",
+  ".ruff_cache",
+  ".venv",
+  "dist",
+  "build",
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+  # Formatting rules that conflict with the formatter.
+  "COM812",
+  "ISC001",
+  # Boundary code intentionally handles framework objects, Redis clients, and
+  # JSON payloads whose exact runtime type depends on deployment wiring.
+  "ANN401",
+  # API-shaped functions keep explicit arguments instead of ceremonial request
+  # objects when that is clearer at call sites.
+  "C901",
+  "PLR0911",
+  "PLR0913",
+  # Async job and rendering boundaries catch broad failures so jobs publish a
+  # Redis failure event instead of disappearing.
+  "BLE001",
+  # Optional heavy dependencies are imported lazily.
+  "PLC0415",
+  # Configuration helpers naturally accept boolean defaults.
+  "FBT001",
+  "FBT002",
+  "FBT003",
+  # These refactors make failure-path code less direct in this service.
+  "TRY300",
+  # Retry loops intentionally keep try/except around the request attempt.
+  "PERF203",
+  # Keep documentation useful without making every small helper carry boilerplate.
+  "D",
+  # Direct exception messages are clearer in this service than extracted constants.
+  "EM101",
+  "EM102",
+  "TRY003",
+]
+fixable = ["ALL"]
+unfixable = [
+  # Do not let auto-fix delete commented context without human review.
+  "ERA001",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = [
+  "async_jobs",
+  "bbox",
+  "chunking",
+  "config",
+  "global_admission",
+  "image_utils",
+  "job_tracker",
+  "lighton_client",
+  "main",
+  "models",
+  "processor",
+  "redis_events",
+  "renderer",
+  "tokenization",
+]
+combine-as-imports = true
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = [
+  # Tests should use plain asserts and compact fixtures.
+  "ANN",
+  "ARG001",
+  "PLR2004",
+  "S101",
+  "S106",
+  "SLF001",
+]
+"src/main.py" = [
+  # Binding to all interfaces is intentional inside Docker.
+  "S104",
+]
+"src/renderer.py" = [
+  # LibreOffice is invoked with a fixed argv list; the input path is not
+  # shell-expanded.
+  "S603",
+]
