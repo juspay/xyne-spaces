@@ -1,6 +1,7 @@
 import type { Query } from '@rocicorp/zero';
 import type { Schema, Context } from '../../schema';
 import { BaseQueryACL } from '../core/base-acl';
+import { guestProjectAccessWhere, isGuestContext } from '../core/guest-acl-utils';
 
 /**
  * ACL for board_sla_policies.
@@ -16,6 +17,14 @@ export class BoardSlaPoliciesACL extends BaseQueryACL<'board_sla_policies'> {
   canSelect<TReturn>(
     query: Query<'board_sla_policies', Schema, TReturn>,
   ): Query<'board_sla_policies', Schema, TReturn> {
+    if (isGuestContext(this.ctx)) {
+      return query.whereExists('board', (b) =>
+        b
+          .where('workspaceId', '=', this.ctx.workspaceId)
+          .whereExists('project', (p) => p.where(guestProjectAccessWhere(this.ctx))),
+      );
+    }
+
     // Filter through the board relation — board visibility is already gated by
     // workspaceId in BoardsACL, so checking the same condition here is correct.
     return query.whereExists('board', b =>

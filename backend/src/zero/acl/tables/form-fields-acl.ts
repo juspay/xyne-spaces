@@ -6,6 +6,7 @@ import {
 import { AccessType, Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { zql } from '../../queries';
+import { assertGuestWriteBlocked } from '../core/guest-access';
 
 const FORMS_RESOURCE_NAME = 'FORMS';
 
@@ -51,6 +52,7 @@ export class FormFieldsACL extends BaseACL<'form_fields'> {
   }
 
   async canInsert(args: InsertValue<TableSchema<'form_fields'>>, tx: Transaction<Schema>): Promise<void> {
+    assertGuestWriteBlocked(this.ctx, 'form_fields', 'insert', 'Form field');
     // Allow FORMS resource ADMIN to insert form fields
     if (await this.hasFormsAdminAccess(tx)) {
       return;
@@ -59,6 +61,7 @@ export class FormFieldsACL extends BaseACL<'form_fields'> {
   }
 
   async canUpdate(args: UpdateValue<TableSchema<'form_fields'>>, tx: Transaction<Schema>): Promise<void> {
+    assertGuestWriteBlocked(this.ctx, 'form_fields', 'update', 'Form field');
     // Allow FORMS resource ADMIN to update any form field
     if (await this.hasFormsAdminAccess(tx)) {
       return;
@@ -71,6 +74,7 @@ export class FormFieldsACL extends BaseACL<'form_fields'> {
   }
 
   async canDelete(args: DeleteID<TableSchema<'form_fields'>>, tx: Transaction<Schema>): Promise<void> {
+    assertGuestWriteBlocked(this.ctx, 'form_fields', 'delete', 'Form field');
     // Allow FORMS resource ADMIN to delete any form field
     if (await this.hasFormsAdminAccess(tx)) {
       return;

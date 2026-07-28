@@ -3,6 +3,7 @@ import { Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, TableSchema } from '../core/types';
 import { zql } from '../../queries';
+import { hasChannelMutationAccess } from '../core/guest-access';
 
 export class CallsACL extends BaseACL<'calls'> {
 
@@ -25,10 +26,22 @@ export class CallsACL extends BaseACL<'calls'> {
     }
     await this.verifyChannelInWorkspace(channel.id, tx, channel.workspaceId);
 
-    const isParticipant = await tx.run(zql.channel_participants
-      .where('channelId', args.channelId ?? undefined)
-      .where('userId', this.ctx.userID)
-      .one());
+    if (this.ctx.role === 'GUEST') {
+      const hasGuestAccess = await hasChannelMutationAccess(this.ctx, tx, channel.id, {
+        allowPublicForNonGuests: true,
+      });
+      if (hasGuestAccess) {
+        return;
+      }
+      throw new MutationACLError('Call insert failed: guest does not have access to this channel', 'calls');
+    }
+
+    const isParticipant = await tx.run(
+      zql.channel_participants
+        .where('channelId', args.channelId ?? undefined)
+        .where('userId', this.ctx.userID)
+        .one(),
+    );
 
     if (!isParticipant) {
       throw new MutationACLError('Call insert failed: you must be a channel participant to start calls', 'calls');

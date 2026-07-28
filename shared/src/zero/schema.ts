@@ -109,6 +109,12 @@ export enum EntityType {
   GATEWAY = 'GATEWAY',
 }
 
+export enum GuestEntity {
+  PROJECT = 'PROJECT',
+  CHANNEL = 'CHANNEL',
+  CANVAS = 'CANVAS',
+}
+
 // @ts-ignore TS1294
 export enum RecapEntityType {
   CHANNEL = 'CHANNEL',
@@ -196,6 +202,7 @@ export enum OrgRole {
   MEMBER = 'MEMBER',
   VIEWER = 'VIEWER',
   COMMUNITY_MEMBER = 'COMMUNITY_MEMBER',
+  GUEST = 'GUEST',
 }
 
 // @ts-ignore TS1294
@@ -1593,8 +1600,23 @@ export const invitationTable = table('invitations')
     expiredAt: number().optional(),
     acceptedAt: number().optional(),
     invitationId: string().optional(),
+    entityId: string().optional(),
+    entityType: string().optional(),
+    channelId: string().optional(),
     createdAt: number(),
     updatedAt: number(),
+  })
+  .primaryKey('id');
+
+export const guestAccessTable = table('guest_access')
+  .columns({
+    id: string(),
+    userId: string(),
+    workspaceId: string(),
+    accessibleEntityId: string(),
+    accessibleEntityType: string(),
+    invitedBy: string(),
+    createdAt: number(),
   })
   .primaryKey('id');
 
@@ -3327,6 +3349,11 @@ export const projectTableRelationships = relationships(projectTable, ({ one, man
     destField: ['projectId'],
     destSchema: projectTagTable,
   }),
+  guestAccess: many({
+    sourceField: ['id'],
+    destField: ['accessibleEntityId'],
+    destSchema: guestAccessTable,
+  }),
 }));
 
 export const boardTableRelationships = relationships(boardTable, ({ one, many }) => ({
@@ -3664,6 +3691,11 @@ export const userTableRelationships = relationships(userTable, ({ one, many }) =
     destField: ['userId'],
     destSchema: channelParticipantTable,
   }),
+  guestAccess: many({
+    sourceField: ['id'],
+    destField: ['userId'],
+    destSchema: guestAccessTable,
+  }),
   sentMessages: many({
     sourceField: ['id'],
     destField: ['senderId'],
@@ -3938,6 +3970,11 @@ export const channelTableRelationships = relationships(channelTable, ({ one, man
     sourceField: ['id'],
     destField: ['channelId'],
     destSchema: canvasFolderTable,
+  }),
+  guestAccess: many({
+    sourceField: ['id'],
+    destField: ['accessibleEntityId'],
+    destSchema: guestAccessTable,
   }),
 }));
 
@@ -4357,6 +4394,11 @@ export const canvasTableRelationships = relationships(canvasTable, ({ one, many 
     destField: ['id'],
     destSchema: projectTable,
   }),
+  guestAccess: many({
+    sourceField: ['id'],
+    destField: ['accessibleEntityId'],
+    destSchema: guestAccessTable,
+  }),
 }));
 
 export const canvasVersionTableRelationships = relationships(canvasVersionTable, ({ one }) => ({
@@ -4538,6 +4580,17 @@ export const invitationTableRelationships = relationships(invitationTable, ({ on
     destSchema: workspaceTable,
   }),
 }));
+
+export const guestAccessTableRelationships = relationships(
+  guestAccessTable,
+  ({ one }) => ({
+    user: one({
+      sourceField: ['userId'],
+      destField: ['id'],
+      destSchema: userTable,
+    }),
+  }),
+);
 
 export const bookmarkTableRelationships = relationships(bookmarkTable, ({ one }) => ({
   user: one({
@@ -5091,6 +5144,7 @@ export const schema = createSchema({
     workspaceTable,
     workspaceOrganizationTable,
     invitationTable,
+    guestAccessTable,
     channelTable,
     channelStatsTable,
     channelParticipantTable,
@@ -5241,6 +5295,7 @@ export const schema = createSchema({
     workspaceTableRelationships,
     workspaceOrganizationTableRelationships,
     invitationTableRelationships,
+    guestAccessTableRelationships,
     reactionCountTableRelationships,
     customEmojiTableRelationships,
     bookmarkTableRelationships,
@@ -5340,6 +5395,7 @@ export type OrgMember = Row<typeof schema.tables.org_members>;
 export type Workspace = Row<typeof schema.tables.workspaces>;
 export type WorkspaceOrganization = Row<typeof schema.tables.workspace_organizations>;
 export type Invitation = Row<typeof schema.tables.invitations>;
+export type GuestAccess = Row<typeof schema.tables.guest_access>;
 export type Channel = Row<typeof schema.tables.channels>;
 export type ChannelStats = Row<typeof schema.tables.channel_stats>;
 export type ChannelParticipant = Row<typeof schema.tables.channel_participants>;

@@ -3,6 +3,7 @@ import { Schema, WorkspaceRole } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, TableSchema } from '../core/types';
 import { verifyWorkspaceAdminOrOwnerFromContext } from '../core/admin-access';
+import { assertGuestWriteBlocked } from '../core/guest-access';
 
 /**
  * Workspaces ACL
@@ -15,6 +16,7 @@ export class WorkspacesACL extends BaseACL<'workspaces'> {
     if (this.ctx.role === WorkspaceRole.COMMUNITY_MEMBER) {
       throw new MutationACLError('Workspace insert failed: community members cannot create workspaces', 'workspaces');
     }
+    assertGuestWriteBlocked(this.ctx, 'workspaces', 'insert', 'Workspace');
     // Workspace creation is handled through auth/organization flow, not direct mutation
     throw new MutationACLError(
       'Workspace insert failed: workspaces are created through organization flow',
@@ -26,6 +28,7 @@ export class WorkspacesACL extends BaseACL<'workspaces'> {
     if (this.ctx.role === WorkspaceRole.COMMUNITY_MEMBER) {
       throw new MutationACLError('Workspace update failed: community members cannot modify workspace settings', 'workspaces');
     }
+    assertGuestWriteBlocked(this.ctx, 'workspaces', 'update', 'Workspace');
     // Security check: workspaceId must match context
     if (this.ctx.workspaceId && this.ctx.workspaceId !== args.id) {
       throw new MutationACLError(
@@ -50,6 +53,7 @@ export class WorkspacesACL extends BaseACL<'workspaces'> {
     if (this.ctx.role === WorkspaceRole.COMMUNITY_MEMBER) {
       throw new MutationACLError('Workspace delete failed: community members cannot delete workspaces', 'workspaces');
     }
+    assertGuestWriteBlocked(this.ctx, 'workspaces', 'delete', 'Workspace');
     // Security check: workspaceId must match context
     if (this.ctx.workspaceId && this.ctx.workspaceId !== args.id) {
       throw new MutationACLError(

@@ -313,6 +313,7 @@ enum OrgRole {
   MEMBER
   VIEWER
   COMMUNITY_MEMBER
+  GUEST
   @@schema("public")
 }
 
@@ -2045,6 +2046,9 @@ model Invitation {
   expiredAt    DateTime?     // Expiration date - 15 days from creation by default, or updated on revoke
   acceptedAt   DateTime?     // When the invitation was accepted
   invitationId String?       @unique // Unique link ID for invitation URL
+  entityId     String?        // projectId | channelId | canvasId
+  entityType   String?   // PROJECT | CHANNEL | CANVAS
+  channelId    String?       // For PROJECT guests: the specific channel to grant access to
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
 
@@ -2056,8 +2060,24 @@ model Invitation {
   @@index([workspaceId])
   @@index([email])
   @@index([invitationId])
+  @@index([entityId])
   @@index([createdAt(sort: Desc), id])
   @@map("invitations")
+  @@schema("public")
+}
+
+model GuestAccess {
+  id                   String      @id @default(cuid())
+  userId               String
+  workspaceId          String
+  accessibleEntityId   String
+  accessibleEntityType String
+  invitedBy            String
+  createdAt            DateTime
+
+  @@unique([userId, accessibleEntityId, accessibleEntityType])
+  @@index([workspaceId, userId])
+  @@map("guest_access")
   @@schema("public")
 }
 

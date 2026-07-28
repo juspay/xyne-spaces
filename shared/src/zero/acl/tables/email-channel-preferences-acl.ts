@@ -3,6 +3,7 @@ import type { Schema, Context } from '../../schema';
 import { ChannelVisibility } from '../../schema';
 import { BaseQueryACL } from '../core/base-acl';
 import type { SelectArgs } from '../core/types';
+import { denyGuestSelect, isGuestContext } from '../core/guest-acl-utils';
 
 export class EmailChannelPreferencesACL extends BaseQueryACL<'email_channel_preferences'> {
   constructor(ctx: Context) {
@@ -10,6 +11,10 @@ export class EmailChannelPreferencesACL extends BaseQueryACL<'email_channel_pref
   }
 
   canSelect<TReturn>(query: Query<'email_channel_preferences', Schema, TReturn>, args?: SelectArgs): Query<'email_channel_preferences', Schema, TReturn> {
+    if (isGuestContext(this.ctx)) {
+      return denyGuestSelect(query, 'channelId');
+    }
+
     const channelId = args?.channelId as string | undefined;
 
     // When the caller knows the user is a member (pre-checked against channel_user_status),

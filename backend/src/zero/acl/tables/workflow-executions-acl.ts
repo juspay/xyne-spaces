@@ -6,10 +6,12 @@ import {
 import { Schema } from '@xyne/shared'
 import { BaseACL } from '../core/base-acl';
 import { zql } from '../../queries';
+import { assertGuestWriteBlocked } from '../core/guest-access';
 
 export class WorkflowExecutionsAcl extends BaseACL<'workflow_executions'> {
 
     async canInsert(args: InsertValue<TableSchema<'workflow_executions'>>, tx: Transaction<Schema>): Promise<void> {
+        assertGuestWriteBlocked(this.ctx, 'workflow_executions', 'insert', 'Workflow execution');
         if (!args.createdBy) {
             throw new MutationACLError('Workflow execution insert failed: createdBy is required', 'workflow_executions');
         }
@@ -21,14 +23,17 @@ export class WorkflowExecutionsAcl extends BaseACL<'workflow_executions'> {
     }
 
     async canUpdate(_args: UpdateValue<TableSchema<'workflow_executions'>>, _tx: Transaction<Schema>): Promise<void> {
+        assertGuestWriteBlocked(this.ctx, 'workflow_executions', 'update', 'Workflow execution');
         throw new MutationACLError('Workflow execution update failed: executions are immutable once created', 'workflow_executions');
     }
 
     async canDelete(_args: DeleteID<TableSchema<'workflow_executions'>>, _tx: Transaction<Schema>): Promise<void> {
+        assertGuestWriteBlocked(this.ctx, 'workflow_executions', 'delete', 'Workflow execution');
         throw new MutationACLError('Workflow execution delete failed: executions cannot be deleted', 'workflow_executions');
     }
 
     async canUpsert(_args: UpsertValue<TableSchema<'workflow_executions'>>, _tx: Transaction<Schema>): Promise<void> {
+        assertGuestWriteBlocked(this.ctx, 'workflow_executions', 'upsert', 'Workflow execution');
         throw new MutationACLError('Workflow execution upsert failed: use insert operation only', 'workflow_executions');
     }
 }

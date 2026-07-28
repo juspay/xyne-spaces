@@ -16,6 +16,8 @@ import {
   Check,
   X,
   Search,
+  Send,
+  Loader2,
 } from 'lucide-react';
 import { useZero } from '../../../hooks/useZero';
 import { useShareableOrigin } from '../../../hooks/useShareableOrigin';
@@ -27,6 +29,8 @@ import { Tooltip } from '../../ui/Tooltip/Tooltip';
 import * as Select from '@radix-ui/react-select';
 import { mutators } from '../../../zero/mutators';
 import { useUsers, useActiveUsers, searchUsers } from '../../../hooks/useUsers';
+import { useGuestInvite } from '../../../hooks/useGuestInvite';
+import Input from '../../ui/Input/Input';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useAllVisibleChannels } from '../../../hooks/useChannels';
 import { v4 as uuidv4 } from 'uuid';
@@ -73,6 +77,7 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
   const z = useZero();
   const shareableOrigin = useShareableOrigin();
   const { isMobile } = usePlatform();
+  const guestInvite = useGuestInvite({ entityType: 'CANVAS', entityId: canvas.id });
 
   const [query, setQuery] = useState('');
   const [pendingAdds, setPendingAdds] = useState<AddCandidate[]>([]);
@@ -116,6 +121,7 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
   }, [allVisibleChannels]);
 
   const canManage = isOwner || isEditor;
+  const canInviteGuests = currentUser?.role === 'ADMIN' || currentUser?.role === 'OWNER';
   const isPublic = localVisibility === CanvasVisibility.PUBLIC;
 
   // ---- Already-shared / pending exclusions -------------------------------
@@ -595,6 +601,41 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
                 />
               </div>
             ) : null}
+          </div>
+        ) : null}
+
+        {/* Invite external user */}
+        {canManage && canInviteGuests ? (
+          <div>
+            <div className='text-xs font-semibold text-foreground mb-1.5'>Invite External User</div>
+            <div className='flex gap-2'>
+              <Input
+                type='email'
+                placeholder='Enter email address...'
+                value={guestInvite.email}
+                onChange={e => guestInvite.setEmail(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && !guestInvite.isLoading) {
+                    void guestInvite.sendInvite();
+                  }
+                }}
+                data-testid='canvas-external-email-input'
+                className='flex-1'
+              />
+              <Button
+                size='sm'
+                disabled={guestInvite.isLoading || !guestInvite.email.trim()}
+                onClick={() => void guestInvite.sendInvite()}
+                className='gap-2'
+              >
+                {guestInvite.isLoading ? (
+                  <Loader2 className='w-4 h-4 animate-spin' />
+                ) : (
+                  <Send className='w-4 h-4' />
+                )}
+                {guestInvite.isLoading ? 'Sending...' : 'Invite'}
+              </Button>
+            </div>
           </div>
         ) : null}
 

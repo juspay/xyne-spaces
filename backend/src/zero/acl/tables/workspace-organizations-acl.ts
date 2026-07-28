@@ -3,6 +3,7 @@ import { Schema, WorkspaceRole } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, TableSchema } from '../core/types';
 import { verifyWorkspaceAdminOrOwnerFromContext } from '../core/admin-access';
+import { assertGuestWriteBlocked } from '../core/guest-access';
 
 /**
  * Workspace Organizations ACL
@@ -15,6 +16,7 @@ export class WorkspaceOrganizationsACL extends BaseACL<'workspace_organizations'
     if (this.ctx.role === WorkspaceRole.COMMUNITY_MEMBER) {
       throw new MutationACLError('Workspace organization insert failed: community members cannot link workspaces to organizations', 'workspace_organizations');
     }
+    assertGuestWriteBlocked(this.ctx, 'workspace_organizations', 'insert', 'Workspace organization');
     // Verify user has ADMIN or OWNER role (uses ctx.role, no DB query)
     verifyWorkspaceAdminOrOwnerFromContext(this.ctx, 'workspace_organizations');
 
@@ -29,6 +31,7 @@ export class WorkspaceOrganizationsACL extends BaseACL<'workspace_organizations'
     if (this.ctx.role === WorkspaceRole.COMMUNITY_MEMBER) {
       throw new MutationACLError('Workspace organization update failed: community members cannot modify workspace organization links', 'workspace_organizations');
     }
+    assertGuestWriteBlocked(this.ctx, 'workspace_organizations', 'update', 'Workspace organization');
     // Verify user has ADMIN or OWNER role (uses ctx.role, no DB query)
     verifyWorkspaceAdminOrOwnerFromContext(this.ctx, 'workspace_organizations');
 
@@ -53,6 +56,7 @@ export class WorkspaceOrganizationsACL extends BaseACL<'workspace_organizations'
     if (this.ctx.role === WorkspaceRole.COMMUNITY_MEMBER) {
       throw new MutationACLError('Workspace organization delete failed: community members cannot delete workspace organization links', 'workspace_organizations');
     }
+    assertGuestWriteBlocked(this.ctx, 'workspace_organizations', 'delete', 'Workspace organization');
     // Verify user has ADMIN or OWNER role (uses ctx.role, no DB query)
     verifyWorkspaceAdminOrOwnerFromContext(this.ctx, 'workspace_organizations');
 

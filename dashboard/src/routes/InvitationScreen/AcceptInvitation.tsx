@@ -1,6 +1,6 @@
 import { ReactElement, useEffect, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { MailPlus, CheckCircle, XCircle, Loader2 } from 'lucide-react';
+import { CheckCircle, XCircle, Loader2, FileText, Hash, Folder, Users } from 'lucide-react';
 import { Button } from '../../components/ui/Button/Button';
 import axios from 'axios';
 import Cookies from 'js-cookie';
@@ -18,6 +18,9 @@ interface InvitationDetails {
   role: string;
   workspaceName?: string;
   organizationName?: string;
+  entityType?: string;
+  entityId?: string;
+  entityTitle?: string | null;
 }
 
 interface VerificationResponse {
@@ -32,6 +35,7 @@ interface AcceptResponse {
   email: string;
   name: string;
   picture?: string;
+  redirectPath?: string | null;
 }
 
 interface LoginWorkspaceResponse {
@@ -56,7 +60,12 @@ type PageState =
   | { status: 'email_mismatch'; loggedInEmail: string; invitedEmail: string }
   | { status: 'ready'; invitation: InvitationDetails }
   | { status: 'accepting' }
-  | { status: 'accepted'; workspaceId: string; invitation: InvitationDetails }
+  | {
+      status: 'accepted';
+      workspaceId: string;
+      invitation: InvitationDetails;
+      redirectPath: string | null | undefined;
+    }
   | { status: 'expired'; message: string }
   | { status: 'error'; message: string };
 
@@ -150,7 +159,7 @@ export const AcceptInvitation = (): ReactElement => {
         { withCredentials: true },
       );
 
-      const { workspaceId } = acceptResponse.data;
+      const { workspaceId, redirectPath } = acceptResponse.data;
 
       // Step 2: Login to workspace — issues JWT cookie, clears google_access_token cookie
       const loginResponse = await axios.post<LoginWorkspaceResponse>(
@@ -177,9 +186,14 @@ export const AcceptInvitation = (): ReactElement => {
       // Show "Open in App" screen instead of redirecting immediately
       // Include invitation data so we can show the success screen
       if (state.status === 'ready') {
-        setState({ status: 'accepted', workspaceId, invitation: state.invitation });
+        setState({ status: 'accepted', workspaceId, invitation: state.invitation, redirectPath });
       } else {
-        setState({ status: 'accepted', workspaceId, invitation: {} as InvitationDetails });
+        setState({
+          status: 'accepted',
+          workspaceId,
+          invitation: {} as InvitationDetails,
+          redirectPath,
+        });
       }
     } catch (error) {
       Cookies.remove('pending_invitation_id', { path: '/' });
@@ -277,13 +291,21 @@ export const AcceptInvitation = (): ReactElement => {
   // state.status === 'accepted'
   if (state.status === 'accepted') {
     const isInElectron = typeof window.electronAPI?.openExternal === 'function';
+    let targetPath = state.redirectPath || `/${state.workspaceId}`;
+    if (!targetPath.startsWith('/') || targetPath.startsWith('//')) {
+      targetPath = `/${state.workspaceId}`;
+    }
+
     if (isInElectron) {
       // In Electron: JWT cookies are already set in session — go directly to the workspace.
       // authMachine will run validateSession (user_id is in localStorage) and land authenticated.
-      window.location.href = `/${state.workspaceId}`;
+      window.location.href = targetPath;
     } else {
       // In browser: open Electron app via /launch deep-link so the user lands in the desktop app.
-      window.location.href = `/launch?path=${state.workspaceId}`;
+      const launchPath = state.redirectPath
+        ? state.redirectPath.replace(/^\//, '')
+        : state.workspaceId;
+      window.location.href = `/launch?path=${encodeURIComponent(launchPath)}`;
     }
     return <></>;
   }
@@ -291,19 +313,64 @@ export const AcceptInvitation = (): ReactElement => {
   // state.status === 'ready'
   const { invitation } = state;
 
+  // Entity-specific icon
+  const getEntityIcon = (): ReactElement => {
+    switch (invitation.entityType) {
+      case 'CANVAS':
+        return <FileText className='w-8 h-8 text-primary' />;
+      case 'CHANNEL':
+        return <Hash className='w-8 h-8 text-primary' />;
+      case 'PROJECT':
+        return <Folder className='w-8 h-8 text-primary' />;
+      default:
+        return <Users className='w-8 h-8 text-primary' />;
+    }
+  };
+
+  // Entity-specific invite message
+  const getInviteMessage = (): ReactElement => {
+    if (invitation.entityType === 'CANVAS' && invitation.entityTitle) {
+      return (
+        <>
+          You&apos;ve been invited to collaborate on{' '}
+          <strong className='text-foreground'>&quot;{invitation.entityTitle}&quot;</strong>
+        </>
+      );
+    }
+    if (invitation.entityType === 'CHANNEL' && invitation.entityTitle) {
+      return (
+        <>
+          You&apos;ve been invited to join{' '}
+          <strong className='text-foreground'>#{invitation.entityTitle}</strong>
+        </>
+      );
+    }
+    if (invitation.entityType === 'PROJECT' && invitation.entityTitle) {
+      return (
+        <>
+          You&apos;ve been invited to join{' '}
+          <strong className='text-foreground'>{invitation.entityTitle}</strong>
+        </>
+      );
+    }
+    return (
+      <>
+        You&apos;ve been invited to join{' '}
+        <strong className='text-foreground'>{invitation.workspaceName || 'a workspace'}</strong>
+      </>
+    );
+  };
+
   return (
     <div className='min-h-screen bg-background flex items-center justify-center p-4'>
       <div className='max-w-md w-full bg-card border border-border rounded-lg p-8 text-center'>
         <div className='w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-4'>
-          <MailPlus className='w-8 h-8 text-primary' />
+          {getEntityIcon()}
         </div>
 
         <h1 className='text-2xl font-semibold text-foreground mb-2'>You&apos;re Invited!</h1>
 
-        <p className='text-muted-foreground mb-6'>
-          You&apos;ve been invited to join{' '}
-          <strong className='text-foreground'>{invitation.workspaceName || 'a workspace'}</strong>
-        </p>
+        <p className='text-muted-foreground mb-6'>{getInviteMessage()}</p>
 
         <div className='bg-muted rounded-lg p-4 mb-6 text-left'>
           <div className='flex items-center gap-3 mb-2'>
@@ -317,6 +384,15 @@ export const AcceptInvitation = (): ReactElement => {
             Role:{' '}
             <span className='text-foreground capitalize'>{invitation.role?.toLowerCase()}</span>
           </p>
+          {invitation.entityType && (
+            <p className='text-sm text-muted-foreground'>
+              Access:{' '}
+              <span className='text-foreground capitalize'>
+                {invitation.entityType.toLowerCase()}
+                {invitation.entityTitle ? `: ${invitation.entityTitle}` : ''}
+              </span>
+            </p>
+          )}
         </div>
 
         <Button onClick={() => void handleAccept()} className='w-full'>

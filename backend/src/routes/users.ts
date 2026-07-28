@@ -10,6 +10,8 @@ const channelController = new ChannelController();
 // User search and listing routes (no ACL required, just auth)
 // Note: Specific routes must come before parameterized routes
 router.get('/search', userManagementController.searchUsers); // Search users
+router.get('/guests', userManagementController.getGuestUsers); // List workspace guest access grants
+router.delete('/guests/:userId/access/:entityType/:entityId', userManagementController.revokeGuestAccess); // Revoke one guest entity grant
 router.get('/me/affinity', affinityController.getAffinity); // Get personalization weights
 router.get('/me/dms', channelController.getUserDMs); // Get all user's DM channels
 router.post('/me/picture', uploadConfig.single('picture'), userManagementController.uploadProfilePicture); // Upload profile picture

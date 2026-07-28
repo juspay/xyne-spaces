@@ -115,22 +115,22 @@ export class YSweetController {
       const { docId, channelId, projectId, folderId, title } = req.body;
 
       if (!docId || typeof docId !== 'string') {
-        res.status(400).json({ 
+        res.status(400).json({
           error: 'Invalid request',
-          message: 'docId is required and must be a string' 
+          message: 'docId is required and must be a string'
         });
         return;
       }
 
       const userId = req.user?.id;
       if (!userId) {
-        res.status(403).json({ 
+        res.status(403).json({
           error: 'Unauthorized',
-          message: 'User authentication required' 
+          message: 'User authentication required'
         });
         return;
       }
-      
+
       let authResult;
       let canEdit = false;
 

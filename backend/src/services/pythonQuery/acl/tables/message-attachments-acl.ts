@@ -1,5 +1,6 @@
 import { Prisma, PrismaClient } from '@prisma/client'
 import { BaseQueryACL, ACLContext } from '../base-acl'
+import { getAccessibleConversationIds, isGuestContext } from './channel-access-helper'
 
 export class MessageAttachmentsACL extends BaseQueryACL<Prisma.MessageAttachmentWhereInput> {
   constructor(ctx: ACLContext, prisma: PrismaClient) {
@@ -7,7 +8,15 @@ export class MessageAttachmentsACL extends BaseQueryACL<Prisma.MessageAttachment
   }
 
   async getWhereClause(): Promise<Prisma.MessageAttachmentWhereInput> {
-    // Optimized: message_attachments has direct workspaceId (0 hops instead of 2)
+    if (isGuestContext(this.ctx)) {
+      const conversationIds = await getAccessibleConversationIds(this.prisma, this.ctx.userId, this.ctx)
+
+      return {
+        workspaceId: this.ctx.workspaceId ?? '',
+        conversationId: { in: conversationIds },
+      }
+    }
+
     return {
       workspaceId: this.ctx.workspaceId ?? '',
     }

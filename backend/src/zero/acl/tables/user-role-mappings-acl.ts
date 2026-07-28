@@ -5,6 +5,7 @@ import { TableSchema, MutationACLError } from '../core/types';
 import { assertCanManageRoles } from '../core/admin-access';
 import { zql } from '../../queries';
 import { getRoleInWorkspaceOrThrow } from './roles-acl';
+import { assertGuestWriteBlocked } from '../core/guest-access';
 
 export class UserRoleMappingsACL extends BaseACL<'user_role_mappings'> {
   private async verifyWorkspace(
@@ -23,6 +24,7 @@ export class UserRoleMappingsACL extends BaseACL<'user_role_mappings'> {
     tx: Transaction<Schema>,
   ): Promise<void> {
     await getRoleInWorkspaceOrThrow(args.roleId, this.ctx.workspaceId, tx);
+    assertGuestWriteBlocked(this.ctx, 'user_role_mappings', 'insert', 'User role mapping');
     await assertCanManageRoles(this.ctx, tx);
   }
 
@@ -30,6 +32,7 @@ export class UserRoleMappingsACL extends BaseACL<'user_role_mappings'> {
     args: UpdateValue<TableSchema<'user_role_mappings'>>,
     tx: Transaction<Schema>,
   ): Promise<void> {
+    assertGuestWriteBlocked(this.ctx, 'user_role_mappings', 'update', 'User role mapping');
     await this.verifyWorkspace(args.id, tx);
     await assertCanManageRoles(this.ctx, tx);
   }
@@ -38,6 +41,7 @@ export class UserRoleMappingsACL extends BaseACL<'user_role_mappings'> {
     args: DeleteID<TableSchema<'user_role_mappings'>>,
     tx: Transaction<Schema>,
   ): Promise<void> {
+    assertGuestWriteBlocked(this.ctx, 'user_role_mappings', 'delete', 'User role mapping');
     await this.verifyWorkspace(args.id, tx);
     await assertCanManageRoles(this.ctx, tx);
   }

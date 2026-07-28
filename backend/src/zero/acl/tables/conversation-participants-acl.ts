@@ -3,6 +3,7 @@ import { Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, TableSchema } from '../core/types';
 import { zql } from '../../queries';
+import { hasChannelMutationAccess } from '../core/guest-access';
 
 export class ConversationParticipantsACL extends BaseACL<'conversation_participants'> {
 
@@ -26,12 +27,22 @@ export class ConversationParticipantsACL extends BaseACL<'conversation_participa
       throw new MutationACLError('Conversation participant insert failed: cannot join conversations in archived channel', 'conversation_participants')
     }
 
-    const isParticipant = await tx
-      .run(
+    if (this.ctx.role === 'GUEST') {
+      const hasGuestAccess = await hasChannelMutationAccess(this.ctx, tx, conversation.channelId, {
+        allowPublicForNonGuests: true,
+      });
+      if (hasGuestAccess) {
+        return;
+      }
+      throw new MutationACLError('Conversation participant insert failed: guest does not have access to this channel', 'conversation_participants')
+    }
+
+    const isParticipant = await tx.run(
       zql.channel_participants
-      .where('userId', this.ctx.userID)
-      .where('channelId', conversation.channelId)
-      .one());
+        .where('userId', this.ctx.userID)
+        .where('channelId', conversation.channelId)
+        .one(),
+    );
 
     if (!isParticipant && conversation.channel?.visibility !== 'PUBLIC') {
       throw new MutationACLError('Conversation participant insert failed: only channel participants can join conversations in private channels', 'conversation_participants')

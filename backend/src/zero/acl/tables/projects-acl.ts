@@ -7,6 +7,7 @@ import { Schema } from '@xyne/shared'
 import { BaseACL } from '../core/base-acl';
 import { zql } from '../../queries';
 import { hasProjectAdminAccess } from '../core/admin-access';
+import { assertGuestWriteBlocked } from '../core/guest-access';
 
 export class ProjectAcl extends BaseACL<'projects'> {
 
@@ -17,6 +18,7 @@ export class ProjectAcl extends BaseACL<'projects'> {
     }
 
     async canInsert(args: InsertValue<TableSchema<'projects'>>, tx: Transaction<Schema>): Promise<void> {
+        assertGuestWriteBlocked(this.ctx, 'projects', 'insert', 'Project');
         this.verifyWorkspace(args.workspaceId);
         // Only project admins can insert projects
         const hasAdminAccess = await hasProjectAdminAccess(this.ctx, tx);
@@ -26,6 +28,7 @@ export class ProjectAcl extends BaseACL<'projects'> {
     }
 
     async canUpdate(args: UpdateValue<TableSchema<'projects'>>, tx: Transaction<Schema>): Promise<void> {
+        assertGuestWriteBlocked(this.ctx, 'projects', 'update', 'Project');
         const project = await tx.run(zql.projects.where('id', args.id).one());
         if (!project) {
             throw new MutationACLError('Project update failed: project does not exist', 'projects');
@@ -47,6 +50,7 @@ export class ProjectAcl extends BaseACL<'projects'> {
     }
 
     async canDelete(args: DeleteID<TableSchema<'projects'>>, tx: Transaction<Schema>): Promise<void> {
+        assertGuestWriteBlocked(this.ctx, 'projects', 'delete', 'Project');
         const project = await tx.run(zql.projects.where('id', args.id).one());
         if (!project) {
             throw new MutationACLError('Project delete failed: project does not exist', 'projects');
@@ -68,6 +72,7 @@ export class ProjectAcl extends BaseACL<'projects'> {
     }
 
     async canUpsert(args: UpsertValue<TableSchema<'projects'>>, tx: Transaction<Schema>): Promise<void> {
+        assertGuestWriteBlocked(this.ctx, 'projects', 'upsert', 'Project');
         const project = await tx.run(zql.projects.where('id', args.id).one());
         if (!project) {
             throw new MutationACLError('Project upsert failed: project does not exist for update', 'projects');

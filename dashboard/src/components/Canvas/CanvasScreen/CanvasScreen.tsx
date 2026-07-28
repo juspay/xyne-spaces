@@ -161,6 +161,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
 
   const canvasWithParticipants = singleCanvas as CanvasWithParticipants | undefined;
   const canvasParticipants = canvasWithParticipants?.participants;
+
   const currentUserGroupIds = useCurrentUserGroupIds();
   const visibleChannels = useAllVisibleChannels();
   const currentUserChannelIds = useMemo(
@@ -269,6 +270,10 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
           role: CanvasRole;
         }[];
       };
+
+      if (selectedCanvasRef.current?.id === canvasData.id && !canvasData.participants) {
+        return;
+      }
 
       const userParticipant = canvasData.participants?.find(p => p.userId === user?.id);
       let accessLevel = userParticipant?.role;

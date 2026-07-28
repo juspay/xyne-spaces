@@ -6,6 +6,7 @@ import {
 import { ChannelVisibility, Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { zql } from '../../queries';
+import { hasGuestTicketAccess } from '../core/guest-access';
 
 export class TicketReferenceMappingsACL extends BaseACL<'ticket_reference_mappings'> {
 
@@ -19,6 +20,13 @@ export class TicketReferenceMappingsACL extends BaseACL<'ticket_reference_mappin
 
   async canInsert(args: InsertValue<TableSchema<'ticket_reference_mappings'>>, tx: Transaction<Schema>): Promise<void> {
     await this.verifyTicketInWorkspace(args.sourceTicketId, tx);
+    if (this.ctx.role === 'GUEST') {
+      const guestTicket = await tx.run(zql.tickets.where('id', args.sourceTicketId).one());
+      if (!guestTicket || !(await hasGuestTicketAccess(this.ctx, tx, guestTicket))) {
+        throw new MutationACLError('Ticket reference insert failed: guest does not have access to the parent ticket', 'ticket_reference_mappings');
+      }
+      return;
+    }
     const ticket = await tx.run(zql.tickets
       .where('id', args.sourceTicketId)
       .whereExists('conversation', (conversation) => {
@@ -58,6 +66,16 @@ export class TicketReferenceMappingsACL extends BaseACL<'ticket_reference_mappin
     const mapping = await tx.run(zql.ticket_reference_mappings.where('id', args.id).one());
     if (mapping) {
       await this.verifyTicketInWorkspace(mapping.sourceTicketId, tx);
+    }
+    if (this.ctx.role === 'GUEST') {
+      if (!mapping) {
+        throw new MutationACLError('Ticket reference update failed: mapping does not exist', 'ticket_reference_mappings');
+      }
+      const guestTicket = await tx.run(zql.tickets.where('id', mapping.sourceTicketId).one());
+      if (!guestTicket || !(await hasGuestTicketAccess(this.ctx, tx, guestTicket))) {
+        throw new MutationACLError('Ticket reference update failed: guest does not have access to the parent ticket', 'ticket_reference_mappings');
+      }
+      return;
     }
     const hasAccess = await tx.run(zql.ticket_reference_mappings
       .where('id', args.id)
@@ -100,6 +118,16 @@ export class TicketReferenceMappingsACL extends BaseACL<'ticket_reference_mappin
     const mapping = await tx.run(zql.ticket_reference_mappings.where('id', args.id).one());
     if (mapping) {
       await this.verifyTicketInWorkspace(mapping.sourceTicketId, tx);
+    }
+    if (this.ctx.role === 'GUEST') {
+      if (!mapping) {
+        throw new MutationACLError('Ticket reference delete failed: mapping does not exist', 'ticket_reference_mappings');
+      }
+      const guestTicket = await tx.run(zql.tickets.where('id', mapping.sourceTicketId).one());
+      if (!guestTicket || !(await hasGuestTicketAccess(this.ctx, tx, guestTicket))) {
+        throw new MutationACLError('Ticket reference delete failed: guest does not have access to the parent ticket', 'ticket_reference_mappings');
+      }
+      return;
     }
     const hasAccess = await tx.run(zql.ticket_reference_mappings
       .where('id', args.id)

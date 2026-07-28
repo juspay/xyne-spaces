@@ -3,13 +3,27 @@ import { ChannelRole, Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, TableSchema } from '../core/types';
 import { zql } from '../../queries';
+import { hasGuestChannelAccess } from '../core/guest-access';
 
 export class ChannelStatsACL extends BaseACL<'channel_stats'> {
-  async canInsert(_args: InsertValue<TableSchema<'channel_stats'>>, _tx: Transaction<Schema>): Promise<void> {
-      // Any user can create channel stats
+  async canInsert(args: InsertValue<TableSchema<'channel_stats'>>, tx: Transaction<Schema>): Promise<void> {
+      if (this.ctx.role === 'GUEST') {
+        const hasGuestAccess = await hasGuestChannelAccess(this.ctx, tx, args.channelId);
+        if (!hasGuestAccess) {
+          throw new MutationACLError('Channel stats insert failed: guest does not have access to this channel', 'channel_stats');
+        }
+      }
   }
 
   async canUpdate(args: UpdateValue<TableSchema<'channel_stats'>>, tx: Transaction<Schema>): Promise<void> {
+    if (this.ctx.role === 'GUEST') {
+      const hasGuestAccess = await hasGuestChannelAccess(this.ctx, tx, args.channelId);
+      if (hasGuestAccess) {
+        return;
+      }
+      throw new MutationACLError('Channel stats update failed: guest does not have access to this channel', 'channel_stats');
+    }
+
     const currentUserParticipantData = await tx.run(zql.channel_participants
       .where('channelId', args.channelId)
       .where('userId', this.ctx.userID)
@@ -21,6 +35,14 @@ export class ChannelStatsACL extends BaseACL<'channel_stats'> {
   }
 
   async canDelete(args: DeleteID<TableSchema<'channel_stats'>>, tx: Transaction<Schema>): Promise<void> {
+    if (this.ctx.role === 'GUEST') {
+      const hasGuestAccess = await hasGuestChannelAccess(this.ctx, tx, args.channelId);
+      if (hasGuestAccess) {
+        return;
+      }
+      throw new MutationACLError('Channel stats delete failed: guest does not have access to this channel', 'channel_stats');
+    }
+
     const currentUserParticipantData = await tx.run(zql.channel_participants
       .where('channelId', args.channelId)
       .where('userId', this.ctx.userID)

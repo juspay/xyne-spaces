@@ -6,10 +6,12 @@ import {
 import { Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { zql } from '../../queries';
+import { assertGuestWriteBlocked } from '../core/guest-access';
 
 export class StagePRStatusMappingsACL extends BaseACL<'stage_pr_status_mappings'> {
 
   async canInsert(args: InsertValue<TableSchema<'stage_pr_status_mappings'>>, tx: Transaction<Schema>): Promise<void> {
+    assertGuestWriteBlocked(this.ctx, 'stage_pr_status_mappings', 'insert', 'Stage PR status mapping');
     // Get the stage with its board to check workspace and creator
     const stageWithBoard = await tx.run(zql.stages.where('id', args.stageId).related('board').one());
 
@@ -37,6 +39,7 @@ export class StagePRStatusMappingsACL extends BaseACL<'stage_pr_status_mappings'
   }
 
   async canUpdate(args: UpdateValue<TableSchema<'stage_pr_status_mappings'>>, tx: Transaction<Schema>): Promise<void> {
+    assertGuestWriteBlocked(this.ctx, 'stage_pr_status_mappings', 'update', 'Stage PR status mapping');
     // Get the mapping with its stage and board to check workspace and creator
     const mappingWithStageAndBoard = await tx.run(
       zql.stage_pr_status_mappings
@@ -76,6 +79,7 @@ export class StagePRStatusMappingsACL extends BaseACL<'stage_pr_status_mappings'
   }
 
   async canDelete(args: DeleteID<TableSchema<'stage_pr_status_mappings'>>, tx: Transaction<Schema>): Promise<void> {
+    assertGuestWriteBlocked(this.ctx, 'stage_pr_status_mappings', 'delete', 'Stage PR status mapping');
     // Get the mapping with its stage and board to check workspace and creator
     const mappingWithStageAndBoard = await tx.run(
       zql.stage_pr_status_mappings

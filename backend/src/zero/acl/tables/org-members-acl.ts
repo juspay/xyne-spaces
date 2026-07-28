@@ -3,6 +3,7 @@ import { OrgRole, Schema, WorkspaceRole } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, TableSchema } from '../core/types';
 import { zql } from '../../queries';
+import { assertGuestWriteBlocked } from '../core/guest-access';
 
 /**
  * Org Members ACL
@@ -47,6 +48,7 @@ export class OrgMembersACL extends BaseACL<'org_members'> {
       throw new MutationACLError('Organization member insert failed: community members cannot add organization members', 'org_members');
     }
 
+    assertGuestWriteBlocked(this.ctx, 'org_members', 'insert', 'Organization member');
     // Allow organization's createdBy user to add themselves as OWNER (for org creation flow)
     if (args.email) {
       const currentUser = await tx.run(zql.users.where('id', this.ctx.userID).one());
@@ -76,6 +78,7 @@ export class OrgMembersACL extends BaseACL<'org_members'> {
     if (this.ctx.role === WorkspaceRole.COMMUNITY_MEMBER) {
       throw new MutationACLError('Organization member update failed: community members cannot modify member roles', 'org_members');
     }
+    assertGuestWriteBlocked(this.ctx, 'org_members', 'update', 'Organization member');
     const targetMember = await tx.run(zql.org_members.where('memberId', args.memberId).one());
     if (!targetMember) {
       throw new MutationACLError('Organization member update failed: the member does not exist', 'org_members');
@@ -126,6 +129,7 @@ export class OrgMembersACL extends BaseACL<'org_members'> {
     if (this.ctx.role === WorkspaceRole.COMMUNITY_MEMBER) {
       throw new MutationACLError('Organization member delete failed: community members cannot remove members', 'org_members');
     }
+    assertGuestWriteBlocked(this.ctx, 'org_members', 'delete', 'Organization member');
     const memberData = await tx.run(zql.org_members.where('memberId', args.memberId).one());
     if (!memberData) {
       throw new MutationACLError('Organization member delete failed: member not found', 'org_members');
