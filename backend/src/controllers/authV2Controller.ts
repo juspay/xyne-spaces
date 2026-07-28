@@ -1752,6 +1752,13 @@ export class AuthV2Controller {
         res.status(404).json({ error: 'User not found' });
         return;
       }
+      if (fullUser.role === 'GUEST') {
+        res.status(403).json({
+          error: 'Forbidden',
+          message: 'Guest users cannot create workspaces',
+        });
+        return;
+      }
 
       const { organization, workspace, workspaceUser } = await this.userService.createWorkspaceInOrg(
         { userId: fullUser.id, providerUserId: fullUser.providerUserId, email: fullUser.email, name: fullUser.name, picture: fullUser.picture },

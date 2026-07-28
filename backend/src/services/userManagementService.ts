@@ -1,7 +1,8 @@
 import { repositories } from '../database/repositories/index';
 import { aclService } from './aclService';
 import { getStorageService } from './storage';
-import { AccessType, PrismaClient } from '@prisma/client';
+import { AccessType, PrismaClient, WorkspaceRole } from '@prisma/client';
+import { GuestEntity } from '@xyne/shared';
 import { logger } from '../utils/logger';
 import { DatabaseClient } from '@/database/client';
 import { config } from '@/config/env';
@@ -376,6 +377,237 @@ export class UserManagementService {
 
   async searchUsers(searchTerm: string, options?: PaginationOptions): Promise<PaginatedResult<UserWithMappings> | UserWithMappings[]> {
     return repositories.users.findBySearch(searchTerm, options);
+  }
+
+  async getWorkspaceGuestsWithAccess(workspaceId: string): Promise<Array<{
+    id: string;
+    name: string;
+    email: string;
+    picture: string | null;
+    status: string;
+    createdAt: Date;
+    access: Array<{
+      id: string;
+      accessibleEntityId: string;
+      accessibleEntityType: string;
+      entityName: string;
+      createdAt: Date;
+      invitedBy: string;
+      invitedByName: string | null;
+    }>;
+  }>> {
+    const mappings = await this.prisma.guestAccess.findMany({
+      where: { workspaceId },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (mappings.length === 0) {
+      return [];
+    }
+
+    const userIds = [...new Set(mappings.map(mapping => mapping.userId))];
+    const inviterIds = [...new Set(mappings.map(mapping => mapping.invitedBy))];
+    const users = await this.prisma.user.findMany({
+      where: {
+        workspaceId,
+        id: { in: [...new Set([...userIds, ...inviterIds])] },
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        picture: true,
+        status: true,
+        role: true,
+        createdAt: true,
+      },
+    });
+
+    const guestUsers = users.filter(user => user.role === WorkspaceRole.GUEST);
+    const guestUserMap = new Map(guestUsers.map(user => [user.id, user]));
+    const userMap = new Map(users.map(user => [user.id, user]));
+
+    const projectIds = mappings
+      .filter(mapping => mapping.accessibleEntityType === GuestEntity.PROJECT)
+      .map(mapping => mapping.accessibleEntityId);
+    const channelIds = mappings
+      .filter(mapping => mapping.accessibleEntityType === GuestEntity.CHANNEL)
+      .map(mapping => mapping.accessibleEntityId);
+    const canvasIds = mappings
+      .filter(mapping => mapping.accessibleEntityType === GuestEntity.CANVAS)
+      .map(mapping => mapping.accessibleEntityId);
+
+    const [projects, channels, canvases] = await Promise.all([
+      projectIds.length
+        ? this.prisma.project.findMany({
+            where: { workspaceId, id: { in: [...new Set(projectIds)] } },
+            select: { id: true, name: true },
+          })
+        : [],
+      channelIds.length
+        ? this.prisma.channel.findMany({
+            where: { workspaceId, id: { in: [...new Set(channelIds)] } },
+            select: { id: true, name: true },
+          })
+        : [],
+      canvasIds.length
+        ? this.prisma.canvas.findMany({
+            where: { id: { in: [...new Set(canvasIds)] } },
+            select: { id: true, title: true },
+          })
+        : [],
+    ]);
+
+    const projectNameById = new Map(projects.map(project => [project.id, project.name]));
+    const channelNameById = new Map(channels.map(channel => [channel.id, channel.name]));
+    const canvasTitleById = new Map(canvases.map(canvas => [canvas.id, canvas.title]));
+    const accessByUserId = new Map<string, Array<{
+      id: string;
+      accessibleEntityId: string;
+      accessibleEntityType: string;
+      entityName: string;
+      createdAt: Date;
+      invitedBy: string;
+      invitedByName: string | null;
+    }>>();
+
+    for (const mapping of mappings) {
+      if (!guestUserMap.has(mapping.userId)) continue;
+      const entityName =
+        mapping.accessibleEntityType === GuestEntity.PROJECT
+          ? projectNameById.get(mapping.accessibleEntityId)
+          : mapping.accessibleEntityType === GuestEntity.CHANNEL
+            ? channelNameById.get(mapping.accessibleEntityId)
+            : canvasTitleById.get(mapping.accessibleEntityId);
+      const access = accessByUserId.get(mapping.userId) ?? [];
+      access.push({
+        id: mapping.id,
+        accessibleEntityId: mapping.accessibleEntityId,
+        accessibleEntityType: mapping.accessibleEntityType,
+        entityName: entityName ?? 'Unknown entity',
+        createdAt: mapping.createdAt,
+        invitedBy: mapping.invitedBy,
+        invitedByName: userMap.get(mapping.invitedBy)?.name ?? null,
+      });
+      accessByUserId.set(mapping.userId, access);
+    }
+
+    return guestUsers
+      .map(user => ({
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        picture: user.picture,
+        status: user.status,
+        createdAt: user.createdAt,
+        access: accessByUserId.get(user.id) ?? [],
+      }))
+      .filter(user => user.access.length > 0)
+      .sort((left, right) => left.email.localeCompare(right.email));
+  }
+
+  async revokeGuestEntityAccess(params: {
+    workspaceId: string;
+    userId: string;
+    accessibleEntityType: GuestEntity;
+    accessibleEntityId: string;
+  }): Promise<{ revoked: boolean }> {
+    const guestUser = await this.prisma.user.findFirst({
+      where: {
+        id: params.userId,
+        workspaceId: params.workspaceId,
+        role: WorkspaceRole.GUEST,
+      },
+      select: { id: true },
+    });
+
+    if (!guestUser) {
+      return { revoked: false };
+    }
+
+    return this.prisma.$transaction(async tx => {
+      const deleted = await tx.guestAccess.deleteMany({
+        where: {
+          workspaceId: params.workspaceId,
+          userId: params.userId,
+          accessibleEntityType: params.accessibleEntityType,
+          accessibleEntityId: params.accessibleEntityId,
+        },
+      });
+
+      if (deleted.count === 0) {
+        return { revoked: false };
+      }
+
+      if (params.accessibleEntityType === GuestEntity.CHANNEL) {
+        const channel = await tx.channel.findFirst({
+          where: { id: params.accessibleEntityId, workspaceId: params.workspaceId },
+          select: { id: true, projectId: true },
+        });
+        const stillHasProjectAccess = channel?.projectId
+          ? await tx.guestAccess.findFirst({
+              where: {
+                workspaceId: params.workspaceId,
+                userId: params.userId,
+                accessibleEntityType: GuestEntity.PROJECT,
+                accessibleEntityId: channel.projectId,
+              },
+              select: { id: true },
+            })
+          : null;
+
+        if (!stillHasProjectAccess) {
+          await tx.channelParticipant.deleteMany({
+            where: { channelId: params.accessibleEntityId, userId: params.userId },
+          });
+          await tx.channelUserStatus.deleteMany({
+            where: { channelId: params.accessibleEntityId, userId: params.userId },
+          });
+        }
+      }
+
+      if (params.accessibleEntityType === GuestEntity.PROJECT) {
+        const projectChannels = await tx.channel.findMany({
+          where: { workspaceId: params.workspaceId, projectId: params.accessibleEntityId },
+          select: { id: true },
+        });
+        const channelIds = projectChannels.map(channel => channel.id);
+        if (channelIds.length > 0) {
+          const directChannelAccess = await tx.guestAccess.findMany({
+            where: {
+              workspaceId: params.workspaceId,
+              userId: params.userId,
+              accessibleEntityType: GuestEntity.CHANNEL,
+              accessibleEntityId: { in: channelIds },
+            },
+            select: { accessibleEntityId: true },
+          });
+          const directlyAccessibleChannelIds = new Set(
+            directChannelAccess.map(mapping => mapping.accessibleEntityId),
+          );
+          const cleanupChannelIds = channelIds.filter(
+            channelId => !directlyAccessibleChannelIds.has(channelId),
+          );
+
+          if (cleanupChannelIds.length > 0) {
+            await tx.channelParticipant.deleteMany({
+              where: { channelId: { in: cleanupChannelIds }, userId: params.userId },
+            });
+            await tx.channelUserStatus.deleteMany({
+              where: { channelId: { in: cleanupChannelIds }, userId: params.userId },
+            });
+          }
+        }
+      }
+
+      if (params.accessibleEntityType === GuestEntity.CANVAS) {
+        await tx.canvasParticipant.deleteMany({
+          where: { canvasId: params.accessibleEntityId, userId: params.userId },
+        });
+      }
+
+      return { revoked: true };
+    });
   }
 
   // Resource Operations

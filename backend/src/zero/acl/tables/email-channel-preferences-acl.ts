@@ -3,6 +3,7 @@ import { ChannelRole, Schema, isDeskChannelType } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, TableSchema } from '../core/types';
 import { zql } from '../../queries';
+import { hasGuestChannelAccess } from '../core/guest-access';
 
 export class EmailChannelPreferencesACL extends BaseACL<'email_channel_preferences'> {
 
@@ -18,6 +19,13 @@ export class EmailChannelPreferencesACL extends BaseACL<'email_channel_preferenc
 
     if (channel.isArchived) {
       throw new MutationACLError('Email channel preference insert failed: cannot modify preferences on an archived channel', 'email_channel_preferences');
+    }
+
+    if (this.ctx.role === 'GUEST') {
+      const hasGuestAccess = await hasGuestChannelAccess(this.ctx, tx, args.channelId);
+      if (!hasGuestAccess) {
+        throw new MutationACLError('Email channel preference insert failed: guest does not have access to this channel', 'email_channel_preferences');
+      }
     }
 
     await this.verifyChannelParticipant(args.channelId, tx, 'insert');
@@ -48,6 +56,13 @@ export class EmailChannelPreferencesACL extends BaseACL<'email_channel_preferenc
 
     if (channel.isArchived) {
       throw new MutationACLError('Email channel preference update failed: cannot modify preferences on an archived channel', 'email_channel_preferences');
+    }
+
+    if (this.ctx.role === 'GUEST') {
+      const hasGuestAccess = await hasGuestChannelAccess(this.ctx, tx, preference.channelId);
+      if (!hasGuestAccess) {
+        throw new MutationACLError('Email channel preference update failed: guest does not have access to this channel', 'email_channel_preferences');
+      }
     }
 
     await this.verifyChannelParticipant(preference.channelId, tx, 'update');

@@ -8,6 +8,9 @@ import {
   ChevronDown,
   Mail,
   AlertCircle,
+  Hash,
+  Folder,
+  FileText,
 } from 'lucide-react';
 import { Button } from '../../components/ui/Button/Button';
 import Input from '../../components/ui/Input/Input';
@@ -19,7 +22,9 @@ import {
 } from '../../components/ui/dropdown-menu';
 import { useSelf } from '../../hooks/useUsers';
 import { useZero } from '../../hooks/useZero';
-import { Membertype, Invitation } from '@xyne/shared';
+import { useAllChannels } from '../../hooks/useChannels';
+import { WorkspaceRole, Invitation, ChannelScopeType } from '@xyne/shared';
+import { EntitySelector } from '../../components/ui/EntitySelector/EntitySelector';
 import { toast } from 'sonner';
 import { cn } from '../../utils/classNames';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
@@ -49,11 +54,55 @@ export const InvitationsTab = ({ isActive = false }: InvitationsTabProps): React
   const self = useSelf();
   const z = useZero();
   const [email, setEmail] = useState('');
-  const [role, setRole] = useState<Membertype>(Membertype.MEMBER);
+  const [role, setRole] = useState<WorkspaceRole>(WorkspaceRole.MEMBER);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const [entityType, setEntityType] = useState<string>('');
+  const [entityId, setEntityId] = useState('');
+  const [channelId, setChannelId] = useState('');
   const { isMobile } = usePlatform();
   const emailInputRef = useRef<HTMLInputElement>(null);
+
+  const allChannels = useAllChannels();
+  const [projects] = useCachedQuery(queries.getAllProjectsList());
+
+  const [openCanvases] = useCachedQuery(queries.hierarchyCanvases({ scope: 'personal_root' }), {
+    enabled: entityType === 'CANVAS',
+  });
+
+  const entityOptions = useMemo(() => {
+    switch (entityType) {
+      case 'CHANNEL':
+        return allChannels
+          .filter(
+            c =>
+              c.scopeType !== ChannelScopeType.DM &&
+              c.scopeType !== ChannelScopeType.GROUP_DM &&
+              !c.isArchived,
+          )
+          .map(c => ({
+            value: c.id,
+            label: c.name,
+            icon: <Hash className='w-4 h-4 text-muted-foreground' />,
+          }));
+      case 'PROJECT':
+        return projects.map(p => ({
+          value: p.id,
+          label: p.name,
+          icon: <Folder className='w-4 h-4 text-muted-foreground' />,
+        }));
+      case 'CANVAS':
+        return (
+          (openCanvases as unknown as Array<{ id: string; title: string }> | undefined) ?? []
+        ).map(c => ({
+          value: c.id,
+          label: c.title,
+          icon: <FileText className='w-4 h-4 text-muted-foreground' />,
+        }));
+      default:
+        return [];
+    }
+  }, [entityType, allChannels, projects, openCanvases]);
 
   const [allInvitations] = useCachedQuery(queries.getAllInvitations({}));
 
@@ -71,6 +120,20 @@ export const InvitationsTab = ({ isActive = false }: InvitationsTabProps): React
       toast.error('No workspace selected');
       return false;
     }
+    if (role === WorkspaceRole.GUEST) {
+      if (!entityType) {
+        toast.error('Please select an entity type');
+        return false;
+      }
+      if (!entityId.trim()) {
+        toast.error('Please select an entity');
+        return false;
+      }
+      if (entityType === 'PROJECT' && !channelId.trim()) {
+        toast.error('Please select a channel for the guest');
+        return false;
+      }
+    }
     return true;
   };
 
@@ -84,15 +147,28 @@ export const InvitationsTab = ({ isActive = false }: InvitationsTabProps): React
 
     setIsSubmitting(true);
     try {
-      await apiInstance.post('/invitations', {
+      const payload: Record<string, unknown> = {
         email: email.trim(),
         role,
         workspaceId: self!.workspaceId,
-      });
+      };
+
+      if (role === WorkspaceRole.GUEST) {
+        payload['entityId'] = entityId.trim();
+        payload['entityType'] = entityType;
+        if (entityType === 'PROJECT') {
+          payload['channelId'] = channelId.trim();
+        }
+      }
+
+      await apiInstance.post('/invitations', payload);
 
       toast.success(`Invitation sent to ${email}`);
       setEmail('');
-      setRole(Membertype.MEMBER);
+      setRole(WorkspaceRole.MEMBER);
+      setEntityType('');
+      setEntityId('');
+      setChannelId('');
       setShowConfirmDialog(false);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to send invitation';
@@ -131,7 +207,7 @@ export const InvitationsTab = ({ isActive = false }: InvitationsTabProps): React
     return true;
   };
 
-  useEffect(() => {
+  useEffect((): (() => void) | void => {
     if (!isActive || isMobile) return;
     const rafId = requestAnimationFrame(() => {
       emailInputRef.current?.focus();
@@ -159,58 +235,136 @@ export const InvitationsTab = ({ isActive = false }: InvitationsTabProps): React
           <h3 className='text-sm font-medium text-foreground'>Send New Invitation</h3>
         </div>
 
-        <div className='flex gap-3 flex-wrap'>
-          <Input
-            ref={emailInputRef}
-            type='email'
-            placeholder='Enter email address...'
-            value={email}
-            onChange={e => setEmail(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === 'Enter' && !isSubmitting) {
-                void handleSendInvitation();
-              }
-            }}
-            className='flex-1 min-w-[200px]'
-          />
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant='outline'
-                size='default'
-                className='gap-2 min-w-[100px] justify-between'
+        <div className='space-y-3'>
+          <div className='flex gap-3 flex-wrap'>
+            <Input
+              ref={emailInputRef}
+              type='email'
+              placeholder='Enter email address...'
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && !isSubmitting) {
+                  void handleSendInvitation();
+                }
+              }}
+              className='flex-1 min-w-[200px]'
+            />
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant='outline'
+                  size='default'
+                  className='gap-2 min-w-[100px] justify-between'
+                >
+                  <span className='capitalize'>{role.toLowerCase()}</span>
+                  <ChevronDown className='w-4 h-4' />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align='start'>
+                <DropdownMenuItem
+                  onClick={() => {
+                    setRole(WorkspaceRole.ADMIN);
+                    setEntityType('');
+                    setEntityId('');
+                    setChannelId('');
+                  }}
+                  className={cn(role === WorkspaceRole.ADMIN && 'bg-accent')}
+                >
+                  Admin
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => {
+                    setRole(WorkspaceRole.MEMBER);
+                    setEntityType('');
+                    setEntityId('');
+                    setChannelId('');
+                  }}
+                  className={cn(role === WorkspaceRole.MEMBER && 'bg-accent')}
+                >
+                  Member
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => setRole(WorkspaceRole.GUEST)}
+                  className={cn(role === WorkspaceRole.GUEST && 'bg-accent')}
+                >
+                  Guest
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <Button
+              onClick={openConfirmDialog}
+              disabled={isSubmitting || !email.trim()}
+              className='gap-2'
+            >
+              {isSubmitting ? (
+                <Loader2 className='w-4 h-4 animate-spin' />
+              ) : (
+                <Send className='w-4 h-4' />
+              )}
+              {isSubmitting ? 'Sending...' : 'Send'}
+            </Button>
+          </div>
+
+          {role === WorkspaceRole.GUEST && (
+            <div className='flex gap-3 flex-wrap'>
+              <select
+                value={entityType}
+                onChange={e => {
+                  setEntityType(e.target.value);
+                  setEntityId('');
+                  setChannelId('');
+                }}
+                className='px-3 py-2 border border-border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary min-w-[140px]'
+                data-track-category='WorkspaceManagement'
+                data-track-name='SelectGuestInvitationEntityType'
               >
-                <span className='capitalize'>{role.toLowerCase()}</span>
-                <ChevronDown className='w-4 h-4' />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align='start'>
-              <DropdownMenuItem
-                onClick={() => setRole(Membertype.ADMIN)}
-                className={cn(role === Membertype.ADMIN && 'bg-accent')}
-              >
-                Admin
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => setRole(Membertype.MEMBER)}
-                className={cn(role === Membertype.MEMBER && 'bg-accent')}
-              >
-                Member
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <Button
-            onClick={openConfirmDialog}
-            disabled={isSubmitting || !email.trim()}
-            className='gap-2'
-          >
-            {isSubmitting ? (
-              <Loader2 className='w-4 h-4 animate-spin' />
-            ) : (
-              <Send className='w-4 h-4' />
-            )}
-            {isSubmitting ? 'Sending...' : 'Send'}
-          </Button>
+                <option value=''>Select entity type...</option>
+                <option value='CHANNEL'>Channel</option>
+                <option value='CANVAS'>Canvas</option>
+                <option value='PROJECT'>Project</option>
+              </select>
+              {entityType && (
+                <div className='flex-1 min-w-[200px]'>
+                  <EntitySelector
+                    options={entityOptions}
+                    selectedValue={entityId || null}
+                    onSelect={value => {
+                      setEntityId(value ?? '');
+                      setChannelId('');
+                    }}
+                    placeholder={`Select ${entityType.toLowerCase()}...`}
+                    searchPlaceholder={`Search ${entityType.toLowerCase()}s...`}
+                    width='100%'
+                  />
+                </div>
+              )}
+              {entityType === 'PROJECT' && entityId && (
+                <div className='flex-1 min-w-[200px]'>
+                  <EntitySelector
+                    options={allChannels
+                      .filter(
+                        c =>
+                          c.projectId === entityId &&
+                          c.scopeType !== ChannelScopeType.DM &&
+                          c.scopeType !== ChannelScopeType.GROUP_DM &&
+                          !c.isArchived,
+                      )
+                      .map(c => ({
+                        value: c.id,
+                        label: c.name,
+                        icon: <Hash className='w-4 h-4 text-muted-foreground' />,
+                      }))}
+                    selectedValue={channelId || null}
+                    onSelect={value => setChannelId(value ?? '')}
+                    placeholder='Select channel...'
+                    searchPlaceholder='Search channels...'
+                    width='100%'
+                  />
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </Card>
 
@@ -251,11 +405,37 @@ export const InvitationsTab = ({ isActive = false }: InvitationsTabProps): React
                 </p>
               </div>
             </div>
+            {role === WorkspaceRole.GUEST && entityType && (
+              <>
+                <div className='border-t border-amber-200 dark:border-amber-800' />
+                <div className='flex items-center gap-3'>
+                  <MailPlus className='w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0' />
+                  <div>
+                    <p className='text-xs text-amber-700 dark:text-amber-300'>Access</p>
+                    <p className='text-sm font-semibold text-amber-900 dark:text-amber-100 capitalize'>
+                      {entityType.toLowerCase()}: {entityId}
+                    </p>
+                  </div>
+                </div>
+                {entityType === 'PROJECT' && channelId && (
+                  <div className='flex items-center gap-3'>
+                    <Hash className='w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0' />
+                    <div>
+                      <p className='text-xs text-amber-700 dark:text-amber-300'>Channel</p>
+                      <p className='text-sm font-semibold text-amber-900 dark:text-amber-100'>
+                        {allChannels.find(c => c.id === channelId)?.name ?? channelId}
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
           </div>
 
           <p className='text-xs text-amber-700 dark:text-amber-400'>
-            Once accepted, this user will become a workspace member with role{' '}
-            <span className='font-semibold capitalize'>{role.toLowerCase()}</span>.
+            {role === WorkspaceRole.GUEST
+              ? `Once accepted, this user will join as a guest with access limited to the selected ${entityType.toLowerCase()}.`
+              : `Once accepted, this user will become a workspace member with role ${role.toLowerCase()}.`}
           </p>
 
           <div className='flex gap-3 justify-end pt-2'>

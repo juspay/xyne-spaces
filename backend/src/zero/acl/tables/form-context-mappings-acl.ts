@@ -6,6 +6,7 @@ import {
 import { Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { zql } from '../../queries';
+import { assertGuestWriteBlocked } from '../core/guest-access';
 
 export class FormContextMappingsACL extends BaseACL<'forms_context_mapping'> {
 
@@ -21,10 +22,12 @@ export class FormContextMappingsACL extends BaseACL<'forms_context_mapping'> {
   }
 
   async canInsert(args: InsertValue<TableSchema<'forms_context_mapping'>>, tx: Transaction<Schema>): Promise<void> {
+    assertGuestWriteBlocked(this.ctx, 'forms_context_mapping', 'insert', 'Form context mapping');
     await this.verifyFormInWorkspace(args.formId, tx);
   }
 
   async canUpdate(args: UpdateValue<TableSchema<'forms_context_mapping'>>, tx: Transaction<Schema>): Promise<void> {
+    assertGuestWriteBlocked(this.ctx, 'forms_context_mapping', 'update', 'Form context mapping');
     const mapping = await tx.run(zql.forms_context_mapping.where('id', args.id).one());
     if (!mapping) {
       throw new MutationACLError('Form context mapping update failed: record does not exist', 'forms_context_mapping');
@@ -33,6 +36,7 @@ export class FormContextMappingsACL extends BaseACL<'forms_context_mapping'> {
   }
 
   async canDelete(args: DeleteID<TableSchema<'forms_context_mapping'>>, tx: Transaction<Schema>): Promise<void> {
+    assertGuestWriteBlocked(this.ctx, 'forms_context_mapping', 'delete', 'Form context mapping');
     const mapping = await tx.run(zql.forms_context_mapping.where('id', args.id).one());
     if (!mapping) {
       throw new MutationACLError('Form context mapping delete failed: record does not exist', 'forms_context_mapping');

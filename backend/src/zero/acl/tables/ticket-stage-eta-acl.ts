@@ -6,6 +6,7 @@ import {
 import { Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { zql } from '../../queries';
+import { hasGuestTicketAccess } from '../core/guest-access';
 
 export class TicketStageEtaACL extends BaseACL<'ticket_stage_eta'> {
 
@@ -14,6 +15,12 @@ export class TicketStageEtaACL extends BaseACL<'ticket_stage_eta'> {
     if (!ticket) throw new MutationACLError('Ticket stage ETA not found: ticket does not exist', 'ticket_stage_eta');
     if (ticket.workspaceId !== this.ctx.workspaceId) {
       throw new MutationACLError('Ticket stage ETA not found in this workspace', 'ticket_stage_eta');
+    }
+    if (this.ctx.role === 'GUEST') {
+      const hasAccess = await hasGuestTicketAccess(this.ctx, tx, ticket);
+      if (!hasAccess) {
+        throw new MutationACLError('Ticket stage ETA not accessible for guest users', 'ticket_stage_eta');
+      }
     }
   }
 

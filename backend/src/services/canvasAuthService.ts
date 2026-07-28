@@ -1,6 +1,6 @@
 import { db } from '@/database/client';
-import { CanvasRole } from '@prisma/client';
-import { resolveCanvasHierarchy } from '@xyne/shared';
+import { CanvasRole, WorkspaceRole } from '@prisma/client';
+import { resolveCanvasHierarchy, GuestEntity } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
@@ -18,6 +18,176 @@ export interface CanvasAuthResult {
 }
 
 class CanvasAuthService {
+  private roleRank(role: CanvasRole | undefined): number {
+    return role === CanvasRole.OWNER ? 3 : role === CanvasRole.EDITOR ? 2 : role === CanvasRole.VIEWER ? 1 : 0;
+  }
+
+  private strongerRole(
+    a: { role: CanvasRole } | null,
+    b: { role: CanvasRole } | null,
+  ): { role: CanvasRole } | null {
+    if (!a) return b;
+    if (!b) return a;
+    return this.roleRank(a.role) >= this.roleRank(b.role) ? a : b;
+  }
+
+  private async getCurrentUserContext(userId: string): Promise<{ role: WorkspaceRole; workspaceId: string } | null> {
+    const user = await db.user.findUnique({
+      where: { id: userId },
+      select: { role: true, workspaceId: true },
+    });
+    if (!user?.workspaceId) {
+      return null;
+    }
+    return { role: user.role as WorkspaceRole, workspaceId: user.workspaceId };
+  }
+
+  private async hasGuestChannelAccess(userId: string, workspaceId: string, channelId: string): Promise<boolean> {
+    const channel = await db.channel.findUnique({
+      where: { id: channelId },
+      select: { workspaceId: true, projectId: true },
+    });
+    if (!channel || channel.workspaceId !== workspaceId) {
+      return false;
+    }
+
+    const directGuestAccess = await db.guestAccess.findFirst({
+      where: {
+        workspaceId,
+        userId,
+        accessibleEntityType: GuestEntity.CHANNEL,
+        accessibleEntityId: channelId,
+      },
+      select: { id: true },
+    });
+    if (directGuestAccess) {
+      return true;
+    }
+
+    if (!channel.projectId) {
+      return false;
+    }
+
+    const projectGuestAccess = await db.guestAccess.findFirst({
+      where: {
+        workspaceId,
+        userId,
+        accessibleEntityType: GuestEntity.PROJECT,
+        accessibleEntityId: channel.projectId,
+      },
+      select: { id: true },
+    });
+    return Boolean(projectGuestAccess);
+  }
+
+  private async hasGuestProjectAccess(userId: string, workspaceId: string, projectId: string): Promise<boolean> {
+    const projectGuestAccess = await db.guestAccess.findFirst({
+      where: {
+        workspaceId,
+        userId,
+        accessibleEntityType: GuestEntity.PROJECT,
+        accessibleEntityId: projectId,
+      },
+      select: { id: true },
+    });
+    return Boolean(projectGuestAccess);
+  }
+
+  private async hasEffectiveChannelAccess(
+    userId: string,
+    context: { role: WorkspaceRole; workspaceId: string } | null,
+    channelId: string,
+  ): Promise<boolean> {
+    const membership = await db.channelParticipant.findUnique({
+      where: {
+        channelId_userId: {
+          channelId,
+          userId,
+        },
+      },
+      select: { channelId: true },
+    });
+    if (membership) {
+      return true;
+    }
+
+    if (context?.role !== WorkspaceRole.GUEST) {
+      return false;
+    }
+
+    return this.hasGuestChannelAccess(userId, context.workspaceId, channelId);
+  }
+
+  private async getChannelSharedRole(
+    canvasId: string,
+    userId: string,
+    context: { role: WorkspaceRole; workspaceId: string } | null,
+  ): Promise<{ role: CanvasRole } | null> {
+    const channelParticipants = await db.canvasParticipant.findMany({
+      where: {
+        canvasId,
+        channelId: { not: null },
+      },
+      select: { role: true, channelId: true },
+    });
+
+    let strongestRole: { role: CanvasRole } | null = null;
+    for (const participant of channelParticipants) {
+      if (!participant.channelId) continue;
+      if (await this.hasEffectiveChannelAccess(userId, context, participant.channelId)) {
+        strongestRole = this.strongerRole(strongestRole, { role: participant.role });
+      }
+    }
+
+    return strongestRole;
+  }
+
+  private async hasPublicVisibilityAccess(
+    canvas: { visibility: string; channelId: string | null; projectId: string | null },
+    userId: string,
+    context: { role: WorkspaceRole; workspaceId: string } | null,
+  ): Promise<boolean> {
+    if (canvas.visibility !== 'PUBLIC') {
+      return false;
+    }
+    if (context?.role === WorkspaceRole.GUEST) {
+      if (canvas.channelId) {
+        return this.hasGuestChannelAccess(userId, context.workspaceId, canvas.channelId);
+      }
+      if (canvas.projectId) {
+        return this.hasGuestProjectAccess(userId, context.workspaceId, canvas.projectId);
+      }
+      return false;
+    }
+    return true;
+  }
+
+  private async hasGuestContainerAccess(
+    canvas: { channelId: string | null; projectId: string | null },
+    userId: string,
+    context: { role: WorkspaceRole; workspaceId: string } | null,
+  ): Promise<boolean> {
+    if (context?.role !== WorkspaceRole.GUEST) {
+      return false;
+    }
+    if (canvas.channelId && (await this.hasGuestChannelAccess(userId, context.workspaceId, canvas.channelId))) {
+      return true;
+    }
+    if (!canvas.projectId) {
+      return false;
+    }
+    const projectGuestAccess = await db.guestAccess.findFirst({
+      where: {
+        workspaceId: context.workspaceId,
+        userId,
+        accessibleEntityType: GuestEntity.PROJECT,
+        accessibleEntityId: canvas.projectId,
+      },
+      select: { id: true },
+    });
+    return Boolean(projectGuestAccess);
+  }
+
   async checkCanvasAccess(
     canvasId: string,
     userId: string
@@ -70,6 +240,7 @@ class CanvasAuthService {
       }
 
       const isCreator = canvas.createdBy === userId;
+      const currentUserContext = await this.getCurrentUserContext(userId);
 
       const participant = await db.canvasParticipant.findUnique({
         where: {
@@ -97,48 +268,37 @@ class CanvasAuthService {
           })
         : null;
 
-      const userChannelIds = (
-        await db.channelParticipant.findMany({
-          where: { userId },
-          select: { channelId: true },
-        })
-      ).map(p => p.channelId);
-      const channelParticipant = userChannelIds.length
-        ? await db.canvasParticipant.findFirst({
-            where: {
-              canvasId: canvas.id,
-              channelId: { in: userChannelIds },
-            },
-            select: { role: true },
-          })
-        : null;
+      const channelParticipant = await this.getChannelSharedRole(
+        canvas.id,
+        userId,
+        currentUserContext,
+      );
 
-      // PUBLIC canvases are open to everyone in the workspace. Workspace
-      // scoping is enforced upstream (a canvas is only reachable by users in
-      // its creator's workspace via the Zero ACL layer).
-      const hasPublicVisibilityAccess = canvas.visibility === 'PUBLIC';
 
-      const roleRank = (r: CanvasRole | undefined): number =>
-        r === CanvasRole.OWNER ? 3 : r === CanvasRole.EDITOR ? 2 : r === CanvasRole.VIEWER ? 1 : 0;
+      const hasPublicVisibilityAccess = await this.hasPublicVisibilityAccess(
+        canvas,
+        userId,
+        currentUserContext,
+      );
 
-      const stronger = (
-        a: { role: CanvasRole } | null,
-        b: { role: CanvasRole } | null,
-      ): { role: CanvasRole } | null => {
-        if (!a) return b;
-        if (!b) return a;
-        return roleRank(a.role) >= roleRank(b.role) ? a : b;
-      };
-
-      const entityRole = stronger(groupParticipant, channelParticipant);
+      const entityRole = this.strongerRole(groupParticipant, channelParticipant);
       const effectiveRole = participant?.role ?? entityRole?.role;
       const hasOwnerRole = effectiveRole === CanvasRole.OWNER;
       const hasEditorRole = effectiveRole === CanvasRole.EDITOR;
       const hasViewerRole = effectiveRole === CanvasRole.VIEWER;
+      const hasGuestContainerAccess = await this.hasGuestContainerAccess(
+        canvas,
+        userId,
+        currentUserContext,
+      );
 
       const canEdit = isCreator || hasOwnerRole || hasEditorRole;
 
-      const canView = canEdit || hasViewerRole || hasPublicVisibilityAccess;
+      const canView =
+        canEdit ||
+        hasViewerRole ||
+        hasPublicVisibilityAccess ||
+        hasGuestContainerAccess;
 
       const hasAccess = canView;
 

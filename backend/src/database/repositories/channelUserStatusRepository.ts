@@ -1,6 +1,8 @@
-import { ChannelUserStatus } from '@prisma/client';
+import { ChannelUserStatus, PrismaClient } from '@prisma/client';
 import { BaseRepository } from './base';
 import { QueryOptions } from '@/types/database';
+
+type TransactionClient = Parameters<Parameters<PrismaClient['$transaction']>[0]>[0];
 
 export interface CreateChannelUserStatusInput {
   channelId: string;
@@ -156,14 +158,15 @@ export class ChannelUserStatusRepository extends BaseRepository<ChannelUserStatu
   async upsert(
     channelId: string,
     userId: string,
-    data: UpdateChannelUserStatusInput
+    data: UpdateChannelUserStatusInput,
+    tx: TransactionClient
   ): Promise<ChannelUserStatus> {
     const now = new Date();
     const lastViewedAt = data.lastViewedAt ?? now;
     const conversationSeenCutoffAt = await this.getConversationSeenCutoffAt(channelId, lastViewedAt);
     const workspaceId = await this.getChannelWorkspaceId(channelId);
 
-    return this.db.channelUserStatus.upsert({
+    return tx.channelUserStatus.upsert({
       where: {
         channelId_userId: {
           channelId,
@@ -195,8 +198,9 @@ export class ChannelUserStatusRepository extends BaseRepository<ChannelUserStatu
   async updateLastViewed(
     channelId: string,
     userId: string,
-    lastViewedAt?: Date,
-    lastViewedConversationId?: string
+    lastViewedAt: Date,
+    lastViewedConversationId: string | undefined,
+    tx: TransactionClient
   ): Promise<ChannelUserStatus> {
     const now = new Date();
     const viewedAt = lastViewedAt ?? now;
@@ -206,7 +210,7 @@ export class ChannelUserStatusRepository extends BaseRepository<ChannelUserStatu
         lastViewedAt: viewedAt,
         conversationSeenCutoffAt,
         lastViewedConversationId,
-    });
+    }, tx);
   }
 
   async findParticipant(channelId: string, userId: string): Promise<ChannelUserStatus | null> {
@@ -240,11 +244,12 @@ export class ChannelUserStatusRepository extends BaseRepository<ChannelUserStatu
   async setClosedStatus(
     channelId: string,
     userId: string,
-    isClosed: boolean
+    isClosed: boolean,
+    tx: TransactionClient
   ): Promise<ChannelUserStatus> {
     return this.upsert(channelId, userId, {
       isClosed,
-    });
+    }, tx);
   }
 
   /**

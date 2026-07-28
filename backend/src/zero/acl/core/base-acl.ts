@@ -10,7 +10,7 @@ import { Schema } from '@xyne/shared'
 export class BaseACL<TTable extends TableName> {
   public ctx: QueryContext;
   protected tableName: string;
-  
+
   constructor(ctx: QueryContext, tableName?: string) {
     this.ctx = ctx;
     this.tableName = tableName || 'unknown';

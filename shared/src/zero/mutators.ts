@@ -52,6 +52,7 @@ import {
   SavedConfigContextType,
   SavedConfigVisibility,
   SavedConfigEntityName,
+  GuestEntity,
   WorkspaceRole,
   Status,
   OrgRole,
@@ -246,28 +247,97 @@ async function hasCanvasVersionEditAccess(
   tx: Transaction<Schema>,
   canvas: { id: string; createdBy: string },
   userId: string,
+  ctx?: { role?: string; workspaceId?: string },
 ): Promise<boolean> {
   if (canvas.createdBy === userId) return true;
 
-  const participant = await tx.run(
+  const participants = await tx.run(
     zql.canvas_participants
       .where('canvasId', canvas.id)
-      .where('role', 'IN', [CanvasRole.EDITOR, CanvasRole.OWNER])
-      .where(({ or, cmp, exists: ex }: any) =>
-        or(
-          cmp('userId', userId),
-          ex('userGroup', (ug: any) =>
-            ug.whereExists('userGroupMappings', (m: any) => m.where('userId', userId)),
-          ),
-          ex('channel', (ch: any) =>
-            ch.whereExists('participants', (cp: any) => cp.where('userId', userId)),
-          ),
-        ),
-      )
-      .one(),
+      .where('role', 'IN', [CanvasRole.EDITOR, CanvasRole.OWNER]),
   );
 
-  return Boolean(participant);
+  if (participants.length === 0) return false;
+
+  // Direct user match — no query needed
+  if (participants.some(p => p.userId === userId)) {
+    return true;
+  }
+
+  // Batch: collect all userGroupIds and channelIds
+  const userGroupIds = participants
+    .map(p => p.userGroupId)
+    .filter((id): id is string => Boolean(id));
+  const channelIds = participants
+    .map(p => p.channelId)
+    .filter((id): id is string => Boolean(id));
+
+  // Batch query: is the user a member of any of these groups?
+  if (userGroupIds.length > 0) {
+    const groupMapping = await tx.run(
+      zql.user_group_mappings
+        .where('userId', userId)
+        .where(({ cmp }) => cmp('userGroupId', 'IN', userGroupIds)),
+    );
+    if (groupMapping.length > 0) {
+      return true;
+    }
+  }
+
+  // Batch query: is the user a participant in any of these channels?
+  if (channelIds.length > 0) {
+    const channelParticipantships = await tx.run(
+      zql.channel_participants
+        .where('userId', userId)
+        .where(({ cmp }) => cmp('channelId', 'IN', channelIds)),
+    );
+    if (channelParticipantships.length > 0) {
+      return true;
+    }
+  }
+
+  if (ctx?.role !== WorkspaceRole.GUEST || !ctx.workspaceId) {
+    return false;
+  }
+
+  // Batch query: does the guest have direct channel access to any of these channels?
+  if (channelIds.length > 0) {
+    const directGuestAccess = await tx.run(
+      zql.guest_access
+        .where('userId', userId)
+        .where('workspaceId', ctx.workspaceId)
+        .where('accessibleEntityType', GuestEntity.CHANNEL)
+        .where(({ cmp }) => cmp('accessibleEntityId', 'IN', channelIds)),
+    );
+    if (directGuestAccess.length > 0) {
+      return true;
+    }
+  }
+
+  // Batch query: fetch projectIds for all participant channels 
+  if (channelIds.length > 0) {
+    const channels = await tx.run(
+      zql.channels.where(({ cmp }) => cmp('id', 'IN', channelIds)),
+    );
+    const projectIds = channels
+      .map(ch => ch.projectId)
+      .filter((id): id is string => Boolean(id));
+
+    if (projectIds.length > 0) {
+      const projectGuestAccess = await tx.run(
+        zql.guest_access
+          .where('userId', userId)
+          .where('workspaceId', ctx.workspaceId)
+          .where('accessibleEntityType', GuestEntity.PROJECT)
+          .where(({ cmp }) => cmp('accessibleEntityId', 'IN', projectIds)),
+      );
+      if (projectGuestAccess.length > 0) {
+        return true;
+      }
+    }
+  }
+
+  return false;
 }
 
 async function deleteConversationWithParticipants(
@@ -5443,10 +5513,6 @@ export const mutators = defineMutators({
           throw new Error('Canvas not found');
         }
 
-        const participant = await tx.run(
-          zql.canvas_participants.where('canvasId', id).where('userId', ctx.userID).one(),
-        );
-
         const currentFolder = canvas.folderId
           ? await tx.run(zql.canvas_folders.where('id', canvas.folderId).one())
           : null;
@@ -5462,10 +5528,10 @@ export const mutators = defineMutators({
             ),
           )
           : false;
-        const canEdit =
-          canvas.createdBy === ctx.userID ||
-          (participant &&
-            (participant.role === CanvasRole.EDITOR || participant.role === CanvasRole.OWNER));
+        const canEdit = await hasCanvasVersionEditAccess(tx, canvas, ctx.userID, {
+          role: ctx.role,
+          workspaceId: ctx.workspaceId,
+        });
         const isMoveOperation =
           folderId !== undefined || projectId !== undefined || channelId !== undefined;
 
@@ -6006,7 +6072,10 @@ export const mutators = defineMutators({
           throw new Error('Canvas not found');
         }
 
-        const canEdit = await hasCanvasVersionEditAccess(tx, canvas, ctx.userID);
+        const canEdit = await hasCanvasVersionEditAccess(tx, canvas, ctx.userID, {
+          role: ctx.role,
+          workspaceId: ctx.workspaceId,
+        });
 
         if (!canEdit) {
           throw new Error('You do not have permission to edit this canvas');
@@ -6053,7 +6122,10 @@ export const mutators = defineMutators({
           throw new Error('Canvas not found');
         }
 
-        const canEdit = await hasCanvasVersionEditAccess(tx, canvas, ctx.userID);
+        const canEdit = await hasCanvasVersionEditAccess(tx, canvas, ctx.userID, {
+          role: ctx.role,
+          workspaceId: ctx.workspaceId,
+        });
 
         if (!canEdit) {
           throw new Error('You do not have permission to edit this canvas');
@@ -6081,7 +6153,10 @@ export const mutators = defineMutators({
           throw new Error('Canvas not found');
         }
 
-        const canEdit = await hasCanvasVersionEditAccess(tx, canvas, ctx.userID);
+        const canEdit = await hasCanvasVersionEditAccess(tx, canvas, ctx.userID, {
+          role: ctx.role,
+          workspaceId: ctx.workspaceId,
+        });
 
         if (!canEdit) {
           throw new Error('You do not have permission to edit this canvas');

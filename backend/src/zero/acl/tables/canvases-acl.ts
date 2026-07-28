@@ -3,12 +3,17 @@ import {
   CanvasHierarchyResolutionError,
   type CanvasHierarchyErrorCode,
   CanvasRole,
+  GuestEntity,
   resolveCanvasHierarchy,
   Schema,
 } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, TableSchema } from '../core/types';
 import { zql } from '../../queries';
+import {
+  hasGuestChannelAccess,
+  hasGuestProjectAccess,
+} from '../core/guest-access';
 
 export class CanvasesACL extends BaseACL<'canvases'> {
   private mapInsertHierarchyError(code: CanvasHierarchyErrorCode): string {
@@ -35,6 +40,35 @@ export class CanvasesACL extends BaseACL<'canvases'> {
     const channel = await tx.run(zql.channels.where('id', channelId).one());
     if (!channel) throw new MutationACLError('Canvas not found: channel does not exist', 'canvases');
     if (channel.workspaceId !== this.ctx.workspaceId) {
+      throw new MutationACLError('Canvas not found in this workspace', 'canvases');
+    }
+  }
+
+  private async verifyCanvasInWorkspace(
+    canvas: {
+      channelId?: string | null;
+      projectId?: string | null;
+      createdBy: string;
+    },
+    tx: Transaction<Schema>,
+  ): Promise<void> {
+    if (canvas.channelId) {
+      await this.verifyWorkspace(canvas.channelId, tx);
+      return;
+    }
+
+    if (canvas.projectId) {
+      const project = await tx.run(zql.projects.where('id', canvas.projectId).one());
+      if (!project) throw new MutationACLError('Canvas not found: project does not exist', 'canvases');
+      if (project.workspaceId !== this.ctx.workspaceId) {
+        throw new MutationACLError('Canvas not found in this workspace', 'canvases');
+      }
+      return;
+    }
+
+    const creator = await tx.run(zql.users.where('id', canvas.createdBy).one());
+    if (!creator) throw new MutationACLError('Canvas not found: creator does not exist', 'canvases');
+    if (creator.workspaceId !== this.ctx.workspaceId) {
       throw new MutationACLError('Canvas not found in this workspace', 'canvases');
     }
   }
@@ -124,7 +158,52 @@ export class CanvasesACL extends BaseACL<'canvases'> {
    */
   async canUpdate(args: UpdateValue<TableSchema<'canvases'>>, tx: Transaction<Schema>): Promise<void> {
     const canvas = await tx.run(zql.canvases.where('id', args.id).one());
-    await this.verifyWorkspace(canvas?.channelId, tx);
+    if (!canvas) {
+      throw new MutationACLError('Canvas update failed: canvas not found', 'canvases');
+    }
+
+    await this.verifyCanvasInWorkspace(canvas, tx);
+
+    if (this.ctx.role === 'GUEST') {
+      if (canvas.createdBy === this.ctx.userID) {
+        return;
+      }
+
+      const directCanvasAccess = await tx.run(
+        zql.guest_access
+          .where('workspaceId', '=', this.ctx.workspaceId)
+          .where('userId', '=', this.ctx.userID)
+          .where('accessibleEntityType', '=', GuestEntity.CANVAS)
+          .where('accessibleEntityId', '=', args.id)
+          .one(),
+      );
+      const channelAccess = canvas.channelId
+        ? await hasGuestChannelAccess(this.ctx, tx, canvas.channelId)
+        : false;
+      const projectAccess = canvas.projectId
+        ? await hasGuestProjectAccess(this.ctx, tx, canvas.projectId)
+        : false;
+
+      if (!directCanvasAccess && !channelAccess && !projectAccess) {
+        throw new MutationACLError(
+          'Canvas update failed: guest does not have access to this canvas',
+          'canvases',
+        );
+      }
+
+      const isEditor = await tx.run(
+        zql.canvas_participants
+          .where('canvasId', args.id)
+          .where('userId', this.ctx.userID)
+          .one(),
+      );
+      if (!isEditor || (isEditor.role !== CanvasRole.EDITOR && isEditor.role !== CanvasRole.OWNER)) {
+        throw new MutationACLError(
+          'Canvas update failed: editor role required',
+          'canvases',
+        );
+      }
+    }
     return;
   }
 

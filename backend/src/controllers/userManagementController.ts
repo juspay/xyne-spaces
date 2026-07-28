@@ -1,7 +1,8 @@
 import { Request, Response } from 'express';
 import { UserManagementService } from '../services/userManagementService';
 import { getStorageService } from '../services/storage';
-import { AccessType, CalendarVisibility } from '@prisma/client';
+import { AccessType, CalendarVisibility, WorkspaceRole } from '@prisma/client';
+import { GuestEntity } from '@xyne/shared';
 import { logger } from '../utils/logger';
 
 const storageService = getStorageService();
@@ -144,6 +145,70 @@ export class UserManagementController {
       res.status(200).json(response);
     } catch (error) {
       logger.error('Error getting user by ID:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  getGuestUsers = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const user = req.user;
+      if (!user) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+
+      if (user.role !== WorkspaceRole.ADMIN && user.role !== WorkspaceRole.OWNER) {
+        res.status(403).json({ error: 'Only workspace admins can manage guest users' });
+        return;
+      }
+
+      const guests = await userManagementService.getWorkspaceGuestsWithAccess(user.workspaceId);
+      res.status(200).json({ data: guests });
+    } catch (error) {
+      logger.error('Error getting guest users:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  revokeGuestAccess = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const user = req.user;
+      if (!user) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+
+      if (user.role !== WorkspaceRole.ADMIN && user.role !== WorkspaceRole.OWNER) {
+        res.status(403).json({ error: 'Only workspace admins can manage guest users' });
+        return;
+      }
+
+      const { userId, entityType, entityId } = req.params;
+      if (!userId || !entityType || !entityId) {
+        res.status(400).json({ error: 'Missing guest access target' });
+        return;
+      }
+
+      if (!Object.values(GuestEntity).includes(entityType as GuestEntity)) {
+        res.status(400).json({ error: 'Invalid guest entity type' });
+        return;
+      }
+
+      const result = await userManagementService.revokeGuestEntityAccess({
+        workspaceId: user.workspaceId,
+        userId,
+        accessibleEntityType: entityType as GuestEntity,
+        accessibleEntityId: entityId,
+      });
+
+      if (!result.revoked) {
+        res.status(404).json({ error: 'Guest access mapping not found' });
+        return;
+      }
+
+      res.status(200).json({ success: true });
+    } catch (error) {
+      logger.error('Error revoking guest access:', error);
       res.status(500).json({ error: 'Internal server error' });
     }
   };

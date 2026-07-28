@@ -3,6 +3,7 @@ import { Schema, ChannelVisibility } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, TableSchema } from '../core/types';
 import { zql } from '../../queries';
+import { hasChannelMutationAccess } from '../core/guest-access';
 
 export class ConversationsACL extends BaseACL<'conversations'> {
 
@@ -26,13 +27,24 @@ export class ConversationsACL extends BaseACL<'conversations'> {
       throw new MutationACLError('Conversation insert failed: cannot create conversations in archived channel', 'conversations');
     }
 
-    const channelParticipant = await tx.run(zql.channel_participants
-      .where('channelId', args.channelId)
-      .where('userId', this.ctx.userID)
-      .one());
+    if (this.ctx.role === 'GUEST') {
+      const hasGuestAccess = await hasChannelMutationAccess(this.ctx, tx, args.channelId, {
+        allowPublicForNonGuests: true,
+      });
+      if (hasGuestAccess) {
+        return;
+      }
+      throw new MutationACLError('Conversation insert failed: guest does not have access to this channel', 'conversations');
+    }
 
-    if (channel?.visibility === ChannelVisibility.PUBLIC ||
-        channelParticipant ) {
+    const channelParticipant = await tx.run(
+      zql.channel_participants
+        .where('channelId', args.channelId)
+        .where('userId', this.ctx.userID)
+        .one(),
+    );
+
+    if (channel.visibility === ChannelVisibility.PUBLIC || channelParticipant) {
       return;
     }
     throw new MutationACLError('Conversation insert failed: you must be a channel participant or the channel must be public', 'conversations');

@@ -2,6 +2,7 @@ import type { Query } from '@rocicorp/zero';
 import type { Schema, Context } from '../../schema';
 import { ChannelVisibility } from '../../schema';
 import { BaseQueryACL } from '../core/base-acl';
+import { guestChannelAccessWhere, isGuestContext } from '../core/guest-acl-utils';
 
 export class MessagesACL extends BaseQueryACL<'messages'> {
   constructor(ctx: Context) {
@@ -9,6 +10,23 @@ export class MessagesACL extends BaseQueryACL<'messages'> {
   }
 
   canSelect<TReturn>(query: Query<'messages', Schema, TReturn>): Query<'messages', Schema, TReturn> {
+    if (isGuestContext(this.ctx)) {
+      return query
+        .where(({ or, cmp }) =>
+          or(
+            cmp('visibleTo', 'IS', null),
+            cmp('visibleTo', this.ctx.userID),
+          ),
+        )
+        .whereExists('conversation', (c) =>
+          c.whereExists('channel', (ch) =>
+            ch
+              .where('workspaceId', '=', this.ctx.workspaceId)
+              .where(guestChannelAccessWhere(this.ctx)),
+          ),
+        );
+    }
+
     return query
       .where(({or, cmp}) => {
         return or(

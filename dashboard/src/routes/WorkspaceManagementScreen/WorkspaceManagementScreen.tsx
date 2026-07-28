@@ -1,5 +1,5 @@
 import { ReactElement, useEffect, useState } from 'react';
-import { Settings, Mail, ChevronLeft } from 'lucide-react';
+import { Settings, Mail, ChevronLeft, UserCheck } from 'lucide-react';
 import { Button } from '../../components/ui/Button/Button';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 import { cn } from '../../utils/classNames';
 import { GeneralAndMembersTab } from './GeneralAndMembersTab';
 import { InvitationsTab } from './InvitationsTab';
+import { GuestUsersTab } from './GuestUsersTab';
 import * as Tabs from '@radix-ui/react-tabs';
 
 export const WorkspaceManagementScreen = (): ReactElement => {
@@ -68,6 +69,7 @@ export const WorkspaceManagementScreen = (): ReactElement => {
             <Tabs.List className='flex gap-0 -mb-px'>
               <TabTrigger value='general' icon={Settings} label='General & Members' />
               <TabTrigger value='invitations' icon={Mail} label='Invitations' />
+              <TabTrigger value='guests' icon={UserCheck} label='Guest Users' />
             </Tabs.List>
           </Tabs.Root>
         </div>
@@ -83,6 +85,9 @@ export const WorkspaceManagementScreen = (): ReactElement => {
               </Tabs.Content>
               <Tabs.Content value='invitations' className='outline-none h-full'>
                 <InvitationsTab isActive={activeTab === 'invitations'} />
+              </Tabs.Content>
+              <Tabs.Content value='guests' className='outline-none h-full'>
+                <GuestUsersTab isActive={activeTab === 'guests'} />
               </Tabs.Content>
             </div>
           </Tabs.Root>

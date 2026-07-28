@@ -3,6 +3,7 @@ import { ChannelVisibility, Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, TableSchema } from '../core/types';
 import { zql } from '../../queries';
+import { hasChannelMutationAccess } from '../core/guest-access';
 
 export class ReactionsACL extends BaseACL<'reactions'> {
 
@@ -27,16 +28,27 @@ export class ReactionsACL extends BaseACL<'reactions'> {
     }
     await this.verifyConversationInWorkspace(message.conversation.conversationId, tx);
 
+    if (this.ctx.role === 'GUEST') {
+      const hasGuestAccess = await hasChannelMutationAccess(this.ctx, tx, channel.id, {
+        allowPublicForNonGuests: true,
+      });
+      if (hasGuestAccess) {
+        return;
+      }
+      throw new MutationACLError('Reaction insert failed: guest does not have access to this channel', 'reactions');
+    }
+
     if (channel.visibility === ChannelVisibility.PUBLIC) {
       return;
     }
 
-    const currentUserParticipantData = await tx.run(zql.channel_participants.where('channelId', channel.id).where('userId', this.ctx.userID).one());
+    const currentUserParticipantData = await tx.run(
+      zql.channel_participants.where('channelId', channel.id).where('userId', this.ctx.userID).one(),
+    );
 
     if (!currentUserParticipantData) {
       throw new MutationACLError('Reaction insert failed: you must be a channel participant to react to messages in private channels', 'reactions');
     }
-
   }
 
   async canUpdate(args: UpdateValue<TableSchema<'reactions'>>, tx: Transaction<Schema>): Promise<void> {

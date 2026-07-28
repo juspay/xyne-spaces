@@ -4,6 +4,7 @@ import { BaseACL } from '../core/base-acl';
 import { TableSchema, MutationACLError } from '../core/types';
 import { canManageUserGroup, hasUserGroupsAdminAccess } from '../core/admin-access';
 import { zql } from '../../queries';
+import { assertGuestWriteBlocked } from '../core/guest-access';
 
 export async function getUserGroupInWorkspaceOrThrow(
   userGroupId: string,
@@ -20,6 +21,7 @@ export async function getUserGroupInWorkspaceOrThrow(
 
 export class UserGroupsACL extends BaseACL<'user_groups'> {
   async canInsert(args: InsertValue<TableSchema<'user_groups'>>, tx: Transaction<Schema>): Promise<void> {
+    assertGuestWriteBlocked(this.ctx, 'user_groups', 'insert', 'User group');
     if (args.workspaceId !== this.ctx.workspaceId) {
       throw new MutationACLError('User group not found in this workspace', 'user_groups');
     }
@@ -60,6 +62,7 @@ export class UserGroupsACL extends BaseACL<'user_groups'> {
 
   async canDelete(args: DeleteID<TableSchema<'user_groups'>>, tx: Transaction<Schema>): Promise<void> {
     await getUserGroupInWorkspaceOrThrow(args.id, this.ctx.workspaceId, tx);
+    assertGuestWriteBlocked(this.ctx, 'user_groups', 'delete', 'User group');
     // Only ADMIN access to the USER-GROUPS resource can control user groups
     const hasAdminAccess = await hasUserGroupsAdminAccess(this.ctx, tx);
     if (!hasAdminAccess) {

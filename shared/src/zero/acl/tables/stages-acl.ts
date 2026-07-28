@@ -1,6 +1,7 @@
 import type { Query } from '@rocicorp/zero';
 import { type Schema, type Context, ChannelVisibility } from '../../schema';
 import { BaseQueryACL } from '../core/base-acl';
+import { guestProjectAccessWhere, isGuestContext } from '../core/guest-acl-utils';
 
 export class StagesACL extends BaseQueryACL<'stages'> {
   constructor(ctx: Context) {
@@ -8,6 +9,16 @@ export class StagesACL extends BaseQueryACL<'stages'> {
   }
 
   canSelect<TReturn>(query: Query<'stages', Schema, TReturn>): Query<'stages', Schema, TReturn> {
+    if (isGuestContext(this.ctx)) {
+      return query.whereExists('board', (boardQuery) =>
+        boardQuery
+          .where('workspaceId', '=', this.ctx.workspaceId)
+          .whereExists('project', (projectQuery) =>
+            projectQuery.where(guestProjectAccessWhere(this.ctx))
+          )
+      );
+    }
+
     // Direct workspaceId check through board - no need to traverse through project
     return query.whereExists('board', (boardQuery) =>
       boardQuery

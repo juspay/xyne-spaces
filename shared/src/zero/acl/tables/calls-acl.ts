@@ -1,6 +1,7 @@
 import type { Query } from '@rocicorp/zero';
 import type { Schema, Context } from '../../schema';
 import { BaseQueryACL } from '../core/base-acl';
+import { guestChannelAccessWhere, isGuestContext } from '../core/guest-acl-utils';
 
 export class CallsACL extends BaseQueryACL<'calls'> {
   constructor(ctx: Context) {
@@ -8,6 +9,20 @@ export class CallsACL extends BaseQueryACL<'calls'> {
   }
 
   canSelect<TReturn>(query: Query<'calls', Schema, TReturn>): Query<'calls', Schema, TReturn> {
+    if (isGuestContext(this.ctx)) {
+      return query.where(({ or, cmp, exists }) =>
+        or(
+          cmp('createdByUserId', this.ctx.userID),
+          exists('participants', (p) => p.where('userId', this.ctx.userID)),
+          exists('channel', (ch) =>
+            ch
+              .where('workspaceId', '=', this.ctx.workspaceId)
+              .where(guestChannelAccessWhere(this.ctx)),
+          ),
+        )
+      );
+    }
+
     return query.where(({ or, cmp, exists }) =>
       or(
         cmp('createdByUserId', this.ctx.userID),

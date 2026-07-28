@@ -144,7 +144,7 @@ const getActivityDescription = (
       const newUser = users?.find(u => u.id === value?.newValue);
       const updatedByUser = users?.find(u => u.id === activity.updatedBy);
 
-      return updatedByUser === newUser
+      return updatedByUser?.id === value?.newValue
         ? {
             description: 'self-assigned as PR Reviewer',
             details: '',
@@ -162,7 +162,7 @@ const getActivityDescription = (
       const newUser = users?.find(u => u.id === value?.newValue);
       const updatedByUser = users?.find(u => u.id === activity.updatedBy);
 
-      return updatedByUser === newUser
+      return updatedByUser?.id === value?.newValue
         ? {
             description: 'self-assigned as QA',
             details: '',
@@ -203,7 +203,7 @@ const getActivityDescription = (
         };
       }
 
-      return updatedByUser === newUser
+      return updatedByUser?.id === value?.newValue
         ? {
             description: 'self-assigned the ticket',
             details: '',

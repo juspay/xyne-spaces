@@ -6,6 +6,7 @@ import {
 import { ChannelVisibility, Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { zql } from '../../queries';
+import { hasGuestTicketAccess } from '../core/guest-access';
 
 export class TicketActivitiesACL extends BaseACL<'ticket_activities'> {
 
@@ -17,7 +18,27 @@ export class TicketActivitiesACL extends BaseACL<'ticket_activities'> {
     }
   }
 
+  private async verifyGuestScope(ticketId: string, tx: Transaction<Schema>): Promise<void> {
+    if (this.ctx.role !== 'GUEST') return;
+    const ticket = await tx.run(zql.tickets.where('id', ticketId).one());
+    if (!ticket) {
+      throw new MutationACLError('Ticket activity insert failed: ticket does not exist', 'ticket_activities');
+    }
+    if (ticket.workspaceId !== this.ctx.workspaceId) {
+      throw new MutationACLError('Ticket activity insert failed: not in this workspace', 'ticket_activities');
+    }
+    const hasAccess = await hasGuestTicketAccess(this.ctx, tx, ticket);
+    if (!hasAccess) {
+      throw new MutationACLError('Ticket activity insert failed: guest does not have access to this ticket', 'ticket_activities');
+    }
+  }
+
   async canInsert(args: InsertValue<TableSchema<'ticket_activities'>>, tx: Transaction<Schema>): Promise<void> {
+    if (this.ctx.role === 'GUEST') {
+      await this.verifyGuestScope(args.ticketId, tx);
+      return;
+    }
+
     await this.verifyTicketInWorkspace(args.ticketId, tx);
     const ticket = await tx.run(zql.tickets
       .where('id', args.ticketId)

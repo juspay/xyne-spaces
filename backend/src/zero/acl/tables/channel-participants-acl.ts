@@ -3,6 +3,10 @@ import { ChannelRole, ChannelScopeType, ChannelVisibility, Schema } from '@xyne/
 import { BaseACL } from '../core/base-acl';
 import {MutationACLError, TableSchema } from '../core/types';
 import { zql } from '../../queries';
+import {
+  hasGuestChannelAccess,
+  hasGuestChannelAccessForUser,
+} from '../core/guest-access';
 
 export class ChannelParticipantsACL extends BaseACL<'channel_participants'> {
 
@@ -30,7 +34,39 @@ export class ChannelParticipantsACL extends BaseACL<'channel_participants'> {
       }
     }
 
-    await this.verifyChannelInWorkspace(args.channelId, tx, channel.workspaceId); 
+    await this.verifyChannelInWorkspace(args.channelId, tx, channel.workspaceId);
+
+    if (this.ctx.role === 'GUEST') {
+      if (args.userId !== this.ctx.userID) {
+        throw new MutationACLError(
+          'Channel participant insert failed: guests cannot add other users',
+          'channel_participants',
+        );
+      }
+
+      const hasAccess = await hasGuestChannelAccess(this.ctx, tx, args.channelId);
+      if (hasAccess) {
+        return;
+      }
+      throw new MutationACLError(
+        'Channel participant insert failed: guest does not have access to this channel',
+        'channel_participants',
+      );
+    }
+
+    if (args.userId !== this.ctx.userID) {
+      const target = await tx.run(zql.users.where('id', args.userId).one());
+      if (target?.role === 'GUEST') {
+        const hasAccess = await hasGuestChannelAccessForUser(this.ctx, tx, args.userId, args.channelId);
+        if (!hasAccess) {
+          throw new MutationACLError(
+            'Channel participant insert failed: guest cannot be added outside their entity',
+            'channel_participants',
+          );
+        }
+      }
+    }
+
     const existingParticipant = await tx.run(zql.channel_participants
       .where('channelId', '=', args.channelId)
       .where('userId', '=', this.ctx.userID)
@@ -53,6 +89,26 @@ export class ChannelParticipantsACL extends BaseACL<'channel_participants'> {
     }
 
     await this.verifyChannelInWorkspace(participant.channelId, tx);
+
+    if (this.ctx.role === 'GUEST') {
+      if (participant.userId !== this.ctx.userID) {
+        throw new MutationACLError(
+          'Channel participant update failed: guests can only modify their own participation',
+          'channel_participants',
+        );
+      }
+
+      const hasAccess = await hasGuestChannelAccess(this.ctx, tx, participant.channelId);
+      if (hasAccess) {
+        return;
+      }
+
+      throw new MutationACLError(
+        'Channel participant update failed: guest does not have access to this channel',
+        'channel_participants',
+      );
+    }
+
     const userParticipationData = await tx.run(zql.channel_participants.where('channelId', '=', participant.channelId).where('userId', '=', this.ctx.userID).one());
 
     if (userParticipationData?.role === ChannelRole.ADMIN || userParticipationData?.userId === this.ctx.userID) {
@@ -71,6 +127,23 @@ export class ChannelParticipantsACL extends BaseACL<'channel_participants'> {
 
     if (participant.channel.isArchived) {
       throw new MutationACLError('Channel participant delete failed: cannot delete participants in archived channel', 'channel_participants');
+    }
+
+    if (this.ctx.role === 'GUEST') {
+      if (participant.userId !== this.ctx.userID) {
+        throw new MutationACLError(
+          'Channel participant delete failed: guests can only remove themselves',
+          'channel_participants',
+        );
+      }
+
+      const hasAccess = await hasGuestChannelAccess(this.ctx, tx, participant.channelId);
+      if (!hasAccess) {
+        throw new MutationACLError(
+          'Channel participant delete failed: guest does not have access to this channel',
+          'channel_participants',
+        );
+      }
     }
 
     if (participant.userId === this.ctx.userID) {

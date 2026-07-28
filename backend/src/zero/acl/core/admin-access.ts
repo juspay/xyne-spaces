@@ -43,7 +43,9 @@ export async function hasProjectAdminAccess(ctx: { userID: string }, tx: Transac
 /**
  * Checks if the current user has ADMIN access to the USER-GROUPS resource (direct or via group).
  */
-export async function hasUserGroupsAdminAccess(ctx: { userID: string }, tx: Transaction<Schema>): Promise<boolean> {
+export async function hasUserGroupsAdminAccess(ctx: { userID: string; role?: string }, tx: Transaction<Schema>): Promise<boolean> {
+  if (ctx.role === WorkspaceRole.GUEST) return false;
+
   const userGroupsResource = await tx.run(
     (zql.resources).where('name', 'USER-GROUPS').one()
   );
