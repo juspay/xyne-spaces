@@ -657,7 +657,7 @@ export const queries = defineQueries({
     },
   ),
 
-
+  // @deprecated
   // Enriched single query for thread panel — replaces getConversationById + ticketById +
   // conversationMessagesV2 with one query and one IVM pipeline (4 queries → 1).
   threadConversation: defineQuery(
@@ -671,6 +671,40 @@ export const queries = defineQueries({
         .where('conversationId', conversationId)
         .related('ticket')
         .related('call')
+        .related('participants', p =>
+          p.where('userId', ctx.userID).one(),
+        )
+        .related('messages', m =>
+          m.where(helpers =>
+            helpers.or(
+              helpers.cmp('visibleTo', 'IS', null),
+              helpers.cmp('visibleTo', '=', ctx.userID),
+            ),
+          )
+          .orderBy('createdAt', 'asc')
+          .related('attachments')
+          .related('nudgeCounts', nc =>
+            nc.where(helpers =>
+              helpers.or(
+                helpers.cmp('userId', '=', ctx.userID),
+                helpers.cmp('channelId', 'IS NOT', null),
+              ),
+            ),
+          ),
+        )
+        .one();
+    },
+  ),
+
+  threadConversationV2: defineQuery(
+    z.object({
+      conversationId: z.string(),
+      channelId: z.string().optional(),
+      isMember: z.boolean().optional(),
+    }),
+    ({ ctx, args: { conversationId } }) => {
+      return zql.conversations
+        .where('conversationId', conversationId)
         .related('participants', p =>
           p.where('userId', ctx.userID).one(),
         )
@@ -1892,6 +1926,13 @@ export const queries = defineQueries({
     z.object({ mappedTicketId: z.string() }),
     ({ args: { mappedTicketId } }) => {
       return zql.sub_tickets.where('mappedTicketId', mappedTicketId).related('ticketMappings');
+    }
+  ),
+
+  subTicketByMappedTicketId: defineQuery(
+    z.object({ mappedTicketId: z.string() }),
+    ({ args: { mappedTicketId } }) => {
+      return zql.sub_tickets.where('mappedTicketId', mappedTicketId).one();
     }
   ),
 

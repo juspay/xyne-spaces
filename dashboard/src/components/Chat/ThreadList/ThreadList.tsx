@@ -17,6 +17,8 @@ import { findLastEditableMessage, isEventFromEmptyInput } from '../../../utils/c
 import { ArrowDown, ArrowUp, ChevronUp } from 'lucide-react';
 import { AttachmentRef } from '../../../machines/attachmentViewerMachine';
 import { useThreadReadTracking } from '../../../hooks/useThreadReadTracking';
+import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { getInitialMessageFromConversation } from '../../../utils/conversationMessageHelpers';
 
 type ThreadListProps = {
   channelId: string;
@@ -134,6 +136,19 @@ const ThreadList = ({
   const [isNearTop, setIsNearTop] = useState(true);
   const [hasOverflow, setHasOverflow] = useState(false);
   const [isScrolling, setIsScrolling] = useState(false);
+
+  const threadTicketId = useMemo(() => {
+    if (!isTicketThread || !conversation) return '';
+    const initMsg = getInitialMessageFromConversation(conversation) ?? conversation.initialMessage;
+    return ((initMsg?.metadata as Record<string, unknown>)?.['ticketId'] as string) || '';
+  }, [isTicketThread, conversation]);
+
+  // Subtickets cannot be nested: hide the action when the thread's ticket is itself a subticket.
+  const [threadTicketParentSubTicket] = useCachedQuery(
+    queries.subTicketByMappedTicketId({ mappedTicketId: threadTicketId }),
+    { enabled: !!threadTicketId },
+  );
+  const isThreadTicketSubTicket = !!threadTicketParentSubTicket;
 
   const {
     firstUnreadIndex,
@@ -469,6 +484,7 @@ const ThreadList = ({
                       context='thread'
                       isFirstInThread={messageIndex === 0}
                       isTicketThread={isTicketThread}
+                      isThreadTicketSubTicket={isThreadTicketSubTicket}
                       channelScopeType={channelScopeType}
                       allThreadAttachments={allThreadAttachments}
                       workflowNumber={workflowNumberMap?.get(threadMessage.messageId)}
@@ -566,6 +582,7 @@ const ThreadList = ({
                     context='thread'
                     isFirstInThread={index === 0}
                     isTicketThread={isTicketThread}
+                    isThreadTicketSubTicket={isThreadTicketSubTicket}
                     channelScopeType={channelScopeType}
                     allThreadAttachments={allThreadAttachments}
                     workflowNumber={workflowNumberMap?.get(threadMessage.messageId)}

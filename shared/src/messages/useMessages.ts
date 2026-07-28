@@ -608,7 +608,7 @@ function useThreadMessagesImpl(
   }, [key]);
 
   const [live] = useQuery(
-    queries.threadConversation({
+    queries.threadConversationV2({
       conversationId: ref.conversationId,
       channelId: ref.channelId,
       isMember: ref.isMember ?? true,
