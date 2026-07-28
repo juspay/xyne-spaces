@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import { createHash } from 'crypto';
 import { OrgRole, WorkspaceRole } from '@prisma/client';
 // import { OAuth2Client } from 'google-auth-library';
 import { logger } from '../utils/logger';
@@ -533,9 +534,12 @@ export class AuthMiddleware {
         email: user.email,
       });
 
-      if (req.cookies?.xyne_user_id !== user.id) {
+      const cohort = String(
+        createHash('sha256').update(user.id).digest().readUInt32BE(0) % 100
+      );
+      if (req.cookies?.u_cohort !== cohort) {
         const isProduction = process.env.NODE_ENV === 'production';
-        res.cookie('xyne_user_id', user.id, {
+        res.cookie('u_cohort', cohort, {
           httpOnly: true,
           secure: isProduction,
           sameSite: 'lax',
@@ -545,7 +549,7 @@ export class AuthMiddleware {
         if (!req.cookies) {
           req.cookies = {};
         }
-        req.cookies.xyne_user_id = user.id;
+        req.cookies.u_cohort = cohort;
       }
 
       next();
