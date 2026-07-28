@@ -2,18 +2,22 @@ export {
   queryCacheMachine,
   queryCacheActor,
   getChannelConversationsQueryHash,
+  getThreadConversationQueryHash,
   getCallHistoryQueryHash,
   getRecordingsQueryHash,
   setupQueryCachePersistence,
   flushQueryCachePersistence,
   hydrateQueryCacheFromStorage,
   FINGERPRINT_FIELD,
+  THREAD_FINGERPRINT_FIELD,
+  THREAD_CONVERSATIONS_KEY,
   CALL_HISTORY_KEY,
   RECORDINGS_KEY,
 } from './queryCacheMachine.js';
 
 export type {
   Conversation as QueryCacheConversation,
+  ThreadConversation,
   CacheEntry,
   QueryCacheContext,
   QueryCacheEvent,

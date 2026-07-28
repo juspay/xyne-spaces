@@ -17,6 +17,9 @@ import type { Context } from '../zero/schema.js';
 
 export type Conversation = QueryResultType<typeof queries.channelConversationsPaginatedV3>[number];
 
+export type ThreadConversation = NonNullable<
+  QueryResultType<typeof queries.threadConversation>
+>;
 export type CallHistoryEntry = QueryResultType<typeof queries.userCallHistoryV2>[number];
 export type RecordingEntry = QueryResultType<typeof queries.userRecordings>[number];
 
@@ -48,6 +51,12 @@ export interface QueryCacheContext {
   channelConversations: {
     [channelId: string]: Conversation[];
   };
+  // Thread caches, keyed by conversationId. Each entry is the full
+  // `threadConversation` query result (conversation + inline messages +
+  // related ticket/call/participants). Bounded by MAX_CACHED_THREADS.
+  threadConversations: {
+    [conversationId: string]: ThreadConversation;
+  };
   callHistory: CallHistoryState;
   recordings: RecordingsState;
 }
@@ -76,6 +85,17 @@ export type QueryCacheEvent =
   | { type: 'MERGE_CALL_HISTORY_PAGE'; page: CallHistoryEntry[]; hasMore: boolean }
   | { type: 'HYDRATE_CALL_HISTORY'; data: CallHistoryState }
   | {
+      type: 'SET_THREAD_CONVERSATION';
+      conversationId: string;
+      conversation: ThreadConversation;
+    }
+  | {
+      type: 'HYDRATE_THREAD_CONVERSATIONS';
+      threadConversationsData: {
+        [conversationId: string]: ThreadConversation;
+      };
+    }
+  | {
       type: 'MERGE_RECORDINGS_PAGE';
       page: RecordingEntry[];
       hasMore: boolean;
@@ -87,6 +107,10 @@ export type QueryCacheEvent =
   | { type: 'SET_HYDRATED' };
 
 export const FINGERPRINT_FIELD = '__conversationFingerprint__';
+// Threads carry their own fingerprint so a schema bump to the thread query
+// doesn't invalidate the channel cache (and vice versa).
+export const THREAD_FINGERPRINT_FIELD = '__threadFingerprint__';
+export const THREAD_CONVERSATIONS_KEY = 'threadConversations';
 
 /* -------------------------- STATE MACHINE -------------------------- */
 
@@ -201,6 +225,32 @@ export const queryCacheMachine = setup({
         channelConversations: wrappedConversations,
       };
     }),
+    setThreadConversation: assign({
+      threadConversations: ({ context, event }) => {
+        if (event.type !== "SET_THREAD_CONVERSATION")
+          return context.threadConversations;
+        const next = {
+          ...context.threadConversations,
+          [event.conversationId]: event.conversation,
+        };
+        // Same LRU trick as channels: string-key insertion order lets us
+        // treat the head of Object.keys as least-recently-set.
+        delete next[event.conversationId];
+        next[event.conversationId] = event.conversation;
+        const keys = Object.keys(next);
+        for (let i = 0; i < keys.length - MAX_CACHED_THREADS; i++) {
+          delete next[keys[i]!];
+        }
+        return next;
+      },
+    }),
+    hydrateThreadConversations: assign(({ event, context }) => {
+      if (event.type !== "HYDRATE_THREAD_CONVERSATIONS") return context;
+      return {
+        ...context,
+        threadConversations: { ...event.threadConversationsData },
+      };
+    }),
     mergeCallHistoryPage: assign({
       callHistory: ({ context, event }) => {
         if (event.type !== 'MERGE_CALL_HISTORY_PAGE') return context.callHistory;
@@ -287,6 +337,7 @@ export const queryCacheMachine = setup({
     cache: new Map(),
     isHydrated: false,
     channelConversations: {},
+    threadConversations: {},
     callHistory: { calls: [], hasMore: true },
     recordings: { recordings: [], hasMore: true },
   },
@@ -305,6 +356,12 @@ export const queryCacheMachine = setup({
     },
     MERGE_CONVERSATION: {
       actions: 'mergeConversation',
+    },
+    SET_THREAD_CONVERSATION: {
+      actions: "setThreadConversation",
+    },
+    HYDRATE_THREAD_CONVERSATIONS: {
+      actions: "hydrateThreadConversations",
     },
     MERGE_CALL_HISTORY_PAGE: {
       actions: 'mergeCallHistoryPage',
@@ -328,6 +385,9 @@ export const queryCacheActor = createActor(queryCacheMachine).start();
 
 // LRU bound for per-channel conversation caches (warm-start data only).
 const MAX_CACHED_CHANNELS = 50;
+// Threads are much larger per entry (whole message list inline), so keep the
+// bound tighter.
+const MAX_CACHED_THREADS = 30;
 
 /* -------------------------- STORAGE REF -------------------------- */
 
@@ -484,6 +544,27 @@ export const getChannelConversationsQueryHash = (context: { userID: string }): s
 };
 
 /**
+ * Get the AST-based hash for the threadConversation query.
+ * This hash changes automatically when the query structure changes.
+ * Uses dummy args since the query shape does not depend on runtime arg values.
+ */
+export const getThreadConversationQueryHash = (context: {
+  userID: string;
+}): string => {
+  try {
+    const query = queries.threadConversation.fn({
+      args: { conversationId: "__dummy__" },
+      ctx: context as Context,
+    });
+    // @ts-expect-error - hash() is part of QueryImpl, not public Query interface
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call
+    return query.hash() as string;
+  } catch {
+    return "";
+  }
+};
+
+/**
  * Get the AST-based hash for the userCallHistory query.
  * This hash changes automatically when the query structure changes.
  * Uses dummy args since the query shape does not depend on runtime arg values.
@@ -538,8 +619,13 @@ export const setupQueryCachePersistence = (
   const doPersist = (): void => {
     // Read the LATEST snapshot at flush time (not the one that scheduled
     // the flush) so dirty-tracking compares against current state.
-    const { cache, channelConversations, callHistory, recordings } =
-      queryCacheActor.getSnapshot().context;
+    const {
+      cache,
+      channelConversations,
+      threadConversations,
+      callHistory,
+      recordings,
+    } = queryCacheActor.getSnapshot().context;
 
     // Only persist cache entries whose reference changed since the
     // last flush. Each `put` structured-clones on the main thread, so
@@ -561,6 +647,7 @@ export const setupQueryCachePersistence = (
       if (
         !cache.has(key) &&
         key !== 'channelConversations' &&
+        key !== THREAD_CONVERSATIONS_KEY &&
         key !== CALL_HISTORY_KEY &&
         key !== RECORDINGS_KEY
       ) {
@@ -580,6 +667,24 @@ export const setupQueryCachePersistence = (
       storage.saveContextProperty('channelConversations', payload).catch(error => {
         console.error('Failed to persist conversations:', error);
       });
+    }
+
+    if (
+      lastPersistedRefs.get(THREAD_CONVERSATIONS_KEY) !== threadConversations
+    ) {
+      lastPersistedRefs.set(THREAD_CONVERSATIONS_KEY, threadConversations);
+      const threadHash = getThreadConversationQueryHash({ userID: userId });
+
+      const threadPayload: Record<string, unknown> = {
+        ...threadConversations,
+        [THREAD_FINGERPRINT_FIELD]: threadHash,
+      };
+
+      storage
+        .saveContextProperty(THREAD_CONVERSATIONS_KEY, threadPayload)
+        .catch((error) => {
+          console.error("Failed to persist thread conversations:", error);
+        });
     }
 
     if (lastPersistedRefs.get(CALL_HISTORY_KEY) !== callHistory) {
@@ -660,13 +765,15 @@ export const hydrateQueryCacheFromStorage = async (
       return false;
     }
 
-    // Only hydrate special keys (conversations, call history, recordings).
+    // Only hydrate special keys (conversations, threads, call history, recordings).
     // Generic cache entries are lazy-loaded from IndexedDB on demand via useCachedQuery.
     const conversationsData: Record<string, Conversation[]> = {};
+    const threadConversationsData: Record<string, ThreadConversation> = {};
     let callHistoryHydrated = false;
     let recordingsHydrated = false;
 
     const currentConversationHash = getChannelConversationsQueryHash({ userID: userId });
+    const currentThreadHash = getThreadConversationQueryHash({ userID: userId });
 
     for (const [key, value] of Object.entries(context)) {
       if (key === 'channelConversations') {
@@ -686,6 +793,23 @@ export const hydrateQueryCacheFromStorage = async (
           if (channelId === FINGERPRINT_FIELD) continue;
           if (Array.isArray(conversations) && conversations.length > 0) {
             conversationsData[channelId] = conversations as Conversation[];
+          }
+        }
+      } else if (key === THREAD_CONVERSATIONS_KEY) {
+        const raw = value as Record<string, unknown>;
+        const storedHash = raw[THREAD_FINGERPRINT_FIELD] as string | undefined;
+        if (storedHash !== undefined && storedHash !== currentThreadHash) {
+          console.log(
+            "threadConversations discarded: query has changed since last save " +
+              `(stored hash: ${storedHash}, current: ${currentThreadHash}).`,
+          );
+          continue;
+        }
+        for (const [conversationId, conversation] of Object.entries(raw)) {
+          if (conversationId === THREAD_FINGERPRINT_FIELD) continue;
+          if (conversation && typeof conversation === "object") {
+            threadConversationsData[conversationId] =
+              conversation as ThreadConversation;
           }
         }
       } else if (key === CALL_HISTORY_KEY) {
@@ -742,8 +866,19 @@ export const hydrateQueryCacheFromStorage = async (
       );
     }
 
+    if (Object.keys(threadConversationsData).length > 0) {
+      queryCacheActor.send({
+        type: "HYDRATE_THREAD_CONVERSATIONS",
+        threadConversationsData,
+      });
+      console.log(
+        `Hydrated ${Object.keys(threadConversationsData).length} thread caches from storage`,
+      );
+    }
+
     return (
       Object.keys(conversationsData).length > 0 ||
+      Object.keys(threadConversationsData).length > 0 ||
       callHistoryHydrated ||
       recordingsHydrated
     );
