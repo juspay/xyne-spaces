@@ -189,8 +189,9 @@ const TicketFiltersSchema = z
   .strict();
 
 const SearchTicketsBodySchema = z.object({
-  channelId: z.string().min(1, 'channelId must not be empty').trim(),
+  channelId: z.string().min(1, 'channelId must not be empty').trim().optional(),
   boardIds: z.array(z.string().min(1, 'boardIds must not contain empty values').trim()).min(1, 'boardIds must not be empty').optional(),
+  projectId: z.string().min(1, 'projectId must not be empty').trim().optional(),
   senderEmail: z.string().email('senderEmail must be a valid email').trim().optional(),
   senderName: z.string().trim().min(1, 'senderName must not be empty').optional(),
   filters: TicketFiltersSchema.optional(),
@@ -198,11 +199,23 @@ const SearchTicketsBodySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
   cursor: z.string().optional(),
 }).superRefine((data, ctx) => {
-  if (data.customFields && Object.keys(data.customFields).length > 0 && (!data.boardIds || data.boardIds.length === 0)) {
+  // Require at least one scope (channelId / boardIds / projectId).
+  const hasChannel = typeof data.channelId === 'string' && data.channelId.length > 0;
+  const hasBoards = Array.isArray(data.boardIds) && data.boardIds.length > 0;
+  const hasProject = typeof data.projectId === 'string' && data.projectId.length > 0;
+  if (!hasChannel && !hasBoards && !hasProject) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['channelId'],
+      message: 'At least one of channelId, boardIds, or projectId is required',
+    });
+  }
+  // customFields is an expensive post-filter — require a board/project scope to bound it.
+  if (data.customFields && Object.keys(data.customFields).length > 0 && !hasBoards && !hasProject) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['boardIds'],
-      message: 'boardIds is required when customFields are provided',
+      message: 'boardIds or projectId is required when customFields are provided',
     });
   }
 });
@@ -1182,24 +1195,40 @@ export class TicketController {
         return;
       }
 
-      const { channelId, boardIds, senderEmail, senderName, filters, customFields, limit, cursor } = bodyResult.data;
-      const channelIds = [channelId.trim()];
-
-      const access = await validateChannelIdsAccess(channelIds, userId);
-      if (!access.ok) {
-        res.status(access.status).json({
-          error: access.error,
-          message: access.message,
+      const workspaceId = req.user?.workspaceId;
+      if (!workspaceId) {
+        res.status(400).json({
+          error: 'Authenticated workspace is required',
+          code: 'VALIDATION_ERROR',
         });
         return;
+      }
+
+      const { channelId, boardIds, projectId, senderEmail, senderName, filters, customFields, limit, cursor } = bodyResult.data;
+      const channelIds = channelId ? [channelId] : [];
+
+      // Channel scope keeps its participant ACL; board/project rely on the workspace backstop.
+      if (channelIds.length > 0) {
+        const access = await validateChannelIdsAccess(channelIds, userId);
+        if (!access.ok) {
+          res.status(access.status).json({
+            error: access.error,
+            message: access.message,
+          });
+          return;
+        }
       }
 
       const decodedCursor = decodeCursor<MerchantTicketsListCursor>(cursor);
 
       let conversationIdsBySender: string[] | undefined;
       const emailWhere: Prisma.EmailWhereInput = {
-        channelId: { in: channelIds },
         type: EmailType.DEFAULT,
+         // Narrow the sender lookup by channel, else by workspace (the ticket query is the
+        // real isolation boundary). Include null-workspace emails — legacy rows aren't backfilled.
+        ...(channelIds.length > 0
+          ? { channelId: { in: channelIds } }
+          : { OR: [{ workspaceId }, { workspaceId: null }] }),
       };
 
       if (senderEmail) {
@@ -1227,9 +1256,12 @@ export class TicketController {
       }
 
       const where: Prisma.TicketWhereInput = {
-        channelId: { in: channelIds },
+        // Tenant-isolation backstop: board/project searches have no ACL of their own.
+        workspaceId,
         isArchived: false,
+        ...(channelIds.length > 0 ? { channelId: { in: channelIds } } : {}),
         ...(boardIds && boardIds.length > 0 ? { boardId: { in: boardIds } } : {}),
+        ...(projectId ? { projectId } : {}),
         ...(conversationIdsBySender
           ? {
               conversationId: { in: conversationIdsBySender },
@@ -1282,6 +1314,7 @@ export class TicketController {
         conversationId: true,
         channelId: true,
         boardId: true,
+        projectId: true,
       } as const;
 
       const hasCustomFieldFilters = !!(customFields && Object.keys(customFields).length > 0);
@@ -1363,6 +1396,7 @@ export class TicketController {
           conversationId: ticket.conversationId,
           channelId: ticket.channelId,
           boardId: ticket.boardId,
+          projectId: ticket.projectId,
         };
       });
 
