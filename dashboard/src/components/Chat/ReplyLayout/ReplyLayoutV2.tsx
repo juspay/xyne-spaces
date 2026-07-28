@@ -57,7 +57,7 @@ const ReplyLayoutV2: React.FC<{
 
   return (
     <div
-      className={`flex items-center gap-2 mt-2 max-w-md pt-2 ${
+      className={`flex items-center gap-2 max-w-md pt-2 ${
         isMe
           ? 'min-[500px]:ml-14 max-[500px]:ml-auto max-[500px]:-mt-3'
           : 'min-[500px]:ml-14 max-[500px]:ml-12'

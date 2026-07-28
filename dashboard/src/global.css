@@ -812,7 +812,7 @@
      When a mention typeahead is open (data-mention-active) selection is owned by the mention list's
      own .cmdk-active-row, so the aria-selected blue is suppressed to avoid a second highlighted row. */
   [data-nav-active="true"]:not([data-mention-active="true"]) [cmdk-item][aria-selected="true"] {
-    background-color: rgb(219 234 254) !important; /* blue-100 */
+    background-color: hsl(var(--accent)) !important; /* gray, matches tabs/rows */
   }
   .cmdk-active-row {
     background-color: rgb(219 234 254); /* blue-100 */
@@ -820,7 +820,7 @@
   [data-theme="midnight"]
     [data-nav-active="true"]:not([data-mention-active="true"])
     [cmdk-item][aria-selected="true"] {
-    background-color: rgb(30 58 138 / 0.4) !important; /* blue-900 @ 40% */
+    background-color: hsl(var(--accent)) !important; /* gray, matches tabs/rows */
   }
   [data-theme="midnight"] .cmdk-active-row {
     background-color: rgb(30 58 138 / 0.4); /* blue-900 @ 40% */
@@ -3770,17 +3770,22 @@ img.inline-emoji,
   color: #d1d5db !important;
 }
 
-/* MultiSelect dropdown menu dark mode */
-[data-theme="midnight"] [role="listbox"] {
+/* MultiSelect dropdown menu dark mode.
+   Excludes the Cmd+K palette, which renders role="listbox" on its list ([cmdk-list])
+   and role="option" on its rows ([cmdk-item]) via cmdk. Those already use design
+   tokens (bg-background list, text-foreground/-muted-foreground rows, its own
+   cmdk-active-row selection), so this hardcoded dark must not override them.
+   Mirrors the [role="option"]:not([cmdk-item]) exclusion below. */
+[data-theme="midnight"] [role="listbox"]:not([cmdk-list]) {
   background-color: #1a1a1a !important;
   border-color: #374151 !important;
 }
 
-[data-theme="midnight"] [role="option"] {
+[data-theme="midnight"] [role="option"]:not([cmdk-item]) {
   color: #d1d5db !important;
 }
 
-[data-theme="midnight"] [role="option"]:hover {
+[data-theme="midnight"] [role="option"]:not([cmdk-item]):hover {
   background-color: #2a2d30 !important;
 }
 
