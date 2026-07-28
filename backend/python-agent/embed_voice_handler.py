@@ -14,10 +14,9 @@ import asyncio
 import tempfile
 import os
 import traceback
-from aiohttp import web
-from config import get_logger
 
-from modules.speaker_embedding import compute_enrollment_embedding
+from aiohttp import web
+from config import Config, get_logger
 
 logger = get_logger(__name__)
 
@@ -36,9 +35,23 @@ async def embed_voice(request):
     """
     tmp_path = None
     try:
+        cfg = Config.load()
+        if not cfg.diarization_enabled:
+            logger.info("[embed_voice] Rejected request | DIARIZATION_ENABLED=false")
+            return web.json_response(
+                {"error": "Speaker diarization is disabled"},
+                status=503,
+            )
+
+        logger.info("[embed_voice] Request received")
+        import av
+        import numpy as np
+        import torch
+
         reader = await request.multipart()
         field = await reader.next()
         if field is None or field.name != "audio":
+            logger.warning("[embed_voice] Missing multipart audio field")
             return web.json_response({"error": "Expected multipart field 'audio'"}, status=400)
 
         suffix = ".wav"
@@ -58,10 +71,6 @@ async def embed_voice(request):
                     break
                 tmp.write(chunk)
 
-        import av
-        import numpy as np
-        import torch
-
         container = av.open(tmp_path)
         resampler = av.AudioResampler(format="fltp", layout="mono", rate=16000)
 
@@ -74,6 +83,7 @@ async def embed_voice(request):
         container.close()
 
         if not frames:
+            logger.warning("[embed_voice] No audio frames decoded")
             return web.json_response({"error": "No audio frames decoded"}, status=400)
 
         waveform_np = np.concatenate(frames, axis=-1)
@@ -82,6 +92,7 @@ async def embed_voice(request):
 
         MIN_DURATION_S = 3.0
         if duration_s < MIN_DURATION_S:
+            logger.warning(f"[embed_voice] Audio too short | duration={duration_s:.1f}s")
             return web.json_response(
                 {"error": f"Audio too short ({duration_s:.1f}s). "
                           f"Please provide at least {MIN_DURATION_S}s of speech."},
@@ -89,6 +100,9 @@ async def embed_voice(request):
             )
 
         waveform = torch.from_numpy(waveform_np)
+
+        logger.info(f"[embed_voice] Computing speaker embedding | duration={duration_s:.1f}s")
+        from modules.speaker_embedding import compute_enrollment_embedding
 
         final_embedding, n_windows = await asyncio.to_thread(
             compute_enrollment_embedding, waveform, sample_rate

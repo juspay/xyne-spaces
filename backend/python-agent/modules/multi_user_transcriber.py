@@ -10,6 +10,8 @@ Uses livekit-agents built-in STT with:
 - Retry logic for handling transient errors
 """
 import asyncio
+import aiohttp
+import base64
 import concurrent.futures
 import json
 import logging
@@ -17,6 +19,8 @@ import math
 import os
 import time
 from typing import Dict, List, Optional, Callable, Awaitable, Set, Any
+
+import aiohttp
 
 from livekit import rtc
 from livekit.agents import (
@@ -139,6 +143,102 @@ class ResilientSTT(stt.STT):
         
         # All retries exhausted
         raise last_error
+class ChuteSTT(stt.STT):
+    """
+    Custom STT implementation for Chutes.ai Whisper API.
+    
+    Chutes.ai uses a non-OpenAI-compatible API:
+    - POST JSON with audio_b64 to /transcribe
+    - Returns JSON with text, language, segments, etc.
+    """
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        base_url: str = "https://chutes-whisper-large-v3.chutes.ai",
+        language: Optional[str] = None,
+    ):
+        super().__init__(
+            capabilities=stt.STTCapabilities(
+                streaming=False,
+                interim_results=False,
+            ),
+        )
+        self._api_key = api_key
+        self._base_url = base_url.rstrip("/")
+        self._language = language
+        self._session: Optional[aiohttp.ClientSession] = None
+
+    def _get_session(self) -> aiohttp.ClientSession:
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession()
+        return self._session
+
+    async def _recognize_impl(
+        self,
+        buffer,
+        *,
+        language=None,
+        conn_options=None,
+    ) -> stt.SpeechEvent:
+        """
+        Send audio to Chutes.ai Whisper API and return a SpeechEvent.
+        Uses rtc.combine_audio_frames().to_wav_bytes()
+        """
+        # Convert audio frames to WAV bytes using LiveKit's built-in utilities
+        wav_data = rtc.combine_audio_frames(buffer).to_wav_bytes()
+        audio_b64 = base64.b64encode(wav_data).decode("ascii")
+
+        payload = {"audio_b64": audio_b64}
+        lang = language or self._language
+        if lang:
+            payload["language"] = lang
+
+        headers = {
+            "Authorization": f"Bearer {self._api_key}",
+            "Content-Type": "application/json",
+        }
+
+        session = self._get_session()
+        url = f"{self._base_url}/transcribe"
+
+        #logger.info(f"Sending STT request directly to Chutes.ai Whisper API for {len(audio_b64)} chars of audio...")
+
+        async with session.post(url, json=payload, headers=headers) as resp:
+            if resp.status != 200:
+                body = await resp.text()
+                raise RuntimeError(
+                    f"Chutes STT API error {resp.status}: {body[:300]}"
+                )
+            data = await resp.json()
+
+        text = ""
+        detected_lang = ""
+        
+        # Chutes.ai returns a list of segment dictionaries
+        if isinstance(data, list):
+            # Concatenate all segment texts
+            text = " ".join(segment.get("text", "").strip() for segment in data if "text" in segment).strip()
+            # If any segment has a language, use it (though segments usually don't have language, 
+            # we rely on the input language if provided)
+            # Just default to input language or 'en'
+            detected_lang = language or self._language or "en"
+        elif isinstance(data, dict):
+            # Fallback just in case they change their API
+            text = data.get("text", "").strip()
+            detected_lang = data.get("language", language or self._language or "en")
+
+        return stt.SpeechEvent(
+            type=stt.SpeechEventType.FINAL_TRANSCRIPT,
+            alternatives=[
+                stt.SpeechData(
+                    text=text,
+                    language=detected_lang,
+                    confidence=1.0,
+                )
+            ],
+        )
 
 
 class ParticipantTranscriber(Agent):
@@ -232,7 +332,7 @@ class ParticipantTranscriber(Agent):
             })
 
         # Log transcription generated (Phase 2.1.16)
-        logger.info(f"transcription_generated | participant_id={self.participant_identity}, text_preview={user_transcript[:50]}...")
+        logger.info(f"transcription_generated | participant_id={self.participant_identity}")
         
         # Stop response generation - we're only transcribing
         raise StopResponse()
@@ -251,6 +351,8 @@ class MultiUserTranscriber:
         ctx: JobContext,
         event_bus: EventBus,
         *,
+        # STT Provider Selection ('azure' or 'chutes')
+        stt_provider: str = "azure",
         # Azure OpenAI STT Configuration
         azure_endpoint: str,
         azure_api_key: str,
@@ -264,6 +366,9 @@ class MultiUserTranscriber:
         deepgram_api_key: Optional[str] = None,
         deepgram_model: str = "nova-3",
         deepgram_language: str = "en-US",
+        # Chutes.ai STT Configuration
+        chutes_stt_base_url: Optional[str] = None,
+        chutes_stt_api_key: Optional[str] = None,
         # VAD Configuration
         vad_activation_threshold: float = 0.5,
         vad_min_speech_duration: float = 0.1,
@@ -301,6 +406,7 @@ class MultiUserTranscriber:
         self.ctx = ctx
         self.bus = event_bus
         self.agent_session = agent_session
+        self._stt_provider = stt_provider.lower()
         self._azure_endpoint = azure_endpoint
         self._azure_api_key = azure_api_key
         self._azure_api_version = azure_api_version
@@ -314,6 +420,9 @@ class MultiUserTranscriber:
         self._deepgram_api_key = deepgram_api_key
         self._deepgram_model = deepgram_model
         self._deepgram_language = deepgram_language
+        
+        self._chutes_stt_base_url = chutes_stt_base_url
+        self._chutes_stt_api_key = chutes_stt_api_key
         
         self._vad_activation_threshold = vad_activation_threshold
         self._vad_min_speech_duration = vad_min_speech_duration
@@ -367,6 +476,7 @@ class MultiUserTranscriber:
         
         logger.info(
             f"multi_user_transcriber_initialized | "
+            f"stt_provider={self._stt_provider}, "
             f"vad_threshold={vad_activation_threshold}, min_speech={vad_min_speech_duration}s, "
             f"min_silence={vad_min_silence_duration}s, prefix_padding={vad_prefix_padding_duration}s, "
             f"session_pool_size={self._pool_size}, "
@@ -401,25 +511,57 @@ class MultiUserTranscriber:
             "Xyne Bot", "Juspay Technologies", "Namma Switch",
         ]
 
+        multi_language = len(language_codes) > 1
+
         # Create Google STT with Chirp configuration and speech adaptation
         return google.STT(
             model=self._google_stt_model,
             languages=language_codes,
             credentials_file=credentials_file,
             location="us",
-            detect_language=False,
+            detect_language=multi_language,
             enable_word_confidence=False,
             min_confidence_threshold=0.5,
             sample_rate=16000,
             interim_results=True,
-            keywords=[(word, 10.0) for word in hot_words],
+            keywords=[(word, 10.0) for word in hot_words] if not multi_language else [],
         )
     
     def _create_stt(self, call_type: Optional[str] = None) -> ResilientSTT:
         """
         Create or reuse shared resilient STT instance.
+        
+        Provider bridge check:
+        - If stt_provider == 'chutes': use direct Chutes.ai Whisper STT
+        - If stt_provider == 'azure' (default): use existing Azure/Google/Deepgram flow
+        
         For HEADLESS calls, bypass cache to allow per-call STT selection.
         """
+        if self._stt_provider == "chutes":
+            if self._shared_stt is None or call_type == 'HEADLESS':
+                chutes_api_key = os.getenv("CHUTES_STT_API_KEY")
+                chutes_base_url = os.getenv("CHUTES_STT_BASE_URL", "https://chutes-whisper-large-v3.chutes.ai")
+                
+                if not chutes_api_key:
+                    raise ValueError(
+                        "STT_PROVIDER is 'chutes' but CHUTES_STT_API_KEY is not set"
+                    )
+                logger.info(
+                    f"[STT] Using Chutes.ai Whisper STT | "
+                    f"base_url={chutes_base_url}"
+                )
+                inner_stt = ChuteSTT(
+                    api_key=chutes_api_key,
+                    base_url=chutes_base_url,
+                )
+                resilient_stt = ResilientSTT(inner_stt=inner_stt, max_retries=3, base_delay=1.0)
+                if call_type == 'HEADLESS':
+                    return resilient_stt
+                else:
+                    self._shared_stt = resilient_stt
+            return self._shared_stt
+        
+        # === Default provider: Azure (existing flow with Google/Deepgram sub-models) ===
         selected_model = self._stt_model_override or self._stt_model
         
         if self._shared_stt is None or call_type == 'HEADLESS':
@@ -476,7 +618,7 @@ class MultiUserTranscriber:
                     azure_endpoint=self._azure_endpoint,
                     azure_deployment=self._azure_deployment,
                     api_version=self._azure_api_version,
-                    api_key=self._azure_api_key,
+                    api_key=self._azure_api_key
                     #prompt=stt_prompt
                 )
                 self._shared_stt = ResilientSTT(inner_stt=inner_stt, max_retries=3, base_delay=1.0)
@@ -848,39 +990,6 @@ class MultiUserTranscriber:
             participant_identity: The participant's identity (for cleanup)
         """
         try:
-            # Force VAD flush: inject silence to trigger END_OF_SPEECH for any buffered speech
-            if hasattr(session, '_activity') and session._activity:
-                activity = session._activity
-                if hasattr(activity, '_audio_recognition') and activity._audio_recognition:
-                    audio_rec = activity._audio_recognition
-                    try:
-                        audio_rec.commit_user_turn(
-                            transcript_timeout=2.0,
-                            stt_flush_duration=0.6,
-                            audio_detached=False
-                        )
-                        # Wait for the async flush task to complete
-                        if hasattr(audio_rec, '_commit_user_turn_atask') and audio_rec._commit_user_turn_atask:
-                            try:
-                                await asyncio.wait_for(audio_rec._commit_user_turn_atask, timeout=3.0)
-                            except asyncio.TimeoutError:
-                                logger.warning(f"stt_flush_task_timeout | participant_id={participant_identity}")
-                        
-                        # Emit transcript if flush captured speech (normal callback won't fire since session is closing)
-                        transcript = getattr(audio_rec, '_audio_transcript', None)
-                        if transcript and transcript.strip():
-                            agent = getattr(activity, '_agent', None)
-                            participant_name = getattr(agent, 'participant_name', participant_identity) if agent else participant_identity
-                            await self._emit_transcription({
-                                "user": participant_name,
-                                "text": transcript,
-                                "timestamp": time.time(),
-                                "spoken_at": time.time(),
-                                "participant_identity": participant_identity,
-                            })
-                    except Exception as e:
-                        logger.warning(f"stt_flush_failed | participant_id={participant_identity}, error={e}")
-            
             logger.info(f"stt_drain_started")
             await session.drain()
             logger.info(f"stt_drain_completed")
@@ -920,9 +1029,11 @@ class MultiUserTranscriber:
         self._call_type = call_type
     
     def set_stt_model_override(self, model: str):
-        """Set user's STT model preference from UI (google or azure)."""
-        self._stt_model_override = model.lower()
-        logger.info(f"[MultiUserTranscriber] STT model override: {model}")
+        """Allow runtime override of STT model (e.g. from room metadata)"""
+        if model and model.lower() in ['google', 'azure', 'deepgram']:
+            self._stt_model_override = model.lower()
+            if self._stt_provider != "chutes":
+                logger.info(f"[{self.__class__.__name__}] STT model override: {model}")
     
     def _is_ai_enabled(self) -> bool:
         """Check if AI voice is currently enabled."""
