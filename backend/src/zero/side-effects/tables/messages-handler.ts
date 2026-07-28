@@ -121,6 +121,38 @@ function getFlowJsonRawTextForMentions(content: string): string | null {
   return extractTextFromFlowJson(content) || null;
 }
 
+/**
+ * Friendly notification label for a flow CARD (plan, etc.) whose todos/title
+ * don't live in text `content` props — so extractTextFromFlowJson returns ''
+ * and the preview would otherwise fall back to the meaningless "Flow JSON" text
+ * node. Currently handles the `plan` component; returns null for other flows so
+ * the caller keeps its existing extraction.
+ */
+function getFlowCardNotificationLabel(content: string): string | null {
+  if (!content.includes('data-flow-json')) return null;
+  const attrMatch = content.match(/data-flow-json="([^"]+)"/);
+  if (!attrMatch) return null;
+  try {
+    const json = attrMatch[1]
+      .replace(/&quot;/g, '"')
+      .replace(/&#10;/g, '\n')
+      .replace(/&#13;/g, '\r');
+    const flow = JSON.parse(json) as {
+      components?: Array<{ type?: string; props?: Record<string, unknown> }>;
+    };
+    const plan = Array.isArray(flow.components)
+      ? flow.components.find((c) => c?.type === 'plan')
+      : undefined;
+    if (!plan) return null;
+    const rawTitle = plan.props?.['title'];
+    const title = typeof rawTitle === 'string' ? rawTitle.trim() : '';
+    const verb = plan.props?.['phase'] === 'proposed' ? 'Proposed a plan' : 'Shared a plan';
+    return title ? `📋 ${verb}: ${title}` : `📋 ${verb}`;
+  } catch {
+    return null;
+  }
+}
+
 function getNotificationPreviewContent(content: string, msgType: string, hasAttachment: boolean): string {
   let cleanContent = '';
 
@@ -142,10 +174,18 @@ function getNotificationPreviewContent(content: string, msgType: string, hasAtta
   }
 
   if (!cleanContent) {
-    // For flow JSON messages, extract text from the component tree instead of
-    // parsing HTML (which only sees the literal "Flow JSON" text node).
-    const flowText = getFlowJsonContentForNotification(content);
-    cleanContent = flowText ?? getPlainTextNotificationContent(content);
+    // Flow CARDS (plan, etc.) carry no text `content` props — show a friendly
+    // label ("📋 Shared a plan: …") instead of the raw FlowJSON / "Flow JSON"
+    // placeholder. Other flows fall back to component-tree text extraction.
+    const flowCardLabel = getFlowCardNotificationLabel(content);
+    if (flowCardLabel) {
+      cleanContent = flowCardLabel;
+    } else {
+      // For flow JSON messages, extract text from the component tree instead of
+      // parsing HTML (which only sees the literal "Flow JSON" text node).
+      const flowText = getFlowJsonContentForNotification(content);
+      cleanContent = flowText ?? getPlainTextNotificationContent(content);
+    }
   }
 
   if (!cleanContent && hasAttachment) {

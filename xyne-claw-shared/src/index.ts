@@ -22,8 +22,8 @@ export type { SkillDiff, SkillForAuthz, ApproverResolution, SkillApprovalAuthz }
 export { createSkillTool, updateSkillTool } from "./tools/skill-management/index.js";
 export { FlowBuilder, mdToMrkdwn, buildWriteApprovalFlow, buildWriteResultFlow, buildTwinApprovalFlow, buildUserQuestionFlow, buildPromoteProviderFlow, buildGoalSuggestionFlow, buildAgentCallProposalFlow, buildCloneApprovalFlow, buildSkillUpdateApprovalFlow } from "./flow/builder.js";
 export type { FlowDefinition, FlowComponent, FlowAction, SelectOption } from "./flow/builder.js";
-export { buildPlanFlow } from "./flow/plan-flow.js";
-export type { Todo, TodoStatus } from "./flow/plan-flow.js";
+export { buildPlanFlow, PLAN_COMPONENT_ID } from "./flow/plan-flow.js";
+export type { Todo, TodoStatus, PlanPhase, PlanTodoInput } from "./flow/plan-flow.js";
 export { todoTools, todoWriteTool, todoReadTool, getPlan, clearPlan, PLAN_TOOL_SLUGS, isPlanToolSlug } from "./tools/todo/todo-tools.js";
 export { isReadOnlyJob } from "./tools/sandbox/repo-configs.js";
 export { buildHtmlDocument, sanitizeHtmlBody } from "./tools/create-report/template.js";

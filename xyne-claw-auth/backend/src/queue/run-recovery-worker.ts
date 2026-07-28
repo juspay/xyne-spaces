@@ -210,6 +210,10 @@ async function enqueueLockContentionRun(state: RunRecoveryState): Promise<boolea
     ...(dispatchPayload.context ? { context: dispatchPayload.context } : {}),
     ...(sessionContext.resultForwardUrl ? { resultForwardUrl: sessionContext.resultForwardUrl } : {}),
     ...(sessionContext.resolveMentions ? { resolveMentions: sessionContext.resolveMentions } : {}),
+    // This run already dispatched once (and persisted its user ChatMessage) before
+    // hitting session_locked — the drain re-dispatch must NOT re-persist it, or the
+    // retried turn shows up as a duplicate root user row (a branch).
+    alreadyPersisted: true,
     ts: Date.now(),
   };
   const enq = await enqueueMessage(queuedMsg);

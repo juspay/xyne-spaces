@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { X, ChevronLeft } from 'lucide-react';
 import { FlowRenderer } from './FlowRenderer';
@@ -33,6 +33,29 @@ export const FlowScreenManager: React.FC<FlowScreenManagerProps> = ({
   onClose,
 }) => {
   const [screenStack, setScreenStack] = useState<FlowDefinition[]>([flow]);
+
+  // Live re-sync of the inline (base) screen when the agent UPDATES this
+  // message's flow in place — e.g. a plan/todo card advancing
+  // proposed → executing → done, or being greyed out as superseded. Zero
+  // replicates the messages.content UPDATE and RenderMessageWithHTML passes a
+  // fresh `flow` prop, but the React key (screenId) is STABLE across an in-place
+  // update, so this component re-renders WITHOUT remounting — meaning the
+  // one-time `useState([flow])` seed above would otherwise stay frozen and the
+  // card would only refresh after a thread close/reopen (the reported "have to
+  // reopen to see progress" bug). `flow` is a new object every render (parsed
+  // fresh from data-flow-json), so key the effect on a stable serialization to
+  // avoid an update loop. Only the inline base [0] is replaced; any open popup
+  // stack (screenStack[1+]) is preserved. FlowRenderer reseeds its own
+  // validated flow from the new prop (same screenId ⇒ user form values kept).
+  const flowKey = JSON.stringify(flow);
+  const flowRef = useRef(flow);
+  flowRef.current = flow;
+  useEffect(() => {
+    setScreenStack(prev =>
+      prev.length <= 1 ? [flowRef.current] : [flowRef.current, ...prev.slice(1)],
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flowKey]);
 
   const inlineScreen = screenStack[0]!;
   const popupScreen = screenStack.length > 1 ? screenStack[screenStack.length - 1] : null;

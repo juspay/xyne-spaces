@@ -105,6 +105,7 @@ import { buildMemorySearchTool } from "../memory-search.js";
 import { buildMemoryWriteTool } from "../memory-write.js";
 import { buildMemoryFileTools } from "../memory-file-tools.js";
 import { buildTwinDeliverTool, buildTwinDeliverMandate, type TwinDeliverRef } from "../twin-deliver.js";
+import { buildProposePlanTool, PROPOSE_PLAN_TOOL_NAME, type ProposePlanRef } from "../propose-plan.js";
 import {
   buildSuggestGoalTool,
   type PendingGoalSuggestion,
@@ -382,6 +383,8 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     twinDestinations,
     senderName,
     channelName,
+    mode,
+    planContinuation,
     generateFollowUpSuggestions: shouldGenerateFollowUpSuggestions,
   } = req.body as {
     userId?: string;
@@ -488,6 +491,15 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
      *  raw sender id. Set by claw-auth webhook.ts on USER_MENTIONED dispatches. */
     senderName?: string;
     channelName?: string;
+    /** Plan/auto mode gate (agent.config.planMode). 'plan' ⇒ read-only palette +
+     *  terminal propose-plan tool; the agent proposes a plan and STOPS. 'auto'
+     *  (or absent) ⇒ today's behavior, unchanged. Set by claw-auth ONLY for
+     *  non-twin thread mentions when planMode is on. */
+    mode?: "plan" | "auto";
+    /** True when this run is Turn 2 (auto) dispatched right after a plan was
+     *  approved (or a trivial plan auto-continued). Used only to emit a
+     *  mode_switch debug event; behavior is identical to any other auto run. */
+    planContinuation?: boolean;
     generateFollowUpSuggestions?: boolean;
   };
 
@@ -732,6 +744,8 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
       twinDestinations,
       senderName,
       channelName,
+      mode,
+      planContinuation,
       shouldGenerateFollowUpSuggestions,
       typeof callbackUrl === "string" ? callbackUrl : undefined,
     ).finally(() => {
@@ -853,6 +867,8 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
         twinDestinations,
         senderName,
         channelName,
+        mode,
+        planContinuation,
         shouldGenerateFollowUpSuggestions,
         typeof callbackUrl === "string" ? callbackUrl : undefined,
       );
@@ -951,6 +967,8 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     twinDestinations,
     senderName,
     channelName,
+    mode,
+    planContinuation,
     shouldGenerateFollowUpSuggestions,
     typeof callbackUrl === "string" ? callbackUrl : undefined,
   ).finally(() => {
@@ -1298,6 +1316,8 @@ async function processTask(
   twinDestinations?: import("xyne-claw-shared").TwinDestinationCandidate[],
   senderName?: string,
   channelName?: string,
+  mode?: "plan" | "auto",
+  planContinuation?: boolean,
   shouldGenerateFollowUpSuggestions?: boolean,
   lateFollowUpCallbackUrl?: string,
 ): Promise<void> {
@@ -1424,6 +1444,11 @@ async function processTask(
   // abort. Filled by buildSuggestGoalTool's callback when the agent calls
   // suggest-goal.
   let pendingGoalSuggestion: PendingGoalSuggestion | null = null;
+  // Hoisted so the catch handler can recover the proposed plan: propose-plan
+  // (plan mode's terminal tool) fires abortRun, so the run lands in the catch
+  // — never the success path — and the plan is read from ref.value there and
+  // shipped as `pendingPlan` on the callback.
+  const proposePlanRef: ProposePlanRef = {};
   let callbackProvider = provider ?? "spaces";
   let callbackModel = LITELLM.model;
   const followUpsEnabledByFlag = shouldGenerateFollowUpSuggestions === true;
@@ -2420,13 +2445,30 @@ async function processTask(
     // never called the delivery tool, fail-closing to silence. Exclude the twin
     // mention flow from plan tools/primer entirely.
     const isTwinMentionFlow = !!agentSlug && isDigitalTwinAgent(agentSlug) && eventType === "USER_MENTIONED";
+    // Plan mode (agent.config.planMode → dispatched with mode='plan' for non-twin
+    // thread mentions): the agent gets a READ-ONLY palette + the terminal
+    // propose-plan tool, proposes a plan, and STOPS for approval. The
+    // `&& !isTwinMentionFlow` is a belt-and-suspenders safety net — claw-auth
+    // already never sets mode='plan' for USER_MENTIONED (INVARIANT B). When mode
+    // is 'auto'/undefined this is false and every branch below is the existing
+    // path, so auto-mode behavior is unchanged (INVARIANT A).
+    const isPlanMode = mode === "plan" && !isTwinMentionFlow;
     const planToolsDefaultOn =
       (!!channelId || (progressUrl && typeof progressUrl !== "string")) &&
       !isScheduledOrAutomationRun(eventType, conversationId) &&
-      !isTwinMentionFlow;
+      !isTwinMentionFlow &&
+      !isPlanMode;
     const planTools = remainingCustomTools.filter((t) => isPlanToolSlug(t.name));
     allTools = allTools.filter((t) => !isPlanToolSlug(t.name));
     if (planToolsDefaultOn) allTools.push(...planTools);
+    // Plan mode swaps the live todo-write/todo-read tools OUT (they're already
+    // filtered above; planToolsDefaultOn is false here) and the terminal
+    // propose-plan tool IN — the ONLY exit in plan mode. It captures the plan
+    // into proposePlanRef and fires abortRun to end the turn.
+    if (isPlanMode) {
+      allTools.push(buildProposePlanTool(proposePlanRef, abortRun));
+      log("Plan mode — injected terminal propose-plan tool (todo-write/todo-read off)");
+    }
 
     // Inject copilot respond-to-user tool if provider is copilot.
     // Defence-in-depth: also require an actual copilot config. Without this
@@ -2435,7 +2477,11 @@ async function processTask(
     // would land in copilot mode while the LLM actually fell through to
     // LiteLLM. That mismatch forced thinking on a Claude Sonnet that
     // doesn't separate thinking blocks, leaking visible reasoning to users.
-    const isCopilot = provider === "copilot" && !!parentProviderConfig?.apiKey;
+    // `&& !isPlanMode`: plan mode owns turn termination via propose-plan, so it
+    // is mutually exclusive with the other terminal-delivery channels. Gating at
+    // the definition keeps tools, prompt notes, and callbacks all consistent.
+    // When auto (isPlanMode false) this is a no-op — behavior is unchanged.
+    const isCopilot = provider === "copilot" && !!parentProviderConfig?.apiKey && !isPlanMode;
     const effectiveModel = parentProviderConfig?.model ?? LITELLM.model;
     log(
       `provider=${provider ?? "spaces"} isCopilot=${isCopilot} model=${effectiveModel}`,
@@ -2476,7 +2522,7 @@ async function processTask(
     }
     const outputFormat = parseOutputFormat(agentConfig);
     const structuredOutputRef: StructuredOutputRef = {};
-    const structuredOutputActive = !!outputFormat && !isCopilot;
+    const structuredOutputActive = !!outputFormat && !isCopilot && !isPlanMode;
     if (outputFormat && isCopilot) {
       log(
         "outputFormat configured but provider is copilot — structured output skipped (respond-to-user owns delivery)",
@@ -2522,7 +2568,8 @@ async function processTask(
     const verifyResponses =
       (verifyCfg ?? (verifyAllDefault && !isTwinAgent)) &&
       !structuredOutputActive &&
-      !isTwinMentionFlow;
+      !isTwinMentionFlow &&
+      !isPlanMode;
     const evidenceRef: EvidenceRef = {};
     if (verifyResponses && !isCopilot) {
       const rawCriteria = agentConfig?.["verifyResponseCriteria"];
@@ -2620,6 +2667,27 @@ async function processTask(
       allTools = allTools.filter((t) => !RO_DISABLED.has(t.name));
       if (allTools.length !== before) {
         log(`Read-only ${eventType ?? "scheduled"} run — stripped ${before - allTools.length} mutating sandbox tool(s) (sbx-git read-only)`);
+      }
+    }
+
+    // Plan mode is read-only: the agent must PROPOSE, not execute. Strip every
+    // write-flagged tool (MCP writes, memory-create, ticket/message creators, …)
+    // AND the mutating sandbox tools, so nothing can act before the user
+    // approves. The terminal propose-plan tool (not a write tool) always
+    // survives. Applies ONLY when isPlanMode — auto runs are untouched.
+    if (isPlanMode) {
+      const RO_PLAN = new Set([
+        "sandbox-run", "sandbox-run-detached", "sandbox-write-file",
+        "sandbox-create", "sandbox-destroy", "write",
+      ]);
+      const beforePlan = allTools.length;
+      allTools = allTools.filter(
+        (t) =>
+          t.name === PROPOSE_PLAN_TOOL_NAME ||
+          (!isWriteTool(t, allGroups) && !RO_PLAN.has(t.name)),
+      );
+      if (allTools.length !== beforePlan) {
+        log(`Plan mode read-only — stripped ${beforePlan - allTools.length} write/mutating tool(s)`);
       }
     }
 
@@ -2760,6 +2828,32 @@ async function processTask(
       fullContext = fullContext
         ? `${fullContext}\n\n${planPrimer}`
         : planPrimer;
+    } else if (isPlanMode) {
+      // Plan mode: the agent has a READ-ONLY palette + the terminal propose-plan
+      // tool. It investigates just enough, then proposes a plan and STOPS for the
+      // user's approval. Execution happens in a separate auto-mode turn.
+      // The default primer below can be OVERRIDDEN per-agent via
+      // agent.config.planModePrompt (edited from the dashboard). Keep this text in
+      // sync with DEFAULT_PLAN_MODE_PROMPT in the dashboard behaviour editor, which
+      // pre-fills the textarea with the same default. The propose-plan gate is
+      // enforced by the TOOL PALETTE (read-only + terminal propose-plan), not this
+      // prose, so a custom prompt can only change guidance — it can never disable
+      // the gate or let the agent execute before approval.
+      const defaultPlanModePrimer = [
+        "## Plan mode — propose first, do NOT execute",
+        "You are in PLAN MODE. You have READ-ONLY tools (search / read) and ONE terminal tool: `propose-plan`. You CANNOT edit, run commands, send messages, or otherwise take action yet — those tools are intentionally unavailable until the user approves.",
+        "Do this, in order:",
+        "1. Investigate ONLY as much as you need to write a concrete, correct plan (search / read the relevant context). Keep it lightweight — you are scoping, not solving.",
+        "2. Call `propose-plan` ONCE with: the full ordered todo list (`{ id, title }` each — stable ids and CRISP titles: imperative, max 6–8 words, NO 'Step 1'/'Stage 2'/number prefixes; the UI numbers them), and a `document` — the full plan written out in GitHub-flavored MARKDOWN (context, approach, what each step does and why, risks, expected outcome). The todos are the checklist; the document is the detailed brief shown when the user expands the plan. Also pass a `trivial` judgment. This call ENDS your turn immediately.",
+        "3. Do NOT do the work, do NOT write a final answer, do NOT call any tool after propose-plan. The user reviews your plan, picks the steps to keep, and approves — only then does execution begin (in a fresh turn where you'll have your full tools back).",
+        "Set `trivial: true` ONLY for a genuinely simple, low-risk ask where an approval prompt would just be noise; then it starts immediately. When unsure, use `trivial: false`.",
+      ].join("\n");
+      const customPlanModePrompt = agentConfig?.["planModePrompt"];
+      const planModePrimer =
+        typeof customPlanModePrompt === "string" && customPlanModePrompt.trim()
+          ? customPlanModePrompt.trim()
+          : defaultPlanModePrimer;
+      fullContext = fullContext ? `${fullContext}\n\n${planModePrimer}` : planModePrimer;
     }
 
     // ── Sandbox primer ─────────────────────────────────────────────────────
@@ -3116,6 +3210,9 @@ async function processTask(
         modelSettings,
         ...(structuredOutputActive ? { structuredOutputRef } : {}),
         ...(isTwinMentionFlow ? { twinDeliverRef } : {}),
+        // Debug telemetry only — agent.ts emits session_tools/mode_switch events.
+        ...(isPlanMode ? { mode: "plan" as const } : mode ? { mode } : {}),
+        ...(planContinuation ? { planContinuation: true } : {}),
         userId,
         task,
         context: fullContext,
@@ -3572,6 +3669,18 @@ async function processTask(
             .slice(0, 200) || undefined
         : undefined;
 
+    // Consistency check: in plan mode propose-plan fires abortRun, so a proposed
+    // plan should ALWAYS land in the catch branch, never here. Reaching the
+    // success path with a proposed plan means abortRun didn't stop the loop — the
+    // run kept going. The read-only plan-mode palette means it couldn't have
+    // *acted*, and claw-auth prioritizes pendingPlan over the (ignored) result
+    // text, so the plan still ships — but log it so broken abort wiring is visible.
+    if (proposePlanRef.value) {
+      logErr(
+        `[plan-mode] propose-plan was called but the run reached the SUCCESS path (abortRun did not terminate the loop) — shipping the plan anyway; investigate abort wiring. session=${sessionId}`,
+      );
+    }
+
     clog.info(
       `[follow-ups] callback sessionId=${sessionId} pendingQuestions=${pendingQuestions.length} followUpCount=${pendingQuestions.find((question) => question.purpose === "follow_up_suggestions")?.options.length ?? 0}`,
     );
@@ -3613,6 +3722,11 @@ async function processTask(
       ...(dedupedPendingActions.length > 0 ? { pendingActions: dedupedPendingActions } : {}),
       ...(pendingResponses.length > 0 ? { pendingResponses } : {}),
       ...(pendingGoalSuggestion ? { pendingGoalSuggestion } : {}),
+      // Plan mode: propose-plan normally aborts (→ catch branch below), but if
+      // the run finished cleanly with a plan proposed, carry it here too.
+      // claw-auth's /webhook/result posts the plan card and (if trivial)
+      // auto-continues into the auto-mode execution turn.
+      ...(proposePlanRef.value ? { pendingPlan: proposePlanRef.value } : {}),
       ...(llmCitations && llmCitations.length > 0 ? { llmCitations } : {}),
       followUpsPending: followUpOutcome === "parallel_pending",
       provider: completedProvider,
@@ -3773,6 +3887,36 @@ async function processTask(
         ...(err instanceof RunCancelledError && err.toolInvocations.length > 0 ? { toolInvocations: err.toolInvocations } : {}),
         ...(err instanceof RunCancelledError ? { tokenUsage: err.tokenUsage } : {}),
         ...(llmCitationsAtError && llmCitationsAtError.length > 0 ? { llmCitations: llmCitationsAtError } : {}),
+        provider: callbackProvider,
+        model: callbackModel,
+      });
+    } else if (
+      proposePlanRef.value &&
+      !isUserCancel &&
+      (err instanceof RunCancelledError || abortSignal?.aborted)
+    ) {
+      // Plan mode: propose-plan fired abortRun to end the turn, so the run lands
+      // HERE (RunCancelledError), not the success path — the SAME pattern as
+      // respond-to-user above. This is a normal, successful plan proposal, NOT a
+      // cancellation: emit status="completed" carrying the plan. claw-auth's
+      // /webhook/result posts the plan card (proposed → Approve, or executing +
+      // auto-continue when trivial). The plan card is the deliverable, so no
+      // chat text on this turn.
+      log(
+        `Session terminated by propose-plan (trivial=${proposePlanRef.value.trivial}, ${proposePlanRef.value.todos.length} todo(s)): ${sessionId}`,
+      );
+      await sendCallback(callbackUrl, sessionToken, {
+        sessionId,
+        userId,
+        conversationId: conversationId ?? null,
+        agentSlug: agentSlug ?? null,
+        fastMode: fastModeForCallback,
+        status: "completed",
+        result: "",
+        pendingPlan: proposePlanRef.value,
+        ...(err instanceof RunCancelledError && err.toolsUsed.length > 0 ? { toolsUsed: err.toolsUsed } : {}),
+        ...(err instanceof RunCancelledError && err.toolInvocations.length > 0 ? { toolInvocations: err.toolInvocations } : {}),
+        ...(err instanceof RunCancelledError ? { tokenUsage: err.tokenUsage } : {}),
         provider: callbackProvider,
         model: callbackModel,
       });

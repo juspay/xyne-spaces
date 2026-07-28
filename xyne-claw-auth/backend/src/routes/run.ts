@@ -977,6 +977,13 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
       }
     }
 
+    // Plan-mode trust gate (see forwardBody below). Honor mode='plan' ONLY when
+    // the agent's own stored config opted in — never from req.body alone.
+    const requestedMode = (req.body as { mode?: "plan" | "auto" }).mode;
+    const agentPlanModeOptIn = (agent.agentConfig as Record<string, unknown> | undefined)?.["planMode"] === true;
+    const effectivePlanMode: "plan" | "auto" | undefined =
+      requestedMode === "plan" ? (agentPlanModeOptIn ? "plan" : "auto") : requestedMode;
+
     // Shared request body for both transports. SSE consumers (run-stream.ts)
     // pass progressUrl/callbackUrl too — claw ignores them in SSE mode since
     // the response stream IS the channel.
@@ -1024,6 +1031,16 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
       ...(detached === true ? { detached: true } : {}),
       fastMode: effectiveFastMode,
       ...(resumedFromHandoff === true ? { resumedFromHandoff: true } : {}),
+      // Plan/auto mode gate. This forwardBody is an explicit allowlist, so these
+      // MUST be threaded here or claw never sees them and plan mode is inert.
+      // 'plan' is set by the webhook mention dispatch (planMode agents, non-twin);
+      // planContinuation marks the auto-mode Turn 2 after a plan is approved.
+      // SECURITY: this proxy is the trust boundary. Only HONOR mode='plan' when the
+      // AGENT actually opted in (agent.agentConfig.planMode), so a caller with the
+      // S2S key can't force plan mode on an agent that never enabled it. 'auto' and
+      // absent are pass-through (both mean today's behavior).
+      ...(effectivePlanMode ? { mode: effectivePlanMode } : {}),
+      ...((req.body as { planContinuation?: boolean }).planContinuation === true ? { planContinuation: true } : {}),
       ...(generateFollowUpSuggestions === true ? { generateFollowUpSuggestions: true } : {}),
     };
 

@@ -266,7 +266,23 @@ export const planPropsSchema = z.discriminatedUnion('phase', [
       phase: z.literal('proposed'),
       title: z.string(),
       desc: z.string().optional(),
+      // The DETAILED plan in markdown — the card briefs (title + todos); the
+      // expanded view renders this full document. Authored once at propose time
+      // and preserved verbatim across executing/done.
+      document: z.string().optional(),
       todos: z.array(proposedTodoSchema),
+      // Set when a NEWER plan has replaced this one (the agent re-planned). The
+      // renderer greys the card out and disables Approve so a stale plan can't
+      // be run. Absent on the live/current proposal.
+      superseded: z.boolean().optional(),
+      // Set when the user explicitly REJECTED this plan (tapped Reject). Terminal,
+      // read-only, with a "Rejected by <decidedBy>" audit — no execution follows.
+      rejected: z.boolean().optional(),
+      // Display name of the human who approved/rejected — the audit footer.
+      decidedBy: z.string().optional(),
+      // ISO timestamp of the reject decision — rendered next to <decidedBy> in the
+      // audit footer ("Rejected by <name> · <time>"). Captured server-side once.
+      decidedAt: z.string().optional(),
     })
     .strict(),
   z
@@ -274,7 +290,22 @@ export const planPropsSchema = z.discriminatedUnion('phase', [
       phase: z.literal('executing'),
       title: z.string(),
       desc: z.string().optional(),
+      // The detailed markdown plan, carried over from the proposed card.
+      document: z.string().optional(),
       todos: z.array(execTodoSchema),
+      // Set when the plan skipped the user-approval gate because it was trivial
+      // (auto-approved). The renderer shows an "Auto-approved" chip so the user
+      // understands why execution started without them tapping Approve.
+      autoApproved: z.boolean().optional(),
+      // Display name of the human who approved this plan (absent when
+      // auto-approved). Rendered as "Approved by <name>" — the who-approved
+      // metadata.
+      approvedBy: z.string().optional(),
+      // ISO timestamp of the approve decision — rendered next to the approver in
+      // the audit footer ("Approved by <name> · <time>" / "Auto-approved by the
+      // agent · <time>"). Captured server-side ONCE at approve/trivial time and
+      // preserved across live todo-write updates (never re-stamped per render).
+      approvedAt: z.string().optional(),
     })
     .strict(),
   z
@@ -282,7 +313,12 @@ export const planPropsSchema = z.discriminatedUnion('phase', [
       phase: z.literal('done'),
       title: z.string(),
       desc: z.string().optional(),
+      // The detailed markdown plan, carried over from the proposed card.
+      document: z.string().optional(),
       todos: z.array(execTodoSchema),
+      autoApproved: z.boolean().optional(),
+      approvedBy: z.string().optional(),
+      approvedAt: z.string().optional(),
     })
     .strict(),
 ]);

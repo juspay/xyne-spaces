@@ -4,6 +4,22 @@
 // same way. Keeping this out of the screen keeps the config-merge testable and
 // leaves every non-behaviour config key (tools, etc.) untouched on save.
 
+/**
+ * Default plan-mode system prompt — the textarea pre-fill, and what the runtime
+ * uses when config.planModePrompt is unset. MUST stay in sync with the
+ * defaultPlanModePrimer in xyne-claw/src/routes/run.ts (the propose-plan gate is
+ * enforced by the tool palette, not this text, so edits only change guidance).
+ */
+export const DEFAULT_PLAN_MODE_PROMPT = [
+  '## Plan mode — propose first, do NOT execute',
+  'You are in PLAN MODE. You have READ-ONLY tools (search / read) and ONE terminal tool: `propose-plan`. You CANNOT edit, run commands, send messages, or otherwise take action yet — those tools are intentionally unavailable until the user approves.',
+  'Do this, in order:',
+  '1. Investigate ONLY as much as you need to write a concrete, correct plan (search / read the relevant context). Keep it lightweight — you are scoping, not solving.',
+  '2. Call `propose-plan` ONCE with: the full ordered todo list (`{ id, title }` each — stable ids and CRISP titles: imperative, max 6–8 words, NO "Step 1"/"Stage 2"/number prefixes; the UI numbers them), and a `document` — the full plan written out in GitHub-flavored MARKDOWN (context, approach, what each step does and why, risks, expected outcome). The todos are the checklist; the document is the detailed brief shown when the user expands the plan. Also pass a `trivial` judgment. This call ENDS your turn immediately.',
+  '3. Do NOT do the work, do NOT write a final answer, do NOT call any tool after propose-plan. The user reviews your plan, picks the steps to keep, and approves — only then does execution begin (in a fresh turn where you’ll have your full tools back).',
+  'Set `trivial: true` ONLY for a genuinely simple, low-risk ask where an approval prompt would just be noise; then it starts immediately. When unsure, use `trivial: false`.',
+].join('\n');
+
 export interface BehaviourDraft {
   /** Extra instructions injected on every turn (config.promptInjection). */
   promptInjection: string;
@@ -11,6 +27,14 @@ export interface BehaviourDraft {
   suggestGoal: boolean;
   /** Wrap every message as an autonomous /goal loop (config.autoGoal). */
   autoGoal: boolean;
+  /** Propose a plan and wait for approval before multi-step work (config.planMode). */
+  planMode: boolean;
+  /**
+   * The plan-mode system prompt (config.planModePrompt). Pre-filled with
+   * DEFAULT_PLAN_MODE_PROMPT; only persisted when the user customizes it (differs
+   * from the default), otherwise the agent runtime uses its own built-in default.
+   */
+  planModePrompt: string;
   /** Verify claims against tool evidence before replying (config.verifyResponses). */
   verifyResponses: boolean;
   /** Extra delivery criteria, only meaningful when verifyResponses is on. */
@@ -45,6 +69,8 @@ interface BehaviourConfigShape {
   promptInjection?: unknown;
   suggestGoal?: unknown;
   autoGoal?: unknown;
+  planMode?: unknown;
+  planModePrompt?: unknown;
   verifyResponses?: unknown;
   verifyResponseCriteria?: unknown;
   citationReflection?: unknown;
@@ -63,6 +89,11 @@ export function readBehaviourDraft(config: ConfigBag): BehaviourDraft {
     promptInjection: typeof promptInjection === 'string' ? promptInjection : '',
     suggestGoal: c.suggestGoal === true,
     autoGoal: c.autoGoal === true,
+    planMode: c.planMode === true,
+    planModePrompt:
+      typeof c.planModePrompt === 'string' && c.planModePrompt.trim()
+        ? c.planModePrompt
+        : DEFAULT_PLAN_MODE_PROMPT,
     verifyResponses: c.verifyResponses === true,
     verifyResponseCriteria:
       typeof verifyResponseCriteria === 'string' ? verifyResponseCriteria : '',
@@ -130,6 +161,17 @@ export function applyBehaviour(config: ConfigBag, draft: BehaviourDraft): Record
   setOrDelete('promptInjection', !!promptInjection, promptInjection);
   setOrDelete('suggestGoal', draft.suggestGoal);
   setOrDelete('autoGoal', draft.autoGoal);
+  setOrDelete('planMode', draft.planMode);
+
+  // Only persist a CUSTOM plan-mode prompt. Empty, or unchanged from the default,
+  // ⇒ delete the key so the runtime falls back to its built-in default. Gated on
+  // planMode being on (a prompt with no plan mode is meaningless).
+  const planModePrompt = draft.planModePrompt.trim();
+  if (draft.planMode && planModePrompt && planModePrompt !== DEFAULT_PLAN_MODE_PROMPT.trim()) {
+    next['planModePrompt'] = planModePrompt;
+  } else {
+    delete next['planModePrompt'];
+  }
 
   if (draft.verifyResponses) {
     next['verifyResponses'] = true;

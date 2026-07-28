@@ -26,7 +26,8 @@ type FlowComponentType =
   | 'card'
   | 'divider'
   | 'image'
-  | 'link';
+  | 'link'
+  | 'plan';
 
 interface FlowComponentStyle {
   padding?: string;
@@ -155,6 +156,17 @@ export class FlowBuilder {
 
   setData(data: Record<string, unknown>): this {
     this._data = { ...this._data, ...data };
+    return this;
+  }
+
+  /**
+   * Push a fully-formed component. Escape hatch for component types that have
+   * no dedicated add* helper (e.g. the `plan` artifact, whose props are a
+   * phase-discriminated union built by buildPlanFlow). Props are passed through
+   * verbatim — the caller is responsible for matching the renderer's schema.
+   */
+  addComponent(component: FlowComponent): this {
+    this._components.push(component);
     return this;
   }
 
