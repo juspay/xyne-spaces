@@ -6,6 +6,7 @@ BACKEND_IMAGE_NAME ?= xyne-spaces-backend
 RUNNER_IMAGE_NAME ?= xyne-spaces-runner
 DASHBOARD_IMAGE_NAME ?= xyne-spaces-dashboard
 EXTERNAL_DASHBOARD_IMAGE_NAME ?= xyne-spaces-dashboard-external
+LIGHTON_OCR_WRAPPER_IMAGE_NAME ?= lighton-ocr-server
 SOURCE_COMMIT := $(shell git rev-parse HEAD)
 SOURCE_SHORT_COMMIT ?= $(shell git rev-parse --short=10 HEAD)
 
@@ -76,6 +77,21 @@ clean-external-dashboard:
 	docker rmi $(EXTERNAL_DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) || true
 	docker rmi $(NS)/$(EXTERNAL_DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) || true
 
+# LightOnOCR Wrapper targets (Python application)
+build-lighton-ocr-wrapper:
+	$(info Building $(LIGHTON_OCR_WRAPPER_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) / git-head: $(SOURCE_COMMIT))
+	$(info Local image: $(LIGHTON_OCR_WRAPPER_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
+	cd lighton-ocr-server && docker buildx build -f Dockerfile -t $(LIGHTON_OCR_WRAPPER_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --load .
+
+push-lighton-ocr-wrapper:
+	$(info Pushing to registry: $(NS)/$(LIGHTON_OCR_WRAPPER_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
+	cd lighton-ocr-server && docker buildx build -f Dockerfile -t $(NS)/$(LIGHTON_OCR_WRAPPER_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --push .
+	$(info Successfully pushed: $(NS)/$(LIGHTON_OCR_WRAPPER_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
+
+clean-lighton-ocr-wrapper:
+	docker rmi $(LIGHTON_OCR_WRAPPER_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) || true
+	docker rmi $(NS)/$(LIGHTON_OCR_WRAPPER_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) || true
+
 # push-built-* : push an image that the matching build-* target already built into this
 # machine's Docker daemon (retag that image to the registry ref and push it). Used by CI
 # so the EXACT image Trivy scanned is what gets pushed - no rebuild, no registry round-trip.
@@ -123,11 +139,11 @@ run-pr-police:
 		sh -c 'cat > /tmp/gcp-creds.json && export GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcp-creds.json && npm run yama review -- --workspace XYNE --repository xyne-spaces --branch $(BRANCH_NAME)'
 
 # Combined targets
-build-all: build-backend build-runner build-dashboard build-external-dashboard
+build-all: build-backend build-runner build-dashboard build-external-dashboard build-lighton-ocr-wrapper
 
-push-all: push-backend push-runner push-dashboard push-external-dashboard
+push-all: push-backend push-runner push-dashboard push-external-dashboard push-lighton-ocr-wrapper
 
-clean-all: clean-backend clean-runner clean-dashboard clean-external-dashboard
+clean-all: clean-backend clean-runner clean-dashboard clean-external-dashboard clean-lighton-ocr-wrapper
 
 test:
 	$(info Running tests for all components)
@@ -142,4 +158,4 @@ configure-docker:
 revoke-sa:
 	gcloud auth revoke $(SERVICE_ACCOUNT) -q || true
 
-.PHONY: build-backend push-backend clean-backend prisma-generate build-runner push-runner clean-runner build-dashboard push-dashboard clean-dashboard build-external-dashboard push-external-dashboard clean-external-dashboard lint-dashboard typecheck run-pr-police build-all push-all clean-all test configure-docker revoke-sa
+.PHONY: build-backend push-backend clean-backend prisma-generate build-runner push-runner clean-runner build-dashboard push-dashboard clean-dashboard build-external-dashboard push-external-dashboard clean-external-dashboard build-lighton-ocr-wrapper push-lighton-ocr-wrapper clean-lighton-ocr-wrapper lint-dashboard typecheck run-pr-police build-all push-all clean-all test configure-docker revoke-sa
