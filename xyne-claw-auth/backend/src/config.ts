@@ -23,7 +23,23 @@ export const CONFIG = {
     ? Buffer.from(process.env["SPACES_ENCRYPTION_KEY"]!, "hex")
     : Buffer.alloc(0),
   xyneClawUrl: process.env["XYNE_CLAW_URL"] ?? "http://localhost:3002",
+  // Public base URL of the claw SPA, used for post-OAuth browser redirects.
+  // Precedence: explicit FRONTEND_URL override; else in production the SPA is
+  // served under /claw/ on the auth service's public host; in development it
+  // runs on vite's own port. Always normalized to a trailing slash.
+  frontendUrl: (() => {
+    const configured = process.env["FRONTEND_URL"]
+      ?? (process.env["NODE_ENV"] === "production"
+        ? `${(process.env["AUTH_SERVICE_URL"] ?? "").replace(/\/+$/, "")}/claw/`
+        : "http://localhost:5174/claw/");
+    return configured.endsWith("/") ? configured : `${configured}/`;
+  })(),
   xyneClawS2sKey: process.env["XYNE_CLAW_S2S_KEY"] ?? "",
+  azureTtsEndpoint: (process.env["AZURE_TTS_ENDPOINT"] ?? "").replace(/\/+$/, ""),
+  azureTtsApiKey: process.env["AZURE_TTS_API_KEY"] ?? "",
+  azureTtsApiVersion: process.env["AZURE_TTS_API_VERSION"] ?? "",
+  azureTtsDeployment: process.env["AZURE_TTS_DEPLOYMENT"] ?? "",
+  azureTtsVoice: process.env["AZURE_TTS_VOICE"] || "shimmer",
   // Platform LiteLLM proxy base URL. Default endpoint the agent-level "litellm"
   // provider lists models from (and, at run time, the runtime falls back to
   // when a credential omits its own baseUrl). Owners bringing their own LiteLLM
@@ -137,6 +153,13 @@ export const CONFIG = {
     (process.env["DIRECT_VESPA_SEARCH"] ?? "").trim().toLowerCase(),
   ),
   vespaQueryEndpoint: (process.env["VESPA_QUERY_ENDPOINT"] ?? "http://localhost:8081").replace(/\/+$/, ""),
+  /**
+   * Vespa FEED endpoint (document API). Separate from vespaQueryEndpoint
+   * because Spaces splits them (VESPA_FEED_URL / VESPA_QUERY_URL) even though
+   * they are usually the same container port. Used only by the
+   * entity-extraction type write-back; defaults to the query endpoint.
+   */
+  vespaFeedEndpoint: (process.env["VESPA_FEED_ENDPOINT"] ?? process.env["VESPA_QUERY_ENDPOINT"] ?? "http://localhost:8080").replace(/\/+$/, ""),
   vespaNamespace: process.env["VESPA_NAMESPACE"] ?? "namespace",
   vespaCluster: process.env["VESPA_CLUSTER"] ?? "my_content",
   /**
@@ -146,6 +169,37 @@ export const CONFIG = {
    * pod with sustained parallel query load. Default 500ms.
    */
   searchEvalQueryDelayMs: Number(process.env["SEARCH_EVAL_QUERY_DELAY_MS"] ?? 500),
+  /**
+   * Entity extraction — reads a channel's threads/tickets out of Vespa and
+   * discovers the entity types the org talks about. The completions run on
+   * xyne-claw (see services/entityExtraction/entityLlmClient.ts), so the model
+   * name is configured on claw; only the read/fan-out limits live here.
+   */
+  entityExtraction: {
+    /** Hard cap on threads read per channel. Bounds a run's cost and duration. */
+    maxThreadsPerChannel: Number(process.env["ENTITY_EXTRACTION_MAX_THREADS"] ?? 400),
+    /**
+     * Parallel LLM calls in flight. A single extraction call takes 20-75s on
+     * this endpoint, and the LiteLLM key's max_parallel_requests slots are
+     * shared with live agent runs — raising this makes calls contend and time
+     * out rather than finish faster.
+     */
+    concurrency: Number(process.env["ENTITY_EXTRACTION_CONCURRENCY"] ?? 2),
+    /**
+     * Org-level framing prepended to the type-discovery prompts, so the model
+     * knows whose data it is reading. Fixes identity-relative errors like
+     * listing the org itself as an external ORGANISATION, and sharpens ORG vs
+     * MERCHANT.
+     */
+    orgContext:
+      process.env["ENTITY_EXTRACTION_ORG_CONTEXT"] ??
+      "The data belongs to Juspay, a payments orchestration company. Juspay routes and " +
+        "processes online transactions for its merchant clients across many payment gateways, " +
+        "payment methods, card networks and banks. MERCHANTS are Juspay customers who use it to " +
+        "accept payments. Payment gateways/PSPs, card networks, banks and regulators such as NPCI " +
+        "are external ecosystem entities. Juspay itself is the operator, NOT an external " +
+        "organisation — never classify Juspay (or its own products/teams) as ORGANISATION.",
+  },
   /**
    * BITBOT — Juspay PR-analysis service. The MCP adapter spawns a stdio
    * child (servers/bitbot-server.ts) that POSTs to {bitbotBaseUrl}/api/prs/bulk

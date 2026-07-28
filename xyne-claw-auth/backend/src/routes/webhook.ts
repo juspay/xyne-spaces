@@ -74,8 +74,8 @@ import { finalizeOrphanedRun } from "../services/orphan-run-finalizer.js";
 import { requireStrictS2S, s2sKeyMatches, requireResultToken } from "../middleware/require-auth.js";
 import { renderAttachmentsToPdf } from "../lib/result-pdf.js";
 import { renderMarkdownToHtml } from "../lib/result-html.js";
-import { sendStoredExternalResultCallback, type ExternalResultCallbackConfig } from "../lib/external-result-callback.js";
-import { deliverSlackResult, type SlackDeliveryTarget } from "../lib/slack-delivery.js";
+import { sendStoredExternalResultCallback, type ExternalResultCallbackConfig } from "../surfaces/external-api/delivery.js";
+import { deliverSlackResult, type SlackDeliveryTarget } from "../surfaces/slack/delivery.js";
 import JSZip from "jszip";
 import { buildWriteApprovalFlow, buildTwinApprovalFlow, buildUserQuestionFlow, buildPromoteProviderFlow, buildGoalSuggestionFlow, buildPlanFlow, isTwinDelivery } from "xyne-claw-shared";
 import type { TwinDelivery } from "xyne-claw-shared";
@@ -359,244 +359,19 @@ function interpolateChainTask(template: string, vars: Record<string, string>): s
   return result;
 }
 
-// ── Redis-backed session context store ──────────────────────────────
-
-export interface SessionContext {
-  mentionedUserId: string;
-  /**
-   * The RUN OWNER — the userId the AgentRun + `user` ChatMessage are persisted
-   * under (run.ts uses the dispatch `userId`). For a twin USER_MENTIONED run
-   * this is the MENTIONED user, NOT the sender. The assistant ChatMessage
-   * written in /result MUST be tagged with this, or the owner can't see their
-   * own twin reply (filtered out by the per-user read ACL) and the SENDER sees
-   * it in their history. Optional: older/other conversation flows omit it and
-   * fall back to the responseMode-derived owner (= sender for "conversation").
-   */
-  targetUserId?: string;
-  senderId: string;
-  senderName: string;
-  channelId: string;
-  channelName: string;
-  conversationId: string;
-  /** The message that triggered this run (the mention). The Twin's twin_deliver
-   *  "react" action targets THIS message. */
-  sourceMessageId?: string;
-  task: string;
-  /**
-   * The ORIGINAL user request that kicked off this run/chain. For a first-touch
-   * run this equals `task`; across chain hops `task` becomes the interpolated
-   * hand-off prompt while `rootTask` stays the human's actual ask. The chain
-   * judge is fed this (not the stale interpolated task) so it can reason about
-   * whether the user's request is satisfied.
-   */
-  rootTask?: string;
-  agentId?: string;
-  agentOrgId?: string | null;
-  agentSlug?: string | undefined;
-  responseMode: "conversation" | "approval";
-  appToken: string;
-  spacesAppId: string;
-  spacesAppUserId: string;
-  traceId?: string;
-  provider?: string;
-  /** Current chain depth — incremented each time a chain fires. Used with maxDepth. */
-  chainDepth?: number;
-  /** Entry-point agent for this chain run. Used to resolve channel-level workflow binding. */
-  rootAgentSlug?: string;
-  /** Resolved workflow ID for this chain run (if any). */
-  workflowId?: string;
-  /**
-   * MessageId of the "⏳ Working on it…" placeholder we posted at webhook-arrival
-   * time. Used ONLY when USE_EPHEMERAL_PROGRESS=false — we edit this message
-   * in-place as tools run, and replace its content with the final agent
-   * response in the result handler. Undefined under the ephemeral path.
-   */
-  progressMessageId?: string;
-  /**
-   * MessageId of the live plan/todo card (todo-write → kind:"plan" progress
-   * event). Posted once, then updated in place on every subsequent todo-write.
-   * Undefined until the first todo-write of the run.
-   */
-  planMessageId?: string;
-  /**
-   * Auto-draft forward URL. Present only when this run was triggered by the
-   * Spaces email auto-draft (a synthetic APP_MENTIONED, not a real mention).
-   * /webhook/result persists as usual, then forwards the result here (the
-   * Spaces autodraft-callback) and skips the bot DM; the start placeholder is
-   * skipped too. Absent for normal mentions.
-   */
-  resultForwardUrl?: string;
-  /** External API caller result target. The optional secret is AES-GCM encrypted. */
-  externalResultCallback?: ExternalResultCallbackConfig;
-  /** Terminal result target for a run dispatched from a per-agent Slack app. */
-  slackDelivery?: SlackDeliveryTarget;
-  /**
-   * When true, the result-forward branch resolves the agent's plain `@Name`
-   * mentions into clickable/notifying Spaces mentions (name→userId via
-   * user-search, then HTML-span expansion) BEFORE forwarding. Set by the Spaces
-   * automation path (handleAutomationWebhook), where there is no human session —
-   * resolution uses the agent's bot token (`appToken`). Left unset for the email
-   * auto-draft forward, which must NOT inject mention spans into a draft body.
-   */
-  resolveMentions?: boolean;
-  /**
-   * Workspace ID of the mentioned user for Digital Twin (USER_MENTIONED)
-   * flows. Captured at webhook-receive time via getSpacesAuthForUser and
-   * threaded all the way to the Flow UI data context so flow-action.ts can
-   * forward it to Spaces' /api/internal/postAsUser — which REQUIRES
-   * workspaceId to mint a JWT for the user. Without this, the Twin's
-   * response generates fine but can never post.
-   */
-  workspaceId?: string;
-  /**
-   * Conversation-scoped "the user opted in to the agent's premium provider"
-   * flag. Set by:
-   *   1. `/upgrade` slash-command in the user's task (immediate auto-escalate)
-   *   2. User clicking "Yes" on the FlowUI escalation prompt after a kimi
-   *      failure or soft refusal (see flow-action.ts promote-provider branch)
-   * When set, the resolution chain in handleWebhook uses this provider instead
-   * of falling through to spaces/LiteLLM. Persists for the lifetime of the
-   * conversation (Redis SESSION_TTL = 24h, keyed by convKey). Clearing it
-   * requires the user to start a new conversation.
-   */
-  escalatedProvider?: string;
-}
-
-const SESSION_TTL = 86400;
-const SESSION_PREFIX = "session:";
-// Conversation-keyed index — see setSession comment.
-const CONV_PREFIX = "session-by-conv:";
-// Duplicate-DELIVERY suppression window (seconds), NOT a run-lifetime lock:
-// absorbs webhook retries / double-fires of the same automation. Kept short
-// deliberately — the key leaks on non-interposed and dispatch-failure paths
-// (only the interposed /result path deletes it), so a long TTL would 409
-// legitimate runs for its whole duration. One-active-run enforcement is the
-// busy slot (tryAcquireSlot) + runtime session lock, not this key.
-const AUTOMATION_RUN_DEDUP_TTL = Number(process.env["AUTOMATION_RUN_DEDUP_TTL_SEC"] ?? 30);
-
-function convKey(conversationId: string, agentSlug: string, userScopeId?: string): string {
-  const base = `${CONV_PREFIX}${conversationId}:${agentSlug}`;
-  // Digital-twin runs are PER-USER: one claw session per mentioned user in a
-  // thread (see buildSandboxStoreKey). So the conv index must be user-scoped
-  // too — otherwise two twins mentioned in ONE thread clobber each other's row
-  // and the /result conv-index fallback resolves the wrong user. Only the twin
-  // passes userScopeId; every conversation-mode caller keeps the legacy 2-part
-  // key (backward compatible, unchanged).
-  return agentSlug === "digital-twin" && userScopeId ? `${base}:${userScopeId}` : base;
-}
-
-function automationRunDedupKey(conversationId: string, agentSlug: string): string {
-  return `automation-run-dedup:${conversationId}:${agentSlug}`;
-}
-
-/**
- * Persist the session context under TWO Redis keys:
- *   1. `session:<sessionId>` — the original per-run key. Hot path; expires
- *      naturally with the run.
- *   2. `session-by-conv:<conversationId>:<agentSlug>` — durable index that
- *      survives sessionId churn across /goal turns, chain hops, run-recovery
- *      refires, and scheduled-job re-triggers. Catches the case where a
- *      refire path (e.g. goalRelooper's `void fetch(...)`) doesn't register
- *      the freshly-minted sessionId back to claw-auth, leaving Turn 2's
- *      result orphaned. With this index the /result handler can fall back
- *      to (conv, slug) lookup using the conversationId + agentSlug that
- *      claw already sends in its callback payload.
- *
- * If the context lacks conversationId or agentSlug we only write the per-
- * session key — those identifiers are required to make the conv index
- * usable, and the original behaviour is the safe default.
- */
-export async function setSession(
-  sessionId: string,
-  ctx: SessionContext,
-  options: { skipConversationIndex?: boolean } = {},
-): Promise<void> {
-  const redis = redisService.getConnection();
-  const json = JSON.stringify(ctx);
-  await redis.set(`${SESSION_PREFIX}${sessionId}`, json, "EX", SESSION_TTL);
-  if (!options.skipConversationIndex && ctx.conversationId && ctx.agentSlug) {
-    await redis.set(convKey(ctx.conversationId, ctx.agentSlug, ctx.mentionedUserId), json, "EX", SESSION_TTL);
-  }
-}
-
-export async function getSession(sessionId: string): Promise<SessionContext | null> {
-  const redis = redisService.getConnection();
-  const raw = await redis.get(`${SESSION_PREFIX}${sessionId}`);
-  if (!raw) return null;
-  return JSON.parse(raw) as SessionContext;
-}
-
-/**
- * Conversation-keyed context lookup. Returns the most recently saved context
- * for `(conversationId, agentSlug)` — exactly what /result needs when claw
- * minted a new sessionId via a refire path and claw-auth never registered it.
- * Exported so flow-action.ts can read+merge before flipping
- * `escalatedProvider` (promote-provider branch).
- */
-export async function getSessionByConv(
-  conversationId: string,
-  agentSlug: string,
-  userScopeId?: string,
-): Promise<SessionContext | null> {
-  const redis = redisService.getConnection();
-  const raw = await redis.get(convKey(conversationId, agentSlug, userScopeId));
-  if (!raw) return null;
-  return JSON.parse(raw) as SessionContext;
-}
-
-/**
- * Single source of truth for "given a callback, find the context that started
- * the run." Tries, in order:
- *   1. the sessionId index            — the normal hot path
- *   2. the durable run-recovery row   — survives a claw-auth restart
- *   3. the (conversationId, agentSlug) index — survives a claw refire that
- *      minted a brand-new sessionId claw-auth never registered (goal turns,
- *      chain hops, run-recovery, scheduled re-triggers)
- * On a conv-index hit we backfill the sessionId index so subsequent callbacks
- * for the same run resolve via the fast path.
- */
-async function resolveSessionContext(
-  sessionId: string,
-  conversationId?: string | null,
-  agentSlug?: string | null,
-  userScopeId?: string | null,
-): Promise<SessionContext | null> {
-  let ctx = sessionId ? await getSession(sessionId) : null;
-  if (!ctx && sessionId) ctx = await getRecoveryContextForSession(sessionId);
-  if (!ctx && conversationId && agentSlug) {
-    ctx = await getSessionByConv(conversationId, agentSlug, userScopeId ?? undefined);
-    if (ctx && sessionId) await setSession(sessionId, ctx);
-  }
-  return ctx;
-}
-
-async function ensureSessionContextOrg(ctx: SessionContext | null, sessionId?: string): Promise<SessionContext | null> {
-  if (!ctx || ctx.agentOrgId) return ctx;
-  const orgId = ctx.agentId
-    ? (await prisma.agent.findUnique({ where: { id: ctx.agentId }, select: { orgId: true } }))?.orgId
-    : (await prisma.user.findUnique({ where: { id: ctx.senderId }, select: { orgId: true } }))?.orgId;
-  if (!orgId) return ctx;
-  const next = { ...ctx, agentOrgId: orgId };
-  if (sessionId) await setSession(sessionId, next);
-  return next;
-}
-
-async function deleteSession(sessionId: string): Promise<void> {
-  const redis = redisService.getConnection();
-  // Read the row before deleting so we can also drop the conv index.
-  const raw = await redis.get(`${SESSION_PREFIX}${sessionId}`);
-  await redis.del(`${SESSION_PREFIX}${sessionId}`);
-  if (raw) {
-    try {
-      const ctx = JSON.parse(raw) as SessionContext;
-      if (ctx.conversationId && ctx.agentSlug) {
-        // Use the SAME per-user key setSession wrote, so completing user A's
-        // twin run doesn't drop user B's conv index for the same thread.
-        await redis.del(convKey(ctx.conversationId, ctx.agentSlug, ctx.mentionedUserId));
-      }
-    } catch { /* malformed — nothing to clean up */ }
-  }
-}
+import {
+  type SessionContext,
+  setSession,
+  getSession,
+  getSessionByConv,
+  resolveSessionContext,
+  ensureSessionContextOrg,
+  deleteSession,
+  convKey,
+  automationRunDedupKey,
+  AUTOMATION_RUN_DEDUP_TTL,
+} from "../lib/session-context.js";
+export { setSession, getSession, getSessionByConv, type SessionContext };
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -635,317 +410,21 @@ interface WebhookEvent {
   timestamp: string;
 }
 
-// ── Helpers ──────────────────────────────────────────────────────────
-
-/**
- * Spaces backend caps `Message.content` at 10,000 chars (enforced in its
- * messageRepository.create — `validateString(..., 'content', 10000)`).
- * Posting longer text returns an opaque 500, not 413, so the user sees
- * nothing. We mirror the same 9,500-char buffer the Spaces team uses
- * elsewhere (notificationService.MAX_MESSAGE_LENGTH = 9500) and convert
- * anything longer into a PDF attachment.
- */
-const MAX_MESSAGE_CHARS = 9500;
-
-/**
- * Spaces' multipart `/files/filesUpload` endpoint is fronted by multer with
- * `files: 10` per request (see `backend/src/middleware/upload.ts:8`). Any
- * count above that triggers a 500 "Too many files". Threshold matches that
- * server-side limit exactly — anything ≤10 passes through untouched.
- *
- * When an agent emits more than this (typically sandbox/playwright runs
- * with many screenshots), we bundle ALL of them into one PDF via
- * `renderAttachmentsToPdf` and send that single PDF as the only attachment.
- * Result: never lose an over-quota delivery; the chat thread stays under
- * the multer cap; the user can still browse the originals via the bundle.
- */
-const MAX_ATTACHMENTS_PER_MESSAGE = 10;
-
-interface OutgoingAttachment {
-  data: string;       // base64
-  mimeType: string;
-  fileName: string;
-}
-
-function isImageAttachment(a: OutgoingAttachment): boolean {
-  return a.mimeType.toLowerCase().startsWith("image/");
-}
-
-/**
- * Bundle attachments into a single .zip, preserving their real bytes. Unlike
- * the PDF gallery (which can only embed images and silently drops everything
- * else), a zip works for ANY file type — PDFs, CSVs, docx, etc. Filenames are
- * de-duplicated so two files sharing a name don't clobber each other.
- */
-async function zipAttachmentsToBuffer(attachments: OutgoingAttachment[]): Promise<Buffer> {
-  const zip = new JSZip();
-  const used = new Set<string>();
-  for (const a of attachments) {
-    let name = a.fileName?.trim() || "file";
-    if (used.has(name)) {
-      const dot = name.lastIndexOf(".");
-      const base = dot > 0 ? name.slice(0, dot) : name;
-      const ext = dot > 0 ? name.slice(dot) : "";
-      let i = 2;
-      while (used.has(`${base}-${i}${ext}`)) i++;
-      name = `${base}-${i}${ext}`;
-    }
-    used.add(name);
-    zip.file(name, Buffer.from(a.data, "base64"));
-  }
-  return zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
-}
-
-/**
- * Prepare an agent-result message for posting to Spaces:
- *
- *   - If the text body exceeds the 10K Spaces cap, render the FULL body
- *     into a PDF, attach it, and replace the chat body with a short
- *     stub + a preview of the first ~600 chars so the thread isn't empty.
- *   - If the total attachment count exceeds the Spaces cap, slice to the
- *     first N and annotate the body.
- *
- * Returns `{ text, attachments }` ready to feed into either the JSON or
- * multipart post path. Callers should switch to the multipart path
- * whenever `attachments.length > 0` after this returns.
- */
-async function prepareAgentResultForPosting(
-  rawText: string,
-  rawAttachments: OutgoingAttachment[] | undefined,
-  meta: {
-    agentSlug?: string;
-    /** Spaces session token of the human who triggered the agent. When
-     *  present we use it to resolve plain `@Name` mentions against
-     *  `/api/users/search` BEFORE running the bracketed-form expander —
-     *  so an LLM that emitted bare `@Anirudh Naruka` (without the
-     *  required `[userId]`) still produces a clickable, notifying tag.
-     *  When absent (no user context — e.g. cron-triggered runs), we
-     *  skip resolution and behave as today. */
-    senderSpacesToken?: string;
-    senderSpacesSessionId?: string;
-    /** Workspace scope for the user-search call. Required when senderSpacesToken
-     *  is set — otherwise the search isn't workspace-scoped and could leak. */
-    senderWorkspaceId?: string;
-    /** The agent's own workspace — used to scope name resolution for headless
-     *  runs (no human sender), derived from the agent's app user. */
-    agentWorkspaceId?: string;
-  } = {},
-): Promise<{ text: string; attachments: OutgoingAttachment[] }> {
-  // Resolve unbracketed `@Name` (e.g. the LLM wrote `@Anirudh Naruka`) →
-  // `@Name[userId]` via Spaces' user-search, using the triggering human's
-  // session token (reliably available — getSpacesAuthForUser refreshes an
-  // expired JWT). Limit=2 → ambiguous names are left as-is (no false pings).
-  // Then the HTML expander below lifts the bracketed form into the mention span.
-  // Resolve via the human's session token when we have one; otherwise fall back
-  // to the direct-DB reader (headless runs — event triggers, cron, automations —
-  // have only the agent's app token, which Spaces' user endpoints reject with a
-  // 401, so without this their `@Name` mentions stayed dead text).
-  let resolved = rawText;
-  const lookups = meta.senderSpacesToken
-    ? buildSpacesMentionLookups({
-        token: meta.senderSpacesToken,
-        ...(meta.senderSpacesSessionId ? { sessionId: meta.senderSpacesSessionId } : {}),
-        ...(meta.senderWorkspaceId ? { workspaceId: meta.senderWorkspaceId } : {}),
-      })
-    : spacesDbAvailable()
-      ? buildSpacesMentionLookupsDb(meta.agentWorkspaceId)
-      : null;
-  clog.info(
-    `[webhook/result] mention lookup branch=${meta.senderSpacesToken ? "sender-token" : lookups ? "db-fallback" : "none"} agent=${meta.agentSlug ?? "(unknown)"} senderWorkspaceId=${meta.senderWorkspaceId ?? "(none)"} agentWorkspaceId=${meta.agentWorkspaceId ?? "(none)"} rawLen=${rawText.length}`,
-  );
-  if (!lookups && /(^|[^A-Za-z0-9_>])@[A-Za-z0-9._%+\-]+/.test(rawText)) {
-    clog.warn(
-      `[webhook/result] mention resolution skipped with @-like text: no sender token and Spaces DB unavailable agent=${meta.agentSlug ?? "(unknown)"}`,
-    );
-  }
-  if (lookups) {
-    resolved = await resolveUnboundMentions(resolved, lookups);
-  }
-
-  // Then: expand mention shorthand (e.g. `@Name[userId]`) into the HTML span
-  // Spaces needs to render a clickable, notifying mention. Done here so every
-  // postMessage/updateMessage/multipart caller below gets the same treatment.
-  // Idempotent on already-expanded HTML.
-  let text = expandSpacesMentions(resolved);
-  let attachments: OutgoingAttachment[] = rawAttachments ? [...rawAttachments] : [];
-
-  // Track the length-fallback attachment separately so the attachment-bundle
-  // step below doesn't accidentally fold it into the bundle. It's the agent's
-  // PRIMARY response and should stay a standalone attachment.
-  let lengthAttachment: OutgoingAttachment | null = null;
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-
-  // 1) Body too long → render full body to a standalone HTML attachment,
-  //    replace body with stub. HTML (vs the old PDF walker) lets the browser
-  //    own layout: tables, code blocks, nested lists render correctly with
-  //    no custom walker, and we reuse the same template as create-html-report
-  //    so length-fallback artifacts look identical to deliberate reports.
-  if (text.length > MAX_MESSAGE_CHARS) {
-    const htmlBuffer = await renderMarkdownToHtml(text, {
-      title: "Agent Response",
-      subtitle: [
-        meta.agentSlug ? `Agent: ${meta.agentSlug}` : null,
-        `Generated: ${new Date().toISOString()}`,
-        `Length: ${text.length.toLocaleString()} chars`,
-      ].filter(Boolean).join("  ·  "),
-    });
-    lengthAttachment = {
-      data: htmlBuffer.toString("base64"),
-      mimeType: "text/html",
-      fileName: `agent-response-${stamp}.html`,
-    };
-    const preview = text.slice(0, 600).replace(/\s+$/, "");
-    text =
-      `_Response was ${text.length.toLocaleString()} characters — over the ` +
-      `${MAX_MESSAGE_CHARS.toLocaleString()}-char Spaces limit. Full answer ` +
-      `attached as an HTML file (open in any browser)._\n\n${preview}${text.length > 600 ? "…" : ""}`;
-  }
-
-  // 2) Too many original attachments → bundle to fit under Spaces' 10-file
-  //    multer cap WITHOUT dropping any bytes:
-  //      • Screenshots (image/*) → one browsable PDF gallery (only images
-  //        embed cleanly; this is the "screenshots can live in the HTML/PDF"
-  //        path).
-  //      • Everything else (PDF, CSV, docx, …) → one .zip, so the real bytes
-  //        survive. The old all-into-PDF path silently dropped non-image files
-  //        (they only got a filename listing), which is the breakage we're
-  //        fixing.
-  //    Worst case this yields 2 bundle files (gallery + zip), both under cap.
-  //    Length-HTML (if any) is kept separate and re-prepended after this step.
-  if (attachments.length > MAX_ATTACHMENTS_PER_MESSAGE) {
-    const originalCount = attachments.length;
-    const screenshots = attachments.filter(isImageAttachment);
-    const others = attachments.filter((a) => !isImageAttachment(a));
-    const bundled: OutgoingAttachment[] = [];
-
-    if (screenshots.length > 0) {
-      const galleryBuffer = await renderAttachmentsToPdf(screenshots, {
-        title: "Screenshots",
-        subtitle: [
-          meta.agentSlug ? `Agent: ${meta.agentSlug}` : null,
-          `Generated: ${new Date().toISOString()}`,
-          `Count: ${screenshots.length} image(s)`,
-        ].filter(Boolean).join("  ·  "),
-      });
-      bundled.push({
-        data: galleryBuffer.toString("base64"),
-        mimeType: "application/pdf",
-        fileName: `screenshots-${screenshots.length}-${stamp}.pdf`,
-      });
-    }
-
-    if (others.length > 0) {
-      const zipBuffer = await zipAttachmentsToBuffer(others);
-      bundled.push({
-        data: zipBuffer.toString("base64"),
-        mimeType: "application/zip",
-        fileName: `attachments-${others.length}-files-${stamp}.zip`,
-      });
-    }
-
-    attachments = bundled;
-    const parts: string[] = [];
-    if (screenshots.length > 0) parts.push(`${screenshots.length} screenshot(s) bundled as a PDF`);
-    if (others.length > 0) parts.push(`${others.length} file(s) zipped`);
-    text +=
-      `\n\n_${originalCount} attachments exceeded Spaces' ${MAX_ATTACHMENTS_PER_MESSAGE}-file ` +
-      `per-message limit — ${parts.join(" and ")}._`;
-  }
-
-  // 3) Re-prepend the length-PDF so it sits as the first attachment.
-  const finalAttachments = lengthAttachment ? [lengthAttachment, ...attachments] : attachments;
-
-  return { text, attachments: finalAttachments };
-}
-
-/**
- * Retry the given async fetch operation once on 5xx responses. Spaces
- * occasionally throws transient `500 Internal server error` on
- * /chat/postMessage (observed in prod ~5x/day) — a single 2-second backoff
- * recovers most of them. 4xx errors are NOT retried — they're caller bugs
- * that won't fix themselves.
- *
- * `fn` must throw an Error whose message starts with "Spaces app API NNN:"
- * — the format used by spacesAppFetch / spacesAppFetchMultipart below.
- */
-async function withSpaces5xxRetry<T>(label: string, fn: () => Promise<T>): Promise<T> {
-  try {
-    return await fn();
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    const status = /^Spaces app API (\d{3})/.exec(msg)?.[1];
-    if (!status || Number(status) < 500) throw err;
-    clog.warn(`[spaces-retry] ${label} got ${status} — retrying once after 2s`);
-    await new Promise((r) => setTimeout(r, 2000));
-    return await fn();
-  }
-}
-
-async function spacesAppFetchMultipart(path: string, form: FormData, appToken?: string): Promise<unknown> {
-  const url = `${CONFIG.spacesInternalUrl}/api/apps${path}`;
-  const token = appToken ?? "";
-  if (!token) throw new Error("No app token provided");
-
-  return withSpaces5xxRetry(`POST ${path} (multipart)`, async () => {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: {
-        // Do NOT set Content-Type — let fetch set it with the multipart boundary
-        Authorization: `Bearer ${token}`,
-      },
-      body: form,
-      signal: AbortSignal.timeout(60_000),
-    });
-
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      throw new Error(`Spaces app API ${res.status}: ${text.slice(0, 500)}`);
-    }
-
-    return res.json();
-  });
-}
-
-async function spacesAppFetchGet(path: string, appToken?: string): Promise<unknown> {
-  const url = `${CONFIG.spacesInternalUrl}/api/apps${path}`;
-  const token = appToken ?? "";
-  if (!token) throw new Error("No app token provided");
-  const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${token}` },
-    signal: AbortSignal.timeout(15_000),
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`Spaces app API ${res.status}: ${text.slice(0, 500)}`);
-  }
-  return res.json();
-}
-
-async function spacesAppFetch(path: string, body: Record<string, unknown>, appToken?: string): Promise<unknown> {
-  const url = `${CONFIG.spacesInternalUrl}/api/apps${path}`;
-  const token = appToken ?? "";
-  if (!token) throw new Error("No app token provided");
-
-  return withSpaces5xxRetry(`POST ${path}`, async () => {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(30_000),
-    });
-
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      throw new Error(`Spaces app API ${res.status}: ${text.slice(0, 500)}`);
-    }
-
-    return res.json();
-  });
-}
-
+import {
+  spacesAppFetch,
+  spacesAppFetchGet,
+  spacesAppFetchMultipart,
+  withSpaces5xxRetry,
+  decryptStoredField,
+} from "../surfaces/spaces/client.js";
+import {
+  MAX_MESSAGE_CHARS,
+  MAX_ATTACHMENTS_PER_MESSAGE,
+  type OutgoingAttachment,
+  isImageAttachment,
+  zipAttachmentsToBuffer,
+  prepareAgentResultForPosting,
+} from "../surfaces/spaces/attachments.js";
 function recordParam(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
@@ -1017,11 +496,6 @@ async function pendingActionTargetValidation(
   }
 }
 
-function decryptStoredField(stored: string): string {
-  const [ciphertext, iv, authTag] = stored.split(":");
-  if (!ciphertext || !iv || !authTag) throw new Error("Invalid encrypted field format");
-  return decrypt(ciphertext, iv, authTag, CONFIG.encryptionKey);
-}
 
 /**
  * Digital Twin (approval mode): open a DM with the mentioned user and send the
@@ -1029,25 +503,57 @@ function decryptStoredField(stored: string): string {
  * Nothing is posted to the originating thread; everything goes through the DM.
  * Deletes the session on completion. Caller should `return` after invoking.
  */
-async function sendDigitalTwinApprovalDm(
+/** Union invocation lists (payload + persisted run) deduped by toolCallId,
+ *  preferring the entry that CARRIES citations — subagent children (which the
+ *  reasoning's `[clf-…]` tokens reference) live only in the persisted run, not
+ *  the parent's payload. Mirrors the merge used by the thread-reply citation path. */
+function mergeInvocationsForCitations(...lists: unknown[]): unknown[] {
+  const byId = new Map<string, unknown>();
+  const order: string[] = [];
+  const hasCitations = (x: unknown): boolean =>
+    !!x && typeof x === "object" && Array.isArray((x as Record<string, unknown>)["citations"]);
+  let noId = 0;
+  for (const list of lists) {
+    if (!Array.isArray(list)) continue;
+    for (const inv of list) {
+      const rawId = inv && typeof inv === "object" ? (inv as Record<string, unknown>)["toolCallId"] : undefined;
+      const key = typeof rawId === "string" && rawId ? rawId : `__noid_${noId++}`;
+      const existing = byId.get(key);
+      if (existing === undefined) {
+        order.push(key);
+        byId.set(key, inv);
+      } else if (!hasCitations(existing) && hasCitations(inv)) {
+        byId.set(key, inv); // upgrade to the entry that has citations
+      }
+    }
+  }
+  return order.map((k) => byId.get(k));
+}
+
+/**
+ * Deliver the Twin's structured proposal as an OWNER-ONLY in-thread reply draft
+ * (replaces the old approval DM card). Bakes citation metadata from the Twin's
+ * private `reasoning` (its `[clf-…#n]` tokens reference the Spaces tools it
+ * searched) so the "Why?" panel can render clickable source chips, then creates
+ * the draft in Spaces (Redis, owner-partitioned) via S2S. Fail-CLOSED: any
+ * create failure leaves nothing posted and the session cleaned up.
+ */
+async function sendTwinReplyDraft(
   ctx: SessionContext,
   delivery: TwinDelivery,
-  attachments: Array<{ fileName: string; mimeType: string; data: string }> | undefined,
+  toolInvocations: unknown,
   sessionId: string,
 ): Promise<void> {
   // Defense-in-depth: an `ignore` delivery must NEVER reach here (the caller
-  // drops it). If it somehow does, never open a DM / post / write a pending row.
+  // drops it). If it somehow does, never create a draft / write a pending row.
   if (delivery.action === "ignore") {
-    clog.warn(`[webhook/result] sendDigitalTwinApprovalDm called with action=ignore — dropping, session ${sessionId}`);
+    clog.warn(`[webhook/result] sendTwinReplyDraft called with action=ignore — dropping, session ${sessionId}`);
     await deleteSession(sessionId);
     return;
   }
-  const token = ctx.appToken;
 
   // Apply the user's configured Twin signature/disclaimer to the REPLY body (not
-  // to a react-only delivery). Deterministic server-side append — the same
-  // behaviour the old suffix decoration gave the raw result, now scoped to the
-  // structured delivery's message.
+  // to a react-only delivery). Deterministic server-side append.
   let effectiveDelivery = delivery;
   if (delivery.message && ctx.mentionedUserId) {
     try {
@@ -1064,48 +570,71 @@ async function sendDigitalTwinApprovalDm(
     }
   }
 
-  // workspaceId required by prod openDm schema. Empty fallback only to satisfy
-  // types — the earlier USER_MENTIONED gate already rejected runs where we
-  // couldn't resolve the workspaceId, so this should always have a real value.
-  const dmResult = (await spacesAppFetch("/channel/openDm", {
-    targetUserId: ctx.mentionedUserId,
-    workspaceId: ctx.workspaceId ?? "",
-  }, token)) as { channelId: string };
+  // Bake citation metadata from the private reasoning. Null when the reasoning
+  // carries no `[clf-…]` tokens — the "Why?" panel then renders plain reasoning.
+  let citationMeta: ReturnType<typeof buildThreadCitationMeta> = null;
+  if (effectiveDelivery.reasoning) {
+    try {
+      const persisted = await agentRunRepository.findBySessionId(sessionId).catch(() => null);
+      const merged = mergeInvocationsForCitations(persisted?.toolInvocations, toolInvocations);
+      citationMeta = buildThreadCitationMeta(merged, effectiveDelivery.reasoning);
+    } catch (err) {
+      clog.warn(`[webhook/result] Twin citation baking failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
 
-  const twinFlow = withSpacesAppId(buildTwinApprovalFlow({
-    delivery: effectiveDelivery,
+  const dest = effectiveDelivery.destination;
+  const draft = {
+    conversationId: ctx.conversationId,
+    ownerUserId: ctx.mentionedUserId,
+    channelId: ctx.channelId,
+    action: effectiveDelivery.action,
+    ...(effectiveDelivery.message ? { message: effectiveDelivery.message } : {}),
+    ...(effectiveDelivery.emoji ? { emoji: effectiveDelivery.emoji } : {}),
+    ...(effectiveDelivery.reasoning ? { reasoning: effectiveDelivery.reasoning } : {}),
+    ...(citationMeta?.clawCitations ? { clawCitations: citationMeta.clawCitations } : {}),
+    ...(citationMeta?.clawCitationIcons ? { clawCitationIcons: citationMeta.clawCitationIcons } : {}),
+    destinationKind: dest?.kind ?? "origin_thread",
+    ...(dest && "channelId" in dest ? { destinationChannelId: dest.channelId } : {}),
+    ...(dest && "conversationId" in dest ? { destinationConversationId: dest.conversationId } : {}),
+    ...(dest && "userId" in dest ? { destinationUserId: dest.userId } : {}),
+    ...(dest && "channelName" in dest && dest.channelName ? { destinationChannelName: dest.channelName } : {}),
+    // DM recipient name for the owner-facing "sends a DM to …" label. `dm` may
+    // carry it on the destination; `dm_sender` is the mention sender we already
+    // know. Spaces resolves any remaining name from the user id at draft create.
+    ...(dest?.kind === "dm" && dest.userName ? { destinationUserName: dest.userName } : {}),
+    ...(dest?.kind === "dm_sender" && ctx.senderName ? { destinationUserName: ctx.senderName } : {}),
+    ...(effectiveDelivery.destinationReason ? { destinationReason: effectiveDelivery.destinationReason } : {}),
     ...(ctx.sourceMessageId ? { sourceMessageId: ctx.sourceMessageId } : {}),
-    targetChannelId: ctx.channelId,
-    targetConversationId: ctx.conversationId,
     mentionedUserId: ctx.mentionedUserId,
     workspaceId: ctx.workspaceId ?? "",
-    senderId: ctx.senderId,
-    senderName: ctx.senderName,
-    channelName: ctx.channelName,
-    task: ctx.task,
+    ...(ctx.senderId ? { senderId: ctx.senderId } : {}),
+    ...(ctx.senderName ? { senderName: ctx.senderName } : {}),
+    ...(ctx.channelName ? { channelName: ctx.channelName } : {}),
+    ...(ctx.task ? { incomingTask: ctx.task } : {}),
     ...(ctx.agentSlug ? { agentSlug: ctx.agentSlug } : {}),
-    dmChannelId: dmResult.channelId,
-    spacesBaseUrl: CONFIG.spacesAppUrl,
-  }), ctx.spacesAppId);
+    ...(ctx.spacesAppId ? { spacesAppId: ctx.spacesAppId } : {}),
+    sessionId,
+  };
 
-  if (attachments?.length) {
-    const form = new FormData();
-    for (const att of attachments) {
-      const buffer = Buffer.from(att.data, "base64");
-      const blob = new Blob([buffer], { type: att.mimeType });
-      form.append("files", blob, att.fileName);
+  // Create the owner-only in-thread draft in Spaces (Redis). Fail-closed silence.
+  try {
+    const resp = await fetch(`${CONFIG.spacesInternalUrl}/api/internal/twin-reply-draft`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-s2s-key": process.env["INTERNAL_S2S_KEY"] ?? "" },
+      body: JSON.stringify(draft),
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => "");
+      clog.error(`[webhook/result] Twin reply-draft create failed: ${resp.status} ${text.slice(0, 200)} — staying silent, session ${sessionId}`);
+      await deleteSession(sessionId);
+      return;
     }
-    form.append("channelId", dmResult.channelId);
-    form.append("userId", ctx.spacesAppUserId);
-    form.append("flow", JSON.stringify(twinFlow));
-
-    await spacesAppFetchMultipart("/files/filesUpload", form, token);
-  } else {
-    await spacesAppFetch("/chat/postMessage", {
-      channelId: dmResult.channelId,
-      flow: twinFlow,
-      userId: ctx.spacesAppUserId,
-    }, token);
+  } catch (err) {
+    clog.error(`[webhook/result] Twin reply-draft create error: ${err instanceof Error ? err.message : String(err)} — staying silent, session ${sessionId}`);
+    await deleteSession(sessionId);
+    return;
   }
 
   // Record a PENDING feedback row so the daily learning loop can later reconcile
@@ -1120,7 +649,7 @@ async function sendDigitalTwinApprovalDm(
     delivery: effectiveDelivery,
   });
 
-  clog.info(`[webhook/result] Digital Twin: sent approve/decline DM to ${ctx.mentionedUserId} (asked by ${ctx.senderId})`);
+  clog.info(`[webhook/result] Digital Twin: posted in-thread reply draft for ${ctx.mentionedUserId} (asked by ${ctx.senderId}) action=${effectiveDelivery.action} dest=${dest?.kind ?? "origin_thread"}`);
   await deleteSession(sessionId);
 }
 
@@ -2440,20 +1969,9 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
 
     const fastModeEnabled = await resolveFastMode(payload.conversationId, runAgentSlug, agentRow?.config);
 
-    // Twin concurrency cap (2026-07-15): twin runs are ~2/3 of all traffic and
-    // land on the shared LiteLLM key — unthrottled they blow through the key's
-    // concurrent-request limit (the 429 storm). Twin dispatches queue for a
-    // slot here (nobody is waiting on their twin); everything else is
-    // unaffected. The slot is re-keyed to the run's sessionId below and freed
-    // by /webhook/result on any terminal callback (TTL backstop in the lib).
-    let twinSlotToken: string | null = null;
-    if (runAsTwin) {
-      twinSlotToken = await acquireTwinSlot();
-      if (twinSlotToken === null) {
-        log.warn(`Twin dispatch dropped for ${targetUserId} — concurrency queue never drained`);
-        return;
-      }
-    }
+    // (The global twin concurrency limiter — the fleet-wide LiteLLM cap — is
+    // acquired further down, AFTER the new per-user FIFO gate, so a queued
+    // follow-up tag never burns a fleet-wide slot. See globalTwinSlotToken.)
 
     // Digital Twin (USER_MENTIONED): make WHO mentioned the user and WHERE
     // explicit in the run context. The thread history labels the sender only by
@@ -2474,6 +1992,142 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       : "";
     const dispatchContext = [twinMentionNote, threadAwarenessBlock].filter(Boolean).join("\n\n");
 
+    // Suppress the bot placeholder + DM and forward the result to this URL when a
+    // Spaces email auto-draft synthesized an APP_MENTIONED (see /webhook/result).
+    // Moved up: the pre-dispatch sessionContext + the placeholder gate both read it.
+    const resultForwardUrl =
+      ((payload as { metadata?: Record<string, unknown> }).metadata?.["resultForwardUrl"] as string | undefined) || undefined;
+
+    // Build the /internal/run body + the SessionContext ONCE, UP FRONT — before
+    // any dispatch decision — so the per-user twin FIFO can enqueue a fully-formed
+    // replay blob when the owner already has a run in flight. A queued tag then
+    // creates NO /internal/run, NO AgentRun and NO user ChatMessage until it drains
+    // (this is what fixes the branched-UI: one query + reply at a time). Neither
+    // object depends on the run's sessionId (that's only ever the setSession key),
+    // so building them here is safe, and it collapses the old duplicate
+    // fetchRun-body / dispatchPayload into a single source of truth.
+    const dispatchPayload = {
+      userId: targetUserId,
+      task,
+      conversationId: payload.conversationId,
+      agentSlug: runAgentSlug,
+      orgId: agent.orgId,
+      eventType,
+      traceId,
+      callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
+      progressUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`,
+      channelId: payload.channelId,
+      // WHO/WHERE for the twin_deliver mandate's who/where line (run.ts reads
+      // these to populate "You were mentioned by X in #Y" in the SYSTEM prompt).
+      ...(payload.senderName ? { senderName: payload.senderName } : {}),
+      ...(payload.channelName ? { channelName: payload.channelName } : {}),
+      ...(payload.projectId ? { projectId: payload.projectId } : {}),
+      ...(payload.projectName ? { projectName: payload.projectName } : {}),
+      ...(dispatchContext ? { context: dispatchContext } : {}),
+      ...(agentSkills && agentSkills.length > 0 ? { skills: agentSkills } : {}),
+      ...(resolvedParentProvider ? { provider: resolvedParentProvider } : {}),
+      ...(runtimeProviderOrder.length > 1 ? { providerOrder: runtimeProviderOrder } : {}),
+      ...(Object.keys(subagentProviders).length > 0 ? { subagentProviders } : {}),
+      // Default provider for subagents not listed in `subagentProviders`:
+      // "parent" (inherit parent's provider) or "spaces" (platform default).
+      subagentProviderMode,
+      ...(Object.keys(providerConfigs).length > 0 ? { providerConfigs } : {}),
+      ...(inboundAttachments.length > 0 ? { attachments: inboundAttachments } : {}),
+      // Ship the agent's JSONB config so xyne-claw can enable per-agent
+      // features that read from it: memoryEnabled (memory-search tool),
+      // toolPermissions (per-tool deny/ask), skillTriggers, promptInjections,
+      // and custom-tool config values (PPT_API_KEY etc). Without this,
+      // those features silently default to "off"/"allow" on Spaces mentions.
+      ...(agentRow?.config ? { agentConfig: agentRow.config as Record<string, unknown> } : {}),
+      fastMode: fastModeEnabled,
+      // `/compact` — force a one-shot compaction of the resumed session
+      // before this turn so the thread continues with a smaller context.
+      ...(compactBeforeRun ? { compactBeforeRun: true } : {}),
+    };
+
+    // progressMessageId is the ONLY session field not knowable pre-dispatch — it's
+    // assigned after the placeholder post below (conversation-mode only), just
+    // before setSession. Everything else is final here.
+    const sessionContext: SessionContext = {
+      // Per-user: for the twin this is THIS iteration's mentioned user
+      // (targetUserId) so the approve/decline DM + per-user conv index route right.
+      mentionedUserId: eventType === "USER_MENTIONED" ? targetUserId : agent.spacesAppUserId,
+      targetUserId,
+      senderId: payload.userId,
+      senderName: payload.senderName ?? payload.userId,
+      channelId: payload.channelId,
+      channelName: payload.channelName ?? payload.channelId,
+      conversationId: payload.conversationId,
+      ...(payload.messageId ? { sourceMessageId: payload.messageId } : {}),
+      task,
+      agentId: agent.id,
+      agentOrgId: agent.orgId,
+      agentSlug: agent.slug,
+      responseMode: eventType === "USER_MENTIONED" ? "approval" as const : "conversation" as const,
+      appToken: agent.appToken,
+      spacesAppId: agent.spacesAppId,
+      spacesAppUserId: agent.spacesAppUserId,
+      traceId,
+      rootAgentSlug: agent.slug,
+      ...(resolvedParentProvider ? { provider: resolvedParentProvider } : {}),
+      ...(escalatedProvider ? { escalatedProvider } : {}),
+      ...(userSpacesWorkspaceId ? { workspaceId: userSpacesWorkspaceId } : {}),
+      ...(twinWorkspaceId ? { workspaceId: twinWorkspaceId } : {}),
+      ...(resultForwardUrl ? { resultForwardUrl } : {}),
+    };
+
+    // ── Per-user twin FIFO gate ───────────────────────────────────────────────
+    // Serialize same-owner tags on this conversation: if this owner already has a
+    // twin run in flight here, enqueue THIS tag (fully-built payload) and return
+    // BEFORE dispatch — no /internal/run, no AgentRun, no user message until it
+    // drains on the active run's completion. Different owners use different keys
+    // (scoped by targetUserId) so they still run in parallel. MUST precede the
+    // global limiter so a queued tag never burns a fleet-wide slot.
+    const twinUserScope = runAsTwin ? targetUserId : undefined;
+    let twinConvSlotToken: string | null = null;
+    if (runAsTwin && QUEUE_ENABLED && payload.conversationId && task) {
+      twinConvSlotToken = await tryAcquireSlot(payload.conversationId, runAgentSlug, twinUserScope);
+      if (!twinConvSlotToken) {
+        const queuedMsg: QueuedMessage = {
+          eventId: payload.messageId ?? traceId,
+          conversationId: payload.conversationId,
+          channelId: payload.channelId,
+          ...(payload.channelName ? { channelName: payload.channelName } : {}),
+          userId: targetUserId,
+          ...(payload.senderName ? { senderName: payload.senderName } : {}),
+          agentSlug: runAgentSlug,
+          ...(agent.orgId ? { orgId: agent.orgId } : {}),
+          ...(twinWorkspaceId ? { workspaceId: twinWorkspaceId } : {}),
+          task,
+          eventType,
+          ...(twinUserScope ? { userScopeId: twinUserScope } : {}),
+          responseMode: "approval" as const,
+          dispatchPayload,
+          sessionContext: sessionContext as unknown as Record<string, unknown>,
+          ts: Date.now(),
+        };
+        const enq = await enqueueMessage(queuedMsg);
+        log.info(`[twin-queue] conv ${payload.conversationId} owner ${twinUserScope} busy — queued eventId=${queuedMsg.eventId} enqueued=${enq.enqueued} pos=${enq.position} deduped=${enq.deduped} full=${enq.full}`);
+        return;
+      }
+    }
+
+    // Global twin concurrency cap (fleet-wide LiteLLM limiter). Acquired AFTER the
+    // per-user gate; re-keyed to the run's sessionId below and freed by
+    // /webhook/result on any terminal callback (TTL backstop in the lib).
+    let globalTwinSlotToken: string | null = null;
+    if (runAsTwin) {
+      globalTwinSlotToken = await acquireTwinSlot();
+      if (globalTwinSlotToken === null) {
+        log.warn(`Twin dispatch dropped for ${targetUserId} — concurrency queue never drained`);
+        // Free/drain the per-user slot we hold so a follow-up tag isn't wedged.
+        if (twinConvSlotToken && payload.conversationId) {
+          await drainNextQueued(payload.conversationId, runAgentSlug, twinConvSlotToken, twinUserScope).catch(() => {});
+        }
+        return;
+      }
+    }
+
     const runUrl = `${CONFIG.internalUrl}/claw/api/v1/internal/run`;
     // eslint-disable-next-line no-inner-declarations
     const fetchRun = () => fetch(runUrl, {
@@ -2482,79 +2136,42 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         "Content-Type": "application/json",
         ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
       },
-      body: JSON.stringify({
-        userId: targetUserId,
-        task,
-        conversationId: payload.conversationId,
-        agentSlug: runAgentSlug,
-        orgId: agent.orgId,
-        eventType,
-        traceId,
-        callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
-        progressUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`,
-        channelId: payload.channelId,
-        // WHO/WHERE for the twin_deliver mandate's who/where line (run.ts reads
-        // these to populate "You were mentioned by X in #Y" in the SYSTEM prompt).
-        ...(payload.senderName ? { senderName: payload.senderName } : {}),
-        ...(payload.channelName ? { channelName: payload.channelName } : {}),
-        ...(payload.projectId ? { projectId: payload.projectId } : {}),
-        ...(payload.projectName ? { projectName: payload.projectName } : {}),
-        ...(dispatchContext ? { context: dispatchContext } : {}),
-        ...(agentSkills && agentSkills.length > 0 ? { skills: agentSkills } : {}),
-        ...(resolvedParentProvider ? { provider: resolvedParentProvider } : {}),
-        ...(runtimeProviderOrder.length > 1 ? { providerOrder: runtimeProviderOrder } : {}),
-        ...(Object.keys(subagentProviders).length > 0 ? { subagentProviders } : {}),
-        // Default provider for subagents not listed in `subagentProviders`:
-        // "parent" (inherit parent's provider) or "spaces" (platform default).
-        subagentProviderMode,
-        ...(Object.keys(providerConfigs).length > 0 ? { providerConfigs } : {}),
-        ...(inboundAttachments.length > 0 ? { attachments: inboundAttachments } : {}),
-        // Ship the agent's JSONB config so xyne-claw can enable per-agent
-        // features that read from it: memoryEnabled (memory-search tool),
-        // toolPermissions (per-tool deny/ask), skillTriggers, promptInjections,
-        // and custom-tool config values (PPT_API_KEY etc). Without this,
-        // those features silently default to "off"/"allow" on Spaces mentions.
-        ...(agentRow?.config ? { agentConfig: agentRow.config as Record<string, unknown> } : {}),
-        fastMode: fastModeEnabled,
-        // `/compact` — force a one-shot compaction of the resumed session
-        // before this turn so the thread continues with a smaller context.
-        ...(compactBeforeRun ? { compactBeforeRun: true } : {}),
-      }),
+      body: JSON.stringify(dispatchPayload),
     });
 
     let runRes: Awaited<ReturnType<typeof fetchRun>>;
     try {
       runRes = await fetchRun();
     } catch (err) {
-      // Dispatch never happened — free the twin slot instead of letting it
-      // TTL out (15 min of wasted capacity per network blip otherwise).
-      if (twinSlotToken !== null) void releaseTwinSlot(twinSlotToken);
+      // Dispatch never happened — free the global twin slot, and drain/free the
+      // per-user FIFO slot so a queued follow-up tag isn't wedged behind a run
+      // that never started.
+      if (globalTwinSlotToken !== null) void releaseTwinSlot(globalTwinSlotToken);
+      if (twinConvSlotToken !== null && payload.conversationId) {
+        await drainNextQueued(payload.conversationId, runAgentSlug, twinConvSlotToken, twinUserScope).catch(() => {});
+      }
       throw err;
     }
 
     const body = (await runRes.json()) as { success: boolean; sessionId?: string };
 
-    // Re-key the twin slot to the real sessionId (released by /webhook/result);
-    // free it immediately if the dispatch didn't produce a run.
-    if (twinSlotToken !== null) {
+    // Re-key the GLOBAL twin slot to the real sessionId (released by
+    // /webhook/result); free it immediately if the dispatch didn't produce a run.
+    if (globalTwinSlotToken !== null) {
       if (body.success && body.sessionId) {
-        void renameTwinSlot(twinSlotToken, body.sessionId);
+        void renameTwinSlot(globalTwinSlotToken, body.sessionId);
       } else {
-        void releaseTwinSlot(twinSlotToken);
+        void releaseTwinSlot(globalTwinSlotToken);
       }
     }
 
     if (body.success && body.sessionId) {
-      // Spaces email auto-draft sends a synthetic APP_MENTIONED carrying this URL
-      // in metadata. When present, suppress the bot placeholder + DM and forward
-      // the result to it instead (see /webhook/result).
-      const resultForwardUrl =
-        ((payload as { metadata?: Record<string, unknown> }).metadata?.["resultForwardUrl"] as string | undefined) || undefined;
-
       // Progress signal to the dashboard. Two paths, switched by flag:
       //   USE_EPHEMERAL_PROGRESS=true  → POST /chat/agentProgress (requires Spaces XYNE-12145)
       //   USE_EPHEMERAL_PROGRESS=false → POST /chat/postMessage for a "⏳ Working on it..."
       //                                  placeholder; we capture messageId and edit it later.
+      // USER_MENTIONED (twin) skips this entirely, so progressMessageId stays
+      // undefined on the twin path. `resultForwardUrl` was resolved pre-dispatch.
       let progressMessageId: string | undefined;
       if (eventType !== "USER_MENTIONED" && !resultForwardUrl) {
         try {
@@ -2583,78 +2200,15 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         }
       }
 
-      const sessionContext: SessionContext = {
-        // Per-user: for the twin this is THIS iteration's mentioned user
-        // (targetUserId), NOT mentionedUserIds[0] — so the approve/decline DM
-        // and the per-user conv index route to the correct person.
-        mentionedUserId: eventType === "USER_MENTIONED" ? targetUserId : agent.spacesAppUserId,
-        // The run owner — same value dispatched as the run's `userId` below and
-        // used by run.ts for the user ChatMessage. The assistant reply is tagged
-        // with this in /result so the whole twin session is owned by the
-        // mentioned user, not the sender.
-        targetUserId,
-        senderId: payload.userId,
-        senderName: payload.senderName ?? payload.userId,
-        channelId: payload.channelId,
-        channelName: payload.channelName ?? payload.channelId,
-        conversationId: payload.conversationId,
-        ...(payload.messageId ? { sourceMessageId: payload.messageId } : {}),
-        task,
-        agentId: agent.id,
-        agentOrgId: agent.orgId,
-        agentSlug: agent.slug,
-        responseMode: eventType === "USER_MENTIONED" ? "approval" as const : "conversation" as const,
-        appToken: agent.appToken,
-        spacesAppId: agent.spacesAppId,
-        spacesAppUserId: agent.spacesAppUserId,
-        traceId,
-        rootAgentSlug: agent.slug,
-        ...(resolvedParentProvider ? { provider: resolvedParentProvider } : {}),
-        ...(escalatedProvider ? { escalatedProvider } : {}),
-        ...(progressMessageId ? { progressMessageId } : {}),
-        ...(userSpacesWorkspaceId ? { workspaceId: userSpacesWorkspaceId } : {}),
-        ...(twinWorkspaceId ? { workspaceId: twinWorkspaceId } : {}),
-        ...(resultForwardUrl ? { resultForwardUrl } : {}),
-      };
+      // Fold the (conversation-mode-only) placeholder id into the pre-built
+      // sessionContext before persisting. On the twin path this is a no-op.
+      if (progressMessageId) sessionContext.progressMessageId = progressMessageId;
 
       await setSession(body.sessionId, sessionContext);
 
-      // Run-recovery / goal-replay payload. Reuses the SAME dispatchContext,
-      // senderName, and channelName as the live fetchRun above — built once
-      // before the dispatch — so a recovered/replayed run is byte-identical to
-      // the original (no mention-note drift).
-      const dispatchPayload = {
-        userId: targetUserId,
-        task,
-        conversationId: payload.conversationId,
-        agentSlug: agent.slug,
-        orgId: agent.orgId,
-        eventType,
-        traceId,
-        callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
-        progressUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`,
-        channelId: payload.channelId,
-        ...(payload.senderName ? { senderName: payload.senderName } : {}),
-        ...(payload.channelName ? { channelName: payload.channelName } : {}),
-        ...(payload.projectId ? { projectId: payload.projectId } : {}),
-        ...(payload.projectName ? { projectName: payload.projectName } : {}),
-        ...(dispatchContext ? { context: dispatchContext } : {}),
-        ...(agentSkills && agentSkills.length > 0 ? { skills: agentSkills } : {}),
-        ...(resolvedParentProvider ? { provider: resolvedParentProvider } : {}),
-        ...(runtimeProviderOrder.length > 1 ? { providerOrder: runtimeProviderOrder } : {}),
-        ...(Object.keys(subagentProviders).length > 0 ? { subagentProviders } : {}),
-        // Default provider for subagents not listed in `subagentProviders`:
-        // "parent" (inherit parent's provider) or "spaces" (platform default).
-        subagentProviderMode,
-        ...(Object.keys(providerConfigs).length > 0 ? { providerConfigs } : {}),
-        ...(inboundAttachments.length > 0 ? { attachments: inboundAttachments } : {}),
-        // Same agentConfig pass-through as the primary /run dispatch above —
-        // run-recovery retries must see memoryEnabled/skillTriggers/etc.
-        ...(agentRow?.config ? { agentConfig: agentRow.config as Record<string, unknown> } : {}),
-        fastMode: fastModeEnabled,
-        ...(compactBeforeRun ? { compactBeforeRun: true } : {}),
-      };
-
+      // Run-recovery / goal-replay reuses the SAME dispatchPayload that was
+      // dispatched above (built once before the per-user gate) — byte-identical
+      // replay, no mention-note drift.
       await registerRunRecovery({
         rootSessionId: body.sessionId,
         maxRetries: CONFIG.runRecoveryMaxRetries,
@@ -2693,6 +2247,10 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       // in prod logs before this dedupe. Leave it to /run.
 
       log.info(`Forwarded to xyne-claw, sessionId=${body.sessionId}`);
+    } else if (runAsTwin && QUEUE_ENABLED && payload.conversationId) {
+      // Twin runtime produced no run — drain this owner's per-user queue so a
+      // follow-up tag isn't wedged behind a phantom slot.
+      await drainNextQueued(payload.conversationId, runAgentSlug, twinConvSlotToken, twinUserScope).catch(() => {});
     } else if (QUEUE_ENABLED && eventType !== "USER_MENTIONED" && payload.conversationId) {
       // Runtime rejected the dispatch — drain any queued follow-up (or release
       // the slot) so the conversation isn’t wedged until the busy TTL expires.
@@ -3008,24 +2566,68 @@ async function redispatchQueuedMessage(msg: QueuedMessage): Promise<void> {
 // is refreshed so a long drain-chain can't let the marker expire mid-flight; it
 // is released only when nothing remains to run. Release is owner-checked when a
 // `token` is supplied, so a late finalizer can't delete a newer run's slot.
-export async function drainNextQueued(conversationId: string, agentSlug: string, token?: string | null): Promise<void> {
+export async function drainNextQueued(conversationId: string, agentSlug: string, token?: string | null, userScopeId?: string): Promise<void> {
   if (!QUEUE_ENABLED || !conversationId || !agentSlug) return;
-  const next = await dequeueMessage(conversationId, agentSlug);
+  const next = await dequeueMessage(conversationId, agentSlug, userScopeId);
   if (!next) {
-    await releaseSlot(conversationId, agentSlug, token ?? undefined);
+    await releaseSlot(conversationId, agentSlug, token ?? undefined, userScopeId);
     return;
   }
   try {
-    await redispatchQueuedMessage(next);
+    // Twin FIFO entries carry a fully-built replay blob (dispatchPayload +
+    // sessionContext) and are replayed VERBATIM (approval mode preserved, user
+    // message created fresh on drain). Conversation-mode entries carry a thin
+    // task and re-derive context — the legacy path.
+    if (next.dispatchPayload && next.sessionContext) {
+      await redispatchTwinQueuedMessage(next);
+    } else {
+      await redispatchQueuedMessage(next);
+    }
     // Hand the slot to the freshly re-dispatched run: bump the TTL so it owns
     // the conversation for a full window rather than inheriting the remaining
     // time from the run that just finished.
-    await refreshSlot(conversationId, agentSlug);
-    clog.info(`[msg-queue] conv ${conversationId} agent ${agentSlug}: dispatched queued eventId=${next.eventId}`);
+    await refreshSlot(conversationId, agentSlug, undefined, userScopeId);
+    clog.info(`[msg-queue] conv ${conversationId} agent ${agentSlug}${userScopeId ? ` owner ${userScopeId}` : ""}: dispatched queued eventId=${next.eventId}`);
   } catch (err) {
     clog.warn(`[msg-queue] conv ${conversationId} agent ${agentSlug}: redispatch failed, releasing slot: ${err instanceof Error ? err.message : String(err)}`);
-    await releaseSlot(conversationId, agentSlug, token ?? undefined);
+    await releaseSlot(conversationId, agentSlug, token ?? undefined, userScopeId);
   }
+}
+
+// Re-dispatch a PROACTIVELY-queued twin tag by replaying its stored, fully-built
+// /internal/run payload verbatim. Unlike redispatchQueuedMessage (which rebuilds
+// a conversation-mode context), this preserves approval mode + the per-turn
+// mention context exactly as the original would have dispatched. CRITICAL: it
+// does NOT set __skipUserMessagePersist — a proactively queued tag never
+// dispatched, so its user ChatMessage must be created NOW (this is what keeps the
+// chat sequential: one query + reply at a time, no branch). A fresh traceId is
+// minted per drained attempt.
+async function redispatchTwinQueuedMessage(msg: QueuedMessage): Promise<void> {
+  const traceId = createTraceId();
+  const dispatch = { ...(msg.dispatchPayload as Record<string, unknown>), traceId };
+  const res = await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+    },
+    body: JSON.stringify(dispatch),
+  });
+  const body = (await res.json().catch(() => null)) as { success?: boolean; sessionId?: string } | null;
+  if (!res.ok || !body?.success || !body.sessionId) {
+    throw new Error(`/internal/run for queued twin message returned no sessionId conv=${msg.conversationId} owner=${msg.userScopeId ?? "?"}`);
+  }
+  const sessionContext = { ...(msg.sessionContext as unknown as SessionContext), traceId };
+  await setSession(body.sessionId, sessionContext);
+  await registerRunRecovery({
+    rootSessionId: body.sessionId,
+    maxRetries: CONFIG.runRecoveryMaxRetries,
+    timeoutMs: CONFIG.runRecoveryTimeoutMs,
+    retryBackoffMs: CONFIG.runRecoveryBackoffMs,
+    dispatchPayload: dispatch as unknown as Parameters<typeof registerRunRecovery>[0]["dispatchPayload"],
+    sessionContext,
+  });
+  clog.info(`[twin-queue] redispatched queued twin sessionId=${body.sessionId} conv=${msg.conversationId} owner=${msg.userScopeId ?? "?"}`);
 }
 
 // ── S2S automation webhook handler for /webhook/:agentSlug ────────────────
@@ -3638,6 +3240,10 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
   let skipQueueDrain = false;
   let resultConversationId = payload.conversationId ?? "";
   let resultAgentSlug = payload.agentSlug ?? "";
+  // Per-user twin FIFO scope for the finalizer's drain. MUST be declared at THIS
+  // scope (not inside the try) so the approval-mode early return — the twin case —
+  // still drains the right owner's queue in the finally. Empty for non-twin.
+  let resultUserScope = "";
   let dedupReleaseConversationId = "";
   let dedupReleaseAgentSlug = "";
   try {
@@ -3661,6 +3267,9 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     ctx = await ensureSessionContextOrg(ctx, sessionId);
     resultConversationId = ctx?.conversationId ?? resultConversationId;
     resultAgentSlug = ctx?.agentSlug ?? resultAgentSlug;
+    // Twin runs are drained per-owner (mentionedUserId = the twin owner). Only
+    // digital-twin uses a user-scoped queue; everything else stays unscoped.
+    resultUserScope = ctx?.agentSlug === "digital-twin" ? (ctx?.mentionedUserId ?? "") : "";
     dedupReleaseConversationId = ctx?.conversationId ?? "";
     dedupReleaseAgentSlug = ctx?.agentSlug ?? "";
 
@@ -3672,6 +3281,80 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
   // model never delivered (no twinDelivery), the Twin wasn't confident enough to
   // speak, so we stay silent rather than posting anything.
   if (ctx?.responseMode === "approval" && payload.status === "completed") {
+    // The RUN itself completed successfully — the twin merely chose HOW to act
+    // (deliver a draft / react / ignore / stay silent). Finalize the AgentRun
+    // and settle run-recovery HERE, before the early return below, exactly as
+    // the conversation-mode path does at its own finalize/handleRunCompletion
+    // sites. Skipping this was leaving every delivered twin reply stuck
+    // "running" until an orphan-reaper mislabeled it "interrupted (orphaned
+    // run)" (65 of 72 orphans had actually called twin_deliver), and left stale
+    // recovery state that could spuriously re-fire the run.
+    // Persist the twin's OUTCOME as an assistant message in the owner's
+    // control-center chat so the conversation reads query → reply → query
+    // (LINEAR — no `<x/y>` branch pager). The frontend groups CONSECUTIVE
+    // same-role messages as sibling variants (resolveEffectiveParents), and a
+    // twin thread is otherwise ALL user rows — its real reply is a Spaces draft,
+    // never an assistant row — so 3 rapid tags rendered as 3 branches. This also
+    // lets the owner SEE what their twin drafted (previously only the raw run
+    // debug showed it). Tagged to the owner (mentionedUserId = run owner) so the
+    // /messages ACL groups it with the mention; created BEFORE finalize so the
+    // run links to it via chatMessageId.
+    const twinDelivered = payload.twinDelivery;
+    const twinOutcomeText =
+      twinDelivered?.action === "ignore"
+        ? "_Chose not to reply to this._"
+        : isTwinDelivery(twinDelivered)
+          ? typeof twinDelivered.message === "string" && twinDelivered.message.trim()
+            ? twinDelivered.emoji
+              ? `${twinDelivered.emoji} ${twinDelivered.message.trim()}`
+              : twinDelivered.message.trim()
+            : twinDelivered.emoji
+              ? `Reacted ${twinDelivered.emoji}`
+              : "_Drafted a reply._"
+          : "_Stayed silent — not confident enough to reply._";
+    let twinAssistantMsgId: string | undefined;
+    if (ctx.conversationId && ctx.agentSlug && ctx.agentOrgId && ctx.mentionedUserId) {
+      try {
+        const outcomeMsg = await chatMessageRepository.create({
+          conversationId: ctx.conversationId,
+          agentSlug: ctx.agentSlug,
+          userId: ctx.mentionedUserId,
+          orgId: ctx.agentOrgId,
+          role: "assistant",
+          content: twinOutcomeText,
+          status: "completed",
+          ...(payload.reasoning ? { reasoning: payload.reasoning } : {}),
+        });
+        twinAssistantMsgId = outcomeMsg.id;
+      } catch (e) {
+        clog.warn(`[webhook/result] Twin: failed to persist outcome chat message for ${sessionId}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+
+    if (sessionId) {
+      const deliveredText =
+        isTwinDelivery(payload.twinDelivery) && typeof payload.twinDelivery.message === "string"
+          ? payload.twinDelivery.message
+          : null;
+      agentRunRepository.finalize(sessionId, {
+        status: "completed",
+        result: deliveredText,
+        error: null,
+        ...(twinAssistantMsgId ? { chatMessageId: twinAssistantMsgId } : {}),
+        ...(payload.provider !== undefined ? { provider: payload.provider } : {}),
+        ...(payload.model !== undefined ? { model: payload.model } : {}),
+        ...(payload.reasoning ? { reasoning: payload.reasoning } : {}),
+        toolsUsed: payload.toolsUsed ?? [],
+        ...(payload.toolInvocations !== undefined ? { toolInvocations: payload.toolInvocations } : {}),
+        ...(payload.tokenUsage ? { tokenUsage: payload.tokenUsage } : {}),
+        ...(payload.latency ? { latency: payload.latency } : {}),
+        ...(payload.fastMode !== undefined ? { fastMode: payload.fastMode === true } : {}),
+      }).catch(() => {});
+      await handleRunCompletion(sessionId, "completed").catch((err) => {
+        clog.warn(`[webhook/result] Twin: failed to settle run recovery for ${sessionId}:`, err instanceof Error ? err.message : err);
+      });
+    }
+
     // action="ignore" is a CONFIDENT decision to post nothing. It is a valid
     // delivery (isTwinDelivery returns true), so this MUST be checked BEFORE the
     // dispatch below — otherwise it would wrongly open an approval DM. Drop it and
@@ -3680,7 +3363,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       clog.info(`[webhook/result] Digital Twin chose to ignore — dropping, no DM/post, session ${sessionId}`);
       await deleteSession(sessionId);
     } else if (isTwinDelivery(payload.twinDelivery)) {
-      await sendDigitalTwinApprovalDm(ctx, payload.twinDelivery, payload.attachments, sessionId);
+      await sendTwinReplyDraft(ctx, payload.twinDelivery, payload.toolInvocations, sessionId);
     } else {
       clog.info(`[webhook/result] Digital Twin stayed silent — no twin_deliver delivery (fail-closed), session ${sessionId}`);
       await deleteSession(sessionId);
@@ -5214,7 +4897,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       }
     }
     if (QUEUE_ENABLED && resultConversationId && resultAgentSlug && !goalContinues && !skipQueueDrain) {
-      await drainNextQueued(resultConversationId, resultAgentSlug).catch(() => {});
+      await drainNextQueued(resultConversationId, resultAgentSlug, undefined, resultUserScope || undefined).catch(() => {});
     }
   }
 });
@@ -5289,7 +4972,21 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
   // prevents a long run from TTL-expiring its slot and letting a second message
   // acquire concurrently (and a late finalizer from releasing the wrong slot).
   if (QUEUE_ENABLED && conversationId && agentSlug) {
-    await refreshSlot(conversationId, agentSlug).catch(() => {});
+    // A twin's busy marker is PER-USER, so a plain refreshSlot(conv, agent) would
+    // PEXPIRE the wrong (unscoped) key and let the real per-user marker TTL-expire
+    // → a queued same-owner tag could then SET NX its way in as a second
+    // concurrent run (the exact slot-theft this closes). Resolve the owner from
+    // the session; if that lookup fails, SKIP the refresh entirely rather than
+    // touch the unscoped key (a missed refresh only shortens the TTL — safe; a
+    // wrong-key refresh reintroduces the concurrency bug).
+    if (agentSlug === "digital-twin") {
+      const ctx = sessionId ? await getSession(sessionId).catch(() => null) : null;
+      if (ctx?.mentionedUserId) {
+        await refreshSlot(conversationId, agentSlug, undefined, ctx.mentionedUserId).catch(() => {});
+      }
+    } else {
+      await refreshSlot(conversationId, agentSlug).catch(() => {});
+    }
   }
 
   if (!sessionId) return;

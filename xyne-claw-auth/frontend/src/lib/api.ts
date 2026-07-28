@@ -1676,6 +1676,7 @@ export interface ServiceAccessToken {
   name: string | null;
   prefix: string;
   userId: string;
+  scopes?: string[];
   lastUsedAt: string | null;
   expiresAt: string | null;
   revokedAt: string | null;
@@ -1752,6 +1753,20 @@ export async function createSlackAgentApp(
   return response.data;
 }
 
+export async function syncSlackAgentApp(
+  slug: string,
+  orgId?: string,
+): Promise<{ appId: string; installUrl: string; scopesChanged: boolean }> {
+  const response = await request<{
+    success: boolean;
+    data: { appId: string; installUrl: string; scopesChanged: boolean };
+  }>(`${AUTH_API_URL}/api/v1/surfaces/slack/agents/${encodeURIComponent(slug)}/sync-app`, {
+    method: "POST",
+    body: JSON.stringify(orgId ? { orgId } : {}),
+  });
+  return response.data;
+}
+
 export interface SlackAgentStatus {
   agentId: string;
   agentSlug: string;
@@ -1760,6 +1775,7 @@ export interface SlackAgentStatus {
   commandName?: string;
   installs: Array<{ teamId: string; teamName: string; installedAt: string }>;
   installUrl: string | null;
+  manifestStale: boolean;
 }
 
 export async function removeSlackAgentRegistration(slug: string, orgId?: string): Promise<void> {
@@ -1846,7 +1862,7 @@ export async function listOrgServiceTokens(
 export async function mintOrgServiceToken(
   userId: string,
   orgId: string,
-  input: { name: string; userId: string; expiresAt?: string | null },
+  input: { name: string; userId: string; expiresAt?: string | null; allowedAgentSlugs: string[] },
 ): Promise<MintedServiceAccessToken> {
   const data = await request<{ success: boolean; data: MintedServiceAccessToken }>(
     `${AUTH_API_URL}/api/v1/organizations/${orgId}/service-tokens`,
@@ -2944,13 +2960,20 @@ export interface ChatHistory {
   reasoningByMsgId: Map<string, string>;
 }
 
-export async function pollChatMessages(slug: string, conversationId: string): Promise<ChatHistory> {
+export async function pollChatMessages(
+  slug: string,
+  conversationId: string,
+  // OPT-IN cross-user read (admin "All Runs" inspector only). Default false so
+  // the normal chat window shows only the caller's own turns — the backend ACL
+  // gates on ?allRuns=1 AND admin, so passing this from a non-admin is a no-op.
+  allRuns = false,
+): Promise<ChatHistory> {
   const data = await request<{
     success: boolean;
     data: ChatMsg[];
     invocationsByMsgId?: Record<string, ToolInvocation[]>;
   }>(
-    `${AUTH_API_URL}/api/v1/agent-chat/${slug}/chat/${conversationId}/messages`,
+    `${AUTH_API_URL}/api/v1/agent-chat/${slug}/chat/${conversationId}/messages${allRuns ? "?allRuns=1" : ""}`,
   );
   const invocationsByMsgId = new Map<string, ToolInvocation[]>();
   if (data.invocationsByMsgId) {
@@ -2997,12 +3020,14 @@ export function subscribeLiveConversation(
   conversationId: string,
   userId: string,
   callbacks: LiveStreamCallbacks,
+  // OPT-IN cross-user live stream (admin "All Runs" only) — mirrors pollChatMessages.
+  allRuns = false,
 ): () => void {
   const controller = new AbortController();
   void (async () => {
     let res: Response;
     try {
-      res = await fetch(`${AUTH_API_URL}/api/v1/agent-chat/${slug}/chat/${conversationId}/live`, {
+      res = await fetch(`${AUTH_API_URL}/api/v1/agent-chat/${slug}/chat/${conversationId}/live${allRuns ? "?allRuns=1" : ""}`, {
         credentials: "include",
         headers: { "x-user-id": userId, Accept: "text/event-stream" },
         signal: controller.signal,
@@ -4918,6 +4943,108 @@ export async function getDigitalTwinMetrics(userId: string, days?: number): Prom
   return data.data;
 }
 
+// ── Twin reply activity (admin, cross-user) ──────────────────────────────────
+// Backed by GET /control-center/twin-reply-metrics (requireClawAdmin). Rates are
+// fractions in [0,1]. Distinct from DigitalTwinMetrics (per-user memory
+// candidates). See docs/twin-reply-system.md.
+
+export interface TwinReplyResponseTime {
+  medianSec: number | null;
+  p90Sec: number | null;
+  avgSec: number | null;
+  count: number;
+}
+
+export interface TwinReplyAgg {
+  total: number;
+  pending: number;
+  accepted: number;
+  acceptedEdited: number;
+  totalApproved: number;
+  declined: number;
+  ignored: number;
+  approvalRate: number | null;
+  editRate: number | null;
+  declineRate: number | null;
+  byAction: { action: string; count: number }[];
+  responseTime: TwinReplyResponseTime;
+  previousApprovalRate: number | null;
+  previousEditRate: number | null;
+}
+
+export interface TwinGateAgg {
+  total: number;
+  respond: number;
+  ignore: number;
+  error: number;
+  respondRate: number | null;
+  errorRate: number | null;
+  avgConfidence: number | null;
+  avgDurationMs: number | null;
+  medianDurationMs: number | null;
+  byDecisionSource: { source: string; respond: number; ignore: number }[];
+  previousRespondRate: number | null;
+}
+
+export interface TwinBehaviorAgg {
+  total: number;
+  responded: number;
+  ignored: number;
+  shouldHaveResponded: number;
+}
+
+export interface TwinReplyPerUserRow {
+  userId: string;
+  name: string;
+  email: string;
+  replies: {
+    accepted: number;
+    acceptedEdited: number;
+    declined: number;
+    ignored: number;
+    pending: number;
+    totalApproved: number;
+    approvalRate: number | null;
+    medianResponseSec: number | null;
+  };
+  gate: { respond: number; ignore: number; error: number };
+  behavior: { responded: number; ignored: number; shouldHaveResponded: number };
+  activity: number;
+}
+
+export interface TwinReplyMetrics {
+  scope: { orgScope: "org" | "all"; userCount: number };
+  window: { since: string | null; until: string | null; days: number | null };
+  replies: TwinReplyAgg;
+  gate: TwinGateAgg;
+  behavior: TwinBehaviorAgg;
+  byUser: TwinReplyPerUserRow[];
+}
+
+export interface TwinReplyMetricsParams {
+  days?: number | null;
+  from?: string | null;
+  to?: string | null;
+  orgScope?: AdminOrgScope;
+}
+
+export async function getTwinReplyMetrics(
+  userId: string,
+  params: TwinReplyMetricsParams = {},
+): Promise<TwinReplyMetrics> {
+  const qs = new URLSearchParams();
+  if (params.from) qs.set("from", params.from);
+  if (params.to) qs.set("to", params.to);
+  if (!params.from && !params.to && params.days) qs.set("days", String(params.days));
+  applyAdminOrgScope(qs, params.orgScope);
+  const q = qs.toString();
+  const data = await request<{ success: boolean; data: TwinReplyMetrics }>(
+    `${AUTH_API_URL}/api/v1/control-center/twin-reply-metrics${q ? `?${q}` : ""}`,
+    { headers: { "x-user-id": userId } },
+  );
+  return data.data;
+}
+
 // ── Workspace-wide metrics (v3 Metrics page) ───────────────────────────
 
 export interface SlowSessionToolRow {
@@ -6044,5 +6171,112 @@ export async function deleteErrorPipelineRule(userId: string, name: string): Pro
   await request(
     `${AUTH_API_URL}/api/v1/admin/error-pipeline/rules/${encodeURIComponent(name)}`,
     { method: "DELETE", headers: { "x-user-id": userId } },
+  );
+}
+
+// ── Entity extraction ────────────────────────────────────────────────────────
+// Type discovery over a channel: read its threads/tickets, propose an entity
+// type vocabulary, pause for human approval. Approving writes the channel's
+// types onto its Vespa document so search can filter by them.
+
+export type EntityRunStatus =
+  | "RUNNING"
+  | "AWAITING_TYPE_APPROVAL"
+  | "COMPLETED"
+  | "FAILED"
+  | "CANCELLED";
+
+export interface EntityExtractionRun {
+  id: string;
+  channelId: string;
+  status: EntityRunStatus;
+  stage: string;
+  messageCount: number;
+  documentCount: number;
+  approvedTypeNames: string[];
+  startedAt: string;
+  completedAt: string | null;
+  errorMessage: string | null;
+}
+
+export interface ProposedEntityType {
+  name: string;
+  prefix: string;
+  rule: string;
+  examples?: string[];
+}
+
+export interface ProposedTypesPayload {
+  types: ProposedEntityType[];
+  /** Labels the pipeline merged away or discarded, with its reason. */
+  dropped: Array<{ label?: string; reason?: string } | string>;
+}
+
+export async function startEntityExtractionRun(
+  channelId: string,
+  userId: string,
+  context?: string,
+): Promise<{ runId: string; status: EntityRunStatus }> {
+  return request<{ runId: string; status: EntityRunStatus }>(
+    `${AUTH_API_URL}/api/v1/entity-extraction/channels/${channelId}/runs`,
+    {
+      method: "POST",
+      headers: { "x-user-id": userId },
+      body: JSON.stringify(context?.trim() ? { context: context.trim() } : {}),
+    },
+  );
+}
+
+export async function getEntityExtractionRun(
+  runId: string,
+  userId: string,
+): Promise<EntityExtractionRun> {
+  return request<EntityExtractionRun>(
+    `${AUTH_API_URL}/api/v1/entity-extraction/runs/${runId}`,
+    { headers: { "x-user-id": userId } },
+  );
+}
+
+export async function getEntityExtractionTypes(
+  runId: string,
+  userId: string,
+): Promise<ProposedTypesPayload> {
+  return request<ProposedTypesPayload>(
+    `${AUTH_API_URL}/api/v1/entity-extraction/runs/${runId}/types`,
+    { headers: { "x-user-id": userId } },
+  );
+}
+
+export interface ApproveTypesResult {
+  runId: string;
+  approvedTypes: string[];
+  /** The channel's full type set as written to Vespa (union across its runs). */
+  channelEntityTypes: string[];
+  vespaSync: "ok" | "failed";
+  vespaSyncError?: string;
+}
+
+export async function approveEntityTypes(
+  runId: string,
+  userId: string,
+  payload: {
+    approve: string[];
+    edit?: Record<string, Partial<ProposedEntityType>>;
+    add?: ProposedEntityType[];
+  },
+): Promise<ApproveTypesResult> {
+  return request<ApproveTypesResult>(
+    `${AUTH_API_URL}/api/v1/entity-extraction/runs/${runId}/types`,
+    { method: "POST", headers: { "x-user-id": userId }, body: JSON.stringify(payload) },
+  );
+}
+
+export async function resyncChannelEntityTypes(
+  channelId: string,
+  userId: string,
+): Promise<{ channelId: string; entityTypes: string[]; vespaSync: "ok" | "failed"; error?: string }> {
+  return request(
+    `${AUTH_API_URL}/api/v1/entity-extraction/channels/${channelId}/resync-types`,
+    { method: "POST", headers: { "x-user-id": userId } },
   );
 }

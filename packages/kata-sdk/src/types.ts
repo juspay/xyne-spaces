@@ -32,6 +32,15 @@ export interface KataClientOptions {
   routerUrl: string;
   namespace?: string;
   template?: string;
+  /**
+   * Minimum spacing between successive `createSession` calls on this client
+   * instance, in milliseconds. Each SandboxClaim triggers a CoW clone off the
+   * template's source VolumeSnapshot; GCP enforces a per-source-snapshot
+   * `CreateVolume` rate limit and every retry counts. Spacing calls out ~10s
+   * apart keeps well under that budget under bursty callers. Set 0 to
+   * disable. Default: 10_000 (10s).
+   */
+  minCreateSpacingMs?: number;
 }
 
 export interface SessionConstructorOptions {

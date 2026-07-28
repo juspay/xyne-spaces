@@ -16,6 +16,7 @@ import { usersRouter } from "./routes/users.js";
 import { gatewaysRouter } from "./routes/gateways.js";
 import { webhookRouter } from "./routes/webhook.js";
 import { flowActionRouter } from "./routes/flow-action.js";
+import { twinDraftInternalRouter } from "./routes/twin-draft.js";
 import { appCallbackRouter } from "./routes/app-callback.js";
 import { agentsRouter } from "./routes/agents.js";
 import { chainWorkflowsRouter } from "./routes/chain-workflows.js";
@@ -53,6 +54,7 @@ import { oauthTokenRouter } from "./routes/oauth-token.js";
 import { rapidApiLinkedInRouter } from "./routes/rapidapi-linkedin.js";
 import { scheduledJobsRouter } from "./routes/scheduled-jobs.js";
 import { pendingQuestionsRouter } from "./routes/pending-questions.js";
+import { ttsRouter } from "./routes/tts.js";
 import { settingsRouter } from "./routes/settings.js";
 import { runsRouter } from "./routes/runs.js";
 import { metricsRouter } from "./routes/metrics.js";
@@ -61,8 +63,9 @@ import { digitalTwinRouter } from "./routes/digital-twin.js";
 import { controlCenterRouter } from "./routes/control-center.js";
 import { evalsRouter } from "./routes/evals/index.js";
 import { searchEvalsRouter } from "./routes/search-evals/index.js";
+import { entityExtractionRouter } from "./routes/entity-extraction.js";
 import { cliAuthRouter } from "./routes/cli-auth.js";
-import { surfacesSlackRouter } from "./routes/surfaces-slack.js";
+import { slackRouter } from "./surfaces/slack/routes/index.js";
 import { mcpGatewayRouter } from "./mcpgateway/index.js";
 import { initScheduledJobsWorker, closeWorker } from "./queue/scheduled-jobs-worker.js";
 import { closeQueue } from "./queue/scheduled-jobs-queue.js";
@@ -73,20 +76,22 @@ import { closeAgentBackfillQueue } from "./queue/agent-backfill-queue.js";
 import { initEvalImportWorker, closeEvalImportWorker } from "./queue/eval-import-worker.js";
 import { initEvalGenerationWorker, closeEvalGenerationWorker } from "./queue/eval-generation-worker.js";
 import { initSearchEvalRunWorker, closeSearchEvalRunWorker } from "./queue/search-eval-run-worker.js";
+import { initEntityExtractionWorker, closeEntityExtractionWorker } from "./queue/entity-extraction-worker.js";
+import { closeEntityExtractionQueue } from "./queue/entity-extraction-queue.js";
 import { initEvalJudgeWorker, closeEvalJudgeWorker } from "./queue/eval-judge-worker.js";
 import { initFailureCuratorWorker, closeFailureCuratorWorker } from "./services/failure-curator-worker.js";
 import { initOrphanFinalizerWorker, closeOrphanFinalizerWorker } from "./services/orphan-finalizer-worker.js";
 import { closeBackfillQueue } from "./queue/digital-twin-backfill-queue.js";
 import { bootstrapCustomTools } from "./bootstrap-tools.js";
 import { initMemoryCron } from "./services/memoryCronService.js";
-import { initSlackConfigTokenCron } from "./services/slackConfigTokenService.js";
+import { initSlackConfigTokenCron } from "./surfaces/slack/config-token-cron.js";
 import { initDigitalTwinDaily } from "./services/digitalTwinDaily.js";
 import {
   startBitbucketStatsBackgroundRefresh,
   stopBitbucketStatsBackgroundRefresh,
 } from "./services/bitbucket-stats.js";
 
-import { requireAuth, requireS2S, requireStrictS2S, requireUserAuth, s2sKeyMatches } from "./middleware/require-auth.js";
+import { requireAuth, requireS2S, requireStrictS2S, requireInternalS2S, requireUserAuth, s2sKeyMatches } from "./middleware/require-auth.js";
 import { requireClawAdmin, requireSearchEvalAccess } from "./middleware/agent-acl.js";
 import { redisService } from "./redis.js";
 
@@ -159,7 +164,7 @@ app.use(`${BASE}/gateways`, requireAuth, requireClawAdmin, gatewaysRouter);
 app.use(`${BASE}/agents`, requireAuth, agentsRouter);
 app.use(`${BASE}/cli`, cliAuthRouter);
 // Public Slack ingress; authenticates itself with the per-install HMAC secret.
-app.use(`${BASE}/surfaces/slack`, surfacesSlackRouter);
+app.use(`${BASE}/surfaces/slack`, slackRouter);
 app.use(`${BASE}/chain-workflows`, requireAuth, chainWorkflowsRouter);
 app.use(`${BASE}/spaces`, requireAuth, spacesRouter);
 app.use(`${BASE}/tools`, requireAuth, toolsRouter);
@@ -174,9 +179,11 @@ app.use(`${BASE}/admin`, requireAuth, adminBackfillSigningSecretsRouter);
 app.use(`${BASE}/dashboard`, requireAuth, dashboardRouter);
 app.use(`${BASE}/agent-chat`, requireAuth, agentChatRouter);
 app.use(`${BASE}/internal/agent-chat`, requireStrictS2S, agentChatInternalRouter); // progress/callback from xyne-claw
+app.use(`${BASE}/internal/twin-draft`, requireInternalS2S, twinDraftInternalRouter);  // Spaces → approve/decline an in-thread Twin reply draft (INTERNAL_S2S_KEY)
 app.use(`${BASE}/internal/sessions`, requireStrictS2S, sessionsArchiveRouter);     // archive/restore session JSONLs to GCS — S2S only (transcripts)
 app.use(`${BASE}/error-pipeline`, errorPipelineIngestRouter); // Grafana webhook ingest (JWT-authed inside)
 app.use(`${BASE}/internal/error-pipeline`, requireStrictS2S, errorPipelineInternalRouter); // run-result callback from xyne-claw (S2S only)
+app.use(`${BASE}/internal/tts`, requireStrictS2S, ttsRouter);
 // Generic live OAuth-token read for every connector — GET /users/:userId/oauth/:provider/token.
 // Mounted before the per-provider routers (which now only serve authorize/callback)
 // so it owns the `/token` path. Same requireAuth guard; the handler additionally
@@ -263,6 +270,8 @@ app.use(`${BASE}/control-center`, requireAuth, controlCenterRouter);
 app.use(`${BASE}/research-agent`, requireAuth, researchAgentRouter);
 app.use(`${BASE}/evals`, requireAuth, requireClawAdmin, evalsRouter);
 app.use(`${BASE}/search-evals`, requireAuth, requireSearchEvalAccess, searchEvalsRouter);
+// A run reads a whole channel with no per-user ACL guard — operator action only.
+app.use(`${BASE}/entity-extraction`, requireAuth, requireClawAdmin, entityExtractionRouter);
 
 // MCP Gateway routes (for backend service registration)
 app.use(`${BASE}/gateway`, mcpGatewayRouter);
@@ -300,6 +309,7 @@ listen(CONFIG.port, () => {
     initEvalGenerationWorker();
     initEvalJudgeWorker();
     initSearchEvalRunWorker();
+    initEntityExtractionWorker();
     initMemoryCron();
     initSlackConfigTokenCron();
     initDigitalTwinDaily();
@@ -331,6 +341,8 @@ async function shutdown(signal: string): Promise<void> {
     await closeEvalGenerationWorker().catch(() => {});
     await closeEvalJudgeWorker().catch(() => {});
     await closeSearchEvalRunWorker().catch(() => {});
+    await closeEntityExtractionWorker().catch(() => {});
+    await closeEntityExtractionQueue().catch(() => {});
     closeFailureCuratorWorker();
     closeOrphanFinalizerWorker();
     await closeQueue().catch(() => {});

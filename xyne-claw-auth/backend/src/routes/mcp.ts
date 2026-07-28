@@ -1489,7 +1489,7 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
     // through callBitbucketThrottled, not the local switch above, so they carry
     // no citation by default. Same pattern as the Grafana block above.
     if (serverType === "bitbucket") {
-      const bbBaseUrl = ((credentials["baseUrl"] as string) || "https://bitbucket.example.com").replace(/\/+$/, "");
+      const bbBaseUrl = ((credentials["baseUrl"] as string) || "https://bitbucket.juspay.net").replace(/\/+$/, "");
       const citation = buildUpstreamBitbucketCitation(bbBaseUrl, tool, effectiveParams);
       if (citation) {
         result = {

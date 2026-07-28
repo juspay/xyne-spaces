@@ -8,6 +8,7 @@
 import { interact, search, memorySearch, spacesFetch, spacesFetchBuffer, spacesFetchText, appFetch } from "./xyne-spaces-client.js";
 import { esc, queryDirect, type DirectSearchResponse } from "./vespa-direct.js";
 import { buildYqlFromParams, AREA_NAMES, AREA_ALIASES, describeAreasForPrompt } from "./vespa-search-areas.js";
+import { validateCorpusScan, buildCorpusScanYql, parseBucketKey, termToQuery, MAX_SCAN_TERMS, type CorpusScanScope } from "./vespa-corpus-scan.js";
 import { getWorkspaceIdForUser } from "../../lib/spaces-db.js";
 import type { Citation } from "xyne-claw-shared";
 import { CONFIG } from "../../config.js";
@@ -5670,9 +5671,163 @@ const spacesSavedViews: ToolDef = {
   },
 };
 
+// ── spaces-corpus-scan ───────────────────────────────────────────────────────
+// The probe tool (plan.md Step 2): real counts per time bucket, paired with the
+// same-scope corpus totals so trend/share questions never get answered from a
+// ranked sample. YQL construction + validation live in vespa-corpus-scan.ts
+// (pure, unit-tested); this handler fans the queries out through queryDirect,
+// which injects the ACL + workspace guards.
+const spacesCorpusScan: ToolDef = {
+  name: "spaces-corpus-scan",
+  description:
+    "Count documents matching each term, bucketed by year or month, over EVERYTHING the asker can see — " +
+    "plus the total corpus size per bucket in the same response. Use for trend and share questions: " +
+    "\"how many X per year\", \"is X growing\", \"what share of tickets mention X\".\n\n" +
+    "## When to use which counting tool\n" +
+    "- Single-entity aggregates (\"who filed the most\", \"which channel has the most X\") → " +
+    "spaces-vespa-search with groupBy + hits:0.\n" +
+    "- Counts OVER TIME, trends, or anything needing a fair denominator → THIS tool.\n" +
+    "- NEVER answer a how-many question by counting a page of search hits — that is a ranked sample, not a total.\n\n" +
+    "## Reading the result\n" +
+    "`counts[term][bucket]` are real Vespa totals (lexical match, ACL-respected). `corpusTotals[bucket]` is the " +
+    "same scope with no term — the denominator. `shares[term][bucket]` = count ÷ that bucket's total, precomputed " +
+    "so you never do the division yourself. Compare SHARES across buckets, not raw counts: the corpus grows over " +
+    "time, so raw counts read as fake growth.\n\n" +
+    "## Notes\n" +
+    `- Up to ${MAX_SCAN_TERMS} terms per call; each term is matched lexically, no semantic expansion — ` +
+    "so a count means \"documents containing this term\". Cover phrasing variants by passing them as extra terms.\n" +
+    "- A multi-word term counts the exact PHRASE (\"refund complaint\" = docs containing that phrase). " +
+    "To count documents matching ANY of several words, pass the words as separate terms — do NOT put them in one term.\n" +
+    "- Month buckets key as yyyymm (e.g. 202403). A month scan with no scope.after is auto-bounded to the " +
+    "last 24 months — pass scope.after explicitly for a longer window.\n" +
+    "- Each term is a full corpus scan (one Vespa query per term + one for the denominator, run in parallel) — " +
+    "prefer few, strong terms over many variants.\n" +
+    "- The executed YQL is echoed in the result and mirrored to the debug panel (_meta.debug), same as spaces-vespa-search.\n" +
+    "- Only available when DIRECT_VESPA_SEARCH is enabled.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      searchArea: {
+        type: "string",
+        enum: [...AREA_NAMES, ...Object.keys(AREA_ALIASES)],
+        description: "The scope to count in — same areas as spaces-vespa-search (message, ticket, mail, …).",
+      },
+      terms: {
+        type: "array",
+        items: { type: "string" },
+        minItems: 1,
+        maxItems: MAX_SCAN_TERMS,
+        description: "Terms/phrases to count, matched lexically. Each gets its own counts row.",
+      },
+      scope: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          channels: { type: "array", items: { type: "string" }, description: "Channel ids to confine the scan to (OR'd)." },
+          after: { type: "string", description: "Inclusive lower bound, dd/mm/yy (IST, optional \" HH:MM\")." },
+          before: { type: "string", description: "Exclusive upper bound, dd/mm/yy (IST, optional \" HH:MM\")." },
+        },
+        description: "Optional filters applied IDENTICALLY to the term counts and the corpus totals, so the share is always apples-to-apples.",
+      },
+      bucket: { type: "string", enum: ["year", "month"], description: "Time bucket for the counts." },
+    },
+    required: ["searchArea", "terms", "bucket"],
+  },
+  async handler(args, ctx) {
+    if (!CONFIG.directVespaSearch) {
+      return err("spaces-corpus-scan requires DIRECT_VESPA_SEARCH=true.");
+    }
+    try {
+      const rawScope = (args["scope"] ?? {}) as CorpusScanScope;
+      const bucket = args["bucket"] as "year" | "month";
+
+      // Month buckets over ALL history are rarely wanted and multiply both the
+      // scan work and the output. Auto-bound an unbounded month scan to the
+      // last 24 months (dd/mm/yyyy — the format convertDateLiteralsToMs
+      // rewrites); a caller who really wants more passes scope.after.
+      let autoBounded = false;
+      if (bucket === "month" && !rawScope.after) {
+        const d = new Date(Date.now() - 730 * 24 * 3600 * 1000);
+        rawScope.after = `01/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
+        autoBounded = true;
+      }
+
+      const scan = validateCorpusScan({
+        searchArea: String(args["searchArea"] ?? ""),
+        terms: Array.isArray(args["terms"]) ? (args["terms"] as unknown[]).map(String) : [],
+        scope: rawScope,
+        bucket,
+      });
+
+      const workspaceId = await getWorkspaceIdForUser(ctx.userId);
+      if (!workspaceId) return err("Could not resolve your workspaceId — cannot run a workspace-scoped scan.");
+
+      // One YQL per role: the per-term census (same YQL for every term, only the
+      // @query binding differs) and the term-free denominator.
+      const termYql = buildCorpusScanYql(scan, { withTerm: true });
+      const totalsYql = buildCorpusScanYql(scan, { withTerm: false });
+
+      // Debug parity with spaces-vespa-search: every executed query rides back
+      // on _meta.debug (stage/yql/vespaParams) for the dashboard's debug panel.
+      const debugPayloads: Array<{ stage: string; yql: string; vespaParams: Record<string, unknown> }> = [];
+
+      const runCount = async (stage: string, yql: string, query: string): Promise<Record<number, number>> => {
+        const res = await queryDirect(yql, query, ctx.userId, 0, 0, CONFIG.vespaQueryEndpoint, "unranked", undefined, workspaceId);
+        const executed = res.data.debug?.payloads?.[0];
+        debugPayloads.push({
+          stage,
+          yql: executed?.yql ?? yql,
+          vespaParams: executed?.vespaParams ?? { query },
+        });
+        const buckets: Record<number, number> = {};
+        for (const g of res.data.groups ?? []) {
+          const key = parseBucketKey(g.groupValue);
+          if (key !== null) buckets[key] = g.count;
+        }
+        return buckets;
+      };
+
+      const [corpusTotals, ...termBuckets] = await Promise.all([
+        runCount("corpus-scan: totals (denominator)", totalsYql, ""),
+        ...scan.terms.map(term => runCount(`corpus-scan: term "${term}"`, termYql, termToQuery(term))),
+      ]);
+
+      const counts: Record<string, Record<number, number>> = {};
+      const shares: Record<string, Record<number, string>> = {};
+      scan.terms.forEach((term, i) => {
+        counts[term] = termBuckets[i] ?? {};
+        const s: Record<number, string> = {};
+        for (const [bucketKey, n] of Object.entries(counts[term])) {
+          const total = corpusTotals?.[Number(bucketKey)];
+          if (total && total > 0) s[Number(bucketKey)] = `${((n / total) * 100).toFixed(2)}%`;
+        }
+        shares[term] = s;
+      });
+
+      const scopeNote = autoBounded
+        ? `\nNote: month scans are auto-bounded to the last 24 months (after=${scan.scope.after}); pass scope.after to override.`
+        : "";
+      const hasScope = Object.keys(scan.scope).length > 0;
+      const result = ok(
+        `Corpus scan over area "${scan.areaName}" (bucket: ${scan.bucket}; lexical match; ACL-scoped to you).\n` +
+        `Counts are totals over ALL matching documents — not a sample. Compare shares, not raw counts.${scopeNote}\n` +
+        `Queries executed (${scan.terms.length} term + 1 denominator, identical scope):\n` +
+        `  term YQL:   ${termYql}\n` +
+        `  totals YQL: ${totalsYql}\n\n` +
+        JSON.stringify({ counts, corpusTotals, shares, ...(hasScope ? { scope: scan.scope } : {}) }, null, 1),
+      );
+      // Same channel spaces-vespa-search uses — the dashboard debug panel
+      // reads _meta.debug; it never reaches the model's context.
+      return { ...result, _meta: { debug: { payloads: debugPayloads } } };
+    } catch (e) {
+      return directError("corpus-scan error", e);
+    }
+  },
+};
+
 export const tools: ToolDef[] = [
   spacesWhoami,
-  ...(CONFIG.directVespaSearch ? [spacesVespaSchema, spacesVespaQuery, spacesVespaSearch] : []),
+  ...(CONFIG.directVespaSearch ? [spacesVespaSchema, spacesVespaQuery, spacesVespaSearch, spacesCorpusScan] : []),
   spacesSearch,
   spacesSearchV2,
   spacesMyItems,

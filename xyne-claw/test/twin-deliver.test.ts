@@ -148,6 +148,36 @@ describe("twin_deliver tool", () => {
     expect(ref.value?.destination).toBeUndefined();
   });
 
+  it("captures private reasoning with clf- citation tokens verbatim (Why panel); message stays clean", async () => {
+    const { ref } = await call(TWIN, {
+      action: "reply",
+      message: "shipping ask-ai v2 this week, defaulting to glm-latest",
+      reasoning: "aman asked and you own it [clf-abc123#2]; v2 parity ships this week [clf-def456#1]",
+    });
+    expect(ref.value?.reasoning).toBe("aman asked and you own it [clf-abc123#2]; v2 parity ships this week [clf-def456#1]");
+    // the POSTED message is never citation-polluted.
+    expect(ref.value?.message).not.toContain("clf-");
+  });
+
+  it("captures reasoning on react_and_reply and on a react-only delivery", async () => {
+    const { ref: r1 } = await call(TWIN, { action: "react_and_reply", emoji: "✅", message: "done", reasoning: "already handled in [clf-x#1]" });
+    expect(r1.value?.reasoning).toBe("already handled in [clf-x#1]");
+    const { ref: r2 } = await call(TWIN, { action: "react", emoji: "👍", reasoning: "acknowledging, nothing to add [clf-y#3]" });
+    expect(r2.value?.reasoning).toBe("acknowledging, nothing to add [clf-y#3]");
+  });
+
+  it("keeps reasoning optional — omitted when not given", async () => {
+    const { ref } = await call(TWIN, { action: "reply", message: "on it" });
+    expect(ref.value?.reasoning).toBeUndefined();
+    expect(ref.value).toEqual({ action: "reply", message: "on it" });
+  });
+
+  it("never attaches reasoning to an ignore (nothing posted, nothing to explain)", async () => {
+    const { ref } = await call(TWIN, { action: "ignore", reasoning: "some private note" });
+    expect(ref.value).toEqual({ action: "ignore" });
+    expect(ref.value?.reasoning).toBeUndefined();
+  });
+
   it("is idempotent — a second call is a no-op and the first delivery stands (glm re-emit guard)", async () => {
     const ref: TwinDeliverRef = {};
     const tool = buildTwinDeliverTool(TWIN, ref);
@@ -232,6 +262,16 @@ describe("buildTwinDeliverMandate (system-prompt injection)", () => {
     expect(m).toMatch(/never guess an id/i);
     expect(m).toMatch(/Spaces tools/i);
   });
+
+  it("teaches the PRIVATE cited reasoning (the Why panel) with verbatim clf- tokens", () => {
+    const m = buildTwinDeliverMandate({ userName: "Pradeesh S" });
+    expect(m).toMatch(/reasoning/);
+    expect(m).toMatch(/Why\?/);
+    expect(m).toMatch(/never posted/i);
+    expect(m).toContain("[clf-…#n]");
+    // the message must stay citation-free — the split is explicit
+    expect(m).toMatch(/message.*citation-free|citation-free/i);
+  });
 });
 
 describe("recoverTwinDeliveryFromText (glm leaked tool-call recovery)", () => {
@@ -270,6 +310,17 @@ describe("recoverTwinDeliveryFromText (glm leaked tool-call recovery)", () => {
 
   it("recovers an ignore", () => {
     expect(recoverTwinDeliveryFromText('twin_deliver(action="ignore")')).toEqual({ action: "ignore" });
+  });
+
+  it("recovers the private reasoning alongside a leaked delivery (markup)", () => {
+    const leaked =
+      "<tool_call>twin_deliver<arg_key>action</arg_key><arg_value>reply</arg_value>" +
+      "<arg_key>message</arg_key><arg_value>on it, shipping this week</arg_value>" +
+      "<arg_key>reasoning</arg_key><arg_value>you own ask-ai and it ships v2 this week [clf-abc#1]</arg_value></tool_call>";
+    const d = recoverTwinDeliveryFromText(leaked);
+    expect(d?.action).toBe("reply");
+    expect(d?.message).toBe("on it, shipping this week");
+    expect(d?.reasoning).toBe("you own ask-ai and it ships v2 this week [clf-abc#1]");
   });
 
   it("returns null when there is no twin_deliver call in the text", () => {

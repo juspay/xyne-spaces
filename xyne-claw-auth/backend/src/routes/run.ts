@@ -29,7 +29,9 @@ import { redisService } from "../redis.js";
 import { requireAuth, requireStrictS2S, requireUserAuth, requireResultToken, s2sKeyMatches } from "../middleware/require-auth.js";
 import { handleRunCompletion, handleRunHandoff } from "../queue/run-recovery-worker.js";
 import { getDmChannelForUserAndApp, getWorkspaceIdForUser } from "../lib/spaces-db.js";
-import { isAllowedExternalCallbackUrl, isInternalCallbackOrigin, type ExternalResultCallbackConfig } from "../lib/external-result-callback.js";
+import { isAllowedExternalCallbackUrl, isInternalCallbackOrigin, type ExternalResultCallbackConfig } from "../surfaces/external-api/delivery.js";
+import type { VerifiedCliToken } from "../lib/cli-tokens.js";
+import { agentScopeAllows, sanitizeExternalRunBody } from "../lib/service-tokens.js";
 import { encryptSurfaceSecret } from "../lib/surface-resolver.js";
 
 import { createLogger } from "../logger.js";
@@ -507,7 +509,20 @@ router.get("/callable-agent-spec", requireStrictS2S, async (req: Request, res: R
 
 router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
   try {
-    const { task, context, conversationId, piSessionConversationId, agentSlug, callbackUrl, callbackSecret, channelId, deliverTo, projectId, projectName, cwd, eventType, triggerSource, slackDelivery, traceId, provider, providerOrder, providerOverride, subagentProviders, subagentProviderMode, providerConfigs, progressUrl, attachments, contextFiles, attachedContext, ticketIds, canvasIds, callIds, idempotencyKey: requestedIdempotencyKey, isRegenerate, detached, fastMode, resumedFromHandoff } = req.body as {
+    // Service tokens get the EXTERNAL body contract: unknown fields (provider
+    // overrides, eventType, session plumbing) are stripped before the shared
+    // destructure below ever sees them — external traffic must not be able to
+    // masquerade as internal traffic.
+    const serviceToken = (res.locals ?? {})["accessToken"] as VerifiedCliToken | undefined;
+    const isServiceTokenCaller = serviceToken?.client === "service";
+    if (isServiceTokenCaller) {
+      const { sanitized, dropped } = sanitizeExternalRunBody(req.body as Record<string, unknown>);
+      if (dropped.length > 0) {
+        log.warn(`[run] service token dropped non-contract fields: ${dropped.join(", ")}`);
+      }
+      req.body = sanitized;
+    }
+    const { task, context, conversationId, piSessionConversationId, agentSlug, callbackUrl, callbackSecret, channelId, deliverTo, projectId, projectName, cwd, eventType, triggerSource, slackDelivery, traceId, provider, providerOrder, providerOverride, subagentProviders, subagentProviderMode, providerConfigs, progressUrl, attachments, contextFiles, attachedContext, ticketIds, canvasIds, callIds, idempotencyKey: requestedIdempotencyKey, isRegenerate, detached, fastMode, resumedFromHandoff, generateFollowUpSuggestions } = req.body as {
       task?: string;
       context?: string;
       conversationId?: string;
@@ -548,6 +563,7 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
       detached?: boolean;
       fastMode?: boolean;
       resumedFromHandoff?: boolean;
+      generateFollowUpSuggestions?: boolean;
       /** Branching: when true, claw branches the PI session at the last user
        *  entry so the new assistant turn is a sibling of the previous one. */
       isRegenerate?: boolean;
@@ -573,6 +589,20 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
     if (callbackUrl !== undefined && typeof callbackUrl !== "string") {
       res.status(400).json({ success: false, error: "callbackUrl must be a string" });
       return;
+    }
+    if (isServiceTokenCaller && serviceToken) {
+      if (!serviceToken.scopes.includes("runs:write")) {
+        res.status(403).json({ success: false, error: "This token does not have the runs:write scope" });
+        return;
+      }
+      const requestedAgent = typeof agentSlug === "string" && agentSlug.trim() ? agentSlug.trim() : "assistant";
+      if (!agentScopeAllows(serviceToken.scopes, requestedAgent)) {
+        // Deny-by-default: tokens minted before agent scopes existed have no
+        // agent:* entries and can invoke nothing until an admin adds them
+        // (per-slug, or the explicit "agent:*" org-wide wildcard).
+        res.status(403).json({ success: false, error: "This token is not scoped for the requested agent" });
+        return;
+      }
     }
     const isInternalS2SCaller = s2sKeyMatches(req.headers["x-s2s-key"]);
     if ((triggerSource === "slack" || slackDelivery !== undefined) && !isInternalS2SCaller) {
@@ -994,6 +1024,7 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
       ...(detached === true ? { detached: true } : {}),
       fastMode: effectiveFastMode,
       ...(resumedFromHandoff === true ? { resumedFromHandoff: true } : {}),
+      ...(generateFollowUpSuggestions === true ? { generateFollowUpSuggestions: true } : {}),
     };
 
     if (detached === true) {
@@ -1073,7 +1104,13 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
       // path below) since the SSE response will not surface a separate
       // {success, sessionId} hand-off.
       const persistedByCaller = (req.body as { __persistedByCaller?: boolean }).__persistedByCaller;
-      if (conversationId && !persistedByCaller) {
+      // A run-recovery re-dispatch replays a run whose user message was already
+      // persisted on the ORIGINAL dispatch (e.g. a lock-contended twin tag that
+      // is retried once the holder frees the session). Re-creating it here would
+      // duplicate the user's turn in the chat and spawn a spurious branch —
+      // skip it. AgentRun.start below still fires so each retry attempt is tracked.
+      const skipUserMessagePersist = (req.body as { __skipUserMessagePersist?: boolean }).__skipUserMessagePersist === true;
+      if (conversationId && !persistedByCaller && !skipUserMessagePersist) {
         try {
           await chatMessageRepository.create({
             conversationId,
@@ -1231,7 +1268,13 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
       // signal to add Control Center / AgentRun rows. sessionId is the one we
       // already minted above and forwardBody carries it.
       const persistedByCaller = (req.body as { __persistedByCaller?: boolean }).__persistedByCaller;
-      if (conversationId && !persistedByCaller) {
+      // A run-recovery re-dispatch replays a run whose user message was already
+      // persisted on the ORIGINAL dispatch (e.g. a lock-contended twin tag that
+      // is retried once the holder frees the session). Re-creating it here would
+      // duplicate the user's turn in the chat and spawn a spurious branch —
+      // skip it. AgentRun.start below still fires so each retry attempt is tracked.
+      const skipUserMessagePersist = (req.body as { __skipUserMessagePersist?: boolean }).__skipUserMessagePersist === true;
+      if (conversationId && !persistedByCaller && !skipUserMessagePersist) {
         try {
           await chatMessageRepository.create({
             conversationId,
@@ -1314,7 +1357,10 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
     // /chat sets __persistedByCaller: true to skip this, since it creates the user message.
     // Direct callers like Ask AI v2 rely on this endpoint to persist messages.
     const persistedByCaller = (req.body as { __persistedByCaller?: boolean }).__persistedByCaller;
-    if (conversationId && !persistedByCaller) {
+    // See the SSE/bridge paths above: recovery re-dispatches must not re-persist
+    // the user message (it belongs to the original dispatch).
+    const skipUserMessagePersist = (req.body as { __skipUserMessagePersist?: boolean }).__skipUserMessagePersist === true;
+    if (conversationId && !persistedByCaller && !skipUserMessagePersist) {
       try {
         await chatMessageRepository.create({
           conversationId,

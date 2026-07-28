@@ -29,6 +29,7 @@ import {
   FlaskIcon,
   MagnifyingGlassIcon,
   PulseIcon,
+  TagIcon,
   ShieldCheckIcon,
   BuildingsIcon,
   SignOutIcon,
@@ -123,6 +124,7 @@ const SIDEBAR_GROUPS: SidebarGroupConfig[] = [
       { label: "Evals", path: "/v3/evals", icon: FlaskIcon },
       { label: "Search Evals", path: "/v3/search-evals", icon: MagnifyingGlassIcon },
       { label: "Error Pipeline", path: "/v3/error-pipeline", icon: PulseIcon },
+      { label: "Entity Types", path: "/v3/entity-types", icon: TagIcon },
     ],
   },
   {
@@ -304,7 +306,7 @@ export function ShellV3({ children, isAdmin = false, hasSearchEvalAccess = false
         ...g,
         items: g.items.filter((i) => {
           if (i.path === "/v3/search-evals") return hasSearchEvalAccess;
-          return i.path !== "/v3/evals";
+          return i.path !== "/v3/evals" && i.path !== "/v3/entity-types";
         }),
       }))
   ).filter((g) => g.items.length > 0);

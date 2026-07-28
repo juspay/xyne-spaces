@@ -18,7 +18,7 @@ import { Router, type Request, type Response } from "express";
 import { getRequesterId, isOrgAdmin, isOrgOwner } from "../middleware/agent-acl.js";
 import { userRepository } from "../repositories/index.js";
 import { prisma } from "../db.js";
-import { generateServiceToken, SERVICE_TOKEN_SCOPES } from "../lib/service-tokens.js";
+import { agentScope, generateServiceToken, SERVICE_TOKEN_SCOPES } from "../lib/service-tokens.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("organizations");
@@ -135,7 +135,7 @@ router.post("/:id/service-tokens", async (req: Request, res: Response) => {
       return;
     }
 
-    const body = req.body as { name?: unknown; userId?: unknown; expiresAt?: unknown };
+    const body = req.body as { name?: unknown; userId?: unknown; expiresAt?: unknown; allowedAgentSlugs?: unknown };
     const name = typeof body.name === "string" ? body.name.trim() : "";
     const userId = typeof body.userId === "string" ? body.userId.trim() : "";
     if (!name) {
@@ -152,6 +152,29 @@ router.post("/:id/service-tokens", async (req: Request, res: Response) => {
     }
     if (!(await isOrgMember(userId, orgId))) {
       res.status(400).json({ success: false, error: "userId must be a current member of this organization" });
+      return;
+    }
+
+    // Agent allowlist is REQUIRED: a service token can only ever invoke the
+    // agents it was explicitly minted for (enforced in /run via agent:* scopes).
+    const rawSlugs = body.allowedAgentSlugs;
+    if (!Array.isArray(rawSlugs) || rawSlugs.length === 0) {
+      res.status(400).json({ success: false, error: "allowedAgentSlugs is required: list the agent slugs this token may invoke" });
+      return;
+    }
+    const allowedAgentSlugs = [...new Set(rawSlugs.map((slug) => typeof slug === "string" ? slug.trim() : "").filter(Boolean))];
+    if (allowedAgentSlugs.length === 0 || allowedAgentSlugs.length > 20) {
+      res.status(400).json({ success: false, error: "allowedAgentSlugs must contain 1-20 agent slugs" });
+      return;
+    }
+    const knownAgents = await prisma.agent.findMany({
+      where: { slug: { in: allowedAgentSlugs }, orgId },
+      select: { slug: true },
+    });
+    const knownSlugs = new Set(knownAgents.map((agent) => agent.slug));
+    const unknown = allowedAgentSlugs.filter((slug) => !knownSlugs.has(slug));
+    if (unknown.length > 0) {
+      res.status(400).json({ success: false, error: `Unknown agents in this organization: ${unknown.join(", ")}` });
       return;
     }
 
@@ -186,7 +209,7 @@ router.post("/:id/service-tokens", async (req: Request, res: Response) => {
         name,
         tokenHash: token.hashed,
         prefix: token.prefix,
-        scopes: SERVICE_TOKEN_SCOPES,
+        scopes: [...SERVICE_TOKEN_SCOPES, ...allowedAgentSlugs.map(agentScope)],
         expiresAt,
       },
       select: {
@@ -194,6 +217,7 @@ router.post("/:id/service-tokens", async (req: Request, res: Response) => {
         name: true,
         prefix: true,
         userId: true,
+        scopes: true,
         lastUsedAt: true,
         expiresAt: true,
         revokedAt: true,
@@ -229,6 +253,7 @@ router.get("/:id/service-tokens", async (req: Request, res: Response) => {
         name: true,
         prefix: true,
         userId: true,
+        scopes: true,
         lastUsedAt: true,
         expiresAt: true,
         revokedAt: true,

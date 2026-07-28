@@ -286,13 +286,18 @@ export function RunHistoryTab({ agentSlug, userId, canViewAllRuns }: Props) {
             showOwner={allUsers}
             // Open the in-app debug conversation view (chat replay + tool-call
             // groups). Needs a conversationId — API/scheduled runs without one
-            // stay non-clickable. Admin "All Runs" rows for other users load via
-            // the chat-messages route's admin (listByConversation) path.
+            // stay non-clickable. When opening ANOTHER user's run, pass
+            // &allRuns=1 so the chat view opts into the cross-user read path
+            // (backend gates on admin + this flag). Own runs open own-only, so a
+            // shared twin thread never renders a confusing mix of other people's
+            // turns unless explicitly inspected from here.
             onOpen={
               run.conversationId
                 ? () =>
                     navigate(
-                      `/v3/chat?agent=${encodeURIComponent(run.agentSlug)}&conversation=${encodeURIComponent(run.conversationId!)}`,
+                      `/v3/chat?agent=${encodeURIComponent(run.agentSlug)}&conversation=${encodeURIComponent(run.conversationId!)}${
+                        run.userId !== userId ? "&allRuns=1" : ""
+                      }`,
                     )
                 : undefined
             }

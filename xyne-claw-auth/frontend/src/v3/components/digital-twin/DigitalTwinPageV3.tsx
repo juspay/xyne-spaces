@@ -1,9 +1,10 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import {
   BrainIcon,
   GearSixIcon,
   PowerIcon,
   ChartLineUpIcon,
+  ChatCenteredDotsIcon,
   FunnelIcon,
   ArrowsClockwiseIcon,
   FileTextIcon,
@@ -14,6 +15,7 @@ import { DigitalTwinLanding } from "./DigitalTwinLanding";
 import { DigitalTwinMemoriesTab } from "./DigitalTwinMemoriesTab";
 import { DigitalTwinFilesTab } from "./DigitalTwinFilesTab";
 import { DigitalTwinMetricsPageV3 } from "./DigitalTwinMetricsPageV3";
+import { DigitalTwinReplyActivityPageV3 } from "./DigitalTwinReplyActivityPageV3";
 import { DigitalTwinPipelinePageV3 } from "./DigitalTwinPipelinePageV3";
 import { ReviewPanel } from "./ReviewPanel";
 import { EnableModal } from "./EnableModal";
@@ -22,7 +24,7 @@ import { SettingsModal } from "./SettingsModal";
 import { MemoryApprovalCard } from "./MemoryApprovalCard";
 import { UploadModal } from "./UploadModal";
 import { Tooltip } from "../ui/Tooltip";
-import { pauseDigitalTwinBackfill, resumeDigitalTwinBackfill } from "../../../lib/api";
+import { pauseDigitalTwinBackfill, resumeDigitalTwinBackfill, checkIsAdmin } from "../../../lib/api";
 
 interface DigitalTwinPageV3Props {
   userId: string;
@@ -32,6 +34,8 @@ export function DigitalTwinPageV3({ userId }: DigitalTwinPageV3Props) {
   const { status, loading, error, reload, backfillStalled } = useDigitalTwin(userId);
 
   const [showMetrics,       setShowMetrics]       = useState(false);
+  const [showReplyMetrics,  setShowReplyMetrics]  = useState(false);
+  const [isAdmin,           setIsAdmin]           = useState(false);
   const [showPersona,       setShowPersona]       = useState(false);
   const [showPipeline,      setShowPipeline]      = useState(false);
   /** Event to auto-expand when opening the pipeline (deep-link from a memory's
@@ -43,6 +47,16 @@ export function DigitalTwinPageV3({ userId }: DigitalTwinPageV3Props) {
   const [showSettings,      setShowSettings]      = useState(false);
   const [showUpload,        setShowUpload]        = useState(false);
   const [reviewRefreshKey,  setReviewRefreshKey]  = useState(0);
+
+  // Reply-activity metrics are an admin cross-user surface (control-center);
+  // gate the entry point on the claw-admin role.
+  useEffect(() => {
+    let cancelled = false;
+    void checkIsAdmin(userId)
+      .then((v) => { if (!cancelled) setIsAdmin(v); })
+      .catch(() => { /* non-admin / check failed → button stays hidden */ });
+    return () => { cancelled = true; };
+  }, [userId]);
 
   /* ── Resizable split between Memories (left) and Controls (right) ── */
   const gridRef = useRef<HTMLDivElement>(null);
@@ -129,7 +143,7 @@ export function DigitalTwinPageV3({ userId }: DigitalTwinPageV3Props) {
     <div className="flex h-full flex-col overflow-hidden">
 
       {/* ── Page header — hidden when a full-page overlay is active ── */}
-      <div className={`shrink-0 border-b border-xyne-border bg-xyne-surface ${showMetrics || showPipeline || showPersona ? "hidden" : ""}`}>
+      <div className={`shrink-0 border-b border-xyne-border bg-xyne-surface ${showMetrics || showReplyMetrics || showPipeline || showPersona ? "hidden" : ""}`}>
         <div className="flex items-center gap-[12px] px-[24px] py-[14px]">
           <BrainIcon size={22} className="text-xyne-brand" />
           <div>
@@ -157,6 +171,23 @@ export function DigitalTwinPageV3({ userId }: DigitalTwinPageV3Props) {
                   <span>Metrics</span>
                 </button>
               </Tooltip>
+
+              {isAdmin && (
+                <Tooltip content="Reply activity — draft approvals/edits/declines/ignored, response time, and the respond gate (admin, cross-user)" side="bottom">
+                  <button
+                    onClick={() => setShowReplyMetrics(true)}
+                    className={`flex items-center gap-[6px] rounded-lg border px-[10px] py-[6px] text-[12px] font-medium transition ${
+                      showReplyMetrics
+                        ? "border-xyne-brand bg-xyne-brand/8 text-xyne-brand"
+                        : "border-xyne-border bg-xyne-surface text-xyne-fg-secondary shadow-sm hover:bg-xyne-surface-sunken hover:text-xyne-fg-primary"
+                    }`}
+                    aria-label="Reply activity"
+                  >
+                    <ChatCenteredDotsIcon size={14} />
+                    <span>Reply activity</span>
+                  </button>
+                </Tooltip>
+              )}
 
               <Tooltip content="Your persona files — soul.md and more. Edit them and choose which load into your Twin's prompt." side="bottom">
                 <button
@@ -237,6 +268,14 @@ export function DigitalTwinPageV3({ userId }: DigitalTwinPageV3Props) {
       ) : !loading && status && !status.enabled ? (
         <div className="min-h-0 flex-1 overflow-hidden">
           <DigitalTwinLanding onEnable={handleEnable} />
+        </div>
+      ) : showReplyMetrics ? (
+        <div className="min-h-0 flex-1 overflow-hidden">
+          <DigitalTwinReplyActivityPageV3
+            userId={userId}
+            isAdmin={isAdmin}
+            onBack={() => setShowReplyMetrics(false)}
+          />
         </div>
       ) : !showMetrics ? (
         <div className="flex min-h-0 flex-1 overflow-hidden">

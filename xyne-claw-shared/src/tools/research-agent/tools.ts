@@ -141,7 +141,7 @@ const fetchResearchAgentTools = async (
   path: string,
   label: string,
 ): Promise<string> => {
-  const apiUrl = context.config["RESEARCH_AGENT_API_URL"] ?? "https://research-agent.internal.example.com";
+  const apiUrl = context.config["RESEARCH_AGENT_API_URL"] ?? "https://research-agent.internal.svc.k8s.office.mum.juspay.net";
   const apiKey = context.config["RESEARCH_AGENT_API_KEY"] ?? "";
   const response = await fetch(`${apiUrl}${path}`, {
     method: "GET",
@@ -161,7 +161,7 @@ const fetchResearchAgentOptions = async (
   path: string,
   label: string,
 ): Promise<string> => {
-  const apiUrl = context.config["RESEARCH_AGENT_API_URL"] ?? "https://research-agent.internal.example.com";
+  const apiUrl = context.config["RESEARCH_AGENT_API_URL"] ?? "https://research-agent.internal.svc.k8s.office.mum.juspay.net";
   const apiKey = context.config["RESEARCH_AGENT_API_KEY"] ?? "";
   const response = await fetch(`${apiUrl}${path}`, {
     method: "GET",
@@ -182,9 +182,9 @@ const appendSessionId = (result: string, sessionId: string): string =>
 export const RESEARCH_AGENT_CONFIG_SCHEMA = {
   RESEARCH_AGENT_API_URL: {
     label: "Research Agent API URL",
-    default: "https://research-agent.internal.example.com",
+    default: "https://research-agent.internal.svc.k8s.office.mum.juspay.net",
     required: true as const,
-    placeholder: "https://research-agent.internal.example.com",
+    placeholder: "https://research-agent.internal.svc.k8s.office.mum.juspay.net",
   },
   RESEARCH_AGENT_API_KEY: {
     label: "Research Agent API Key",
@@ -368,7 +368,7 @@ export const queryCodebase: ToolDefinition = {
     const selection = getResearchAgentSelection(params, context);
     if (typeof selection === "string") return selection;
 
-    const apiUrl = context.config["RESEARCH_AGENT_API_URL"] ?? "https://research-agent.internal.example.com";
+    const apiUrl = context.config["RESEARCH_AGENT_API_URL"] ?? "https://research-agent.internal.svc.k8s.office.mum.juspay.net";
     const apiKey = context.config["RESEARCH_AGENT_API_KEY"] ?? "";
     const repositoryId = selection.repositoryId;
     const productId = selection.productId;
@@ -669,7 +669,7 @@ export const reviewPullRequest: ToolDefinition = {
     const selection = getResearchAgentSelection(params, context);
     if (typeof selection === "string") return selection;
 
-    const apiUrl = context.config["RESEARCH_AGENT_API_URL"] ?? "https://research-agent.internal.example.com";
+    const apiUrl = context.config["RESEARCH_AGENT_API_URL"] ?? "https://research-agent.internal.svc.k8s.office.mum.juspay.net";
     const apiKey = context.config["RESEARCH_AGENT_API_KEY"] ?? "";
     const repositoryId = selection.repositoryId;
     const productId = selection.productId;

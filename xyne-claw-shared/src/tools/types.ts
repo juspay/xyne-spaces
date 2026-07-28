@@ -23,6 +23,7 @@ export interface PendingQuestion {
   questionId: string;
   question: string;
   options: string[];
+  purpose?: "clarification" | "follow_up_suggestions";
 }
 
 export interface PendingResponse {

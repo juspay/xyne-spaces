@@ -169,6 +169,11 @@ export async function requireAuth(
     if (token) {
       req.headers["x-user-id"] = token.userId;
       req.headers["x-org-id"] = token.orgId;
+      // Route-level policy (e.g. service-token scope enforcement in /run)
+      // needs the verified token record, not just the identity headers.
+      // (locals always exists under Express; test doubles may omit it.)
+      res.locals = res.locals ?? {};
+      res.locals["accessToken"] = token;
       next();
       return;
     }
@@ -244,6 +249,31 @@ export function requireStrictS2S(
   if (s2sKeyMatches(s2sKey)) {
     next();
     return;
+  }
+  res.status(401).json({ success: false, error: "s2s key required" });
+}
+
+/**
+ * Strict S2S using the Spaces↔claw-auth shared `INTERNAL_S2S_KEY` (the key the
+ * Spaces backend uses for its own `/api/internal` routes and that claw-auth
+ * sends when calling Spaces). Use this — NOT requireStrictS2S — for endpoints
+ * whose caller is the Spaces backend rather than the claw runtime, since Spaces
+ * does not hold `XYNE_CLAW_S2S_KEY`. Constant-time; fails closed when unset.
+ */
+export function requireInternalS2S(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): void {
+  const provided = req.headers["x-s2s-key"];
+  const expected = process.env["INTERNAL_S2S_KEY"] ?? "";
+  if (expected && typeof provided === "string") {
+    const a = Buffer.from(provided);
+    const b = Buffer.from(expected);
+    if (a.length === b.length && timingSafeEqual(a, b)) {
+      next();
+      return;
+    }
   }
   res.status(401).json({ success: false, error: "s2s key required" });
 }

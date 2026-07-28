@@ -11,6 +11,7 @@ import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { KNOWN_PROVIDERS, buildProviderConfig, agentCredRefreshTarget, userCredRefreshTarget } from "../lib/agent-provider-config.js";
 import { resolveFastMode } from "../lib/fast-mode.js";
+import { extractFollowUpSuggestionsFromInvocations } from "../lib/follow-up-suggestions.js";
 import { getRequesterId, getOrgId, getAgentEditAccess, isClawAdmin } from "../middleware/agent-acl.js";
 import { uploadChatAttachments } from "../services/chatAttachmentService.js";
 import { gcsService } from "../services/gcsService.js";
@@ -30,6 +31,17 @@ import { pushDelta, endDeltaCoalescer, liveUserIdForSession } from "../lib/live-
 
 import { createLogger } from "../logger.js";
 const log = createLogger("agent-chat");
+
+function withoutFollowUpRecorderInvocations(value: unknown[]): unknown[] {
+  return value.filter((item) => {
+    if (!item || typeof item !== "object") return true;
+    const invocation = item as { toolName?: string; args?: unknown };
+    if (invocation.toolName === "internal-follow-up-diagnostics") return false;
+    if (invocation.toolName !== "ask-user-question") return true;
+    return !invocation.args || typeof invocation.args !== "object" ||
+      (invocation.args as { purpose?: string }).purpose !== "follow_up_suggestions";
+  });
+}
 
 // Match the SLIDE_JSON_START/END markers emitted by create-ppt / edit-ppt so
 // we can persist the slide JSON on the attachment's metadata for the viewer.
@@ -1839,8 +1851,16 @@ router.get("/:slug/chat/:convId/messages", async (req: Request<{ slug: string; c
     // rows are tagged with the triggering user's id). Admins see everything.
     // Filtering — rather than an owner-only 403 — is the access boundary:
     // guessing a conversation id returns only your own slice (empty if none).
+    // Cross-user visibility is OPT-IN. A twin thread shares one conversationId
+    // across every mentioned user, so an admin's OWN chat window would otherwise
+    // render a confusing mix of other people's turns. The default (even for
+    // admins) is own-turns-only; cross-user is returned ONLY when the admin
+    // explicitly opened this conversation from the agent "All Runs" inspector,
+    // which passes ?allRuns=1. Admins keep full cross-user access there — this
+    // just stops it leaking into the normal chat view.
     const isAdmin = await isClawAdmin(userId);
-    const visibleForUser = isAdmin ? allMessages : allMessages.filter((m) => m.userId === userId);
+    const crossUser = isAdmin && req.query["allRuns"] === "1";
+    const visibleForUser = crossUser ? allMessages : allMessages.filter((m) => m.userId === userId);
     // Hide the in-progress "running" assistant placeholder from the transcript:
     // the in-flight turn is rendered by the /live stream (snapshot `partial` +
     // `delta` events), so returning it here too would double-render it (a second
@@ -1850,7 +1870,7 @@ router.get("/:slug/chat/:convId/messages", async (req: Request<{ slug: string; c
 
     // Fetch agent runs for this conversation to get tool invocations. Already
     // user-scoped via listByUser (admins use the conversation-wide view).
-    const agentRuns = isAdmin
+    const agentRuns = crossUser
       ? await agentRunRepository.listByConversation(req.params.convId, userId)
       : await agentRunRepository.listByUser(userId || "", { conversationId: req.params.convId });
 
@@ -1877,6 +1897,7 @@ router.get("/:slug/chat/:convId/messages", async (req: Request<{ slug: string; c
     // written before the column existed — those don't have branches because
     // the feature is new.
     const invocationsByMsgId: Record<string, unknown[]> = {};
+    const followUpsByMsgId: Record<string, string[]> = {};
     // assistantMsgId → AgentRun.sessionId. Lets the debugger filter runs by
     // the assistant message the user clicked on instead of by chronological
     // index. Under branching, the Nth visible assistant is no longer the Nth
@@ -1898,10 +1919,15 @@ router.get("/:slug/chat/:convId/messages", async (req: Request<{ slug: string; c
       if (run.rating) ratingByMsgId[linkedId] = { rating: run.rating as "up" | "down", comment: run.ratingComment ?? null };
       const invocations = run.toolInvocations;
       if (Array.isArray(invocations) && (invocations as unknown[]).length > 0) {
-        invocationsByMsgId[linkedId] =
-          isAdmin && run.userId !== userId
-            ? redactToolResults(invocations as unknown[])
-            : (invocations as unknown[]);
+        const followUps = extractFollowUpSuggestionsFromInvocations(invocations);
+        if (followUps) followUpsByMsgId[linkedId] = followUps;
+        const visibleInvocations = withoutFollowUpRecorderInvocations(invocations as unknown[]);
+        if (visibleInvocations.length > 0) {
+          invocationsByMsgId[linkedId] =
+            crossUser && run.userId !== userId
+              ? redactToolResults(visibleInvocations)
+              : visibleInvocations;
+        }
       }
       linkedAssistantIds.add(linkedId);
     }
@@ -1926,14 +1952,19 @@ router.get("/:slug/chat/:convId/messages", async (req: Request<{ slug: string; c
       if (run.rating) ratingByMsgId[msg.id] = { rating: run.rating as "up" | "down", comment: run.ratingComment ?? null };
       const invocations = run.toolInvocations;
       if (Array.isArray(invocations) && (invocations as unknown[]).length > 0) {
+        const followUps = extractFollowUpSuggestionsFromInvocations(invocations);
+        if (followUps) followUpsByMsgId[msg.id] = followUps;
+        const visibleInvocations = withoutFollowUpRecorderInvocations(invocations as unknown[]);
         // Citations carry only their tiny `iconKey` on the wire — the heavy SVG
         // bytes are NOT stamped per citation. They ship once each in the
         // top-level `icons` map below (built from these same iconKeys), so N
         // chips sharing the Spaces mark cost one copy, not N.
-        invocationsByMsgId[msg.id] =
-          isAdmin && run.userId !== userId
-            ? redactToolResults(invocations as unknown[])
-            : (invocations as unknown[]);
+        if (visibleInvocations.length > 0) {
+          invocationsByMsgId[msg.id] =
+            crossUser && run.userId !== userId
+              ? redactToolResults(visibleInvocations)
+              : visibleInvocations;
+        }
       }
     }
 
@@ -1946,7 +1977,12 @@ router.get("/:slug/chat/:convId/messages", async (req: Request<{ slug: string; c
 
     res.json({
       success: true,
-      data: serialized,
+      data: serialized.map((message) => ({
+        ...message,
+        ...(followUpsByMsgId[message.id]?.length
+          ? { followUpSuggestions: followUpsByMsgId[message.id] }
+          : {}),
+      })),
       ...(Object.keys(invocationsByMsgId).length > 0 && { invocationsByMsgId }),
       ...(Object.keys(icons).length > 0 && { icons }),
       ...(Object.keys(runByMsgId).length > 0 && { runByMsgId }),
@@ -1976,7 +2012,12 @@ router.get("/:slug/chat/:convId/live", async (req: Request<{ slug: string; convI
     return;
   }
   const { slug, convId } = req.params;
+  // Cross-user visibility is OPT-IN (mirrors /messages): the default live view
+  // — even for admins — streams ONLY the requester's own runs, so a shared twin
+  // thread doesn't leak other users' in-flight turns into the normal chat. The
+  // agent "All Runs" inspector passes ?allRuns=1 for genuine cross-user viewing.
   const isAdmin = await isClawAdmin(userId);
+  const crossUser = isAdmin && req.query["allRuns"] === "1";
 
   res.writeHead(200, {
     "Content-Type": "text/event-stream",
@@ -1987,14 +2028,16 @@ router.get("/:slug/chat/:convId/live", async (req: Request<{ slug: string; convI
   res.write(`event: open\ndata: ${JSON.stringify({ conversationId: convId })}\n\n`);
   log.info(`[agent-chat] /live connected: conv=${convId} agent=${slug} user=${userId} admin=${isAdmin}`);
 
-  // Non-admins only receive events for runs they triggered.
-  const allow = (evtUserId: string) => isAdmin || evtUserId === userId;
+  // Only cross-user (admin + All Runs) viewers receive events for other users'
+  // runs; everyone else — including admins in the normal chat view — gets only
+  // the runs they triggered.
+  const allow = (evtUserId: string) => crossUser || evtUserId === userId;
 
   // 1) Snapshot from Postgres so a mid-run joiner sees tool calls already made.
   try {
     const messages = await chatMessageRepository.findByConversationAndAgent(convId, slug);
-    const visible = isAdmin ? messages : messages.filter((m) => m.userId === userId);
-    const agentRuns = isAdmin
+    const visible = crossUser ? messages : messages.filter((m) => m.userId === userId);
+    const agentRuns = crossUser
       ? await agentRunRepository.listByConversation(convId, userId)
       : await agentRunRepository.listByUser(userId, { conversationId: convId });
 
@@ -2013,8 +2056,13 @@ router.get("/:slug/chat/:convId/live", async (req: Request<{ slug: string; convI
       const run = completedRuns[i]!;
       const invs = run.toolInvocations;
       if (Array.isArray(invs) && (invs as unknown[]).length > 0) {
-        invocationsByMsgId[msg.id] =
-          isAdmin && run.userId !== userId ? redactToolResults(invs as unknown[]) : (invs as unknown[]);
+        const visibleInvocations = withoutFollowUpRecorderInvocations(invs as unknown[]);
+        if (visibleInvocations.length > 0) {
+          invocationsByMsgId[msg.id] =
+            crossUser && run.userId !== userId
+              ? redactToolResults(visibleInvocations)
+              : visibleInvocations;
+        }
       }
     }
 
@@ -2023,9 +2071,14 @@ router.get("/:slug/chat/:convId/live", async (req: Request<{ slug: string; convI
     // renders against the streaming placeholder.
     const inProgress = agentRuns
       .filter((r) => !r.completedAt && allow(r.userId) && Array.isArray(r.toolInvocations) && (r.toolInvocations as unknown[]).length > 0)
-      .flatMap((r) =>
-        isAdmin && r.userId !== userId ? redactToolResults(r.toolInvocations as unknown[]) : (r.toolInvocations as unknown[]),
-      );
+      .flatMap((r) => {
+        const visibleInvocations = withoutFollowUpRecorderInvocations(
+          r.toolInvocations as unknown[],
+        );
+        return crossUser && r.userId !== userId
+          ? redactToolResults(visibleInvocations)
+          : visibleInvocations;
+      });
 
     // Partial assistant answer-so-far (persisted by the /progress coalescer onto
     // the "running" placeholder row) so a mid-run joiner/reloader sees the text
@@ -2050,7 +2103,7 @@ router.get("/:slug/chat/:convId/live", async (req: Request<{ slug: string; convI
     if (evt.agentSlug && evt.agentSlug !== slug) return; // scope to this agent
     if (!allow(evt.userId)) return;
     let data: LiveEvent = evt;
-    if (evt.type === "invocation" && isAdmin && evt.userId !== userId) {
+    if (evt.type === "invocation" && crossUser && evt.userId !== userId) {
       data = { ...evt, toolInvocation: redactToolResults([evt.toolInvocation])[0] };
     }
     try {
@@ -2152,6 +2205,32 @@ router.get("/:slug/chat/:convId/debug", async (req: Request<{ slug: string; conv
         debugEvents?: unknown[] | null;
         runs?: Array<{ fileName: string; data: { userId?: string; sessionId?: string; [k: string]: unknown } }>;
         subagents?: Array<{ fileName: string; data: { parentSessionId?: string } }>;
+        followUpDiagnostics?: Array<{
+          sessionId: string;
+          startedAt: string;
+          completedAt?: string;
+          runStatus: string;
+          outcome: string;
+          enabled?: boolean;
+          enabledByV2Flag?: boolean;
+          answerLength?: number;
+          generationInput?: string;
+          conversationMessageCount?: number;
+          agentContextProvided?: boolean;
+          agentContextName?: string;
+          agentContextDescription?: string;
+          generationSource?: string;
+          generationModel?: string;
+          generationStartedAt?: string;
+          generationCompletedAt?: string;
+          generationDurationMs?: number;
+          failureCode?: string;
+          failureMessage?: string;
+          httpStatus?: number;
+          suggestionCount: number;
+          persistedRecorder: boolean;
+          suggestions: string[];
+        }>;
       };
     };
     if (upstream.status === 404) {
@@ -2267,6 +2346,112 @@ router.get("/:slug/chat/:convId/debug", async (req: Request<{ slug: string; conv
             ownsSession(s.data?.parentSessionId) ? s : { ...s, data: redactResultKeysDeep(s.data) as typeof s.data },
           ),
       };
+    }
+    if (body.data) {
+      const diagnosticRuns = hasElevatedDebugAccess
+        ? await agentRunRepository.listByConversation(req.params.convId, requesterId, { limit: 100 })
+        : await agentRunRepository.listByUser(requesterId, {
+            conversationId: req.params.convId,
+            agentSlug: req.params.slug,
+            limit: 100,
+          });
+      body.data.followUpDiagnostics = diagnosticRuns
+        .filter((run) => run.agentSlug === req.params.slug)
+        .map((run) => {
+          const invocations = Array.isArray(run.toolInvocations)
+            ? (run.toolInvocations as Array<Record<string, unknown>>)
+            : [];
+          const diagnostic = invocations.find(
+            (item) => item["toolName"] === "internal-follow-up-diagnostics",
+          );
+          const diagnosticArgs = diagnostic && typeof diagnostic["args"] === "object" && diagnostic["args"]
+            ? diagnostic["args"] as Record<string, unknown>
+            : null;
+          const recorder = invocations.find((item) => {
+            if (item["toolName"] !== "ask-user-question") return false;
+            const args = item["args"];
+            return Boolean(args) && typeof args === "object" &&
+              (args as Record<string, unknown>)["purpose"] === "follow_up_suggestions";
+          });
+          const recorderArgs = recorder && typeof recorder["args"] === "object" && recorder["args"]
+            ? recorder["args"] as Record<string, unknown>
+            : null;
+          const suggestions = Array.isArray(recorderArgs?.["options"])
+            ? recorderArgs["options"].filter((value): value is string => typeof value === "string")
+            : [];
+          const generationStartedAt = typeof diagnostic?.["startedAt"] === "string"
+            ? diagnostic["startedAt"]
+            : undefined;
+          const generationDurationMs = typeof diagnostic?.["durationMs"] === "number"
+            ? diagnostic["durationMs"]
+            : undefined;
+          const generationStartedMs = generationStartedAt
+            ? new Date(generationStartedAt).getTime()
+            : Number.NaN;
+          const generationCompletedAt =
+            generationStartedAt &&
+            Number.isFinite(generationStartedMs) &&
+            generationDurationMs !== undefined &&
+            diagnostic?.["status"] !== "running"
+              ? new Date(generationStartedMs + generationDurationMs).toISOString()
+              : undefined;
+          return {
+            sessionId: run.sessionId,
+            startedAt: run.startedAt.toISOString(),
+            ...(run.completedAt ? { completedAt: run.completedAt.toISOString() } : {}),
+            runStatus: run.status,
+            outcome: typeof diagnosticArgs?.["outcome"] === "string"
+              ? diagnosticArgs["outcome"]
+              : recorder
+                ? "generated"
+                : "not_recorded",
+            ...(typeof diagnosticArgs?.["enabled"] === "boolean"
+              ? { enabled: diagnosticArgs["enabled"] }
+              : {}),
+            ...(typeof diagnosticArgs?.["enabledByV2Flag"] === "boolean"
+              ? { enabledByV2Flag: diagnosticArgs["enabledByV2Flag"] }
+              : {}),
+            ...(typeof diagnosticArgs?.["answerLength"] === "number"
+              ? { answerLength: diagnosticArgs["answerLength"] }
+              : {}),
+            ...(typeof diagnosticArgs?.["generationInput"] === "string"
+              ? { generationInput: diagnosticArgs["generationInput"] }
+              : {}),
+            ...(typeof diagnosticArgs?.["conversationMessageCount"] === "number"
+              ? { conversationMessageCount: diagnosticArgs["conversationMessageCount"] }
+              : {}),
+            ...(typeof diagnosticArgs?.["agentContextProvided"] === "boolean"
+              ? { agentContextProvided: diagnosticArgs["agentContextProvided"] }
+              : {}),
+            ...(typeof diagnosticArgs?.["agentContextName"] === "string"
+              ? { agentContextName: diagnosticArgs["agentContextName"] }
+              : {}),
+            ...(typeof diagnosticArgs?.["agentContextDescription"] === "string"
+              ? { agentContextDescription: diagnosticArgs["agentContextDescription"] }
+              : {}),
+            ...(typeof diagnosticArgs?.["generationSource"] === "string"
+              ? { generationSource: diagnosticArgs["generationSource"] }
+              : {}),
+            ...(typeof diagnosticArgs?.["generationModel"] === "string"
+              ? { generationModel: diagnosticArgs["generationModel"] }
+              : {}),
+            ...(generationStartedAt ? { generationStartedAt } : {}),
+            ...(generationCompletedAt ? { generationCompletedAt } : {}),
+            ...(generationDurationMs !== undefined ? { generationDurationMs } : {}),
+            ...(typeof diagnosticArgs?.["failureCode"] === "string"
+              ? { failureCode: diagnosticArgs["failureCode"] }
+              : {}),
+            ...(typeof diagnosticArgs?.["failureMessage"] === "string"
+              ? { failureMessage: diagnosticArgs["failureMessage"] }
+              : {}),
+            ...(typeof diagnosticArgs?.["httpStatus"] === "number"
+              ? { httpStatus: diagnosticArgs["httpStatus"] }
+              : {}),
+            suggestionCount: suggestions.length,
+            persistedRecorder: Boolean(recorder),
+            suggestions,
+          };
+        });
     }
     res.json(body);
   } catch (err) {

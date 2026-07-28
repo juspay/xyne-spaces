@@ -13,6 +13,8 @@ export interface VerifiedCliToken {
   userId: string;
   orgId: string;
   scopes: string[];
+  /** "cli" (personal device-flow) or "service" (org-minted machine token). */
+  client: string | null;
 }
 
 export function hash(raw: string): string {
@@ -52,6 +54,7 @@ export async function verify(raw: string | undefined): Promise<VerifiedCliToken 
       userId: true,
       orgId: true,
       scopes: true,
+      client: true,
       expiresAt: true,
       revokedAt: true,
       user: { select: { orgId: true } },
@@ -68,5 +71,6 @@ export async function verify(raw: string | undefined): Promise<VerifiedCliToken 
     userId: record.userId,
     orgId: record.orgId,
     scopes: record.scopes,
+    client: record.client,
   };
 }

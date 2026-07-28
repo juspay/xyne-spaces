@@ -28,6 +28,7 @@ export function ServiceTokensCard({ userId, org }: { userId: string; org: OrgDet
   const [name, setName] = useState("");
   const [boundUserId, setBoundUserId] = useState(org.members[0]?.userId ?? "");
   const [expiry, setExpiry] = useState("");
+  const [agentSlugsInput, setAgentSlugsInput] = useState("");
   const [minting, setMinting] = useState(false);
   const [minted, setMinted] = useState<MintedServiceAccessToken | null>(null);
   const [copied, setCopied] = useState(false);
@@ -61,10 +62,12 @@ export function ServiceTokensCard({ userId, org }: { userId: string; org: OrgDet
   }
 
   async function handleMint() {
-    if (!name.trim() || !boundUserId) return;
+    if (!name.trim() || !boundUserId || !agentSlugsInput.trim()) return;
     setMinting(true);
     try {
+      const allowedAgentSlugs = agentSlugsInput.split(",").map((slug) => slug.trim()).filter(Boolean);
       const result = await mintOrgServiceToken(userId, org.id, {
+        allowedAgentSlugs,
         name: name.trim(),
         userId: boundUserId,
         expiresAt: expiry ? new Date(expiry).toISOString() : null,
@@ -134,6 +137,7 @@ export function ServiceTokensCard({ userId, org }: { userId: string; org: OrgDet
                   </div>
                   <div className="mt-1 text-[11px] text-xyne-fg-muted">
                     Runs as {member?.name || member?.email || token.userId} · Last used {formatDate(token.lastUsedAt)} · Expires {formatDate(token.expiresAt)}
+                    {(token.scopes ?? []).some((scope) => scope.startsWith("agent:")) ? ` · Agents: ${(token.scopes ?? []).filter((scope) => scope.startsWith("agent:")).map((scope) => scope.slice("agent:".length)).join(", ")}` : " · Agents: none (legacy token — re-mint with an allowlist)"}
                   </div>
                 </div>
                 {!token.revokedAt && (
@@ -177,6 +181,7 @@ export function ServiceTokensCard({ userId, org }: { userId: string; org: OrgDet
           <>
             <TextField label="Name" value={name} maxLength={60} placeholder="Production billing worker" onChange={(event) => setName(event.target.value)} hint={`${name.length}/60 characters`} />
             <SelectField label="Run as member" value={boundUserId} options={memberOptions} onValueChange={(value) => setBoundUserId(value ?? "")} />
+            <TextField label="Allowed agents" value={agentSlugsInput} placeholder="euler-doctor, doctor-agent" onChange={(event) => setAgentSlugsInput(event.target.value)} hint="Comma-separated agent slugs this token may invoke. Required — the token can call nothing else." />
             <TextField label="Expiry (optional)" type="datetime-local" value={expiry} onChange={(event) => setExpiry(event.target.value)} hint="Leave blank for no expiry." />
           </>
         )}

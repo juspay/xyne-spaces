@@ -70,6 +70,7 @@ import {
   setAdminMcpFallbackFlag,
   getCredentialFields,
   createSlackAgentApp,
+  syncSlackAgentApp,
   listSlackAgentStatuses,
   registerSlackCommand,
   removeSlackAgentRegistration,
@@ -871,6 +872,7 @@ export function AdminPageV3({ userId }: Props) {
             status: "created",
             installs: [],
             installUrl: created.installUrl,
+            manifestStale: false,
           },
         };
       });
@@ -908,6 +910,7 @@ export function AdminPageV3({ userId }: Props) {
             status: "created",
             installs: [],
             installUrl: created.installUrl,
+            manifestStale: false,
           },
         };
       });
@@ -926,6 +929,31 @@ export function AdminPageV3({ userId }: Props) {
       showSnackbar({
         variant: "error",
         title: error instanceof Error ? error.message : "Failed to open Slack install",
+      });
+    } finally {
+      setSlackCreatingSlug(null);
+    }
+  }, [loadSlackAgentStatuses, showSnackbar]);
+
+  const updateSlackAppAndReinstall = useCallback(async (agent: AgentLight) => {
+    setSlackCreatingSlug(agent.slug);
+    try {
+      const synced = await syncSlackAgentApp(agent.slug, agent.orgId);
+      if (slackFocusListenerRef.current) {
+        window.removeEventListener("focus", slackFocusListenerRef.current);
+      }
+      const refreshOnce = () => {
+        window.removeEventListener("focus", refreshOnce);
+        slackFocusListenerRef.current = null;
+        void loadSlackAgentStatuses();
+      };
+      slackFocusListenerRef.current = refreshOnce;
+      window.addEventListener("focus", refreshOnce, { once: true });
+      window.open(synced.installUrl, "_blank", "noopener,noreferrer");
+    } catch (error) {
+      showSnackbar({
+        variant: "error",
+        title: error instanceof Error ? error.message : "Failed to update Slack app",
       });
     } finally {
       setSlackCreatingSlug(null);
@@ -986,6 +1014,7 @@ export function AdminPageV3({ userId }: Props) {
             status: "command" as const,
             installs: [],
             installUrl: null,
+            manifestStale: false,
           }),
           commandName: registered.commandName,
           ...(current[agent.id] ? {} : { status: "command" as const }),
@@ -1222,6 +1251,7 @@ export function AdminPageV3({ userId }: Props) {
                     }
                     onUploadPicture={openRowPicturePicker}
                     onSlackAction={handleSlackAction}
+                    onUpdateSlackApp={updateSlackAppAndReinstall}
                     onRemoveSlack={handleRemoveSlackRegistration}
                     onPromote={setPromoteTarget}
                     onDemote={setDemoteTarget}
@@ -2133,6 +2163,7 @@ function AgentsTab({
   slackStatusesReady,
   onResumeSetup,
   onSlackAction,
+  onUpdateSlackApp,
   onRemoveSlack,
   onUploadPicture,
   onPromote,
@@ -2150,6 +2181,7 @@ function AgentsTab({
   slackStatusesReady: boolean;
   onResumeSetup: (a: AgentLight, hasApp: boolean) => void;
   onSlackAction: (a: AgentLight) => void;
+  onUpdateSlackApp: (a: AgentLight) => void;
   onRemoveSlack: (a: AgentLight) => void;
   onUploadPicture: (slug: string) => void;
   onPromote: (a: AgentLight) => void;
@@ -2212,6 +2244,11 @@ function AgentsTab({
                         />
                       </span>
                     )}
+                    {slackStatus?.manifestStale && (
+                      <span className="ml-2 inline-block align-middle">
+                        <Badge as="span" size="sm" variant="warning" label="Slack app update required" />
+                      </span>
+                    )}
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
@@ -2262,6 +2299,14 @@ function AgentsTab({
                               ? "Slack (install)"
                               : "Add to Slack"}
                     </MenuItem>
+                    {slackStatus?.manifestStale ? (
+                      <MenuItem
+                        onSelect={() => onUpdateSlackApp(a)}
+                        leading={<SlackLogoIcon size={13} />}
+                      >
+                        Slack (update app + reinstall)
+                      </MenuItem>
+                    ) : null}
                     {slackStatus ? (
                       <MenuItem
                         onSelect={() => void onRemoveSlack(a)}
@@ -2347,6 +2392,11 @@ function AgentsTab({
                           />
                         </span>
                       )}
+                      {slackStatus?.manifestStale && (
+                        <span className="ml-2 inline-block align-middle">
+                          <Badge as="span" size="sm" variant="warning" label="Slack app update required" />
+                        </span>
+                      )}
                     </div>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
@@ -2395,6 +2445,14 @@ function AgentsTab({
                               ? "Slack (install)"
                               : "Create Slack app"}
                       </MenuItem>
+                      {slackStatus?.manifestStale ? (
+                        <MenuItem
+                          onSelect={() => onUpdateSlackApp(a)}
+                          leading={<SlackLogoIcon size={13} />}
+                        >
+                          Slack (update app + reinstall)
+                        </MenuItem>
+                      ) : null}
                       {slackStatus ? (
                         <MenuItem
                           onSelect={() => void onRemoveSlack(a)}

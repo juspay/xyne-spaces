@@ -13,6 +13,11 @@ const DEFAULT_TEMPLATE = "kata-workspace-template";
 const DEFAULT_SESSION_TIMEOUT_MS = 60 * 60 * 1000;
 const DEFAULT_READY_TIMEOUT_MS = 120 * 1000;
 const ONE_SHOT_SESSION_TIMEOUT_MS = 60 * 1000;
+// Minimum spacing between SandboxClaim creations on one client instance.
+// SandboxClaims CoW-clone off the template's source VolumeSnapshot; GCP
+// throttles per-source-snapshot CreateVolume ops, so bursts trip a
+// self-sustaining retry loop. 10s spacing keeps callers under the budget.
+const DEFAULT_MIN_CREATE_SPACING_MS = 10_000;
 
 function sleep(delayMs: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, delayMs));
@@ -68,12 +73,31 @@ export class KataClient {
   private readonly namespace: string;
   private readonly template: string;
   private readonly k8sClient: CustomObjectsApi;
+  private readonly minCreateSpacingMs: number;
+  // Wall-clock time (ms since epoch) at which the NEXT createSession call
+  // is allowed to actually issue its CreateNamespacedCustomObject. Each
+  // caller advances the marker atomically so concurrent bursts serialize
+  // into a 10s-spaced queue instead of all racing to hit GCP at once.
+  private nextCreateAllowedTime = Date.now();
 
   constructor(options: KataClientOptions) {
     this.routerUrl = options.routerUrl.replace(/\/$/, "");
     this.namespace = options.namespace ?? DEFAULT_NAMESPACE;
     this.template = options.template ?? DEFAULT_TEMPLATE;
+    this.minCreateSpacingMs =
+      options.minCreateSpacingMs ?? DEFAULT_MIN_CREATE_SPACING_MS;
     this.k8sClient = createKubeClient();
+  }
+
+  private async claimCreateSlot(): Promise<void> {
+    if (this.minCreateSpacingMs <= 0) return;
+    const now = Date.now();
+    const startAt = Math.max(now, this.nextCreateAllowedTime);
+    // Reserve the slot BEFORE awaiting; concurrent callers get sequential
+    // slots even if they enter this method at the same tick.
+    this.nextCreateAllowedTime = startAt + this.minCreateSpacingMs;
+    const waitMs = startAt - now;
+    if (waitMs > 0) await sleep(waitMs);
   }
 
   async createSession(options: CreateSessionOptions = {}): Promise<Session> {
@@ -82,6 +106,8 @@ export class KataClient {
     const timeoutMs = options.timeoutMs ?? DEFAULT_SESSION_TIMEOUT_MS;
     const readyTimeoutMs = options.readyTimeoutMs ?? DEFAULT_READY_TIMEOUT_MS;
     const claimName = `kata-claim-${randomHex(8)}`;
+
+    await this.claimCreateSlot();
 
     await this.k8sClient.createNamespacedCustomObject(
       GROUP,

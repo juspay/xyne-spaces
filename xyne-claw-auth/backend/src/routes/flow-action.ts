@@ -16,7 +16,7 @@ import { Router, type NextFunction, type Request, type Response } from "express"
 import { CONFIG } from "../config.js";
 import { prisma } from "../db.js";
 import { decrypt } from "../crypto.js";
-import { expandSpacesMentions } from "../lib/mention-transform.js";
+import { executeTwinApprovalDelivery } from "../lib/twin-delivery.js";
 import { verifySpacesSignature } from "../middleware/verify-spaces-signature.js";
 import { agentRunRepository } from "../repositories/index.js";
 import { recordTwinApprovalOutcome } from "../services/twinResponseFeedback.js";
@@ -39,29 +39,6 @@ import { registerRunRecovery } from "../queue/run-recovery-worker.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("flow-action");
-
-/** Resolve a Twin reply destination descriptor to a Spaces post target.
- *  `origin_channel` / `channel` post a NEW top-level message (no conversationId);
- *  `origin_thread` / `thread` post into an existing thread. Unknown kinds fall
- *  back to the origin thread — post-as-user is the hard permission gate regardless. */
-function resolveTwinReplyTarget(
-  kind: string,
-  ids: { targetChannelId: string; targetConversationId: string; destinationChannelId?: string | undefined; destinationConversationId?: string | undefined },
-): { channelId: string; conversationId?: string } {
-  switch (kind) {
-    case "origin_channel":
-      return { channelId: ids.targetChannelId };
-    case "channel":
-      return { channelId: ids.destinationChannelId ?? ids.targetChannelId };
-    case "thread":
-      return ids.destinationChannelId && ids.destinationConversationId
-        ? { channelId: ids.destinationChannelId, conversationId: ids.destinationConversationId }
-        : { channelId: ids.targetChannelId, conversationId: ids.targetConversationId };
-    case "origin_thread":
-    default:
-      return { channelId: ids.targetChannelId, conversationId: ids.targetConversationId };
-  }
-}
 
 const router = Router();
 const DEFAULT_GATEWAY_TENANT = process.env.ALLOWED_TENANTS
@@ -924,9 +901,6 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       const destinationUserId = data["destinationUserId"] as string | undefined;
       const senderId = data["senderId"] as string | undefined;
 
-      const willReact = deliveryAction === "react" || deliveryAction === "react_and_reply";
-      const willReply = deliveryAction === "reply" || deliveryAction === "react_and_reply";
-
       if (!mentionedUserId || !workspaceId) {
         res.status(400).json({ type: "error", message: "Missing twin-approval fields in flowJSON.data" } satisfies AppActionResponse);
         return;
@@ -947,103 +921,38 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         return;
       }
 
-      // actionId === "twin-approve". For a reply, prefer the user's edited text.
+      // actionId === "twin-approve". Deliver via the shared implementation
+      // (react + post as the user); on success replace the flow card and record
+      // the outcome for the daily learning loop.
       const editedContent = (values["editedContent"] as string | undefined)?.trim();
-      const finalContent = willReply
-        ? (editedContent && editedContent.length > 0 ? editedContent : messageContent)
-        : "";
-      const wasEdited = willReply && !!editedContent && editedContent.length > 0 && editedContent !== messageContent.trim();
-
-      const s2sKey = process.env["INTERNAL_S2S_KEY"] ?? "";
-      const s2sHeaders = { "Content-Type": "application/json", "x-s2s-key": s2sKey };
       try {
-        // 1) React AS the user on the triggering message.
-        if (willReact && sourceMessageId && deliveryEmoji) {
-          const rr = await fetch(`${CONFIG.spacesInternalUrl}/api/internal/reactAsUser`, {
-            method: "POST",
-            headers: s2sHeaders,
-            body: JSON.stringify({ messageId: sourceMessageId, emojiName: deliveryEmoji, userId: mentionedUserId }),
-            signal: AbortSignal.timeout(30_000),
-          });
-          if (!rr.ok) {
-            const text = await rr.text().catch(() => "");
-            log.warn(`[flow-action] Twin react failed: ${rr.status} ${text.slice(0, 160)}`);
-            // If the reaction was the ONLY action, surface the failure; otherwise
-            // continue so the reply still posts.
-            if (!willReply) {
-              resp = { type: "error", message: `Failed to react: ${rr.status}` };
-              res.json(resp);
-              return;
-            }
-          }
+        const result = await executeTwinApprovalDelivery(
+          {
+            mentionedUserId,
+            workspaceId,
+            targetChannelId,
+            targetConversationId,
+            sourceMessageId,
+            messageContent,
+            deliveryAction,
+            deliveryEmoji,
+            destinationKind,
+            destinationChannelId,
+            destinationConversationId,
+            destinationUserId,
+            senderId,
+          },
+          { editedContent },
+        );
+        if (!result.ok) {
+          resp = { type: "error", message: result.error };
+          res.json(resp);
+          return;
         }
-
-        // 2) Post the reply AS the user to the resolved destination.
-        if (willReply && finalContent) {
-          // DM destinations resolve to a 1:1 channel between the user and the
-          // target (the sender for `dm_sender`, or an explicit person for `dm`),
-          // opened/looked-up via Spaces. Everything else resolves to a channel /
-          // thread post target synchronously.
-          let target: { channelId: string; conversationId?: string };
-          if (destinationKind === "dm_sender" || destinationKind === "dm") {
-            const dmTarget = destinationKind === "dm_sender" ? senderId : destinationUserId;
-            if (!dmTarget) {
-              log.error(`[flow-action] Twin DM has no target user (kind=${destinationKind})`);
-              resp = { type: "error", message: "Couldn't resolve who to DM" };
-              res.json(resp);
-              return;
-            }
-            const dmRes = await fetch(`${CONFIG.spacesInternalUrl}/api/internal/getOrCreateDm`, {
-              method: "POST",
-              headers: s2sHeaders,
-              body: JSON.stringify({ userId: mentionedUserId, targetUserId: dmTarget, workspaceId }),
-              signal: AbortSignal.timeout(30_000),
-            });
-            if (!dmRes.ok) {
-              const text = await dmRes.text().catch(() => "");
-              log.error(`[flow-action] Failed to open DM: ${dmRes.status} ${text.slice(0, 200)}`);
-              resp = { type: "error", message: `Couldn't open the DM: ${dmRes.status}` };
-              res.json(resp);
-              return;
-            }
-            const dmData = (await dmRes.json()) as { channelId?: string };
-            if (!dmData.channelId) {
-              resp = { type: "error", message: "DM channel could not be resolved" };
-              res.json(resp);
-              return;
-            }
-            target = { channelId: dmData.channelId };
-          } else {
-            target = resolveTwinReplyTarget(destinationKind, { targetChannelId, targetConversationId, destinationChannelId, destinationConversationId });
-          }
-          const postRes = await fetch(`${CONFIG.spacesInternalUrl}/api/internal/postAsUser`, {
-            method: "POST",
-            headers: s2sHeaders,
-            body: JSON.stringify({
-              channelId: target.channelId,
-              ...(target.conversationId ? { conversationId: target.conversationId } : {}),
-              markdownText: expandSpacesMentions(finalContent),
-              userId: mentionedUserId,
-              workspaceId,
-              metadata: { contentFormat: "markdown" },
-            }),
-            signal: AbortSignal.timeout(30_000),
-          });
-          if (!postRes.ok) {
-            const text = await postRes.text().catch(() => "");
-            log.error(`[flow-action] Failed to post as user: ${postRes.status} ${text.slice(0, 200)}`);
-            resp = { type: "error", message: `Failed to post: ${postRes.status}` };
-            res.json(resp);
-            return;
-          }
-        }
-
-        const doneMsg = willReact && willReply ? "✅ Reacted & replied." : willReply ? "✅ Response sent." : "✅ Reacted.";
-        log.info(`[flow-action] Twin approved — action=${deliveryAction} dest=${destinationKind} edited=${wasEdited}`);
-        resp = { type: "close_screen", finalMessage: doneMsg };
+        resp = { type: "close_screen", finalMessage: result.doneMsg };
         res.json(resp);
-        void replaceFlowCardWithText(messageId, data["agentSlug"] as string | undefined, `**${doneMsg}**`, conversationId, data["dmChannelId"] as string | undefined, data["spacesAppId"] as string | undefined);
-        void recordTwinApprovalOutcome(data, wasEdited ? "accepted_edited" : "accepted", finalContent);
+        void replaceFlowCardWithText(messageId, data["agentSlug"] as string | undefined, `**${result.doneMsg}**`, conversationId, data["dmChannelId"] as string | undefined, data["spacesAppId"] as string | undefined);
+        void recordTwinApprovalOutcome(data, result.wasEdited ? "accepted_edited" : "accepted", result.finalContent);
       } catch (err) {
         log.error("[flow-action] Twin approval error:", err);
         resp = { type: "error", message: "Failed to deliver response" };
