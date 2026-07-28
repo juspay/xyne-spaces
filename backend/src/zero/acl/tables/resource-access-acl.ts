@@ -3,6 +3,7 @@ import { Schema, AccessType } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, TableSchema } from '../core/types';
 import { zql } from '../../queries';
+import { assertGuestWriteBlocked } from '../core/guest-access';
 
 export class ResourceAccessACL extends BaseACL<'resource_access'> {
   // Helper to check if user is User Management admin (ADMIN on USERS resource)
@@ -27,6 +28,8 @@ export class ResourceAccessACL extends BaseACL<'resource_access'> {
     _args: InsertValue<TableSchema<'resource_access'>>,
     tx: Transaction<Schema>,
   ): Promise<void> {
+    assertGuestWriteBlocked(this.ctx, 'resource_access', 'insert', 'Resource access');
+
     // Only User Management admins can grant access
     const isAdmin = await this.isUserManagementAdmin(tx);
     if (!isAdmin) {
@@ -41,6 +44,8 @@ export class ResourceAccessACL extends BaseACL<'resource_access'> {
     _args: UpdateValue<TableSchema<'resource_access'>>,
     tx: Transaction<Schema>,
   ): Promise<void> {
+    assertGuestWriteBlocked(this.ctx, 'resource_access', 'update', 'Resource access');
+
     // Only User Management admins can modify access
     const isAdmin = await this.isUserManagementAdmin(tx);
     if (!isAdmin) {
@@ -55,6 +60,8 @@ export class ResourceAccessACL extends BaseACL<'resource_access'> {
     _args: DeleteID<TableSchema<'resource_access'>>,
     tx: Transaction<Schema>,
   ): Promise<void> {
+    assertGuestWriteBlocked(this.ctx, 'resource_access', 'delete', 'Resource access');
+
     // Only User Management admins can revoke access
     const isAdmin = await this.isUserManagementAdmin(tx);
     if (!isAdmin) {

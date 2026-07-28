@@ -3,6 +3,7 @@ import { MutationACLError, type TableSchema } from '../core/types';
 import { AccessType, Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { zql } from '../../queries';
+import { assertGuestWriteBlocked } from '../core/guest-access';
 
 const AUTOMATION_WORKFLOW_TYPE = 'Automations';
 const AUTOMATIONS_RESOURCE_NAME = 'AUTOMATIONS';
@@ -64,6 +65,7 @@ export class WOrkflowsAcl extends BaseACL<'workflows'> {
     args: InsertValue<TableSchema<'workflows'>>,
     tx: Transaction<Schema>,
   ): Promise<void> {
+    assertGuestWriteBlocked(this.ctx, 'workflows', 'insert', 'Workflow');
     // workspaceId is NOT NULL in Postgres; the DB rejects missing values
     // but we still enforce the cross-tenant check here for clarity.
     if (args.workspaceId !== this.ctx.workspaceId) {
@@ -111,6 +113,7 @@ export class WOrkflowsAcl extends BaseACL<'workflows'> {
     args: UpdateValue<TableSchema<'workflows'>>,
     tx: Transaction<Schema>,
   ): Promise<void> {
+    assertGuestWriteBlocked(this.ctx, 'workflows', 'update', 'Workflow');
     const existing = await tx.run(zql.workflows.where('id', args.id).one());
     if (!existing) {
       return;
@@ -144,6 +147,7 @@ export class WOrkflowsAcl extends BaseACL<'workflows'> {
     args: DeleteID<TableSchema<'workflows'>>,
     tx: Transaction<Schema>,
   ): Promise<void> {
+    assertGuestWriteBlocked(this.ctx, 'workflows', 'delete', 'Workflow');
     const existing = await tx.run(zql.workflows.where('id', args.id).one());
     if (!existing) {
       return;
@@ -169,6 +173,7 @@ export class WOrkflowsAcl extends BaseACL<'workflows'> {
     _args: UpsertValue<TableSchema<'workflows'>>,
     _tx: Transaction<Schema>,
   ): Promise<void> {
+    assertGuestWriteBlocked(this.ctx, 'workflows', 'upsert', 'Workflow');
     throw new MutationACLError('Workflow upsert failed: use insert operation only', 'workflows');
   }
 }

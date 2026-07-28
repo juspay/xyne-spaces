@@ -129,6 +129,17 @@ export class OrganizationController {
       } = req.body;
 
       const userId = req.user!.id;
+      const currentUser = await db.user.findUnique({
+        where: { id: userId },
+        select: { role: true },
+      });
+      if (currentUser?.role === 'GUEST') {
+        res.status(403).json({
+          error: 'Forbidden',
+          message: 'Guest users cannot create organizations',
+        });
+        return;
+      }
 
       // Validate required fields
       if (!name || name.trim() === '') {
@@ -378,7 +389,7 @@ export class OrganizationController {
       }
 
       // Validate role
-      const validRoles: OrgRole[] = ['OWNER', 'ADMIN', 'MEMBER', 'VIEWER'];
+      const validRoles: OrgRole[] = ['OWNER', 'ADMIN', 'MEMBER', 'GUEST'];
       if (!validRoles.includes(role)) {
         res.status(400).json({
           error: 'Invalid role',
@@ -436,7 +447,7 @@ export class OrganizationController {
       
 
       // Validate role
-      const validRoles: OrgRole[] = ['OWNER', 'ADMIN', 'MEMBER', 'VIEWER'];
+      const validRoles: OrgRole[] = ['OWNER', 'ADMIN', 'MEMBER', 'GUEST'];
       if (!role || !validRoles.includes(role)) {
         res.status(400).json({
           error: 'Invalid role',

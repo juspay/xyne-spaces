@@ -94,9 +94,9 @@ export class QueryACLFactory {
       case 'installed_apps':
         return new InstalledAppsACL(ctx) as BaseQueryACL<TTable>;
       case 'agent_tools_mappings':
-        return new BaseQueryACL(ctx, table);
+        return new BaseQueryACL(ctx, table) as BaseQueryACL<TTable>;
       case 'agents':
-        return new BaseQueryACL(ctx, table);
+        return new BaseQueryACL(ctx, table) as BaseQueryACL<TTable>;
       case 'board_complexity_scores':
         return new BoardComplexityScoresACL(ctx) as BaseQueryACL<TTable>;
       case 'boards':
@@ -118,7 +118,7 @@ export class QueryACLFactory {
       case 'channel_participants':
         return new ChannelParticipantsACL(ctx) as BaseQueryACL<TTable>;
       case 'channel_user_status':
-        return new BaseQueryACL(ctx, table);
+        return new BaseQueryACL(ctx, table) as BaseQueryACL<TTable>;
       case 'channel_sections':
         return new ChannelSectionsACL(ctx) as BaseQueryACL<TTable>;
       case 'channel_daily_recaps':
@@ -136,7 +136,7 @@ export class QueryACLFactory {
       case 'message_attachments':
         return new MessageAttachmentsACL(ctx) as BaseQueryACL<TTable>;
       case 'models':
-        return new BaseQueryACL(ctx, table);
+        return new BaseQueryACL(ctx, table) as BaseQueryACL<TTable>;
       case 'messages':
         return new MessagesACL(ctx) as BaseQueryACL<TTable>;
       case 'notification_preferences':
@@ -180,7 +180,7 @@ export class QueryACLFactory {
       case 'ticket_tag_mappings':
         return new TicketTagMappingsACL(ctx) as BaseQueryACL<TTable>;
       case 'tools':
-        return new BaseQueryACL(ctx, table);
+        return new BaseQueryACL(ctx, table) as BaseQueryACL<TTable>;
       case 'tickets':
         return new TicketsACL(ctx) as BaseQueryACL<TTable>;
       case 'user_assignment_states':
@@ -220,7 +220,7 @@ export class QueryACLFactory {
       case 'saved_user_configurations':
         return new SavedUserConfigurationsACL(ctx) as BaseQueryACL<TTable>;
       case 'saved_user_configuration_values':
-        return new BaseQueryACL(ctx, table);
+        return new BaseQueryACL(ctx, table) as BaseQueryACL<TTable>;
       case 'delayed_messages':
         return new DelayedMessagesACL(ctx) as BaseQueryACL<TTable>;
       case 'collections':
@@ -230,7 +230,7 @@ export class QueryACLFactory {
       case 'collection_permissions':
         return new CollectionPermissionsACL(ctx) as BaseQueryACL<TTable>;
       default:
-        return new BaseQueryACL(ctx, table);
+        return new BaseQueryACL(ctx, table) as BaseQueryACL<TTable>;
       case 'emails':
         return new EmailsACL(ctx) as BaseQueryACL<TTable>;
       case 'email_drafts':
@@ -258,7 +258,12 @@ export class QueryACLFactory {
       case 'dashboards':
       case 'queries':
       case 'dashboard_queries_mapping':
-        return new BaseQueryACL(ctx, table);
+        // These tables have no workspaceId column, so they can't be
+        // workspace-scoped here. They're only read as related data off a
+        // dashboard (getDashboardById -> queryMappings -> query), which
+        // already inherits the parent dashboard's creator/participant
+        // filter, so the default (unfiltered) ACL is acceptable for them.
+        return new BaseQueryACL(ctx, table) as BaseQueryACL<TTable>;
     }
   }
 }

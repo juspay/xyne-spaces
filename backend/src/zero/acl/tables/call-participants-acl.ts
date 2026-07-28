@@ -3,6 +3,7 @@ import { Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, TableSchema } from '../core/types';
 import { zql } from '../../queries';
+import { hasChannelMutationAccess } from '../core/guest-access';
 export class CallParticipantsACL extends BaseACL<'call_participants'> {
 
   private async verifyChannelInWorkspace(channelId: string, tx: Transaction<Schema>): Promise<void> {
@@ -24,10 +25,22 @@ export class CallParticipantsACL extends BaseACL<'call_participants'> {
     }
 
     await this.verifyChannelInWorkspace(callData.channel.id, tx);
-    const isParticipant = await tx.run(zql.channel_participants
-      .where('channelId', callData.channel.id)
-      .where('userId', this.ctx.userID)
-      .one());
+    if (this.ctx.role === 'GUEST') {
+      const hasGuestAccess = await hasChannelMutationAccess(this.ctx, tx, callData.channel.id, {
+        allowPublicForNonGuests: true,
+      });
+      if (hasGuestAccess) {
+        return;
+      }
+      throw new MutationACLError('Call participant insert failed: guest does not have access to this channel', 'call_participants');
+    }
+
+    const isParticipant = await tx.run(
+      zql.channel_participants
+        .where('channelId', callData.channel.id)
+        .where('userId', this.ctx.userID)
+        .one(),
+    );
 
     if (!isParticipant) {
       throw new MutationACLError('Call participant insert failed: you must be a channel participant to join calls', 'call_participants');

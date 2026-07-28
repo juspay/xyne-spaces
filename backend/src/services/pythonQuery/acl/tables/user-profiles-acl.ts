@@ -1,5 +1,6 @@
 import { Prisma, PrismaClient } from '@prisma/client'
 import { BaseQueryACL, ACLContext } from '../base-acl'
+import { getGuestVisibleUserIds, isGuestContext } from './channel-access-helper'
 
 /**
  * UserProfiles ACL for Python Query Service
@@ -12,6 +13,18 @@ export class UserProfilesACL extends BaseQueryACL<Prisma.UserProfileWhereInput> 
   }
 
   async getWhereClause(): Promise<Prisma.UserProfileWhereInput> {
+    if (isGuestContext(this.ctx)) {
+      const userIds = await getGuestVisibleUserIds(
+        this.prisma,
+        this.ctx.workspaceId ?? '',
+        this.ctx.userId
+      )
+
+      return {
+        userId: { in: userIds },
+      }
+    }
+
     // Get all userIds in this workspace
     const workspaceUsers = await this.prisma.user.findMany({
       where: { workspaceId: this.ctx.workspaceId },

@@ -4,7 +4,7 @@ import { authV2Middleware } from '../middleware/authV2Middleware';
 import { userManagementController } from '../controllers/userManagementController';
 import { channelService } from '../services/channelService';
 import { canCreateWorkspace } from '../middleware/workspaceAuth';
-import { logger } from '../utils/logger'; 
+import { logger } from '../utils/logger';
 
 const router = express.Router();
 const authV2Controller = new AuthV2Controller();

@@ -6,6 +6,7 @@ import {
 import { AccessType, Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { zql } from '../../queries';
+import { assertGuestWriteBlocked } from '../core/guest-access';
 
 const FORMS_RESOURCE_NAME = 'FORMS';
 
@@ -40,6 +41,7 @@ export class FormsACL extends BaseACL<'forms'> {
   }
 
   async canInsert(args: InsertValue<TableSchema<'forms'>>, _tx: Transaction<Schema>): Promise<void> {
+    assertGuestWriteBlocked(this.ctx, 'forms', 'insert', 'Form');
     if (args.createdBy !== this.ctx.userID) {
       throw new MutationACLError('Form insert failed: createdBy must match the current user', 'forms');
     }
@@ -50,6 +52,7 @@ export class FormsACL extends BaseACL<'forms'> {
   }
 
   async canUpdate(args: UpdateValue<TableSchema<'forms'>>, tx: Transaction<Schema>): Promise<void> {
+    assertGuestWriteBlocked(this.ctx, 'forms', 'update', 'Form');
     const form = await tx.run(zql.forms.where('id', args.id).one());
     if (!form) {
       throw new MutationACLError('Form update failed: form does not exist', 'forms');
@@ -69,6 +72,7 @@ export class FormsACL extends BaseACL<'forms'> {
   }
 
   async canDelete(args: DeleteID<TableSchema<'forms'>>, tx: Transaction<Schema>): Promise<void> {
+    assertGuestWriteBlocked(this.ctx, 'forms', 'delete', 'Form');
     const form = await tx.run(zql.forms.where('id', args.id).one());
     if (!form) {
       throw new MutationACLError('Form delete failed: form does not exist', 'forms');

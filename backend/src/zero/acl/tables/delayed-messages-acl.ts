@@ -3,6 +3,7 @@ import { ChannelVisibility, Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, TableSchema } from '../core/types';
 import { zql } from '../../queries';
+import { hasChannelMutationAccess } from '../core/guest-access';
 
 export class DelayedMessagesACL extends BaseACL<'delayed_messages'> {
   private async verifyChannelInWorkspace(
@@ -30,9 +31,24 @@ export class DelayedMessagesACL extends BaseACL<'delayed_messages'> {
     if (channel.isArchived) {
       throw new MutationACLError('Scheduled message: channel is archived', 'delayed_messages');
     }
+
+    if (this.ctx.role === 'GUEST') {
+      const hasGuestAccess = await hasChannelMutationAccess(this.ctx, tx, channelId, {
+        allowPublicForNonGuests: true,
+      });
+      if (hasGuestAccess) {
+        return;
+      }
+      throw new MutationACLError(
+        'Scheduled message: guest does not have access to this channel',
+        'delayed_messages',
+      );
+    }
+
     if (channel.visibility === ChannelVisibility.PUBLIC) {
       return;
     }
+
     const participant = await tx.run(
       zql.channel_participants.where('channelId', channelId).where('userId', this.ctx.userID).one(),
     );

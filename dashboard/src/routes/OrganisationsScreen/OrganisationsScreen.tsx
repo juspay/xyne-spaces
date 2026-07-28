@@ -102,6 +102,7 @@ const RoleBadge = ({ role }: { role: OrgRole }): ReactElement => {
     [OrgRole.MEMBER]: 'bg-muted text-muted-foreground',
     [OrgRole.VIEWER]: 'bg-muted text-muted-foreground',
     [OrgRole.COMMUNITY_MEMBER]: 'bg-muted text-muted-foreground',
+    [OrgRole.GUEST]: 'bg-purple-500/10 text-purple-600',
   };
   return (
     <span
@@ -138,6 +139,7 @@ const OrgMembersSection = ({
   console.log('[DEBUG] OrgMembersSection render', { orgId, members }); // Debug log to trace renders and data
 
   const [emailInput, setEmailInput] = useState('');
+  const [selectedRole, setSelectedRole] = useState<OrgRole>(OrgRole.MEMBER);
   const [isAdding, setIsAdding] = useState(false);
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [updatingRoleId, setUpdatingRoleId] = useState<string | null>(null);
@@ -192,7 +194,7 @@ const OrgMembersSection = ({
     // This mirrors the server-side canInsert ACL bootstrap path.
     const isCreatorBootstrap =
       isOrgCreator && !selfMembership && email === (selfEmail ?? '').toLowerCase();
-    const role = isCreatorBootstrap ? OrgRole.OWNER : OrgRole.MEMBER;
+    const role = isCreatorBootstrap ? OrgRole.OWNER : selectedRole;
 
     setIsAdding(true);
     try {
@@ -275,7 +277,7 @@ const OrgMembersSection = ({
             <UserPlus className='w-4 h-4 text-primary' />
             Add Member by Email
           </p>
-          <div className='flex gap-2'>
+          <div className='flex gap-2 flex-wrap'>
             <Input
               ref={emailInputRef}
               type='email'
@@ -287,8 +289,18 @@ const OrgMembersSection = ({
                   void handleAdd();
                 }
               }}
-              className='flex-1'
+              className='flex-1 min-w-[200px]'
             />
+            <select
+              value={selectedRole}
+              onChange={e => setSelectedRole(e.target.value as OrgRole)}
+              className='px-3 py-2 border border-border rounded-lg bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary min-w-[120px]'
+              data-track-category='Organisations'
+              data-track-name='SelectOrgMemberRole'
+            >
+              <option value={OrgRole.MEMBER}>Member</option>
+              <option value={OrgRole.GUEST}>Guest</option>
+            </select>
             <Button
               onClick={() => void handleAdd()}
               disabled={isAdding || !emailInput.trim()}

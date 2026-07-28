@@ -142,6 +142,7 @@ import {
 import { z } from 'zod';
 import { generateKeyBetween } from 'fractional-indexing';
 import { zql } from './queries';
+import { hasGuestChannelAccess } from './acl/core/guest-access';
 import vespaClient from '@/vespa/client';
 import { fileSchema } from '@/vespa/src/types';
 
@@ -8735,6 +8736,48 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           editAccessId: z.string().optional(),
         }),
         async ({ tx, args: params }) => {
+          const getGuestSharedCanvasEditRole = async (
+            canvasId: string,
+          ): Promise<CanvasRole | null> => {
+            const requester = await tx.run(zql.users.where('id', authData.sub).one());
+            if (!requester || requester.role !== WorkspaceRole.GUEST) {
+              return null;
+            }
+
+            const guestCtx = {
+              userID: authData.sub,
+              workspaceId: requester.workspaceId,
+              role: requester.role,
+              orgRole: '',
+              memberId: '',
+            };
+
+            const sharedParticipants = await tx.run(
+              zql.canvas_participants.where('canvasId', canvasId),
+            );
+
+            let strongestRole: CanvasRole | null = null;
+            const roleRank = (role: CanvasRole | null): number =>
+              role === CanvasRole.OWNER ? 3 : role === CanvasRole.EDITOR ? 2 : role === CanvasRole.VIEWER ? 1 : 0;
+
+            for (const sharedParticipant of sharedParticipants) {
+              if (!sharedParticipant.channelId) continue;
+
+              const hasAccess = await hasGuestChannelAccess(
+                guestCtx,
+                tx,
+                sharedParticipant.channelId,
+              );
+              if (!hasAccess) continue;
+
+              if (roleRank(sharedParticipant.role) > roleRank(strongestRole)) {
+                strongestRole = sharedParticipant.role;
+              }
+            }
+
+            return strongestRole;
+          };
+
           // Verify user has edit access
           const canvas = await tx.run(zql.canvases.where('id', params.id).one());
           if (!canvas) {
@@ -8750,6 +8793,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             .where('canvasId', canvas.id)
             .where('userId', authData.sub)
             .one());
+          const guestSharedRole = await getGuestSharedCanvasEditRole(canvas.id);
 
           const currentFolder = canvas.folderId
             ? await tx.run(zql.canvas_folders.where('id', canvas.folderId).one())
@@ -8770,7 +8814,9 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           const canEdit =
             canvas.createdBy === authData.sub ||
             (participant &&
-              (participant.role === CanvasRole.EDITOR || participant.role === CanvasRole.OWNER));
+              (participant.role === CanvasRole.EDITOR || participant.role === CanvasRole.OWNER)) ||
+              guestSharedRole === CanvasRole.EDITOR ||
+              guestSharedRole === CanvasRole.OWNER;
 
           if (!canEdit && !(isMoveOperation && isChannelAdmin)) {
             throw new Error('You do not have permission to edit this canvas');

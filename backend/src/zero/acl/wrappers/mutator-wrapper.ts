@@ -37,7 +37,13 @@ export function wrapMutatorsWithACL<T extends Record<string, any>>(
   vespaJobs: VespaJobsAccumulator,
   sideEffectJobs: SideEffectJobsAccumulator,
 ): T {
-  const ctx: QueryContext = { userID: authData.sub, workspaceId: authData.workspaceId, role: authData.role, memberId: authData.memberId, orgRole: authData.orgRole};
+  const ctx: QueryContext = {
+    userID: authData.sub,
+    workspaceId: authData.workspaceId,
+    role: authData.role,
+    memberId: authData.memberId,
+    orgRole: authData.orgRole,
+  };
 
   return new Proxy(mutators, {
     get(target, namespace: string | symbol) {

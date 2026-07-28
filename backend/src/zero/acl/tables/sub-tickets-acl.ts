@@ -6,6 +6,7 @@ import {
 import { ChannelVisibility, Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { zql } from '../../queries';
+import { hasGuestTicketAccess } from '../core/guest-access';
 
 export class SubTicketsACL extends BaseACL<'sub_tickets'> {
 
@@ -15,7 +16,28 @@ export class SubTicketsACL extends BaseACL<'sub_tickets'> {
     }
   }
 
+  private async verifyGuestScope(subTicketId: string, tx: Transaction<Schema>): Promise<void> {
+    const subTicket = await tx.run(zql.sub_tickets.where('id', subTicketId).related('mappedTicket').one());
+    if (!subTicket) {
+      throw new MutationACLError('Sub-ticket not found', 'sub_tickets');
+    }
+    const ticket = subTicket.mappedTicket;
+    if (!ticket || ticket.workspaceId !== this.ctx.workspaceId) {
+      throw new MutationACLError('Sub-ticket not found in this workspace', 'sub_tickets');
+    }
+    const hasAccess = await hasGuestTicketAccess(this.ctx, tx, ticket);
+    if (!hasAccess) {
+      throw new MutationACLError('Sub-ticket not accessible for guest users', 'sub_tickets');
+    }
+  }
+
   async canUpdate(args: UpdateValue<TableSchema<'sub_tickets'>>, tx: Transaction<Schema>): Promise<void> {
+    if (this.ctx.role === 'GUEST') {
+      await this.verifyGuestScope(args.id, tx);
+      return;
+    }
+
+    // Get existing subTicket to verify workspace
     const subTicket = await tx.run(zql.sub_tickets.where('id', args.id).one());
     if (!subTicket || subTicket.workspaceId !== this.ctx.workspaceId) {
       throw new MutationACLError('Sub-ticket not found in this workspace', 'sub_tickets');

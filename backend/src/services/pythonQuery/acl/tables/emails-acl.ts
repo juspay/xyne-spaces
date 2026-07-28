@@ -1,5 +1,6 @@
 import { Prisma, PrismaClient } from '@prisma/client'
 import { BaseQueryACL, ACLContext } from '../base-acl'
+import { getAccessibleChannelIds, isGuestContext } from './channel-access-helper'
 
 /**
  * ACL for the `email` model.
@@ -17,6 +18,17 @@ export class EmailsACL extends BaseQueryACL<Prisma.EmailWhereInput> {
   }
 
   async getWhereClause(): Promise<Prisma.EmailWhereInput> {
+    if (isGuestContext(this.ctx)) {
+      const channelIds = await getAccessibleChannelIds(this.prisma, this.ctx.userId, this.ctx)
+
+      return {
+        channel: {
+          workspaceId: this.ctx.workspaceId ?? '',
+          id: { in: channelIds },
+        },
+      }
+    }
+
     return {
       channel: {
         AND: [

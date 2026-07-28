@@ -7,9 +7,11 @@ import { canManageUserGroup } from '../core/admin-access';
 import { getUserInWorkspaceOrThrow } from './users-acl';
 import { getRoleInWorkspaceOrThrow } from './roles-acl';
 import { getUserGroupInWorkspaceOrThrow } from './user-groups-acl';
+import { assertGuestWriteBlocked } from '../core/guest-access';
 
 export class UserGroupMappingsACL extends BaseACL<'user_group_mappings'> {
   async canInsert(args: InsertValue<TableSchema<'user_group_mappings'>>, tx: Transaction<Schema>): Promise<void> {
+    assertGuestWriteBlocked(this.ctx, 'user_group_mappings', 'insert', 'User group mapping');
     // Check if the user group exists
     const userGroup = await tx.run(
       zql.user_groups
@@ -36,6 +38,7 @@ export class UserGroupMappingsACL extends BaseACL<'user_group_mappings'> {
   }
 
   async canUpdate(args: UpdateValue<TableSchema<'user_group_mappings'>>, tx: Transaction<Schema>): Promise<void> {
+    assertGuestWriteBlocked(this.ctx, 'user_group_mappings', 'update', 'User group mapping');
     // Get the mapping being updated
     const userGroupMapping = await tx.run(
       zql.user_group_mappings
@@ -74,6 +77,7 @@ export class UserGroupMappingsACL extends BaseACL<'user_group_mappings'> {
   }
 
   async canDelete(args: DeleteID<TableSchema<'user_group_mappings'>>, tx: Transaction<Schema>): Promise<void> {
+    assertGuestWriteBlocked(this.ctx, 'user_group_mappings', 'delete', 'User group mapping');
     // Get the mapping being deleted
     const userGroupMapping = await tx.run(
       zql.user_group_mappings

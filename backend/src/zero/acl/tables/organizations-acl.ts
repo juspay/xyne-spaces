@@ -3,6 +3,7 @@ import { OrgRole, Schema, WorkspaceRole } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, TableSchema } from '../core/types';
 import { zql } from '../../queries';
+import { assertGuestWriteBlocked } from '../core/guest-access';
 
 /**
  * Organizations ACL
@@ -23,12 +24,14 @@ export class OrganizationsACL extends BaseACL<'organizations'> {
     if (this.ctx.role === WorkspaceRole.COMMUNITY_MEMBER) {
       throw new MutationACLError('Organization insert failed: community members cannot create organizations', 'organizations');
     }
+    assertGuestWriteBlocked(this.ctx, 'organizations', 'insert', 'Organization');
   }
 
   async canUpdate(args: UpdateValue<TableSchema<'organizations'>>, tx: Transaction<Schema>): Promise<void> {
     if (this.ctx.role === WorkspaceRole.COMMUNITY_MEMBER) {
       throw new MutationACLError('Organization update failed: community members cannot modify organizations', 'organizations');
     }
+    assertGuestWriteBlocked(this.ctx, 'organizations', 'update', 'Organization');
     const org = await tx.run(zql.organizations.where('orgId', args.orgId).one());
     if (org && org.createdBy === this.ctx.userID) {
       return;
@@ -43,6 +46,7 @@ export class OrganizationsACL extends BaseACL<'organizations'> {
     if (this.ctx.role === WorkspaceRole.COMMUNITY_MEMBER) {
       throw new MutationACLError('Organization delete failed: community members cannot delete organizations', 'organizations');
     }
+    assertGuestWriteBlocked(this.ctx, 'organizations', 'delete', 'Organization');
     const org = await tx.run(zql.organizations.where('orgId', args.orgId).one());
     if (org && org.createdBy === this.ctx.userID) {
       return;

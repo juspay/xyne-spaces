@@ -4,6 +4,7 @@ import { BaseACL } from '../core/base-acl';
 import { TableSchema, MutationACLError } from '../core/types';
 import { assertCanManageRoles } from '../core/admin-access';
 import { zql } from '../../queries';
+import { assertGuestWriteBlocked } from '../core/guest-access';
 
 export async function getRoleInWorkspaceOrThrow(
   roleId: string,
@@ -19,6 +20,7 @@ export async function getRoleInWorkspaceOrThrow(
 
 export class RolesACL extends BaseACL<'roles'> {
   async canInsert(args: InsertValue<TableSchema<'roles'>>, tx: Transaction<Schema>): Promise<void> {
+    assertGuestWriteBlocked(this.ctx, 'roles', 'insert', 'Role');
     if (args.workspaceId !== this.ctx.workspaceId) {
       throw new MutationACLError('Role must be created in the current workspace', 'roles');
     }
@@ -27,11 +29,13 @@ export class RolesACL extends BaseACL<'roles'> {
 
   async canUpdate(args: UpdateValue<TableSchema<'roles'>>, tx: Transaction<Schema>): Promise<void> {
     await getRoleInWorkspaceOrThrow(args.id, this.ctx.workspaceId, tx);
+    assertGuestWriteBlocked(this.ctx, 'roles', 'update', 'Role');
     await assertCanManageRoles(this.ctx, tx);
   }
 
   async canDelete(args: DeleteID<TableSchema<'roles'>>, tx: Transaction<Schema>): Promise<void> {
     await getRoleInWorkspaceOrThrow(args.id, this.ctx.workspaceId, tx);
+    assertGuestWriteBlocked(this.ctx, 'roles', 'delete', 'Role');
     await assertCanManageRoles(this.ctx, tx);
   }
 }

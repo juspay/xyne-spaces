@@ -3,6 +3,7 @@ import type { Schema, Context } from '../../schema';
 import { ChannelVisibility } from '../../schema';
 import { BaseQueryACL } from '../core/base-acl';
 import type { SelectArgs } from '../core/types';
+import { guestChannelAccessWhere, isGuestContext } from '../core/guest-acl-utils';
 
 export class ConversationsACL extends BaseQueryACL<'conversations'> {
   constructor(ctx: Context) {
@@ -10,6 +11,14 @@ export class ConversationsACL extends BaseQueryACL<'conversations'> {
   }
 
   canSelect<TReturn>(query: Query<'conversations', Schema, TReturn>, args?: SelectArgs): Query<'conversations', Schema, TReturn> {
+    if (isGuestContext(this.ctx)) {
+      return query.whereExists('channel', (ch) =>
+        ch
+          .where('workspaceId', '=', this.ctx.workspaceId)
+          .where(guestChannelAccessWhere(this.ctx)),
+      );
+    }
+
     const channelId = args?.channelId as string | undefined;
 
     // When the caller knows the user is a member (pre-checked against channel_user_status),

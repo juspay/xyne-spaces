@@ -6,6 +6,7 @@ import {
 import { Schema } from '@xyne/shared'
 import { BaseACL } from '../core/base-acl';
 import { zql } from '../../queries';
+import { hasGuestTicketAccess } from '../core/guest-access';
 
 export class TicketACl extends BaseACL<'tickets'> {
 
@@ -14,6 +15,17 @@ export class TicketACl extends BaseACL<'tickets'> {
         if (!ticket) throw new MutationACLError('Ticket not found', 'tickets');
         if (ticket.workspaceId !== this.ctx.workspaceId) {
             throw new MutationACLError('Ticket not found in this workspace', 'tickets');
+        }
+    }
+
+    private async verifyGuestScope(
+        tx: Transaction<Schema>,
+        ticket: { workspaceId: string; channelId: string; projectId: string },
+    ): Promise<void> {
+        if (this.ctx.role !== 'GUEST') return;
+        const hasAccess = await hasGuestTicketAccess(this.ctx, tx, ticket);
+        if (!hasAccess) {
+            throw new MutationACLError('Ticket update failed: guest does not have access to this ticket', 'tickets');
         }
     }
 
@@ -26,6 +38,14 @@ export class TicketACl extends BaseACL<'tickets'> {
         if (channel?.isArchived) {
             throw new MutationACLError('Ticket insert failed: cannot create tickets in archived channel', 'tickets');
         }
+
+        await this.verifyGuestScope(tx, {
+            workspaceId: args.workspaceId,
+            channelId: args.channelId,
+            projectId: args.projectId,
+        });
+        if (this.ctx.role === 'GUEST') return;
+
         const isParticipant = await tx
             .run(
             zql.channels
@@ -55,6 +75,9 @@ export class TicketACl extends BaseACL<'tickets'> {
         if (ticket.isArchived) {
             throw new MutationACLError('Ticket update failed: cannot update archived ticket', 'tickets');
         }
+
+        await this.verifyGuestScope(tx, ticket);
+        if (this.ctx.role === 'GUEST') return;
 
         const isParticipant = await tx
             .run(

@@ -42,7 +42,7 @@ export class ChannelUserStatusACL extends BaseACL<'channel_user_status'> {
       throw new MutationACLError('Channel user status update failed: status record does not exist', 'channel_user_status');
     }
     await this.verifyChannelInWorkspace(status.channelId, tx);
-    
+
     const argsKeys = Object.keys(args);
     
     // Allow updating only `isClosed` and `updatedAt` on any user's status (e.g., admin closing a channel for a user)
@@ -120,7 +120,7 @@ export class ChannelUserStatusACL extends BaseACL<'channel_user_status'> {
       throw new MutationACLError('Channel user status delete failed: status record does not exist', 'channel_user_status');
     }
     await this.verifyChannelInWorkspace(status.channelId, tx);
-    
+
     // Allow delete if:
     // 1. The requesting user is the owner of the status record, OR
     // 2. The requesting user is a channel ADMIN

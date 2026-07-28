@@ -3,6 +3,7 @@ import { ChannelRole, Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, TableSchema } from '../core/types';
 import { zql } from '../../queries';
+import { assertGuestWriteBlocked } from '../core/guest-access';
 
 export class ChannelsACL extends BaseACL<'channels'> {
   private async verifyChannelInWorkspace(
@@ -19,6 +20,8 @@ export class ChannelsACL extends BaseACL<'channels'> {
   }
 
   async canInsert(args: InsertValue<TableSchema<'channels'>>, tx: Transaction<Schema>): Promise<void> {
+    assertGuestWriteBlocked(this.ctx, 'channels', 'insert', 'Channel');
+
     if (args.projectId) {
       const project = await tx.run(zql.projects.where('id', args.projectId).one());
       if (!project) {
@@ -31,6 +34,7 @@ export class ChannelsACL extends BaseACL<'channels'> {
   }
 
   async canUpdate(args: UpdateValue<TableSchema<'channels'>>, tx: Transaction<Schema>): Promise<void> {
+    assertGuestWriteBlocked(this.ctx, 'channels', 'update', 'Channel');
     const channel = await tx.run(zql.channels.where('id', args.id).one());
     if (!channel) {
       throw new MutationACLError('Channel update failed: channel does not exist', 'channels');
@@ -70,6 +74,7 @@ export class ChannelsACL extends BaseACL<'channels'> {
   }
 
   async canDelete(_args: DeleteID<TableSchema<'channels'>>, _tx: Transaction<Schema>): Promise<void> {
+    assertGuestWriteBlocked(this.ctx, 'channels', 'delete', 'Channel');
 
     throw new MutationACLError('Channel delete failed: channels cannot be deleted, use archive instead', 'channels');
   }

@@ -7,6 +7,7 @@ import { Schema } from '@xyne/shared'
 import { BaseACL } from '../core/base-acl';
 import { zql } from '../../queries';
 import { hasProjectAdminAccess } from '../core/admin-access';
+import { assertGuestWriteBlocked } from '../core/guest-access';
 
 export class StageAcl extends BaseACL<'stages'> {
 
@@ -19,6 +20,7 @@ export class StageAcl extends BaseACL<'stages'> {
     }
 
     async canInsert(args: InsertValue<TableSchema<'stages'>>, tx: Transaction<Schema>): Promise<void> {
+        assertGuestWriteBlocked(this.ctx, 'stages', 'insert', 'Stage');
         const { board } = await this.verifyBoardWorkspace(args.boardId, tx);
 
         // Allow if user is the board creator
@@ -36,6 +38,7 @@ export class StageAcl extends BaseACL<'stages'> {
     }
 
     async canUpdate(args: UpdateValue<TableSchema<'stages'>>, tx: Transaction<Schema>): Promise<void> {
+        assertGuestWriteBlocked(this.ctx, 'stages', 'update', 'Stage');
         const stage = await tx.run(zql.stages.where('id', args.id).related('board').one());
         if (!stage || !stage.board) {
             throw new MutationACLError('Stage update failed: stage or its board does not exist', 'stages');
@@ -61,6 +64,7 @@ export class StageAcl extends BaseACL<'stages'> {
     }
 
     async canDelete(args: DeleteID<TableSchema<'stages'>>, tx: Transaction<Schema>): Promise<void> {
+        assertGuestWriteBlocked(this.ctx, 'stages', 'delete', 'Stage');
         const stage = await tx.run(zql.stages.where('id', args.id).related('board').one());
         if (!stage || !stage.board) {
             throw new MutationACLError('Stage delete failed: stage or its board does not exist', 'stages');
@@ -86,6 +90,7 @@ export class StageAcl extends BaseACL<'stages'> {
     }
 
     async canUpsert(args: UpsertValue<TableSchema<'stages'>>, tx: Transaction<Schema>): Promise<void> {
+        assertGuestWriteBlocked(this.ctx, 'stages', 'upsert', 'Stage');
         const stage = await tx.run(zql.stages.where('id', args.id).related('board').one());
         if (!stage || !stage.board) {
             throw new MutationACLError('Stage upsert failed: stage or its board does not exist', 'stages');

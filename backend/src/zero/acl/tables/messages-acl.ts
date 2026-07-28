@@ -3,6 +3,7 @@ import { ChannelVisibility, MessageType, Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, TableSchema } from '../core/types';
 import { zql } from '../../queries';
+import { hasChannelMutationAccess } from '../core/guest-access';
 
 export class MessagesACL extends BaseACL<'messages'> {
 
@@ -23,15 +24,27 @@ export class MessagesACL extends BaseACL<'messages'> {
       throw new MutationACLError('Message insert failed: cannot send messages in archived channel', 'messages');
     }
     await this.verifyConversationInWorkspace(args.conversationId, tx, conversation.channel.workspaceId);
+
+    if (this.ctx.role === 'GUEST') {
+      const hasGuestAccess = await hasChannelMutationAccess(this.ctx, tx, conversation.channel.id, {
+        allowPublicForNonGuests: true,
+      });
+      if (hasGuestAccess) {
+        return;
+      }
+      throw new MutationACLError('Message insert failed: guest does not have access to this channel', 'messages');
+    }
+
     if (conversation.channel.visibility === ChannelVisibility.PUBLIC) {
       return;
     }
 
-    const participant = await tx.run(zql.channel_participants
-      .where('channelId', '=', conversation.channel.id)
-      .where('userId', '=', this.ctx.userID)
-      .one());
-
+    const participant = await tx.run(
+      zql.channel_participants
+        .where('channelId', '=', conversation.channel.id)
+        .where('userId', '=', this.ctx.userID)
+        .one(),
+    );
     if (participant) {
       return;
     }

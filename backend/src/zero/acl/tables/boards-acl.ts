@@ -7,10 +7,12 @@ import { Schema } from '@xyne/shared'
 import { BaseACL } from '../core/base-acl';
 import { zql } from '../../queries';
 import { hasProjectAdminAccess } from '../core/admin-access';
+import { assertGuestWriteBlocked } from '../core/guest-access';
 
 export class BoardAcl extends BaseACL<'boards'> {
 
     async canInsert(args: InsertValue<TableSchema<'boards'>>, tx: Transaction<Schema>): Promise<void> {
+        assertGuestWriteBlocked(this.ctx, 'boards', 'insert', 'Board');
         // Verify board's workspaceId matches context (direct check, no project lookup)
         if (args.workspaceId !== this.ctx.workspaceId) {
             throw new MutationACLError('Board insert failed: workspace ID mismatch', 'boards');
@@ -44,6 +46,7 @@ export class BoardAcl extends BaseACL<'boards'> {
     }
 
     async canUpdate(args: UpdateValue<TableSchema<'boards'>>, tx: Transaction<Schema>): Promise<void> {
+        assertGuestWriteBlocked(this.ctx, 'boards', 'update', 'Board');
         const board = await tx.run(zql.boards.where('id', args.id).one());
         if (!board) {
             throw new MutationACLError('Board update failed: board does not exist', 'boards');
@@ -69,6 +72,7 @@ export class BoardAcl extends BaseACL<'boards'> {
     }
 
     async canDelete(args: DeleteID<TableSchema<'boards'>>, tx: Transaction<Schema>): Promise<void> {
+        assertGuestWriteBlocked(this.ctx, 'boards', 'delete', 'Board');
         const board = await tx.run(zql.boards.where('id', args.id).one());
         if (!board) {
             throw new MutationACLError('Board delete failed: board does not exist', 'boards');

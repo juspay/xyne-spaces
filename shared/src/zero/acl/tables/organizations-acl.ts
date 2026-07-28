@@ -2,6 +2,7 @@ import type { Query } from '@rocicorp/zero';
 import type { Schema, Context } from '../../schema';
 import { OrgRole } from '../../schema';
 import { BaseQueryACL } from '../core/base-acl';
+import { denyGuestSelect, isGuestContext } from '../core/guest-acl-utils';
 
 export class OrganizationsACL extends BaseQueryACL<'organizations'> {
   constructor(ctx: Context) {
@@ -9,6 +10,10 @@ export class OrganizationsACL extends BaseQueryACL<'organizations'> {
   }
 
   canSelect<TReturn>(query: Query<'organizations', Schema, TReturn>): Query<'organizations', Schema, TReturn> {
+    if (isGuestContext(this.ctx)) {
+      return denyGuestSelect(query, 'orgId');
+    }
+
     if (this.ctx.orgRole === OrgRole.ADMIN || this.ctx.orgRole === OrgRole.OWNER) {
       return query;
     }

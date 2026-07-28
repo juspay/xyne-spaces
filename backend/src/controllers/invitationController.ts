@@ -25,11 +25,18 @@ export class InvitationController {
     let invitation = null;
 
     try {
-      const { email, role, workspaceId } = req.body;
+      const { email, role, workspaceId, entityId, entityType, channelId } = req.body;
       const invitedBy = req.user?.id;
 
       if (!invitedBy) {
         res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+
+      // Only workspace admins/owners can send invitations
+      const inviterRole = req.user?.role;
+      if (inviterRole !== 'ADMIN' && inviterRole !== 'OWNER') {
+        res.status(403).json({ error: 'Only workspace admins can send invitations' });
         return;
       }
 
@@ -59,6 +66,9 @@ export class InvitationController {
         role,
         workspaceId,
         invitedBy,
+        entityId,
+        entityType,
+        channelId,
       });
 
       const normalizedEmail = email.trim().toLowerCase();
@@ -70,25 +80,33 @@ export class InvitationController {
       });
 
       let tempPassword: string | null = null;
-      if (existingWorkspaceUsers === 0) {
+      if (existingWorkspaceUsers === 0 && role !== 'GUEST') {
         tempPassword = await invitationService.generateOrgMemberPassword(normalizedEmail);
       }
 
-      // Send invitation email
-      const emailResult = await invitationService.sendInvitationEmail({
-        to: email,
-        inviterName: req.user?.name || 'A team member',
-        workspaceName: invitation.workspace?.name || 'the workspace',
-        invitationLink: `${config.slackFrontendUrl}/launch?path=${encodeURIComponent(`invite?workspaceId=${workspaceId}&invitationId=${invitation.invitationId || invitation.id}`)}`,
-        invitationId: invitation.invitationId || invitation.id,
-        tempPassword: tempPassword ?? undefined,
-      });
+      const publicInvitationId = invitation.invitationId || invitation.id;
+      const invitationLink =
+        `${config.slackFrontendUrl}/launch?path=${encodeURIComponent(`invite?workspaceId=${workspaceId}&invitationId=${publicInvitationId}`)}`;
 
-      // If email failed, delete the invitation to maintain consistency
-      if (!emailResult.success) {
-        await invitationService.deleteInvitation(invitation.id);
-        invitation = null; // Prevent double-delete in catch block
-        throw new Error(`Failed to send invitation email: ${emailResult.error}`);
+      if (config.env === 'development') {
+        logger.info(`[InvitationController] DEV MODE — skipping email send. Invitation link for ${email}: ${invitationLink}`);
+      } else {
+        // Send invitation email
+        const emailResult = await invitationService.sendInvitationEmail({
+          to: email,
+          inviterName: req.user?.name || 'A team member',
+          workspaceName: invitation.workspace?.name || 'the workspace',
+          invitationLink,
+          invitationId: publicInvitationId,
+          tempPassword: tempPassword ?? undefined,
+        });
+
+        // If email failed, delete the invitation to maintain consistency
+        if (!emailResult.success) {
+          await invitationService.deleteInvitation(invitation.id);
+          invitation = null; // Prevent double-delete in catch block
+          throw new Error(`Failed to send invitation email: ${emailResult.error}`);
+        }
       }
 
       res.status(201).json({
@@ -180,6 +198,37 @@ export class InvitationController {
         return;
       }
 
+      // Build entity info
+      let entityType: string | undefined;
+      let entityId: string | undefined;
+      let entityTitle: string | null = null;
+
+      if (invitation.entityType && invitation.entityId) {
+        entityType = invitation.entityType;
+        entityId = invitation.entityId;
+
+        const prisma = DatabaseClient.getInstance();
+        if (invitation.entityType === 'CANVAS') {
+          const canvas = await prisma.canvas.findUnique({
+            where: { id: invitation.entityId },
+            select: { title: true },
+          });
+          entityTitle = canvas?.title ?? null;
+        } else if (invitation.entityType === 'CHANNEL') {
+          const channel = await prisma.channel.findUnique({
+            where: { id: invitation.entityId },
+            select: { name: true },
+          });
+          entityTitle = channel?.name ?? null;
+        } else if (invitation.entityType === 'PROJECT') {
+          const project = await prisma.project.findUnique({
+            where: { id: invitation.entityId },
+            select: { name: true },
+          });
+          entityTitle = project?.name ?? null;
+        }
+      }
+
       // Invitation is valid
       res.status(200).json({
         valid: true,
@@ -189,6 +238,9 @@ export class InvitationController {
           role: invitation.role,
           workspaceName: invitation.workspace?.name,
           organizationName: invitation.organization?.name,
+          entityType,
+          entityId,
+          entityTitle,
         },
       });
     } catch (error) {
@@ -290,7 +342,7 @@ export class InvitationController {
         return;
       }
 
-      await invitationService.acceptInvitation({
+      const { redirectPath } = await invitationService.acceptInvitation({
         invitationId: id,
         userData: {
           id: providerUserId,
@@ -312,6 +364,7 @@ export class InvitationController {
         email: oauthUser.email,
         name: oauthUser.name,
         picture: oauthUser.picture ?? '',
+        redirectPath,
       });
     } catch (error) {
       logger.error('[InvitationController] Failed to accept invitation:', error);
@@ -353,6 +406,14 @@ export class InvitationController {
       }
 
       const invitedBy = req.user!.id;
+
+      // Only workspace admins/owners can provision organizations
+      const inviterRole = req.user?.role;
+      if (inviterRole !== 'ADMIN' && inviterRole !== 'OWNER') {
+        res.status(403).json({ error: 'Only workspace admins can provision organizations' });
+        return;
+      }
+
       const prisma = DatabaseClient.getInstance();
       const normalizedOwnerEmail = ownerEmail.trim().toLowerCase();
 
@@ -444,15 +505,15 @@ export class InvitationController {
       });
       invitationId = invitation.invitationId ?? invitation.id;
 
+      const provisionInvitationLink = `${config.slackFrontendUrl}/launch?path=${encodeURIComponent(`invite?workspaceId=${workspace.id}&invitationId=${invitationId}`)}`;
       const emailResult = await invitationService.sendInvitationEmail({
         to: normalizedOwnerEmail,
         inviterName: req.user?.name ?? 'Administrator',
         workspaceName: workspaceName.trim(),
-        invitationLink: `${config.slackFrontendUrl}/launch?path=${encodeURIComponent(`invite?workspaceId=${workspace.id}&invitationId=${invitationId}`)}`,
+        invitationLink: provisionInvitationLink,
         invitationId,
       });
 
-      // If email failed, rollback everything
       if (!emailResult.success) {
         // 1. Delete invitation
         await invitationService.deleteInvitation(invitation.id);

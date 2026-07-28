@@ -6,6 +6,7 @@ import {
 import { ChannelVisibility, Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { zql } from '../../queries';
+import { hasGuestTicketAccess } from '../core/guest-access';
 
 export class TicketSubTicketMappingsACL extends BaseACL<'ticket_sub_ticket_mappings'> {
 
@@ -19,6 +20,13 @@ export class TicketSubTicketMappingsACL extends BaseACL<'ticket_sub_ticket_mappi
 
   async canInsert(args: InsertValue<TableSchema<'ticket_sub_ticket_mappings'>>, tx: Transaction<Schema>): Promise<void> {
     await this.verifyTicketInWorkspace(args.ticketId, tx);
+    if (this.ctx.role === 'GUEST') {
+      const guestTicket = await tx.run(zql.tickets.where('id', args.ticketId).one());
+      if (!guestTicket || !(await hasGuestTicketAccess(this.ctx, tx, guestTicket))) {
+        throw new MutationACLError('Ticket sub-ticket mapping insert failed: guest does not have access to the parent ticket', 'ticket_sub_ticket_mappings');
+      }
+      return;
+    }
     const ticket = await tx.run(zql.tickets
       .where('id', args.ticketId)
       .whereExists('conversation', (conversation) => {
@@ -58,6 +66,16 @@ export class TicketSubTicketMappingsACL extends BaseACL<'ticket_sub_ticket_mappi
     const mapping = await tx.run(zql.ticket_sub_ticket_mappings.where('id', args.id).one());
     if (mapping) {
       await this.verifyTicketInWorkspace(mapping.ticketId, tx);
+    }
+    if (this.ctx.role === 'GUEST') {
+      if (!mapping) {
+        throw new MutationACLError('Ticket sub-ticket mapping update failed: mapping does not exist', 'ticket_sub_ticket_mappings');
+      }
+      const guestTicket = await tx.run(zql.tickets.where('id', mapping.ticketId).one());
+      if (!guestTicket || !(await hasGuestTicketAccess(this.ctx, tx, guestTicket))) {
+        throw new MutationACLError('Ticket sub-ticket mapping update failed: guest does not have access to the parent ticket', 'ticket_sub_ticket_mappings');
+      }
+      return;
     }
     const hasAccess = await tx.run(zql.ticket_sub_ticket_mappings
       .where('id', args.id)
@@ -100,6 +118,16 @@ export class TicketSubTicketMappingsACL extends BaseACL<'ticket_sub_ticket_mappi
     const mapping = await tx.run(zql.ticket_sub_ticket_mappings.where('id', args.id).one());
     if (mapping) {
       await this.verifyTicketInWorkspace(mapping.ticketId, tx);
+    }
+    if (this.ctx.role === 'GUEST') {
+      if (!mapping) {
+        throw new MutationACLError('Ticket sub-ticket mapping delete failed: mapping does not exist', 'ticket_sub_ticket_mappings');
+      }
+      const guestTicket = await tx.run(zql.tickets.where('id', mapping.ticketId).one());
+      if (!guestTicket || !(await hasGuestTicketAccess(this.ctx, tx, guestTicket))) {
+        throw new MutationACLError('Ticket sub-ticket mapping delete failed: guest does not have access to the parent ticket', 'ticket_sub_ticket_mappings');
+      }
+      return;
     }
     const hasAccess = await tx.run(zql.ticket_sub_ticket_mappings
       .where('id', args.id)

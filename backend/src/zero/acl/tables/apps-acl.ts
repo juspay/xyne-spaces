@@ -6,14 +6,17 @@ import {
 import { Schema } from '@xyne/shared'
 import { BaseACL } from '../core/base-acl';
 import { zql } from '../../queries';
+import { assertGuestWriteBlocked } from '../core/guest-access';
 
 export class AppsACL extends BaseACL<'apps'> {
 
   async canInsert(_args: InsertValue<TableSchema<'apps'>>, _tx: Transaction<Schema>): Promise<void> {
+    assertGuestWriteBlocked(this.ctx, 'apps', 'insert', 'App');
     return;
   }
 
   async canUpdate(args: UpdateValue<TableSchema<'apps'>>, tx: Transaction<Schema>): Promise<void> {
+    assertGuestWriteBlocked(this.ctx, 'apps', 'update', 'App');
     const app = await tx.run(zql.apps.where('id', args.id).one());
     if (!app) {
       throw new MutationACLError('App update failed: app does not exist', 'apps');
@@ -28,10 +31,12 @@ export class AppsACL extends BaseACL<'apps'> {
   }
 
   async canDelete(_args: DeleteID<TableSchema<'apps'>>, _tx: Transaction<Schema>): Promise<void> {
+    assertGuestWriteBlocked(this.ctx, 'apps', 'delete', 'App');
     throw new MutationACLError('App delete failed: apps cannot be deleted', 'apps');
   }
 
   async canUpsert(args: UpsertValue<TableSchema<'apps'>>, tx: Transaction<Schema>): Promise<void> {
+    assertGuestWriteBlocked(this.ctx, 'apps', 'upsert', 'App');
     const app = await tx.run(zql.apps.where('id', args.id).one());
     if (!app) {
       throw new MutationACLError('App upsert failed: app does not exist for update', 'apps');

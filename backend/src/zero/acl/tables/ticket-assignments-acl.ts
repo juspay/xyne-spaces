@@ -6,6 +6,7 @@ import {
 import { Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { zql } from '../../queries';
+import { hasGuestTicketAccess } from '../core/guest-access';
 
 export class TicketAssignmentsACL extends BaseACL<'ticket_assignments'> {
 
@@ -19,6 +20,13 @@ export class TicketAssignmentsACL extends BaseACL<'ticket_assignments'> {
 
   async canInsert(args: InsertValue<TableSchema<'ticket_assignments'>>, tx: Transaction<Schema>): Promise<void> {
     await this.verifyTicketInWorkspace(args.ticketId, tx);
+    if (this.ctx.role === 'GUEST') {
+      const ticket = await tx.run(zql.tickets.where('id', args.ticketId).one());
+      if (!ticket || !(await hasGuestTicketAccess(this.ctx, tx, ticket))) {
+        throw new MutationACLError('Ticket assignment insert failed: guest does not have access to this ticket', 'ticket_assignments');
+      }
+      return;
+    }
     // Only project participants can assign responsibilities
     const isParticipant = await tx.run(
       zql.channels
@@ -37,6 +45,12 @@ export class TicketAssignmentsACL extends BaseACL<'ticket_assignments'> {
       throw new MutationACLError('Ticket assignment update failed: assignment does not exist', 'ticket_assignments');
     }
     await this.verifyTicketInWorkspace(assignment.ticketId, tx);
+    if (this.ctx.role === 'GUEST') {
+      const ticket = await tx.run(zql.tickets.where('id', assignment.ticketId).one());
+      if (!ticket || !(await hasGuestTicketAccess(this.ctx, tx, ticket))) {
+        throw new MutationACLError('Ticket assignment update failed: guest does not have access to this ticket', 'ticket_assignments');
+      }
+    }
   }
 
   async canDelete(args: DeleteID<TableSchema<'ticket_assignments'>>, tx: Transaction<Schema>): Promise<void> {
@@ -45,5 +59,11 @@ export class TicketAssignmentsACL extends BaseACL<'ticket_assignments'> {
       throw new MutationACLError('Ticket assignment delete failed: assignment does not exist', 'ticket_assignments');
     }
     await this.verifyTicketInWorkspace(assignment.ticketId, tx);
+    if (this.ctx.role === 'GUEST') {
+      const ticket = await tx.run(zql.tickets.where('id', assignment.ticketId).one());
+      if (!ticket || !(await hasGuestTicketAccess(this.ctx, tx, ticket))) {
+        throw new MutationACLError('Ticket assignment delete failed: guest does not have access to this ticket', 'ticket_assignments');
+      }
+    }
   }
 }

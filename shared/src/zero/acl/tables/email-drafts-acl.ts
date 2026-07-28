@@ -3,6 +3,7 @@ import type { Schema, Context } from '../../schema';
 import { ChannelVisibility } from '../../schema';
 import { BaseQueryACL } from '../core/base-acl';
 import type { SelectArgs } from '../core/types';
+import { guestChannelAccessWhere, isGuestContext } from '../core/guest-acl-utils';
 
 export class EmailDraftsACL extends BaseQueryACL<'email_drafts'> {
   constructor(ctx: Context) {
@@ -10,6 +11,18 @@ export class EmailDraftsACL extends BaseQueryACL<'email_drafts'> {
   }
 
   canSelect<TReturn>(query: Query<'email_drafts', Schema, TReturn>, args?: SelectArgs): Query<'email_drafts', Schema, TReturn> {
+    if (isGuestContext(this.ctx)) {
+      return query
+        .where(({ or, cmp }) =>
+          or(cmp('userId', '=', this.ctx.userID), cmp('userId', 'IS', null)),
+        )
+        .whereExists('channel', (ch) =>
+          ch
+            .where('workspaceId', '=', this.ctx.workspaceId)
+            .where(guestChannelAccessWhere(this.ctx)),
+        );
+    }
+
     const channelId = args?.channelId as string | undefined;
 
     // A user can read either their own draft (userId = me) or the shared

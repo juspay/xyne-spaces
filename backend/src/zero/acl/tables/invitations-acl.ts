@@ -4,6 +4,7 @@ import { zql } from '../../queries';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, TableSchema } from '../core/types';
 import { verifyWorkspaceAdminOrOwnerFromContext } from '../core/admin-access';
+import { assertGuestWriteBlocked } from '../core/guest-access';
 
 /**
  * Invitations ACL
@@ -12,6 +13,7 @@ import { verifyWorkspaceAdminOrOwnerFromContext } from '../core/admin-access';
 export class InvitationsACL extends BaseACL<'invitations'> {
 
   async canInsert(_args: InsertValue<TableSchema<'invitations'>>, _tx: Transaction<Schema>): Promise<void> {
+    assertGuestWriteBlocked(this.ctx, 'invitations', 'insert', 'Invitation');
     // Security check: workspaceId must match context
     if (this.ctx.workspaceId && this.ctx.workspaceId !== _args.workspaceId) {
       throw new MutationACLError(
@@ -25,6 +27,7 @@ export class InvitationsACL extends BaseACL<'invitations'> {
   }
 
   async canUpdate(args: UpdateValue<TableSchema<'invitations'>>, tx: Transaction<Schema>): Promise<void> {
+    assertGuestWriteBlocked(this.ctx, 'invitations', 'update', 'Invitation');
     // Get the invitation to check its workspace
     const invitation = await tx.run(zql.invitations.where('id', args.id).one());
     if (!invitation) {
@@ -44,6 +47,7 @@ export class InvitationsACL extends BaseACL<'invitations'> {
   }
 
   async canDelete(args: DeleteID<TableSchema<'invitations'>>, tx: Transaction<Schema>): Promise<void> {
+    assertGuestWriteBlocked(this.ctx, 'invitations', 'delete', 'Invitation');
     // Get the invitation to check its workspace
     const invitation = await tx.run(zql.invitations.where('id', args.id).one());
     if (!invitation) {

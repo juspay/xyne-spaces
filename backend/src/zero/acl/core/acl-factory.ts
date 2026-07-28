@@ -25,7 +25,7 @@ import { UserGroupMappingsACL } from '../tables/user-group-mappings-acl';
 import { UserGroupsACL } from '../tables/user-groups-acl';
 import { UserPresenceACL } from '../tables/user-presence-acl';
 import { UsersACL } from '../tables/users-acl';
-import { NoAcl } from './no-acl';
+import { DenyGuestsACL } from './deny-guests-acl';
 import { ProjectAcl } from '../tables/projects-acl';
 import { StageAcl } from '../tables/stage-acl';
 import { BoardAcl } from '../tables/boards-acl';
@@ -38,6 +38,8 @@ import { TicketActivitiesACL } from '../tables/ticket-activities-acl';
 import { TicketEntityMappingsACL } from '../tables/ticket-entity-mappings-acl';
 import { TicketReferenceMappingsACL } from '../tables/ticket-reference-mappings-acl';
 import { TicketTagsACL } from '../tables/ticket-tags-acl';
+import { ProjectTagsACL } from '../tables/project-tags-acl';
+import { TicketTagMappingsACL } from '../tables/ticket-tag-mappings-acl';
 import { PullRequestsACL } from '../tables/pull-requests-acl';
 import { BookmarksACL } from '../tables/bookmarks-acl';
 import { EmailSignaturesACL } from '../tables/email-signatures-acl';
@@ -68,6 +70,46 @@ import { FormFieldsACL } from '../tables/form-fields-acl';
 import { GlobalFieldsACL } from '../tables/global-fields-acl';
 import { FormEntityValuesACL } from '../tables/form-entity-values-acl';
 import { DelayedMessagesACL } from '../tables/delayed-messages-acl';
+import { DraftMessagesACL } from '../tables/draft-messages-acl';
+
+// Tables where GUEST users may perform mutations.
+// All other tables default to DenyGuestsACL for guest users.
+// When adding a new table, decide: either add it to this list (with custom guest
+// handling in its ACL class) or let it fall through to the default deny.
+const GUEST_MUTATION_ALLOWLIST: readonly TableName[] = [
+  'messages',
+  'reactions',
+  'message_attachments',
+  'activities',
+  'channel_user_status',
+  'canvas_user_status',
+  'user_presence',
+  'bookmarks',
+  'email_reads',
+  'notification_preferences',
+  'conversations',
+  'conversation_participants',
+  'delayed_messages',
+  'call_participants',
+  'canvas_participants',
+  'canvases',
+  'user_profiles',
+  'user_preferences',
+  'email_signatures',
+  'saved_user_configurations',
+  'saved_user_configuration_values',
+  'channel_participants',
+  'channel_stats',
+  'draft_messages',
+  'tickets',
+  'ticket_activities',
+  'sub_tickets',
+  'ticket_stage_eta',
+  'ticket_tags',
+  'project_tags',
+  'ticket_tag_mappings',
+  'users',
+];
 
 export class ACLFactory {
   /**
@@ -81,15 +123,21 @@ export class ACLFactory {
     table: TableName,
     ctx: QueryContext
   ): Promise<BaseACL<any>> {
+    // Guest users are denied mutations on all tables except those in the allowlist.
+    // This is a safety net: new tables are blocked for guests by default.
+    if (ctx.role === 'GUEST' && !GUEST_MUTATION_ALLOWLIST.includes(table)) {
+      return new DenyGuestsACL<any>(ctx, table);
+    }
+
     switch (table) {
       case 'activities':
         return new ActivitiesACL(ctx);
       case 'apps':
         return new AppsACL(ctx);
       case 'agent_tools_mappings':
-        return new NoAcl<'agent_tools_mappings'>(ctx);
+        return new DenyGuestsACL<'agent_tools_mappings'>(ctx, 'agent_tools_mappings');
       case 'agents':
-        return new NoAcl<'agents'>(ctx);
+        return new DenyGuestsACL<'agents'>(ctx, 'agents');
       case 'board_complexity_scores':
         return new BoardComplexityScoresACL(ctx);
       case 'boards':
@@ -129,7 +177,7 @@ export class ACLFactory {
       case 'messages':
         return new MessagesACL(ctx);
       case 'models':
-        return new NoAcl<'models'>(ctx);
+        return new DenyGuestsACL<'models'>(ctx, 'models');
       case 'notification_preferences':
         return new NotificationPreferencesACL(ctx);
       case 'org_members':
@@ -172,10 +220,14 @@ export class ACLFactory {
         return new TicketSubTicketMappingsACL(ctx);
       case 'ticket_tags':
         return new TicketTagsACL(ctx);
+      case 'project_tags':
+        return new ProjectTagsACL(ctx);
+      case 'ticket_tag_mappings':
+        return new TicketTagMappingsACL(ctx);
       case 'tickets':
         return new TicketACl(ctx);
       case 'tools':
-        return new NoAcl<'tools'>(ctx);
+        return new DenyGuestsACL<'tools'>(ctx, 'tools');
       case 'user_assignment_states':
         return new UserAssignmentStatesACL(ctx);
       case 'user_expertise_mappings':
@@ -217,11 +269,11 @@ export class ACLFactory {
       case 'form_entity_values':
         return new FormEntityValuesACL(ctx);
       case 'rcas':
-        return new NoAcl<'rcas'>(ctx);
+        return new DenyGuestsACL<'rcas'>(ctx, 'rcas');
       case 'impacts':
-        return new NoAcl<'impacts'>(ctx);
+        return new DenyGuestsACL<'impacts'>(ctx, 'impacts');
       case 'coes':
-        return new NoAcl<'coes'>(ctx);
+        return new DenyGuestsACL<'coes'>(ctx, 'coes');
       case 'saved_user_configurations':
         return new SavedUserConfigurationsACL(ctx);
       case 'saved_user_configuration_values':
@@ -230,8 +282,10 @@ export class ACLFactory {
         return new SurfaceLinksACL(ctx);
       case 'delayed_messages':
         return new DelayedMessagesACL(ctx);
+      case 'draft_messages':
+        return new DraftMessagesACL(ctx);
       default:
-        return new NoAcl<any>(ctx);
+        return new DenyGuestsACL<any>(ctx, table);
     }
   }
 }

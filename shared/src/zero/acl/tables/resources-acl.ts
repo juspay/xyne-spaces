@@ -2,6 +2,7 @@ import type { Query } from '@rocicorp/zero';
 import type { Schema, Context } from '../../schema';
 import { AccessType } from '../../schema';
 import { BaseQueryACL } from '../core/base-acl';
+import { isGuestContext } from '../core/guest-acl-utils';
 
 export class ResourcesACL extends BaseQueryACL<'resources'> {
   constructor(ctx: Context) {
@@ -9,9 +10,15 @@ export class ResourcesACL extends BaseQueryACL<'resources'> {
   }
 
   canSelect<TReturn>(query: Query<'resources', Schema, TReturn>): Query<'resources', Schema, TReturn> {
+    // Guests can only see resources they have explicit access to, never admin-level resources
+    if (isGuestContext(this.ctx)) {
+      return query.whereExists('resourceAccess', (accessQuery) =>
+        accessQuery.where('userId', this.ctx.userID)
+      );
+    }
+
     // User Management admins (ADMIN on USERS resource) can see all resources
     // Non-admins can only see resources they have some access to
-
     return query.where(({ or, exists }) =>
       or(
         // Can see resources they have access to

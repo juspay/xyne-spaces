@@ -2,6 +2,7 @@ import type { Query } from '@rocicorp/zero';
 import type { Schema, Context } from '../../schema';
 import { AccessType } from '../../schema';
 import { BaseQueryACL } from '../core/base-acl';
+import { isGuestContext } from '../core/guest-acl-utils';
 
 export class ResourceAccessACL extends BaseQueryACL<'resource_access'> {
   constructor(ctx: Context) {
@@ -9,9 +10,13 @@ export class ResourceAccessACL extends BaseQueryACL<'resource_access'> {
   }
 
   canSelect<TReturn>(query: Query<'resource_access', Schema, TReturn>): Query<'resource_access', Schema, TReturn> {
+    // Guests can only see their own records, never admin-level records
+    if (isGuestContext(this.ctx)) {
+      return query.where('userId', this.ctx.userID);
+    }
+
     // User Management admins (ADMIN on USERS resource) can see all records
     // Non-admins can only see their own records
-
     return query.where(({ or, cmp, exists }) =>
       or(
         // Can see own records
