@@ -26,7 +26,8 @@ import {
   type SerializedTextNode,
   type Spread,
 } from 'lexical';
-import { Hash, Lock, SignalHigh, User } from 'lucide-react';
+import { SignalHigh } from 'lucide-react';
+import { Hashtag, UserTwo, Lock02Close } from '@xyne/icons';
 import { ChannelScopeType, ChannelVisibility, TicketPriority } from '@xyne/shared';
 import { useChannel } from '../../../hooks/useChannels';
 import { MentionType, type MentionData } from './ChannelCommandMenu.types';
@@ -162,18 +163,18 @@ export const PRIORITY_ICON_COLOR: Record<string, string> = {
 function ChannelChipIcon({ id }: { id: string }): React.JSX.Element {
   const channel = useChannel(id);
   if (!channel) {
-    return <Hash className={ICON_CLASS} />;
+    return <Hashtag className={ICON_CLASS} />;
   }
   if (
     channel.scopeType === ChannelScopeType.DM ||
     channel.scopeType === ChannelScopeType.GROUP_DM
   ) {
-    return <User className={ICON_CLASS} />;
+    return <UserTwo className={ICON_CLASS} />;
   }
   return channel.visibility === ChannelVisibility.PUBLIC ? (
-    <Hash className={ICON_CLASS} />
+    <Hashtag className={ICON_CLASS} />
   ) : (
-    <Lock className={ICON_CLASS} />
+    <Lock02Close className={ICON_CLASS} />
   );
 }
 
@@ -186,7 +187,7 @@ function ChipIcon({ mentionData }: { mentionData: MentionData }): React.JSX.Elem
   // User filters always get the person glyph. The channel lookup lives in its own
   // component so `useChannel` is never called conditionally (rules of hooks).
   if (mentionData.type === MentionType.USER) {
-    return <User className={ICON_CLASS} />;
+    return <UserTwo className={ICON_CLASS} />;
   }
   return <ChannelChipIcon id={mentionData.id} />;
 }

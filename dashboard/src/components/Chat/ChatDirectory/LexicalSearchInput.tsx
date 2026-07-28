@@ -72,6 +72,9 @@ interface LexicalSearchInputProps {
   disableAutoFocus?: boolean;
   // Current user's id — threaded to chip creation so a current-user chip gets Slack's color.
   currentUserID?: string;
+  // Hide the leading search magnifier. The command menu passes this; other consumers
+  // (e.g. call-history search) keep the icon by default.
+  hideSearchIcon?: boolean;
 }
 
 export interface InitialQueryData {
@@ -194,10 +197,15 @@ function InitialQueryPlugin({
   return null;
 }
 
-function PlaceholderPlugin({ placeholder }: { placeholder?: string }) {
+function PlaceholderPlugin({
+  placeholder,
+  offsetClass = 'left-0',
+}: {
+  placeholder?: string;
+  offsetClass?: string;
+}) {
   const [editor] = useLexicalComposerContext();
   const [showPlaceholder, setShowPlaceholder] = useState(true);
-  const { isMobile } = usePlatform();
 
   useEffect(() => {
     return editor.registerUpdateListener(() => {
@@ -213,7 +221,7 @@ function PlaceholderPlugin({ placeholder }: { placeholder?: string }) {
 
   return (
     <div
-      className={`absolute ${isMobile ? 'left-0' : 'left-9'} top-1/2 -translate-y-1/2 text-sm text-muted-foreground pointer-events-none`}
+      className={`absolute ${offsetClass} top-1/2 -translate-y-1/2 text-sm text-muted-foreground pointer-events-none`}
     >
       {placeholder}
     </div>
@@ -493,8 +501,10 @@ export function LexicalSearchInput({
   initialQuery,
   disableAutoFocus = false,
   currentUserID,
+  hideSearchIcon = false,
 }: LexicalSearchInputProps) {
   const { isMobile } = usePlatform();
+  const showLeadingIcon = !hideSearchIcon && !isMobile;
   const [suffixPos, setSuffixPos] = useState({ left: 0, top: 0 });
   const handlePositionChange = useCallback((pos: { left: number; top: number }) => {
     setSuffixPos(pos);
@@ -523,7 +533,7 @@ export function LexicalSearchInput({
           <RichTextPlugin
             contentEditable={
               <span className='flex items-center gap-2'>
-                {!isMobile && <Search size={16} className='ml-3 text-muted-foreground' />}
+                {showLeadingIcon && <Search size={16} className='ml-3 text-muted-foreground' />}
                 <ContentEditable
                   className='min-h-5 py-1 text-sm text-foreground focus:outline-none flex-1'
                   spellCheck={true}
@@ -541,7 +551,14 @@ export function LexicalSearchInput({
               </span>
             }
             {...(placeholder
-              ? { placeholder: <PlaceholderPlugin placeholder={placeholder} /> }
+              ? {
+                  placeholder: (
+                    <PlaceholderPlugin
+                      placeholder={placeholder}
+                      offsetClass={showLeadingIcon ? 'left-9' : 'left-0'}
+                    />
+                  ),
+                }
               : {})}
             ErrorBoundary={({ children }) => <>{children}</>}
           />

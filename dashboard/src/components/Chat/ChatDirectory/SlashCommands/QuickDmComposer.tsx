@@ -1,6 +1,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { X, Hash, Users } from 'lucide-react';
+import { X } from 'lucide-react';
+import { Hashtag, UserTwo } from '@xyne/icons';
 import { ChannelScopeType, ChannelVisibility, type User, type Channel } from '@xyne/shared';
 import { InputBox } from '../../../ui/InputBox';
 import { useAuth } from '../../../../hooks/useAuth';
@@ -129,11 +130,11 @@ export const QuickDmComposer: React.FC<QuickDmComposerProps> = ({ target, onSent
           <span className='text-muted-foreground'>Message to</span>
           <span className='inline-flex items-center gap-1.5 px-1.5 py-1 rounded bg-muted text-xs font-medium text-foreground'>
             {isRealChannel ? (
-              <Hash className='size-3.5' />
+              <Hashtag className='size-4' />
             ) : isGroupDm ? (
-              <Users className='size-3.5' />
+              <UserTwo className='size-4' />
             ) : (
-              <Avatar userId={targetId} size='sm' className='size-4' />
+              <Avatar userId={targetId} size='xs' />
             )}
             {targetName}
           </span>
