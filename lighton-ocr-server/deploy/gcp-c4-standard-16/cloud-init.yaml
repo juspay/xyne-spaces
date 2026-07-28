@@ -1,0 +1,105 @@
+#cloud-config
+#
+# LightOn OCR wrapper fleet bootstrap.
+# This VM runs only the CPU OCR wrapper. LightOn inference stays external behind
+# the internal LightOn fleet LB at http://10.2.0.101/v1/chat/completions.
+
+package_update: true
+packages:
+  - docker.io
+  - docker-compose-plugin
+
+write_files:
+  - path: /opt/lighton-ocr-server/docker-compose.yml
+    permissions: '0644'
+    owner: root:root
+    content: |
+      services:
+        lighton-ocr:
+          image: ${LIGHTON_OCR_IMAGE_URI}
+          container_name: lighton-ocr
+          environment:
+            - PYTHONUNBUFFERED=1
+            - PORT=8000
+
+            # External LightOn inference fleet.
+            - LIGHTON_URL=http://10.2.0.101/v1/chat/completions
+            - LIGHTON_MODEL=lightonai/LightOnOCR-2-1B-bbox
+            - LIGHTON_ACCESS_TOKEN=
+            - LIGHTON_TIMEOUT_SECONDS=300
+            - LIGHTON_CONCURRENCY=16
+            - LIGHTON_MAX_OUTPUT_TOKENS=8192
+            - LIGHTON_TEMPERATURE=0.0
+            - LIGHTON_RETRIES=2
+            - LIGHTON_IMAGE_MAX_DIM=1540
+            - LIGHTON_SSL_VERIFY=true
+
+            # Rendering and crop handling.
+            - OCR_RENDER_MAX_DIM=1540
+            - OCR_PDF_RENDER_DPI=200
+            - OCR_MAX_PAGES=-1
+            - OCR_JPEG_QUALITY=90
+            - OCR_OFFICE_CONVERT_TIMEOUT_SECONDS=120
+            - LIGHTON_CROP_PADDING_PIXELS=5
+            - LIGHTON_MIN_CROP_WIDTH=32
+            - LIGHTON_MIN_CROP_HEIGHT=32
+            - LIGHTON_MIN_CROP_AREA=2048
+            - LIGHTON_MAX_IMAGE_REGIONS_PER_PAGE=256
+            - LIGHTON_MAX_CROPS_PER_PAGE=32
+
+            # E5 tokenizer is baked into the image.
+            - E5_TOKENIZER_PATH=/app/e5-tokenizer
+            - MAX_TOKENS=460
+            - CHUNK_OVERLAP_TOKENS=12
+            - IMAGE_CHUNK_MAX_TOKENS=460
+
+            # Async job behavior.
+            - REDIS_URL=${REDIS_URL}
+            - OCR_RUNTIME_CONFIG_KEY=docling:runtime-config
+            - OCR_RUNTIME_CONFIG_POLL_SECONDS=300
+            - OCR_RESULTS_STREAM=docling:results
+            - OCR_RESULT_KEY_PREFIX=docling:result
+            - OCR_RESULT_TTL_SECONDS=604800
+            - OCR_ASYNC_JOB_TTL_SECONDS=86400
+            - OCR_ASYNC_MAX_INFLIGHT=5
+            - OCR_ASYNC_GLOBAL_MAX_INFLIGHT=${OCR_ASYNC_GLOBAL_MAX_INFLIGHT}
+            - OCR_ASYNC_GLOBAL_ADMISSION_KEY=docling:async:global:active
+            - OCR_ASYNC_GLOBAL_ADMISSION_LEASE_TTL_SECONDS=86400
+            - OCR_ASYNC_RETRY_AFTER_SECONDS=180
+
+            # Avoid accidental proxying for internal LBs.
+            - HTTP_PROXY=
+            - HTTPS_PROXY=
+            - http_proxy=
+            - https_proxy=
+            - NO_PROXY=*
+            - no_proxy=*
+          ports:
+            - "8000:8000"
+          restart: unless-stopped
+
+  - path: /etc/systemd/system/lighton-ocr-server.service
+    permissions: '0644'
+    owner: root:root
+    content: |
+      [Unit]
+      Description=LightOn OCR Server
+      Requires=docker.service
+      After=docker.service network-online.target
+      Wants=network-online.target
+
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      WorkingDirectory=/opt/lighton-ocr-server
+      ExecStart=/usr/bin/docker compose up -d
+      ExecStop=/usr/bin/docker compose down
+      TimeoutStartSec=0
+
+      [Install]
+      WantedBy=multi-user.target
+
+runcmd:
+  - systemctl enable --now docker
+  - systemctl daemon-reload
+  - systemctl enable --now lighton-ocr-server.service
