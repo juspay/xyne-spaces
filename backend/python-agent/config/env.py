@@ -5,6 +5,14 @@ from dataclasses import dataclass
 from typing import Optional
 
 
+def _get_bool_env(name: str, default: bool = False) -> bool:
+    """Parse common boolean env values."""
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
 @dataclass
 class Config:
     """Application configuration loaded from environment variables"""
@@ -16,10 +24,17 @@ class Config:
     agent_livekit_url: Optional[str]
     
     # Azure OpenAI STT Configuration
-    azure_stt_endpoint: str
-    azure_stt_api_key: str
-    azure_stt_api_version: str
-    azure_stt_model: str
+    azure_stt_endpoint: Optional[str]
+    azure_stt_api_key: Optional[str]
+    azure_stt_api_version: Optional[str]
+    azure_stt_model: Optional[str]
+
+    # STT Provider: 'azure' (default) or 'chutes'
+    stt_provider: str
+    
+    # Chutes.ai STT Configuration 
+    chutes_stt_base_url: Optional[str]
+    chutes_stt_api_key: Optional[str]
 
     # STT Provider Configuration (google, azure, or deepgram)
     stt_model: str  # 'google', 'azure', or 'deepgram'
@@ -51,6 +66,9 @@ class Config:
     
     # AI Voice Configuration
     ai_voice_enabled_default: bool
+
+    # Speaker diarization / identification
+    diarization_enabled: bool
     
     # VAD Configuration
     vad_activation_threshold: float
@@ -68,7 +86,7 @@ class Config:
     # GCS Configuration
     gcs_project_id: Optional[str]
     gcs_bucket_name: Optional[str]
-    gcs_credentials_file: Optional[str]
+    gcs_credentials_path: Optional[str]
 
     # S3 Configuration
     s3_bucket_name: Optional[str]
@@ -139,6 +157,13 @@ class Config:
             azure_stt_api_version=os.getenv("AZURE_OPENAI_STT_API_VERSION", ""),
             azure_stt_model=os.getenv("AZURE_OPENAI_STT_MODEL", ""),
 
+            # STT Provider: 'azure' (default) or 'chutes'
+            stt_provider=os.getenv("STT_PROVIDER", "azure").lower(),
+            
+            # Chutes.ai STT
+            chutes_stt_base_url=os.getenv("CHUTES_STT_BASE_URL"),
+            chutes_stt_api_key=os.getenv("CHUTES_STT_API_KEY"),
+
             # STT Provider Configuration (google, azure, or deepgram, default: azure)
             stt_model=os.getenv("STT_MODEL", "azure").lower(),
             voice_input_stt_model=os.getenv("VOICE_INPUT_STT_MODEL", os.getenv("STT_MODEL", "azure")).lower(),
@@ -168,7 +193,10 @@ class Config:
             azure_openai_model=os.getenv("AZURE_OPENAI_MODEL", "gpt-4o"),
             
             # AI Voice
-            ai_voice_enabled_default=os.getenv("AI_VOICE_ENABLED_DEFAULT", "false").lower() == "true",
+            ai_voice_enabled_default=_get_bool_env("AI_VOICE_ENABLED_DEFAULT", False),
+
+            # Speaker diarization / identification
+            diarization_enabled=_get_bool_env("DIARIZATION_ENABLED", False),
             
             # VAD Configuration
             vad_activation_threshold=float(os.getenv("VAD_ACTIVATION_THRESHOLD", "0.45")),
@@ -177,7 +205,7 @@ class Config:
             vad_max_buffered_speech=float(os.getenv("VAD_MAX_BUFFERED_SPEECH", "5.0")),
             
             # Debug Configuration
-            debug_audio_storage=os.getenv("DEBUG_AUDIO_STORAGE", "false").lower() == "true",
+            debug_audio_storage=_get_bool_env("DEBUG_AUDIO_STORAGE", False),
             debug_audio_storage_path=os.getenv("DEBUG_AUDIO_STORAGE_PATH", "/tmp/xyne-audio-debug"),
             
             # Storage provider
@@ -186,7 +214,8 @@ class Config:
             # GCS
             gcs_project_id=os.getenv("GCS_PROJECT_ID"),
             gcs_bucket_name=os.getenv("TRANSCRIPTION_BUCKET_NAME") or os.getenv("GCS_BUCKET_NAME"),
-            gcs_credentials_file=os.getenv('GCS_CREDENTIALS_FILE'),
+            gcs_credentials_path=os.getenv("GCS_CREDENTIALS_PATH"),
+
             # S3
             s3_bucket_name=os.getenv("S3_BUCKET_NAME") or os.getenv("TRANSCRIPTION_BUCKET_NAME"),
             s3_region=os.getenv("AWS_REGION", "ap-south-1"),
@@ -202,7 +231,7 @@ class Config:
             redis_host=os.getenv("REDIS_HOST", "localhost"),
             redis_port=int(os.getenv("REDIS_PORT", "6379")),
             redis_password=os.getenv("REDIS_PASSWORD"),  # None if not set
-            redis_tls=os.getenv("REDIS_TLS", "false").lower() == "true",
+            redis_tls=_get_bool_env("REDIS_TLS", False),
             
             # Transcript incremental flush cadence (events per GCS upload)
             transcript_flush_every_n=int(os.getenv("TRANSCRIPT_FLUSH_EVERY_N_EVENTS", "5")),

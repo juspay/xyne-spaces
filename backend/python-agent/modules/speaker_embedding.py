@@ -14,9 +14,19 @@ import from here so the model is only loaded once across the whole process.
 import os
 import logging
 
+import numpy as np
+
 logger = logging.getLogger(__name__)
 
-_embedding_inference = None  # pyannote Inference instance, window="whole"
+_embedding_inference = None
+_MODEL_ID = "pyannote/wespeaker-voxceleb-resnet34-LM"
+
+
+def _get_bool_env(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
 def get_embedding_inference():
@@ -27,18 +37,24 @@ def get_embedding_inference():
     """
     global _embedding_inference
     if _embedding_inference is not None:
+        logger.debug("Speaker embedding model already loaded; reusing cached inference")
         return _embedding_inference
 
-    try:
-        import torch
-        from pyannote.audio import Model, Inference
+    if not _get_bool_env("DIARIZATION_ENABLED", False):
+        logger.info("Speaker embedding model load skipped: DIARIZATION_ENABLED=false")
+        raise RuntimeError("Speaker diarization is disabled")
 
+    try:
         hf_token = os.getenv("HUGGINGFACE_TOKEN") or os.getenv("HF_TOKEN")
         if not hf_token:
             raise ValueError("HUGGINGFACE_TOKEN env var not set")
 
+        import torch
+        from pyannote.audio import Model, Inference
+
+        logger.info(f"Loading speaker embedding model | model={_MODEL_ID}")
         model = Model.from_pretrained(
-            "pyannote/wespeaker-voxceleb-resnet34-LM",
+            _MODEL_ID,
             token=hf_token,
         )
         device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -47,7 +63,7 @@ def get_embedding_inference():
         # the sliding-window logic in compute_embedding uses a separate
         # Inference instance created on-the-fly from the same model.
         _embedding_inference = Inference(model, window="whole")
-        logger.info(f"Speaker embedding model loaded on {device}")
+        logger.info(f"Speaker embedding model loaded | model={_MODEL_ID}, device={device}")
     except Exception as e:
         logger.error(f"Failed to load speaker embedding model: {e}")
         raise
@@ -82,7 +98,7 @@ def compute_enrollment_embedding(waveform, sample_rate: int = 16000):
     from pyannote.audio import Inference
 
     inference_whole = get_embedding_inference()
-    model = inference_whole.model  # reuse already-loaded model — no overhead
+    model = inference_whole.model
 
     sliding = Inference(model, window="sliding", duration=3.0, step=1.0)
     sliding_embeddings = sliding({"waveform": waveform, "sample_rate": sample_rate})

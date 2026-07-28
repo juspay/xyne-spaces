@@ -16,11 +16,13 @@ import os
 from typing import Dict, List, Optional
 
 import numpy as np
+import torch
 from livekit import rtc
 from livekit.agents import vad as agents_vad
 from livekit.plugins import silero
 
 from config import get_logger
+from modules.speaker_embedding import compute_enrollment_embedding
 
 logger = get_logger(__name__)
 
@@ -259,13 +261,9 @@ class RealtimeIdentifier:
         async event loop.  Resamples from LiveKit's native 48 kHz to 16 kHz
         before handing off to compute_enrollment_embedding.
         """
-        import torch
-        import numpy as np
-
         chunks = []
         for frame in frames:
             pcm = np.frombuffer(bytes(frame.data), dtype=np.int16).astype(np.float32)
-            # Mix down stereo/multi-channel to mono
             if frame.num_channels > 1:
                 pcm = pcm.reshape(-1, frame.num_channels).mean(axis=1)
             chunks.append(pcm)
@@ -278,7 +276,6 @@ class RealtimeIdentifier:
             g = gcd(16000, sample_rate)
             audio_np = resample_poly(audio_np, 16000 // g, sample_rate // g).astype(np.float32)
 
-        waveform = torch.from_numpy(audio_np).unsqueeze(0)  # shape (1, N)
+        waveform = torch.from_numpy(audio_np).unsqueeze(0)
 
-        from modules.speaker_embedding import compute_enrollment_embedding
         return compute_enrollment_embedding(waveform, 16000)
