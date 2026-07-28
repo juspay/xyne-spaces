@@ -1549,9 +1549,9 @@ export const mutators = defineMutators({
 
         let hasAttachments = false;
         if (attachmentIds !== undefined) {
-          // Explicit list from a pending-message-aware caller: transfer only
-          // those ids, leave any other DRAFT attachments alone, never touch
-          // the draft row (the client's clearContent mutator owns draft state).
+          // Explicit attachment set from caller (pending-message-aware sends).
+          // Transfer only these specific ids; leave any other draft attachments
+          // alone so a concurrent compose isn't corrupted. Never delete the draft row.
           if (attachmentIds.length > 0) {
             hasAttachments = true;
             for (const attachmentId of attachmentIds) {
@@ -3025,11 +3025,11 @@ export const mutators = defineMutators({
         timestamp: z.number(),
       }),
       async ({ tx, ctx, args: { channelId, conversationId, timestamp } }) => {
-        // Called at send-time to detach the draft from the message the user
-        // just queued: zeroes content and hasAttachment so `markChannelAsViewed`
-        // can garbage-collect the row on channel exit. The actual DRAFT-typed
-        // attachment rows are not touched — the send mutator claims them by id
-        // when it fires (immediate or on retry).
+        // Called at send-time to detach the draft from the queued message:
+        // zeroes content and hasAttachment so `markChannelAsViewed` can
+        // garbage-collect the row on channel exit. The DRAFT-typed attachment
+        // rows are left in place; the send mutator claims them by id when
+        // it fires (immediate or on retry).
         const channelDrafts = await tx.run(
           zql.draft_messages.where('channelId', channelId).where('userId', ctx.userID),
         );
