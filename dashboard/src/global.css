@@ -783,30 +783,43 @@
     @apply inline whitespace-nowrap;
   }
 
-  /* Filter chip (cmd+K) */
+  /* Filter chip (cmd+K)
+     Colors come from the app-wide mention palette (--mention-*, defined per theme above):
+     the chip is the same blue as an @mention, so no new color is introduced and midnight
+     is handled by the token itself (#3b82f6 -> #88c2ff). The 6% surface is derived from
+     that same hue with color-mix (same trick as --desk-accent-subtle) instead of a second
+     hardcoded rgba. */
   .filter-chip {
-    --chip-bg: rgb(219 234 254); /* blue-100 */
-    --chip-fg: rgb(30 64 175); /* blue-800 */
-    @apply inline-flex items-center gap-1 rounded px-1.5 py-0.5 align-middle font-medium;
+    --chip-bg: color-mix(in srgb, var(--mention-color) 6%, transparent);
+    --chip-fg: var(--mention-color);
+    @apply inline-flex items-center gap-1 rounded-[5px] px-1 py-0 align-middle text-sm font-medium tracking-[-0.28px];
     background-color: var(--chip-bg);
     color: var(--chip-fg);
     white-space: nowrap;
+    word-break: break-word;
   }
 
-  [data-theme="midnight"] .filter-chip {
-    --chip-bg: rgb(30 58 138 / 0.4); /* blue-900 @ 40% */
-    --chip-fg: rgb(191 219 254); /* blue-200 */
+  /* Icon/avatar slot: 16px, centered, and inheriting --chip-fg via currentColor. */
+  .filter-chip__icon {
+    @apply inline-flex items-center;
+  }
+
+  /* `in:` pill: the design groups the channel glyph with the channel name at a tighter
+     2px, while the `in:` prefix keeps the pill's 4px gap. Pulling the glyph in by 2px
+     avoids an extra wrapper node just for the inner group. */
+  .filter-chip__icon[data-mention-type="mention-channel"] {
+    margin-right: -2px;
   }
 
   /* A chip of the current user reuses Slack's current-user mention color
      (--mention-current-user-*, defined per-theme above) — no new color introduced. */
   .filter-chip--self-mention {
-    --chip-bg: var(--mention-current-user-bg);
+    --chip-bg: color-mix(in srgb, var(--mention-current-user-color) 6%, transparent);
     --chip-fg: var(--mention-current-user-color, var(--mention-color));
   }
 
   /* cmd+K "active" row tier (Slack-style): once the user engages a row (ArrowUp/Down or hover)
-     the selection turns blue; the resting auto-selection stays gray. Theme-tuned like .filter-chip.
+     the selection turns blue; the resting auto-selection stays gray. Theme-tuned per data-theme.
      Result rows carry aria-selected + an aria-selected:bg-accent utility, so !important is needed
      to win over the utilities layer; mention rows use the .cmdk-active-row class directly.
      When a mention typeahead is open (data-mention-active) selection is owned by the mention list's

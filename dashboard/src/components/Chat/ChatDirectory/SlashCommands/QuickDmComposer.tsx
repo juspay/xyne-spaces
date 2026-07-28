@@ -142,7 +142,7 @@ export const QuickDmComposer: React.FC<QuickDmComposerProps> = ({ target, onSent
         <button
           type='button'
           onClick={onBack}
-          className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors'
+          className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors focus-visible:outline-none focus-visible:ring-0'
           aria-label='Change target'
           data-track-category='CHANNEL_SEARCH'
           data-track-name='QUICK_DM_CHANGE_RECIPIENT'
