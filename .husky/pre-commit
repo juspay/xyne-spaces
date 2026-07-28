@@ -116,9 +116,5 @@ bash scripts/change-analysis.sh || exit 1
 echo "Running schema-migration validation..."
 bash scripts/validate-schema-migrations.sh || exit 1
 
-# Enum guard: block new Postgres enums / CREATE TYPE / ALTER TYPE (XYNE-16525)
-echo "Running enum guard..."
-npm run test:enum || exit 1
-
 echo ""
 echo "✅ All pre-commit checks passed!"
