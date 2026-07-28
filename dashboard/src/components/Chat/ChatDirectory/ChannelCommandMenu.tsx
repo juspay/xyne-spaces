@@ -1,31 +1,29 @@
 import React, { ReactElement, useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Command } from 'cmdk';
+import { X, SlidersHorizontal, SignalHigh } from 'lucide-react';
 import {
-  Hash,
-  Loader2,
-  MessageSquare,
-  Users,
-  FolderOpen,
-  SquareDashedKanban,
-  ArrowLeft,
-  CornerDownLeft,
-  MoveUp,
-  MoveDown,
-  Search,
-  X,
-  Check,
-  LayoutDashboard,
+  ChatDefault,
+  UserTwo,
+  UserDefault,
+  Hashtag,
+  Lock02Close,
+  TicketToken,
+  FolderDefault,
+  File02Text,
   Phone,
-  Mic,
-  Lock,
-  Mail,
+  MicOn,
+  EnvelopeDefault,
+  Spinner,
+  ArrowLeft,
   ArrowRight,
-  ListFilter,
-  SlidersHorizontal,
-  User,
-  SignalHigh,
-} from 'lucide-react';
+  ArrowUp,
+  ArrowDown,
+  ArrowTurnDownLeft,
+  SearchDefault,
+  CheckTickSingle,
+  FilterFunnel,
+} from '@xyne/icons';
 import * as Tabs from '@radix-ui/react-tabs';
 import * as Popover from '@radix-ui/react-popover';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
@@ -148,14 +146,14 @@ export const ChannelCommandItem = ({
       data-item-label={displayName}
       onSelect={() => onSelect(displayName)}
       onMouseDownCapture={onItemMouseDown}
-      className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer mt-1 ${!isMobile && 'aria-selected:bg-muted'}`}
+      className={`flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer mt-1.5 ${!isMobile && 'hover:bg-accent aria-selected:bg-accent'}`}
       style={{ WebkitTapHighlightColor: 'transparent' }}
     >
       <div className='flex items-center justify-center h-4 w-5 flex-shrink-0'>
         {getChannelIcon(channel)}
       </div>
       <div className='flex-1 min-w-0 flex items-center gap-1'>
-        <span className='text-left text-sm font-medium text-foreground truncate'>
+        <span className='text-left text-[15px] leading-[1.2] tracking-[-0.1px] text-foreground truncate'>
           {displayName}
         </span>
         {hasStatus && (
@@ -169,7 +167,7 @@ export const ChannelCommandItem = ({
       </div>
       {isSelected ? (
         <span className='flex-shrink-0 flex items-center justify-center w-4 h-4 rounded-full bg-primary text-white'>
-          <Check size={10} />
+          <CheckTickSingle size={10} />
         </span>
       ) : (
         unreadCount > 0 && (
@@ -281,10 +279,10 @@ const ChannelCommandMenu = ({
   useShortcutById(
     'global.search',
     () => {
-      if (searchMode === 'screen') {
-        window.dispatchEvent(new CustomEvent('xyne:activate-search-bar'));
-        return;
-      }
+      // In screen (full-page) search mode Cmd+K used to activate the top-bar search overlay
+      // (`xyne:activate-search-bar`). That top bar no longer exists in the new UI, so Cmd+K now
+      // opens this palette in both modes. Screen-mode behavior (2-item previews + "See more" that
+      // routes to `/search-results`) still comes from the `searchMode === 'screen'` checks below.
       onOpenChange(!open);
       if (!open && !searchSessionId) {
         onOpen('keyboard_shortcut');
@@ -294,17 +292,11 @@ const ChannelCommandMenu = ({
   );
 
   // `mod+/` opens the menu straight into command mode (seeds `/` for slash-command discovery).
-  // In screen (full-page) search mode, route to the same top-bar overlay Cmd+K uses, tagged with a
-  // `command` flag so it opens seeded with `/` — otherwise the popup would ignore the preference.
+  // Like Cmd+K, this used to route to the top-bar overlay in screen mode; that top bar is gone, so
+  // it now opens this palette seeded with `/` in both modes.
   useShortcutById(
     'global.openCommandMode',
     () => {
-      if (searchMode === 'screen') {
-        window.dispatchEvent(
-          new CustomEvent('xyne:activate-search-bar', { detail: { command: true } }),
-        );
-        return;
-      }
       onOpenChange(true);
       if (!open && !searchSessionId) {
         onOpen('keyboard_shortcut');
@@ -1787,7 +1779,7 @@ const ChannelCommandMenu = ({
       const otherCount = getDMParticipantIdsToFetch(channel, currentUserID).length;
       return (
         <div className='relative flex h-5 w-5 items-center justify-center'>
-          <Users size={16} className='text-muted-foreground' />
+          <UserTwo size={16} className='text-muted-foreground' />
           {otherCount > 0 && (
             <span className='absolute -bottom-0.5 -right-0.5 min-w-3 rounded-full bg-muted px-0.5 text-xs font-semibold leading-none text-muted-foreground'>
               {otherCount}
@@ -1799,13 +1791,13 @@ const ChannelCommandMenu = ({
     if (isDMChannel(channel.scopeType)) {
       const userIds = getDMParticipantIdsToFetch(channel, currentUserID);
       if (userIds.length > 0 && userIds[0]) {
-        return <Avatar userId={userIds[0]} size='sm' />;
+        return <Avatar userId={userIds[0]} size='xs' />;
       }
     }
     if (channel.visibility === ChannelVisibility.PRIVATE) {
-      return <Lock size={14} />;
+      return <Lock02Close size={16} />;
     }
-    return <Hash size={14} />;
+    return <Hashtag size={16} />;
   };
 
   // Group results by type for display
@@ -1884,18 +1876,18 @@ const ChannelCommandMenu = ({
     cleanedSearchText,
   ]);
 
-  const iconSize = isMobile ? 14 : 12;
+  const iconSize = 14;
 
   const allTabDefinitions: Array<{ id: TabType; label: string; icon?: ReactElement }> = [
-    { id: TabType.USERS, label: 'People', icon: <Users size={iconSize} /> },
-    { id: TabType.MESSAGES, label: 'Messages', icon: <MessageSquare size={iconSize} /> },
-    { id: TabType.CHANNELS, label: 'Channels', icon: <Hash size={iconSize} /> },
-    { id: TabType.TICKETS, label: 'Tickets', icon: <SquareDashedKanban size={iconSize} /> },
-    { id: TabType.ATTACHMENTS, label: 'Files', icon: <FolderOpen size={iconSize} /> },
-    { id: TabType.CANVAS, label: 'Canvas', icon: <LayoutDashboard size={iconSize} /> },
+    { id: TabType.USERS, label: 'People', icon: <UserTwo size={iconSize} /> },
+    { id: TabType.MESSAGES, label: 'Messages', icon: <ChatDefault size={iconSize} /> },
+    { id: TabType.CHANNELS, label: 'Channels', icon: <Hashtag size={iconSize} /> },
+    { id: TabType.TICKETS, label: 'Tickets', icon: <TicketToken size={iconSize} /> },
+    { id: TabType.ATTACHMENTS, label: 'Files', icon: <FolderDefault size={iconSize} /> },
+    { id: TabType.CANVAS, label: 'Canvas', icon: <File02Text size={iconSize} /> },
     { id: TabType.CALL, label: 'Calls', icon: <Phone size={iconSize} /> },
-    { id: TabType.RECORDING, label: 'Recordings', icon: <Mic size={iconSize} /> },
-    { id: TabType.DESK, label: 'Desk', icon: <Mail size={iconSize} /> },
+    { id: TabType.RECORDING, label: 'Recordings', icon: <MicOn size={iconSize} /> },
+    { id: TabType.DESK, label: 'Desk', icon: <EnvelopeDefault size={iconSize} /> },
   ];
 
   const tabs = allTabDefinitions.filter(t => activeEnabledTabs.includes(t.id));
@@ -2143,7 +2135,7 @@ const ChannelCommandMenu = ({
         <div ref={loadMoreRef} className='py-4 flex justify-center'>
           {isLoadingMore && (
             <div className='flex items-center gap-2 text-sm text-muted-foreground'>
-              <Loader2 className='h-4 w-4 animate-spin' />
+              <Spinner className='h-4 w-4 animate-spin' />
               <span>Loading more results...</span>
             </div>
           )}
@@ -2229,7 +2221,7 @@ const ChannelCommandMenu = ({
         <div ref={loadMoreRef} className='py-4 flex justify-center'>
           {isLoadingMore && (
             <div className='flex items-center gap-2 text-sm text-muted-foreground'>
-              <Loader2 className='h-4 w-4 animate-spin' />
+              <Spinner className='h-4 w-4 animate-spin' />
               <span>Loading more results...</span>
             </div>
           )}
@@ -2260,7 +2252,9 @@ const ChannelCommandMenu = ({
           const displayCount = totalItemsCount;
 
           const isExpanded = expandedCategories.has('user');
-          const isScreenAll = searchMode === 'screen' && activeTab === TabType.ALL;
+          // Full-screen (screen) mode: "See more" routes to the results page for ANY tab
+          // (not just ALL); popup mode keeps the inline expand/collapse.
+          const routeSeeMore = searchMode === 'screen';
           const hasMore = totalItemsCount > DISPLAY_LIMIT;
 
           const displayItems = !isExpanded && hasMore ? allItems.slice(0, DISPLAY_LIMIT) : allItems;
@@ -2284,21 +2278,21 @@ const ChannelCommandMenu = ({
               {hasMore && (
                 <button
                   onClick={() =>
-                    isScreenAll ? handleSeeMoreNavigate('people') : toggleCategoryExpansion('user')
+                    routeSeeMore ? handleSeeMoreNavigate('people') : toggleCategoryExpansion('user')
                   }
                   className={`w-full px-2 py-1.5 mt-1 text-sm text-muted-foreground rounded-sm text-left transition-colors ${!isMobile && 'hover:text-foreground hover:bg-accent'}`}
                   style={{
                     WebkitTapHighlightColor: 'transparent',
                     userSelect: 'none',
                   }}
-                  data-track-category={isScreenAll ? 'SEARCH' : 'CHANNEL_SEARCH'}
-                  data-track-name={isScreenAll ? 'SEE_MORE_SECTION' : 'TOGGLE_CATEGORY_EXPANSION'}
+                  data-track-category={routeSeeMore ? 'SEARCH' : 'CHANNEL_SEARCH'}
+                  data-track-name={routeSeeMore ? 'SEE_MORE_SECTION' : 'TOGGLE_CATEGORY_EXPANSION'}
                   data-track-metadata={JSON.stringify({
                     category: 'user',
                     isExpanded,
                   })}
                 >
-                  {isScreenAll
+                  {routeSeeMore
                     ? `See ${hiddenCount} more`
                     : isExpanded
                       ? 'See less'
@@ -3019,8 +3013,8 @@ const ChannelCommandMenu = ({
       {/* Search Input — hidden (but kept mounted) during `/chat` compose so its
           `/chat <query>` text survives for the "back" button. Stays visible during the
           `/call` channel-confirm so the modal overlays the picker. */}
-      <div className={cn('flex items-center border-b border-border', isComposing && 'hidden')}>
-        <div className='relative flex-1 flex items-center gap-2 px-4 py-2.5'>
+      <div className={cn('flex items-center', isComposing && 'hidden')}>
+        <div className='relative flex-1 flex items-center gap-2 p-3'>
           <button
             onClick={() => onOpenChange(false)}
             className='p-1 rounded-md text-foreground hover:text-muted-foreground hover:bg-accent transition-colors duration-200 sm:hidden'
@@ -3041,6 +3035,7 @@ const ChannelCommandMenu = ({
             }
             onChange={handleEditorChange}
             currentUserID={currentUserID}
+            hideSearchIcon
             onUserSearch={handleUserSearch}
             onChannelSearch={handleChannelSearch}
             onPrioritySearch={handlePrioritySearch}
@@ -3051,7 +3046,7 @@ const ChannelCommandMenu = ({
               name: displayName,
             }))}
             availablePriorities={availablePriorities}
-            className='flex-1'
+            className='flex-1 px-1.5'
             open={open}
             mentionSearchType={mentionSearchType}
             selectedMentionIndex={selectedMentionIndex}
@@ -3092,7 +3087,7 @@ const ChannelCommandMenu = ({
               {search.trim() || searchText.trim() ? (
                 <X className='w-4 h-4' />
               ) : (
-                <Search className='w-4 h-4' />
+                <SearchDefault className='w-4 h-4' />
               )}
             </button>
           )}
@@ -3110,7 +3105,7 @@ const ChannelCommandMenu = ({
                     )}
                     aria-label='Show filters'
                   >
-                    <ListFilter size={13} />
+                    <FilterFunnel size={13} />
                   </button>
                 </Popover.Trigger>
                 <div className='pointer-events-none absolute top-full left-1/2 -translate-x-1/2 mt-1.5 px-2 py-1 rounded text-xs bg-foreground text-background whitespace-nowrap opacity-0 group-hover/filtertip:opacity-100 transition-opacity z-[10001]'>
@@ -3125,10 +3120,10 @@ const ChannelCommandMenu = ({
                     onOpenAutoFocus={e => e.preventDefault()}
                   >
                     {[
-                      { label: 'From', prefix: 'from: ', icon: <User size={13} /> },
-                      { label: 'In', prefix: 'in: ', icon: <Hash size={13} /> },
-                      { label: 'With', prefix: 'with: ', icon: <User size={13} /> },
-                      { label: 'Assignee', prefix: 'assignee: ', icon: <User size={13} /> },
+                      { label: 'From', prefix: 'from: ', icon: <UserDefault size={13} /> },
+                      { label: 'In', prefix: 'in: ', icon: <Hashtag size={13} /> },
+                      { label: 'With', prefix: 'with: ', icon: <UserDefault size={13} /> },
+                      { label: 'Assignee', prefix: 'assignee: ', icon: <UserDefault size={13} /> },
                     ].map(({ label, prefix, icon }) => (
                       <button
                         key={label}
@@ -3310,11 +3305,11 @@ const ChannelCommandMenu = ({
         >
           {/* Tabs - hidden when bot is selected or hideTabs is true */}
           <div
-            className={`overflow-x-auto no-scrollbar p-2 ${isMobile ? 'mx-1' : 'ml-4'} ${hideTabs ? 'hidden' : ''}`}
+            className={`overflow-x-auto no-scrollbar px-4 py-1.5 ${isMobile ? 'mx-1' : ''} ${hideTabs ? 'hidden' : ''}`}
           >
             <Tabs.Root value={activeTab}>
               <Tabs.List
-                className='flex items-center justify-start gap-1.5'
+                className='flex items-center justify-start gap-2'
                 onKeyDownCapture={e => {
                   // Capture arrow keys before Radix UI's internal handler
                   if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
@@ -3358,10 +3353,10 @@ const ChannelCommandMenu = ({
                         });
                       }}
                       className={cn(
-                        'flex items-center justify-center gap-1.5 px-2 text-sm py-0.5 max-h-6 whitespace-nowrap transition-colors cursor-pointer rounded-lg border',
+                        'flex items-center justify-center gap-2 px-3 py-1.5 text-sm whitespace-nowrap rounded-md transition-colors cursor-pointer',
                         activeTab === tab.id
-                          ? 'border-primary bg-primary text-primary-foreground'
-                          : 'border-border text-foreground hover:text-foreground',
+                          ? 'bg-accent text-foreground'
+                          : 'text-muted-foreground hover:bg-accent hover:text-foreground',
                         isMobile && 'text-base w-fit h-9 px-3',
                       )}
                       data-track-category='CHANNEL_SEARCH'
@@ -3380,7 +3375,7 @@ const ChannelCommandMenu = ({
           {/* Results */}
           <Command.List
             className={cn(
-              'flex-1 overflow-y-auto md:max-h-[32rem] p-2 bg-background',
+              'flex-1 overflow-y-auto md:max-h-[32rem] px-4 pt-3 pb-6 bg-background',
               suppressHover && '[&_[cmdk-item]]:pointer-events-none',
             )}
             ref={el => {
@@ -3419,7 +3414,7 @@ const ChannelCommandMenu = ({
                       data-track-category='SEARCH'
                       data-track-name='SHOW_RESULTS_FOR'
                     >
-                      <Search size={14} className='text-muted-foreground shrink-0' />
+                      <SearchDefault size={14} className='text-muted-foreground shrink-0' />
                       <span className='flex items-center flex-wrap gap-1'>
                         <span className='text-sm'>Show results for:</span>
                         {selectedMentions.map(m => {
@@ -3458,7 +3453,7 @@ const ChannelCommandMenu = ({
                                 />
                               ) : (
                                 <div className='flex items-center justify-center flex-shrink-0 size-4 rounded-sm'>
-                                  <Hash size={12} className='text-foreground' />
+                                  <Hashtag size={12} className='text-foreground' />
                                 </div>
                               )}
                               <span className='leading-tight'>
@@ -3514,7 +3509,7 @@ const ChannelCommandMenu = ({
                                     {getChannelIcon(channel)}
                                   </div>
                                   <div className='flex-1 min-w-0'>
-                                    <div className='font-semibold text-sm text-foreground truncate'>
+                                    <div className='text-[15px] leading-[1.2] tracking-[-0.1px] text-foreground truncate'>
                                       {displayName}
                                     </div>
                                   </div>
@@ -3560,7 +3555,7 @@ const ChannelCommandMenu = ({
                                     {getChannelIcon(channel)}
                                   </div>
                                   <div className='flex-1 min-w-0'>
-                                    <div className='font-semibold text-sm text-foreground truncate'>
+                                    <div className='text-[15px] leading-[1.2] tracking-[-0.1px] text-foreground truncate'>
                                       {displayName}
                                     </div>
                                   </div>
@@ -3615,24 +3610,22 @@ const ChannelCommandMenu = ({
                                     } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
                                     style={{ WebkitTapHighlightColor: 'transparent' }}
                                   >
-                                    <Avatar userId={user.id} size='sm' />
-                                    <div className='flex-1 min-w-0'>
-                                      <div className='flex items-center gap-1.5'>
-                                        <div
-                                          className={`font-semibold text-sm truncate ${isDeactivated ? 'text-muted-foreground' : 'text-foreground'}`}
-                                        >
-                                          {getUserDisplayName(user)}
-                                        </div>
-                                        {isDeactivated && (
-                                          <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-muted text-muted-foreground shrink-0'>
-                                            Deactivated
-                                          </span>
-                                        )}
-                                      </div>
+                                    <Avatar userId={user.id} size='xs' />
+                                    <div className='flex-1 min-w-0 flex items-center gap-2'>
+                                      <span
+                                        className={`min-w-0 truncate text-[15px] leading-[1.2] tracking-[-0.1px] ${isDeactivated ? 'text-muted-foreground' : 'text-foreground'}`}
+                                      >
+                                        {getUserDisplayName(user)}
+                                      </span>
+                                      {isDeactivated && (
+                                        <span className='shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-muted text-muted-foreground'>
+                                          Deactivated
+                                        </span>
+                                      )}
                                       {user.email && (
-                                        <div className='text-xs text-muted-foreground truncate'>
+                                        <span className='min-w-0 truncate text-xs text-muted-foreground'>
                                           {user.email}
-                                        </div>
+                                        </span>
                                       )}
                                     </div>
                                   </Command.Item>
@@ -3691,7 +3684,7 @@ const ChannelCommandMenu = ({
                                     {getChannelIcon(channel)}
                                   </div>
                                   <div className='flex-1 min-w-0'>
-                                    <div className='font-semibold text-sm text-foreground truncate'>
+                                    <div className='text-[15px] leading-[1.2] tracking-[-0.1px] text-foreground truncate'>
                                       {displayName}
                                     </div>
                                   </div>
@@ -3742,7 +3735,7 @@ const ChannelCommandMenu = ({
                               {getChannelIcon(channel)}
                             </div>
                             <div className='flex-1 min-w-0'>
-                              <div className='font-semibold text-sm text-foreground truncate'>
+                              <div className='text-[15px] leading-[1.2] tracking-[-0.1px] text-foreground truncate'>
                                 {displayName}
                               </div>
                             </div>
@@ -3792,7 +3785,7 @@ const ChannelCommandMenu = ({
                                 {getChannelIcon(channel)}
                               </div>
                               <div className='flex-1 min-w-0'>
-                                <div className='font-semibold text-sm text-foreground truncate'>
+                                <div className='text-[15px] leading-[1.2] tracking-[-0.1px] text-foreground truncate'>
                                   {displayName}
                                 </div>
                               </div>
@@ -3845,15 +3838,15 @@ const ChannelCommandMenu = ({
                               } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
                               style={{ WebkitTapHighlightColor: 'transparent' }}
                             >
-                              <Avatar userId={user.id} size='sm' />
-                              <div className='flex-1 min-w-0'>
-                                <div className='font-semibold text-sm text-foreground truncate'>
+                              <Avatar userId={user.id} size='xs' />
+                              <div className='flex-1 min-w-0 flex items-center gap-2'>
+                                <span className='min-w-0 truncate text-[15px] leading-[1.2] tracking-[-0.1px] text-foreground'>
                                   {getUserDisplayName(user)}
-                                </div>
+                                </span>
                                 {user.email && (
-                                  <div className='text-xs text-muted-foreground truncate'>
+                                  <span className='min-w-0 truncate text-xs text-muted-foreground'>
                                     {user.email}
-                                  </div>
+                                  </span>
                                 )}
                               </div>
                             </Command.Item>
@@ -3911,7 +3904,7 @@ const ChannelCommandMenu = ({
                                 <SignalHigh size={16} />
                               </div>
                               <div className='flex-1 min-w-0'>
-                                <div className='font-semibold text-sm text-foreground truncate'>
+                                <div className='text-[15px] leading-[1.2] tracking-[-0.1px] text-foreground truncate'>
                                   {priority.name}
                                 </div>
                               </div>
@@ -3978,22 +3971,22 @@ const ChannelCommandMenu = ({
                               >
                                 {isChannelTab &&
                                   (item.isPrivate ? (
-                                    <Lock
-                                      size={14}
+                                    <Lock02Close
+                                      size={16}
                                       className='text-muted-foreground flex-shrink-0'
                                     />
                                   ) : (
-                                    <Hash
-                                      size={14}
+                                    <Hashtag
+                                      size={16}
                                       className='text-muted-foreground flex-shrink-0'
                                     />
                                   ))}
-                                <span className='flex-1 min-w-0 text-left text-sm font-medium text-foreground truncate'>
+                                <span className='flex-1 min-w-0 text-left text-[15px] leading-[1.2] tracking-[-0.1px] text-foreground truncate'>
                                   {item.title}
                                 </span>
                                 {isSelected && (
                                   <span className='flex-shrink-0 flex items-center justify-center w-4 h-4 rounded-full bg-primary text-white'>
-                                    <Check size={10} />
+                                    <CheckTickSingle size={10} />
                                   </span>
                                 )}
                               </Command.Item>
@@ -4129,7 +4122,16 @@ const ChannelCommandMenu = ({
 
       {/* Footer - outside body flex so TicketPreviewPanel only spans results area */}
       {!inline && !isMobile && (
-        <div className='px-4 py-2 border-t border-border/40 text-sm text-muted-foreground flex items-center justify-end shrink-0 bg-muted/30 rounded-b-2xl'>
+        <div className='relative px-6 py-4 text-sm font-medium text-muted-foreground flex items-center justify-between shrink-0 bg-background rounded-b-2xl'>
+          {/* Fade the scrolling results into the footer (replaces the hard top border) */}
+          <div className='pointer-events-none absolute inset-x-0 bottom-full h-[30px] bg-gradient-to-t from-background to-transparent' />
+          {/* Left: slash-command hint for Ask AI */}
+          <span className='flex items-center gap-2.5'>
+            <span className='flex items-center justify-center px-1.5 py-1 bg-muted rounded-lg leading-none'>
+              /
+            </span>
+            <span>Ask AI</span>
+          </span>
           <div className='flex items-center gap-6'>
             {deskMergeEnabled &&
               activeTab === TabType.DESK &&
@@ -4146,26 +4148,26 @@ const ChannelCommandMenu = ({
               )}
             <span className='flex gap-2.5 items-center'>
               <span>Open</span>
-              <span className='p-1 bg-background rounded-md border border-border'>
-                <CornerDownLeft size={10} />
+              <span className='p-1 bg-muted rounded-lg'>
+                <ArrowTurnDownLeft size={10} />
               </span>
             </span>
             {/* <span className='text-gray-300'>|</span> */}
             <span className='flex gap-2.5 items-center'>
               <span>Navigate </span>
               <span className='flex gap-1'>
-                <span className='p-1 bg-background rounded-md border border-border'>
-                  <MoveUp size={12} />
+                <span className='p-1 bg-muted rounded-lg'>
+                  <ArrowUp size={12} />
                 </span>
-                <span className='p-1 bg-background rounded-md border border-border'>
-                  <MoveDown size={12} />
+                <span className='p-1 bg-muted rounded-lg'>
+                  <ArrowDown size={12} />
                 </span>
               </span>
             </span>
             {previewTicket ? (
               <span className='flex gap-2.5 items-center'>
                 <span className='flex gap-1'>
-                  <span className='p-1 bg-background rounded-md border border-border'>
+                  <span className='p-1 bg-muted rounded-lg'>
                     <ArrowLeft size={12} />
                   </span>
                 </span>
@@ -4178,7 +4180,7 @@ const ChannelCommandMenu = ({
                   isPreviewableTicketResult(keyboardSelectedResult))) ? (
               <span className='flex gap-2.5 items-center'>
                 <span className='flex gap-1'>
-                  <span className='p-1 bg-background rounded-md border border-border'>
+                  <span className='p-1 bg-muted rounded-lg'>
                     <ArrowRight size={12} />
                   </span>
                 </span>

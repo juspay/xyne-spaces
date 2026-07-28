@@ -1,17 +1,17 @@
 import { ReactElement, MouseEvent as ReactMouseEvent } from 'react';
 import { Command } from 'cmdk';
+import { Eye } from 'lucide-react';
 import {
-  Hash,
-  User,
-  MessageCircle,
-  Mail,
-  Ticket,
-  Paperclip,
-  Eye,
-  FileText,
-  Mic,
-  Check,
-} from 'lucide-react';
+  Hashtag,
+  UserTwo,
+  ChatDefault,
+  EnvelopeDefault,
+  TicketToken,
+  File02Text,
+  File02Default,
+  MicOn,
+  CheckTickSingle,
+} from '@xyne/icons';
 import { DisplaySearchResult } from '../../../types/search';
 import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWithHTML';
 import UserAvatar from '../../UserAvatar/UserAvatar';
@@ -46,27 +46,27 @@ const getResultIcon = (result: DisplaySearchResult): ReactElement => {
   const { type, searchContext } = result;
   switch (type) {
     case 'user':
-      return <User size={16} className='text-muted-foreground' />;
+      return <UserTwo size={16} className='text-muted-foreground' />;
     case 'channel':
-      return <Hash size={16} className='text-muted-foreground' />;
+      return <Hashtag size={16} className='text-muted-foreground' />;
     case 'conversation':
       // Mail (Desk) results come back as 'conversation' with subApp='DESK'
       if (searchContext?.subApp === 'DESK') {
-        return <Mail size={16} className='text-muted-foreground' />;
+        return <EnvelopeDefault size={16} className='text-muted-foreground' />;
       }
-      return <MessageCircle size={16} className='text-muted-foreground' />;
+      return <ChatDefault size={16} className='text-muted-foreground' />;
     case 'ticket':
-      return <Ticket size={16} className='text-muted-foreground' />;
+      return <TicketToken size={16} className='text-muted-foreground' />;
     case 'attachment':
       if (searchContext?.subApp?.toUpperCase() === 'CANVAS') {
-        return <FileText size={16} className='text-muted-foreground' />;
+        return <File02Text size={16} className='text-muted-foreground' />;
       }
       if (searchContext?.subApp?.toUpperCase() === 'TRANSCRIPT') {
-        return <Mic size={16} className='text-muted-foreground' />;
+        return <MicOn size={16} className='text-muted-foreground' />;
       }
-      return <Paperclip size={16} className='text-muted-foreground' />;
+      return <File02Default size={16} className='text-muted-foreground' />;
     default:
-      return <MessageCircle size={16} className='text-muted-foreground' />;
+      return <ChatDefault size={16} className='text-muted-foreground' />;
   }
 };
 
@@ -88,7 +88,7 @@ const utcToIst = (utcString?: string): string => {
 
 const SelectedBadge = (): ReactElement => (
   <span className='flex-shrink-0 flex items-center justify-center w-4 h-4 rounded-full bg-primary text-primary-foreground'>
-    <Check size={10} />
+    <CheckTickSingle size={10} />
   </span>
 );
 
@@ -118,31 +118,31 @@ const UserSearchResultItem = ({
       data-item-label={result.title}
       onSelect={() => void onSelect(result)}
       onMouseDownCapture={handleMouseDown}
-      className='flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1'
+      className='flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1.5'
     >
-      <Avatar userId={result.id} size='sm' />
-      <div className='flex-1 min-w-0'>
-        <div className='flex items-center gap-2'>
-          <span
-            className={`font-semibold text-sm truncate ${isDeactivated ? 'text-muted-foreground' : 'text-foreground'}`}
-          >
-            {result.title}
+      <Avatar userId={result.id} size='xs' />
+      <div className='flex-1 min-w-0 flex items-center gap-2'>
+        <span
+          className={`min-w-0 truncate text-[15px] leading-[1.2] tracking-[-0.1px] ${isDeactivated ? 'text-muted-foreground' : 'text-foreground'}`}
+        >
+          {result.title}
+        </span>
+        {!isDeactivated && (user?.statusEmoji || user?.statusContent) && (
+          <StatusIndicator
+            statusEmoji={user?.statusEmoji}
+            statusContent={user?.statusContent}
+            statusExpiryAt={user?.statusExpiryAt}
+            size='sm'
+          />
+        )}
+        {isDeactivated && (
+          <span className='shrink-0 text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded'>
+            Deactivated
           </span>
-          {!isDeactivated && (user?.statusEmoji || user?.statusContent) && (
-            <StatusIndicator
-              statusEmoji={user?.statusEmoji}
-              statusContent={user?.statusContent}
-              statusExpiryAt={user?.statusExpiryAt}
-              size='sm'
-            />
-          )}
-          {isDeactivated && (
-            <span className='text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded shrink-0'>
-              Deactivated
-            </span>
-          )}
-        </div>
-        <div className='text-xs text-muted-foreground'>{result.subtitle}</div>
+        )}
+        {result.subtitle && (
+          <span className='min-w-0 truncate text-xs text-muted-foreground'>{result.subtitle}</span>
+        )}
       </div>
       {isSelected && <SelectedBadge />}
     </Command.Item>
@@ -217,14 +217,14 @@ const SearchResultItem = ({
             onMouseDownCapture={handleMouseDown}
             onMouseEnter={handleMouseEnter}
             onMouseLeave={handleMouseLeave}
-            className='flex flex-col gap-0.5 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1'
+            className='flex flex-col gap-0.5 px-3 py-2.5 rounded-lg cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1.5'
           >
             <div className='flex items-start gap-1.5'>
               {mergeMode && (
                 <div className='flex items-center justify-center h-4 w-5 flex-shrink-0 mt-0.5'>
                   {isMergeSelected ? (
                     <span className='flex-shrink-0 flex items-center justify-center w-4 h-4 rounded-full bg-primary text-primary-foreground'>
-                      <Check size={10} />
+                      <CheckTickSingle size={10} />
                     </span>
                   ) : (
                     <span className='w-4 h-4 rounded border border-muted-foreground/30 flex-shrink-0' />
@@ -234,7 +234,7 @@ const SearchResultItem = ({
               {getResultIcon(result)}
               <div className='flex-1 min-w-0'>
                 {/* Line 1: subject gets the full row */}
-                <div className='flex items-baseline gap-1 font-semibold text-sm text-foreground'>
+                <div className='flex items-baseline gap-1 text-[15px] leading-[1.2] tracking-[-0.1px] text-foreground'>
                   <div className='min-w-0 truncate'>
                     <RenderMessageWithHTML message={result.title} />
                   </div>
@@ -276,13 +276,13 @@ const SearchResultItem = ({
           data-item-label={itemLabel}
           onSelect={() => void onSelect(result)}
           onMouseDownCapture={handleMouseDown}
-          className='flex flex-col gap-0.5 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1'
+          className='flex flex-col gap-0.5 px-3 py-2.5 rounded-lg cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1.5'
         >
           <div className='flex items-center gap-1.5'>
             {result.avatar ? <UserAvatar userId={result.avatar} /> : getResultIcon(result)}
             <div className='flex-1 min-w-0'>
               <div className='flex items-center gap-1.5 text-sm'>
-                <span className='font-semibold text-foreground truncate'>
+                <span className='font-medium text-foreground truncate'>
                   {result.searchContext?.senderName}
                 </span>
                 <span className='text-xs text-muted-foreground'>{preposition}</span>
@@ -313,12 +313,12 @@ const SearchResultItem = ({
           onMouseDownCapture={handleMouseDown}
           onMouseEnter={handleMouseEnter}
           onMouseLeave={handleMouseLeave}
-          className='group flex flex-col gap-2 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1'
+          className='group flex flex-col gap-2 px-3 py-2.5 rounded-lg cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1.5'
         >
           <div className='flex items-center gap-2'>
             {getResultIcon(result)}
             <div className='flex-1 min-w-0'>
-              <div className='font-semibold text-sm text-foreground truncate'>
+              <div className='text-[15px] leading-[1.2] tracking-[-0.1px] text-foreground truncate'>
                 <RenderMessageWithHTML message={result.title} />
               </div>
               {(result.subtitle || result.metadata.timestamp) && (
@@ -354,11 +354,11 @@ const SearchResultItem = ({
           data-item-label={itemLabel}
           onSelect={() => void onSelect(result)}
           onMouseDownCapture={handleMouseDown}
-          className='flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1'
+          className='flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1.5'
         >
           {getResultIcon(result)}
           <div className='flex-1 min-w-0'>
-            <div className='font-semibold text-sm text-foreground truncate'>
+            <div className='text-[15px] leading-[1.2] tracking-[-0.1px] text-foreground truncate'>
               {' '}
               <RenderMessageWithHTML message={result.title} />
             </div>
@@ -409,11 +409,13 @@ const SearchResultItem = ({
           data-item-label={itemLabel}
           onSelect={() => void onSelect(result)}
           onMouseDownCapture={handleMouseDown}
-          className='flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1'
+          className='flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1.5'
         >
           {getResultIcon(result)}
           <div className='flex-1 min-w-0'>
-            <div className='font-semibold text-sm text-foreground truncate'>{result.title}</div>
+            <div className='text-[15px] leading-[1.2] tracking-[-0.1px] text-foreground truncate'>
+              {result.title}
+            </div>
             <div className='text-xs text-muted-foreground'>{result.subtitle}</div>
           </div>
           {isSelected && <SelectedBadge />}

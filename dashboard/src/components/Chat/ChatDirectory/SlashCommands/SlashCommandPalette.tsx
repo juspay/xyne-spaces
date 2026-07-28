@@ -1,6 +1,6 @@
 import { ReactElement, type MouseEventHandler } from 'react';
 import { Command } from 'cmdk';
-import { Users } from 'lucide-react';
+import { UserTwo } from '@xyne/icons';
 import { COMMAND_KINDS, getCommand } from './commands';
 import { getUserDisplayName } from '../../../../utils/userDisplayName';
 import Avatar from '../../../ui/Avatar/Avatar';
@@ -81,14 +81,11 @@ export function SlashCommandPalette({
               onSelect={() => (def.type === 'action' ? onRunAction(kind) : onApplyCommand(kind))}
               onMouseDownCapture={onItemMouseDown}
               onMouseEnter={() => onHoverCommand(kind)}
-              className='flex items-center gap-2.5 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1'
+              className='flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1.5'
             >
-              <div className='flex items-center justify-center size-7 rounded-md bg-muted text-foreground shrink-0'>
-                <def.icon size={15} />
-              </div>
-              <div className='flex-1 min-w-0'>
-                <div className='text-sm font-semibold text-foreground truncate'>/{kind}</div>
-                <div className='text-xs text-muted-foreground truncate'>{def.label}</div>
+              <div className='flex-1 min-w-0 flex items-center gap-1.5 text-[15px] leading-[1.2] tracking-[-0.1px]'>
+                <span className='shrink-0 text-foreground'>/{kind}</span>
+                <span className='min-w-0 truncate text-muted-foreground'>{def.label}</span>
               </div>
             </Command.Item>
           );
@@ -107,14 +104,12 @@ export function SlashCommandPalette({
           data-item-label={activeDef.title}
           onSelect={() => onRunAction(commandKind)}
           onMouseDownCapture={onItemMouseDown}
-          className='flex items-center gap-2.5 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1'
+          className='flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1.5'
         >
-          <div className='flex items-center justify-center size-7 rounded-md bg-muted text-foreground shrink-0'>
-            <activeDef.icon size={15} />
-          </div>
-          <div className='flex-1 min-w-0'>
-            <div className='font-semibold text-sm truncate text-foreground'>{activeDef.title}</div>
-            <div className='text-xs text-muted-foreground truncate'>{activeDef.description}</div>
+          <activeDef.icon size={16} className='shrink-0 text-muted-foreground' />
+          <div className='flex-1 min-w-0 flex items-center gap-1.5 text-[15px] leading-[1.2] tracking-[-0.1px]'>
+            <span className='shrink-0 text-foreground'>{activeDef.title}</span>
+            <span className='min-w-0 truncate text-muted-foreground'>{activeDef.description}</span>
           </div>
         </Command.Item>
       </Command.Group>
@@ -141,13 +136,11 @@ export function SlashCommandPalette({
         data-item-label={extra.label}
         onSelect={() => onRunGotoExtra(extra)}
         onMouseDownCapture={onItemMouseDown}
-        className='flex items-center gap-2.5 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1'
+        className='flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1.5'
       >
-        <div className='flex items-center justify-center size-7 rounded-md bg-muted text-foreground shrink-0'>
-          <extra.icon size={15} />
-        </div>
-        <div className='flex-1 min-w-0'>
-          <div className='text-sm font-semibold text-foreground truncate'>{extra.label}</div>
+        <extra.icon size={16} className='shrink-0 text-muted-foreground' />
+        <div className='flex-1 min-w-0 text-[15px] leading-[1.2] tracking-[-0.1px] text-foreground truncate'>
+          {extra.label}
         </div>
       </Command.Item>
     );
@@ -163,13 +156,11 @@ export function SlashCommandPalette({
                 data-item-label={item.label}
                 onSelect={() => onRunNavSection(item)}
                 onMouseDownCapture={onItemMouseDown}
-                className='flex items-center gap-2.5 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1'
+                className='flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1.5'
               >
-                <div className='flex items-center justify-center size-7 rounded-md bg-muted text-foreground shrink-0'>
-                  <item.icon size={item.iconSize ?? 15} />
-                </div>
-                <div className='flex-1 min-w-0'>
-                  <div className='text-sm font-semibold text-foreground truncate'>{item.label}</div>
+                <item.icon size={item.iconSize ?? 16} className='shrink-0 text-muted-foreground' />
+                <div className='flex-1 min-w-0 text-[15px] leading-[1.2] tracking-[-0.1px] text-foreground truncate'>
+                  {item.label}
                 </div>
               </Command.Item>
             ))}
@@ -203,17 +194,17 @@ export function SlashCommandPalette({
               data-item-label={getUserDisplayName(user)}
               onSelect={() => onRunTarget({ type: 'user', user })}
               onMouseDownCapture={onItemMouseDown}
-              className='flex items-center gap-2.5 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1'
+              className='flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1.5'
             >
-              <Avatar userId={user.id} size='sm' />
-              <div className='flex-1 min-w-0'>
-                <div className='font-semibold text-sm truncate text-foreground'>
+              <Avatar userId={user.id} size='xs' />
+              <div className='flex-1 min-w-0 flex items-center gap-2'>
+                <span className='min-w-0 truncate text-[15px] leading-[1.2] tracking-[-0.1px] text-foreground'>
                   {getUserDisplayName(user)}
                   {user.id === currentUserID && (
-                    <span className='text-muted-foreground font-normal'> (you)</span>
+                    <span className='text-muted-foreground'> (you)</span>
                   )}
-                </div>
-                <div className='text-xs text-muted-foreground truncate'>{user.email}</div>
+                </span>
+                <span className='min-w-0 truncate text-xs text-muted-foreground'>{user.email}</span>
               </div>
             </Command.Item>
           ))}
@@ -228,13 +219,15 @@ export function SlashCommandPalette({
               data-item-label={channel.name}
               onSelect={() => onRunTarget({ type: 'channel', channel })}
               onMouseDownCapture={onItemMouseDown}
-              className='flex items-center gap-2.5 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1'
+              className='flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1.5'
             >
-              <div className='flex items-center justify-center size-7 rounded-md bg-muted text-muted-foreground shrink-0'>
+              <span className='shrink-0 text-muted-foreground'>
                 <ChannelIcon channel={channel} />
-              </div>
+              </span>
               <div className='flex-1 min-w-0'>
-                <div className='font-semibold text-sm truncate text-foreground'>{channel.name}</div>
+                <div className='text-[15px] leading-[1.2] tracking-[-0.1px] truncate text-foreground'>
+                  {channel.name}
+                </div>
                 {channel.description && (
                   <div className='text-xs text-muted-foreground truncate'>
                     {channel.description}
@@ -256,13 +249,13 @@ export function SlashCommandPalette({
                 onRunTarget({ type: 'channel', channel, displayName: label, isDm: true })
               }
               onMouseDownCapture={onItemMouseDown}
-              className='flex items-center gap-2.5 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1'
+              className='flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1.5'
             >
-              <div className='flex items-center justify-center size-7 rounded-md bg-muted text-muted-foreground shrink-0'>
-                <Users size={14} />
-              </div>
+              <UserTwo size={16} className='shrink-0 text-muted-foreground' />
               <div className='flex-1 min-w-0'>
-                <div className='font-semibold text-sm truncate text-foreground'>{label}</div>
+                <div className='text-[15px] leading-[1.2] tracking-[-0.1px] truncate text-foreground'>
+                  {label}
+                </div>
               </div>
             </Command.Item>
           ))}
