@@ -7,6 +7,7 @@ import { usePlatform } from './usePlatform';
 import { getUserCallAccessLevel } from './useCalls';
 import { mutators } from '../zero/mutators';
 import { v4 as uuidv4 } from 'uuid';
+import { logger, Event } from '../utils/logger';
 
 // ─────────────────────────────────────────────
 // Types
@@ -303,7 +304,11 @@ export function useCallJoinState(callId: string, userId: string | undefined): Ca
         }),
       );
     } catch (error) {
-      console.error('[useCallJoinState] Failed to request to join:', error);
+      logger.error(Event.ZERO_MUTATION_ERROR, {
+        callId,
+        context: 'useCallJoinState.requestToJoin',
+        error: error instanceof Error ? error.message : String(error),
+      });
     } finally {
       // Short timeout to allow the mutation to optimistically update before clearing
       if (requestTimeoutRef.current) {
@@ -329,7 +334,11 @@ export function useCallJoinState(callId: string, userId: string | undefined): Ca
         }),
       );
     } catch (error) {
-      console.error('[useCallJoinState] Failed to cancel join request:', error);
+      logger.error(Event.ZERO_MUTATION_ERROR, {
+        callId,
+        context: 'useCallJoinState.cancelJoinRequest',
+        error: error instanceof Error ? error.message : String(error),
+      });
     } finally {
       if (cancelTimeoutRef.current) {
         clearTimeout(cancelTimeoutRef.current);

@@ -66,6 +66,7 @@ import {
   validateRecurringCallTimes,
   mergeDateWithTime,
 } from '../../../utils/callTimeValidation';
+import { logger, Event } from '../../../utils/logger';
 
 export type { EditCallData } from './types';
 
@@ -777,7 +778,13 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
       onSuccess?.();
       handleClose();
     } catch (err) {
-      console.error('[ScheduleCallModal] submit failed:', err);
+      logger.error(Event.API_CALL_FAILED, {
+        callId: initialCall?.externalId ?? null,
+        context: 'ScheduleCallModal.submit',
+        mode,
+        recurringSeriesId: initialCall?.recurringSeriesId ?? null,
+        error: err instanceof Error ? err.message : String(err),
+      });
       toast.error('Error scheduling call', {
         description: 'Failed to schedule call',
         duration: 5000,

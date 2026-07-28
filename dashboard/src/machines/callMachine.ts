@@ -3,6 +3,7 @@ import { CallType } from '@xyne/shared';
 import { roomActor } from './roomMachine';
 import type { Zero } from '@rocicorp/zero';
 import { detectPlatform } from '../hooks/usePlatform';
+import { logger, Event } from '../utils/logger';
 
 // Simplified context - only what we need for main screen states
 export interface CallContext {
@@ -69,9 +70,9 @@ export const callMachine = setup({
 
         // Debug: Check roomActor state before sending
         const currentState = roomActor.getSnapshot().value;
-        // eslint-disable-next-line no-console
-        console.log('[callMachine.joinCall] Sending JOIN_CALL to roomActor', {
+        logger.info(Event.LIVEKIT_ROOM_EVENT, {
           callId,
+          eventName: 'join_call_sent_to_room_actor',
           hasZero: !!zero,
           roomActorState: currentState,
         });
@@ -239,12 +240,14 @@ export const callMachine = setup({
     },
     accepting: {
       entry: [
-        // eslint-disable-next-line no-console
-        ({ context }): void =>
-          console.log('[callMachine] Entering accepting state', {
-            acceptingCallId: context.incomingCallQueue[0]?.callId,
+        ({ context }): void => {
+          const callId = context.incomingCallQueue[0]?.callId ?? null;
+          logger.info(Event.LIVEKIT_ROOM_EVENT, {
+            callId,
+            eventName: 'accepting_state_entered',
             queueLength: context.incomingCallQueue.length,
-          }),
+          });
+        },
         'storeAcceptingCallId',
         'removeFromQueue',
       ],

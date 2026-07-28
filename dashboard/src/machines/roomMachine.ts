@@ -64,6 +64,18 @@ setLogLevel('warn');
 // Auto-mute threshold: mute the joining user when more than this many remote participants are already in the call
 const DEFAULT_MUTE_THRESHOLD = 5;
 
+const logRoomMachineEvent = (
+  callId: string | null | undefined,
+  eventName: string,
+  details: Record<string, unknown> = {},
+): void => {
+  logger.info(Event.LIVEKIT_ROOM_EVENT, {
+    ...details,
+    callId: callId ?? null,
+    eventName,
+  });
+};
+
 export interface ParticipantInfo {
   identity: string;
   name?: string;
@@ -406,7 +418,7 @@ export const roomMachine = setup({
 
         const syncHostControls = (metadata?: string) => {
           if (!metadata) return;
-          const hostControls = parseHostControlsFromMetadata(metadata);
+          const hostControls = parseHostControlsFromMetadata(metadata, callId);
           if (hostControls) {
             sendBack({
               type: 'HOST_CONTROLS_CHANGED',
@@ -797,8 +809,7 @@ export const roomMachine = setup({
           // For DM: participant name, for channels: channel name
           const callerName = callDisplayName || undefined;
 
-          // eslint-disable-next-line no-console
-          console.log('[LiveKit] CallKit display name:', {
+          logRoomMachineEvent(externalId, 'callkit_display_name_resolved', {
             callerName,
             channelId,
             conversationId,
@@ -827,8 +838,9 @@ export const roomMachine = setup({
 
             const unsubscribe = reactNativeBridge.on('LIVEKIT_CONNECTION_STATE', message => {
               const state = message.payload?.state;
-              // eslint-disable-next-line no-console
-              console.log('[LiveKit Native] Connection state changed:', state);
+              logRoomMachineEvent(externalId, 'native_connection_state_changed', {
+                state,
+              });
 
               if (state === 'connecting' || state === 'reconnecting') {
                 hasStartedConnecting = true;
@@ -868,34 +880,45 @@ export const roomMachine = setup({
 
         for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
           try {
-            // eslint-disable-next-line no-console
-            console.log(`[LiveKit] Connection attempt ${attempt + 1}/${MAX_RETRIES}`);
+            logRoomMachineEvent(externalId, 'connection_attempt_started', {
+              attempt: attempt + 1,
+              maxRetries: MAX_RETRIES,
+            });
 
             await room.connect(serverUrl, token, options);
 
-            // eslint-disable-next-line no-console
-            console.log('[LiveKit] Successfully connected to room');
+            logRoomMachineEvent(externalId, 'connection_succeeded', {
+              attempt: attempt + 1,
+            });
             return; // Success!
           } catch (error) {
             lastError = error instanceof Error ? error : new Error(String(error));
 
-            // eslint-disable-next-line no-console
-            console.error(
-              `[LiveKit] Connection attempt ${attempt + 1}/${MAX_RETRIES} failed:`,
-              lastError.message,
-            );
+            logger.error(Event.LIVEKIT_ROOM_EVENT, {
+              callId: externalId,
+              eventName: 'connection_attempt_failed',
+              attempt: attempt + 1,
+              maxRetries: MAX_RETRIES,
+              error: lastError.message,
+            });
 
             // Don't retry on the last attempt
             if (attempt < MAX_RETRIES - 1) {
-              // eslint-disable-next-line no-console
-              console.log(`[LiveKit] Retrying...`);
+              logRoomMachineEvent(externalId, 'connection_retry_scheduled', {
+                nextAttempt: attempt + 2,
+                maxRetries: MAX_RETRIES,
+              });
             }
           }
         }
 
         // All retries failed
-        // eslint-disable-next-line no-console
-        console.error('[LiveKit] All connection attempts failed');
+        logger.error(Event.LIVEKIT_ROOM_EVENT, {
+          callId: externalId,
+          eventName: 'all_connection_attempts_failed',
+          maxRetries: MAX_RETRIES,
+          error: lastError?.message ?? 'Unknown connection error',
+        });
         throw lastError || new Error('Failed to connect to room after multiple attempts');
       },
     ),
@@ -914,10 +937,8 @@ export const roomMachine = setup({
       }) => {
         const { room, externalId, isNativeMode, endForAll } = input;
 
-        // eslint-disable-next-line no-console
-        console.log('[roomMachine] disconnectAndCleanup started', {
+        logRoomMachineEvent(externalId, 'disconnect_cleanup_started', {
           hasRoom: !!room,
-          externalId,
           isNativeMode,
           endForAll,
         });
@@ -929,6 +950,7 @@ export const roomMachine = setup({
               await callService.endCallForAll(externalId);
             } catch (error) {
               logger.error(Event.API_CALL_FAILED, {
+                callId: externalId,
                 context: 'roomMachine.disconnectAndCleanup.endForAll',
                 error: error instanceof Error ? error.message : String(error),
               });
@@ -938,11 +960,11 @@ export const roomMachine = setup({
 
           // If in native mode, send disconnect to React Native bridge
           if (isNativeMode) {
-            // eslint-disable-next-line no-console
-            console.log('[roomMachine] Sending LIVEKIT_DISCONNECT to native');
+            logRoomMachineEvent(externalId, 'native_disconnect_sent');
             reactNativeBridge.livekitDisconnect();
-            // eslint-disable-next-line no-console
-            console.log('[roomMachine] disconnectAndCleanup completed (native mode)');
+            logRoomMachineEvent(externalId, 'disconnect_cleanup_completed', {
+              mode: 'native',
+            });
             return;
           }
 
@@ -957,75 +979,80 @@ export const roomMachine = setup({
 
           await new Promise(resolve => setTimeout(resolve, 200));
 
-          // eslint-disable-next-line no-console
-          console.log('[roomMachine] disconnectAndCleanup completed (web mode)');
+          logRoomMachineEvent(externalId, 'disconnect_cleanup_completed', {
+            mode: 'web',
+          });
         } catch (error) {
-          // eslint-disable-next-line no-console
-          console.error('[roomMachine] disconnectAndCleanup error:', error);
+          logger.error(Event.LIVEKIT_ROOM_EVENT, {
+            callId: externalId,
+            eventName: 'disconnect_cleanup_failed',
+            error: error instanceof Error ? error.message : String(error),
+          });
           // Don't rethrow - we want to transition to idle even on error
         }
       },
     ),
 
     // Native bridge event listener - receives events from React Native
-    nativeBridgeEventListener: fromCallback(({ sendBack }) => {
-      // eslint-disable-next-line no-console
-      console.log('[Room Machine] nativeBridgeEventListener STARTED - listening for native events');
+    nativeBridgeEventListener: fromCallback(
+      ({
+        sendBack,
+        input,
+      }: {
+        sendBack: (event: RoomMachineEvent) => void;
+        input: { callId: string | null };
+      }) => {
+        const { callId } = input;
+        logRoomMachineEvent(callId, 'native_bridge_listener_started');
 
-      const unsubConnectionState = reactNativeBridge.on('LIVEKIT_CONNECTION_STATE', message => {
-        // eslint-disable-next-line no-console
-        console.log(
-          '[Room Machine] Received LIVEKIT_CONNECTION_STATE in connected state:',
-          message.payload?.state,
-        );
-        sendBack({
-          type: 'NATIVE_CONNECTION_STATE',
-          state: message.payload?.state ?? 'disconnected',
-        });
-      });
-
-      const unsubParticipants = reactNativeBridge.on('LIVEKIT_PARTICIPANTS_CHANGED', message => {
-        sendBack({
-          type: 'NATIVE_PARTICIPANTS_CHANGED',
-          participants: message.payload?.participants ?? [],
-        });
-      });
-
-      const unsubError = reactNativeBridge.on('LIVEKIT_ERROR', message => {
-        // eslint-disable-next-line no-console
-        console.log(
-          '[Room Machine] Received LIVEKIT_ERROR in connected state:',
-          message.payload?.error,
-        );
-        sendBack({ type: 'NATIVE_ERROR', error: message.payload?.error ?? 'Unknown error' });
-      });
-
-      const unsubCallEnded = reactNativeBridge.on('LIVEKIT_CALL_ENDED', message => {
-        // eslint-disable-next-line no-console
-        console.log(
-          '[Room Machine] Received LIVEKIT_CALL_ENDED in connected state:',
-          message.payload,
-        );
-        if (message.payload) {
-          sendBack({
-            type: 'NATIVE_CALL_ENDED',
-            callId: message.payload.callId,
-            callType: message.payload.callType,
-            durationMs: message.payload.durationMs,
-            initiatedBy: message.payload.initiatedBy,
+        const unsubConnectionState = reactNativeBridge.on('LIVEKIT_CONNECTION_STATE', message => {
+          logRoomMachineEvent(callId, 'native_connection_state_received', {
+            state: message.payload?.state,
           });
-        }
-      });
+          sendBack({
+            type: 'NATIVE_CONNECTION_STATE',
+            state: message.payload?.state ?? 'disconnected',
+          });
+        });
 
-      return (): void => {
-        // eslint-disable-next-line no-console
-        console.log('[Room Machine] nativeBridgeEventListener STOPPED - cleanup called');
-        unsubConnectionState();
-        unsubParticipants();
-        unsubError();
-        unsubCallEnded();
-      };
-    }),
+        const unsubParticipants = reactNativeBridge.on('LIVEKIT_PARTICIPANTS_CHANGED', message => {
+          sendBack({
+            type: 'NATIVE_PARTICIPANTS_CHANGED',
+            participants: message.payload?.participants ?? [],
+          });
+        });
+
+        const unsubError = reactNativeBridge.on('LIVEKIT_ERROR', message => {
+          logRoomMachineEvent(callId, 'native_error_received', {
+            error: message.payload?.error,
+          });
+          sendBack({ type: 'NATIVE_ERROR', error: message.payload?.error ?? 'Unknown error' });
+        });
+
+        const unsubCallEnded = reactNativeBridge.on('LIVEKIT_CALL_ENDED', message => {
+          logRoomMachineEvent(message.payload?.callId ?? callId, 'native_call_ended_received', {
+            payload: message.payload,
+          });
+          if (message.payload) {
+            sendBack({
+              type: 'NATIVE_CALL_ENDED',
+              callId: message.payload.callId,
+              callType: message.payload.callType,
+              durationMs: message.payload.durationMs,
+              initiatedBy: message.payload.initiatedBy,
+            });
+          }
+        });
+
+        return (): void => {
+          logRoomMachineEvent(callId, 'native_bridge_listener_stopped');
+          unsubConnectionState();
+          unsubParticipants();
+          unsubError();
+          unsubCallEnded();
+        };
+      },
+    ),
   },
   actions: {
     createRoom: assign({
@@ -1225,7 +1252,10 @@ export const roomMachine = setup({
           try {
             const { joinMuted, joinWithoutVideo } = getCallJoinSettings();
             const metadataHostControls = context.room!.metadata
-              ? parseHostControlsFromMetadata(context.room!.metadata)
+              ? parseHostControlsFromMetadata(
+                  context.room!.metadata,
+                  context.externalId ?? context.callId,
+                )
               : null;
             const effectiveHostControls = metadataHostControls ?? context.hostControls;
 
@@ -1399,8 +1429,9 @@ export const roomMachine = setup({
   states: {
     idle: {
       entry: [
-        // eslint-disable-next-line no-console
-        (): void => console.log('[roomMachine] Entered idle state'),
+        ({ context }): void => {
+          logRoomMachineEvent(context.externalId ?? context.callId, 'idle_state_entered');
+        },
       ],
       on: {
         CONNECT: {
@@ -1431,11 +1462,10 @@ export const roomMachine = setup({
         JOIN_CALL: {
           target: 'joining',
           actions: [
-            // eslint-disable-next-line no-console
-            ({ event }): void =>
-              console.log('[roomMachine] JOIN_CALL received in idle state', {
-                callId: event.type === 'JOIN_CALL' ? event.callId : null,
-              }),
+            ({ event }): void => {
+              const callId = event.type === 'JOIN_CALL' ? event.callId : null;
+              logRoomMachineEvent(callId, 'join_call_received');
+            },
             assign({
               callId: ({ event }) => (event.type === 'JOIN_CALL' ? event.callId : null),
               zero: ({ event }) => (event.type === 'JOIN_CALL' ? (event.zero ?? null) : null),
@@ -1468,8 +1498,13 @@ export const roomMachine = setup({
             }
             reactNativeBridge.send('CALL_INITIATING', payload);
           } else {
-            // eslint-disable-next-line no-console
-            console.log('[Room Machine] Not sending CALL_INITIATING - native calls not supported');
+            logRoomMachineEvent(
+              context.externalId ?? context.callId,
+              'native_call_initiating_skipped',
+              {
+                reason: 'native_calls_not_supported',
+              },
+            );
           }
         },
       ],
@@ -1541,11 +1576,9 @@ export const roomMachine = setup({
       entry: [
         // Send CALL_INITIATING to native app for incoming call overlay (only if native calls are enabled)
         ({ context }): void => {
-          // eslint-disable-next-line no-console
-          console.log(
-            '[roomMachine] joining state entry, isNativeCallSupported:',
-            isNativeCallSupported(),
-          );
+          logRoomMachineEvent(context.externalId ?? context.callId, 'joining_state_entered', {
+            isNativeCallSupported: isNativeCallSupported(),
+          });
           if (isNativeCallSupported() && reactNativeBridge.isAvailable()) {
             // Find the call being joined to get its type and channel
             const call = context.activeCalls.find(c => c.externalId === context.callId);
@@ -1680,12 +1713,17 @@ export const roomMachine = setup({
           ],
         },
         nativeMode: {
-          entry: (): void => {
-            // eslint-disable-next-line no-console
-            console.log('[Room Machine] Entering connected.nativeMode state');
+          entry: ({ context }): void => {
+            logRoomMachineEvent(
+              context.externalId ?? context.callId,
+              'connected_native_mode_entered',
+            );
           },
           invoke: {
             src: 'nativeBridgeEventListener',
+            input: ({ context }) => ({
+              callId: context.externalId ?? context.callId,
+            }),
           },
         },
         webMode: {
@@ -1712,13 +1750,11 @@ export const roomMachine = setup({
       on: {
         DISCONNECT: {
           target: 'disconnecting',
-          actions: ({ event }): void => {
-            // eslint-disable-next-line no-console
-            console.log(
-              '[Room Machine] Received DISCONNECT event in connected state',
-              { endForAll: event.type === 'DISCONNECT' ? event.endForAll : false },
-              new Error().stack,
-            );
+          actions: ({ context, event }): void => {
+            logRoomMachineEvent(context.externalId ?? context.callId, 'disconnect_event_received', {
+              endForAll: event.type === 'DISCONNECT' ? (event.endForAll ?? false) : false,
+              stack: new Error().stack,
+            });
           },
         },
         TOGGLE_MIC: {
@@ -1836,8 +1872,13 @@ export const roomMachine = setup({
                 })
                 .catch((error: Error) => {
                   // User cancelled or error occurred
-                  // eslint-disable-next-line no-console
-                  console.log('Screen share toggle cancelled or failed:', error);
+                  logRoomMachineEvent(
+                    context.externalId ?? context.callId,
+                    'screen_share_toggle_failed',
+                    {
+                      error: error.message,
+                    },
+                  );
                 });
             }
           },
@@ -2129,11 +2170,12 @@ export const roomMachine = setup({
               event.type === 'NATIVE_CONNECTION_STATE' && event.state === 'disconnected',
             target: 'idle',
             actions: [
-              // eslint-disable-next-line no-console
-              (): void =>
-                console.log(
-                  '[roomMachine] NATIVE_CONNECTION_STATE disconnected - transitioning to idle',
-                ),
+              ({ context }): void => {
+                logRoomMachineEvent(
+                  context.externalId ?? context.callId,
+                  'native_disconnected_transition_to_idle',
+                );
+              },
               'clearContext',
             ],
           },
@@ -2202,8 +2244,9 @@ export const roomMachine = setup({
     },
     disconnecting: {
       entry: [
-        // eslint-disable-next-line no-console
-        (): void => console.log('[roomMachine] Entered disconnecting state'),
+        ({ context }): void => {
+          logRoomMachineEvent(context.externalId ?? context.callId, 'disconnecting_state_entered');
+        },
         ({ context }): void => {
           // Track call ended (no sensitive data - only metadata)
           const duration = context.callStartTime ? Date.now() - context.callStartTime : 0;
@@ -2231,18 +2274,25 @@ export const roomMachine = setup({
         onDone: {
           target: 'idle',
           actions: [
-            // eslint-disable-next-line no-console
-            (): void =>
-              console.log('[roomMachine] disconnectAndCleanup onDone - transitioning to idle'),
+            ({ context }): void => {
+              logRoomMachineEvent(
+                context.externalId ?? context.callId,
+                'disconnect_cleanup_done_transition_to_idle',
+              );
+            },
             'clearContext',
           ],
         },
         onError: {
           target: 'idle',
           actions: [
-            // eslint-disable-next-line no-console
-            ({ event }): void =>
-              console.error('[roomMachine] disconnectAndCleanup onError:', event),
+            ({ context, event }): void => {
+              logger.error(Event.LIVEKIT_ROOM_EVENT, {
+                callId: context.externalId ?? context.callId,
+                eventName: 'disconnect_cleanup_actor_failed',
+                error: event.error instanceof Error ? event.error.message : String(event.error),
+              });
+            },
             'clearContext',
             assign({
               error: () => 'Failed to disconnect from room',

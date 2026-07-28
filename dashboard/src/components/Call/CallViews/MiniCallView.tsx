@@ -447,6 +447,7 @@ export function MiniCallView({
 
         {/* Presentation Mode Overlay — fullscreen + smooth fade, consistent with FullCallView */}
         <PresentationModeOverlay
+          callId={callId}
           isOpen={isPresentationMode}
           participant={remoteParticipant ?? null}
           aiController={aiController}
@@ -671,6 +672,7 @@ export function MiniCallView({
 
       {/* Presentation Mode Overlay — fullscreen + smooth fade, consistent with FullCallView */}
       <PresentationModeOverlay
+        callId={callId}
         isOpen={isPresentationMode}
         participant={remoteParticipant ?? null}
         aiController={aiController}

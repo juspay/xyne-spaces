@@ -2,6 +2,7 @@ import { apiInstance } from '../clients/apiClient';
 import { queryClient } from '../clients/queryClient';
 import { AxiosError } from 'axios';
 import { CallType, MeetingStatus, type HostControls } from '@xyne/shared';
+import { logger, Event } from '../../utils/logger';
 
 // ============================================================================
 // TYPES
@@ -287,8 +288,12 @@ export class CallService {
         callIds: data.callIds,
       });
     } catch (error) {
-      // eslint-disable-next-line no-console
-      console.error('Failed to validate calls:', error);
+      logger.error(Event.API_CALL_FAILED, {
+        callId: data.callIds.length === 1 ? data.callIds[0] : null,
+        callIds: data.callIds,
+        context: 'callService.validateRooms',
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
