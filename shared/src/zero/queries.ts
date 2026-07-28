@@ -768,9 +768,8 @@ export const queries = defineQueries({
   ),
 
 
-  // Enriched single query for thread panel — replaces getConversationById + ticketById +
-  // conversationMessagesV2 with one query and one IVM pipeline (4 queries → 1).
-  threadConversation: defineQuery(
+  // Enriched single query for thread panel.
+  threadConversationV2: defineQuery(
     z.object({
       conversationId: z.string(),
       channelId: z.string().optional(),
@@ -779,8 +778,6 @@ export const queries = defineQueries({
     ({ ctx, args: { conversationId } }) => {
       return zql.conversations
         .where('conversationId', conversationId)
-        .related('ticket')
-        .related('call')
         .related('participants', p =>
           p.where('userId', ctx.userID).one(),
         )
@@ -1676,6 +1673,12 @@ export const queries = defineQueries({
     z.object({ mappedTicketId: z.string() }),
     ({ args: { mappedTicketId } }) => {
       return zql.sub_tickets.where('mappedTicketId', mappedTicketId).related('ticketMappings');
+    },
+  ),
+  subTicketByMappedTicketId: defineQuery(
+    z.object({ mappedTicketId: z.string() }),
+    ({ args: { mappedTicketId } }) => {
+      return zql.sub_tickets.where('mappedTicketId', mappedTicketId).one();
     },
   ),
   ticketAssignmentsByTicketId: defineQuery(

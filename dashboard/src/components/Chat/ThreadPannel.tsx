@@ -51,7 +51,7 @@ import { BotBubble } from './BotBubble';
 import { toast } from 'sonner';
 import { TicketDetails } from '../Tickets/TicketDetails/TicketDetails';
 import { FileBubble } from '../ui/FileBubble/FileBubble';
-import { MessageType, ChannelScopeType, BaseTicketType } from '@xyne/shared';
+import { MessageType, ChannelScopeType, BaseTicketType, parseTicketMd } from '@xyne/shared';
 import { RCAPanelView } from '../Tickets/RCAPanelView';
 import Tooltip from '../ui/Tooltip';
 import { mixpanelService } from '../../services/Analytics/mixpanelService';
@@ -180,7 +180,7 @@ export const ThreadMessages = ({
   // (4 pipelines → 1 pipeline, 178ms → 44ms hydration)
   const threadConversationQuery = useMemo(
     () =>
-      queries.threadConversation({
+      queries.threadConversationV2({
         conversationId: derivedConversationId || ' ',
         ...(derivedChannelId ? { channelId: derivedChannelId, isMember } : {}),
       }),
@@ -208,7 +208,7 @@ export const ThreadMessages = ({
     return source;
   }, [propConversationParticipant, conversation?.participants]);
 
-  const ticket = conversation?.ticket ?? null;
+  const ticket = useMemo(() => parseTicketMd(conversation?.ticket_md), [conversation?.ticket_md]);
   const derivedTicketId = ticketId || conversation?.ticketId || '';
 
   // Update derived values when props/params change OR when conversation loads
@@ -707,7 +707,7 @@ export const ThreadMessages = ({
   ) : null;
 
   const openTicketDetailsExpandedView = (): void => {
-    if (!ticket) return;
+    if (!ticket?.channelId || !ticket.conversationId) return;
 
     standaloneNavigate(
       navigate,
@@ -741,7 +741,7 @@ export const ThreadMessages = ({
   };
 
   const handleCopyTicketViewLink = () => {
-    if (!ticket) return;
+    if (!ticket?.channelId || !ticket.conversationId) return;
 
     // Use shareable origin from environment variable
     const minimizedTicketViewRoute = `${shareableOrigin}/chat/dir/${ticket.channelId}/${ticket.conversationId}/${ticket.id}?selectedTab=details`;

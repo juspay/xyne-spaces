@@ -1,7 +1,5 @@
 import React, { useState, useRef, useEffect, useId, useMemo } from 'react';
 import { useZero } from '../../../hooks/useZero';
-import { useCachedQuery } from '../../../hooks/useCachedQuery';
-import { queries } from '../../../zero/queries';
 import { useSummaryCache } from '../../../hooks/useSummaryQuery';
 import { MessageBubble } from '../../ui/MessageBubble/MessageBubble';
 import { BotBubble } from '../BotBubble';
@@ -132,6 +130,7 @@ interface ChatBubbleProps {
   /** Message ID to highlight when this bubble is rendered in a thread context (e.g. search screen sidebar). */
   highlightMessageId?: string | null;
   afterTextContent?: React.ReactNode;
+  isThreadTicketSubTicket?: boolean;
 }
 
 export const ChatBubble: React.FC<ChatBubbleProps> = ({
@@ -159,6 +158,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   linkedConversationId,
   highlightMessageId,
   afterTextContent,
+  isThreadTicketSubTicket = false,
 }) => {
   const { user } = useAuthContext();
   const { copyImage } = useClipboard();
@@ -289,13 +289,6 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     const initMsg = getInitialMessageFromConversation(conversation) ?? conversation.initialMessage;
     return ((initMsg?.metadata as Record<string, unknown>)?.['ticketId'] as string) || '';
   }, [context, isTicketThread, conversation]);
-
-  // Subtickets cannot be nested: hide the action when the thread's ticket is itself a subticket
-  const [threadTicketParentSubTickets] = useCachedQuery(
-    queries.subTicketsByMappedTicketId({ mappedTicketId: threadTicketId }),
-    { enabled: !!threadTicketId },
-  );
-  const isThreadTicketSubTicket = (threadTicketParentSubTickets?.length ?? 0) > 0;
 
   // Mark activities as read when message becomes visible
   // const observerRef = useIntersectionObserver(() => {
