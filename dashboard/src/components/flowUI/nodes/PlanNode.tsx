@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useContext, useEffect, useState } from 'react';
 import {
   MaximizeFourArrow,
   Spinner,
@@ -7,6 +7,8 @@ import {
 } from '@xyne/icons';
 import { useFlow } from '../FlowContext';
 import type { FlowComponent, PlanProps, ExecTodoStatus } from '@xyne/shared';
+import { PlanPreview, InsidePlanPreviewContext } from './PlanPreview';
+import { useAgentProgress } from '../../../hooks/useAgentProgress';
 import { cn } from '../../../utils/classNames';
 
 /**
@@ -63,11 +65,53 @@ export const PlanNode: React.FC<PlanNodeProps> = ({ node }) => {
   return <ExecutingPlan node={node} props={props} />;
 };
 
+/**
+ * Optional plan-card metadata the shared `PlanProps` type does not (currently)
+ * declare: the detailed document, the approve/reject audit fields, and the
+ * superseded/auto-approved flags. The backend may still emit them, so the card
+ * reads them through this typed view (`props as typeof props & PlanCardMeta`) —
+ * every access stays `string`/`boolean` `| undefined` instead of an unsafe
+ * `any`/error-typed read.
+ */
+interface PlanCardMeta {
+  document?: string | undefined;
+  superseded?: boolean | undefined;
+  rejected?: boolean | undefined;
+  decidedBy?: string | undefined;
+  decidedAt?: string | undefined;
+  autoApproved?: boolean | undefined;
+  approvedBy?: string | undefined;
+  approvedAt?: string | undefined;
+}
+
 const ProposedPlan: React.FC<{
   node: FlowComponent;
   props: Extract<PlanProps, { phase: 'proposed' }>;
 }> = ({ node, props }) => {
-  const { state, updateFieldValue } = useFlow();
+  const { state, updateFieldValue, executeAction, conversationId, messageId } = useFlow();
+  // A copy of this card lives inside its own PlanPreview thread panel; hide the
+  // Maximize there so it can't open a nested preview.
+  const insidePreview = useContext(InsidePlanPreviewContext);
+  // Which decision is in flight (issue 5): drives the "Approving…"/"Rejecting…"
+  // button state until the backend confirms and the card re-renders.
+  const [pending, setPending] = useState<'approve' | 'reject' | null>(null);
+  const [expanded, setExpanded] = useState(false);
+
+  // Optional plan-card metadata (see PlanCardMeta) read type-safely.
+  const meta = props as typeof props & PlanCardMeta;
+  // Terminal read-only states: superseded (agent re-planned) or rejected (the
+  // user tapped Reject). No toggling, no buttons — just the audit at the bottom.
+  const superseded = meta.superseded === true;
+  const rejected = meta.rejected === true;
+  const decidedBy = meta.decidedBy;
+  const terminal = superseded || rejected;
+
+  // Block approval while a run is active in this thread. Approving mid-run
+  // dispatches a second run that collides with the active one at the runtime
+  // session lock (one dies "session_locked" and re-fires as a duplicate/branch).
+  // The server also fail-closes this, but disabling the button is the clearer UX.
+  const { agents } = useAgentProgress(conversationId || undefined);
+  const agentRunning = agents.length > 0;
 
   const stored = state.values[node.id];
   const seeded = Array.isArray(stored);
@@ -85,8 +129,10 @@ const ProposedPlan: React.FC<{
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [node.id]);
 
+  const locked = state.submitting || terminal || pending !== null;
+
   const toggle = (id: string): void => {
-    if (state.submitting) return;
+    if (locked) return;
     const next = new Set(includedIds);
     if (next.has(id)) {
       next.delete(id);
@@ -96,18 +142,115 @@ const ProposedPlan: React.FC<{
     updateFieldValue(node.id, Array.from(next));
   };
 
+  const submit = async (actionId: 'plan-approve' | 'plan-reject'): Promise<void> => {
+    if (locked || agentRunning) return;
+    if (actionId === 'plan-approve' && includedIds.size === 0) return;
+    setPending(actionId === 'plan-approve' ? 'approve' : 'reject');
+    try {
+      await executeAction({ type: 'submit', actionId });
+      // On a decision, drop the expanded preview back to the thread view.
+      setExpanded(false);
+    } finally {
+      setPending(null);
+    }
+  };
+
+  const approveLabel =
+    pending === 'approve' ? 'Approving…' : agentRunning ? 'Agent is working…' : 'Approve';
+  const rejectLabel = pending === 'reject' ? 'Rejecting…' : 'Reject';
+
+  const auditText = rejected
+    ? withDecisionTime(decidedBy ? `Rejected by ${decidedBy}` : 'Rejected', meta.decidedAt)
+    : 'Replaced by a newer plan';
+
+  // Approve / Reject controls, shared by the compact card footer AND the expanded
+  // preview footer (submit() closes the preview on a decision).
+  const actionControls = (
+    <div className='flex flex-wrap items-center gap-2'>
+      <button
+        type='button'
+        onClick={() => void submit('plan-approve')}
+        disabled={includedIds.size === 0 || locked || agentRunning}
+        className={cn(
+          'inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-2 py-1.5',
+          'text-sm font-medium leading-[1.2] text-foreground',
+          'disabled:cursor-not-allowed disabled:opacity-60',
+        )}
+        data-track-category='PLAN_ARTIFACT'
+        data-track-name='CLICK_APPROVE'
+      >
+        {(pending === 'approve' || agentRunning) && <Spinner size={14} className='animate-spin' />}
+        {approveLabel}
+      </button>
+      <button
+        type='button'
+        onClick={() => void submit('plan-reject')}
+        disabled={locked || agentRunning}
+        className={cn(
+          'inline-flex items-center gap-1.5 rounded-lg border border-transparent px-2 py-1.5',
+          'text-sm font-medium leading-[1.2] text-muted-foreground',
+          'hover:bg-foreground/[0.04] hover:text-foreground',
+          'disabled:cursor-not-allowed disabled:opacity-60',
+        )}
+        data-track-category='PLAN_ARTIFACT'
+        data-track-name='CLICK_REJECT'
+      >
+        {pending === 'reject' && <Spinner size={14} className='animate-spin' />}
+        {rejectLabel}
+      </button>
+      {agentRunning && (
+        <span className='text-xs text-muted-foreground'>Approve once it finishes.</span>
+      )}
+    </div>
+  );
+
+  // Interactive checklist for the expanded view — SAME selection state/toggle as
+  // the compact card (radios via FilledDot/EmptyCircle), roomier max-view styling.
+  const previewTodos = (
+    <div className='flex flex-col gap-2'>
+      <p className='text-sm font-medium leading-[1.2] text-muted-foreground tabular-nums'>
+        {terminal ? `${props.todos.length} To-dos` : `${includedIds.size} To-dos Selected`}
+      </p>
+      <div className='flex flex-col'>
+        {props.todos.map(todo => (
+          <button
+            key={todo.id}
+            type='button'
+            onClick={() => toggle(todo.id)}
+            aria-pressed={includedIds.has(todo.id)}
+            disabled={locked}
+            className={cn(
+              'flex items-start gap-3 rounded-lg px-3 py-2.5 text-left transition-colors',
+              !terminal && 'hover:bg-foreground/[0.03]',
+              'disabled:cursor-not-allowed',
+              !terminal && 'disabled:opacity-60',
+            )}
+            data-track-category='PLAN_ARTIFACT'
+            data-track-name='TOGGLE_TODO_MAX'
+          >
+            <DotSlot>{includedIds.has(todo.id) ? <FilledDot /> : <EmptyCircle />}</DotSlot>
+            <span className='text-sm leading-[1.4] text-foreground/90'>{todo.text}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
   return (
     <CardShell style={node.style}>
-      <div className='flex flex-col gap-3 p-4'>
+      <div className={cn('flex flex-col gap-3 p-4', terminal && 'opacity-60')}>
         <div className='flex flex-col gap-[9px]'>
-          <Header />
+          <Header
+            onExpand={insidePreview ? undefined : (): void => setExpanded(true)}
+            chip={terminal ? <StatusChip label='Rejected' tone='rejected' /> : undefined}
+          />
           <TitleBlock title={props.title} desc={props.desc} />
         </div>
 
         <div className='h-px w-full bg-border' />
 
         <p className='text-sm font-medium leading-[1.2] text-muted-foreground tabular-nums'>
-          {includedIds.size} To-dos Selected
+          {terminal ? `${props.todos.length} To-dos` : `${includedIds.size} To-dos Selected`}
         </p>
 
         <div className='flex flex-col gap-3'>
@@ -117,10 +260,11 @@ const ProposedPlan: React.FC<{
               type='button'
               onClick={() => toggle(todo.id)}
               aria-pressed={includedIds.has(todo.id)}
-              disabled={state.submitting}
+              disabled={locked}
               className={cn(
                 'flex items-start gap-[7px] text-left',
-                'disabled:cursor-not-allowed disabled:opacity-60',
+                'disabled:cursor-not-allowed',
+                !terminal && 'disabled:opacity-60',
               )}
               data-track-category='PLAN_ARTIFACT'
               data-track-name='TOGGLE_TODO'
@@ -132,21 +276,22 @@ const ProposedPlan: React.FC<{
         </div>
       </div>
 
-      <div className='flex items-center gap-3 border-t border-border bg-foreground/[0.03] px-4 py-3'>
-        <button
-          type='button'
-          disabled={includedIds.size === 0}
-          className={cn(
-            'rounded-lg border border-border bg-background px-2 py-1.5',
-            'text-sm font-medium leading-[1.2] text-foreground',
-            'disabled:cursor-not-allowed disabled:opacity-60',
-          )}
-          data-track-category='PLAN_ARTIFACT'
-          data-track-name='CLICK_APPROVE'
-        >
-          Approve
-        </button>
+      {/* Footer — audit for a decided plan, or the Approve / Reject actions. */}
+      <div className='border-t border-border bg-foreground/[0.03] px-4 py-3'>
+        {terminal ? <AuditLine text={auditText} /> : actionControls}
       </div>
+
+      <PlanPreview
+        open={expanded}
+        onOpenChange={setExpanded}
+        messageId={messageId ?? ''}
+        title={props.title}
+        desc={props.desc}
+        document={meta.document}
+        conversationId={conversationId ?? undefined}
+        footer={terminal ? <AuditLine text={auditText} /> : actionControls}
+        todos={previewTodos}
+      />
     </CardShell>
   );
 };
@@ -155,13 +300,63 @@ const ExecutingPlan: React.FC<{
   node: FlowComponent;
   props: Extract<PlanProps, { phase: 'executing' | 'done' }>;
 }> = ({ node, props }) => {
+  const { messageId, conversationId } = useFlow();
+  const insidePreview = useContext(InsidePlanPreviewContext);
+  const [expanded, setExpanded] = useState(false);
   const doneCount = props.todos.filter(t => t.status === 'done').length;
+  const progressText = `${doneCount} of ${props.todos.length} completed`;
+  // Optional plan-card metadata (see PlanCardMeta) read type-safely.
+  const meta = props as typeof props & PlanCardMeta;
+
+  // Chip: Completed once done; otherwise "Auto-approved" when the plan skipped
+  // the approval gate (trivial), so the user knows why it started without them.
+  const chipLabel =
+    props.phase === 'done' ? 'Completed' : meta.autoApproved ? 'Auto-approved' : 'Approved';
+
+  // Who-approved audit — shown at the BOTTOM of the artifact, with the decision
+  // time appended ("· <time>") when known.
+  const auditText = meta.autoApproved
+    ? withDecisionTime('Auto-approved by the agent', meta.approvedAt)
+    : meta.approvedBy
+      ? withDecisionTime(`Approved by ${meta.approvedBy}`, meta.approvedAt)
+      : null;
+
+  // Live status checklist for the expanded view (roomier max-view styling) + the
+  // preview footer (live progress + audit).
+  const previewTodos = (
+    <div className='flex flex-col gap-2'>
+      <p className='text-sm font-medium leading-[1.2] text-muted-foreground tabular-nums'>
+        {progressText}
+      </p>
+      <div className='flex flex-col'>
+        {props.todos.map(todo => (
+          <div key={todo.id} className='flex items-start gap-3 rounded-lg px-3 py-2.5'>
+            <DotSlot>
+              <ExecDot status={todo.status} />
+            </DotSlot>
+            <span className='text-sm leading-[1.4] text-foreground/90'>{todo.text}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+  const previewFooter = (
+    <div className='flex flex-col gap-1'>
+      <span className='text-sm font-medium leading-[1.2] text-muted-foreground tabular-nums'>
+        {progressText}
+      </span>
+      {auditText && <AuditLine text={auditText} />}
+    </div>
+  );
 
   return (
     <CardShell style={node.style}>
       <div className='flex flex-col gap-3 p-4'>
         <div className='flex flex-col gap-[9px]'>
-          <Header chip={<StatusChip label={props.phase === 'done' ? 'Completed' : 'Approved'} />} />
+          <Header
+            chip={<StatusChip label={chipLabel} />}
+            onExpand={insidePreview ? undefined : (): void => setExpanded(true)}
+          />
           <TitleBlock title={props.title} desc={props.desc} />
         </div>
 
@@ -182,6 +377,24 @@ const ExecutingPlan: React.FC<{
           ))}
         </div>
       </div>
+
+      {auditText && (
+        <div className='border-t border-border bg-foreground/[0.03] px-4 py-3'>
+          <AuditLine text={auditText} />
+        </div>
+      )}
+
+      <PlanPreview
+        open={expanded}
+        onOpenChange={setExpanded}
+        messageId={messageId ?? ''}
+        title={props.title}
+        desc={props.desc}
+        document={meta.document}
+        conversationId={conversationId ?? undefined}
+        footer={previewFooter}
+        todos={previewTodos}
+      />
     </CardShell>
   );
 };
@@ -217,14 +430,20 @@ const CardShell: React.FC<{
   style?: React.CSSProperties | undefined;
 }> = ({ children, style }) => (
   <div
-    className='flex w-full max-w-[450px] flex-col overflow-hidden rounded-xl border border-border bg-muted/40'
+    // Fixed width so the card never resizes with its content (long/short todos
+    // render at the same width). `max-w-full` caps it only on containers narrower
+    // than 450px (mobile). Height stays auto — it grows with the todo list.
+    className='flex w-[450px] max-w-full flex-col overflow-hidden rounded-xl border border-border bg-muted/40'
     style={style}
   >
     {children}
   </div>
 );
 
-const Header: React.FC<{ chip?: React.ReactNode }> = ({ chip }) => (
+const Header: React.FC<{ chip?: React.ReactNode; onExpand?: (() => void) | undefined }> = ({
+  chip,
+  onExpand,
+}) => (
   <div className='flex items-center justify-between'>
     <div className='flex items-center gap-2'>
       <span className='font-mono text-sm leading-[18px] tracking-[0.2px] text-muted-foreground'>
@@ -232,17 +451,84 @@ const Header: React.FC<{ chip?: React.ReactNode }> = ({ chip }) => (
       </span>
       {chip}
     </div>
-    <MaximizeFourArrow size={16} className='shrink-0 text-muted-foreground' />
+    {/* No Maximize when the card is rendered inside a PlanPreview's own thread
+        panel (onExpand omitted) — prevents stacking a second full-screen preview. */}
+    {onExpand && (
+      <button
+        type='button'
+        onClick={onExpand}
+        aria-label='Expand plan'
+        className='shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
+        data-track-category='PLAN_ARTIFACT'
+        data-track-name='EXPAND_PLAN'
+      >
+        <MaximizeFourArrow size={16} className='shrink-0' />
+      </button>
+    )}
   </div>
 );
 
-const StatusChip: React.FC<{ label: string }> = ({ label }) => (
+const StatusChip: React.FC<{ label: string; tone?: 'approved' | 'muted' | 'rejected' }> = ({
+  label,
+  tone = 'approved',
+}) => (
   <span className='flex h-[18px] items-center'>
-    <span className='rounded px-1 py-px text-xs font-semibold leading-[18px] tracking-[0.2px] bg-[var(--plan-chip-approved-bg)] text-[var(--plan-chip-approved-fg)]'>
+    <span
+      className={cn(
+        'rounded px-1 py-px text-xs font-semibold leading-[18px] tracking-[0.2px]',
+        tone === 'muted' && 'bg-muted text-muted-foreground',
+        // Mild red — a superseded plan the agent re-planned away from.
+        tone === 'rejected' && 'bg-destructive/10 text-destructive',
+        tone === 'approved' &&
+          'bg-[var(--plan-chip-approved-bg)] text-[var(--plan-chip-approved-fg)]',
+      )}
+    >
       {label}
     </span>
   </span>
 );
+
+// Small muted audit line shown in a card footer — "Approved by <name>",
+// "Auto-approved by the agent", or "Rejected by <name>", each optionally suffixed
+// with the decision time.
+const AuditLine: React.FC<{ text: string }> = ({ text }) => (
+  <span className='text-xs leading-[1.2] text-muted-foreground'>{text}</span>
+);
+
+// Format an ISO decision timestamp for the audit footer. Relative within the
+// first day ("just now", "5 mins ago", "1 hr ago"); absolute after 24h, e.g.
+// "Jul 26, 2:34 PM". Returns null for a missing/invalid value so callers omit
+// the "· <time>" suffix.
+const formatDecisionTime = (iso?: string): string | null => {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+
+  // Relative for the first day; a future timestamp (clock skew) falls through
+  // to the absolute format rather than showing a negative "ago".
+  const diffMs = Date.now() - d.getTime();
+  const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+  if (diffMs >= 0 && diffMs < ONE_DAY_MS) {
+    const mins = Math.floor(diffMs / 60000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins} ${mins === 1 ? 'min' : 'mins'} ago`;
+    const hrs = Math.floor(mins / 60);
+    return `${hrs} ${hrs === 1 ? 'hr' : 'hrs'} ago`;
+  }
+
+  return d.toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+};
+
+// Join an audit label with its (optional) decision time: "Approved by X · 2:34 PM".
+const withDecisionTime = (label: string, iso?: string): string => {
+  const t = formatDecisionTime(iso);
+  return t ? `${label} · ${t}` : label;
+};
 
 const TitleBlock: React.FC<{ title: string; desc?: string | undefined }> = ({ title, desc }) => (
   <div className='flex flex-col'>

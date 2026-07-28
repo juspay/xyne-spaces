@@ -115,6 +115,26 @@ const BehaviourTab = ({ permissions, value, onChange }: BehaviourTabProps): Reac
       />
 
       <ToggleCard
+        title='Plan mode'
+        description='For multi-step requests in threads and DMs, propose a plan and wait for approval before doing the work. Trivial asks run without a prompt. Off = act immediately (default).'
+        checked={value.planMode}
+        onCheckedChange={next => onChange({ planMode: next })}
+        disabled={!canEdit}
+      >
+        <Labeled
+          label='Plan-mode prompt'
+          hint='System prompt used while the agent scopes a plan (pre-filled with the default — edit only if you need custom guidance). The propose-then-approve gate is always enforced regardless of this text.'
+        >
+          <Textarea
+            value={value.planModePrompt}
+            onChange={e => onChange({ planModePrompt: e.target.value })}
+            readOnly={!canEdit}
+            className={cn('min-h-[180px] font-mono text-[13px]', readOnlyCls)}
+          />
+        </Labeled>
+      </ToggleCard>
+
+      <ToggleCard
         title='Verify responses'
         description='Check factual claims against gathered tool evidence before replying.'
         checked={value.verifyResponses}

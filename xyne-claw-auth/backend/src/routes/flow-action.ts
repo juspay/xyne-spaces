@@ -21,7 +21,8 @@ import { verifySpacesSignature } from "../middleware/verify-spaces-signature.js"
 import { agentRunRepository } from "../repositories/index.js";
 import { recordTwinApprovalOutcome } from "../services/twinResponseFeedback.js";
 import type { FlowDefinition } from "xyne-claw-shared";
-import { mdToMrkdwn, buildWriteResultFlow } from "xyne-claw-shared";
+import { mdToMrkdwn, buildWriteResultFlow, buildPlanFlow, PLAN_COMPONENT_ID } from "xyne-claw-shared";
+import { clearActivePlanCard, setPlanExecMeta, clearPlanExecMeta, normalizePlanTitle } from "../lib/session-context.js";
 import { executeTool as executeGatewayTool } from "../mcpgateway/services/execution.js";
 import { GATEWAY_KEY_PREFIX, parseGatewayCatalogSource } from "../mcpgateway/key-format.js";
 import { redisService } from "../redis.js";
@@ -30,9 +31,11 @@ import {
   QUEUE_ENABLED,
   enqueueMessage,
   tryAcquireSlot,
+  isSlotBusy,
   type QueuedMessage,
 } from "../lib/message-queue.js";
 import { visibleAgentWhereForRunningUser } from "../lib/callable-agent-resolver.js";
+import { emitAgentWorkingSignal } from "../surfaces/spaces/client.js";
 import { resolveFastMode } from "../lib/fast-mode.js";
 import { isClawAdmin } from "../middleware/agent-acl.js";
 import { registerRunRecovery } from "../queue/run-recovery-worker.js";
@@ -1514,6 +1517,317 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
           }
         } catch (err) {
           log.error("[flow-action] start-goal: dispatch errored:", err instanceof Error ? err.message : String(err));
+        }
+      })();
+      return;
+    }
+
+    // ── Plan approval (plan mode Turn 2) ──────────────────────────────────────
+    // Triggered when the user taps "Approve" on the proposed plan card posted by
+    // webhook.ts /result (pendingPlan). Cloned structurally from start-goal:
+    // reads routing from flowJSON.data, authz callerUserId === userId, closes the
+    // card, then fire-and-forget dispatches a fresh /internal/run in AUTO mode
+    // (Turn 2) with the subset of todos the user kept selected. Never twin (twin
+    // uses the approval DM card, not plan mode).
+    if (actionType === "plan-approval") {
+      const planAgentSlug = data["agentSlug"] as string | undefined;
+      const planSpacesAppId = data["spacesAppId"] as string | undefined;
+      const planChannelId = data["channelId"] as string | undefined;
+      const planConversationId = data["conversationId"] as string | undefined;
+      const planUserId = data["userId"] as string | undefined;
+
+      if (!planAgentSlug || !planConversationId || !planUserId) {
+        res.status(400).json({ type: "error", message: "Missing plan-approval fields in flowJSON.data" } satisfies AppActionResponse);
+        return;
+      }
+
+      // Only the user the plan was proposed to can approve/reject it (fail-closed).
+      if (!callerUserId || callerUserId !== planUserId) {
+        log.error(`[flow-action] plan-approval: unauthorized — caller ${callerUserId ?? "(none)"} != expected ${planUserId}`);
+        res.status(403).json({ type: "error", message: "Unauthorized" } satisfies AppActionResponse);
+        return;
+      }
+
+      // ── Reject ────────────────────────────────────────────────────────────
+      // The user tapped Reject: dismiss the plan. Terminal + read-only card with
+      // a "Rejected by <name>" audit. NO Turn 2, NO plan-mode/config change, no
+      // follow-ups — if they want a new plan they mention the agent again.
+      if (actionId === "plan-reject") {
+        const rejectComponent = flowJSON.components?.find((c) => c.type === "plan");
+        const rejectedTodos = (
+          (rejectComponent?.props?.["todos"] as Array<{ id?: string; text?: string }> | undefined) ?? []
+        )
+          .filter((t) => typeof t.id === "string")
+          .map((t) => ({ id: t.id as string, title: (t.text ?? "").toString() }));
+        const rejectTitle = (rejectComponent?.props?.["title"] as string | undefined) ?? "Plan";
+        const rejectDesc = rejectComponent?.props?.["desc"] as string | undefined;
+        const rejectDoc = rejectComponent?.props?.["document"] as string | undefined;
+        const rejecterName = await prisma.user
+          .findUnique({ where: { id: callerUserId }, select: { name: true } })
+          .then((u) => u?.name?.trim() ?? "")
+          .catch(() => "");
+        // Stamp the reject decision time once — the card is terminal (never re-rendered).
+        const rejectedAt = new Date().toISOString();
+        resp = { type: "close_screen", finalMessage: "✋ Plan rejected." };
+        res.json(resp);
+        void replaceFlowCardWithFlow(
+          messageId,
+          planAgentSlug,
+          buildPlanFlow(rejectedTodos, {
+            phase: "proposed",
+            rejected: true,
+            title: rejectTitle,
+            ...(rejectDesc ? { desc: rejectDesc } : {}),
+            ...(rejectDoc ? { document: rejectDoc } : {}),
+            ...(rejecterName ? { decidedBy: rejecterName } : {}),
+            decidedAt: rejectedAt,
+          }),
+          planConversationId,
+          planChannelId,
+          planSpacesAppId,
+        );
+        // Drop all plan state — nothing executes, nothing to supersede/continue.
+        void clearActivePlanCard(planConversationId, planAgentSlug).catch(() => {});
+        void clearPlanExecMeta(planConversationId, planAgentSlug).catch(() => {});
+        log.info(`[flow-action] plan-approval: REJECTED by ${callerUserId} conv=${planConversationId}`);
+        return;
+      }
+
+      // The user's kept todo ids arrive under the plan component's state key.
+      const selectedIds = values[PLAN_COMPONENT_ID] as string[] | undefined;
+      if (!selectedIds || selectedIds.length === 0) {
+        res.status(400).json({ type: "error", message: "Select at least one step to run." } satisfies AppActionResponse);
+        return;
+      }
+
+      // Resolve the FULL proposed todos (id + text) from the submitted flow's plan
+      // component, then filter to the kept ids → the approved subset. The plan
+      // component's props.todos = [{ id, text, included }].
+      const planComponent = flowJSON.components?.find((c) => c.type === "plan");
+      const proposedTodos = (planComponent?.props?.["todos"] as Array<{ id?: string; text?: string }> | undefined) ?? [];
+      const selectedSet = new Set(selectedIds);
+      let approved = proposedTodos
+        .filter((t) => typeof t.id === "string" && selectedSet.has(t.id))
+        .map((t) => ({ id: t.id as string, title: (t.text ?? "").toString() }));
+
+      // Fallback: if the submitted flow didn't carry the proposed todos, recover
+      // them from the session's pendingPlan (prefer flowJSON above).
+      if (approved.length === 0) {
+        try {
+          const { getSessionByConv } = await import("./webhook.js");
+          const priorCtx = await getSessionByConv(planConversationId, planAgentSlug);
+          const stashed = priorCtx?.pendingPlan?.todos ?? [];
+          approved = stashed
+            .filter((t) => selectedSet.has(t.id))
+            .map((t) => ({ id: t.id, title: t.title }));
+        } catch {
+          // Fall through — empty approved handled below.
+        }
+      }
+
+      if (approved.length === 0) {
+        res.status(400).json({ type: "error", message: "Could not resolve the selected steps." } satisfies AppActionResponse);
+        return;
+      }
+
+      // Fail-CLOSED concurrency guard: refuse to approve while a run is already
+      // active for this thread. Approving dispatches Turn 2 straight to
+      // /internal/run (bypassing the busy-slot queue that serializes normal
+      // mentions), so if the user tapped Approve while an earlier turn (e.g. a
+      // "revise the plan" mention) is still running, BOTH runs race the runtime
+      // session lock → one dies "session_locked" and re-fires later as a
+      // DUPLICATE turn, and the two root user rows render as a branch. Blocking
+      // here keeps the card intact (plain error → Approve button stays) so the
+      // user can approve once the agent is idle. Fail-open on Redis outage
+      // (isSlotBusy → false) since the runtime lock is still the backstop.
+      if (QUEUE_ENABLED && (await isSlotBusy(planConversationId, planAgentSlug))) {
+        log.info(`[flow-action] plan-approval: blocked — run active for conv=${planConversationId} agent=${planAgentSlug}`);
+        res.status(409).json({
+          type: "error",
+          message: "The agent is still working on this thread — approve this plan once it's done.",
+        } satisfies AppActionResponse);
+        return;
+      }
+
+      // Close the card immediately, then swap it for the live "executing" plan
+      // node (bug 6) — the same rich card the trivial/auto path shows, NOT a bare
+      // text line. Turn 2's todo-write updates this SAME card in place
+      // (planMessageId = messageId) as each step runs. The Approve button is gone
+      // because the whole flow is replaced.
+      resp = { type: "close_screen", finalMessage: `▶ Approved — running ${approved.length} step(s)…` };
+      res.json(resp);
+      const planTitleForCard =
+        (planComponent?.props?.["title"] as string | undefined) ?? "Plan";
+      const planDescForCard = planComponent?.props?.["desc"] as string | undefined;
+      const planDocForCard = planComponent?.props?.["document"] as string | undefined;
+      // Who approved (already authz-checked === planUserId) — resolved once here
+      // and reused for BOTH the immediate executing card and the durable exec
+      // meta, so the card shows "Approved by <name>" with no flicker. Response is
+      // already sent, so this await doesn't delay the user's confirmation.
+      const approverName = await prisma.user
+        .findUnique({ where: { id: callerUserId }, select: { name: true } })
+        .then((u) => u?.name?.trim() ?? "")
+        .catch(() => "");
+      // Stamp the approve decision time ONCE here and reuse it for both the
+      // immediate executing card and the durable exec meta, so Turn 2's live
+      // todo-write renders keep showing the same "· <time>" (see doRenderPlanCard,
+      // which re-reads approvedAt from the meta rather than re-stamping).
+      const approvedAt = new Date().toISOString();
+      void replaceFlowCardWithFlow(
+        messageId,
+        planAgentSlug,
+        buildPlanFlow(approved, {
+          title: planTitleForCard,
+          ...(planDescForCard ? { desc: planDescForCard } : {}),
+          ...(planDocForCard ? { document: planDocForCard } : {}),
+          phase: "executing",
+          ...(approverName ? { approvedBy: approverName } : {}),
+          approvedAt,
+        }),
+        planConversationId,
+        planChannelId,
+        planSpacesAppId,
+      );
+      // The proposed card is consumed — drop the active-plan pointer so a later
+      // re-plan in this thread doesn't try to "supersede" an approved card.
+      void clearActivePlanCard(planConversationId, planAgentSlug).catch(() => {});
+
+      // Fire-and-forget: dispatch Turn 2 (auto mode). Errors are logged but never
+      // roll back the user-visible confirmation.
+      (async () => {
+        try {
+          const agent = await findAgentForFlow(planAgentSlug, planSpacesAppId);
+          if (!agent) {
+            log.error(`[flow-action] plan-approval: agent ${planAgentSlug} not found`);
+            return;
+          }
+          const appToken = agent.spacesAppToken
+            ? decrypt(...(agent.spacesAppToken.split(":") as [string, string, string]), CONFIG.encryptionKey)
+            : "";
+
+          const { setSession, getSessionByConv } = await import("./webhook.js");
+          let priorCtx = await getSessionByConv(planConversationId, planAgentSlug);
+          // SECURITY: the conversation session index is NOT user-scoped for
+          // conversation-mode (non-twin) agents — its key is only
+          // (conversationId, agentSlug). So if a DIFFERENT user in the same thread
+          // dispatched a plan-mode run after this plan was proposed, it OVERWROTE
+          // the index with their context. Trust priorCtx ONLY when it belongs to
+          // the approver (planUserId, already authz-checked === callerUserId);
+          // otherwise drop it and build a fresh context below with the correct
+          // owner. Without this, User A's approval could run Turn 2 under User B's
+          // identity (the AgentRun + result message are persisted under senderId).
+          if (priorCtx && priorCtx.senderId !== planUserId) {
+            log.warn(
+              `[flow-action] plan-approval: conv-index owner ${priorCtx.senderId} != approver ${planUserId} — building fresh ctx (not trusting stale session)`,
+            );
+            priorCtx = null;
+          }
+
+          const task =
+            "Execute this approved plan:\n" +
+            approved.map((t, i) => `${i + 1}. ${t.title}`).join("\n");
+          const fastModeEnabled = await resolveFastMode(planConversationId, planAgentSlug, agent.config);
+          const dispatchPayload: Record<string, unknown> = {
+            userId: planUserId,
+            task,
+            conversationId: planConversationId,
+            ...(planChannelId ? { channelId: planChannelId } : {}),
+            agentSlug: planAgentSlug,
+            orgId: agent.orgId,
+            callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
+            // WITHOUT this, Turn 2's todo-write plan progress never reaches
+            // /webhook/progress (run.ts's postProgress no-ops when progressUrl is
+            // absent, and run.ts injects no default), so the plan card never
+            // advances past its approval-time snapshot — it must match the normal
+            // mention dispatch, which is what makes auto mode update live.
+            progressUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`,
+            mode: "auto",
+            planContinuation: true,
+            fastMode: fastModeEnabled,
+          };
+
+          // Deterministic plan facts for Turn 2's live render, written BEFORE
+          // dispatch so the very first todo-write sees them: user-approved (not
+          // auto), who approved (approverName resolved above), and the whitelist
+          // of KEPT todo titles — so a rejected todo the model may re-add can
+          // never render (reject filter).
+          await setPlanExecMeta(planConversationId, planAgentSlug, {
+            autoApproved: false,
+            approvedTitles: approved.map((t) => normalizePlanTitle(t.title)),
+            ...(approverName ? { approvedByName: approverName } : {}),
+            approvedAt,
+            ...(planTitleForCard ? { title: planTitleForCard } : {}),
+            ...(planDescForCard ? { desc: planDescForCard } : {}),
+            ...(planDocForCard ? { document: planDocForCard } : {}),
+          }).catch(() => {});
+
+          const runRes = await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+            },
+            body: JSON.stringify(dispatchPayload),
+          });
+          const runBody = (await runRes.json().catch(() => null)) as { success?: boolean; sessionId?: string } | null;
+
+          if (runBody?.success && runBody.sessionId) {
+            // Light the "working" pill immediately. Turn 2 is dispatched DIRECT to
+            // /internal/run (bypassing the normal mention path that posts this at
+            // dispatch), so without it the indicator only shows on the first
+            // tool-call tick — minutes later on a slow model (the approve→pill lag).
+            void emitAgentWorkingSignal({
+              conversationId: planConversationId,
+              channelId: planChannelId,
+              agentSlug: planAgentSlug,
+              spacesAppUserId: agent.spacesAppUserId ?? undefined,
+              appToken,
+              toolLabel: "Starting the plan…",
+            });
+            const approvedTodos = approved.map((t) => ({ id: t.id, title: t.title }));
+            // Carry priorCtx forward (keeps planMessageId so Turn 2's todo-write
+            // updates the SAME card); fall back to a minimal ctx if the session
+            // index missed. Flip mode → auto and stash the approved plan.
+            // The card the user approved IS the plan card, so its messageId is the
+            // authoritative planMessageId — carry it so Turn 2's todo-write updates
+            // that SAME card in place (robust even if priorCtx was dropped/missing,
+            // which would otherwise post a duplicate card).
+            const planMessageIdField = messageId ? { planMessageId: messageId } : {};
+            if (priorCtx) {
+              await setSession(runBody.sessionId, {
+                ...priorCtx,
+                task,
+                mode: "auto",
+                pendingPlan: { todos: approvedTodos },
+                ...planMessageIdField,
+              });
+            } else {
+              await setSession(runBody.sessionId, {
+                mentionedUserId: agent.spacesAppUserId ?? "",
+                senderId: planUserId,
+                senderName: "",
+                channelId: planChannelId ?? "",
+                channelName: planChannelId ?? "",
+                conversationId: planConversationId,
+                task,
+                agentId: agent.id,
+                agentOrgId: agent.orgId,
+                agentSlug: planAgentSlug,
+                responseMode: "conversation",
+                appToken,
+                spacesAppId: agent.spacesAppId ?? "",
+                spacesAppUserId: agent.spacesAppUserId ?? "",
+                mode: "auto",
+                pendingPlan: { todos: approvedTodos },
+                ...planMessageIdField,
+              });
+            }
+            log.info(`[flow-action] plan-approval: launched Turn 2 session=${runBody.sessionId} for conv=${planConversationId}`);
+          } else {
+            log.error("[flow-action] plan-approval: /run dispatch failed", { runBody });
+          }
+        } catch (err) {
+          log.error("[flow-action] plan-approval: dispatch errored:", err instanceof Error ? err.message : String(err));
         }
       })();
       return;

@@ -90,6 +90,43 @@ export async function spacesAppFetch(path: string, body: Record<string, unknown>
 }
 
 
+/**
+ * Light the dashboard's "agent is working" progress pill IMMEDIATELY, before the
+ * agent's first tool call. The normal mention path posts this at dispatch time
+ * (webhook.ts, right after /internal/run returns). DIRECT /internal/run dispatches
+ * — plan-mode Turn 2 (manual approval in flow-action.ts AND trivial auto-run in
+ * webhook.ts) — must post it too; otherwise the pill only appears when the FIRST
+ * progress tick arrives, i.e. after the LLM's first response, which can be minutes
+ * on a slow model. Fire-and-forget: never block or fail the dispatch on it. The
+ * pill self-clears via the /webhook/result "done" signal (and a client stale-sweep).
+ */
+export async function emitAgentWorkingSignal(opts: {
+  conversationId?: string | undefined;
+  channelId?: string | undefined;
+  agentSlug?: string | undefined;
+  spacesAppUserId?: string | undefined;
+  appToken?: string | undefined;
+  toolLabel?: string;
+}): Promise<void> {
+  if (!opts.appToken) return;
+  try {
+    await spacesAppFetch(
+      "/chat/agentProgress",
+      {
+        conversationId: opts.conversationId,
+        channelId: opts.channelId,
+        agentSlug: opts.agentSlug,
+        userId: opts.spacesAppUserId,
+        toolLabel: opts.toolLabel ?? "Working on it...",
+        status: "working",
+      },
+      opts.appToken,
+    );
+  } catch {
+    // Best-effort — the pill will still light on the first real progress tick.
+  }
+}
+
 export function decryptStoredField(stored: string): string {
   const [ciphertext, iv, authTag] = stored.split(":");
   if (!ciphertext || !iv || !authTag) throw new Error("Invalid encrypted field format");
