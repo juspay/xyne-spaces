@@ -146,10 +146,10 @@ export const ChannelCommandItem = ({
       data-item-label={displayName}
       onSelect={() => onSelect(displayName)}
       onMouseDownCapture={onItemMouseDown}
-      className={`flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer mt-1.5 ${!isMobile && 'hover:bg-accent aria-selected:bg-accent'}`}
+      className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer mt-1.5 aria-selected:bg-accent ${!isMobile && 'hover:bg-accent'}`}
       style={{ WebkitTapHighlightColor: 'transparent' }}
     >
-      <div className='flex items-center justify-center h-4 w-5 flex-shrink-0'>
+      <div className='flex items-center justify-center h-4 w-5 flex-shrink-0 text-muted-foreground'>
         {getChannelIcon(channel)}
       </div>
       <div className='flex-1 min-w-0 flex items-center gap-1'>
@@ -166,7 +166,7 @@ export const ChannelCommandItem = ({
         )}
       </div>
       {isSelected ? (
-        <span className='flex-shrink-0 flex items-center justify-center w-4 h-4 rounded-full bg-primary text-white'>
+        <span className='flex-shrink-0 flex items-center justify-center w-4 h-4 rounded-full bg-primary text-primary-foreground'>
           <CheckTickSingle size={10} />
         </span>
       ) : (
@@ -180,12 +180,19 @@ export const ChannelCommandItem = ({
   );
 };
 
+// Call-site override for the shared ui/Button in the desk-merge bar: the primitive
+// ships `focus-visible:ring-[3px]`, but nothing inside the palette is Tab-reachable
+// (Tab is intercepted for tab-cycling), so that ring only ever appears as a
+// click-then-Tab artifact. Overridden here rather than in ui/Button, which other
+// screens rely on for real keyboard navigation.
+const MERGE_BAR_BUTTON_NO_RING = 'focus-visible:outline-none focus-visible:ring-0';
+
 const DEFAULT_ENABLED_TABS: TabType[] = [
+  TabType.MESSAGES,
   TabType.USERS,
   TabType.CHANNELS,
-  TabType.MESSAGES,
-  TabType.TICKETS,
   TabType.ATTACHMENTS,
+  TabType.TICKETS,
   TabType.DESK,
 ];
 
@@ -1800,6 +1807,30 @@ const ChannelCommandMenu = ({
     return <Hashtag size={16} />;
   };
 
+  /**
+   * Channel tag for a result row (currently only ticket rows render it).
+   *
+   * The Vespa ticket doc denormalizes both `searchContext.channelId` and
+   * `metadata.channelName`, so this needs no lookup of its own: it resolves the id
+   * against the already-loaded `allChannels` to reuse `getChannelIcon` (hashtag vs
+   * lock vs DM avatar). When the channel isn't in the local set — not a member, not
+   * yet loaded — it falls back to the denormalized name with a hashtag, mirroring
+   * FilterChipNode's `ChannelChipIcon` fallback. No network call, no per-row hook.
+   */
+  const getResultChannelTag = (
+    result: DisplaySearchResult,
+  ): { name: string; icon: ReactElement } | undefined => {
+    const entry = result.searchContext?.channelId
+      ? allChannels.find(item => item.channel.id === result.searchContext?.channelId)
+      : undefined;
+    if (entry) {
+      return { name: entry.channel.name, icon: getChannelIcon(entry.channel) };
+    }
+    const fallbackName = result.metadata.channelName;
+    if (!fallbackName) return undefined;
+    return { name: fallbackName, icon: <Hashtag size={16} /> };
+  };
+
   // Group results by type for display
   const groupedBackendResults = useMemo(() => {
     const groups: Record<string, DisplaySearchResult[]> = {};
@@ -1879,12 +1910,12 @@ const ChannelCommandMenu = ({
   const iconSize = 14;
 
   const allTabDefinitions: Array<{ id: TabType; label: string; icon?: ReactElement }> = [
-    { id: TabType.USERS, label: 'People', icon: <UserTwo size={iconSize} /> },
     { id: TabType.MESSAGES, label: 'Messages', icon: <ChatDefault size={iconSize} /> },
+    { id: TabType.USERS, label: 'People', icon: <UserTwo size={iconSize} /> },
     { id: TabType.CHANNELS, label: 'Channels', icon: <Hashtag size={iconSize} /> },
-    { id: TabType.TICKETS, label: 'Tickets', icon: <TicketToken size={iconSize} /> },
     { id: TabType.ATTACHMENTS, label: 'Files', icon: <FolderDefault size={iconSize} /> },
     { id: TabType.CANVAS, label: 'Canvas', icon: <File02Text size={iconSize} /> },
+    { id: TabType.TICKETS, label: 'Tickets', icon: <TicketToken size={iconSize} /> },
     { id: TabType.CALL, label: 'Calls', icon: <Phone size={iconSize} /> },
     { id: TabType.RECORDING, label: 'Recordings', icon: <MicOn size={iconSize} /> },
     { id: TabType.DESK, label: 'Desk', icon: <EnvelopeDefault size={iconSize} /> },
@@ -2035,6 +2066,7 @@ const ChannelCommandMenu = ({
                     key={`${result.type}-${result.id}`}
                     result={result}
                     channelDisplayName={getResultChannelLabel(result)}
+                    channelTag={getResultChannelTag(result)}
                     onSelect={res => handleBackendResultSelect(res, index + 1)}
                     onPreview={handleFilePreview}
                     onItemMouseDown={handleItemMouseDown}
@@ -2097,6 +2129,7 @@ const ChannelCommandMenu = ({
                         key={result.id}
                         result={result}
                         channelDisplayName={getResultChannelLabel(result)}
+                        channelTag={getResultChannelTag(result)}
                         onSelect={res => handleBackendResultSelect(res, index + 1)}
                         onPreview={handleFilePreview}
                         onItemMouseDown={handleItemMouseDown}
@@ -2113,7 +2146,7 @@ const ChannelCommandMenu = ({
                     {isScreenAll && hiddenCount > 0 && sectionTab && (
                       <button
                         onClick={() => handleSeeMoreNavigate(sectionTab)}
-                        className={`w-full px-2 py-1.5 mt-1 text-sm text-muted-foreground rounded-sm text-left transition-colors ${!isMobile && 'hover:text-foreground hover:bg-accent'}`}
+                        className={`w-full px-2 py-1.5 mt-1 text-sm text-muted-foreground rounded-sm text-left transition-colors focus-visible:outline-none focus-visible:ring-0 ${!isMobile && 'hover:text-foreground hover:bg-accent'}`}
                         style={{
                           WebkitTapHighlightColor: 'transparent',
                           userSelect: 'none',
@@ -2185,6 +2218,7 @@ const ChannelCommandMenu = ({
                     key={result.id}
                     result={result}
                     channelDisplayName={getResultChannelLabel(result)}
+                    channelTag={getResultChannelTag(result)}
                     onSelect={res => handleBackendResultSelect(res, index + 1)}
                     onPreview={handleFilePreview}
                     onItemMouseDown={handleItemMouseDown}
@@ -2196,7 +2230,7 @@ const ChannelCommandMenu = ({
                 {isUserType && hasMore && (
                   <button
                     onClick={() => toggleCategoryExpansion(type)}
-                    className={`w-full px-2 py-1.5 mt-1 text-sm text-muted-foreground rounded-sm text-left transition-colors ${!isMobile && 'hover:text-foreground hover:bg-accent'}`}
+                    className={`w-full px-2 py-1.5 mt-1 text-sm text-muted-foreground rounded-sm text-left transition-colors focus-visible:outline-none focus-visible:ring-0 ${!isMobile && 'hover:text-foreground hover:bg-accent'}`}
                     style={{
                       WebkitTapHighlightColor: 'transparent',
                       userSelect: 'none',
@@ -2280,7 +2314,7 @@ const ChannelCommandMenu = ({
                   onClick={() =>
                     routeSeeMore ? handleSeeMoreNavigate('people') : toggleCategoryExpansion('user')
                   }
-                  className={`w-full px-2 py-1.5 mt-1 text-sm text-muted-foreground rounded-sm text-left transition-colors ${!isMobile && 'hover:text-foreground hover:bg-accent'}`}
+                  className={`w-full px-2 py-1.5 mt-1 text-sm text-muted-foreground rounded-sm text-left transition-colors focus-visible:outline-none focus-visible:ring-0 ${!isMobile && 'hover:text-foreground hover:bg-accent'}`}
                   style={{
                     WebkitTapHighlightColor: 'transparent',
                     userSelect: 'none',
@@ -2347,7 +2381,7 @@ const ChannelCommandMenu = ({
               {hasMore && (
                 <button
                   onClick={() => toggleCategoryExpansion(category)}
-                  className={`w-full px-2 py-1.5 mt-1 text-sm text-muted-foreground rounded-sm text-left transition-colors ${!isMobile && 'hover:text-foreground hover:bg-accent'}`}
+                  className={`w-full px-2 py-1.5 mt-1 text-sm text-muted-foreground rounded-sm text-left transition-colors focus-visible:outline-none focus-visible:ring-0 ${!isMobile && 'hover:text-foreground hover:bg-accent'}`}
                   style={{
                     WebkitTapHighlightColor: 'transparent',
                     userSelect: 'none',
@@ -2410,7 +2444,7 @@ const ChannelCommandMenu = ({
               {hasMore && (
                 <button
                   onClick={() => toggleCategoryExpansion(category)}
-                  className={`w-full px-2 py-1.5 mt-1 text-sm text-muted-foreground rounded-sm text-left transition-colors ${!isMobile && 'hover:text-foreground hover:bg-accent'}`}
+                  className={`w-full px-2 py-1.5 mt-1 text-sm text-muted-foreground rounded-sm text-left transition-colors focus-visible:outline-none focus-visible:ring-0 ${!isMobile && 'hover:text-foreground hover:bg-accent'}`}
                   data-track-category='CHANNEL_SEARCH'
                   data-track-name='TOGGLE_CHANNEL_CATEGORY_EXPANSION'
                   data-track-metadata={JSON.stringify({
@@ -2519,7 +2553,7 @@ const ChannelCommandMenu = ({
                     {shouldLimit && hasMore && (
                       <button
                         onClick={() => toggleCategoryExpansion(category)}
-                        className={`w-full px-2 py-1.5 mt-1 text-sm text-muted-foreground rounded-sm text-left transition-colors ${!isMobile && 'hover:text-foreground hover:bg-accent'}`}
+                        className={`w-full px-2 py-1.5 mt-1 text-sm text-muted-foreground rounded-sm text-left transition-colors focus-visible:outline-none focus-visible:ring-0 ${!isMobile && 'hover:text-foreground hover:bg-accent'}`}
                         style={{
                           WebkitTapHighlightColor: 'transparent',
                           userSelect: 'none',
@@ -3013,11 +3047,11 @@ const ChannelCommandMenu = ({
       {/* Search Input — hidden (but kept mounted) during `/chat` compose so its
           `/chat <query>` text survives for the "back" button. Stays visible during the
           `/call` channel-confirm so the modal overlays the picker. */}
-      <div className={cn('flex items-center', isComposing && 'hidden')}>
+      <div className={cn('flex items-center shrink-0', isComposing && 'hidden')}>
         <div className='relative flex-1 flex items-center gap-2 p-3'>
           <button
             onClick={() => onOpenChange(false)}
-            className='p-1 rounded-md text-foreground hover:text-muted-foreground hover:bg-accent transition-colors duration-200 sm:hidden'
+            className='p-1 rounded-md text-foreground hover:text-muted-foreground hover:bg-accent transition-colors duration-200 sm:hidden focus-visible:outline-none focus-visible:ring-0'
             aria-label='Go back'
             data-track-category='CHANNEL_SEARCH'
             data-track-name='CLOSE_SEARCH_MENU`'
@@ -3078,7 +3112,7 @@ const ChannelCommandMenu = ({
                   }
                 }
               }}
-              className='p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors flex-shrink-0 flex items-center justify-center'
+              className='p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors flex-shrink-0 flex items-center justify-center focus-visible:outline-none focus-visible:ring-0'
               aria-label={search.trim() || searchText.trim() ? 'Clear search' : 'Search'}
               data-track-category='CHANNEL_SEARCH'
               data-track-name={search.trim() || searchText.trim() ? 'ClearSearch' : 'OpenSearch'}
@@ -3098,7 +3132,7 @@ const ChannelCommandMenu = ({
                   <button
                     type='button'
                     className={cn(
-                      'flex items-center px-2 py-1 rounded-md text-xs font-medium border flex-shrink-0 transition-colors',
+                      'flex items-center px-2 py-1 rounded-md text-xs font-medium border flex-shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-0',
                       filterOpen
                         ? 'bg-primary/10 border-primary/40 text-primary'
                         : 'border-border text-foreground hover:bg-accent hover:text-accent-foreground',
@@ -3133,7 +3167,7 @@ const ChannelCommandMenu = ({
                           insertTextRef.current?.(prefix);
                           setFilterOpen(false);
                         }}
-                        className='flex w-full items-center gap-2 px-3 py-1.5 text-sm rounded hover:bg-accent hover:text-accent-foreground text-popover-foreground text-left'
+                        className='flex w-full items-center gap-2 px-3 py-1.5 text-sm rounded hover:bg-accent hover:text-accent-foreground text-popover-foreground text-left focus-visible:outline-none focus-visible:bg-accent focus-visible:text-accent-foreground'
                         data-track-category='SEARCH'
                         data-track-name={`INSERT_FILTER_${label.toUpperCase()}`}
                       >
@@ -3146,7 +3180,7 @@ const ChannelCommandMenu = ({
                       type='button'
                       onMouseDown={e => e.preventDefault()}
                       onClick={() => setIncludeBotMessages(v => !v)}
-                      className='flex w-full items-center justify-between gap-2 px-3 py-1.5 text-sm rounded hover:bg-accent hover:text-accent-foreground text-popover-foreground text-left'
+                      className='flex w-full items-center justify-between gap-2 px-3 py-1.5 text-sm rounded hover:bg-accent hover:text-accent-foreground text-popover-foreground text-left focus-visible:outline-none focus-visible:bg-accent focus-visible:text-accent-foreground'
                       data-track-category='SEARCH'
                       data-track-name='TOGGLE_BOT_MESSAGES'
                     >
@@ -3177,7 +3211,7 @@ const ChannelCommandMenu = ({
                   <button
                     type='button'
                     className={cn(
-                      'flex items-center px-2 py-1 rounded-md text-xs font-medium border flex-shrink-0 transition-colors',
+                      'flex items-center px-2 py-1 rounded-md text-xs font-medium border flex-shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-0',
                       searchFiltersOpen
                         ? 'bg-primary/10 border-primary/40 text-primary'
                         : 'border-border text-foreground hover:bg-accent hover:text-accent-foreground',
@@ -3202,7 +3236,7 @@ const ChannelCommandMenu = ({
                       type='button'
                       onMouseDown={e => e.preventDefault()}
                       onClick={() => setOnlyMyChannels(v => !v)}
-                      className='flex w-full items-center justify-between gap-2 px-3 py-1.5 text-sm rounded hover:bg-accent hover:text-accent-foreground text-popover-foreground text-left'
+                      className='flex w-full items-center justify-between gap-2 px-3 py-1.5 text-sm rounded hover:bg-accent hover:text-accent-foreground text-popover-foreground text-left focus-visible:outline-none focus-visible:bg-accent focus-visible:text-accent-foreground'
                       data-track-category='SEARCH'
                       data-track-name='TOGGLE_ONLY_MY_CHANNELS'
                     >
@@ -3225,7 +3259,7 @@ const ChannelCommandMenu = ({
                       type='button'
                       onMouseDown={e => e.preventDefault()}
                       onClick={() => setIncludeBotMessages(v => !v)}
-                      className='flex w-full items-center justify-between gap-2 px-3 py-1.5 text-sm rounded hover:bg-accent hover:text-accent-foreground text-popover-foreground text-left'
+                      className='flex w-full items-center justify-between gap-2 px-3 py-1.5 text-sm rounded hover:bg-accent hover:text-accent-foreground text-popover-foreground text-left focus-visible:outline-none focus-visible:bg-accent focus-visible:text-accent-foreground'
                       data-track-category='SEARCH'
                       data-track-name='TOGGLE_BOT_MESSAGES'
                     >
@@ -3265,7 +3299,7 @@ const ChannelCommandMenu = ({
         {isComposing && commandTarget && (
           <div
             role='presentation'
-            className='flex-1 min-h-0 overflow-y-auto'
+            className='flex-1 min-h-0 overflow-y-auto focus:outline-none focus-visible:outline-none'
             onKeyDown={e => e.stopPropagation()}
           >
             <QuickDmComposer
@@ -3305,7 +3339,7 @@ const ChannelCommandMenu = ({
         >
           {/* Tabs - hidden when bot is selected or hideTabs is true */}
           <div
-            className={`overflow-x-auto no-scrollbar px-4 py-1.5 ${isMobile ? 'mx-1' : ''} ${hideTabs ? 'hidden' : ''}`}
+            className={`shrink-0 overflow-x-auto no-scrollbar px-4 py-1.5 focus:outline-none focus-visible:outline-none ${isMobile ? 'mx-1' : ''} ${hideTabs ? 'hidden' : ''}`}
           >
             <Tabs.Root value={activeTab}>
               <Tabs.List
@@ -3353,7 +3387,10 @@ const ChannelCommandMenu = ({
                         });
                       }}
                       className={cn(
-                        'flex items-center justify-center gap-2 px-3 py-1.5 text-sm whitespace-nowrap rounded-md transition-colors cursor-pointer',
+                        // No focus ring: Tab is bound to tab-cycling here, so a click-focused
+                        // trigger would paint a ring on the next Tab press. The active tab's
+                        // bg-accent treatment already communicates position.
+                        'flex items-center justify-center gap-2 px-3 py-1.5 text-sm whitespace-nowrap rounded-md transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-0',
                         activeTab === tab.id
                           ? 'bg-accent text-foreground'
                           : 'text-muted-foreground hover:bg-accent hover:text-foreground',
@@ -3375,7 +3412,12 @@ const ChannelCommandMenu = ({
           {/* Results */}
           <Command.List
             className={cn(
-              'flex-1 overflow-y-auto md:max-h-[32rem] px-4 pt-3 pb-6 bg-background',
+              // flex-1 only — the shell owns the height (md:h-[72vh]); a second cap here
+              // would leave the footer floating short of the bottom on tall viewports.
+              // cmdk gives the list tabIndex={-1} + role="listbox", and it's a scroll
+              // container (Chrome can keyboard-focus scrollers) — both outline. Row
+              // position is communicated by aria-selected, never by a ring here.
+              'flex-1 overflow-y-auto px-4 pt-3 pb-6 bg-background focus:outline-none focus-visible:outline-none',
               suppressHover && '[&_[cmdk-item]]:pointer-events-none',
             )}
             ref={el => {
@@ -3496,7 +3538,7 @@ const ChannelCommandMenu = ({
                                   onMouseEnter={() => {
                                     selectMention(index);
                                   }}
-                                  className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer transition-all duration-150 mt-1 ${
+                                  className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all duration-150 mt-1.5 ${
                                     index === selectedMentionIndex
                                       ? hasNavigated
                                         ? 'cmdk-active-row'
@@ -3542,7 +3584,7 @@ const ChannelCommandMenu = ({
                                   onMouseEnter={() => {
                                     selectMention(adjustedIndex);
                                   }}
-                                  className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer transition-all duration-150 mt-1 ${
+                                  className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all duration-150 mt-1.5 ${
                                     adjustedIndex === selectedMentionIndex
                                       ? hasNavigated
                                         ? 'cmdk-active-row'
@@ -3601,7 +3643,7 @@ const ChannelCommandMenu = ({
                                     onMouseEnter={() => {
                                       selectMention(index);
                                     }}
-                                    className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer transition-all duration-150 mt-1 ${
+                                    className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all duration-150 mt-1.5 ${
                                       index === selectedMentionIndex
                                         ? hasNavigated
                                           ? 'cmdk-active-row'
@@ -3618,7 +3660,7 @@ const ChannelCommandMenu = ({
                                         {getUserDisplayName(user)}
                                       </span>
                                       {isDeactivated && (
-                                        <span className='shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-muted text-muted-foreground'>
+                                        <span className='shrink-0 text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded'>
                                           Deactivated
                                         </span>
                                       )}
@@ -3671,7 +3713,7 @@ const ChannelCommandMenu = ({
                                   onMouseEnter={() => {
                                     selectMention(index);
                                   }}
-                                  className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer transition-all duration-150 mt-1 ${
+                                  className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all duration-150 mt-1.5 ${
                                     index === selectedMentionIndex
                                       ? hasNavigated
                                         ? 'cmdk-active-row'
@@ -3722,7 +3764,7 @@ const ChannelCommandMenu = ({
                             onMouseEnter={() => {
                               selectMention(index);
                             }}
-                            className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer transition-all duration-150 mt-1 ${
+                            className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all duration-150 mt-1.5 ${
                               index === selectedMentionIndex
                                 ? hasNavigated
                                   ? 'cmdk-active-row'
@@ -3772,7 +3814,7 @@ const ChannelCommandMenu = ({
                               onMouseEnter={() => {
                                 selectMention(index);
                               }}
-                              className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer transition-all duration-150 mt-1 ${
+                              className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all duration-150 mt-1.5 ${
                                 index === selectedMentionIndex
                                   ? hasNavigated
                                     ? 'cmdk-active-row'
@@ -3814,43 +3856,53 @@ const ChannelCommandMenu = ({
                           heading='Users'
                           className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
                         >
-                          {availableUsers.map((user, index) => (
-                            <Command.Item
-                              key={user.id}
-                              value={`mention-user-${user.id}`}
-                              onSelect={() => {
-                                void handleMentionSelect({
-                                  id: user.id,
-                                  name: getUserDisplayName(user),
-                                  type: MentionType.USER,
-                                  ...(user.email ? { email: user.email } : {}),
-                                });
-                              }}
-                              onMouseEnter={() => {
-                                selectMention(index);
-                              }}
-                              className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer transition-all duration-150 mt-1 ${
-                                index === selectedMentionIndex
-                                  ? hasNavigated
-                                    ? 'cmdk-active-row'
-                                    : 'bg-muted'
-                                  : ''
-                              } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
-                              style={{ WebkitTapHighlightColor: 'transparent' }}
-                            >
-                              <Avatar userId={user.id} size='xs' />
-                              <div className='flex-1 min-w-0 flex items-center gap-2'>
-                                <span className='min-w-0 truncate text-[15px] leading-[1.2] tracking-[-0.1px] text-foreground'>
-                                  {getUserDisplayName(user)}
-                                </span>
-                                {user.email && (
-                                  <span className='min-w-0 truncate text-xs text-muted-foreground'>
-                                    {user.email}
+                          {availableUsers.map((user, index) => {
+                            const isDeactivated = isUserDeactivated(user);
+                            return (
+                              <Command.Item
+                                key={user.id}
+                                value={`mention-user-${user.id}`}
+                                onSelect={() => {
+                                  void handleMentionSelect({
+                                    id: user.id,
+                                    name: getUserDisplayName(user),
+                                    type: MentionType.USER,
+                                    ...(user.email ? { email: user.email } : {}),
+                                  });
+                                }}
+                                onMouseEnter={() => {
+                                  selectMention(index);
+                                }}
+                                className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all duration-150 mt-1.5 ${
+                                  index === selectedMentionIndex
+                                    ? hasNavigated
+                                      ? 'cmdk-active-row'
+                                      : 'bg-muted'
+                                    : ''
+                                } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
+                                style={{ WebkitTapHighlightColor: 'transparent' }}
+                              >
+                                <Avatar userId={user.id} size='xs' />
+                                <div className='flex-1 min-w-0 flex items-center gap-2'>
+                                  <span
+                                    className={`min-w-0 truncate text-[15px] leading-[1.2] tracking-[-0.1px] ${isDeactivated ? 'text-muted-foreground' : 'text-foreground'}`}
+                                  >
+                                    {getUserDisplayName(user)}
                                   </span>
-                                )}
-                              </div>
-                            </Command.Item>
-                          ))}
+                                  {isDeactivated && (
+                                    <span className='shrink-0 text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded'>
+                                      Deactivated
+                                    </span>
+                                  )}
+                                  {user.email && (
+                                    <span className='min-w-0 truncate text-xs text-muted-foreground'>
+                                      {user.email}
+                                    </span>
+                                  )}
+                                </div>
+                              </Command.Item>
+                            );
+                          })}
                         </Command.Group>
                       )}
                     {mentionSearchType === MentionType.USER &&
@@ -3887,7 +3939,7 @@ const ChannelCommandMenu = ({
                               onMouseEnter={() => {
                                 selectMention(index);
                               }}
-                              className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer transition-all duration-150 mt-1 ${
+                              className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all duration-150 mt-1.5 ${
                                 index === selectedMentionIndex
                                   ? hasNavigated
                                     ? 'cmdk-active-row'
@@ -3966,7 +4018,7 @@ const ChannelCommandMenu = ({
                                     } as DisplaySearchResult,
                                   });
                                 }}
-                                className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer mt-1 ${!isMobile && 'hover:bg-muted aria-selected:bg-muted'}`}
+                                className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer mt-1.5 aria-selected:bg-accent ${!isMobile && 'hover:bg-accent'}`}
                                 style={{ WebkitTapHighlightColor: 'transparent' }}
                               >
                                 {isChannelTab &&
@@ -3985,7 +4037,7 @@ const ChannelCommandMenu = ({
                                   {item.title}
                                 </span>
                                 {isSelected && (
-                                  <span className='flex-shrink-0 flex items-center justify-center w-4 h-4 rounded-full bg-primary text-white'>
+                                  <span className='flex-shrink-0 flex items-center justify-center w-4 h-4 rounded-full bg-primary text-primary-foreground'>
                                     <CheckTickSingle size={10} />
                                   </span>
                                 )}
@@ -4071,7 +4123,12 @@ const ChannelCommandMenu = ({
                   <span className='text-sm text-muted-foreground'>
                     Click tickets to select them for merging
                   </span>
-                  <Button variant='secondary' size='sm' onClick={toggleDeskMergeMode}>
+                  <Button
+                    variant='secondary'
+                    size='sm'
+                    onClick={toggleDeskMergeMode}
+                    className={MERGE_BAR_BUTTON_NO_RING}
+                  >
                     Cancel
                   </Button>
                 </>
@@ -4082,16 +4139,27 @@ const ChannelCommandMenu = ({
                     selected
                   </span>
                   <div className='flex items-center gap-2'>
-                    <Button variant='ghost' size='sm' onClick={clearDeskMergeSelection}>
+                    <Button
+                      variant='ghost'
+                      size='sm'
+                      onClick={clearDeskMergeSelection}
+                      className={MERGE_BAR_BUTTON_NO_RING}
+                    >
                       Clear
                     </Button>
-                    <Button variant='secondary' size='sm' onClick={toggleDeskMergeMode}>
+                    <Button
+                      variant='secondary'
+                      size='sm'
+                      onClick={toggleDeskMergeMode}
+                      className={MERGE_BAR_BUTTON_NO_RING}
+                    >
                       Cancel
                     </Button>
                     <Button
                       size='sm'
                       disabled={selectedMergeTickets.size < 2}
                       onClick={() => setShowMergeDialog(true)}
+                      className={MERGE_BAR_BUTTON_NO_RING}
                     >
                       Merge {selectedMergeTickets.size > 0 ? `(${selectedMergeTickets.size})` : ''}
                     </Button>
@@ -4139,7 +4207,7 @@ const ChannelCommandMenu = ({
               hasDeskChannelFilter && (
                 <button
                   onClick={toggleDeskMergeMode}
-                  className='flex gap-2 items-center text-muted-foreground hover:text-foreground transition-colors cursor-pointer'
+                  className='flex gap-2 items-center text-muted-foreground hover:text-foreground transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-0'
                   data-track-category='COMMAND_MENU'
                   data-track-name='TOGGLE_DESK_MERGE_MODE'
                 >
@@ -4259,7 +4327,10 @@ const ChannelCommandMenu = ({
         data-nav-active={hasNavigated ? 'true' : undefined}
         data-mention-active={mentionSearchType ? 'true' : undefined}
         shouldFilter={false}
-        className='w-full h-full flex flex-col bg-background'
+        // cmdk renders its root with tabIndex={-1}, so it can take programmatic focus
+        // and paint an outline around the whole palette — suppress it (container, not
+        // a control). Same on the dialog branch below and on Command.List.
+        className='w-full h-full flex flex-col bg-background focus:outline-none focus-visible:outline-none'
         onMouseMove={() => {
           if (suppressHover) {
             commandRef.current
@@ -4289,6 +4360,10 @@ const ChannelCommandMenu = ({
         <DialogPrimitive.Portal>
           <DialogPrimitive.Overlay />
           <DialogPrimitive.Content
+            // Radix gives Content tabIndex={-1} and focuses it on open; opening via
+            // Cmd+K means the browser treats that as keyboard focus and outlines the
+            // whole palette. It's a container, never a navigation position.
+            className='focus:outline-none focus-visible:outline-none'
             onInteractOutside={event => {
               // Keep the palette open when the interaction comes from a composer
               // overlay portaled to <body> (canvas/emoji modals). They live
@@ -4336,10 +4411,15 @@ const ChannelCommandMenu = ({
                 reconcileHoverSelection();
               }}
               className={cn(
-                'fixed left-0 md:left-1/2 top-0 md:top-[14vh] -translate-x-0 md:-translate-x-1/2 md:translate-y-0 w-full flex flex-col',
+                // cmdk root carries tabIndex={-1} — see the inline branch above.
+                'fixed left-0 md:left-1/2 top-0 md:top-[14vh] -translate-x-0 md:-translate-x-1/2 md:translate-y-0 w-full flex flex-col focus:outline-none focus-visible:outline-none',
                 isMobile ? 'h-[100dvh]' : 'h-screen',
                 contextSelectionMode ? 'md:max-w-4xl' : 'md:max-w-3xl',
-                'md:w-full md:h-auto md:max-h-[72vh] md:overflow-hidden bg-background md:rounded-2xl shadow-[0px_7px_15px_0px_#0000000D,0px_28px_28px_0px_#00000017,0px_62px_37px_0px_#0000000D,0px_111px_44px_0px_#00000003,0px_173px_48px_0px_#00000000] border border-border',
+                // Fixed height (not max-height) so the shell doesn't grow/shrink as results
+                // come and go. Header + footer are shrink-0; Command.List is flex-1 and
+                // absorbs the remainder, so a wrapped filter-chip row or a hidden tab bar
+                // changes the list height, never the total. Mobile keeps h-[100dvh]/h-screen.
+                'md:w-full md:h-[72vh] md:overflow-hidden bg-background md:rounded-2xl shadow-[0px_7px_15px_0px_#0000000D,0px_28px_28px_0px_#00000017,0px_62px_37px_0px_#0000000D,0px_111px_44px_0px_#00000003,0px_173px_48px_0px_#00000000] border border-border',
                 showMergeDialog ? 'z-40' : 'z-[9999]',
               )}
               onKeyDownCapture={handleCommandKeyDown}

@@ -21,7 +21,9 @@ import {
   FilterChipNode,
   FilterChipContainerNode,
   FilterChipIconNode,
+  FilterChipPrefixNode,
   $isFilterChipNode,
+  $isFilterChipContainerNode,
   $createFilterChip,
 } from './FilterChipNode';
 import { FilterChipPlugin } from './FilterChipPlugin';
@@ -413,8 +415,15 @@ function OnChangePluginWrapper({
   };
 
   const extractTextWithoutMentions = (node: LexicalNode): string => {
+    // Exclude the whole pill from the search text; it's carried as a mention. Skipping at
+    // the container covers every part of it — the label AND the `from:`/`in:` prefix node,
+    // which reports text of its own and would otherwise leak into the query.
+    if ($isFilterChipContainerNode(node)) {
+      return '';
+    }
+
     if ($isFilterChipNode(node)) {
-      return ''; // Exclude chip text from search; it's carried as a mention
+      return ''; // Chip label outside a container (shouldn't happen, but stays excluded)
     }
 
     if ($isElementNode(node)) {
@@ -513,7 +522,7 @@ export function LexicalSearchInput({
   const initialConfig = {
     namespace: 'SearchInput',
     theme: {
-      paragraph: 'm-0 leading-7',
+      paragraph: 'm-0',
       text: {
         base: 'text-sm',
       },
@@ -521,8 +530,8 @@ export function LexicalSearchInput({
     onError: (_error: Error) => {
       // Silently handle Lexical errors
     },
-    // The three filter-chip nodes (pill + icon + label); see FilterChipNode.tsx.
-    nodes: [FilterChipContainerNode, FilterChipIconNode, FilterChipNode],
+    // The four filter-chip nodes (pill + prefix + icon + label); see FilterChipNode.tsx.
+    nodes: [FilterChipContainerNode, FilterChipPrefixNode, FilterChipIconNode, FilterChipNode],
     ...(value ? { editorState: value } : {}),
   };
 

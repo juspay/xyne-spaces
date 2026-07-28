@@ -1,8 +1,8 @@
 /**
  * Demotes a filter chip to plain text the moment its label is edited (the
- * Slack-style chip → plain-text transition). Because the icon lives inside the
- * FilterChipContainerNode, replacing the container drops the pill + icon in one
- * step — no icon pairing/orphan bookkeeping needed.
+ * Slack-style chip → plain-text transition). Because the prefix and icon live inside
+ * the FilterChipContainerNode, replacing the container drops the whole pill in one
+ * step — no pairing/orphan bookkeeping needed.
  *
  *   - On label edit (text diverges from `__expectedText`) → demote.
  *   - On Backspace at the label's start → demote instead of deleting into the
@@ -25,20 +25,29 @@ import {
   $isFilterChipContainerNode,
 } from './FilterChipNode';
 
-// Replace the whole pill (container + icon + label) with its label as plain text,
-// preserving the caret offset. Plain text re-arms the mention dropdown, so a demoted
-// chip stays editable and re-pickable; promotion only happens on an explicit pick.
+// Replace the whole pill (container + prefix + icon + label) with its FULL text as plain
+// text, preserving the caret offset. The `from:`/`in:` prefix lives in its own node, so the
+// text is read off the container (`from: alice`), not the label alone (`alice`) — dropping
+// the prefix would turn an author/scope filter into a bare word search. Plain text re-arms
+// the mention dropdown, so a demoted chip stays editable and re-pickable; promotion only
+// happens on an explicit pick.
 function $demoteChip(chip: FilterChipNode): void {
-  const text = chip.getTextContent();
+  const label = chip.getTextContent();
+  const parent = chip.getParent();
+  const container = $isFilterChipContainerNode(parent) ? parent : null;
+  const text = container ? container.getTextContent() : label;
+  // The label is always the container's last child, so everything before it is the prefix —
+  // shift the caret by that much to keep it on the same character.
+  const prefixLength = text.length - label.length;
+
   const selection = $getSelection();
   const offset =
     $isRangeSelection(selection) && selection.anchor.getNode() === chip
-      ? selection.anchor.offset
+      ? prefixLength + selection.anchor.offset
       : text.length;
 
   const plain = $createTextNode(text);
-  const parent = chip.getParent();
-  ($isFilterChipContainerNode(parent) ? parent : chip).replace(plain);
+  (container ?? chip).replace(plain);
   plain.select(offset, offset);
 }
 

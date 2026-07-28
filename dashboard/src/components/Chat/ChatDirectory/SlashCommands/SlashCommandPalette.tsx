@@ -81,7 +81,7 @@ export function SlashCommandPalette({
               onSelect={() => (def.type === 'action' ? onRunAction(kind) : onApplyCommand(kind))}
               onMouseDownCapture={onItemMouseDown}
               onMouseEnter={() => onHoverCommand(kind)}
-              className='flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1.5'
+              className='flex items-center gap-3 p-3 rounded-lg cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1.5'
             >
               <div className='flex-1 min-w-0 flex items-center gap-1.5 text-[15px] leading-[1.2] tracking-[-0.1px]'>
                 <span className='shrink-0 text-foreground'>/{kind}</span>
@@ -104,7 +104,7 @@ export function SlashCommandPalette({
           data-item-label={activeDef.title}
           onSelect={() => onRunAction(commandKind)}
           onMouseDownCapture={onItemMouseDown}
-          className='flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1.5'
+          className='flex items-center gap-3 p-3 rounded-lg cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1.5'
         >
           <activeDef.icon size={16} className='shrink-0 text-muted-foreground' />
           <div className='flex-1 min-w-0 flex items-center gap-1.5 text-[15px] leading-[1.2] tracking-[-0.1px]'>
@@ -136,7 +136,7 @@ export function SlashCommandPalette({
         data-item-label={extra.label}
         onSelect={() => onRunGotoExtra(extra)}
         onMouseDownCapture={onItemMouseDown}
-        className='flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1.5'
+        className='flex items-center gap-3 p-3 rounded-lg cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1.5'
       >
         <extra.icon size={16} className='shrink-0 text-muted-foreground' />
         <div className='flex-1 min-w-0 text-[15px] leading-[1.2] tracking-[-0.1px] text-foreground truncate'>
@@ -156,7 +156,7 @@ export function SlashCommandPalette({
                 data-item-label={item.label}
                 onSelect={() => onRunNavSection(item)}
                 onMouseDownCapture={onItemMouseDown}
-                className='flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1.5'
+                className='flex items-center gap-3 p-3 rounded-lg cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1.5'
               >
                 <item.icon size={item.iconSize ?? 16} className='shrink-0 text-muted-foreground' />
                 <div className='flex-1 min-w-0 text-[15px] leading-[1.2] tracking-[-0.1px] text-foreground truncate'>
@@ -194,7 +194,7 @@ export function SlashCommandPalette({
               data-item-label={getUserDisplayName(user)}
               onSelect={() => onRunTarget({ type: 'user', user })}
               onMouseDownCapture={onItemMouseDown}
-              className='flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1.5'
+              className='flex items-center gap-3 p-3 rounded-lg cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1.5'
             >
               <Avatar userId={user.id} size='xs' />
               <div className='flex-1 min-w-0 flex items-center gap-2'>
@@ -219,10 +219,14 @@ export function SlashCommandPalette({
               data-item-label={channel.name}
               onSelect={() => onRunTarget({ type: 'channel', channel })}
               onMouseDownCapture={onItemMouseDown}
-              className='flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1.5'
+              className='flex items-center gap-3 p-3 rounded-lg cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1.5'
             >
               <span className='shrink-0 text-muted-foreground'>
-                <ChannelIcon channel={channel} />
+                <ChannelIcon
+                  channel={channel}
+                  glyphClassName='text-muted-foreground'
+                  avatarSize='xs'
+                />
               </span>
               <div className='flex-1 min-w-0'>
                 <div className='text-[15px] leading-[1.2] tracking-[-0.1px] truncate text-foreground'>
@@ -249,7 +253,7 @@ export function SlashCommandPalette({
                 onRunTarget({ type: 'channel', channel, displayName: label, isDm: true })
               }
               onMouseDownCapture={onItemMouseDown}
-              className='flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1.5'
+              className='flex items-center gap-3 p-3 rounded-lg cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1.5'
             >
               <UserTwo size={16} className='shrink-0 text-muted-foreground' />
               <div className='flex-1 min-w-0'>
