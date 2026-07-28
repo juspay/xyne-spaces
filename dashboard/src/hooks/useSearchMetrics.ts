@@ -10,6 +10,10 @@ import {
   VespaApps,
   VespaDocTypes,
   SearchableTypes,
+  getRelevantTabs,
+  getRelevantAppsParam,
+  filterChipToKind,
+  type FilterKind,
 } from '../components/Chat/ChatDirectory/ChannelCommandMenu.types';
 import { User } from '../machines/stateMachine';
 import { Channel } from '@xyne/shared';
@@ -86,24 +90,39 @@ type MentionBuckets = {
 };
 
 /**
- * Split selected chips into search buckets: a bare (prefix-less) @user/#channel is a *mention*
- * search; explicit from:/with:/assignee:/in: keep their meaning. Shared by all 3 fold-sites.
+ * Chip role (FilterKind) → its bucket. Bare @user/#channel (mention/channelMention) go to the
+ * plural buckets; kinds absent here aren't bucketed (priority is read separately as priorityFilter).
+ */
+const FILTER_KIND_TO_BUCKET: Partial<Record<FilterKind, keyof MentionBuckets>> = {
+  from: 'from',
+  with: 'with',
+  assignee: 'assignee',
+  to: 'to',
+  in: 'in',
+  mention: 'mentions',
+  channelMention: 'channelMentions',
+};
+
+/**
+ * Split selected chips into search buckets, routing each via filterChipToKind (the shared chip
+ * taxonomy in ChannelCommandMenu.types) so bucketing and the relevance registry can't drift.
  */
 function deriveMentionBuckets(selectedMentions: SelectedMention[]): MentionBuckets {
-  const users = selectedMentions.filter(m => m.type === MentionType.USER);
-  const channels = selectedMentions.filter(m => m.type === MentionType.CHANNEL);
-  return {
-    from: users.filter(m => m.prefix === 'from:'),
-    with: users.filter(m => m.prefix === 'with:'),
-    assignee: users.filter(m => m.prefix === 'assignee:'),
-    // to:@user is an email-recipient filter (→ toEmail), not a mention search.
-    to: users.filter(m => m.prefix === 'to:'),
-    // Bare @user (no prefix) is a mention search, not an author filter.
-    mentions: users.filter(m => !m.prefix),
-    in: channels.filter(m => m.prefix === 'in:'),
-    // Bare #channel (no prefix) is a channel-mention search, not a scope.
-    channelMentions: channels.filter(m => !m.prefix),
+  const buckets: MentionBuckets = {
+    from: [],
+    with: [],
+    assignee: [],
+    to: [],
+    mentions: [],
+    in: [],
+    channelMentions: [],
   };
+  for (const mention of selectedMentions) {
+    const kind = filterChipToKind(mention);
+    const bucket = kind ? FILTER_KIND_TO_BUCKET[kind] : undefined;
+    if (bucket) buckets[bucket].push(mention);
+  }
+  return buckets;
 }
 
 interface UseSearchMetricsOptions {
@@ -1139,6 +1158,20 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
               searchFilters.mentionHighlights = mentionHighlights;
             }
 
+            // Relevance of the active filters — computed once here and reused for
+            // both the app narrowing below and the people-merge decision further down.
+            const relevantTabs = getRelevantTabs(selectedMentions, query);
+
+            // Narrow the queried apps to only those a filter can match, so ticket-only filters
+            // (priority:/status:/…) stop scanning chat/file/mail that ignore them. ALL path only:
+            // a specific tab self-scopes, and a canvas/transcript subApp override (above) wins.
+            if (activeTab === TabType.ALL && !searchFilters.subApp) {
+              const relevantAppsParam = getRelevantAppsParam(relevantTabs);
+              if (relevantAppsParam) {
+                searchFilters.apps = relevantAppsParam;
+              }
+            }
+
             let mergedResults: DisplaySearchResult[] = [];
             let totalCount = 0;
             let currentOffset = 0;
@@ -1163,9 +1196,11 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
               // Honor the backend grouping decision: flat response => flat ALL view.
               setIsGrouped(vespaResponse.grouped);
 
-              // Merge local users only when no type filter AND no message-only mention is active
-              // (a bare @user/#channel filter is message-only, so people shouldn't be merged in).
-              if (typeFilter || hasMessageOnlyMention) {
+              // Merge local people only when the active filters make the People category relevant.
+              // from:/in:/assignee:/with:/@/# and non-people type: filters scope to content — people
+              // are noise there. Same relevantTabs that gates the popup's People section.
+              const peopleRelevant = !relevantTabs || relevantTabs.has(TabType.USERS);
+              if (!peopleRelevant) {
                 mergedResults = vespaResponse.results;
                 totalCount = vespaResponse.totalCount;
               } else {
