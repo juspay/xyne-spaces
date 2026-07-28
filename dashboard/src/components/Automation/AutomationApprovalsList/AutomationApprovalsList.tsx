@@ -19,12 +19,19 @@ import { workflowToAutomation } from '../automation.adapter';
 import { AutomationStatusValues, type Automation } from '../Automation.types';
 import { useIsAutomationsAdmin } from '../useIsAutomationsAdmin';
 
+export interface AutomationApprovalsListProps {
+  /** When provided, only proposals passing this predicate are shown. */
+  filterPredicate?: (automation: Automation) => boolean;
+}
+
 /**
  * Approvals inbox — lists every PROPOSAL row in `PENDING_APPROVAL` status
  * across the workspace, with Approve / Reject buttons. Visible only to
  * users with `ADMIN` on the `AUTOMATIONS` resource.
  */
-export function AutomationApprovalsList(): React.ReactElement {
+export function AutomationApprovalsList({
+  filterPredicate,
+}: AutomationApprovalsListProps = {}): React.ReactElement {
   const navigate = useNavigate();
   const me = useSelf();
   const zero = useZero();
@@ -38,11 +45,12 @@ export function AutomationApprovalsList(): React.ReactElement {
 
   const pending: Automation[] = useMemo(() => {
     if (!rows) return [];
-    return rows
+    const mapped = rows
       .map(workflowToAutomation)
       .filter(a => a.status === AutomationStatusValues.PENDING_APPROVAL)
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-  }, [rows]);
+    return filterPredicate ? mapped.filter(filterPredicate) : mapped;
+  }, [rows, filterPredicate]);
 
   const approveMutation = useMutation({
     mutationFn: (id: string): Promise<void> => {

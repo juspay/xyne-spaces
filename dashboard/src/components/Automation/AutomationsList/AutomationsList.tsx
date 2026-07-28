@@ -59,6 +59,7 @@ export function AutomationsList({
   onCreate,
   onOpen,
   onShowRuns,
+  filterPredicate,
 }: AutomationsListProps): React.ReactElement {
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState<ListCategory>('all');
@@ -85,7 +86,10 @@ export function AutomationsList({
 
   const [rows, rowsMeta] = useCachedQuery(queries.automationsList({ workspaceId }));
   const isLoading = !rows || rowsMeta?.type !== 'complete';
-  const adapted: Automation[] = useMemo(() => (rows ?? []).map(workflowToAutomation), [rows]);
+  const adapted: Automation[] = useMemo(() => {
+    const mapped = (rows ?? []).map(workflowToAutomation);
+    return filterPredicate ? mapped.filter(filterPredicate) : mapped;
+  }, [rows, filterPredicate]);
 
   const items: Automation[] = useMemo(() => {
     if (isArchivedTab) {

@@ -8,10 +8,8 @@ import { InboxTab } from './tabs/InboxTab';
 import { AssignmentTab } from './tabs/AssignmentTab';
 import { AutomationTab } from './tabs/AutomationTab';
 import { AIFeaturesTab } from './tabs/AIFeaturesTab';
-import { AiSyncTab } from './tabs/AiSyncTab';
-import { TagsTab } from './tabs/TagsTab';
 import { MetricsTab } from './tabs/MetricsTab';
-import { Inbox, Route, Zap, Bot, RefreshCw, Tag, X, BarChart3 } from 'lucide-react';
+import { Inbox, Route, Zap, Bot, X, BarChart3 } from 'lucide-react';
 
 /** Props for the DeskSettings modal component */
 export interface DeskSettingsProps {
@@ -21,14 +19,7 @@ export interface DeskSettingsProps {
   userID: string | null | undefined;
 }
 
-export type TabId =
-  | 'inbox'
-  | 'assignment'
-  | 'automation'
-  | 'ai-features'
-  | 'ai-sync'
-  | 'tags'
-  | 'metrics';
+export type TabId = 'inbox' | 'assignment' | 'automation' | 'Agent' | 'metrics';
 
 /** Configuration for a single settings tab */
 export interface TabConfig {
@@ -46,11 +37,18 @@ export interface DeskSignature {
 export const DESK_SETTINGS_TABS: { id: TabId; label: string; icon: React.ElementType }[] = [
   { id: 'inbox', label: 'Inbox', icon: Inbox },
   { id: 'assignment', label: 'Assignment & Routing', icon: Route },
-  { id: 'automation', label: 'Automation', icon: Zap },
-  { id: 'tags', label: 'Tag Generation', icon: Tag },
-  { id: 'ai-features', label: 'AI Features', icon: Bot },
-  { id: 'ai-sync', label: 'AI Sync', icon: RefreshCw },
+  { id: 'automation', label: 'Automations', icon: Zap },
+  { id: 'Agent', label: 'Agent', icon: Bot },
   { id: 'metrics', label: 'Metrics', icon: BarChart3 },
+];
+
+export type AIFeaturesSubTabId = 'ai-draft' | 'knowledge' | 'attribution' | 'ai-sync';
+
+export const AI_FEATURES_SUB_TABS: { id: AIFeaturesSubTabId; label: string }[] = [
+  { id: 'ai-draft', label: 'AI Draft' },
+  { id: 'knowledge', label: 'Knowledge' },
+  { id: 'attribution', label: 'Attribution' },
+  { id: 'ai-sync', label: 'AI Sync' },
 ];
 
 /**
@@ -58,6 +56,8 @@ export const DESK_SETTINGS_TABS: { id: TabId; label: string; icon: React.Element
  */
 export const DeskSettings: React.FC<DeskSettingsProps> = ({ open, onClose, channelId, userID }) => {
   const [activeTab, setActiveTab] = useState<TabId>('inbox');
+  const [activeAIFeaturesSubTab, setActiveAIFeaturesSubTab] =
+    useState<AIFeaturesSubTabId>('ai-draft');
   const [signatures] = useCachedQuery(queries.userEmailSignatures());
 
   const form = useDeskSettingsForm(channelId, userID, open);
@@ -72,6 +72,10 @@ export const DeskSettings: React.FC<DeskSettingsProps> = ({ open, onClose, chann
     classificationConfigError,
   } = form;
   const saveBlockedReason = sendAsAliasError ?? classificationConfigError;
+  const effectiveAIFeaturesSubTab =
+    !form.autoAIDraft && activeAIFeaturesSubTab === 'knowledge'
+      ? 'ai-draft'
+      : activeAIFeaturesSubTab;
 
   const [confirmDiscardOpen, setConfirmDiscardOpen] = useState(false);
   const requestClose = useCallback(() => {
@@ -84,7 +88,7 @@ export const DeskSettings: React.FC<DeskSettingsProps> = ({ open, onClose, chann
 
   const availableTabs = useMemo(() => {
     if (isCall) {
-      return DESK_SETTINGS_TABS.filter(tab => ['assignment', 'ai-features'].includes(tab.id));
+      return DESK_SETTINGS_TABS.filter(tab => ['assignment', 'Agent'].includes(tab.id));
     }
     return isEmail ? DESK_SETTINGS_TABS : DESK_SETTINGS_TABS.filter(tab => tab.id !== 'automation');
   }, [isCall, isEmail]);
@@ -106,20 +110,20 @@ export const DeskSettings: React.FC<DeskSettingsProps> = ({ open, onClose, chann
       open={open}
       onOpenChange={handleOpenChange}
       title='Desk Settings'
-      className='max-w-[1200px] max-h-[800px] bg-transparent shadow-none rounded-none'
+      className='left-auto right-0 top-0 bottom-0 translate-x-0 translate-y-0 h-screen w-[80vw] max-w-none max-h-none rounded-l-[16px] rounded-r-none bg-transparent shadow-none'
     >
       {!channelId ? null : (
-        <div className='relative'>
+        <div className='relative h-full w-full'>
           <button
             type='button'
             onClick={requestClose}
-            className='absolute left-[96%] z-10 mt-[8px] ml-2 top-0 flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] border border-desk-border bg-popover text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-foreground dark:border-border'
+            className='absolute right-4 top-4 z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] border border-desk-border bg-popover text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-foreground dark:border-border'
             data-track-category='DeskSettings'
             data-track-name='CloseButton'
           >
             <X size={16} />
           </button>
-          <div className='isolate flex h-[82vh] max-h-[800px] flex-col overflow-hidden rounded-[12px] border border-desk-border bg-popover shadow-lg dark:border-border'>
+          <div className='isolate flex h-full w-full flex-col overflow-hidden rounded-l-[16px] border border-desk-border bg-popover shadow-2xl dark:border-border'>
             <div className='flex flex-1 min-h-0'>
               <div className='w-[240px] shrink-0 flex flex-col px-[8px] border-r border-desk-border dark:border-border'>
                 <div className='text-lg font-semibold text-foreground shrink-0 pt-[24px] px-[8px] pb-[16px]'>
@@ -130,42 +134,78 @@ export const DeskSettings: React.FC<DeskSettingsProps> = ({ open, onClose, chann
                     const Icon = tab.icon;
                     const isActive = activeTab === tab.id;
                     return (
-                      <button
-                        key={tab.id}
-                        type='button'
-                        onClick={() => setActiveTab(tab.id)}
-                        className={cn(
-                          'flex items-center gap-2 px-3 py-2 rounded-[10px] text-sm font-[550] leading-[1.2] tracking-[-0.1px] transition-colors text-left',
-                          isActive
-                            ? 'bg-accent text-foreground'
-                            : 'text-desk-muted hover:bg-accent/50',
+                      <React.Fragment key={tab.id}>
+                        <button
+                          type='button'
+                          onClick={() => setActiveTab(tab.id)}
+                          className={cn(
+                            'flex items-center gap-2 px-3 py-2 rounded-[10px] text-sm font-[550] leading-[1.2] tracking-[-0.1px] transition-colors text-left',
+                            isActive
+                              ? 'bg-accent text-foreground'
+                              : 'text-desk-muted hover:bg-accent/50',
+                          )}
+                          data-track-category='DeskSettings'
+                          data-track-name={`Tab_${tab.id}`}
+                        >
+                          <Icon size={16} />
+                          <span>{tab.label}</span>
+                        </button>
+                        {tab.id === 'Agent' && isActive && (
+                          <div className='flex flex-col gap-[2px] pl-[30px]'>
+                            {AI_FEATURES_SUB_TABS.filter(
+                              subTab => subTab.id !== 'knowledge' || form.autoAIDraft,
+                            ).map(subTab => {
+                              const isSubActive = effectiveAIFeaturesSubTab === subTab.id;
+                              return (
+                                <button
+                                  key={subTab.id}
+                                  type='button'
+                                  onClick={() => setActiveAIFeaturesSubTab(subTab.id)}
+                                  className={cn(
+                                    'px-3 py-1.5 rounded-[8px] text-sm leading-[1.2] tracking-[-0.1px] transition-colors text-left',
+                                    isSubActive
+                                      ? 'text-foreground font-[550] bg-accent/60'
+                                      : 'text-desk-muted hover:bg-accent/40',
+                                  )}
+                                  data-track-category='DeskSettings'
+                                  data-track-name={`AIFeaturesSubTab_${subTab.id}`}
+                                >
+                                  {subTab.label}
+                                </button>
+                              );
+                            })}
+                          </div>
                         )}
-                        data-track-category='DeskSettings'
-                        data-track-name={`Tab_${tab.id}`}
-                      >
-                        <Icon size={16} />
-                        <span>{tab.label}</span>
-                      </button>
+                      </React.Fragment>
                     );
                   })}
                 </div>
               </div>
 
-              <div className='flex-1 min-w-0 overflow-y-auto scrollbar-none pt-[28px] pb-[16px] px-6 md:px-12 lg:px-[86px]'>
-                <div className='flex flex-col gap-[32px]'>
-                  {activeTab === 'inbox' && (
-                    <InboxTab channelId={channelId} form={form} signatures={signatures} />
-                  )}
-                  {activeTab === 'assignment' && <AssignmentTab form={form} />}
-                  {activeTab === 'automation' && <AutomationTab form={form} />}
-                  {activeTab === 'tags' && <TagsTab form={form} />}
-                  {activeTab === 'ai-features' && <AIFeaturesTab form={form} />}
-                  {activeTab === 'ai-sync' && <AiSyncTab channelId={channelId} form={form} />}
-                  {activeTab === 'metrics' && <MetricsTab form={form} />}
+              {activeTab === 'automation' ? (
+                <div className='flex-1 min-w-0 overflow-hidden pt-12'>
+                  <AutomationTab channelId={channelId} form={form} />
                 </div>
-              </div>
+              ) : (
+                <div className='flex-1 min-w-0 overflow-y-auto scrollbar-none pt-[28px] pb-[16px] px-6 md:px-12 lg:px-[86px]'>
+                  <div className='flex flex-col gap-[32px]'>
+                    {activeTab === 'inbox' && (
+                      <InboxTab channelId={channelId} form={form} signatures={signatures} />
+                    )}
+                    {activeTab === 'assignment' && <AssignmentTab form={form} />}
+                    {activeTab === 'Agent' && (
+                      <AIFeaturesTab
+                        channelId={channelId}
+                        form={form}
+                        section={effectiveAIFeaturesSubTab}
+                      />
+                    )}
+                    {activeTab === 'metrics' && <MetricsTab form={form} />}
+                  </div>
+                </div>
+              )}
             </div>
-            {isDirty && activeTab !== 'ai-sync' && activeTab !== 'tags' && (
+            {isDirty && activeTab !== 'automation' && (
               <div className='shrink-0 border-t border-desk-border px-6 md:px-12 lg:px-[86px] py-[12px] dark:border-border'>
                 <div className='flex items-center justify-end gap-[8px]'>
                   <button
