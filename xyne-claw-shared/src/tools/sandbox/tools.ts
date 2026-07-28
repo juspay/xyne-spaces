@@ -731,6 +731,7 @@ export const sandboxWriteFile: ToolDefinition = {
 const BINARY_MIME: Record<string, string> = {
   png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
   gif: "image/gif", webp: "image/webp", svg: "image/svg+xml",
+  mp4: "video/mp4",
   pdf: "application/pdf", zip: "application/zip",
 };
 

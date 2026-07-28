@@ -1,0 +1,10 @@
+# Formatting is rolled out module-by-module as each reaches the Code
+# Constitution standard (same ratchet as eslint). Currently in scope:
+# src/surfaces/slack only.
+/**
+!/src
+/src/**
+!/src/surfaces
+/src/surfaces/**
+!/src/surfaces/slack
+!/src/surfaces/slack/**

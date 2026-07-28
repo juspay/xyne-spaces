@@ -83,13 +83,23 @@ export class Session {
     process.off("uncaughtException", this.exitHandler);
     process.off("unhandledRejection", this.exitHandler);
 
-    await this.k8sClient.deleteNamespacedCustomObject(
-      SANDBOX_CLAIMS_GROUP,
-      SANDBOX_CLAIMS_VERSION,
-      this.namespace,
-      SANDBOX_CLAIMS_PLURAL,
-      this.claimName,
-    );
+    // Idempotent delete: the claim may already be gone (idle/shutdown timer,
+    // a concurrent destroy, or operator cleanup). A 404 here is success, not
+    // an error — and this call often runs un-awaited from timers, so a thrown
+    // 404 surfaces as an unhandledRejection in the host process.
+    try {
+      await this.k8sClient.deleteNamespacedCustomObject(
+        SANDBOX_CLAIMS_GROUP,
+        SANDBOX_CLAIMS_VERSION,
+        this.namespace,
+        SANDBOX_CLAIMS_PLURAL,
+        this.claimName,
+      );
+    } catch (err) {
+      const status = (err as { statusCode?: number; response?: { statusCode?: number } });
+      const code = status.statusCode ?? status.response?.statusCode;
+      if (code !== 404) throw err;
+    }
   }
 
   async [Symbol.asyncDispose](): Promise<void> {

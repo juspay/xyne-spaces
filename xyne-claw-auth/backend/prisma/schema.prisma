@@ -311,14 +311,58 @@ model SurfaceAgent {
   surface          Surface  @relation(fields: [surfaceId], references: [id], onDelete: Restrict)
   surfaceTenantId  String   @default("")
   surfaceChannelId String?
+  /// The surface-side application identity (Slack app id, Teams bot id).
+  /// Events arrive tagged with this; unique per surface so the reverse
+  /// lookup (app -> agent) is guaranteed single-owner.
+  externalAppId    String?
+  /// Non-secret OAuth client identifier of the surface app.
+  clientId         String?
+  /// AES-GCM `ciphertext:iv:authTag` — never stored plaintext.
+  encryptedClientSecret String? @db.Text
   signingSecret    String?  @db.Text
+  /// Slash-command name bound to this agent (e.g. "/euler-doctor").
+  commandName      String?
+  /// ConnectedSurface row whose bot token answers this agent's slash
+  /// commands (the umbrella app's team connection). Read at dispatch time.
+  commandConnectedSurfaceId String?
+  /// Registration lifecycle: "created" (app minted) | "installed".
+  status           String?
+  /// sha256 of the manifest template last pushed to the surface app —
+  /// compared against the current template to detect drift.
+  manifestHash     String?
+  manifestSyncedAt DateTime?
+  /// Surface-idiosyncratic residue ONLY (validated by the surface's schema);
+  /// anything the core queries must be a real column above.
   config           Json?
+  installs         SurfaceAgentInstall[]
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
   @@unique([agentId, surfaceId, surfaceTenantId])
+  @@unique([surfaceId, externalAppId])
   @@index([surfaceId])
   @@map("surface_agents")
+}
+
+/// One row per workspace/tenant a surface app is installed into: the
+/// credential produced by that tenant's consent. (Slack: workspace bot
+/// token; Teams: per-AAD-tenant install.)
+model SurfaceAgentInstall {
+  id                String       @id @default(cuid())
+  surfaceAgentId    String
+  surfaceAgent      SurfaceAgent @relation(fields: [surfaceAgentId], references: [id], onDelete: Cascade)
+  surfaceTenantId   String
+  /// AES-GCM `ciphertext:iv:authTag`.
+  encryptedBotToken String       @db.Text
+  tenantName        String?
+  botUserId         String?
+  installedByUserId String?
+  installedAt       DateTime     @default(now())
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  @@unique([surfaceAgentId, surfaceTenantId])
+  @@map("surface_agent_installs")
 }
 
 model SurfaceAccessToken {
@@ -2011,4 +2055,62 @@ model ErrorBucket {
 
   @@index([enabled, matchOrder])
   @@map("error_buckets")
+}
+
+model EntityTypeDefinition {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
+  id          String  @id @default(cuid())
+
+  name     String // "GATEWAY" — used verbatim in prompts and on entities
+  prefix   String // "gw" — entity id prefix, for readability only
+  rule     String // decision rule, injected verbatim into the extraction prompt
+  examples String[] @default([]) // 3-5 real spans, teaching the model the formatting range
+
+  status           String    @default("PROPOSED") // PROPOSED | APPROVED | DEPRECATED
+  proposedInRunId  String?
+  approvedByUserId String?
+  approvedAt       DateTime?
+  deprecatedReason String? // required when status = DEPRECATED
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  // Stops channel B inventing GATEWAY_2 when channel A already defined GATEWAY.
+  @@unique([workspaceId, name])
+  @@index([workspaceId, status])
+  @@map("entity_type_definitions")
+}
+
+/// One type-discovery pass over one channel.
+model EntityExtractionRun {
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
+  id          String  @id @default(cuid())
+  channelId   String
+
+  status String @default("RUNNING") // RUNNING | AWAITING_TYPE_APPROVAL | COMPLETED | FAILED | CANCELLED
+  stage  String @default("FETCHING_MESSAGES") // FETCHING_MESSAGES | DISCOVERING_TYPES | DONE
+
+  /// Full settings snapshot, so a run can be reproduced or explained later.
+  settings      Json
+  /// Types the pipeline proposed, awaiting human approval. Approving creates
+  /// EntityTypeDefinition rows rather than editing this back.
+  proposedTypes Json?
+
+  messageCount  Int @default(0)
+  documentCount Int @default(0)
+
+  /// Type names a human approved on this run. The per-channel set written to
+  /// Vespa is the union of this across the channel's completed runs, so a
+  /// second run on the same channel adds to the channel's vocabulary rather
+  /// than replacing it.
+  approvedTypeNames String[] @default([])
+
+  triggeredByUserId String?
+  startedAt         DateTime  @default(now())
+  completedAt       DateTime?
+  errorMessage      String?
+
+  @@index([workspaceId, channelId, status])
+  @@index([workspaceId, status])
+  @@map("entity_extraction_runs")
 }

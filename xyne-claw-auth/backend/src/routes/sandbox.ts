@@ -6,10 +6,9 @@ const router = Router();
 /**
  * Catalog of sandbox repo setups for the agent-config UI (the "Sandbox
  * repository" dropdown). Single source of truth: REPO_CONFIGS in
- * xyne-claw-shared — the SAME object the xyne-claw runtime uses to actually
- * set the sandbox up. Currently empty — the repo catalog used to be
- * hardcoded there (real internal repo URLs) and is being moved to a DB
- * table; until that's wired up, this returns no repos.
+ * xyne-claw-shared — the SAME object the xyne-claw runtime uses to actually set
+ * the sandbox up. Add a repo to REPO_CONFIGS and it appears here automatically;
+ * no hardcoding / drift.
  *
  * GET /api/v1/sandbox/repos → { success, data: [{ key, name, description }] }
  */

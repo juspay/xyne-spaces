@@ -7,6 +7,9 @@ RUNNER_IMAGE_NAME ?= xyne-spaces-runner
 DASHBOARD_IMAGE_NAME ?= xyne-spaces-dashboard
 EXTERNAL_DASHBOARD_IMAGE_NAME ?= xyne-spaces-dashboard-external
 LIGHTON_OCR_WRAPPER_IMAGE_NAME ?= lighton-ocr-server
+CLAW_IMAGE_NAME ?= xyne-spaces-claw
+CLAW_AUTH_BACKEND_IMAGE_NAME ?= xyne-spaces-claw-auth-backend
+CLAW_AUTH_FRONTEND_IMAGE_NAME ?= xyne-spaces-claw-auth-frontend
 SOURCE_COMMIT := $(shell git rev-parse HEAD)
 SOURCE_SHORT_COMMIT ?= $(shell git rev-parse --short=10 HEAD)
 
@@ -92,6 +95,52 @@ clean-lighton-ocr-wrapper:
 	docker rmi $(LIGHTON_OCR_WRAPPER_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) || true
 	docker rmi $(NS)/$(LIGHTON_OCR_WRAPPER_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) || true
 
+# Claw runtime targets (xyne-claw — the agent runtime). Root build context (.)
+# because the Dockerfile COPYs xyne-claw-shared/ and packages/kata-sdk/ too.
+build-claw:
+	$(info Building $(CLAW_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) / git-head: $(SOURCE_COMMIT))
+	$(info Local image: $(CLAW_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
+	docker buildx build -f xyne-claw/Dockerfile -t $(CLAW_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --load .
+
+push-claw:
+	$(info Pushing to registry: $(NS)/$(CLAW_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
+	docker buildx build -f xyne-claw/Dockerfile -t $(NS)/$(CLAW_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --push .
+	$(info Successfully pushed: $(NS)/$(CLAW_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
+
+clean-claw:
+	docker rmi $(CLAW_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) || true
+	docker rmi $(NS)/$(CLAW_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) || true
+
+# Claw-auth backend targets
+build-claw-auth-backend:
+	$(info Building $(CLAW_AUTH_BACKEND_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) / git-head: $(SOURCE_COMMIT))
+	$(info Local image: $(CLAW_AUTH_BACKEND_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
+	docker buildx build -f xyne-claw-auth/backend/Dockerfile -t $(CLAW_AUTH_BACKEND_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --load .
+
+push-claw-auth-backend:
+	$(info Pushing to registry: $(NS)/$(CLAW_AUTH_BACKEND_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
+	docker buildx build -f xyne-claw-auth/backend/Dockerfile -t $(NS)/$(CLAW_AUTH_BACKEND_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --push .
+	$(info Successfully pushed: $(NS)/$(CLAW_AUTH_BACKEND_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
+
+clean-claw-auth-backend:
+	docker rmi $(CLAW_AUTH_BACKEND_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) || true
+	docker rmi $(NS)/$(CLAW_AUTH_BACKEND_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) || true
+
+# Claw-auth frontend targets (nginx-served SPA)
+build-claw-auth-frontend:
+	$(info Building $(CLAW_AUTH_FRONTEND_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) / git-head: $(SOURCE_COMMIT))
+	$(info Local image: $(CLAW_AUTH_FRONTEND_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
+	docker buildx build -f xyne-claw-auth/frontend/Dockerfile -t $(CLAW_AUTH_FRONTEND_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --load .
+
+push-claw-auth-frontend:
+	$(info Pushing to registry: $(NS)/$(CLAW_AUTH_FRONTEND_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
+	docker buildx build -f xyne-claw-auth/frontend/Dockerfile -t $(NS)/$(CLAW_AUTH_FRONTEND_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --push .
+	$(info Successfully pushed: $(NS)/$(CLAW_AUTH_FRONTEND_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
+
+clean-claw-auth-frontend:
+	docker rmi $(CLAW_AUTH_FRONTEND_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) || true
+	docker rmi $(NS)/$(CLAW_AUTH_FRONTEND_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) || true
+
 # push-built-* : push an image that the matching build-* target already built into this
 # machine's Docker daemon (retag that image to the registry ref and push it). Used by CI
 # so the EXACT image Trivy scanned is what gets pushed - no rebuild, no registry round-trip.
@@ -138,12 +187,19 @@ run-pr-police:
 		xyne-spaces-ci:$(SOURCE_SHORT_COMMIT) \
 		sh -c 'cat > /tmp/gcp-creds.json && export GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcp-creds.json && npm run yama review -- --workspace XYNE --repository xyne-spaces --branch $(BRANCH_NAME)'
 
+# Combined claw targets
+build-claw-all: build-claw build-claw-auth-backend build-claw-auth-frontend
+
+push-claw-all: push-claw push-claw-auth-backend push-claw-auth-frontend
+
+clean-claw-all: clean-claw clean-claw-auth-backend clean-claw-auth-frontend
+
 # Combined targets
-build-all: build-backend build-runner build-dashboard build-external-dashboard build-lighton-ocr-wrapper
+build-all: build-backend build-runner build-dashboard build-external-dashboard build-lighton-ocr-wrapper build-claw-all
 
-push-all: push-backend push-runner push-dashboard push-external-dashboard push-lighton-ocr-wrapper
+push-all: push-backend push-runner push-dashboard push-external-dashboard push-lighton-ocr-wrapper push-claw-all
 
-clean-all: clean-backend clean-runner clean-dashboard clean-external-dashboard clean-lighton-ocr-wrapper
+clean-all: clean-backend clean-runner clean-dashboard clean-external-dashboard clean-lighton-ocr-wrapper clean-claw-all
 
 test:
 	$(info Running tests for all components)
@@ -158,4 +214,4 @@ configure-docker:
 revoke-sa:
 	gcloud auth revoke $(SERVICE_ACCOUNT) -q || true
 
-.PHONY: build-backend push-backend clean-backend prisma-generate build-runner push-runner clean-runner build-dashboard push-dashboard clean-dashboard build-external-dashboard push-external-dashboard clean-external-dashboard build-lighton-ocr-wrapper push-lighton-ocr-wrapper clean-lighton-ocr-wrapper lint-dashboard typecheck run-pr-police build-all push-all clean-all test configure-docker revoke-sa
+.PHONY: build-backend push-backend clean-backend prisma-generate build-runner push-runner clean-runner build-dashboard push-dashboard clean-dashboard build-external-dashboard push-external-dashboard clean-external-dashboard build-lighton-ocr-wrapper push-lighton-ocr-wrapper clean-lighton-ocr-wrapper build-claw push-claw clean-claw build-claw-auth-backend push-claw-auth-backend clean-claw-auth-backend build-claw-auth-frontend push-claw-auth-frontend clean-claw-auth-frontend build-claw-all push-claw-all clean-claw-all lint-dashboard typecheck run-pr-police build-all push-all clean-all test configure-docker revoke-sa

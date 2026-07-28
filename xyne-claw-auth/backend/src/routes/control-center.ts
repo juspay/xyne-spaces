@@ -24,6 +24,15 @@ import { redisService } from "../redis.js";
 import { requireClawAdmin, getRequesterId } from "../middleware/agent-acl.js";
 import { requireS2S } from "../middleware/require-auth.js";
 import { getAdminOrgScope, getOrgNameMap, withOrgLabel } from "../lib/admin-org-scope.js";
+import {
+  computeReplyAgg,
+  computeGateAgg,
+  computeBehaviorAgg,
+  computePerUser,
+  type ReplyFeedbackRow,
+  type GateEventRow,
+  type BehaviorRow,
+} from "../lib/twin-reply-metrics.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("control-center");
@@ -639,5 +648,219 @@ router.get("/events", requireClawAdmin, async (req: Request, res: Response) => {
     ccBus.off("cc", listener);
   });
 });
+
+/* ─────────────────────────────────────────────────────────────────────
+   GET /twin-reply-metrics — admin Digital-Twin "Reply activity" metrics.
+
+   Cross-user, admin-only rollup of the twin REPLY system (distinct from the
+   per-user memory-candidate "Approval metrics"):
+     - TwinResponseFeedback      → approvals / edits / declines / ignored +
+                                    response time (proposed → decided).
+     - DigitalTwinPipelineEvent  → respond/ignore GATE accepts / declines /
+       (runType="gate")            errors, confidence, decision source.
+     - TwinBehaviorSignal        → ground-truth responded/ignored + wrong
+                                    silences.
+
+   Scope: own org by default; `?orgScope=all` widens to all orgs. Window:
+   `?days=N` (preset, with prev-period deltas) OR `?from=&to=` ISO custom range.
+
+   The twin tables are keyed by userId only (no orgId column), so org scoping
+   resolves the org's user ids first and filters `userId IN (...)`. All-orgs
+   skips the filter entirely.
+   ───────────────────────────────────────────────────────────────────── */
+
+// Bound the per-request row scan so a huge window can't blow memory. Counts are
+// exact up to the cap; we log a warning (never silently truncate) if hit.
+const TWIN_ROW_CAP = 50_000;
+const TWIN_USER_LIMIT = 200;
+
+function parseWindow(req: Request): {
+  since: Date | null;
+  until: Date | null;
+  days: number | null;
+  prevSince: Date | null;
+  prevUntil: Date | null;
+} {
+  const fromRaw = typeof req.query["from"] === "string" ? req.query["from"] : "";
+  const toRaw = typeof req.query["to"] === "string" ? req.query["to"] : "";
+  const fromDate = fromRaw ? new Date(fromRaw) : null;
+  const toDate = toRaw ? new Date(toRaw) : null;
+  const validFrom = fromDate && !Number.isNaN(fromDate.getTime()) ? fromDate : null;
+  const validTo = toDate && !Number.isNaN(toDate.getTime()) ? toDate : null;
+
+  // Explicit custom range takes precedence; no prev-period deltas for it.
+  if (validFrom || validTo) {
+    return { since: validFrom, until: validTo, days: null, prevSince: null, prevUntil: null };
+  }
+
+  const daysParam = Number(req.query["days"]);
+  if (!Number.isNaN(daysParam) && daysParam > 0) {
+    const ms = daysParam * 24 * 60 * 60 * 1000;
+    const since = new Date(Date.now() - ms);
+    return {
+      since,
+      until: null,
+      days: daysParam,
+      prevSince: new Date(since.getTime() - ms),
+      prevUntil: since,
+    };
+  }
+
+  return { since: null, until: null, days: null, prevSince: null, prevUntil: null };
+}
+
+/** Prisma date filter for a field over [since, until). */
+function dateFilter(
+  field: string,
+  since: Date | null,
+  until: Date | null,
+): Record<string, unknown> {
+  if (!since && !until) return {};
+  const range: Record<string, Date> = {};
+  if (since) range["gte"] = since;
+  if (until) range["lt"] = until;
+  return { [field]: range };
+}
+
+router.get("/twin-reply-metrics", requireClawAdmin, async (req: Request, res: Response) => {
+  try {
+    const scope = getAdminOrgScope(req, "/control-center/twin-reply-metrics");
+    const { since, until, days, prevSince, prevUntil } = parseWindow(req);
+
+    // Resolve the user identities we can attribute rows to (and, when org-scoped,
+    // the id whitelist to filter on).
+    const users = await prisma.user.findMany({
+      where: scope.orgId ? { orgId: scope.orgId } : {},
+      select: { id: true, name: true, email: true },
+    });
+
+    if (scope.orgId && users.length === 0) {
+      res.json({
+        success: true,
+        data: emptyTwinReplyMetrics(scope, since, until, days),
+      });
+      return;
+    }
+
+    const orgUserIds = users.map((u) => u.id);
+    const userFilter = scope.orgId ? { userId: { in: orgUserIds } } : {};
+
+    const [replyRowsRaw, gateRowsRaw, behaviorRowsRaw] = await Promise.all([
+      prisma.twinResponseFeedback.findMany({
+        where: { ...userFilter, ...dateFilter("proposedAt", since, until) },
+        select: { userId: true, status: true, deliveryAction: true, proposedAt: true, decidedAt: true },
+        orderBy: { proposedAt: "desc" },
+        take: TWIN_ROW_CAP,
+      }),
+      prisma.digitalTwinPipelineEvent.findMany({
+        where: { ...userFilter, runType: "gate", ...dateFilter("createdAt", since, until) },
+        select: { userId: true, status: true, durationMs: true, trace: true },
+        orderBy: { createdAt: "desc" },
+        take: TWIN_ROW_CAP,
+      }),
+      prisma.twinBehaviorSignal.findMany({
+        where: { ...userFilter, ...dateFilter("occurredAt", since, until) },
+        select: { userId: true, outcome: true, gateDecision: true, shouldHaveResponded: true },
+        orderBy: { occurredAt: "desc" },
+        take: TWIN_ROW_CAP,
+      }),
+    ]);
+
+    for (const [label, rows] of [
+      ["reply-feedback", replyRowsRaw],
+      ["gate-events", gateRowsRaw],
+      ["behavior-signals", behaviorRowsRaw],
+    ] as const) {
+      if (rows.length >= TWIN_ROW_CAP) {
+        log.warn(`[control-center] twin-reply-metrics ${label} hit row cap ${TWIN_ROW_CAP}; totals truncated`);
+      }
+    }
+
+    const replyRows = replyRowsRaw as ReplyFeedbackRow[];
+    const gateRows = gateRowsRaw as GateEventRow[];
+    const behaviorRows = behaviorRowsRaw as BehaviorRow[];
+
+    const replies = computeReplyAgg(replyRows);
+    const gate = computeGateAgg(gateRows);
+    const behavior = computeBehaviorAgg(behaviorRows);
+
+    const allUserRows = computePerUser(users, replyRows, gateRows, behaviorRows);
+    const byUser = allUserRows.slice(0, TWIN_USER_LIMIT);
+    if (allUserRows.length > TWIN_USER_LIMIT) {
+      log.warn(`[control-center] twin-reply-metrics returning top ${TWIN_USER_LIMIT} of ${allUserRows.length} users`);
+    }
+
+    // Previous-period deltas (preset windows only).
+    let previousApprovalRate: number | null = null;
+    let previousEditRate: number | null = null;
+    let previousRespondRate: number | null = null;
+    if (prevSince && prevUntil) {
+      const [prevReplyRaw, prevGateRaw] = await Promise.all([
+        prisma.twinResponseFeedback.findMany({
+          where: { ...userFilter, ...dateFilter("proposedAt", prevSince, prevUntil) },
+          select: { userId: true, status: true, deliveryAction: true, proposedAt: true, decidedAt: true },
+          take: TWIN_ROW_CAP,
+        }),
+        prisma.digitalTwinPipelineEvent.findMany({
+          where: { ...userFilter, runType: "gate", ...dateFilter("createdAt", prevSince, prevUntil) },
+          select: { userId: true, status: true, durationMs: true, trace: true },
+          take: TWIN_ROW_CAP,
+        }),
+      ]);
+      const prevReply = computeReplyAgg(prevReplyRaw as ReplyFeedbackRow[]);
+      const prevGate = computeGateAgg(prevGateRaw as GateEventRow[]);
+      previousApprovalRate = prevReply.approvalRate;
+      previousEditRate = prevReply.editRate;
+      previousRespondRate = prevGate.respondRate;
+    }
+
+    res.json({
+      success: true,
+      data: {
+        scope: {
+          orgScope: scope.allOrgs ? "all" : "org",
+          userCount: users.length,
+        },
+        window: {
+          since: since ? since.toISOString() : null,
+          until: until ? until.toISOString() : null,
+          days,
+        },
+        replies: { ...replies, previousApprovalRate, previousEditRate },
+        gate: { ...gate, previousRespondRate },
+        behavior,
+        byUser,
+      },
+    });
+  } catch (err) {
+    log.error("[control-center] twin-reply-metrics error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+/** Zero-valued payload for an org with no users (keeps the client shape stable). */
+function emptyTwinReplyMetrics(
+  scope: { allOrgs: boolean },
+  since: Date | null,
+  until: Date | null,
+  days: number | null,
+): unknown {
+  return {
+    scope: { orgScope: scope.allOrgs ? "all" : "org", userCount: 0 },
+    window: {
+      since: since ? since.toISOString() : null,
+      until: until ? until.toISOString() : null,
+      days,
+    },
+    replies: {
+      ...computeReplyAgg([]),
+      previousApprovalRate: null,
+      previousEditRate: null,
+    },
+    gate: { ...computeGateAgg([]), previousRespondRate: null },
+    behavior: computeBehaviorAgg([]),
+    byUser: [],
+  };
+}
 
 export { router as controlCenterRouter };

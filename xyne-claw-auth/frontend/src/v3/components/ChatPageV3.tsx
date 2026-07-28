@@ -3255,6 +3255,16 @@ export function ChatPageV3() {
   // We don't keep this in state; once we've auto-loaded the conv once we
   // mark it consumed so URL changes from in-page nav don't re-trigger.
   const urlConversation = searchParams.get("conversation");
+  // ?allRuns=1 — set by the agent "All Runs" inspector when an admin deep-links
+  // into ANOTHER user's conversation. It opts this view into cross-user reads
+  // (backend gates on admin + this flag). It applies ONLY to the deep-linked
+  // conversation: the instant the user opens any other (their own) conversation,
+  // allRunsActive() returns false and the view is own-turns-only again.
+  const urlAllRuns = searchParams.get("allRuns") === "1";
+  const allRunsActive = useCallback(
+    (cid: string | null | undefined): boolean => !!cid && urlAllRuns && cid === urlConversation,
+    [urlAllRuns, urlConversation],
+  );
   const consumedDeepLinkRef = useRef<string | null>(null);
   const activeAgentSlug = urlAgent ?? ctxAgentSlug;
   const setActiveAgentSlug = useCallback(
@@ -3591,7 +3601,7 @@ export function ChatPageV3() {
               (!conversationId && !sending && messages.length === 0));
           if (shouldLoad && targetConvId) {
             if (deepLinkTarget) consumedDeepLinkRef.current = deepLinkTarget;
-            pollChatMessages(activeAgentSlug, targetConvId)
+            pollChatMessages(activeAgentSlug, targetConvId, allRunsActive(targetConvId))
               .then(({ messages: msgs, invocationsByMsgId, reasoningByMsgId }) => {
                 // Skip auto-load if the user started sending while we were
                 // fetching — the draft session is already the active one.
@@ -3657,7 +3667,7 @@ export function ChatPageV3() {
         applyLiveEvent(convId, { type: "done" });
         let attempts = 0;
         const tryLoad = () => {
-          pollChatMessages(slug, convId)
+          pollChatMessages(slug, convId, allRunsActive(convId))
             .then(({ messages: msgs, invocationsByMsgId: invMap, reasoningByMsgId: reasonMap }) => {
               const last = msgs[msgs.length - 1];
               if (last?.role !== "assistant" && attempts < 4) {
@@ -3671,9 +3681,9 @@ export function ChatPageV3() {
         };
         tryLoad();
       },
-    });
+    }, allRunsActive(convId));
     return close;
-  }, [conversationId, activeAgentSlug, userId, sending, applyLiveEvent, loadConversation]);
+  }, [conversationId, activeAgentSlug, userId, sending, applyLiveEvent, loadConversation, allRunsActive]);
 
   /* When a new conversation row is created mid-stream (SSE meta event), pull
    * the freshly persisted conversation into the sidebar so the user can click
@@ -3777,7 +3787,7 @@ export function ChatPageV3() {
   const handleSelectConv = useCallback(async (conv: ConversationWithAgent) => {
     const switchingAgent = conv.agentSlug !== activeAgentSlug;
     try {
-      const { messages: msgs, invocationsByMsgId, reasoningByMsgId } = await pollChatMessages(conv.agentSlug, conv.conversationId);
+      const { messages: msgs, invocationsByMsgId, reasoningByMsgId } = await pollChatMessages(conv.agentSlug, conv.conversationId, allRunsActive(conv.conversationId));
       loadConversation(msgs, conv.conversationId, invocationsByMsgId, reasoningByMsgId);
       setSelectedCitation(null);
       // Per-chat model pick doesn't carry across conversations — start each at
@@ -3797,7 +3807,7 @@ export function ChatPageV3() {
     } catch {
       // no-op — error is non-critical
     }
-  }, [activeAgentSlug, loadConversation, userId]);
+  }, [activeAgentSlug, loadConversation, userId, allRunsActive]);
 
   const handleNewConversation = useCallback(() => {
     if (activeAgent) {

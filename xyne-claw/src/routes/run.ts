@@ -5,6 +5,8 @@ import { publishHandoffSignal } from "../handoff-redis.js";
 import {
   runTask,
   pushAttachment,
+  pushInvocation,
+  pushDebugProgress,
   applyCopilotProxyIfNeeded,
   RunHandoffError,
   RunCancelledError,
@@ -48,6 +50,16 @@ import {
   type StructuredOutputRef,
 } from "../agent-model-settings.js";
 import { fetchLiteLLMWithRetry } from "../litellm-retry.js";
+import {
+  asFollowUpPendingQuestion,
+  buildFollowUpGenerationEndEvent,
+  buildFollowUpGenerationStartEvent,
+  generateFollowUpSuggestions,
+  normalizeFollowUpAgentContext,
+  normalizeFollowUpConversationHistory,
+  shouldGenerateFollowUpsForRun,
+  type FollowUpGenerationResult,
+} from "../follow-up-generator.js";
 import {
   buildSubagentTools,
   loadDeepwikiTools,
@@ -111,6 +123,7 @@ import { ingestAttachments } from "../attachment-ingest.js";
 import { metric } from "../metrics.js";
 import { runWithProviderFallback } from "../provider-fallback.js";
 import { isDraining } from "../drain.js";
+import { parseTaskCommand } from "../task-commands.js";
 import { createLogger } from "../logger.js";
 
 const clog = createLogger("run");
@@ -369,6 +382,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     twinDestinations,
     senderName,
     channelName,
+    generateFollowUpSuggestions: shouldGenerateFollowUpSuggestions,
   } = req.body as {
     userId?: string;
     userName?: string;
@@ -474,6 +488,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
      *  raw sender id. Set by claw-auth webhook.ts on USER_MENTIONED dispatches. */
     senderName?: string;
     channelName?: string;
+    generateFollowUpSuggestions?: boolean;
   };
 
   // [AUTODBG] claw-side receipt of every /run forward (esp. automations). Confirms
@@ -717,6 +732,8 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
       twinDestinations,
       senderName,
       channelName,
+      shouldGenerateFollowUpSuggestions,
+      typeof callbackUrl === "string" ? callbackUrl : undefined,
     ).finally(() => {
       if (activeRun.handoffCapTimer) clearTimeout(activeRun.handoffCapTimer);
       activeRuns.delete(sessionId);
@@ -836,6 +853,8 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
         twinDestinations,
         senderName,
         channelName,
+        shouldGenerateFollowUpSuggestions,
+        typeof callbackUrl === "string" ? callbackUrl : undefined,
       );
     } catch (err) {
       processTaskError = err;
@@ -932,6 +951,8 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     twinDestinations,
     senderName,
     channelName,
+    shouldGenerateFollowUpSuggestions,
+    typeof callbackUrl === "string" ? callbackUrl : undefined,
   ).finally(() => {
     if (activeRun.handoffCapTimer) clearTimeout(activeRun.handoffCapTimer);
     activeRuns.delete(sessionId);
@@ -1277,6 +1298,8 @@ async function processTask(
   twinDestinations?: import("xyne-claw-shared").TwinDestinationCandidate[],
   senderName?: string,
   channelName?: string,
+  shouldGenerateFollowUpSuggestions?: boolean,
+  lateFollowUpCallbackUrl?: string,
 ): Promise<void> {
   let mcpCleanup: (() => Promise<void>) | undefined;
   const tid = traceId ?? sessionId.slice(0, 8);
@@ -1403,6 +1426,25 @@ async function processTask(
   let pendingGoalSuggestion: PendingGoalSuggestion | null = null;
   let callbackProvider = provider ?? "spaces";
   let callbackModel = LITELLM.model;
+  const followUpsEnabledByFlag = shouldGenerateFollowUpSuggestions === true;
+  const followUpsEnabled = followUpsEnabledByFlag;
+  const followUpAgentContext = normalizeFollowUpAgentContext(
+    agentConfig?.["followUpAgentContext"],
+  );
+  const followUpConversationHistory = normalizeFollowUpConversationHistory(
+    agentConfig?.["followUpConversationHistory"],
+  );
+  const followUpGenerationInput = followUpConversationHistory.length > 0
+    ? "conversation_history_and_prompt"
+    : "prompt_only";
+  const parallelFollowUpStartedAt = new Date().toISOString();
+  const parallelFollowUpDebugSeq = Date.now();
+  let parallelFollowUpResult:
+    | { generation: FollowUpGenerationResult; completedAt: string }
+    | undefined;
+  let parallelFollowUpPromise:
+    | Promise<{ generation: FollowUpGenerationResult; completedAt: string }>
+    | undefined;
 
   try {
     // SSRF guard: progressUrl is caller-supplied and gets POSTed to on every
@@ -1419,6 +1461,49 @@ async function processTask(
     log(
       `Session ${sessionId}: starting for user ${userId}, progressUrl=${progressUrlLabel}`,
     );
+    if (followUpsEnabled) {
+      // Follow-ups use prior conversation plus the current user prompt, but
+      // never wait for the current assistant response. This fast-model request
+      // overlaps the main agent run and stays off the answer's critical path.
+      pushDebugProgress(
+        progressUrl,
+        sessionId,
+        buildFollowUpGenerationStartEvent({
+          seq: parallelFollowUpDebugSeq,
+          at: parallelFollowUpStartedAt,
+          sessionId,
+          model: LITELLM.fastModel,
+          generationInput: followUpGenerationInput,
+          conversationMessageCount: followUpConversationHistory.length,
+          ...(followUpAgentContext ? { agentContext: followUpAgentContext } : {}),
+        }),
+      );
+      parallelFollowUpPromise = generateFollowUpSuggestions(
+        task,
+        followUpAgentContext,
+        followUpConversationHistory,
+        abortSignal,
+      ).then((generation) => {
+        const settled = { generation, completedAt: new Date().toISOString() };
+        pushDebugProgress(
+          progressUrl,
+          sessionId,
+          buildFollowUpGenerationEndEvent({
+            seq: parallelFollowUpDebugSeq + 1,
+            at: settled.completedAt,
+            startedAt: parallelFollowUpStartedAt,
+            sessionId,
+            model: LITELLM.fastModel,
+            generationInput: followUpGenerationInput,
+            conversationMessageCount: followUpConversationHistory.length,
+            ...(followUpAgentContext ? { agentContext: followUpAgentContext } : {}),
+            generation,
+          }),
+        );
+        parallelFollowUpResult = settled;
+        return settled;
+      });
+    }
 
     // All per-type attachment ingestion (filter → decode → convert to a
     // `.context/` markdown sibling, plus the pdf/video/zip side effects) lives
@@ -2574,6 +2659,22 @@ async function processTask(
 
     const tools = allTools.length > 0 ? allTools : undefined;
 
+    // Task commands (/explainer …): a leading command binds the run to a
+    // required tool — instruction injected here, exit gated in runTask.
+    const taskCommand = parseTaskCommand(task);
+    const taskCommandToolAvailable =
+      taskCommand !== null && allTools.some((t) => t.name === taskCommand.requiredTool);
+    if (taskCommand) {
+      activeInjections.push({
+        id: `__task-command-${taskCommand.command.slice(1)}`,
+        label: `Command: ${taskCommand.command}`,
+        content: taskCommandToolAvailable ? taskCommand.instruction : taskCommand.missingToolInstruction,
+      });
+      log(
+        `[task-command] ${taskCommand.command} → requires ${taskCommand.requiredTool} (available=${taskCommandToolAvailable})`,
+      );
+    }
+
     // Inject event type into context so the agent knows how it was invoked
     let fullContext = context;
     if (eventType) {
@@ -3036,8 +3137,12 @@ async function processTask(
           resolvedTriggers.length > 0 ? resolvedTriggers : undefined,
         promptInjections:
           activeInjections.length > 0 ? activeInjections : undefined,
+        ...(taskCommand && taskCommandToolAvailable
+          ? { requiredTool: { name: taskCommand.requiredTool, nudge: taskCommand.nudge } }
+          : {}),
         ...(twinPersonaBlock ? { twinPersona: twinPersonaBlock } : {}),
         abortSignal,
+        debugStartedAt: parallelFollowUpStartedAt,
         // Raw Spaces identity for progress callbacks → lets /webhook/progress fall
         // back to claw-auth's conv-keyed session index (mirrors the /result body).
         progressMeta: {
@@ -3146,6 +3251,95 @@ async function processTask(
 
     const resultAttachments = [...getAttachments(), ...(mcpGetAttachments?.() ?? [])];
     const pendingQuestions = getPendingQuestions();
+    const hadFollowUpRecorder = pendingQuestions.some(
+      (question) => question.purpose === "follow_up_suggestions",
+    );
+    const shouldAttachGeneratedFollowUps = shouldGenerateFollowUpsForRun(
+      followUpsEnabled,
+      result.text,
+      pendingQuestions,
+    );
+    const inlineFollowUps = shouldAttachGeneratedFollowUps
+      ? parallelFollowUpResult
+      : undefined;
+    const followUpOutcome:
+      | "delivered_inline"
+      | "parallel_pending"
+      | "already_recorded"
+      | "empty_answer"
+      | "disabled" =
+      !followUpsEnabled
+        ? "disabled"
+        : result.text.trim().length === 0
+          ? "empty_answer"
+          : hadFollowUpRecorder
+            ? "already_recorded"
+            : inlineFollowUps
+              ? "delivered_inline"
+              : "parallel_pending";
+    let generatedFollowUpCount = 0;
+    if (inlineFollowUps) {
+      const { suggestions } = inlineFollowUps.generation;
+      generatedFollowUpCount = suggestions.length;
+      const followUpQuestion = asFollowUpPendingQuestion(suggestions);
+      pendingQuestions.push(followUpQuestion);
+      // Persist the deterministic post-response output in AgentRun's existing
+      // toolInvocations JSON. History can then restore the chips without a DB
+      // migration, while the API strips this internal recorder from activity UI.
+      const followUpRecorder = {
+        toolName: "ask-user-question",
+        args: followUpQuestion,
+        result: "Follow-up suggestions recorded.",
+        isError: false,
+        startedAt: new Date().toISOString(),
+        durationMs: 0,
+        status: "completed" as const,
+        toolCallId: `follow-up-${followUpQuestion.questionId}`,
+      };
+      result.toolInvocations.push(followUpRecorder);
+      pushInvocation(progressUrl, sessionId, followUpRecorder);
+      clog.info(
+        `[follow-ups] delivered inline sessionId=${sessionId} agentSlug=${agentSlug ?? ""} count=${suggestions.length}`,
+      );
+    }
+    if (followUpsEnabled) {
+      const followUpDiagnostic = {
+        toolName: "internal-follow-up-diagnostics",
+        args: {
+          purpose: "follow_up_debug",
+          enabled: true,
+          enabledByV2Flag: followUpsEnabledByFlag,
+          answerLength: result.text.length,
+          hadExistingRecorder: hadFollowUpRecorder,
+          outcome: followUpOutcome,
+          suggestionCount: generatedFollowUpCount,
+          generationInput: followUpGenerationInput,
+          conversationMessageCount: followUpConversationHistory.length,
+          agentContextProvided: Boolean(followUpAgentContext),
+          agentContextName: followUpAgentContext?.name,
+          agentContextDescription: followUpAgentContext?.description,
+          generationSource: inlineFollowUps?.generation.source,
+          generationModel: inlineFollowUps?.generation.model,
+          failureCode: inlineFollowUps?.generation.failureCode,
+          failureMessage: inlineFollowUps?.generation.failureMessage,
+          httpStatus: inlineFollowUps?.generation.httpStatus,
+        },
+        result: `Follow-up generation ${followUpOutcome}.`,
+        isError: false,
+        startedAt: parallelFollowUpStartedAt,
+        durationMs: inlineFollowUps
+          ? Math.max(
+              0,
+              new Date(inlineFollowUps.completedAt).getTime() -
+                new Date(parallelFollowUpStartedAt).getTime(),
+            )
+          : 0,
+        status: followUpOutcome === "parallel_pending" ? ("running" as const) : ("completed" as const),
+        toolCallId: `follow-up-debug-${sessionId}`,
+      };
+      result.toolInvocations.push(followUpDiagnostic);
+      pushInvocation(progressUrl, sessionId, followUpDiagnostic);
+    }
     const pendingActions = [
       ...getPendingActions(),
       ...getCustomPendingActions(),
@@ -3378,6 +3572,9 @@ async function processTask(
             .slice(0, 200) || undefined
         : undefined;
 
+    clog.info(
+      `[follow-ups] callback sessionId=${sessionId} pendingQuestions=${pendingQuestions.length} followUpCount=${pendingQuestions.find((question) => question.purpose === "follow_up_suggestions")?.options.length ?? 0}`,
+    );
     await sendCallback(callbackUrl, sessionToken, {
       sessionId,
       userId,
@@ -3417,9 +3614,43 @@ async function processTask(
       ...(pendingResponses.length > 0 ? { pendingResponses } : {}),
       ...(pendingGoalSuggestion ? { pendingGoalSuggestion } : {}),
       ...(llmCitations && llmCitations.length > 0 ? { llmCitations } : {}),
+      followUpsPending: followUpOutcome === "parallel_pending",
       provider: completedProvider,
       model: completedModel,
     });
+    if (
+      followUpOutcome === "parallel_pending" &&
+      parallelFollowUpPromise &&
+      lateFollowUpCallbackUrl
+    ) {
+      const lateCallbackUrl = buildLateFollowUpCallbackUrl(lateFollowUpCallbackUrl);
+      if (lateCallbackUrl) {
+        void parallelFollowUpPromise.then(async ({ generation, completedAt }) => {
+          const delivered = await sendCallback(lateCallbackUrl, sessionToken, {
+            sessionId,
+            suggestions: generation.suggestions,
+            startedAt: parallelFollowUpStartedAt,
+            completedAt,
+            answerLength: result.text.length,
+            enabledByV2Flag: followUpsEnabledByFlag,
+            outcome: "delivered_late",
+            generationInput: followUpGenerationInput,
+            conversationMessageCount: followUpConversationHistory.length,
+            agentContextProvided: Boolean(followUpAgentContext),
+            agentContextName: followUpAgentContext?.name,
+            agentContextDescription: followUpAgentContext?.description,
+            generationSource: generation.source,
+            generationModel: generation.model,
+            failureCode: generation.failureCode,
+            failureMessage: generation.failureMessage,
+            httpStatus: generation.httpStatus,
+          });
+          if (!delivered) {
+            clog.warn(`[follow-ups] late callback was not delivered sessionId=${sessionId}`);
+          }
+        });
+      }
+    }
   } catch (err) {
     if (err instanceof RunHandoffError) {
       await sendHandoffCallback(err.lastTurn);
@@ -3624,6 +3855,24 @@ async function processTask(
 
 function coerceAutomationResult(text: string): Record<string, unknown> {
   return { result: text };
+}
+
+function buildLateFollowUpCallbackUrl(callbackUrl: string): string | undefined {
+  try {
+    const url = new URL(callbackUrl);
+    const pathname = url.pathname.replace(/\/$/, "");
+    // Only run-stream v2 owns the late callback contract. Other ask-ai
+    // callback surfaces may share the agent slug but must keep their existing
+    // single-callback behavior.
+    if (!pathname.includes("/internal/run-stream/") || !pathname.endsWith("/callback")) {
+      return undefined;
+    }
+    url.pathname = `${pathname}/follow-ups`;
+    return url.toString();
+  } catch {
+    clog.warn(`[follow-ups] invalid late callback URL: ${callbackUrl}`);
+    return undefined;
+  }
 }
 
 async function sendCallback(

@@ -158,7 +158,15 @@ function isOneShotScheduledConversation(conversationId: string | undefined): boo
   return typeof conversationId === "string" && conversationId.startsWith("scheduled_");
 }
 
-const LOCK_CONTENTION_RETRY_DELAY_MS = 120_000;
+const LOCK_CONTENTION_RETRY_DELAY_MS = Number(process.env["LOCK_CONTENTION_RETRY_DELAY_MS"] ?? 120_000);
+/** Interactive (Digital Twin / approval-mode) contention resolves fast — the
+ *  holder is a live mention run finishing in seconds, not a 15-min scheduled
+ *  job — so re-dispatch a starved follow-up tag far sooner than the scheduled
+ *  default. A mentioned user shouldn't wait ~2 min for their second tag to get
+ *  a draft. Kept comfortably above the runtime's own in-claw lock wait
+ *  (SESSION_LOCK_WAIT_MS, ~25s) so we don't churn re-dispatches while the holder
+ *  is still mid-run. */
+const INTERACTIVE_LOCK_RETRY_DELAY_MS = Number(process.env["INTERACTIVE_LOCK_RETRY_DELAY_MS"] ?? 30_000);
 /** Hard cap on lock-contention deferrals. The runtime session lock TTL is 15
  *  min, so the holder either finishes or its lock expires well within
  *  10 × 2 min; the cap only guards against a pathological refresh loop. */
@@ -168,14 +176,17 @@ const MAX_LOCK_DEFERRALS = 10;
  *  consuming a retry attempt. dispatchRetry's runAlreadyCompleted check exits
  *  the loop as soon as the lock-holding original finishes and writes its
  *  marker. Returns false when the deferral cap is hit (caller exhausts). */
-async function deferLockContentionRetry(state: RunRecoveryState): Promise<boolean> {
+async function deferLockContentionRetry(
+  state: RunRecoveryState,
+  delayMs: number = LOCK_CONTENTION_RETRY_DELAY_MS,
+): Promise<boolean> {
   state.lockDeferrals = (state.lockDeferrals ?? 0) + 1;
   if (state.lockDeferrals > MAX_LOCK_DEFERRALS) return false;
   state.retryScheduled = true;
   state.lastHeartbeatAt = Date.now();
   await saveState(state);
-  await scheduleDispatch(state.rootSessionId, "session_locked — waiting for lock holder", LOCK_CONTENTION_RETRY_DELAY_MS);
-  log.info(`[run-recovery] lock contention deferred root=${state.rootSessionId} deferral=${state.lockDeferrals}/${MAX_LOCK_DEFERRALS} retryInMs=${LOCK_CONTENTION_RETRY_DELAY_MS}`);
+  await scheduleDispatch(state.rootSessionId, "session_locked — waiting for lock holder", delayMs);
+  log.info(`[run-recovery] lock contention deferred root=${state.rootSessionId} deferral=${state.lockDeferrals}/${MAX_LOCK_DEFERRALS} retryInMs=${delayMs}`);
   return true;
 }
 
@@ -404,13 +415,20 @@ async function dispatchRetry(rootSessionId: string, reason: string): Promise<voi
       await markExhausted(state, "retry dispatch missing orgId");
       return;
     }
+    // The original dispatch already persisted the user message. For an
+    // approval-mode (twin) re-dispatch tell /run to skip re-persisting it, so a
+    // retried tag doesn't duplicate the user's turn (and spawn a branch) in chat.
+    const redispatchBody = {
+      ...state.dispatchPayload,
+      ...(state.sessionContext.responseMode !== "conversation" ? { __skipUserMessagePersist: true } : {}),
+    };
     const runRes = await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
       },
-      body: JSON.stringify(state.dispatchPayload),
+      body: JSON.stringify(redispatchBody),
       signal: AbortSignal.timeout(30_000),
     });
 
@@ -425,12 +443,14 @@ async function dispatchRetry(rootSessionId: string, reason: string): Promise<voi
           await markExhausted(state, "session_locked after handoff (lock never released)");
           return;
         }
-        if (isOneShotScheduledConversation(state.dispatchPayload.conversationId)) {
-          // Scheduled run colliding with its own still-running original:
-          // defer a re-dispatch (the FIFO for this one-shot conversationId
-          // would never drain). runAlreadyCompleted exits the loop once the
-          // holder finishes.
-          if (await deferLockContentionRetry(state)) return;
+        const isInteractiveApproval = state.sessionContext.responseMode !== "conversation";
+        if (isOneShotScheduledConversation(state.dispatchPayload.conversationId) || isInteractiveApproval) {
+          // Scheduled run colliding with its own still-running original, OR an
+          // approval-mode twin tag (the FIFO's redispatch is conversation-mode
+          // only and would drop/miscontextualize it): defer a full-payload
+          // re-dispatch. runAlreadyCompleted exits the loop once the holder
+          // finishes.
+          if (await deferLockContentionRetry(state, isInteractiveApproval ? INTERACTIVE_LOCK_RETRY_DELAY_MS : LOCK_CONTENTION_RETRY_DELAY_MS)) return;
           await markExhausted(state, "session_locked (lock never released)");
           return;
         }
@@ -832,13 +852,20 @@ export async function handleRunHandoff(sessionId: string): Promise<{ rootSession
 
   let body: { success?: boolean; sessionId?: string; error?: string };
   try {
+    // The original dispatch already persisted the user message. For an
+    // approval-mode (twin) re-dispatch tell /run to skip re-persisting it, so a
+    // retried tag doesn't duplicate the user's turn (and spawn a branch) in chat.
+    const redispatchBody = {
+      ...state.dispatchPayload,
+      ...(state.sessionContext.responseMode !== "conversation" ? { __skipUserMessagePersist: true } : {}),
+    };
     const runRes = await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
       },
-      body: JSON.stringify(state.dispatchPayload),
+      body: JSON.stringify(redispatchBody),
       signal: AbortSignal.timeout(30_000),
     });
     body = (await runRes.json().catch(() => ({}))) as { success?: boolean; sessionId?: string; error?: string };
@@ -901,12 +928,22 @@ export async function handleRunCompletion(sessionId: string, status: "completed"
       await markExhausted(state, "session_locked after handoff (lock never released)");
       return { retried: false, exhausted: true, rootSessionId, retriesUsed: state.retriesUsed, maxRetries: state.maxRetries, terminalDrop: true };
     }
-    if (isOneShotScheduledConversation(state.dispatchPayload.conversationId)) {
-      // Scheduled run: defer a re-dispatch instead of queueing into a FIFO
-      // nobody drains (one-shot conversationId). Report retried:true so the
-      // scheduled result handler treats this as handled, not a failure.
+    // Re-dispatch (replaying the FULL original payload) rather than queue into
+    // the mid-run FIFO, for the two cases that FIFO can't serve:
+    //   - one-shot scheduled convIds — no inbound message ever drains that FIFO.
+    //   - approval-mode Digital Twin runs — enqueueLockContentionRun /
+    //     redispatchQueuedMessage rebuild a CONVERSATION-mode context, so a twin
+    //     follow-up tag routed through the FIFO would lose its approval mode +
+    //     per-turn mention context. WORSE, enqueueLockContentionRun no-ops for
+    //     non-conversation mode, so before this a second rapid tag on the same
+    //     thread was silently DROPPED (marked completed, never retried, no
+    //     draft). Deferred re-dispatch keeps the twin-safe payload and lets the
+    //     tag deliver once the lock frees — fast, since the holder is a live run.
+    const isInteractiveApproval = state.sessionContext.responseMode !== "conversation";
+    if (isOneShotScheduledConversation(state.dispatchPayload.conversationId) || isInteractiveApproval) {
       await removeWatchdog(state.rootSessionId, state.activeSessionId).catch(() => {});
-      if (await deferLockContentionRetry(state)) {
+      const delayMs = isInteractiveApproval ? INTERACTIVE_LOCK_RETRY_DELAY_MS : LOCK_CONTENTION_RETRY_DELAY_MS;
+      if (await deferLockContentionRetry(state, delayMs)) {
         return { retried: true, exhausted: false, rootSessionId, retriesUsed: state.retriesUsed, maxRetries: state.maxRetries };
       }
       await markExhausted(state, "session_locked (lock never released)");
