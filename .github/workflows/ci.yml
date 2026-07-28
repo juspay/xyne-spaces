@@ -194,3 +194,66 @@ jobs:
 
       - name: Run gitleaks
         run: gitleaks dir . --config .gitleaks.toml --redact --no-banner --exit-code 1
+
+  # ---------------------------------------------------------------------------
+  # Vulnerability + IaC scan (Trivy). Mirrors the Jenkins "Security Scan" source
+  # stage (trivyScanSource) and scripts/run-trivy-local.sh: SOURCE TREE (fs) only
+  # — dependency lockfiles + misconfig. Container image scanning is intentionally
+  # not done here (removed from Jenkins too; it mostly surfaced base-image CVEs).
+  # Secrets are handled by the gitleaks job above, not Trivy.
+  #
+  # Two-step scan: (1) full JSON report (never fails, archived as an artifact),
+  # (2) gate on CRITICAL — matching the Jenkins gate (Jenkinsfile: `trivy convert
+  # --severity CRITICAL`). Pinned to the same TRIVY_VERSION Jenkins uses.
+  # ---------------------------------------------------------------------------
+  trivy:
+    name: Vulnerability scan (Trivy)
+    runs-on: ubuntu-latest
+    env:
+      TRIVY_VERSION: "0.72.0"
+      # secrets handled by gitleaks; scan deps (vuln) + IaC (misconfig) only.
+      TRIVY_SCANNERS: "vuln,misconfig"
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Trivy
+        run: |
+          curl -sfL "https://raw.githubusercontent.com/aquasecurity/trivy/v${TRIVY_VERSION}/contrib/install.sh" \
+            | sudo sh -s -- -b /usr/local/bin "v${TRIVY_VERSION}"
+          trivy --version
+
+      # Vulnerability DB (~few hundred MB) changes ~every 6h; cache it per day so
+      # reruns don't re-download. A cache miss just downloads fresh — never fatal.
+      - name: Cache Trivy DB
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/trivy
+          key: trivy-db-${{ github.run_id }}
+          restore-keys: |
+            trivy-db-
+
+      # Scan ONCE to JSON, then render a table from that JSON. exit-code 0 here so
+      # the full report is always produced and uploaded, independent of the gate.
+      - name: Trivy source scan (report)
+        run: |
+          mkdir -p security-reports
+          trivy fs --scanners "$TRIVY_SCANNERS" \
+            --skip-dirs .securitybin --skip-dirs security-reports \
+            --skip-dirs '**/node_modules' --skip-dirs '**/dist' \
+            --format json -o security-reports/trivy-fs.json \
+            --exit-code 0 --no-progress .
+          trivy convert --format table security-reports/trivy-fs.json
+
+      - name: Upload Trivy report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-fs-report
+          path: security-reports/trivy-fs.json
+          if-no-files-found: warn
+
+      # Gate: fail the job on CRITICAL findings (mirrors the Jenkins gate). HIGH
+      # and below are reported above but do not block. Reads the JSON from the
+      # step above — no second scan.
+      - name: Trivy gate (CRITICAL)
+        run: trivy convert --severity CRITICAL --exit-code 1 security-reports/trivy-fs.json

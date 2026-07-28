@@ -15,5 +15,9 @@
   "devDependencies": {
     "@types/node": "^22.0.0",
     "typescript": "^5.7.0"
+  },
+  "overrides": {
+    "form-data@2": "2.5.6",
+    "tar@7": "7.5.19"
   }
 }
