@@ -7,6 +7,7 @@ import { PauseStep } from '../engine/pause-step';
 import { automationContextStorage } from '../engine/automation-context-storage';
 import { OutputSchemaSchema, assertMatchesSchema } from '../engine/declared-schema';
 import { clawClient } from '../services/claw-client';
+import { parseAgentAttachments } from '../services/agent-attachment.service';
 import { config } from '@/config/env';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
@@ -117,14 +118,24 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
 
     const declaredSchema = (cfg.outputSchema ?? {}) as Record<string, unknown>;
     const rawResult = (agentRawResult as { result?: unknown }).result;
+    const attachments = parseAgentAttachments(
+      (agentRawResult as { attachments?: unknown }).attachments,
+    );
     logger.info(
-      `[RUN_AGENT] callback result — status=${String(envelopeStatus ?? '∅')} rawType=${typeof rawResult} raw=${formatForLog(rawResult)}`,
+      `[RUN_AGENT] callback result — status=${String(envelopeStatus ?? '∅')} rawType=${typeof rawResult} attachments=${attachments.length} raw=${formatForLog(rawResult)}`,
     );
 
     try {
       const parsed = parseAgentJson(rawResult);
       assertMatchesSchema(parsed, declaredSchema);
-      return parsed as RunAgentOutput;
+      if (attachments.length === 0) return parsed as RunAgentOutput;
+      if ('attachments' in parsed) {
+        logger.warn(
+          '[RUN_AGENT] agent JSON already declares "attachments"; keeping it and dropping the callback attachments',
+        );
+        return parsed as RunAgentOutput;
+      }
+      return { ...parsed, attachments } as RunAgentOutput;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       logger.warn(`[RUN_AGENT] validation failed: ${message}`);
