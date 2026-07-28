@@ -302,6 +302,74 @@
                 height: auto;
                 overflow: visible;
             }
+            .expandable-chart {
+                cursor: zoom-in;
+                border-radius: 8px;
+                outline: none;
+            }
+            .expandable-chart:focus-visible {
+                box-shadow: 0 0 0 3px rgba(46, 95, 163, 0.24);
+            }
+            .chart-modal[hidden] {
+                display: none;
+            }
+            .chart-modal {
+                position: fixed;
+                inset: 0;
+                z-index: 100;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 24px;
+                background: rgba(18, 41, 77, 0.72);
+            }
+            .chart-modal-panel {
+                width: min(1400px, 100%);
+                max-height: calc(100vh - 48px);
+                display: flex;
+                flex-direction: column;
+                overflow: hidden;
+                border-radius: 12px;
+                background: var(--card);
+                box-shadow: 0 24px 70px rgba(18, 41, 77, 0.3);
+            }
+            .chart-modal-header {
+                display: flex;
+                align-items: flex-start;
+                justify-content: space-between;
+                gap: 20px;
+                padding: 18px 20px 14px;
+                border-bottom: 1px solid var(--line);
+            }
+            .chart-modal-header h2 {
+                margin: 0;
+                color: var(--navy-deep);
+                font-size: 19px;
+            }
+            .chart-modal-header p {
+                margin: 4px 0 0;
+                color: var(--muted);
+                font-size: 11.5px;
+            }
+            .chart-modal-close {
+                flex: 0 0 auto;
+            }
+            .chart-modal-scroll {
+                overflow: auto;
+                padding: 18px 20px 24px;
+            }
+            .chart-modal-chart {
+                min-width: 850px;
+            }
+            .chart-modal-chart svg {
+                display: block;
+                width: 100%;
+                height: auto;
+                overflow: visible;
+            }
+            body.expanded-chart-open {
+                overflow: hidden;
+            }
             .empty-chart {
                 min-height: 260px;
                 display: grid;
@@ -433,6 +501,12 @@
                 .chart-note {
                     white-space: normal;
                 }
+                .chart-modal {
+                    padding: 8px;
+                }
+                .chart-modal-panel {
+                    max-height: calc(100vh - 16px);
+                }
             }
         </style>
     </head>
@@ -451,9 +525,7 @@
   Do not paste a JSON-escaped wrapper string. Paste the actual email body.
   ============================================================================
 -->
-        <template id="dpip-email-body">
-
-        </template>
+        <template id="dpip-email-body"> </template>
 
         <header>
             <div class="header-inner">
@@ -504,12 +576,6 @@
                 <div class="filter-field">
                     <label for="identifierTypeSelect">Identifier type</label>
                     <select id="identifierTypeSelect">
-                        <option value="">ALL</option>
-                    </select>
-                </div>
-                <div class="filter-field">
-                    <label for="reportStatusSelect">Report status</label>
-                    <select id="reportStatusSelect">
                         <option value="">ALL</option>
                     </select>
                 </div>
@@ -587,7 +653,9 @@
                     <article class="chart-card">
                         <div class="chart-title-row">
                             <h3>Daily reports</h3>
-                            <span class="chart-note">reports_count</span>
+                            <span class="chart-note"
+                                >reports_count · Click to expand</span
+                            >
                         </div>
                         <div
                             id="dailyReportsChart"
@@ -597,7 +665,9 @@
                     <article class="chart-card">
                         <div class="chart-title-row">
                             <h3>Daily screenings</h3>
-                            <span class="chart-note">screenings.count</span>
+                            <span class="chart-note"
+                                >screenings.count · Click to expand</span
+                            >
                         </div>
                         <div
                             id="dailyScreeningsChart"
@@ -619,14 +689,18 @@
                     <article class="chart-card">
                         <div class="chart-title-row">
                             <h3>Reports by party</h3>
-                            <span class="chart-note">Top 12</span>
+                            <span class="chart-note"
+                                >Top 12 · Click to view all</span
+                            >
                         </div>
                         <div id="reportsByPartyChart" class="chart-host"></div>
                     </article>
                     <article class="chart-card">
                         <div class="chart-title-row">
                             <h3>Screenings by party</h3>
-                            <span class="chart-note">Top 12</span>
+                            <span class="chart-note"
+                                >Top 12 · Click to view all</span
+                            >
                         </div>
                         <div
                             id="screeningsByPartyChart"
@@ -636,7 +710,9 @@
                     <article class="chart-card">
                         <div class="chart-title-row">
                             <h3>Identifiers by party</h3>
-                            <span class="chart-note">Top 12</span>
+                            <span class="chart-note"
+                                >Top 12 · Click to view all</span
+                            >
                         </div>
                         <div
                             id="identifiersByPartyChart"
@@ -649,34 +725,26 @@
             <section class="section">
                 <div class="section-heading">
                     <h2>Registry composition</h2>
-                    <p>
-                        Identifier type, report sub-source and activity status
-                        composition.
-                    </p>
+                    <p>Identifier type and report sub-source composition.</p>
                 </div>
-                <div class="grid-3">
+                <div class="grid-2-even">
                     <article class="chart-card">
                         <div class="chart-title-row">
                             <h3>Identifier types</h3>
-                            <span class="chart-note">Top 12</span>
+                            <span class="chart-note"
+                                >Top 12 · Click to view all</span
+                            >
                         </div>
                         <div id="identifierTypeChart" class="chart-host"></div>
                     </article>
                     <article class="chart-card">
                         <div class="chart-title-row">
                             <h3>Report sub-sources</h3>
-                            <span class="chart-note">By report volume</span>
-                        </div>
-                        <div id="subSourceChart" class="chart-host"></div>
-                    </article>
-                    <article class="chart-card">
-                        <div class="chart-title-row">
-                            <h3>Status composition</h3>
                             <span class="chart-note"
-                                >Reports and screenings</span
+                                >By volume · Click to view all</span
                             >
                         </div>
-                        <div id="statusChart" class="chart-host"></div>
+                        <div id="subSourceChart" class="chart-host"></div>
                     </article>
                 </div>
             </section>
@@ -693,7 +761,7 @@
                     <article class="chart-card">
                         <div class="chart-title-row">
                             <h3>Common identifiers across parties</h3>
-                            <span class="chart-note">party_identifiers</span>
+                            <span class="chart-note">Click to view all</span>
                         </div>
                         <div
                             id="partyIdentifiersChart"
@@ -703,7 +771,9 @@
                     <article class="chart-card">
                         <div class="chart-title-row">
                             <h3>Clusters by linked external entities</h3>
-                            <span class="chart-note">Logarithmic display</span>
+                            <span class="chart-note"
+                                >Log scale · Click to view all</span
+                            >
                         </div>
                         <div id="clusterExternalChart" class="chart-host"></div>
                     </article>
@@ -712,7 +782,7 @@
                     <article class="chart-card">
                         <div class="chart-title-row">
                             <h3>External entities by identifiers linked</h3>
-                            <span class="chart-note">Latest snapshot</span>
+                            <span class="chart-note">Click to view all</span>
                         </div>
                         <div
                             id="externalIdentifiersChart"
@@ -722,7 +792,9 @@
                     <article class="chart-card">
                         <div class="chart-title-row">
                             <h3>Clusters by identifier count</h3>
-                            <span class="chart-note">Logarithmic display</span>
+                            <span class="chart-note"
+                                >Log scale · Click to view all</span
+                            >
                         </div>
                         <div
                             id="clusterIdentifiersChart"
@@ -761,6 +833,37 @@
                 </article>
             </section>
         </main>
+
+        <div
+            id="expandedChartModal"
+            class="chart-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="expandedChartModalTitle"
+            hidden
+        >
+            <div class="chart-modal-panel">
+                <div class="chart-modal-header">
+                    <div>
+                        <h2 id="expandedChartModalTitle">Chart details</h2>
+                        <p id="expandedChartModalNote">
+                            Showing the complete chart.
+                        </p>
+                    </div>
+                    <button
+                        id="expandedChartModalClose"
+                        class="chart-modal-close"
+                        type="button"
+                        aria-label="Close expanded chart"
+                    >
+                        Close
+                    </button>
+                </div>
+                <div class="chart-modal-scroll">
+                    <div id="expandedChart" class="chart-modal-chart"></div>
+                </div>
+            </div>
+        </div>
 
         <footer>
             DPIP Daily Registry Intelligence — generated from the structured
@@ -1178,9 +1281,14 @@
                         return;
                     }
 
-                    const width = 920,
+                    const width = options.width || 920,
                         height = options.height || 340;
-                    const margin = { top: 22, right: 18, bottom: 48, left: 72 };
+                    const margin = {
+                        top: options.showAllPoints ? 42 : 22,
+                        right: 18,
+                        bottom: options.showAllLabels ? 82 : 48,
+                        left: 72,
+                    };
                     const plotW = width - margin.left - margin.right;
                     const plotH = height - margin.top - margin.bottom;
                     const values = entries.map(([, value]) => value);
@@ -1214,7 +1322,9 @@
                                 fill: "#737d8e",
                                 "font-size": 11,
                             },
-                            compact(value),
+                            options.valueFormatter
+                                ? options.valueFormatter(value)
+                                : compact(value),
                         );
                     }
 
@@ -1235,23 +1345,31 @@
                         "stroke-linecap": "round",
                     });
 
-                    const tickIndexes = unique([
-                        0,
-                        Math.floor((entries.length - 1) * 0.25),
-                        Math.floor((entries.length - 1) * 0.5),
-                        Math.floor((entries.length - 1) * 0.75),
-                        entries.length - 1,
-                    ]);
+                    const tickIndexes = options.showAllLabels
+                        ? entries.map((_, index) => index)
+                        : unique([
+                              0,
+                              Math.floor((entries.length - 1) * 0.25),
+                              Math.floor((entries.length - 1) * 0.5),
+                              Math.floor((entries.length - 1) * 0.75),
+                              entries.length - 1,
+                          ]);
                     for (const index of tickIndexes) {
                         const [label] = entries[index];
+                        const tickY = height - 18;
                         svg += svgElement(
                             "text",
                             {
                                 x: x(index),
-                                y: height - 18,
-                                "text-anchor": "middle",
+                                y: tickY,
+                                "text-anchor": options.showAllLabels
+                                    ? "end"
+                                    : "middle",
                                 fill: "#737d8e",
                                 "font-size": 10.5,
+                                transform: options.showAllLabels
+                                    ? `rotate(-45 ${x(index)} ${tickY})`
+                                    : "",
                             },
                             escapeHtml(
                                 options.labelFormatter
@@ -1261,45 +1379,84 @@
                         );
                     }
 
+                    if (options.showAllPoints) {
+                        entries.forEach(([label, value], index) => {
+                            const pointValue = options.valueFormatter
+                                ? options.valueFormatter(value)
+                                : compact(value);
+                            svg += `<g><title>${escapeHtml(
+                                `${options.labelFormatter ? options.labelFormatter(label) : label}: ${pointValue}`,
+                            )}</title>`;
+                            svg += svgElement("circle", {
+                                cx: x(index),
+                                cy: y(value),
+                                r: 4,
+                                fill: options.color || COLORS[0],
+                                stroke: "#fff",
+                                "stroke-width": 1.5,
+                            });
+                            svg += svgElement(
+                                "text",
+                                {
+                                    x: x(index),
+                                    y: Math.max(14, y(value) - 9),
+                                    "text-anchor": "middle",
+                                    fill: options.color || COLORS[0],
+                                    "font-size": 9.5,
+                                    "font-weight": 700,
+                                },
+                                pointValue,
+                            );
+                            svg += "</g>";
+                        });
+                    }
+
                     const peakIndex = values.indexOf(max);
-                    svg += svgElement("circle", {
-                        cx: x(peakIndex),
-                        cy: y(max),
-                        r: 4.5,
-                        fill: options.color || COLORS[0],
-                        stroke: "#fff",
-                        "stroke-width": 2,
-                    });
-                    svg += svgElement(
-                        "text",
-                        {
-                            x: x(peakIndex),
-                            y: Math.max(14, y(max) - 9),
-                            "text-anchor": "middle",
+                    if (!options.showAllPoints) {
+                        svg += svgElement("circle", {
+                            cx: x(peakIndex),
+                            cy: y(max),
+                            r: 4.5,
                             fill: options.color || COLORS[0],
-                            "font-size": 11,
-                            "font-weight": 700,
-                        },
-                        compact(max),
-                    );
+                            stroke: "#fff",
+                            "stroke-width": 2,
+                        });
+                        svg += svgElement(
+                            "text",
+                            {
+                                x: x(peakIndex),
+                                y: Math.max(14, y(max) - 9),
+                                "text-anchor": "middle",
+                                fill: options.color || COLORS[0],
+                                "font-size": 11,
+                                "font-weight": 700,
+                            },
+                            compact(max),
+                        );
+                    }
                     svg += "</svg>";
                     $(hostId).innerHTML = svg;
                 }
 
                 function horizontalBarChart(hostId, entries, options = {}) {
-                    const filtered = entries.filter(([, value]) => value > 0);
+                    const filtered = entries.filter(([, value]) =>
+                        options.includeZero ? value >= 0 : value > 0,
+                    );
                     if (!filtered.length) {
                         emptyChart(hostId);
                         return;
                     }
 
-                    const data = filtered.slice(0, options.limit || 12);
+                    const data =
+                        options.limit === null
+                            ? filtered
+                            : filtered.slice(0, options.limit || 12);
                     const width = 860;
                     const rowH = options.rowHeight || 31;
                     const height = Math.max(285, 50 + data.length * rowH);
                     const margin = {
                         top: 16,
-                        right: 72,
+                        right: options.right || 72,
                         bottom: 24,
                         left: options.left || 190,
                     };
@@ -1317,7 +1474,10 @@
                             ? Math.log10(rawValue + 1)
                             : rawValue;
                         const y = margin.top + index * rowH;
-                        const barW = Math.max(2, (scaled / max) * plotW);
+                        const barW =
+                            rawValue === 0
+                                ? 0
+                                : Math.max(2, (scaled / max) * plotW);
                         svg += svgElement(
                             "text",
                             {
@@ -1351,108 +1511,118 @@
                                 "font-size": 10.5,
                                 "font-weight": 700,
                             },
-                            compact(rawValue),
+                            options.valueFormatter
+                                ? options.valueFormatter(rawValue)
+                                : compact(rawValue),
                         );
                     });
                     svg += "</svg>";
                     $(hostId).innerHTML = svg;
                 }
 
-                function groupedStatusChart(
-                    hostId,
-                    reportEntries,
-                    screeningEntries,
-                ) {
-                    const labels = unique([
-                        ...reportEntries.map(([label]) => label),
-                        ...screeningEntries.map(([label]) => label),
-                    ]);
-                    if (!labels.length) {
-                        emptyChart(hostId);
-                        return;
+                const expandableChartConfigs = new Map();
+                let expandedChartTrigger = null;
+
+                function closeExpandedChart() {
+                    const modal = $("expandedChartModal");
+                    modal.hidden = true;
+                    document.body.classList.remove("expanded-chart-open");
+                    $("expandedChart").innerHTML = "";
+                    $("expandedChart").style.minWidth = "";
+                    expandedChartTrigger?.focus();
+                    expandedChartTrigger = null;
+                }
+
+                function openExpandedChart(hostId) {
+                    const config = expandableChartConfigs.get(hostId);
+                    if (!config) return;
+
+                    expandedChartTrigger = $(hostId);
+                    $("expandedChartModalTitle").textContent = config.title;
+
+                    if (config.type === "line") {
+                        const expandedWidth = Math.max(
+                            920,
+                            config.entries.length * 78,
+                        );
+                        $("expandedChartModalNote").textContent =
+                            `Showing all ${fmt(config.entries.length)} date and value point(s). Scroll horizontally to inspect the full timeline.`;
+                        $("expandedChart").style.minWidth =
+                            `${expandedWidth}px`;
+                        lineChart("expandedChart", config.entries, {
+                            ...config.options,
+                            width: expandedWidth,
+                            height: 500,
+                            showAllLabels: true,
+                            showAllPoints: true,
+                            valueFormatter: fmt,
+                            ariaLabel: `${config.title}, all values`,
+                        });
+                    } else {
+                        $("expandedChartModalNote").textContent =
+                            `Showing all ${fmt(config.entries.length)} available y-axis value(s). Scroll to inspect the full chart.`;
+                        $("expandedChart").style.minWidth = "850px";
+                        horizontalBarChart("expandedChart", config.entries, {
+                            ...config.options,
+                            limit: null,
+                            rowHeight: 34,
+                            right: 140,
+                            includeZero: true,
+                            valueFormatter: fmt,
+                            ariaLabel: `${config.title}, all values`,
+                        });
                     }
 
-                    const reports = new Map(reportEntries);
-                    const screenings = new Map(screeningEntries);
-                    const width = 860,
-                        height = Math.max(285, 70 + labels.length * 44);
-                    const margin = {
-                        top: 22,
-                        right: 80,
-                        bottom: 24,
-                        left: 160,
-                    };
-                    const plotW = width - margin.left - margin.right;
-                    const max = Math.max(
-                        ...labels.flatMap((label) => [
-                            reports.get(label) || 0,
-                            screenings.get(label) || 0,
-                        ]),
-                        1,
-                    );
+                    $("expandedChartModal").hidden = false;
+                    document.body.classList.add("expanded-chart-open");
+                    $("expandedChartModalClose").focus();
+                }
 
-                    let svg = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Status comparison chart">`;
-                    labels.forEach((label, index) => {
-                        const y = margin.top + index * 44;
-                        const rv = reports.get(label) || 0;
-                        const sv = screenings.get(label) || 0;
-                        const rw = (rv / max) * plotW;
-                        const sw = (sv / max) * plotW;
-                        svg += svgElement(
-                            "text",
-                            {
-                                x: margin.left - 10,
-                                y: y + 20,
-                                "text-anchor": "end",
-                                fill: "#4d586a",
-                                "font-size": 11,
-                            },
-                            escapeHtml(label),
-                        );
-                        svg += svgElement("rect", {
-                            x: margin.left,
-                            y: y + 4,
-                            width: Math.max(1, rw),
-                            height: 12,
-                            rx: 2,
-                            fill: COLORS[0],
-                        });
-                        svg += svgElement("rect", {
-                            x: margin.left,
-                            y: y + 21,
-                            width: Math.max(1, sw),
-                            height: 12,
-                            rx: 2,
-                            fill: COLORS[2],
-                        });
-                        svg += svgElement(
-                            "text",
-                            {
-                                x: Math.min(width - 4, margin.left + rw + 6),
-                                y: y + 14,
-                                fill: "#4d586a",
-                                "font-size": 10,
-                            },
-                            compact(rv),
-                        );
-                        svg += svgElement(
-                            "text",
-                            {
-                                x: Math.min(width - 4, margin.left + sw + 6),
-                                y: y + 31,
-                                fill: "#4d586a",
-                                "font-size": 10,
-                            },
-                            compact(sv),
-                        );
+                function makeChartExpandable(
+                    hostId,
+                    title,
+                    type,
+                    entries,
+                    options,
+                ) {
+                    expandableChartConfigs.set(hostId, {
+                        title,
+                        type,
+                        entries,
+                        options,
                     });
-                    svg += "</svg>";
-                    $(hostId).innerHTML =
-                        svg +
-                        `<div class="legend">
-        <span class="legend-item"><span class="legend-swatch" style="background:${COLORS[0]}"></span>Reports</span>
-        <span class="legend-item"><span class="legend-swatch" style="background:${COLORS[2]}"></span>Screenings</span>
-      </div>`;
+
+                    const host = $(hostId);
+                    host.classList.add("expandable-chart");
+                    host.tabIndex = 0;
+                    host.setAttribute("role", "button");
+                    host.setAttribute(
+                        "aria-label",
+                        `${title}. Open expanded chart showing all values.`,
+                    );
+                    host.onclick = () => openExpandedChart(hostId);
+                    host.onkeydown = (event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            openExpandedChart(hostId);
+                        }
+                    };
+                }
+
+                function expandableLineChart(hostId, title, entries, options) {
+                    lineChart(hostId, entries, options);
+                    makeChartExpandable(
+                        hostId,
+                        title,
+                        "line",
+                        entries,
+                        options,
+                    );
+                }
+
+                function expandableBarChart(hostId, title, entries, options) {
+                    horizontalBarChart(hostId, entries, options);
+                    makeChartExpandable(hostId, title, "bar", entries, options);
                 }
 
                 function setSelectOptions(
@@ -1510,7 +1680,6 @@
                         "identifiersByPartyChart",
                         "identifierTypeChart",
                         "subSourceChart",
-                        "statusChart",
                         "partyIdentifiersChart",
                         "clusterExternalChart",
                         "externalIdentifiersChart",
@@ -1600,9 +1769,6 @@
                     ),
                 ]).sort((a, b) => a.localeCompare(b));
 
-                const reportStatuses = unique(
-                    tables.reports.map((row) => String(row.status ?? "")),
-                ).sort();
                 const identifierTypeOptions = unique(
                     tables.reports.map((row) =>
                         String(row.identifier_type ?? ""),
@@ -1619,7 +1785,6 @@
                     $("identifierTypeSelect"),
                     identifierTypeOptions,
                 );
-                setSelectOptions($("reportStatusSelect"), reportStatuses);
                 setSelectOptions($("screeningStatusSelect"), screeningStatuses);
 
                 if (minDate && maxDate) {
@@ -1645,7 +1810,6 @@
                     const selectedTo = $("dateTo").value;
                     const party = $("partySelect").value;
                     const identifierType = $("identifierTypeSelect").value;
-                    const reportStatus = $("reportStatusSelect").value;
                     const screeningStatus = $("screeningStatusSelect").value;
 
                     const reports = tables.reports.filter(
@@ -1657,10 +1821,7 @@
                             ) &&
                             (!party || String(row.party_id) === party) &&
                             (!identifierType ||
-                                String(row.identifier_type) ===
-                                    identifierType) &&
-                            (!reportStatus ||
-                                String(row.status) === reportStatus),
+                                String(row.identifier_type) === identifierType),
                     );
 
                     const screenings = tables.screenings.filter(
@@ -1676,18 +1837,12 @@
                                     screeningStatus),
                     );
 
-                    const metricReports = reportStatus
-                        ? reports
-                        : reports.filter(
-                              (row) =>
-                                  String(row.status).toLowerCase() === "all",
-                          );
+                    const metricReports = reports.filter(
+                        (row) => String(row.status).toLowerCase() === "all",
+                    );
                     const aggregateReports = identifierType
                         ? metricReports
                         : metricReports.filter(isAllIdentifierType);
-                    const reportStatusRows = identifierType
-                        ? reports
-                        : reports.filter(isAllIdentifierType);
 
                     const partyMatcher = party
                         ? (row) => String(row.party_id ?? "") === party
@@ -1720,10 +1875,7 @@
                         partyIdsMatcher,
                     );
 
-                    const totalReports = sum(
-                        aggregateReports,
-                        "reports_count",
-                    );
+                    const totalReports = sum(aggregateReports, "reports_count");
                     const totalScreenings = sum(screenings, "count");
                     const totalIdentifiers = party
                         ? weightedSum(
@@ -1740,10 +1892,7 @@
                         externalIdentifiers,
                         "external_entity_count",
                     );
-                    const totalClusters = sum(
-                        clusterExternal,
-                        "cluster_count",
-                    );
+                    const totalClusters = sum(clusterExternal, "cluster_count");
                     const activeParties = unique([
                         ...aggregateReports.map((row) =>
                             String(row.party_id ?? ""),
@@ -1818,17 +1967,6 @@
                             "reports_count",
                         ),
                     );
-                    const reportStatusEntries = sortedEntries(
-                        aggregate(
-                            reportStatusRows,
-                            "status",
-                            "reports_count",
-                        ),
-                    );
-                    const screeningStatusEntries = sortedEntries(
-                        aggregate(screenings, "screening_status", "count"),
-                    );
-
                     const dailyReports = [
                         ...aggregate(
                             aggregateReports,
@@ -1844,26 +1982,42 @@
                         ).entries(),
                     ].sort((a, b) => a[0].localeCompare(b[0]));
 
-                    lineChart("dailyReportsChart", dailyReports, {
-                        color: COLORS[0],
-                        fill: "rgba(46,95,163,.12)",
-                        labelFormatter: fmtDate,
-                        ariaLabel: "Daily reports trend",
-                    });
-                    lineChart("dailyScreeningsChart", dailyScreenings, {
-                        color: COLORS[2],
-                        fill: "rgba(184,118,46,.13)",
-                        labelFormatter: fmtDate,
-                        ariaLabel: "Daily screenings trend",
-                    });
-                    horizontalBarChart("reportsByPartyChart", reportsByParty, {
-                        color: COLORS[0],
-                        limit: 12,
-                        left: 150,
-                        labelFormatter: displayParty,
-                    });
-                    horizontalBarChart(
+                    expandableLineChart(
+                        "dailyReportsChart",
+                        "Daily reports",
+                        dailyReports,
+                        {
+                            color: COLORS[0],
+                            fill: "rgba(46,95,163,.12)",
+                            labelFormatter: fmtDate,
+                            ariaLabel: "Daily reports trend",
+                        },
+                    );
+                    expandableLineChart(
+                        "dailyScreeningsChart",
+                        "Daily screenings",
+                        dailyScreenings,
+                        {
+                            color: COLORS[2],
+                            fill: "rgba(184,118,46,.13)",
+                            labelFormatter: fmtDate,
+                            ariaLabel: "Daily screenings trend",
+                        },
+                    );
+                    expandableBarChart(
+                        "reportsByPartyChart",
+                        "Reports by party",
+                        reportsByParty,
+                        {
+                            color: COLORS[0],
+                            limit: 12,
+                            left: 150,
+                            labelFormatter: displayParty,
+                        },
+                    );
+                    expandableBarChart(
                         "screeningsByPartyChart",
+                        "Screenings by party",
                         screeningsByParty,
                         {
                             color: COLORS[2],
@@ -1872,8 +2026,9 @@
                             labelFormatter: displayParty,
                         },
                     );
-                    horizontalBarChart(
+                    expandableBarChart(
                         "identifiersByPartyChart",
+                        "Identifiers by party",
                         identifiersByParty,
                         {
                             color: COLORS[1],
@@ -1882,21 +2037,27 @@
                             labelFormatter: displayParty,
                         },
                     );
-                    horizontalBarChart("identifierTypeChart", identifierTypes, {
-                        color: COLORS[3],
-                        limit: 12,
-                        left: 230,
-                        labelFormatter: (label) => label.replaceAll("_", " "),
-                    });
-                    horizontalBarChart("subSourceChart", subSources, {
-                        color: COLORS[2],
-                        limit: 12,
-                        left: 190,
-                    });
-                    groupedStatusChart(
-                        "statusChart",
-                        reportStatusEntries,
-                        screeningStatusEntries,
+                    expandableBarChart(
+                        "identifierTypeChart",
+                        "Identifier types",
+                        identifierTypes,
+                        {
+                            color: COLORS[3],
+                            limit: 12,
+                            left: 230,
+                            labelFormatter: (label) =>
+                                label.replaceAll("_", " "),
+                        },
+                    );
+                    expandableBarChart(
+                        "subSourceChart",
+                        "Report sub-sources",
+                        subSources,
+                        {
+                            color: COLORS[2],
+                            limit: 12,
+                            left: 190,
+                        },
                     );
 
                     const overlapEntries = partyIdentifiers
@@ -1905,8 +2066,9 @@
                             safeNumber(row.num_identifiers),
                         ])
                         .sort((a, b) => b[1] - a[1]);
-                    horizontalBarChart(
+                    expandableBarChart(
                         "partyIdentifiersChart",
+                        "Common identifiers across parties",
                         overlapEntries,
                         { color: COLORS[2], limit: 14, left: 250 },
                     );
@@ -1917,8 +2079,9 @@
                             safeNumber(row.cluster_count),
                         ])
                         .sort((a, b) => Number(a[0]) - Number(b[0]));
-                    horizontalBarChart(
+                    expandableBarChart(
                         "clusterExternalChart",
+                        "Clusters by linked external entities",
                         clusterExternalEntries,
                         {
                             color: COLORS[1],
@@ -1938,8 +2101,9 @@
                             safeNumber(row.external_entity_count),
                         ])
                         .sort((a, b) => b[1] - a[1]);
-                    horizontalBarChart(
+                    expandableBarChart(
                         "externalIdentifiersChart",
+                        "External entities by identifiers linked",
                         externalIdentifierEntries,
                         {
                             color: COLORS[3],
@@ -1956,8 +2120,9 @@
                             safeNumber(row.cluster_count),
                         ])
                         .sort((a, b) => Number(a[0]) - Number(b[0]));
-                    horizontalBarChart(
+                    expandableBarChart(
                         "clusterIdentifiersChart",
+                        "Clusters by identifier count",
                         clusterIdentifierEntries,
                         {
                             color: COLORS[0],
@@ -2103,7 +2268,6 @@
                     "dateTo",
                     "partySelect",
                     "identifierTypeSelect",
-                    "reportStatusSelect",
                     "screeningStatusSelect",
                 ].forEach((id) => $(id).addEventListener("change", render));
 
@@ -2114,9 +2278,25 @@
                     }
                     $("partySelect").value = "";
                     $("identifierTypeSelect").value = "";
-                    $("reportStatusSelect").value = "";
                     $("screeningStatusSelect").value = "";
                     render();
+                });
+
+                $("expandedChartModalClose").addEventListener(
+                    "click",
+                    closeExpandedChart,
+                );
+                $("expandedChartModal").addEventListener("click", (event) => {
+                    if (event.target === $("expandedChartModal"))
+                        closeExpandedChart();
+                });
+                document.addEventListener("keydown", (event) => {
+                    if (
+                        event.key === "Escape" &&
+                        !$("expandedChartModal").hidden
+                    ) {
+                        closeExpandedChart();
+                    }
                 });
             })();
         </script>
