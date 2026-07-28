@@ -143,6 +143,9 @@ const readFiltersFromUrl = (params: URLSearchParams): TicketFilters => {
   const aiCategory = params.getAll('aiCategory');
   if (aiCategory.length) filters.aiCategory = aiCategory;
 
+  const generatedTags = params.getAll('generatedTags');
+  if (generatedTags.length) filters.generatedTags = generatedTags;
+
   const hasAiDraft = params.get('hasAiDraft');
   if (hasAiDraft === '1') filters.hasAiDraft = true;
 
@@ -218,6 +221,7 @@ const FILTER_PARAM_KEYS = [
   'ticketTypes',
   'sourceChannels',
   'aiCategory',
+  'generatedTags',
   'hasAiDraft',
   'dueDateStart',
   'dueDateEnd',
@@ -260,6 +264,7 @@ const writeFiltersToUrl = (params: URLSearchParams, filters: TicketFilters): voi
   filters.ticketTypes?.forEach((t: string) => params.append('ticketTypes', t));
   filters.sourceChannels?.forEach((c: string) => params.append('sourceChannels', c));
   filters.aiCategory?.forEach((c: string) => params.append('aiCategory', c));
+  filters.generatedTags?.forEach((t: string) => params.append('generatedTags', t));
 
   if (filters.hasAiDraft) {
     params.set('hasAiDraft', '1');

@@ -11,6 +11,7 @@ interface TagsTabProps {
 export const TagsTab: React.FC<TagsTabProps> = ({ form }) => {
   const {
     canManage,
+    channelId,
     tagCategories,
     isTagConfigLoading,
     isTagConfigSaving,
@@ -21,6 +22,7 @@ export const TagsTab: React.FC<TagsTabProps> = ({ form }) => {
   return (
     <TagGenerationConfig
       canManage={canManage}
+      channelId={channelId ?? undefined}
       categories={tagCategories}
       isLoading={isTagConfigLoading}
       isSaving={isTagConfigSaving}
