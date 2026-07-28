@@ -24,6 +24,7 @@ import { InviteToCallModal } from '../CallModals/InviteToCallModal';
 import { callService } from '../../../services/Call/callService';
 import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDisplayName';
 import { cn } from '../../../utils/classNames';
+import { logger, Event } from '../../../utils/logger';
 
 // Speaking indicator component (animated bars like Google Meet)
 function SpeakingIndicator(): React.ReactElement {
@@ -187,7 +188,11 @@ export function ParticipantsSidebar({
     try {
       await callService.muteAllParticipants(callId);
     } catch (error) {
-      console.error('[ParticipantsSidebar] Failed to mute all participants:', error);
+      logger.error(Event.API_CALL_FAILED, {
+        callId,
+        context: 'ParticipantsSidebar.muteAllParticipants',
+        error: error instanceof Error ? error.message : String(error),
+      });
     } finally {
       setIsMuting(false);
     }
@@ -202,7 +207,12 @@ export function ParticipantsSidebar({
       try {
         await callService.muteParticipant(callId, participantUserId);
       } catch (error) {
-        console.error('[ParticipantsSidebar] Failed to mute participant:', error);
+        logger.error(Event.API_CALL_FAILED, {
+          callId,
+          context: 'ParticipantsSidebar.muteParticipant',
+          participantUserId,
+          error: error instanceof Error ? error.message : String(error),
+        });
       } finally {
         setMutingParticipantId(null);
       }
@@ -226,7 +236,12 @@ export function ParticipantsSidebar({
       try {
         await callService.removeParticipant(callId, participantUserId);
       } catch (error) {
-        console.error('[ParticipantsSidebar] Failed to remove participant:', error);
+        logger.error(Event.API_CALL_FAILED, {
+          callId,
+          context: 'ParticipantsSidebar.removeParticipant',
+          participantUserId,
+          error: error instanceof Error ? error.message : String(error),
+        });
       } finally {
         removingParticipantIdRef.current = null;
         setRemovingParticipantId(null);

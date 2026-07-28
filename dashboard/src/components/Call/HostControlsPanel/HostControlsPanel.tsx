@@ -6,6 +6,7 @@ import { roomActor } from '../../../machines/roomMachine';
 import { callService } from '../../../services/Call/callService';
 import { getApiErrorMessage } from '../../../utils/apiError';
 import { Switch } from '../../ui/Switch';
+import { logger, Event } from '../../../utils/logger';
 
 interface HostControlsPanelProps {
   callId: string;
@@ -60,7 +61,13 @@ export function HostControlsPanel({ callId, onClose }: HostControlsPanelProps): 
         });
         roomActor.send({ type: 'HOST_CONTROLS_CHANGED', hostControls });
       } catch (error) {
-        console.error('[HostControlsPanel] Failed to update host controls:', error);
+        logger.error(Event.API_CALL_FAILED, {
+          callId,
+          context: 'HostControlsPanel.updateHostControls',
+          hostControl: key,
+          enabled: next,
+          error: error instanceof Error ? error.message : String(error),
+        });
         toast.error('Failed to update host controls', {
           description: `${getApiErrorMessage(error, 'Please try again.')} Previous state was kept.`,
         });

@@ -5,8 +5,10 @@ import { ParticipantTile } from '../ParticipantTile/ParticipantTile';
 import type { ParticipantInfo } from '../../../machines/roomMachine';
 import { XyneTelepresenceIcon } from '../../../assets/icons/XyneTelepresenceIcon';
 import { isTelepresenceToggleEnable } from '../telepresenceCacConfig';
+import { logger, Event } from '../../../utils/logger';
 
 interface PresentationModeOverlayProps {
+  callId: string;
   isOpen: boolean;
   participant: ParticipantInfo | null;
   aiController: { id: string; name: string } | null;
@@ -15,6 +17,7 @@ interface PresentationModeOverlayProps {
 }
 
 export function PresentationModeOverlay({
+  callId,
   isOpen,
   participant,
   aiController,
@@ -35,18 +38,28 @@ export function PresentationModeOverlay({
       fullscreenRequestedRef.current = false;
       setFullscreenFailed(false);
       if (document.fullscreenElement) {
-        void document.exitFullscreen()?.catch(console.error);
+        void document.exitFullscreen()?.catch((error: unknown) => {
+          logger.error(Event.LIVEKIT_ROOM_EVENT, {
+            callId,
+            eventName: 'presentation_fullscreen_exit_failed',
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
       }
       return;
     }
     if (fullscreenRequestedRef.current) return;
     fullscreenRequestedRef.current = true;
     void overlayRef.current?.requestFullscreen()?.catch((err: Error) => {
-      console.error('[PresentationModeOverlay] requestFullscreen failed:', err);
+      logger.error(Event.LIVEKIT_ROOM_EVENT, {
+        callId,
+        eventName: 'presentation_fullscreen_request_failed',
+        error: err.message,
+      });
       fullscreenRequestedRef.current = false;
       setFullscreenFailed(true);
     });
-  }, [isOpen]);
+  }, [callId, isOpen]);
 
   // Exit fullscreen on unmount (route change, error boundary) so the browser
   // doesn't stay fullscreen with nothing rendered.

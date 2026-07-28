@@ -40,6 +40,7 @@ import { useAuth } from '../../../hooks/useAuth';
 import { useTelepresenceEnabled } from '../useTelepresenceEnabled';
 import { PresentationModeOverlay } from '../PresentationMode/PresentationModeOverlay';
 import { formatElapsedTime } from '../../../utils/recordingUtils';
+import { logger, Event } from '../../../utils/logger';
 
 const CALL_PRIVACY_DESCRIPTION = [
   'Xyne AI is active in this call. Active actions and saved artifacts are listed below.',
@@ -248,7 +249,12 @@ export function FullCallView({
           setOptimisticRecordingType(null);
         }
       } catch (err) {
-        console.error('[Recording] start error', err);
+        logger.error(Event.API_CALL_FAILED, {
+          callId,
+          context: 'FullCallView.startRecording',
+          recordingType: type,
+          error: err instanceof Error ? err.message : String(err),
+        });
         setOptimisticRecording(false);
         setOptimisticRecordingType(null);
       }
@@ -279,7 +285,12 @@ export function FullCallView({
           ...(name ? { name } : {}),
         });
       } catch (err) {
-        console.error('[Recording] stop error', err);
+        logger.error(Event.API_CALL_FAILED, {
+          callId,
+          context: 'FullCallView.stopRecording',
+          recordingId: recordingId ?? null,
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     },
     [callId, stopDialog],
@@ -676,6 +687,7 @@ export function FullCallView({
 
       {/* Presentation Mode Overlay — handles fullscreen + smooth fade transition */}
       <PresentationModeOverlay
+        callId={callId}
         isOpen={isPresentationMode}
         participant={remoteParticipant ?? null}
         aiController={aiController}
