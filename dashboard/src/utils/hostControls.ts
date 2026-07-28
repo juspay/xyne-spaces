@@ -1,4 +1,5 @@
 import { normalizeHostControls, type HostControls } from '@xyne/shared';
+import { logger, Event } from './logger';
 
 export type HostControlTurnOffKey = keyof HostControls;
 
@@ -34,23 +35,38 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
-export function parseHostControlsFromMetadata(metadata: string): HostControls | null {
+export function parseHostControlsFromMetadata(
+  metadata: string,
+  callId?: string | null,
+): HostControls | null {
   try {
     const parsed = JSON.parse(metadata) as unknown;
     if (!isRecord(parsed)) {
-      console.warn('[hostControls] Ignoring non-object room metadata for host controls');
+      logger.warn(Event.LIVEKIT_ROOM_EVENT, {
+        callId: callId ?? null,
+        eventName: 'host_controls_metadata_ignored',
+        reason: 'metadata_not_object',
+      });
       return null;
     }
 
     const rawHostControls = parsed['hostControls'];
     const hostControls = normalizeHostControls(rawHostControls);
     if (!hostControls && rawHostControls !== undefined) {
-      console.warn('[hostControls] Ignoring invalid hostControls metadata');
+      logger.warn(Event.LIVEKIT_ROOM_EVENT, {
+        callId: callId ?? null,
+        eventName: 'host_controls_metadata_ignored',
+        reason: 'invalid_host_controls',
+      });
     }
 
     return hostControls;
   } catch (error) {
-    console.warn('[hostControls] Failed to parse host controls metadata:', error);
+    logger.warn(Event.LIVEKIT_ROOM_EVENT, {
+      callId: callId ?? null,
+      eventName: 'host_controls_metadata_parse_failed',
+      error: error instanceof Error ? error.message : String(error),
+    });
     return null;
   }
 }
