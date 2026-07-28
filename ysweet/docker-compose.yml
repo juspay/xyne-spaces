@@ -1,7 +1,7 @@
 services:
   # Y-Sweet Server with Filesystem Persistence
   ysweet:
-    image: ghcr.io/xynehq/y-sweet:sha-709cabc
+    image: ghcr.io/xynehq/y-sweet:sha-dceb9d1
     container_name: ${COMPOSE_PROJECT_NAME:-xyne}-ysweet
     ports:
       - "${YSWEET_BIND_PORT:-8080}:8080"
