@@ -45,7 +45,6 @@ SERVICE_MAPPINGS=(
     "apps/backend/src/:backend"
     "apps/backend/prisma/:backend"
     "apps/backend/package.json:backend"
-    "ysweet/:ysweet"
     "apps/dashboard/src/:dashboard"
     "apps/dashboard/package.json:dashboard"
     "packages/shared/:backend"

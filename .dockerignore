@@ -69,7 +69,6 @@ apps/public-web
 apps/electron
 apps/site
 tools
-ysweet
 scripts/*
 !scripts/setup-fake-gcs.sh
 !scripts/setup-fake-gcs-test.sh
