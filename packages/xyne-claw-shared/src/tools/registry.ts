@@ -202,6 +202,7 @@ register(sandbox.sandboxRun);
 register(sandbox.sandboxRunDetached);
 register(sandbox.sandboxPollJob);
 register(sandbox.sandboxWriteFile);
+register(sandbox.sandboxCopyIn);
 register(sandbox.sandboxReadFile);
 register(sandbox.sandboxDeliverFiles);
 register(sandbox.sandboxDestroy);

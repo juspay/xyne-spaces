@@ -3,6 +3,8 @@ import type { Session } from "@xyne/kata-sdk";
 import type { ToolDefinition, ToolExecutionContext } from "../types.js";
 import { redactSecrets, redactAndStringify } from "./redact.js";
 import { rotateTemplate, isSameTemplateFamily } from "./template-rotation.js";
+import { readFile } from "node:fs/promises";
+import { resolve, join, sep } from "node:path";
 
 // Build a redacted `Error: ...` string from a caught error. Several tool
 // catch blocks interpolate err.message straight into tool output, which can
@@ -758,6 +760,107 @@ export const sandboxWriteFile: ToolDefinition = {
       if (isStaleSessionError(err)) {
         evictSession(session);
         return `Error: Session ${sessionId} died (sandbox pod replaced). Call sandbox-repo-setup to re-provision.`;
+      }
+      return sandboxErr(err);
+    }
+  },
+};
+
+/**
+ * Copy a companion file from THIS run's materialized skill directory directly
+ * into the sandbox — server-side, so the bytes never round-trip through the
+ * model's context (no token cost, no base64 corruption of binaries, no
+ * truncation of large scripts). This is the ergonomic path for "a skill ships
+ * a script, run it in the sandbox": instead of reading the file into context
+ * and re-emitting it through sandbox-write-file, point at the skill file and
+ * the runtime streams the bytes across.
+ *
+ * Confinement: the source is resolved ONLY under this run's session-skills
+ * root (`context.meta.skillsRoot`, injected by the claw runtime as
+ * `<dataDir>/session-skills/<sessionId>` — the SAME directory the agent's
+ * read tools are granted). Absolute inputs and `..` traversal that escape that
+ * root are rejected, so this can't read another user's session or arbitrary
+ * pod files.
+ */
+export const sandboxCopyIn: ToolDefinition = {
+  slug: "sandbox-copy-in",
+  name: "Sandbox Copy Skill File",
+  description:
+    "Copy a companion file bundled with a loaded skill (a script or asset in the skill's folder) directly into a sandbox session, WITHOUT pasting its content. " +
+    "Prefer this over sandbox-write-file when a skill ships a script/binary you need to run in the sandbox: the file is streamed server-side, so large or binary files stay intact and don't bloat context. " +
+    "`skillPath` is relative to the skill directory shown in the skill's <location> (e.g. 'sandbox-record-video/scripts/recorder.mjs').",
+  source: "custom:sandbox",
+  configSchema: SANDBOX_CONFIG_SCHEMA,
+  inputSchema: {
+    type: "object",
+    properties: {
+      sessionId: {
+        type: "string",
+        description: "Sandbox session ID returned by sandbox-create / sandbox-repo-setup",
+      },
+      skillPath: {
+        type: "string",
+        description:
+          "Path of the skill companion file RELATIVE to this run's session-skills root, e.g. '<skill-slug>/scripts/run.sh'. Leading '/' and '..' are rejected.",
+      },
+      destPath: {
+        type: "string",
+        description: "Absolute destination path inside the sandbox (default: /workspace/<basename of skillPath>).",
+      },
+    },
+    required: ["sessionId", "skillPath"],
+  },
+
+  async execute(params, context) {
+    if (!context) return "Error: No execution context available.";
+    const sessionId = params["sessionId"] as string;
+    const skillPathRaw = params["skillPath"] as string;
+    const destPathRaw = params["destPath"] as string | undefined;
+
+    const skillsRoot = context.meta?.["skillsRoot"];
+    if (!skillsRoot) {
+      return "Error: No skills are materialized for this run (context.meta.skillsRoot is unset), so there is nothing to copy in. Use sandbox-write-file for ad-hoc content.";
+    }
+    if (typeof skillPathRaw !== "string" || skillPathRaw.trim().length === 0) {
+      return "Error: skillPath must be a non-empty path relative to the skill directory.";
+    }
+
+    // Confine the source to THIS run's session-skills root. Reject absolute
+    // inputs and any '..' traversal that escapes the root — otherwise this
+    // becomes an arbitrary pod-file / cross-session read primitive.
+    const rootAbs = resolve(skillsRoot);
+    const sourceAbs = resolve(join(rootAbs, skillPathRaw));
+    if (sourceAbs !== rootAbs && !sourceAbs.startsWith(rootAbs + sep)) {
+      return "Error: skillPath escapes the skill directory. Pass a path relative to the skill folder (no leading '/' and no '..').";
+    }
+    if (isCredentialPath(sourceAbs)) {
+      return JSON.stringify({ error: "Refused: path looks like a credential file" });
+    }
+
+    const destPath =
+      typeof destPathRaw === "string" && destPathRaw.trim().length > 0
+        ? destPathRaw.trim()
+        : `/workspace/${sourceAbs.split("/").pop()}`;
+
+    const session = SESSION_STORE.get(sessionId);
+    if (!session) return `Error: Session ${sessionId} not found.`;
+    if (!isSessionOwnedByContext(session, sessionId, context)) {
+      return unauthorizedSessionMessage(sessionId);
+    }
+    const roWrite = readOnlyGuard(session, { write: true });
+    if (roWrite) return roWrite;
+
+    try {
+      const buf = await readFile(sourceAbs);
+      await session.files.write(destPath, buf);
+      return JSON.stringify({ skillPath: skillPathRaw, destPath, bytes: buf.length, copied: true });
+    } catch (err) {
+      if (isStaleSessionError(err)) {
+        evictSession(session);
+        return `Error: Session ${sessionId} died (sandbox pod replaced). Call sandbox-repo-setup to re-provision.`;
+      }
+      if ((err as NodeJS.ErrnoException)?.code === "ENOENT") {
+        return `Error: Skill file not found at '${skillPathRaw}'. Check the path relative to the skill's <location> directory.`;
       }
       return sandboxErr(err);
     }
