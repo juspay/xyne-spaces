@@ -5223,6 +5223,21 @@ async function doRenderPlanCard(
   const ctx = await resolveSessionContext(sessionId, conversationId ?? null, agentSlug ?? null);
   if (!ctx || ctx.responseMode !== "conversation" || !ctx.channelId || !ctx.appToken) return;
 
+  // Per-agent opt-out (agent.config.postTodos === false): suppress the live
+  // plan/todo card in the Spaces thread for agents whose owner turned this off.
+  // Absent/true preserves the default (post), so existing agents are unchanged.
+  // This is the ONE choke point every kind:"plan" emitter funnels through
+  // (the runtime todo-write tool, run.ts onPlan, consume-claw-stream), so a
+  // single guard here covers every emitter and every dispatch surface. Read
+  // fresh from the agent row (a PK lookup) — mirrors how memoryEnabled is
+  // consumed at the point of use, and lets a mid-run config change take effect.
+  if (ctx.agentId) {
+    const cfgRow = await prisma.agent
+      .findUnique({ where: { id: ctx.agentId }, select: { config: true } })
+      .catch(() => null);
+    if ((cfgRow?.config as { postTodos?: boolean } | null)?.postTodos === false) return;
+  }
+
   // Deterministic per-conversation plan facts, written BEFORE Turn 2 dispatched
   // (so they're present even for the first todo-write): whether the plan was
   // auto-approved (chip), and the whitelist of approved todo titles (reject
