@@ -19,7 +19,7 @@ import { cn } from '../../../utils/classNames';
 import type { ActivityWithRelated } from '../../../types/activity';
 import { ActivityClassification, UserType } from '@xyne/shared';
 import { Bot, UserUser02 } from '@xyne/icons';
-import { groupActivities, type ActivityFeedItem } from '../activityGrouping';
+import { groupActivities, countGroupedActivities, type ActivityFeedItem } from '../activityGrouping';
 import {
   mixpanelService,
   EVENTS,
@@ -354,6 +354,7 @@ const ActivityListView = (): ReactElement => {
           'stage_eta_breach',
           'ticket_assigned',
           'ticket_status',
+          'ticket_status_v2',
           'ticket_eta',
           'ticket_board',
           'ticket_assigned_to',
@@ -736,7 +737,7 @@ const ActivityListView = (): ReactElement => {
   const unreadActivities = useSelector(stateMachineActor, state => state.context.unreadActivities);
 
   const activityCounts = useMemo(() => {
-    const counts: Record<ActivityTab, number> = {
+    const emptyCounts: Record<ActivityTab, number> = {
       all: 0,
       your_mentions: 0,
       replies: 0,
@@ -750,59 +751,45 @@ const ActivityListView = (): ReactElement => {
     };
 
     if (!unreadActivities) {
-      return counts;
+      return emptyCounts;
     }
 
-    unreadActivities.forEach(activity => {
-      // 'all' count includes everything visible
-      // Cast to ActivityWithRelated since unreadActivities has slightly different shape
-      // but isAllVisibleActivity only uses fields that exist in both
-      if (isAllVisibleActivity(activity as unknown as ActivityWithRelated)) {
-        counts.all++;
-      }
-
-      // Check specific tabs
-      if (activity.actorAction === 'mentioned_user') {
-        counts.your_mentions++;
-      } else if (activity.actorAction === 'group_mention') {
-        counts.group_mentions++;
-      } else if (
-        // added to maintain backward compat for now, to be deprecated
-        activity.actorAction === 'replied' ||
-        activity.actorAction === 'replied_v2'
-      ) {
-        counts.replies++;
-      } else if (
-        // added to maintain backward compat for now, to be deprecated
+    // Single pass over unreadActivities; each bucket collapses consecutive
+    // same-actor/same-ticket ticket_* activities within the grouping window
+    // into one count, matching what the grouped feed renders as one card.
+    // Cast to ActivityWithRelated in bucket predicates that reuse tab filters
+    // built for the fetched-feed shape — unreadActivities (state machine) has
+    // a slightly different shape, but these predicates only touch fields
+    // present on both.
+    const counts = countGroupedActivities(unreadActivities, {
+      all: activity => isAllVisibleActivity(activity as unknown as ActivityWithRelated),
+      your_mentions: activity => activity.actorAction === 'mentioned_user',
+      group_mentions: activity => activity.actorAction === 'group_mention',
+      // added to maintain backward compat for now, to be deprecated
+      replies: activity => activity.actorAction === 'replied' || activity.actorAction === 'replied_v2',
+      // added to maintain backward compat for now, to be deprecated
+      reactions: activity =>
         activity.actorAction === 'added' ||
         activity.actorAction === 'added_v2' ||
-        activity.actorAction === 'removed'
-      ) {
-        counts.reactions++;
-      }
-
-      if (
+        activity.actorAction === 'removed',
+      tickets: activity =>
+        activity.actorAction === 'eta_warning' ||
+        activity.actorAction === 'eta_breach' ||
+        activity.actorAction === 'stage_eta_breach' ||
+        activity.ticketId !== null,
+      canvas: activity =>
         activity.actorAction === 'canvas_shared' ||
         activity.actorAction === 'canvas_role_changed' ||
         activity.actorAction === 'canvas_access_revoked' ||
-        (activity.actorAction === 'mentioned_user' && activity.canvasId)
-      ) {
-        counts.canvas++;
-      }
-
-      if (CALL_ACTIVITY_TYPES.some(type => type === activity.actorAction)) {
-        counts.calls++;
-      }
-
-      const classification = activity.classification ?? ActivityClassification.PENDING;
-      if (classification === ActivityClassification.ACTIONABLE) {
-        counts.actionable++;
-      } else if (classification === ActivityClassification.FYI) {
-        counts.fyi++;
-      }
+        (activity.actorAction === 'mentioned_user' && !!activity.canvasId),
+      calls: activity => CALL_ACTIVITY_TYPES.some(type => type === activity.actorAction),
+      actionable: activity =>
+        (activity.classification ?? ActivityClassification.PENDING) === ActivityClassification.ACTIONABLE,
+      fyi: activity =>
+        (activity.classification ?? ActivityClassification.PENDING) === ActivityClassification.FYI,
     });
 
-    return counts;
+    return { ...emptyCounts, ...counts };
   }, [unreadActivities]);
 
   const renderActivityList = (feedItems: ActivityFeedItem[]): ReactElement => {

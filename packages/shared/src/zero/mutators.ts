@@ -1010,21 +1010,34 @@ export const mutators = defineMutators({
           });
         }
 
+        // Only message-domain activities are cleared by viewing a channel —
+        // ticket/canvas/call activities are never marked read here.
         const unreadActivities = await tx.run(
           zql.activities
             .where('userId', ctx.userID)
             .where('isRead', false)
-            .where('channelId', channelId),
+            .where('channelId', channelId)
+            .where('actionSource', 'message'),
         );
 
         if (unreadActivities.length === 0) {
           return;
         }
 
-        const activityBySourceId = new Map(
-          unreadActivities.map(a => [a.actionSourceId, a]),
-        );
-        const uniqueSourceIds = [...activityBySourceId.keys()];
+        // Group by source message id — several activities (e.g. a mention
+        // plus a reply) can share the same top-level message and must all be
+        // marked read together when that message is viewed.
+        const activitiesBySourceId = new Map<string, typeof unreadActivities>();
+        for (const activity of unreadActivities) {
+          const sourceId = activity.messageId ?? activity.actionSourceId;
+          const existing = activitiesBySourceId.get(sourceId);
+          if (existing) {
+            existing.push(activity);
+          } else {
+            activitiesBySourceId.set(sourceId, [activity]);
+          }
+        }
+        const uniqueSourceIds = [...activitiesBySourceId.keys()];
 
         // Batch fetch messages
         const foundMessages = await tx.run(
@@ -1054,17 +1067,21 @@ export const mutators = defineMutators({
           conversations.map(c => [c.conversationId, c]),
         );
 
-        for (const [sourceId, activity] of activityBySourceId) {
+        for (const [sourceId, activities] of activitiesBySourceId) {
           const message = messageByMessageId.get(sourceId);
           if (!message) {
             continue;
           }
           const conv = convByConversationId.get(message.conversationId);
           if (conv?.initialMessageId === message.messageId) {
-            await tx.mutate.activities.update({
-              id: activity.id,
-              isRead: true,
-            });
+            await Promise.all(
+              activities.map(activity =>
+                tx.mutate.activities.update({
+                  id: activity.id,
+                  isRead: true,
+                }),
+              ),
+            );
           }
         }
       },
@@ -3647,6 +3664,63 @@ export const mutators = defineMutators({
           id: activityId,
           isRead: true,
         });
+      },
+    ),
+    markManyAsRead: defineMutator(
+      z.object({ activityIds: z.array(z.string()), timestamp: z.number() }),
+      async ({ tx, ctx, args: { activityIds, timestamp } }) => {
+        if (activityIds.length === 0) {
+          return;
+        }
+
+        const activities = await tx.run(
+          zql.activities.where('id', 'IN', activityIds).where('userId', ctx.userID),
+        );
+
+        const unreadActivities = activities.filter(activity => !activity.isRead);
+        if (unreadActivities.length === 0) {
+          return;
+        }
+
+        await Promise.all(
+          unreadActivities.map(activity =>
+            tx.mutate.activities.update({
+              id: activity.id,
+              isRead: true,
+            }),
+          ),
+        );
+
+        const channelIdCounts = new Map<string, number>();
+        unreadActivities.forEach(activity => {
+          if (activity.channelId) {
+            const currentCount = channelIdCounts.get(activity.channelId) || 0;
+            channelIdCounts.set(activity.channelId, currentCount + 1);
+          }
+        });
+
+        const uniqueChannelIds = Array.from(channelIdCounts.keys());
+        if (uniqueChannelIds.length === 0) {
+          return;
+        }
+
+        const channelUserStatuses = await tx.run(
+          zql.channel_user_status
+            .where('userId', ctx.userID)
+            .where('isDeleted', false)
+            .where('channelId', 'IN', uniqueChannelIds),
+        );
+        await Promise.all(
+          channelUserStatuses.map(channelStatus => {
+            const readCount = channelIdCounts.get(channelStatus.channelId) || 0;
+            const newUnreadCount = Math.max(0, channelStatus.unreadCount - readCount);
+            return tx.mutate.channel_user_status.update({
+              id: channelStatus.id,
+              unreadCount: newUnreadCount,
+              updatedAt: timestamp,
+            });
+          }),
+        );
       },
     ),
     markAsReadByFilter: defineMutator(

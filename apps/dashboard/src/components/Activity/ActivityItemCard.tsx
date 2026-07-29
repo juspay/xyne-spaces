@@ -50,6 +50,11 @@ interface ActivityItemCardProps {
   useActivityCutoff?: boolean;
   focusThread?: boolean;
   unresolvedChannelLabel?: string;
+  /** When this card represents a grouped set of activities (e.g. multiple field
+   * changes on the same ticket), ids of every underlying activity in the group.
+   * Marking the card read applies to all of them; `activity` itself must be the
+   * newest of the group and remains the sole target of mark-as-unread. */
+  groupActivityIds?: string[];
 }
 
 export const ActivityItemCard = ({
@@ -72,6 +77,7 @@ export const ActivityItemCard = ({
   useActivityCutoff = true,
   focusThread = false,
   unresolvedChannelLabel = 'Unknown Channel',
+  groupActivityIds,
 }: ActivityItemCardProps): ReactElement | null => {
   const navigate = useNavigate();
   const context = useAuthContextValues();
@@ -108,11 +114,28 @@ export const ActivityItemCard = ({
     return `${base}${sep}focusThread=1${hash}`;
   };
 
-  const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
-    // Always mark as read on any click (including URL clicks per FR-4)
-    if (!activity.isRead) {
+  // For a grouped card, `activity.isRead` reflects the whole group (every
+  // underlying id read); marking it read must mark every id, not just the
+  // representative one shown on the card.
+  const markRead = () => {
+    if (activity.isRead) {
+      return;
+    }
+    if (groupActivityIds && groupActivityIds.length > 0) {
+      void zero.mutate(
+        mutators.activities.markManyAsRead({
+          activityIds: groupActivityIds,
+          timestamp: Date.now(),
+        }),
+      );
+    } else {
       void zero.mutate(mutators.activities.markAsRead({ activityId: activity.id }));
     }
+  };
+
+  const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
+    // Always mark as read on any click (including URL clicks per FR-4)
+    markRead();
     // If the click originated from a hyperlink inside the message content,
     // let the browser handle it and do not navigate the card
     const target = e.target as HTMLElement;
@@ -211,9 +234,7 @@ export const ActivityItemCard = ({
   };
 
   const doMarkAsRead = () => {
-    if (!activity.isRead) {
-      void zero.mutate(mutators.activities.markAsRead({ activityId: activity.id }));
-    }
+    markRead();
   };
 
   const handleMarkAsRead = (e: React.MouseEvent<HTMLDivElement>) => {
