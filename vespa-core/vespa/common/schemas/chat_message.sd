@@ -15,6 +15,17 @@ schema chat_message {
       index: enable-bm25
     }
 
+    # Per-chunk body used for chunk-level embeddings, mirroring mail.sd.
+    # `text` (above) is retained as the single display/summary/lexical field;
+    # `chunks` holds the same body split into <=2000-char segments so long
+    # messages are not truncated at embed time (bge-small-en-v1.5 512-token limit).
+    field chunks type array<string> {
+      indexing: index | summary
+      index {
+        enable-bm25
+      }
+    }
+
     field userId type string {
       indexing: attribute | summary
       attribute: fast-search
@@ -156,7 +167,15 @@ schema chat_message {
       distance-metric: angular
     }
   }
-  
+
+  # Per-chunk embeddings (one vector per `chunks` element).
+  field chunk_embeddings type tensor<bfloat16>(p{}, v[DIMS]) {
+    indexing: input chunks | embed hf-embedder | attribute | index
+    attribute {
+      distance-metric: angular
+    }
+  }
+
 field text_fuzzy type string {
     indexing: input text |tokenize | lowercase | index | summary
     index: enable-bm25
@@ -166,7 +185,7 @@ field text_fuzzy type string {
     }
 }
   fieldset default {
-    fields: text, text_fuzzy, channelId, userId, threadId, attachmentIds, channelName, isPrivate, username, messageChannelName, entityNames
+    fields: text, chunks, text_fuzzy, channelId, userId, threadId, attachmentIds, channelName, isPrivate, username, messageChannelName, entityNames
   }
 
   rank-profile initial {
@@ -232,6 +251,7 @@ field text_fuzzy type string {
     summary text {
       bolding: on
     }
+    summary chunks {}
     summary mentions {}
     summary channelMentions {}
     summary attachmentIds {}
