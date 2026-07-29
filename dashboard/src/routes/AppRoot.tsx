@@ -202,6 +202,9 @@ import { useScreenRecorder } from '../hooks/useScreenRecorder';
 import type { ScreenSource } from '../types/electron';
 import ConfluenceMigrationScreen from './ConfluenceMigrationScreen/ConfluenceMigrationScreen';
 import AIScreen from './AIScreen/AIScreen';
+import AILibraryScreen from './AIScreen/AILibraryScreen';
+import AIKnowledgeScreen from './AIScreen/AIKnowledgeScreen';
+import AISectionScreen from './AIScreen/AISectionScreen';
 import UserGuideScreen from './UserGuideScreen';
 import AutomationsListScreen from './AutomationsScreen/AutomationsListScreen';
 import AutomationBuilderScreen from './AutomationsScreen/AutomationBuilderScreen';
@@ -809,7 +812,15 @@ export const router = createBrowserRouter([
               },
               {
                 path: 'ai',
-                element: <AIScreen />,
+                children: [
+                  { index: true, element: <Navigate to='chat/new' replace /> },
+                  { path: 'chat/new', element: <AIScreen /> },
+                  { path: 'library', element: <AILibraryScreen /> },
+                  { path: 'knowledge', element: <AIKnowledgeScreen /> },
+                  { path: 'digital-twin', element: <AISectionScreen title='Digital twin' /> },
+                  { path: 'metrics', element: <AISectionScreen title='Metrics' /> },
+                  { path: 'workflow', element: <AISectionScreen title='Workflow' /> },
+                ],
               },
               {
                 path: 'onboarding',
