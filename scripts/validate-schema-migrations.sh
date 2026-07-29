@@ -37,15 +37,15 @@ done
 # Default configuration if not provided via CLI
 if [ ${#SCHEMA_PATHS[@]} -eq 0 ]; then
     SCHEMA_PATHS=(
-        "backend/prisma/schema.prisma"
-        "xyne-claw-auth/backend/prisma/schema.prisma"
+        "apps/backend/prisma/schema.prisma"
+        "apps/xyne-claw-auth/backend/prisma/schema.prisma"
     )
 fi
 
 if [ ${#MIGRATIONS_DIRS[@]} -eq 0 ]; then
     MIGRATIONS_DIRS=(
-        "backend/prisma/migrations"
-        "xyne-claw-auth/backend/prisma/migrations"
+        "apps/backend/prisma/migrations"
+        "apps/xyne-claw-auth/backend/prisma/migrations"
     )
 fi
 
@@ -145,11 +145,11 @@ get_migration_content_preview() {
     get_migration_content "$migration_file" | head -20 || echo "(unable to read file)"
 }
 
-# Validate that new models/enums added to schema.prisma are also reflected in shared/src/zero/schema.ts
+# Validate that new models/enums added to schema.prisma are also reflected in packages/shared/src/zero/schema.ts
 # This enforces that any Prisma schema change is manually synced to the Zero TS schema
 validate_prisma_zero_sync() {
-    local prisma_schema="backend/prisma/schema.prisma"
-    local zero_schema="shared/src/zero/schema.ts"
+    local prisma_schema="apps/backend/prisma/schema.prisma"
+    local zero_schema="packages/shared/src/zero/schema.ts"
     local has_errors=false
 
     # Only run this check if schema.prisma was changed
@@ -300,7 +300,7 @@ validate_schema_migrations() {
         log_error "Schema file(s) changed but no migration files staged!"
         echo ""
         echo "You must create and stage migration files when modifying the Prisma schema."
-        echo "Run: npx prisma migrate dev --name <descriptive_name>"
+        echo "Run: pnpm exec prisma migrate dev --name <descriptive_name>"
         echo ""
         return 1
     fi
@@ -351,7 +351,7 @@ validate_schema_migrations() {
         echo ""
         echo "To fix this issue:"
         echo "1. Ensure your migration file contains SQL for the new models/enums"
-        echo "2. Run: npx prisma migrate dev --name <descriptive_name>"
+        echo "2. Run: pnpm exec prisma migrate dev --name <descriptive_name>"
         echo "3. Stage the generated migration files"
         echo ""
         return 1

@@ -38,10 +38,10 @@ curl -X POST "http://${FAKE_GCS_HOST}/storage/v1/b?project=xyne-spaces" \
 echo "✅ Bucket created/verified: ${CHAT_BUCKET}"
 
 # Build dashboard if not already built
-if [ ! -d "dashboard/dist" ]; then
+if [ ! -d "apps/dashboard/dist" ]; then
   echo "🔨 Building dashboard..."
-  cd dashboard
-  npm run build
+  cd apps/dashboard
+  pnpm run build
   cd ..
   echo "✅ Dashboard built!"
 else
@@ -51,7 +51,7 @@ fi
 # Upload test bundle using curl (more reliable with fake-gcs-server)
 echo "📤 Uploading test bundle to: ${TEST_BRANCH}/"
 
-cd dashboard/dist
+cd apps/dashboard/dist
 file_count=$(find . -type f | wc -l | tr -d ' ')
 echo "   Found ${file_count} files to upload..."
 

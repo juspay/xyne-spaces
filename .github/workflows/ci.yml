@@ -11,23 +11,16 @@ permissions:
 
 env:
   NODE_VERSION: "22"
-  # --include=dev: the runner env can set NODE_ENV=production, which would
-  #   skip the devDependencies (typescript, react, @types/*) these builds need.
-  # --ignore-scripts: several packages have prepare/postinstall hooks that
-  #   auto-build sibling packages (e.g. backend's postinstall runs
-  #   `cd ../shared && npm install && npm run build`); we orchestrate builds
-  #   explicitly instead. NOTE: npm still runs the `prepare` of file:../
-  #   linked deps when packing them, so each job installs those packages'
-  #   node_modules first — that's why the lib-build steps below precede the
-  #   app's own `npm ci`.
-  NPM_FLAGS: "--include=dev --ignore-scripts --prefer-offline --no-audit"
+  # --prod=false: the runner env can set NODE_ENV=production, which would skip
+  #   the devDependencies (typescript, react, @types/*) these builds need.
+  # Each job installs only its own package plus that package's workspace
+  # dependencies (the `...` filter suffix), so jobs stay independent and cheap.
+  PNPM_FLAGS: "--frozen-lockfile --prod=false"
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Backend: needs shared + framework (file:../ deps) installed AND built
-  # before its own npm ci, because npm packs file: deps and runs their
-  # `prepare` (tsc) — which requires their node_modules to exist.
-  # Mirrors backend/Dockerfile's stage order.
+  # Backend: depends on @xyne/shared and agentic-framework, which are workspace
+  # packages consumed from their built dist/ — so they are compiled first.
   # ---------------------------------------------------------------------------
   backend:
     name: Backend typecheck + build
@@ -39,44 +32,33 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - uses: pnpm/action-setup@v4
+
       - uses: actions/setup-node@v5
         with:
           node-version: ${{ env.NODE_VERSION }}
-
-      - name: Build @xyne/shared (file dep)
-        working-directory: shared
-        run: |
-          npm ci ${{ env.NPM_FLAGS }}
-          npm run build
-
-      - name: Build agentic-framework (file dep)
-        working-directory: framework
-        run: |
-          npm ci ${{ env.NPM_FLAGS }}
-          npm run build
+          cache: pnpm
 
       - name: Install dependencies
-        working-directory: backend
-        run: npm ci ${{ env.NPM_FLAGS }}
+        run: pnpm install ${{ env.PNPM_FLAGS }} --filter xyne-spaces-backend...
+
+      - name: Build workspace libraries
+        run: pnpm --filter @xyne/shared --filter agentic-framework run build
 
       - name: Prisma generate (app + common schemas)
-        working-directory: backend
         run: |
-          npm run db:generate
-          npm run db:common:generate
+          pnpm --filter xyne-spaces-backend run db:generate
+          pnpm --filter xyne-spaces-backend run db:common:generate
 
       # backend lint intentionally omitted (~259 pre-existing errors — separate cleanup).
       - name: Typecheck
-        working-directory: backend
-        run: npm run typecheck
+        run: pnpm --filter xyne-spaces-backend run typecheck
 
       - name: Build
-        working-directory: backend
-        run: npm run build
+        run: pnpm --filter xyne-spaces-backend run build
 
   # ---------------------------------------------------------------------------
-  # Dashboard: needs shared + icons (file:../ deps) installed AND built first,
-  # for the same file:-dep prepare reason. Mirrors dashboard/Dockerfile.
+  # Dashboard: depends on @xyne/shared and @xyne/icons, consumed from dist/.
   # ---------------------------------------------------------------------------
   dashboard:
     name: Dashboard lint + typecheck + build
@@ -84,67 +66,58 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - uses: pnpm/action-setup@v4
+
       - uses: actions/setup-node@v5
         with:
           node-version: ${{ env.NODE_VERSION }}
-
-      - name: Build @xyne/shared (file dep)
-        working-directory: shared
-        run: |
-          npm ci ${{ env.NPM_FLAGS }}
-          npm run build
-
-      - name: Build @xyne/icons (file dep)
-        working-directory: icons
-        run: |
-          npm ci ${{ env.NPM_FLAGS }}
-          npm run build
+          cache: pnpm
 
       - name: Install dependencies
-        working-directory: dashboard
-        run: npm ci ${{ env.NPM_FLAGS }}
+        run: pnpm install ${{ env.PNPM_FLAGS }} --filter xyne-spaces-dashboard...
+
+      - name: Build workspace libraries
+        run: pnpm --filter @xyne/shared --filter @xyne/icons run build
 
       # errors-only (warnings ignored); heap bump avoids OOM on type-aware lint.
       - name: Lint (errors only)
-        working-directory: dashboard
         env:
           NODE_OPTIONS: "--max-old-space-size=8192"
-        run: npm run lint:errors-only
+        run: pnpm --filter xyne-spaces-dashboard run lint:errors-only
 
       - name: Typecheck
-        working-directory: dashboard
-        run: npm run typecheck
+        run: pnpm --filter xyne-spaces-dashboard run typecheck
 
       - name: Build
-        working-directory: dashboard
-        # Matches dashboard/Dockerfile — vite build needs a larger V8 heap.
+        # Matches apps/dashboard/Dockerfile — vite build needs a larger V8 heap.
         env:
           NODE_OPTIONS: "--max-old-space-size=8192"
-        run: npm run build
+        run: pnpm --filter xyne-spaces-dashboard run build
 
-  # Framework lint — self-contained (no file: deps).
+  # Framework lint — self-contained (no workspace deps).
   framework-lint:
     name: Framework lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
 
+      - uses: pnpm/action-setup@v4
+
       - uses: actions/setup-node@v5
         with:
           node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
 
       - name: Install dependencies
-        working-directory: framework
-        run: npm ci ${{ env.NPM_FLAGS }}
+        run: pnpm install ${{ env.PNPM_FLAGS }} --filter agentic-framework...
 
       - name: Lint
-        working-directory: framework
-        run: npm run lint
+        run: pnpm --filter agentic-framework run lint
 
   # ---------------------------------------------------------------------------
   # xyne-claw stack: kata-sdk -> xyne-claw-shared -> xyne-claw (typecheck only;
-  # these expose typecheck but no build script). kata-sdk has no lifecycle
-  # scripts, so installing it first is sufficient for its file: link.
+  # these expose typecheck but no build script). One filtered install pulls the
+  # whole chain in, replacing the old three-step sequential npm ci.
   # ---------------------------------------------------------------------------
   xyne-claw:
     name: xyne-claw typecheck
@@ -152,25 +125,21 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - uses: pnpm/action-setup@v4
+
       - uses: actions/setup-node@v5
         with:
           node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
 
-      - name: Install kata-sdk
-        working-directory: packages/kata-sdk
-        run: npm ci ${{ env.NPM_FLAGS }}
+      - name: Install dependencies
+        run: pnpm install ${{ env.PNPM_FLAGS }} --filter xyne-claw...
 
-      - name: Install + typecheck xyne-claw-shared
-        working-directory: xyne-claw-shared
-        run: |
-          npm ci ${{ env.NPM_FLAGS }}
-          npm run typecheck
+      - name: Typecheck xyne-claw-shared
+        run: pnpm --filter xyne-claw-shared run typecheck
 
-      - name: Install + typecheck xyne-claw
-        working-directory: xyne-claw
-        run: |
-          npm ci ${{ env.NPM_FLAGS }}
-          npm run typecheck
+      - name: Typecheck xyne-claw
+        run: pnpm --filter xyne-claw run typecheck
 
   # ---------------------------------------------------------------------------
   # Secret scan (gitleaks). Scans the working tree with the committed

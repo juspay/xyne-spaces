@@ -1,33 +1,50 @@
 # Development Dockerfile for sandbox dashboard (HMR via volume mount)
 # Used by sandbox system for per-agent isolated dashboard instances
+#
+# Build context is the repo root (the pnpm workspace root).
 
 FROM mirror.gcr.io/library/node:22.22.3-slim
-
-WORKDIR /app
 
 # Install curl for health checks
 RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 
-# Copy shared module and build
-COPY shared ../shared
-RUN cd ../shared && npm ci && npm run build
+RUN corepack enable && corepack prepare pnpm@10.15.0 --activate
 
-# Copy icons module and build
-COPY icons ../icons
-RUN cd ../icons && npm ci --ignore-scripts && npm run build
+WORKDIR /repo
 
-# Copy dashboard and install deps
-COPY dashboard .
-RUN npm ci
+# Manifests + lockfile first so the install layer caches independently of source.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
+COPY packages/shared/package.json           packages/shared/
+COPY packages/icons/package.json            packages/icons/
+COPY apps/dashboard/package.json            apps/dashboard/
+COPY apps/backend/package.json              apps/backend/
+COPY apps/backend/eslint-rules/package.json apps/backend/eslint-rules/
 
-# Copy backend dependencies for Prisma (dashboard needs @prisma/client)
-COPY backend/package*.json ../backend/
-RUN cd ../backend && npm install prisma
-COPY backend/prisma ../backend/prisma
-RUN cd ../backend && npx prisma generate
+# dashboard + its workspace deps (shared, icons). backend is included too because
+# the dashboard imports @prisma/client generated from backend's schema below.
+# --ignore-scripts: only the manifests are present at this layer, so the
+# `prepare` hooks on @xyne/shared and @xyne/icons (which run tsc) would fail
+# with no sources or tsconfig.json. The explicit build steps after the source
+# COPY below do that work instead.
+RUN pnpm install --frozen-lockfile --prod=false --ignore-scripts \
+      --filter xyne-spaces-dashboard... --filter xyne-spaces-backend
 
-# Copy root package.json to / so logger.ts can import version (../../../package.json)
+COPY packages/shared packages/shared
+COPY packages/icons  packages/icons
+COPY apps/dashboard  apps/dashboard
+
+# dashboard consumes both from their built dist/
+RUN pnpm --filter @xyne/shared --filter @xyne/icons run build
+
+# Prisma client for the dashboard's @prisma/client imports
+COPY apps/backend/prisma apps/backend/prisma
+RUN pnpm --filter xyne-spaces-backend exec prisma generate
+
+# logger.ts imports the version from the repo-root package.json (../../../package.json)
 COPY package.json /package.json
+
+# /app is where the sandbox volume mounts expect the dashboard
+RUN ln -s /repo/apps/dashboard /app
 
 # Expose Vite dev server port
 EXPOSE 5173
@@ -39,7 +56,7 @@ RUN cat > /entrypoint.sh << 'ENTRY'
 #!/bin/sh
 set -e
 echo "[sandbox] Starting dashboard dev server..."
-cd /app && exec npx vite --host 0.0.0.0
+cd /repo/apps/dashboard && exec pnpm exec vite --host 0.0.0.0
 ENTRY
 RUN chmod +x /entrypoint.sh
 

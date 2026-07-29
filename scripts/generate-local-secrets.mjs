@@ -12,11 +12,16 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
-const envPath = join(repoRoot, "backend", ".env.local");
-const webPushPath = join(repoRoot, "backend", "node_modules", "web-push", "src", "index.js");
+// The backend moved to apps/backend in the pnpm-workspace restructure. Both are
+// accepted so this works on branches either side of that change.
+const backendDir = existsSync(join(repoRoot, "apps", "backend"))
+  ? join(repoRoot, "apps", "backend")
+  : join(repoRoot, "backend");
+const envPath = join(backendDir, ".env.local");
+const webPushPath = join(backendDir, "node_modules", "web-push", "src", "index.js");
 
 if (!existsSync(envPath)) {
-  console.error("backend/.env.local not found");
+  console.error(`${envPath} not found`);
   process.exit(1);
 }
 

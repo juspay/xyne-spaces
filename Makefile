@@ -19,11 +19,11 @@ build-backend:
 	$(info Version $(VERSION) / Short: $(SOURCE_SHORT_COMMIT))
 	$(info Building $(BACKEND_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) / git-head: $(SOURCE_COMMIT))
 	$(info Local image: $(BACKEND_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
-	docker buildx build -f backend/Dockerfile -t $(BACKEND_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --build-arg "GITHUB_PAT_TOKEN=$(GITHUB_PAT_TOKEN)" --load .
+	docker buildx build -f apps/backend/Dockerfile -t $(BACKEND_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --build-arg "GITHUB_PAT_TOKEN=$(GITHUB_PAT_TOKEN)" --load .
 
 push-backend:
 	$(info Pushing to registry: $(NS)/$(BACKEND_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
-	docker buildx build -f backend/Dockerfile -t $(NS)/$(BACKEND_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --build-arg "GITHUB_PAT_TOKEN=$(GITHUB_PAT_TOKEN)" --push .
+	docker buildx build -f apps/backend/Dockerfile -t $(NS)/$(BACKEND_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --build-arg "GITHUB_PAT_TOKEN=$(GITHUB_PAT_TOKEN)" --push .
 	$(info Successfully pushed: $(NS)/$(BACKEND_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
 
 clean-backend:
@@ -32,18 +32,18 @@ clean-backend:
 
 prisma-generate:
 	$(info Generating backend Prisma clients)
-	cd backend && npm run db:generate
-	cd backend && npm run db:common:generate
+	cd apps/backend && pnpm run db:generate
+	cd apps/backend && pnpm run db:common:generate
 
 # Runner targets
 build-runner:
 	$(info Building $(RUNNER_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) / git-head: $(SOURCE_COMMIT))
 	$(info Local image: $(RUNNER_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
-	docker buildx build -f backend/Docker.runner -t $(RUNNER_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --build-arg "GITHUB_PAT_TOKEN=$(GITHUB_PAT_TOKEN)" --build-arg "CACHIX_AUTH_TOKEN=$(CACHIX_AUTH_TOKEN)" --load .
+	docker buildx build -f apps/backend/Docker.runner -t $(RUNNER_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --build-arg "GITHUB_PAT_TOKEN=$(GITHUB_PAT_TOKEN)" --build-arg "CACHIX_AUTH_TOKEN=$(CACHIX_AUTH_TOKEN)" --load .
 
 push-runner:
 	$(info Pushing to registry: $(NS)/$(RUNNER_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
-	docker buildx build -f backend/Docker.runner -t $(NS)/$(RUNNER_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --build-arg "GITHUB_PAT_TOKEN=$(GITHUB_PAT_TOKEN)" --build-arg "CACHIX_AUTH_TOKEN=$(CACHIX_AUTH_TOKEN)" --push .
+	docker buildx build -f apps/backend/Docker.runner -t $(NS)/$(RUNNER_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --build-arg "GITHUB_PAT_TOKEN=$(GITHUB_PAT_TOKEN)" --build-arg "CACHIX_AUTH_TOKEN=$(CACHIX_AUTH_TOKEN)" --push .
 	$(info Successfully pushed: $(NS)/$(RUNNER_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
 
 clean-runner:
@@ -54,11 +54,11 @@ clean-runner:
 build-dashboard:
 	$(info Building $(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) / git-head: $(SOURCE_COMMIT))
 	$(info Local image: $(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
-	docker buildx build -f dashboard/Dockerfile -t $(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --load .
+	docker buildx build -f apps/dashboard/Dockerfile -t $(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --load .
 
 push-dashboard:
 	$(info Pushing to registry: $(NS)/$(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
-	docker buildx build -f dashboard/Dockerfile -t $(NS)/$(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --push .
+	docker buildx build -f apps/dashboard/Dockerfile -t $(NS)/$(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --push .
 	$(info Successfully pushed: $(NS)/$(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
 
 clean-dashboard:
@@ -69,11 +69,11 @@ clean-dashboard:
 build-external-dashboard:
 	$(info Building $(EXTERNAL_DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) / git-head: $(SOURCE_COMMIT))
 	$(info Local image: $(EXTERNAL_DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
-	docker buildx build -f dashboard-external/Dockerfile -t $(EXTERNAL_DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --load .
+	docker buildx build -f apps/dashboard-external/Dockerfile -t $(EXTERNAL_DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --load .
 
 push-external-dashboard:
 	$(info Pushing to registry: $(NS)/$(EXTERNAL_DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
-	docker buildx build -f dashboard-external/Dockerfile -t $(NS)/$(EXTERNAL_DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --push .
+	docker buildx build -f apps/dashboard-external/Dockerfile -t $(NS)/$(EXTERNAL_DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --push .
 	$(info Successfully pushed: $(NS)/$(EXTERNAL_DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
 
 clean-external-dashboard:
@@ -96,15 +96,15 @@ clean-lighton-ocr-wrapper:
 	docker rmi $(NS)/$(LIGHTON_OCR_WRAPPER_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) || true
 
 # Claw runtime targets (xyne-claw — the agent runtime). Root build context (.)
-# because the Dockerfile COPYs xyne-claw-shared/ and packages/kata-sdk/ too.
+# because the Dockerfile COPYs packages/xyne-claw-shared/ and packages/kata-sdk/ too.
 build-claw:
 	$(info Building $(CLAW_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) / git-head: $(SOURCE_COMMIT))
 	$(info Local image: $(CLAW_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
-	docker buildx build -f xyne-claw/Dockerfile -t $(CLAW_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --load .
+	docker buildx build -f apps/xyne-claw/Dockerfile -t $(CLAW_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --load .
 
 push-claw:
 	$(info Pushing to registry: $(NS)/$(CLAW_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
-	docker buildx build -f xyne-claw/Dockerfile -t $(NS)/$(CLAW_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --push .
+	docker buildx build -f apps/xyne-claw/Dockerfile -t $(NS)/$(CLAW_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --push .
 	$(info Successfully pushed: $(NS)/$(CLAW_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
 
 clean-claw:
@@ -115,11 +115,11 @@ clean-claw:
 build-claw-auth-backend:
 	$(info Building $(CLAW_AUTH_BACKEND_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) / git-head: $(SOURCE_COMMIT))
 	$(info Local image: $(CLAW_AUTH_BACKEND_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
-	docker buildx build -f xyne-claw-auth/backend/Dockerfile -t $(CLAW_AUTH_BACKEND_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --load .
+	docker buildx build -f apps/xyne-claw-auth/backend/Dockerfile -t $(CLAW_AUTH_BACKEND_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --load .
 
 push-claw-auth-backend:
 	$(info Pushing to registry: $(NS)/$(CLAW_AUTH_BACKEND_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
-	docker buildx build -f xyne-claw-auth/backend/Dockerfile -t $(NS)/$(CLAW_AUTH_BACKEND_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --push .
+	docker buildx build -f apps/xyne-claw-auth/backend/Dockerfile -t $(NS)/$(CLAW_AUTH_BACKEND_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --push .
 	$(info Successfully pushed: $(NS)/$(CLAW_AUTH_BACKEND_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
 
 clean-claw-auth-backend:
@@ -130,11 +130,11 @@ clean-claw-auth-backend:
 build-claw-auth-frontend:
 	$(info Building $(CLAW_AUTH_FRONTEND_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) / git-head: $(SOURCE_COMMIT))
 	$(info Local image: $(CLAW_AUTH_FRONTEND_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
-	docker buildx build -f xyne-claw-auth/frontend/Dockerfile -t $(CLAW_AUTH_FRONTEND_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --load .
+	docker buildx build -f apps/xyne-claw-auth/frontend/Dockerfile -t $(CLAW_AUTH_FRONTEND_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --load .
 
 push-claw-auth-frontend:
 	$(info Pushing to registry: $(NS)/$(CLAW_AUTH_FRONTEND_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
-	docker buildx build -f xyne-claw-auth/frontend/Dockerfile -t $(NS)/$(CLAW_AUTH_FRONTEND_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --push .
+	docker buildx build -f apps/xyne-claw-auth/frontend/Dockerfile -t $(NS)/$(CLAW_AUTH_FRONTEND_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --push .
 	$(info Successfully pushed: $(NS)/$(CLAW_AUTH_FRONTEND_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
 
 clean-claw-auth-frontend:
@@ -162,12 +162,12 @@ push-built-external-dashboard:
 
 lint-dashboard:
 	$(info Running dashboard quality checks)
-	cd dashboard && npm ci && npm run lint:errors-only && npm run type-check
+	cd apps/dashboard && pnpm install --frozen-lockfile && pnpm run lint:errors-only && pnpm run type-check
 
 # Python type checking (local development only)
 typecheck:
 	$(info Running Pyright type checking on Python agent)
-	cd backend/python-agent && pyright
+	cd apps/backend/python-agent && pyright
 
 # PR Police - Build CI image and run yama
 run-pr-police:
@@ -185,7 +185,7 @@ run-pr-police:
 		-e LANGFUSE_BASE_URL=$(LANGFUSE_BASE_URL) \
 		-e LANGFUSE_ENABLED=$(LANGFUSE_ENABLED) \
 		xyne-spaces-ci:$(SOURCE_SHORT_COMMIT) \
-		sh -c 'cat > /tmp/gcp-creds.json && export GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcp-creds.json && npm run yama review -- --workspace XYNE --repository xyne-spaces --branch $(BRANCH_NAME)'
+		sh -c 'cat > /tmp/gcp-creds.json && export GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcp-creds.json && pnpm run yama review -- --workspace XYNE --repository xyne-spaces --branch $(BRANCH_NAME)'
 
 # Combined claw targets
 build-claw-all: build-claw build-claw-auth-backend build-claw-auth-frontend

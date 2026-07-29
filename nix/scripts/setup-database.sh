@@ -10,15 +10,15 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 # Only run if backend directory exists and has node_modules
-if [ ! -d "backend/node_modules" ]; then
+if [ ! -d "apps/backend/node_modules" ]; then
   echo -e "${YELLOW}⚠️  Backend dependencies not installed. Skipping database setup.${NC}"
-  echo -e "${YELLOW}   Run: cd backend && npm install${NC}"
+  echo -e "${YELLOW}   Run: cd apps/backend && pnpm install${NC}"
   exit 0
 fi
 
 echo -e "${BLUE}🔄 Checking database setup...${NC}"
 
-cd backend
+cd apps/backend
 
 # Check if users table exists (Prisma creates lowercase table names)
 USER_COUNT=$(psql -h 127.0.0.1 -p 5433 -U xyne -d xyne_dev_db -t -c "SELECT COUNT(*) FROM users;" 2>&1 || echo "ERROR")
@@ -35,11 +35,11 @@ if [[ "$USER_COUNT" == *"ERROR"* ]] || [[ "$USER_COUNT" == *"does not exist"* ]]
   
   # Push schema with force-reset (first time setup - ensures tables are created)
   echo -e "${BLUE}Creating database schema...${NC}"
-  npx dotenv -e .env.local -- npx prisma db push --force-reset --accept-data-loss --skip-generate
+  pnpm exec dotenv -e .env.local -- pnpm exec prisma db push --force-reset --accept-data-loss --skip-generate
   
   # Seed ACL system
   echo -e "${BLUE}🌱 Seeding ACL system...${NC}"
-  npx dotenv -e .env.local -- npx tsx scripts/seed-acl.ts
+  pnpm exec dotenv -e .env.local -- pnpm exec tsx scripts/seed-acl.ts
   echo -e "${GREEN}✓ ACL system seeded${NC}"
   
   # Prompt for developer user
@@ -49,7 +49,7 @@ if [[ "$USER_COUNT" == *"ERROR"* ]] || [[ "$USER_COUNT" == *"does not exist"* ]]
   
   if [ -n "$USER_EMAIL" ]; then
     echo -e "${BLUE}Creating developer user for ${USER_EMAIL}...${NC}"
-    npx dotenv -e .env.local -- npx tsx scripts/assign-user-group.ts "$USER_EMAIL"
+    pnpm exec dotenv -e .env.local -- pnpm exec tsx scripts/assign-user-group.ts "$USER_EMAIL"
     echo -e "${GREEN}✓ Developer user created${NC}"
   else
     echo -e "${YELLOW}⚠️  Skipping user creation${NC}"
@@ -57,7 +57,7 @@ if [[ "$USER_COUNT" == *"ERROR"* ]] || [[ "$USER_COUNT" == *"does not exist"* ]]
 else
   # User table exists - just sync schema changes without dropping data
   echo -e "${BLUE}Syncing database schema...${NC}"
-  npx dotenv -e .env.local -- npx prisma db push
+  pnpm exec dotenv -e .env.local -- pnpm exec prisma db push
   echo -e "${GREEN}✓ Database schema is up to date${NC}"
 fi
 

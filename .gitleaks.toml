@@ -27,7 +27,7 @@ paths = [
   '''(^|/)dist/''',
   '''(^|/)build/''',
   '''\.gradle/''',
-  '''(^|/)electron/release/''',
+  '''(^|/)apps/electron/release/''',
   '''(^|/)\.vite/''',
 
   # CI security-scan scratch: downloaded scanner binaries + generated reports
@@ -74,7 +74,7 @@ regexes = [
   # False positives: test-fixture labels (testAuthSeeder.ts)
   '''(dm-fixtures-v1|thread-fixtures-v2)''',
   # Keyboard-shortcut chords in the shortcuts catalog — `keys: '<chord>'` trips generic-api-key
-  # (dashboard/src/shortcuts/catalog.ts). Anchored: the whole value must be a modifier+key chord.
+  # (apps/dashboard/src/shortcuts/catalog.ts). Anchored: the whole value must be a modifier+key chord.
   '''^(mod|cmd|ctrl|alt|shift|meta)\+[a-z0-9+]+$''',
   # UI local-storage key, not a credential (ErrorPipelinePageV3.tsx).
   '''^errpipe-detail-width-v2$''',

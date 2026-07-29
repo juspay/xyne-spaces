@@ -1,0 +1,45 @@
+{
+  "name": "xyne-claw",
+  "license": "Apache-2.0",
+  "version": "0.1.0",
+  "description": "Multi-tenant agent orchestration server",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx --env-file=.env --watch src/main.ts",
+    "start": "node --import tsx/esm src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "postinstall": "patch-package"
+  },
+  "dependencies": {
+    "@earendil-works/pi-agent-core": "0.75.5",
+    "@earendil-works/pi-ai": "0.75.5",
+    "@earendil-works/pi-coding-agent": "0.75.5",
+    "@google-cloud/storage": "^7.21.0",
+    "@modelcontextprotocol/sdk": "^1.28.0",
+    "@sinclair/typebox": "^0.34.0",
+    "@upstash/context7-mcp": "^2.1.7",
+    "deepwiki-mcp": "^0.0.6",
+    "exceljs": "^4.4.0",
+    "express": "^4.21.0",
+    "ioredis": "^5.11.1",
+    "jsonwebtoken": "^9.0.3",
+    "jszip": "^3.10.1",
+    "mammoth": "^1.12.0",
+    "pdf-lib": "^1.17.1",
+    "tsx": "^4.19.0",
+    "undici": "^7.28.0",
+    "unpdf": "^1.6.2",
+    "xyne-claw-shared": "workspace:*",
+    "yaml": "^2.8.3"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^22.0.0",
+    "patch-package": "^8.0.1",
+    "typescript": "^5.7.0",
+    "vitest": "^2.0.0"
+  }
+}

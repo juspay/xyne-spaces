@@ -134,7 +134,11 @@ def upload_file_to_s3(file_path, commit_hash, normalBranch):
 
 def main(codepath, fromBranch):
 
-    pth = Path(codepath + "/backend")
+    # The backend moved to apps/backend in the pnpm-workspace restructure. Both
+    # are accepted so this works on branches either side of that change.
+    pth = Path(codepath) / "apps" / "backend"
+    if not pth.is_dir():
+        pth = Path(codepath) / "backend"
     commitHash = get_git_commit_hash()
     output_dir = Path("./")
 

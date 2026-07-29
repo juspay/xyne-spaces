@@ -230,13 +230,13 @@ fi
 
 # Run database migrations
 echo -e "${BLUE}🔄 Setting up database schema...${NC}"
-cd backend
+cd apps/backend
 
 # Create .env.local from .env.example if it doesn't exist
 if [ ! -f ".env.local" ]; then
-    echo -e "${YELLOW}⚠️  backend/.env.local not found. Creating from .env.example...${NC}"
+    echo -e "${YELLOW}⚠️  apps/backend/.env.local not found. Creating from .env.example...${NC}"
     cp .env.example .env.local
-    echo -e "${GREEN}✓ Created backend/.env.local${NC}"
+    echo -e "${GREEN}✓ Created apps/backend/.env.local${NC}"
     node ../scripts/generate-local-secrets.mjs
     echo -e "${YELLOW}   Please review and update values as needed.${NC}"
 fi
@@ -259,8 +259,8 @@ echo -e "${BLUE}   DATABASE_URL: ${DATABASE_URL}${NC}"
 if [ ! -d "node_modules" ]; then
   echo -e "${YELLOW}⚠️  Backend dependencies not installed.${NC}"
   echo -e "${YELLOW}   Skipping database setup. Please run:${NC}"
-  echo -e "${YELLOW}   1. cd backend && npm install${NC}"
-  echo -e "${YELLOW}   2. npm run services (to setup database)${NC}"
+  echo -e "${YELLOW}   1. cd apps/backend && pnpm install${NC}"
+  echo -e "${YELLOW}   2. pnpm run services (to setup database)${NC}"
   cd ..
 else
   # Check if users table exists by trying to query it (Prisma creates lowercase table names)
@@ -285,36 +285,36 @@ else
 
     # Push schema with force-reset (first time setup - ensures tables are created)
     echo -e "${BLUE}Creating database schema...${NC}"
-    npx dotenv -e .env.local -- npx prisma db push --force-reset --accept-data-loss --skip-generate
+    pnpm exec dotenv -e .env.local -- pnpm exec prisma db push --force-reset --accept-data-loss --skip-generate
 
     # Push common database schema (common DB lives in its own Postgres instance)
     echo -e "${BLUE}Creating common database schema...${NC}"
-    npx dotenv -e .env.local -- npx prisma db push --schema prisma-common/schema.prisma --force-reset --accept-data-loss --skip-generate
+    pnpm exec dotenv -e .env.local -- pnpm exec prisma db push --schema prisma-common/schema.prisma --force-reset --accept-data-loss --skip-generate
 
     # Regenerate Prisma client to ensure it matches the current schema
     echo -e "${BLUE}Generating Prisma client...${NC}"
-    npx prisma generate
-    npx prisma generate --schema prisma-common/schema.prisma
+    pnpm exec prisma generate
+    pnpm exec prisma generate --schema prisma-common/schema.prisma
     echo -e "${GREEN}✓ Prisma client generated${NC}"
 
     # Seed ACL system
     echo -e "${BLUE}🌱 Seeding ACL system...${NC}"
-    npx dotenv -e .env.local -- npx tsx scripts/seed-acl.ts
+    pnpm exec dotenv -e .env.local -- pnpm exec tsx scripts/seed-acl.ts
     echo -e "${GREEN}✓ ACL system seeded${NC}"
 
     # Create developer user (uses DEFAULT_ADMIN_EMAIL from .env.local)
     echo -e "${BLUE}Creating developer user...${NC}"
-    npx dotenv -e .env.local -- npx tsx scripts/assign-user-group.ts
+    pnpm exec dotenv -e .env.local -- pnpm exec tsx scripts/assign-user-group.ts
     echo -e "${GREEN}✓ Developer user created${NC}"
   else
     # User table exists - just sync schema changes without dropping data
     echo -e "${BLUE}Syncing database schema...${NC}"
-    npx dotenv -e .env.local -- npx prisma db push
+    pnpm exec dotenv -e .env.local -- pnpm exec prisma db push
 
     # Sync common database schema (common DB lives in its own Postgres instance)
     echo -e "${BLUE}Syncing common database schema...${NC}"
-    npx dotenv -e .env.local -- npx prisma db push --schema prisma-common/schema.prisma --accept-data-loss --skip-generate
-    npx prisma generate --schema prisma-common/schema.prisma
+    pnpm exec dotenv -e .env.local -- pnpm exec prisma db push --schema prisma-common/schema.prisma --accept-data-loss --skip-generate
+    pnpm exec prisma generate --schema prisma-common/schema.prisma
     echo -e "${GREEN}✓ Database schema is up to date${NC}"
 
     # Check if default workspace exists, create if not
@@ -323,7 +323,7 @@ else
     
     if [ "$WORKSPACE_EXISTS" = "0" ] || [ -z "$WORKSPACE_EXISTS" ]; then
       echo -e "${YELLOW}⚠️  Default workspace not found. Running seed...${NC}"
-      npx dotenv -e .env.local -- npx tsx scripts/seed-acl.ts
+      pnpm exec dotenv -e .env.local -- pnpm exec tsx scripts/seed-acl.ts
       echo -e "${GREEN}✓ ACL system seeded${NC}"
     else
       echo -e "${GREEN}✓ Default workspace exists${NC}"
@@ -373,63 +373,63 @@ done
 echo -e "${BLUE}🔧 Setting up kata-sdk...${NC}"
 if [ -d "packages/kata-sdk" ] && [ ! -d "packages/kata-sdk/node_modules" ]; then
     cd packages/kata-sdk
-    echo -e "${YELLOW}⚠️  kata-sdk dependencies not installed. Running npm install...${NC}"
-    npm install
+    echo -e "${YELLOW}⚠️  kata-sdk dependencies not installed. Running pnpm install...${NC}"
+    pnpm install
     echo -e "${GREEN}✓ kata-sdk ready${NC}"
     cd ../..
 fi
 
 # Setup xyne-claw-shared (shared dependency for xyne-claw and xyne-claw-auth)
 echo -e "${BLUE}🔧 Setting up xyne-claw-shared...${NC}"
-if [ -d "xyne-claw-shared" ] && [ ! -d "xyne-claw-shared/node_modules" ]; then
-    cd xyne-claw-shared
-    echo -e "${YELLOW}⚠️  xyne-claw-shared dependencies not installed. Running npm install...${NC}"
-    npm install
+if [ -d "xyne-claw-shared" ] && [ ! -d "packages/xyne-claw-shared/node_modules" ]; then
+    cd packages/xyne-claw-shared
+    echo -e "${YELLOW}⚠️  xyne-claw-shared dependencies not installed. Running pnpm install...${NC}"
+    pnpm install
     echo -e "${GREEN}✓ xyne-claw-shared ready${NC}"
     cd ..
 fi
 
 # Setup xyne-claw-auth backend
 echo -e "${BLUE}🔧 Setting up xyne-claw-auth backend...${NC}"
-if [ ! -f "xyne-claw-auth/backend/.env" ]; then
-    echo -e "${YELLOW}⚠️  xyne-claw-auth/backend/.env not found. Creating from .env.example...${NC}"
-    cp xyne-claw-auth/backend/.env.example xyne-claw-auth/backend/.env
-    echo -e "${GREEN}✓ Created xyne-claw-auth/backend/.env${NC}"
+if [ ! -f "apps/xyne-claw-auth/backend/.env" ]; then
+    echo -e "${YELLOW}⚠️  apps/xyne-claw-auth/backend/.env not found. Creating from .env.example...${NC}"
+    cp apps/xyne-claw-auth/backend/.env.example apps/xyne-claw-auth/backend/.env
+    echo -e "${GREEN}✓ Created apps/xyne-claw-auth/backend/.env${NC}"
     echo -e "${YELLOW}   Please review and update values as needed.${NC}"
 fi
 
 # Ensure SPACES_DB_URL is set in claw-auth .env (links claw-auth to Spaces DB for JIT user mirroring)
-if ! grep -q "^SPACES_DB_URL=" xyne-claw-auth/backend/.env 2>/dev/null; then
-    echo 'SPACES_DB_URL=postgresql://xyne:xyne123@localhost:5433/xyne_dev_db' >> xyne-claw-auth/backend/.env
-    echo -e "${GREEN}✓ Added SPACES_DB_URL to xyne-claw-auth/backend/.env${NC}"
+if ! grep -q "^SPACES_DB_URL=" apps/xyne-claw-auth/backend/.env 2>/dev/null; then
+    echo 'SPACES_DB_URL=postgresql://xyne:xyne123@localhost:5433/xyne_dev_db' >> apps/xyne-claw-auth/backend/.env
+    echo -e "${GREEN}✓ Added SPACES_DB_URL to apps/xyne-claw-auth/backend/.env${NC}"
 fi
 
-if [ -f "xyne-claw-auth/backend/.env" ]; then
+if [ -f "apps/xyne-claw-auth/backend/.env" ]; then
     echo -e "${BLUE}🔄 Setting up xyne-claw-auth database schema...${NC}"
-    cd xyne-claw-auth/backend
+    cd apps/xyne-claw-auth/backend
     if [ ! -d "node_modules" ]; then
-        echo -e "${YELLOW}⚠️  xyne-claw-auth/backend dependencies not installed. Running npm install...${NC}"
-        npm install
+        echo -e "${YELLOW}⚠️  apps/xyne-claw-auth/backend dependencies not installed. Running pnpm install...${NC}"
+        pnpm install
     fi
     set -a && source .env && set +a
     # Pass through DEFAULT_ADMIN_EMAIL from the main backend .env.local if not set locally
     if [ -z "$DEFAULT_ADMIN_EMAIL" ]; then
       export DEFAULT_ADMIN_EMAIL=$(grep -m 1 '^DEFAULT_ADMIN_EMAIL=' ../../backend/.env.local 2>/dev/null | sed 's/^DEFAULT_ADMIN_EMAIL=//' || echo "admin@example.in")
     fi
-    npx prisma db push --skip-generate --accept-data-loss
-    npx prisma generate
-    NODE_OPTIONS="" npx tsx prisma/seed.ts
+    pnpm exec prisma db push --skip-generate --accept-data-loss
+    pnpm exec prisma generate
+    NODE_OPTIONS="" pnpm exec tsx prisma/seed.ts
     echo -e "${GREEN}✓ xyne-claw-auth database schema ready${NC}"
     cd ../..
 fi
 
 # Setup xyne-claw-auth frontend
 echo -e "${BLUE}🔧 Setting up xyne-claw-auth frontend...${NC}"
-if [ -d "xyne-claw-auth/frontend" ]; then
-    cd xyne-claw-auth/frontend
+if [ -d "apps/xyne-claw-auth/frontend" ]; then
+    cd apps/xyne-claw-auth/frontend
     if [ ! -d "node_modules" ]; then
-        echo -e "${YELLOW}⚠️  xyne-claw-auth/frontend dependencies not installed. Running npm install...${NC}"
-        npm install
+        echo -e "${YELLOW}⚠️  apps/xyne-claw-auth/frontend dependencies not installed. Running pnpm install...${NC}"
+        pnpm install
     fi
     echo -e "${GREEN}✓ xyne-claw-auth frontend ready${NC}"
     cd ../..
@@ -437,18 +437,18 @@ fi
 
 # Setup xyne-claw
 echo -e "${BLUE}🔧 Setting up xyne-claw...${NC}"
-if [ ! -f "xyne-claw/.env" ]; then
-    echo -e "${YELLOW}⚠️  xyne-claw/.env not found. Creating from .env.example...${NC}"
-    cp xyne-claw/.env.example xyne-claw/.env
-    echo -e "${GREEN}✓ Created xyne-claw/.env${NC}"
+if [ ! -f "apps/xyne-claw/.env" ]; then
+    echo -e "${YELLOW}⚠️  apps/xyne-claw/.env not found. Creating from .env.example...${NC}"
+    cp apps/xyne-claw/.env.example apps/xyne-claw/.env
+    echo -e "${GREEN}✓ Created apps/xyne-claw/.env${NC}"
     echo -e "${YELLOW}   Please review and update values as needed.${NC}"
 fi
 
 if [ -d "xyne-claw" ]; then
-    cd xyne-claw
+    cd apps/xyne-claw
     if [ ! -d "node_modules" ]; then
-        echo -e "${YELLOW}⚠️  xyne-claw dependencies not installed. Running npm install...${NC}"
-        npm install
+        echo -e "${YELLOW}⚠️  xyne-claw dependencies not installed. Running pnpm install...${NC}"
+        pnpm install
     fi
     echo -e "${GREEN}✓ xyne-claw ready${NC}"
     cd ..
@@ -467,7 +467,7 @@ if [ "${SKIP_VESPA:-0}" != "1" ]; then
     else
         echo -e "${YELLOW}⚠️  Vespa schema deploy failed — search will not work.${NC}"
         echo -e "${YELLOW}   Needs curl plus either zip or python3 (all usually present).${NC}"
-        echo -e "${YELLOW}   Retry on its own with: ${BLUE}npm run services:vespa${NC}"
+        echo -e "${YELLOW}   Retry on its own with: ${BLUE}pnpm run services:vespa${NC}"
     fi
 fi
 
@@ -484,7 +484,7 @@ if [ "${SKIP_VESPA:-0}" != "1" ]; then
     else
         echo -e "${YELLOW}⚠️  Vespa schema deploy failed — search will not work.${NC}"
         echo -e "${YELLOW}   Needs curl plus either zip or python3 (all usually present).${NC}"
-        echo -e "${YELLOW}   Retry on its own with: ${BLUE}npm run services:vespa${NC}"
+        echo -e "${YELLOW}   Retry on its own with: ${BLUE}pnpm run services:vespa${NC}"
     fi
 fi
 
@@ -516,18 +516,18 @@ elif [ "${SKIP_VESPA:-0}" != "1" ]; then
 fi
 echo ""
 echo -e "${YELLOW}Next steps:${NC}"
-echo -e "  Backend:        ${BLUE}cd backend && npm run dev${NC}"
-echo -e "  Frontend:       ${BLUE}cd dashboard && npm run dev${NC}"
-echo -e "  XyneClaw:       ${BLUE}cd xyne-claw && npm run dev${NC}"
-echo -e "  Claw auth:      ${BLUE}cd xyne-claw-auth/backend && npm run dev${NC}"
-echo -e "  Claw auth UI:   ${BLUE}cd xyne-claw-auth/frontend && npm run dev${NC}"
+echo -e "  Backend:        ${BLUE}cd apps/backend && pnpm run dev${NC}"
+echo -e "  Frontend:       ${BLUE}cd apps/dashboard && pnpm run dev${NC}"
+echo -e "  XyneClaw:       ${BLUE}cd apps/xyne-claw && pnpm run dev${NC}"
+echo -e "  Claw auth:      ${BLUE}cd apps/xyne-claw-auth/backend && pnpm run dev${NC}"
+echo -e "  Claw auth UI:   ${BLUE}cd apps/xyne-claw-auth/frontend && pnpm run dev${NC}"
 echo ""
 echo -e "${YELLOW}To stop services:${NC}"
 echo -e "  ${BLUE}$COMPOSE_CMD -f docker-compose.dev.yml down${NC}"
 echo ""
 
 # Read dev user email from .env.local for credentials display
-DEV_EMAIL=$(grep -m 1 '^DEFAULT_ADMIN_EMAIL=' backend/.env.local 2>/dev/null | sed 's/^DEFAULT_ADMIN_EMAIL=//' || true)
+DEV_EMAIL=$(grep -m 1 '^DEFAULT_ADMIN_EMAIL=' apps/backend/.env.local 2>/dev/null | sed 's/^DEFAULT_ADMIN_EMAIL=//' || true)
 if [ -z "$DEV_EMAIL" ] || [[ "$DEV_EMAIL" == definition* ]]; then
     DEV_EMAIL="admin@xyne.ai"
 fi
@@ -538,5 +538,5 @@ echo -e "${GREEN}========================================${NC}"
 echo -e "  ${BLUE}Email:${NC}     ${DEV_EMAIL}"
 echo -e "  ${BLUE}Password:${NC}  ${GREEN}xynelocal@123${NC}"
 echo -e "${GREEN}========================================${NC}"
-echo -e "${YELLOW}💡 Tip: update DEFAULT_ADMIN_EMAIL in backend/.env.local and re-run 'npm run services' to use your own email.${NC}"
+echo -e "${YELLOW}💡 Tip: update DEFAULT_ADMIN_EMAIL in apps/backend/.env.local and re-run 'pnpm run services' to use your own email.${NC}"
 echo ""

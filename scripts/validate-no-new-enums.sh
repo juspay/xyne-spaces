@@ -93,7 +93,7 @@ fi
 # Prisma schema file(s) to guard. (Intentionally NOT xyne-claw-auth — the freeze
 # does not apply there.)
 SCHEMA_FILES=(
-    "backend/prisma/schema.prisma"
+    "apps/backend/prisma/schema.prisma"
 )
 
 if [ -t 1 ]; then
@@ -166,7 +166,7 @@ done
 # --- Check 3: no CREATE TYPE / ALTER TYPE in migration .sql -------------------
 # Scoped to the guarded backend only — xyne-claw-auth's migrations are exempt,
 # matching SCHEMA_FILES above.
-migration_sqls=$(diff_names | grep -E '^backend/prisma/migrations/.*\.sql$' || true)
+migration_sqls=$(diff_names | grep -E '^apps/backend/prisma/migrations/.*\.sql$' || true)
 if [ -n "$migration_sqls" ]; then
     while IFS= read -r f; do
         [ -z "$f" ] && continue

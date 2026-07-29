@@ -23,24 +23,41 @@ RUN apt-get update && apt-get install -y \
     postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy shared module and build
-COPY shared ../shared
-RUN cd ../shared && npm ci && npm run build
+# pnpm workspace: the build context is the repo root. Manifests and the lockfile
+# are copied first so the install layer caches independently of source changes.
+RUN corepack enable && corepack prepare pnpm@10.15.0 --activate
 
-# Copy framework and build
-COPY framework ../framework
-RUN cd ../framework && npm ci && npm run build
+WORKDIR /repo
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
+COPY packages/shared/package.json           packages/shared/
+COPY packages/framework/package.json        packages/framework/
+COPY apps/backend/package.json              apps/backend/
+COPY apps/backend/eslint-rules/package.json apps/backend/eslint-rules/
 
-# Copy backend and install deps
-COPY backend .
-RUN npm ci
+# Only backend and its workspace dependencies; `...` pulls in shared + framework.
+# --ignore-scripts: only the manifests are present at this layer, so the
+# `prepare` hooks on @xyne/shared and @xyne/icons (which run tsc) would fail
+# with no sources or tsconfig.json. The explicit build steps after the source
+# COPY below do that work instead.
+RUN pnpm install --frozen-lockfile --prod=false --ignore-scripts --filter xyne-spaces-backend...
 
-# Copy root package.json to / so logger.ts can import version (../../../package.json)
+COPY packages/shared    packages/shared
+COPY packages/framework packages/framework
+COPY apps/backend       apps/backend
+
+# backend consumes these from their built dist/
+RUN pnpm --filter @xyne/shared --filter agentic-framework run build
+
+# /app is where the entrypoint and the sandbox volume mounts expect the backend
+WORKDIR /repo/apps/backend
+RUN ln -s /repo/apps/backend /app
+
+# logger.ts imports the version from the repo-root package.json (../../../package.json)
 COPY package.json /package.json
 
 # Generate Prisma client
-RUN npm run db:generate
-RUN npm run db:common:generate
+RUN pnpm run db:generate
+RUN pnpm run db:common:generate
 
 # Expose dev server port
 EXPOSE 3001
@@ -52,9 +69,12 @@ RUN cat > /entrypoint.sh << 'ENTRY'
 #!/bin/sh
 set -e
 echo "[sandbox] Running prisma db push..."
-cd /app && npm run db:push
+cd /repo/apps/backend && pnpm run db:push
 echo "[sandbox] Starting backend dev server..."
-cd /app && exec npx tsx watch --ignore ../shared/node_modules --ignore ../framework/node_modules src/index.ts
+cd /repo/apps/backend && exec pnpm exec tsx watch \
+  --ignore ../../packages/shared/node_modules \
+  --ignore ../../packages/framework/node_modules \
+  src/index.ts
 ENTRY
 RUN chmod +x /entrypoint.sh
 

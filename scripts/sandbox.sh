@@ -232,7 +232,7 @@ generate_compose() {
 
   # Populate the secrets referenced in the generated compose below. Prefer values
   # already exported in the environment (CI / prod-like runs); otherwise pull them
-  # from backend/.env.local (direnv loads this automatically for local dev). Fail
+  # from apps/backend/.env.local (direnv loads this automatically for local dev). Fail
   # fast on the essential ones so we never bake empty auth secrets into a sandbox.
   local _env_local="$PROJECT_ROOT/backend/.env.local"
   local _v _line
@@ -244,7 +244,7 @@ generate_compose() {
   done
   for _v in ZERO_AUTH_SECRET JWT_SECRET; do
     if [ -z "$(eval "printf '%s' \"\${$_v:-}\"")" ]; then
-      echo -e "${RED}❌ $_v is not set — export it or populate backend/.env.local before creating a sandbox.${NC}" >&2
+      echo -e "${RED}❌ $_v is not set — export it or populate apps/backend/.env.local before creating a sandbox.${NC}" >&2
       exit 1
     fi
   done
@@ -293,9 +293,9 @@ services:
     container_name: xyne-sandbox-${name}-backend
     mem_limit: 1g
     volumes:
-      - ./backend:/app
-      - ./shared:/shared
-      - ./framework:/framework
+      - ./apps/backend:/app
+      - ./packages/shared:/shared
+      - ./packages/framework:/framework
       - backend_node_modules_${name_under}:/app/node_modules
       - /app/node_modules/.prisma
     environment:
@@ -356,8 +356,8 @@ services:
     image: ${DASHBOARD_IMAGE_NAME}:${image_hash}
     container_name: xyne-sandbox-${name}-dashboard
     volumes:
-      - ./dashboard:/app
-      - ./shared:/shared
+      - ./apps/dashboard:/app
+      - ./packages/shared:/shared
       - dashboard_node_modules_${name_under}:/app/node_modules
     environment:
       - VITE_API_URL=http://${name}.localhost/api
@@ -478,9 +478,9 @@ cmd_create() {
   echo -e "${GREEN}✓ Database created${NC}"
 
   echo -e "${BLUE}📦 Building shared dependencies in worktree...${NC}"
-  (cd "$sandbox_dir/shared" && npm install --prefer-offline --no-audit --no-fund 2>&1 | tail -1 && npm run build) 2>&1 | tail -3
+  (cd "$sandbox_dir/shared" && pnpm install --prefer-offline --no-audit --no-fund 2>&1 | tail -1 && pnpm run build) 2>&1 | tail -3
   echo -e "${GREEN}✓ shared module built${NC}"
-  (cd "$sandbox_dir/framework" && npm install --prefer-offline --no-audit --no-fund 2>&1 | tail -1 && npm run build) 2>&1 | tail -3
+  (cd "$sandbox_dir/framework" && pnpm install --prefer-offline --no-audit --no-fund 2>&1 | tail -1 && pnpm run build) 2>&1 | tail -3
   echo -e "${GREEN}✓ framework module built${NC}"
 
   echo -e "${BLUE}📝 Generating sandbox compose file...${NC}"
@@ -497,19 +497,19 @@ cmd_create() {
       break
     fi
     if [ $i -eq 90 ]; then
-      echo -e "${YELLOW}⚠️  Backend still starting. Check logs: npm run sandbox -- logs $name backend${NC}"
+      echo -e "${YELLOW}⚠️  Backend still starting. Check logs: pnpm run sandbox -- logs $name backend${NC}"
       break
     fi
     sleep 5
   done
 
   echo -e "${BLUE}🌱 Seeding ACL system...${NC}"
-  docker exec "xyne-sandbox-${name}-backend" npx tsx scripts/seed-acl.ts 2>/dev/null || \
+  docker exec "xyne-sandbox-${name}-backend" pnpm exec tsx scripts/seed-acl.ts 2>/dev/null || \
     echo -e "${YELLOW}⚠️  ACL seed skipped or already done${NC}"
   echo -e "${GREEN}✓ ACL seeded${NC}"
 
   echo -e "${BLUE}👑 Assigning sandbox admin (sandbox@xyne.ai)...${NC}"
-  docker exec "xyne-sandbox-${name}-backend" npx tsx scripts/assign-admin-user.ts sandbox@xyne.ai 2>/dev/null || \
+  docker exec "xyne-sandbox-${name}-backend" pnpm exec tsx scripts/assign-admin-user.ts sandbox@xyne.ai 2>/dev/null || \
     echo -e "${YELLOW}⚠️  Admin assignment skipped${NC}"
   echo -e "${GREEN}✓ Admin assigned${NC}"
 
@@ -604,7 +604,7 @@ cmd_destroy() {
 cmd_list() {
   if [ ! -d "$SANDBOXES_DIR" ] || [ -z "$(ls -A "$SANDBOXES_DIR" 2>/dev/null)" ]; then
     echo -e "${YELLOW}No sandboxes found.${NC}"
-    echo -e "Create one with: ${BLUE}npm run sandbox -- create <name>${NC}"
+    echo -e "Create one with: ${BLUE}pnpm run sandbox -- create <name>${NC}"
     return
   fi
 
@@ -777,9 +777,9 @@ cmd_reset() {
   # Remove the sandbox-net network if nothing is attached
   $CONTAINER_RUNTIME network rm sandbox-net >/dev/null 2>&1 || true
 
-  echo -e "${GREEN}✓ Reset complete. Run 'npm run sandbox -- create <name>' to rebuild shared infra.${NC}"
+  echo -e "${GREEN}✓ Reset complete. Run 'pnpm run sandbox -- create <name>' to rebuild shared infra.${NC}"
   echo -e "${BLUE}   Data volumes preserved: sandbox_postgres_data, sandbox_redis_data, sandbox_fake_gcs_data.${NC}"
-  echo -e "${BLUE}   For a total wipe including data, use: npm run sandbox -- destroy-all && podman volume prune${NC}"
+  echo -e "${BLUE}   For a total wipe including data, use: pnpm run sandbox -- destroy-all && podman volume prune${NC}"
 }
 
 cmd_stop_all() {
@@ -897,9 +897,9 @@ case "${1:-}" in
     echo "  reset                 Force-clean stuck shared infra (keeps data volumes)"
     echo ""
     echo "Examples:"
-    echo "  npm run sandbox -- create agent-1"
-    echo "  npm run sandbox -- list"
-    echo "  npm run sandbox -- logs agent-1 backend"
-    echo "  npm run sandbox -- destroy agent-1"
+    echo "  pnpm run sandbox -- create agent-1"
+    echo "  pnpm run sandbox -- list"
+    echo "  pnpm run sandbox -- logs agent-1 backend"
+    echo "  pnpm run sandbox -- destroy agent-1"
     ;;
 esac

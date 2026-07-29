@@ -132,7 +132,7 @@ spec:
           image: asia.gcr.io/xyne-spaces/agent-workspace:02ce3e4f09-v9
           imagePullPolicy: IfNotPresent
 
-          # In-cluster npm registry — every `npm install` / `npm ci` from
+          # In-cluster npm registry — every `pnpm install` / `pnpm install --frozen-lockfile` from
           # sandbox-repo-setup hits verdaccio first (cached) and falls
           # through to npmjs.org for misses. Mirrors what the workflow
           # nix-runner postStart does. Audit/fund/update-notifier off for

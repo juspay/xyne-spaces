@@ -1,0 +1,51 @@
+# syntax=docker/dockerfile:1
+# Build context is the repo root (the pnpm workspace root).
+FROM mirror.gcr.io/library/node:22.22.3-slim
+
+RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
+
+RUN corepack enable && corepack prepare pnpm@10.15.0 --activate
+
+WORKDIR /repo
+
+# --- manifests + lockfile first, so the install layer caches independently ---
+# The old `npm pkg delete scripts.postinstall scripts.prepare` hack is gone: the
+# postinstall it worked around (`cd ../shared && npm install && npm run build`)
+# no longer exists, since workspace:* links handle it.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
+COPY packages/shared/package.json           packages/shared/
+COPY packages/icons/package.json            packages/icons/
+COPY apps/dashboard/package.json            apps/dashboard/
+COPY apps/backend/package.json              apps/backend/
+COPY apps/backend/eslint-rules/package.json apps/backend/eslint-rules/
+
+RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
+# --ignore-scripts: only the manifests are present at this layer, so the
+# `prepare` hooks on @xyne/shared and @xyne/icons (which run tsc) would fail
+# with no sources or tsconfig.json. The explicit build steps after the source
+# COPY below do that work instead.
+    pnpm install --frozen-lockfile --prod=false --ignore-scripts --filter xyne-spaces-dashboard...
+
+# --- workspace libraries: source then build ---
+COPY packages/shared packages/shared
+COPY packages/icons  packages/icons
+RUN pnpm --filter @xyne/shared --filter @xyne/icons run build
+
+# --- dashboard source ---
+COPY apps/dashboard apps/dashboard
+COPY package.json /package.json
+
+WORKDIR /repo/apps/dashboard
+
+# Seed .env from the tracked, non-secret apps/dashboard/.env.test (Vite loads .env
+# by default). .env.test is committed (test config only) and is the single source
+# of truth for the test image. docker-compose.test.yml also layers it at runtime.
+RUN cp .env.test .env
+
+# Compile the dashboard while building the image instead of making the first
+# Playwright navigation cold-transform the entire Vite module graph. This layer
+# remains cached for automation-only changes, and preview serves only after the
+# complete test bundle is available.
+RUN NODE_OPTIONS=--max-old-space-size=8192 pnpm exec vite build --mode test
+
+CMD ["pnpm", "run", "preview", "--", "--host", "0.0.0.0", "--port", "5173"]
