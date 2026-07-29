@@ -24,7 +24,10 @@ export interface ActivityGroupable {
 }
 
 function isTicketGroupCandidate(activity: ActivityGroupable): boolean {
-  return typeof activity.actorAction === 'string' && activity.actorAction.startsWith(TICKET_ACTIVITY_PREFIX);
+  return (
+    typeof activity.actorAction === 'string' &&
+    activity.actorAction.startsWith(TICKET_ACTIVITY_PREFIX)
+  );
 }
 
 function canExtendGroup(tail: ActivityGroupable, candidate: ActivityGroupable): boolean {
@@ -67,7 +70,7 @@ export function countGroupedActivities<T extends ActivityGroupable>(
         continue;
       }
 
-      counts[key]++;
+      counts[key] = (counts[key] ?? 0) + 1;
       tails[key] = activity;
     }
   }

@@ -766,7 +766,8 @@ const ActivityListView = (): ReactElement => {
       your_mentions: activity => activity.actorAction === 'mentioned_user',
       group_mentions: activity => activity.actorAction === 'group_mention',
       // added to maintain backward compat for now, to be deprecated
-      replies: activity => activity.actorAction === 'replied' || activity.actorAction === 'replied_v2',
+      replies: activity =>
+        activity.actorAction === 'replied' || activity.actorAction === 'replied_v2',
       // added to maintain backward compat for now, to be deprecated
       reactions: activity =>
         activity.actorAction === 'added' ||
@@ -784,7 +785,8 @@ const ActivityListView = (): ReactElement => {
         (activity.actorAction === 'mentioned_user' && !!activity.canvasId),
       calls: activity => CALL_ACTIVITY_TYPES.some(type => type === activity.actorAction),
       actionable: activity =>
-        (activity.classification ?? ActivityClassification.PENDING) === ActivityClassification.ACTIONABLE,
+        (activity.classification ?? ActivityClassification.PENDING) ===
+        ActivityClassification.ACTIONABLE,
       fyi: activity =>
         (activity.classification ?? ActivityClassification.PENDING) === ActivityClassification.FYI,
     });
