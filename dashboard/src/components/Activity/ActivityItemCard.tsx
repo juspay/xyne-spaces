@@ -228,13 +228,9 @@ export const ActivityItemCard = ({
       onClick={handleClick}
       className={cn(
         'group flex w-full font-normal items-start gap-3 px-3 pt-2.5 pb-2 text-left transition-colors duration-150 h-auto rounded-[14px] border border-transparent',
-        // Selection highlight is driven by the `data-selected` attribute that
-        // ActivityListView stamps imperatively (no render needed to update).
-        // Active row gets a raised card surface; hover previews the same
-        // treatment; inactive rows stay transparent (unread state is shown by
-        // the count badge, not a row background).
-        'bg-transparent hover:!bg-card hover:border-border hover:shadow-sm',
-        'data-[selected]:bg-card data-[selected]:border-border data-[selected]:shadow-sm',
+        activity.isRead ? 'bg-transparent' : 'bg-[var(--activity-sidebar-primary)]',
+        'hover:!bg-[var(--activity-sidebar-accent)]',
+        'data-[selected]:!bg-[var(--activity-sidebar-accent)] data-[selected]:border-[var(--activity-sidebar-border)] data-[selected]:shadow-sm',
         className,
       )}
       data-activity-id={activity.id}
@@ -246,7 +242,7 @@ export const ActivityItemCard = ({
         isRead: activity.isRead,
       })}
     >
-      <div className={cn('relative flex-shrink-0', activity.isRead ? 'opacity-70' : '')}>
+      <div className='relative flex-shrink-0'>
         <UserHoverWrapper userId={actorId}>
           <button
             onClick={e => e.stopPropagation()}
@@ -280,13 +276,13 @@ export const ActivityItemCard = ({
             )}
           >
             {isMobile ? (
-              <span className={activity.isRead ? undefined : 'font-semibold'}>{actorName}</span>
+              <span className={activity.isRead ? '' : 'font-semibold'}>{actorName}</span>
             ) : (
               <UserHoverWrapper userId={actorId}>
                 <button
                   className={cn(
                     'hover:underline flex-shrink-0',
-                    !activity.isRead && 'font-semibold',
+                    activity.isRead ? '' : 'font-semibold',
                   )}
                   onClick={e => e.stopPropagation()}
                   data-track-category='ACTIVITY'
@@ -301,7 +297,7 @@ export const ActivityItemCard = ({
             {/* Description children (the `description` prop) set their own
                 text-muted-foreground; on unread we override them to foreground via
                 the child selector. Read + the container's color handle the rest. */}
-            <span className={cn('ml-1.5', !activity.isRead && '*:text-foreground')}>
+            <span className={cn('ml-1.5', activity.isRead ? '' : '*:text-foreground')}>
               {description}
             </span>
 
@@ -310,7 +306,7 @@ export const ActivityItemCard = ({
               actorAction !== 'workflow_question' &&
               channelId &&
               (isMobile ? (
-                <span className={cn('ml-1.5', !activity.isRead && 'font-semibold')}>
+                <span className={cn('ml-1.5', activity.isRead ? '' : 'font-semibold')}>
                   {`#${channel ? channelDisplayName : 'Unknown Channel'}`}
                 </span>
               ) : (
@@ -409,18 +405,8 @@ export const ActivityItemCard = ({
         <div
           className={cn(
             'mt-px w-full',
-            // Read: mute the whole preview. Message bodies rendered via
-            // RenderMessageWithHTML set their own color on `.jp-message-html`
-            // (`@apply text-foreground` in global.css), which breaks the inherited
-            // muted color — so override just that wrapper from here. The
-            // descendant selector wins on specificity (0,2,0 vs 0,1,0) with no
-            // !important, leaving inline-code colors (self-styled) intact.
-            // Mentions colour themselves (some with !important), so inheritance
-            // can't dim them — fade them with opacity instead (no specificity /
-            // !important battle). [data-mention] = user/group/@channel/@here;
-            // [data-channel-mention] = #channel links.
             activity.isRead
-              ? 'text-muted-foreground [&_.jp-message-html]:text-muted-foreground [&_[data-mention]]:opacity-60 [&_[data-channel-mention]]:opacity-60'
+              ? 'text-muted-foreground [&_.jp-message-html]:text-muted-foreground'
               : 'text-foreground',
             isExpanded
               ? 'whitespace-normal break-normal'
