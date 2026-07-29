@@ -974,7 +974,7 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
     // connector + credentials checks so they don't reject a valid call.
     //
     // SECURITY:
-    // - ALL four kb-* tools are read-only by design (see KB_TOOLS, writeTools
+    // - ALL kb-* tools are read-only by design (see KB_TOOL_NAMES, writeTools
     //   set to []). They intentionally bypass the write-action approval flow
     //   below — if a future change adds a mutating KB tool, it MUST be routed
     //   through validateWriteAction (above) instead of this branch.
@@ -1016,7 +1016,12 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
             });
             break;
           case "kb-list-files":
-            out = await handleKbListFiles({ userId, agentSlug, collectionId: String(p["collectionId"] ?? "") });
+            out = await handleKbListFiles({
+              userId,
+              agentSlug,
+              collectionId: String(p["collectionId"] ?? ""),
+              ...(typeof p["depth"] === "number" ? { depth: p["depth"] as number } : {}),
+            });
             break;
           case "kb-read-file":
             out = await handleKbReadFile({ userId, agentSlug, fileId: String(p["fileId"] ?? "") });
