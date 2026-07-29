@@ -3082,7 +3082,12 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
  */
 async function forwardResult(
   url: string,
-  payload: { sessionId?: string; status?: string; error?: string },
+  payload: {
+    sessionId?: string;
+    status?: string;
+    error?: string;
+    attachments?: OutgoingAttachment[];
+  },
   result: string,
 ): Promise<void> {
   // The Spaces automation RUN_AGENT executor (backend/src/automations/steps/
@@ -3110,6 +3115,7 @@ async function forwardResult(
         status: payload.status,
         result: resultField,
         ...(payload.error ? { error: payload.error } : {}),
+        ...(payload.attachments?.length ? { attachments: payload.attachments } : {}),
       }),
     });
     if (!res.ok) clog.warn(`[webhook/result] resultForward returned ${res.status}`);
