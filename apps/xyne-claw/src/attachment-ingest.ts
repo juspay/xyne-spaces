@@ -86,6 +86,26 @@ const MD_CONVERTERS: ReadonlyArray<{
   { match: isHtmlAttachment, convert: htmlBufferToMarkdown, suffix: "" },
 ];
 
+/**
+ * Convert a single document buffer to markdown iff its type is convertible —
+ * the one reusable "is this convertible + convert it" decision, shared by the
+ * /run attachment pipeline above and skill-file materialization
+ * (session-skills.ts). Returns null for unsupported types. Throws whatever
+ * the underlying converter throws (corrupt file etc.) — callers decide
+ * whether that is fatal (attachments) or skippable (skill files).
+ */
+export async function documentBufferToMarkdown(
+  buf: Buffer,
+  fileName: string,
+  mimeType: string,
+): Promise<string | null> {
+  if (isPdfAttachment(fileName, mimeType)) return pdfBufferToMarkdown(buf, fileName);
+  for (const c of MD_CONVERTERS) {
+    if (c.match(fileName, mimeType)) return c.convert(buf, fileName);
+  }
+  return null;
+}
+
 async function convertAll(
   attachments: AttachmentInput[],
   convert: (buf: Buffer, fileName: string) => Promise<string>,
