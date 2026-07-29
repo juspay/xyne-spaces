@@ -140,6 +140,10 @@
     --claw-ai-border: rgb(196 181 253 / 0.7);
     --claw-ai-solid: #7c3aed;
     --claw-ai-solid-hover: #6d28d9;
+
+    --activity-sidebar-primary: rgba(35, 34, 41, 0.08);
+    --activity-sidebar-accent: #ffffff;
+    --activity-sidebar-border: rgba(35, 34, 41, 0.1);
   }
 
   /* Classic theme - default theme with current design */
@@ -256,6 +260,10 @@
     --claw-ai-border: rgb(196 181 253 / 0.7);
     --claw-ai-solid: #7c3aed;
     --claw-ai-solid-hover: #6d28d9;
+
+    --activity-sidebar-primary: rgba(35, 34, 41, 0.08);
+    --activity-sidebar-accent: #ffffff;
+    --activity-sidebar-border: rgba(35, 34, 41, 0.1);
   }
 
   /* Midnight theme - dark theme variant */
@@ -387,6 +395,10 @@
     --claw-ai-border: rgb(109 40 217 / 0.4);
     --claw-ai-solid: #7c3aed;
     --claw-ai-solid-hover: #8b5cf6;
+
+    --activity-sidebar-primary: rgba(255, 255, 255, 0.06);
+    --activity-sidebar-accent: #2d2e34;
+    --activity-sidebar-border: rgba(255, 255, 255, 0.2);
   }
 }
 
