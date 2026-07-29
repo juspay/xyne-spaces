@@ -10,8 +10,8 @@ LIGHTON_OCR_WRAPPER_IMAGE_NAME ?= lighton-ocr-server
 CLAW_IMAGE_NAME ?= xyne-spaces-claw
 CLAW_AUTH_BACKEND_IMAGE_NAME ?= xyne-spaces-claw-auth-backend
 CLAW_AUTH_FRONTEND_IMAGE_NAME ?= xyne-spaces-claw-auth-frontend
-SOURCE_COMMIT := $(shell git rev-parse HEAD)
-SOURCE_SHORT_COMMIT ?= $(shell git rev-parse --short=10 HEAD)
+SOURCE_COMMIT := $(or $(SOURCE_COMMIT),$(shell git rev-parse HEAD))
+SOURCE_SHORT_COMMIT := $(or $(SOURCE_SHORT_COMMIT),$(shell git rev-parse --short=10 HEAD))
 
 #temp2
 # Backend targets 3s
