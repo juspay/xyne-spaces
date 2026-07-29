@@ -3,8 +3,6 @@ import type { Prisma } from '@prisma/client';
 import { LLMClient, createUserMessage } from '@framework';
 import { config as appConfig } from '../../config/env.js';
 import { logger } from '@/utils/logger';
-import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
-import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
 import type {
   TeamIntelligenceCommitInput,
   TeamIntelligenceTeamSummaryBullet,
@@ -14,6 +12,9 @@ import type {
   TeamIntelligenceTeamSummaryOutput,
   TeamIntelligenceTeamSummaryProvenance,
 } from '../types';
+import { TeamIntelligenceLLMUnavailableError } from '../errors';
+import { extractJson } from '../llm-utils';
+import { createTeamIntelligenceLlmClient } from './team-intelligence-llm-client';
 
 interface RawTeamSummaryBullet {
   bulletTitle?: unknown;
@@ -106,26 +107,6 @@ function summarizeCommitMessage(message: string): string {
   return `${firstSentence.slice(0, 137).trimEnd()}...`;
 }
 
-function formatList(items: string[]): string {
-  const values = items.map((item) => item.trim()).filter(Boolean);
-  if (values.length === 0) {
-    return '';
-  }
-  if (values.length === 1) {
-    return values[0];
-  }
-  if (values.length === 2) {
-    return `${values[0]} and ${values[1]}`;
-  }
-  return `${values.slice(0, -1).join(', ')}, and ${values[values.length - 1]}`;
-}
-
-function trimSentence(value: string): string {
-  return value.trim().replace(/[.\s]+$/, '');
-}
-
-const SUMMARY_MIN_LINES = 3;
-const SUMMARY_MAX_LINES = 4;
 const SUMMARY_MAX_WORDS = 50;
 
 const TEAM_BULLET_CATEGORIES = new Set([
@@ -239,7 +220,7 @@ async function llmRewriteTeamBullets(
   llmClient: LLMClient,
   input: TeamIntelligenceTeamSummaryInput,
   bullets: TeamIntelligenceTeamSummaryBullet[]
-): Promise<TeamIntelligenceTeamSummaryBullet[] | null> {
+): Promise<TeamIntelligenceTeamSummaryBullet[]> {
   const prompt = [
     'Rewrite team bullets for a manager feed.',
     'Return STRICT JSON only with this shape:',
@@ -278,15 +259,14 @@ async function llmRewriteTeamBullets(
   ].join('\n');
 
   const raw = await llmGenerate(llmClient, prompt);
-  if (!raw) {
-    return null;
-  }
 
   let parsed: RawTeamBulletRewriteResponse;
   try {
-    parsed = JSON.parse(raw) as RawTeamBulletRewriteResponse;
-  } catch {
-    return null;
+    parsed = JSON.parse(extractJson(raw)) as RawTeamBulletRewriteResponse;
+  } catch (error) {
+    throw new TeamIntelligenceLLMUnavailableError(
+      `LLM team rewrite response was not valid JSON: ${error instanceof Error ? error.message : 'parse error'}`
+    );
   }
 
   const rewriteRows = asArray<RawTeamBulletRewriteItem>(parsed.bullets);
@@ -309,7 +289,9 @@ async function llmRewriteTeamBullets(
   }
 
   if (rewriteMap.size !== bullets.length) {
-    return null;
+    throw new TeamIntelligenceLLMUnavailableError(
+      `LLM team rewrite returned ${rewriteMap.size} usable bullets, expected ${bullets.length}`
+    );
   }
 
   return bullets.map((bullet) => {
@@ -327,68 +309,68 @@ async function llmRewriteTeamBullets(
   });
 }
 
-function buildPrNarrativeBullet(
-  reportDate: string,
-  teamId: string,
-  teamName: string,
-  evidenceItems: TeamIntelligenceTeamSummaryEvidenceItem[]
-): TeamIntelligenceTeamSummaryBullet {
-  const firstItem = evidenceItems[0];
-  const contributors = evidenceItems.map((item) => ({
-    userId: item.userId,
-    userEmail: item.userEmail,
-    userName: item.userName,
-    role: item.role ?? null,
-    contributionNote: `${item.userName} contributed to this delivery`,
-  }));
-  const uniqueContributors = [...new Map(contributors.map((contributor) => [contributor.userEmail, contributor])).values()];
-  const prIdsUsed = [...new Set(evidenceItems.map((item) => item.prId))].sort((left, right) => left - right);
-  const repoNames = [...new Set(evidenceItems.map((item) => item.repoName))].sort();
-  const contributorNames = uniqueContributors.map((contributor) => contributor.userName);
-  const focus = trimSentence(normalizeSummaryText(firstItem.prSummary ?? firstItem.prDescription ?? firstItem.prTitle, 14));
-  const improvements = evidenceItems
-    .flatMap((item) => item.commitSummaries)
-    .map((summary) => trimSentence(normalizeSummaryText(summary, 12)))
-    .filter(Boolean)
-    .slice(0, 2);
-  const improvementText = improvements.length > 0 ? `, with additional refinements in ${formatList(improvements)}` : '';
-  const actorText = contributorNames.length > 0 ? formatList(contributorNames) : teamName;
-  const repoLabel = formatList(repoNames);
-  const repoText = repoLabel ? ` in ${repoLabel}` : ' across core systems';
-  const bulletText = normalizeSummaryText(
-    `Delivery progressed${repoText} as ${actorText} implemented ${focus}${improvementText}.`,
-    SUMMARY_MAX_WORDS
-  );
 
-  return {
-    bulletId: createStableId({ reportDate, teamId, prIdsUsed, bulletText }),
-    reportDate,
-    bulletTitle: buildBulletTitle(bulletText),
-    bulletText,
-    bulletCat: inferBulletCategory(bulletText),
-    prIdsUsed,
-    repoNames,
-    contributors: uniqueContributors,
-    confidence: 0.65,
-  };
+
+const LLM_MAX_ATTEMPTS = 3;
+const LLM_RETRY_BASE_DELAY_MS = 1000;
+
+function isTransientLLMError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return true;
+  }
+  const message = error.message.toLowerCase();
+  return (
+    message.includes('timeout') ||
+    message.includes('timed out') ||
+    message.includes('econnreset') ||
+    message.includes('econnrefused') ||
+    message.includes('enotfound') ||
+    message.includes('fetch failed') ||
+    message.includes('socket') ||
+    message.includes('network') ||
+    message.includes('429') ||
+    message.includes('rate limit') ||
+    message.includes('503') ||
+    message.includes('502') ||
+    message.includes('504')
+  );
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
-async function llmGenerate(llmClient: LLMClient, prompt: string): Promise<string | null> {
-  try {
-    const response = await llmClient.generate({
-      model: appConfig.workflow.defaultModelName,
-      messages: [createUserMessage(prompt)],
-      parameters: { maxTokens: 2048 },
-    });
-
-    return response.content?.trim() || null;
-  } catch (error) {
-    logger.warn('[TEAM-INTEL-TEAM-SUMMARY] LLM call failed, falling back to deterministic summary', {
-      error,
-    });
-    return null;
+async function llmGenerate(llmClient: LLMClient, prompt: string): Promise<string> {
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= LLM_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      const response = await llmClient.generate({
+        model: appConfig.workflow.defaultModelName,
+        messages: [createUserMessage(prompt)],
+        parameters: { maxTokens: 2048 },
+      });
+      const content = response.content?.trim();
+      if (content) {
+        return content;
+      }
+      lastError = new Error('LLM returned an empty response');
+    } catch (error) {
+      lastError = error;
+      if (!isTransientLLMError(error) || attempt === LLM_MAX_ATTEMPTS) {
+        break;
+      }
+    }
+    if (attempt < LLM_MAX_ATTEMPTS) {
+      await sleep(LLM_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1));
+    }
   }
+
+  logger.error('[TEAM-INTEL-TEAM-SUMMARY] LLM call failed after retries; no fallback', { error: lastError });
+  throw new TeamIntelligenceLLMUnavailableError(
+    `LLM team summary generation failed after ${LLM_MAX_ATTEMPTS} attempt(s): ${
+      lastError instanceof Error ? lastError.message : 'unknown error'
+    }`
+  );
 }
 
 function buildTeamEvidenceItems(input: TeamIntelligenceTeamSummaryInput): TeamIntelligenceTeamSummaryEvidenceItem[] {
@@ -480,66 +462,6 @@ function buildTeamSummaryPrompt(input: TeamIntelligenceTeamSummaryInput, evidenc
   ].join('\n');
 }
 
-function buildDeterministicBulletFromEvidence(
-  input: TeamIntelligenceTeamSummaryInput,
-  evidenceItems: TeamIntelligenceTeamSummaryEvidenceItem[]
-): TeamIntelligenceTeamSummaryBullet[] {
-  if (evidenceItems.length === 0) {
-    return input.users.map((user) => {
-      const directCommits = asArray<TeamIntelligenceCommitInput>(user.soloCommits);
-      const highlights = directCommits
-        .map((commit) => trimSentence(typeof commit.commitSummary === 'string' ? commit.commitSummary : summarizeCommitMessage(commit.commitMessage)))
-        .filter(Boolean)
-        .slice(0, 2);
-      const bulletText = highlights.length > 0
-        ? `${input.teamName} moved work forward outside the PR flow, where ${user.userName} improved ${formatList(highlights)}.`
-        : `${input.teamName} had no PR-linked delivery signal on ${input.reportDate}, but ${user.userName} handled direct engineering maintenance work.`;
-
-      return {
-        bulletId: createStableId({
-          reportDate: input.reportDate,
-          teamId: input.teamId,
-          userEmail: user.userEmail,
-          bulletText,
-        }),
-        reportDate: input.reportDate,
-        bulletTitle: buildBulletTitle(normalizeSummaryText(bulletText, SUMMARY_MAX_WORDS)),
-        bulletText,
-        bulletCat: inferBulletCategory(normalizeSummaryText(bulletText, SUMMARY_MAX_WORDS)),
-        prIdsUsed: [],
-        repoNames: [],
-        contributors: [
-          {
-            userId: user.userId,
-            userEmail: user.userEmail,
-            userName: user.userName,
-            role: user.role ?? null,
-            contributionNote: highlights.length > 0
-              ? `${user.userName} handled direct changes outside PR flow`
-              : `${user.userName} handled maintenance work on ${input.reportDate}`,
-          },
-        ],
-        confidence: 0.4,
-      };
-    }).slice(0, SUMMARY_MAX_LINES);
-  }
-
-  const byPr = new Map<number, TeamIntelligenceTeamSummaryEvidenceItem[]>();
-
-  for (const item of evidenceItems) {
-    const key = item.prId;
-    const existing = byPr.get(key) ?? [];
-    existing.push(item);
-    byPr.set(key, existing);
-  }
-
-  const bullets = [...byPr.values()]
-    .sort((left, right) => left[0].prId - right[0].prId)
-    .map((items) => buildPrNarrativeBullet(input.reportDate, input.teamId, input.teamName, items));
-
-  return bullets.slice(0, SUMMARY_MAX_LINES);
-}
-
 function parseBulletContributors(rawContributors: unknown): TeamIntelligenceTeamSummaryBulletContributor[] {
   return asArray<RawTeamSummaryContributor>(rawContributors)
     .map((contributor) => ({
@@ -556,21 +478,22 @@ function parseTeamSummaryResponse(
   rawContent: string,
   input: TeamIntelligenceTeamSummaryInput,
   evidenceItems: TeamIntelligenceTeamSummaryEvidenceItem[]
-): TeamIntelligenceTeamSummaryBullet[] | null {
+): TeamIntelligenceTeamSummaryBullet[] {
   let parsed: RawTeamSummaryResponse;
   try {
-    parsed = JSON.parse(rawContent) as RawTeamSummaryResponse;
+    parsed = JSON.parse(extractJson(rawContent)) as RawTeamSummaryResponse;
   } catch (error) {
-    logger.warn('[TEAM-INTEL-TEAM-SUMMARY] Failed to parse LLM JSON response', { error });
-    return null;
+    throw new TeamIntelligenceLLMUnavailableError(
+      `LLM team summary response was not valid JSON: ${error instanceof Error ? error.message : 'parse error'}`
+    );
   }
 
   if (normalizeString(parsed.reportDate, input.reportDate) !== input.reportDate) {
-    return null;
+    throw new TeamIntelligenceLLMUnavailableError('LLM team summary response reportDate did not match input');
   }
 
   if (normalizeString(parsed.teamName, input.teamName) !== input.teamName) {
-    return null;
+    throw new TeamIntelligenceLLMUnavailableError('LLM team summary response teamName did not match input');
   }
 
   const evidencePrIds = new Set(evidenceItems.map((item) => item.prId));
@@ -628,7 +551,11 @@ function parseTeamSummaryResponse(
     })
     .filter((bullet) => bullet !== null) as TeamIntelligenceTeamSummaryBullet[];
 
-  return bullets.length > 0 ? bullets : null;
+  if (bullets.length === 0) {
+    throw new TeamIntelligenceLLMUnavailableError('LLM team summary response contained no valid bullets');
+  }
+
+  return bullets;
 }
 
 function buildProvenance(
@@ -663,148 +590,41 @@ function buildSummaryText(bullets: TeamIntelligenceTeamSummaryBullet[], teamName
   return bullets.map((bullet) => `**[${teamName}]:** ${bullet.bulletText}`);
 }
 
-function enforceTeamBulletWindow(
-  input: TeamIntelligenceTeamSummaryInput,
-  evidenceItems: TeamIntelligenceTeamSummaryEvidenceItem[],
-  bullets: TeamIntelligenceTeamSummaryBullet[]
-): TeamIntelligenceTeamSummaryBullet[] {
-  const concise = bullets.slice(0, SUMMARY_MAX_LINES);
-  if (concise.length >= SUMMARY_MIN_LINES) {
-    return concise;
-  }
-
-  if (concise.length === 1) {
-    const repoNames = [...new Set(evidenceItems.map((item) => item.repoName).filter(Boolean))].slice(0, 2);
-    const repoLabel = repoNames.length > 0 ? formatList(repoNames) : 'core systems';
-    const secondText = normalizeSummaryText(
-      `${input.teamName} continued focused delivery in ${repoLabel} during ${input.reportDate}.`,
-      SUMMARY_MAX_WORDS
-    );
-    const primary = concise[0];
-    const secondBullet: TeamIntelligenceTeamSummaryBullet = {
-      bulletId: createStableId({
-        reportDate: input.reportDate,
-        teamId: input.teamId,
-        bulletText: secondText,
-        prIdsUsed: primary.prIdsUsed,
-      }),
-      reportDate: input.reportDate,
-      bulletTitle: buildBulletTitle(secondText),
-      bulletText: secondText,
-      bulletCat: normalizeBulletCategory(primary.bulletCat, secondText),
-      prIdsUsed: primary.prIdsUsed,
-      repoNames: primary.repoNames,
-      contributors: primary.contributors,
-      confidence: 0.5,
-    };
-
-    return [primary, secondBullet];
-  }
-
-  const defaultText = normalizeSummaryText(
-    `${input.teamName} delivered focused engineering updates during ${input.reportDate}.`,
-    SUMMARY_MAX_WORDS
-  );
-  const secondaryText = normalizeSummaryText(
-    `${input.teamName} maintained delivery momentum with concise, evidence-based progress updates.`,
-    SUMMARY_MAX_WORDS
-  );
-  const defaultBullet: TeamIntelligenceTeamSummaryBullet = {
-    bulletId: createStableId({
-      reportDate: input.reportDate,
-      teamId: input.teamId,
-      bulletText: defaultText,
-      prIdsUsed: [],
-    }),
-    reportDate: input.reportDate,
-    bulletTitle: buildBulletTitle(defaultText),
-    bulletText: defaultText,
-    bulletCat: inferBulletCategory(defaultText),
-    prIdsUsed: [],
-    repoNames: [],
-    contributors: [],
-    confidence: 0.4,
-  };
-
-  const secondaryBullet: TeamIntelligenceTeamSummaryBullet = {
-    bulletId: createStableId({
-      reportDate: input.reportDate,
-      teamId: input.teamId,
-      bulletText: secondaryText,
-      prIdsUsed: [],
-    }),
-    reportDate: input.reportDate,
-    bulletTitle: buildBulletTitle(secondaryText),
-    bulletText: secondaryText,
-    bulletCat: inferBulletCategory(secondaryText),
-    prIdsUsed: [],
-    repoNames: [],
-    contributors: [],
-    confidence: 0.4,
-  };
-
-  return [defaultBullet, secondaryBullet];
-}
-
 class TeamIntelligenceTeamSummaryService {
-  private async getDefaultWorkspaceLlmClient(): Promise<LLMClient | null> {
-    const credential = await orgLLMCredentialService.getCredentialByWorkspaceId(
-      appConfig.defaultWorkspaceId,
-      OrgLLMServiceAccountPurpose.DEFAULT,
-    );
-    if (!credential) {
-      return null;
+  private async getDefaultWorkspaceLlmClient(): Promise<LLMClient> {
+    const llmClient = createTeamIntelligenceLlmClient();
+    if (!llmClient) {
+      throw new TeamIntelligenceLLMUnavailableError(
+        'LITELLM_API_KEY and LITELLM_BASE_URL must be configured for Team Intelligence team summaries'
+      );
     }
-
-    return new LLMClient({
-      provider: {
-        type: 'litellm',
-        config: {
-          apiKey: credential.apiKey,
-          baseUrl: credential.baseUrl,
-          timeout: 60000,
-        },
-      },
-      defaultModel: appConfig.workflow.defaultModelName,
-    });
+    return llmClient;
   }
 
   async generate(input: TeamIntelligenceTeamSummaryInput): Promise<TeamIntelligenceTeamSummaryOutput> {
     const evidenceItems = buildTeamEvidenceItems(input);
     const llmClient = await this.getDefaultWorkspaceLlmClient();
 
-    let bullets: TeamIntelligenceTeamSummaryBullet[] | null = null;
-    let llmPrimaryCallSucceeded = false;
-
-    if (llmClient && evidenceItems.length > 0) {
-      const prompt = buildTeamSummaryPrompt(input, evidenceItems);
-      const rawContent = await llmGenerate(llmClient, prompt);
-      if (rawContent) {
-        llmPrimaryCallSucceeded = true;
-        bullets = parseTeamSummaryResponse(rawContent, input, evidenceItems);
-      }
+    // LLM-only team summary. There is no deterministic fallback: if the LLM call
+    // fails or yields no valid bullets, this throws and the worker fails the team
+    // summary job (then passes ahead to the org stage with whatever teams completed).
+    if (evidenceItems.length === 0) {
+      throw new TeamIntelligenceLLMUnavailableError(
+        `No PR evidence to summarize for team=${input.teamName} on ${input.reportDate}`
+      );
     }
 
-    if (!bullets) {
-      bullets = buildDeterministicBulletFromEvidence(input, evidenceItems);
-    }
+    const prompt = buildTeamSummaryPrompt(input, evidenceItems);
+    const rawContent = await llmGenerate(llmClient, prompt);
+    let bullets = parseTeamSummaryResponse(rawContent, input, evidenceItems);
 
-    if (llmClient && bullets.length > 0) {
-      const rewritten = await llmRewriteTeamBullets(llmClient, input, bullets);
-      if (rewritten) {
-        bullets = rewritten;
-      }
-    }
-
-    if (!llmPrimaryCallSucceeded) {
-      bullets = enforceTeamBulletWindow(input, evidenceItems, bullets);
-    }
+    bullets = await llmRewriteTeamBullets(llmClient, input, bullets);
 
     const provenance = buildProvenance(input, evidenceItems, bullets);
     const summaryText = buildSummaryText(bullets, input.teamName);
 
     const summaryMetadata: Prisma.InputJsonValue = {
-      generator: llmClient ? 'team-intelligence-team-summary-llm-v1' : 'team-intelligence-team-summary-v1',
+      generator: 'team-intelligence-team-summary-llm-v1',
       generatedAt: provenance.generatedAt,
       reportDate: input.reportDate,
       teamId: input.teamId,

@@ -34,9 +34,14 @@ class TeamIntelligenceQueue {
           removeOnFail: { count: 100 },
         },
         settings: {
-          lockDuration: 60000,
-          stalledInterval: 30000,
-          maxStalledCount: 1,
+          // LLM-backed user-summary jobs can run for several minutes (multiple
+          // LLM calls with retries). Keep the lock generous and allow a couple
+          // of stalled reclaims before giving up, so slow-but-healthy jobs are
+          // not false-failed. Bull renews the lock while the process is alive;
+          // stalls only happen on actual worker death.
+          lockDuration: 300000,
+          stalledInterval: 120000,
+          maxStalledCount: 2,
         },
       });
 

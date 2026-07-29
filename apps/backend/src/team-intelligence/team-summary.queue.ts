@@ -34,9 +34,9 @@ class TeamIntelligenceTeamSummaryQueue {
           removeOnFail: { count: 100 },
         },
         settings: {
-          lockDuration: 60000,
-          stalledInterval: 30000,
-          maxStalledCount: 1,
+          lockDuration: 300000,
+          stalledInterval: 120000,
+          maxStalledCount: 2,
         },
       });
 

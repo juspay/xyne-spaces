@@ -6,8 +6,7 @@ import {
 } from '@/database/repositories/teamIntelligenceTeamRepository';
 import { redisService } from '@/services/redisService';
 import { logger } from '@/utils/logger';
-import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
-import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
+import { createTeamIntelligenceLlmClient } from '@/team-intelligence/services/team-intelligence-llm-client';
 
 export interface TeamBulletsDateRangeInput {
   from: Date;
@@ -19,23 +18,7 @@ export interface TeamBulletsDateRangeInput {
 
 class TeamIntelligenceTeamDashboardService {
   private async getDefaultWorkspaceLlmClient(): Promise<LLMClient | null> {
-    const credential = await orgLLMCredentialService.getCredentialByWorkspaceId(
-      appConfig.defaultWorkspaceId,
-      OrgLLMServiceAccountPurpose.DEFAULT,
-    );
-    if (!credential) return null;
-
-    return new LLMClient({
-      provider: {
-        type: 'litellm',
-        config: {
-          apiKey: credential.apiKey,
-          baseUrl: credential.baseUrl,
-          timeout: appConfig.llm.requestTimeoutMs,
-        },
-      },
-      defaultModel: appConfig.workflow.defaultModelName,
-    });
+    return createTeamIntelligenceLlmClient();
   }
 
   async getTeamBullets(input: TeamBulletsDateRangeInput) {
