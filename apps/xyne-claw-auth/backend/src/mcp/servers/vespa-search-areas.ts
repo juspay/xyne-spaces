@@ -687,8 +687,11 @@ function buildAreaClauses(
     const emb = area.embeddingFields ?? [];
     // Hybrid works with grouping too — buildYqlFromParams pins default_native
     // below whenever a query is present, so queryDirect sends input.query(e).
-    // Only an explicit `unranked` (or a schema with no embedding) drops the NN.
-    const scored = emb.length > 0 && params.rankProfile !== "unranked";
+    // An explicit `unranked`, a schema with no embedding, or a SORT drops the
+    // NN: sorted queries run unranked (`order by` replaces ranking, and file's
+    // default_native has a global-phase rerank Vespa refuses to sort under),
+    // so `e` is never supplied and the vector clause would break.
+    const scored = emb.length > 0 && params.rankProfile !== "unranked" && !params.sort?.by;
     if (scored) {
       const targetHits = Math.max(params.hits ?? 20, 100);
       const nn = emb.map(f => `({targetHits:${targetHits}} nearestNeighbor(${f}, e))`).join(" or ");
@@ -854,7 +857,11 @@ export function buildYqlFromParams(
     // default_native so queryDirect sends input.query(e)=embed(hf-embedder, @query) that the
     // nearestNeighbor clause needs. (Its auto-pick would fall to `unranked` for
     // a grouping query and drop `e`, breaking the vector clause.)
-    rankProfile = "default_native";
+    // EXCEPT under sort: `order by` replaces ranking entirely, and schemas
+    // whose default_native carries a global-phase rerank (file) 400 with
+    // "Sorting is not supported with global phase" — so sorted queries run
+    // unranked (buildAreaClauses drops their NN clause for the same reason).
+    rankProfile = hasSort ? "unranked" : "default_native";
   }
 
   return { yql, query, ...(rankProfile ? { rankProfile } : {}) };
