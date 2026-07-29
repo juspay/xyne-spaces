@@ -58,7 +58,7 @@ class TeamIntelligenceWorker {
       throw new Error('[TEAM-INTEL-WORKER] Queue not available after initialization');
     }
 
-    queue.process('ingest-user', 5, async (job: Bull.Job<TeamIntelligenceQueuedJobData>) => {
+    queue.process('ingest-user', 2, async (job: Bull.Job<TeamIntelligenceQueuedJobData>) => {
       return this.processJob(job);
     });
 
@@ -359,24 +359,31 @@ class TeamIntelligenceWorker {
       `[TEAM-INTEL-WORKER] Processing job ${job.id} batchId=${batchId} userIngestionId=${userIngestionId} userEmail=${userEmail}`
     );
 
-    await teamIntelligenceRepository.updateUserStatus(userIngestionId, {
+    const userIngestion = await teamIntelligenceRepository.updateUserStatus(userIngestionId, {
       processingStatus: TeamIntelligenceUserIngestionStatus.PROCESSING,
       startedAt,
       errorMessage: null,
       failedAt: null,
     });
+    if (!userIngestion) {
+      logger.warn(
+        `[TEAM-INTEL-WORKER] Discarding stale user job ${job.id}; ingestion ${userIngestionId} no longer exists`
+      );
+      return;
+    }
 
-    await teamIntelligenceRepository.updateBatchStatus(batchId, {
+    const batch = await teamIntelligenceRepository.updateBatchStatus(batchId, {
       status: TeamIntelligenceBatchStatus.PROCESSING,
       errorMessage: null,
     });
+    if (!batch) {
+      logger.warn(
+        `[TEAM-INTEL-WORKER] Discarding stale user job ${job.id}; batch ${batchId} no longer exists`
+      );
+      return;
+    }
 
     try {
-      const userIngestion = await teamIntelligenceRepository.findUserIngestionById(userIngestionId);
-      if (!userIngestion) {
-        throw new Error(`User ingestion record not found for id=${userIngestionId}`);
-      }
-
       const [pullRequests, soloCommits] = await Promise.all([
         teamIntelligenceContentStorageService.hydrateJsonPayload<{
           pullRequests?: unknown[];
@@ -415,7 +422,7 @@ class TeamIntelligenceWorker {
         },
       });
 
-      await teamIntelligenceRepository.updateUserIngestionSummary(userIngestionId, {
+      const completedUser = await teamIntelligenceRepository.updateUserIngestionSummary(userIngestionId, {
         contentUrl: contentPointer.contentUrl,
         contentSize: contentPointer.contentSize,
         contentChecksum: contentPointer.contentChecksum,
@@ -424,6 +431,12 @@ class TeamIntelligenceWorker {
         failedAt: null,
         errorMessage: null,
       });
+      if (!completedUser) {
+        logger.warn(
+          `[TEAM-INTEL-WORKER] User ingestion ${userIngestionId} was removed while job ${job.id} was running; discarding result`
+        );
+        return;
+      }
 
       await this.triggerTeamSummaryIfReady({
         batchId,
@@ -445,11 +458,14 @@ class TeamIntelligenceWorker {
   }
 
   private async handleJobFailure(data: TeamIntelligenceQueuedJobData, error: unknown): Promise<void> {
-    await teamIntelligenceRepository.updateUserStatus(data.userIngestionId, {
+    const failedUser = await teamIntelligenceRepository.updateUserStatus(data.userIngestionId, {
       processingStatus: TeamIntelligenceUserIngestionStatus.FAILED,
       failedAt: new Date(),
       errorMessage: error instanceof Error ? error.message : 'Unknown processing error',
     });
+    if (!failedUser) {
+      return;
+    }
 
     await this.triggerTeamSummaryIfReady({
       batchId: data.batchId,
@@ -470,18 +486,20 @@ class TeamIntelligenceWorker {
       `[TEAM-INTEL-WORKER] Processing team summary job ${job.id} batchId=${batchId} teamSummaryId=${teamSummaryId} teamId=${teamId ?? 'null'} teamName=${teamName}`
     );
 
-    await teamIntelligenceRepository.updateTeamSummaryStatus(teamSummaryId, {
+    const teamSummary = await teamIntelligenceRepository.updateTeamSummaryStatus(teamSummaryId, {
       status: TeamIntelligenceBatchStatus.PROCESSING,
       startedAt,
       errorMessage: null,
       failedAt: null,
     });
+    if (!teamSummary) {
+      logger.warn(
+        `[TEAM-INTEL-WORKER] Discarding stale team summary job ${job.id}; summary ${teamSummaryId} no longer exists`
+      );
+      return;
+    }
 
     try {
-      const teamSummary = await teamIntelligenceRepository.findTeamSummaryById(teamSummaryId);
-      if (!teamSummary) {
-        throw new Error(`Team summary record not found for id=${teamSummaryId}`);
-      }
       if (!teamSummary.teamId) {
         throw new Error(`Team summary ${teamSummaryId} is missing teamId`);
       }
@@ -532,7 +550,7 @@ class TeamIntelligenceWorker {
         },
       });
 
-      await teamIntelligenceRepository.updateTeamSummaryResult(teamSummaryId, {
+      const completedTeamSummary = await teamIntelligenceRepository.updateTeamSummaryResult(teamSummaryId, {
         contentUrl: teamContentPointer.contentUrl,
         contentSize: teamContentPointer.contentSize,
         contentChecksum: teamContentPointer.contentChecksum,
@@ -544,6 +562,12 @@ class TeamIntelligenceWorker {
         failedAt: null,
         errorMessage: null,
       });
+      if (!completedTeamSummary) {
+        logger.warn(
+          `[TEAM-INTEL-WORKER] Team summary ${teamSummaryId} was removed while job ${job.id} was running; discarding result`
+        );
+        return;
+      }
 
       logger.info(
         `[TEAM-INTEL-WORKER] Completed team summary job ${job.id} batchId=${batchId} teamSummaryId=${teamSummaryId} teamId=${teamId} teamName=${teamName}`
@@ -564,11 +588,14 @@ class TeamIntelligenceWorker {
     data: TeamIntelligenceTeamSummaryQueuedJobData,
     error: unknown
   ): Promise<void> {
-    await teamIntelligenceRepository.updateTeamSummaryStatus(data.teamSummaryId, {
+    const failedTeamSummary = await teamIntelligenceRepository.updateTeamSummaryStatus(data.teamSummaryId, {
       status: TeamIntelligenceBatchStatus.FAILED,
       failedAt: new Date(),
       errorMessage: error instanceof Error ? error.message : 'Unknown team summary processing error',
     });
+    if (!failedTeamSummary) {
+      return;
+    }
 
     await this.triggerOrgSummaryIfReady({
       batchId: data.batchId,
@@ -585,19 +612,20 @@ class TeamIntelligenceWorker {
       `[TEAM-INTEL-WORKER] Processing org summary job ${job.id} batchId=${batchId} orgSummaryId=${orgSummaryId}`
     );
 
-    await teamIntelligenceRepository.updateOrgSummaryStatus(orgSummaryId, {
+    const orgSummary = await teamIntelligenceRepository.updateOrgSummaryStatus(orgSummaryId, {
       status: TeamIntelligenceBatchStatus.PROCESSING,
       startedAt,
       errorMessage: null,
       failedAt: null,
     });
+    if (!orgSummary) {
+      logger.warn(
+        `[TEAM-INTEL-WORKER] Discarding stale org summary job ${job.id}; summary ${orgSummaryId} no longer exists`
+      );
+      return;
+    }
 
     try {
-      const orgSummary = await teamIntelligenceRepository.findOrgSummaryById(orgSummaryId);
-      if (!orgSummary) {
-        throw new Error(`Org summary record not found for id=${orgSummaryId}`);
-      }
-
       const completedTeamSummaries = await teamIntelligenceRepository.findTeamSummariesByBatchId(batchId);
       const completedOnly = completedTeamSummaries.filter(
         (teamSummary) => teamSummary.status === TeamIntelligenceBatchStatus.COMPLETED
@@ -640,7 +668,7 @@ class TeamIntelligenceWorker {
         },
       });
 
-      await teamIntelligenceRepository.updateOrgSummaryResult(orgSummaryId, {
+      const completedOrgSummary = await teamIntelligenceRepository.updateOrgSummaryResult(orgSummaryId, {
         contentUrl: orgContentPointer.contentUrl,
         contentSize: orgContentPointer.contentSize,
         contentChecksum: orgContentPointer.contentChecksum,
@@ -652,6 +680,12 @@ class TeamIntelligenceWorker {
         failedAt: null,
         errorMessage: null,
       });
+      if (!completedOrgSummary) {
+        logger.warn(
+          `[TEAM-INTEL-WORKER] Org summary ${orgSummaryId} was removed while job ${job.id} was running; discarding result`
+        );
+        return;
+      }
 
       logger.info(
         `[TEAM-INTEL-WORKER] Completed org summary job ${job.id} batchId=${batchId} orgSummaryId=${orgSummaryId}`
@@ -666,11 +700,14 @@ class TeamIntelligenceWorker {
     data: TeamIntelligenceOrgSummaryQueuedJobData,
     error: unknown
   ): Promise<void> {
-    await teamIntelligenceRepository.updateOrgSummaryStatus(data.orgSummaryId, {
+    const failedOrgSummary = await teamIntelligenceRepository.updateOrgSummaryStatus(data.orgSummaryId, {
       status: TeamIntelligenceBatchStatus.FAILED,
       failedAt: new Date(),
       errorMessage: error instanceof Error ? error.message : 'Unknown org summary processing error',
     });
+    if (!failedOrgSummary) {
+      return;
+    }
   }
 
   private async triggerTeamSummaryIfReady(input: {
@@ -728,6 +765,14 @@ class TeamIntelligenceWorker {
         status: progress.completedUsers > 0 ? TeamIntelligenceBatchStatus.RECEIVED : TeamIntelligenceBatchStatus.FAILED,
         errorMessage: progress.completedUsers === 0 ? 'No completed users available for team summary generation' : null,
       });
+    }
+
+    if (!teamSummary) {
+      // Record was removed (e.g. table truncated while a stale job was queued).
+      logger.warn(
+        `[TEAM-INTEL-WORKER] Team summary record vanished during trigger batchId=${input.batchId} teamId=${teamId}; skipping`
+      );
+      return;
     }
 
     if (progress.completedUsers === 0) {
@@ -801,6 +846,14 @@ class TeamIntelligenceWorker {
         status: progress.completedTeams > 0 ? TeamIntelligenceBatchStatus.RECEIVED : TeamIntelligenceBatchStatus.FAILED,
         errorMessage: progress.completedTeams === 0 ? 'No completed team summaries available for org summary generation' : null,
       });
+    }
+
+    if (!orgSummary) {
+      // Record was removed (e.g. table truncated while a stale job was queued).
+      logger.warn(
+        `[TEAM-INTEL-WORKER] Org summary record vanished during trigger batchId=${input.batchId}; skipping`
+      );
+      return;
     }
 
     if (progress.completedTeams === 0) {

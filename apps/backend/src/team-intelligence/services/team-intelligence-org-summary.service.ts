@@ -2,14 +2,15 @@ import type { Prisma } from '@prisma/client';
 import { LLMClient, createUserMessage } from '@framework';
 import { config as appConfig } from '../../config/env.js';
 import { logger } from '@/utils/logger';
-import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
-import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
 import type {
   TeamIntelligenceOrgSummaryBullet,
   TeamIntelligenceOrgSummaryInput,
   TeamIntelligenceOrgSummaryOutput,
   TeamIntelligenceTeamSummaryBullet,
 } from '../types';
+import { TeamIntelligenceLLMUnavailableError } from '../errors';
+import { extractJson } from '../llm-utils';
+import { createTeamIntelligenceLlmClient } from './team-intelligence-llm-client';
 
 interface RawOrgSummaryBullet {
   teamId?: unknown;
@@ -41,19 +42,66 @@ function asArray<T = unknown>(value: unknown): T[] {
 }
 
 
-async function llmGenerate(llmClient: LLMClient, prompt: string): Promise<string | null> {
-  try {
-    const response = await llmClient.generate({
-      model: appConfig.workflow.defaultModelName,
-      messages: [createUserMessage(prompt)],
-      parameters: { maxTokens: 2048 },
-    });
+const LLM_MAX_ATTEMPTS = 3;
+const LLM_RETRY_BASE_DELAY_MS = 1000;
 
-    return response.content?.trim() || null;
-  } catch (error) {
-    logger.warn('[TEAM-INTEL-ORG-SUMMARY] LLM call failed, falling back to deterministic summary', { error });
-    return null;
+function isTransientLLMError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return true;
   }
+  const message = error.message.toLowerCase();
+  return (
+    message.includes('timeout') ||
+    message.includes('timed out') ||
+    message.includes('econnreset') ||
+    message.includes('econnrefused') ||
+    message.includes('enotfound') ||
+    message.includes('fetch failed') ||
+    message.includes('socket') ||
+    message.includes('network') ||
+    message.includes('429') ||
+    message.includes('rate limit') ||
+    message.includes('503') ||
+    message.includes('502') ||
+    message.includes('504')
+  );
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function llmGenerate(llmClient: LLMClient, prompt: string): Promise<string> {
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= LLM_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      const response = await llmClient.generate({
+        model: appConfig.workflow.defaultModelName,
+        messages: [createUserMessage(prompt)],
+        parameters: { maxTokens: 2048 },
+      });
+      const content = response.content?.trim();
+      if (content) {
+        return content;
+      }
+      lastError = new Error('LLM returned an empty response');
+    } catch (error) {
+      lastError = error;
+      if (!isTransientLLMError(error) || attempt === LLM_MAX_ATTEMPTS) {
+        break;
+      }
+    }
+    if (attempt < LLM_MAX_ATTEMPTS) {
+      await sleep(LLM_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1));
+    }
+  }
+
+  logger.error('[TEAM-INTEL-ORG-SUMMARY] LLM call failed after retries; no fallback', { error: lastError });
+  throw new TeamIntelligenceLLMUnavailableError(
+    `LLM org summary generation failed after ${LLM_MAX_ATTEMPTS} attempt(s): ${
+      lastError instanceof Error ? lastError.message : 'unknown error'
+    }`
+  );
 }
 
 function normalizeString(value: unknown, fallback = ''): string {
@@ -148,8 +196,6 @@ function buildBulletTitle(bulletText: string): string {
   return concise || 'Team Update';
 }
 
-const SUMMARY_MIN_LINES = 2;
-const SUMMARY_MAX_LINES = 4;
 const SUMMARY_MAX_WORDS = 50;
 
 function normalizeSummaryText(value: string, maxWords = SUMMARY_MAX_WORDS): string {
@@ -181,7 +227,7 @@ async function llmRewriteBullets(
   reportDate: string,
   source: string,
   bullets: TeamIntelligenceOrgSummaryBullet[]
-): Promise<TeamIntelligenceOrgSummaryBullet[] | null> {
+): Promise<TeamIntelligenceOrgSummaryBullet[]> {
   const prompt = [
     'Rewrite org bullets for a manager feed.',
     'Return STRICT JSON only with this shape:',
@@ -222,15 +268,14 @@ async function llmRewriteBullets(
   ].join('\n');
 
   const raw = await llmGenerate(llmClient, prompt);
-  if (!raw) {
-    return null;
-  }
 
   let parsed: RawOrgBulletRewriteResponse;
   try {
-    parsed = JSON.parse(raw) as RawOrgBulletRewriteResponse;
-  } catch {
-    return null;
+    parsed = JSON.parse(extractJson(raw)) as RawOrgBulletRewriteResponse;
+  } catch (error) {
+    throw new TeamIntelligenceLLMUnavailableError(
+      `LLM org rewrite response was not valid JSON: ${error instanceof Error ? error.message : 'parse error'}`
+    );
   }
 
   const rewriteRows = asArray<RawOrgBulletRewriteItem>(parsed.bullets);
@@ -253,7 +298,9 @@ async function llmRewriteBullets(
   }
 
   if (rewriteMap.size !== bullets.length) {
-    return null;
+    throw new TeamIntelligenceLLMUnavailableError(
+      `LLM org rewrite returned ${rewriteMap.size} usable bullets, expected ${bullets.length}`
+    );
   }
 
   return bullets.map((bullet) => {
@@ -271,45 +318,6 @@ async function llmRewriteBullets(
       bulletCat: normalizeBulletCategory(bullet.bulletCat, normalizedText),
     };
   });
-}
-
-function buildDeterministicBullets(input: TeamIntelligenceOrgSummaryInput): TeamIntelligenceOrgSummaryBullet[] {
-  const bullets: TeamIntelligenceOrgSummaryBullet[] = input.teamSummaries.flatMap((teamSummary): TeamIntelligenceOrgSummaryBullet[] => {
-    const teamBullets = teamSummary.provenance.bullets ?? [];
-    if (teamBullets.length > 0) {
-      return teamBullets.map((bullet) => ({
-        bulletId: `${teamSummary.teamId}:${bullet.bulletId}`,
-        teamId: teamSummary.teamId,
-        teamName: teamSummary.teamName,
-        reportDate: bullet.reportDate,
-        bulletTitle: buildBulletTitle(normalizeSummaryText(bullet.bulletText, SUMMARY_MAX_WORDS)),
-        bulletText: normalizeSummaryText(bullet.bulletText, SUMMARY_MAX_WORDS),
-        bulletCat: inferBulletCategory(normalizeSummaryText(bullet.bulletText, SUMMARY_MAX_WORDS)),
-        sourceTeamBulletIds: [bullet.bulletId],
-        prIdsUsed: bullet.prIdsUsed,
-        repoNames: bullet.repoNames,
-        contributors: bullet.contributors,
-        confidence: bullet.confidence,
-      }));
-    }
-
-    return [{
-      bulletId: `${teamSummary.teamId}:no-signal`,
-      teamId: teamSummary.teamId,
-      teamName: teamSummary.teamName,
-      reportDate: input.reportDate,
-      bulletTitle: `${teamSummary.teamName} had no PR-linked signal`,
-      bulletText: 'No PR-linked delivery signal was recorded for this reporting date.',
-      bulletCat: 'milestone' as const,
-      sourceTeamBulletIds: [],
-      prIdsUsed: [],
-      repoNames: [],
-      contributors: [],
-      confidence: 0.3,
-    }];
-  });
-
-  return bullets.slice(0, SUMMARY_MAX_LINES);
 }
 
 function buildSummaryText(bullets: TeamIntelligenceOrgSummaryBullet[]): string[] {
@@ -366,7 +374,7 @@ function buildPrompt(input: TeamIntelligenceOrgSummaryInput): string {
   ].join('\n');
 }
 
-function parseOrgSummaryResponse(input: TeamIntelligenceOrgSummaryInput, raw: string): TeamIntelligenceOrgSummaryBullet[] | null {
+function parseOrgSummaryResponse(input: TeamIntelligenceOrgSummaryInput, raw: string): TeamIntelligenceOrgSummaryBullet[] {
   const teamBulletIndex = new Map<string, { teamId: string; teamName: string; bullet: TeamIntelligenceTeamSummaryBullet }>();
   for (const teamSummary of input.teamSummaries) {
     for (const bullet of teamSummary.provenance.bullets ?? []) {
@@ -376,14 +384,15 @@ function parseOrgSummaryResponse(input: TeamIntelligenceOrgSummaryInput, raw: st
 
   let parsed: RawOrgSummaryResponse;
   try {
-    parsed = JSON.parse(raw) as RawOrgSummaryResponse;
+    parsed = JSON.parse(extractJson(raw)) as RawOrgSummaryResponse;
   } catch (error) {
-    logger.warn('[TEAM-INTEL-ORG-SUMMARY] Failed to parse LLM JSON response', { error });
-    return null;
+    throw new TeamIntelligenceLLMUnavailableError(
+      `LLM org summary response was not valid JSON: ${error instanceof Error ? error.message : 'parse error'}`
+    );
   }
 
   if (normalizeString(parsed.reportDate, input.reportDate) !== input.reportDate) {
-    return null;
+    throw new TeamIntelligenceLLMUnavailableError('LLM org summary response reportDate did not match input');
   }
 
   const bullets = asArray<RawOrgSummaryBullet>(parsed.bullets).map((rawBullet) => {
@@ -430,108 +439,39 @@ function parseOrgSummaryResponse(input: TeamIntelligenceOrgSummaryInput, raw: st
     } satisfies TeamIntelligenceOrgSummaryBullet;
   }).filter((bullet) => bullet !== null) as TeamIntelligenceOrgSummaryBullet[];
 
-  return bullets.length > 0 ? bullets : null;
-}
-
-function enforceOrgBulletWindow(input: TeamIntelligenceOrgSummaryInput, bullets: TeamIntelligenceOrgSummaryBullet[]): TeamIntelligenceOrgSummaryBullet[] {
-  const concise = bullets.slice(0, SUMMARY_MAX_LINES);
-  if (concise.length >= SUMMARY_MIN_LINES) {
-    return concise;
+  if (bullets.length === 0) {
+    throw new TeamIntelligenceLLMUnavailableError('LLM org summary response contained no valid bullets');
   }
 
-  if (concise.length === 1) {
-    const primary = concise[0];
-    const secondText = normalizeSummaryText(
-      `${input.source} teams maintained focused delivery progress on ${input.reportDate}.`,
-      SUMMARY_MAX_WORDS
-    );
-    const secondBullet: TeamIntelligenceOrgSummaryBullet = {
-      ...primary,
-      bulletId: `${primary.teamId}:${primary.sourceTeamBulletIds.join('|')}:context`,
-      bulletTitle: buildBulletTitle(secondText),
-      bulletText: secondText,
-      bulletCat: normalizeBulletCategory(primary.bulletCat, secondText),
-    };
-
-    return [primary, secondBullet];
-  }
-
-  const fallbackTeam = input.teamSummaries[0];
-  const defaultText = normalizeSummaryText(
-    `${fallbackTeam?.teamName ?? 'Org'} delivered focused engineering progress on ${input.reportDate}.`,
-    SUMMARY_MAX_WORDS
-  );
-  const defaultBullet: TeamIntelligenceOrgSummaryBullet = {
-    bulletId: `${fallbackTeam?.teamId ?? 'org'}:fallback`,
-    teamId: fallbackTeam?.teamId ?? 'org',
-    teamName: fallbackTeam?.teamName ?? 'Org',
-    reportDate: input.reportDate,
-    bulletTitle: buildBulletTitle(defaultText),
-    bulletText: defaultText,
-    bulletCat: 'milestone',
-    sourceTeamBulletIds: [],
-    prIdsUsed: [],
-    repoNames: [],
-    contributors: [],
-    confidence: 0.3,
-  };
-
-  const secondBullet: TeamIntelligenceOrgSummaryBullet = {
-    ...defaultBullet,
-    bulletId: `${defaultBullet.teamId}:fallback-context`,
-  };
-
-  return [defaultBullet, secondBullet];
+  return bullets;
 }
 
 class TeamIntelligenceOrgSummaryService {
-  private async getDefaultWorkspaceLlmClient(): Promise<LLMClient | null> {
-    const credential = await orgLLMCredentialService.getCredentialByWorkspaceId(
-      appConfig.defaultWorkspaceId,
-      OrgLLMServiceAccountPurpose.DEFAULT,
-    );
-    if (!credential) {
-      return null;
+  private async getDefaultWorkspaceLlmClient(): Promise<LLMClient> {
+    const llmClient = createTeamIntelligenceLlmClient();
+    if (!llmClient) {
+      throw new TeamIntelligenceLLMUnavailableError(
+        'LITELLM_API_KEY and LITELLM_BASE_URL must be configured for Team Intelligence org summaries'
+      );
     }
-
-    return new LLMClient({
-      provider: {
-        type: 'litellm',
-        config: {
-          apiKey: credential.apiKey,
-          baseUrl: credential.baseUrl,
-          timeout: 60000,
-        },
-      },
-      defaultModel: appConfig.workflow.defaultModelName,
-    });
+    return llmClient;
   }
 
   async generate(input: TeamIntelligenceOrgSummaryInput): Promise<TeamIntelligenceOrgSummaryOutput> {
     const llmClient = await this.getDefaultWorkspaceLlmClient();
-    let bullets = buildDeterministicBullets(input);
-    let llmPrimaryCallSucceeded = false;
-    if (llmClient && input.teamSummaries.length > 0) {
-      const raw = await llmGenerate(llmClient, buildPrompt(input));
-      if (raw) {
-        llmPrimaryCallSucceeded = true;
-        const parsed = parseOrgSummaryResponse(input, raw);
-        if (parsed) {
-          bullets = parsed;
-        }
-      }
+
+    // LLM-only org summary. No deterministic fallback: if the LLM call fails or
+    // yields no valid bullets, this throws and the worker fails the org summary job.
+    if (input.teamSummaries.length === 0) {
+      throw new TeamIntelligenceLLMUnavailableError(
+        `No team summaries to roll up for org summary on ${input.reportDate}`
+      );
     }
 
-    if (llmClient && bullets.length > 0) {
-      const rewritten = await llmRewriteBullets(llmClient, input.reportDate, input.source, bullets);
-      if (rewritten) {
-        bullets = rewritten;
-      }
-    }
+    const raw = await llmGenerate(llmClient, buildPrompt(input));
+    let bullets = parseOrgSummaryResponse(input, raw);
 
-    if (!llmPrimaryCallSucceeded) {
-      bullets = enforceOrgBulletWindow(input, bullets);
-    }
+    bullets = await llmRewriteBullets(llmClient, input.reportDate, input.source, bullets);
 
     const summaryText = buildSummaryText(bullets);
 
@@ -545,7 +485,7 @@ class TeamIntelligenceOrgSummaryService {
     }, {});
 
     const summaryMetadata: Prisma.InputJsonValue = {
-      generator: llmClient ? 'team-intelligence-org-summary-llm-v2' : 'team-intelligence-org-summary-v2',
+      generator: 'team-intelligence-org-summary-llm-v2',
       generatedAt,
       reportDate: input.reportDate,
       source: input.source,

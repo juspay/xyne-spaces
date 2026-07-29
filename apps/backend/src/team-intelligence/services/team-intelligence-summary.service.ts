@@ -3,14 +3,15 @@ import { LLMClient } from '@framework';
 import { createUserMessage } from '@framework';
 import { config as appConfig } from '../../config/env.js';
 import { logger } from '@/utils/logger';
-import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
-import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
 import type {
   TeamIntelligenceAiUsageInput,
   TeamIntelligenceCommitInput,
   TeamIntelligenceDiffInput,
   TeamIntelligencePullRequestInput,
 } from '../types';
+import { TeamIntelligenceLLMUnavailableError } from '../errors';
+import { extractJson } from '../llm-utils';
+import { createTeamIntelligenceLlmClient } from './team-intelligence-llm-client';
 
 export interface TeamIntelligenceGeneratedSummary {
   pullRequests: Prisma.InputJsonValue;
@@ -45,44 +46,6 @@ function toFiniteNumber(value: unknown, fallback = 0): number {
   return fallback;
 }
 
-function normalizeCommitMessageForSummary(message: string): string {
-  const normalized = message.trim();
-  if (!normalized) {
-    return 'Updated code changes';
-  }
-
-  const withoutPrefix = normalized.replace(/^[a-z]+(?:\([^)]+\))?!?:\s*/i, '');
-  return withoutPrefix || normalized;
-}
-
-function summarizeCommitMessage(message: string): string {
-  const normalized = normalizeCommitMessageForSummary(message);
-  if (!normalized) {
-    return 'Updated code changes.';
-  }
-
-  const firstSentence = normalized.split(/[.!?]\s/)[0] ?? normalized;
-  if (firstSentence.length <= 140) {
-    return `${firstSentence.trim()}.`;
-  }
-
-  return `${firstSentence.slice(0, 137).trimEnd()}...`;
-}
-
-function summarizeDiff(diff: TeamIntelligenceDiffInput | undefined): string {
-  if (!diff) {
-    return 'Diff details were not provided.';
-  }
-
-  const filesChanged = toFiniteNumber(diff.filesChanged);
-  const additions = toFiniteNumber(diff.additions);
-  const deletions = toFiniteNumber(diff.deletions);
-
-  return `Changed ${filesChanged} file(s) with ${additions} additions and ${deletions} deletions.`;
-}
-
-const SUMMARY_MIN_LINES = 3;
-const SUMMARY_MAX_LINES = 4;
 const SUMMARY_MAX_WORDS = 50;
 
 function normalizeSummaryText(value: string, maxWords = SUMMARY_MAX_WORDS): string {
@@ -96,7 +59,7 @@ function normalizeSummaryText(value: string, maxWords = SUMMARY_MAX_WORDS): stri
     .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
     .replace(/\b[A-Z][A-Z0-9]+-\d+\b:?\s*/g, ' ')
     .replace(/\b(?:feat|fix|chore|refactor|docs|test|perf|style|build|ci|revert)(?:\([^)]+\))?!?:\s*/gi, ' ')
-    .replace(/[#>*\-\[\]`*_~]|\d+\./g, ' ')
+    .replace(/[#>*[\]`*_~-]|\d+\./g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 
@@ -107,106 +70,6 @@ function normalizeSummaryText(value: string, maxWords = SUMMARY_MAX_WORDS): stri
   return concise ? `${concise}.`.replace(/\.\./g, '.') : '';
 }
 
-function summarizePullRequest(pr: TeamIntelligencePullRequestInput): string {
-  const prState = pr.prState?.trim() || 'updated';
-  const repoName = pr.repoName?.trim() || 'unknown-repository';
-  const projectName = pr.projectName?.trim() || 'unknown-project';
-  const commitCount = asArray(pr.commits).length;
-
-  const diffRecord = asObject(pr.diff);
-  const filesChanged = toFiniteNumber(diffRecord.filesChanged);
-  const additions = toFiniteNumber(diffRecord.additions);
-  const deletions = toFiniteNumber(diffRecord.deletions);
-
-  // Robustly extract a concise summary from prDescription or prSummary or prTitle
-  const rawDesc = pr.prDescription?.trim() || pr.prSummary?.trim() || pr.prTitle;
-  const conciseDesc = normalizeSummaryText(rawDesc);
-
-  return [
-    `Implemented ${conciseDesc} in ${projectName}/${repoName}.`,
-    `${prState === 'merged' ? 'The change shipped' : 'The change progressed'} through ${commitCount} commit(s) and ${filesChanged} touched file(s) (${additions}+/${deletions}-).`
-  ].join(' ');
-}
-
-function formatList(items: string[]): string {
-  const values = items.map((item) => item.trim()).filter(Boolean);
-  if (values.length === 0) {
-    return '';
-  }
-  if (values.length === 1) {
-    return values[0];
-  }
-  if (values.length === 2) {
-    return `${values[0]} and ${values[1]}`;
-  }
-  return `${values.slice(0, -1).join(', ')}, and ${values[values.length - 1]}`;
-}
-
-function trimSentence(value: string): string {
-  return value.trim().replace(/[.\s]+$/, '');
-}
-
-function buildSubjectivePullRequestBullet(
-  userName: string,
-  pr: TeamIntelligencePullRequestInput,
-  commitSummaries: string[]
-): string {
-  const repoLabel = [pr.projectName, pr.repoName].filter(Boolean).join('/');
-  const focus = trimSentence(normalizeSummaryText(pr.prSummary?.trim() || pr.prDescription?.trim() || pr.prTitle, 14));
-  const highlights = commitSummaries.map(trimSentence).filter(Boolean).slice(0, 2);
-  const highlightText = highlights.length > 0
-    ? `, with refinements in ${formatList(highlights)}`
-    : '';
-  const target = repoLabel || 'the product';
-  const variants = [
-    `Delivery in ${target} advanced through ${focus}${highlightText}.`,
-    `${focus} was delivered in ${target}${highlightText}.`,
-    `Work in ${target} moved forward with ${focus}${highlightText}.`,
-    `${userName} moved ${target} forward by delivering ${focus}${highlightText}.`,
-  ];
-
-  const variantIndex = Math.abs(pr.prId) % variants.length;
-  return variants[variantIndex];
-}
-
-function buildSubjectiveSoloCommitBullet(userName: string, commits: TeamIntelligenceCommitInput[]): string | null {
-  const highlights = commits
-    .map((commit) => trimSentence(typeof commit.commitSummary === 'string' ? commit.commitSummary : summarizeCommitMessage(commit.commitMessage)))
-    .filter(Boolean)
-    .slice(0, 3);
-
-  if (highlights.length === 0) {
-    return null;
-  }
-
-  return `${userName} also improved day-to-day engineering flow through direct changes, including ${formatList(highlights)}.`;
-}
-
-function buildSubjectiveEmployeeSummary(input: {
-  userName: string;
-  teamName: string | null;
-  pullRequests: TeamIntelligencePullRequestInput[];
-  soloCommits: TeamIntelligenceCommitInput[];
-}): string[] {
-  const prBullets = input.pullRequests.slice(0, 3).map((pr) => {
-    const commitSummaries = asArray<TeamIntelligenceCommitInput>(pr.commits)
-      .map((commit) => typeof commit.commitSummary === 'string' ? commit.commitSummary : summarizeCommitMessage(commit.commitMessage));
-    return buildSubjectivePullRequestBullet(input.userName, pr, commitSummaries);
-  });
-
-  const soloBullet = buildSubjectiveSoloCommitBullet(input.userName, input.soloCommits);
-
-  const repoNames = [...new Set(input.pullRequests.map((pr) => pr.repoName).filter(Boolean))];
-  const scopeBullet = prBullets.length > 0
-    ? `${input.userName} focused ${input.teamName ? `${input.teamName} work` : 'their work'} on ${formatList(repoNames)} and related platform changes during this reporting window.`
-    : null;
-
-  return [...prBullets, ...(soloBullet ? [soloBullet] : []), ...(scopeBullet ? [scopeBullet] : [])]
-    .map((line) => normalizeSummaryText(line, SUMMARY_MAX_WORDS))
-    .filter(Boolean)
-    .slice(0, SUMMARY_MAX_LINES);
-}
-
 function extractEmployeeBullets(rawText: string): string[] {
   const trimmed = rawText.trim();
   if (!trimmed) {
@@ -214,7 +77,7 @@ function extractEmployeeBullets(rawText: string): string[] {
   }
 
   try {
-    const parsed = JSON.parse(trimmed);
+    const parsed = JSON.parse(extractJson(trimmed));
     if (Array.isArray(parsed)) {
       return parsed
         .map((item) => (typeof item === 'string' ? normalizeSummaryText(item, SUMMARY_MAX_WORDS) : ''))
@@ -242,42 +105,6 @@ function extractEmployeeBullets(rawText: string): string[] {
     .filter(Boolean);
 }
 
-function enforceEmployeeSummaryWindow(input: {
-  userName: string;
-  teamName: string | null;
-  reportDate: Date;
-}, lines: string[]): string[] {
-  const concise = lines
-    .map((line) => normalizeSummaryText(line, SUMMARY_MAX_WORDS))
-    .filter(Boolean)
-    .slice(0, SUMMARY_MAX_LINES);
-
-  if (concise.length >= SUMMARY_MIN_LINES) {
-    return concise;
-  }
-
-  if (concise.length === 1) {
-    return [
-      concise[0],
-      normalizeSummaryText(
-        `${input.userName} sustained delivery momentum for ${input.teamName ?? 'the team'} on ${input.reportDate.toISOString().slice(0, 10)}.`,
-        SUMMARY_MAX_WORDS
-      ),
-    ];
-  }
-
-  return [
-    normalizeSummaryText(
-      `${input.userName} delivered focused engineering progress for ${input.teamName ?? 'the team'}.`,
-      SUMMARY_MAX_WORDS
-    ),
-    normalizeSummaryText(
-      `Work remained concise, outcome-oriented, and aligned to priorities on ${input.reportDate.toISOString().slice(0, 10)}.`,
-      SUMMARY_MAX_WORDS
-    ),
-  ];
-}
-
 function formatAiUsage(aiUsage: TeamIntelligenceAiUsageInput | null): string {
   if (!aiUsage) {
     return 'AI usage data not available.';
@@ -293,18 +120,92 @@ function formatAiUsage(aiUsage: TeamIntelligenceAiUsageInput | null): string {
 }
 
 
-async function llmGenerate(llmClient: LLMClient, prompt: string): Promise<string | null> {
-  try {
-    const response = await llmClient.generate({
-      model: appConfig.workflow.defaultModelName,
-      messages: [createUserMessage(prompt)],
-      parameters: { maxTokens: 2048 },
-    });
-    return response.content?.trim() || null;
-  } catch (error) {
-    logger.warn('[TEAM-INTEL-SUMMARY] LLM call failed, falling back to rule-based', { error });
-    return null;
+const LLM_MAX_ATTEMPTS = 3;
+const LLM_RETRY_BASE_DELAY_MS = 1000;
+// Cap concurrent LLM calls within a single user-summary job. litellm enforces a
+// max_parallel_requests limit per api_key; a user with many PRs/commits would
+// otherwise fan out dozens of parallel calls and trip the rate limit.
+const LLM_MAX_CONCURRENCY = 3;
+
+async function runWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  worker: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let cursor = 0;
+  async function runNext(): Promise<void> {
+    while (cursor < items.length) {
+      const index = cursor;
+      cursor += 1;
+      results[index] = await worker(items[index], index);
+    }
   }
+  const runners = Array.from({ length: Math.min(limit, items.length) }, () => runNext());
+  await Promise.all(runners);
+  return results;
+}
+
+function isTransientLLMError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return true;
+  }
+  const message = error.message.toLowerCase();
+  // Treat network/timeout/rate-limit style failures as retryable. Everything
+  // else (e.g. malformed request) is surfaced immediately.
+  return (
+    message.includes('timeout') ||
+    message.includes('timed out') ||
+    message.includes('econnreset') ||
+    message.includes('econnrefused') ||
+    message.includes('enotfound') ||
+    message.includes('fetch failed') ||
+    message.includes('socket') ||
+    message.includes('network') ||
+    message.includes('429') ||
+    message.includes('rate limit') ||
+    message.includes('503') ||
+    message.includes('502') ||
+    message.includes('504')
+  );
+}
+
+async function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function llmGenerate(llmClient: LLMClient, prompt: string): Promise<string> {
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= LLM_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      const response = await llmClient.generate({
+        model: appConfig.workflow.defaultModelName,
+        messages: [createUserMessage(prompt)],
+        parameters: { maxTokens: 2048 },
+      });
+      const content = response.content?.trim();
+      if (content) {
+        return content;
+      }
+      // Empty response — treat as a transient failure and retry.
+      lastError = new Error('LLM returned an empty response');
+    } catch (error) {
+      lastError = error;
+      if (!isTransientLLMError(error) || attempt === LLM_MAX_ATTEMPTS) {
+        break;
+      }
+    }
+    if (attempt < LLM_MAX_ATTEMPTS) {
+      await sleep(LLM_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1));
+    }
+  }
+
+  logger.error('[TEAM-INTEL-SUMMARY] LLM call failed after retries; no fallback', { error: lastError });
+  throw new TeamIntelligenceLLMUnavailableError(
+    `LLM summary generation failed after ${LLM_MAX_ATTEMPTS} attempt(s): ${
+      lastError instanceof Error ? lastError.message : 'unknown error'
+    }`
+  );
 }
 
 async function llmRewriteEmployeeSummary(
@@ -315,7 +216,7 @@ async function llmRewriteEmployeeSummary(
     reportDate: Date;
   },
   bullets: string[]
-): Promise<string[] | null> {
+): Promise<string[]> {
   const prompt = [
     'Rewrite employee summary bullets for a manager feed.',
     'Return STRICT JSON only with this shape:',
@@ -337,15 +238,14 @@ async function llmRewriteEmployeeSummary(
   ].join('\n');
 
   const raw = await llmGenerate(llmClient, prompt);
-  if (!raw) {
-    return null;
-  }
 
   let parsed: RawEmployeeBulletRewriteResponse;
   try {
-    parsed = JSON.parse(raw) as RawEmployeeBulletRewriteResponse;
-  } catch {
-    return null;
+    parsed = JSON.parse(extractJson(raw)) as RawEmployeeBulletRewriteResponse;
+  } catch (error) {
+    throw new TeamIntelligenceLLMUnavailableError(
+      `LLM rewrite response was not valid JSON: ${error instanceof Error ? error.message : 'parse error'}`
+    );
   }
 
   const rewritten = asArray<unknown>(parsed.bullets)
@@ -353,33 +253,21 @@ async function llmRewriteEmployeeSummary(
     .filter(Boolean);
 
   if (rewritten.length === 0) {
-    return null;
+    throw new TeamIntelligenceLLMUnavailableError('LLM rewrite returned no usable bullets');
   }
 
   return rewritten;
 }
 
 class TeamIntelligenceSummaryService {
-  private async getDefaultWorkspaceLlmClient(): Promise<LLMClient | null> {
-    const credential = await orgLLMCredentialService.getCredentialByWorkspaceId(
-      appConfig.defaultWorkspaceId,
-      OrgLLMServiceAccountPurpose.DEFAULT,
-    );
-    if (!credential) {
-      return null;
+  private async getDefaultWorkspaceLlmClient(): Promise<LLMClient> {
+    const llmClient = createTeamIntelligenceLlmClient();
+    if (!llmClient) {
+      throw new TeamIntelligenceLLMUnavailableError(
+        'LITELLM_API_KEY and LITELLM_BASE_URL must be configured for Team Intelligence'
+      );
     }
-
-    return new LLMClient({
-      provider: {
-        type: 'litellm',
-        config: {
-          apiKey: credential.apiKey,
-          baseUrl: credential.baseUrl,
-          timeout: 60000,
-        },
-      },
-      defaultModel: appConfig.workflow.defaultModelName,
-    });
+    return llmClient;
   }
 
   async generate(input: {
@@ -395,31 +283,31 @@ class TeamIntelligenceSummaryService {
     const rawPullRequests = asArray<TeamIntelligencePullRequestInput>(input.pullRequests);
     const rawSoloCommits = asArray<TeamIntelligenceCommitInput>(input.soloCommits);
 
-    // Generate LLM summaries for each commit (in PRs and solo)
-    const pullRequests: TeamIntelligencePullRequestInput[] = await Promise.all(
-      rawPullRequests.map(async (pr) => {
-        const commits: TeamIntelligenceCommitInput[] = await Promise.all(
-          asArray<TeamIntelligenceCommitInput>(pr.commits).map(async (commit) => {
-            const fallback = summarizeCommitMessage(commit.commitMessage?.toString() ?? '');
-            const existingSummary = typeof commit.commitSummary === 'string' ? commit.commitSummary.trim() : '';
-            const commitSummary = llmClient
-              ? (await llmGenerate(
-                  llmClient,
-                  `Summarize this git commit for an engineering manager.\nContext PR: ${pr.prTitle}\nCommit message: "${commit.commitMessage}"\nReturn exactly one sentence under 50 words, factual and outcome-focused. Respond with only that sentence.`,
-                )) ?? fallback
-              : (existingSummary || fallback);
+    // LLM-only enrichment: every commit/diff/PR summary is generated by the LLM.
+    // There is no deterministic fallback; if the LLM call fails it throws and the
+    // worker marks this user ingestion FAILED (then passes ahead to the team stage).
+    const pullRequests: TeamIntelligencePullRequestInput[] = await runWithConcurrency(
+      rawPullRequests,
+      LLM_MAX_CONCURRENCY,
+      async (pr) => {
+        const commitItems = asArray<TeamIntelligenceCommitInput>(pr.commits);
+        const commits: TeamIntelligenceCommitInput[] = await runWithConcurrency(
+          commitItems,
+          LLM_MAX_CONCURRENCY,
+          async (commit) => {
+            const commitSummary = await llmGenerate(
+              llmClient,
+              `Summarize this git commit for an engineering manager.\nContext PR: ${pr.prTitle}\nCommit message: "${commit.commitMessage}"\nReturn exactly one sentence under 50 words, factual and outcome-focused. Respond with only that sentence.`,
+            );
             return { ...commit, commitSummary };
-          })
+          }
         );
 
         const diffRecord = asObject(pr.diff);
-        const fallbackDiffSummary = summarizeDiff(pr.diff);
-        const diffSummary = llmClient
-          ? (await llmGenerate(
-              llmClient,
-              `Summarize this code diff for a manager. Files changed: ${toFiniteNumber(diffRecord.filesChanged)}, additions: ${toFiniteNumber(diffRecord.additions)}, deletions: ${toFiniteNumber(diffRecord.deletions)}.\nPR title: "${pr.prTitle}".\nReturn exactly one factual sentence under 50 words. Respond with only the sentence.`,
-            )) ?? fallbackDiffSummary
-          : fallbackDiffSummary;
+        const diffSummary = await llmGenerate(
+          llmClient,
+          `Summarize this code diff for a manager. Files changed: ${toFiniteNumber(diffRecord.filesChanged)}, additions: ${toFiniteNumber(diffRecord.additions)}, deletions: ${toFiniteNumber(diffRecord.deletions)}.\nPR title: "${pr.prTitle}".\nReturn exactly one factual sentence under 50 words. Respond with only the sentence.`,
+        );
 
         const diff: TeamIntelligenceDiffInput = {
           filesChanged: toFiniteNumber(diffRecord.filesChanged),
@@ -428,33 +316,28 @@ class TeamIntelligenceSummaryService {
           diffSummary,
         };
 
-        const fallbackPrSummary = summarizePullRequest(pr);
         const commitHighlights = commits
           .map((c) => `- ${c.commitMessage}: ${typeof c.commitSummary === 'string' ? c.commitSummary : ''}`)
           .join('\n');
-        const prSummary = llmClient
-          ? (await llmGenerate(
-              llmClient,
-              `Summarize this pull request for a manager in one concise line.\nTitle: "${pr.prTitle}"\nState: ${pr.prState}\nRepo: ${pr.repoName}\nDescription (may contain noisy markdown/checklists): ${pr.prDescription ?? 'N/A'}\nDiff: ${diffSummary}\nCommit highlights:\n${commitHighlights || '- No commits listed'}\nRequirements:\n- Use factual, evidence-based wording only.\n- Prioritize concrete implementation changes and impact.\n- Return exactly one sentence under 50 words.\n- Do not copy markdown headings, checklist items, links, screenshots, or testing sections.\n- If description is verbose, extract only the top concrete change.\n- No speculation or filler.\nRespond with only plain summary text.`,
-            )) ?? fallbackPrSummary
-          : fallbackPrSummary;
+        const prSummary = await llmGenerate(
+          llmClient,
+          `Summarize this pull request for a manager in one concise line.\nTitle: "${pr.prTitle}"\nState: ${pr.prState}\nRepo: ${pr.repoName}\nDescription (may contain noisy markdown/checklists): ${pr.prDescription ?? 'N/A'}\nDiff: ${diffSummary}\nCommit highlights:\n${commitHighlights || '- No commits listed'}\nRequirements:\n- Use factual, evidence-based wording only.\n- Prioritize concrete implementation changes and impact.\n- Return exactly one sentence under 50 words.\n- Do not copy markdown headings, checklist items, links, screenshots, or testing sections.\n- If description is verbose, extract only the top concrete change.\n- No speculation or filler.\nRespond with only plain summary text.`,
+        );
 
         return { ...pr, commits, diff, prSummary };
-      })
+      }
     );
 
-    const soloCommits: TeamIntelligenceCommitInput[] = await Promise.all(
-      rawSoloCommits.map(async (commit) => {
-        const fallback = summarizeCommitMessage(commit.commitMessage?.toString() ?? '');
-        const existingSummary = typeof commit.commitSummary === 'string' ? commit.commitSummary.trim() : '';
-        const commitSummary = llmClient
-          ? (await llmGenerate(
-              llmClient,
-              `Summarize this direct (non-PR) commit for a manager.\nCommit message: "${commit.commitMessage}"\nReturn exactly one sentence under 50 words, highlighting practical impact. Respond with only that sentence.`,
-            )) ?? fallback
-          : (existingSummary || fallback);
+    const soloCommits: TeamIntelligenceCommitInput[] = await runWithConcurrency(
+      rawSoloCommits,
+      LLM_MAX_CONCURRENCY,
+      async (commit) => {
+        const commitSummary = await llmGenerate(
+          llmClient,
+          `Summarize this direct (non-PR) commit for a manager.\nCommit message: "${commit.commitMessage}"\nReturn exactly one sentence under 50 words, highlighting practical impact. Respond with only that sentence.`,
+        );
         return { ...commit, commitSummary };
-      })
+      }
     );
 
     const mergedPrCount = pullRequests.filter((pr) => (pr.prState || '').toLowerCase() === 'merged').length;
@@ -476,66 +359,36 @@ class TeamIntelligenceSummaryService {
       .map((c) => `- ${c.commitMessage}: ${c.commitSummary}`)
       .join('\n');
 
-    const fallbackEmployeeSummary = buildSubjectiveEmployeeSummary({
-      userName: input.userName,
-      teamName: input.teamName,
-      pullRequests,
-      soloCommits,
-    });
+    // LLM-only employee summary. No rule-based fallback: if the LLM call fails or
+    // returns nothing usable, this throws and the worker fails the job (passing ahead).
+    const llmText = await llmGenerate(
+      llmClient,
+      `Create a manager-ready employee summary as a JSON array of 2-3 bullet strings.\nEmployee: ${input.userName}\nTeam: ${input.teamName ?? 'No Team'}\nDate: ${input.reportDate.toISOString().slice(0, 10)}\n\nPull Requests:\n${prBullets || 'None'}\n\nDirect Commits:\n${commitBullets || 'None'}\n\nAI Usage: ${formatAiUsage(aiUsage)}\n\nSelection strategy (must follow):\n1) Build candidate insights from PR and commit evidence.\n2) Score candidates by impact, specificity, and uniqueness.\n3) Keep top non-overlapping insights only.\n4) If there are more than 3 strong insights, keep the highest-impact 3 (not the first 3).\n\nRequirements:\n- Use factual, evidence-based bullets (not narrative or promotional style).\n- Say exactly what the engineer implemented, improved, fixed, or enabled.\n- Mention repo or system area when available.\n- Keep each bullet to one sentence and under 50 words.\n- Return exactly 2 or 3 bullets only.\n- Prefer concrete delivery outcomes over broad activity statements.\n- Avoid PR counts, token counts, and generic status lines unless there is no other signal.\n- Write in natural, human narration with clean grammar.\n- Do not include ticket IDs, PR IDs, commit hashes, branch names, or conventional-commit prefixes.\n- Never copy PR titles or commit messages verbatim; paraphrase into plain language.\n- Avoid repetitive phrasing and avoid always starting bullets with the employee name.\n- Do not include markdown bullets, just JSON array strings.\nRespond with valid JSON only.`,
+    );
 
-    const completeFallbackEmployeeSummary = fallbackEmployeeSummary.length > 0
-      ? fallbackEmployeeSummary
-      : [
-          `${input.userName} kept ${input.teamName ?? 'their team'} moving with ${totalCommitCount} code change(s) on ${input.reportDate.toISOString().slice(0, 10)}.`,
-          `This included ${mergedPrCount} merged PR(s), ${openPrCount} open PR(s), and ${directCommitCount} direct commit(s).`,
-        ];
-
-    let employeeSummary: string[] = completeFallbackEmployeeSummary;
-    let llmPrimaryCallSucceeded = false;
-    if (llmClient) {
-      const llmText = await llmGenerate(
-        llmClient,
-        `Create a manager-ready employee summary as a JSON array of 2-3 bullet strings.\nEmployee: ${input.userName}\nTeam: ${input.teamName ?? 'No Team'}\nDate: ${input.reportDate.toISOString().slice(0, 10)}\n\nPull Requests:\n${prBullets || 'None'}\n\nDirect Commits:\n${commitBullets || 'None'}\n\nAI Usage: ${formatAiUsage(aiUsage)}\n\nSelection strategy (must follow):\n1) Build candidate insights from PR and commit evidence.\n2) Score candidates by impact, specificity, and uniqueness.\n3) Keep top non-overlapping insights only.\n4) If there are more than 3 strong insights, keep the highest-impact 3 (not the first 3).\n\nRequirements:\n- Use factual, evidence-based bullets (not narrative or promotional style).\n- Say exactly what the engineer implemented, improved, fixed, or enabled.\n- Mention repo or system area when available.\n- Keep each bullet to one sentence and under 50 words.\n- Return exactly 2 or 3 bullets only.\n- Prefer concrete delivery outcomes over broad activity statements.\n- Avoid PR counts, token counts, and generic status lines unless there is no other signal.\n- Write in natural, human narration with clean grammar.\n- Do not include ticket IDs, PR IDs, commit hashes, branch names, or conventional-commit prefixes.\n- Never copy PR titles or commit messages verbatim; paraphrase into plain language.\n- Avoid repetitive phrasing and avoid always starting bullets with the employee name.\n- Do not include markdown bullets, just JSON array strings.\nRespond with valid JSON only.`,
-      );
-      if (llmText) {
-        llmPrimaryCallSucceeded = true;
-        const parsedBullets = extractEmployeeBullets(llmText);
-        if (parsedBullets.length > 0) {
-          employeeSummary = parsedBullets;
-        } else {
-          employeeSummary = [normalizeSummaryText(llmText, SUMMARY_MAX_WORDS)].filter(Boolean);
-        }
+    let employeeSummary = extractEmployeeBullets(llmText);
+    if (employeeSummary.length === 0) {
+      const single = normalizeSummaryText(llmText, SUMMARY_MAX_WORDS);
+      if (!single) {
+        throw new TeamIntelligenceLLMUnavailableError('LLM employee summary returned no usable bullets');
       }
-
-      const rewrittenEmployeeSummary = await llmRewriteEmployeeSummary(
-        llmClient,
-        {
-          userName: input.userName,
-          teamName: input.teamName,
-          reportDate: input.reportDate,
-        },
-        employeeSummary
-      );
-      if (rewrittenEmployeeSummary) {
-        employeeSummary = rewrittenEmployeeSummary;
-      }
+      employeeSummary = [single];
     }
 
-    if (!llmPrimaryCallSucceeded) {
-      employeeSummary = enforceEmployeeSummaryWindow(
-        {
-          userName: input.userName,
-          teamName: input.teamName,
-          reportDate: input.reportDate,
-        },
-        employeeSummary
-      );
-    }
+    employeeSummary = await llmRewriteEmployeeSummary(
+      llmClient,
+      {
+        userName: input.userName,
+        teamName: input.teamName,
+        reportDate: input.reportDate,
+      },
+      employeeSummary
+    );
 
     const summaryMetadata: Prisma.InputJsonValue = {
-      generator: llmClient ? 'team-intelligence-llm-summary-v1' : 'team-intelligence-summary-v1',
+      generator: 'team-intelligence-llm-summary-v1',
       generatedAt: new Date().toISOString(),
-      model: llmClient ? appConfig.workflow.defaultModelName : null,
+      model: appConfig.workflow.defaultModelName,
       metrics: {
         pullRequestCount: pullRequests.length,
         mergedPullRequestCount: mergedPrCount,

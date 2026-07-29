@@ -160,10 +160,16 @@ class TeamIntelligenceRepository {
       completedAt: Date | null;
       errorMessage: string | null;
     }>
-  ): Promise<TeamIntelligenceIngestionBatchV2> {
-    return await this.prisma.teamIntelligenceIngestionBatchV2.update({
+  ): Promise<TeamIntelligenceIngestionBatchV2 | null> {
+    const result = await this.prisma.teamIntelligenceIngestionBatchV2.updateMany({
       where: { id: batchId },
       data,
+    });
+    if (result.count === 0) {
+      return null;
+    }
+    return await this.prisma.teamIntelligenceIngestionBatchV2.findUnique({
+      where: { id: batchId },
     });
   }
 
@@ -177,10 +183,16 @@ class TeamIntelligenceRepository {
       failedAt: Date | null;
       errorMessage: string | null;
     }>
-  ): Promise<TeamIntelligenceUserIngestionV2> {
-    return await this.prisma.teamIntelligenceUserIngestionV2.update({
+  ): Promise<TeamIntelligenceUserIngestionV2 | null> {
+    const result = await this.prisma.teamIntelligenceUserIngestionV2.updateMany({
       where: { id: userIngestionId },
       data,
+    });
+    if (result.count === 0) {
+      return null;
+    }
+    return await this.prisma.teamIntelligenceUserIngestionV2.findUnique({
+      where: { id: userIngestionId },
     });
   }
 
@@ -250,10 +262,16 @@ class TeamIntelligenceRepository {
       failedAt?: Date | null;
       errorMessage?: string | null;
     }
-  ): Promise<TeamIntelligenceUserIngestionV2> {
-    return await this.prisma.teamIntelligenceUserIngestionV2.update({
+  ): Promise<TeamIntelligenceUserIngestionV2 | null> {
+    const result = await this.prisma.teamIntelligenceUserIngestionV2.updateMany({
       where: { id: userIngestionId },
       data,
+    });
+    if (result.count === 0) {
+      return null;
+    }
+    return await this.prisma.teamIntelligenceUserIngestionV2.findUnique({
+      where: { id: userIngestionId },
     });
   }
 
@@ -316,10 +334,16 @@ class TeamIntelligenceRepository {
       failedAt: Date | null;
       errorMessage: string | null;
     }>
-  ): Promise<TeamIntelligenceTeamSummaryV2> {
-    return await this.prisma.teamIntelligenceTeamSummaryV2.update({
+  ): Promise<TeamIntelligenceTeamSummaryV2 | null> {
+    const result = await this.prisma.teamIntelligenceTeamSummaryV2.updateMany({
       where: { id: teamSummaryId },
       data,
+    });
+    if (result.count === 0) {
+      return null;
+    }
+    return await this.prisma.teamIntelligenceTeamSummaryV2.findUnique({
+      where: { id: teamSummaryId },
     });
   }
 
@@ -364,10 +388,16 @@ class TeamIntelligenceRepository {
       failedAt?: Date | null;
       errorMessage?: string | null;
     }
-  ): Promise<TeamIntelligenceTeamSummaryV2> {
-    return await this.prisma.teamIntelligenceTeamSummaryV2.update({
+  ): Promise<TeamIntelligenceTeamSummaryV2 | null> {
+    const result = await this.prisma.teamIntelligenceTeamSummaryV2.updateMany({
       where: { id: teamSummaryId },
       data,
+    });
+    if (result.count === 0) {
+      return null;
+    }
+    return await this.prisma.teamIntelligenceTeamSummaryV2.findUnique({
+      where: { id: teamSummaryId },
     });
   }
 
@@ -414,10 +444,16 @@ class TeamIntelligenceRepository {
       failedAt: Date | null;
       errorMessage: string | null;
     }>
-  ): Promise<TeamIntelligenceOrgSummaryV2> {
-    return await this.prisma.teamIntelligenceOrgSummaryV2.update({
+  ): Promise<TeamIntelligenceOrgSummaryV2 | null> {
+    const result = await this.prisma.teamIntelligenceOrgSummaryV2.updateMany({
       where: { id: orgSummaryId },
       data,
+    });
+    if (result.count === 0) {
+      return null;
+    }
+    return await this.prisma.teamIntelligenceOrgSummaryV2.findUnique({
+      where: { id: orgSummaryId },
     });
   }
 
@@ -462,10 +498,16 @@ class TeamIntelligenceRepository {
       failedAt?: Date | null;
       errorMessage?: string | null;
     }
-  ): Promise<TeamIntelligenceOrgSummaryV2> {
-    return await this.prisma.teamIntelligenceOrgSummaryV2.update({
+  ): Promise<TeamIntelligenceOrgSummaryV2 | null> {
+    const result = await this.prisma.teamIntelligenceOrgSummaryV2.updateMany({
       where: { id: orgSummaryId },
       data,
+    });
+    if (result.count === 0) {
+      return null;
+    }
+    return await this.prisma.teamIntelligenceOrgSummaryV2.findUnique({
+      where: { id: orgSummaryId },
     });
   }
 
