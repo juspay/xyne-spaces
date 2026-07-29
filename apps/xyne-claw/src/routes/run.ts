@@ -1549,6 +1549,9 @@ async function processTask(
       textAttachments,
       xlsxAttachments,
       pdfAttachments,
+      docxAttachments,
+      pptxAttachments,
+      htmlAttachments,
     } = await ingestAttachments(attachments, log);
 
     const mergedContextFiles = [
@@ -3046,10 +3049,13 @@ async function processTask(
     }
 
     // Surface every derived context file to the agent — without this, files
-    // written under .context/ (xlsx → <name>.md, pdf → <name>.md) are
-    // invisible: the LLM sees only the user's free-text turn and replies
+    // written under .context/ (xlsx/pdf/docx/pptx → <name>.md, html in place)
+    // are invisible: the LLM sees only the user's free-text turn and replies
     // "I don't see any attachment". Each entry shows the ORIGINAL filename
-    // plus the path the agent's read tool should use.
+    // plus the path the agent's read tool should use. EVERY type that
+    // ingestAttachments converts must be listed below — docx/pptx/html were
+    // converted and written but never advertised here, which is how a working
+    // .docx conversion still produced "I don't see any attachment".
     // Advertise the SAME sanitized path that writeWorkspaceTextFiles actually
     // wrote. sanitizeRelativePath replaces every char outside [a-zA-Z0-9._-]
     // with "_", so "Juspay ecomm Issues Log.xlsx" lands at
@@ -3071,6 +3077,20 @@ async function processTask(
       ...pdfAttachments.map((a) => ({
         label: `${a.fileName} (pdf, text-extracted to markdown)`,
         path: toWorkspaceContextPath(`${a.fileName}.md`),
+      })),
+      ...docxAttachments.map((a) => ({
+        label: `${a.fileName} (docx, extracted to markdown)`,
+        path: toWorkspaceContextPath(`${a.fileName}.md`),
+      })),
+      ...pptxAttachments.map((a) => ({
+        label: `${a.fileName} (pptx, extracted to markdown)`,
+        path: toWorkspaceContextPath(`${a.fileName}.md`),
+      })),
+      // html converts in place — its MD_CONVERTERS suffix is "", so the derived
+      // file keeps the original filename rather than gaining a ".md".
+      ...htmlAttachments.map((a) => ({
+        label: `${a.fileName} (html, converted to markdown)`,
+        path: toWorkspaceContextPath(a.fileName),
       })),
     ];
     if (attachmentEntries.length > 0) {

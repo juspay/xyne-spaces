@@ -56,6 +56,9 @@ export interface IngestedAttachments {
   textAttachments: TextAttachmentFile[];
   xlsxAttachments: AttachmentInput[];
   pdfAttachments: AttachmentInput[];
+  docxAttachments: AttachmentInput[];
+  pptxAttachments: AttachmentInput[];
+  htmlAttachments: AttachmentInput[];
 }
 
 /** Decode an attachment's base64 payload to bytes (handles data-URI prefixes). */
@@ -118,9 +121,10 @@ export async function ingestAttachments(
       mimeType: a.mimeType,
     }));
 
-  // Simple markdown converters (xlsx/docx/pptx/html). xlsx is pulled out as a
-  // named list because the prompt-builder references it; the others are only
-  // consumed as derived files.
+  // Simple markdown converters (xlsx/docx/pptx/html). Every list is returned by
+  // name: the prompt-builder needs them to advertise the derived `.context/`
+  // paths, and a type missing from that block is invisible to the agent even
+  // though its markdown sibling is on disk.
   const xlsxAttachments = all.filter((a) => isXlsxAttachment(a.fileName, a.mimeType));
   const docxAttachments = all.filter((a) => isDocxAttachment(a.fileName, a.mimeType));
   const pptxAttachments = all.filter((a) => isPptxAttachment(a.fileName, a.mimeType));
@@ -190,5 +194,8 @@ export async function ingestAttachments(
     textAttachments,
     xlsxAttachments,
     pdfAttachments,
+    docxAttachments,
+    pptxAttachments,
+    htmlAttachments,
   };
 }
