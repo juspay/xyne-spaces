@@ -996,7 +996,10 @@ export async function handleKbReadFile(args: {
     // search — out of scope for v1).
     const looksTextual = /^(text\/|application\/(json|xml|x-yaml|yaml|markdown))/.test(contentType);
     const text = buffer.toString("utf8");
-    const isLikelyBinary = text.includes("") || /[\x00-\x08\x0E-\x1F]/.test(text.slice(0, 200));
+    // NB: match the NUL via the regex escape below, never a raw 0x00 byte in a
+    // string literal. A literal NUL lived here once and got silently stripped,
+    // leaving `includes("")` — always true, so every file reported as binary.
+    const isLikelyBinary = /\x00/.test(text) || /[\x00-\x08\x0E-\x1F]/.test(text.slice(0, 200));
 
     // Single-result read still emits the same `[clf-__TOOL_CALL_ID__#0]` token
     // shape as kb-get-chunks so the dashboard chip resolves via the matching
