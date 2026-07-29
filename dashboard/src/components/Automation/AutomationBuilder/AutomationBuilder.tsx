@@ -945,7 +945,20 @@ export function AutomationBuilder({
         </div>
       </div>
 
-      <div className='flex-1 overflow-y-auto bg-muted/30'>
+      <div
+        className={cn(
+          'flex-1 overflow-y-auto bg-muted/30',
+          !editMode && canEdit && 'cursor-pointer',
+        )}
+        {...(!editMode && canEdit
+          ? {
+              onClick: (): void => {
+                if (forksOnEdit) setProposeChangeConfirmOpen(true);
+                else setEditConfirmOpen(true);
+              },
+            }
+          : {})}
+      >
         <div
           className={cn(
             'mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 py-6',
@@ -1170,10 +1183,10 @@ export function AutomationBuilder({
         className='sm:max-w-md'
       >
         <div className='flex flex-col gap-4 px-5 py-4 text-sm text-foreground'>
-          <p>
-            This leaves the existing version untouched. You&apos;ll start a new draft prefilled with
-            the current config — edit it, then click <strong>Save</strong> to create the proposal
-            and <strong>Send for approval</strong> when you&apos;re ready.
+          <p>The live automation keeps running. Nothing changes until an admin approves.</p>
+          <p className='text-muted-foreground'>
+            You&apos;ll edit a copy of it. <strong className='text-foreground'>Save</strong> when
+            you&apos;re done, then <strong className='text-foreground'>Send for approval</strong>.
           </p>
           <div className='flex justify-end gap-2 pt-2'>
             <Button

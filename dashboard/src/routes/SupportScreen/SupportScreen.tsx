@@ -209,6 +209,7 @@ import { DeskSettings } from '../../components/xyne-desk/DeskSettings';
 import { DeskMetricsDashboard } from '../../components/xyne-desk/DeskMetrics';
 import {
   useChannelConnectedEmail,
+  useChannelIntegrationInfo,
   clearChannelConnectedEmailCache,
 } from '../../hooks/useChannelConnectedEmail';
 import AddChannelForm from '../../components/Chat/AddChannelForm/AddChannelForm';
@@ -302,6 +303,14 @@ interface PersistedComposeInstance {
   /** Unix ms timestamp of when the draft was last saved/closed. */
   savedAt?: number;
 }
+
+/** Desk types with no "new message" concept: calls aren't composed, and Slack/app
+ *  desks can only reply into a thread that already exists externally. */
+const COMPOSE_DISABLED_CHANNEL_TYPES: ReadonlySet<ChannelType | undefined> = new Set([
+  ChannelType.CALL,
+  ChannelType.SLACK,
+  ChannelType.APP,
+]);
 
 const COMPOSE_INSTANCES_KEY_PREFIX = 'xyne:composeInstances:';
 const COMPOSE_DRAFT_KEY_PREFIX = 'xyne:composeDraft:';
@@ -2793,7 +2802,7 @@ const SupportScreen = (): ReactElement => {
                       )}
                       {isSelectedChannelJoined &&
                         selectedChannelId &&
-                        selectedChannelFull?.type !== ChannelType.CALL && (
+                        !COMPOSE_DISABLED_CHANNEL_TYPES.has(selectedChannelFull?.type) && (
                           <Tooltip content='Compose new email' side='bottom'>
                             <Button
                               variant='default'
@@ -3190,6 +3199,7 @@ const SupportScreen = (): ReactElement => {
           scrolls left to reveal older windows. pointer-events-none on the strip
           itself prevents it from blocking clicks on the ticket list beneath. */}
       {isSelectedChannelJoined &&
+        !COMPOSE_DISABLED_CHANNEL_TYPES.has(selectedChannelFull?.type) &&
         composeInstances.filter(inst => inst.channelId === selectedChannelId).length > 0 && (
           <div
             className='fixed bottom-0 left-0 right-0 z-50 flex flex-row-reverse items-end gap-3 overflow-x-auto pointer-events-none pr-6'
@@ -3626,6 +3636,7 @@ export const SupportTicketDetail = ({
   // and recipient summaries. Sourced from the existing `/channels/:id/connected-email`
   // API via `useChannelConnectedEmail`. Empty string until loaded.
   const deskEmail = useChannelConnectedEmail(channelId || null);
+  const { outboundConfigured } = useChannelIntegrationInfo(channelId || null);
 
   useAskAiTicketContext({
     channelId: channelId || null,
@@ -4562,6 +4573,7 @@ export const SupportTicketDetail = ({
                     conversationId={conversationId}
                     channelId={channel?.id ?? null}
                     variant={channel?.type === ChannelType.APP ? 'app' : 'slack'}
+                    recordOnly={channel.type === ChannelType.APP && !outboundConfigured}
                   />
                 ) : null
               ) : channel?.type === ChannelType.EMAIL ? (
