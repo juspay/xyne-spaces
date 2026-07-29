@@ -25,7 +25,7 @@ class AppDeskService {
     body: string;
     userId: string;
     attachmentIds?: string[];
-  }): Promise<{ emailId: string; threadId: string }> {
+  }): Promise<{ emailId: string; threadId: string; delivered: boolean }> {
     const { conversationId, body, userId, attachmentIds = [] } = params;
 
     const conversation = await this.conversationRepo.findById(conversationId);
@@ -53,10 +53,13 @@ class AppDeskService {
       where: { id: installedAppId },
       select: { webhookUrl: true, app: { select: { signingSecret: true } }, user: { select: { workspaceId: true } } },
     });
-    if (!installedApp?.webhookUrl || !installedApp.app?.signingSecret) {
-      throw new Error('The app backing this desk is not fully configured (missing webhook URL or signing secret)');
+    if (!installedApp) {
+      throw new Error(`The app backing this desk no longer exists (install ${installedAppId})`);
     }
-    const signingSecret = installedApp.app.signingSecret;
+    const outboundConfigured = Boolean(
+      installedApp.webhookUrl?.trim() && installedApp.app?.signingSecret,
+    );
+    const signingSecret = installedApp.app?.signingSecret ?? null;
 
     const replier = await this.prisma.user.findUnique({
       where: { id: userId },
@@ -103,37 +106,38 @@ class AppDeskService {
       timestamp: new Date().toISOString(),
     };
 
-    logger.info(`${TAG} delivering DESK_REPLY`, {
+    logger.info(`${TAG} ${outboundConfigured ? 'delivering' : 'recording (no outbound webhook)'} DESK_REPLY`, {
       conversationId,
       channelId: conversation.channelId,
       threadId,
       externalId: externalMessageId,
       installedAppId,
-      webhookUrl: installedApp.webhookUrl,
+      webhookUrl: installedApp?.webhookUrl ?? null,
+      outboundConfigured,
       ticketId: ticket?.id,
       replierUserId: userId,
       replierName,
       attachmentCount: attachments.length,
     });
 
-    const ack = await sendWebhookNotification(
-      installedApp.webhookUrl,
-      event,
-      decrypt(signingSecret),
-    );
+    const ack = outboundConfigured
+      ? await sendWebhookNotification(installedApp.webhookUrl!, event, decrypt(signingSecret!))
+      : null;
 
     const ackExternalId =
-      ack.body && typeof ack.body === 'object' && typeof (ack.body as { externalId?: unknown }).externalId === 'string'
+      ack?.body && typeof ack.body === 'object' && typeof (ack.body as { externalId?: unknown }).externalId === 'string'
         ? (ack.body as { externalId: string }).externalId
         : externalMessageId;
 
-    logger.info(`${TAG} DESK_REPLY accepted by app`, {
-      conversationId,
-      threadId,
-      status: ack.status,
-      ackExternalId,
-      appAssignedId: ackExternalId !== externalMessageId,
-    });
+    if (ack) {
+      logger.info(`${TAG} DESK_REPLY accepted by app`, {
+        conversationId,
+        threadId,
+        status: ack.status,
+        ackExternalId,
+        appAssignedId: ackExternalId !== externalMessageId,
+      });
+    }
 
     const email = await this.prisma.$transaction(async (tx) => {
       const created = await tx.email.create({
@@ -154,18 +158,20 @@ class AppDeskService {
         } as Prisma.EmailUncheckedCreateInput,
       });
 
-      await tx.externalMessage.create({
-        data: {
-          externalSourceId: externalSource.id,
-          externalId: ackExternalId,
-          externalThreadId: threadId,
-          messageId: created.id,
-          entityId: created.id,
-          workspaceId: conversation.workspaceId,
-          direction: MessageDirection.OUTGOING,
-          entityType: ExternalEntityType.EMAIL,
-        },
-      });
+      if (outboundConfigured) {
+        await tx.externalMessage.create({
+          data: {
+            externalSourceId: externalSource.id,
+            externalId: ackExternalId,
+            externalThreadId: threadId,
+            messageId: created.id,
+            entityId: created.id,
+            workspaceId: conversation.workspaceId,
+            direction: MessageDirection.OUTGOING,
+            entityType: ExternalEntityType.EMAIL,
+          },
+        });
+      }
 
       if (stagedAttachments.length > 0) {
         await tx.messageAttachment.updateMany({
@@ -215,14 +221,12 @@ class AppDeskService {
       logger.error(`${TAG} Failed to record email sent activity`, { conversationId, err });
     }
 
-    logger.info(`${TAG} Reply delivered to app webhook`, {
-      conversationId,
-      threadId,
-      externalId: ackExternalId,
-      emailId: email.id,
-    });
+    logger.info(
+      `${TAG} ${outboundConfigured ? 'Reply delivered to app webhook' : 'Reply recorded on ticket (desk is receive-only)'}`,
+      { conversationId, threadId, externalId: ackExternalId, emailId: email.id },
+    );
 
-    return { emailId: email.id, threadId };
+    return { emailId: email.id, threadId, delivered: outboundConfigured };
   }
 }
 

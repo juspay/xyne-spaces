@@ -26,12 +26,14 @@ interface SlackComposerProps {
   conversationId: string;
   channelId?: string | null;
   variant?: 'slack' | 'app';
+  recordOnly?: boolean;
 }
 
 const SlackComposer = ({
   conversationId,
   channelId,
   variant = 'slack',
+  recordOnly = false,
 }: SlackComposerProps): ReactElement => {
   const [sending, setSending] = useState(false);
   const [content, setContent] = useState('');
@@ -84,7 +86,9 @@ const SlackComposer = ({
           rel: 'noopener noreferrer',
         },
       }),
-      Placeholder.configure({ placeholder: 'Reply to thread...' }),
+      Placeholder.configure({
+        placeholder: recordOnly ? 'Add a note to this ticket...' : 'Reply to thread...',
+      }),
       MentionExtension.configure({ userActions: [], groupActions: [] }),
     ],
     content: '',
@@ -249,6 +253,11 @@ const SlackComposer = ({
 
   return (
     <div className='px-4 py-3 border-t border-border'>
+      {recordOnly && (
+        <div className='mb-2 text-xs text-muted-foreground'>
+          Receive-only desk — this is saved to the ticket but not sent to the app.
+        </div>
+      )}
       {/* Auth status (Slack send-as-user — not applicable to app desks) */}
       {variant === 'slack' && !authLoading && (
         <div className='flex items-center gap-2 mb-2 text-xs text-muted-foreground'>

@@ -1448,13 +1448,17 @@ export class ChannelController {
       const sourceType = source?.sourceType ?? null;
 
       let connectedLabel: string | null = null;
+      let outboundConfigured = true;
       if (source?.sourceType === 'app-desk') {
         const installedAppId = extractInstalledAppId(source.name) ?? '';
         const installedApp = await db.installedApps.findUnique({
           where: { id: installedAppId },
-          select: { app: { select: { name: true } } },
+          select: { webhookUrl: true, app: { select: { name: true, signingSecret: true } } },
         });
         connectedLabel = installedApp?.app?.name ?? null;
+        outboundConfigured = Boolean(
+          installedApp?.webhookUrl?.trim() && installedApp.app?.signingSecret,
+        );
       } else if (source?.sourceType === 'slack-desk') {
         connectedLabel = extractSlackChannelId(source.name);
       }
@@ -1464,7 +1468,7 @@ export class ChannelController {
         const email = fromDisplay.toLowerCase();
         res
           .status(200)
-          .json({ email, isConnected, hasSource, sourceType, connectedLabel: connectedLabel ?? email });
+          .json({ email, isConnected, hasSource, sourceType, connectedLabel: connectedLabel ?? email, outboundConfigured });
         return;
       }
 
@@ -1481,12 +1485,12 @@ export class ChannelController {
           const email = owner.email.toLowerCase();
           res
             .status(200)
-            .json({ email, isConnected, hasSource, sourceType, connectedLabel: connectedLabel ?? email });
+            .json({ email, isConnected, hasSource, sourceType, connectedLabel: connectedLabel ?? email, outboundConfigured });
           return;
         }
       }
 
-      res.status(200).json({ email: null, isConnected, hasSource, sourceType, connectedLabel });
+      res.status(200).json({ email: null, isConnected, hasSource, sourceType, connectedLabel, outboundConfigured });
     } catch (error) {
       logger.error('Error in getConnectedEmail:', error);
       res.status(500).json({ error: 'Internal server error' });
