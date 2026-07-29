@@ -11,6 +11,7 @@ import { buildYqlFromParams, AREA_NAMES, AREA_ALIASES, describeAreasForPrompt } 
 import { validateCorpusScan, buildCorpusScanYql, parseBucketKey, termToQuery, MAX_SCAN_TERMS, type CorpusScanScope } from "./vespa-corpus-scan.js";
 import { getWorkspaceIdForUser } from "../../lib/spaces-db.js";
 import type { Citation } from "xyne-claw-shared";
+import { extractCleanTextFromFlowJson, isFlowJsonContent } from "xyne-claw-shared";
 import { CONFIG } from "../../config.js";
 import { createLogger } from "../../logger.js";
 
@@ -934,6 +935,13 @@ function decodeHtmlEntities(s: string): string {
  */
 function cleanSnippet(text: string): string {
   if (!text || typeof text !== "string") return text ?? "";
+  // Flow JSON (app/bot block messages) hide their real content in a
+  // `data-flow-json` attribute; the tag-strip below would drop it, so flatten
+  // the block tree first. Falls through to normal handling when empty.
+  if (isFlowJsonContent(text)) {
+    const flowText = extractCleanTextFromFlowJson(text);
+    if (flowText) return flowText;
+  }
   // Fast path: nothing tag-shaped → just decode entities + trim.
   if (!/<[a-z!/][^>]*>/i.test(text)) return decodeHtmlEntities(text).trim();
   const s = text
