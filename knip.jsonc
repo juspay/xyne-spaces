@@ -45,7 +45,7 @@
         "**/*.spec.ts",
         "dist/**",
         "node_modules/**",
-        "backend/**"
+        "apps/backend/**"
       ]
     },
     "shared": {
@@ -114,7 +114,7 @@
         "node_modules/**"
       ]
     },
-    "xyne-claw-auth/frontend": {
+    "apps/xyne-claw-auth/frontend": {
       "entry": [
         "src/main.tsx",
         "index.html"
@@ -126,7 +126,7 @@
         "node_modules/**"
       ]
     },
-    "xyne-claw-auth/backend": {
+    "apps/xyne-claw-auth/backend": {
       "entry": [
         "src/main.ts",
         "src/queue/scheduled-jobs-worker.ts",

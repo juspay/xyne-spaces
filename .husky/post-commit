@@ -40,7 +40,7 @@ elif ( exec </dev/tty ) 2>/dev/null; then
             echo "   ${YELLOW}Skipping tests.${NC}"
             echo ""
             echo "   ${BLUE}You can retrigger this flow later by running:${NC}"
-            echo "      npm run test && npm run test:push"
+            echo "      pnpm run test && pnpm run test:push"
             echo ""
             exit 0
             ;;
@@ -49,16 +49,16 @@ else
     echo ""
     echo "ℹ️  Non-interactive shell — skipping post-commit test prompt."
     echo "   Set XYNE_RUN_TESTS=1 to run automation tests, or XYNE_RUN_TESTS=0 (or CI=1) to silence this message."
-    echo "   Run later with: npm run test && npm run test:push"
+    echo "   Run later with: pnpm run test && pnpm run test:push"
     exit 0
 fi
 
 if [ "$RUN_TESTS" = "true" ]; then
-  # Detect if any changed files are under xyne-automation/ (matches Jenkinsfile logic)
+  # Detect if any changed files are under tools/xyne-automation/ (matches Jenkinsfile logic)
   CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "")
   AUTOMATION_TOUCHED=false
 
-  if echo "$CHANGED_FILES" | grep -q "^xyne-automation/"; then
+  if echo "$CHANGED_FILES" | grep -q "^tools/xyne-automation/"; then
     AUTOMATION_TOUCHED=true
   fi
 
@@ -66,7 +66,7 @@ if [ "$RUN_TESTS" = "true" ]; then
   if [ "$AUTOMATION_TOUCHED" = "false" ]; then
     echo ""
     echo "🔒 Verifying test code integrity..."
-    if ! npm run test:integrity; then
+    if ! pnpm run test:integrity; then
         echo "❌ Test code integrity check failed!"
         echo "   Please ensure your test code is in sync with main."
         exit 1
@@ -81,20 +81,20 @@ if [ "$RUN_TESTS" = "true" ]; then
   echo "   (This may take several minutes...)"
   echo ""
 
-  if npm run test; then
+  if pnpm run test; then
     echo ""
     echo "✅ Tests completed successfully!"
 
     echo ""
     echo "📤 Pushing test reports to remote for Jenkins processing..."
-    npm run test:push
+    pnpm run test:push
   else
     echo ""
     echo "⚠️  Tests completed with failures."
     echo "❌ Skipping push — automation tests did not pass."
     echo ""
     echo "   ${BLUE}You can retrigger this flow later by running:${NC}"
-    echo "      npm run test && npm run test:push"
+    echo "      pnpm run test && pnpm run test:push"
     echo ""
     exit 1
   fi

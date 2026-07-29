@@ -193,9 +193,9 @@ Thumbs.db
 /playwright/.cache/
 
 # Electron builds
-electron/release/
-electron/dist/
-electron/ui-active/
+apps/electron/release/
+apps/electron/dist/
+apps/electron/ui-active/
 
 # App Specific
 apps/xyne-spaces/.yarn/*

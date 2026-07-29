@@ -108,7 +108,7 @@ services:
   # Python Transcription Agent (shared)
   transcription-agent:
     build:
-      context: ./backend/python-agent
+      context: ./apps/backend/python-agent
       dockerfile: Dockerfile
     container_name: xyne-sandbox-transcription-agent
     shm_size: '512mb'
@@ -123,7 +123,7 @@ services:
     ports:
       - "8001:8080"
     volumes:
-      - ./backend/python-agent:/app
+      - ./apps/backend/python-agent:/app
       - sandbox_transcription_agent_cache:/app/.cache/huggingface
     depends_on:
       - livekit

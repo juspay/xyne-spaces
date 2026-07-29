@@ -26,9 +26,9 @@
       # Start services (automatically cleans up ports first)
       nix run .#xyne-space-services  # Or, `just services`
       # Run backend
-      cd backend && npm install && npm run dev
+      cd apps/backend && pnpm install && pnpm run dev
       # Run dashboard
-      cd dashboard && npm install && npm run dev
+      cd apps/dashboard && pnpm install && pnpm run dev
       ```
 
       ## Cleanup Commands
@@ -110,7 +110,7 @@
         # Only run setup if backend has dependencies
         if [ ! -d "$BACKEND_DIR/node_modules" ]; then
           echo "Backend dependencies not installed. Skipping database setup."
-          echo "Run: cd backend && npm install"
+          echo "Run: cd apps/backend && pnpm install"
           exit 0
         fi
         echo "✓ Backend node_modules found"
@@ -132,22 +132,22 @@
           ${pkgs.postgresql}/bin/psql -h 127.0.0.1 -p 5433 -U xyne -d postgres -c "CREATE DATABASE xyne_dev_db;" 2>/dev/null || true
           
           # Push schema
-          ${pkgs.nodejs}/bin/npx dotenv -e .env.local -- npx prisma db push --force-reset --accept-data-loss --skip-generate
+          ${pkgs.nodejs}/bin/pnpm exec dotenv -e .env.local -- pnpm exec prisma db push --force-reset --accept-data-loss --skip-generate
           
           # Seed ACL system
           echo "Seeding ACL system..."
-          ${pkgs.nodejs}/bin/npx dotenv -e .env.local -- npx tsx scripts/seed-acl.ts
+          ${pkgs.nodejs}/bin/pnpm exec dotenv -e .env.local -- pnpm exec tsx scripts/seed-acl.ts
           echo "✓ ACL system seeded"
           
           # Auto-create admin user from DEFAULT_ADMIN_EMAIL
           echo ""
           echo "Creating default admin user..."
-          ${pkgs.nodejs}/bin/npx dotenv -e .env.local -- npx tsx scripts/assign-admin-user.ts
+          ${pkgs.nodejs}/bin/pnpm exec dotenv -e .env.local -- pnpm exec tsx scripts/assign-admin-user.ts
           echo ""
           echo "✓ Database setup complete"
         else
           echo "Syncing database schema..."
-          ${pkgs.nodejs}/bin/npx dotenv -e .env.local -- npx prisma db push
+          ${pkgs.nodejs}/bin/pnpm exec dotenv -e .env.local -- pnpm exec prisma db push
           echo "✓ Database schema is up to date"
         fi
         
@@ -330,7 +330,7 @@
     # Python Transcription Agent - Native via Nix Python
     settings.processes.transcription-agent = {
       command = toString (pkgs.writeShellScript "transcription-agent" ''
-        cd backend/python-agent
+        cd apps/backend/python-agent
         mkdir -p transcriptions
         
         # Set environment variables
@@ -433,9 +433,9 @@
           echo -e "''${GREEN}   ✓ .nix-cache/ removed''${NC}"
         fi
         
-        if [ -d "backend/python-agent/.venv" ]; then
+        if [ -d "apps/backend/python-agent/.venv" ]; then
           echo "   Removing Python virtual environment..."
-          rm -rf backend/python-agent/.venv
+          rm -rf apps/backend/python-agent/.venv
           echo -e "''${GREEN}   ✓ Python .venv/ removed''${NC}"
         fi
         echo ""
@@ -455,9 +455,9 @@
         echo -e "''${BLUE}Next steps for fresh start:''${NC}"
         echo "  1. Run: nix run .#xyne-space-services"
         echo "  2. Wait for services to start (~10 seconds)"
-        echo "  3. Run: cd backend && npm run dev (in another terminal)"
+        echo "  3. Run: cd apps/backend && pnpm run dev (in another terminal)"
         echo "  4. Run: just assign-admin YOUR_EMAIL"
-        echo "  5. Run: cd dashboard && npm run dev (in another terminal)"
+        echo "  5. Run: cd apps/dashboard && pnpm run dev (in another terminal)"
         echo ""
       '');
     };

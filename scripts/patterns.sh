@@ -25,8 +25,8 @@ IGNORE_PATTERNS=(
 
 # Migration patterns - files matching these require migration justification
 MIGRATION_PATTERNS=(
-    "backend/prisma/migrations/"
-    "backend/prisma/schema.prisma"
+    "apps/backend/prisma/migrations/"
+    "apps/backend/prisma/schema.prisma"
 )
 
 # Environment patterns - files matching these require env justification
@@ -40,14 +40,14 @@ ENV_PATTERNS=(
 # Service mappings - format: "path_prefix:service_name"
 # Order matters! More specific patterns should come first
 SERVICE_MAPPINGS=(
-    "backend/python-agent/:xyne-transcription-agent"
-    "backend/src/workflows/:runner"
-    "backend/src/:backend"
-    "backend/prisma/:backend"
-    "backend/package.json:backend"
+    "apps/backend/python-agent/:xyne-transcription-agent"
+    "apps/backend/src/workflows/:runner"
+    "apps/backend/src/:backend"
+    "apps/backend/prisma/:backend"
+    "apps/backend/package.json:backend"
     "ysweet/:ysweet"
-    "dashboard/src/:dashboard"
-    "dashboard/package.json:dashboard"
-    "shared/:backend"
-    "shared/:dashboard"
+    "apps/dashboard/src/:dashboard"
+    "apps/dashboard/package.json:dashboard"
+    "packages/shared/:backend"
+    "packages/shared/:dashboard"
 )

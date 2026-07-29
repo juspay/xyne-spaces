@@ -19,31 +19,31 @@ cleanup-ports:
 
 # Start backend development server
 backend:
-    cd backend && npm install && npm run dev
+    cd apps/backend && pnpm install && pnpm run dev
 
 # Start dashboard development server
 dashboard:
-    cd dashboard && npm install && npm run dev
+    cd apps/dashboard && pnpm install && pnpm run dev
 
 # Run database migrations
 migrate:
-    cd backend && npx dotenv -e .env.local -- npx prisma db push
-    cd backend && npx dotenv -e .env.local -- npx prisma db push --schema prisma-common/schema.prisma
+    cd apps/backend && pnpm exec dotenv -e .env.local -- pnpm exec prisma db push
+    cd apps/backend && pnpm exec dotenv -e .env.local -- pnpm exec prisma db push --schema prisma-common/schema.prisma
 
 # Generate Prisma client
 prisma-generate:
-    cd backend && npx prisma generate
-    cd backend && npx prisma generate --schema prisma-common/schema.prisma
+    cd apps/backend && pnpm exec prisma generate
+    cd apps/backend && pnpm exec prisma generate --schema prisma-common/schema.prisma
 
 # Deploy Zero permissions
 zero-permissions:
-    cd backend && npx zero-deploy-permissions
+    cd apps/backend && pnpm exec zero-deploy-permissions
 
 # Assign user to admin group (full system access)
 # Usage: just assign-admin [EMAIL]
 # If EMAIL is not provided, uses DEFAULT_ADMIN_EMAIL from .env.local
 assign-admin EMAIL='':
-    cd backend && npx dotenv -e .env.local -- npx tsx scripts/assign-admin-user.ts {{EMAIL}}
+    cd apps/backend && pnpm exec dotenv -e .env.local -- pnpm exec tsx scripts/assign-admin-user.ts {{EMAIL}}
 
 # Full fresh start (cleanup + services + backend + dashboard)
 fresh-start: cleanup

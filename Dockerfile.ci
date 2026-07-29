@@ -1,5 +1,5 @@
 # CI/CD Dockerfile for running Yama PR tools
-# This image contains pre-installed npm dependencies for Jenkins
+# This image contains pre-installed dependencies for Jenkins
 
 FROM node:22.22.3-bookworm
 
@@ -15,14 +15,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpixman-1-dev \
     && rm -rf /var/lib/apt/lists/*
 
+RUN corepack enable && corepack prepare pnpm@10.15.0 --activate
+
 # Set working directory
 WORKDIR /workspace
 
-# Copy only package files first (for layer caching)
-COPY package.json package-lock.json* ./
+# Copy only package files first (for layer caching). pnpm-workspace.yaml is
+# copied too so that --ignore-workspace below is an explicit choice rather than
+# an accident of the file being absent.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
 
-# Install dependencies
-RUN npm ci --omit=dev --ignore-scripts && npm rebuild canvas
+# Only the root project's own dependencies (the yama tooling) are needed here,
+# not the 20 workspace members. --ignore-workspace installs the root in
+# isolation; --no-frozen-lockfile because the workspace lockfile does not
+# describe a standalone root-only install.
+RUN pnpm install --prod --ignore-workspace --no-frozen-lockfile --ignore-scripts && \
+    pnpm rebuild canvas
 
 # Copy yama config (cached separately)
 # This layer will be cached if yama.config.yaml doesn't change

@@ -82,26 +82,26 @@ echo -e "${GREEN}✓ Buckets created.${NC}"
 
 # --- STEP 6: Database Setup ---
 echo -e "${BLUE}🔄 Checking Database Schema...${NC}"
-cd backend
+cd apps/backend
 
 if [ ! -d "node_modules" ]; then
     echo -e "${YELLOW}⚠️  Installing backend dependencies...${NC}"
-    npm install
+    pnpm install
 fi
 
 # We use 'call' logic implicitly by running npx. 
 # If database is empty, we force push.
 echo -e "${BLUE}Pushing Prisma Schema...${NC}"
-npx dotenv -e .env.local -- npx prisma db push
+pnpm exec dotenv -e .env.local -- pnpm exec prisma db push
 
 echo -e "${BLUE}🌱 Seeding ACL...${NC}"
-npx dotenv -e .env.local -- npx tsx scripts/seed-acl.ts
+pnpm exec dotenv -e .env.local -- pnpm exec tsx scripts/seed-acl.ts
 
 # Optional: Prompt for user creation (Simplified)
 # You can uncomment this if you need it interactively
 # read -p "Enter email for dev user (or press enter to skip): " USER_EMAIL
 # if [ -n "$USER_EMAIL" ]; then
-#    npx dotenv -e .env.local -- npx tsx scripts/assign-user-group.ts "$USER_EMAIL"
+#    pnpm exec dotenv -e .env.local -- pnpm exec tsx scripts/assign-user-group.ts "$USER_EMAIL"
 # fi
 
 cd ..
@@ -111,14 +111,14 @@ echo -e "${BLUE}🚀 Starting Zero Cache...${NC}"
 $COMPOSE_CMD -f docker-compose.dev.yml up -d zero-cache
 
 # --- STEP 8: Deploy Vespa schemas ---
-# Non-fatal: needs bun + the vespa CLI. Retry with `npm run services:vespa`.
+# Non-fatal: needs bun + the vespa CLI. Retry with `pnpm run services:vespa`.
 if [ "${SKIP_VESPA:-0}" != "1" ] && [ -f "$VESPA_COMPOSE" ]; then
     echo -e "${BLUE}🔎 Deploying Vespa schemas...${NC}"
     if DOCKER_COMPOSE="$COMPOSE_CMD" CONTAINER_CLI="podman" bash vespa-core/scripts/deploy-dev.sh; then
         echo -e "${GREEN}✓ Vespa schemas deployed${NC}"
     else
         echo -e "${YELLOW}⚠️  Vespa schema deploy failed — needs bun + vespa CLI.${NC}"
-        echo -e "${YELLOW}   Retry with: npm run services:vespa${NC}"
+        echo -e "${YELLOW}   Retry with: pnpm run services:vespa${NC}"
     fi
 fi
 

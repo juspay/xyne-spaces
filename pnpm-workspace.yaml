@@ -1,0 +1,30 @@
+# apps/     — deployable surfaces
+# packages/ — libraries consumed by other workspace members
+# tools/    — dev and test tooling, not shipped
+#
+# Explicit member list rather than globs. A stray `npm install` in the wrong
+# directory must not silently become a workspace member — that is how the
+# unnamed backend/backend package appeared.
+packages:
+  - apps/backend
+  - apps/backend/eslint-rules
+  - apps/dashboard
+  - apps/dashboard-external
+  - apps/electron
+  - apps/site
+  - apps/xyne-claw
+  - apps/xyne-claw-auth/backend
+  - apps/xyne-claw-auth/frontend
+
+  - packages/shared
+  - packages/icons
+  - packages/framework
+  - packages/kata-sdk
+  - packages/xyne-claw-shared
+  - packages/xyne-claw-mcp
+  - packages/xyne-claw-pi-plugin
+
+  - tools/xyne-automation
+  - tools/xyne-automation-old
+  - tools/deadcode-analyzer
+  - tools/fcm-ota-trigger

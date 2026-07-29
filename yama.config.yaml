@@ -104,7 +104,7 @@ review:
     - This is MANDATORY - you MUST add mentions when file paths match pathMentions patterns
     
     Example add_comment() call format:
-    - file_path: "backend/src/services/userService.ts"
+    - file_path: "apps/backend/src/services/userService.ts"
     - line_number: 42
     - code_snippet: "const user = await prisma.user.findUnique({ where: { id } });"
     - comment_text: "Missing null check - user could be null"
@@ -136,16 +136,16 @@ review:
     Before starting any code review, you MUST read the project guidelines:
     a. Read `xyne.md` in the repository root - this is the main entry point for understanding the project structure
     b. After getting the list of changed files, determine which areas are affected:
-       - If changes are in `backend/` → Read `backend/docs/guidelines/xyne.md` and relevant sub-docs
-       - If changes are in `dashboard/` → Read `dashboard/docs/guidelines/xyne.md` and relevant sub-docs
+       - If changes are in `apps/backend/` → Read `apps/backend/docs/guidelines/xyne.md` and relevant sub-docs
+       - If changes are in `apps/dashboard/` → Read `apps/dashboard/docs/guidelines/xyne.md` and relevant sub-docs
        - If changes span both → Read BOTH guideline files
     c. Based on the specific files changed, read the relevant documentation:
-       - Zero changes → Read `backend/docs/guidelines/zero/` and `dashboard/docs/guidelines/zero/`
-       - Auth changes → Read `backend/docs/guidelines/auth.md`
-       - Job/queue changes → Read `backend/docs/guidelines/jobs.md`
-       - Integration changes → Read `backend/docs/guidelines/integrations.md`
-       - State machine changes → Read `dashboard/docs/guidelines/machines.md`
-       - Hook changes → Read `dashboard/docs/guidelines/hooks.md`
+       - Zero changes → Read `apps/backend/docs/guidelines/zero/` and `apps/dashboard/docs/guidelines/zero/`
+       - Auth changes → Read `apps/backend/docs/guidelines/auth.md`
+       - Job/queue changes → Read `apps/backend/docs/guidelines/jobs.md`
+       - Integration changes → Read `apps/backend/docs/guidelines/integrations.md`
+       - State machine changes → Read `apps/dashboard/docs/guidelines/machines.md`
+       - Hook changes → Read `apps/dashboard/docs/guidelines/hooks.md`
     d. This context gathering ensures you understand the project patterns and can provide accurate, relevant review comments
     
     1. Use get_branch() with branch name to get PR details and list of changed files
@@ -178,10 +178,10 @@ review:
   # When file_path in add_comment() matches any path below, MANDATORY to append the mention(s) to comment_text
   # Parent directory paths match ALL files within that directory and subdirectories (prefix/substring match)
   pathMentions:
-    - path: "backend/src/zero/acl"  # Matches ALL files in this directory and subdirectories
+    - path: "apps/backend/src/zero/acl"  # Matches ALL files in this directory and subdirectories
       mentions:
         - "@codeowner@example.com"
-    - path: "backend/src/zero/vespa-injection"  # Matches ALL files in this directory and subdirectories
+    - path: "apps/backend/src/zero/vespa-injection"  # Matches ALL files in this directory and subdirectories
       mentions:
         - "@codeowner@example.com"
 
@@ -503,7 +503,7 @@ descriptionEnhancement:
 
       Zero Deployment Required section:
       - Indicate if database schema changes require Zero deployment
-      - Mention which Zero config files need updates (backend/src/zero/)
+      - Mention which Zero config files need updates (apps/backend/src/zero/)
       - If no Zero deployment needed: "No Zero deployment required"
       - If required: "Yes - Schema changes require Zero replication update"
 
@@ -540,7 +540,7 @@ descriptionEnhancement:
       Impacted Areas:
       - Think in terms of FEATURES and FUNCTIONALITY, not file names
       - Good: "Ticket management - Added Slack webhook integration"
-      - Bad: "backend/src/integrations/adapters/slack-webhook-tickets/flow.ts"
+      - Bad: "apps/backend/src/integrations/adapters/slack-webhook-tickets/flow.ts"
 
       What is done:
       - Answer: What functionality was added/changed/removed?
@@ -578,7 +578,7 @@ descriptionEnhancement:
       To enable seamless integration with third-party services for automatic ticket creation, reducing manual data entry and improving workflow efficiency across different platforms.
 
       How to test it section header followed by:
-      1. Start the backend server: npm run dev in backend/
+      1. Start the backend server: pnpm run dev in apps/backend/
       2. Configure webhook credentials in .env file
       3. Send a POST request to /api/webhooks/tickets with valid payload
       4. Open the dashboard at /tickets and verify the new ticket appears
@@ -588,7 +588,7 @@ descriptionEnhancement:
       No new environment variables
 
       Zero Deployment Required section header followed by:
-      Yes - Schema changes require Zero replication update. Update backend/src/zero/ configs to reflect new ticket metadata fields.
+      Yes - Schema changes require Zero replication update. Update apps/backend/src/zero/ configs to reflect new ticket metadata fields.
 
       REMEMBER: Output ONLY the enhanced description - NO meta-commentary!
 
@@ -631,33 +631,33 @@ memoryBank:
   enabled: true
   path: "xyne.md"
   fallbackPaths:
-    - "backend/docs/guidelines"
-    - "dashboard/docs/guidelines"
+    - "apps/backend/docs/guidelines"
+    - "apps/dashboard/docs/guidelines"
 
   # Standard files AI will read for project context
   standardFiles:
     # Backend Guidelines
-    - "backend/guidelines/README.md"
-    - "backend/guidelines/code-practices.md"
-    - "backend/guidelines/technologies.md"
-    - "backend/guidelines/api-design.md"
-    - "backend/guidelines/folder-structure.md"
+    - "apps/backend/guidelines/README.md"
+    - "apps/backend/guidelines/code-practices.md"
+    - "apps/backend/guidelines/technologies.md"
+    - "apps/backend/guidelines/api-design.md"
+    - "apps/backend/guidelines/folder-structure.md"
     # Frontend/Dashboard Guidelines
-    - "dashboard/guidelines/README.md"
-    - "dashboard/guidelines/code-practices.md"
-    - "dashboard/guidelines/technologies.md"
-    - "dashboard/guidelines/folder-structure.md"
-    - "dashboard/guidelines/routing.md"
+    - "apps/dashboard/guidelines/README.md"
+    - "apps/dashboard/guidelines/code-practices.md"
+    - "apps/dashboard/guidelines/technologies.md"
+    - "apps/dashboard/guidelines/folder-structure.md"
+    - "apps/dashboard/guidelines/routing.md"
 
   # Reference files for helper functions and utilities
   referenceFiles:
     # Backend patterns
-    - "backend/src/middleware/errorHandler.ts"  # Custom error classes (AppError) and error handling middleware
-    - "backend/src/middleware/validation.ts"  # Request validation middleware patterns with Joi
-    - "backend/src/database/repositories/base.ts"  # Base repository class pattern with pagination and filtering
-    - "backend/src/utils/logger.ts"  # Winston logger configuration and usage
+    - "apps/backend/src/middleware/errorHandler.ts"  # Custom error classes (AppError) and error handling middleware
+    - "apps/backend/src/middleware/validation.ts"  # Request validation middleware patterns with Joi
+    - "apps/backend/src/database/repositories/base.ts"  # Base repository class pattern with pagination and filtering
+    - "apps/backend/src/utils/logger.ts"  # Winston logger configuration and usage
     # Frontend patterns
-    - "dashboard/src/utils/classNames.ts"  # Utility for merging Tailwind CSS classes
+    - "apps/dashboard/src/utils/classNames.ts"  # Utility for merging Tailwind CSS classes
 
 # ============================================================================
 # Project-Specific Standards

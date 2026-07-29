@@ -4,12 +4,12 @@ services:
   backend-migrate:
     build:
       context: .
-      dockerfile: backend/Dockerfile.test
+      dockerfile: apps/backend/Dockerfile.test
     container_name: ${COMPOSE_PROJECT_NAME:-xyne}-backend-migrate
     env_file:
-      - ./backend/.env.test
+      - ./apps/backend/.env.test
     restart: "no"
-    command: sh -c "npm run db:push && npx prisma db push --schema prisma-common/schema.prisma --accept-data-loss --skip-generate && npx prisma db execute --file prisma/migrations/20251127175400_add_ticket_xyne_id_sequence/migration.sql --schema prisma/schema.prisma"
+    command: sh -c "pnpm run db:push && pnpm exec prisma db push --schema prisma-common/schema.prisma --accept-data-loss --skip-generate && pnpm exec prisma db execute --file prisma/migrations/20251127175400_add_ticket_xyne_id_sequence/migration.sql --schema prisma/schema.prisma"
     depends_on:
       postgres:
         condition: service_healthy
@@ -21,13 +21,13 @@ services:
   backend:
     build:
       context: .
-      dockerfile: backend/Dockerfile.test
+      dockerfile: apps/backend/Dockerfile.test
     container_name: ${COMPOSE_PROJECT_NAME:-xyne}-backend
     ports:
       - "${BACKEND_BIND_PORT:-0}:3001"
     env_file:
-      - ./backend/.env.test   # Override with container hostnames
-    command: sh -c "/scripts/setup-fake-gcs-test.sh && npm run dev:test"
+      - ./apps/backend/.env.test   # Override with container hostnames
+    command: sh -c "/scripts/setup-fake-gcs-test.sh && pnpm run dev:test"
     depends_on:
       backend-migrate:
         condition: service_completed_successfully
@@ -51,10 +51,10 @@ services:
   dashboard:
     build:
       context: .
-      dockerfile: dashboard/Dockerfile.test
+      dockerfile: apps/dashboard/Dockerfile.test
     container_name: ${COMPOSE_PROJECT_NAME:-xyne}-dashboard
     env_file:
-      - ./dashboard/.env.test   # Override with container hostnames
+      - ./apps/dashboard/.env.test   # Override with container hostnames
     ports:
       - "${DASHBOARD_BIND_PORT:-0}:5173"
     depends_on:
@@ -72,7 +72,7 @@ services:
   #   image: node:22-slim
   #   container_name: xyne-jenkins-backend
   #   working_dir: /app/backend
-  #   command: npm run start
+  #   command: pnpm run start
   #   environment:
   #     - NODE_ENV=production
   #     - DATABASE_URL=postgresql://xyne:xyne123@postgres:5432/xyne_dev_db
@@ -110,7 +110,7 @@ services:
   #   image: node:22-slim
   #   container_name: xyne-jenkins-dashboard
   #   working_dir: /app/dashboard
-  #   command: npm run preview -- --host --port 5173
+  #   command: pnpm run preview -- --host --port 5173
   #   environment:
   #     - VITE_API_URL=http://backend:3001/api
   #     - VITE_ZERO_SERVER=http://backend:3001/zero
@@ -132,7 +132,7 @@ services:
   xyne-automation:
     profiles: ["gauge"]
     build:
-      context: ./xyne-automation
+      context: ./tools/xyne-automation
       dockerfile: Dockerfile
     container_name: ${COMPOSE_PROJECT_NAME:-xyne-test}-automation
     # Parallel Gauge workers each launch Chromium, all sharing this container's /dev/shm.
@@ -152,7 +152,7 @@ services:
   xyne-automation-old:
     profiles: ["cucumber"]
     build:
-      context: ./xyne-automation-old
+      context: ./tools/xyne-automation-old
       dockerfile: Dockerfile
     container_name: ${COMPOSE_PROJECT_NAME:-xyne-test}-automation-old
     shm_size: '2gb'

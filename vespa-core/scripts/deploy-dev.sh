@@ -33,7 +33,7 @@ VESPA_TARGET="http://localhost:19071"
 
 EMBEDDING_MODEL="${EMBEDDING_MODEL:-bge-small-en-v1.5}"
 
-# Container runtime. Both are overridable so a parent script (npm run services)
+# Container runtime. Both are overridable so a parent script (pnpm run services)
 # can pass down the runtime it already detected instead of re-detecting docker.
 DOCKER_COMPOSE="${DOCKER_COMPOSE:-}"
 CONTAINER_CLI="${CONTAINER_CLI:-}"

@@ -61,12 +61,15 @@ docker-compose*.yml
 .husky
 .github
 
-# Exclude other apps not needed for builds
-apps
-electron
-xyne-automation
+# Exclude other apps not needed for builds.
+# These are listed individually: `apps` as a bare entry would exclude the whole
+# apps/ tree, which now holds backend and dashboard and is required by every
+# image build.
+apps/public-web
+apps/electron
+apps/site
+tools
 ysweet
-site
 scripts/*
 !scripts/setup-fake-gcs.sh
 !scripts/setup-fake-gcs-test.sh

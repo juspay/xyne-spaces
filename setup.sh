@@ -102,9 +102,9 @@ print_warning () {
 cleanup_npx_cache () {
   local npx_cache_dir=$(ls -d ~/.npm/_npx/* 2>/dev/null | head -1)
   if [ -n "$npx_cache_dir" ]; then
-    print_step "Cleaning npx cache to avoid architecture mismatch..."
+    print_step "Cleaning pnpm exec cache to avoid architecture mismatch..."
     rm -rf "$npx_cache_dir"
-    print_success "npx cache cleaned"
+    print_success "pnpm exec cache cleaned"
   fi
 }
 
@@ -188,7 +188,7 @@ done
 print_success "Ports cleaned"
 echo ""
 
-# Step 2: Cleanup npx cache (fixes arm64/x64 architecture issues)
+# Step 2: Cleanup pnpm exec cache (fixes arm64/x64 architecture issues)
 cleanup_npx_cache
 echo ""
 
@@ -203,11 +203,11 @@ update_stage_status "dependencies" "in_progress" "Installing shared dependencies
 
 # Step 3.5: Install shared dependencies (needed by backend postinstall)
 print_step "Installing shared dependencies..."
-cd shared
+cd packages/shared
 print_step "Removing existing shared dependencies..."
 rm -rf node_modules
 print_success "Existing shared dependencies removed"
-npm install
+pnpm install
 cd ..
 print_success "Shared dependencies installed"
 echo ""
@@ -216,11 +216,11 @@ update_stage_status "dependencies" "in_progress" "Framework dependencies complet
 
 # Step 3.6: Install framework dependencies (needed by backend postinstall)
 print_step "Installing framework dependencies..."
-cd framework
+cd packages/framework
 print_step "Removing existing framework dependencies..."
 rm -rf node_modules
 print_success "Existing framework dependencies removed"
-npm install
+pnpm install
 cd ..
 print_success "Framework dependencies installed"
 echo ""
@@ -229,11 +229,11 @@ update_stage_status "dependencies" "in_progress" "Backend dependencies being ins
 
 # Step 4: Install backend dependencies
 print_step "Installing backend dependencies..."
-cd backend
+cd apps/backend
 print_step "Removing existing backend dependencies..."
 rm -rf node_modules
 print_success "Existing backend dependencies removed"
-npm install
+pnpm install
 cd ..
 print_success "Backend dependencies installed"
 echo ""
@@ -345,11 +345,11 @@ while [ $elapsed -lt $TIMEOUT ]; do
     update_stage_status "seeding" "in_progress" "Cleaning database and seeding dummy data..."
     sync
     
-    cd backend
+    cd apps/backend
     
     # # Clean database with force reset
     # echo "  Cleaning database (this may take a moment)..."
-    # if npx dotenv -e .env.local -- npx prisma db push --force-reset --accept-data-loss --skip-generate; then
+    # if pnpm exec dotenv -e .env.local -- pnpm exec prisma db push --force-reset --accept-data-loss --skip-generate; then
     #   print_success "Database cleaned successfully"
     # else
     #   print_error "Failed to clean database"
@@ -358,7 +358,7 @@ while [ $elapsed -lt $TIMEOUT ]; do
     
     # # Re-seed ACL system after cleaning
     # echo "  Re-seeding ACL system..."
-    # if npx dotenv -e .env.local -- npx tsx scripts/seed-acl.ts; then
+    # if pnpm exec dotenv -e .env.local -- pnpm exec tsx scripts/seed-acl.ts; then
     #   print_success "ACL system re-seeded"
     # else
     #   print_error "Failed to re-seed ACL system"
@@ -367,7 +367,7 @@ while [ $elapsed -lt $TIMEOUT ]; do
     
     # Seed dummy data
     echo "  Running dummy seeding script..."
-    if npx dotenv -e .env.local -- npx tsx scripts/dummy-seed.ts; then
+    if pnpm exec dotenv -e .env.local -- pnpm exec tsx scripts/dummy-seed.ts; then
       print_success "Dummy data seeded successfully"
     else
       print_error "Failed to seed dummy data"
@@ -392,7 +392,7 @@ tell application "Terminal"
 
     -- Always reuse the FRONT window (infra window)
     tell front window
-        do script "cd '$PROJECT_DIR/backend' && npm run dev"
+        do script "cd '$PROJECT_DIR/backend' && pnpm run dev"
     end tell
 end tell
 EOF
@@ -412,7 +412,7 @@ tell application "Terminal"
     activate
 
     tell front window
-        do script "cd '$PROJECT_DIR/dashboard' && rm -rf node_modules/.vite && npm install && npm run dev"
+        do script "cd '$PROJECT_DIR/dashboard' && rm -rf node_modules/.vite && pnpm install && pnpm run dev"
     end tell
 end tell
 EOF

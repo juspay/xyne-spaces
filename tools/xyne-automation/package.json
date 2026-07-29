@@ -1,0 +1,40 @@
+{
+  "name": "xyne-automation",
+  "version": "1.0.0",
+  "description": "Automation testing for xyne-spaces",
+  "main": "index.js",
+  "scripts": {
+    "test": "ts-node --project tsconfig.json scripts/run-gauge.ts tests",
+    "test:api": "ts-node --project tsconfig.json scripts/run-gauge.ts tests/01_api",
+    "test:ui": "ts-node --project tsconfig.json scripts/run-gauge.ts tests/02_ui",
+    "test:e2e": "ts-node --project tsconfig.json scripts/run-gauge.ts tests/03_e2e",
+    "test:push": "bash scripts/push-report-branch.sh",
+    "test:integrity": "bash scripts/verify-test-code-integrity.sh",
+    "format": "biome format --write .",
+    "format:check": "biome format . --diagnostic-level=error",
+    "lint": "biome check --assist-enabled=true .",
+    "lint:fix": "biome check --assist-enabled=true --write .",
+    "check": "biome check --assist-enabled=true .",
+    "check:fix": "biome check --assist-enabled=true --write .",
+    "validate": "biome ci --assist-enabled=true . && biome format . --diagnostic-level=error && pnpm run validate:filename && pnpm run validate:literals",
+    "test:runner": "ts-node --project tsconfig.json scripts/runner/index.ts",
+    "validate:filename": "ts-node --project tsconfig.json scripts/validation/validate-filename.ts",
+    "validate:literals": "ts-node --project tsconfig.json scripts/validation/validate-literals.ts"
+  },
+  "keywords": [],
+  "author": "Ameer Noufil <ameer.noufil@juspay.com>",
+  "license": "Apache-2.0",
+  "type": "commonjs",
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.11",
+    "@getgauge/cli": "^1.6.30",
+    "@playwright/test": "1.59.1",
+    "@types/node": "^24.6.1",
+    "chalk": "^4.1.2",
+    "dotenv": "^17.2.3",
+    "gauge-ts": "^0.3.6",
+    "ts-node": "^10.9.2",
+    "tsconfig-paths": "^4.2.0",
+    "typescript": "^5.9.3"
+  }
+}

@@ -4,7 +4,7 @@
 #
 # This is the Nix equivalent of:
 #   - docker-compose down -v (stops containers and removes volumes)
-#   - npm run cleanup (from package.json - removes Docker/Podman storage)
+#   - pnpm run cleanup (from package.json - removes Docker/Podman storage)
 #
 # Use this when:
 #   - Database migrations break
@@ -67,9 +67,9 @@ else
   echo "   No .nix-cache/ directory found"
 fi
 
-if [ -d "backend/python-agent/.venv" ]; then
+if [ -d "apps/backend/python-agent/.venv" ]; then
   echo "   Removing Python virtual environment..."
-  rm -rf backend/python-agent/.venv
+  rm -rf apps/backend/python-agent/.venv
   echo -e "${GREEN}   ✓ Python .venv/ removed${NC}"
 else
   echo "   No Python .venv/ found"
@@ -92,8 +92,8 @@ echo ""
 echo -e "${BLUE}Next steps for fresh start:${NC}"
 echo "  1. Run: nix run .#xyne-space-services"
 echo "  2. Wait for services to start (~10 seconds)"
-echo "  3. Run: cd backend && npm run dev (in another terminal)"
+echo "  3. Run: cd apps/backend && pnpm run dev (in another terminal)"
 echo "  4. Run: just assign-admin YOUR_EMAIL"
-echo "  5. Run: cd dashboard && npm run dev (in another terminal)"
+echo "  5. Run: cd apps/dashboard && pnpm run dev (in another terminal)"
 echo ""
 

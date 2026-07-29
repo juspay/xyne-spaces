@@ -119,12 +119,12 @@ services:
   zero-cache:
     image: mirror.gcr.io/rocicorp/zero:1.6.0
     container_name: ${COMPOSE_PROJECT_NAME:-xyne}-zero-cache
-    # ZERO_AUTH_SECRET is injected from backend/.env.local (gitignored) so the
+    # ZERO_AUTH_SECRET is injected from apps/backend/.env.local (gitignored) so the
     # backend and zero-cache always share the same secret; never hardcode it here.
     env_file:
       # Optional: loaded locally (dev has .env.local); absent in CI, where
       # .env.test provides the values via docker-compose.test.yml.
-      - path: ./backend/.env.local
+      - path: ./apps/backend/.env.local
         required: false
     environment:
       - ZERO_UPSTREAM_DB=postgresql://xyne:xyne123@postgres:5432/xyne_dev_db
@@ -165,14 +165,14 @@ services:
   # Python Transcription Agent
   transcription-agent:
     build:
-      context: ./backend/python-agent
+      context: ./apps/backend/python-agent
       dockerfile: Dockerfile
     container_name: ${COMPOSE_PROJECT_NAME:-xyne}-transcription-agent
     shm_size: '512mb'
     env_file:
       # Optional: loaded locally (dev has .env.local); absent in CI, where
       # .env.test provides the values via docker-compose.test.yml.
-      - path: ./backend/.env.local
+      - path: ./apps/backend/.env.local
         required: false
     environment:
       # Override LIVEKIT_URL to use container hostname instead of localhost
@@ -188,9 +188,9 @@ services:
     ports:
       - "${TRANSCRIPTION_AGENT_BIND_PORT:-8001}:8080"
     volumes:
-      - ./backend/python-agent/transcriptions:/app/transcriptions
+      - ./apps/backend/python-agent/transcriptions:/app/transcriptions
       # Mount source code for live development (no rebuild needed)
-      - ./backend/python-agent:/app
+      - ./apps/backend/python-agent:/app
       # Persist HuggingFace model cache across container restarts
       - transcription-agent-cache:/app/.cache/huggingface
     depends_on:
@@ -271,7 +271,7 @@ services:
       start_period: 30s
     restart: unless-stopped
 
-  # Backend API - NOW RUNS LOCALLY (see backend/.env.local)
+  # Backend API - NOW RUNS LOCALLY (see apps/backend/.env.local)
   # Uncomment if you want to run backend in Docker instead of locally
   # backend:
   #   build:
@@ -280,7 +280,7 @@ services:
   #   container_name: xyne-backend
   #   ... (rest of config omitted)
 
-  # Dashboard (Frontend) - NOW RUNS LOCALLY (see dashboard/.env.local)
+  # Dashboard (Frontend) - NOW RUNS LOCALLY (see apps/dashboard/.env.local)
   # Uncomment if you want to run dashboard in Docker instead of locally
   # dashboard:
   #   build:

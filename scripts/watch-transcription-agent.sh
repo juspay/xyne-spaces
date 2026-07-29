@@ -4,7 +4,7 @@
 
 set -e
 
-WATCH_DIR="backend/python-agent"
+WATCH_DIR="apps/backend/python-agent"
 COMPOSE_FILE="docker-compose.dev.yml"
 SERVICE_NAME="transcription-agent"
 
