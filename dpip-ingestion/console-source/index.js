@@ -289,6 +289,8 @@ var REPORT_METRIC_TYPES = /* @__PURE__ */ new Set([
   "clusters_count"
 ]);
 var DEEP_DISCOVERY_FOOTER_PATTERN = /^[ \t]*=+[ \t]*(?:\r?\n[\s\S]*|$)/m;
+var HTML_EMAIL_FOOTER_PATTERN = /^(\s*\[[\s\S]*\])(?:\r\n?|\n)?<br\b[^>]*>[ \t]*=+[ \t]*(?:(?:\r\n?|\n)?<br\b[^>]*>[\s\S]*|$)/i;
+var HTML_LINE_BREAK_PATTERN = /(?:\r\n?|\n)?<br\b[^>]*>/gi;
 var DpipPayloadError = class extends Error {
   constructor(message) {
     super(message);
@@ -323,11 +325,11 @@ function htmlEmailToText(value) {
     value.replace(/<!--[\s\S]*?-->/g, "").replace(
       /<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>/gi,
       ""
-    ).replace(/<br\s*\/?>/gi, "\n").replace(/<\/(?:div|p|li|tr|h[1-6])\s*>/gi, "\n").replace(/<[^>]+>/g, "")
+    ).replace(HTML_LINE_BREAK_PATTERN, " ").replace(/<\/(?:div|p|li|tr|h[1-6])\s*>/gi, "\n").replace(/<[^>]+>/g, "")
   ).replace(/\u00a0/g, " ");
 }
 function stripKnownEmailFooters(value) {
-  return value.replace(DEEP_DISCOVERY_FOOTER_PATTERN, "").trim();
+  return value.replace(HTML_EMAIL_FOOTER_PATTERN, "$1").replace(DEEP_DISCOVERY_FOOTER_PATTERN, "").trim();
 }
 function normalizeInput(input) {
   if (typeof input !== "string") {
@@ -337,11 +339,10 @@ function normalizeInput(input) {
   if (trimmed.length === 0) {
     throw new DpipPayloadError("Request body is empty");
   }
-  const candidates = [
-    stripKnownEmailFooters(trimmed.replace(/<br\s*\/?>/gi, "\n"))
-  ];
+  const withoutFooter = stripKnownEmailFooters(trimmed);
+  const candidates = [withoutFooter.replace(HTML_LINE_BREAK_PATTERN, " ")];
   if (/<\/?[a-z][^>]*>|&(?:nbsp|quot|apos|lt|gt|amp|#\d+|#x[0-9a-f]+);/i.test(trimmed)) {
-    candidates.push(stripKnownEmailFooters(htmlEmailToText(trimmed)));
+    candidates.push(stripKnownEmailFooters(htmlEmailToText(withoutFooter)));
   }
   for (const candidate of candidates) {
     try {

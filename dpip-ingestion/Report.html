@@ -941,6 +941,10 @@
                 ];
                 const DEEP_DISCOVERY_FOOTER_PATTERN =
                     /^[ \t]*=+[ \t]*(?:\r?\n[\s\S]*|$)/m;
+                const HTML_EMAIL_FOOTER_PATTERN =
+                    /^(\s*\[[\s\S]*\])(?:\r\n?|\n)?<br\b[^>]*>[ \t]*=+[ \t]*(?:(?:\r\n?|\n)?<br\b[^>]*>[\s\S]*|$)/i;
+                const HTML_LINE_BREAK_PATTERN =
+                    /(?:\r\n?|\n)?<br\b[^>]*>/gi;
 
                 const $ = (id) => document.getElementById(id);
                 const fmt = (value) =>
@@ -1047,7 +1051,7 @@
                                 /<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>/gi,
                                 "",
                             )
-                            .replace(/<br\s*\/?>/gi, "\n")
+                            .replace(HTML_LINE_BREAK_PATTERN, " ")
                             .replace(/<\/(?:div|p|li|tr|h[1-6])\s*>/gi, "\n")
                             .replace(/<[^>]+>/g, ""),
                     ).replace(/\u00a0/g, " ");
@@ -1055,6 +1059,7 @@
 
                 function stripKnownEmailFooters(value) {
                     return value
+                        .replace(HTML_EMAIL_FOOTER_PATTERN, "$1")
                         .replace(DEEP_DISCOVERY_FOOTER_PATTERN, "")
                         .trim();
                 }
@@ -1080,10 +1085,9 @@
                     const trimmed = input.trim();
                     if (!trimmed) throw new Error("The payload area is empty.");
 
+                    const withoutFooter = stripKnownEmailFooters(trimmed);
                     const candidates = [
-                        stripKnownEmailFooters(
-                            trimmed.replace(/<br\s*\/?>/gi, "\n"),
-                        ),
+                        withoutFooter.replace(HTML_LINE_BREAK_PATTERN, " "),
                     ];
 
                     if (
@@ -1092,7 +1096,9 @@
                         )
                     ) {
                         candidates.push(
-                            stripKnownEmailFooters(htmlEmailToText(trimmed)),
+                            stripKnownEmailFooters(
+                                htmlEmailToText(withoutFooter),
+                            ),
                         );
                     }
 

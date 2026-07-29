@@ -303,6 +303,37 @@ describe('parseDpipPayload', () => {
     assert.equal(result.tables.external_entity_identifiers.length, 1);
   });
 
+  it('accepts HTML line-break variants inside quoted party identifiers', () => {
+    for (const lineBreak of [
+      '\r<br>',
+      '\n<br/>',
+      '\r\n<br />',
+      '<BR class="email-break">',
+    ]) {
+      const body = `${JSON.stringify(validPayload()).replace(
+        'party-1, party-2',
+        `party-1,${lineBreak}party-2`,
+      )}${lineBreak}============================${lineBreak}Email disclaimer`;
+
+      const result = parseDpipPayload(body);
+
+      assert.equal(
+        result.tables.party_identifiers[0]?.party_ids,
+        'party-1, party-2',
+      );
+    }
+  });
+
+  it('preserves separator-like text inside JSON strings', () => {
+    const payload = validPayload();
+    const reports = payload[0] as { data: unknown[][] };
+    reports.data[1]![3] = 'dpip<br>===<br>ingestion';
+
+    const result = parseDpipPayload(JSON.stringify(payload));
+
+    assert.equal(result.tables.reports[0]?.sub_source, 'dpip === ingestion');
+  });
+
   it('accepts valid JSON wrapped in Outlook div elements and HTML entities', () => {
     const body = JSON.stringify(validPayload(), null, 2)
       .split('\n')

@@ -21,6 +21,9 @@ const REPORT_METRIC_TYPES = new Set([
 ]);
 const DEEP_DISCOVERY_FOOTER_PATTERN =
   /^[ \t]*=+[ \t]*(?:\r?\n[\s\S]*|$)/m;
+const HTML_EMAIL_FOOTER_PATTERN =
+  /^(\s*\[[\s\S]*\])(?:\r\n?|\n)?<br\b[^>]*>[ \t]*=+[ \t]*(?:(?:\r\n?|\n)?<br\b[^>]*>[\s\S]*|$)/i;
+const HTML_LINE_BREAK_PATTERN = /(?:\r\n?|\n)?<br\b[^>]*>/gi;
 
 export class DpipPayloadError extends Error {
   constructor(message: string) {
@@ -75,14 +78,17 @@ function htmlEmailToText(value: string): string {
         /<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>/gi,
         '',
       )
-      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(HTML_LINE_BREAK_PATTERN, ' ')
       .replace(/<\/(?:div|p|li|tr|h[1-6])\s*>/gi, '\n')
       .replace(/<[^>]+>/g, ''),
   ).replace(/\u00a0/g, ' ');
 }
 
 function stripKnownEmailFooters(value: string): string {
-  return value.replace(DEEP_DISCOVERY_FOOTER_PATTERN, '').trim();
+  return value
+    .replace(HTML_EMAIL_FOOTER_PATTERN, '$1')
+    .replace(DEEP_DISCOVERY_FOOTER_PATTERN, '')
+    .trim();
 }
 
 function normalizeInput(input: unknown): unknown {
@@ -95,11 +101,10 @@ function normalizeInput(input: unknown): unknown {
     throw new DpipPayloadError('Request body is empty');
   }
 
-  const candidates = [
-    stripKnownEmailFooters(trimmed.replace(/<br\s*\/?>/gi, '\n')),
-  ];
+  const withoutFooter = stripKnownEmailFooters(trimmed);
+  const candidates = [withoutFooter.replace(HTML_LINE_BREAK_PATTERN, ' ')];
   if (/<\/?[a-z][^>]*>|&(?:nbsp|quot|apos|lt|gt|amp|#\d+|#x[0-9a-f]+);/i.test(trimmed)) {
-    candidates.push(stripKnownEmailFooters(htmlEmailToText(trimmed)));
+    candidates.push(stripKnownEmailFooters(htmlEmailToText(withoutFooter)));
   }
 
   for (const candidate of candidates) {
