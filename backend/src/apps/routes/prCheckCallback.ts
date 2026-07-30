@@ -87,6 +87,9 @@ async function sendVarysWebhook(
       'X-Xyne-Event': 'PR_CHECK_REQUESTED',
     },
     body: JSON.stringify(payload),
+    redirect: 'manual',
+    // Fail fast if Varys stalls — this runs inside a user-facing request.
+    signal: AbortSignal.timeout(10_000),
   });
 
   if (!response.ok) {
@@ -118,6 +121,9 @@ router.post('/callback', validateS2SKey, async (req: Request, res: Response) => 
     const projectKey = typeof context.projectKey === 'string' ? context.projectKey : '';
     const repositorySlug = typeof context.repositorySlug === 'string' ? context.repositorySlug : '';
 
+    // ticketId is required: buttons are only posted for PRs with a linked
+    // ticket, and bitbot's PR_CHECK_REQUESTED contract expects it — fail here
+    // rather than sending bitbot a payload it may reject.
     if (!ticketId || !prId || !projectKey || !repositorySlug) {
       res.status(400).json({
         error: 'Missing required fields in context',
@@ -126,23 +132,38 @@ router.post('/callback', validateS2SKey, async (req: Request, res: Response) => 
       return;
     }
 
-    // Look up the ticket to get conversation and channel info
-    const ticket = await db.ticket.findUnique({
-      where: { id: ticketId },
-      select: {
-        conversationId: true,
-        channelId: true,
-      },
-    });
+    // Resolve conversation/channel: thread buttons carry them in context (the
+    // thread where the PR link was posted); ticket buttons derive them from
+    // the ticket the PR is linked to. Context values are trusted without a
+    // membership re-check because this route is S2S-key protected and the
+    // context originates from button frontmatter that only our backend writes
+    // — do not reuse this pattern on a route without those guarantees.
+    let conversationId = typeof context.conversationId === 'string' && context.conversationId ? context.conversationId : undefined;
+    let channelId = typeof context.channelId === 'string' && context.channelId ? context.channelId : undefined;
 
-    if (!ticket || !ticket.conversationId) {
-      res.status(404).json({ error: `Ticket ${ticketId} not found or has no conversation` });
-      return;
+    if (!conversationId || !channelId) {
+      // ticketId is guaranteed present (validated above), so the ticket
+      // fallback below always applies for legacy buttons lacking thread context.
+      const ticket = await db.ticket.findUnique({
+        where: { id: ticketId },
+        select: {
+          conversationId: true,
+          channelId: true,
+        },
+      });
+
+      if (!ticket || !ticket.conversationId) {
+        res.status(404).json({ error: `Ticket ${ticketId} not found or has no conversation` });
+        return;
+      }
+
+      conversationId = ticket.conversationId;
+      channelId = ticket.channelId;
     }
 
     // Get channel info for channel name
     const channel = await db.channel.findUnique({
-      where: { id: ticket.channelId },
+      where: { id: channelId },
       select: { name: true },
     });
 
@@ -159,15 +180,15 @@ router.post('/callback', validateS2SKey, async (req: Request, res: Response) => 
 
     logger.info(
       `[PR-Check-Callback] Button clicked — sending webhook to Varys for PR #${prId} in ${repositorySlug} ` +
-      `(ticket: ${ticketId}, conversation: ${ticket.conversationId})`
+      `(ticket: ${ticketId}, conversation: ${conversationId})`
     );
 
     // Build webhook payload
     const webhookPayload: PRCheckRequestedPayload = {
       eventType: 'PR_CHECK_REQUESTED',
       payload: {
-        conversationId: ticket.conversationId,
-        channelId: ticket.channelId,
+        conversationId,
+        channelId,
         userId,
         channelName: channel?.name,
         createdAt: Date.now(),
