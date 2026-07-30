@@ -15,6 +15,11 @@ Backend/target/
 .env
 .env.local
 .env.*.local
+# ...and at any depth: the 2026-07 audit found backend/.env.local tracked for
+# 8 months because the root-only rule never matched it (and .gitignore has no
+# effect on files that are already tracked).
+**/.env.local
+**/.env.*.local
 .gradle/
 # IDE files
 .vscode/
