@@ -1,0 +1,97 @@
+name: Create Release Branch
+
+# Manually triggered. Creates a release branch and a matching annotated tag
+# named release-<today> (e.g. release-20260729) from the latest main, and
+# pushes both to origin. Fails loudly if either ref already exists.
+#
+# This workflow is PUBLIC-ONLY: it does not touch Jenkins or the private repo.
+# The build is triggered separately by trigger-private-build.yml, which reacts
+# to the push of the new release-* branch.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# Only one release-cut may run at a time.
+concurrency:
+  group: create-release-branch
+  cancel-in-progress: false
+
+jobs:
+  create-release-branch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          # Full history so the tag points at real main history, not a shallow graft.
+          fetch-depth: 0
+          # Fetch tags so the existence check below can see them.
+          fetch-tags: true
+
+      - name: Compute release name
+        id: name
+        run: |
+          RELEASE_NAME="release-$(date -u +'%Y%m%d')"
+          echo "Release ref: ${RELEASE_NAME}"
+          echo "release_name=${RELEASE_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Fail if branch or tag already exists
+        env:
+          RELEASE_NAME: ${{ steps.name.outputs.release_name }}
+        run: |
+          set -euo pipefail
+
+          # Re-check origin directly so we never rely on a stale local view.
+          if git ls-remote --exit-code --heads origin "refs/heads/${RELEASE_NAME}" >/dev/null 2>&1; then
+            echo "::error::Branch ${RELEASE_NAME} already exists on origin. Refusing to overwrite."
+            exit 1
+          fi
+
+          if git ls-remote --exit-code --tags origin "refs/tags/${RELEASE_NAME}" >/dev/null 2>&1; then
+            echo "::error::Tag ${RELEASE_NAME} already exists on origin. Refusing to overwrite."
+            exit 1
+          fi
+
+          echo "No existing branch or tag named ${RELEASE_NAME}. Proceeding."
+
+      - name: Create and push branch + annotated tag from latest main
+        env:
+          RELEASE_NAME: ${{ steps.name.outputs.release_name }}
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          MAIN_SHA="$(git rev-parse HEAD)"
+          echo "Cutting ${RELEASE_NAME} from main @ ${MAIN_SHA}"
+
+          # Branch at latest main.
+          git branch "${RELEASE_NAME}" "${MAIN_SHA}"
+
+          # Annotated tag at the same commit.
+          git tag -a "${RELEASE_NAME}" "${MAIN_SHA}" \
+            -m "Release ${RELEASE_NAME} cut from main @ ${MAIN_SHA}"
+
+          # Push both. --atomic so a mid-push failure leaves neither ref behind.
+          git push --atomic origin \
+            "refs/heads/${RELEASE_NAME}:refs/heads/${RELEASE_NAME}" \
+            "refs/tags/${RELEASE_NAME}:refs/tags/${RELEASE_NAME}"
+
+          echo "Created and pushed branch and tag ${RELEASE_NAME} @ ${MAIN_SHA}"
+
+      - name: Summary
+        if: success()
+        env:
+          RELEASE_NAME: ${{ steps.name.outputs.release_name }}
+        run: |
+          {
+            echo "### Release cut :rocket:"
+            echo ""
+            echo "- **Branch:** \`${RELEASE_NAME}\`"
+            echo "- **Tag:** \`${RELEASE_NAME}\` (annotated)"
+            echo "- **From:** \`main\`"
+          } >> "$GITHUB_STEP_SUMMARY"
