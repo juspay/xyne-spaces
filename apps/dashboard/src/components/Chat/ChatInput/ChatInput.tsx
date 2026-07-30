@@ -66,6 +66,8 @@ import { ShortcutPickerModal } from '../../Apps/ShortcutPickerModal/ShortcutPick
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
 import type { CommandItem } from '../../ui/Selectors/Selectors.types';
 import { setThreadLastRead } from '../../../machines/stateMachine';
+import { BlockNoteEditor } from '@blocknote/core';
+import { sanitizeHtmlString } from '../../../utils/sanitizer';
 
 const CHAT_MESSAGE_SENT_EVENT = 'xyne:chat-message-sent';
 
@@ -434,6 +436,29 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
           </span>
         )}
       </span>
+    );
+
+    const handleCreateCanvasFromComposer = useCallback(
+      (initialContent?: string): void => {
+        try {
+          const sanitizedContent = sanitizeHtmlString(initialContent ?? '');
+          const blocks = BlockNoteEditor.create().tryParseHTMLToBlocks(sanitizedContent);
+
+          void navigate('/chat/canvas/new', {
+            state: {
+              mode: 'create-message',
+              initialContent: blocks,
+              channelId,
+              ...(conversationId ? { conversationId } : {}),
+            },
+          });
+        } catch {
+          toast.error('Error', {
+            description: 'Failed to convert the message to canvas format. Please try again.',
+          });
+        }
+      },
+      [channelId, conversationId, navigate],
     );
 
     const handleMentionSearch = useCallback(
@@ -1004,6 +1029,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               onTranscriptSelect={(content: string) => {
                 inputBoxRef.current?.insertContent(content);
               }}
+              onCreateCanvas={handleCreateCanvasFromComposer}
               hasTicket={hasTicket}
               sendDisabled={isOffline}
               onScheduleSend={handleScheduleSend}

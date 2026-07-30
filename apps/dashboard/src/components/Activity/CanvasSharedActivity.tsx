@@ -53,6 +53,7 @@ export const CanvasSharedActivity = ({
       targetPath={targetPath}
       isExpanded={isExpanded}
       className='flex items-start'
+      unresolvedChannelLabel='Private channel'
     >
       <div className='text-muted-foreground text-sm'>
         {isExpanded

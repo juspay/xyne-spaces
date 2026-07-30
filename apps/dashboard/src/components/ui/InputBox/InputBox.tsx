@@ -182,6 +182,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       preserveThreadRoute = false,
       isDMThread = false,
       onCreateTicket,
+      onCreateCanvas,
       onTranscriptSelect,
       onScheduleSend,
       hasTicket = false,
@@ -1182,6 +1183,12 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     }, []);
 
     const handleCreateNewCanvas = useCallback(async () => {
+      if (onCreateCanvas) {
+        setIsCanvasAttachmentModalOpen(false);
+        onCreateCanvas(editor?.getHTML() ?? '');
+        return;
+      }
+
       // Create canvas immediately, attach to composer, then open canvas editor
       const newCanvasId = uuidv4();
       const now = Date.now();
@@ -1221,7 +1228,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           description: 'Please try again.',
         });
       }
-    }, [channelId, shareableOrigin]);
+    }, [channelId, editor, onCreateCanvas, shareableOrigin]);
 
     const handleRemoveAttachedCanvas = useCallback(() => {
       setAttachedCanvas(null);
