@@ -1698,6 +1698,9 @@ importers:
       ioredis:
         specifier: ^5.8.2
         version: 5.11.1
+      jose:
+        specifier: 6.2.4
+        version: 6.2.4
       jsonwebtoken:
         specifier: ^9.0.3
         version: 9.0.3

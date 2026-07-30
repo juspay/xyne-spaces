@@ -100,6 +100,26 @@ docker compose -f docker-compose.dev.yml logs zero-cache
 `zero-cache` is the usual suspect — it depends on Postgres being migrated first, so a
 failed migration surfaces here rather than in Postgres.
 
+### `JWT_SECRET environment variable is required and must be at least 32 characters`
+
+`apps/backend/.env.local` still holds the `set-me` placeholders from `.env.example`.
+This happens when the file was copied by hand, or carried over from a checkout that
+predates secret generation.
+
+```bash
+pnpm run secrets
+```
+
+That fills `JWT_SECRET`, `ZERO_AUTH_SECRET`, `ENCRYPTION_KEY`, and the VAPID keypair.
+It only touches placeholder or empty values, so it is safe to run against an
+`.env.local` that already contains real secrets.
+
+To check which values are still placeholders without printing them:
+
+```bash
+grep -nE '=(set-me|changeme|placeholder)$' apps/backend/.env.local
+```
+
 ### Backend cannot reach the database
 
 Confirm Postgres is healthy and that `DATABASE_URL` in `apps/backend/.env.local`
