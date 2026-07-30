@@ -22,7 +22,7 @@ import { workspacePath } from "./workspace.js";
 import type { ThinkingLevel } from "@earendil-works/pi-ai";
 import { AGENT, LITELLM, SERVER } from "./config.js";
 import { ensureSessionDebugDir, sessionDir } from "./session-store.js";
-import { SUBAGENT_DEFINITIONS, getSandboxSession, probeSession, REPO_CONFIGS, buildSandboxStoreKey, type SubagentDefinition, type SetupStep } from "xyne-claw-shared";
+import { SUBAGENT_DEFINITIONS, findSubagentDefinitionForServer, getSandboxSession, probeSession, REPO_CONFIGS, buildSandboxStoreKey, type SubagentDefinition, type SetupStep } from "xyne-claw-shared";
 import type { McpToolGroup } from "./mcp.js";
 import { resolveModel, applyCopilotProxyIfNeeded, capCustomToolOutput, pushDebugProgress, pushInvocation, type CopilotConfig, type ClaudeConfig, type CodexConfig, type DebugEventRecord, type ProgressDest, type ToolInvocation } from "./agent.js";
 import { compactionExtension } from "./compaction-extension.js";
@@ -1468,7 +1468,7 @@ export function buildSubagentTools(
   };
 
   for (const group of groups) {
-    const def = SUBAGENT_DEFINITIONS.find((d) => d.serverType === group.serverType);
+    const def = findSubagentDefinitionForServer(group.serverType);
 
     if (def) {
       // Split write tools out as direct (they need user approval in the parent agent)
@@ -1514,7 +1514,7 @@ export function buildSubagentTools(
     }
 
     for (const [source, tools] of customBySource) {
-      const def = SUBAGENT_DEFINITIONS.find((d) => d.serverType === source);
+      const def = findSubagentDefinitionForServer(source);
       if (def && tools.length > 0) {
         const customSkills = subagentSkills?.[def.name] ?? subagentSkills?.["__default"];
         // The sandbox subagent must not see sandbox-destroy — child LLMs were
