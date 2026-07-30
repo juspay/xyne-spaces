@@ -3315,6 +3315,10 @@ async function processTask(
         userId,
         task,
         context: fullContext,
+        // Automation/scheduled runs draw from the low-priority LiteLLM key so
+        // batch fleets can't queue interactive mentions (same predicate as the
+        // read-only sandbox routing above).
+        automationRun: isReadOnlyJob,
         userName,
         userEmail,
         customTools: tools,
