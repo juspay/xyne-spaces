@@ -14,7 +14,7 @@ overrides:
   '@hono/node-server': 1.19.14
   '@isaacs/brace-expansion': 5.0.1
   '@livekit/components-core': 0.12.12
-  '@livekit/protocol': 1.42.2
+  '@livekit/protocol': 1.48.0
   '@modelcontextprotocol/sdk': 1.29.0
   '@opentelemetry/auto-instrumentations-node': 0.78.0
   '@opentelemetry/core': 2.8.0
@@ -185,8 +185,8 @@ importers:
         specifier: ^4.5.1
         version: 4.6.1(@opentelemetry/api@1.9.1)
       '@livekit/protocol':
-        specifier: 1.42.2
-        version: 1.42.2
+        specifier: 1.48.0
+        version: 1.48.0
       '@mariozechner/pi-agent-core':
         specifier: ^0.61.0
         version: 0.61.1(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76)
@@ -355,6 +355,9 @@ importers:
       marked:
         specifier: ^17.0.1
         version: 17.0.6
+      mime:
+        specifier: ^4.1.0
+        version: 4.1.0
       ml-pca:
         specifier: ^4.1.1
         version: 4.1.1
@@ -4787,8 +4790,8 @@ packages:
   '@livekit/mutex@1.1.1':
     resolution: {integrity: sha512-EsshAucklmpuUAfkABPxJNhzj9v2sG7JuzFDL4ML1oJQSV14sqrpTYnsaOudMAw9yOaW53NU3QQTlUQoRs4czw==}
 
-  '@livekit/protocol@1.42.2':
-    resolution: {integrity: sha512-0jeCwoMJKcwsZICg5S6RZM4xhJoF78qMvQELjACJQn6/VB+jmiySQKOSELTXvPBVafHfEbMlqxUw2UR1jTXs2g==}
+  '@livekit/protocol@1.48.0':
+    resolution: {integrity: sha512-fYHYgltH6YavAsokl3qsHLkBdQeKCl4UORVTub5crS3t8JtKFZ0uinHDFQ+XXdNKS6Ub9gcOjV+UHcDiqnWXoQ==}
 
   '@livekit/rtc-ffi-bindings-darwin-arm64@0.12.68':
     resolution: {integrity: sha512-xyBakR8fo3RC8CdrfV6/9U14JlmxXUYqB4eLITEsB+iCKW0CE7JfMqDFqV/JIlq43+xzf7wLJsNktgQRrlcdJg==}
@@ -23337,7 +23340,7 @@ snapshots:
       '@livekit/av': 10.0.0
       '@livekit/local-inference': 0.2.6
       '@livekit/mutex': 1.1.1
-      '@livekit/protocol': 1.42.2
+      '@livekit/protocol': 1.48.0
       '@livekit/rtc-node': 0.13.32
       '@livekit/throws-transformer': 0.1.8(typescript@5.9.3)
       '@livekit/typed-emitter': 3.0.0
@@ -23454,7 +23457,7 @@ snapshots:
 
   '@livekit/mutex@1.1.1': {}
 
-  '@livekit/protocol@1.42.2':
+  '@livekit/protocol@1.48.0':
     dependencies:
       '@bufbuild/protobuf': 1.10.1
 
@@ -35658,7 +35661,7 @@ snapshots:
   livekit-client@2.17.0(@types/dom-mediacapture-record@1.0.22):
     dependencies:
       '@livekit/mutex': 1.1.1
-      '@livekit/protocol': 1.42.2
+      '@livekit/protocol': 1.48.0
       '@types/dom-mediacapture-record': 1.0.22
       events: 3.3.0
       jose: 6.2.4
@@ -35672,7 +35675,7 @@ snapshots:
   livekit-server-sdk@2.17.0:
     dependencies:
       '@bufbuild/protobuf': 1.10.1
-      '@livekit/protocol': 1.42.2
+      '@livekit/protocol': 1.48.0
       jose: 5.10.0
 
   load-json-file@4.0.0:
