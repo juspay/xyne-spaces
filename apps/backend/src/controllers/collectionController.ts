@@ -476,7 +476,7 @@ uploadFiles = async (req: Request, res: Response): Promise<void> => {
             ingestionStatus: IngestionStatus.PENDING,
         });
 
-        await vespaQueue.addJob({ schema: 'file', docId: item.id, jobType: 'feed', userId: user.id, app: SubApp.COLLECTIONS });
+        await vespaQueue.addJob({ schema: 'file', docId: item.fileId, jobType: 'feed', userId: user.id, app: SubApp.COLLECTIONS });
         logger.info(`[UPLOAD] Successfully uploaded: ${finalFileName} (ID: ${item.id})`);
 
         return { fileName: finalFileName, itemId: item.id, status: 'success', size: fileSize, mimeType };
