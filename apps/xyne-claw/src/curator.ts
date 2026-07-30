@@ -29,7 +29,9 @@ import { createLogger } from "./logger.js";
 const log = createLogger("curator");
 
 const LITELLM_URL = (process.env["LITELLM_URL"] ?? "https://grid.ai.example.com").replace(/\/$/, "");
-const LITELLM_API_KEY = process.env["LITELLM_API_KEY"] ?? "";
+// Background job: prefer the low-priority automation key so curator bursts
+// can't queue interactive agent turns on the main key's parallel-slot pool.
+const LITELLM_API_KEY = process.env["LITELLM_AUTOMATION_API_KEY"]?.trim() || (process.env["LITELLM_API_KEY"] ?? "");
 const CURATOR_MODEL = process.env["MEMORY_CURATOR_MODEL"] ?? "claude-haiku-4-5-20251001";
 const CURATOR_TIMEOUT_MS = Number(process.env["MEMORY_CURATOR_TIMEOUT_MS"] ?? 600_000);
 
