@@ -739,7 +739,9 @@ export function resolveModel(
   // Per-agent overrides (agentConfig.modelSettings). `model` only applies to
   // the default LiteLLM branch — provider branches already receive an
   // overridden providerConfig.model from runTask. `maxTokens` applies to all.
-  overrides?: { model?: string | undefined; maxTokens?: number | undefined },
+  // `litellmApiKey` swaps the platform key on the default LiteLLM branch only
+  // (automation/scheduled runs use the low-priority automation key).
+  overrides?: { model?: string | undefined; maxTokens?: number | undefined; litellmApiKey?: string | undefined },
 ) {
   const maxTokens = overrides?.maxTokens ?? 16384;
   if (provider === "copilot" && providerConfig?.apiKey) {
@@ -926,7 +928,7 @@ export function resolveModel(
   const litellmModel = overrides?.model ?? LITELLM.model;
   modelRegistry.registerProvider("litellm", {
     baseUrl: LITELLM.url,
-    apiKey: LITELLM.apiKey,
+    apiKey: overrides?.litellmApiKey || LITELLM.apiKey,
     api: "openai-completions",
     authHeader: true,
     models: [
@@ -1271,6 +1273,9 @@ export interface PromptInjection {
 export interface RunTaskOptions {
   userId: string;
   task: string;
+  /** Automation/scheduled run — the default LiteLLM branch uses the
+   *  low-priority automation key so batch load never queues human mentions. */
+  automationRun?: boolean | undefined;
   // Optional fields use `| undefined` (not bare `?`) so call sites can pass
   // through possibly-undefined values under exactOptionalPropertyTypes.
   context?: string | undefined;
@@ -1502,6 +1507,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     // provider-credential runs keep the model configured on the credential.
     model: effectiveProviderConfig ? undefined : modelSettings?.model,
     maxTokens: modelSettings?.maxTokens,
+    litellmApiKey: opts.automationRun ? LITELLM.automationApiKey : undefined,
   });
 
   // Use persistent session if conversationId provided, otherwise in-memory
