@@ -3,7 +3,7 @@ import { getCanvasUrl } from '@/services/canvasService';
 import { logger } from '@/utils/logger';
 import { AttachmentEntityType, CallOrigin, CallType, Prisma } from '@prisma/client';
 import { config } from '@/config/env';
-import { Agent, createUserMessage, createSystemMessage } from '@framework';
+import { Agent, createUserMessage } from '@framework';
 import { extractAgentContent } from '@/utils/agentUtils';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { MessageType, OrgLLMServiceAccountPurpose } from '@xyne/shared';
@@ -17,7 +17,7 @@ import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
 import { CacConfigService } from '@/services/cacConfigService';
 import { getCallTicketSuggestionsTotal } from '@/services/otel/suggestionMetrics';
-import { executeCallLlmWithRetry } from './callLlmRetry';
+import { executeCallLlmWithRetry, executeStreamingLlmRequest } from './callLlmRetry';
 import { callRecordingService } from '@/services/callRecordingService';
 import { callDocumentService } from '@/services/callDocumentService';
 import { acquireLock, releaseLock } from '@/utils/distributedLock';
@@ -881,12 +881,6 @@ export class TranscriptService {
    * @returns Post-processed transcript or original if processing fails
    */
   async postProcessTranscript(transcript: string, callId?: string): Promise<string> {
-    const agent = await this.createAgent(callId);
-    if (!agent) {
-      logger.warn('Agent creation failed. Skipping transcript post-processing.');
-      return transcript;
-    }
-
     const systemInstructions = `You are processing a call transcript. Your task is to translate any non-English text to English, and to fix one specific brand name spelling.
 
 IMPORTANT:
@@ -912,72 +906,92 @@ Output ONLY the processed transcript, nothing else.`;
       const MAX_LINES_PER_CHUNK = 100;
 
       if (lines.length <= MAX_LINES_PER_CHUNK) {
-        const result = await agent.execute({
-          messages: [createSystemMessage(systemInstructions), createUserMessage(transcript)],
+        const translated = await executeStreamingLlmRequest({
+          userPrompt: transcript,
+          systemPrompt: systemInstructions,
+          operation: 'transcript_translation',
+          callId,
         });
 
-        const extracted = extractAgentContent(result);
-        if (!extracted.ok) {
-          logger.warn(`post_process_transcript_failed | reason=${extracted.reason} | status=${extracted.status ?? ''} | using_original=true`);
+        if (!translated.ok) {
+          logger.warn(`post_process_transcript_failed | reason=${translated.reason} | using_original=true`);
           return transcript;
         }
 
-        logger.info('Successfully post-processed transcript (translation)');
-        return extracted.content;
+        logger.info('Successfully post-processed transcript (streaming translation)');
+        return translated.content;
       }
 
-      // For long transcripts, process in chunks CONCURRENTLY
+      // For long transcripts, process in chunks with LIMITED CONCURRENCY.
+      // Each chunk is a separate streaming request; a bounded worker pool keeps
+      // the number of concurrent streams in check (the previous unbounded
+      // Promise.all overwhelmed the LiteLLM deployment).
+      const CHUNK_CONCURRENCY = 3;
+      const totalChunks = Math.ceil(lines.length / MAX_LINES_PER_CHUNK);
+
       logger.info(
-        `Transcript has ${lines.length} lines, processing in chunks of ${MAX_LINES_PER_CHUNK}`
+        `Transcript has ${lines.length} lines, processing in ${totalChunks} chunks of ${MAX_LINES_PER_CHUNK} (concurrency ${CHUNK_CONCURRENCY})`
       );
 
-      // Split into chunks
-      const chunkPromises: Array<Promise<string>> = [];
+      // Build chunk metadata up front so results can be reassembled in order.
+      const chunks: Array<{ chunkText: string; chunkIndex: number; startLine: number; endLine: number }> = [];
       for (let i = 0; i < lines.length; i += MAX_LINES_PER_CHUNK) {
         const chunkLines = lines.slice(i, i + MAX_LINES_PER_CHUNK);
-        const chunkText = chunkLines.join('\n');
-        const chunkIndex = Math.floor(i / MAX_LINES_PER_CHUNK) + 1;
-        const totalChunks = Math.ceil(lines.length / MAX_LINES_PER_CHUNK);
-
-        // Create a fresh agent for each chunk to avoid BUSY errors
-        const chunkPromise = (async () => {
-          const chunkAgent = await this.createAgent(callId);
-          if (!chunkAgent) {
-            logger.warn(`Agent creation failed for chunk ${chunkIndex}, using original`);
-            return chunkText;
-          }
-
-          logger.info(
-            `Processing chunk ${chunkIndex}/${totalChunks} (lines ${i + 1}-${i + chunkLines.length})`
-          );
-
-          try {
-            const result = await chunkAgent.execute({
-              messages: [createSystemMessage(systemInstructions), createUserMessage(chunkText)],
-            });
-
-            const extracted = extractAgentContent(result);
-            if (!extracted.ok) {
-              logger.warn(`post_process_chunk_failed | chunk=${chunkIndex}/${totalChunks} | reason=${extracted.reason} | status=${extracted.status ?? ''} | using_original=true`);
-              return chunkText;
-            }
-
-            logger.info(`Chunk ${chunkIndex}/${totalChunks} completed`);
-            return extracted.content;
-          } catch (error) {
-            logger.error(`Error processing chunk ${chunkIndex}:`, error);
-            return chunkText;
-          }
-        })();
-
-        chunkPromises.push(chunkPromise);
+        chunks.push({
+          chunkText: chunkLines.join('\n'),
+          chunkIndex: Math.floor(i / MAX_LINES_PER_CHUNK) + 1,
+          startLine: i + 1,
+          endLine: i + chunkLines.length,
+        });
       }
 
-      // Process all chunks in parallel
-      const processedChunks = await Promise.all(chunkPromises);
-      const processedTranscript = processedChunks.join('\n');
+      const results: string[] = new Array(chunks.length);
+      let nextIndex = 0;
+
+      const processChunk = async (chunk: typeof chunks[0], index: number): Promise<void> => {
+        logger.info(
+          `Processing chunk ${chunk.chunkIndex}/${totalChunks} (lines ${chunk.startLine}-${chunk.endLine})`
+        );
+
+        try {
+          const translated = await executeStreamingLlmRequest({
+            userPrompt: chunk.chunkText,
+            systemPrompt: systemInstructions,
+            operation: 'transcript_translation',
+            callId,
+          });
+
+          if (!translated.ok) {
+            logger.warn(`post_process_chunk_failed | chunk=${chunk.chunkIndex}/${totalChunks} | reason=${translated.reason} | using_original=true`);
+            results[index] = chunk.chunkText;
+            return;
+          }
+
+          logger.info(`Chunk ${chunk.chunkIndex}/${totalChunks} completed`);
+          results[index] = translated.content;
+        } catch (error) {
+          logger.error(`Error processing chunk ${chunk.chunkIndex}:`, error);
+          results[index] = chunk.chunkText;
+        }
+      };
+
+      // Worker-pool: run up to CHUNK_CONCURRENCY chunks at a time.
+      const workers = Array.from(
+        { length: Math.min(CHUNK_CONCURRENCY, chunks.length) },
+        async () => {
+          while (nextIndex < chunks.length) {
+            const currentIndex = nextIndex;
+            nextIndex += 1;
+            await processChunk(chunks[currentIndex], currentIndex);
+          }
+        }
+      );
+
+      await Promise.all(workers);
+
+      const processedTranscript = results.join('\n');
       logger.info(
-        `Successfully post-processed transcript in ${processedChunks.length} chunks (parallel translation)`
+        `Successfully post-processed transcript in ${results.length} chunks (streaming translation)`
       );
       return processedTranscript;
     } catch (error) {

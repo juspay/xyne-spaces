@@ -1,12 +1,34 @@
-import { Agent, createUserMessage } from '@framework';
+import { Agent, LLMClient, createUserMessage } from '@framework';
+import { config } from '@/config/env';
 import { extractAgentContent } from '@/utils/agentUtils';
 import { logger } from '@/utils/logger';
 
 const MAX_ATTEMPTS = 5;
 const BASE_DELAY_MS = 120_000; // 2 minutes
 const MAX_DELAY_MS = 960_000; // 16 minutes
+const DEFAULT_MODEL = 'glm-latest';
 
 type ExtractedContent = ReturnType<typeof extractAgentContent>;
+
+export type StreamingLlmFailureReason =
+  | 'cancelled'
+  | 'empty_content'
+  | 'litellm_credentials_missing'
+  | 'exception';
+
+export type StreamingLlmResult =
+  | { ok: true; content: string }
+  | { ok: false; reason: StreamingLlmFailureReason; error?: string };
+
+export interface ExecuteStreamingLlmOptions {
+  userPrompt: string;
+  systemPrompt?: string;
+  operation: string;
+  callId?: string;
+  abortSignal?: AbortSignal;
+}
+
+let streamingLlmClient: LLMClient | null = null;
 
 const sleep = (ms: number): Promise<void> =>
   new Promise(resolve => setTimeout(resolve, ms));
@@ -125,4 +147,133 @@ export async function executeCallLlmWithRetry(
   }
 
   return failedResult('exhausted');
+}
+
+/**
+ * Returns a singleton LLMClient for streaming requests against the call LiteLLM
+ * deployment. Returns null when credentials are not configured.
+ */
+function getStreamingLlmClient(): LLMClient | null {
+  const apiKey = config.llm.callLitellmApiKey;
+  const baseUrl = config.llm.litellmBaseUrl;
+
+  if (!apiKey || !baseUrl) {
+    return null;
+  }
+
+  if (!streamingLlmClient) {
+    streamingLlmClient = new LLMClient({
+      provider: {
+        type: 'litellm',
+        config: {
+          apiKey,
+          baseUrl,
+          timeout: config.llm.requestTimeoutMs,
+        },
+      },
+      defaultModel: config.llm.callLitellmModel || DEFAULT_MODEL,
+      retry: {
+        maxAttempts: MAX_ATTEMPTS,
+        baseDelay: BASE_DELAY_MS,
+        maxDelay: MAX_DELAY_MS,
+        exponentialBackoff: true,
+      },
+    });
+  }
+
+  return streamingLlmClient;
+}
+
+/**
+ * Requests a streaming completion through the shared framework client,
+ * fully drains the stream, and returns the accumulated final message.
+ * The full drain is required: the framework only resolves `finalMessage`
+ * once the consumer has iterated the stream to completion.
+ */
+export async function executeStreamingLlmRequest(
+  options: ExecuteStreamingLlmOptions,
+): Promise<StreamingLlmResult> {
+  const callId = options.callId || 'unknown';
+  const startedAt = Date.now();
+
+  try {
+    if (options.abortSignal?.aborted) {
+      return { ok: false, reason: 'cancelled' };
+    }
+
+    const client = getStreamingLlmClient();
+
+    if (!client) {
+      logger.warn(`[${callId}] ${options.operation}_skipped`, {
+        reason: 'litellm_credentials_missing',
+      });
+
+      return {
+        ok: false,
+        reason: 'litellm_credentials_missing',
+      };
+    }
+
+    logger.info(`[${callId}] ${options.operation}_started`, {
+      input_length: options.userPrompt.length,
+      has_system_prompt: Boolean(options.systemPrompt),
+    });
+
+    const streamResult = await client.generateStream({
+      systemPrompt: options.systemPrompt,
+      messages: [createUserMessage(options.userPrompt)],
+      abortSignal: options.abortSignal,
+    });
+
+    try {
+      for await (const chunk of streamResult.stream) {
+        if (chunk.type === 'error') {
+          throw new Error(chunk.error || 'LLM stream returned an error chunk');
+        }
+      }
+    } catch (error) {
+      // Prevent an unhandled rejection when stream accumulation fails.
+      await streamResult.finalMessage.catch(() => undefined);
+      throw error;
+    }
+
+    const finalMessage = await streamResult.finalMessage;
+    const content = finalMessage.content.trim();
+
+    if (!content) {
+      logger.warn(`[${callId}] ${options.operation}_failed`, {
+        reason: 'empty_content',
+        duration_ms: Date.now() - startedAt,
+      });
+
+      return {
+        ok: false,
+        reason: 'empty_content',
+      };
+    }
+
+    logger.info(`[${callId}] ${options.operation}_success`, {
+      duration_ms: Date.now() - startedAt,
+    });
+
+    return {
+      ok: true,
+      content,
+    };
+  } catch (error) {
+    const reason = options.abortSignal?.aborted ? 'cancelled' : 'exception';
+    const message = error instanceof Error ? error.message : String(error);
+
+    logger.error(`[${callId}] ${options.operation}_failed`, {
+      reason,
+      error: message,
+      duration_ms: Date.now() - startedAt,
+    });
+
+    return {
+      ok: false,
+      reason,
+      error: message,
+    };
+  }
 }

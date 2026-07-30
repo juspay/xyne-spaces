@@ -655,6 +655,11 @@ export class LiteLLMProvider extends BaseProvider {
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
+      // SSE events are not aligned with network read boundaries, so a single
+      // `data: {...}` line can straddle two reads. Buffer partial lines here and
+      // only parse complete ones — otherwise split chunks fail JSON.parse and are
+      // silently dropped (matches the vertex/gemini providers in this repo).
+      let buffer = '';
 
       try {
         while (true) {
@@ -664,13 +669,16 @@ export class LiteLLMProvider extends BaseProvider {
             break;
           }
 
-          const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split('\n').filter(line => line.trim() !== '');
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          // Retain the last, possibly-incomplete line for the next read.
+          buffer = lines.pop() ?? '';
 
           for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              const data = line.slice(6);
-              
+            const trimmed = line.trim();
+            if (trimmed.startsWith('data: ')) {
+              const data = trimmed.slice(6);
+
               if (data === '[DONE]') {
                 return;
               }
@@ -681,6 +689,20 @@ export class LiteLLMProvider extends BaseProvider {
               } catch (parseError) {
                 logger.warn('Failed to parse streaming chunk', { data, error: parseError });
               }
+            }
+          }
+        }
+
+        // Flush any complete SSE line still buffered when the stream ends.
+        const trailing = buffer.trim();
+        if (trailing.startsWith('data: ')) {
+          const data = trailing.slice(6);
+          if (data !== '[DONE]') {
+            try {
+              const parsed = JSON.parse(data) as unknown;
+              yield parseLiteLLMStreamChunk(parsed);
+            } catch (parseError) {
+              logger.warn('Failed to parse trailing streaming chunk', { data, error: parseError });
             }
           }
         }

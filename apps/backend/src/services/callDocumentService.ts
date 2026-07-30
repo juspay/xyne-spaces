@@ -5,14 +5,11 @@
  */
 
 import { v4 as uuidv4 } from 'uuid';
-import { Agent, type AgentConfig } from '@framework';
-import { LogLevel } from '@framework';
 import { DatabaseClient } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { DEFAULT_SUMMARY_FIELDS, MessageType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
-import { config } from '@/config/env';
 import { formatToISTLocaleString } from '@/utils/dateUtils';
 import { CanvasRole } from '@prisma/client';
 import { ServerBlockNoteEditor } from '@blocknote/server-util';
@@ -56,7 +53,7 @@ interface ParticipantInfo {
   userPicture?: string;
 }
 
-import { executeCallLlmWithRetry } from './callLlmRetry';
+import { executeStreamingLlmRequest } from './callLlmRetry';
 import { initializeYSweetDoc, syncToYSweet } from '@/utils/ysweetUtils.js';
 
 /**
@@ -569,62 +566,6 @@ export class CallDocumentService {
   }
 
   /**
-   * Create a fresh Agent instance for each request
-   * This prevents state pollution between concurrent requests
-   */
-  private createAgent(): Agent | null {
-    try {
-      const apiKey = config.llm.callLitellmApiKey;
-      const baseUrl = config.llm.litellmBaseUrl;
-
-      if (!apiKey || !baseUrl) {
-        logger.warn('[CallDocumentService] LiteLLM not configured. Document generation disabled.');
-        return null;
-      }
-
-      const agentConfig: AgentConfig = {
-        model: {
-          provider: {
-            type: 'litellm',
-            config: {
-              apiKey,
-              baseUrl,
-              timeout: 300000,
-            },
-          },
-          defaultModel: config.llm.callLitellmModel || 'glm-latest',
-        },
-        tools: {
-          enabled: [],
-          config: {},
-          execution: { timeout: 300000 },
-        },
-        execution: {
-          maxTurns: 1,
-          mode: 'single',
-          timeouts: { llm: 300000 },
-          limits: {},
-          errorHandling: {
-            maxRetries: 3,
-            retryDelay: 120000,
-            maxDelay: 960000,
-          },
-        },
-        events: {
-          logging: LogLevel.WARN,
-        },
-      };
-
-      const agent = Agent.create(agentConfig);
-      logger.info('[CallDocumentService] Agent created for document generation');
-      return agent;
-    } catch (error) {
-      logger.error('[CallDocumentService] Failed to create Agent:', error);
-      return null;
-    }
-  }
-
-  /**
    * Generate a PRD from transcript and summary
    * @param transcript - The call transcript content
    * @param summary - Optional call summary
@@ -654,20 +595,19 @@ export class CallDocumentService {
       return prompt;
     };
 
-    const extracted = await executeCallLlmWithRetry(
-      () => this.createAgent(),
-      buildPrompt,
-      'prd_generation',
-      logCallId,
-    );
+    const result = await executeStreamingLlmRequest({
+      userPrompt: buildPrompt(),
+      operation: 'prd_generation',
+      callId: logCallId,
+    });
 
-    if (!extracted.ok) {
-      logger.error(`[${logCallId}] prd_generation_failed`, { reason: extracted.reason, status: extracted.status });
+    if (!result.ok) {
+      logger.error(`[${logCallId}] prd_generation_failed`, { reason: result.reason });
       return null;
     }
 
     // Extract JSON from response
-    const jsonMatch = extracted.content.match(/\{[\s\S]*\}/);
+    const jsonMatch = result.content.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
       logger.error(`[${logCallId}] Could not find JSON in PRD response`);
       return null;
@@ -716,20 +656,19 @@ export class CallDocumentService {
       return prompt;
     };
 
-    const extracted = await executeCallLlmWithRetry(
-      () => this.createAgent(),
-      buildPrompt,
-      'detailed_summary_generation',
+    const result = await executeStreamingLlmRequest({
+      userPrompt: buildPrompt(),
+      operation: 'detailed_summary_generation',
       callId,
-    );
+    });
 
-    if (!extracted.ok) {
-      logger.error(`[${callId}] detailed_summary_generation_failed`, { reason: extracted.reason, status: extracted.status });
+    if (!result.ok) {
+      logger.error(`[${callId}] detailed_summary_generation_failed`, { reason: result.reason });
       return null;
     }
 
     logger.info(`[${callId}] Successfully generated detailed summary`);
-    return extracted.content;
+    return result.content;
   }
 
   async editSummaryStructureWithAI(
@@ -746,19 +685,18 @@ export class CallDocumentService {
         instruction: sanitizedInstruction,
       });
 
-    const extracted = await executeCallLlmWithRetry(
-      () => this.createAgent(),
-      buildPrompt,
-      'summary_prompt_edit',
-      callId || 'prompt-edit',
-    );
+    const result = await executeStreamingLlmRequest({
+      userPrompt: buildPrompt(),
+      operation: 'summary_prompt_edit',
+      callId: callId || 'prompt-edit',
+    });
 
-    if (!extracted.ok) {
-      logger.error('[CallDocumentService] summary_prompt_edit_failed', { reason: extracted.reason, status: extracted.status });
+    if (!result.ok) {
+      logger.error('[CallDocumentService] summary_prompt_edit_failed', { reason: result.reason });
       return null;
     }
 
-    return extracted.content.trim();
+    return result.content.trim();
   }
 
   /**
