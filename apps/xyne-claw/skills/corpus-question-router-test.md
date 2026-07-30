@@ -24,7 +24,10 @@ disease. The cure is to name what you are doing *before* touching a tool:
 > **OPERATE** — what function turns that set into the answer?
 
 State both in ONE visible line before the first data call, so a person can catch a wrong
-choice.
+choice. **The line lives in the first todo's title** — `Classify: READ+newest-state — <set>`
+— because the todo card is what the user actually sees; a classification that exists only in
+your reasoning is invisible and uncatchable. The todo is completed only once the line is
+visible.
 
 ## The four operations — a closed set
 
@@ -124,6 +127,12 @@ the model changed — only the primitive.
   surface is a silent undercount.
 - **Multi-word terms count as exact phrases.** "refund complaint" = that phrase. To count
   any-of-words, pass the words as separate terms.
+- **Derived arithmetic runs as code, not in your head.** When a sandbox is available, any
+  number the counting tool doesn't return directly — a sub-window sum, a difference, a
+  ratio, a top-N, a dedup, a verdict threshold — is computed by writing the tool's JSON
+  response to a sandbox file verbatim and running Python over it; the printed output is
+  copied verbatim into the answer. The script and its output are the audit trail. The
+  sandbox computes over tool outputs only — it is never a source of evidence.
 
 ## EXHAUST — how to be complete
 
@@ -183,7 +192,12 @@ Design → Count → Verify) and tick them off live.
 
 ## Non-negotiables — every answer, every operation
 
-- Every factual claim carries its citation.
+- Every factual claim carries its citation — **the doc id itself, verbatim, as a plain-text
+  token in the final answer** (`[clf-ab12#7]`, no backticks/code formatting, punctuation
+  outside); a prose source name may accompany a token, never replace it. **Verification is
+  two-part** (see `corpus-self-verify`): Part A — citation integrity — runs on EVERY answer,
+  including plain READ lookups; Part B — the full measurement checklist — runs whenever the
+  draft contains any MEASURE / EXHAUST / RELATE result.
 - "I couldn't find it" ≠ "it didn't happen" — say which one you mean.
 - Name the denominator on any comparison.
 - Never state a number that came from tallying a ranked page.
