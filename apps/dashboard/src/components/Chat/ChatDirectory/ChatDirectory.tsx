@@ -499,177 +499,11 @@ const ChatDirectory = ({
             </div>
           </div>
         </div>
-        <div className='hidden sm:flex pt-2 pb-3 px-2 h-10 items-center justify-between mb-2'>
+        <div className='hidden sm:flex pt-2 pb-3 px-2 h-10 items-center justify-between mb-2 shrink-0'>
           <h2 className='text-base font-semibold leading-normal text-sidebar-accent-foreground'>
             Inbox
           </h2>
         </div>
-
-        <div className='hidden md:block'>
-          <button
-            className={cn(
-              'flex items-center justify-start gap-3 w-full px-3 py-2 text-sm font-medium tracking-[-0.14px] rounded-[10px] border border-transparent transition-colors hover:bg-sidebar-accent hover:border-sidebar-border',
-              'text-sidebar-foreground hover:text-sidebar-accent-foreground',
-            )}
-            onClick={() => {
-              void navigate('/chat/search?mode=dm', { replace: true });
-            }}
-            data-track-category='CHAT_SIDEBAR'
-            data-track-name='NEW_MESSAGE'
-          >
-            <span className='size-4 flex items-center justify-center shrink-0'>
-              <ChatPlus className='size-4' />
-            </span>
-            <span className='flex-1 min-w-0 text-left truncate block'>New Message</span>
-          </button>
-          <button
-            className={cn(
-              'flex items-center justify-start gap-3 w-full px-3 py-2 text-sm font-medium tracking-[-0.14px] rounded-[10px] border border-transparent transition-colors hover:bg-sidebar-accent hover:border-sidebar-border',
-              hasUnreadThreads
-                ? 'text-sidebar-accent-foreground font-semibold'
-                : 'text-sidebar-foreground hover:text-sidebar-accent-foreground',
-            )}
-            onClick={() => {
-              void navigate('/chat/dir/threads');
-            }}
-            data-track-category='CHAT_SIDEBAR'
-            data-track-name='OPEN_THREADS'
-            data-track-metadata={JSON.stringify({ threadCount, hasUnreadThreads })}
-          >
-            <span className='size-4 flex items-center justify-center shrink-0'>
-              <Subtask className='size-4' />
-            </span>
-            <span className='flex-1 min-w-0 text-left truncate block'>Threads</span>
-            {threadCount > 0 && (
-              <span className='size-5 flex items-center justify-center shrink-0'>
-                <Badge
-                  variant='success'
-                  className='text-xs h-[18px] px-[6px] py-[1px] bg-sidebar-primary border border-sidebar-accent-ring text-sidebar-primary-foreground'
-                >
-                  {threadCount > 10 ? '10+' : threadCount}
-                </Badge>
-              </span>
-            )}
-          </button>
-          <button
-            className={cn(
-              'flex items-center justify-start gap-3 w-full px-3 py-2 text-sm font-medium tracking-[-0.14px] rounded-[10px] border border-transparent transition-colors hover:bg-sidebar-accent hover:border-sidebar-border',
-              location.pathname.includes('/chat/dir/unreads')
-                ? 'text-sidebar-accent-foreground font-medium bg-sidebar-accent'
-                : unreadActivityStats.hasUnread
-                  ? 'text-sidebar-accent-foreground font-semibold'
-                  : 'text-sidebar-foreground hover:text-sidebar-accent-foreground',
-            )}
-            onClick={() => {
-              void navigate('/chat/dir/unreads');
-            }}
-            data-track-category='CHAT_SIDEBAR'
-            data-track-name='OPEN_UNREADS'
-          >
-            <span className='size-4 flex items-center justify-center shrink-0'>
-              <ChatTyping className='size-4' />
-            </span>
-            <span className='flex-1 min-w-0 text-left truncate block'>Unreads</span>
-          </button>
-          <button
-            className={cn(
-              'flex items-center justify-start gap-3 w-full px-3 py-2 text-sm font-medium tracking-[-0.14px] rounded-[10px] border border-transparent transition-colors hover:bg-sidebar-accent hover:border-sidebar-border',
-              overdueRemindersCount > 0
-                ? 'text-sidebar-accent-foreground font-semibold'
-                : 'text-sidebar-foreground hover:text-sidebar-accent-foreground',
-            )}
-            onClick={() => {
-              void navigate('/chat/bookmarks');
-            }}
-            data-testid='open-bookmarks-button'
-            data-track-category='CHAT_SIDEBAR'
-            data-track-name='OPEN_BOOKMARKS'
-            data-track-metadata={JSON.stringify({ overdueRemindersCount })}
-          >
-            <span className='size-4 flex items-center justify-center shrink-0'>
-              <BookmarkDefault className='size-4' />
-            </span>
-            <span className='flex-1 min-w-0 text-left truncate block'>Bookmarks</span>
-            {overdueRemindersCount > 0 && (
-              <span className='size-5 flex items-center justify-center shrink-0'>
-                <Badge
-                  variant='success'
-                  className='text-xs h-[18px] px-[6px] py-[1px] bg-sidebar-primary border border-sidebar-accent-ring text-sidebar-primary-foreground'
-                >
-                  {overdueRemindersCount > 10 ? '10+' : overdueRemindersCount}
-                </Badge>
-              </span>
-            )}
-          </button>
-          <button
-            className={cn(
-              'flex items-center justify-start gap-3 w-full px-3 py-2 text-sm font-medium tracking-[-0.14px] rounded-[10px] border border-transparent transition-colors hover:bg-sidebar-accent hover:border-sidebar-border',
-              location.pathname.endsWith('/chat/drafts-sent')
-                ? 'text-sidebar-accent-foreground'
-                : 'text-sidebar-foreground hover:text-sidebar-accent-foreground',
-            )}
-            onClick={() => {
-              void navigate('drafts-sent');
-            }}
-            data-testid='open-drafts-and-sent-button'
-            data-track-category='CHAT_SIDEBAR'
-            data-track-name='OPEN_DRAFTS_AND_SENT'
-          >
-            <span className='size-4 flex items-center justify-center shrink-0'>
-              <SendPlaneSlant className='size-4' />
-            </span>
-            <span className='flex-1 min-w-0 text-left truncate block'>Drafts &amp; Sent</span>
-            <span className='flex items-center gap-2 text-sidebar-foreground'>
-              {draftsCount > 0 && (
-                <span className='flex items-center gap-1 text-xs'>
-                  <PencilEdit size={12} />
-                  {draftsCount}
-                </span>
-              )}
-              {pendingScheduledCount > 0 && (
-                <span className='flex items-center gap-1 text-xs'>
-                  <ClockDefault size={12} />
-                  {pendingScheduledCount}
-                </span>
-              )}
-            </span>
-          </button>
-          <button
-            className={cn(
-              'flex items-center justify-start gap-3 w-full px-3 py-2 text-sm font-medium tracking-[-0.14px] rounded-[10px] border border-transparent transition-colors hover:bg-sidebar-accent hover:border-sidebar-border',
-              recapUnreadCount > 0
-                ? 'text-sidebar-accent-foreground font-semibold'
-                : 'text-sidebar-foreground hover:text-sidebar-accent-foreground',
-            )}
-            onMouseEnter={() => {
-              // Pre-fetch recap data on hover for instant load
-              prefetchRecap();
-            }}
-            onClick={() => {
-              // Always navigate to recap page first
-              void navigate('/chat/dir/recap');
-            }}
-            data-track-category='CHAT_SIDEBAR'
-            data-track-name='OPEN_RECAP'
-          >
-            <span className='size-4 flex items-center justify-center shrink-0'>
-              <ListAiGenerated className='size-4' />
-            </span>
-            <span className='flex-1 min-w-0 text-left truncate block'>Recap</span>
-            {recapUnreadCount > 0 && (
-              <span className='size-5 flex items-center justify-center shrink-0'>
-                <Badge
-                  variant='success'
-                  className='text-xs h-[18px] px-[6px] py-[1px] bg-sidebar-primary border border-sidebar-accent-ring text-sidebar-primary-foreground'
-                >
-                  {recapUnreadCount > 10 ? '10+' : recapUnreadCount}
-                </Badge>
-              </span>
-            )}
-          </button>
-        </div>
-
-        <div className='py-3 w-full hidden md:block' />
 
         <div
           ref={listContainerRef}
@@ -677,8 +511,174 @@ const ChatDirectory = ({
           tabIndex={0}
           role='region'
           aria-label='Channels and direct messages'
-          className=' flex-1 h-full overflow-y-scroll no-scrollbar pb-[calc(2.5rem+env(safe-area-inset-bottom))] px-0.5 pt-1 outline-none'
+          className='flex-1 h-full overflow-y-scroll no-scrollbar pb-[calc(2.5rem+env(safe-area-inset-bottom))] px-0.5 pt-1 outline-none'
         >
+          <div className='hidden md:block'>
+            <button
+              className={cn(
+                'flex items-center justify-start gap-3 w-full px-3 py-2 text-sm font-medium tracking-[-0.14px] rounded-[10px] border border-transparent transition-colors hover:bg-sidebar-accent hover:border-sidebar-border',
+                'text-sidebar-foreground hover:text-sidebar-accent-foreground',
+              )}
+              onClick={() => {
+                void navigate('/chat/search?mode=dm', { replace: true });
+              }}
+              data-track-category='CHAT_SIDEBAR'
+              data-track-name='NEW_MESSAGE'
+            >
+              <span className='size-4 flex items-center justify-center shrink-0'>
+                <ChatPlus className='size-4' />
+              </span>
+              <span className='flex-1 min-w-0 text-left truncate block'>New Message</span>
+            </button>
+            <button
+              className={cn(
+                'flex items-center justify-start gap-3 w-full px-3 py-2 text-sm font-medium tracking-[-0.14px] rounded-[10px] border border-transparent transition-colors hover:bg-sidebar-accent hover:border-sidebar-border',
+                hasUnreadThreads
+                  ? 'text-sidebar-accent-foreground font-semibold'
+                  : 'text-sidebar-foreground hover:text-sidebar-accent-foreground',
+              )}
+              onClick={() => {
+                void navigate('/chat/dir/threads');
+              }}
+              data-track-category='CHAT_SIDEBAR'
+              data-track-name='OPEN_THREADS'
+              data-track-metadata={JSON.stringify({ threadCount, hasUnreadThreads })}
+            >
+              <span className='size-4 flex items-center justify-center shrink-0'>
+                <Subtask className='size-4' />
+              </span>
+              <span className='flex-1 min-w-0 text-left truncate block'>Threads</span>
+              {threadCount > 0 && (
+                <span className='size-5 flex items-center justify-center shrink-0'>
+                  <Badge
+                    variant='success'
+                    className='text-xs h-[18px] px-[6px] py-[1px] bg-sidebar-primary border border-sidebar-accent-ring text-sidebar-primary-foreground'
+                  >
+                    {threadCount > 10 ? '10+' : threadCount}
+                  </Badge>
+                </span>
+              )}
+            </button>
+            <button
+              className={cn(
+                'flex items-center justify-start gap-3 w-full px-3 py-2 text-sm font-medium tracking-[-0.14px] rounded-[10px] border border-transparent transition-colors hover:bg-sidebar-accent hover:border-sidebar-border',
+                location.pathname.includes('/chat/dir/unreads')
+                  ? 'text-sidebar-accent-foreground font-medium bg-sidebar-accent'
+                  : unreadActivityStats.hasUnread
+                    ? 'text-sidebar-accent-foreground font-semibold'
+                    : 'text-sidebar-foreground hover:text-sidebar-accent-foreground',
+              )}
+              onClick={() => {
+                void navigate('/chat/dir/unreads');
+              }}
+              data-track-category='CHAT_SIDEBAR'
+              data-track-name='OPEN_UNREADS'
+            >
+              <span className='size-4 flex items-center justify-center shrink-0'>
+                <ChatTyping className='size-4' />
+              </span>
+              <span className='flex-1 min-w-0 text-left truncate block'>Unreads</span>
+            </button>
+            <button
+              className={cn(
+                'flex items-center justify-start gap-3 w-full px-3 py-2 text-sm font-medium tracking-[-0.14px] rounded-[10px] border border-transparent transition-colors hover:bg-sidebar-accent hover:border-sidebar-border',
+                overdueRemindersCount > 0
+                  ? 'text-sidebar-accent-foreground font-semibold'
+                  : 'text-sidebar-foreground hover:text-sidebar-accent-foreground',
+              )}
+              onClick={() => {
+                void navigate('/chat/bookmarks');
+              }}
+              data-testid='open-bookmarks-button'
+              data-track-category='CHAT_SIDEBAR'
+              data-track-name='OPEN_BOOKMARKS'
+              data-track-metadata={JSON.stringify({ overdueRemindersCount })}
+            >
+              <span className='size-4 flex items-center justify-center shrink-0'>
+                <BookmarkDefault className='size-4' />
+              </span>
+              <span className='flex-1 min-w-0 text-left truncate block'>Bookmarks</span>
+              {overdueRemindersCount > 0 && (
+                <span className='size-5 flex items-center justify-center shrink-0'>
+                  <Badge
+                    variant='success'
+                    className='text-xs h-[18px] px-[6px] py-[1px] bg-sidebar-primary border border-sidebar-accent-ring text-sidebar-primary-foreground'
+                  >
+                    {overdueRemindersCount > 10 ? '10+' : overdueRemindersCount}
+                  </Badge>
+                </span>
+              )}
+            </button>
+            <button
+              className={cn(
+                'flex items-center justify-start gap-3 w-full px-3 py-2 text-sm font-medium tracking-[-0.14px] rounded-[10px] border border-transparent transition-colors hover:bg-sidebar-accent hover:border-sidebar-border',
+                location.pathname.endsWith('/chat/drafts-sent')
+                  ? 'text-sidebar-accent-foreground'
+                  : 'text-sidebar-foreground hover:text-sidebar-accent-foreground',
+              )}
+              onClick={() => {
+                void navigate('drafts-sent');
+              }}
+              data-testid='open-drafts-and-sent-button'
+              data-track-category='CHAT_SIDEBAR'
+              data-track-name='OPEN_DRAFTS_AND_SENT'
+            >
+              <span className='size-4 flex items-center justify-center shrink-0'>
+                <SendPlaneSlant className='size-4' />
+              </span>
+              <span className='flex-1 min-w-0 text-left truncate block'>Drafts &amp; Sent</span>
+              <span className='flex items-center gap-2 text-sidebar-foreground'>
+                {draftsCount > 0 && (
+                  <span className='flex items-center gap-1 text-xs'>
+                    <PencilEdit size={12} />
+                    {draftsCount}
+                  </span>
+                )}
+                {pendingScheduledCount > 0 && (
+                  <span className='flex items-center gap-1 text-xs'>
+                    <ClockDefault size={12} />
+                    {pendingScheduledCount}
+                  </span>
+                )}
+              </span>
+            </button>
+            <button
+              className={cn(
+                'flex items-center justify-start gap-3 w-full px-3 py-2 text-sm font-medium tracking-[-0.14px] rounded-[10px] border border-transparent transition-colors hover:bg-sidebar-accent hover:border-sidebar-border',
+                recapUnreadCount > 0
+                  ? 'text-sidebar-accent-foreground font-semibold'
+                  : 'text-sidebar-foreground hover:text-sidebar-accent-foreground',
+              )}
+              onMouseEnter={() => {
+                // Pre-fetch recap data on hover for instant load
+                prefetchRecap();
+              }}
+              onClick={() => {
+                // Always navigate to recap page first
+                void navigate('/chat/dir/recap');
+              }}
+              data-track-category='CHAT_SIDEBAR'
+              data-track-name='OPEN_RECAP'
+            >
+              <span className='size-4 flex items-center justify-center shrink-0'>
+                <ListAiGenerated className='size-4' />
+              </span>
+              <span className='flex-1 min-w-0 text-left truncate block'>Recap</span>
+              {recapUnreadCount > 0 && (
+                <span className='size-5 flex items-center justify-center shrink-0'>
+                  <Badge
+                    variant='success'
+                    className='text-xs h-[18px] px-[6px] py-[1px] bg-sidebar-primary border border-sidebar-accent-ring text-sidebar-primary-foreground'
+                  >
+                    {recapUnreadCount > 10 ? '10+' : recapUnreadCount}
+                  </Badge>
+                </span>
+              )}
+            </button>
+          </div>
+
+          <div className='py-3 w-full hidden md:block' />
+
           <Accordion.Root
             type='multiple'
             className='space-y-4'
