@@ -408,6 +408,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
       context.userID,
     );
     const isDM = channel && isDMChannel(channel.scopeType);
+    const isOneToOneDM = channel?.scopeType === ChannelScopeType.DM;
     const dmUser = useUser(avatarUserId || '');
     const hasValidStatus =
       dmUser?.statusEmoji && (!dmUser.statusExpiryAt || !isStatusExpired(dmUser.statusExpiryAt));
@@ -424,7 +425,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
     const placeholderText = (
       <span className='flex items-center gap-1.5 whitespace-nowrap overflow-hidden'>
         <span>{placeholder || defaultPlaceholder}</span>
-        {isDM && hasValidStatus && dmUser?.statusEmoji && (
+        {isOneToOneDM && hasValidStatus && dmUser?.statusEmoji && (
           <span className='inline-flex items-center gap-1 min-w-0'>
             <span className='shrink-0'>{renderEmoji(dmUser.statusEmoji)}</span>
             {dmUser.statusContent && (
