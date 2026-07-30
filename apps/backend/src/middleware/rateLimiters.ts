@@ -17,6 +17,19 @@ export const generalLimiter: RateLimitRequestHandler = rateLimit({
   legacyHeaders: false,
 });
 
+export const aiTitleLimiter: RateLimitRequestHandler = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 15,
+  keyGenerator: (req): string => req.user?.id ?? req.ip ?? 'unknown',
+  message: {
+    success: false,
+    error: 'Too many title requests. Please slow down and try again shortly.',
+    timestamp: new Date().toISOString(),
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 /**
  * Rate limiter for webhook endpoints
  * Applied to: /api/webhooks/* and external source sync routes
