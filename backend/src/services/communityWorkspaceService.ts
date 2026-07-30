@@ -263,6 +263,8 @@ export class CommunityWorkspaceService {
         workspaceId: params.workspace.id,
         email,
         status: WorkspaceJoinRequestStatus.PENDING,
+        createdAt: new Date(),
+        updatedAt: new Date(),
       },
     });
 
@@ -495,6 +497,8 @@ export class CommunityWorkspaceService {
         workspaceId: params.workspace.id,
         email,
         status: WorkspaceJoinRequestStatus.PENDING,
+        createdAt: new Date(),
+        updatedAt: new Date(),
       },
     });
 
@@ -599,6 +603,7 @@ export class CommunityWorkspaceService {
         reviewedByUserId: params.reviewerUserId,
         reviewedAt: new Date(),
         reviewNote: params.reviewNote?.trim() || null,
+        updatedAt: new Date(),
       },
     });
 
