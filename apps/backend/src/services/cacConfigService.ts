@@ -14,7 +14,12 @@ export class CacConfigService {
 
       if (rawValue === undefined || rawValue === null) return null;
       if (typeof rawValue === 'string') {
-        return JSON.parse(rawValue) as unknown;
+        // JSON.parse expects a JSON-formatted string. A URL like "https://app.spaces.xyne.juspay.net" is not valid JSON:
+        try {
+          return JSON.parse(rawValue) as unknown;
+        } catch {
+          return rawValue;
+        }
       }
       return rawValue;
     } catch (error) {
