@@ -45,6 +45,7 @@ interface ActivityItemCardProps {
   linkedItemCreatedAt?: number;
   useActivityCutoff?: boolean;
   focusThread?: boolean;
+  unresolvedChannelLabel?: string;
 }
 
 export const ActivityItemCard = ({
@@ -65,6 +66,7 @@ export const ActivityItemCard = ({
   linkedItemCreatedAt,
   useActivityCutoff = true,
   focusThread = false,
+  unresolvedChannelLabel = 'Unknown Channel',
 }: ActivityItemCardProps): ReactElement | null => {
   const navigate = useNavigate();
   const context = useAuthContextValues();
@@ -75,6 +77,7 @@ export const ActivityItemCard = ({
 
   const channel = useChannel(channelId || '');
   const { displayName: channelDisplayName } = useChannelDisplayName(channel, context.userID);
+  const displayedChannelName = channel ? channelDisplayName : unresolvedChannelLabel;
 
   // Appends ?selectedActivity=id to path, preserving existing hash
   const appendSelectedActivity = (path: string): string => {
@@ -303,14 +306,12 @@ export const ActivityItemCard = ({
               actorAction !== 'workflow_question' &&
               channelId &&
               (isMobile ? (
-                <span className='ml-1.5 font-semibold'>
-                  {`#${channel ? channelDisplayName : 'Unknown Channel'}`}
-                </span>
+                <span className='ml-1.5 font-semibold'>{`#${displayedChannelName}`}</span>
               ) : (
                 <GenericMentionHoverPopover
                   data={{
                     icon: '#',
-                    title: channelDisplayName,
+                    title: displayedChannelName,
                     subtitle: channel?.description || 'Channel',
                   }}
                 >
@@ -335,10 +336,10 @@ export const ActivityItemCard = ({
                     data-track-metadata={JSON.stringify({
                       activityId: activity.id,
                       channelId: activity.channelId,
-                      channelName: channelDisplayName,
+                      channelName: displayedChannelName,
                     })}
                   >
-                    {`#${channel ? channelDisplayName : 'Unknown Channel'}`}
+                    {`#${displayedChannelName}`}
                   </span>
                 </GenericMentionHoverPopover>
               ))}
