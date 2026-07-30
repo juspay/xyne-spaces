@@ -274,11 +274,12 @@ export class InvitationController {
       }
 
       // Invitation is valid
+      // Note: invitee email is intentionally omitted — this endpoint is unauthenticated,
+      // and the actual email match is enforced server-side at accept time.
       res.status(200).json({
         valid: true,
         invitation: {
           id: invitation.id,
-          email: invitation.email,
           role: invitation.role,
           workspaceName: invitation.workspace?.name,
           organizationName: invitation.organization?.name,

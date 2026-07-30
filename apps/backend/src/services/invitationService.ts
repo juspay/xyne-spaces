@@ -765,7 +765,15 @@ export class InvitationService {
         redirectPath = guestResult.redirectPath;
         logger.info(`[DEBUG] [acceptInvitation] Granted existing guest user id=${newWorkspaceUser.id} access to invitation entity`);
       } else {
-        // User exists - reactivate them if they were removed (leftAt is set)
+        // A currently-active member of this workspace must not have their role
+        // silently overwritten by accepting a fresh invitation — that's a role
+        // escalation/downgrade vector for whoever created the invitation, not a
+        // legitimate edit path. Only a genuinely departed member (leftAt was
+        // already set) gets reactivated with the new invitation's role.
+        if (!existingWorkspaceUser.leftAt) {
+          throw new Error('You are already a member of this workspace.');
+        }
+
         newWorkspaceUser = await this.prisma.user.update({
           where: { id: existingWorkspaceUser.id },
           data: {
@@ -784,7 +792,7 @@ export class InvitationService {
       // Fetch existing orgMember by email
       const existingOrgMember = await this.prisma.orgMember.findUnique({
         where: { email: userData.email.toLowerCase() },
-        select: { memberId: true, role: true }
+        select: { memberId: true, orgId: true, leftAt: true, role: true }
       });
 
       let orgMember: { memberId: string };
@@ -800,9 +808,18 @@ export class InvitationService {
             email: userData.email.toLowerCase(),
             role: this.toEnterpriseOrgRole(invitation.role as WorkspaceRole),
           },
-          select: { memberId: true },
+          select: { memberId: true, orgId: true, leftAt: true },
         });
       } else if (resolvedOrgId) {
+        // An email that's already an active OrgMember of a *different* org must
+        // not be silently relocated into this org just because someone there
+        // sent them an invitation — that's a cross-org account-hijack vector.
+        // A departed member (leftAt already set) can still be picked up here;
+        // that's a legitimate rejoin-elsewhere case, not a hijack.
+        if (existingOrgMember.orgId !== resolvedOrgId && !existingOrgMember.leftAt) {
+          throw new Error('This email is already an active member of a different organization.');
+        }
+
         const wasCommunityMember = existingOrgMember.role === 'COMMUNITY_MEMBER';
         orgMember = await this.prisma.orgMember.update({
           where: { memberId: existingOrgMember.memberId },
@@ -811,7 +828,7 @@ export class InvitationService {
             orgId: resolvedOrgId,
             role: this.toEnterpriseOrgRole(invitation.role as WorkspaceRole),
           },
-          select: { memberId: true },
+          select: { memberId: true, orgId: true, leftAt: true },
         });
 
         if (wasCommunityMember) {
