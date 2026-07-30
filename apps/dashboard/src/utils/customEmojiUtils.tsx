@@ -1,5 +1,6 @@
 import { ReactElement } from 'react';
 import { API_BASE_URL } from '../config';
+import { findUnicodeEmojiName } from './emojiLookup';
 
 // Helper to check if emojiName is a custom emoji
 const isCustomEmoji = (emojiName: string | null | undefined): boolean => {
@@ -26,7 +27,8 @@ const getEmojiDisplayName = (emojiName: string): string => {
   if (customEmoji) {
     return `:${customEmoji.name}:`;
   }
-  return emojiName;
+  const unicodeEmojiName = findUnicodeEmojiName(emojiName);
+  return unicodeEmojiName ? `:${unicodeEmojiName}:` : emojiName;
 };
 
 /**
@@ -61,8 +63,9 @@ const convertCustomEmojiUrls = (htmlContent: string): string => {
 const renderEmoji = (
   emojiName: string | null | undefined,
   customSizeClass = 'w-5 h-5',
+  unicodeSizeClass = 'text-base',
 ): ReactElement => {
-  if (!emojiName) return <span className='text-base leading-none' />;
+  if (!emojiName) return <span className={`${unicodeSizeClass} leading-none`} />;
 
   const customEmoji = parseCustomEmoji(emojiName);
   if (customEmoji) {
@@ -94,7 +97,7 @@ const renderEmoji = (
       </span>
     );
   }
-  return <span className='text-base leading-none'>{emojiName}</span>;
+  return <span className={`${unicodeSizeClass} leading-none`}>{emojiName}</span>;
 };
 
 export {

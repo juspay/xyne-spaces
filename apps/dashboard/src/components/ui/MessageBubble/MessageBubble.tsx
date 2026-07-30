@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import Tooltip from '../Tooltip/Tooltip';
 import { AvatarSize } from '../../UserAvatar/UserAvatar';
@@ -93,6 +93,7 @@ import { isPreviewableDocument } from '../../../services/documentThumbnailServic
 import { ChannelEmailCard } from './ChannelEmailCard';
 import { AudioPlayer } from '../AudioPlayer/AudioPlayer';
 import { recordingService } from '../../../services/Recording/recordingService';
+import { loadEmojiData } from '../../../utils/emojiLookup';
 
 // ================== ATTACHMENTS BLOCK ==================
 type AttachmentType = QueryResultType<
@@ -1580,6 +1581,20 @@ export const ReactionView = ({
 
   const reactionsData: ReactionsData = parseReactionsMd(reactionsMd);
   const emojiOrder = Object.keys(reactionsData);
+  const [, setEmojiNamesReady] = useState(false);
+
+  useEffect(() => {
+    if (!emojiOrder.some(emoji => !emoji.startsWith('custom:'))) return undefined;
+
+    let active = true;
+    void loadEmojiData().then(() => {
+      if (active) setEmojiNamesReady(true);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [reactionsMd]);
 
   if (emojiOrder.length === 0) {
     return null;
@@ -1638,14 +1653,32 @@ export const ReactionView = ({
     <>
       <div className='flex items-center gap-1 flex-wrap'>
         {groupedReactionsArray.map(reaction => {
-          const userNames = reaction.users.map(u => u.name).join(', ');
+          const visibleUserNames = reaction.users.slice(0, 2).map(u => u.name);
+          const remainingUserCount = reaction.users.length - visibleUserNames.length;
+          const userNames =
+            remainingUserCount > 0
+              ? `${visibleUserNames.join(', ')} and ${remainingUserCount} ${remainingUserCount === 1 ? 'other' : 'others'}`
+              : visibleUserNames.join(', ');
           const verb = reaction.users.length === 1 ? 'has' : 'have';
           // For custom emojis, show the emoji name instead of the full ID
           const displayEmojiName = getEmojiDisplayName(reaction.emojiName);
-          const tooltipContent = `${userNames} ${verb} reacted with ${displayEmojiName}`;
+          const tooltipContent = (
+            <div className='flex max-w-full flex-col items-center gap-2'>
+              {renderEmoji(reaction.emojiName, 'size-16', 'text-5xl')}
+              <span>
+                {userNames} {verb} reacted with {displayEmojiName}
+              </span>
+            </div>
+          );
 
           return (
-            <Tooltip key={reaction.emojiName} content={tooltipContent} side='top'>
+            <Tooltip
+              key={reaction.emojiName}
+              content={tooltipContent}
+              side='top'
+              showArrow={false}
+              className='w-max max-w-[calc(100vw-2rem)] whitespace-normal break-words border border-border bg-popover text-center text-popover-foreground text-wrap shadow-md sm:max-w-md'
+            >
               <button
                 type='button'
                 data-testid='message-reaction-chip'
