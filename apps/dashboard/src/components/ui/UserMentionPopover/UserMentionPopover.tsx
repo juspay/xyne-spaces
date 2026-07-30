@@ -45,7 +45,7 @@ const UserHoverWrapperInner: React.FC<UserHoverWrapperProps> = ({
     if (!isHoverOpen) return;
     const handleScroll = (): void => setIsHoverOpen(false);
     window.addEventListener('scroll', handleScroll, true);
-    return () => window.removeEventListener('scroll', handleScroll, true);
+    return (): void => window.removeEventListener('scroll', handleScroll, true);
   }, [isHoverOpen]);
 
   // Check if user has a valid status
@@ -175,6 +175,8 @@ const UserHoverWrapperInner: React.FC<UserHoverWrapperProps> = ({
       }
       side='top'
       align='start'
+      avoidCollisions
+      collisionPadding={12}
       openDelay={400}
       closeDelay={200}
       open={hasTyped ? false : isHoverOpen}
@@ -186,15 +188,15 @@ const UserHoverWrapperInner: React.FC<UserHoverWrapperProps> = ({
           setIsHoverOpen(false);
         }
       }}
-      className='min-w-[300px] bg-transparent p-0 border-0 shadow-none'
+      className='w-[min(380px,calc(100vw-24px))] bg-transparent p-0 border-0 shadow-none'
     >
-      <div className='bg-popover rounded-lg shadow-lg w-fit border border-muted-foreground/20'>
+      <div className='w-full rounded-lg border border-muted-foreground/20 bg-popover shadow-lg'>
         <div className='flex items-start gap-4 p-4'>
           <Avatar userId={user.id} size='xl' />
-          <div className='flex-1'>
+          <div className='min-w-0 flex-1'>
             <div className='flex items-center gap-2 mb-1'>
               <div
-                className={`font-semibold text-lg ${isUserDeactivated(user) ? 'text-muted-foreground' : 'text-foreground'}`}
+                className={`min-w-0 truncate font-semibold text-lg ${isUserDeactivated(user) ? 'text-muted-foreground' : 'text-foreground'}`}
               >
                 {getUserDisplayName(user)}
               </div>
