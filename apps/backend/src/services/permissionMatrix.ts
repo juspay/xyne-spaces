@@ -30,7 +30,8 @@ export type ResourceName =
   | 'ORGANIZATIONS'
   | 'TICKET-MIGRATION'
   | 'CONFLUENCE-MIGRATION'
-  | 'EXTERNAL-STEP-RESPONSE';
+  | 'EXTERNAL-STEP-RESPONSE'
+  | 'VESPA';
 
 export interface PermissionEntry {
   resourceName: ResourceName;
@@ -96,6 +97,7 @@ export const PERMISSION_MATRIX: Record<WorkspaceRole, readonly PermissionEntry[]
     { resourceName: 'TICKET-MIGRATION', accessType: AccessType.ADMIN },
     { resourceName: 'CONFLUENCE-MIGRATION', accessType: AccessType.ADMIN },
     { resourceName: 'XYNE-APPS', accessType: AccessType.ADMIN },
+    { resourceName: 'VESPA', accessType: AccessType.ADMIN },
   ],
   OWNER: [
     { resourceName: 'TICKETS', accessType: AccessType.ADMIN },
@@ -118,6 +120,7 @@ export const PERMISSION_MATRIX: Record<WorkspaceRole, readonly PermissionEntry[]
     { resourceName: 'TICKET-MIGRATION', accessType: AccessType.ADMIN },
     { resourceName: 'CONFLUENCE-MIGRATION', accessType: AccessType.ADMIN },
     { resourceName: 'XYNE-APPS', accessType: AccessType.ADMIN },
+    { resourceName: 'VESPA', accessType: AccessType.ADMIN },
   ],
   GUEST: [
     { resourceName: 'TICKETS', accessType: AccessType.WRITE },
