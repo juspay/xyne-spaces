@@ -829,7 +829,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
 
         {/* ================== LEFT AVATAR ================== */}
         {!contentOnly && (
-          <div className='w-8 h-full flex items-start justify-center'>
+          <div
+            className={`w-8 h-full flex items-start justify-center ${showAvatar && !isWorkflowMessage ? 'pt-[4px]' : ''}`}
+          >
             {message.isDeleted ? (
               <div className='w-8 h-8 rounded-md flex items-center justify-center bg-muted'>
                 <Trash2 className='w-4 h-4 text-muted-foreground' />
