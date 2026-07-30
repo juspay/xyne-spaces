@@ -7,6 +7,9 @@ import { DisplaySearchResult, VespaSearchResponse, VespaSearchFilters } from '..
 export function sanitizeSearchQuery(query: string): string {
   return (
     query
+      // NFKC folds exotic characters to canonical form — notably U+202F (the narrow no-break
+      // space in macOS screenshot names) -> a plain space, matching how filenames are stored.
+      .normalize('NFKC')
       .trim()
       // eslint-disable-next-line no-control-regex
       .replace(/[\u0000-\u001F\u007F]/g, '') // Remove control characters

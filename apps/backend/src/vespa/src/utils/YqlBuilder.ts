@@ -199,6 +199,7 @@ export class YqlBuilder {
     useSemanticAnyway: boolean = true,
     workspaceId?: string,
     sort?: string,
+    useExactMatch: boolean = false,
   ): { yql: string; params: Record<string, string> } {
     const schemaNames = schemas.join(', ');
     // `limit` is interpolated raw into non-bindable YQL grammar ({targetHits:N}, max(N)); coerce to
@@ -216,7 +217,13 @@ export class YqlBuilder {
     const useSemantic = useSemanticAnyway && queryLength > 3;
 
     if (query && query !== '*') {
-      if (useFuzzy) {
+      if (useExactMatch) {
+        // Exact match: grammar:"phrase" matches the query as a strict adjacent-term phrase over the
+        // default fieldset. Needs rules.off on the request (set in searchService) — the deployed
+        // searchrules.sr strips stopwords ("is", "the", ...) by default, which silently breaks a
+        // phrase when a stopword sits mid-query. No nearestNeighbor / fuzzy — those broaden a match.
+        whereConditions.push(userInputClause(undefined, 'grammar:"phrase"'));
+      } else if (useFuzzy) {
         // Same user-query fields for both fuzzy branches; grammar:"tokenize" applied per clause.
         const lexicalFieldClauses = LEXICAL_FUZZY_FIELDS.map((field) => userInputClause(field)).join('\n      or ');
         if (useSemantic) {

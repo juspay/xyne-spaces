@@ -1,5 +1,6 @@
 import { storageService } from './storage/index.js';
 import { logger } from '../utils/logger';
+import { decodeUploadFilename } from '../utils/filename';
 
 export interface UploadedFileResult {
   originalName: string;
@@ -53,6 +54,9 @@ export async function uploadFiles(
 
   const uploadPromises = files.map(async (file, fileIndex): Promise<UploadedFileResult> => {
     try {
+      // Repair multipart latin1 mojibake at upload time so the stored name is correct (chat + search).
+      // Deliberately write-path only: new uploads are fixed; existing rows stay untouched (no backfill).
+      const decodedName = decodeUploadFilename(file.originalname);
       const existingStoragePath = getExistingStoragePath(file);
       let filePath = existingStoragePath;
       let fileSize = file.size;
@@ -63,10 +67,10 @@ export async function uploadFiles(
         }
 
         const storageResult = await storageService.uploadFile(file.buffer, {
-          filename: file.originalname,
+          filename: decodedName,
           contentType: file.mimetype || 'application/octet-stream',
           metadata: {
-            originalName: file.originalname,
+            originalName: decodedName,
             uploadedAt: new Date().toISOString(),
           },
           scopeType: 'CONVERSATION',
@@ -151,8 +155,8 @@ export async function uploadFiles(
       const height = metadata?.height;
       
       const uploadedFile: UploadedFileResult = {
-        originalName: file.originalname,
-        fileName: file.originalname,
+        originalName: decodedName,
+        fileName: decodedName,
         fileSize: fileSize || file.size,
         mimeType: fileMimeType,
         fileUrl: filePath,
