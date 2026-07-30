@@ -1505,7 +1505,11 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   const model = resolveModel(modelRegistry, provider, effectiveProviderConfig, {
     // Spaces default-model override — only the LiteLLM branch reads it;
     // provider-credential runs keep the model configured on the credential.
-    model: effectiveProviderConfig ? undefined : modelSettings?.model,
+    // Precedence on the platform branch: per-agent modelSettings.model, then
+    // the automation default model (batch runs), then LITELLM.model.
+    model: effectiveProviderConfig
+      ? undefined
+      : modelSettings?.model ?? (opts.automationRun ? LITELLM.automationModel : undefined),
     maxTokens: modelSettings?.maxTokens,
     litellmApiKey: opts.automationRun ? LITELLM.automationApiKey : undefined,
   });

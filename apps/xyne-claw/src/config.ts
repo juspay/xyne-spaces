@@ -50,6 +50,10 @@ export const LITELLM = {
   // queueing human mentions for minutes). Falls back to the main key so the
   // split can deploy before the second key is provisioned.
   automationApiKey: process.env["LITELLM_AUTOMATION_API_KEY"]?.trim() || (process.env["LITELLM_API_KEY"] ?? ""),
+  // Optional cheaper/faster model for automation/scheduled runs. Falls back to
+  // the main model, and a per-agent modelSettings.model still wins over this —
+  // it only replaces the PLATFORM DEFAULT for batch traffic.
+  automationModel: process.env["LITELLM_AUTOMATION_MODEL"]?.trim() || litellmModel,
   model: litellmModel,
   // Cheap-and-fast model used by judge/boss roles (chain-judge, goal-judge).
   // Boss decisions are short structured calls; running them on the same big
