@@ -197,6 +197,24 @@ export class ConfigSyncService {
         logger.info('TEAM-INTELLIGENCE-DASHBOARD resource already exists');
       }
 
+      // Ensure VESPA resource exists (gates the Vespa backfill / reindex admin endpoints)
+      const vespaResource = await prisma.resource.findUnique({
+        where: { name: 'VESPA' }
+      });
+
+      if (!vespaResource) {
+        logger.info('Creating VESPA resource');
+        await prisma.resource.create({
+          data: {
+            name: 'VESPA',
+            description: 'Vespa backfill / reindex admin endpoints (/api/admin/vespa-backfill/*, /api/migration/vespa-workspace-backfill/*)'
+          }
+        });
+        logger.info('Successfully created VESPA resource');
+      } else {
+        logger.info('VESPA resource already exists');
+      }
+
       // Log final group distribution (only for this workspace)
       const groups = await prisma.userGroup.findMany({
         where: { workspaceId }

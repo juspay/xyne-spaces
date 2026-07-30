@@ -1,5 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { authMiddleware } from '@/middleware/auth';
+import { authorize } from '@/middleware/authorize';
+import { AccessType } from '@prisma/client';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import vespaClient from '@/vespa/client';
@@ -329,7 +331,7 @@ async function backfillSchema(
  * Body: { schema?: string, delayMs?: number }
  * Query: ?schema=chat_container&delayMs=50
  */
-router.post('/trigger', authMiddleware.authenticate, async (req: Request, res: Response) => {
+router.post('/trigger', authMiddleware.authenticate, authorize('VESPA', AccessType.WRITE), async (req: Request, res: Response) => {
   try {
     const schemaFilter = (req.body.schema as string) || (req.query.schema as string);
     const delayMs = Number(req.body.delayMs ?? req.query.delayMs ?? 50);
@@ -389,7 +391,7 @@ router.post('/trigger', authMiddleware.authenticate, async (req: Request, res: R
  * GET /api/migration/vespa-workspace-backfill/status/:jobId
  * GET /migrate/api/migration/vespa-workspace-backfill/status/:jobId
  */
-router.get('/status/:jobId', authMiddleware.authenticate, (req: Request, res: Response) => {
+router.get('/status/:jobId', authMiddleware.authenticate, authorize('VESPA', AccessType.WRITE), (req: Request, res: Response) => {
   const jobId = req.params.jobId;
   const stats = jobs.get(jobId);
   if (!stats) {

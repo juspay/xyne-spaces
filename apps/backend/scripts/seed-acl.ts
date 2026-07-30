@@ -48,6 +48,11 @@ const ESSENTIAL_RESOURCES = [
     description:
       'Automation approval and on/off control (/api/automations/*). ADMIN access lets a user approve/reject proposals and toggle live automations on/off.',
   },
+  {
+    name: 'VESPA',
+    description:
+      'Vespa backfill / reindex admin endpoints (/api/admin/vespa-backfill/*, /api/migration/vespa-workspace-backfill/*). WRITE or ADMIN access lets a user trigger and manage backfill jobs.',
+  },
 ];
 
 // Default user groups with their permissions
