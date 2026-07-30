@@ -18,7 +18,7 @@ import Avatar from '../ui/Avatar/Avatar';
 import { StatusIndicator } from '../ui/StatusIndicator';
 import { Button } from '../ui/Button/Button';
 import { cn } from '../../utils/classNames';
-import { isStatusExpired, formatExpiryTime } from '../../utils/statusUtils';
+import { isStatusExpired } from '../../utils/statusUtils';
 import { useChannelByName } from '../../hooks/useChannels';
 import { useSelf } from '../../hooks/useUsers';
 import { mutators } from '../../zero/mutators';
@@ -268,11 +268,6 @@ const Settings = ({
             </div>
           )}
         </div>
-        {hasValidStatus && user?.statusExpiryAt && (
-          <div className='text-xs text-muted-foreground'>
-            {formatExpiryTime(user.statusExpiryAt, true)}
-          </div>
-        )}
       </div>
 
       {/* Pause notifications */}

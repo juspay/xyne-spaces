@@ -64,9 +64,10 @@ export const StatusIndicator: React.FC<StatusIndicatorProps> = ({
         <Tooltip.Trigger asChild>{statusIndicator}</Tooltip.Trigger>
         <Tooltip.Portal>
           <Tooltip.Content
-            side='top'
-            align='center'
-            sideOffset={5}
+            side='right'
+            align='end'
+            sideOffset={12}
+            collisionPadding={12}
             className='z-50 bg-popover text-popover-foreground px-3 py-2 rounded-lg shadow-lg max-w-48'
           >
             <div className='text-sm text-center'>
