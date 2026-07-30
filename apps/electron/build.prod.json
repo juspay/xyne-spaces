@@ -27,43 +27,210 @@
   "asarUnpack": [
     "native/mic-monitor/mic-monitor"
   ],
+  "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+
   "mac": {
     "icon": "assets/images/xyne.png",
     "category": "public.app-category.productivity",
-    "hardenedRuntime": false,
+    "hardenedRuntime": true,
+    "notarize": true,
+    "entitlements": "build/entitlements.mac.plist",
+    "entitlementsInherit": "build/entitlements.mac.plist",
+    "gatekeeperAssess": false,
+    "darkModeSupport": true,
     "target": [
       {
-        "target": "pkg",
-        "arch": [
-          "universal"
-        ]
+        "target": "dmg",
+        "arch": ["universal"]
+      },
+      {
+        "target": "zip",
+        "arch": ["universal"]
       }
     ],
     "extendInfo": {
       "NSMicrophoneUsageDescription": "Xyne Spaces needs access to your microphone for audio calls and meetings",
       "NSCameraUsageDescription": "Xyne Spaces needs access to your camera for video calls and meetings",
-      "NSScreenCaptureUsageDescription": "Xyne Spaces needs access to screen recording for screen sharing in meetings"
+      "NSScreenCaptureUsageDescription": "Xyne Spaces needs access to screen recording for screen sharing in meetings",
+      "ITSAppUsesNonExemptEncryption": false
+    }
+  },
+  "dmg": {
+    "sign": false,
+    "contents": [
+      { "x": 150, "y": 185, "type": "file" },
+      { "x": 390, "y": 185, "type": "link", "path": "/Applications" }
+    ],
+    "window": {
+      "width": 540,
+      "height": 380
     }
   },
   "win": {
     "icon": "assets/images/xyne.png",
-    "signAndEditExecutable": false
-  },
-  "linux": {
-    "icon": "build/icons",
-    "category": "Utility",
+    "signAndEditExecutable": false,
     "target": [
       {
-        "target": "AppImage",
+        "target": "nsis",
+        "arch": ["x64", "arm64"]
+      },
+      {
+        "target": "msi",
         "arch": ["x64"]
       },
       {
-        "target": "deb",
+        "target": "portable",
         "arch": ["x64"]
       }
     ]
   },
+  "nsis": {
+    "oneClick": false,
+    "perMachine": false,
+    "allowElevation": true,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "runAfterFinish": true,
+    "deleteAppDataOnUninstall": false,
+    "unicode": true,
+    "packElevateHelper": true,
+    "uninstallDisplayName": "Xyne Spaces"
+  },
+  "msi": {
+    "oneClick": false,
+    "perMachine": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "runAfterFinish": false
+  },
+  "portable": {
+    "artifactName": "${productName}-Portable-${version}-${os}-${arch}.${ext}"
+  },
+
+  "linux": {
+    "icon": "build/icons",
+    "category": "Utility",
+    "synopsis": "Xyne Spaces desktop application",
+    "description": "Xyne Spaces - collaborative workspace for teams",
+    "maintainer": "engineering@xyne.com",
+    "vendor": "Xyne Team",
+    "executableName": "xyne-spaces",
+    "mimeTypes": ["x-scheme-handler/xyne-spaces"],
+    "desktop": {
+      "entry": "[Desktop Entry]\nName=Xyne Spaces\nType=Application\nGenericName=Collaboration Tool"
+    },
+    "target": [
+      {
+        "target": "AppImage",
+        "arch": ["x64", "arm64"]
+      },
+      {
+        "target": "deb",
+        "arch": ["x64", "arm64"]
+      },
+      {
+        "target": "rpm",
+        "arch": ["x64", "arm64"]
+      },
+      {
+        "target": "snap",
+        "arch": ["x64"]
+      },
+      {
+        "target": "pacman",
+        "arch": ["x64"]
+      },
+      {
+        "target": "flatpak",
+        "arch": ["x64"]
+      },
+      {
+        "target": "tar.gz",
+        "arch": ["x64", "arm64"]
+      }
+    ]
+  },
   "deb": {
-    "depends": ["libnss3-tools"]
+    "depends": [
+      "libnss3-tools",
+      "libnotify4",
+      "libxtst6",
+      "libnss3",
+      "libxss1",
+      "libsecret-1-0"
+    ],
+    "recommends": ["libappindicator3-1"],
+    "compression": "xz",
+    "priority": "optional"
+  },
+  "rpm": {
+    "depends": [
+      "gtk3",
+      "libnotify",
+      "nss",
+      "libXScrnSaver",
+      "libXtst",
+      "xdg-utils",
+      "at-spi2-core",
+      "libsecret"
+    ],
+    "compression": "xz",
+    "fpm": ["--rpm-rpmbuild-define", "_build_id_links none"]
+  },
+  "appImage": {
+    "artifactName": "${productName}-${version}-${arch}.${ext}"
+  },
+  "snap": {
+    "summary": "Xyne Spaces - collaborative workspace for teams",
+    "description": "Xyne Spaces desktop application for team collaboration, meetings, and screen sharing.",
+    "base": "core22",
+    "confinement": "strict",
+    "grade": "stable",
+    "allowNativeWayland": true,
+    "compression": "xz",
+    "plugs": [
+      "default",
+      "audio-playback",
+      "audio-record",
+      "camera",
+      "screen-inhibit-control",
+      "network",
+      "network-bind",
+      "password-manager-service"
+    ],
+    "stagePackages": ["default"]
+  },
+  "flatpak": {
+    "runtime": "org.freedesktop.Platform",
+    "runtimeVersion": "23.08",
+    "sdk": "org.freedesktop.Sdk",
+    "base": "org.electronjs.Electron2.BaseApp",
+    "baseVersion": "23.08",
+    "finishArgs": [
+      "--share=ipc",
+      "--socket=x11",
+      "--socket=wayland",
+      "--socket=pulseaudio",
+      "--share=network",
+      "--device=dri",
+      "--device=all",
+      "--filesystem=home",
+      "--talk-name=org.freedesktop.Notifications"
+    ],
+    "useWaylandFlags": true
+  },
+  "pacman": {
+    "depends": [
+      "c-ares",
+      "gtk3",
+      "libnotify",
+      "nss",
+      "libxss",
+      "libxtst",
+      "xdg-utils",
+      "libsecret"
+    ],
+    "compression": "xz"
   }
 }

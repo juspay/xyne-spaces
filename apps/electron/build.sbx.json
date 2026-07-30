@@ -7,6 +7,13 @@
   "directories": {
     "output": "release/sandbox"
   },
+  "electronFuses": {
+    "runAsNode": false,
+    "enableNodeOptionsEnvironmentVariable": false,
+    "enableNodeCliInspectArguments": false,
+    "onlyLoadAppFromAsar": true,
+    "enableEmbeddedAsarIntegrityValidation": true
+  },
   "protocols": [
     {
       "name": "Xyne Spaces Sandbox",
@@ -28,7 +35,9 @@
   "mac": {
     "icon": "assets/images/xyne.png",
     "category": "public.app-category.productivity",
-    "hardenedRuntime": false,
+    "hardenedRuntime": true,
+    "entitlements": "build/entitlements.mac.plist",
+    "entitlementsInherit": "build/entitlements.mac.plist",
     "target": [
       {
         "target": "pkg",

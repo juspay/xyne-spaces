@@ -1,4 +1,4 @@
-import { exec } from 'child_process';
+import { exec, execFile } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -11,6 +11,9 @@ import { safeRecordMetric } from '../services/telemetry';
 import { IKeychain } from './IKeychain';
 
 const execAsync = promisify(exec);
+// Shell-free variant (argument array, no /bin/sh) for commands that handle a value parsed out of
+// an untrusted certificate (the CommonName-derived nickname below), which must never reach a shell.
+const execFileAsync = promisify(execFile);
 const writeFileAsync = promisify(fs.writeFile);
 const unlinkAsync = promisify(fs.unlink);
 const mkdirAsync = promisify(fs.mkdir);
@@ -140,6 +143,9 @@ class LinuxKeychainService implements IKeychain {
         await writeFileAsync(certPath, certPem);
 
         try {
+            // ACCEPTED RISK (secops #289, MED): static 'changeit' P12 passphrase. The .p12 is a
+            // per-call temp file, immediately imported via pk12util and unlink()ed in the finally
+            // below, so the passphrase guards nothing on-host; kept static so export/import agree.
             // Create PKCS#12 bundle
             const p12Cmd = `${OPENSSL} pkcs12 -export -in "${certPath}" -inkey "${keyPath}" -out "${p12Path}" -passout pass:changeit -name "${this.label}"`;
             await execAsync(p12Cmd);
@@ -197,14 +203,19 @@ class LinuxKeychainService implements IKeychain {
         await writeFileAsync(tmpPath, pem);
 
         try {
-            // Extract Common Name to use as nickname
-            const { stdout: subjectOut } = await execAsync(`${OPENSSL} x509 -in "${tmpPath}" -noout -subject -nameopt multiline`);
+            // Extract Common Name to use as nickname. execFile (no shell) — the CN comes from an
+            // untrusted certificate and must not be interpolated into a shell command (secops #362).
+            const { stdout: subjectOut } = await execFileAsync(OPENSSL, ['x509', '-in', tmpPath, '-noout', '-subject', '-nameopt', 'multiline']);
             const cnMatch = subjectOut.match(/commonName\s*=\s*(.*)/);
-            const nickname = cnMatch ? cnMatch[1].trim() : `XyneRootCA_${Date.now()}`;
+            const rawNickname = cnMatch ? cnMatch[1].trim() : `XyneRootCA_${Date.now()}`;
+            // Restrict the nickname to a safe charset: it is used both as a certutil -n value and as a
+            // filename under /usr/local/share/ca-certificates below, so it must not carry shell
+            // metacharacters or path separators/traversal (secops #362).
+            const nickname = rawNickname.replace(/[^A-Za-z0-9._@ -]/g, '_').slice(0, 128) || `XyneRootCA_${Date.now()}`;
 
             // Check if certificate with same nickname already exists
             try {
-                await execAsync(`certutil -d sql:${nssDir} -L -n "${nickname}"`);
+                await execFileAsync('certutil', ['-d', `sql:${nssDir}`, '-L', '-n', nickname]);
                 // If no error, cert exists
                 Logger.info(EnrollmentEvent.ROOT_CA_INSTALL_SUCCESS, {
                     exists_in_keychain: true,

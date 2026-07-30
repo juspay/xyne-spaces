@@ -1,4 +1,4 @@
-import { app, ipcMain } from 'electron';
+import { app, ipcMain, IpcMainInvokeEvent } from 'electron';
 import * as os from 'os';
 import * as path from 'path';
 import log from 'electron-log/main';
@@ -13,6 +13,13 @@ import { safeRecordMetric } from '../services/telemetry';
 import { dashboardLoad, enrollmentDone } from '../services/enrollmentMetrics';
 
 const MAX_RETRIES = 3;
+
+interface MainWindowLike {
+    isDestroyed(): boolean;
+    webContents: {
+        mainFrame: unknown;
+    };
+}
 
 /**
  * Loads a URL with retry logic to handle mTLS timeout issues
@@ -61,15 +68,51 @@ async function urlLoadWithRetry(fn: () => Promise<void>, attempts = 0): Promise<
     }
 }
 
+/**
+ * Gate for the privileged mTLS/keychain IPC handlers. Only the top-level frame of the main
+ * application window may invoke them — this blocks renderer-injected content (an XSS'd sub-frame
+ * or `<iframe srcdoc>`) from silently driving certificate/keychain operations (secops #362).
+ *
+ * The legitimate device-enrollment flow (generate-keys -> generate-csr -> store-certificate) runs
+ * in the main window's top frame, so it passes this gate unchanged; only nested/foreign frames are
+ * rejected. If enrollment is ever moved into a child frame or a dedicated window, update this check
+ * to reference that window's webContents rather than loosening it.
+ *
+ * Validate both the owning WebContents and the exact current main frame. Identity comparison also
+ * rejects iframes and stale frames retained across a navigation.
+ */
+export function isCurrentMainFrameSender(
+    sender: unknown,
+    senderFrame: unknown,
+    mainWindow: MainWindowLike | null | undefined,
+): boolean {
+    return Boolean(
+        mainWindow
+        && !mainWindow.isDestroyed()
+        && senderFrame
+        && sender === mainWindow.webContents
+        && senderFrame === mainWindow.webContents.mainFrame,
+    );
+}
+
+function assertMainWindowSender(event: IpcMainInvokeEvent): void {
+    if (!isCurrentMainFrameSender(event.sender, event.senderFrame, getMainWindow())) {
+        log.error('[mTLS] Rejected privileged keychain IPC from a non-main-window sender');
+        throw new Error('Unauthorized: mTLS/keychain IPC is restricted to the main application window');
+    }
+}
+
 export function setupMTLSIpcHandlers(): void {
 
     // mtls start
-    ipcMain.handle('generate-keys', async () => {
+    ipcMain.handle('generate-keys', async (event) => {
+        assertMainWindowSender(event);
         Logger.info(EnrollmentEvent.FIRST_TIME_SIGNUP_START);
         return await keychain.generateKeyPair(config.MTLS_IDENTITY_NAME);
     });
 
-    ipcMain.handle('generate-csr', async () => {
+    ipcMain.handle('generate-csr', async (event) => {
+        assertMainWindowSender(event);
         try {
             const result = await keychain.generateCSR(config.MTLS_IDENTITY_NAME);
             Logger.info(EnrollmentEvent.CSR_GENERATION_SUCCESS);
@@ -81,6 +124,7 @@ export function setupMTLSIpcHandlers(): void {
     });
 
     ipcMain.handle('store-certificate', async (event, pem: string) => {
+        assertMainWindowSender(event);
         try {
             await keychain.importCertificate(pem);
             Logger.info(EnrollmentEvent.ENROLLMENT_SUCCESS, { 
@@ -115,15 +159,18 @@ export function setupMTLSIpcHandlers(): void {
         }
     });
 
-    ipcMain.handle('delete-keys', async () => {
+    ipcMain.handle('delete-keys', async (event) => {
+        assertMainWindowSender(event);
         return await keychain.deleteIdentity(config.MTLS_IDENTITY_NAME);
     });
 
-    ipcMain.handle('check-keys', async () => {
+    ipcMain.handle('check-keys', async (event) => {
+        assertMainWindowSender(event);
         return await keychain.checkIdentity(config.MTLS_IDENTITY_NAME);
     });
 
-    ipcMain.handle('get-device-info', async () => {
+    ipcMain.handle('get-device-info', async (event) => {
+        assertMainWindowSender(event);
         Logger.info(EnrollmentEvent.DEVICE_INFO_REQUESTED);
         return {
             name: os.hostname(),

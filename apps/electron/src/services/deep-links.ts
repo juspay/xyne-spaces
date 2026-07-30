@@ -357,6 +357,11 @@ async function handleDeepLink(url: string): Promise<void> {
       pathStr = '/' + pathStr;
     }
 
+    // ACCEPTED RISK (secops #398, LOW): isSafeDeepLinkPath (#9110) is a SYNTAX filter — it blocks
+    // protocol-relative '//', backslashes, path traversal and non-route charsets, but it is NOT the
+    // route-prefix allowlist the finding recommends, so a syntactically-valid path to any in-app
+    // route can still be forwarded. The team accepted this residual (the renderer router only
+    // exposes known screens). Tighten to an explicit allowlist if the deep-link surface grows.
     // XYNE Issues 398/405: only forward validated in-app route paths.
     if (!isSafeDeepLinkPath(pathStr)) {
       log.warn('[DeepLinks] Rejected unsafe deep-link navigation path:', pathStr);

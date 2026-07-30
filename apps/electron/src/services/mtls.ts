@@ -7,6 +7,61 @@ import { Logger } from './logger/Logger';
 import { EnrollmentEvent } from './logger/enrollment-events';
 import { config } from '../app/config';
 
+export function normalizeCertificateRequestHostname(target: string): string | null {
+    const value = target.trim();
+    if (!value) {
+        return null;
+    }
+
+    const hasScheme = /^[a-z][a-z\d+.-]*:\/\//i.test(value);
+
+    try {
+        const parsed = new URL(hasScheme ? value : `https://${value}`);
+        if ((parsed.protocol !== 'https:' && parsed.protocol !== 'http:') || !parsed.hostname) {
+            return null;
+        }
+        return parsed.hostname.toLowerCase();
+    } catch {
+        return null;
+    }
+}
+
+export function certificateRequestIsAllowed(target: string, allowedHosts: ReadonlySet<string>): boolean {
+    const hostname = normalizeCertificateRequestHostname(target);
+    return hostname !== null && allowedHosts.has(hostname);
+}
+
+export function selectClientCertificate<T>(
+    target: string,
+    allowedHosts: ReadonlySet<string>,
+    certificates: readonly T[],
+): T | undefined {
+    if (!certificateRequestIsAllowed(target, allowedHosts)) {
+        return undefined;
+    }
+    return certificates[0];
+}
+
+// The device identity client certificate must only be presented to the Xyne backend/auth hosts —
+// never to an arbitrary server that requests one, which would leak the device identity to a foreign
+// origin (secops #345). The allowlist is derived from the mTLS-protected endpoints in config.
+function allowedMtlsHosts(): Set<string> {
+    const hosts = new Set<string>();
+    for (const u of [config.BACKEND_URL, config.MTLS_BACKEND_URL, config.MTLS_FRONTEND_URL, config.FRONTEND_URL]) {
+        try {
+            if (u) {
+                const hostname = normalizeCertificateRequestHostname(u);
+                if (hostname) {
+                    hosts.add(hostname);
+                }
+            }
+        } catch {
+            // ignore malformed config entries
+        }
+    }
+    return hosts;
+}
+
 export async function setupMTLS() {
     log.info('[mTLS] setupMTLS called - registering event handlers');
 
@@ -19,13 +74,29 @@ export async function setupMTLS() {
 
     app.on('select-client-certificate', (event, _webContents, url, list, callback) => {
         log.info(`[mTLS] Server requested client certificate for ${url}`);
+
+        // Only present the device identity certificate to allowlisted Xyne hosts (secops #345).
+        const allowlist = allowedMtlsHosts();
+        const requestHost = normalizeCertificateRequestHostname(url);
+        if (!requestHost || !allowlist.has(requestHost)) {
+            log.warn(`[mTLS] Refusing client certificate to non-allowlisted host: ${requestHost || url}`);
+            Logger.warn(EnrollmentEvent.CERTIFICATE_INVALID, { url, error: 'host_not_allowlisted' });
+            event.preventDefault();
+            callback(undefined); // present NO certificate to foreign hosts
+            return;
+        }
+
         log.info(`[mTLS] Candidates found: ${list.length}`);
 
-        // Always handle certificate selection (both app.spaces and auth.spaces require mTLS)
+        // Both app.spaces and auth.spaces require mTLS.
         event.preventDefault();
 
         if (list.length > 0) {
-            const cert = list[0];
+            const cert = selectClientCertificate(url, allowlist, list);
+            if (!cert) {
+                callback(undefined);
+                return;
+            }
             log.info(`[mTLS] Selecting certificate: Subject: ${cert.subjectName}, Issuer: ${cert.issuerName}, Serial: ${cert.serialNumber}`);
             callback(cert);
         } else {
