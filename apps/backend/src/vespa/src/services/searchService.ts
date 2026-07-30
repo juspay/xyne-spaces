@@ -302,9 +302,22 @@ export class SearchService {
         || (await db.user.findUnique({ where: { id: userId }, select: { workspaceId: true } }))?.workspaceId
         || undefined;
 
-      // Parse time keywords from query
-      const parsedQuery: ParsedTimeQuery = parseTimeKeywords(query);
-      const searchQuery = parsedQuery.cleanedQuery || query;
+      // Exact-match mode: the user wrapped the whole query in double quotes (e.g. "quarterly
+      // report") to match it as a strict adjacent-term phrase (grammar:"phrase" + rules.off),
+      // with no fuzzy/semantic broadening. Detect on the raw query, before any keyword stripping.
+      const rawTrimmedQuery = query?.trim() ?? '';
+      const isExactMatch =
+        rawTrimmedQuery.length >= 2 &&
+        rawTrimmedQuery.startsWith('"') &&
+        rawTrimmedQuery.endsWith('"') &&
+        rawTrimmedQuery.slice(1, -1).trim().length > 0;
+
+      // Parse time keywords from query — skipped for exact match so a quoted word like
+      // "yesterday" is searched literally instead of being consumed as a time filter.
+      const parsedQuery: ParsedTimeQuery = parseTimeKeywords(isExactMatch ? '' : query);
+      const searchQuery = isExactMatch
+        ? rawTrimmedQuery.slice(1, -1).trim()
+        : parsedQuery.cleanedQuery || query;
       const freshnessWeight = parsedQuery.config?.freshnessWeight ?? 0.0;
       const filteringWeight = parsedQuery.config?.filteringWeight ?? 0.0;
       const timeRangeStart = parsedQuery.config?.timeRange.from ?? 0;
@@ -400,6 +413,7 @@ export class SearchService {
           useSemanticAnyway,
           wsId,
           sort,
+          isExactMatch,
         );
 
         const hasQuery = !!(searchQuery && searchQuery.trim());
@@ -428,6 +442,9 @@ export class SearchService {
           "ranking.listFeatures": true,
           ...(presentationSummary ? { "presentation.summary": presentationSummary } : {}),
           tracelevel: 0,
+          // Exact match turns off the default searchrules.sr rewriting (stopword removal + ranking
+          // boosts): stripping a word like "is"/"the" mid-query silently breaks phrase adjacency.
+          ...(isExactMatch ? { "rules.off": true } : {}),
           ...(rankProfile === RankProfile.personalizedRank && {
             "input.query(channel_personalization_weights)": channelWeights,
             "input.query(user_personalization_weights)": userWeights,
@@ -504,7 +521,8 @@ export class SearchService {
         goodResults.length < MIN_GOOD_RESULTS;
 
 
-      const needsFallback = newFallbackMethod ? newFallback : oldFallback;
+      // Exact-match queries never fall back to fuzzy — 3-gram fuzzy would defeat "exact".
+      const needsFallback = !isExactMatch && (newFallbackMethod ? newFallback : oldFallback);
       let fallbackDuration = 0
 
       if(needsFallback){
