@@ -230,7 +230,6 @@ export async function executeStreamingLlmRequest(
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     const attemptStart = Date.now();
     const isLastAttempt = attempt === MAX_ATTEMPTS;
-
     if (options.abortSignal?.aborted) {
       return { ok: false, reason: 'cancelled' };
     }
