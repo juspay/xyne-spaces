@@ -219,6 +219,7 @@ export const PreviewThreadPanel: React.FC<{
           {...(threadMessages && threadMessages.length > 0 ? { threadMessages } : {})}
           hideHeader
           disableAskAI
+          skipInputAutoFocus
         />
       </div>
     )}

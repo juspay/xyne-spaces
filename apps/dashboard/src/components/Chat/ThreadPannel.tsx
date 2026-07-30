@@ -106,6 +106,7 @@ interface ThreadMessagesProps {
   showChannelLink?: boolean;
   /** Custom click handler for the channel name badge. Defaults to opening the thread in-channel. */
   onChannelLinkClick?: () => void;
+  skipInputAutoFocus?: boolean;
 }
 
 export const ThreadMessages = ({
@@ -125,6 +126,7 @@ export const ThreadMessages = ({
   matchedMessageId,
   showChannelLink = false,
   onChannelLinkClick,
+  skipInputAutoFocus: propSkipInputAutoFocus = false,
 }: ThreadMessagesProps = {}): ReactElement => {
   const {
     channelId: paramChannelId,
@@ -171,7 +173,7 @@ export const ThreadMessages = ({
     : 'thread';
 
   const isFocusedThread = searchParams.get('focusThread') === '1';
-  const skipInputAutoFocus = searchParams.get('nofocus') === '1';
+  const skipInputAutoFocus = propSkipInputAutoFocus || searchParams.get('nofocus') === '1';
 
   const participationStatus = useGetChannelUserStatus(derivedChannelId);
   const isMember = !!participationStatus;
