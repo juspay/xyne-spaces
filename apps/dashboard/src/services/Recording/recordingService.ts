@@ -135,6 +135,17 @@ export interface RecordingDetail extends Recording {
   linkedTicketMessageId?: string | null;
 }
 
+export interface RecordingRepairOutage {
+  startedAt: string;
+  endedAt: string | null;
+  reason: 'browser_offline' | 'livekit_disconnected' | 'reconnect_timeout' | 'agent_left';
+}
+
+export interface RecordingRepairStatus {
+  status: 'OPEN' | 'FINALIZED' | 'PROCESSING' | 'MERGED' | 'FAILED';
+  processingError: string | null;
+}
+
 /** A single in-call recording session (call_recordings row). */
 export interface CallRecording {
   id: string;
@@ -376,6 +387,42 @@ class RecordingService {
    */
   async deleteRecording(callId: string): Promise<void> {
     await apiInstance.delete(`/calls/recordings/${callId}`);
+  }
+
+  async uploadRecordingRepairChunk(
+    callId: string,
+    captureId: string,
+    sequence: number,
+    chunk: {
+      audio: Blob;
+      startedAt: string;
+      endedAt: string;
+      checksum: string;
+      mimeType: string;
+    },
+  ): Promise<void> {
+    const form = new FormData();
+    form.append('audio', chunk.audio, `${sequence}.webm`);
+    form.append('startedAt', chunk.startedAt);
+    form.append('endedAt', chunk.endedAt);
+    form.append('checksum', chunk.checksum);
+    form.append('mimeType', chunk.mimeType);
+    await apiInstance.put(`/calls/${callId}/recording-repairs/${captureId}/chunks/${sequence}`, form);
+  }
+
+  async finalizeRecordingRepair(
+    callId: string,
+    captureId: string,
+    outages: RecordingRepairOutage[],
+  ): Promise<void> {
+    await apiInstance.post(`/calls/${callId}/recording-repairs/${captureId}/finalize`, { outages });
+  }
+
+  async getRecordingRepairStatus(callId: string, captureId: string): Promise<RecordingRepairStatus> {
+    const response: AxiosResponse<{ capture: RecordingRepairStatus }> = await apiInstance.get(
+      `/calls/${callId}/recording-repairs/${captureId}`,
+    );
+    return response.data.capture;
   }
 
   /**

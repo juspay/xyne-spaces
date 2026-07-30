@@ -55,6 +55,8 @@ import {
 } from './components/RecordingConnectionStatus';
 import { getRecordingDefaultLayout } from '../../hooks/useRecordingDefaultLayout';
 import { DEFAULT_NOTES_TITLE } from '../../stores/recordingStore';
+import { shouldConfirmTranscriptionAgentLeft } from '../../utils/livekitAgent';
+import { offlineRecordingService } from '../../services/Recording/offlineRecordingService';
 
 const AUTO_START_TTL_MS = 60_000;
 
@@ -126,9 +128,6 @@ export default function RecordingsScreen(): ReactElement {
   const [scrollContainer, setScrollContainer] = useState<HTMLDivElement | null>(null);
   const [showTitleModal, setShowTitleModal] = useState(false);
   const [savingTitle, setSavingTitle] = useState(false);
-  // True when the title modal was opened because the agent dropped (auto-end),
-  // not by a user-initiated stop. Drives the warning banner in SaveTitleModal.
-  const [endedByAgentDrop, setEndedByAgentDrop] = useState(false);
   const [showSttPicker, setShowSttPicker] = useState(false);
   const [sttModel, setSttModel] = useState<'google' | 'azure' | 'deepgram'>('google');
   // Multi-select for bulk actions (delete / ask AI)
@@ -152,7 +151,6 @@ export default function RecordingsScreen(): ReactElement {
   const pendingAutoStart = useRecordingStore(ctx => ctx.pendingAutoStart);
   const autoStartRequestedAt = useRecordingStore(ctx => ctx.autoStartRequestedAt);
   const pendingStop = useRecordingStore(ctx => ctx.pendingStop);
-  const agentLeft = useRecordingStore(ctx => ctx.agentLeft);
   const room = useRecordingStore(ctx => ctx.room);
   const activeLayout = useRecordingStore(ctx => ctx.activeLayout);
   const isTranscriptMinimized = useRecordingStore(ctx => ctx.isTranscriptMinimized);
@@ -166,6 +164,7 @@ export default function RecordingsScreen(): ReactElement {
 
   const isActive =
     recordingStatus === 'recording' ||
+    recordingStatus === 'offline' ||
     recordingStatus === 'paused' ||
     recordingStatus === 'starting';
 
@@ -180,15 +179,37 @@ export default function RecordingsScreen(): ReactElement {
     }
   }, [isActive]);
 
-  // Stable callback passed to the connection hook — stops the recording and
-  // shows the save-title modal when the room disconnects unexpectedly.
-  const handleUnexpectedDisconnect = useCallback((): void => {
-    sendRecordingEvent({ type: 'stopRecording' });
-    setShowTitleModal(true);
-  }, []);
+  const offlineFallbackEnabled = import.meta.env.VITE_ENABLE_RECORDING_OFFLINE_FALLBACK === 'true';
+
+  const handleConnectionLost = useCallback((reason: 'browser_offline' | 'livekit_disconnected' | 'reconnect_timeout'): void => {
+    if (offlineFallbackEnabled) {
+      sendRecordingEvent({ type: 'enterOfflineFallback', reason });
+    } else {
+      sendRecordingEvent({ type: 'stopRecording' });
+    }
+  }, [offlineFallbackEnabled]);
 
   const { roomConnectionState, showConnectionWarning, networkQuality, dismissConnectionWarning } =
-    useRecordingConnectionState(room, isActive, recordingStatus, handleUnexpectedDisconnect);
+    useRecordingConnectionState(room, isActive, recordingStatus, handleConnectionLost);
+
+  useEffect(() => {
+    if (
+      recordingStatus === 'offline' &&
+      roomConnectionState === ConnectionState.Connected &&
+      room &&
+      !shouldConfirmTranscriptionAgentLeft(room)
+    ) {
+      sendRecordingEvent({ type: 'resumeLiveRecording' });
+    }
+  }, [recordingStatus, roomConnectionState, room]);
+
+  useEffect(() => {
+    if (!offlineFallbackEnabled) return;
+    void offlineRecordingService.initialize().catch(() => undefined);
+    const recover = (): void => { void offlineRecordingService.initialize().catch(() => undefined); };
+    window.addEventListener('online', recover);
+    return (): void => window.removeEventListener('online', recover);
+  }, [offlineFallbackEnabled]);
 
   // Live transcript streaming from global store (subscription is managed by the store)
   const { transcripts } = useTranscriptStream();
@@ -328,23 +349,11 @@ export default function RecordingsScreen(): ReactElement {
 
   // Stop from the floating pill — same flow as clicking Stop in the UI (shows title modal)
   useEffect(() => {
-    if (pendingStop && (recordingStatus === 'recording' || recordingStatus === 'paused')) {
+    if (pendingStop && (recordingStatus === 'recording' || recordingStatus === 'offline' || recordingStatus === 'paused')) {
       handleStopRecording();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingStop, recordingStatus]);
-
-  // Agent dropped mid-recording → auto-end and show the save-title modal with a
-  // notice. No confirmation: a note-taker with no transcription can't continue.
-  useEffect(() => {
-    if (agentLeft && (recordingStatus === 'recording' || recordingStatus === 'paused')) {
-      lastExternalIdRef.current = externalId;
-      setEndedByAgentDrop(true);
-      sendRecordingEvent({ type: 'stopRecording' }); // clears agentLeft in the store
-      setShowTitleModal(true);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [agentLeft, recordingStatus]);
 
   // ─── REMOVED: connection state management moved to useRecordingConnectionState ───
   // See hooks/useRecordingConnectionState.ts
@@ -361,7 +370,6 @@ export default function RecordingsScreen(): ReactElement {
       }
       await recordingService.updateRecordingTitle(lastExternalIdRef.current, title);
       setShowTitleModal(false);
-      setEndedByAgentDrop(false);
       sendRecordingEvent({ type: 'clearTranscripts' });
       toast.success('Recording saved', { description: title });
     } catch {
@@ -868,8 +876,9 @@ export default function RecordingsScreen(): ReactElement {
 
       {/* ─── Sticky Bottom Control Bar (always visible) ───── */}
       <RecordingControlBar
-        isRecording={recordingStatus === 'recording' || recordingStatus === 'paused'}
+        isRecording={recordingStatus === 'recording' || recordingStatus === 'offline' || recordingStatus === 'paused'}
         isPaused={recordingStatus === 'paused'}
+        isOffline={recordingStatus === 'offline'}
         isStarting={recordingStatus === 'starting'}
         startTime={startTime}
         onStart={handleStartRecording}
@@ -884,7 +893,7 @@ export default function RecordingsScreen(): ReactElement {
         defaultTitle={generateAutoTitle()}
         onSave={handleSaveTitle}
         isSaving={savingTitle}
-        endedByAgentDrop={endedByAgentDrop}
+        endedByAgentDrop={false}
       />
 
       {/* ─── Bulk Delete Confirmation Dialog ───── */}

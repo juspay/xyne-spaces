@@ -29,7 +29,7 @@ export function RecordingReconnectingOverlay(): ReactElement {
         <div className='animate-spin rounded-full h-12 w-12 border-b-2 border-t-2 border-yellow-500 mx-auto mb-4' />
         <p className='font-semibold text-foreground dark:text-gray-100 mb-1'>Reconnecting...</p>
         <p className='text-sm text-yellow-500 dark:text-yellow-400'>
-          Connection lost — your recording may be interrupted
+          Local recording active. Transcript will resume after reconnecting.
         </p>
       </div>
     </div>
@@ -79,8 +79,8 @@ export function RecordingConnectionWarningModal({
             </h2>
             <p className='text-sm text-muted-foreground dark:text-muted-foreground'>
               {isLost
-                ? 'You appear to be offline. The recording may have stopped.'
-                : 'Your connection is poor. The recording may be interrupted or stopped.'}
+                ? 'Local recording remains active. Transcript is paused until reconnecting.'
+                : 'Local recording protects gaps if this connection drops.'}
             </p>
           </div>
         </div>

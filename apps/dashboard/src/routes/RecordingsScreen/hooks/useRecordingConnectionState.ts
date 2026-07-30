@@ -6,7 +6,7 @@
  *  - Bridges browser offline/online events into ConnectionState
  *  - Shows a "Recording resumed" banner when reconnection succeeds
  *  - Shows a network-quality warning modal when quality is Poor/Lost
- *  - Applies a 30 s safety-net timeout: stops the recording if still reconnecting
+ *  - Applies a 30 s safety-net timeout: switches to local fallback if reconnecting
  *
  * Mirrors the pattern used in CallStateTransition / FullCallView.
  */
@@ -34,15 +34,13 @@ export interface RecordingConnectionStateResult {
  * @param room            The LiveKit Room from the recording store (null when not recording).
  * @param isActive        True while recordingStatus is recording/paused/starting.
  * @param recordingStatus Raw status string — used only for log context.
- * @param onUnexpectedDisconnect  Called when the room disconnects unexpectedly or the
- *                        reconnect timeout fires.  Caller is responsible for stopping
- *                        the recording and showing the save-title modal.
+ * @param onConnectionLost Called with an outage reason; caller keeps local capture running.
  */
 export function useRecordingConnectionState(
   room: Room | null,
   isActive: boolean,
   recordingStatus: string,
-  onUnexpectedDisconnect: () => void,
+  onConnectionLost: (reason: 'browser_offline' | 'livekit_disconnected' | 'reconnect_timeout') => void,
 ): RecordingConnectionStateResult {
   const [roomConnectionState, setRoomConnectionState] = useState<ConnectionState | null>(null);
   const [showConnectionWarning, setShowConnectionWarning] = useState(false);
@@ -75,6 +73,7 @@ export function useRecordingConnectionState(
       });
       if (isActive) {
         setRoomConnectionState(ConnectionState.Reconnecting);
+        onConnectionLost('browser_offline');
       }
     };
 
@@ -89,10 +88,10 @@ export function useRecordingConnectionState(
       if (!isActive || !room) return;
 
       if (room.state === ConnectionState.Disconnected) {
-        // Room gave up while we were offline — stop immediately.
-        console.warn('[RecordingsScreen] Room already disconnected on browser online — stopping');
+        // Room gave up while offline. Keep local capture active.
+        console.warn('[RecordingsScreen] Room already disconnected on browser online — local fallback');
         setRoomConnectionState(ConnectionState.Disconnected);
-        onUnexpectedDisconnect();
+        onConnectionLost('livekit_disconnected');
       } else if (room.state === ConnectionState.Connected) {
         // The blip was so brief LiveKit never lost the connection.
         // Clear the Reconnecting state we set from the offline event so the
@@ -109,7 +108,7 @@ export function useRecordingConnectionState(
       window.removeEventListener('offline', handleOffline);
       window.removeEventListener('online', handleOnline);
     };
-  }, [recordingStatus, isActive, room, onUnexpectedDisconnect]);
+  }, [recordingStatus, isActive, room, onConnectionLost]);
 
   // ─── LiveKit ConnectionStateChanged — single source of truth ──────────────
   useEffect(() => {
@@ -140,25 +139,11 @@ export function useRecordingConnectionState(
         prev === ConnectionState.Reconnecting &&
         isActive
       ) {
-        // After reconnecting, check if the transcription agent (or anyone else) is
-        // still in the room.  If we're alone there's nothing to transcribe, so stop.
-        if (room.remoteParticipants.size === 0) {
-          console.warn(
-            '[RecordingsScreen] Reconnected but no remote participants — stopping recording (no agent)',
-          );
-          logger.info(Logger.Event.RECORDING_STATE_CHANGED, {
-            source: 'recording_screen',
-            event: 'reconnected_alone_in_room',
-            recordingStatus,
-          });
-          onUnexpectedDisconnect();
-        } else {
-          // Agent is still present — recording can continue normally.
-        }
+        // Resume only when a transcription agent has rejoined. Other participants do not provide STT.
       }
 
       if (state === ConnectionState.Disconnected && isActive) {
-        onUnexpectedDisconnect();
+        onConnectionLost('livekit_disconnected');
       }
     };
 
@@ -188,24 +173,24 @@ export function useRecordingConnectionState(
       room.off(RoomEvent.ConnectionStateChanged, handleConnectionStateChanged);
       room.off(RoomEvent.ConnectionQualityChanged, handleQualityChanged);
     };
-  }, [room, recordingStatus, isActive, onUnexpectedDisconnect]);
+  }, [room, recordingStatus, isActive, onConnectionLost]);
 
-  // ─── Safety-net: stop recording if stuck reconnecting for >30 s ───────────
+  // ─── Safety-net: switch to local fallback if stuck reconnecting for >30 s ──
   useEffect(() => {
     if (roomConnectionState !== ConnectionState.Reconnecting || !isActive) return;
     const timer = setTimeout(() => {
       console.warn(
-        `[RecordingsScreen] Reconnect timeout after ${RECONNECT_TIMEOUT_MS / 1000} s — auto-stopping`,
+        `[RecordingsScreen] Reconnect timeout after ${RECONNECT_TIMEOUT_MS / 1000} s — local fallback`,
       );
       logger.info(Logger.Event.LIVEKIT_SOCKET_DISCONNECTED, {
         source: 'recording_screen',
         reason: 'reconnect_timeout',
         recordingStatus,
       });
-      onUnexpectedDisconnect();
+      onConnectionLost('reconnect_timeout');
     }, RECONNECT_TIMEOUT_MS);
     return (): void => clearTimeout(timer);
-  }, [roomConnectionState, isActive, recordingStatus, onUnexpectedDisconnect]);
+  }, [roomConnectionState, isActive, recordingStatus, onConnectionLost]);
 
   const dismissConnectionWarning = useCallback(() => setShowConnectionWarning(false), []);
 

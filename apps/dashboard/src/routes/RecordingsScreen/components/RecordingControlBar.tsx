@@ -33,6 +33,7 @@ function useMobileWebPadding(): boolean {
 interface RecordingControlBarProps {
   isRecording: boolean;
   isPaused: boolean;
+  isOffline: boolean;
   isStarting: boolean;
   startTime: number | null;
   onStart: () => void;
@@ -44,6 +45,7 @@ interface RecordingControlBarProps {
 export function RecordingControlBar({
   isRecording,
   isPaused,
+  isOffline,
   isStarting,
   startTime,
   onStart,
@@ -93,20 +95,22 @@ export function RecordingControlBar({
         {/* Pause/Resume and Stop buttons (visible when recording) */}
         {isRecording ? (
           <>
-            <button
-              onClick={isPaused ? onResume : onPause}
-              disabled={isStarting}
-              className='flex items-center justify-center w-10 h-10 rounded-full border border-border bg-foreground/15 hover:bg-foreground/25 transition-colors disabled:opacity-50'
-              title={isPaused ? 'Resume recording' : 'Pause recording'}
-              data-track-category='RecordingControlBar'
-              data-track-name={isPaused ? 'resume_recording' : 'pause_recording'}
-            >
-              {isPaused ? (
-                <Play className='w-5 h-5 text-foreground' />
-              ) : (
-                <Pause className='w-5 h-5 text-foreground' />
-              )}
-            </button>
+            {!isOffline && (
+              <button
+                onClick={isPaused ? onResume : onPause}
+                disabled={isStarting}
+                className='flex items-center justify-center w-10 h-10 rounded-full border border-border bg-foreground/15 hover:bg-foreground/25 transition-colors disabled:opacity-50'
+                title={isPaused ? 'Resume recording' : 'Pause recording'}
+                data-track-category='RecordingControlBar'
+                data-track-name={isPaused ? 'resume_recording' : 'pause_recording'}
+              >
+                {isPaused ? (
+                  <Play className='w-5 h-5 text-foreground' />
+                ) : (
+                  <Pause className='w-5 h-5 text-foreground' />
+                )}
+              </button>
+            )}
 
             <button
               onClick={onStop}

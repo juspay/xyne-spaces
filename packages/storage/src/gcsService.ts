@@ -23,6 +23,16 @@ export interface GCSDeleteResult {
   deleted: boolean;
 }
 
+export interface RecordingRepairChunkMetadata {
+  sequence: number;
+  startedAt: number;
+  endedAt: number;
+  sha256: string;
+  mimeType: string;
+  size: number;
+  path: string;
+}
+
 export class GCSService {
   private storage: Storage;
   private bucket: Bucket;
@@ -328,6 +338,66 @@ export class GCSService {
     }
   }
 
+  /** Write-once repair chunks need GCS generation preconditions, not a check-then-write race. */
+  async uploadRecordingRepairChunk(
+    buffer: Buffer,
+    options: Omit<RecordingRepairChunkMetadata, 'size'>,
+  ): Promise<void> {
+    const file = this.bucket.file(options.path);
+    await file.save(buffer, {
+      resumable: false,
+      preconditionOpts: { ifGenerationMatch: 0 },
+      metadata: {
+        contentType: options.mimeType,
+        metadata: {
+          sequence: String(options.sequence),
+          startedAt: String(options.startedAt),
+          endedAt: String(options.endedAt),
+          sha256: options.sha256,
+          mimeType: options.mimeType,
+        },
+      },
+    });
+  }
+
+  async getRecordingRepairChunkMetadata(path: string): Promise<RecordingRepairChunkMetadata | null> {
+    try {
+      const [metadata] = await this.bucket.file(path).getMetadata();
+      return this.parseRecordingRepairChunkMetadata(path, metadata);
+    } catch (error) {
+      if ((error as { code?: number }).code === 404) return null;
+      throw error;
+    }
+  }
+
+  async listRecordingRepairChunks(prefix: string): Promise<RecordingRepairChunkMetadata[]> {
+    const [files] = await this.bucket.getFiles({ prefix });
+    const chunks = await Promise.all(files.map(async file => {
+      const [metadata] = await file.getMetadata();
+      return this.parseRecordingRepairChunkMetadata(file.name, metadata);
+    }));
+    return chunks.filter((chunk): chunk is RecordingRepairChunkMetadata => chunk !== null);
+  }
+
+  private parseRecordingRepairChunkMetadata(path: string, metadata: any): RecordingRepairChunkMetadata | null {
+    const custom = metadata.metadata as Record<string, string> | undefined;
+    const sequence = Number(custom?.sequence);
+    const startedAt = Number(custom?.startedAt);
+    const endedAt = Number(custom?.endedAt);
+    const sha256 = custom?.sha256;
+    const mimeType = custom?.mimeType;
+    const size = Number(metadata.size);
+    if (!Number.isInteger(sequence) || sequence < 0 || !Number.isFinite(startedAt) ||
+      !Number.isFinite(endedAt) || endedAt <= startedAt || !sha256 || !mimeType || !Number.isFinite(size)) {
+      logger.warn('[GCS] Ignoring invalid recording repair object metadata', { path });
+      return null;
+    }
+    return { path, sequence, startedAt, endedAt, sha256, mimeType, size };
+  }
+
+  /**
+   * Delete file from GCS
+   */
   async deleteFile(filename: string): Promise<GCSDeleteResult> {
     try {
       if (!filename) {
