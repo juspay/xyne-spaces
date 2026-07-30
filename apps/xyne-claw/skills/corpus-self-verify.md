@@ -52,7 +52,9 @@ The check has two parts with different triggers:
    returned totals (`termTotals` / `windowTotal` when present); for any derived number the
    tool doesn't return (sub-window sums, differences, ratios, top-N, dedup, verdict bands),
    compute it in the **sandbox** from the tool's verbatim JSON and copy the printed output.
-   A derived number with no script behind it fails this check.
+   The JSON goes into a data file the script parses — numbers retyped into the script body
+   are transposition risk, not an audit trail. A derived number with no script behind it
+   fails this check.
 3. **Denominators match the numerators.** Every share is `count ÷ that bucket's own total`,
    and the term query and the total query used the identical scope and filters. A share built
    from mismatched filters is wrong even if it looks plausible.
@@ -79,6 +81,20 @@ If a check fails, correct the cause — the query, the phrase, the scope, the su
 re-run. Never hand-edit a number, invent or adjust a citation, or quietly drop a caveat to
 make a check pass. A number or citation that had to be hand-patched is a defect even if it
 happens to be right.
+
+## For a written analysis (packs + stats)
+
+When the deliverable was produced through the written-analysis pipeline (spec → evidence
+packs → stats → write), three checks are added on top of Parts A and B:
+
+1. **Citations are closed-set.** Every cited row exists in one of this analysis's pack
+   files — not merely "somewhere in the corpus". Run the membership check as a sandbox
+   script over the draft + pack files; a citation outside the packs means the writer
+   searched, which is the confirmation-bias hole the packs exist to close.
+2. **Numbers are closed-set.** Every figure in the draft appears in `stats.json`. A number
+   with no stats entry is a defect even if it happens to be right.
+3. **Coverage is carried forward.** The delivered analysis includes each pack's coverage
+   note (buckets fetched/skipped, caps) and the spec version it was produced under.
 
 ## For a locked analysis spec (replacing human approval)
 
