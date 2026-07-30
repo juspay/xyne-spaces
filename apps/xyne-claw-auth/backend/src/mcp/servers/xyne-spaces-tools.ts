@@ -5697,8 +5697,10 @@ const spacesCorpusScan: ToolDef = {
     "- Counts OVER TIME, trends, or anything needing a fair denominator → THIS tool.\n" +
     "- NEVER answer a how-many question by counting a page of search hits — that is a ranked sample, not a total.\n\n" +
     "## Reading the result\n" +
-    "`counts[term][bucket]` are real Vespa totals (lexical match, ACL-respected). `corpusTotals[bucket]` is the " +
-    "same scope with no term — the denominator. `shares[term][bucket]` = count ÷ that bucket's total, precomputed " +
+    "`counts[term][bucket]` are real Vespa totals (lexical match, ACL-respected). `termTotals[term]` is that term's " +
+    "total over the WHOLE scanned window — use it for any \"how many total\" number; NEVER sum bucket rows yourself. " +
+    "`corpusTotals[bucket]` is the same scope with no term — the denominator (`windowTotal` = its whole-window sum). " +
+    "`shares[term][bucket]` = count ÷ that bucket's total, precomputed " +
     "so you never do the division yourself. Compare SHARES across buckets, not raw counts: the corpus grows over " +
     "time, so raw counts read as fake growth.\n\n" +
     "## Notes\n" +
@@ -5802,8 +5804,14 @@ const spacesCorpusScan: ToolDef = {
 
       const counts: Record<string, Record<number, number>> = {};
       const shares: Record<string, Record<number, string>> = {};
+      // Whole-window totals computed HERE so the model never sums buckets by
+      // hand — a live run hand-summed 7 month buckets and shipped 1,713 where
+      // the true total was 2,152. Any "how many total" number must come from
+      // termTotals / windowTotal, not model arithmetic over the bucket rows.
+      const termTotals: Record<string, number> = {};
       scan.terms.forEach((term, i) => {
         counts[term] = termBuckets[i] ?? {};
+        termTotals[term] = Object.values(counts[term]).reduce((a, b) => a + b, 0);
         const s: Record<number, string> = {};
         for (const [bucketKey, n] of Object.entries(counts[term])) {
           const total = corpusTotals?.[Number(bucketKey)];
@@ -5811,6 +5819,7 @@ const spacesCorpusScan: ToolDef = {
         }
         shares[term] = s;
       });
+      const windowTotal = Object.values(corpusTotals ?? {}).reduce((a, b) => a + b, 0);
 
       const scopeNote = autoBounded
         ? `\nNote: month scans are auto-bounded to the last 24 months (after=${scan.scope.after}); pass scope.after to override.`
@@ -5822,7 +5831,7 @@ const spacesCorpusScan: ToolDef = {
         `Queries executed (${scan.terms.length} term + 1 denominator, identical scope):\n` +
         `  term YQL:   ${termYql}\n` +
         `  totals YQL: ${totalsYql}\n\n` +
-        JSON.stringify({ counts, corpusTotals, shares, ...(hasScope ? { scope: scan.scope } : {}) }, null, 1),
+        JSON.stringify({ counts, termTotals, corpusTotals, windowTotal, shares, ...(hasScope ? { scope: scan.scope } : {}) }, null, 1),
       );
       // Same channel spaces-vespa-search uses — the dashboard debug panel
       // reads _meta.debug; it never reaches the model's context.
