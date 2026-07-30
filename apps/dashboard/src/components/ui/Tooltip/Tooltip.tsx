@@ -16,6 +16,7 @@ export interface TooltipProps extends React.ComponentProps<typeof TooltipPrimiti
   collisionPadding?: React.ComponentProps<typeof TooltipPrimitive.Content>['collisionPadding'];
   sticky?: React.ComponentProps<typeof TooltipPrimitive.Content>['sticky'];
   hideWhenDetached?: boolean;
+  showArrow?: boolean;
   className?: string;
   providerProps?: Omit<
     React.ComponentProps<typeof TooltipPrimitive.Provider>,
@@ -149,6 +150,7 @@ export const Tooltip = ({
   collisionPadding = 0,
   sticky = 'partial',
   hideWhenDetached,
+  showArrow = true,
   className,
   providerProps: _providerProps,
   ...rootProps
@@ -184,7 +186,9 @@ export const Tooltip = ({
           )}
         >
           {content}
-          <TooltipPrimitive.Arrow className='bg-foreground fill-foreground z-[60] size-2.5 translate-y-[calc(-50%_-_2px)] rotate-45 rounded-[2px]' />
+          {showArrow && (
+            <TooltipPrimitive.Arrow className='bg-foreground fill-foreground z-[60] size-2.5 translate-y-[calc(-50%_-_2px)] rotate-45 rounded-[2px]' />
+          )}
         </TooltipPrimitive.Content>
       </TooltipPrimitive.Portal>
     </TooltipPrimitive.Root>

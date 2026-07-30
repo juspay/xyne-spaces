@@ -3,15 +3,50 @@ import type { EmojiPickerEmoji } from '../hooks/useCustomEmojis';
 import type { EmojiDatasourceEntry } from 'emoji-datasource/emoji.json';
 
 let emojiDataCache: EmojiDatasourceEntry[] | null = null;
+let emojiDataPromise: Promise<void> | null = null;
+let nativeEmojiNames: Map<string, string> | null = null;
+
+const normalizeNativeEmoji = (emoji: string): string =>
+  [...emoji]
+    .filter(character => {
+      const codePoint = character.codePointAt(0);
+      return codePoint !== 0xfe0f && !(codePoint && codePoint >= 0x1f3fb && codePoint <= 0x1f3ff);
+    })
+    .join('');
+
+const unifiedToEmoji = (unified: string): string =>
+  unified
+    .split('-')
+    .map(code => String.fromCodePoint(parseInt(code, 16)))
+    .join('');
+
+const ensureEmojiData = (): Promise<void> => {
+  if (emojiDataCache) return Promise.resolve();
+
+  emojiDataPromise ??= import('emoji-datasource/emoji.json').then(m => {
+    emojiDataCache = m.default;
+    nativeEmojiNames = new Map(
+      emojiDataCache.map(entry => [
+        normalizeNativeEmoji(unifiedToEmoji(entry.unified)),
+        entry.short_name,
+      ]),
+    );
+  });
+
+  return emojiDataPromise;
+};
 
 /** Trigger lazy load of emoji data so it's ready for sync lookups. */
 export function preloadEmojiData(): void {
-  if (!emojiDataCache) {
-    void import('emoji-datasource/emoji.json').then(m => {
-      emojiDataCache = m.default;
-    });
-  }
+  void ensureEmojiData();
 }
+
+/** Load emoji metadata and resolve once sync native-emoji name lookups are ready. */
+export const loadEmojiData = (): Promise<void> => ensureEmojiData();
+
+/** Convert a native Unicode emoji to its canonical shortcode name. */
+export const findUnicodeEmojiName = (emoji: string): string | undefined =>
+  nativeEmojiNames?.get(normalizeNativeEmoji(emoji));
 
 export const findCustomEmoji = (
   name: string,
@@ -89,14 +124,6 @@ export const findEmojiByText = (text: string): { unified: string } | undefined =
  * Used by the TipTap extension to build the input-rule regex.
  */
 export const getTextEmoticons = (): string[] => Array.from(getTextEmoticonMap().keys());
-/** Convert a unified code string like "1F603" or "2764-FE0F" to an emoji character */
-function unifiedToEmoji(unified: string): string {
-  return unified
-    .split('-')
-    .map(code => String.fromCodePoint(parseInt(code, 16)))
-    .join('');
-}
-
 /**
  * Replaces text emoticons that appear at the end of HTML text nodes with their
  * corresponding emoji characters. This handles the case where a user types an
