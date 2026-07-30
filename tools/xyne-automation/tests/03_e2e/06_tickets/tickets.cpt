@@ -37,7 +37,6 @@
 * typing "Bug report from chat for ticket creation flow" in "[data-testid='message-input']"
 * clicking on "[data-testid='send-options-menu']"
 * clicking on text "Create a ticket"
-* clicking on "[data-testid='send-message-button']"
 * waiting for "[data-testid='ticket-title-input']" to appear
 * typing stored user <userAlias> ticket <ticketAlias> field "title" in "[data-testid='ticket-title-input']"
 * typing stored user <userAlias> ticket <ticketAlias> field "description" in "[data-testid='ticket-description-input']"
