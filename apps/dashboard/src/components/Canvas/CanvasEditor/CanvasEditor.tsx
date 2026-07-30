@@ -16,10 +16,7 @@ import {
 } from '@blocknote/react';
 import { BlockNoteView } from '@blocknote/mantine';
 import {
-  BlockNoteSchema,
-  defaultBlockSpecs,
   InlineContentSchema,
-  defaultInlineContentSpecs,
   PartialBlock,
   type BlockSchema,
   type StyleSchema,
@@ -30,14 +27,11 @@ import '@blocknote/core/fonts/inter.css';
 import '@blocknote/mantine/style.css';
 import { en } from '@blocknote/core/locales';
 import { PresentationModal, usePresentation } from 'blocknote-layout-extensions';
-import { whiteboardBlockSpecs, getWhiteboardSlashMenuItems } from 'blocknote-layout-extensions';
+import { getWhiteboardSlashMenuItems } from 'blocknote-layout-extensions';
 import { getMentionSuggestionMenuItems, insertGroupMention } from 'blocknote-layout-extensions';
 import { asBlockNoteEditorForView } from 'blocknote-layout-extensions';
-import {
-  mentionInlineContentSpec,
-  buildMentionProps,
-  CanvasMentionContext,
-} from '../CanvasMentionSpec';
+import { buildMentionProps, CanvasMentionContext } from '../CanvasMentionSpec';
+import { canvasSchema, knownCanvasBlockTypes } from '../canvasSchema';
 import { createElement } from 'react';
 import { RiGroupLine } from 'react-icons/ri';
 import Avatar from '../../ui/Avatar/Avatar';
@@ -47,7 +41,6 @@ import {
   extractHeadingsFromBlocks,
   scrollToHeading,
   removeUnknownBlocks,
-  knownBlockTypesOf,
 } from '../../../utils/canvasUtils';
 import {
   exportCanvasAsMarkdown,
@@ -74,20 +67,6 @@ import { useSelector } from '@xstate/react';
 import { xyneAIActor } from '../../../machines/xyneAIMachine';
 import { useCanvasEditorMentionSharing } from '@/hooks/useCanvasEditorMentionSharing';
 
-// Schema with default blocks + whiteboard, then extend with mention inline content.
-// Helper isolates the type assertion so ESLint no-unsafe-assignment does not trigger at call site.
-function createCanvasSchema() {
-  return BlockNoteSchema.create({
-    blockSpecs: Object.assign({}, defaultBlockSpecs, whiteboardBlockSpecs),
-  } as Parameters<typeof BlockNoteSchema.create>[0]).extend({
-    inlineContentSpecs: {
-      ...defaultInlineContentSpecs,
-      mention: mentionInlineContentSpec,
-    },
-  });
-}
-const schema = createCanvasSchema();
-
 const canvasDictionary = {
   ...en,
   placeholders: {
@@ -96,7 +75,6 @@ const canvasDictionary = {
     emptyDocument: "Write something, or press '/' for commands",
   },
 };
-const knownBlockTypes = knownBlockTypesOf(schema);
 
 // Content size limit in bytes
 const CONTENT_SIZE_MAX_THRESHOLD = 100 * 1024; // 100KB - block save
@@ -163,14 +141,14 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
 
     // Create BlockNote editor instance with custom schema (cast so extended schema is accepted)
     const editor = useCreateBlockNote({
-      schema: schema as unknown as CustomBlockNoteSchema<
+      schema: canvasSchema as unknown as CustomBlockNoteSchema<
         BlockSchema,
         InlineContentSchema,
         StyleSchema
       >,
       ...(content && content.length > 0
         ? {
-            initialContent: removeUnknownBlocks(content, knownBlockTypes),
+            initialContent: removeUnknownBlocks(content, knownCanvasBlockTypes),
           }
         : {}),
       ...(onFileUpload ? { uploadFile: onFileUpload } : {}),
@@ -229,7 +207,7 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
         replaceContent: (blocks: PartialBlock[]) => {
           const currentBlocks = editor.document;
           const nextBlocks = deepCloneBlocks(
-            removeUnknownBlocks(blocks, knownBlockTypes),
+            removeUnknownBlocks(blocks, knownCanvasBlockTypes),
           ) as Parameters<typeof editor.replaceBlocks>[1];
           editor.replaceBlocks(currentBlocks, nextBlocks);
         },
@@ -545,7 +523,7 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
     return (
       <div
         ref={containerRef}
-        className={`canvas-editor-container flex flex-col h-full bg-background overflow-hidden relative ${className}`}
+        className={`canvas-surface flex flex-col h-full bg-background overflow-hidden relative ${className}`}
         onContextMenu={e => e.preventDefault()}
         onFocusCapture={handleFocusCapture}
         onBlurCapture={handleBlurCapture}

@@ -20,4 +20,5 @@ export type ComboboxProps = {
   open?: boolean; //- controlled open state for the dropdown
   onOpenChange?: (open: boolean) => void; //- callback when the dropdown open state changes
   autoHighlight?: boolean; //- auto-highlight first item in the dropdown
+  className?: string; //- merged into the input container, e.g. to match a form's input styling
 };

@@ -1,13 +1,17 @@
 import { ReactElement, useState, useEffect, useMemo } from 'react';
 import { useZero } from '../../../hooks/useZero';
 import { useNavigate } from 'react-router-dom';
-import { PauseCircle, Settings } from 'lucide-react';
+import { toast } from 'sonner';
+import { ArrowLeft, PauseCircle, Settings02 } from '@xyne/icons';
 import { Button } from '../../ui/Button/Button';
 import Avatar from '../../ui/Avatar/Avatar';
 import { Switch } from '../../ui/Switch';
 import Input from '../../ui/Input/Input';
+import { Checkbox } from '../../ui/Checkbox/Checkbox';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../ui/Select';
 import { Tooltip } from '../../ui/Tooltip';
 import { Dialog } from '../../ui/Dialog/Dialog';
+import { cn } from '../../../utils/classNames';
 import { queries } from '../../../zero/queries';
 import { mutators } from '../../../zero/mutators';
 import { useActiveUsers } from '../../../hooks/useUsers';
@@ -29,6 +33,12 @@ const ROTATION_INTERVAL_OPTIONS: { value: RotationInterval; label: string }[] = 
   { value: 'BIWEEKLY' as RotationInterval, label: 'Bi-Weekly' },
   { value: 'MONTHLY' as RotationInterval, label: 'Monthly' },
 ];
+
+/** Radix Select rejects an empty-string item value, so "no board filter" needs a sentinel. */
+const ALL_BOARDS_VALUE = '__all_boards__';
+
+const TABLE_HEAD_CELL =
+  'px-6 py-3 text-xs font-medium uppercase tracking-wider text-muted-foreground';
 
 export const AssignmentConfigScreen = ({
   userGroupId,
@@ -581,7 +591,10 @@ export const AssignmentConfigScreen = ({
       setPendingSetMappings(null);
       setJustSaved(true);
     } catch {
-      alert('Failed to save changes. Please try again.');
+      toast.error('Changes not saved', {
+        description: 'Something went wrong on save. Try again.',
+        duration: 5000,
+      });
     } finally {
       setIsSaving(false);
     }
@@ -619,7 +632,7 @@ export const AssignmentConfigScreen = ({
       : 'Unavailable for ticket assignment';
 
     return (
-      <tr key={user.id} className='hover:bg-muted'>
+      <tr key={user.id} className='transition-colors hover:bg-muted/50'>
         <td className='px-6 py-4 whitespace-nowrap'>
           <div className='flex items-center'>
             <Avatar userId={user.id} size='sm' showActiveStatus={false} />
@@ -657,15 +670,18 @@ export const AssignmentConfigScreen = ({
         {selectedBoardId && (
           <>
             <td className='px-6 py-4 whitespace-nowrap text-center'>
-              <input
-                type='checkbox'
-                checked={hasLocalExpertise(user.id)}
-                onChange={() => handleToggleExpertise(user.id)}
-                className='h-4 w-4 text-blue-600 focus:ring-blue-500 border-input rounded cursor-pointer'
+              <div
+                className='flex items-center justify-center'
                 data-track-category='UserGroup'
                 data-track-name='ToggleExpertise'
                 data-track-metadata={JSON.stringify({ userId: user.id })}
-              />
+              >
+                <Checkbox
+                  checked={hasLocalExpertise(user.id)}
+                  onChange={() => handleToggleExpertise(user.id)}
+                  label=''
+                />
+              </div>
             </td>
             {localUsePercentage && (
               <>
@@ -702,59 +718,48 @@ export const AssignmentConfigScreen = ({
     const setPercentageTotal = getSetTotalPercentage(setNumber);
 
     return (
-      <div key={setNumber} className='mb-6'>
-        <div className='flex items-center gap-3 mb-3'>
-          <h3 className='text-lg font-semibold text-foreground'>
+      <div key={setNumber}>
+        <div className='mb-3 flex items-center gap-3'>
+          <h3 className='flex items-center gap-2 text-sm font-semibold text-foreground'>
             Set {setNumber}
             {isActive && (
-              <span className='ml-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800'>
-                ACTIVE
+              <span className='inline-flex items-center rounded-full bg-stage-completed px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-status-success'>
+                Active
               </span>
             )}
           </h3>
           {localUsePercentage && selectedBoardId && (
             <span
-              className={`text-sm font-medium ${
-                setPercentageTotal === 100 ? 'text-green-600' : 'text-red-600'
-              }`}
+              className={cn(
+                'text-xs font-medium',
+                setPercentageTotal === 100 ? 'text-status-success' : 'text-status-failure',
+              )}
             >
-              (Total: {setPercentageTotal}%)
+              Total: {setPercentageTotal}%
             </span>
           )}
         </div>
-        <div className='bg-background border border-border rounded-lg overflow-hidden'>
-          <table className='min-w-full divide-y divide-border table-fixed'>
-            <thead className='bg-muted'>
+        <div className='overflow-hidden rounded-2xl border border-border bg-card'>
+          <table className='min-w-full table-fixed divide-y divide-border'>
+            <thead className='bg-muted/50'>
               <tr>
-                <th className='px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider w-[40%]'>
-                  User
-                </th>
-                <th className='px-6 py-3 text-center text-xs font-medium text-muted-foreground uppercase tracking-wider w-[12%]'>
-                  On-Call
-                </th>
-                <th className='px-6 py-3 text-center text-xs font-medium text-muted-foreground uppercase tracking-wider w-[12%]'>
-                  Active
-                </th>
+                <th className={cn(TABLE_HEAD_CELL, 'w-[40%] text-left')}>User</th>
+                <th className={cn(TABLE_HEAD_CELL, 'w-[12%] text-center')}>On-Call</th>
+                <th className={cn(TABLE_HEAD_CELL, 'w-[12%] text-center')}>Active</th>
                 {selectedBoardId && (
                   <>
-                    <th className='px-6 py-3 text-center text-xs font-medium text-muted-foreground uppercase tracking-wider w-[12%]'>
-                      Expertise
-                    </th>
+                    <th className={cn(TABLE_HEAD_CELL, 'w-[12%] text-center')}>Expertise</th>
                     {localUsePercentage && (
                       <>
-                        <th className='px-6 py-3 text-center text-xs font-medium text-muted-foreground uppercase tracking-wider w-[12%]'>
-                          % Share
-                        </th>
-                        <th className='px-6 py-3 text-center text-xs font-medium text-muted-foreground uppercase tracking-wider w-[12%]'>
-                          Max Tickets
-                        </th>
+                        <th className={cn(TABLE_HEAD_CELL, 'w-[12%] text-center')}>% Share</th>
+                        <th className={cn(TABLE_HEAD_CELL, 'w-[12%] text-center')}>Max Tickets</th>
                       </>
                     )}
                   </>
                 )}
               </tr>
             </thead>
-            <tbody className='bg-background divide-y divide-border'>
+            <tbody className='divide-y divide-border'>
               {setUsers.length > 0 ? (
                 setUsers.map(renderUserRow)
               ) : (
@@ -775,302 +780,305 @@ export const AssignmentConfigScreen = ({
   };
 
   return (
-    <div className='h-full w-full overflow-hidden bg-muted'>
-      <div className='h-full overflow-hidden'>
-        <div className='flex flex-col h-full'>
-          {/* Header */}
-          <div className='flex items-center justify-between p-6 border-b border-border bg-background'>
-            <div>
-              <div className='flex items-center gap-3 mb-2'>
-                <Button
-                  variant='outline'
-                  size='sm'
-                  onClick={() => void navigate('/user-groups')}
-                  data-track-category='UserGroups'
-                  data-track-name='BackToUserGroups'
-                >
-                  ← Back
-                </Button>
-                <h1 className='text-2xl font-bold text-foreground'>Assignment Configuration</h1>
-              </div>
-              <p className='text-sm text-muted-foreground'>
-                {userGroup?.name || 'User Group'}
-                {userGroup?.description ? ` • ${userGroup.description}` : ''}
+    <div className='flex h-full w-full flex-col overflow-hidden bg-background shadow-md md:rounded-2xl'>
+      {/* Header */}
+      <div className='shrink-0'>
+        <div className='mx-auto flex w-full max-w-[1040px] items-center gap-5 px-4 pt-5'>
+          <Button
+            variant='ghost'
+            size='iconSm'
+            className='shrink-0 text-muted-foreground hover:text-foreground'
+            onClick={() => void navigate('/user-groups')}
+            aria-label='Back to user groups'
+            data-track-category='UserGroups'
+            data-track-name='BackToUserGroups'
+          >
+            <ArrowLeft size={16} />
+          </Button>
+          <div className='flex min-w-0 flex-1 flex-col gap-1'>
+            <h1 className='text-base font-semibold leading-7 tracking-[-0.32px] text-foreground'>
+              Assignment Configuration
+            </h1>
+            <p className='truncate text-[15px] leading-[1.2] text-muted-foreground'>
+              {userGroup?.name || 'User Group'}
+              {userGroup?.description ? ` • ${userGroup.description}` : ''}
+            </p>
+          </div>
+          <Button
+            className='h-auto shrink-0 rounded-lg p-2 text-sm'
+            onClick={() => void handleSave()}
+            disabled={!hasChanges || isSaving || !isPercentageValid}
+            data-track-category='UserGroups'
+            data-track-name='SaveAssignmentConfig'
+          >
+            {isSaving ? 'Saving…' : 'Save changes'}
+          </Button>
+        </div>
+      </div>
+
+      {/* Main Content */}
+      <div className='flex-1 overflow-y-auto'>
+        <div className='mx-auto w-full max-w-[1040px] space-y-4 px-4 pb-8 pt-8'>
+          {/* Group-Level Rotation Configuration */}
+          <div className='rounded-2xl border border-border bg-card p-4'>
+            <div className='mb-4'>
+              <h2 className='text-sm font-semibold text-foreground'>On-call rotation</h2>
+              <p className='mt-1 text-[13px] leading-[1.4] text-muted-foreground'>
+                Rotate on-call status across team sets automatically.
               </p>
             </div>
-            <Button
-              variant='default'
-              size='default'
-              onClick={() => void handleSave()}
-              disabled={!hasChanges || isSaving || !isPercentageValid}
-              data-track-category='UserGroups'
-              data-track-name='SaveAssignmentConfig'
-            >
-              {isSaving ? 'Saving...' : 'Save Changes'}
-            </Button>
-          </div>
 
-          {/* Main Content */}
-          <div className='flex-1 overflow-auto p-6'>
-            <div className='max-w-7xl mx-auto space-y-6'>
-              {/* Group-Level Rotation Configuration */}
-              <div className='bg-background border border-border rounded-lg p-4'>
-                <div className='flex items-center justify-between mb-4'>
-                  <div>
-                    <h2 className='text-lg font-semibold text-foreground'>On-Call Rotation</h2>
-                    <p className='text-sm text-muted-foreground'>
-                      Automatically rotate on-call status across team sets
-                    </p>
-                  </div>
-                </div>
+            <div className='flex items-center justify-between gap-4 border-t border-border pt-4'>
+              <div className='min-w-0'>
+                <span className='block text-[13px] font-medium text-foreground'>
+                  Enable auto-rotation
+                </span>
+                <p className='mt-1 text-xs leading-[1.4] text-muted-foreground'>
+                  On-call status moves to the next set on the interval you choose.
+                </p>
+              </div>
+              <Switch
+                checked={localAutoRotationEnabled}
+                onCheckedChange={checked => {
+                  setLocalAutoRotationEnabled(checked);
+                  setHasChanges(true);
+                }}
+              />
+            </div>
 
-                <div className='flex items-center justify-between mb-4'>
-                  <div>
-                    <span className='block text-sm font-medium text-foreground'>
-                      Enable Auto-Rotation
-                    </span>
-                    <p className='text-xs text-muted-foreground mt-1'>
-                      When enabled, on-call status rotates automatically based on the configured
-                      interval
-                    </p>
-                  </div>
-                  <Switch
-                    checked={localAutoRotationEnabled}
-                    onCheckedChange={checked => {
-                      setLocalAutoRotationEnabled(checked);
+            {localAutoRotationEnabled && (
+              <div className='mt-4 flex flex-wrap items-end gap-3 border-t border-border pt-4'>
+                <div className='flex flex-col gap-2'>
+                  <span className='text-[13px] font-medium text-foreground'>Rotation interval</span>
+                  <Select
+                    value={localRotationInterval}
+                    onValueChange={value => {
+                      setLocalRotationInterval(value as RotationInterval);
                       setHasChanges(true);
                     }}
-                  />
+                  >
+                    <SelectTrigger
+                      className='w-[200px]'
+                      aria-label='Rotation interval'
+                      data-track-category='UserGroups'
+                      data-track-name='ChangeRotationInterval'
+                    >
+                      <SelectValue placeholder='Select an interval' />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {ROTATION_INTERVAL_OPTIONS.map(option => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
 
-                {localAutoRotationEnabled && (
-                  <>
-                    <div className='mb-4'>
-                      <label
-                        htmlFor='rotation-interval'
-                        className='block text-sm font-medium text-foreground mb-2'
-                      >
-                        Rotation Interval
-                      </label>
-                      <select
-                        id='rotation-interval'
-                        value={localRotationInterval}
-                        onChange={e => {
-                          setLocalRotationInterval(e.target.value as RotationInterval);
-                          setHasChanges(true);
-                        }}
-                        className='block w-full max-w-md px-3 py-2 border border-input rounded-md shadow-sm bg-background text-foreground focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm'
-                        data-track-category='UserGroups'
-                        data-track-name='ChangeRotationInterval'
-                      >
-                        {ROTATION_INTERVAL_OPTIONS.map(option => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <Button
-                      variant='outline'
-                      size='sm'
-                      onClick={() => setIsRotationModalOpen(true)}
-                    >
-                      <Settings className='w-4 h-4 mr-2' />
-                      Configure On-Call Sets
-                    </Button>
-                  </>
-                )}
+                <Button variant='outline' onClick={() => setIsRotationModalOpen(true)}>
+                  <Settings02 size={16} />
+                  Configure on-call sets
+                </Button>
               </div>
+            )}
+          </div>
 
-              {/* Board Filter */}
-              <div className='bg-background border border-border rounded-lg p-4'>
-                <label
-                  htmlFor='board-filter'
-                  className='block text-sm font-medium text-foreground mb-2'
-                >
-                  Filter by Board
-                </label>
-                <select
-                  id='board-filter'
-                  value={selectedBoardId ?? ''}
-                  onChange={e => setSelectedBoardId(e.target.value || null)}
-                  className='block w-full max-w-md px-3 py-2 border border-input rounded-md shadow-sm bg-background text-foreground focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm'
-                  data-track-event='change'
+          {/* Board Filter */}
+          <div className='rounded-2xl border border-border bg-card p-4'>
+            <div className='flex flex-col gap-2'>
+              <span className='text-[13px] font-medium text-foreground'>Filter by board</span>
+              <Select
+                value={selectedBoardId ?? ALL_BOARDS_VALUE}
+                onValueChange={value =>
+                  setSelectedBoardId(value === ALL_BOARDS_VALUE ? null : value)
+                }
+              >
+                <SelectTrigger
+                  className='w-full max-w-[320px]'
+                  aria-label='Filter by board'
                   data-track-category='UserGroups'
                   data-track-name='SelectBoardFilter'
                 >
-                  <option value=''>All Boards</option>
+                  <SelectValue placeholder='All boards' />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={ALL_BOARDS_VALUE}>All boards</SelectItem>
                   {boards.map((board: Board) => (
-                    <option key={board.id} value={board.id}>
+                    <SelectItem key={board.id} value={board.id}>
                       {board.name}
-                    </option>
+                    </SelectItem>
                   ))}
-                </select>
+                </SelectContent>
+              </Select>
+              <p className='text-xs leading-[1.4] text-muted-foreground'>
+                Pick a board to set per-board weight, expertise and share.
+              </p>
+            </div>
+          </div>
+
+          {/* Board Weight Configuration - Only shown when a specific board is selected */}
+          {selectedBoardId && (
+            <div className='rounded-2xl border border-border bg-card p-4'>
+              <div className='flex flex-col gap-2'>
+                <label htmlFor='board-weight' className='text-[13px] font-medium text-foreground'>
+                  Board weight
+                </label>
+                <p className='text-xs leading-[1.4] text-muted-foreground'>
+                  Higher weights increase how much this board&apos;s tickets count towards a
+                  person&apos;s workload. Range: 1 to 100.
+                </p>
+                <Input
+                  type='text'
+                  inputMode='numeric'
+                  id='board-weight'
+                  value={boardWeight}
+                  onChange={e => handleBoardWeightChange(e.target.value)}
+                  onBlur={() => {
+                    // Reset to 1 if empty or invalid on blur
+                    const numValue = parseInt(boardWeight);
+                    if (isNaN(numValue) || numValue < 1) {
+                      setBoardWeight('1');
+                      setLocalBoardWeight(1);
+                      setHasChanges(true);
+                    }
+                  }}
+                  placeholder='1'
+                  className='mt-1 w-24 text-sm'
+                  data-track-event='change'
+                  data-track-category='UserGroups'
+                  data-track-name='SetBoardWeight'
+                />
               </div>
 
-              {/* Board Weight Configuration - Only shown when a specific board is selected */}
-              {selectedBoardId && (
-                <div className='bg-background border border-border rounded-lg p-4'>
-                  <label
-                    htmlFor='board-weight'
-                    className='block text-sm font-medium text-foreground mb-2'
-                  >
-                    Board Weight
-                  </label>
-                  <p className='text-xs text-muted-foreground mb-3'>
-                    Higher weights increase the workload impact for this board during assignment.
-                    Range: 1 to 100.
+              <div className='mt-4 flex items-center justify-between gap-4 border-t border-border pt-4'>
+                <div className='min-w-0'>
+                  <span className='block text-[13px] font-medium text-foreground'>
+                    Use percentage assignment
+                  </span>
+                  <p className='mt-1 text-xs leading-[1.4] text-muted-foreground'>
+                    Distribute tickets by % share instead of standard workload balancing.
                   </p>
-                  <input
-                    type='text'
-                    inputMode='numeric'
-                    id='board-weight'
-                    value={boardWeight}
-                    onChange={e => handleBoardWeightChange(e.target.value)}
-                    onBlur={() => {
-                      // Reset to 1 if empty or invalid on blur
-                      const numValue = parseInt(boardWeight);
-                      if (isNaN(numValue) || numValue < 1) {
-                        setBoardWeight('1');
-                        setLocalBoardWeight(1);
-                        setHasChanges(true);
-                      }
-                    }}
-                    placeholder='1'
-                    className='block w-32 px-3 py-2 border border-input rounded-md shadow-sm bg-background text-foreground focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
-                    data-track-event='change'
-                    data-track-category='UserGroups'
-                    data-track-name='SetBoardWeight'
-                  />
-
-                  <div className='mt-4 pt-4 border-t border-border'>
-                    <div className='flex items-center justify-between'>
-                      <div>
-                        <span className='block text-sm font-medium text-foreground'>
-                          Use Percentage Assignment
-                        </span>
-                        <p className='text-xs text-muted-foreground mt-1'>
-                          When enabled, tickets are distributed based on % Share. When disabled,
-                          uses standard workload-based assignment.
-                        </p>
-                      </div>
-                      <Switch
-                        checked={localUsePercentage}
-                        onCheckedChange={checked => {
-                          setLocalUsePercentage(checked);
-                          setHasChanges(true);
-                        }}
-                      />
-                    </div>
-                  </div>
                 </div>
-              )}
-
-              {/* User Assignment Table - Grouped by Set when rotation is enabled */}
-              {localAutoRotationEnabled ? (
-                // Render users grouped by set
-                Array.from({ length: currentMaxSet }, (_, i) => i + 1).map(renderSetSection)
-              ) : (
-                // Render flat user list when rotation is disabled
-                <div className='bg-background border border-border rounded-lg overflow-hidden'>
-                  <table className='min-w-full divide-y divide-border'>
-                    <thead className='bg-muted'>
-                      <tr>
-                        <th className='px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider'>
-                          User
-                        </th>
-                        <th className='px-6 py-3 text-center text-xs font-medium text-muted-foreground uppercase tracking-wider'>
-                          On-Call
-                        </th>
-                        <th className='px-6 py-3 text-center text-xs font-medium text-muted-foreground uppercase tracking-wider'>
-                          Active
-                        </th>
-                        {selectedBoardId && (
-                          <>
-                            <th className='px-6 py-3 text-center text-xs font-medium text-muted-foreground uppercase tracking-wider'>
-                              Expertise ({boards.find(b => b.id === selectedBoardId)?.name})
-                            </th>
-                            {localUsePercentage && (
-                              <>
-                                <th className='px-6 py-3 text-center text-xs font-medium text-muted-foreground uppercase tracking-wider'>
-                                  % Share
-                                  <span
-                                    className={`block text-xs font-normal mt-1 ${
-                                      totalPercentage === 100 ? 'text-green-600' : 'text-red-600'
-                                    }`}
-                                  >
-                                    (Total: {totalPercentage}%)
-                                  </span>
-                                </th>
-                                <th className='px-6 py-3 text-center text-xs font-medium text-muted-foreground uppercase tracking-wider'>
-                                  Max Tickets
-                                </th>
-                              </>
-                            )}
-                          </>
-                        )}
-                      </tr>
-                    </thead>
-                    <tbody className='bg-background divide-y divide-border'>
-                      {users.map(renderUserRow)}
-                      {users.length === 0 && (
-                        <tr>
-                          <td
-                            colSpan={selectedBoardId ? (localUsePercentage ? 6 : 4) : 3}
-                            className='px-6 py-4 text-center text-sm text-muted-foreground'
-                          >
-                            No users in this group
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-
-              {/* Percentage Error Message */}
-              {percentageError && (
-                <div className='bg-red-50 border border-red-200 rounded-lg p-4'>
-                  <p className='text-sm text-red-600'>{percentageError}</p>
-                </div>
-              )}
-
-              {/* Info Section */}
-              <div className='bg-muted border border-border rounded-lg p-4'>
-                <h3 className='font-medium text-foreground mb-2'>How Auto-Assignment Works</h3>
-                <ul className='text-sm text-muted-foreground space-y-1 list-disc list-inside'>
-                  <li>
-                    <strong>Eligibility</strong>: Users must be Active. On-Call is preferred but not
-                    required. If expertise mappings exist, experts get priority.
-                  </li>
-                  <li>
-                    <strong>Score-based</strong>: Users with lower scores get priority. Score
-                    formula: <code>weightedActiveTasks - expertiseBonus - percentDiff</code>
-                  </li>
-                  <li>
-                    <strong>Expertise Bonus</strong>: Users with expertise get -10 points (higher
-                    priority)
-                  </li>
-                  <li>
-                    <strong>% Share</strong>: Users below their target percentage get priority.
-                    Helps balance ticket distribution.
-                  </li>
-                  <li>
-                    <strong>Max Tickets</strong>: Users at their limit are skipped. Set to -1 for
-                    unlimited.
-                  </li>
-                  <li>
-                    <strong>Board Weight</strong>: Multiplies task impact. Weight of 2 means 1 task
-                    counts as 2 towards workload.
-                  </li>
-                  <li>
-                    <strong>On-Call Rotation</strong>: Only the active set receives tickets.
-                    Rotation happens automatically based on the configured interval.
-                  </li>
-                </ul>
+                <Switch
+                  checked={localUsePercentage}
+                  onCheckedChange={checked => {
+                    setLocalUsePercentage(checked);
+                    setHasChanges(true);
+                  }}
+                />
               </div>
             </div>
+          )}
+
+          {/* User Assignment Table - Grouped by Set when rotation is enabled */}
+          {localAutoRotationEnabled ? (
+            // Render users grouped by set
+            <div className='space-y-6'>
+              {Array.from({ length: currentMaxSet }, (_, i) => i + 1).map(renderSetSection)}
+            </div>
+          ) : (
+            // Render flat user list when rotation is disabled
+            <div className='overflow-hidden rounded-2xl border border-border bg-card'>
+              <table className='min-w-full divide-y divide-border'>
+                <thead className='bg-muted/50'>
+                  <tr>
+                    <th className={cn(TABLE_HEAD_CELL, 'text-left')}>User</th>
+                    <th className={cn(TABLE_HEAD_CELL, 'text-center')}>On-Call</th>
+                    <th className={cn(TABLE_HEAD_CELL, 'text-center')}>Active</th>
+                    {selectedBoardId && (
+                      <>
+                        <th className={cn(TABLE_HEAD_CELL, 'text-center')}>
+                          Expertise ({boards.find(b => b.id === selectedBoardId)?.name})
+                        </th>
+                        {localUsePercentage && (
+                          <>
+                            <th className={cn(TABLE_HEAD_CELL, 'text-center')}>
+                              % Share
+                              <span
+                                className={cn(
+                                  'mt-1 block text-xs font-normal normal-case tracking-normal',
+                                  totalPercentage === 100
+                                    ? 'text-status-success'
+                                    : 'text-status-failure',
+                                )}
+                              >
+                                Total: {totalPercentage}%
+                              </span>
+                            </th>
+                            <th className={cn(TABLE_HEAD_CELL, 'text-center')}>Max Tickets</th>
+                          </>
+                        )}
+                      </>
+                    )}
+                  </tr>
+                </thead>
+                <tbody className='divide-y divide-border'>
+                  {users.map(renderUserRow)}
+                  {users.length === 0 && (
+                    <tr>
+                      <td
+                        colSpan={selectedBoardId ? (localUsePercentage ? 6 : 4) : 3}
+                        className='px-6 py-8 text-center text-[13px] text-muted-foreground'
+                      >
+                        This group has no members yet. Add people to the group to configure
+                        assignment.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* Percentage Error Message */}
+          {percentageError && (
+            <div
+              role='alert'
+              className='rounded-2xl border border-destructive/30 bg-destructive/10 p-4'
+            >
+              <p className='text-[13px] text-destructive'>{percentageError}</p>
+            </div>
+          )}
+
+          {/* Info Section */}
+          <div className='rounded-2xl border border-border bg-muted/40 p-4'>
+            <h3 className='mb-2 text-sm font-semibold text-foreground'>
+              How auto-assignment works
+            </h3>
+            <ul className='list-inside list-disc space-y-1 text-[13px] leading-[1.5] text-muted-foreground'>
+              <li>
+                <strong className='font-medium text-foreground'>Eligibility</strong>: people must be
+                Active. On-Call is preferred but not required. Where expertise is set, experts go
+                first.
+              </li>
+              <li>
+                <strong className='font-medium text-foreground'>Score</strong>: the lowest score
+                gets the ticket —{' '}
+                <code className='font-mono text-xs'>
+                  weightedActiveTasks − expertiseBonus − percentDiff
+                </code>
+              </li>
+              <li>
+                <strong className='font-medium text-foreground'>Expertise bonus</strong>: experts
+                get −10 points, which moves them up the queue.
+              </li>
+              <li>
+                <strong className='font-medium text-foreground'>% Share</strong>: anyone below their
+                target share gets priority, which evens out distribution.
+              </li>
+              <li>
+                <strong className='font-medium text-foreground'>Max tickets</strong>: people at
+                their limit are skipped. Leave it empty for no limit.
+              </li>
+              <li>
+                <strong className='font-medium text-foreground'>Board weight</strong>: multiplies
+                ticket impact. A weight of 2 makes one ticket count as two.
+              </li>
+              <li>
+                <strong className='font-medium text-foreground'>On-call rotation</strong>: only the
+                active set receives tickets, and it advances on the interval you set.
+              </li>
+            </ul>
           </div>
         </div>
       </div>
@@ -1095,14 +1103,13 @@ export const AssignmentConfigScreen = ({
       <Dialog
         open={showDisableRotationWarning}
         onOpenChange={setShowDisableRotationWarning}
-        title='Disable Auto-Rotation?'
+        title='Disable auto-rotation?'
       >
         <div className='p-6'>
-          <p className='text-sm text-muted-foreground mb-4'>
-            Disabling auto-rotation will clear all set configurations. When you re-enable rotation
-            in the future, you will need to reconfigure the on-call sets from scratch.
+          <p className='mb-6 text-[13px] leading-[1.5] text-muted-foreground'>
+            Disabling auto-rotation clears every set configuration for this group. Re-enabling it
+            later means building the on-call sets again from scratch.
           </p>
-          <p className='text-sm text-muted-foreground mb-6'>Are you sure you want to continue?</p>
 
           <div className='flex justify-end gap-3'>
             <Button
@@ -1114,16 +1121,16 @@ export const AssignmentConfigScreen = ({
               Cancel
             </Button>
             <Button
+              variant='destructive'
               onClick={() => {
                 setShowDisableRotationWarning(false);
                 performSave();
               }}
-              className='bg-red-600 hover:bg-red-700 text-white'
               data-track-category='UserGroups'
               data-track-name='ConfirmDisableRotation'
               data-track-metadata={JSON.stringify({ userGroupId })}
             >
-              Disable Rotation
+              Disable rotation
             </Button>
           </div>
         </div>

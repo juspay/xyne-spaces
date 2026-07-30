@@ -11,6 +11,19 @@ export type XyneAIContextType = 'chat' | 'ticket' | 'call' | 'canvas' | 'general
 export interface ThreadInfo {
   conversationId: string;
   senderName?: string;
+  // Lets the context pill show the sender's avatar instead of their name. Absent
+  // on non-message contexts (tickets, calls, recordings) and on sessions
+  // persisted before it existed — the pill falls back to `senderName` then.
+  senderId?: string;
+  // The message the context was taken from. Clicking the pill scrolls to and
+  // highlights it, the same way activity/search navigation does. Absent on
+  // non-message contexts and on sessions persisted before it existed.
+  messageId?: string;
+  // Whether the context came from inside a thread. Only an explicit `false`
+  // routes the pill to the channel instead of the thread panel — contexts that
+  // don't know (tickets, calls, recordings) and sessions persisted before this
+  // existed leave it undefined and keep opening the thread.
+  isThreadMessage?: boolean;
   previewText: string;
   attachmentIds?: string[]; // Attachment IDs from the message to fetch from GCS
 }

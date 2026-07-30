@@ -2,7 +2,7 @@ import { ReactElement, useState, useMemo, useRef, useEffect } from 'react';
 import { useZero } from '../../hooks/useZero';
 import { useMutation } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Search } from 'lucide-react';
+import { PlusDefault, SearchBig, UserThree } from '@xyne/icons';
 import { Button } from '../../components/ui/Button/Button';
 import { Dialog } from '../../components/ui/Dialog/Dialog';
 import Input from '../../components/ui/Input/Input';
@@ -11,10 +11,11 @@ import { UserGroupForm } from '../../components/UserGroup/UserGroupForm/UserGrou
 import { apiInstance } from '../../services/clients/apiClient';
 import type { UserGroup as ZeroUserGroup } from '@xyne/shared';
 import { mutators } from '../../zero/mutators';
-import { useUserGroups } from '../../hooks/useUserGroup';
+import { useUserGroups, useUserGroupsHydrated } from '../../hooks/useUserGroup';
 import { usePlatform } from '../../hooks/usePlatform';
 import { useHasResourceAccess, usePermissions } from '../../hooks/usePermissions';
 import { useAuth } from '../../hooks/useAuth';
+import { searchUserGroups } from './UserGroupsScreen.utils';
 
 const UserGroupsScreen = (): ReactElement => {
   const zero = useZero();
@@ -25,6 +26,7 @@ const UserGroupsScreen = (): ReactElement => {
   const [searchQuery, setSearchQuery] = useState('');
   const searchInputRef = useRef<HTMLInputElement>(null);
   const userGroups = useUserGroups();
+  const userGroupsHydrated = useUserGroupsHydrated();
   const permissions = usePermissions();
   const hasUserGroupsAdminAccess = useHasResourceAccess('USER-GROUPS');
   const canCreateUserGroup = permissions.some(
@@ -33,28 +35,16 @@ const UserGroupsScreen = (): ReactElement => {
       (permission.accessType === 'WRITE' || permission.accessType === 'ADMIN'),
   );
 
-  const loading = userGroups === undefined;
+  const loading = !userGroupsHydrated;
 
-  // Filter groups based on search
+  // Non-admins only see the groups they created; the search is fuzzy so typos
+  // and partial names still resolve.
   const filteredUserGroups = useMemo(() => {
-    if (!userGroups) return [];
-
-    let filtered = hasUserGroupsAdminAccess
+    const visible = hasUserGroupsAdminAccess
       ? userGroups
       : userGroups.filter(group => group.createdBy === user?.id);
 
-    // Apply search filter
-    if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase().trim();
-      filtered = filtered.filter(
-        group =>
-          group.name?.toLowerCase().includes(query) ||
-          group.alias?.toLowerCase().includes(query) ||
-          group.description?.toLowerCase().includes(query),
-      );
-    }
-
-    return filtered;
+    return searchUserGroups(visible, searchQuery);
   }, [userGroups, hasUserGroupsAdminAccess, user?.id, searchQuery]);
 
   const createUserGroupMutation = useMutation({
@@ -167,7 +157,7 @@ const UserGroupsScreen = (): ReactElement => {
     }
   };
 
-  useEffect(() => {
+  useEffect((): (() => void) | undefined => {
     if (isMobile || editingUserGroup || showCreateModal) return;
     const rafId = requestAnimationFrame(() => {
       searchInputRef.current?.focus();
@@ -184,76 +174,78 @@ const UserGroupsScreen = (): ReactElement => {
   }
 
   return (
-    <div className='h-full w-full bg-background md:rounded-2xl overflow-hidden shadow-md'>
-      <div className='h-full overflow-hidden'>
-        <div className='flex flex-col h-full'>
-          <div className='p-6 border-b border-border bg-background'>
-            <div className='flex items-center justify-between mb-4'>
-              <div>
-                <h2 className='text-lg font-bold text-foreground'>User Groups</h2>
-                <p className='text-xs text-muted-foreground mt-1'>
-                  Manage your organization user groups and teams
-                </p>
-              </div>
-              {canCreateUserGroup && (
-                <Button
-                  onClick={() => setShowCreateModal(true)}
-                  data-track-category='UserGroups'
-                  data-track-name='CreateUserGroup'
-                  data-testid='create-user-group-btn'
-                >
-                  Create User Group
-                </Button>
-              )}
+    <div className='h-full w-full bg-background md:rounded-2xl overflow-hidden shadow-md flex flex-col'>
+      {/* Header */}
+      <div className='shrink-0'>
+        <div className='mx-auto flex w-full max-w-[832px] flex-col gap-5 px-4 pt-5'>
+          <div className='flex items-center gap-5'>
+            <div className='flex min-w-0 flex-1 flex-col gap-1'>
+              <h2 className='text-base font-bold leading-7 tracking-[-0.32px] text-foreground'>
+                User Groups
+              </h2>
+              <p className='text-[15px] leading-[1.2] text-muted-foreground'>
+                Manage your organization user groups and teams
+              </p>
             </div>
-
-            {/* Search and Filter Bar */}
-            <div className='flex items-center gap-3 mt-4'>
-              {/* Search Input */}
-              <div className='relative flex-1 max-w-md'>
-                <Search
-                  className='absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground'
-                  size={18}
-                />
-                <Input
-                  ref={searchInputRef}
-                  type='text'
-                  placeholder='Search user groups by name...'
-                  value={searchQuery}
-                  onChange={e => setSearchQuery(e.target.value)}
-                  className='pl-10 w-full'
-                />
-              </div>
-            </div>
-          </div>
-
-          <div className='flex-1 overflow-y-auto p-4'>
-            {filteredUserGroups && filteredUserGroups.length > 0 ? (
-              <div className='space-y-2'>
-                {filteredUserGroups.map((userGroup: ZeroUserGroup) => (
-                  <UserGroupListItem
-                    key={userGroup.id}
-                    userGroup={userGroup}
-                    onEdit={setEditingUserGroup}
-                    onDeactivate={handleDeactivateUserGroup}
-                    onReactivate={handleReactivateUserGroup}
-                  />
-                ))}
-              </div>
-            ) : (
-              <div className='text-center py-16'>
-                <div className='text-muted-foreground text-5xl mb-4'>👥</div>
-                <h3 className='text-xl font-semibold text-foreground mb-2'>
-                  {searchQuery ? 'No matching user groups' : 'No user groups yet'}
-                </h3>
-                <p className='text-muted-foreground'>
-                  {searchQuery
-                    ? 'Try adjusting your search'
-                    : 'Get started by creating your first user group'}
-                </p>
-              </div>
+            {canCreateUserGroup && (
+              <Button
+                className='h-auto shrink-0 gap-1.5 rounded-lg p-2 text-sm'
+                onClick={() => setShowCreateModal(true)}
+                data-track-category='UserGroups'
+                data-track-name='CreateUserGroup'
+                data-testid='create-user-group-btn'
+              >
+                <PlusDefault size={16} />
+                Create User Group
+              </Button>
             )}
           </div>
+
+          {/* Search */}
+          <div className='flex h-[33px] w-full max-w-[416px] items-center gap-[5px] rounded-md border border-border pl-[5px] pr-2 transition-colors focus-within:border-ring'>
+            <span className='flex size-7 shrink-0 items-center justify-center text-muted-foreground'>
+              <SearchBig size={16} />
+            </span>
+            <Input
+              ref={searchInputRef}
+              type='text'
+              placeholder='Search user groups by name...'
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              className='h-full min-w-0 flex-1 rounded-none border-0 p-0 text-[13px] shadow-none focus-visible:border-0 focus-visible:ring-0 md:text-[13px]'
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* User Groups */}
+      <div className='flex-1 overflow-y-auto'>
+        <div className='mx-auto w-full max-w-[832px] px-4 pb-8 pt-8'>
+          {filteredUserGroups.length > 0 ? (
+            <div className='grid grid-cols-1 gap-4 md:grid-cols-2'>
+              {filteredUserGroups.map((userGroup: ZeroUserGroup) => (
+                <UserGroupListItem
+                  key={userGroup.id}
+                  userGroup={userGroup}
+                  onEdit={setEditingUserGroup}
+                  onDeactivate={handleDeactivateUserGroup}
+                  onReactivate={handleReactivateUserGroup}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className='flex flex-col items-center py-16 text-center'>
+              <UserThree size={40} className='mb-4 text-muted-foreground' />
+              <h3 className='mb-2 text-base font-semibold text-foreground'>
+                {searchQuery ? 'No matching user groups' : 'No user groups yet'}
+              </h3>
+              <p className='text-[13px] text-muted-foreground'>
+                {searchQuery
+                  ? 'Try adjusting your search'
+                  : 'Get started by creating your first user group'}
+              </p>
+            </div>
+          )}
         </div>
       </div>
 

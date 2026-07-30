@@ -3,6 +3,7 @@ import { Search } from 'lucide-react';
 import { ComboboxProps, DropdownListItemType } from './Combobox.types';
 import { forwardRef, useId, useImperativeHandle, useRef } from 'react';
 import { Tooltip } from '../Tooltip/Tooltip';
+import { cn } from '../../../utils/classNames';
 
 const ComboboxItemContent = ({ item }: { item: DropdownListItemType }) => {
   const content = (
@@ -50,6 +51,7 @@ export const Combobox = forwardRef<HTMLInputElement, ComboboxProps>(
       open,
       onOpenChange,
       autoHighlight = false,
+      className,
     },
     ref,
   ) => {
@@ -79,7 +81,12 @@ export const Combobox = forwardRef<HTMLInputElement, ComboboxProps>(
         {...(onOpenChange && { onOpenChange })}
       >
         {label && <span className='block text-sm font-medium text-foreground mb-1.5'>{label}</span>}
-        <div className='relative flex items-center border border-input h-8 px-2 rounded-lg'>
+        <div
+          className={cn(
+            'relative flex items-center border border-input h-8 px-2 rounded-lg',
+            className,
+          )}
+        >
           <div className='absolute text-muted-foreground'>
             <Search size={16} />
           </div>

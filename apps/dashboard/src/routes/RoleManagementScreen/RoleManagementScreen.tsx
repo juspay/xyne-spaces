@@ -1,7 +1,7 @@
 import { ReactElement, useEffect, useMemo, useRef, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { toast } from 'sonner';
-import { Plus, Pencil, Check, X, Users, ChevronDown, Search, UserPlus } from 'lucide-react';
+import { Plus, Check, X, Users, Search, UserPlus } from 'lucide-react';
 import { useZero } from '../../hooks/useZero';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { useUsers } from '../../hooks/useUsers';
@@ -11,9 +11,17 @@ import { Button } from '../../components/ui/Button/Button';
 import Input from '../../components/ui/Input/Input';
 import { Dialog } from '../../components/ui/Dialog/Dialog';
 import Avatar from '../../components/ui/Avatar/Avatar';
+import RolesSidebar from '../../components/Roles/RolesSidebar';
+import RoleDetailHeader from '../../components/Roles/RoleDetailHeader';
+import { Panel, ResizableGroup, Separator } from '../../components/ui/Resizable/Resizable';
 import { cn } from '../../utils/classNames';
 import { getUserDisplayNameById } from '../../utils/userDisplayName';
 import type { Role, UserRoleMapping } from '@xyne/shared';
+import {
+  ROLES_SIDEBAR_DEFAULT_WIDTH,
+  ROLES_SIDEBAR_MAX_WIDTH,
+  ROLES_SIDEBAR_MIN_WIDTH,
+} from './rolesSidebarWidth';
 
 type RoleCursor = { id: string; createdAt: number };
 
@@ -178,53 +186,6 @@ const CreateRoleDialog = ({
     </Dialog>
   );
 };
-
-// ─── Sidebar role item ───────────────────────────────────────────────────────
-
-interface RoleItemProps {
-  role: Role;
-  selected: boolean;
-  memberCount: number | undefined;
-  onClick: () => void;
-}
-
-const RoleItem = ({ role, selected, memberCount, onClick }: RoleItemProps): ReactElement => (
-  <button
-    type='button'
-    onClick={onClick}
-    data-track-category='ROLES'
-    data-track-name='SelectRole'
-    className={cn(
-      'w-full flex items-center gap-2.5 px-2.5 py-2 rounded-md text-left transition-colors group',
-      selected ? 'bg-accent' : 'hover:bg-accent/60',
-    )}
-  >
-    <span
-      className={cn(
-        'w-2 h-2 rounded-full shrink-0 transition-colors',
-        selected ? 'bg-foreground' : 'bg-muted-foreground/40 group-hover:bg-muted-foreground/60',
-      )}
-    />
-    <span
-      className={cn(
-        'text-sm font-medium flex-1 truncate',
-        selected ? 'text-accent-foreground' : 'text-foreground',
-      )}
-    >
-      {role.name}
-    </span>
-    {memberCount !== undefined && (
-      <span
-        className={cn(
-          'text-[11px] px-1.5 py-0.5 rounded-full shrink-0 tabular-nums',
-          selected ? 'bg-background/60 text-foreground' : 'bg-muted text-muted-foreground',
-        )}
-      >
-        {memberCount}
-      </span>
-    )}
-  </button>
-);
 
 // ─── Member row ──────────────────────────────────────────────────────────────
 
@@ -586,6 +547,7 @@ export const RoleManagementScreen = (): ReactElement => {
   };
 
   const memberUserIds = useMemo(() => new Set(members.map(m => m.userId)), [members]);
+  const memberAvatarIds = useMemo(() => members.map(m => m.user?.id ?? m.userId), [members]);
 
   const handleRemoveMember = async (mappingId: string): Promise<void> => {
     if (!selectedId) return;
@@ -617,188 +579,114 @@ export const RoleManagementScreen = (): ReactElement => {
   return (
     <div
       data-testid='role-management-page'
-      className='h-full bg-background flex flex-col md:rounded-2xl overflow-hidden shadow-md'
+      data-component='RoleManagementScreen'
+      className='h-full relative overflow-hidden'
     >
-      {/* Header */}
-      <div className='px-4 pt-4 pb-3 border-b border-border'>
-        <div className='flex items-center justify-between mb-1'>
-          <h2 className='text-lg font-bold text-foreground'>Roles</h2>
-          <Button size='sm' onClick={() => setShowCreate(true)}>
-            <Plus size={14} /> New role
-          </Button>
-        </div>
-        <p className='text-xs text-muted-foreground'>
-          Reusable named sets of users you can reference across the workspace.
-        </p>
-      </div>
+      <ResizableGroup
+        orientation='horizontal'
+        className='flex align-top h-full'
+        autoSaveId='roles-panel-layout'
+      >
+        {/* Sidebar — sized in pixels + `preserve-pixel-size` so it keeps its width when
+            the group shrinks (Ask AI opening, window resize) instead of scaling. */}
+        <Panel
+          id='roles-sidebar'
+          defaultSize={ROLES_SIDEBAR_DEFAULT_WIDTH}
+          minSize={ROLES_SIDEBAR_MIN_WIDTH}
+          maxSize={ROLES_SIDEBAR_MAX_WIDTH}
+          groupResizeBehavior='preserve-pixel-size'
+        >
+          <aside className='w-full h-full'>
+            <RolesSidebar
+              roles={accumulated}
+              selectedId={selectedId}
+              loading={listLoading}
+              hasMore={hasMore}
+              onSelect={handleSelectRole}
+              onCreate={() => setShowCreate(true)}
+              onLoadMore={loadMore}
+            />
+          </aside>
+        </Panel>
 
-      {/* Two-pane body */}
-      <div className='flex-1 flex min-h-0'>
-        {/* Sidebar */}
-        <aside className='w-60 shrink-0 border-r border-border flex flex-col min-h-0'>
-          <div className='px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground'>
-            {accumulated.length > 0
-              ? `${accumulated.length} role${accumulated.length === 1 ? '' : 's'}`
-              : 'Roles'}
-          </div>
+        {/* RESIZE HANDLE */}
+        <Separator className='w-[2px] transition-colors cursor-col-resize flex items-center justify-center group'>
+          <div
+            id='panel-resize-divider'
+            className='w-[2px] h-full bg-transparent group-hover:bg-primary group-active:bg-primary'
+          />
+        </Separator>
 
-          <nav className='flex-1 overflow-y-auto px-2 pb-2'>
-            {listLoading && (
-              <div className='space-y-1.5'>
-                {Array.from({ length: 4 }).map((_, i) => (
-                  <div key={i} className='h-8 rounded-md bg-muted/50 animate-pulse' />
-                ))}
-              </div>
-            )}
-
-            {!listLoading && accumulated.length === 0 && (
-              <div className='px-2 py-8 text-center'>
-                <Users size={20} className='mx-auto text-muted-foreground/40 mb-2' />
-                <p className='text-xs text-muted-foreground'>No roles yet.</p>
-                <p className='text-xs text-muted-foreground/70 mt-0.5'>
-                  Create one to get started.
+        <Panel id='roles-main' minSize='30%'>
+          <main
+            data-id='roles-view'
+            className='flex-1 h-full overflow-hidden relative flex flex-col rounded-2xl border border-border bg-background'
+          >
+            {!selectedId ? (
+              <div className='flex-1 flex flex-col items-center justify-center text-center px-6'>
+                <Users size={28} className='text-muted-foreground/30 mb-3' />
+                <h3 className='text-sm font-semibold text-foreground mb-1'>Select a role</h3>
+                <p className='text-xs text-muted-foreground max-w-xs'>
+                  Roles are reusable named sets of users you can reference across the workspace.
+                  Choose one from the list to view its members, or create a new one.
                 </p>
-              </div>
-            )}
-
-            {accumulated.map(role => (
-              <RoleItem
-                key={role.id}
-                role={role}
-                selected={role.id === selectedId}
-                memberCount={undefined}
-                onClick={() => handleSelectRole(role.id)}
-              />
-            ))}
-
-            {accumulated.length > 0 && hasMore && (
-              <button
-                type='button'
-                onClick={loadMore}
-                data-track-category='ROLES'
-                data-track-name='LoadMoreRoles'
-                className='w-full mt-1 flex items-center justify-center gap-1 text-xs text-muted-foreground hover:text-foreground py-1.5 rounded-md hover:bg-accent/60 transition-colors'
-              >
-                <ChevronDown size={12} /> Load more
-              </button>
-            )}
-          </nav>
-        </aside>
-
-        {/* Main panel */}
-        <div className='flex-1 flex flex-col min-w-0 min-h-0'>
-          {!selectedId ? (
-            <div className='flex-1 flex flex-col items-center justify-center text-center px-6'>
-              <Users size={28} className='text-muted-foreground/30 mb-3' />
-              <h3 className='text-sm font-semibold text-foreground mb-1'>Select a role</h3>
-              <p className='text-xs text-muted-foreground max-w-xs'>
-                Choose a role from the list to view its members and details, or create a new one.
-              </p>
-            </div>
-          ) : (
-            <>
-              {/* Role header */}
-              <div className='px-5 py-4 border-b border-border'>
-                {editing ? (
-                  <div>
-                    <div className='flex items-center gap-2'>
-                      <Input
-                        ref={editNameRef}
-                        value={editName}
-                        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                          setEditName(formatRoleName(e.target.value))
-                        }
-                        onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
-                          if (e.key === 'Enter' && cleanRoleName(editName)) void saveEdit();
-                          if (e.key === 'Escape') cancelEdit();
-                        }}
-                        maxLength={40}
-                        placeholder='e.g. XYNE_PM'
-                        className='h-8 w-48 text-sm font-medium'
-                      />
-                      <Button
-                        size='sm'
-                        onClick={() => void saveEdit()}
-                        disabled={!cleanRoleName(editName)}
-                        loading={saving}
-                      >
-                        <Check size={14} /> Save
-                      </Button>
-                      <Button size='sm' variant='outline' onClick={cancelEdit} disabled={saving}>
-                        <X size={14} /> Cancel
-                      </Button>
-                    </div>
-                    <Input
-                      value={editDesc}
-                      onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                        setEditDesc(e.target.value)
-                      }
-                      onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
-                        if (e.key === 'Escape') cancelEdit();
-                      }}
-                      maxLength={80}
-                      placeholder='Short description (optional)'
-                      className='mt-2 h-8 w-72 text-xs'
-                    />
-                  </div>
-                ) : (
-                  <>
-                    <div className='flex items-center gap-2'>
-                      <h1 className='text-base font-semibold text-foreground'>{displayName}</h1>
-                      <span className='text-[11px] font-medium px-2 py-0.5 rounded-full bg-muted text-muted-foreground tabular-nums'>
-                        {members.length} {members.length === 1 ? 'member' : 'members'}
-                      </span>
-                      <Button size='sm' variant='outline' onClick={startEdit}>
-                        <Pencil size={12} /> Edit
-                      </Button>
-                    </div>
-                    {displayDesc && (
-                      <p className='mt-1.5 text-xs text-muted-foreground'>{displayDesc}</p>
-                    )}
-                  </>
-                )}
-              </div>
-
-              {/* Members toolbar */}
-              <div className='px-5 py-2.5 border-b border-border flex items-center gap-3'>
-                <span className='text-sm font-medium text-foreground'>Members</span>
-                <span className='flex-1' />
-                <Button size='sm' variant='outline' onClick={() => setShowAddMembers(true)}>
-                  <UserPlus size={14} /> Add users
+                <Button size='sm' className='mt-4' onClick={() => setShowCreate(true)}>
+                  <Plus size={14} /> New role
                 </Button>
               </div>
+            ) : (
+              <>
+                <RoleDetailHeader
+                  name={displayName}
+                  description={displayDesc}
+                  memberUserIds={memberAvatarIds}
+                  createdAt={selectedRole?.createdAt ?? listRole?.createdAt}
+                  editing={editing}
+                  saving={saving}
+                  editName={editName}
+                  editDesc={editDesc}
+                  editNameRef={editNameRef}
+                  canSaveEdit={Boolean(cleanRoleName(editName)) && !saving}
+                  onEditNameChange={value => setEditName(formatRoleName(value))}
+                  onEditDescChange={setEditDesc}
+                  onStartEdit={startEdit}
+                  onCancelEdit={cancelEdit}
+                  onSaveEdit={() => void saveEdit()}
+                  onAddUsers={() => setShowAddMembers(true)}
+                />
 
-              {/* Members list */}
-              <div className='flex-1 overflow-y-auto'>
-                {members.length === 0 ? (
-                  <div className='flex flex-col items-center justify-center h-full text-center px-6'>
-                    <Users size={24} className='text-muted-foreground/30 mb-2' />
-                    <p className='text-sm text-muted-foreground'>No members in this role yet.</p>
-                    <Button
-                      size='sm'
-                      variant='outline'
-                      onClick={() => setShowAddMembers(true)}
-                      className='mt-3'
-                    >
-                      <UserPlus size={14} /> Add users
-                    </Button>
-                  </div>
-                ) : (
-                  members.map(m => (
-                    <MemberRow
-                      key={m.id}
-                      mapping={m}
-                      workspaceUsers={workspaceUsers}
-                      onRemove={handleRemoveMember}
-                      removing={removingId !== null}
-                    />
-                  ))
-                )}
-              </div>
-            </>
-          )}
-        </div>
-      </div>
+                {/* Members list */}
+                <div className='flex-1 overflow-y-auto'>
+                  {members.length === 0 ? (
+                    <div className='flex flex-col items-center justify-center h-full text-center px-6'>
+                      <Users size={24} className='text-muted-foreground/30 mb-2' />
+                      <p className='text-sm text-muted-foreground'>No members in this role yet.</p>
+                      <Button
+                        size='sm'
+                        variant='outline'
+                        onClick={() => setShowAddMembers(true)}
+                        className='mt-3'
+                      >
+                        <UserPlus size={14} /> Add users
+                      </Button>
+                    </div>
+                  ) : (
+                    members.map(m => (
+                      <MemberRow
+                        key={m.id}
+                        mapping={m}
+                        workspaceUsers={workspaceUsers}
+                        onRemove={handleRemoveMember}
+                        removing={removingId !== null}
+                      />
+                    ))
+                  )}
+                </div>
+              </>
+            )}
+          </main>
+        </Panel>
+      </ResizableGroup>
 
       <CreateRoleDialog open={showCreate} onOpenChange={setShowCreate} onCreated={handleCreated} />
       {selectedId && (

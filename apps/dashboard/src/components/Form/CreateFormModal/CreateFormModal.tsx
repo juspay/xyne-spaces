@@ -1,8 +1,14 @@
-import { ReactElement, useEffect, useState } from 'react';
+import { ReactElement, useEffect, useMemo, useState } from 'react';
 import { useForm, Controller } from 'react-hook-form';
 import { useMutation } from '@tanstack/react-query';
+import { arrayMove } from '@dnd-kit/sortable';
 import { useZero } from '../../../hooks/useZero';
-import { Plus, Trash2, Edit2, X } from 'lucide-react';
+import {
+  PlusDefault,
+  DeleteDustbin02,
+  PencilEditBox,
+  MultipleCrossCancelDefault,
+} from '@xyne/icons';
 import { v4 as uuidv4 } from 'uuid';
 import {
   Form,
@@ -18,6 +24,15 @@ import {
 import { Dialog } from '../../ui/Dialog/Dialog';
 import { Button } from '../../ui/Button/Button';
 import Input from '../../ui/Input/Input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../../ui/Select/Select';
+import { Combobox } from '../../ui/Combobox/Combobox';
+import type { DropdownListItemType } from '../../ui/Combobox/Combobox.types';
 import Textarea from '../../ui/Textarea/Textarea';
 import {
   formService,
@@ -29,6 +44,7 @@ import { queries } from '../../../zero/queries';
 import { FORM_CONTEXT_TYPES, getEntityTypesForContext } from '../../../constants/formConstants';
 import { toast } from 'sonner';
 import { Checkbox } from '../../ui/Checkbox/Checkbox';
+import FieldOptionsList from './FieldOptionsList';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 
 interface FormField {
@@ -103,6 +119,22 @@ export const CreateFormModal = ({
   });
 
   const selectedContextType = watch('contextType');
+
+  // Combobox does not filter internally (`filteredItems={items}`), so the
+  // project list is narrowed here against the typed query.
+  const [projectSearch, setProjectSearch] = useState('');
+
+  const projectItems = useMemo<DropdownListItemType[]>(() => {
+    const term = projectSearch.trim().toLowerCase();
+    return (projects ?? [])
+      .filter((project: Project) => !term || project.name.toLowerCase().includes(term))
+      .map((project: Project) => ({ label: project.name, value: project.id }));
+  }, [projects, projectSearch]);
+
+  const selectedProjectItem = useMemo<DropdownListItemType | null>(() => {
+    const match = projects?.find((project: Project) => project.id === selectedProjectId);
+    return match ? { label: match.name, value: match.id } : null;
+  }, [projects, selectedProjectId]);
 
   useEffect(() => {
     if (projectId) {
@@ -299,6 +331,18 @@ export const CreateFormModal = ({
       ...field,
       fieldEnum: field.fieldEnum.map((opt, i) => (i === optionIndex ? { ...opt, value } : opt)),
     };
+    setFields(updatedFields);
+  };
+
+  // Option order is the order they render in for the end user, so dragging a
+  // row persists as a real reorder of `fieldEnum`.
+  const reorderFieldOptions = (fieldIndex: number, fromIndex: number, toIndex: number): void => {
+    const field = fields[fieldIndex];
+    if (!field?.fieldEnum) return;
+
+    const reordered = arrayMove(field.fieldEnum, fromIndex, toIndex);
+    const updatedFields = [...fields];
+    updatedFields[fieldIndex] = { ...field, fieldEnum: reordered };
     setFields(updatedFields);
   };
 
@@ -547,6 +591,13 @@ export const CreateFormModal = ({
     return 'Create New Form';
   };
 
+  // The visible header shows the form's own name; `title` on Dialog stays the
+  // mode label since it is the (hidden) accessible name.
+  const getHeaderTitle = (): string => {
+    if (isEditMode && form) return form.formName;
+    return 'Create New Form';
+  };
+
   const getSubmitButtonText = (): string => {
     if (isEditMode) {
       return 'Update Form';
@@ -559,14 +610,46 @@ export const CreateFormModal = ({
       open={open}
       onOpenChange={onOpenChange}
       title={getDialogTitle()}
-      className='max-h-[85vh]'
+      className='max-w-[800px] max-h-[85vh] rounded-[16px] overflow-hidden'
     >
       <form
         onSubmit={e => void handleFormSubmit(handleSubmit)(e)}
         className='flex flex-col max-h-[85vh]'
       >
+        {/* Header — form name on the left, Edit + close on the right */}
+        <div className='flex shrink-0 items-center justify-between gap-4 border-b border-border px-[18px] py-3'>
+          <p className='truncate text-base font-semibold leading-[1.2] tracking-[-0.16px] text-foreground'>
+            {getHeaderTitle()}
+          </p>
+          <div className='flex shrink-0 items-center gap-1.5'>
+            {isEditMode && isReadOnly && (
+              <button
+                type='button'
+                onClick={handleEditClick}
+                className='flex h-7 items-center justify-center gap-2 rounded-[10px] p-2 text-base leading-[1.2] tracking-[-0.16px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring'
+                data-track-category='Forms'
+                data-track-name='EditForm'
+                data-track-metadata={JSON.stringify({ formId: form.id })}
+              >
+                <PencilEditBox className='size-4' />
+                Edit
+              </button>
+            )}
+            <button
+              type='button'
+              onClick={() => onOpenChange(false)}
+              aria-label='Close'
+              className='flex h-7 w-8 shrink-0 items-center justify-center rounded-[10px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring'
+              data-track-category='Forms'
+              data-track-name='CloseFormModal'
+            >
+              <MultipleCrossCancelDefault className='size-4' />
+            </button>
+          </div>
+        </div>
+
         {/* Scrollable content area */}
-        <div className='flex-1 overflow-y-auto p-6 space-y-6'>
+        <div className='flex-1 overflow-y-auto p-5 space-y-7'>
           {createFormMutation.error && (
             <div className='bg-destructive/10 border border-destructive/30 text-destructive px-4 py-3 rounded'>
               {createFormMutation.error instanceof Error
@@ -577,70 +660,51 @@ export const CreateFormModal = ({
 
           {shouldSelectProject && (
             <div>
-              <label
-                htmlFor='form-project-select'
-                className='block text-sm font-medium text-foreground mb-1.5'
-              >
+              {/* Not a <label htmlFor>: Combobox owns its input id internally */}
+              <span className='block text-sm font-medium text-foreground mb-1.5'>
                 Project {!isReadOnly && <span className='text-red-500'>*</span>}
-              </label>
+              </span>
               {isReadOnly ? (
                 <div className='px-3 py-2 text-sm bg-muted border border-border rounded-lg'>
                   {projects?.find(project => project.id === selectedProjectId)?.name || '-'}
                 </div>
               ) : (
                 <>
-                  <select
-                    id='form-project-select'
-                    value={selectedProjectId}
-                    onChange={event => setSelectedProjectId(event.target.value)}
-                    className='w-full px-3 py-2 text-sm border border-input bg-card text-foreground rounded-lg focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent disabled:bg-muted'
-                    disabled={
-                      projects === undefined ||
-                      projects.length === 0 ||
-                      createFormMutation.isPending
-                    }
-                    required
-                    data-track-event='change'
-                    data-track-category='Forms'
-                    data-track-name='SelectProject'
+                  {/* Combobox has no `disabled` prop — gate interaction on the wrapper */}
+                  <div
+                    className={createFormMutation.isPending ? 'opacity-50 pointer-events-none' : ''}
                   >
-                    <option value=''>
-                      {projects === undefined
-                        ? 'Loading projects...'
-                        : projects.length === 0
-                          ? 'No projects available'
-                          : 'Select a project'}
-                    </option>
-                    {projects?.map((project: Project) => (
-                      <option key={project.id} value={project.id}>
-                        {project.name}
-                      </option>
-                    ))}
-                  </select>
+                    <Combobox
+                      // Match the sibling Input/SelectTrigger box in this form
+                      className='h-9 rounded-md px-3 shadow-xs bg-transparent transition-[color,box-shadow] focus-within:border-ring focus-within:ring-ring/10 focus-within:ring-[2px]'
+                      queryString={selectedProjectItem?.label ?? projectSearch}
+                      onInputValueChange={value => {
+                        if (value === '' && selectedProjectItem) return;
+                        setProjectSearch(value);
+                        if (selectedProjectItem && value !== selectedProjectItem.label) {
+                          setSelectedProjectId('');
+                        }
+                      }}
+                      items={projectItems}
+                      value={selectedProjectItem}
+                      onValueChange={value => {
+                        setSelectedProjectId(value ?? '');
+                        setProjectSearch('');
+                      }}
+                      placeholder={
+                        projects === undefined
+                          ? 'Loading projects...'
+                          : projects.length === 0
+                            ? 'No projects available'
+                            : 'Search projects'
+                      }
+                    />
+                  </div>
                   <p className='mt-1 text-xs text-muted-foreground'>
                     Form fields are scoped to the selected project.
                   </p>
                 </>
               )}
-            </div>
-          )}
-
-          {/* Edit button in header for edit mode */}
-          {isEditMode && isReadOnly && (
-            <div className='absolute top-4 right-4 z-10'>
-              <Button
-                type='button'
-                variant='outline'
-                size='sm'
-                onClick={handleEditClick}
-                className='flex items-center gap-2'
-                data-track-category='Forms'
-                data-track-name='EditForm'
-                data-track-metadata={JSON.stringify({ formId: form.id })}
-              >
-                <Edit2 size={16} />
-                Edit
-              </Button>
             </div>
           )}
 
@@ -721,22 +785,27 @@ export const CreateFormModal = ({
                 control={control}
                 rules={{ required: 'Context type is required' }}
                 render={({ field: { onChange, value } }) => (
-                  <select
-                    id='contextType'
+                  <Select
                     value={value}
-                    onChange={e => onChange(e.target.value as FormContextType)}
-                    className='w-full px-3 py-2 text-sm border border-input bg-card text-foreground rounded-lg focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent disabled:bg-muted'
+                    onValueChange={next => onChange(next as FormContextType)}
                     disabled={isEditMode || createFormMutation.isPending}
-                    data-track-event='change'
-                    data-track-category='Forms'
-                    data-track-name='SelectContextType'
                   >
-                    {FORM_CONTEXT_TYPES.map(context => (
-                      <option key={context} value={context}>
-                        {context}
-                      </option>
-                    ))}
-                  </select>
+                    <SelectTrigger
+                      id='contextType'
+                      className='w-full'
+                      data-track-category='Forms'
+                      data-track-name='SelectContextType'
+                    >
+                      <SelectValue placeholder='Select a context type' />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {FORM_CONTEXT_TYPES.map(context => (
+                        <SelectItem key={context} value={context}>
+                          {context}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 )}
               />
             )}
@@ -760,22 +829,27 @@ export const CreateFormModal = ({
                 control={control}
                 rules={{ required: 'Entity type is required' }}
                 render={({ field: { onChange, value } }) => (
-                  <select
-                    id='entityType'
+                  <Select
                     value={value}
-                    onChange={e => onChange(e.target.value)}
-                    className='w-full px-3 py-2 text-sm border border-input bg-card text-foreground rounded-lg focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent disabled:bg-muted'
+                    onValueChange={onChange}
                     disabled={isEditMode || createFormMutation.isPending}
-                    data-track-event='change'
-                    data-track-category='Forms'
-                    data-track-name='SelectEntityType'
                   >
-                    {getEntityTypesForContext(selectedContextType).map(entity => (
-                      <option key={entity} value={entity}>
-                        {entity}
-                      </option>
-                    ))}
-                  </select>
+                    <SelectTrigger
+                      id='entityType'
+                      className='w-full'
+                      data-track-category='Forms'
+                      data-track-name='SelectEntityType'
+                    >
+                      <SelectValue placeholder='Select an entity type' />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {getEntityTypesForContext(selectedContextType).map(entity => (
+                        <SelectItem key={entity} value={entity}>
+                          {entity}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 )}
               />
             )}
@@ -784,47 +858,34 @@ export const CreateFormModal = ({
           {/* Fields Section - Disabled in view mode */}
           <div>
             <hr className='border-border my-6' />
-            <div className='flex items-center justify-between mb-4'>
-              <div>
-                <h3 className='font-medium text-foreground'>Form Fields</h3>
-                <p className='text-sm text-muted-foreground'>Add fields to your form</p>
-              </div>
-              {!isReadOnly && (
-                <Button
-                  type='button'
-                  variant='outline'
-                  size='sm'
-                  onClick={addField}
-                  disabled={createFormMutation.isPending}
-                  data-track-category='Forms'
-                  data-track-name='AddFormField'
-                >
-                  <Plus size={16} className='mr-1' />
-                  Add Field
-                </Button>
-              )}
+            <div className='mb-4'>
+              <h3 className='font-medium text-foreground'>Form Fields</h3>
+              <p className='text-sm text-muted-foreground'>Add fields to your form</p>
             </div>
 
-            {fields.length === 0 ? (
+            {fields.length === 0 && isReadOnly ? (
               <div className='text-center py-8 border-2 border-dashed border-border rounded-lg'>
-                <p className='text-muted-foreground text-sm'>
-                  No fields added yet. {!isReadOnly && ' Click "Add Field" to get started.'}
-                </p>
+                <p className='text-muted-foreground text-sm'>No fields added yet.</p>
               </div>
             ) : (
               <div className='space-y-3'>
                 {fields.map((field, index) => (
-                  <div key={index} className='flex items-start gap-3 p-4 bg-muted rounded-lg'>
-                    <div className='flex-1 space-y-3'>
-                      <div>
+                  <div
+                    key={index}
+                    className='flex flex-col gap-2.5 rounded-[12px] border border-border bg-card p-4'
+                  >
+                    {/* Name and type share a row — each column carries its own label */}
+                    <div className='flex w-full items-start gap-2.5'>
+                      <div className='flex min-w-0 flex-1 flex-col gap-2'>
                         <label
                           htmlFor={`fieldName-${index}`}
-                          className='block text-sm font-medium text-foreground mb-1'
+                          className='flex items-center gap-1 text-sm font-[550] leading-[1.2] tracking-[-0.1px] text-foreground'
                         >
-                          Field Name {!isReadOnly && <span className='text-red-500'>*</span>}
+                          Field Name
+                          {!isReadOnly && <span className='text-destructive'>*</span>}
                         </label>
                         {isReadOnly ? (
-                          <div className='px-3 py-2 text-sm bg-background border border-border rounded-lg'>
+                          <div className='flex h-11 items-center rounded-[12px] border border-border bg-muted/20 px-2 py-3 text-sm text-foreground'>
                             {field.fieldName || '-'}
                           </div>
                         ) : (
@@ -835,30 +896,31 @@ export const CreateFormModal = ({
                               onChange={e => updateField(index, { fieldName: e.target.value })}
                               placeholder='e.g., Priority, Due Date'
                               disabled={createFormMutation.isPending}
+                              className='h-11 rounded-[12px] px-2 py-3'
                             />
                             {fieldErrors.has(index) && (
-                              <p className='mt-1 text-xs text-red-600'>Field name already exists</p>
+                              <p className='text-xs text-destructive'>Field name already exists</p>
                             )}
                           </>
                         )}
                       </div>
-                      <div>
+                      <div className='flex min-w-0 flex-1 flex-col gap-2'>
                         <label
                           htmlFor={`fieldType-${index}`}
-                          className='block text-sm font-medium text-foreground mb-1'
+                          className='flex items-center gap-1 text-sm font-[550] leading-[1.2] tracking-[-0.1px] text-foreground'
                         >
-                          Field Type {!isReadOnly && <span className='text-red-500'>*</span>}
+                          Field Type
+                          {!isReadOnly && <span className='text-destructive'>*</span>}
                         </label>
                         {isReadOnly ? (
-                          <div className='px-3 py-2 text-sm bg-background border border-border rounded-lg'>
+                          <div className='flex h-11 items-center rounded-[12px] border border-border bg-muted/20 px-2 py-3 text-sm text-foreground'>
                             {field.fieldType}
                           </div>
                         ) : (
-                          <select
-                            id={`fieldType-${index}`}
+                          <Select
                             value={field.fieldType}
-                            onChange={e => {
-                              const newFieldType = e.target.value as FormFieldType;
+                            onValueChange={value => {
+                              const newFieldType = value as FormFieldType;
 
                               // Reset fieldEnum when changing away from SELECT types
                               if (!isSelectField(newFieldType)) {
@@ -880,129 +942,113 @@ export const CreateFormModal = ({
                                 updateField(index, { fieldType: newFieldType });
                               }
                             }}
-                            data-track-category='Form'
-                            data-track-name='SelectFieldType'
-                            className='w-full px-3 py-2 text-sm border border-input rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent disabled:bg-muted'
                             disabled={createFormMutation.isPending}
                           >
-                            {Object.values(FormFieldType).map(type => (
-                              <option key={type} value={type}>
-                                {type}
-                              </option>
-                            ))}
-                          </select>
+                            <SelectTrigger
+                              id={`fieldType-${index}`}
+                              className='h-11 w-full rounded-[12px] px-2 py-3'
+                              data-track-category='Form'
+                              data-track-name='SelectFieldType'
+                            >
+                              <SelectValue placeholder='Select a field type' />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {Object.values(FormFieldType).map(type => (
+                                <SelectItem key={type} value={type}>
+                                  {type}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                         )}
                       </div>
+                    </div>
 
-                      {/* Is Optional Checkbox */}
-                      {!isReadOnly && (
-                        <div
-                          className={
-                            createFormMutation.isPending ? 'opacity-50 pointer-events-none' : ''
-                          }
-                        >
+                    {/* Optional toggle shares its row with the card's own delete
+                        action, which the design frame leaves out. */}
+                    {(!isReadOnly || field.isOptional) && (
+                      <div className='flex w-full items-center justify-between gap-2'>
+                        {isReadOnly ? (
+                          <p className='text-sm text-muted-foreground italic'>Optional field</p>
+                        ) : (
                           <Checkbox
                             checked={field.isOptional ?? false}
                             onChange={checked => updateField(index, { isOptional: checked })}
-                            label='This field is optional'
+                            label='Keep this field optional'
+                            size='sm'
+                            disabled={createFormMutation.isPending}
                           />
-                        </div>
-                      )}
+                        )}
+                        {!isReadOnly && (
+                          <button
+                            type='button'
+                            onClick={() => removeField(index)}
+                            disabled={createFormMutation.isPending}
+                            aria-label='Remove field'
+                            className='flex size-4 shrink-0 items-center justify-center text-destructive outline-none transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:rounded-sm focus-visible:ring-2 focus-visible:ring-ring'
+                            data-track-category='Forms'
+                            data-track-name='RemoveFormField'
+                            data-track-metadata={JSON.stringify({ fieldIndex: index })}
+                          >
+                            <DeleteDustbin02 className='size-4' />
+                          </button>
+                        )}
+                      </div>
+                    )}
 
-                      {/* Show optional status in read mode */}
-                      {isReadOnly && field.isOptional && (
-                        <div className='text-xs text-muted-foreground italic'>Optional field</div>
-                      )}
-
-                      {/* Field Options - Only for SELECT types */}
-                      {isSelectField(field.fieldType) && (
-                        <div>
-                          <label className='block text-sm font-medium text-foreground mb-2'>
-                            Field Options {!isReadOnly && <span className='text-red-500'>*</span>}
-                          </label>
-                          {isReadOnly ? (
-                            <div className='space-y-1'>
-                              {field.fieldEnum && field.fieldEnum.length > 0 ? (
-                                field.fieldEnum.map(option => (
-                                  <div
-                                    key={option.id}
-                                    className='px-3 py-2 text-sm bg-background border border-border rounded-lg'
-                                  >
-                                    {option.value || '(empty)'}
-                                  </div>
-                                ))
-                              ) : (
-                                <div className='px-3 py-2 text-sm text-muted-foreground italic'>
-                                  No options
+                    {/* Field Options - Only for SELECT types */}
+                    {isSelectField(field.fieldType) && (
+                      <div className='flex w-full flex-col gap-2'>
+                        <span className='flex items-center gap-1 text-sm font-[550] leading-[1.2] tracking-[-0.1px] text-foreground'>
+                          Field Options
+                          {!isReadOnly && <span className='text-destructive'>*</span>}
+                        </span>
+                        {isReadOnly ? (
+                          <div className='flex w-full flex-col gap-2'>
+                            {field.fieldEnum && field.fieldEnum.length > 0 ? (
+                              field.fieldEnum.map(option => (
+                                <div
+                                  key={option.id}
+                                  className='flex h-11 items-center rounded-[12px] border border-border bg-muted/20 px-2 py-3 text-sm text-foreground'
+                                >
+                                  {option.value || '(empty)'}
                                 </div>
-                              )}
-                            </div>
-                          ) : (
-                            <div className='space-y-2'>
-                              {(field.fieldEnum || []).map((option, optIndex) => (
-                                <div key={option.id} className='flex gap-2'>
-                                  <Input
-                                    value={option.value}
-                                    onChange={e =>
-                                      updateFieldOption(index, optIndex, e.target.value)
-                                    }
-                                    placeholder={`Option ${optIndex + 1}`}
-                                    disabled={createFormMutation.isPending}
-                                    className='flex-1'
-                                  />
-                                  <Button
-                                    type='button'
-                                    variant='ghost'
-                                    size='sm'
-                                    onClick={() => removeFieldOption(index, optIndex)}
-                                    disabled={createFormMutation.isPending}
-                                    className='text-destructive hover:text-destructive hover:bg-destructive/10'
-                                    data-track-category='Forms'
-                                    data-track-name='RemoveFieldOption'
-                                    data-track-metadata={JSON.stringify({
-                                      fieldIndex: index,
-                                      optionIndex: optIndex,
-                                    })}
-                                  >
-                                    <X size={16} />
-                                  </Button>
-                                </div>
-                              ))}
-                              <Button
-                                type='button'
-                                variant='outline'
-                                size='sm'
-                                onClick={() => addFieldOption(index)}
-                                disabled={createFormMutation.isPending}
-                                data-track-category='Forms'
-                                data-track-name='AddFieldOption'
-                                data-track-metadata={JSON.stringify({ fieldIndex: index })}
-                              >
-                                <Plus size={14} className='mr-1' />
-                                Add Option
-                              </Button>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                    {!isReadOnly && (
-                      <Button
-                        type='button'
-                        variant='ghost'
-                        size='sm'
-                        onClick={() => removeField(index)}
-                        disabled={createFormMutation.isPending}
-                        className='mt-6 text-destructive hover:text-destructive hover:bg-destructive/10'
-                        data-track-category='Forms'
-                        data-track-name='RemoveFormField'
-                        data-track-metadata={JSON.stringify({ fieldIndex: index })}
-                      >
-                        <Trash2 size={16} />
-                      </Button>
+                              ))
+                            ) : (
+                              <p className='text-sm text-muted-foreground italic'>No options</p>
+                            )}
+                          </div>
+                        ) : (
+                          <FieldOptionsList
+                            fieldIndex={index}
+                            options={field.fieldEnum ?? []}
+                            disabled={createFormMutation.isPending}
+                            onChangeOption={(optionIndex, value) =>
+                              updateFieldOption(index, optionIndex, value)
+                            }
+                            onRemoveOption={optionIndex => removeFieldOption(index, optionIndex)}
+                            onAddOption={() => addFieldOption(index)}
+                            onReorder={(from, to) => reorderFieldOptions(index, from, to)}
+                          />
+                        )}
+                      </div>
                     )}
                   </div>
                 ))}
+
+                {!isReadOnly && (
+                  <button
+                    type='button'
+                    onClick={addField}
+                    disabled={createFormMutation.isPending}
+                    className='flex w-full items-center justify-center gap-2 rounded-[12px] border border-dashed border-border bg-card px-2 py-3 text-sm font-[450] leading-[1.2] text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-ring'
+                    data-track-category='Forms'
+                    data-track-name='AddFormField'
+                  >
+                    <PlusDefault className='size-4' />
+                    Add new form field
+                  </button>
+                )}
               </div>
             )}
           </div>

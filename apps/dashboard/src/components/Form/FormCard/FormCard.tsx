@@ -1,5 +1,4 @@
 import { ReactElement } from 'react';
-import { Clipboard } from 'lucide-react';
 import type { Form } from '@xyne/shared';
 
 interface FormCardProps {
@@ -19,28 +18,22 @@ const FormCard = ({ form, onClick }: FormCardProps): ReactElement => {
         }
       }}
       onClick={onClick}
-      className='bg-background border border-border rounded-lg p-4 hover:border-blue-300 hover:shadow-sm transition-all cursor-pointer'
+      className='flex flex-col items-start justify-center gap-3 overflow-clip rounded-[20px] border border-border bg-background px-5 pb-4 pt-5 transition-colors hover:bg-muted/40 cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring'
       data-track-category='Forms'
       data-track-name='OpenForm'
       data-track-metadata={JSON.stringify({ formId: form.id, formName: form.formName })}
     >
-      <div className='flex items-start gap-3'>
-        <div className='flex-shrink-0 w-10 h-10 bg-blue-50 rounded-lg flex items-center justify-center'>
-          <Clipboard size={20} className='text-blue-600' />
-        </div>
-        <div className='flex-1 min-w-0'>
-          <h3 className='font-semibold text-foreground truncate'>{form.formName}</h3>
-          <div className='mt-1 space-y-1'>
-            <div className='flex items-center gap-2 text-sm'>
-              <span className='text-muted-foreground'>Context:</span>
-              <span className='text-foreground font-medium'>{form.contextType}</span>
-            </div>
-            <div className='flex items-center gap-2 text-sm'>
-              <span className='text-muted-foreground'>Entity:</span>
-              <span className='text-foreground font-medium'>{form.entityType}</span>
-            </div>
-          </div>
-        </div>
+      <div className='flex w-full items-center'>
+        <p className='truncate text-sm font-medium leading-none text-foreground'>{form.formName}</p>
+      </div>
+      <div className='flex w-full items-center gap-1'>
+        <p className='truncate text-sm font-[450] leading-5 text-muted-foreground'>
+          Entity: {form.entityType}
+        </p>
+        <div className='h-3 w-px shrink-0 rounded-[15px] bg-border' />
+        <p className='shrink-0 text-center text-xs font-[450] leading-[22px] text-muted-foreground opacity-70'>
+          Context: {form.contextType}
+        </p>
       </div>
     </div>
   );

@@ -8,15 +8,12 @@ import {
   forwardRef,
   useImperativeHandle,
 } from 'react';
-import { Microscope } from 'lucide-react';
 import {
   ArrowLeft,
   ArrowUp,
   ChevronRight,
-  FileDefault,
   FileText,
   FolderDefault,
-  Globe,
   Notebook,
   PlusDefault,
 } from '@xyne/icons';
@@ -53,6 +50,7 @@ import {
   mentionPluginKey,
 } from '../../../ui/TipTapExtensions';
 import { MentionSelector } from '../../../ui/Selectors';
+import { XyneAIPlusMenu } from './XyneAIPlusMenu';
 import type { MentionResult } from '@xyne/shared';
 import { usePlatform } from '../../../../hooks/usePlatform';
 import type { CollectionSummary } from '../../../../services/Knowledge/collectionService';
@@ -791,6 +789,39 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       }
     };
 
+    // Destinations mirror the canonical navigators in utils/searchNavigation.ts,
+    // so a canvas/transcript reached from search and from a pill land in the
+    // same place. Each closes the sidebar on mobile, as the other pills do.
+    const handleCanvasContextClick = (canvas: SelectedCanvas): void => {
+      void navigate(`/chat/canvas/${canvas.canvasId ?? canvas.id}`);
+      if (isMobile) xyneAIActor.send({ type: 'CLOSE' });
+    };
+
+    // `navigateToTranscript`: the chat location the transcript was shared at.
+    // The call detail screen is not a valid target — it reads its call off
+    // `location.state`, so a URL-only navigation renders an empty screen.
+    const handleTranscriptContextClick = (transcript: SelectedTranscript): void => {
+      const { channelId: transcriptChannelId, conversationId } = transcript;
+      if (!transcriptChannelId) return;
+      void navigate(
+        conversationId
+          ? `/chat/dir/${transcriptChannelId}/${conversationId}`
+          : `/chat/dir/${transcriptChannelId}`,
+      );
+      if (isMobile) xyneAIActor.send({ type: 'CLOSE' });
+    };
+
+    // Recordings have a real linkable detail route; fall back to the shared
+    // conversation when the search result didn't carry the recording id.
+    const handleRecordingContextClick = (recording: SelectedRecording): void => {
+      if (recording.externalId) {
+        void navigate(`/recordings/${recording.externalId}`);
+        if (isMobile) xyneAIActor.send({ type: 'CLOSE' });
+        return;
+      }
+      handleTranscriptContextClick(recording);
+    };
+
     // Handle removing browser context
     const handleRemoveBrowserContext = (e: React.MouseEvent): void => {
       e.stopPropagation();
@@ -813,8 +844,27 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
     const handleThreadPillClick = (): void => {
       if (!activeThreadInfo || !channelId) return;
 
-      // Navigate to the thread
-      void navigate(`/chat/dir/${channelId}/${activeThreadInfo.conversationId}`);
+      // Mirrors `navigateToMessage` in utils/searchNavigation.ts.
+      //
+      // Context taken from a channel message belongs to the channel, not to a
+      // thread — routing without the conversation segment leaves the thread
+      // panel closed, and `origin` alone is what highlights the conversation in
+      // the channel list.
+      //
+      // Inside a thread we keep the dual hash: `origin` scrolls the channel list
+      // to the parent conversation, `messageId` scrolls the thread panel to the
+      // source message and flashes the highlight on it. Contexts that never set
+      // the flag (tickets, calls, recordings) stay on this path.
+      const { conversationId, messageId, isThreadMessage } = activeThreadInfo;
+
+      if (isThreadMessage === false) {
+        void navigate(`/chat/dir/${channelId}#origin=${conversationId}`);
+      } else {
+        const hash = messageId
+          ? `#origin=${conversationId}&messageId=${messageId}`
+          : `#origin=${conversationId}`;
+        void navigate(`/chat/dir/${channelId}/${conversationId}${hash}`);
+      }
 
       // Close XyneAI modal on mobile after navigation
       if (isMobile) {
@@ -1518,6 +1568,13 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       const rawId = result.searchContext?.attachmentId ?? result.id;
       const title = (result.title || '').replace(/<[^>]*>/g, '');
       const next = currentSelections();
+      // Chat location the transcript lives at — what the pill navigates to.
+      const pillLocation = {
+        ...(result.searchContext?.channelId ? { channelId: result.searchContext.channelId } : {}),
+        ...(result.searchContext?.conversationId
+          ? { conversationId: result.searchContext.conversationId }
+          : {}),
+      };
 
       const toggle = <T extends { id: string }>(list: T[], make: () => T): T[] | null => {
         if (list.some(item => item.id === rawId)) return list.filter(item => item.id !== rawId);
@@ -1545,15 +1602,26 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
         if (!toggled) return;
         next.tickets = toggled;
       } else if (tab === TabType.CANVAS) {
-        const toggled = toggle(selectedCanvases, () => ({ id: rawId, title }));
+        const toggled = toggle(selectedCanvases, () => ({
+          id: rawId,
+          title,
+          ...(result.id ? { canvasId: result.id } : {}),
+        }));
         if (!toggled) return;
         next.canvases = toggled;
       } else if (tab === TabType.CALL) {
-        const toggled = toggle(selectedTranscripts, () => ({ id: rawId, title }));
+        const toggled = toggle(selectedTranscripts, () => ({ id: rawId, title, ...pillLocation }));
         if (!toggled) return;
         next.transcripts = toggled;
       } else if (tab === TabType.RECORDING) {
-        const toggled = toggle(selectedRecordings, () => ({ id: rawId, title }));
+        const toggled = toggle(selectedRecordings, () => ({
+          id: rawId,
+          title,
+          ...pillLocation,
+          ...(result.searchContext?.externalId
+            ? { externalId: result.searchContext.externalId }
+            : {}),
+        }));
         if (!toggled) return;
         next.recordings = toggled;
       } else {
@@ -1604,10 +1672,13 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
           {...(onRemoveTicket && { onRemoveTicket })}
           canvases={selectedCanvases}
           {...(onRemoveCanvas && { onRemoveCanvas })}
+          onCanvasClick={handleCanvasContextClick}
           transcripts={selectedTranscripts}
           {...(onRemoveTranscript && { onRemoveTranscript })}
+          onTranscriptClick={handleTranscriptContextClick}
           recordings={selectedRecordings}
           {...(onRemoveRecording && { onRemoveRecording })}
+          onRecordingClick={handleRecordingContextClick}
           activities={selectedActivities}
           {...(onActivitiesChange && { onActivitiesChange })}
         />
@@ -1700,18 +1771,33 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                     className='hidden'
                     aria-label='Upload files'
                   />
-                  {/* Attach files button */}
-                  <button
-                    type='button'
-                    onClick={handleAttachFiles}
-                    className={`flex items-center justify-center rounded hover:bg-accent transition-all duration-200 ease-in-out shrink-0 p-1.5`}
-                    aria-label='Attach files'
-                    title='Attach files'
-                    data-track-category='XyneAI'
-                    data-track-name='ATTACH_FILES'
+                  {/* "+" menu — attach, collections, canvas, web/deep search */}
+                  <XyneAIPlusMenu
+                    onAttachFiles={handleAttachFiles}
+                    onOpenCollections={() => {
+                      setShowCollectionDropdown(true);
+                      setCollectionSearchQuery('');
+                    }}
+                    {...(onCreateCanvasToggle && { onCreateCanvasToggle })}
+                    createCanvasEnabled={createCanvasEnabled}
+                    {...(onWebSearchToggle && { onWebSearchToggle })}
+                    webSearchEnabled={webSearchEnabled}
+                    webSearchAccessible={webSearchAccessible}
+                    {...(onDeepResearchToggle && { onDeepResearchToggle })}
+                    deepResearchEnabled={deepResearchEnabled}
+                    deepResearchAccessible={deepResearchAccessible}
                   >
-                    <PlusDefault className='w-4 h-4 text-muted-foreground' />
-                  </button>
+                    <button
+                      type='button'
+                      className={`flex items-center justify-center rounded hover:bg-accent transition-all duration-200 ease-in-out shrink-0 p-1.5`}
+                      aria-label='Add to conversation'
+                      title='Add to conversation'
+                      data-track-category='XyneAI'
+                      data-track-name='OPEN_PLUS_MENU'
+                    >
+                      <PlusDefault className='w-4 h-4 text-muted-foreground' />
+                    </button>
+                  </XyneAIPlusMenu>
 
                   {/* "/" Button toggles the inline context picker in the card
                       above. The ⌘/ shortcut still opens the old modal. */}
@@ -1732,124 +1818,6 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                     </span>
                   </button>
 
-                  {/* Knowledge-base / collection selector */}
-                  <button
-                    type='button'
-                    onClick={() => {
-                      setShowCollectionDropdown(true);
-                      setCollectionSearchQuery('');
-                    }}
-                    className={`flex items-center justify-center rounded hover:bg-accent transition-all duration-200 ease-in-out shrink-0 p-1.5`}
-                    aria-label='Select collections'
-                    title='Select collections'
-                    data-track-category='XyneAI'
-                    data-track-name='OPEN_COLLECTION_SELECTOR'
-                  >
-                    <Notebook className='w-4 h-4 text-muted-foreground' />
-                  </button>
-
-                  {/* Divider line */}
-                  {onWebSearchToggle && <div className='h-4 w-px bg-muted' />}
-
-                  {/* Web Search Toggle Button */}
-                  {onWebSearchToggle && (
-                    <button
-                      type='button'
-                      onClick={() => {
-                        if (webSearchAccessible) {
-                          onWebSearchToggle();
-                        }
-                      }}
-                      disabled={!webSearchAccessible}
-                      className={`flex items-center justify-center rounded transition-all duration-200 ease-in-out shrink-0 p-1.5 ${
-                        webSearchEnabled
-                          ? 'bg-accent text-status-success'
-                          : 'hover:bg-accent text-muted-foreground'
-                      } ${!webSearchAccessible ? 'opacity-50 cursor-not-allowed' : ''}`}
-                      aria-label={
-                        webSearchAccessible
-                          ? webSearchEnabled
-                            ? 'Disable web search'
-                            : 'Enable web search'
-                          : 'Web search not available'
-                      }
-                      title={
-                        webSearchAccessible
-                          ? webSearchEnabled
-                            ? 'Web search enabled'
-                            : 'Enable web search'
-                          : "You don't have access to web search."
-                      }
-                      data-track-category='XyneAI'
-                      data-track-name='TOGGLE_WEB_SEARCH'
-                      data-track-metadata={JSON.stringify({ enabled: webSearchEnabled })}
-                    >
-                      <Globe className='w-4 h-4' />
-                    </button>
-                  )}
-
-                  {/* Divider line */}
-                  {onDeepResearchToggle && <div className='h-4 w-px bg-muted' />}
-
-                  {/* Deep Research Toggle Button */}
-                  {onDeepResearchToggle && (
-                    <button
-                      type='button'
-                      onClick={() => {
-                        if (deepResearchAccessible) {
-                          onDeepResearchToggle();
-                        }
-                      }}
-                      disabled={!deepResearchAccessible}
-                      className={`flex items-center justify-center rounded transition-all duration-200 ease-in-out shrink-0 p-1.5 ${
-                        deepResearchEnabled
-                          ? 'bg-accent text-status-pending'
-                          : 'hover:bg-accent text-muted-foreground'
-                      } ${!deepResearchAccessible ? 'opacity-50 cursor-not-allowed' : ''}`}
-                      aria-label={
-                        deepResearchAccessible
-                          ? deepResearchEnabled
-                            ? 'Disable deep research'
-                            : 'Enable deep research'
-                          : 'Deep research not available'
-                      }
-                      title={
-                        deepResearchAccessible
-                          ? deepResearchEnabled
-                            ? 'Deep research enabled'
-                            : 'Enable deep research'
-                          : "You don't have access to deep research."
-                      }
-                      data-track-category='XyneAI'
-                      data-track-name='TOGGLE_DEEP_RESEARCH'
-                      data-track-metadata={JSON.stringify({ enabled: deepResearchEnabled })}
-                    >
-                      <Microscope className='w-4 h-4' />
-                    </button>
-                  )}
-
-                  {/* Divider line */}
-                  {onCreateCanvasToggle && <div className='h-4 w-px bg-border' />}
-
-                  {/* Create Canvas Toggle Button */}
-                  {onCreateCanvasToggle && (
-                    <button
-                      type='button'
-                      onClick={onCreateCanvasToggle}
-                      className={`flex items-center justify-center rounded transition-all duration-200 ease-in-out shrink-0 p-1.5 ${
-                        createCanvasEnabled
-                          ? 'bg-accent text-primary'
-                          : 'hover:bg-accent text-muted-foreground'
-                      }`}
-                      aria-label={createCanvasEnabled ? 'Disable create canvas' : 'Create canvas'}
-                      title={createCanvasEnabled ? 'Create canvas enabled' : 'Create canvas'}
-                      data-track-category='XyneAI'
-                      data-track-name='TOGGLE_CREATE_CANVAS'
-                      data-track-metadata={JSON.stringify({ enabled: createCanvasEnabled })}
-                    >
-                      <FileDefault className='w-4 h-4' />
-                    </button>
-                  )}
                   {/* Agent selector */}
                   {onSelectAgent && (
                     <div className='flex items-center shrink-0'>

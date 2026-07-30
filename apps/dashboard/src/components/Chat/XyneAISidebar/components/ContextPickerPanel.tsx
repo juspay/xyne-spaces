@@ -22,16 +22,32 @@ export interface SelectedTicket {
 export interface SelectedCanvas {
   id: string;
   title: string;
+  /**
+   * Canvas id for `/chat/canvas/:id`. Kept separate from `id`, which prefers the
+   * attachment id for dedupe and is not what the canvas route accepts.
+   */
+  canvasId?: string;
 }
 
+/**
+ * Calls and recordings are both indexed as TRANSCRIPT files shared into a
+ * conversation, so both carry the chat location the transcript lives at — that
+ * is what `navigateToTranscript` (utils/searchNavigation.ts) targets.
+ */
 export interface SelectedTranscript {
   id: string;
   title: string;
+  channelId?: string;
+  conversationId?: string;
 }
 
 export interface SelectedRecording {
   id: string;
   title: string;
+  channelId?: string;
+  conversationId?: string;
+  /** Recording id for `/recordings/:id`, when the search result carries one. */
+  externalId?: string;
 }
 
 export interface ContextSelections {
@@ -286,8 +302,17 @@ export const ContextPickerPanel = ({
           return next;
         });
       } else if (item.type === 'attachment') {
-        const subApp = item.searchResult?.searchContext?.subApp?.toLowerCase();
+        const searchContext = item.searchResult?.searchContext;
+        const subApp = searchContext?.subApp?.toLowerCase();
         const currentTab = currentTabRef.current;
+        // Where the pill navigates to. `rawId` can't stand in for these: it
+        // prefers the attachment id, which neither route accepts.
+        const location = {
+          ...(searchContext?.channelId ? { channelId: searchContext.channelId } : {}),
+          ...(searchContext?.conversationId
+            ? { conversationId: searchContext.conversationId }
+            : {}),
+        };
 
         if (subApp === 'canvas') {
           setSelectedCanvases(prev => {
@@ -296,7 +321,11 @@ export const ContextPickerPanel = ({
               next.delete(rawId);
             } else {
               if (!checkNonChannelLimit()) return prev;
-              next.set(rawId, { id: rawId, title });
+              next.set(rawId, {
+                id: rawId,
+                title,
+                ...(item.searchResult?.id ? { canvasId: item.searchResult.id } : {}),
+              });
             }
             return next;
           });
@@ -310,7 +339,12 @@ export const ContextPickerPanel = ({
                 next.delete(rawId);
               } else {
                 if (!checkNonChannelLimit()) return prev;
-                next.set(rawId, { id: rawId, title });
+                next.set(rawId, {
+                  id: rawId,
+                  title,
+                  ...location,
+                  ...(searchContext?.externalId ? { externalId: searchContext.externalId } : {}),
+                });
               }
               return next;
             });
@@ -321,7 +355,7 @@ export const ContextPickerPanel = ({
                 next.delete(rawId);
               } else {
                 if (!checkNonChannelLimit()) return prev;
-                next.set(rawId, { id: rawId, title });
+                next.set(rawId, { id: rawId, title, ...location });
               }
               return next;
             });

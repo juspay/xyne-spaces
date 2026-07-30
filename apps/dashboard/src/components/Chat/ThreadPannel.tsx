@@ -43,6 +43,7 @@ import { DragAndDropOverlay } from './DragAndDropOverlay';
 import { ConversationSubscription } from './ConversationSubscription';
 import { useChannelSubscription } from '../../hooks/useChannelSubscription';
 import { insertDateSeparatorsForThreadMessages } from '../../utils/chatUtils';
+import { htmlToPlainText } from '../../utils/sanitizer';
 import { QueryResultType } from '@rocicorp/zero';
 import * as Tabs from '@radix-ui/react-tabs';
 import { cn } from '../../utils/classNames';
@@ -513,12 +514,19 @@ export const ThreadMessages = ({
     const senderName: string = String(initialMessageSender?.name || 'Unknown');
     const contentStr: string =
       typeof initialMessage.content === 'string' ? initialMessage.content : '';
-    const previewText: string = contentStr.slice(0, 100);
+    // Message content is stored as HTML — slicing it raw leaks tags (and can cut
+    // mid-tag) into the Ask AI context pill label.
+    const previewText: string = htmlToPlainText(contentStr).slice(0, 100);
 
     return {
       conversationId: derivedConversationId,
       senderName,
       previewText,
+      ...(initialMessage.senderId && { senderId: initialMessage.senderId }),
+      ...(initialMessage.messageId && { messageId: initialMessage.messageId }),
+      // Opened from the thread panel header — the context is the thread itself,
+      // so the pill should navigate back into it.
+      isThreadMessage: true,
     };
   }, [derivedConversationId, initialMessage, initialMessageSender]);
 

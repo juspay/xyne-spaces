@@ -9,6 +9,7 @@ import type {
 } from '@blocknote/core';
 import '@blocknote/core/fonts/inter.css';
 import '@blocknote/mantine/style.css';
+import { canvasSchema } from '../../Canvas/canvasSchema';
 import { useTheme } from '../../../hooks/useTheme';
 
 interface SummaryCanvasPreviewProps {
@@ -17,7 +18,7 @@ interface SummaryCanvasPreviewProps {
 
 export const SummaryCanvasPreview: React.FC<SummaryCanvasPreviewProps> = ({ markdown }) => {
   const { theme } = useTheme();
-  const editor = useCreateBlockNote();
+  const editor = useCreateBlockNote({ schema: canvasSchema });
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
@@ -37,10 +38,14 @@ export const SummaryCanvasPreview: React.FC<SummaryCanvasPreviewProps> = ({ mark
   }
 
   return (
-    <BlockNoteView
-      editor={editor as unknown as BlockNoteEditor<BlockSchema, InlineContentSchema, StyleSchema>}
-      editable={false}
-      theme={theme === 'midnight' ? 'dark' : 'light'}
-    />
+    // canvas-surface is what makes this render like the real canvas — see global.css.
+    // The 24px gutter matches the hosting panel's px-6 empty state.
+    <div className='canvas-surface canvas-surface-preview [--canvas-gutter:24px]'>
+      <BlockNoteView
+        editor={editor as unknown as BlockNoteEditor<BlockSchema, InlineContentSchema, StyleSchema>}
+        editable={false}
+        theme={theme === 'midnight' ? 'dark' : 'light'}
+      />
+    </div>
   );
 };

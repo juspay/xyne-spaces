@@ -147,8 +147,12 @@ export const XyneAIEmptyState = ({ onSelect = () => {} }: XyneAIEmptyStateProps)
             sidebars (mobile / dragged-in panel) instead of clipping. Caps at 1x
             once ~398px of width is available. */}
         <div className='w-full' style={{ containerType: 'inline-size' }}>
+          {/* `isolate` keeps the cards' `hover:z-10` inside this group. It only
+              exists to lift a hovered card above its overlapping sibling —
+              without a stacking context here it also outranks the composer, and
+              a hovered card paints over the context picker floating above it. */}
           <div
-            className='relative mx-auto h-[188px] w-[382px] origin-top'
+            className='relative isolate mx-auto h-[188px] w-[382px] origin-top'
             style={{ transform: 'scale(min(1, 100cqw / 398))' }}
           >
             {/* Card 1 — "Catch me up" */}

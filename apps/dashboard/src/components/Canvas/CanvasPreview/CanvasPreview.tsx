@@ -4,37 +4,18 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useShareableOrigin } from '../../../hooks/useShareableOrigin';
 import { useCreateBlockNote } from '@blocknote/react';
 import { BlockNoteView } from '@blocknote/mantine';
-import {
-  BlockNoteSchema,
-  defaultBlockSpecs,
-  defaultInlineContentSpecs,
-  BlockNoteEditor,
-  BlockSchema,
-  InlineContentSchema,
-  StyleSchema,
-} from '@blocknote/core';
+import { BlockNoteEditor, BlockSchema, InlineContentSchema, StyleSchema } from '@blocknote/core';
 import '@blocknote/core/fonts/inter.css';
 import '@blocknote/mantine/style.css';
 
-import { whiteboardBlockSpecs } from 'blocknote-layout-extensions';
-import { mentionInlineContentSpec } from '../CanvasMentionSpec';
-import { resolveFileUrl, removeUnknownBlocks, knownBlockTypesOf } from '../../../utils/canvasUtils';
+import { canvasSchema, knownCanvasBlockTypes } from '../canvasSchema';
+import { resolveFileUrl, removeUnknownBlocks } from '../../../utils/canvasUtils';
 import { queries } from '../../../zero/queries';
 import { Canvas } from '../Canvas.types';
 import { useRouteContext } from '../../../hooks/useRouteContext';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useTheme } from '../../../hooks/useTheme';
-
-const schema = BlockNoteSchema.create({
-  blockSpecs: Object.assign({}, defaultBlockSpecs, whiteboardBlockSpecs),
-} as Parameters<typeof BlockNoteSchema.create>[0]).extend({
-  inlineContentSpecs: {
-    ...defaultInlineContentSpecs,
-    mention: mentionInlineContentSpec,
-  },
-});
-const knownBlockTypes = knownBlockTypesOf(schema);
 
 interface CanvasPreviewProps {
   canvasId?: string;
@@ -70,14 +51,14 @@ export const CanvasPreview: React.FC<CanvasPreviewProps> = ({
   const validContent = useMemo(
     () =>
       canvas?.content && Array.isArray(canvas.content) && canvas.content.length > 0
-        ? removeUnknownBlocks(canvas.content, knownBlockTypes)
+        ? removeUnknownBlocks(canvas.content, knownCanvasBlockTypes)
         : undefined,
     [canvas?.content],
   );
 
   // Create a read-only editor instance with URL resolver
   const editor = useCreateBlockNote({
-    schema,
+    schema: canvasSchema,
     resolveFileUrl,
     ...(validContent ? { initialContent: validContent } : {}),
   });
@@ -134,9 +115,6 @@ export const CanvasPreview: React.FC<CanvasPreviewProps> = ({
           </div>
           <div className='w-full bg-card p-4'>
             <div className='h-[220px] bg-muted rounded' />
-          </div>
-          <div className='flex items-center gap-1.5 px-3 py-2 border-t border-border'>
-            <div className='h-3 bg-muted rounded w-24' />
           </div>
         </div>
       );
@@ -253,9 +231,8 @@ export const CanvasPreview: React.FC<CanvasPreviewProps> = ({
       {/* Rich Preview Section */}
       <div className='w-full relative bg-card'>
         <div className='max-h-[220px] overflow-hidden relative pointer-events-none select-none'>
-          <div className='-ml-12'>
-            {' '}
-            {/* Negative margin to pull content left, counteracting BlockNote default padding globally */}
+          {/* canvas-surface is what makes this render like the real canvas — see global.css */}
+          <div className='canvas-surface canvas-surface-preview'>
             <BlockNoteView
               editor={
                 editor as unknown as BlockNoteEditor<BlockSchema, InlineContentSchema, StyleSchema>
@@ -269,11 +246,6 @@ export const CanvasPreview: React.FC<CanvasPreviewProps> = ({
           {/* Subtle gradient overlay at the very bottom */}
           <div className='absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-card to-transparent pointer-events-none' />
         </div>
-      </div>
-
-      <div className='flex items-center gap-1.5 px-3 py-2 border-t border-border text-xs text-muted-foreground'>
-        <FileText size={11} className='flex-shrink-0' />
-        <span className='truncate'>Canvas preview</span>
       </div>
     </div>
   );
