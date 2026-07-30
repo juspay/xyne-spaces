@@ -569,7 +569,7 @@ export function hideClawOverlay(): void {
 }
 
 export function isClawOverlayEnabled(): boolean {
-  return clawStore.get(ENABLED_KEY, true) as boolean;
+  return clawStore.get(ENABLED_KEY, false) as boolean;
 }
 
 function destroyClawOverlay(): void {
