@@ -4,6 +4,10 @@
 
 set -e
 
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+COMPOSE_FILE="$REPO_ROOT/docker-compose.dev.yml"
+cd "$REPO_ROOT"
+
 echo "🚀 Starting Xyne Spaces Infrastructure Services..."
 echo ""
 
@@ -106,16 +110,16 @@ fi
 
 # Start infrastructure services
 echo -e "${BLUE}🚢 Starting infrastructure services...${NC}"
-$COMPOSE_CMD -f docker-compose.dev.yml up -d postgres common-postgres redis livekit fake-gcs minio ysweet transcription-agent victoriametrics grafana otel-collector superposition
+$COMPOSE_CMD -f "$COMPOSE_FILE" up -d postgres common-postgres redis livekit fake-gcs minio ysweet transcription-agent victoriametrics grafana otel-collector superposition
 
 # Start Vespa now so it boots (~1 min) in parallel with the database work below.
 # It lives in its own compose file with its own data volume; schemas are deployed
 # at the end of this script. Set SKIP_VESPA=1 to leave search out entirely.
-VESPA_COMPOSE="vespa-core/deployment/docker-compose.dev.yml"
+VESPA_COMPOSE="$REPO_ROOT/vespa-core/deployment/docker-compose.dev.yml"
 # -p is required: compose would otherwise name the project after the compose file's
 # parent dir ("deployment") and split Vespa off from the rest of the stack. This is
 # the same project name the root compose file resolves to.
-VESPA_PROJECT="${COMPOSE_PROJECT_NAME:-$(basename "$PWD")}"
+VESPA_PROJECT="${COMPOSE_PROJECT_NAME:-$(basename "$REPO_ROOT")}"
 if [ "${SKIP_VESPA:-0}" = "1" ]; then
     echo -e "${YELLOW}⏭  Skipping Vespa (SKIP_VESPA=1)${NC}"
 elif [ ! -f "$VESPA_COMPOSE" ]; then
@@ -134,7 +138,7 @@ fi
 # Wait for PostgreSQL
 echo -e "${BLUE}⏳ Waiting for PostgreSQL...${NC}"
 for i in {1..30}; do
-    if $COMPOSE_CMD -f docker-compose.dev.yml exec -T postgres pg_isready -U xyne -d xyne_dev_db > /dev/null 2>&1; then
+    if $COMPOSE_CMD -f "$COMPOSE_FILE" exec -T postgres pg_isready -U xyne -d xyne_dev_db > /dev/null 2>&1; then
         echo -e "${GREEN}✓ PostgreSQL is ready${NC}"
         break
     fi
@@ -148,7 +152,7 @@ done
 # Wait for common PostgreSQL
 echo -e "${BLUE}⏳ Waiting for common PostgreSQL...${NC}"
 for i in {1..30}; do
-    if $COMPOSE_CMD -f docker-compose.dev.yml exec -T common-postgres pg_isready -U xyne -d xyne_common > /dev/null 2>&1; then
+    if $COMPOSE_CMD -f "$COMPOSE_FILE" exec -T common-postgres pg_isready -U xyne -d xyne_common > /dev/null 2>&1; then
         echo -e "${GREEN}✓ Common PostgreSQL is ready${NC}"
         break
     fi
@@ -162,7 +166,7 @@ done
 # Wait for Redis
 echo -e "${BLUE}⏳ Waiting for Redis...${NC}"
 for i in {1..30}; do
-    if $COMPOSE_CMD -f docker-compose.dev.yml exec -T redis redis-cli ping > /dev/null 2>&1; then
+    if $COMPOSE_CMD -f "$COMPOSE_FILE" exec -T redis redis-cli ping > /dev/null 2>&1; then
         echo -e "${GREEN}✓ Redis is ready${NC}"
         break
     fi
@@ -230,14 +234,14 @@ fi
 
 # Run database migrations
 echo -e "${BLUE}🔄 Setting up database schema...${NC}"
-cd apps/backend
+cd "$REPO_ROOT/apps/backend"
 
 # Create .env.local from .env.example if it doesn't exist
 if [ ! -f ".env.local" ]; then
     echo -e "${YELLOW}⚠️  apps/backend/.env.local not found. Creating from .env.example...${NC}"
     cp .env.example .env.local
     echo -e "${GREEN}✓ Created apps/backend/.env.local${NC}"
-    node ../scripts/generate-local-secrets.mjs
+    node "$REPO_ROOT/scripts/generate-local-secrets.mjs"
     echo -e "${YELLOW}   Please review and update values as needed.${NC}"
 fi
 
@@ -261,10 +265,10 @@ if [ ! -d "node_modules" ]; then
   echo -e "${YELLOW}   Skipping database setup. Please run:${NC}"
   echo -e "${YELLOW}   1. cd apps/backend && pnpm install${NC}"
   echo -e "${YELLOW}   2. pnpm run services (to setup database)${NC}"
-  cd ..
+  cd "$REPO_ROOT"
 else
   # Check if users table exists by trying to query it (Prisma creates lowercase table names)
-  USER_COUNT=$($COMPOSE_CMD -f ../docker-compose.dev.yml exec -T postgres psql -U xyne -d xyne_dev_db -t -c "SELECT COUNT(*) FROM users;" 2>&1 || true)
+  USER_COUNT=$($COMPOSE_CMD -f "$COMPOSE_FILE" exec -T postgres psql -U xyne -d xyne_dev_db -t -c "SELECT COUNT(*) FROM users;" 2>&1 || true)
   echo "DEBUG: User count query result: '$USER_COUNT'"
   USER_COUNT=$(echo "$USER_COUNT" | xargs)
 
@@ -274,14 +278,14 @@ else
 
     # Stop zero-cache and clear its cache
     echo -e "${BLUE}🛑 Stopping zero-cache and clearing cache...${NC}"
-    $COMPOSE_CMD -f ../docker-compose.dev.yml stop zero-cache 2>/dev/null || true
-    $COMPOSE_CMD -f ../docker-compose.dev.yml rm -f zero-cache 2>/dev/null || true
+    $COMPOSE_CMD -f "$COMPOSE_FILE" stop zero-cache 2>/dev/null || true
+    $COMPOSE_CMD -f "$COMPOSE_FILE" rm -f zero-cache 2>/dev/null || true
     docker volume rm xyne-spaces_zero_cache_data 2>/dev/null || podman volume rm xyne-spaces_zero_cache_data 2>/dev/null || true
 
     # Drop and recreate database
     echo -e "${BLUE}Dropping and recreating database...${NC}"
-    $COMPOSE_CMD -f ../docker-compose.dev.yml exec -T postgres psql -U xyne -d postgres -c "DROP DATABASE IF EXISTS xyne_dev_db;" 2>/dev/null
-    $COMPOSE_CMD -f ../docker-compose.dev.yml exec -T postgres psql -U xyne -d postgres -c "CREATE DATABASE xyne_dev_db;" 2>/dev/null
+    $COMPOSE_CMD -f "$COMPOSE_FILE" exec -T postgres psql -U xyne -d postgres -c "DROP DATABASE IF EXISTS xyne_dev_db;" 2>/dev/null
+    $COMPOSE_CMD -f "$COMPOSE_FILE" exec -T postgres psql -U xyne -d postgres -c "CREATE DATABASE xyne_dev_db;" 2>/dev/null
 
     # Push schema with force-reset (first time setup - ensures tables are created)
     echo -e "${BLUE}Creating database schema...${NC}"
@@ -319,7 +323,7 @@ else
 
     # Check if default workspace exists, create if not
     echo -e "${BLUE}🔍 Checking for default workspace...${NC}"
-    WORKSPACE_EXISTS=$($COMPOSE_CMD -f ../docker-compose.dev.yml exec -T postgres psql -U xyne -d xyne_dev_db -t -c "SELECT COUNT(*) FROM workspaces WHERE name = 'Default Workspace';" 2>&1 | xargs)
+    WORKSPACE_EXISTS=$($COMPOSE_CMD -f "$COMPOSE_FILE" exec -T postgres psql -U xyne -d xyne_dev_db -t -c "SELECT COUNT(*) FROM workspaces WHERE name = 'Default Workspace';" 2>&1 | xargs)
     
     if [ "$WORKSPACE_EXISTS" = "0" ] || [ -z "$WORKSPACE_EXISTS" ]; then
       echo -e "${YELLOW}⚠️  Default workspace not found. Running seed...${NC}"
@@ -331,17 +335,17 @@ else
   fi
 
   echo -e "${GREEN}✓ Database ready${NC}"
-  cd ..
+  cd "$REPO_ROOT"
 fi
 
 # Start zero-cache
 echo -e "${BLUE}🚀 Starting zero-cache...${NC}"
-$COMPOSE_CMD -f docker-compose.dev.yml up -d zero-cache
+$COMPOSE_CMD -f "$COMPOSE_FILE" up -d zero-cache
 
 # Wait for zero-cache
 echo -e "${BLUE}⏳ Waiting for Zero cache...${NC}"
 for i in {1..30}; do
-    if $COMPOSE_CMD -f docker-compose.dev.yml logs zero-cache 2>&1 | grep -q "zero-cache ready"; then
+    if $COMPOSE_CMD -f "$COMPOSE_FILE" logs zero-cache 2>&1 | grep -q "zero-cache ready"; then
         echo -e "${GREEN}✓ Zero cache is ready${NC}"
         break
     fi
@@ -354,11 +358,11 @@ done
 
 # Start claw-auth-postgres
 echo -e "${BLUE}🚢 Starting claw-auth-postgres...${NC}"
-$COMPOSE_CMD -f docker-compose.dev.yml up -d claw-auth-postgres
+$COMPOSE_CMD -f "$COMPOSE_FILE" up -d claw-auth-postgres
 
 echo -e "${BLUE}⏳ Waiting for claw-auth-postgres...${NC}"
 for i in {1..30}; do
-    if $COMPOSE_CMD -f docker-compose.dev.yml exec -T claw-auth-postgres pg_isready -U claw -d claw_auth_db > /dev/null 2>&1; then
+    if $COMPOSE_CMD -f "$COMPOSE_FILE" exec -T claw-auth-postgres pg_isready -U claw -d claw_auth_db > /dev/null 2>&1; then
         echo -e "${GREEN}✓ claw-auth-postgres is ready${NC}"
         break
     fi
@@ -372,21 +376,21 @@ done
 # Setup kata-sdk (dependency of xyne-claw-shared)
 echo -e "${BLUE}🔧 Setting up kata-sdk...${NC}"
 if [ -d "packages/kata-sdk" ] && [ ! -d "packages/kata-sdk/node_modules" ]; then
-    cd packages/kata-sdk
+    cd "$REPO_ROOT/packages/kata-sdk"
     echo -e "${YELLOW}⚠️  kata-sdk dependencies not installed. Running pnpm install...${NC}"
     pnpm install
     echo -e "${GREEN}✓ kata-sdk ready${NC}"
-    cd ../..
+    cd "$REPO_ROOT"
 fi
 
 # Setup xyne-claw-shared (shared dependency for xyne-claw and xyne-claw-auth)
 echo -e "${BLUE}🔧 Setting up xyne-claw-shared...${NC}"
-if [ -d "xyne-claw-shared" ] && [ ! -d "packages/xyne-claw-shared/node_modules" ]; then
-    cd packages/xyne-claw-shared
+if [ -d "packages/xyne-claw-shared" ] && [ ! -d "packages/xyne-claw-shared/node_modules" ]; then
+    cd "$REPO_ROOT/packages/xyne-claw-shared"
     echo -e "${YELLOW}⚠️  xyne-claw-shared dependencies not installed. Running pnpm install...${NC}"
     pnpm install
     echo -e "${GREEN}✓ xyne-claw-shared ready${NC}"
-    cd ..
+    cd "$REPO_ROOT"
 fi
 
 # Setup xyne-claw-auth backend
@@ -406,7 +410,7 @@ fi
 
 if [ -f "apps/xyne-claw-auth/backend/.env" ]; then
     echo -e "${BLUE}🔄 Setting up xyne-claw-auth database schema...${NC}"
-    cd apps/xyne-claw-auth/backend
+    cd "$REPO_ROOT/apps/xyne-claw-auth/backend"
     if [ ! -d "node_modules" ]; then
         echo -e "${YELLOW}⚠️  apps/xyne-claw-auth/backend dependencies not installed. Running pnpm install...${NC}"
         pnpm install
@@ -414,25 +418,25 @@ if [ -f "apps/xyne-claw-auth/backend/.env" ]; then
     set -a && source .env && set +a
     # Pass through DEFAULT_ADMIN_EMAIL from the main backend .env.local if not set locally
     if [ -z "$DEFAULT_ADMIN_EMAIL" ]; then
-      export DEFAULT_ADMIN_EMAIL=$(grep -m 1 '^DEFAULT_ADMIN_EMAIL=' ../../backend/.env.local 2>/dev/null | sed 's/^DEFAULT_ADMIN_EMAIL=//' || echo "admin@example.in")
+      export DEFAULT_ADMIN_EMAIL=$(grep -m 1 '^DEFAULT_ADMIN_EMAIL=' "$REPO_ROOT/apps/backend/.env.local" 2>/dev/null | sed 's/^DEFAULT_ADMIN_EMAIL=//' || echo "admin@example.in")
     fi
     pnpm exec prisma db push --skip-generate --accept-data-loss
     pnpm exec prisma generate
     NODE_OPTIONS="" pnpm exec tsx prisma/seed.ts
     echo -e "${GREEN}✓ xyne-claw-auth database schema ready${NC}"
-    cd ../..
+    cd "$REPO_ROOT"
 fi
 
 # Setup xyne-claw-auth frontend
 echo -e "${BLUE}🔧 Setting up xyne-claw-auth frontend...${NC}"
 if [ -d "apps/xyne-claw-auth/frontend" ]; then
-    cd apps/xyne-claw-auth/frontend
+    cd "$REPO_ROOT/apps/xyne-claw-auth/frontend"
     if [ ! -d "node_modules" ]; then
         echo -e "${YELLOW}⚠️  apps/xyne-claw-auth/frontend dependencies not installed. Running pnpm install...${NC}"
         pnpm install
     fi
     echo -e "${GREEN}✓ xyne-claw-auth frontend ready${NC}"
-    cd ../..
+    cd "$REPO_ROOT"
 fi
 
 # Setup xyne-claw
@@ -444,14 +448,14 @@ if [ ! -f "apps/xyne-claw/.env" ]; then
     echo -e "${YELLOW}   Please review and update values as needed.${NC}"
 fi
 
-if [ -d "xyne-claw" ]; then
-    cd apps/xyne-claw
+if [ -d "apps/xyne-claw" ]; then
+    cd "$REPO_ROOT/apps/xyne-claw"
     if [ ! -d "node_modules" ]; then
         echo -e "${YELLOW}⚠️  xyne-claw dependencies not installed. Running pnpm install...${NC}"
         pnpm install
     fi
     echo -e "${GREEN}✓ xyne-claw ready${NC}"
-    cd ..
+    cd "$REPO_ROOT"
 fi
 
 # Deploy Vespa schemas (idempotent: waits for health, downloads the embedding
@@ -461,7 +465,7 @@ fi
 VESPA_READY=0
 if [ "${SKIP_VESPA:-0}" != "1" ]; then
     echo -e "${BLUE}🔎 Deploying Vespa schemas (first run downloads the embedding model)...${NC}"
-    if DOCKER_COMPOSE="$COMPOSE_CMD" CONTAINER_CLI="$CONTAINER_RUNTIME" ./vespa-core/scripts/deploy-dev.sh; then
+    if DOCKER_COMPOSE="$COMPOSE_CMD" CONTAINER_CLI="$CONTAINER_RUNTIME" "$REPO_ROOT/vespa-core/scripts/deploy-dev.sh"; then
         echo -e "${GREEN}✓ Vespa schemas deployed${NC}"
         VESPA_READY=1
     else
@@ -478,7 +482,7 @@ fi
 VESPA_READY=0
 if [ "${SKIP_VESPA:-0}" != "1" ]; then
     echo -e "${BLUE}🔎 Deploying Vespa schemas (first run downloads the embedding model)...${NC}"
-    if DOCKER_COMPOSE="$COMPOSE_CMD" CONTAINER_CLI="$CONTAINER_RUNTIME" ./vespa-core/scripts/deploy-dev.sh; then
+    if DOCKER_COMPOSE="$COMPOSE_CMD" CONTAINER_CLI="$CONTAINER_RUNTIME" "$REPO_ROOT/vespa-core/scripts/deploy-dev.sh"; then
         echo -e "${GREEN}✓ Vespa schemas deployed${NC}"
         VESPA_READY=1
     else
