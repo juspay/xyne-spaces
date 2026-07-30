@@ -208,6 +208,7 @@ import type { ScreenSource } from '../types/electron';
 import ConfluenceMigrationScreen from './ConfluenceMigrationScreen/ConfluenceMigrationScreen';
 import AIScreen from './AIScreen/AIScreen';
 import AILibraryScreen from './AIScreen/AILibraryScreen';
+import AIAgentCreateScreen from './AIScreen/AIAgentCreateScreen';
 import AIKnowledgeScreen from './AIScreen/AIKnowledgeScreen';
 import AISectionScreen from './AIScreen/AISectionScreen';
 import UserGuideScreen from './UserGuideScreen';
@@ -825,6 +826,7 @@ export const router = createBrowserRouter([
                   { index: true, element: <Navigate to='chat/new' replace /> },
                   { path: 'chat/new', element: <AIScreen /> },
                   { path: 'library', element: <AILibraryScreen /> },
+                  { path: 'library/agent/create', element: <AIAgentCreateScreen /> },
                   { path: 'knowledge', element: <AIKnowledgeScreen /> },
                   { path: 'digital-twin', element: <AISectionScreen title='Digital twin' /> },
                   { path: 'metrics', element: <AISectionScreen title='Metrics' /> },

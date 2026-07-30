@@ -1,5 +1,5 @@
 import { ComponentType, ReactElement, useRef, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { PlusDefault, SearchDefault } from '@xyne/icons';
 import { cn } from '@/utils/classNames';
 import { Button } from '@/components/ui/Button';
@@ -23,7 +23,7 @@ const LIBRARY_TABS = [
     label: 'Agents',
     content: AgentsV2,
     searchPlaceholder: 'Search agents',
-    create: { label: 'Create Agent', path: '/claw-agents/create' },
+    create: { label: 'Create Agent', path: '/ai/library/agent/create' },
   },
   {
     id: 'subagents',
@@ -53,6 +53,10 @@ const TAB_SCOPED_PARAMS = ['q', 'category', 'source'];
 
 const LibraryV2 = (): ReactElement => {
   const navigate = useNavigate();
+  const { workspaceId } = useParams<{ workspaceId?: string }>();
+  // Every app route lives under `/:workspaceId`, so the create targets below
+  // have to carry the prefix when we're inside a workspace.
+  const prefixWs = (path: string): string => (workspaceId ? `/${workspaceId}${path}` : path);
   const [searchParams, setSearchParams] = useSearchParams();
   const [toolbarSlot, setToolbarSlot] = useState<HTMLDivElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
@@ -91,31 +95,34 @@ const LibraryV2 = (): ReactElement => {
   };
 
   return (
-    <div className='mx-auto flex w-full max-w-[800px] flex-col gap-8 px-6 pb-16'>
-      <div className='flex flex-col gap-5 pt-5'>
-        <div className='flex items-center gap-5'>
-          <div className='flex min-w-0 flex-1 flex-col justify-center gap-1'>
-            <h1 className='text-2xl font-semibold leading-[1.2] tracking-[-0.24px] text-foreground'>
-              Library
-            </h1>
-            <p className='text-[15px] leading-[1.2] text-muted-foreground'>
-              View and manage agents, subagent, skills and MCP.
-            </p>
-          </div>
-          {activeTab.create && (
-            <Button
-              type='button'
-              className='shrink-0'
-              onClick={() => void navigate(activeTab.create.path)}
-              data-track-category='Claw Agents'
-              data-track-name={activeTab.create.label}
-            >
-              <PlusDefault className='size-4' />
-              {activeTab.create.label}
-            </Button>
-          )}
+    <div className='mx-auto flex w-full max-w-[800px] flex-col px-6 pb-16'>
+      <div className='flex items-center gap-5 pt-5'>
+        <div className='flex min-w-0 flex-1 flex-col justify-center gap-1'>
+          <h1 className='text-2xl font-semibold leading-[1.2] tracking-[-0.24px] text-foreground'>
+            Library
+          </h1>
+          <p className='text-[15px] leading-[1.2] text-muted-foreground'>
+            View and manage agents, subagent, skills and MCP.
+          </p>
         </div>
+        {activeTab.create && (
+          <Button
+            type='button'
+            className='shrink-0'
+            onClick={() => void navigate(prefixWs(activeTab.create.path))}
+            data-track-category='Claw Agents'
+            data-track-name={activeTab.create.label}
+          >
+            <PlusDefault className='size-4' />
+            {activeTab.create.label}
+          </Button>
+        )}
+      </div>
 
+      {/* Tabs + search/filter pin to the top of the scroll container so the
+            switcher stays reachable while a long list scrolls under it. The
+            background is opaque so cards don't show through. */}
+      <div className='sticky top-0 z-10 mt-3 flex flex-col gap-5 bg-background pb-3 pt-2'>
         <div className='flex items-center justify-between gap-4'>
           <div className='flex items-start gap-1'>
             {LIBRARY_TABS.map(tab => (
@@ -181,7 +188,9 @@ const LibraryV2 = (): ReactElement => {
       </div>
 
       <LibraryToolbarSlotProvider value={toolbarSlot}>
-        <TabContent key={activeTab.id} query={query} />
+        <div className='mt-5'>
+          <TabContent key={activeTab.id} query={query} />
+        </div>
       </LibraryToolbarSlotProvider>
     </div>
   );

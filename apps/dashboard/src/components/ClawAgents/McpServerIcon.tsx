@@ -35,7 +35,9 @@ export const McpServerIcon = ({
   size?: 'md' | 'lg';
 }): ReactElement => {
   const [errored, setErrored] = useState(false);
-  const bg = MCP_ICON_BG[server.type] ?? 'bg-muted';
+  // `bg-card` (white), not `bg-muted` (grey), so brand logos sit on the same
+  // white-tile-with-grey-border frame the Browse MCP dialog's McpLogo uses.
+  const bg = MCP_ICON_BG[server.type] ?? 'bg-card';
   const sizeCls = SIZE[size];
 
   if (errored || !server.type) {
