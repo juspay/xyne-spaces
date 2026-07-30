@@ -1193,6 +1193,29 @@ model PullRequests {
   @@schema("public")
 }
 
+/// Links a PR to channel threads where its link was posted (e.g. -merge channels).
+/// Written when the "Run PR Check" button is posted on a PR-link message; read to
+/// mirror PR lifecycle updates (merged, build status) into those threads.
+model PrThreadLink {
+  id             String   @id @default(cuid())
+  prUrl          String   // Canonical PR URL: <base>/projects/{KEY}/repos/{SLUG}/pull-requests/{ID}
+  prId           Int
+  projectKey     String
+  repositorySlug String
+  conversationId String   // Thread where the PR link was posted
+  channelId      String
+  messageId      String   // The button message posted in that thread
+  workspaceId    String   // Denormalized for workspace scoping (matches channels.workspaceId convention)
+  createdAt      DateTime // Supplied by the application — no DB default
+  updatedAt      DateTime @updatedAt
+
+  @@unique([prUrl, conversationId]) // Idempotency guard against duplicate side-effect delivery
+  @@index([prId])
+  @@index([conversationId])
+  @@map("pr_thread_links")
+  @@schema("non_zero")
+}
+
 model TeamIntelligenceIngestionBatchV2 {
   id              String                           @id @default(cuid())
   reportDate      DateTime

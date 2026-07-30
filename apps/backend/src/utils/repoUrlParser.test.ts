@@ -1,4 +1,54 @@
-import { parseBitbucketRepoUrl } from './repoUrlParser';
+import { parseBitbucketPrUrl, parseBitbucketRepoUrl } from './repoUrlParser';
+
+describe('parseBitbucketPrUrl', () => {
+  it('parses a canonical PR URL', () => {
+    expect(
+      parseBitbucketPrUrl('https://bitbucket.juspay.net/projects/XYNE/repos/xyne-spaces/pull-requests/8594')
+    ).toEqual({
+      prUrl: 'https://bitbucket.juspay.net/projects/XYNE/repos/xyne-spaces/pull-requests/8594',
+      prId: 8594,
+      projectKey: 'XYNE',
+      repositorySlug: 'xyne-spaces',
+      hostname: 'bitbucket.juspay.net',
+    });
+  });
+
+  it('canonicalizes URL variants with trailing segments and query params', () => {
+    expect(
+      parseBitbucketPrUrl('https://bitbucket.juspay.net/projects/EULER/repos/euler-api/pull-requests/12/overview?commentId=9')
+    ).toEqual({
+      prUrl: 'https://bitbucket.juspay.net/projects/EULER/repos/euler-api/pull-requests/12',
+      prId: 12,
+      projectKey: 'EULER',
+      repositorySlug: 'euler-api',
+      hostname: 'bitbucket.juspay.net',
+    });
+  });
+
+  it('normalizes casing to Bitbucket conventions (uppercase key, lowercase slug/host)', () => {
+    expect(
+      parseBitbucketPrUrl('https://BITBUCKET.juspay.net/projects/xyne/repos/Xyne-Spaces/pull-requests/7')
+    ).toEqual({
+      prUrl: 'https://bitbucket.juspay.net/projects/XYNE/repos/xyne-spaces/pull-requests/7',
+      prId: 7,
+      projectKey: 'XYNE',
+      repositorySlug: 'xyne-spaces',
+      hostname: 'bitbucket.juspay.net',
+    });
+  });
+
+  it('strips userinfo from the canonical URL', () => {
+    expect(
+      parseBitbucketPrUrl('https://user:pass@bitbucket.juspay.net/projects/XYNE/repos/xyne-spaces/pull-requests/9')?.prUrl
+    ).toBe('https://bitbucket.juspay.net/projects/XYNE/repos/xyne-spaces/pull-requests/9');
+  });
+
+  it('returns null for non-PR URLs and garbage', () => {
+    expect(parseBitbucketPrUrl('https://bitbucket.juspay.net/projects/XYNE/repos/xyne-spaces/commits/abc')).toBeNull();
+    expect(parseBitbucketPrUrl('not a url')).toBeNull();
+    expect(parseBitbucketPrUrl('')).toBeNull();
+  });
+});
 
 describe('parseBitbucketRepoUrl', () => {
   describe('SSH clone URLs (what the webhook stores on pull_requests.repositoryUrl)', () => {
