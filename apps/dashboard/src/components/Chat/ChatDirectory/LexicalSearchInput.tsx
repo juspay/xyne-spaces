@@ -332,9 +332,8 @@ function CursorPositionPlugin({
 
       // Use requestAnimationFrame to ensure DOM has been updated after Lexical's render
       requestAnimationFrame(() => {
-        const containerRect = editorEl
-          .closest('[data-lexical-search-input]')
-          ?.getBoundingClientRect();
+        // Must be the suffix's own containing block, or call-site padding offsets the suffix.
+        const containerRect = editorEl.closest('[data-suffix-anchor]')?.getBoundingClientRect();
         if (!containerRect) return;
 
         // Anchor the suffix to the RIGHT EDGE of the typed text, not the caret \u2014 keying off
@@ -538,7 +537,7 @@ export function LexicalSearchInput({
   return (
     <div className={cn('relative flex-1', className)} data-lexical-search-input='true'>
       <LexicalComposer initialConfig={initialConfig}>
-        <div className='relative'>
+        <div className='relative' data-suffix-anchor='true'>
           <RichTextPlugin
             contentEditable={
               <span className='flex items-center gap-2'>

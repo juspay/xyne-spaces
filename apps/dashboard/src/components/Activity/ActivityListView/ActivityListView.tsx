@@ -46,7 +46,6 @@ import { logger, Event } from '../../../utils/logger';
 import { dataLoadDuration, safeRecordMetric } from '../../../services/otel';
 import { useSelector } from '@xstate/react';
 import { stateMachineActor } from '../../../machines/stateMachine';
-import { ActivityUnreadsFloatingButton } from '../ActivityUnreadsFloatingButton';
 import AppNavigator from '../../AppNavigator/AppNavigator';
 import {
   MarkAsRead,
@@ -877,24 +876,37 @@ const ActivityListView = (): ReactElement => {
               Activity
             </h2>
           </div>
-          <div className='flex items-center'>
-            {/* Mark as Read Button */}
-            <Tooltip content='Mark as read' side='bottom' delayDuration={500}>
-              <button
-                type='button'
-                onClick={markActiveTabUnread}
-                aria-label='Mark as read'
+          <div className='flex items-center gap-1'>
+            {/* Unread-only filter */}
+            <label
+              htmlFor='activity-unread-toggle'
+              className='flex h-7 items-center gap-2 px-2 rounded-[10px] cursor-pointer select-none transition-colors hover:bg-accent'
+            >
+              <span className='text-sm font-medium text-muted-foreground'>Unread</span>
+              <Switch.Root
+                id='activity-unread-toggle'
+                checked={showUnreadOnly}
+                onCheckedChange={handleUnreadToggle}
                 data-track-category='ACTIVITY'
-                data-track-name={`MARK_TAB_READ`}
-                data-track-metadata={JSON.stringify({
-                  tab: activeTab,
-                  action: 'mark_all_as_read',
-                })}
-                className='p-2 flex items-center justify-center rounded-lg border border-transparent transition-colors text-muted-foreground hover:text-foreground hover:bg-accent hover:border-border'
+                data-track-name='UNREAD_FILTER_TOGGLE'
+                data-track-metadata={JSON.stringify({ filter_value: !showUnreadOnly })}
+                data-testid='activity-unread-toggle'
+                className={cn(
+                  'relative inline-flex h-3.5 w-6 shrink-0 items-center rounded-full',
+                  'bg-muted transition-colors duration-200',
+                  'data-[state=checked]:bg-primary',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
+                )}
               >
-                <MarkAsRead size={16} />
-              </button>
-            </Tooltip>
+                <Switch.Thumb
+                  className={cn(
+                    'block size-2.5 rounded-full bg-background shadow-sm',
+                    'transition-transform duration-200',
+                    'translate-x-0.5 data-[state=checked]:translate-x-3',
+                  )}
+                />
+              </Switch.Root>
+            </label>
 
             {/* 3-dot menu with Actionable Toggle and View Toggle (Desktop & Mobile) */}
             <div className='relative' ref={mobileMenuRef}>
@@ -912,6 +924,28 @@ const ActivityListView = (): ReactElement => {
 
               {showMobileMenu && (
                 <div className='absolute right-0 top-full mt-1 bg-popover border border-border rounded-lg shadow-lg py-1 min-w-[200px] z-50'>
+                  {/* Mark as Read */}
+                  <button
+                    onClick={() => {
+                      markActiveTabUnread();
+                      setShowMobileMenu(false);
+                    }}
+                    className='w-full px-4 py-2 flex items-center gap-2 text-sm text-muted-foreground hover:bg-accent transition-colors'
+                    data-track-category='ACTIVITY'
+                    data-track-name={`MARK_TAB_READ`}
+                    data-track-metadata={JSON.stringify({
+                      tab: activeTab,
+                      action: 'mark_all_as_read',
+                    })}
+                    data-testid='activity-mark-as-read-btn'
+                  >
+                    <MarkAsRead size={16} />
+                    <span>Mark as read</span>
+                  </button>
+
+                  {/* Divider */}
+                  <div className='border-t border-border my-1'></div>
+
                   {/* Actionable Toggle */}
                   <div className='px-4 py-2 flex items-center justify-between'>
                     <span className='text-sm font-medium text-muted-foreground'>Actionable</span>
@@ -1013,8 +1047,8 @@ const ActivityListView = (): ReactElement => {
                     showActionableTabs ||
                     activeTab === tab.value;
 
-                  return (
-                    <Tabs.Trigger key={tab.value} value={tab.value} asChild>
+                  const trigger = (
+                    <Tabs.Trigger value={tab.value} asChild>
                       <button
                         aria-label={tab.label}
                         data-track-category='ACTIVITY'
@@ -1070,6 +1104,11 @@ const ActivityListView = (): ReactElement => {
                       </button>
                     </Tabs.Trigger>
                   );
+                  return (
+                    <Tooltip key={tab.value} content={tab.label} side='top' delayDuration={500}>
+                      {trigger}
+                    </Tooltip>
+                  );
                 })}
               </Tabs.List>
             </div>
@@ -1090,12 +1129,6 @@ const ActivityListView = (): ReactElement => {
             </Tabs.Content>
           </Tabs.Root>
         </div>
-
-        <ActivityUnreadsFloatingButton
-          isActive={showUnreadOnly}
-          onActivate={() => handleUnreadToggle(true)}
-          onDeactivate={() => handleUnreadToggle(false)}
-        />
       </div>
     </div>
   );

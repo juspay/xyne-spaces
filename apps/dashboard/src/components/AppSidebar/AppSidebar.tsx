@@ -337,7 +337,7 @@ const AppSidebar = (): ReactElement => {
 
   useLayoutEffect(() => {
     updateActiveMarker();
-  }, [updateActiveMarker, toolbarItems, windowWidth]);
+  }, [updateActiveMarker, toolbarItems, aiLandingDefault, windowWidth]);
 
   if (isMobile || windowWidth < 500) {
     return (

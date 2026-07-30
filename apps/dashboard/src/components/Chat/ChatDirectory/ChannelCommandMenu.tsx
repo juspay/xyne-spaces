@@ -218,6 +218,38 @@ const isPreviewableTicketResult = (result: DisplaySearchResult | null): boolean 
   (result.type === 'ticket' ||
     (result.type === 'conversation' && result.searchContext?.subApp === 'DESK'));
 
+// A cmdk item, not a button, so arrow keys reach it. No `data-item-label` on purpose — that
+// would splice "See N more" into the input's ghost preview.
+const SeeMoreItem = ({
+  value,
+  label,
+  onSelect,
+  hoverable,
+  trackCategory,
+  trackName,
+  trackMetadata,
+}: {
+  value: string;
+  label: string;
+  onSelect: () => void;
+  hoverable: boolean;
+  trackCategory: string;
+  trackName: string;
+  trackMetadata: string;
+}): ReactElement => (
+  <Command.Item
+    value={value}
+    onSelect={onSelect}
+    className={`w-full px-2 py-1.5 mt-1 text-sm text-muted-foreground rounded-lg text-left cursor-pointer transition-colors aria-selected:text-foreground aria-selected:bg-accent ${hoverable ? 'hover:text-foreground hover:bg-accent' : ''}`}
+    style={{ WebkitTapHighlightColor: 'transparent', userSelect: 'none' }}
+    data-track-category={trackCategory}
+    data-track-name={trackName}
+    data-track-metadata={trackMetadata}
+  >
+    {label}
+  </Command.Item>
+);
+
 const ChannelCommandMenu = ({
   channels,
   starred,
@@ -286,10 +318,9 @@ const ChannelCommandMenu = ({
   useShortcutById(
     'global.search',
     () => {
-      // In screen (full-page) search mode Cmd+K used to activate the top-bar search overlay
-      // (`xyne:activate-search-bar`). That top bar no longer exists in the new UI, so Cmd+K now
-      // opens this palette in both modes. Screen-mode behavior (2-item previews + "See more" that
-      // routes to `/search-results`) still comes from the `searchMode === 'screen'` checks below.
+      // Cmd+K opens this palette in both search modes. Screen-mode behavior (2-item previews +
+      // "See more" that routes to `/search-results`) comes from the `searchMode === 'screen'`
+      // checks below.
       onOpenChange(!open);
       if (!open && !searchSessionId) {
         onOpen('keyboard_shortcut');
@@ -298,9 +329,8 @@ const ChannelCommandMenu = ({
     { enabled: !contextSelectionMode },
   );
 
-  // `mod+/` opens the menu straight into command mode (seeds `/` for slash-command discovery).
-  // Like Cmd+K, this used to route to the top-bar overlay in screen mode; that top bar is gone, so
-  // it now opens this palette seeded with `/` in both modes.
+  // `mod+/` opens the menu straight into command mode (seeds `/` for slash-command discovery)
+  // in both search modes.
   useShortcutById(
     'global.openCommandMode',
     () => {
@@ -2144,19 +2174,15 @@ const ChannelCommandMenu = ({
                       />
                     ))}
                     {isScreenAll && hiddenCount > 0 && sectionTab && (
-                      <button
-                        onClick={() => handleSeeMoreNavigate(sectionTab)}
-                        className={`w-full px-2 py-1.5 mt-1 text-sm text-muted-foreground rounded-sm text-left transition-colors focus-visible:outline-none focus-visible:ring-0 ${!isMobile && 'hover:text-foreground hover:bg-accent'}`}
-                        style={{
-                          WebkitTapHighlightColor: 'transparent',
-                          userSelect: 'none',
-                        }}
-                        data-track-category='SEARCH'
-                        data-track-name='SEE_MORE_SECTION'
-                        data-track-metadata={JSON.stringify({ tab: sectionTab })}
-                      >
-                        See {hiddenCount} more
-                      </button>
+                      <SeeMoreItem
+                        value={`__see-more-backend-${groupKey}__`}
+                        label={`See ${hiddenCount} more`}
+                        onSelect={() => handleSeeMoreNavigate(sectionTab)}
+                        hoverable={!isMobile}
+                        trackCategory='SEARCH'
+                        trackName='SEE_MORE_SECTION'
+                        trackMetadata={JSON.stringify({ tab: sectionTab })}
+                      />
                     )}
                   </Command.Group>
                 </div>
@@ -2228,22 +2254,15 @@ const ChannelCommandMenu = ({
                   />
                 ))}
                 {isUserType && hasMore && (
-                  <button
-                    onClick={() => toggleCategoryExpansion(type)}
-                    className={`w-full px-2 py-1.5 mt-1 text-sm text-muted-foreground rounded-sm text-left transition-colors focus-visible:outline-none focus-visible:ring-0 ${!isMobile && 'hover:text-foreground hover:bg-accent'}`}
-                    style={{
-                      WebkitTapHighlightColor: 'transparent',
-                      userSelect: 'none',
-                    }}
-                    data-track-category='CHANNEL_SEARCH'
-                    data-track-name='TOGGLE_BACKEND_USER_EXPANSION'
-                    data-track-metadata={JSON.stringify({
-                      type,
-                      isExpanded,
-                    })}
-                  >
-                    {isExpanded ? 'See less' : `See ${hiddenCount} more`}
-                  </button>
+                  <SeeMoreItem
+                    value={`__see-more-default-${type}__`}
+                    label={isExpanded ? 'See less' : `See ${hiddenCount} more`}
+                    onSelect={() => toggleCategoryExpansion(type)}
+                    hoverable={!isMobile}
+                    trackCategory='CHANNEL_SEARCH'
+                    trackName='TOGGLE_BACKEND_USER_EXPANSION'
+                    trackMetadata={JSON.stringify({ type, isExpanded })}
+                  />
                 )}
               </Command.Group>
             </div>
@@ -2310,28 +2329,17 @@ const ChannelCommandMenu = ({
                 />
               ))}
               {hasMore && (
-                <button
-                  onClick={() =>
+                <SeeMoreItem
+                  value='__see-more-local-user__'
+                  label={!routeSeeMore && isExpanded ? 'See less' : `See ${hiddenCount} more`}
+                  onSelect={() =>
                     routeSeeMore ? handleSeeMoreNavigate('people') : toggleCategoryExpansion('user')
                   }
-                  className={`w-full px-2 py-1.5 mt-1 text-sm text-muted-foreground rounded-sm text-left transition-colors focus-visible:outline-none focus-visible:ring-0 ${!isMobile && 'hover:text-foreground hover:bg-accent'}`}
-                  style={{
-                    WebkitTapHighlightColor: 'transparent',
-                    userSelect: 'none',
-                  }}
-                  data-track-category={routeSeeMore ? 'SEARCH' : 'CHANNEL_SEARCH'}
-                  data-track-name={routeSeeMore ? 'SEE_MORE_SECTION' : 'TOGGLE_CATEGORY_EXPANSION'}
-                  data-track-metadata={JSON.stringify({
-                    category: 'user',
-                    isExpanded,
-                  })}
-                >
-                  {routeSeeMore
-                    ? `See ${hiddenCount} more`
-                    : isExpanded
-                      ? 'See less'
-                      : `See ${hiddenCount} more`}
-                </button>
+                  hoverable={!isMobile}
+                  trackCategory={routeSeeMore ? 'SEARCH' : 'CHANNEL_SEARCH'}
+                  trackName={routeSeeMore ? 'SEE_MORE_SECTION' : 'TOGGLE_CATEGORY_EXPANSION'}
+                  trackMetadata={JSON.stringify({ category: 'user', isExpanded })}
+                />
               )}
             </Command.Group>
           );
@@ -2379,22 +2387,15 @@ const ChannelCommandMenu = ({
                 );
               })}
               {hasMore && (
-                <button
-                  onClick={() => toggleCategoryExpansion(category)}
-                  className={`w-full px-2 py-1.5 mt-1 text-sm text-muted-foreground rounded-sm text-left transition-colors focus-visible:outline-none focus-visible:ring-0 ${!isMobile && 'hover:text-foreground hover:bg-accent'}`}
-                  style={{
-                    WebkitTapHighlightColor: 'transparent',
-                    userSelect: 'none',
-                  }}
-                  data-track-category='CHANNEL_SEARCH'
-                  data-track-name='TOGGLE_GROUP_DM_CATEGORY_EXPANSION'
-                  data-track-metadata={JSON.stringify({
-                    category: category as string,
-                    isExpanded,
-                  })}
-                >
-                  {isExpanded ? 'See less' : `See ${hiddenCount} more`}
-                </button>
+                <SeeMoreItem
+                  value={`__see-more-group-dm-${category as string}__`}
+                  label={isExpanded ? 'See less' : `See ${hiddenCount} more`}
+                  onSelect={() => toggleCategoryExpansion(category)}
+                  hoverable={!isMobile}
+                  trackCategory='CHANNEL_SEARCH'
+                  trackName='TOGGLE_GROUP_DM_CATEGORY_EXPANSION'
+                  trackMetadata={JSON.stringify({ category: category as string, isExpanded })}
+                />
               )}
             </Command.Group>
           );
@@ -2442,18 +2443,15 @@ const ChannelCommandMenu = ({
                 );
               })}
               {hasMore && (
-                <button
-                  onClick={() => toggleCategoryExpansion(category)}
-                  className={`w-full px-2 py-1.5 mt-1 text-sm text-muted-foreground rounded-sm text-left transition-colors focus-visible:outline-none focus-visible:ring-0 ${!isMobile && 'hover:text-foreground hover:bg-accent'}`}
-                  data-track-category='CHANNEL_SEARCH'
-                  data-track-name='TOGGLE_CHANNEL_CATEGORY_EXPANSION'
-                  data-track-metadata={JSON.stringify({
-                    category: category as string,
-                    isExpanded,
-                  })}
-                >
-                  {isExpanded ? 'See less' : `See ${hiddenCount} more`}
-                </button>
+                <SeeMoreItem
+                  value={`__see-more-channel-${category as string}__`}
+                  label={isExpanded ? 'See less' : `See ${hiddenCount} more`}
+                  onSelect={() => toggleCategoryExpansion(category)}
+                  hoverable={!isMobile}
+                  trackCategory='CHANNEL_SEARCH'
+                  trackName='TOGGLE_CHANNEL_CATEGORY_EXPANSION'
+                  trackMetadata={JSON.stringify({ category: category as string, isExpanded })}
+                />
               )}
             </Command.Group>
           );
@@ -2551,22 +2549,15 @@ const ChannelCommandMenu = ({
                       );
                     })}
                     {shouldLimit && hasMore && (
-                      <button
-                        onClick={() => toggleCategoryExpansion(category)}
-                        className={`w-full px-2 py-1.5 mt-1 text-sm text-muted-foreground rounded-sm text-left transition-colors focus-visible:outline-none focus-visible:ring-0 ${!isMobile && 'hover:text-foreground hover:bg-accent'}`}
-                        style={{
-                          WebkitTapHighlightColor: 'transparent',
-                          userSelect: 'none',
-                        }}
-                        data-track-category='CHANNEL_SEARCH'
-                        data-track-name='TOGGLE_LOCAL_CHANNEL_EXPANSION'
-                        data-track-metadata={JSON.stringify({
-                          category: category,
-                          isExpanded,
-                        })}
-                      >
-                        {isExpanded ? 'See less' : `See ${hiddenCount} more`}
-                      </button>
+                      <SeeMoreItem
+                        value={`__see-more-browse-${category}__`}
+                        label={isExpanded ? 'See less' : `See ${hiddenCount} more`}
+                        onSelect={() => toggleCategoryExpansion(category)}
+                        hoverable={!isMobile}
+                        trackCategory='CHANNEL_SEARCH'
+                        trackName='TOGGLE_LOCAL_CHANNEL_EXPANSION'
+                        trackMetadata={JSON.stringify({ category, isExpanded })}
+                      />
                     )}
                   </Command.Group>
                 </div>
@@ -3290,7 +3281,7 @@ const ChannelCommandMenu = ({
       </div>
 
       {/* Body: results panel + optional context panel side-by-side */}
-      <div className='flex flex-1 min-h-0 overflow-hidden bg-background rounded-b-2xl'>
+      <div className='flex flex-1 min-h-0 overflow-hidden rounded-b-2xl'>
         {/* `/chat` compose: the real message composer (mentions, formatting, attachments).
             Stop keys from bubbling to cmdk (which wraps this) so cmdk can't steal focus
             or hijack Enter/arrows — the editor and its mention dropdown handle them.
@@ -3317,7 +3308,7 @@ const ChannelCommandMenu = ({
         {/* Tabs, Results, Footer Container - modal overlays everything below search input */}
         <div
           className={cn(
-            'relative flex-1 flex flex-col min-h-0 overflow-x-hidden bg-background rounded-b-2xl',
+            'relative flex-1 flex flex-col min-h-0 overflow-x-hidden rounded-b-2xl',
             isComposing && 'hidden',
           )}
           role='presentation'
@@ -3417,7 +3408,7 @@ const ChannelCommandMenu = ({
               // cmdk gives the list tabIndex={-1} + role="listbox", and it's a scroll
               // container (Chrome can keyboard-focus scrollers) — both outline. Row
               // position is communicated by aria-selected, never by a ring here.
-              'flex-1 overflow-y-auto px-4 pt-3 pb-6 bg-background focus:outline-none focus-visible:outline-none',
+              'flex-1 overflow-y-auto px-4 pt-3 pb-6 focus:outline-none focus-visible:outline-none',
               suppressHover && '[&_[cmdk-item]]:pointer-events-none',
             )}
             ref={el => {
@@ -4190,9 +4181,9 @@ const ChannelCommandMenu = ({
 
       {/* Footer - outside body flex so TicketPreviewPanel only spans results area */}
       {!inline && !isMobile && (
-        <div className='relative px-6 py-4 text-sm font-medium text-muted-foreground flex items-center justify-between shrink-0 bg-background rounded-b-2xl'>
+        <div className='relative px-6 py-4 text-sm font-medium text-muted-foreground flex items-center justify-between shrink-0 rounded-b-2xl'>
           {/* Fade the scrolling results into the footer (replaces the hard top border) */}
-          <div className='pointer-events-none absolute inset-x-0 bottom-full h-[30px] bg-gradient-to-t from-background to-transparent' />
+          <div className='pointer-events-none absolute inset-x-0 bottom-full h-[30px] bg-gradient-to-t from-card to-transparent' />
           {/* Left: slash-command hint for Ask AI */}
           <span className='flex items-center gap-2.5'>
             <span className='flex items-center justify-center px-1.5 py-1 bg-muted rounded-lg leading-none'>
@@ -4330,7 +4321,7 @@ const ChannelCommandMenu = ({
         // cmdk renders its root with tabIndex={-1}, so it can take programmatic focus
         // and paint an outline around the whole palette — suppress it (container, not
         // a control). Same on the dialog branch below and on Command.List.
-        className='w-full h-full flex flex-col bg-background focus:outline-none focus-visible:outline-none'
+        className='w-full h-full flex flex-col focus:outline-none focus-visible:outline-none'
         onMouseMove={() => {
           if (suppressHover) {
             commandRef.current
@@ -4419,7 +4410,7 @@ const ChannelCommandMenu = ({
                 // come and go. Header + footer are shrink-0; Command.List is flex-1 and
                 // absorbs the remainder, so a wrapped filter-chip row or a hidden tab bar
                 // changes the list height, never the total. Mobile keeps h-[100dvh]/h-screen.
-                'md:w-full md:h-[72vh] md:overflow-hidden bg-background md:rounded-2xl shadow-[0px_7px_15px_0px_#0000000D,0px_28px_28px_0px_#00000017,0px_62px_37px_0px_#0000000D,0px_111px_44px_0px_#00000003,0px_173px_48px_0px_#00000000] border border-border',
+                'md:w-full md:h-[549px] md:overflow-hidden bg-card md:rounded-2xl shadow-[0px_7px_15px_0px_#0000000D,0px_28px_28px_0px_#00000017,0px_62px_37px_0px_#0000000D,0px_111px_44px_0px_#00000003,0px_173px_48px_0px_#00000000] border border-border',
                 showMergeDialog ? 'z-40' : 'z-[9999]',
               )}
               onKeyDownCapture={handleCommandKeyDown}

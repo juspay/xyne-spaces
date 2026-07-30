@@ -4845,7 +4845,7 @@ export const SupportTicketDetail = ({
                         channelScopeType={channel?.scopeType}
                       />
                       {isUserMember ? (
-                        <div className='px-4 pb-4 bg-background flex-shrink-0'>
+                        <div className='pb-4 bg-background flex-shrink-0 px-[var(--composer-px)] [--composer-px:1rem]'>
                           <ChatInput
                             ref={inputRef}
                             channelId={channelId}
