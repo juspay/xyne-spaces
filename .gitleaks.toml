@@ -79,3 +79,49 @@ regexes = [
   # UI local-storage key, not a credential (ErrorPipelinePageV3.tsx).
   '''^errpipe-detail-width-v2$''',
 ]
+
+# ---------------------------------------------------------------------------
+# Base64-wrapped secrets.
+#
+# Added after a history audit found credentials that every plaintext rule
+# missed because the value was base64-encoded before being committed:
+#   * a GCP service-account JSON (with its RSA private key) stored in
+#     FCM_SERVICE_ACCOUNT_BASE64
+#   * a cachix auth token stored as `$(echo -e "<base64>" | base64 -d)`,
+#     split with \n so it did not even look like one long token
+#
+# gitleaks does not decode before matching, so these rules target the
+# ENCODED form. "ewogICJ0eXBlIjogInNlcnZpY2VfYWNjb3VudCI" is the base64 of
+# '{\n  "type": "service_account"'; "eyJhbGciOi" is the base64 of '{"alg":'
+# and "ZXlKaGJHY2lPaU" is that same string base64-encoded a second time.
+# ---------------------------------------------------------------------------
+
+[[rules]]
+id = "base64-gcp-service-account"
+description = "GCP service account JSON stored base64-encoded (e.g. *_BASE64 env vars)"
+regex = '''ewogICJ0eXBlIjog?ImVzZXJ2aWNlX2FjY291bnQi|ewogICJ0eXBlIjogInNlcnZpY2VfYWNjb3VudCI|eyJ0eXBlIjoic2VydmljZV9hY2NvdW50Ig'''
+keywords = ["ewogICJ0eXBl", "eyJ0eXBlIjoic2Vydmlj"]
+
+[[rules]]
+id = "double-base64-jwt"
+description = "JWT that has been base64-encoded a second time to evade secret scanning"
+regex = '''ZXlKaGJHY2lPaU[A-Za-z0-9+/=]{10,}'''
+keywords = ["ZXlKaGJHY2lPaU"]
+
+[[rules]]
+id = "decode-at-runtime-literal"
+description = "Inline literal piped through base64 -d / atob at runtime (classic scanner evasion)"
+regex = '''(?:base64\s+-d|base64\s+--decode|atob\s*\()[^\n]{0,20}["'][A-Za-z0-9+/=\\n]{60,}["']|["'][A-Za-z0-9+/=\\n]{60,}["'][^\n]{0,20}\|\s*base64\s+-{1,2}d'''
+keywords = ["base64 -d", "base64 --decode", "atob("]
+
+[[rules]]
+id = "pomerium-session-cookie"
+description = "Pomerium SSO session cookie hardcoded in source"
+regex = '''_pomerium=eyJ[A-Za-z0-9_.\-]{40,}'''
+keywords = ["_pomerium="]
+
+[[rules]]
+id = "tracked-env-local"
+description = "Per-developer .env.local must never be committed"
+path = '''(^|/)\.env\.local$'''
+regex = '''.'''
