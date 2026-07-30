@@ -130,9 +130,11 @@ the model changed — only the primitive.
 - **Derived arithmetic runs as code, not in your head.** When a sandbox is available, any
   number the counting tool doesn't return directly — a sub-window sum, a difference, a
   ratio, a top-N, a dedup, a verdict threshold — is computed by writing the tool's JSON
-  response to a sandbox file verbatim and running Python over it; the printed output is
-  copied verbatim into the answer. The script and its output are the audit trail. The
-  sandbox computes over tool outputs only — it is never a source of evidence.
+  response to a sandbox **data file verbatim** and running Python that **parses that file**;
+  the printed output is copied verbatim into the answer. Do not retype numbers into the
+  script body — retyping is transposition risk, the same species as the hand-sum. The
+  script and its output are the audit trail. The sandbox computes over tool outputs only —
+  it is never a source of evidence.
 
 ## EXHAUST — how to be complete
 
@@ -170,6 +172,26 @@ surfaces counted separately, scope, unit, numeric verdict bands), **self-verify 
 yourself, and proceed — no human sign-off.** The spec is an audit trail, not a gate. A wrong
 rule after locking means a new spec version and a re-run, never an in-place edit. Only pause
 for the user if they explicitly asked to review the plan first.
+
+**The written-analysis pipeline (spec → packs → stats → write → verify).** When the
+deliverable is a shareable analysis (a report someone will argue with), the loose loop above
+tightens into the full contract:
+
+1. **DESIGN** — the spec is a sandbox file (`spec.md`: topics as exact phrases, scope,
+   caps, verdict bands), self-verified and locked before any extraction.
+2. **EXTRACT** — one `spaces-evidence-pack` call per topic per surface; each returned JSON
+   is written **verbatim** to a sandbox data file (`packs/<topic>-<area>.json`). Packs are
+   capped and dated by construction; their `counts`/`termTotals` are the real totals.
+3. **COMPUTE** — one Python script parses the pack files and emits `stats.json` (totals,
+   shares, deltas, verdicts by the spec's bands). Printed output only; no retyping.
+4. **WRITE** — the analysis cites **only pack rows** and states numbers **only from
+   `stats.json`**. A claim with no pack row behind it doesn't go in. "Not visible in the
+   data" is an approved finding.
+5. **VERIFY** — before delivering: every cited row ∈ some pack file (closed-set check —
+   runnable as a script over the draft + packs), every number ∈ `stats.json`, and the
+   coverage note carries each pack's `coverage` field (buckets fetched/skipped, caps).
+
+Everyday questions never do this — the pipeline exists for artifacts, not answers.
 
 ## Show the method — name each step as you do it
 

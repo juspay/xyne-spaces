@@ -9,6 +9,7 @@ import { interact, search, memorySearch, spacesFetch, spacesFetchBuffer, spacesF
 import { esc, queryDirect, type DirectSearchResponse } from "./vespa-direct.js";
 import { buildYqlFromParams, AREA_NAMES, AREA_ALIASES, describeAreasForPrompt } from "./vespa-search-areas.js";
 import { validateCorpusScan, buildCorpusScanYql, parseBucketKey, termToQuery, MAX_SCAN_TERMS, type CorpusScanScope } from "./vespa-corpus-scan.js";
+import { validateEvidencePack, bucketRange, buildPackFetchYql, formatIstDate, toSnippet, MAX_PACK_PER_BUCKET, DEFAULT_PACK_PER_BUCKET, MAX_BUCKET_FETCHES } from "./vespa-evidence-pack.js";
 import { getWorkspaceIdForUser } from "../../lib/spaces-db.js";
 import type { Citation } from "xyne-claw-shared";
 import { extractCleanTextFromFlowJson, isFlowJsonContent } from "xyne-claw-shared";
@@ -5842,9 +5843,188 @@ const spacesCorpusScan: ToolDef = {
   },
 };
 
+// ── spaces-evidence-pack ─────────────────────────────────────────────────────
+// The EXTRACT tool (corpus playbook Step 3): run a fixed spec once and emit a
+// bounded, dated pack — the writer's only input and the verifier's closed set.
+// Dumb by design: caps per time-bucket (which forces spread across time),
+// deterministic oldest-first order within a bucket, dates on every row.
+// Query construction/validation live in vespa-evidence-pack.ts (pure,
+// unit-testable); this handler fans out through queryDirect (ACL + workspace
+// guards injected there).
+const spacesEvidencePack: ToolDef = {
+  name: "spaces-evidence-pack",
+  description:
+    "EXTRACT a deterministic, capped, dated evidence pack for one topic — the input for a written analysis. " +
+    "Runs a fixed spec (terms + scope) over ONE area, discovers which time buckets have matches, and returns up to " +
+    "perBucket snippets per bucket, each row carrying {docId, date, channel, term, snippet}. Rows within a bucket " +
+    "are the EARLIEST members (timestamp asc) — deterministic and spread across time, not relevance-ranked.\n\n" +
+    "## When to use\n" +
+    "- A multi-topic or shareable analysis where writing happens under contract: the pack is the writer's ONLY " +
+    "evidence source and the closed set that verification checks citations against.\n" +
+    "- NOT for everyday lookups — plain questions use spaces-vespa-search; counting uses spaces-corpus-scan.\n\n" +
+    "## The contract\n" +
+    "1. Write this tool's JSON output VERBATIM to a sandbox data file (the pack artifact) before any writing starts.\n" +
+    "2. The writer cites only pack rows; claims not supported by a pack row don't go in the analysis.\n" +
+    "3. Numbers about the topic come from the returned counts/termTotals or from sandbox code over them — never " +
+    "from tallying pack rows (the pack is capped; counts are not).\n\n" +
+    "## Notes\n" +
+    `- perBucket 1..${MAX_PACK_PER_BUCKET} (default ${DEFAULT_PACK_PER_BUCKET}). At most ${MAX_BUCKET_FETCHES} term×bucket fetches per call — ` +
+    "when history is longer, the NEWEST buckets win and the skip is reported in coverage.\n" +
+    "- Terms follow corpus-scan semantics: lexical, exact phrase for multi-word terms, up to " +
+    `${MAX_SCAN_TERMS} per call.\n` +
+    "- One call = one topic = one pack. Fan out calls per topic for a multi-topic spec.\n" +
+    "- Only available when DIRECT_VESPA_SEARCH is enabled.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      searchArea: {
+        type: "string",
+        enum: [...AREA_NAMES, ...Object.keys(AREA_ALIASES)],
+        description: "The area to extract from — same areas as spaces-vespa-search.",
+      },
+      topic: { type: "string", description: "The topic this pack is for (names the artifact; one pack per topic)." },
+      terms: {
+        type: "array",
+        items: { type: "string" },
+        minItems: 1,
+        maxItems: MAX_SCAN_TERMS,
+        description: "Terms/phrases defining the topic's evidence set, matched lexically (multi-word = exact phrase).",
+      },
+      scope: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          channels: { type: "array", items: { type: "string" }, description: "Channel ids to confine the spec to (OR'd)." },
+          after: { type: "string", description: "Inclusive lower bound, dd/mm/yy (IST)." },
+          before: { type: "string", description: "Exclusive upper bound, dd/mm/yy (IST)." },
+        },
+        description: "Spec-level filters, applied identically to counting and extraction.",
+      },
+      bucket: { type: "string", enum: ["year", "month"], description: "Time bucket that caps + spreads the pack." },
+      perBucket: { type: "number", description: `Max rows per term per bucket (1..${MAX_PACK_PER_BUCKET}, default ${DEFAULT_PACK_PER_BUCKET}).` },
+    },
+    required: ["searchArea", "topic", "terms", "bucket"],
+  },
+  async handler(args, ctx) {
+    if (!CONFIG.directVespaSearch) {
+      return err("spaces-evidence-pack requires DIRECT_VESPA_SEARCH=true.");
+    }
+    try {
+      const validated = validateEvidencePack({
+        searchArea: String(args["searchArea"] ?? ""),
+        topic: String(args["topic"] ?? ""),
+        terms: Array.isArray(args["terms"]) ? (args["terms"] as unknown[]).map(String) : [],
+        ...(args["scope"] !== undefined ? { scope: args["scope"] as CorpusScanScope } : {}),
+        bucket: args["bucket"] as "year" | "month",
+        ...(args["perBucket"] !== undefined ? { perBucket: Number(args["perBucket"]) } : {}),
+      });
+      const { scan, topic, perBucket } = validated;
+
+      const workspaceId = await getWorkspaceIdForUser(ctx.userId);
+      if (!workspaceId) return err("Could not resolve your workspaceId — cannot run a workspace-scoped extraction.");
+
+      const debugPayloads: Array<{ stage: string; yql: string; vespaParams: Record<string, unknown> }> = [];
+
+      // Phase 1 — discover which buckets have matches, per term (the same
+      // grouping census corpus-scan runs). This is what makes the fetch list
+      // finite and the coverage note honest.
+      const censusYql = buildCorpusScanYql(scan, { withTerm: true });
+      const termBucketCounts = await Promise.all(scan.terms.map(async term => {
+        const res = await queryDirect(censusYql, termToQuery(term), ctx.userId, 0, 0, CONFIG.vespaQueryEndpoint, "unranked", undefined, workspaceId);
+        const executed = res.data.debug?.payloads?.[0];
+        debugPayloads.push({ stage: `evidence-pack census: "${term}"`, yql: executed?.yql ?? censusYql, vespaParams: executed?.vespaParams ?? {} });
+        const buckets: Record<number, number> = {};
+        for (const g of res.data.groups ?? []) {
+          const key = parseBucketKey(g.groupValue);
+          if (key !== null && g.count > 0) buckets[key] = g.count;
+        }
+        return buckets;
+      }));
+
+      const counts: Record<string, Record<number, number>> = {};
+      const termTotals: Record<string, number> = {};
+      scan.terms.forEach((term, i) => {
+        counts[term] = termBucketCounts[i] ?? {};
+        termTotals[term] = Object.values(counts[term]).reduce((a, b) => a + b, 0);
+      });
+
+      // Phase 2 — build the fetch list (term × non-empty bucket), newest
+      // buckets first, hard-capped so one call can't become a query storm.
+      const fetchList: Array<{ term: string; bucketKey: number }> = [];
+      scan.terms.forEach(term => {
+        for (const key of Object.keys(counts[term] ?? {})) fetchList.push({ term, bucketKey: Number(key) });
+      });
+      fetchList.sort((a, b) => b.bucketKey - a.bucketKey);
+      const skipped = fetchList.splice(MAX_BUCKET_FETCHES);
+
+      const rowsNested = await Promise.all(fetchList.map(async ({ term, bucketKey }) => {
+        const yql = buildPackFetchYql(scan, bucketRange(bucketKey, scan.bucket));
+        const res = await queryDirect(yql, termToQuery(term), ctx.userId, perBucket, 0, CONFIG.vespaQueryEndpoint, "unranked", undefined, workspaceId, true);
+        const executed = res.data.debug?.payloads?.[0];
+        debugPayloads.push({ stage: `evidence-pack fetch: "${term}" @ ${bucketKey}`, yql: executed?.yql ?? yql, vespaParams: executed?.vespaParams ?? {} });
+        const results = (!res.data.grouped ? res.data.results : []) ?? [];
+        return results.map(r => {
+          const raw = (r.rawFields ?? {}) as Record<string, unknown>;
+          const ts = Number(raw[scan.area.timestampField] ?? NaN);
+          return {
+            docId: r.id,
+            date: formatIstDate(ts),
+            _ts: Number.isFinite(ts) ? ts : 0,
+            area: scan.areaName,
+            channel: typeof raw["channelId"] === "string" && raw["channelId"] ? String(raw["channelId"]) : (r.title || undefined),
+            term,
+            bucket: bucketKey,
+            snippet: toSnippet(r.context),
+          };
+        });
+      }));
+
+      // Dedupe by docId (a doc matching two terms appears once, first term
+      // wins), then order the pack oldest-first — the shape trend/timeline
+      // writing wants to read.
+      const seen = new Set<string>();
+      const pack = rowsNested.flat()
+        .filter(row => {
+          if (!row.docId || seen.has(row.docId)) return false;
+          seen.add(row.docId);
+          return true;
+        })
+        .sort((a, b) => a._ts - b._ts)
+        .map(({ _ts, ...row }) => row);
+
+      const coverage = {
+        bucketsFetched: fetchList.length,
+        bucketsSkipped: skipped.length,
+        note: skipped.length > 0
+          ? `Fetch cap hit: the ${skipped.length} OLDEST term×bucket cells were not extracted (oldest skipped bucket: ${Math.min(...skipped.map(s => s.bucketKey))}). Narrow the scope or split the spec to cover them.`
+          : "All non-empty buckets extracted.",
+        capNote: `Pack rows are capped at ${perBucket}/term/bucket (earliest-first) — the pack is a bounded SAMPLE of each bucket; counts/termTotals are the real totals.`,
+      };
+
+      const hasScope = Object.keys(scan.scope).length > 0;
+      const result = ok(
+        `Evidence pack "${topic}" over area "${scan.areaName}" (bucket: ${scan.bucket}; cap ${perBucket}/term/bucket; deterministic oldest-first; lexical; ACL-scoped to you).\n` +
+        `CONTRACT: write this JSON verbatim to a sandbox data file as the pack artifact. Writers cite only pack rows; ` +
+        `numbers come from counts/termTotals (or sandbox code over them), never from tallying the capped pack.\n\n` +
+        JSON.stringify({
+          topic,
+          spec: { area: scan.areaName, terms: scan.terms, bucket: scan.bucket, perBucket, ...(hasScope ? { scope: scan.scope } : {}) },
+          counts,
+          termTotals,
+          coverage,
+          pack,
+        }, null, 1),
+      );
+      return { ...result, _meta: { debug: { payloads: debugPayloads } } };
+    } catch (e) {
+      return directError("evidence-pack error", e);
+    }
+  },
+};
+
 export const tools: ToolDef[] = [
   spacesWhoami,
-  ...(CONFIG.directVespaSearch ? [spacesVespaSchema, spacesVespaQuery, spacesVespaSearch, spacesCorpusScan] : []),
+  ...(CONFIG.directVespaSearch ? [spacesVespaSchema, spacesVespaQuery, spacesVespaSearch, spacesCorpusScan, spacesEvidencePack] : []),
   spacesSearch,
   spacesSearchV2,
   spacesMyItems,
