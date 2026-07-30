@@ -50,6 +50,8 @@ import { useCurrentUserGroupIds } from '../../../hooks/useUserGroup';
 import { filterExcludedCallGeneratedCanvases } from '../canvasFilters';
 import { usePersistedCanvasPreferences } from '../../../hooks/usePersistedCanvasPreferences';
 import { Switch } from '@/components/ui/Switch';
+import { CanvasExitTitleDialog } from '../CanvasExitTitleDialog';
+import { useCanvasExitTitleGuard } from '../../../hooks/useCanvasExitTitleGuard';
 import {
   createCanvasContentTextDiff,
   isVisibleCanvasContentDiffPart,
@@ -570,7 +572,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
     }
   };
 
-  const handleSelectCanvas = (_e: React.MouseEvent | KeyboardEvent, selected: Canvas): void => {
+  const performSelectCanvas = (_e: React.MouseEvent | KeyboardEvent, selected: Canvas): void => {
     if (!navigator.onLine) {
       toast.info('Canvas Unavailable', {
         description: 'Canvases are available online only. Please check your connection.',
@@ -722,9 +724,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
     },
   );
 
-  const handleLeaveEditor = (): void => {
-    saveCanvasExitSnapshot();
-
+  const navigateAwayFromEditor = useCallback((): void => {
     if (isMobile) {
       const state = location.state as { previousPath?: string };
       const backPath = state?.previousPath ? state.previousPath : '/chat';
@@ -732,6 +732,54 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
     } else {
       setView('list');
     }
+  }, [isMobile, location.state, navigate]);
+
+  const exitTitleGuard = useCanvasExitTitleGuard({
+    getTitle: () => titleRef.current,
+    getContent: () => editorRef.current?.getBlocks() ?? latestContentRef.current,
+    canEdit,
+    canDelete: isCanvasOwner,
+    onExit: () => {
+      saveCanvasExitSnapshot();
+      navigateAwayFromEditor();
+    },
+    onSaveTitle: async nextTitle => {
+      if (!canvas?.id) throw new Error('Canvas is not ready to be titled');
+
+      const result = z.mutate(
+        mutators.canvas.update({
+          id: canvas.id,
+          title: nextTitle,
+          timestamp: Date.now(),
+        }),
+      );
+      const serverResult = await result.server;
+      if (serverResult.type === 'error') {
+        throw new Error(serverResult.error.message || 'Failed to save canvas title');
+      }
+
+      setCurrentTitle(nextTitle);
+      titleRef.current = nextTitle;
+    },
+    onDeleteAndExit: async () => {
+      if (!canvas?.id) throw new Error('Canvas is not ready to be deleted');
+
+      const result = z.mutate(mutators.canvas.delete({ id: canvas.id }));
+      const serverResult = await result.server;
+      if (serverResult.type === 'error') {
+        throw new Error(serverResult.error.message || 'Failed to delete canvas');
+      }
+    },
+  });
+
+  const handleLeaveEditor = exitTitleGuard.requestExit;
+  const handleSelectCanvas = (event: React.MouseEvent | KeyboardEvent, selected: Canvas): void => {
+    if (canvasRef.current?.id === selected.id) {
+      performSelectCanvas(event, selected);
+      return;
+    }
+
+    exitTitleGuard.requestExitWith(() => performSelectCanvas(event, selected));
   };
 
   if (view === 'list') {
@@ -1157,6 +1205,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
         onRename={handleRenameVersion}
         onMakeCopy={version => void handleMakeCopyVersion(version)}
       />
+      <CanvasExitTitleDialog {...exitTitleGuard.dialogProps} />
     </div>
   );
 };

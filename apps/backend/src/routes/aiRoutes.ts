@@ -4,7 +4,12 @@
  */
 
 import express from 'express';
-import { generateTitleFromDescription, rewriteEmail } from '../controllers/aiController.js';
+import {
+  generateTitleFromCanvasContent,
+  generateTitleFromDescription,
+  rewriteEmail,
+} from '../controllers/aiController.js';
+import { aiTitleLimiter } from '../middleware/rateLimiters.js';
 
 const router = express.Router();
 
@@ -15,6 +20,8 @@ const router = express.Router();
  * Generate a title from a description
  */
 router.post('/generate-title', generateTitleFromDescription);
+
+router.post('/generate-canvas-title', aiTitleLimiter, generateTitleFromCanvasContent);
 
 /**
  * POST /api/ai/rewrite-email
