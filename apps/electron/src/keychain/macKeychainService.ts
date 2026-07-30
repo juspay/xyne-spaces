@@ -1,4 +1,4 @@
-import { exec } from 'child_process';
+import { exec, execFile } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -12,6 +12,10 @@ import { IKeychain } from './IKeychain';
 import { config } from '../app/config';
 
 const execAsync = promisify(exec);
+// Shell-free variant (argument array, no /bin/sh) for commands that must handle values parsed
+// out of an untrusted certificate — the CommonName below can contain shell metacharacters that
+// `openssl -nameopt` does NOT escape ($(), backticks, ...), so it must never reach a shell.
+const execFileAsync = promisify(execFile);
 const writeFileAsync = promisify(fs.writeFile);
 const unlinkAsync = promisify(fs.unlink);
 const SECURITY = '/usr/bin/security';
@@ -81,6 +85,13 @@ class MacKeychainService implements IKeychain {
         await writeFileAsync(certPath, certPem);
 
         try {
+            // ACCEPTED RISK (secops #289, MED): the P12 is encrypted with a static 'changeit'
+            // passphrase, but it guards nothing — the .p12 is a per-call temp file in os.tmpdir(),
+            // written, immediately `security import`ed, and unlink()ed in the finally below, so the
+            // passphrase only has to survive the moment between export and import on the same host.
+            // Anyone who can read the temp file already has the raw key/cert in this process. Kept
+            // static so the export (-passout) and import (-P) agree; switch to a random passphrase
+            // if the P12 is ever persisted or moved off-host.
             // openssl pkcs12 -export -in cert.pem -inkey key.pem -out identity.p12 -passout pass:changeit -name "label"
             const p12Cmd = `${OPENSSL} pkcs12 -export -in "${certPath}" -inkey "${keyPath}" -out "${p12Path}" -passout pass:changeit -name "${this.label}"`;
             await execAsync(p12Cmd);
@@ -168,8 +179,10 @@ class MacKeychainService implements IKeychain {
         await writeFileAsync(tmpPath, pem);
 
         try {
-            // Check if certificate with same Common Name already exists
-            const { stdout: subjectOut } = await execAsync(`${OPENSSL} x509 -in "${tmpPath}" -noout -subject -nameopt multiline`);
+            // Check if certificate with same Common Name already exists.
+            // execFile (no shell) — the CommonName is parsed out of an attacker-supplied cert and
+            // MUST NOT be interpolated into a shell command (secops #362).
+            const { stdout: subjectOut } = await execFileAsync(OPENSSL, ['x509', '-in', tmpPath, '-noout', '-subject', '-nameopt', 'multiline']);
             const cnMatch = subjectOut.match(/commonName\s*=\s*(.*)/);
 
             if (cnMatch && cnMatch[1]) {
@@ -178,7 +191,7 @@ class MacKeychainService implements IKeychain {
 
                 try {
                     // security find-certificate returns 0 if found, non-zero if not found
-                    await execAsync(`${SECURITY} find-certificate -c "${commonName}"`);
+                    await execFileAsync(SECURITY, ['find-certificate', '-c', commonName]);
                     await unlinkAsync(tmpPath);
                     Logger.info(EnrollmentEvent.ROOT_CA_INSTALL_SUCCESS, {
                         exists_in_keychain: true,

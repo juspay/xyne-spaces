@@ -178,6 +178,13 @@ class AgentAuthService {
 
   /**
    * Handle authorization request
+   *
+   * ACCEPTED RISK (secops #367, MED): this loopback endpoint (127.0.0.1:49231) has no
+   * requesting-process binding and no out-of-band pairing, so ANY local process can POST an auth
+   * request and spawn a native consent dialog with attacker-controlled agentName/description text
+   * (and, on user approval, proxy authenticated backend calls). The declared pairing-code flow was
+   * never implemented; the team accepted this under a local-only (already-compromised-host) threat
+   * model. Implement the pairing-code echo before relying on this endpoint for anything sensitive.
    */
   private async handleAuthRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const body = await this.parseBody(req);
