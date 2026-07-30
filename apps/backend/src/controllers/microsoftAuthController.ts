@@ -12,6 +12,7 @@ import { jwtService } from '../services/jwtService';
 import { config } from '@/config/env';
 import jwt from 'jsonwebtoken';
 import { getFrontendUrl, resolveConfiguredOAuthRedirectUrl } from '@/utils/publicUrls';
+import { registerPendingAuthJwtId } from '@/services/pendingAuthService';
 import { jwtVerify, createRemoteJWKSet } from 'jose';
 import { WorkspaceType } from '@xyne/shared';
 import {
@@ -420,6 +421,7 @@ export class MicrosoftAuthController {
             }
           }
 
+          const domainConflictPendingAuthJwtId = await registerPendingAuthJwtId(microsoftUserData.email);
           res.cookie('google_access_token', jwt.sign({
             providerUserId: microsoftUserData.providerUserId,
             email: microsoftUserData.email,
@@ -427,6 +429,7 @@ export class MicrosoftAuthController {
             picture: microsoftUserData.picture,
             provider: AuthProvider.MICROSOFT,
             refreshToken: refreshToken ?? null,
+            jwtId: domainConflictPendingAuthJwtId,
           }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
             httpOnly: true,
             secure: isProduction,
@@ -550,6 +553,7 @@ export class MicrosoftAuthController {
         // parsePendingAuthCookie, which needs providerUserId AND provider — the
         // session token has neither, so it would mislabel the user as GOOGLE and
         // drop the refresh token. Mirrors Google's web callback + MS electron.
+        const electronPendingAuthJwtId = await registerPendingAuthJwtId(microsoftUserData.email);
         res.cookie('google_access_token', jwt.sign({
           providerUserId: microsoftUserData.providerUserId,
           email: microsoftUserData.email,
@@ -559,6 +563,7 @@ export class MicrosoftAuthController {
           refreshToken: refreshToken ?? null,
           accessToken: accessToken ?? null,
           accessTokenExpiry: accessTokenExpiry?.toISOString(),
+          jwtId: electronPendingAuthJwtId,
         }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
           ...cookieOptions,
           maxAge: 10 * 60 * 1000, // 10 minutes pending auth window
@@ -788,6 +793,7 @@ export class MicrosoftAuthController {
       // This mirrors Google's exchangeElectronCode which always sets google_access_token (line 842).
       if (workspaces.length === 0 && !userExistsButRemoved && !stateData.invitationId && !bodyInvitationId) {
         logger.info(`[${requestId}] User has no workspaces and no invitation - setting google_access_token and returning no-access`);
+        const noWorkspacePendingAuthJwtId = await registerPendingAuthJwtId(email);
         res.cookie('google_access_token', jwt.sign({
           providerUserId: profile.id,
           email,
@@ -795,6 +801,7 @@ export class MicrosoftAuthController {
           picture: undefined,
           provider: 'microsoft',
           refreshToken: (token.refresh_token as string | undefined) ?? null,
+          jwtId: noWorkspacePendingAuthJwtId,
         }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
           httpOnly: true,
           secure: isProduction,
@@ -824,6 +831,7 @@ export class MicrosoftAuthController {
         logger.info(`[${requestId}] Invitation detected (${effectiveInvitationId}) — returning hasInvitation signal to Electron`);
         // Use sameSite: 'lax' for Electron invitation flow - cookies need to be sent
         // from the renderer (localhost:5173) to backend (localhost:3001)
+        const invitationPendingAuthJwtId = await registerPendingAuthJwtId(email);
         res.cookie('google_access_token', jwt.sign({
           providerUserId: profile.id,
           email,
@@ -831,6 +839,7 @@ export class MicrosoftAuthController {
           picture: undefined,
           provider: 'microsoft',
           refreshToken: (token.refresh_token as string | undefined) ?? null,
+          jwtId: invitationPendingAuthJwtId,
         }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
           httpOnly: true,
           secure: isProduction,
@@ -949,6 +958,7 @@ export class MicrosoftAuthController {
           });
         }
 
+        const workspaceSelectionPendingAuthJwtId = await registerPendingAuthJwtId(email);
         res.cookie('google_access_token', jwt.sign({
           providerUserId: profile.id,
           email,
@@ -958,6 +968,7 @@ export class MicrosoftAuthController {
           refreshToken: refreshToken ?? null,
           accessToken,
           accessTokenExpiry: accessTokenExpiry?.toISOString(),
+          jwtId: workspaceSelectionPendingAuthJwtId,
         }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
           httpOnly: true,
           secure: isProduction,
@@ -1029,6 +1040,7 @@ export class MicrosoftAuthController {
       }
 
       // Store pending auth data for later loginWorkspace / acceptInvitation call
+      const workspaceOrInvitePendingAuthJwtId = await registerPendingAuthJwtId(email);
       res.cookie('google_access_token', jwt.sign({
         providerUserId: profile.id,
         email,
@@ -1038,6 +1050,7 @@ export class MicrosoftAuthController {
         refreshToken: refreshToken ?? null,
         accessToken,
         accessTokenExpiry: accessTokenExpiry?.toISOString(),
+        jwtId: workspaceOrInvitePendingAuthJwtId,
       }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
         httpOnly: true,
         secure: isProduction,
@@ -1283,6 +1296,7 @@ export class MicrosoftAuthController {
       // provider) so a later loginWorkspace / createOrg / acceptInvitation call
       // resolves the Microsoft user correctly. Mirrors Google's mobile exchange.
       const mobileExpiresIn = token.expires_in as number | undefined;
+      const mobileMsPendingAuthJwtId = await registerPendingAuthJwtId(email);
       res.cookie('google_access_token', jwt.sign({
         providerUserId: profile.id,
         email,
@@ -1294,6 +1308,7 @@ export class MicrosoftAuthController {
         accessTokenExpiry: mobileExpiresIn
           ? new Date(Date.now() + mobileExpiresIn * 1000).toISOString()
           : undefined,
+        jwtId: mobileMsPendingAuthJwtId,
       }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
         ...cookieOptions,
         maxAge: 10 * 60 * 1000, // 10 minutes pending auth window

@@ -10,6 +10,7 @@ import { oauthStateServiceV2 } from '../services/oauthStateServiceV2';
 import { pkceServiceV2 } from '../services/pkceServiceV2';
 import { MicrosoftAuthController } from './microsoftAuthController';
 import { channelService } from '../services/channelService';
+import { registerPendingAuthJwtId } from '@/services/pendingAuthService';
 import { WorkspaceJoinPolicy, WorkspaceType } from '@xyne/shared';
 import type { WorkspaceJoinPolicy as WorkspaceJoinPolicyValue, WorkspaceType as WorkspaceTypeValue } from '@xyne/shared';
 
@@ -478,6 +479,7 @@ export class AuthV2Controller {
       }
 
       const isProduction = process.env.NODE_ENV === 'production';
+      const pendingAuthJwtId = await registerPendingAuthJwtId(googleUserData.email);
       res.cookie('google_access_token', jwt.sign({
         googleId: googleUserData.googleId,
         email: googleUserData.email,
@@ -487,6 +489,7 @@ export class AuthV2Controller {
         refreshToken: refresh_token,
         accessToken: access_token,
         accessTokenExpiry: accessTokenExpiry?.toISOString(),
+        jwtId: pendingAuthJwtId,
       }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
         httpOnly: true,
         secure: isProduction,
@@ -817,6 +820,7 @@ export class AuthV2Controller {
       const effectiveInvitationId = stateData.invitationId || invitationId;
       if (effectiveInvitationId) {
         logger.info(`[${requestId}] Invitation detected (${effectiveInvitationId}) — returning hasInvitation signal to Electron`);
+        const pendingAuthJwtId = await registerPendingAuthJwtId(googleUserData.email);
         res.cookie('google_access_token', jwt.sign({
           googleId: googleUserData.googleId,
           email: googleUserData.email,
@@ -825,6 +829,7 @@ export class AuthV2Controller {
           provider: AuthProvider.GOOGLE,
           refreshToken: refresh_token,
           accessToken: access_token,
+          jwtId: pendingAuthJwtId,
         }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
           httpOnly: true,
           secure: isProduction,
@@ -899,6 +904,7 @@ export class AuthV2Controller {
       }
 
       // Store pending auth data for later loginWorkspace/createOrg call (multi-workspace case)
+      const multiWorkspacePendingAuthJwtId = await registerPendingAuthJwtId(googleUserData.email);
       res.cookie('google_access_token', jwt.sign({
         googleId: googleUserData.googleId,
         email: googleUserData.email,
@@ -908,6 +914,7 @@ export class AuthV2Controller {
         refreshToken: refresh_token,
         accessToken: access_token,
         accessTokenExpiry: accessTokenExpiry?.toISOString(),
+        jwtId: multiWorkspacePendingAuthJwtId,
       }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
         httpOnly: true,
         secure: isProduction,
@@ -1041,6 +1048,7 @@ export class AuthV2Controller {
       };
 
       // Store all Google auth data in one cookie (until workspace selection)
+      const mobilePendingAuthJwtId = await registerPendingAuthJwtId(googleUserData.email);
       res.cookie('google_access_token', jwt.sign({
         googleId: googleUserData.googleId,
         email: googleUserData.email,
@@ -1049,6 +1057,7 @@ export class AuthV2Controller {
         provider: AuthProvider.GOOGLE,
         refreshToken: refresh_token || null,
         accessToken: access_token || null,
+        jwtId: mobilePendingAuthJwtId,
       }, process.env.JWT_SECRET!, { expiresIn: '10m' }), cookieOptions);
       logger.info(`[${requestId}] Stored pending auth data for workspace selection`);
 
