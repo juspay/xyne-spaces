@@ -186,6 +186,7 @@ import { documentIngestQueue } from '@/queues/documentIngestQueue';
 import { teamIntelligenceQueue } from '@/team-intelligence/queue';
 import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
 import { autoDraftQueue } from '@/queues/autoDraftQueue';
+import { entityExtractionQueue } from '@/queues/entityExtractionQueue';
 import { initStorage } from '@/services/storage';
 
 import queryRoutes from '@/routes/query';
@@ -835,6 +836,11 @@ export class App {
 
       logger.info('Initializing email classification queue...');
       await emailClassificationQueue.initialize();
+
+      // Producer only — messages are enqueued here at ingest; the worker (a
+      // separate process) drains them nightly.
+      logger.info('Initializing entity extraction queue...');
+      await entityExtractionQueue.initialize();
 
       logger.info('Initializing auto draft queue...');
       await autoDraftQueue.initialize();

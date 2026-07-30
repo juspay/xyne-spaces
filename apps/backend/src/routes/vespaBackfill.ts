@@ -26,6 +26,17 @@ router.post(
 );
 
 /**
+ * @route POST /api/admin/vespa-backfill/entities
+ * @desc Trigger entity-generation backfill for a channel's threads
+ * @query channelId (required), fromTimestamp, toTimestamp (ISO 8601, optional)
+ */
+router.post(
+  '/entities',
+  requireAuth,
+  AdminBackfillController.triggerEntityBackfill
+);
+
+/**
  * @desc Get Vespa queue statistics
  * @access Requires VESPA resource WRITE or ADMIN
  */

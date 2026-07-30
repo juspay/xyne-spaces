@@ -36,6 +36,7 @@ import { emailFetchWorker } from '@/workers/emailFetchWorker';
 import { teamIntelligenceWorker } from '@/workers/teamIntelligenceWorker';
 import { emailClassificationWorker } from '@/workers/emailClassificationWorker';
 import { autoDraftWorker } from '@/workers/autoDraftWorker';
+import { entityExtractionWorker } from '@/workers/entityExtractionWorker';
 import { tagGenerationPipeline, registerDeskEmailTags, DESK_EMAIL_SOURCE_TYPE, enqueueTagVespaRefeed } from '@/tags';
 import { recoveryService } from './workflows/services/recovery-service'
 import { aiProvisioningWorker } from '@/workers/aiProvisioningWorker';
@@ -262,6 +263,9 @@ class WorkerService {
 
       logger.info('Starting auto draft worker...');
       await autoDraftWorker.start();
+
+      logger.info('Starting entity extraction worker...');
+      await entityExtractionWorker.start();
 
       if (appConfig.enableTagGenerationPipeline) {
         logger.info('Initializing tag generation pipeline...');

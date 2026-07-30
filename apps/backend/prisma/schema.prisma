@@ -5231,3 +5231,47 @@ model DoclingAsyncPart {
   @@map("docling_async_parts")
   @@schema("non_zero")
 }
+
+
+model Entity {
+  workspaceId String?
+  id          String  @id @default(cuid())
+
+  type           String
+  canonicalName  String
+  normalizedName String
+
+  mentionCount Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  aliases EntityAlias[]
+
+  @@unique([workspaceId, type, normalizedName])
+  @@index([workspaceId, type])
+  @@map("entities")
+  @@schema("non_zero")
+}
+
+model EntityAlias {
+  workspaceId String?
+  id          String  @id @default(cuid())
+
+  entityId String
+  entity   Entity @relation(fields: [entityId], references: [id], onDelete: Cascade)
+
+  type           String
+  surfaceForm    String
+  normalizedForm String
+
+  count Int @default(0)
+
+  createdAt DateTime @default(now())
+
+  @@unique([workspaceId, type, normalizedForm])
+  @@index([entityId])
+  @@map("entity_aliases")
+  @@schema("non_zero")
+}
+
