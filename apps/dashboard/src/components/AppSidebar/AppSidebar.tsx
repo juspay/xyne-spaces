@@ -27,6 +27,7 @@ import {
   SparkleAi01,
   GridDashboard01,
   QuestionMarkCircle,
+  InformationCircle,
   AlertCircle,
   TicketToken,
 } from '@xyne/icons';
@@ -539,7 +540,7 @@ const AppSidebar = (): ReactElement => {
                     : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
                 )}
               >
-                <QuestionMarkCircle size={16} />
+                <InformationCircle size={16} />
               </button>
             }
           >
@@ -559,12 +560,12 @@ const AppSidebar = (): ReactElement => {
             trigger={
               hasValidStatus ? (
                 <div
-                  className='relative w-[32px] h-14 rounded-lg flex flex-col items-center justify-end transition-opacity hover:opacity-90 cursor-pointer [--avatar-ring:var(--sidebar-avatar-ring)]'
+                  className='relative w-[32px] h-16 rounded-lg flex flex-col items-center justify-end transition-opacity hover:opacity-90 cursor-pointer [--avatar-ring:var(--sidebar-avatar-ring)]'
                   style={{ backgroundColor: 'var(--sidebar-border)' }}
                   data-testid='profile-icon'
                 >
                   {/* Status Emoji at Top Center */}
-                  <div className='absolute top-1 left-1/2 -translate-x-1/2'>
+                  <div className='absolute top-0.5 left-1/2 -translate-x-1/2'>
                     <StatusIndicator
                       statusEmoji={currentUser?.statusEmoji}
                       statusContent={currentUser?.statusContent}
@@ -575,7 +576,7 @@ const AppSidebar = (): ReactElement => {
                   </div>
 
                   {/* Avatar at Bottom - overlaps container slightly */}
-                  <div className='relative -mb-1.5'>
+                  <div className='relative'>
                     {user ? (
                       <Avatar userId={user.id} size='md' className='rounded-lg' />
                     ) : (
@@ -591,7 +592,7 @@ const AppSidebar = (): ReactElement => {
                   data-testid='profile-icon'
                 >
                   {/* Avatar at Bottom - overlaps container slightly to match with-status state */}
-                  <div className='relative -mb-1.5'>
+                  <div className='relative'>
                     {user ? (
                       <Avatar userId={user.id} size='md' className='rounded-md' />
                     ) : (
