@@ -5,10 +5,10 @@ import { OrgRole, ProjectType } from '@prisma/client';
 import { DatabaseClient } from '../database/client';
 import { logger } from '@/utils/logger';
 import { invitationService } from '@/services/invitationService';
-import { config } from '@/config/env';
 import { WorkspaceJoinPolicy, WorkspaceType } from '@xyne/shared';
 import { aiProvisioningService } from '@/services/aiProvisioningService';
 import { isOrganizationPolicyError, organizationDomainService } from '@/services/organizationDomainService';
+import { buildInvitationLink } from '@/controllers/invitationController';
 
 // Create OrgMemberRepository interface since we don't have the full file yet
 interface OrgMember {
@@ -234,7 +234,7 @@ export class OrganizationController {
         to: ownerEmail.trim(),
         inviterName: req.user!.name || 'Admin',
         workspaceName: workspaceName.trim(),
-        invitationLink: `${config.slackFrontendUrl}/launch?path=${encodeURIComponent(`invite?workspaceId=${workspace.id}&invitationId=${invitation.invitationId || invitation.id}`)}`,
+        invitationLink: await buildInvitationLink({ req, workspaceId: workspace.id, invitationId: invitation.invitationId || invitation.id }),
         invitationId: invitation.invitationId || invitation.id,
       });
 

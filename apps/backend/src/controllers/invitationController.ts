@@ -15,6 +15,50 @@ import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-
 import { WorkspaceJoinPolicy, WorkspaceType } from '@xyne/shared';
 import { aiProvisioningService } from '@/services/aiProvisioningService';
 import { isOrganizationPolicyError, organizationDomainService } from '@/services/organizationDomainService';
+import { CacConfigService } from '@/services/cacConfigService';
+
+/**
+ * Extract the hostname from an Origin header value.
+ * e.g. "https://external.spaces.xyne.juspay.io" → "external.spaces.xyne.juspay.io"
+ */
+function extractDomainFromOrigin(origin: string): string | null {
+  try {
+    return new URL(origin).hostname;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Build an invitation link resolving the frontend URL via CAC per-domain.
+ *
+ * 1. Extract the domain from the request Origin header
+ * 2. Look up `frontend_url` in CAC (Superposition) with { domain } context
+ *    — this lets us map e.g. "spaces.xyne.juspay.net" → "https://app.spaces.xyne.juspay.net"
+ * 3. If CAC has no override, use the Origin itself (for domains where origin = frontend)
+ * 4. If no Origin, fall back to SLACK_FRONTEND_URL env
+ */
+export async function buildInvitationLink(params: {
+  req: Request;
+  workspaceId: string;
+  invitationId: string;
+}): Promise<string> {
+  const { req, workspaceId, invitationId } = params;
+  const origin = req.headers.origin as string | undefined;
+  const domain = origin ? extractDomainFromOrigin(origin) : null;
+
+  let baseUrl: string;
+
+  if (domain) {
+    const cacUrl = await CacConfigService.fetch('frontend_url', { domain }) as string | null;
+    baseUrl = (cacUrl || origin!).replace(/\/$/, '');
+  } else {
+    baseUrl = config.slackFrontendUrl.replace(/\/$/, '');
+  }
+
+  const path = `invite?workspaceId=${workspaceId}&invitationId=${invitationId}`;
+  return `${baseUrl}/launch?path=${encodeURIComponent(path)}`;
+}
 
 export class InvitationController {
   /**
@@ -86,7 +130,7 @@ export class InvitationController {
 
       const publicInvitationId = invitation.invitationId || invitation.id;
       const invitationLink =
-        `${config.slackFrontendUrl}/launch?path=${encodeURIComponent(`invite?workspaceId=${workspaceId}&invitationId=${publicInvitationId}`)}`;
+        await buildInvitationLink({ req, workspaceId, invitationId: invitation.invitationId || invitation.id });
 
       if (config.env === 'development') {
         logger.info(`[InvitationController] DEV MODE — skipping email send. Invitation link for ${email}: ${invitationLink}`);
@@ -505,7 +549,7 @@ export class InvitationController {
       });
       invitationId = invitation.invitationId ?? invitation.id;
 
-      const provisionInvitationLink = `${config.slackFrontendUrl}/launch?path=${encodeURIComponent(`invite?workspaceId=${workspace.id}&invitationId=${invitationId}`)}`;
+      const provisionInvitationLink = await buildInvitationLink({ req, workspaceId: workspace.id, invitationId });
       const emailResult = await invitationService.sendInvitationEmail({
         to: normalizedOwnerEmail,
         inviterName: req.user?.name ?? 'Administrator',
