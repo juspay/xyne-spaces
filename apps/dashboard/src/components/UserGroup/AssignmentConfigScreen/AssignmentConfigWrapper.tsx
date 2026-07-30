@@ -7,10 +7,12 @@ export const AssignmentConfigWrapper = (): ReactElement => {
 
   if (!userGroupId) {
     return (
-      <div className='h-full w-full flex items-center justify-center bg-muted'>
-        <div className='text-center'>
-          <h2 className='text-2xl font-semibold text-foreground mb-2'>User Group Not Found</h2>
-          <p className='text-muted-foreground'>The user group ID is missing or invalid.</p>
+      <div className='flex h-full w-full items-center justify-center overflow-hidden bg-background shadow-md md:rounded-2xl'>
+        <div className='px-4 text-center'>
+          <h2 className='mb-2 text-base font-semibold text-foreground'>User group not found</h2>
+          <p className='text-[13px] text-muted-foreground'>
+            This URL has no user group ID, or the ID is not valid.
+          </p>
         </div>
       </div>
     );

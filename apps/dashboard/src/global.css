@@ -2116,8 +2116,7 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
    inline box is painted but excluded from line-box height, so a line containing
    a mention keeps the same height. An inline-block/inline-flex chip would add
    its padding to the line box and space that line further apart. */
-.canvas-editor-container [data-inline-content-type="mention"],
-.collaborative-canvas-editor [data-inline-content-type="mention"] {
+.canvas-surface [data-inline-content-type="mention"] {
   line-height: inherit;
   vertical-align: baseline;
 }
@@ -2255,13 +2254,18 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 }
 
 /* ============================================================
-   Canvas editor — Notion-style page
-   Scoped to the two canvas editor roots so it never touches the
-   chat/email ProseMirror editors. Colours use theme tokens so the
-   light and midnight themes both work automatically.
+   Canvas — Notion-style page
+   Scoped to `.canvas-surface` so it never touches the chat/email
+   ProseMirror editors. Every surface that renders canvas content
+   carries the class — the two editors and the read-only previews —
+   so a canvas looks the same wherever it appears. Anything new that
+   mounts a <BlockNoteView> for canvas content must add it too; without
+   it BlockNote falls back to its own defaults (16px body, 3em h1,
+   #7d797a rules, #161616 code blocks) and the surface drifts.
+   Colours use theme tokens so the light and midnight themes both work
+   automatically.
    ============================================================ */
-.canvas-editor-container,
-.collaborative-canvas-editor {
+.canvas-surface {
   --canvas-content-width: 720px;
   /* Matches BlockNote's default .bn-editor padding-inline — the drag-handle / "+" gutter. */
   --canvas-gutter: 54px;
@@ -2269,8 +2273,7 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 
 /* Centered reading column. .bn-editor keeps its inline padding as the
    hover-handle gutter, so the drag-handle / "+" stay in the margin. */
-.canvas-editor-container .bn-editor,
-.collaborative-canvas-editor .bn-editor {
+.canvas-surface .bn-editor {
   box-sizing: border-box;
   max-width: calc(var(--canvas-content-width) + 2 * var(--canvas-gutter));
   margin-inline: auto;
@@ -2281,23 +2284,15 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   color: hsl(var(--foreground));
 }
 
-.canvas-editor-container .bn-side-menu .mantine-UnstyledButton-root:not(.mantine-Menu-item),
-.collaborative-canvas-editor .bn-side-menu .mantine-UnstyledButton-root:not(.mantine-Menu-item) {
+.canvas-surface .bn-side-menu .mantine-UnstyledButton-root:not(.mantine-Menu-item) {
   background-color: transparent;
 }
 
-.canvas-editor-container .bn-side-menu .mantine-UnstyledButton-root:not(.mantine-Menu-item):hover,
-.collaborative-canvas-editor
-  .bn-side-menu
-  .mantine-UnstyledButton-root:not(.mantine-Menu-item):hover {
+.canvas-surface .bn-side-menu .mantine-UnstyledButton-root:not(.mantine-Menu-item):hover {
   background-color: hsl(var(--accent));
 }
 
-.canvas-editor-container
-  .bn-editor
-  .bn-block
-  .bn-block-content[data-content-type="heading"][data-level="1"],
-.collaborative-canvas-editor
+.canvas-surface
   .bn-editor
   .bn-block
   .bn-block-content[data-content-type="heading"][data-level="1"] {
@@ -2307,11 +2302,7 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   letter-spacing: normal;
   padding-top: 22px;
 }
-.canvas-editor-container
-  .bn-editor
-  .bn-block
-  .bn-block-content[data-content-type="heading"][data-level="2"],
-.collaborative-canvas-editor
+.canvas-surface
   .bn-editor
   .bn-block
   .bn-block-content[data-content-type="heading"][data-level="2"] {
@@ -2320,11 +2311,7 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   font-weight: 600;
   padding-top: 20px;
 }
-.canvas-editor-container
-  .bn-editor
-  .bn-block
-  .bn-block-content[data-content-type="heading"][data-level="3"],
-.collaborative-canvas-editor
+.canvas-surface
   .bn-editor
   .bn-block
   .bn-block-content[data-content-type="heading"][data-level="3"] {
@@ -2333,11 +2320,7 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   font-weight: 600;
   padding-top: 18px;
 }
-.canvas-editor-container
-  .bn-editor
-  .bn-block
-  .bn-block-content[data-content-type="heading"][data-level="4"],
-.collaborative-canvas-editor
+.canvas-surface
   .bn-editor
   .bn-block
   .bn-block-content[data-content-type="heading"][data-level="4"] {
@@ -2345,18 +2328,13 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   line-height: 1.3;
   font-weight: 600;
 }
-.canvas-editor-container .bn-editor .bn-block-content[data-content-type="paragraph"],
-.collaborative-canvas-editor .bn-editor .bn-block-content[data-content-type="paragraph"] {
+.canvas-surface .bn-editor .bn-block-content[data-content-type="paragraph"] {
   padding-top: 8px;
 }
 
 /* The UA default `strong { font-weight: bolder }` resolves to 900 against a 600
    heading, pulling in Inter Black. Headings are already bold — keep the weight. */
-.canvas-editor-container .bn-editor .bn-block-content[data-content-type="heading"] :is(strong, b),
-.collaborative-canvas-editor
-  .bn-editor
-  .bn-block-content[data-content-type="heading"]
-  :is(strong, b) {
+.canvas-surface .bn-editor .bn-block-content[data-content-type="heading"] :is(strong, b) {
   font-weight: inherit;
 }
 
@@ -2373,85 +2351,66 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
  * Body text here is 15px/1.55 = 23.25px. Keep these in sync with the
  * padding-top values above — changing one without the other misaligns the handle.
  */
-.canvas-editor-container .bn-side-menu,
-.collaborative-canvas-editor .bn-side-menu {
+.canvas-surface .bn-side-menu {
   /* paragraph: 2x8 + 23.25 */
   height: 39px;
 }
-.canvas-editor-container .bn-side-menu[data-block-type="heading"][data-level="1"],
-.collaborative-canvas-editor .bn-side-menu[data-block-type="heading"][data-level="1"] {
+.canvas-surface .bn-side-menu[data-block-type="heading"][data-level="1"] {
   /* 2x22 + (34 x 1.5) */
   height: 95px;
 }
-.canvas-editor-container .bn-side-menu[data-block-type="heading"][data-level="2"],
-.collaborative-canvas-editor .bn-side-menu[data-block-type="heading"][data-level="2"] {
+.canvas-surface .bn-side-menu[data-block-type="heading"][data-level="2"] {
   /* 2x20 + (24 x 1.3) */
   height: 71px;
 }
-.canvas-editor-container .bn-side-menu[data-block-type="heading"][data-level="3"],
-.collaborative-canvas-editor .bn-side-menu[data-block-type="heading"][data-level="3"] {
+.canvas-surface .bn-side-menu[data-block-type="heading"][data-level="3"] {
   /* 2x18 + (20 x 1.3) */
   height: 62px;
 }
-.canvas-editor-container .bn-side-menu[data-block-type="heading"][data-level="4"],
-.collaborative-canvas-editor .bn-side-menu[data-block-type="heading"][data-level="4"] {
+.canvas-surface .bn-side-menu[data-block-type="heading"][data-level="4"] {
   /* 2x3 + (18 x 1.3) — h4 keeps BlockNote's default padding */
   height: 29px;
 }
-.canvas-editor-container .bn-side-menu[data-block-type="quote"],
-.canvas-editor-container .bn-side-menu[data-block-type="toggleListItem"],
-.collaborative-canvas-editor .bn-side-menu[data-block-type="quote"],
-.collaborative-canvas-editor .bn-side-menu[data-block-type="toggleListItem"] {
+.canvas-surface .bn-side-menu[data-block-type="quote"],
+.canvas-surface .bn-side-menu[data-block-type="toggleListItem"] {
   /* 2x14 + 23.25 */
   height: 51px;
 }
-.canvas-editor-container .bn-side-menu[data-block-type="codeBlock"],
-.collaborative-canvas-editor .bn-side-menu[data-block-type="codeBlock"] {
+.canvas-surface .bn-side-menu[data-block-type="codeBlock"] {
   /* 2x(14 + 1px border + 12px pre padding) + 23.25 */
   height: 77px;
 }
-.canvas-editor-container .bn-side-menu[data-block-type="divider"],
-.collaborative-canvas-editor .bn-side-menu[data-block-type="divider"] {
+.canvas-surface .bn-side-menu[data-block-type="divider"] {
   /* 2x(16 + 3.5) + 1px rule */
   height: 40px;
 }
 
-.canvas-editor-container .bn-editor .bn-block-group .bn-block-group > .bn-block-outer::before,
-.collaborative-canvas-editor .bn-editor .bn-block-group .bn-block-group > .bn-block-outer::before {
+.canvas-surface .bn-editor .bn-block-group .bn-block-group > .bn-block-outer::before {
   display: none;
 }
 
 /* Divider — 16px of air above/below the block, with the 1px rule centred in an
    8px band (BlockNote hardcodes rgb(125,121,122) and a 0.5em margin). */
-.canvas-editor-container .bn-editor .bn-block-content[data-content-type="divider"],
-.collaborative-canvas-editor .bn-editor .bn-block-content[data-content-type="divider"] {
+.canvas-surface .bn-editor .bn-block-content[data-content-type="divider"] {
   padding-top: 16px;
   padding-bottom: 16px;
 }
-.canvas-editor-container .bn-editor [data-content-type="divider"] hr,
-.collaborative-canvas-editor .bn-editor [data-content-type="divider"] hr {
+.canvas-surface .bn-editor [data-content-type="divider"] hr {
   border-top-color: hsl(var(--border));
   margin: 3.5px 0;
 }
 
 /* Lists — 8px above / 4px below, 24px marker box with a 12px gutter. The marker
    is pinned to the first line (BlockNote centres it across the whole block). */
-.canvas-editor-container .bn-editor .bn-block-content[data-content-type="bulletListItem"],
-.canvas-editor-container .bn-editor .bn-block-content[data-content-type="numberedListItem"],
-.collaborative-canvas-editor .bn-editor .bn-block-content[data-content-type="bulletListItem"],
-.collaborative-canvas-editor .bn-editor .bn-block-content[data-content-type="numberedListItem"] {
+.canvas-surface .bn-editor .bn-block-content[data-content-type="bulletListItem"],
+.canvas-surface .bn-editor .bn-block-content[data-content-type="numberedListItem"] {
   padding-top: 8px;
   padding-bottom: 4px;
 }
 
 /* Bullet — a drawn 6px dot rather than BlockNote's "•" text glyph. The extra
    ancestors are needed to outrank BlockNote's own `content` rules. */
-.canvas-editor-container
-  .bn-editor
-  .bn-block-outer
-  .bn-block
-  .bn-block-content[data-content-type="bulletListItem"]::before,
-.collaborative-canvas-editor
+.canvas-surface
   .bn-editor
   .bn-block-outer
   .bn-block
@@ -2466,12 +2425,7 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 }
 
 /* Numbered — right-aligned in the 24px box, pinned to the first line. */
-.canvas-editor-container
-  .bn-editor
-  .bn-block-outer
-  .bn-block
-  .bn-block-content[data-content-type="numberedListItem"]::before,
-.collaborative-canvas-editor
+.canvas-surface
   .bn-editor
   .bn-block-outer
   .bn-block
@@ -2488,25 +2442,21 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 /* Toggle list — same 14/10 rhythm as the quote, 12px between chevron and text.
    BlockNote centres the chevron across the whole block; the design tops it out
    so it tracks the first line on multi-line items. */
-.canvas-editor-container .bn-editor .bn-block-content[data-content-type="toggleListItem"],
-.collaborative-canvas-editor .bn-editor .bn-block-content[data-content-type="toggleListItem"] {
+.canvas-surface .bn-editor .bn-block-content[data-content-type="toggleListItem"] {
   padding-top: 14px;
   padding-bottom: 10px;
 }
-.canvas-editor-container .bn-editor [data-content-type="toggleListItem"] .bn-toggle-wrapper,
-.collaborative-canvas-editor .bn-editor [data-content-type="toggleListItem"] .bn-toggle-wrapper {
+.canvas-surface .bn-editor [data-content-type="toggleListItem"] .bn-toggle-wrapper {
   align-items: flex-start;
   gap: 12px;
 }
 
 /* Quote block — 4px bar at 10% foreground, 20px gutter, muted text (token-based). */
-.canvas-editor-container .bn-editor .bn-block-content[data-content-type="quote"],
-.collaborative-canvas-editor .bn-editor .bn-block-content[data-content-type="quote"] {
+.canvas-surface .bn-editor .bn-block-content[data-content-type="quote"] {
   padding-top: 14px;
   padding-bottom: 10px;
 }
-.canvas-editor-container .bn-editor [data-content-type="quote"] blockquote,
-.collaborative-canvas-editor .bn-editor [data-content-type="quote"] blockquote {
+.canvas-surface .bn-editor [data-content-type="quote"] blockquote {
   border-left: 4px solid hsl(var(--foreground) / 0.1);
   color: hsl(var(--muted-foreground));
   padding-left: 20px;
@@ -2516,20 +2466,17 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 /* Code block — theme-adaptive (BlockNote hardcodes a #161616 dark box that
    blends into the midnight page and is heavy in light). Uses tokens so it
    stays a subtle, bordered surface in both themes, with a monospace font. */
-.canvas-editor-container .bn-editor .bn-block-content[data-content-type="codeBlock"],
-.collaborative-canvas-editor .bn-editor .bn-block-content[data-content-type="codeBlock"] {
+.canvas-surface .bn-editor .bn-block-content[data-content-type="codeBlock"] {
   padding-top: 14px;
   padding-bottom: 10px;
 }
-.canvas-editor-container .bn-editor [data-content-type="codeBlock"],
-.collaborative-canvas-editor .bn-editor [data-content-type="codeBlock"] {
+.canvas-surface .bn-editor [data-content-type="codeBlock"] {
   background-color: hsl(var(--foreground) / 0.04);
   color: hsl(var(--foreground));
   border: 1px solid hsl(var(--foreground) / 0.06);
   border-radius: 8px;
 }
-.canvas-editor-container .bn-editor [data-content-type="codeBlock"] > pre,
-.collaborative-canvas-editor .bn-editor [data-content-type="codeBlock"] > pre {
+.canvas-surface .bn-editor [data-content-type="codeBlock"] > pre {
   font-family:
     ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
   font-size: 15px;
@@ -2537,47 +2484,59 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   padding: 12px;
 }
 /* Language dropdown (revealed on hover) picks up the theme text colour. */
-.canvas-editor-container .bn-editor [data-content-type="codeBlock"] > div > select,
-.collaborative-canvas-editor .bn-editor [data-content-type="codeBlock"] > div > select {
+.canvas-surface .bn-editor [data-content-type="codeBlock"] > div > select {
   color: hsl(var(--muted-foreground));
 }
 
 /* Table — token-based borders + subtle header row (BlockNote hardcodes #ddd). */
-.canvas-editor-container .bn-editor [data-content-type="table"] td,
-.canvas-editor-container .bn-editor [data-content-type="table"] th,
-.collaborative-canvas-editor .bn-editor [data-content-type="table"] td,
-.collaborative-canvas-editor .bn-editor [data-content-type="table"] th {
+.canvas-surface .bn-editor [data-content-type="table"] td,
+.canvas-surface .bn-editor [data-content-type="table"] th {
   border-color: hsl(var(--border));
 }
-.canvas-editor-container .bn-editor [data-content-type="table"] th,
-.collaborative-canvas-editor .bn-editor [data-content-type="table"] th {
+.canvas-surface .bn-editor [data-content-type="table"] th {
   background-color: hsl(var(--muted));
   font-weight: 600;
 }
 /* BlockNote wraps header text in <strong>; the UA default `bolder` would resolve
    to 900 against the header weight. Headers are already bold — keep the weight. */
-.canvas-editor-container .bn-editor [data-content-type="table"] th :is(strong, b),
-.collaborative-canvas-editor .bn-editor [data-content-type="table"] th :is(strong, b) {
+.canvas-surface .bn-editor [data-content-type="table"] th :is(strong, b) {
   font-weight: inherit;
 }
 /* Table cell selection fill — themed (BlockNote hardcodes a periwinkle #c8c8ff). */
-.canvas-editor-container .bn-editor .selectedCell:after,
-.collaborative-canvas-editor .bn-editor .selectedCell:after {
+.canvas-surface .bn-editor .selectedCell:after {
   background: hsl(var(--ring) / 0.2);
 }
 /* Align the table grid's left edge with paragraphs/code blocks — BlockNote reserves a 9px
    left inset on .tableWrapper for the row handles; drop it so all blocks start at the same X. */
-.canvas-editor-container .bn-editor [data-content-type="table"] .tableWrapper,
-.collaborative-canvas-editor .bn-editor [data-content-type="table"] .tableWrapper {
+.canvas-surface .bn-editor [data-content-type="table"] .tableWrapper {
   padding-left: 0;
 }
 /* Breathing room between the hover + / drag handles and block content. Applied at the
    .bn-block level (border-box) so the whole block — including boxed blocks like code —
    shifts uniformly and every block stays aligned, just a few px off the handles. */
-.canvas-editor-container .bn-editor .bn-block,
-.collaborative-canvas-editor .bn-editor .bn-block {
+.canvas-surface .bn-editor .bn-block {
   box-sizing: border-box;
   padding-left: 14px;
+}
+
+/* Read-only preview surfaces (message cards, config panels).
+ *
+ * Same typography as the page — only the horizontal insets change. A preview
+ * has no hover handles, so the 54px gutter BlockNote reserves for them is dead
+ * space that a ~460px card cannot spare, and the block-level 14px handle offset
+ * has nothing to clear. Both collapse to one `--canvas-gutter` the host can
+ * override inline to match its own padding.
+ */
+.canvas-surface-preview {
+  --canvas-gutter: 12px;
+}
+.canvas-surface-preview .bn-editor {
+  padding-inline: var(--canvas-gutter);
+}
+/* Both classes in the selector so this outranks the base .bn-block rule above on
+   specificity rather than on source order. */
+.canvas-surface.canvas-surface-preview .bn-editor .bn-block {
+  padding-left: 0;
 }
 
 /* Call summary card */

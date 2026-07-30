@@ -50,15 +50,11 @@ import {
 } from '../../../utils/canvasExport';
 import { apiInstance } from '../../../services/clients/apiClient';
 import type { CanvasParticipant, CollaborativeCanvasEditorRef } from '../Canvas.types';
-import { BlockNoteSchema, defaultBlockSpecs, defaultInlineContentSpecs } from '@blocknote/core';
 import { filterSuggestionItems } from '@blocknote/core/extensions';
-import { whiteboardBlockSpecs, getWhiteboardSlashMenuItems } from 'blocknote-layout-extensions';
+import { getWhiteboardSlashMenuItems } from 'blocknote-layout-extensions';
 import { insertGroupMention } from 'blocknote-layout-extensions';
-import {
-  mentionInlineContentSpec,
-  buildMentionProps,
-  CanvasMentionContext,
-} from '../CanvasMentionSpec';
+import { buildMentionProps, CanvasMentionContext } from '../CanvasMentionSpec';
+import { canvasSchema } from '../canvasSchema';
 import { createElement } from 'react';
 import { RiGroupLine } from 'react-icons/ri';
 import Avatar from '../../ui/Avatar/Avatar';
@@ -74,15 +70,6 @@ import { useSelector } from '@xstate/react';
 import { xyneAIActor } from '../../../machines/xyneAIMachine';
 import { useCanvasEditorMentionSharing } from '@/hooks/useCanvasEditorMentionSharing';
 import { CanvasRole } from '@xyne/shared';
-
-const schema = BlockNoteSchema.create({
-  blockSpecs: Object.assign({}, defaultBlockSpecs, whiteboardBlockSpecs),
-} as Parameters<typeof BlockNoteSchema.create>[0]).extend({
-  inlineContentSpecs: {
-    ...defaultInlineContentSpecs,
-    mention: mentionInlineContentSpec,
-  },
-});
 
 const canvasDictionary = {
   ...en,
@@ -189,7 +176,7 @@ export const CollaborativeCanvasEditor = forwardRef<
     const shouldUseCollaboration = hasCollaborationInitializedRef.current || isCollaborationReady;
 
     const editorOptions = {
-      schema,
+      schema: canvasSchema,
       dictionary: canvasDictionary,
       ...(onFileUpload ? { uploadFile: onFileUpload } : {}),
       resolveFileUrl,
@@ -608,7 +595,7 @@ export const CollaborativeCanvasEditor = forwardRef<
     return (
       <div
         ref={containerRef}
-        className={`collaborative-canvas-editor flex flex-col h-full bg-background overflow-hidden ${className} ${!editable || isReadOnly ? 'read-only-canvas' : ''}`}
+        className={`canvas-surface flex flex-col h-full bg-background overflow-hidden ${className} ${!editable || isReadOnly ? 'read-only-canvas' : ''}`}
         // Disable native browser context menu to prevent conflicts with BlockNote's custom menus (Slash menu, Format menu, etc.)
         onContextMenu={(e): void => e.preventDefault()}
         onFocusCapture={handleFocusCapture}

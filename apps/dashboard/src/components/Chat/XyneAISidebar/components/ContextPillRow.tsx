@@ -23,6 +23,7 @@ import {
   TicketToken,
 } from '@xyne/icons';
 import { motion } from 'framer-motion';
+import Avatar from '../../../ui/Avatar/Avatar';
 import useMeasure from '../../../../hooks/useMeasure';
 import { ContextPicker } from './ContextPicker';
 import type { ThreadInfo, CanvasInfo, SelectionInfo } from '../../../../machines/xyneAIMachine';
@@ -64,6 +65,32 @@ const CONTEXT_PILL_REMOVE_CLASS =
   'rounded p-0.5 flex-shrink-0 text-muted-foreground group-hover:text-foreground transition-colors';
 const CONTEXT_PILL_TRIGGER_CLASS =
   'flex items-center gap-1.5 cursor-pointer bg-transparent border-0 p-0';
+
+/**
+ * Icon + label for the list-driven pills, wrapped in a click target only when
+ * the pill actually has somewhere to go. Pills whose stored selection predates
+ * the navigation fields — or whose search result never carried them — stay
+ * inert `div`s rather than advertising a click that would go nowhere.
+ */
+const pillContent = (
+  content: ReactNode,
+  action?: { onClick: () => void; ariaLabel: string; trackName: string; trackMetadata: string },
+): ReactElement =>
+  action ? (
+    <button
+      type='button'
+      onClick={action.onClick}
+      className={CONTEXT_PILL_TRIGGER_CLASS}
+      aria-label={action.ariaLabel}
+      data-track-category='XyneAI'
+      data-track-name={action.trackName}
+      data-track-metadata={action.trackMetadata}
+    >
+      {content}
+    </button>
+  ) : (
+    <div className='flex items-center gap-1.5'>{content}</div>
+  );
 
 /**
  * Horizontal gap between pills, in px. Figma node 1500:25898 butts them up
@@ -154,12 +181,18 @@ export interface ContextPillRowProps {
 
   canvases: SelectedCanvas[];
   onRemoveCanvas?: (id: string) => void;
+  /** Opens the canvas. */
+  onCanvasClick?: (canvas: SelectedCanvas) => void;
 
   transcripts: SelectedTranscript[];
   onRemoveTranscript?: (id: string) => void;
+  /** Opens the conversation the call transcript was shared in. */
+  onTranscriptClick?: (transcript: SelectedTranscript) => void;
 
   recordings: SelectedRecording[];
   onRemoveRecording?: (id: string) => void;
+  /** Opens the recording, or the conversation it was shared in. */
+  onRecordingClick?: (recording: SelectedRecording) => void;
 
   activities: UserActivity[];
   onActivitiesChange?: (activities: UserActivity[]) => void;
@@ -217,10 +250,13 @@ export const ContextPillRow = ({
   onRemoveTicket,
   canvases,
   onRemoveCanvas,
+  onCanvasClick,
   transcripts,
   onRemoveTranscript,
+  onTranscriptClick,
   recordings,
   onRemoveRecording,
+  onRecordingClick,
   activities,
   onActivitiesChange,
 }: ContextPillRowProps): ReactElement | null => {
@@ -261,13 +297,32 @@ export const ContextPillRow = ({
             type='button'
             onClick={onThreadClick}
             className={CONTEXT_PILL_TRIGGER_CLASS}
-            aria-label={`Navigate to thread from ${threadInfo.senderName}`}
+            aria-label={
+              threadInfo.senderName
+                ? `Navigate to thread from ${threadInfo.senderName}`
+                : 'Navigate to thread'
+            }
+            {...(threadInfo.senderName && { title: threadInfo.senderName })}
             data-track-category='XYNE_AI'
             data-track-name='ClickThreadContextPill'
             data-track-metadata={JSON.stringify({ thread: threadInfo })}
           >
+            {/* The avatar stands in for the sender's name — no presence dot, it
+                reads as noise at pill scale. Contexts without a sender (tickets,
+                calls, recordings) and sessions persisted before `senderId`
+                existed fall back to the name prefix. */}
+            {threadInfo.senderId && (
+              <Avatar
+                userId={threadInfo.senderId}
+                size='xs'
+                rounded
+                showActiveStatus={false}
+                className='flex-shrink-0'
+              />
+            )}
             <span className={`${CONTEXT_PILL_LABEL_CLASS} max-w-[200px] truncate`}>
-              {threadInfo.senderName} • {threadInfo.previewText}
+              {!threadInfo.senderId && threadInfo.senderName ? `${threadInfo.senderName} • ` : ''}
+              {threadInfo.previewText}
             </span>
           </button>
           <button
@@ -553,14 +608,22 @@ export const ContextPillRow = ({
       key: `canvas-${canvas.id}`,
       node: (
         <div className={CONTEXT_PILL_CLASS}>
-          <div className='flex items-center gap-1.5'>
-            <div className='flex-shrink-0'>
-              <FileText className={CONTEXT_PILL_ICON_CLASS} />
-            </div>
-            <span className={`${CONTEXT_PILL_LABEL_CLASS} max-w-[120px] truncate`}>
-              {canvas.title}
-            </span>
-          </div>
+          {pillContent(
+            <>
+              <div className='flex-shrink-0'>
+                <FileText className={CONTEXT_PILL_ICON_CLASS} />
+              </div>
+              <span className={`${CONTEXT_PILL_LABEL_CLASS} max-w-[120px] truncate`}>
+                {canvas.title}
+              </span>
+            </>,
+            onCanvasClick && {
+              onClick: (): void => onCanvasClick(canvas),
+              ariaLabel: `Open canvas ${canvas.title}`,
+              trackName: 'CLICK_CANVAS_CONTEXT_PILL',
+              trackMetadata: JSON.stringify({ canvasId: canvas.canvasId ?? canvas.id }),
+            },
+          )}
           <button
             onClick={() => {
               removeDebugPill('canvases', canvas.id);
@@ -584,14 +647,26 @@ export const ContextPillRow = ({
       key: `transcript-${transcript.id}`,
       node: (
         <div className={CONTEXT_PILL_CLASS}>
-          <div className='flex items-center gap-1.5'>
-            <div className='flex-shrink-0'>
-              <PhoneDefault className={CONTEXT_PILL_ICON_CLASS} />
-            </div>
-            <span className={`${CONTEXT_PILL_LABEL_CLASS} max-w-[120px] truncate`}>
-              {transcript.title}
-            </span>
-          </div>
+          {pillContent(
+            <>
+              <div className='flex-shrink-0'>
+                <PhoneDefault className={CONTEXT_PILL_ICON_CLASS} />
+              </div>
+              <span className={`${CONTEXT_PILL_LABEL_CLASS} max-w-[120px] truncate`}>
+                {transcript.title}
+              </span>
+            </>,
+            // No channel means no conversation to open — the transcript's only
+            // navigable home.
+            onTranscriptClick && transcript.channelId
+              ? {
+                  onClick: (): void => onTranscriptClick(transcript),
+                  ariaLabel: `Open conversation for ${transcript.title}`,
+                  trackName: 'CLICK_TRANSCRIPT_CONTEXT_PILL',
+                  trackMetadata: JSON.stringify({ transcriptId: transcript.id }),
+                }
+              : undefined,
+          )}
           <button
             onClick={() => {
               removeDebugPill('transcripts', transcript.id);
@@ -615,14 +690,24 @@ export const ContextPillRow = ({
       key: `recording-${recording.id}`,
       node: (
         <div className={CONTEXT_PILL_CLASS}>
-          <div className='flex items-center gap-1.5'>
-            <div className='flex-shrink-0'>
-              <MicOn className={CONTEXT_PILL_ICON_CLASS} />
-            </div>
-            <span className={`${CONTEXT_PILL_LABEL_CLASS} max-w-[120px] truncate`}>
-              {recording.title}
-            </span>
-          </div>
+          {pillContent(
+            <>
+              <div className='flex-shrink-0'>
+                <MicOn className={CONTEXT_PILL_ICON_CLASS} />
+              </div>
+              <span className={`${CONTEXT_PILL_LABEL_CLASS} max-w-[120px] truncate`}>
+                {recording.title}
+              </span>
+            </>,
+            onRecordingClick && (recording.externalId || recording.channelId)
+              ? {
+                  onClick: (): void => onRecordingClick(recording),
+                  ariaLabel: `Open recording ${recording.title}`,
+                  trackName: 'CLICK_RECORDING_CONTEXT_PILL',
+                  trackMetadata: JSON.stringify({ recordingId: recording.id }),
+                }
+              : undefined,
+          )}
           <button
             onClick={() => {
               removeDebugPill('recordings', recording.id);

@@ -367,6 +367,9 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       conversationId,
       senderName: sender?.name || 'Unknown',
       previewText,
+      ...(message.senderId && { senderId: message.senderId }),
+      ...(message.messageId && { messageId: message.messageId }),
+      isThreadMessage: context === 'thread',
       ...(attachmentIds.length > 0 && { attachmentIds }),
     };
 

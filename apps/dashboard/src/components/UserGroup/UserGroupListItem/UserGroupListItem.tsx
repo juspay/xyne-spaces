@@ -2,13 +2,17 @@ import { ReactElement, useMemo, useState } from 'react';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { Button } from '../../ui/Button/Button';
-import Avatar from '../../ui/Avatar/Avatar';
+import AvatarGroup from '../../ui/Avatar/AvatarGroup';
+import { Tooltip } from '../../ui/Tooltip';
 import type { UserGroup, User } from '@xyne/shared';
 import { useUsers } from '../../../hooks/useUsers';
 import { useNavigate } from 'react-router-dom';
-import { Copy, Check } from 'lucide-react';
+import { CopyCopied, CopyDefault, DeleteDustbin02, PencilEditBox, Refresh } from '@xyne/icons';
 import { copyTextToClipboard } from '../../../utils/clipboardUtils';
 import { toast } from 'sonner';
+import { cn } from '../../../utils/classNames';
+
+const VISIBLE_AVATARS = 3;
 
 interface UserGroupListItemProps {
   userGroup: UserGroup;
@@ -27,7 +31,27 @@ export const UserGroupListItem = ({
     queries.getUserGroupMembers({ userGroupId: userGroup.id }),
   );
   const navigate = useNavigate();
+  const allUsers = useUsers();
   const [copied, setCopied] = useState(false);
+
+  const usersById = useMemo(() => {
+    const map = new Map<string, User>();
+    for (const u of allUsers) {
+      map.set(u.id, u);
+    }
+    return map;
+  }, [allUsers]);
+
+  const memberIds = useMemo(
+    () =>
+      (userGroupMembers ?? [])
+        .map(mapping => usersById.get(mapping.userId)?.id)
+        .filter((id): id is string => Boolean(id)),
+    [userGroupMembers, usersById],
+  );
+
+  const memberCount = memberIds.length;
+  const isActive = userGroup.isActive !== false;
 
   const handleCopyId = (e: React.MouseEvent): void => {
     e.stopPropagation();
@@ -42,121 +66,85 @@ export const UserGroupListItem = ({
       });
   };
 
-  const allUsers = useUsers();
-  const usersById = useMemo(() => {
-    const map = new Map<string, User>();
-    for (const u of allUsers) {
-      map.set(u.id, u);
-    }
-    return map;
-  }, [allUsers]);
-
-  const members =
-    userGroupMembers
-      ?.map(mapping => usersById.get(mapping.userId))
-      .filter((user): user is User => Boolean(user)) || [];
-  const memberCount = members.length;
-
-  const isActive = userGroup.isActive !== false;
-
   return (
     <div
       data-testid='user-group-list-item'
-      className={`bg-background border rounded-lg p-4 hover:bg-muted transition-colors ${
-        !isActive ? 'opacity-60' : ''
-      }`}
+      className={cn(
+        'flex h-full flex-col justify-between gap-8 rounded-2xl border border-border bg-card p-4',
+        !isActive && 'opacity-60',
+      )}
     >
-      <div className='flex items-center justify-between'>
-        <div className='flex-1'>
-          <div className='flex items-center space-x-3'>
-            <div className='flex items-center justify-center w-10 h-10 bg-muted rounded-lg'>
-              <span className='text-muted-foreground font-medium'>👥</span>
-            </div>
-            <div>
-              <div className='flex items-center gap-2'>
-                <h3 className='font-medium text-foreground'>{userGroup.name}</h3>
-                {!isActive && (
-                  <span className='px-2 py-0.5 text-xs bg-muted text-muted-foreground rounded'>
-                    Deactivated
-                  </span>
-                )}
-              </div>
-              {userGroup.description && (
-                <p className='text-sm text-muted-foreground line-clamp-1'>
-                  {userGroup.description}
-                </p>
+      <div className='flex flex-col gap-0.5'>
+        <div className='flex flex-col gap-1'>
+          <div className='flex items-center justify-between gap-3'>
+            <div className='flex min-w-0 items-center gap-2'>
+              <h3 className='truncate text-base font-semibold text-foreground'>{userGroup.name}</h3>
+              {!isActive && (
+                <span className='shrink-0 rounded bg-muted px-2 py-0.5 text-xs text-muted-foreground'>
+                  Deactivated
+                </span>
               )}
-              {userGroup.alias && (
-                <p className='text-xs text-muted-foreground'>Alias: {userGroup.alias}</p>
-              )}
-              <div className='flex items-center gap-1 mt-0.5'>
-                <span className='text-xs text-muted-foreground'>ID:</span>
-                <code className='text-xs bg-muted px-1.5 py-0.5 rounded font-mono truncate max-w-[160px]'>
-                  {userGroup.id}
-                </code>
-                <Button
-                  variant='ghost'
-                  size='iconSm'
-                  className='h-5 w-5 p-0 text-muted-foreground hover:text-foreground'
-                  onClick={handleCopyId}
-                  title='Copy user group ID'
-                >
-                  {copied ? <Check size={12} /> : <Copy size={12} />}
-                </Button>
-              </div>
             </div>
-          </div>
-
-          <div className='mt-2 flex items-center space-x-4'>
-            <div className='flex items-center text-sm text-muted-foreground'>
-              <span className='font-medium'>{memberCount}</span>
-              <span className='ml-1'>{memberCount === 1 ? 'member' : 'members'}</span>
-            </div>
-
             {memberCount > 0 && (
-              <div className='flex items-center -space-x-2 z-0'>
-                {members.slice(0, 3).map((member, index) => (
-                  <div
-                    key={member.id}
-                    className='relative flex items-center'
-                    style={{ zIndex: 3 - index }}
-                  >
-                    <Avatar userId={member.id} size='sm' showActiveStatus={false} />
-                  </div>
-                ))}
-                {memberCount > 3 && (
-                  <div
-                    className='relative flex items-center justify-center w-5 h-5 bg-muted border border-white rounded-full text-xs font-medium text-muted-foreground'
-                    style={{ zIndex: 0 }}
-                  >
-                    +{memberCount - 3}
-                  </div>
-                )}
-              </div>
+              <Tooltip content={`${memberCount} ${memberCount === 1 ? 'member' : 'members'}`}>
+                <span className='flex h-5 shrink-0 items-center'>
+                  <AvatarGroup userIds={memberIds} size='sm' count={VISIBLE_AVATARS} />
+                </span>
+              </Tooltip>
             )}
           </div>
+          {userGroup.description && (
+            <p className='line-clamp-2 text-[13px] leading-[1.4] text-muted-foreground'>
+              {userGroup.description}
+            </p>
+          )}
         </div>
 
-        <div className='flex items-center space-x-2'>
-          {isActive ? (
-            <>
+        {userGroup.alias && (
+          <p className='truncate text-xs text-muted-foreground'>Alias: {userGroup.alias}</p>
+        )}
+
+        <div className='flex items-center gap-[3px]'>
+          <span className='font-mono text-[10px] text-muted-foreground'>ID:</span>
+          <code className='max-w-[160px] truncate rounded-lg bg-muted p-1 font-mono text-[10px] text-muted-foreground'>
+            {userGroup.id}
+          </code>
+          <Button
+            variant='ghost'
+            size='iconSm'
+            className='size-5 p-0 text-muted-foreground hover:text-foreground'
+            onClick={handleCopyId}
+            title='Copy user group ID'
+            aria-label='Copy user group ID'
+          >
+            {copied ? <CopyCopied size={14} /> : <CopyDefault size={14} />}
+          </Button>
+        </div>
+      </div>
+
+      <div className='flex items-center gap-2'>
+        {isActive ? (
+          <>
+            <Button
+              variant='outline'
+              className='h-[26px] rounded-[10px] px-3 text-xs'
+              onClick={() => void navigate(`/user-groups/${userGroup.id}/assignment-config`)}
+              data-track-category='UserGroups'
+              data-track-name='OpenAssignmentConfig'
+              data-track-metadata={JSON.stringify({
+                groupId: userGroup.id,
+                groupName: userGroup.name,
+              })}
+            >
+              Auto Assignment
+            </Button>
+            <Tooltip content='Edit'>
               <Button
-                variant='outline'
-                size='sm'
-                onClick={() => void navigate(`/user-groups/${userGroup.id}/assignment-config`)}
-                data-track-category='UserGroups'
-                data-track-name='OpenAssignmentConfig'
-                data-track-metadata={JSON.stringify({
-                  groupId: userGroup.id,
-                  groupName: userGroup.name,
-                })}
-              >
-                Auto Assignment
-              </Button>
-              <Button
-                variant='outline'
-                size='sm'
+                variant='ghost'
+                size='iconSm'
+                className='size-6 rounded-md p-1 text-muted-foreground hover:text-foreground'
                 onClick={() => onEdit(userGroup)}
+                aria-label='Edit user group'
                 data-track-category='UserGroups'
                 data-track-name='EditUserGroup'
                 data-track-metadata={JSON.stringify({
@@ -164,12 +152,16 @@ export const UserGroupListItem = ({
                   groupName: userGroup.name,
                 })}
               >
-                Edit
+                <PencilEditBox size={16} />
               </Button>
+            </Tooltip>
+            <Tooltip content='Deactivate'>
               <Button
-                variant='destructive'
-                size='sm'
+                variant='ghost'
+                size='iconSm'
+                className='size-6 rounded-md p-1 text-muted-foreground hover:text-destructive'
                 onClick={() => void onDeactivate(userGroup.id)}
+                aria-label='Deactivate user group'
                 data-track-category='UserGroups'
                 data-track-name='DeactivateUserGroup'
                 data-track-metadata={JSON.stringify({
@@ -177,27 +169,26 @@ export const UserGroupListItem = ({
                   groupName: userGroup.name,
                 })}
               >
-                Deactivate
+                <DeleteDustbin02 size={16} />
               </Button>
-            </>
-          ) : (
-            <>
-              <Button
-                variant='outline'
-                size='sm'
-                onClick={() => void onReactivate(userGroup.id)}
-                data-track-category='UserGroups'
-                data-track-name='ReactivateUserGroup'
-                data-track-metadata={JSON.stringify({
-                  groupId: userGroup.id,
-                  groupName: userGroup.name,
-                })}
-              >
-                Reactivate
-              </Button>
-            </>
-          )}
-        </div>
+            </Tooltip>
+          </>
+        ) : (
+          <Button
+            variant='outline'
+            className='h-[26px] gap-1.5 rounded-[10px] px-3 text-xs'
+            onClick={() => void onReactivate(userGroup.id)}
+            data-track-category='UserGroups'
+            data-track-name='ReactivateUserGroup'
+            data-track-metadata={JSON.stringify({
+              groupId: userGroup.id,
+              groupName: userGroup.name,
+            })}
+          >
+            <Refresh size={14} />
+            Reactivate
+          </Button>
+        )}
       </div>
     </div>
   );
