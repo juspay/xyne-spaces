@@ -21,13 +21,20 @@ pnpm install
 pnpm run up
 ```
 
-`pnpm run up` chains three steps that you can also run individually:
+`pnpm run up` is an alias for `pnpm run bootstrap`, which chains every setup step from
+[Local Development](local-development.md) in order. Each is also runnable on its own:
 
 | Step | Command | What it does |
 | ---- | ------- | ------------ |
-| 1 | `pnpm run setup` | Installs the workspace and builds `@xyne/shared`, `@xyne/icons`, `agentic-framework` |
-| 2 | `pnpm run services` | Starts infrastructure containers and waits for health checks |
-| 3 | `pnpm run dev:all` | Runs backend, dashboard, xyne-claw, and claw-auth together |
+| 1 | `pnpm run env:setup` | Copies each app's `.env.example` to the filename that app reads; never overwrites an existing file |
+| 2 | `pnpm run setup` | Installs the workspace and builds `@xyne/shared`, `@xyne/icons`, `agentic-framework` |
+| 3 | `pnpm run secrets` | Fills the `set-me` placeholders in `apps/backend/.env.local` (JWT, encryption, VAPID) |
+| 4 | `pnpm run services` | Starts infrastructure containers and waits for health checks |
+| 5 | `pnpm run dev:all` | Runs backend, dashboard, xyne-claw, and claw-auth together |
+
+Steps run serially and the chain stops at the first failure, so a broken step is never
+masked by a later one. Every step is idempotent — re-running `bootstrap` on an existing
+checkout is safe and will not overwrite env files or real secrets.
 
 Stop the infrastructure with `pnpm run services:stop`.
 

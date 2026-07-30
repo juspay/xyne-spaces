@@ -65,14 +65,21 @@ cd xyne-spaces
 npm run up
 ```
 
-`npm run up` runs three phases in order:
+`npm run up` is an alias for `npm run bootstrap`, which runs every phase serially and
+stops at the first failure:
+- `npm run env:setup` — copy each app's `.env.example` to the filename that app reads (never overwrites an existing file)
 - `npm run setup` — install dependencies for root and every package (including `/shared` and `/icons`) and build shared packages
+- `npm run secrets` — generate the local secrets that ship as `set-me` placeholders (JWT, encryption, VAPID keys)
 - `npm run services` — start infrastructure containers and seed all databases
 - `npm run dev:all` — start backend, dashboard, `xyne-claw`, and `xyne-claw-auth/backend` dev servers in parallel
 
+Every phase is idempotent, so re-running `up` on an existing checkout is safe.
+
 Alternatively, run the phases separately:
 ```bash
+npm run env:setup
 npm run setup
+npm run secrets
 npm run services
 npm run dev:all
 ```

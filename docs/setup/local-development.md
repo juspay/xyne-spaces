@@ -3,6 +3,33 @@
 A first run from a clean clone. Assumes you have already worked through
 [Prerequisites](prerequisites.md).
 
+## The one-command path
+
+If you just want a running environment, this does every step on this page in order:
+
+```bash
+git clone https://github.com/juspay/xyne-spaces.git
+cd xyne-spaces
+pnpm run up
+```
+
+`pnpm run up` is an alias for `pnpm run bootstrap`, which chains:
+
+```
+env:setup → setup (install + build:shared) → secrets → services → dev:all
+```
+
+The steps run serially and the chain stops at the first failure, so a broken step is
+never masked by a later one. Every step is idempotent — env files and real secrets are
+never overwritten — so it is safe to re-run on an existing checkout.
+
+Expect a few minutes on the first run while container images download. When it
+finishes, open **http://localhost:5173**.
+
+The rest of this page walks through the same steps individually. Read on if you want
+to understand what each one does, need to run only part of the setup, or are debugging
+a step that failed.
+
 ## 1. Clone and install
 
 ```bash
@@ -16,7 +43,14 @@ if you find yourself running `pnpm install` inside `apps/backend`, something is 
 
 ## 2. Environment files
 
-Each app ships an `.env.example`. Copy the ones you need:
+Each app ships an `.env.example`. Copy all four at once:
+
+```bash
+pnpm run env:setup
+```
+
+That never overwrites an existing file, so it is safe to re-run. The equivalent by
+hand, if you only want some of them:
 
 ```bash
 cp apps/backend/.env.example              apps/backend/.env.local
@@ -29,9 +63,27 @@ The backend reads `.env.local` (via `dotenv -e .env.local`), while `xyne-claw` a
 `claw-auth` read `.env` (via `tsx --env-file=.env`). This asymmetry is deliberate —
 copy to the filename shown above.
 
-Local secrets that need generating (VAPID keys for web push, etc.) are filled in by
-`scripts/start-services.sh` on first run; it only replaces placeholder values, so
-real secrets you add are never overwritten.
+### Generate local secrets
+
+`apps/backend/.env.example` ships several secrets as the literal placeholder `set-me`.
+The backend refuses to boot on those — `JWT_SECRET` is validated at startup and throws
+`JWT_SECRET environment variable is required and must be at least 32 characters`.
+
+Fill them in:
+
+```bash
+pnpm run secrets
+```
+
+This generates `JWT_SECRET`, `ZERO_AUTH_SECRET`, `ENCRYPTION_KEY`, and the VAPID
+keypair used for web push, writing them into `apps/backend/.env.local`.
+
+`pnpm run services` runs this for you, so a normal setup never needs it explicitly.
+Reach for it directly when you copied `.env.local` by hand, or when a `.env.local`
+from an older checkout still has `set-me` values in it.
+
+Safe to re-run at any time: it only replaces placeholder or empty values, so real
+secrets you have added are never overwritten.
 
 ## 3. Build the shared libraries
 

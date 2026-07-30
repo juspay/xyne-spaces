@@ -17,6 +17,11 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m' # No Color
 
+# Bound every health-poll curl. Without this, a port that accepts the connection but
+# never answers (e.g. a stale forwarder from another container runtime squatting on it)
+# blocks curl forever and the retry loop below never gets to iterate or time out.
+CURL_TIMEOUT="--connect-timeout 3 --max-time 5"
+
 # Check and stop local PostgreSQL if running on port 5432
 echo -e "${BLUE}Checking for local PostgreSQL on port 5432...${NC}"
 if lsof -Pi :5432 -sTCP:LISTEN -t >/dev/null 2>&1 ; then
@@ -108,6 +113,19 @@ if [ -z "$CONTAINER_RUNTIME" ]; then
     exit 1
 fi
 
+# Both runtimes publish to the same host ports. Whichever bound them first wins, and the
+# loser's containers still report their mappings while being unreachable from the host —
+# so health checks hang and Prisma fails with P1001 against a container that looks healthy.
+if [ "$CONTAINER_RUNTIME" = "docker" ] && command -v podman &> /dev/null; then
+    if podman ps --format '{{.Names}}' 2>/dev/null | grep -q .; then
+        echo -e "${RED}❌ Podman containers are running while Docker is the selected runtime.${NC}"
+        echo -e "${YELLOW}   They hold the dev ports (5433, 5434, 4443, 6379, ...), so the Docker${NC}"
+        echo -e "${YELLOW}   containers this script starts will be unreachable from the host.${NC}"
+        echo -e "${YELLOW}   Stop them first:  ${BLUE}podman machine stop${NC}"
+        exit 1
+    fi
+fi
+
 # Start infrastructure services
 echo -e "${BLUE}🚢 Starting infrastructure services...${NC}"
 $COMPOSE_CMD -f "$COMPOSE_FILE" up -d postgres common-postgres redis livekit fake-gcs minio ysweet transcription-agent victoriametrics grafana otel-collector superposition
@@ -180,7 +198,7 @@ done
 # Wait for fake-gcs-server
 echo -e "${BLUE}⏳ Waiting for fake-gcs-server...${NC}"
 for i in {1..30}; do
-    if curl -s http://localhost:4443/storage/v1/b > /dev/null 2>&1; then
+    if curl -s $CURL_TIMEOUT http://localhost:4443/storage/v1/b > /dev/null 2>&1; then
         echo -e "${GREEN}✓ fake-gcs-server is ready${NC}"
         break
     fi
@@ -194,7 +212,7 @@ done
 # Wait for MinIO
 echo -e "${BLUE}⏳ Waiting for MinIO...${NC}"
 for i in {1..30}; do
-    if curl -s http://localhost:9000/minio/health/live > /dev/null 2>&1; then
+    if curl -s $CURL_TIMEOUT http://localhost:9000/minio/health/live > /dev/null 2>&1; then
         echo -e "${GREEN}✓ MinIO is ready${NC}"
         break
     fi
@@ -206,26 +224,26 @@ for i in {1..30}; do
 done
 
 # Setup fake-gcs buckets
-if curl -s http://localhost:4443/storage/v1/b > /dev/null 2>&1; then
+if curl -s $CURL_TIMEOUT http://localhost:4443/storage/v1/b > /dev/null 2>&1; then
     echo -e "${BLUE}📦 Setting up fake-gcs buckets...${NC}"
 
     # Create frontend bundles bucket
-    curl -s -X POST "http://localhost:4443/storage/v1/b?project=xyne-spaces" \
+    curl -s $CURL_TIMEOUT -X POST "http://localhost:4443/storage/v1/b?project=xyne-spaces" \
       -H "Content-Type: application/json" \
       -d '{"name":"xyne-frontend-bundles"}' > /dev/null 2>&1
 
     # Create chat documents bucket
-    curl -s -X POST "http://localhost:4443/storage/v1/b?project=xyne-spaces" \
+    curl -s $CURL_TIMEOUT -X POST "http://localhost:4443/storage/v1/b?project=xyne-spaces" \
       -H "Content-Type: application/json" \
       -d '{"name":"xyne-spaces-chat-documents"}' > /dev/null 2>&1
 
     # Create transcription bucket
-    curl -s -X POST "http://localhost:4443/storage/v1/b?project=xyne-spaces" \
+    curl -s $CURL_TIMEOUT -X POST "http://localhost:4443/storage/v1/b?project=xyne-spaces" \
       -H "Content-Type: application/json" \
       -d '{"name":"transcription-dev-v2"}' > /dev/null 2>&1
 
     # Create canvas documents bucket
-    curl -s -X POST "http://localhost:4443/storage/v1/b?project=xyne-spaces" \
+    curl -s $CURL_TIMEOUT -X POST "http://localhost:4443/storage/v1/b?project=xyne-spaces" \
       -H "Content-Type: application/json" \
       -d '{"name":"xyne-spaces-canvas-documents"}' > /dev/null 2>&1
 
@@ -241,9 +259,14 @@ if [ ! -f ".env.local" ]; then
     echo -e "${YELLOW}⚠️  apps/backend/.env.local not found. Creating from .env.example...${NC}"
     cp .env.example .env.local
     echo -e "${GREEN}✓ Created apps/backend/.env.local${NC}"
-    node "$REPO_ROOT/scripts/generate-local-secrets.mjs"
     echo -e "${YELLOW}   Please review and update values as needed.${NC}"
 fi
+
+# Always run, not just on first creation: an .env.local that predates this script (or one
+# whose creation run died partway) keeps its `set-me` placeholders, and the backend then
+# fails at startup with "JWT_SECRET ... must be at least 32 characters". The generator only
+# replaces placeholder/empty values, so re-running it never clobbers a real secret.
+node "$REPO_ROOT/scripts/generate-local-secrets.mjs"
 
 # Export key env vars from .env.local to ensure prisma/node use correct values
 # (dotenv -e sometimes fails to override shell/env values)
@@ -456,23 +479,6 @@ if [ -d "apps/xyne-claw" ]; then
     fi
     echo -e "${GREEN}✓ xyne-claw ready${NC}"
     cd "$REPO_ROOT"
-fi
-
-# Deploy Vespa schemas (idempotent: waits for health, downloads the embedding
-# model once, builds the application package, then activates it on the config
-# server — via the vespa CLI when installed, otherwise a plain curl upload).
-# Non-fatal on purpose: a dev without search should still get a working stack.
-VESPA_READY=0
-if [ "${SKIP_VESPA:-0}" != "1" ]; then
-    echo -e "${BLUE}🔎 Deploying Vespa schemas (first run downloads the embedding model)...${NC}"
-    if DOCKER_COMPOSE="$COMPOSE_CMD" CONTAINER_CLI="$CONTAINER_RUNTIME" "$REPO_ROOT/vespa-core/scripts/deploy-dev.sh"; then
-        echo -e "${GREEN}✓ Vespa schemas deployed${NC}"
-        VESPA_READY=1
-    else
-        echo -e "${YELLOW}⚠️  Vespa schema deploy failed — search will not work.${NC}"
-        echo -e "${YELLOW}   Needs curl plus either zip or python3 (all usually present).${NC}"
-        echo -e "${YELLOW}   Retry on its own with: ${BLUE}pnpm run services:vespa${NC}"
-    fi
 fi
 
 # Deploy Vespa schemas (idempotent: waits for health, downloads the embedding
