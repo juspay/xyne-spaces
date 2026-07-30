@@ -46,6 +46,14 @@ import { aiProvisioningWorker } from '@/workers/aiProvisioningWorker';
 import { socialMediaSyncWorker } from '@/workers/socialMediaSyncWorker';
 config()
 
+process.on('unhandledRejection', reason => {
+  logger.error('WORKER UNHANDLED REJECTION', { error: reason });
+});
+
+process.on('uncaughtException', error => {
+  logger.error('WORKER UNCAUGHT EXCEPTION', { error });
+});
+
 class WorkerService {
   private isShuttingDown = false
   private automationTemplateCleanupTimer: NodeJS.Timeout | null = null

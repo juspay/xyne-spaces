@@ -24,6 +24,7 @@ const getCommonErrorProperties = (): {
 const handleConsoleError = (args: unknown[]): void => {
   try {
     const errorMessage = args.map(arg => String(arg)).join(' ');
+    const error = args.find(arg => arg instanceof Error);
 
     const properties = {
       type: 'console.error',
@@ -31,7 +32,7 @@ const handleConsoleError = (args: unknown[]): void => {
       ...getCommonErrorProperties(),
     };
     mixpanelService.track('Frontend Error', properties);
-    logger.error(Event.FRONTEND_ERROR, properties);
+    logger.error(Event.FRONTEND_ERROR, { ...properties, error });
   } catch (trackingError) {
     originalConsoleError('Failed to track console.error to Mixpanel:', trackingError);
   }
@@ -53,7 +54,7 @@ const handleWindowError = (event: ErrorEvent): void => {
       ...getCommonErrorProperties(),
     };
     mixpanelService.track('Frontend Error', properties);
-    logger.error(Event.FRONTEND_ERROR, properties);
+    logger.error(Event.FRONTEND_ERROR, { ...properties, error });
   } catch (trackingError) {
     originalConsoleError('Failed to track error to Mixpanel:', trackingError);
   }
@@ -79,7 +80,7 @@ const handleUnhandledRejection = (event: PromiseRejectionEvent): void => {
       ...getCommonErrorProperties(),
     };
     mixpanelService.track('Frontend Error', properties);
-    logger.error(Event.FRONTEND_ERROR, properties);
+    logger.error(Event.FRONTEND_ERROR, { ...properties, error: reason });
   } catch (trackingError) {
     originalConsoleError('Failed to track promise rejection to Mixpanel:', trackingError);
   }

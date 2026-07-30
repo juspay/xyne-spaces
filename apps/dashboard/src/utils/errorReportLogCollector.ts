@@ -1,6 +1,7 @@
 import { detectPlatform, type Platform } from '../hooks/usePlatform';
 import type { ErrorReportNativeLog } from '../types/electron';
 import { logger } from './logger';
+import { createErrorTrace, type ErrorTrace } from './errorTrace';
 
 type LogLevel = 'error' | 'window.error' | 'unhandledrejection';
 
@@ -18,6 +19,7 @@ export interface ErrorReportLogEntry {
   timestamp: string;
   level: LogLevel;
   message: string;
+  errorTrace?: ErrorTrace;
 }
 
 export interface ErrorReportContext {
@@ -50,12 +52,16 @@ const serializeValue = (value: unknown): string => {
   }
 };
 
-const appendLogEntry = (level: LogLevel, message: string): void => {
-  logEntries.push({
+const appendLogEntry = (level: LogLevel, message: string, error?: unknown): void => {
+  const entry: ErrorReportLogEntry = {
     timestamp: new Date().toISOString(),
     level,
     message,
-  });
+  };
+  if (error !== undefined) {
+    entry.errorTrace = createErrorTrace(error);
+  }
+  logEntries.push(entry);
 
   if (logEntries.length > MAX_LOG_ENTRIES) {
     logEntries.splice(0, logEntries.length - MAX_LOG_ENTRIES);
@@ -104,7 +110,11 @@ export const installErrorReportLogCollector = (
   // eslint-disable-next-line no-console
   console.error = (...args: unknown[]): void => {
     originalConsoleError(...args);
-    appendLogEntry('error', args.map(serializeValue).join(' '));
+    appendLogEntry(
+      'error',
+      args.map(serializeValue).join(' '),
+      args.find(arg => arg instanceof Error),
+    );
     options.onConsoleError?.(args);
   };
 
@@ -118,12 +128,13 @@ export const installErrorReportLogCollector = (
       ]
         .filter(Boolean)
         .join(' | '),
+      event.error,
     );
     options.onWindowError?.(event);
   });
 
   window.addEventListener('unhandledrejection', event => {
-    appendLogEntry('unhandledrejection', serializeValue(event.reason));
+    appendLogEntry('unhandledrejection', serializeValue(event.reason), event.reason);
     options.onUnhandledRejection?.(event);
   });
 };

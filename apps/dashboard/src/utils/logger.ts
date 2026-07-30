@@ -10,11 +10,11 @@ import {
 import type { WorkerMessage } from './logger.worker';
 import { v4 as uuidv4 } from 'uuid';
 import { detectReactNativeWebView, reactNativeBridge } from './reactNativeBridge';
-
-// LogLevel is the single source of truth from shared
-export { LogLevel } from '@xyne/shared/logger';
+import { createErrorTrace, findError, serializeError } from './errorTrace';
 
 import { Event as LoggerEvent, LogLevel } from '@xyne/shared/logger';
+
+const ERROR_DEDUP_WINDOW_IN_MS = 5_000;
 
 export const NotificationSocketState = {
   CONNECTED: 'connected',
@@ -161,6 +161,49 @@ export const Event = {
 } as const;
 
 export type EventType = (typeof Event)[keyof typeof Event];
+const normalizeDedupValue = (value: unknown, seen: WeakSet<object> = new WeakSet()): unknown => {
+  if (
+    value === null ||
+    typeof value === 'string' ||
+    typeof value === 'number' ||
+    typeof value === 'boolean'
+  ) {
+    return value;
+  }
+  if (typeof value === 'undefined' || typeof value === 'function' || typeof value === 'symbol') {
+    return String(value);
+  }
+  if (value instanceof Error) {
+    return serializeError(value);
+  }
+  if (typeof value !== 'object') {
+    return Object.prototype.toString.call(value);
+  }
+  if (seen.has(value)) {
+    return '[Circular]';
+  }
+  seen.add(value);
+  if (Array.isArray(value)) {
+    return value.map(item => normalizeDedupValue(item, seen));
+  }
+  return Object.keys(value as Record<string, unknown>)
+    .sort()
+    .reduce<Record<string, unknown>>((normalized, key) => {
+      normalized[key] = normalizeDedupValue((value as Record<string, unknown>)[key], seen);
+      return normalized;
+    }, {});
+};
+
+const createErrorDedupKey = (
+  event: EventType,
+  fingerprint: string,
+  extraFields?: Record<string, unknown>,
+): string =>
+  JSON.stringify({
+    event,
+    fingerprint,
+    extraFields: normalizeDedupValue(extraFields ?? {}),
+  });
 
 export interface LogEntry {
   clientSessionId: string;
@@ -198,6 +241,7 @@ export class Logger implements LoggerConfig {
   private zeroSocketState: ZeroSocketState = ZeroSocketState.DISCONNECTED;
   private pageViewId: string | null = null;
   private pageUrl: string | null = null;
+  private recentErrorFingerprints = new Map<string, number>();
 
   constructor(config: { clientSessionId: string; platform_name: Platform }) {
     this.clientSessionId = config.clientSessionId;
@@ -360,7 +404,30 @@ export class Logger implements LoggerConfig {
   }
 
   error(event: EventType, extraFields?: Record<string, unknown>, consoleLog?: boolean): void {
-    this.postLogMessage(LogLevel.ERROR, event, extraFields, consoleLog);
+    const error =
+      findError(extraFields ?? {}) ?? new Error(String(extraFields?.['message'] ?? event));
+    const errorTrace = createErrorTrace(error);
+    const now = Date.now();
+    const dedupKey = createErrorDedupKey(event, errorTrace.fingerprint, extraFields);
+    const previous = this.recentErrorFingerprints.get(dedupKey);
+    this.recentErrorFingerprints.set(dedupKey, now);
+    for (const [fingerprint, timestamp] of this.recentErrorFingerprints) {
+      if (now - timestamp > ERROR_DEDUP_WINDOW_IN_MS) {
+        this.recentErrorFingerprints.delete(fingerprint);
+      }
+    }
+    if (previous && now - previous < ERROR_DEDUP_WINDOW_IN_MS) return;
+    this.postLogMessage(
+      LogLevel.ERROR,
+      event,
+      {
+        ...extraFields,
+        error: serializeError(error),
+        errorTrace,
+        release: __APP_VERSION__,
+      },
+      consoleLog,
+    );
   }
 
   pushlogs(): void {

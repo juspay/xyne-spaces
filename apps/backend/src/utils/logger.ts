@@ -3,6 +3,13 @@ import { AsyncLocalStorage } from 'async_hooks';
 import fluentLogger from 'fluent-logger';
 import type { Socket } from 'net';
 import { config } from '@/config/env';
+import {
+  ErrorTrace,
+  createCallSiteError,
+  createErrorTrace,
+  findError,
+  serializeError as serializeTraceError,
+} from './errorTrace';
 
 export interface LogContext {
   requestId?: string;
@@ -24,26 +31,54 @@ const injectContext = winston.format((info) => {
   return info;
 });
 
-const SAFE_ERROR_FIELDS = ['code', 'status', 'statusCode', 'errno', 'syscall'] as const;
 const ERROR_PAYLOAD_KEYS = new Set(['config', 'request', 'response', 'headers', 'options']);
 const REDACTED = '[REDACTED]';
+const CALL_SITE_TRACE_KEY = '__callSiteTrace';
 
-export function serializeError(err: Error): Record<string, unknown> {
-  const out: Record<string, unknown> = {
-    name: err.name,
-    message: err.message,
-    stack: err.stack,
-  };
-  for (const field of SAFE_ERROR_FIELDS) {
-    const value = (err as unknown as Record<string, unknown>)[field];
-    if (typeof value === 'string' || typeof value === 'number') {
-      out[field] = value;
-    }
-  }
-  return out;
+export function serializeError(value: unknown): Record<string, unknown> {
+  return serializeTraceError(value);
 }
 
 const normalizeErrors = winston.format((info) => {
+  if (info.level === 'error') {
+    const splat = (info as Record<PropertyKey, unknown>)[Symbol.for('splat')];
+    const infoRecord = info as Record<string, unknown>;
+    const error =
+      findError(info) ??
+      (Array.isArray(splat) ? splat.map(findError).find(Boolean) : findError(splat));
+    const metadataError = infoRecord.error;
+    const splatError = Array.isArray(splat)
+      ? splat.find(
+          (item) =>
+            item instanceof Error || (item !== null && typeof item === 'object' && 'error' in item)
+        )
+      : splat;
+    const splatValue =
+      splatError !== null && typeof splatError === 'object' && 'error' in splatError
+        ? (splatError as Record<string, unknown>).error
+        : splatError;
+    const callSiteTrace = [
+      infoRecord[CALL_SITE_TRACE_KEY],
+      ...(Array.isArray(splat)
+        ? splat.map((item) =>
+            item !== null && typeof item === 'object'
+              ? (item as Record<string, unknown>)[CALL_SITE_TRACE_KEY]
+              : undefined
+          )
+        : []),
+    ].find(
+      (value): value is ErrorTrace =>
+        value !== null && typeof value === 'object' && 'fingerprint' in value
+    );
+    delete infoRecord[CALL_SITE_TRACE_KEY];
+    const traceValue = error ?? metadataError ?? splatValue;
+    if (traceValue !== undefined) {
+      infoRecord.errorTrace = createErrorTrace(traceValue);
+      infoRecord.error = serializeError(traceValue);
+    } else if (callSiteTrace) {
+      infoRecord.errorTrace = callSiteTrace;
+    }
+  }
   for (const key of Object.keys(info)) {
     const value = (info as Record<string, unknown>)[key];
     if (value instanceof Error) {
@@ -192,8 +227,25 @@ export const logger = winston.createLogger({
   },
 });
 
+const originalError = logger.error.bind(logger) as (...args: unknown[]) => winston.Logger;
+
+const captureErrorLog = (...args: unknown[]): winston.Logger => {
+  if (!args.some((arg) => findError(arg))) {
+    const callSiteError = createCallSiteError(args[0], captureErrorLog);
+    const lastArgument = args[args.length - 1];
+    const callback = typeof lastArgument === 'function' ? args.pop() : undefined;
+    const callSiteMetadata = { [CALL_SITE_TRACE_KEY]: createErrorTrace(callSiteError) };
+    return callback
+      ? originalError(...args, callSiteMetadata, callback)
+      : originalError(...args, callSiteMetadata);
+  }
+  return originalError(...args);
+};
+
+logger.error = captureErrorLog as typeof logger.error;
+
 export const stream = {
   write: (message: string) => {
     logger.info(message.trim());
   },
-}; 
+};

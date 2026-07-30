@@ -15,6 +15,7 @@ import si from 'systeminformation';
 import { config } from '../../app/config';
 import { ElectronEventType } from './electron-events';
 import Store from 'electron-store';
+import { createErrorTrace, serializeError } from './errorTrace';
 
 // Create logger instance for errors and warnings only
 export const errorLogger = log.create({ logId: 'error' });
@@ -164,6 +165,8 @@ class LoggerService {
   logError(event: EventType, error: unknown, extraFields?: Record<string, unknown>, logType?: string): void {
     const errorDetails = {
       ...(extraFields || {}),
+      error: serializeError(error),
+      errorTrace: createErrorTrace(error),
       error_message: error instanceof Error ? error.message : String(error),
       error_stack: error instanceof Error ? error.stack : undefined,
     };
@@ -191,6 +194,14 @@ class LoggerService {
       return;
     }
 
+    const error = level === LogLevel.ERROR && extraFields instanceof Error
+      ? extraFields
+      : level === LogLevel.ERROR
+        ? Object.values(extraFields ?? {}).find(value => value instanceof Error)
+        : undefined;
+    const normalizedFields = error
+      ? { ...(extraFields instanceof Error ? {} : extraFields), error: serializeError(error), errorTrace: createErrorTrace(error) }
+      : extraFields;
     const logEntry: LogEntry = {
       clientSessionId: this.clientSessionId,
       platformName: this.platformName,
@@ -202,7 +213,7 @@ class LoggerService {
       hostname: os.hostname(),
       serialNumber: this.serialNumber,
       event,
-      ...(extraFields || {}),
+      ...(normalizedFields || {}),
     };
 
     // Write to main log (all levels)

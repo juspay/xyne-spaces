@@ -124,6 +124,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
 
     logger.error(Event.FRONTEND_ERROR, {
       type: 'react_error_boundary',
+      error,
       message: error.message,
       errorName: error.name,
       stack: error.stack,
