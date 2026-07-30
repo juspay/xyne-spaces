@@ -53,7 +53,7 @@ FRAMEWORK_CHANGED=$(echo "$CHANGED_FILES" | grep '^packages/framework/' || true)
 # Backend checks (only if backend files changed)
 if [ -n "$BACKEND_CHANGED" ]; then
   echo "🔧 Checking backend (backend files changed)..."
-  cd "$REPO_ROOT/backend"
+  cd "$REPO_ROOT/apps/backend"
 
   echo "Running backend typecheck..."
   pnpm run typecheck || exit 1
@@ -67,7 +67,7 @@ fi
 # Dashboard checks (only if dashboard files changed)
 if [ -n "$DASHBOARD_CHANGED" ]; then
   echo "🎨 Checking dashboard (dashboard files changed)..."
-  cd "$REPO_ROOT/dashboard"
+  cd "$REPO_ROOT/apps/dashboard"
 
   echo "Running dashboard lint (errors only)..."
   pnpm run lint:errors-only || exit 1
@@ -81,7 +81,7 @@ fi
 # Framework checks (only if framework files changed)
 if [ -n "$FRAMEWORK_CHANGED" ]; then
   echo "🧩 Checking framework (framework files changed)..."
-  cd "$REPO_ROOT/framework"
+  cd "$REPO_ROOT/packages/framework"
 
   echo "Running framework lint..."
   pnpm run lint || exit 1
@@ -92,7 +92,7 @@ fi
 # Automation checks (only if xyne-automation files changed)
 if [ -n "$AUTOMATION_CHANGED" ]; then
   echo "🤖 Checking automation (xyne-automation files changed)..."
-  cd "$REPO_ROOT/xyne-automation"
+  cd "$REPO_ROOT/tools/xyne-automation"
 
   echo "Running automation validate..."
   pnpm run validate || exit 1
@@ -103,7 +103,7 @@ fi
 # If no relevant files changed, still run a basic check
 if [ -z "$BACKEND_CHANGED" ] && [ -z "$DASHBOARD_CHANGED" ] && [ -z "$AUTOMATION_CHANGED" ] && [ -z "$FRAMEWORK_CHANGED" ]; then
   echo "ℹ️  No backend or dashboard files changed, running basic dashboard check..."
-  cd "$REPO_ROOT/dashboard"
+  cd "$REPO_ROOT/apps/dashboard"
   pnpm run lint:errors-only || exit 1
 fi
 
