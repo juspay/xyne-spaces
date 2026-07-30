@@ -17,9 +17,9 @@
     "sandbox": "chmod +x scripts/sandbox.sh && ./scripts/sandbox.sh",
     "cleanup": "chmod +x scripts/cleanup-storage.sh && ./scripts/cleanup-storage.sh",
     "yama": "node node_modules/@juspay/yama/dist/cli/v2.cli.js",
-    "test": "./xyne-automation/scripts/run-test.sh",
+    "test": "./tools/xyne-automation/scripts/run-test.sh",
     "test:integrity": "pnpm --filter xyne-automation run test:integrity",
-    "test:push": "./xyne-automation/scripts/push-report-branch.sh",
+    "test:push": "./tools/xyne-automation/scripts/push-report-branch.sh",
     "test:enum": "bash scripts/validate-no-new-enums.sh"
   },
   "devDependencies": {
