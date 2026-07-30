@@ -48,7 +48,7 @@
         "prerelease": true
       }
     ],
-    "repositoryUrl": "ssh://git@github.com/example-org/xyne-spaces.git",
+    "repositoryUrl": "ssh://git@github.com/juspay/xyne-spaces.git",
     "tagFormat": "v${version}",
     "plugins": [
       [
@@ -183,7 +183,7 @@
       "@hono/node-server": "1.19.14",
       "@isaacs/brace-expansion": "5.0.1",
       "@livekit/components-core": "0.12.12",
-      "@livekit/protocol": "1.42.2",
+      "@livekit/protocol": "1.48.0",
       "@modelcontextprotocol/sdk": "1.29.0",
       "@opentelemetry/auto-instrumentations-node": "0.78.0",
       "@opentelemetry/core": "2.8.0",
