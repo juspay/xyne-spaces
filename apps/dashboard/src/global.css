@@ -22,9 +22,6 @@
   [data-theme="classic"] {
     --root-bg: transparent;
     --wallpaper-image: url("/images/wallpaper.png");
-    --wallpaper-overlay: url("/images/wallpaper-texture.png");
-    --wallpaper-overlay-opacity: 0.96;
-    --wallpaper-overlay-blur: 50px;
     --background: 0 0% 100%;
     --foreground: 240 10% 3.9%;
     --card: 0 0% 100%;
@@ -141,18 +138,15 @@
     --claw-ai-solid: #7c3aed;
     --claw-ai-solid-hover: #6d28d9;
 
-    --activity-sidebar-primary: rgba(35, 34, 41, 0.08);
+    --activity-sidebar-primary: hsl(0 0% 100% / 0.5);
     --activity-sidebar-accent: #ffffff;
-    --activity-sidebar-border: rgba(35, 34, 41, 0.1);
+    --activity-sidebar-border: rgba(35 34 41 / 0.16);
   }
 
   /* Classic theme - default theme with current design */
   [data-theme="summer_breeze"] {
     --root-bg: transparent;
     --wallpaper-image: url("/images/wallpaper.png");
-    --wallpaper-overlay: url("/images/wallpaper-texture.png");
-    --wallpaper-overlay-opacity: 0.96;
-    --wallpaper-overlay-blur: 50px;
     --background: 0 0% 100%;
     --foreground: 240 10% 3.9%;
     --card: 0 0% 100%;
@@ -261,22 +255,18 @@
     --claw-ai-solid: #7c3aed;
     --claw-ai-solid-hover: #6d28d9;
 
-    --activity-sidebar-primary: rgba(35, 34, 41, 0.08);
+    --activity-sidebar-primary: hsl(0 0% 100% / 0.5);
     --activity-sidebar-accent: #ffffff;
-    --activity-sidebar-border: rgba(35, 34, 41, 0.1);
+    --activity-sidebar-border: rgba(35 34 41 / 0.15);
   }
 
   /* Midnight theme - dark theme variant */
   [data-theme="midnight"] {
     --root-bg: transparent;
-    --wallpaper-image: url("/images/wallpaper-midnight.jpg");
-    /* Solid dark wash instead of the light texture — #222229 at 80%, no blur. */
-    --wallpaper-overlay: #222229;
-    --wallpaper-overlay-opacity: 0.8;
-    --wallpaper-overlay-blur: 0px;
-    --background: 232 11% 15%; /* #22232A */
+    --wallpaper-image: url("/images/wallpaper-midnight.png");
+    --background: 232 9% 11%; /* #1A1A1F */
     --foreground: 210 8% 93%;
-    --card: 233 8% 19.2%; /* #2D2E35 */
+    --card: 233 11% 15%; /* #22232A */
     --card-foreground: 210 8% 93%;
     --popover: 216 6% 15%;
     --popover-foreground: 210 8% 93%;
@@ -396,7 +386,7 @@
     --claw-ai-solid: #7c3aed;
     --claw-ai-solid-hover: #8b5cf6;
 
-    --activity-sidebar-primary: rgba(255, 255, 255, 0.06);
+    --activity-sidebar-primary: rgba(45, 46, 52, 0.5);
     --activity-sidebar-accent: #2d2e34;
     --activity-sidebar-border: rgba(255, 255, 255, 0.2);
   }
@@ -463,24 +453,11 @@
     filter: brightness(0) saturate(100%);
   }
 
-  /* Wallpaper layers — see components/Wallpaper/Wallpaper.tsx. Both layers read
-     per-theme CSS variables, so adding a theme only means setting the tokens
-     (--wallpaper-image / --wallpaper-overlay / -opacity / -blur) in its block. */
+  /* Wallpaper layer — see components/Wallpaper/Wallpaper.tsx. Reads a per-theme
+     CSS variable, so adding a theme only means setting --wallpaper-image in its
+     block. */
   .app-wallpaper-image {
     background-image: var(--wallpaper-image);
-  }
-
-  /* Overlay wash. `--wallpaper-overlay` may be a texture image (url(...)) OR a
-     solid color — the `background` shorthand accepts both. Size/position come
-     after the shorthand so an image still covers; a color ignores them. */
-  .app-wallpaper-overlay {
-    background: var(--wallpaper-overlay, transparent);
-    background-size: cover;
-    background-position: center;
-    background-repeat: no-repeat;
-    opacity: var(--wallpaper-overlay-opacity, 1);
-    backdrop-filter: blur(var(--wallpaper-overlay-blur, 0px));
-    -webkit-backdrop-filter: blur(var(--wallpaper-overlay-blur, 0px));
   }
 
   [data-theme="midnight"] input[type="date"]::-webkit-calendar-picker-indicator {

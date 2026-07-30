@@ -416,7 +416,7 @@ function createClawOverlay(): BrowserWindow {
     if (!clawWindow || clawWindow.isDestroyed()) return;
     void clawWindow.webContents
       .insertCSS(
-        "html, body, #root, main { background: transparent !important; background-color: transparent !important; } .app-wallpaper-image, .app-wallpaper-overlay, [data-slot='switch-loading-overlay'] { display: none !important; } [data-id='error-fallback'] { background: transparent !important; }",
+        "html, body, #root, main { background: transparent !important; background-color: transparent !important; } .app-wallpaper-image, [data-slot='switch-loading-overlay'] { display: none !important; } [data-id='error-fallback'] { background: transparent !important; }",
       )
       .catch((error) => {
         log.warn("[ClawOverlay] Failed to inject transparency CSS", error);

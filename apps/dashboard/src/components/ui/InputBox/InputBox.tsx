@@ -1369,11 +1369,13 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             this single (left) slot; when both are active they alternate every 2s (see
             the flip effect above). The bar is transparent and each chip carries its own
             bg, so it's invisible when nothing is active. The agent slot stays mounted
-            (display-toggled) so its progress subscription isn't torn down on each flip. */}
-        <div className='absolute top-0 left-0 right-0 -translate-y-full flex items-center px-1.5'>
+            (display-toggled) so its progress subscription isn't torn down on each flip.
+            Composers set --composer-px to their own horizontal padding so the bar bleeds back
+            out to the full container width; unset (0px) it stays flush with the input box. */}
+        <div className='absolute top-0 -translate-y-full flex items-center left-[calc(var(--composer-px,0px)*-1)] right-[calc(var(--composer-px,0px)*-1)]'>
           {hasTypingActivity && (
             <div
-              className='flex items-center gap-1.5 h-5 bg-background w-full'
+              className='flex items-center gap-1.5 h-5 bg-background w-full px-[var(--composer-px)]'
               style={{ display: typingVisible ? 'flex' : 'none' }}
             >
               <div className='flex items-center -space-x-1'>

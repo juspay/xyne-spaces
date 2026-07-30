@@ -7,7 +7,6 @@ html.claw-overlay-active main {
 }
 
 html.claw-overlay-active .app-wallpaper-image,
-html.claw-overlay-active .app-wallpaper-overlay,
 html.claw-overlay-active [data-slot="switch-loading-overlay"] {
   display: none !important;
 }

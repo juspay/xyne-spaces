@@ -230,7 +230,7 @@ export const ActivityItemCard = ({
         'group flex w-full font-normal items-start gap-3 px-3 pt-2.5 pb-2 text-left transition-colors duration-150 h-auto rounded-[14px] border border-transparent',
         activity.isRead ? 'bg-transparent' : 'bg-[var(--activity-sidebar-primary)]',
         'hover:!bg-[var(--activity-sidebar-accent)]',
-        'data-[selected]:!bg-[var(--activity-sidebar-accent)] data-[selected]:border-[var(--activity-sidebar-border)] data-[selected]:shadow-sm',
+        'data-[selected]:!bg-[var(--activity-sidebar-accent)] data-[selected]:border-[var(--activity-sidebar-border)]',
         className,
       )}
       data-activity-id={activity.id}
@@ -276,14 +276,11 @@ export const ActivityItemCard = ({
             )}
           >
             {isMobile ? (
-              <span className={activity.isRead ? '' : 'font-semibold'}>{actorName}</span>
+              <span className='font-semibold'>{actorName}</span>
             ) : (
               <UserHoverWrapper userId={actorId}>
                 <button
-                  className={cn(
-                    'hover:underline flex-shrink-0',
-                    activity.isRead ? '' : 'font-semibold',
-                  )}
+                  className='hover:underline flex-shrink-0 font-semibold'
                   onClick={e => e.stopPropagation()}
                   data-track-category='ACTIVITY'
                   data-track-name='VIEW_USER_PROFILE'
@@ -306,7 +303,7 @@ export const ActivityItemCard = ({
               actorAction !== 'workflow_question' &&
               channelId &&
               (isMobile ? (
-                <span className={cn('ml-1.5', activity.isRead ? '' : 'font-semibold')}>
+                <span className='ml-1.5 font-semibold'>
                   {`#${channel ? channelDisplayName : 'Unknown Channel'}`}
                 </span>
               ) : (
@@ -326,10 +323,7 @@ export const ActivityItemCard = ({
                   <span
                     role='button'
                     tabIndex={0}
-                    className={cn(
-                      'hover:underline cursor-pointer text-left ml-1.5',
-                      activity.isRead ? 'font-normal' : 'font-semibold',
-                    )}
+                    className='hover:underline cursor-pointer text-left ml-1.5 font-semibold'
                     onClick={e => e.stopPropagation()}
                     onKeyDown={e => {
                       if (e.key === 'Enter' || e.key === ' ') {

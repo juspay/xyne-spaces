@@ -169,12 +169,7 @@ export const TOKEN_GROUPS: TokenGroup[] = [
   },
   {
     label: 'Wallpaper',
-    tokens: [
-      '--wallpaper-image',
-      '--wallpaper-overlay',
-      '--wallpaper-overlay-opacity',
-      '--wallpaper-overlay-blur',
-    ],
+    tokens: ['--wallpaper-image'],
   },
   {
     label: 'BlockNote Editor (bn-colors-*)',
