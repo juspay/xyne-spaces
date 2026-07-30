@@ -1985,12 +1985,12 @@ model WorkspaceJoinRequest {
   id               String   @id @default(cuid())
   workspaceId      String
   email            String
-  status           String   @default("PENDING")
+  status           String
   reviewedByUserId String?
   reviewedAt       DateTime?
   reviewNote       String?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  createdAt        DateTime
+  updatedAt        DateTime
 
   @@index([workspaceId, email, updatedAt(sort: Desc)])
   @@index([email, status, updatedAt(sort: Desc)])
