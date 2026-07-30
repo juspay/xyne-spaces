@@ -4,11 +4,12 @@ import { BaseVespaHandler } from '../core/base-handler';
 import type { VespaQueueHandler } from '../core/types';
 import type { QueryContext } from '../../acl/core/types';
 import { ticketSchema } from '@/vespa/src/types';
+import { entityExtractionQueue } from '@/queues/entityExtractionQueue';
 
 type TicketsSchema = Schema['tables']['tickets'];
 /**
  * Vespa handler for the ticket table.
- * 
+ *
  * Queues jobs for ticket indexing in Vespa's ticket schema.
  */
 export class TicketsVespaHandler extends BaseVespaHandler<'tickets'> {
@@ -17,6 +18,9 @@ export class TicketsVespaHandler extends BaseVespaHandler<'tickets'> {
   }
 
   onInsert(args: InsertValue<TicketsSchema>, _tx: Transaction<Schema>): VespaQueueHandler[] {
+    // Enqueue the ticket's thread for entity extraction. This is what covers
+    // mail-only tickets — they have no chat message to fire MessagesVespaHandler.
+    void entityExtractionQueue.enqueueForMessage(args.conversationId);
     return [{
       schema: ticketSchema,
       jobType: 'feed',
@@ -26,6 +30,7 @@ export class TicketsVespaHandler extends BaseVespaHandler<'tickets'> {
   }
 
   onUpdate(args: UpdateValue<TicketsSchema>, _tx: Transaction<Schema>): VespaQueueHandler[] {
+    void entityExtractionQueue.enqueueForMessage(args.conversationId);
     return [{
       schema: ticketSchema,
       jobType: 'feed',
@@ -35,6 +40,7 @@ export class TicketsVespaHandler extends BaseVespaHandler<'tickets'> {
   }
 
   onUpsert(args: UpsertValue<TicketsSchema>, _tx: Transaction<Schema>): VespaQueueHandler[] {
+    void entityExtractionQueue.enqueueForMessage(args.conversationId);
     return [{
       schema: ticketSchema,
       jobType: 'feed',

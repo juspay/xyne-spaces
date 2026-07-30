@@ -145,6 +145,32 @@ get_migration_content_preview() {
     get_migration_content "$migration_file" | head -20 || echo "(unable to read file)"
 }
 
+# Extract names of models/enums annotated with @@schema("non_zero") from a schema file.
+# Definitions in the "non_zero" Postgres schema are intentionally NOT replicated to Zero,
+# so they must be exempt from the Prisma<>Zero sync check.
+# Arguments: $1 = schema_file, $2 = definition_type (model|enum)
+# Returns: list of definition names (one per line)
+get_non_zero_definitions() {
+    local schema_file="$1"
+    local definition_type="$2"
+
+    [ -f "$schema_file" ] || return 0
+
+    awk -v type="$definition_type" '
+        $0 ~ "^"type"[[:space:]]+[A-Za-z0-9_]+" { name=$2; in_block=1 }
+        in_block && /@@schema\("non_zero"\)/ { print name }
+        /^}/ { in_block=0; name="" }
+    ' "$schema_file"
+}
+
+# Check if a name is present in a newline-separated list.
+# Arguments: $1 = name, $2 = list
+in_list() {
+    local needle="$1"
+    local haystack="$2"
+    [ -n "$needle" ] && grep -qxF "$needle" <<< "$haystack"
+}
+
 # Validate that new models/enums added to schema.prisma are also reflected in packages/shared/src/zero/schema.ts
 # This enforces that any Prisma schema change is manually synced to the Zero TS schema
 validate_prisma_zero_sync() {
@@ -165,6 +191,13 @@ validate_prisma_zero_sync() {
 
     log_info "Checking Prisma<>Zero schema sync (schema.prisma → schema.ts)..."
 
+    # Definitions in the "non_zero" Postgres schema are not replicated to Zero and
+    # must be excluded from the sync requirement.
+    local non_zero_models
+    non_zero_models=$(get_non_zero_definitions "$prisma_schema" "model")
+    local non_zero_enums
+    non_zero_enums=$(get_non_zero_definitions "$prisma_schema" "enum")
+
     # Extract newly added Prisma model names from the staged diff
     local new_prisma_models
     new_prisma_models=$(git diff --cached -- "$prisma_schema" 2>/dev/null | \
@@ -183,6 +216,11 @@ validate_prisma_zero_sync() {
     if [ -n "$new_prisma_models" ]; then
         while IFS= read -r model; do
             [ -z "$model" ] && continue
+            # Skip models that live in the "non_zero" schema — they are not synced to Zero.
+            if in_list "$model" "$non_zero_models"; then
+                log_info "  ⏭ Prisma model '$model' is in the non_zero schema — skipping Zero sync check"
+                continue
+            fi
             # Case-insensitive grep to handle both PascalCase and snake_case table names
             if ! grep -qi "table(.*${model}" "$zero_schema"; then
                 log_error "Prisma model '$model' added to schema.prisma but no matching table() found in $zero_schema"
@@ -198,6 +236,11 @@ validate_prisma_zero_sync() {
     if [ -n "$new_prisma_enums" ]; then
         while IFS= read -r enum_name; do
             [ -z "$enum_name" ] && continue
+            # Skip enums that live in the "non_zero" schema — they are not synced to Zero.
+            if in_list "$enum_name" "$non_zero_enums"; then
+                log_info "  ⏭ Prisma enum '$enum_name' is in the non_zero schema — skipping Zero sync check"
+                continue
+            fi
             if ! grep -qi "export enum ${enum_name}" "$zero_schema"; then
                 log_error "Prisma enum '$enum_name' added to schema.prisma but not found in $zero_schema"
                 log_error "  → Add a corresponding enum definition in $zero_schema"

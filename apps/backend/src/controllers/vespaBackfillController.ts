@@ -4,6 +4,7 @@ import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { vespaBackfillQueue } from '@/queues/vespaQueue';
+import { entityExtractionQueue } from '@/queues/entityExtractionQueue';
 import {
   messageSchema,
   channelSchema,
@@ -956,6 +957,161 @@ export class AdminBackfillController {
 
     logger.info(`✓ Transformed and queued ${totalQueued} transcripts for ingestion`);
     return totalQueued;
+  }
+
+  /**
+   * Backfill entity generation for a channel — enqueue each of its threads into
+   * the entity-extraction queue for immediate processing. A thread is a
+   * conversation (conversationId == threadId); we page the channel's threads
+   * that were active in the window and enqueue distinct thread ids.
+   */
+  private static async backfillEntities(
+    channelId: string,
+    cutoffTime?: Date,
+    fromTime?: Date | null,
+  ): Promise<number> {
+    const whereClause: Prisma.ConversationWhereInput = { channelId };
+    if (cutoffTime) {
+      whereClause.lastActivityAt = fromTime
+        ? { gte: fromTime, lte: cutoffTime }
+        : { lte: cutoffTime };
+    }
+
+    const timeRange = cutoffTime
+      ? `(active ${fromTime ? `between ${fromTime.toISOString()} and ` : 'before '}${cutoffTime.toISOString()})`
+      : '(all threads)';
+    logger.info(`🔄 Backfilling entity threads for channel ${channelId} ${timeRange}...`);
+
+    let skip = 0;
+    let totalQueued = 0;
+
+    while (true) {
+      const threads = await db.conversation.findMany({
+        where: whereClause,
+        take: AdminBackfillController.BATCH_SIZE,
+        skip,
+        // conversationId tiebreaker keeps skip/take pagination stable when
+        // lastActivityAt ties (rows would otherwise repeat / get skipped).
+        orderBy: [{ lastActivityAt: 'asc' }, { conversationId: 'asc' }],
+        select: { conversationId: true },
+      });
+
+      if (threads.length === 0) break;
+
+      for (const thread of threads) {
+        try {
+          // Immediate enqueue (no nightly delay). jobId == threadId dedupes.
+          await entityExtractionQueue.enqueueThreadNow(thread.conversationId);
+          totalQueued++;
+        } catch (error) {
+          logger.error(`[Backfill] Failed to enqueue thread ${thread.conversationId}:`, error);
+        }
+      }
+
+      skip += AdminBackfillController.BATCH_SIZE;
+      logger.info(`  Queued ${totalQueued} entity threads...`);
+    }
+
+    logger.info(`✓ Queued ${totalQueued} entity threads for channel ${channelId}`);
+    return totalQueued;
+  }
+
+  /**
+   * Trigger entity-generation backfill for one channel. Enqueues the channel's
+   * threads (optionally within a fromTimestamp/toTimestamp window) into the
+   * entity-extraction queue, which the worker processes per thread. Returns 202
+   * and runs in the background.
+   *
+   * Example: POST /api/admin/entity-backfill?channelId=abc&fromTimestamp=...&toTimestamp=...
+   */
+  public static async triggerEntityBackfill(req: Request, res: Response): Promise<void> {
+    try {
+      const channelId = (req.query.channelId as string | undefined)?.trim();
+      if (!channelId) {
+        res.status(400).json({
+          success: false,
+          error: 'channelId is required',
+          timestamp: new Date().toISOString(),
+        } as ApiResponse);
+        return;
+      }
+
+      const fromTimestampParam = req.query.fromTimestamp as string | undefined;
+      const toTimestampParam = req.query.toTimestamp as string | undefined;
+
+      let fromTime: Date | null = null;
+      if (fromTimestampParam) {
+        fromTime = new Date(fromTimestampParam);
+        if (isNaN(fromTime.getTime())) {
+          res.status(400).json({
+            success: false,
+            error: 'Invalid fromTimestamp parameter',
+            message: 'fromTimestamp must be a valid ISO 8601 date string',
+            timestamp: new Date().toISOString(),
+          } as ApiResponse);
+          return;
+        }
+      }
+
+      let toTime: Date | null = null;
+      if (toTimestampParam) {
+        toTime = new Date(toTimestampParam);
+        if (isNaN(toTime.getTime())) {
+          res.status(400).json({
+            success: false,
+            error: 'Invalid toTimestamp parameter',
+            message: 'toTimestamp must be a valid ISO 8601 date string',
+            timestamp: new Date().toISOString(),
+          } as ApiResponse);
+          return;
+        }
+      }
+
+      if (fromTime && toTime && toTime.getTime() <= fromTime.getTime()) {
+        res.status(400).json({
+          success: false,
+          error: 'Invalid time range',
+          message: 'toTimestamp must be after fromTimestamp',
+          timestamp: new Date().toISOString(),
+        } as ApiResponse);
+        return;
+      }
+
+      // Explicit toTimestamp wins; else default the upper bound to now when a
+      // fromTime was given; else no bound (all threads).
+      const cutoffTime = toTime ?? (fromTime ? new Date() : undefined);
+      const backfillJobId = `entity-backfill-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
+
+      logger.info(`🚀 Entity backfill triggered for channel ${channelId} (job ${backfillJobId})`);
+
+      // Return immediately; the enqueue loop runs in the background.
+      res.status(202).json({
+        success: true,
+        data: {
+          message: 'Entity backfill started in background',
+          backfillJobId,
+          channelId,
+          fromTimestamp: fromTime ? fromTime.toISOString() : null,
+          toTimestamp: cutoffTime ? cutoffTime.toISOString() : null,
+        },
+        timestamp: new Date().toISOString(),
+      } as ApiResponse);
+
+      AdminBackfillController.backfillEntities(channelId, cutoffTime, fromTime).catch((error) => {
+        logger.error(
+          `❌ Entity backfill failed for channel ${channelId} (job ${backfillJobId}):`,
+          error,
+        );
+      });
+    } catch (error) {
+      logger.error('❌ Entity backfill trigger failed:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to trigger entity backfill',
+        message: error instanceof Error ? error.message : 'Unknown error',
+        timestamp: new Date().toISOString(),
+      } as ApiResponse);
+    }
   }
 
   /**

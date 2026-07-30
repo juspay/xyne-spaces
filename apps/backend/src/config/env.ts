@@ -162,6 +162,21 @@ const envSchema = Joi.object({
   // LiteLLM Configuration for AI Agents
   LITELLM_BASE_URL: Joi.string().default(''),
   LITELLM_API_KEY: Joi.string().allow('').default(''),
+  ENTITY_EXTRACTION_MODEL: Joi.string().default('glm-latest'),
+  ENTITY_EXTRACTION_CONCURRENCY: Joi.number().default(2),
+  // Org-level framing prepended to the mention-extraction prompt, so the model
+  // knows whose data it is reading. Fixes identity-relative errors like listing
+  // the org itself as an external ORGANISATION, and sharpens ORG vs MERCHANT.
+  ENTITY_EXTRACTION_ORG_CONTEXT: Joi.string()
+    .allow('')
+    .default(
+      'The data belongs to Juspay, a payments orchestration company. Juspay routes and ' +
+        'processes online transactions for its merchant clients across many payment gateways, ' +
+        'payment methods, card networks and banks. MERCHANTS are Juspay customers who use it to ' +
+        'accept payments. Payment gateways/PSPs, card networks, banks and regulators such as NPCI ' +
+        'are external ecosystem entities. Juspay itself is the operator, NOT an external ' +
+        'organisation — never classify Juspay (or its own products/teams) as ORGANISATION.',
+    ),
   ASK_AI_LITELLM_API_KEY: Joi.string().allow('').default(''),
   // Document outline generation (BaseStrategy.buildDocumentOutline) — an extra LLM
   // call per ingested document. Disable independently of the shared LiteLLM config.
@@ -635,6 +650,14 @@ export const config = {
   ysweet: {
     url: envVars.Y_SWEET_URL,
   },
+  entityExtraction: {
+    model: envVars.ENTITY_EXTRACTION_MODEL,
+    // A single extraction call takes 20-75s on this endpoint. Raising this
+    // makes calls contend and time out rather than finish faster.
+    concurrency: envVars.ENTITY_EXTRACTION_CONCURRENCY,
+    orgContext: envVars.ENTITY_EXTRACTION_ORG_CONTEXT,
+  },
+
   litellm: {
     baseUrl: envVars.LITELLM_BASE_URL,
     apiKey: envVars.LITELLM_API_KEY,
