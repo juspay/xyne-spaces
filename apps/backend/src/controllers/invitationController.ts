@@ -274,11 +274,12 @@ export class InvitationController {
       }
 
       // Invitation is valid
+      // Note: invitee email is intentionally omitted — this endpoint is unauthenticated,
+      // and the actual email match is enforced server-side at accept time.
       res.status(200).json({
         valid: true,
         invitation: {
           id: invitation.id,
-          email: invitation.email,
           role: invitation.role,
           workspaceName: invitation.workspace?.name,
           organizationName: invitation.organization?.name,
@@ -333,16 +334,21 @@ export class InvitationController {
         };
         if (!decoded.email) throw new Error('Invalid JWT payload');
 
-        // If the JWT contains a jwtId, verify it exists in Redis (email-flow revocable token)
-        if (decoded.jwtId) {
-          const jwtKey = `pendingauth:jwtid:${decoded.jwtId}`;
-          const jwtValue = await redisService.get(jwtKey);
-          if (!jwtValue) {
-            res.status(401).json({ error: 'Authentication session expired. Please login again.' });
-            return;
-          }
-          pendingAuthJwtId = decoded.jwtId;
+        // Every pending-auth token must carry a single-use jwtId (registered in Redis
+        // at mint time) — tokens without one predate that mechanism and are rejected
+        // outright rather than accepted without replay protection.
+        if (!decoded.jwtId) {
+          res.status(401).json({ error: 'Authentication session expired. Please login again.' });
+          return;
         }
+
+        const jwtKey = `pendingauth:jwtid:${decoded.jwtId}`;
+        const jwtValue = await redisService.get(jwtKey);
+        if (!jwtValue) {
+          res.status(401).json({ error: 'Authentication session expired. Please login again.' });
+          return;
+        }
+        pendingAuthJwtId = decoded.jwtId;
 
         oauthUser = {
           email: decoded.email,

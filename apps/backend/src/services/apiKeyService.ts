@@ -230,8 +230,10 @@ export class ApiKeyService {
       // Convert to scopes format for compatibility
       const scopes = this.permissionsToScopes(allPermissions);
 
-      // Determine user role (admin if has any ADMIN access)
-      const isAdmin = allPermissions.some(p => p.access === AccessType.ADMIN);
+      // Determine user role (admin only for the platform-wide 'system' resource grant —
+      // i.e. the admin:system scope. Narrower ADMIN grants like admin:users/admin:api_keys
+      // must not imply blanket admin access; they're enforced via `scopes` instead).
+      const isAdmin = allPermissions.some(p => p.access === AccessType.ADMIN && p.resource === 'system');
 
       // Fetch org member for role
       const orgMember = await this.db.orgMember.findUnique({

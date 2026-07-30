@@ -777,6 +777,31 @@ export class AuthMiddleware {
   };
 
   /**
+   * Middleware to require organization owner access (not just admin).
+   * Stricter than requireAdminOrOwner: only the OWNER of the caller's own
+   * organization may proceed.
+   */
+  requireOrgOwner = (req: Request, res: Response, next: NextFunction): void => {
+    if (!req.user) {
+      res.status(401).json({
+        error: 'Authentication required',
+        message: 'Please authenticate to access this resource',
+      });
+      return;
+    }
+
+    if (req.user.orgRole !== OrgRole.OWNER) {
+      res.status(403).json({
+        error: 'Organization owner access required',
+        message: 'This endpoint requires organization owner privileges',
+      });
+      return;
+    }
+
+    next();
+  };
+
+  /**
    * Middleware for Zero endpoints - NO auto-refresh
    * Returns 401 if token is missing or expired, forcing frontend to refresh explicitly
    */

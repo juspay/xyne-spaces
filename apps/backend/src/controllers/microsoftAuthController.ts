@@ -12,6 +12,7 @@ import { jwtService } from '../services/jwtService';
 import { config } from '@/config/env';
 import jwt from 'jsonwebtoken';
 import { getFrontendUrl, resolveConfiguredOAuthRedirectUrl } from '@/utils/publicUrls';
+import { registerPendingAuthJwtId } from '@/services/pendingAuthService';
 import { jwtVerify, createRemoteJWKSet } from 'jose';
 import { WorkspaceType } from '@xyne/shared';
 import {
@@ -512,6 +513,7 @@ export class MicrosoftAuthController {
             accessToken,
             accessTokenExpiry,
           );
+          const domainConflictPendingAuthJwtId = await registerPendingAuthJwtId(microsoftUserData.email);
           res.cookie('google_access_token', jwt.sign({
             providerUserId: microsoftUserData.providerUserId,
             email: microsoftUserData.email,
@@ -643,6 +645,12 @@ export class MicrosoftAuthController {
           accessToken,
           accessTokenExpiry,
         );
+        // Set pending-auth cookie. This must be a pending-auth JWT (not the
+        // session customToken): loginWorkspace/createOrg read it via
+        // parsePendingAuthCookie, which needs providerUserId AND provider — the
+        // session token has neither, so it would mislabel the user as GOOGLE and
+        // drop the refresh token. Mirrors Google's web callback + MS electron.
+        const electronPendingAuthJwtId = await registerPendingAuthJwtId(microsoftUserData.email);
         res.cookie('google_access_token', jwt.sign({
           providerUserId: microsoftUserData.providerUserId,
           email: microsoftUserData.email,
@@ -650,6 +658,7 @@ export class MicrosoftAuthController {
           picture: microsoftUserData.picture,
           provider: AuthProvider.MICROSOFT,
           tokenKey,
+          jwtId: electronPendingAuthJwtId,
         }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
           ...cookieOptions,
           maxAge: 10 * 60 * 1000, // 10 minutes pending auth window
@@ -901,6 +910,7 @@ export class MicrosoftAuthController {
           accessToken,
           accessTokenExpiry,
         );
+        const noWorkspacePendingAuthJwtId = await registerPendingAuthJwtId(email);
         res.cookie('google_access_token', jwt.sign({
           providerUserId: profile.id,
           email,
@@ -908,6 +918,7 @@ export class MicrosoftAuthController {
           picture: undefined,
           provider: 'microsoft',
           tokenKey,
+          jwtId: noWorkspacePendingAuthJwtId,
         }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
           httpOnly: true,
           secure: isProduction,
@@ -942,6 +953,7 @@ export class MicrosoftAuthController {
           accessToken,
           accessTokenExpiry,
         );
+        const invitationPendingAuthJwtId = await registerPendingAuthJwtId(email);
         res.cookie('google_access_token', jwt.sign({
           providerUserId: profile.id,
           email,
@@ -949,6 +961,7 @@ export class MicrosoftAuthController {
           picture: undefined,
           provider: 'microsoft',
           tokenKey,
+          jwtId: invitationPendingAuthJwtId,
         }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
           httpOnly: true,
           secure: isProduction,
@@ -1072,6 +1085,7 @@ export class MicrosoftAuthController {
           accessToken,
           accessTokenExpiry,
         );
+        const workspaceSelectionPendingAuthJwtId = await registerPendingAuthJwtId(email);
         res.cookie('google_access_token', jwt.sign({
           providerUserId: profile.id,
           email,
@@ -1079,6 +1093,7 @@ export class MicrosoftAuthController {
           picture: undefined,
           provider: 'microsoft',
           tokenKey,
+          jwtId: workspaceSelectionPendingAuthJwtId,
         }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
           httpOnly: true,
           secure: isProduction,
@@ -1155,6 +1170,7 @@ export class MicrosoftAuthController {
         accessToken,
         accessTokenExpiry,
       );
+      const workspaceOrInvitePendingAuthJwtId = await registerPendingAuthJwtId(email);
       res.cookie('google_access_token', jwt.sign({
         providerUserId: profile.id,
         email,
@@ -1162,6 +1178,7 @@ export class MicrosoftAuthController {
         picture: undefined,
         provider: 'microsoft',
         tokenKey,
+        jwtId: workspaceOrInvitePendingAuthJwtId,
       }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
         httpOnly: true,
         secure: isProduction,
@@ -1432,6 +1449,7 @@ export class MicrosoftAuthController {
         accessToken,
         mobileAccessTokenExpiry,
       );
+      const mobileMsPendingAuthJwtId = await registerPendingAuthJwtId(email);
       res.cookie('google_access_token', jwt.sign({
         providerUserId: profile.id,
         email,
@@ -1439,6 +1457,7 @@ export class MicrosoftAuthController {
         picture: undefined,
         provider: 'microsoft',
         tokenKey,
+        jwtId: mobileMsPendingAuthJwtId,
       }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
         ...cookieOptions,
         maxAge: 10 * 60 * 1000, // 10 minutes pending auth window
