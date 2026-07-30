@@ -53,7 +53,7 @@ const getNextClonedBoardName = (
 };
 
 const ProjectDetailScreen = (): ReactElement => {
-  const { projectId } = useParams<{ projectId: string }>();
+  const { workspaceId, projectId } = useParams<{ workspaceId: string; projectId: string }>();
   const navigate = useNavigate();
   const location = useLocation();
   const zero = useZero();
@@ -321,6 +321,13 @@ const ProjectDetailScreen = (): ReactElement => {
                   boards={boards}
                   onEdit={handleEditBoard}
                   applicationBoardIds={applicationBoardIds}
+                  applicationByBoardId={applicationByBoardId}
+                  {...(workspaceId && projectId
+                    ? {
+                        onBoardClick: (board: BoardWithStages) =>
+                          void navigate(`/${workspaceId}/projects/${projectId}/${board.id}`),
+                      }
+                    : {})}
                 />
               </Tabs.Content>
 

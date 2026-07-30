@@ -3674,6 +3674,23 @@ dmChannelsLatestMessagesPaginated: defineQuery(
         .one();
     }
   ),
+  // Plural variant: fetch the form mappings for several contexts at once (e.g.
+  // the distinct boards a release's dev tickets span). Returns an array so
+  // callers can union the fields across boards.
+  getFormMappingsByContextIds: defineQuery(
+    z.object({
+      contextIds: z.array(z.string()),
+      contextType: z.nativeEnum(FormContextType),
+      entityType: z.nativeEnum(FormEntityType),
+    }),
+    ({ args: { contextIds, contextType, entityType } }) => {
+      return zql.forms_context_mapping
+        .where('contextId', 'IN', contextIds)
+        .where('contextType', contextType)
+        .where('entityType', entityType)
+        .related('formFields', q => q.related('globalField'));
+    }
+  ),
     // Query to get all form entity values for tickets (cached for reuse across all boards)
   getAllFormEntityValues: defineQuery(() => {
     return zql.form_entity_values.where('entityType', FormEntityType.TICKET).related('formField').related('globalField');
@@ -3774,9 +3791,12 @@ dmChannelsLatestMessagesPaginated: defineQuery(
       let query = zql.application_release_tickets
         .where('releaseId', releaseId)
         .related('devTicket', q =>
-          q.one().related('pullRequests', pullRequests =>
-            pullRequests.orderBy('date', 'desc')
-          )
+          q
+            .one()
+            .related('pullRequests', pullRequests => pullRequests.orderBy('date', 'desc'))
+            .related('workflows')
+            .related('tags')
+            .related('formEntityValues')
         )
         .orderBy('createdAt', 'desc')
         .orderBy('id', 'desc');
@@ -3797,6 +3817,22 @@ dmChannelsLatestMessagesPaginated: defineQuery(
         .where('releaseId', releaseId)
         .related('application')
         .orderBy('createdAt', 'desc');
+    },
+  ),
+
+  // Audit-log feed for a release ticket, powering the Timeline tab on the
+  // Release Detail screen. Newest-first, with id as tiebreaker for stable order.
+  // NOTE: this MUST also exist in shared/src/zero/queries.ts — the dashboard
+  // imports from shared, the zero-cache forwards queries to this module.
+  // Bounded: the audit log grows on every re-run. Keep in sync with the shared copy.
+  releaseEventsByReleaseId: defineQuery(
+    z.object({ releaseId: z.string().min(1), limit: z.number().int().positive().max(500).optional() }),
+    ({ args: { releaseId, limit } }) => {
+      return zql.release_events
+        .where('releaseId', releaseId)
+        .orderBy('createdAt', 'desc')
+        .orderBy('id', 'desc')
+        .limit(limit ?? 200);
     },
   ),
 

@@ -2620,6 +2620,7 @@ export const applicationReleaseTicketTable = table('application_release_tickets'
     testedBy: string().optional(),
     testedAt: number().optional(),
     failureReason: string().optional(),
+    isHotfix: boolean().optional(), // release-scoped: dev ticket entered as a hotfix
     createdAt: number(),
     updatedAt: number().optional(), // nullable in DB (no default; set app-side)
   })
@@ -5437,8 +5438,8 @@ export type EmailChannelPreference = Row<typeof schema.tables.email_channel_pref
 export type ClassificationMapping = Row<typeof schema.tables.classification_mappings>;
 export type Form = Row<typeof schema.tables.forms>;
 export type FormContextMapping = Row<typeof schema.tables.forms_context_mapping>;
-export type FormFields = Row<typeof schema.tables.form_fields>;
 export type GlobalField = Row<typeof schema.tables.global_fields>;
+export type FormFields = Row<typeof schema.tables.form_fields>;
 export type FormEntityValues = Row<typeof schema.tables.form_entity_values>;
 export type StageApprovers = Row<typeof schema.tables.stage_approvers>;
 export type TicketStageRequest = Row<typeof schema.tables.ticket_stage_requests>;

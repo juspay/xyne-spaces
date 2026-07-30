@@ -52,6 +52,7 @@ export class ApplicationRepository {
     applicationReleaseId: string;
     releaseId: string;
     devTicketId: string;
+    isHotfix?: boolean;
   }>): Promise<{ count: number }> {
     if (records.length === 0) return { count: 0 };
 
@@ -63,6 +64,7 @@ export class ApplicationRepository {
       applicationReleaseId: r.applicationReleaseId,
       releaseId: r.releaseId,
       ticketId: r.devTicketId,
+      isHotfix: r.isHotfix ?? false,
       workspaceId: artWorkspaceId,
     }));
 
@@ -70,8 +72,22 @@ export class ApplicationRepository {
       data,
       skipDuplicates: true,
     });
+
+    // skipDuplicates leaves existing rows untouched, so a dev ticket that first
+    // appeared in a MAIN run (isHotfix=false) and is now confirmed a hotfix needs
+    // an explicit flip. Only ever set true — a later main re-run must not unflag.
+    const hotfixPairs = records
+      .filter(r => r.isHotfix)
+      .map(r => ({ applicationReleaseId: r.applicationReleaseId, ticketId: r.devTicketId }));
+    if (hotfixPairs.length > 0) {
+      await prisma.applicationReleaseTicket.updateMany({
+        where: { OR: hotfixPairs },
+        data: { isHotfix: true },
+      });
+    }
+
     logger.info(
-      `Inserted ${result.count}/${data.length} ART row(s) for releaseId=${data[0]?.releaseId ?? 'unknown'}`,
+      `Inserted ${result.count}/${data.length} ART row(s) for releaseId=${data[0]?.releaseId ?? 'unknown'} (${hotfixPairs.length} hotfix)`,
     );
     return result;
   }
@@ -98,9 +114,9 @@ export class ApplicationRepository {
    * Returns a Map keyed by applicationId so callers don't have to maintain index alignment
    * with the input list (apps may be skipped if they have no boardId or transaction fails).
    *
-   * On retry, this is called again with the same parentTicketId; new SubTickets/Tickets
-   * are created for the retry's deploy event. Old ones remain as deploy-event history.
-   * ART rows for the new deploy event will be written under the new SubTicket id.
+   * Idempotent: looks up existing SubTickets for `parentTicketId` first and reuses them.
+   * Re-running commit analysis on the same release thus reuses the original SubTickets and
+   * keeps QA assignment / test state intact, instead of producing parallel duplicates.
    */
   async createApplicationSubTickets(opts: {
     parentTicketId: string;
@@ -124,14 +140,34 @@ export class ApplicationRepository {
       prLinksByApplication,
       isHotFix,
     } = opts;
-    logger.info(`Creating sub-tickets for ${affectedApplications.length} affected applications`);
+
+    // ── Idempotency guard ─────────────────────────────────────────────────────
+    // Re-running commit analysis must NOT keep creating new SubTickets — each
+    // new SubTicket spawned a fresh applicationReleaseId, which bypassed the
+    // (applicationReleaseId, ticketId) unique constraint on ART rows and led
+    // to 3× duplicated Dev Tickets / Envs / Migrations after 3 re-runs.
+    // Look up existing per-app SubTickets for this release and reuse them.
+    const result = await this.findExistingApplicationSubTickets(
+      parentTicketId,
+      affectedApplications,
+    );
+    const missingApplications = affectedApplications.filter(app => !result.has(app.id));
+
+    if (missingApplications.length === 0) {
+      logger.info(
+        `[ApplicationRepository] SubTickets already exist for all ${affectedApplications.length} apps on release=${parentTicketId} — skipping create`,
+      );
+      return result;
+    }
+
+    logger.info(
+      `[ApplicationRepository] Creating sub-tickets for ${missingApplications.length} of ${affectedApplications.length} apps (${affectedApplications.length - missingApplications.length} already existed)`,
+    );
 
     // Project workspace doesn't change per-app; resolve once outside the loop.
     const ticketWorkspaceId = await resolveWorkspaceIdFromModel(prisma, 'project', { id: projectId });
 
-    const result = new Map<string, { subTicketId: string; mappedTicketId: string; xyneId: string }>();
-
-    for (const application of affectedApplications) {
+    for (const application of missingApplications) {
       if (!application.boardId) {
         logger.warn(`Application ${application.name} has no boardId, skipping ticket creation`);
         continue;
@@ -230,6 +266,40 @@ export class ApplicationRepository {
       }
     }
 
+    return result;
+  }
+
+  /**
+   * Look up existing SubTickets for a release ticket, keyed by applicationId.
+   * Each Application has a unique `boardId` — we match the SubTicket's mapped
+   * dev ticket boardId back to that to identify which app a SubTicket belongs to.
+   */
+  private async findExistingApplicationSubTickets(
+    releaseTicketId: string,
+    affectedApplications: Array<{ id: string; boardId: string | null }>,
+  ): Promise<Map<string, { subTicketId: string; mappedTicketId: string; xyneId: string }>> {
+    const appByBoardId = new Map(
+      affectedApplications.filter(app => !!app.boardId).map(app => [app.boardId!, app]),
+    );
+    const result = new Map<string, { subTicketId: string; mappedTicketId: string; xyneId: string }>();
+    if (appByBoardId.size === 0) return result;
+
+    const mappings = await prisma.ticketSubTicketMapping.findMany({
+      where: { ticketId: releaseTicketId },
+      include: { subTicket: { include: { mappedTicket: true } } },
+    });
+
+    for (const mapping of mappings) {
+      const mapped = mapping.subTicket.mappedTicket;
+      if (!mapped) continue;
+      const app = appByBoardId.get(mapped.boardId);
+      if (!app || result.has(app.id)) continue;
+      result.set(app.id, {
+        subTicketId: mapping.subTicket.id,
+        mappedTicketId: mapped.id,
+        xyneId: mapped.xyneId,
+      });
+    }
     return result;
   }
 }

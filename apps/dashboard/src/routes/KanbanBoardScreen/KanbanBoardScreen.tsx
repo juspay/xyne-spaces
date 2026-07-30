@@ -52,7 +52,12 @@ import type { TicketFilters } from '../../components/Tickets/TicketFilters/types
 import { KanbanColumns } from '../../components/Tickets/KanbanColumns/KanbanColumns';
 import { ViewBoardPicker } from '../../components/Project/ViewBoardPicker/ViewBoardPicker';
 import { useDragAndDrop, type StageTransitionInfo } from '../../hooks/useDragAndDrop';
-import { useAllChannels, useChannel, useGetChannelUserStatus } from '../../hooks/useChannels';
+import {
+  useAllChannels,
+  useChannel,
+  useChannelsByProjectId,
+  useGetChannelUserStatus,
+} from '../../hooks/useChannels';
 import { getUserDisplayName } from '../../utils/userDisplayName';
 import { queries } from '../../zero/queries';
 import { mutators } from '../../zero/mutators';
@@ -308,7 +313,14 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const [kanbanTicketsByColumn, setKanbanTicketsByColumn] = useState<Record<string, Ticket[]>>({});
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [isCustomizeOpen, setIsCustomizeOpen] = useState(false);
-  const channel = useChannel(channelId || '');
+  // When mounted from the project route (AppRoot.tsx → :projectId / :projectId/:boardId),
+  // no channelId prop is passed. The Create Ticket button at the bottom of this file
+  // gates on `channel`, so without a fallback the button stays hidden on that route.
+  // Fall back to the first non-archived channel of the project so the modal has a
+  // channel to write into.
+  const projectChannels = useChannelsByProjectId(channelId ? undefined : projectIdParam);
+  const fallbackChannelId = projectChannels.find(c => !c.isArchived)?.id ?? '';
+  const channel = useChannel(channelId || fallbackChannelId);
   const isEmailChannel = channel?.type === ChannelType.EMAIL;
 
   // Aggregate views (My Tickets, saved views) mix tickets from many channels,

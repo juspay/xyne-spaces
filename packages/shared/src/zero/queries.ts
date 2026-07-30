@@ -3320,6 +3320,23 @@ export const queries = defineQueries({
         .one();
     },
   ),
+  // Plural variant: fetch the form mappings for several contexts at once (e.g.
+  // the distinct boards a release's dev tickets span). Returns an array so
+  // callers can union the fields across boards.
+  getFormMappingsByContextIds: defineQuery(
+    z.object({
+      contextIds: z.array(z.string()),
+      contextType: z.nativeEnum(FormContextType),
+      entityType: z.nativeEnum(FormEntityType),
+    }),
+    ({ args: { contextIds, contextType, entityType } }) => {
+      return zql.forms_context_mapping
+        .where('contextId', 'IN', contextIds)
+        .where('contextType', contextType)
+        .where('entityType', entityType)
+        .related('formFields', q => q.related('globalField'));
+    },
+  ),
 
   // Dashboard queries
   getAllDashboards: defineQuery(() => {
@@ -3406,9 +3423,12 @@ export const queries = defineQueries({
       let query = zql.application_release_tickets
         .where('releaseId', releaseId)
         .related('devTicket', q =>
-          q.one().related('pullRequests', pullRequests =>
-            pullRequests.orderBy('date', 'desc'),
-          ),
+          q
+            .one()
+            .related('pullRequests', pullRequests => pullRequests.orderBy('date', 'desc'))
+            .related('workflows')
+            .related('tags')
+            .related('formEntityValues'),
         )
         .orderBy('createdAt', 'desc')
         .orderBy('id', 'desc');
@@ -3418,6 +3438,22 @@ export const queries = defineQueries({
       }
 
       return limit !== undefined ? query.limit(limit) : query;
+    },
+  ),
+
+  // Audit log of everything that happened on a release ticket — commit analysis
+  // runs, SubTicket provisioning, env/migration captures, ART-write failures,
+  // canvas publishes. Powers the Timeline tab on the Release Detail screen.
+  // Ordered newest-first so the most recent event is at the top of the feed.
+  // Bounded: the audit log grows on every re-run. Keep in sync with the backend copy.
+  releaseEventsByReleaseId: defineQuery(
+    z.object({ releaseId: z.string().min(1), limit: z.number().int().positive().max(500).optional() }),
+    ({ args: { releaseId, limit } }) => {
+      return zql.release_events
+        .where('releaseId', releaseId)
+        .orderBy('createdAt', 'desc')
+        .orderBy('id', 'desc')
+        .limit(limit ?? 200);
     },
   ),
 
