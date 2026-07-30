@@ -106,6 +106,7 @@ import { buildMemoryWriteTool } from "../memory-write.js";
 import { buildMemoryFileTools } from "../memory-file-tools.js";
 import { buildTwinDeliverTool, buildTwinDeliverMandate, type TwinDeliverRef } from "../twin-deliver.js";
 import { buildProposePlanTool, PROPOSE_PLAN_TOOL_NAME, type ProposePlanRef } from "../propose-plan.js";
+import { buildEmitBriefTool, EMIT_BRIEF_TOOL_NAME, type EmitBriefRef } from "../daily-brief.js";
 import {
   buildSuggestGoalTool,
   type PendingGoalSuggestion,
@@ -491,11 +492,13 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
      *  raw sender id. Set by claw-auth webhook.ts on USER_MENTIONED dispatches. */
     senderName?: string;
     channelName?: string;
-    /** Plan/auto mode gate (agent.config.planMode). 'plan' ⇒ read-only palette +
-     *  terminal propose-plan tool; the agent proposes a plan and STOPS. 'auto'
-     *  (or absent) ⇒ today's behavior, unchanged. Set by claw-auth ONLY for
-     *  non-twin thread mentions when planMode is on. */
-    mode?: "plan" | "auto";
+    /** Pipeline mode gate. 'plan' (agent.config.planMode) ⇒ read-only palette +
+     *  terminal propose-plan tool; the agent proposes a plan and STOPS.
+     *  'daily_brief' (agent.config.dailyBriefMode) ⇒ read-only palette + subagents
+     *  + terminal emit_brief tool; the agent gathers, emits the structured brief,
+     *  and STOPS. 'auto' (or absent) ⇒ today's behavior, unchanged. Set by
+     *  claw-auth, trust-gated on the matching agent config flag. */
+    mode?: "plan" | "auto" | "daily_brief";
     /** True when this run is Turn 2 (auto) dispatched right after a plan was
      *  approved (or a trivial plan auto-continued). Used only to emit a
      *  mode_switch debug event; behavior is identical to any other auto run. */
@@ -1316,7 +1319,7 @@ async function processTask(
   twinDestinations?: import("xyne-claw-shared").TwinDestinationCandidate[],
   senderName?: string,
   channelName?: string,
-  mode?: "plan" | "auto",
+  mode?: "plan" | "auto" | "daily_brief",
   planContinuation?: boolean,
   shouldGenerateFollowUpSuggestions?: boolean,
   lateFollowUpCallbackUrl?: string,
@@ -1449,6 +1452,10 @@ async function processTask(
   // — never the success path — and the plan is read from ref.value there and
   // shipped as `pendingPlan` on the callback.
   const proposePlanRef: ProposePlanRef = {};
+  // Hoisted for the same reason: emit_brief (daily-brief mode's terminal tool)
+  // fires abortRun, so the brief is recovered from ref.value in the catch block
+  // and shipped as `dailyBrief` on the callback.
+  const emitBriefRef: EmitBriefRef = {};
   let callbackProvider = provider ?? "spaces";
   let callbackModel = LITELLM.model;
   const followUpsEnabledByFlag = shouldGenerateFollowUpSuggestions === true;
@@ -2453,11 +2460,19 @@ async function processTask(
     // is 'auto'/undefined this is false and every branch below is the existing
     // path, so auto-mode behavior is unchanged (INVARIANT A).
     const isPlanMode = mode === "plan" && !isTwinMentionFlow;
+    // Daily brief (agent.config.dailyBriefMode → dispatched with mode='daily_brief'):
+    // the agent gets the FULL read-only palette + subagents + the terminal
+    // emit_brief tool, gathers the user's tickets/activity/calendar, emits the
+    // structured brief, and STOPS. Like plan mode, the palette + primer are
+    // server-owned here and cannot be changed from the dashboard. Excluded from the
+    // twin flow (belt-and-suspenders; claw-auth never sets it for USER_MENTIONED).
+    const isDailyBrief = mode === "daily_brief" && !isTwinMentionFlow;
     const planToolsDefaultOn =
       (!!channelId || (progressUrl && typeof progressUrl !== "string")) &&
       !isScheduledOrAutomationRun(eventType, conversationId) &&
       !isTwinMentionFlow &&
-      !isPlanMode;
+      !isPlanMode &&
+      !isDailyBrief;
     const planTools = remainingCustomTools.filter((t) => isPlanToolSlug(t.name));
     allTools = allTools.filter((t) => !isPlanToolSlug(t.name));
     if (planToolsDefaultOn) allTools.push(...planTools);
@@ -2468,6 +2483,14 @@ async function processTask(
     if (isPlanMode) {
       allTools.push(buildProposePlanTool(proposePlanRef, abortRun));
       log("Plan mode — injected terminal propose-plan tool (todo-write/todo-read off)");
+    }
+    // Daily brief: inject the terminal emit_brief tool — the ONLY exit in
+    // daily-brief mode. It captures the structured brief into emitBriefRef and
+    // fires abortRun to end the turn (recovered in the catch block, shipped as
+    // `dailyBrief`). The read-only strip below whitelists it like propose-plan.
+    if (isDailyBrief) {
+      allTools.push(buildEmitBriefTool(emitBriefRef, abortRun));
+      log("Daily brief mode — injected terminal emit_brief tool");
     }
 
     // Inject copilot respond-to-user tool if provider is copilot.
@@ -2481,7 +2504,7 @@ async function processTask(
     // is mutually exclusive with the other terminal-delivery channels. Gating at
     // the definition keeps tools, prompt notes, and callbacks all consistent.
     // When auto (isPlanMode false) this is a no-op — behavior is unchanged.
-    const isCopilot = provider === "copilot" && !!parentProviderConfig?.apiKey && !isPlanMode;
+    const isCopilot = provider === "copilot" && !!parentProviderConfig?.apiKey && !isPlanMode && !isDailyBrief;
     const effectiveModel = parentProviderConfig?.model ?? LITELLM.model;
     log(
       `provider=${provider ?? "spaces"} isCopilot=${isCopilot} model=${effectiveModel}`,
@@ -2522,7 +2545,7 @@ async function processTask(
     }
     const outputFormat = parseOutputFormat(agentConfig);
     const structuredOutputRef: StructuredOutputRef = {};
-    const structuredOutputActive = !!outputFormat && !isCopilot && !isPlanMode;
+    const structuredOutputActive = !!outputFormat && !isCopilot && !isPlanMode && !isDailyBrief;
     if (outputFormat && isCopilot) {
       log(
         "outputFormat configured but provider is copilot — structured output skipped (respond-to-user owns delivery)",
@@ -2569,7 +2592,8 @@ async function processTask(
       (verifyCfg ?? (verifyAllDefault && !isTwinAgent)) &&
       !structuredOutputActive &&
       !isTwinMentionFlow &&
-      !isPlanMode;
+      !isPlanMode &&
+      !isDailyBrief;
     const evidenceRef: EvidenceRef = {};
     if (verifyResponses && !isCopilot) {
       const rawCriteria = agentConfig?.["verifyResponseCriteria"];
@@ -2606,7 +2630,10 @@ async function processTask(
     // output. Accepts boolean or "true" (free-form config editor stores strings).
     const autoToolCitations =
       agentConfig?.["autoToolCitations"] === true ||
-      agentConfig?.["autoToolCitations"] === "true";
+      agentConfig?.["autoToolCitations"] === "true" ||
+      // Daily brief always needs [clf-…] tokens on tool results so the brief's
+      // prose can cite them, regardless of which agent executes it.
+      isDailyBrief;
     if (autoToolCitations) log("autoToolCitations enabled — generic [clf-…] tokens on all tool results");
 
     // suggest-goal tool: opt-in per agent. When the agent's config has
@@ -2688,6 +2715,29 @@ async function processTask(
       );
       if (allTools.length !== beforePlan) {
         log(`Plan mode read-only — stripped ${beforePlan - allTools.length} write/mutating tool(s)`);
+      }
+    }
+
+    // Daily brief is read-only: the agent GATHERS and EMITS, it must never mutate
+    // (post a message, create a ticket, write a doc). Strip every write-flagged
+    // tool + mutating sandbox tool, but KEEP all read tools and subagents so the
+    // agent can freely decide how to gather. The terminal emit_brief tool (not a
+    // write tool) is explicitly whitelisted so it always survives. This also
+    // covers the interactive regenerate path, which is NOT a scheduled read-only
+    // run and so wouldn't otherwise be stripped. Applies ONLY when isDailyBrief.
+    if (isDailyBrief) {
+      const RO_BRIEF = new Set([
+        "sandbox-run", "sandbox-run-detached", "sandbox-write-file",
+        "sandbox-create", "sandbox-destroy", "write",
+      ]);
+      const beforeBrief = allTools.length;
+      allTools = allTools.filter(
+        (t) =>
+          t.name === EMIT_BRIEF_TOOL_NAME ||
+          (!isWriteTool(t, allGroups) && !RO_BRIEF.has(t.name)),
+      );
+      if (allTools.length !== beforeBrief) {
+        log(`Daily brief read-only — stripped ${beforeBrief - allTools.length} write/mutating tool(s) (read tools + subagents kept)`);
       }
     }
 
@@ -2854,6 +2904,35 @@ async function processTask(
           ? customPlanModePrompt.trim()
           : defaultPlanModePrimer;
       fullContext = fullContext ? `${fullContext}\n\n${planModePrimer}` : planModePrimer;
+    } else if (isDailyBrief) {
+      // Daily brief: SERVER-OWNED primer (not dashboard-overridable) describing the
+      // brief the agent must produce. It has the full read-only palette + subagents
+      // and decides HOW to gather; this only defines WHAT the brief must contain and
+      // that emit_brief is the single exit. Any per-user custom instructions arrive
+      // separately, appended as "## Additional Instructions" below, and may tune tone
+      // and emphasis — but cannot change the required structure or remove emit_brief.
+      const briefPrimer = [
+        "## Daily brief — gather, then write ONE elegant brief",
+        "You are writing this person's Daily Brief: the morning read that tells them, in under a minute, what actually deserves their attention today. You have READ-ONLY tools and subagents (tickets, activity/mentions, approvals, calendar, search). You CANNOT act — no posting, no ticket edits. Your ONE terminal tool is `emit_brief`.",
+        "",
+        "### Step 1 — gather (quietly)",
+        "First find out who the user is (id/email) so every query is scoped to them. Then pull what you need: what most needs them today (critical/overdue tickets, pending approvals, direct @mentions, ETA breaches); truly overdue items; work they're blocked on / waiting on others for (they own it but it's stuck on a review/someone else); their own open tickets; and today's calendar. Use whatever read tools and subagents you judge relevant — you decide.",
+        "",
+        "### Step 2 — write it like a sharp chief of staff",
+        "The brief is EDITORIAL PROSE, not a data dump. This is the single most important instruction. Do NOT list rows. SYNTHESIZE: find the story across the items and say it plainly.",
+        "- Voice: crisp, brief, elegant, human. Full sentences. Calm and direct. No filler, no hedging, no emoji, no headers inside the text.",
+        "- Lead each section with the insight, then only the specifics that earn their place. 2–4 short lines per section is plenty; one sharp line beats five dull ones.",
+        "- Prefer the pattern over the pile. 'Ten tickets sit in PR Review, not one with a reviewer assigned — naming reviewers is a two-minute job that unblocks a month of work' is worth more than ten separate rows.",
+        "- Be specific where it matters: ticket ids, real ages ('untouched since 3 June'), real counts. Name the one thing worth doing first.",
+        "- `what_needs_you`: open with a 1–2 sentence read of the whole day (this replaces any separate summary), then the 1–3 items that genuinely need them. `overdue`: only what's truly late; if nothing is, say so in one honest line. `waiting_on_others`: name the bottleneck. `assigned_to_you`: their open work, grouped and synthesized. `todays_schedule`: the meetings with times, or one line if the day is clear.",
+        "",
+        "### Step 3 — cite with clf tokens",
+        "Your tool results contain inline citation tokens like `[clf-abc123#14]`. After any factual claim you draw from a tool result, append the EXACT token(s) that appeared in that tool's output, verbatim — e.g. `... no reviewer has been assigned to any of them [clf-abc123#14].` Never invent a token; only use ones you actually saw. If a claim rests on several sources, include several tokens. These are the brief's only citation mechanism.",
+        "",
+        "### Step 4 — emit",
+        "Call `emit_brief` EXACTLY ONCE with each section as an array of your written lines. This ENDS your turn. Do NOT narrate, do NOT write a chat answer, do NOT call any tool after it. If a data source is unavailable, skip it gracefully rather than failing the whole brief.",
+      ].join("\n");
+      fullContext = fullContext ? `${fullContext}\n\n${briefPrimer}` : briefPrimer;
     }
 
     // ── Sandbox primer ─────────────────────────────────────────────────────
@@ -3680,6 +3759,11 @@ async function processTask(
         `[plan-mode] propose-plan was called but the run reached the SUCCESS path (abortRun did not terminate the loop) — shipping the plan anyway; investigate abort wiring. session=${sessionId}`,
       );
     }
+    if (emitBriefRef.value) {
+      logErr(
+        `[daily-brief] emit_brief was called but the run reached the SUCCESS path (abortRun did not terminate the loop) — shipping the brief anyway; investigate abort wiring. session=${sessionId}`,
+      );
+    }
 
     clog.info(
       `[follow-ups] callback sessionId=${sessionId} pendingQuestions=${pendingQuestions.length} followUpCount=${pendingQuestions.find((question) => question.purpose === "follow_up_suggestions")?.options.length ?? 0}`,
@@ -3727,6 +3811,11 @@ async function processTask(
       // claw-auth's /webhook/result posts the plan card and (if trivial)
       // auto-continues into the auto-mode execution turn.
       ...(proposePlanRef.value ? { pendingPlan: proposePlanRef.value } : {}),
+      // Daily brief: emit_brief normally aborts (→ catch branch below), but if the
+      // run finished cleanly with a brief emitted, carry it here too. claw-auth
+      // persists it to GeneratedContent and (on the SSE regenerate path) forwards
+      // it to the dashboard on the terminal `done` frame.
+      ...(emitBriefRef.value ? { dailyBrief: emitBriefRef.value } : {}),
       ...(llmCitations && llmCitations.length > 0 ? { llmCitations } : {}),
       followUpsPending: followUpOutcome === "parallel_pending",
       provider: completedProvider,
@@ -3914,6 +4003,36 @@ async function processTask(
         status: "completed",
         result: "",
         pendingPlan: proposePlanRef.value,
+        ...(err instanceof RunCancelledError && err.toolsUsed.length > 0 ? { toolsUsed: err.toolsUsed } : {}),
+        ...(err instanceof RunCancelledError && err.toolInvocations.length > 0 ? { toolInvocations: err.toolInvocations } : {}),
+        ...(err instanceof RunCancelledError ? { tokenUsage: err.tokenUsage } : {}),
+        provider: callbackProvider,
+        model: callbackModel,
+      });
+    } else if (
+      emitBriefRef.value &&
+      !isUserCancel &&
+      (err instanceof RunCancelledError || abortSignal?.aborted)
+    ) {
+      // Daily brief: emit_brief fired abortRun to end the turn, so the run lands
+      // HERE (RunCancelledError), not the success path — the SAME pattern as
+      // propose-plan above. This is a normal, successful brief emission, NOT a
+      // cancellation: emit status="completed" carrying the brief. claw-auth
+      // persists it (kind=DAILY_BRIEF) and, on the SSE regenerate path, forwards
+      // it to the dashboard on the terminal frame. The brief is the deliverable,
+      // so there is no chat text on this turn.
+      log(
+        `Session terminated by emit_brief (needs=${emitBriefRef.value.what_needs_you.length}, overdue=${emitBriefRef.value.overdue.length}, schedule=${emitBriefRef.value.todays_schedule.length}): ${sessionId}`,
+      );
+      await sendCallback(callbackUrl, sessionToken, {
+        sessionId,
+        userId,
+        conversationId: conversationId ?? null,
+        agentSlug: agentSlug ?? null,
+        fastMode: fastModeForCallback,
+        status: "completed",
+        result: "",
+        dailyBrief: emitBriefRef.value,
         ...(err instanceof RunCancelledError && err.toolsUsed.length > 0 ? { toolsUsed: err.toolsUsed } : {}),
         ...(err instanceof RunCancelledError && err.toolInvocations.length > 0 ? { toolInvocations: err.toolInvocations } : {}),
         ...(err instanceof RunCancelledError ? { tokenUsage: err.tokenUsage } : {}),

@@ -3,7 +3,8 @@ import { randomUUID } from "crypto";
 import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
 import { decrypt } from "../crypto.js";
-import { chatMessageRepository, agentRunRepository, chatAttachmentRepository, userProviderCredentialsRepository } from "../repositories/index.js";
+import { chatMessageRepository, agentRunRepository, chatAttachmentRepository, userProviderCredentialsRepository, userAgentInstructionRepository } from "../repositories/index.js";
+import { resolveBriefAgentSlug } from "../services/dailyBrief.js";
 import { buildAgentCatalog } from "../services/agentCatalogService.js";
 import { gcsService } from "../services/gcsService.js";
 import {
@@ -745,6 +746,38 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
     
     let additionalInstructions = (req.body as { additionalInstructions?: string }).additionalInstructions ?? "";
 
+    // Per-user, per-agent custom instructions: users can tune ANY agent's
+    // behaviour for themselves (generic feature — not just the daily brief). We
+    // append them to additionalInstructions, which claw renders under a
+    // "## Additional Instructions" heading. Appended (not prepended) so any
+    // backend housekeeping instructions still lead. Best-effort: a lookup failure
+    // must never break the run.
+    //
+    // SKIPPED for daily_brief runs: the brief may execute on a SHARED agent
+    // (default ask-ai), and its per-user instructions are keyed under the fixed
+    // logical "daily-brief" slug and passed EXPLICITLY in the dispatch body — so we
+    // must NOT also inject the executing agent's own instructions here (that would
+    // leak e.g. the user's Ask AI chat prefs into the brief and vice-versa).
+    const bodyMode = (req.body as { mode?: string }).mode;
+    if (bodyMode !== "daily_brief") {
+      const instructionAgentSlug = agentSlug ?? CONFIG.defaultAgentSlug;
+      try {
+        const userInstructions = await userAgentInstructionRepository.getEnabledText(
+          resolved.userId,
+          agent.orgId,
+          instructionAgentSlug,
+        );
+        if (userInstructions) {
+          additionalInstructions = additionalInstructions
+            ? `${additionalInstructions}\n\n${userInstructions}`
+            : userInstructions;
+          log.info(`[run] injected user custom instructions for agent=${instructionAgentSlug} user=${resolved.userId}`);
+        }
+      } catch (err) {
+        log.warn("[run] failed to load user agent instructions:", err instanceof Error ? err.message : String(err));
+      }
+    }
+
     // Promote the attached-context prefix into `context` (NOT additionalInstructions).
     // Mirrors agent-chat.ts:918, where attached items already land in `context`.
     // Why: claw wraps additionalInstructions under a "## Additional Instructions"
@@ -977,12 +1010,32 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
       }
     }
 
-    // Plan-mode trust gate (see forwardBody below). Honor mode='plan' ONLY when
-    // the agent's own stored config opted in — never from req.body alone.
-    const requestedMode = (req.body as { mode?: "plan" | "auto" }).mode;
-    const agentPlanModeOptIn = (agent.agentConfig as Record<string, unknown> | undefined)?.["planMode"] === true;
-    const effectivePlanMode: "plan" | "auto" | undefined =
-      requestedMode === "plan" ? (agentPlanModeOptIn ? "plan" : "auto") : requestedMode;
+    // Pipeline-mode trust gate (see forwardBody below). Honor a requested pipeline
+    // mode ONLY when the agent's own stored config opted in — never from req.body
+    // alone, so a caller with the S2S key can't force a mode the agent never
+    // enabled. 'auto'/absent are pass-through (today's behavior).
+    const requestedMode = (req.body as { mode?: "plan" | "auto" | "daily_brief" }).mode;
+    const agentModeCfg = agent.agentConfig as Record<string, unknown> | undefined;
+    const agentPlanModeOptIn = agentModeCfg?.["planMode"] === true;
+    // Daily-brief is honored when EITHER the agent explicitly opted in
+    // (config.dailyBriefMode — the dedicated-agent case) OR this agent is the org's
+    // configured brief agent (Organization.dailyBriefAgentSlug, set at runtime via
+    // the settings API; default "ask-ai"). The brief pipeline is read-only +
+    // terminal emit_brief, so honoring it for the configured agent is safe and lets
+    // the brief run on a shared agent without a dedicated seed.
+    let agentDailyBriefOptIn = agentModeCfg?.["dailyBriefMode"] === true;
+    if (!agentDailyBriefOptIn && requestedMode === "daily_brief") {
+      // Lazy (only when a brief run is actually requested): the configured brief
+      // agent is per-org (Organization.dailyBriefAgentSlug), falling back to the
+      // deployment default — resolved by the single source of truth in dailyBrief.ts.
+      agentDailyBriefOptIn = agentSlug === (await resolveBriefAgentSlug(agent.orgId));
+    }
+    const effectiveMode: "plan" | "auto" | "daily_brief" | undefined =
+      requestedMode === "plan"
+        ? (agentPlanModeOptIn ? "plan" : "auto")
+        : requestedMode === "daily_brief"
+          ? (agentDailyBriefOptIn ? "daily_brief" : "auto")
+          : requestedMode;
 
     // Shared request body for both transports. SSE consumers (run-stream.ts)
     // pass progressUrl/callbackUrl too — claw ignores them in SSE mode since
@@ -1039,7 +1092,7 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
       // AGENT actually opted in (agent.agentConfig.planMode), so a caller with the
       // S2S key can't force plan mode on an agent that never enabled it. 'auto' and
       // absent are pass-through (both mean today's behavior).
-      ...(effectivePlanMode ? { mode: effectivePlanMode } : {}),
+      ...(effectiveMode ? { mode: effectiveMode } : {}),
       ...((req.body as { planContinuation?: boolean }).planContinuation === true ? { planContinuation: true } : {}),
       ...(generateFollowUpSuggestions === true ? { generateFollowUpSuggestions: true } : {}),
     };

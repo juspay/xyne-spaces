@@ -7,6 +7,7 @@ set -e
 FAKE_GCS_HOST="localhost:4443"
 BUNDLE_BUCKET="xyne-frontend-bundles"
 CHAT_BUCKET="xyne-spaces-chat-documents"
+CLAW_CHAT_BUCKET="xyne-claw-chat-attachments"
 TEST_BRANCH="devqa-xyne-test-123"
 
 echo "🚀 Setting up fake-gcs-server..."
@@ -36,6 +37,15 @@ curl -X POST "http://${FAKE_GCS_HOST}/storage/v1/b?project=xyne-spaces" \
   2>/dev/null || echo "   Bucket may already exist, continuing..."
 
 echo "✅ Bucket created/verified: ${CHAT_BUCKET}"
+
+# Create claw chat attachments bucket (for agent-generated attachments like PPT/PDF)
+echo "📦 Creating bucket: ${CLAW_CHAT_BUCKET}"
+curl -X POST "http://${FAKE_GCS_HOST}/storage/v1/b?project=xyne-spaces" \
+  -H "Content-Type: application/json" \
+  -d "{\"name\":\"${CLAW_CHAT_BUCKET}\"}" \
+  2>/dev/null || echo "   Bucket may already exist, continuing..."
+
+echo "✅ Bucket created/verified: ${CLAW_CHAT_BUCKET}"
 
 # Build dashboard if not already built
 if [ ! -d "apps/dashboard/dist" ]; then
@@ -81,6 +91,7 @@ echo "📋 Summary:"
 echo "   Buckets created:"
 echo "     - ${BUNDLE_BUCKET} (frontend bundles)"
 echo "     - ${CHAT_BUCKET} (chat file uploads)"
+echo "     - ${CLAW_CHAT_BUCKET} (agent-generated attachments)"
 echo "   Test branch: ${TEST_BRANCH}"
 echo "   Endpoint: http://${FAKE_GCS_HOST}"
 echo ""

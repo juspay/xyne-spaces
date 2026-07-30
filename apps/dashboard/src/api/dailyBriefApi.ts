@@ -1,0 +1,131 @@
+import { apiInstance, BASE_URL } from '../services/clients/apiClient';
+
+/**
+ * Daily Brief API (proxied by the backend to xyne-claw-auth).
+ *
+ * Minimal surface for the Daily Brief dashboard page:
+ *   - getLatest()  → today's stored brief (or the most recent one)
+ *   - getHistory() → the user's recent briefs, newest first
+ *   - regenerate() → re-run the brief now, streaming progress over SSE
+ *
+ * This is intentionally thin — a starting point for UI developers to build on.
+ */
+
+/** A stored brief as returned by GET /daily-brief/latest. */
+export interface DailyBriefLatest {
+  /** Lifecycle: 'none' (never generated) | 'generating' | 'ready' | 'failed'. */
+  status: string;
+  /** Calendar bucket the brief is for, e.g. "2026-07-29". Absent when status==='none'. */
+  date?: string;
+  /** Rendered markdown for direct display. */
+  content?: string;
+  /** Structured payload (the emit_brief JSON) alongside the rendered content. */
+  data?: unknown;
+  generatedAt?: string | null;
+  /** True when `date` is today's bucket. */
+  isToday?: boolean;
+}
+
+/** One entry in the history list (GET /daily-brief/history). */
+export interface DailyBriefHistoryItem {
+  date: string;
+  status: string;
+  content: string;
+  data?: unknown;
+  agentSlug?: string | null;
+  generatedAt?: string | null;
+}
+
+/** Callbacks for the regenerate SSE stream. */
+export interface RegenerateHandlers {
+  onStart?: (date: string | undefined) => void;
+  onProgress?: (label: string) => void;
+  onComplete?: (payload: { content: string; brief: unknown }) => void;
+  onError?: (message: string) => void;
+}
+
+export const dailyBriefApi = {
+  /** Today's stored brief (falls back to the most recent one). */
+  getLatest: async (): Promise<DailyBriefLatest> => {
+    const res = await apiInstance.get<DailyBriefLatest>('/daily-brief/latest');
+    return res.data;
+  },
+
+  /** Recent briefs, newest first. */
+  getHistory: async (limit = 30): Promise<DailyBriefHistoryItem[]> => {
+    const res = await apiInstance.get<DailyBriefHistoryItem[]>('/daily-brief/history', {
+      params: { limit },
+    });
+    return Array.isArray(res.data) ? res.data : [];
+  },
+
+  /**
+   * Re-run the brief now. Streams `start` / `progress` / `complete` / `error`
+   * events (SSE) to the provided handlers. Returns once the stream ends; pass
+   * an AbortSignal to cancel (which aborts the underlying run server-side).
+   */
+  regenerate: async (handlers: RegenerateHandlers, signal?: AbortSignal): Promise<void> => {
+    // SSE needs a streamed ReadableStream body — axios (XHR) can't provide one.
+    // eslint-disable-next-line local-rules/no-fetch-use-axios
+    const response = await fetch(`${BASE_URL}/daily-brief/regenerate`, {
+      method: 'POST',
+      headers: { Accept: 'text/event-stream', 'Content-Type': 'application/json' },
+      body: '{}',
+      credentials: 'include',
+      ...(signal ? { signal } : {}),
+    });
+
+    if (!response.ok || !response.body) {
+      handlers.onError?.(`Regenerate failed (${response.status})`);
+      return;
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let eventType = '';
+
+    const dispatch = (event: string, dataRaw: string): void => {
+      let data: Record<string, unknown> = {};
+      try {
+        data = dataRaw ? (JSON.parse(dataRaw) as Record<string, unknown>) : {};
+      } catch {
+        data = {};
+      }
+      const asString = (value: unknown, fallback = ''): string =>
+        typeof value === 'string' ? value : fallback;
+      if (event === 'start') handlers.onStart?.(asString(data['date']) || undefined);
+      else if (event === 'progress') handlers.onProgress?.(asString(data['label']));
+      else if (event === 'complete')
+        handlers.onComplete?.({ content: asString(data['content']), brief: data['brief'] });
+      else if (event === 'error')
+        handlers.onError?.(asString(data['message'], 'Regeneration failed'));
+    };
+
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) {
+            eventType = '';
+            continue;
+          }
+          if (trimmed.startsWith('event:')) eventType = trimmed.slice(6).trim();
+          else if (trimmed.startsWith('data:'))
+            dispatch(eventType || 'message', trimmed.slice(5).trim());
+        }
+      }
+    } finally {
+      try {
+        reader.releaseLock();
+      } catch {
+        /* already released */
+      }
+    }
+  },
+};

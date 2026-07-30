@@ -29,6 +29,7 @@
     "@slack/web-api": "8.0.0",
     "@types/pdfkit": "^0.17.6",
     "bullmq": "^5.72.0",
+    "cron-parser": "^4.9.0",
     "exceljs": "^4.4.0",
     "express": "^4.21.0",
     "ioredis": "^5.8.2",

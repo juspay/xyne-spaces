@@ -53,6 +53,7 @@ import { customerioOAuthRouter, customerioCallbackRouter } from "./routes/custom
 import { oauthTokenRouter } from "./routes/oauth-token.js";
 import { rapidApiLinkedInRouter } from "./routes/rapidapi-linkedin.js";
 import { scheduledJobsRouter } from "./routes/scheduled-jobs.js";
+import { dailyBriefRouter } from "./routes/daily-brief.js";
 import { pendingQuestionsRouter } from "./routes/pending-questions.js";
 import { ttsRouter } from "./routes/tts.js";
 import { settingsRouter } from "./routes/settings.js";
@@ -69,6 +70,9 @@ import { slackRouter } from "./surfaces/slack/routes/index.js";
 import { mcpGatewayRouter } from "./mcpgateway/index.js";
 import { initScheduledJobsWorker, closeWorker } from "./queue/scheduled-jobs-worker.js";
 import { closeQueue } from "./queue/scheduled-jobs-queue.js";
+import { initDailyBriefWorker, closeDailyBriefWorker } from "./queue/daily-brief-worker.js";
+import { closeDailyBriefQueue } from "./queue/daily-brief-queue.js";
+import { initDailyBriefCron } from "./services/dailyBriefCron.js";
 import { initRunRecoveryWorker, closeRunRecoveryWorker } from "./queue/run-recovery-worker.js";
 import { initDigitalTwinBackfillWorker } from "./queue/digital-twin-backfill-worker.js";
 import { initAgentBackfillWorker, closeAgentBackfillWorker } from "./queue/agent-backfill-worker.js";
@@ -178,6 +182,7 @@ app.use(`${BASE}/admin`, requireAuth, adminRouter);
 app.use(`${BASE}/admin`, requireAuth, adminBackfillSigningSecretsRouter);
 app.use(`${BASE}/dashboard`, requireAuth, dashboardRouter);
 app.use(`${BASE}/agent-chat`, requireAuth, agentChatRouter);
+app.use(`${BASE}/daily-brief`, requireAuth, dailyBriefRouter);
 app.use(`${BASE}/internal/agent-chat`, requireStrictS2S, agentChatInternalRouter); // progress/callback from xyne-claw
 app.use(`${BASE}/internal/twin-draft`, requireInternalS2S, twinDraftInternalRouter);  // Spaces → approve/decline an in-thread Twin reply draft (INTERNAL_S2S_KEY)
 app.use(`${BASE}/internal/sessions`, requireStrictS2S, sessionsArchiveRouter);     // archive/restore session JSONLs to GCS — S2S only (transcripts)
@@ -313,6 +318,10 @@ listen(CONFIG.port, () => {
     initMemoryCron();
     initSlackConfigTokenCron();
     initDigitalTwinDaily();
+    // Daily Brief: bounded worker (caps concurrent LLM runs) + leader-locked
+    // enqueue cron (fans out opted-in users once/day). See services/dailyBrief*.
+    initDailyBriefWorker();
+    initDailyBriefCron();
     initFailureCuratorWorker();
     initOrphanFinalizerWorker();
   // Upsert custom tools from the shared registry so newly added tools (e.g.
@@ -346,6 +355,8 @@ async function shutdown(signal: string): Promise<void> {
     closeFailureCuratorWorker();
     closeOrphanFinalizerWorker();
     await closeQueue().catch(() => {});
+    await closeDailyBriefWorker().catch(() => {});
+    await closeDailyBriefQueue().catch(() => {});
     await closeBackfillQueue().catch(() => {});
     await closeAgentBackfillWorker().catch(() => {});
     await closeAgentBackfillQueue().catch(() => {});

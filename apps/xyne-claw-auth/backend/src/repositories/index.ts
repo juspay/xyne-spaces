@@ -8,6 +8,8 @@ export { chatAttachmentRepository } from "./chatAttachmentRepository.js";
 export { agentRunRepository } from "./agentRunRepository.js";
 export { agentChainWorkflowRepository } from "./agentChainWorkflowRepository.js";
 export { userAgentConfigRepository } from "./userAgentConfigRepository.js";
+export { userAgentInstructionRepository } from "./userAgentInstructionRepository.js";
+export { generatedContentRepository, DAILY_BRIEF_KIND } from "./generatedContentRepository.js";
 export { userProviderCredentialsRepository } from "./userProviderCredentialsRepository.js";
 export { agentProviderCredentialsRepository } from "./agentProviderCredentialsRepository.js";
 export { sharedProviderCredentialRepository } from "./sharedProviderCredentialRepository.js";

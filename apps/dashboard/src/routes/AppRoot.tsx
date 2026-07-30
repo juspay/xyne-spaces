@@ -206,6 +206,7 @@ import AILibraryScreen from './AIScreen/AILibraryScreen';
 import AIKnowledgeScreen from './AIScreen/AIKnowledgeScreen';
 import AISectionScreen from './AIScreen/AISectionScreen';
 import UserGuideScreen from './UserGuideScreen';
+import DailyBriefScreen from './DailyBriefScreen';
 import AutomationsListScreen from './AutomationsScreen/AutomationsListScreen';
 import AutomationBuilderScreen from './AutomationsScreen/AutomationBuilderScreen';
 import AutomationRunsScreen from './AutomationsScreen/AutomationRunsScreen';
@@ -1417,6 +1418,10 @@ export const router = createBrowserRouter([
               {
                 path: 'guide',
                 element: <UserGuideScreen />,
+              },
+              {
+                path: 'daily-brief',
+                element: <DailyBriefScreen />,
               },
             ],
           },
