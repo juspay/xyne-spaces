@@ -34,6 +34,12 @@ paths = [
   '''(^|/)\.securitybin/''',
   '''(^|/)security-reports/''',
 
+  # Automation-suite run artifacts: Gauge HTML reports and captured container
+  # logs. Gitignored and never committed, but `gitleaks dir` walks the working
+  # tree regardless of .gitignore, and service logs are full of session tokens
+  # that trip generic-api-key.
+  '''(^|/)xyne-automation/reports/''',
+
   # Signing material — must never be committed; flag via separate policy, not scan noise
   '''\.keystore$''',
   '''\.jks$''',

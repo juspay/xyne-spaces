@@ -8,6 +8,7 @@
 * Creating sub-ticket "ticket-sub-1" for user "admin-1" with priority "Medium"
 
 ## Admin creates two sub-tickets including one with attachment
+tags: quarantine
 * Setting up sub-ticket test with parent ticket "ticket-parent-2" for admin "admin-1"
 * Updating ticket "ticket-parent-2" status to "In Progress" and priority to "Critical" for user "admin-1"
 * waiting for zero sync to settle

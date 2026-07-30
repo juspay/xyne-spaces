@@ -24,7 +24,7 @@ jobs:
   # ---------------------------------------------------------------------------
   backend:
     name: Backend typecheck + build
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     # tsc over backend's type surface (incl. generated Prisma/Zero schemas)
     # exceeds Node's ~2GB default heap on the runner.
     env:
@@ -62,7 +62,7 @@ jobs:
   # ---------------------------------------------------------------------------
   dashboard:
     name: Dashboard lint + typecheck + build
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v5
 
@@ -97,7 +97,7 @@ jobs:
   # Framework lint — self-contained (no workspace deps).
   framework-lint:
     name: Framework lint
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v5
 
@@ -121,7 +121,7 @@ jobs:
   # ---------------------------------------------------------------------------
   xyne-claw:
     name: xyne-claw typecheck
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v5
 
@@ -149,7 +149,7 @@ jobs:
   # ---------------------------------------------------------------------------
   gitleaks:
     name: Secret scan (gitleaks)
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     env:
       GITLEAKS_VERSION: "8.30.1"
     steps:
@@ -157,9 +157,25 @@ jobs:
 
       - name: Install gitleaks
         run: |
-          curl -sfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
-            | sudo tar -xz -C /usr/local/bin gitleaks
-          gitleaks version
+          set -euo pipefail
+          # The self-hosted runners differ in OS, so the release asset has to
+          # follow whichever machine picked the job up.
+          case "$RUNNER_OS" in
+            Linux) os=linux ;;
+            macOS) os=darwin ;;
+            *) echo "::error::Unsupported runner OS: $RUNNER_OS"; exit 1 ;;
+          esac
+          case "$RUNNER_ARCH" in
+            X64)   arch=x64 ;;
+            ARM64) arch=arm64 ;;
+            *) echo "::error::Unsupported runner arch: $RUNNER_ARCH"; exit 1 ;;
+          esac
+
+          mkdir -p "$RUNNER_TEMP/bin"
+          curl -sfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_${os}_${arch}.tar.gz" \
+            | tar -xz -C "$RUNNER_TEMP/bin" gitleaks
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/bin/gitleaks" version
 
       - name: Run gitleaks
         run: gitleaks dir . --config .gitleaks.toml --redact --no-banner --exit-code 1
@@ -177,7 +193,7 @@ jobs:
   # ---------------------------------------------------------------------------
   trivy:
     name: Vulnerability scan (Trivy)
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     env:
       TRIVY_VERSION: "0.72.0"
       # secrets handled by gitleaks; scan deps (vuln) + IaC (misconfig) only.
@@ -187,9 +203,17 @@ jobs:
 
       - name: Install Trivy
         run: |
+          mkdir -p "$RUNNER_TEMP/bin"
           curl -sfL "https://raw.githubusercontent.com/aquasecurity/trivy/v${TRIVY_VERSION}/contrib/install.sh" \
-            | sudo sh -s -- -b /usr/local/bin "v${TRIVY_VERSION}"
-          trivy --version
+            | sh -s -- -b "$RUNNER_TEMP/bin" "v${TRIVY_VERSION}"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/bin/trivy" --version
+
+      # Trivy's default cache path is ~/.cache/trivy on Linux but
+      # ~/Library/Caches/trivy on macOS. Pin it so the cached path below matches
+      # on both self-hosted runners.
+      - name: Pin Trivy cache path
+        run: echo "TRIVY_CACHE_DIR=$HOME/.cache/trivy" >> "$GITHUB_ENV"
 
       # Vulnerability DB (~few hundred MB) changes ~every 6h; cache it per day so
       # reruns don't re-download. A cache miss just downloads fresh — never fatal.
