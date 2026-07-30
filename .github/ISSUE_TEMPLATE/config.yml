@@ -1,0 +1,14 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or idea
+    url: https://github.com/juspay/xyne-spaces/discussions
+    about: Ask a question or float an idea before it becomes an issue.
+  - name: Setup not working
+    url: https://github.com/juspay/xyne-spaces/blob/main/docs/setup/troubleshooting.md
+    about: Known setup failures and their fixes — check here before opening a bug.
+  - name: AI features are silent
+    url: https://github.com/juspay/xyne-spaces/blob/main/docs/setup/ai-providers.md
+    about: Agents need an OpenAI-compatible endpoint. This page walks through configuring one.
+  - name: Report a security vulnerability
+    url: https://github.com/juspay/xyne-spaces/security/advisories/new
+    about: Please report vulnerabilities privately, not as a public issue.

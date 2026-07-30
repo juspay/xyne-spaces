@@ -1,0 +1,61 @@
+name: Feature request
+description: Suggest a capability or an improvement
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the problem before the solution — it usually leads to a better design
+        discussion than starting from an implementation.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do, and where does the current behaviour get in the way?
+      placeholder: |
+        When a ticket moves to a new stage, there is no way to …
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like to happen
+      description: Your proposed behaviour. Rough is fine.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+      description: Workarounds you tried, or other designs you rejected and why.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Setup / developer experience
+        - Backend (apps/backend)
+        - Dashboard (apps/dashboard)
+        - Agents (xyne-claw / claw-auth)
+        - Infrastructure (docker-compose, services)
+        - Search (Vespa)
+        - Real-time (Zero, Y-Sweet, LiveKit)
+        - Documentation
+        - Other / not sure
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contribution
+      options:
+        - label: I would be willing to work on this
+          required: false

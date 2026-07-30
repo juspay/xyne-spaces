@@ -1,0 +1,91 @@
+name: Bug report
+description: Something behaves incorrectly or crashes
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug.
+
+        If this is a **setup failure**, please skim
+        [Troubleshooting](https://github.com/juspay/xyne-spaces/blob/main/docs/setup/troubleshooting.md)
+        first — the common ones are already written up with fixes.
+
+        If the AI features are silent rather than erroring, that is usually a missing
+        provider: see [AI Providers](https://github.com/juspay/xyne-spaces/blob/main/docs/setup/ai-providers.md).
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you observe, and what did you expect instead?
+      placeholder: |
+        Ran `pnpm run services`. It exited after "Starting zero-cache" instead of
+        printing the login credentials.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: The exact commands or clicks, starting from a known state.
+      placeholder: |
+        1. git clone …
+        2. pnpm run up
+        3. Open http://localhost:5173 and …
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Output
+      description: >
+        Paste the error, stack trace, or relevant log lines. Redact secrets — this is a
+        public issue.
+      render: shell
+    validations:
+      required: false
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Where does this happen? Pick the closest.
+      options:
+        - Setup / installation
+        - Backend (apps/backend)
+        - Dashboard (apps/dashboard)
+        - Agents (xyne-claw / claw-auth)
+        - Infrastructure (docker-compose, services)
+        - Search (Vespa)
+        - Real-time (Zero, Y-Sweet, LiveKit)
+        - Documentation
+        - Other / not sure
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: Output of `git rev-parse --short HEAD`, or the release tag.
+      placeholder: d61983f14
+    validations:
+      required: false
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS and architecture, plus the output of the commands below.
+      placeholder: |
+        macOS 15.2 (Apple Silicon) / Ubuntu 24.04
+        node --version   → v22.x
+        pnpm --version   → 10.15.0
+        docker --version → 27.x  (Docker Desktop / OrbStack / Podman)
+      render: shell
+    validations:
+      required: true
