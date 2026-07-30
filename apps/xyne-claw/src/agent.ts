@@ -1332,11 +1332,11 @@ export interface RunTaskOptions {
    *  the model to call the tool and, if it never does, leaves this undefined so
    *  the caller stays silent (fail-closed) instead of posting raw assistant text. */
   twinDeliverRef?: import("./twin-deliver.js").TwinDeliverRef | undefined;
-  /** Plan/auto mode of this run (agent.config.planMode). Debug-telemetry only —
+  /** Pipeline mode of this run (plan / daily_brief / auto). Debug-telemetry only —
    *  emitted in the session_tools event so the pipeline UI shows which mode a run
    *  executed in. Behavior is driven by the tool palette / prompt assembled in
    *  run.ts, not by this field. */
-  mode?: "plan" | "auto" | undefined;
+  mode?: "plan" | "auto" | "daily_brief" | undefined;
   /** True when this is the auto-mode execution turn dispatched right after a plan
    *  was approved (or a trivial plan auto-continued). Debug-telemetry only —
    *  emits a mode_switch (plan→auto) event at session start. */

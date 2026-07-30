@@ -100,6 +100,29 @@ export const CONFIG = {
     ?? "https://app.spaces.xyne.juspay.net",
   defaultAgentSlug: process.env["DEFAULT_AGENT_SLUG"] ?? "assistant",
   minCronIntervalMinutes: Number(process.env["MIN_CRON_INTERVAL_MINUTES"] ?? 30),
+  // Daily Brief fan-out throttle. `concurrency` is the HARD cap on parallel brief
+  // runs (= concurrent LLM sessions) since the worker awaits each run to
+  // completion; keep it well under the provider's concurrency budget. The
+  // optional rate limiter (`rateMax` per `rateDurationMs`, 0 = off) additionally
+  // caps the START rate. The cron enqueues all opted-in users once/day at
+  // HH:MM UTC (default 00:30 UTC = 6:00 AM IST).
+  // Which agent EXECUTES the daily brief. Defaults to the existing "ask-ai" agent
+  // (no dedicated seed needed); change globally to route briefs through a
+  // different agent (e.g. a dedicated "daily-brief"). The brief's per-user config
+  // + instructions are stored under the fixed logical "daily-brief" slug,
+  // independent of this, so switching the executing agent never moves user data.
+  dailyBriefAgentSlug: process.env["DAILY_BRIEF_AGENT_SLUG"] ?? "ask-ai",
+  dailyBriefConcurrency: Number(process.env["DAILY_BRIEF_CONCURRENCY"] ?? 8),
+  // CLUSTER-GLOBAL cap on concurrent brief LLM runs (Redis semaphore), independent
+  // of replica count — this, not per-worker concurrency, is the real provider-rate
+  // guard for a mass fan-out. Set 0 to disable the global gate.
+  dailyBriefGlobalConcurrency: Number(process.env["DAILY_BRIEF_GLOBAL_CONCURRENCY"] ?? 8),
+  // How long a worker waits for a global slot before deferring the job (retry).
+  dailyBriefSlotWaitMs: Number(process.env["DAILY_BRIEF_SLOT_WAIT_MS"] ?? 120_000),
+  dailyBriefRateMax: Number(process.env["DAILY_BRIEF_RATE_MAX"] ?? 0),
+  dailyBriefRateDurationMs: Number(process.env["DAILY_BRIEF_RATE_DURATION_MS"] ?? 1000),
+  dailyBriefCronUtcHour: Number(process.env["DAILY_BRIEF_CRON_UTC_HOUR"] ?? 0),
+  dailyBriefCronUtcMinute: Number(process.env["DAILY_BRIEF_CRON_UTC_MINUTE"] ?? 30),
   redisHost: process.env["REDIS_HOST"] ?? "localhost",
   redisPort: Number(process.env["REDIS_PORT"] ?? 6379),
   redisPassword: process.env["REDIS_PASSWORD"] || undefined,

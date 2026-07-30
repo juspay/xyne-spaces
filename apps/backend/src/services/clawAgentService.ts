@@ -1391,3 +1391,164 @@ async function safeReadText(res: globalThis.Response): Promise<string> {
     return '<unreadable>';
   }
 }
+
+// ============================================================================
+// Daily Brief (proxied to xyne-claw-auth; user-scoped via Cookie + x-user-id)
+// ============================================================================
+
+const DAILY_BRIEF_BASE = () => `${getClawBaseUrl()}/claw/api/v1/daily-brief`;
+
+/** GET the user's Daily Brief config (enable flag + custom instructions). */
+export async function getDailyBriefConfig(
+  req: { headers?: { cookie?: string } },
+  userId: string
+): Promise<unknown> {
+  const response = await fetch(`${DAILY_BRIEF_BASE()}/config`, {
+    method: 'GET',
+    headers: { ...extractCookieHeader(req), ...extractUserIdHeader(userId) },
+  });
+  if (!response.ok) {
+    throw new Error(`[ClawAgentService] daily-brief config GET ${response.status}: ${await safeReadText(response)}`);
+  }
+  return response.json();
+}
+
+/** PUT the user's Daily Brief config ({ enabled?, instructions? }). */
+export async function saveDailyBriefConfig(
+  req: { headers?: { cookie?: string } },
+  userId: string,
+  body: { enabled?: boolean; instructions?: string | null }
+): Promise<unknown> {
+  const response = await fetch(`${DAILY_BRIEF_BASE()}/config`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...extractCookieHeader(req), ...extractUserIdHeader(userId) },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    throw new Error(`[ClawAgentService] daily-brief config PUT ${response.status}: ${await safeReadText(response)}`);
+  }
+  return response.json();
+}
+
+/** GET the org's Daily Brief agent settings (effective slug + pickable agents). */
+export async function getDailyBriefSettings(
+  req: { headers?: { cookie?: string } },
+  userId: string
+): Promise<unknown> {
+  const response = await fetch(`${DAILY_BRIEF_BASE()}/settings`, {
+    method: 'GET',
+    headers: { ...extractCookieHeader(req), ...extractUserIdHeader(userId) },
+  });
+  if (!response.ok) {
+    throw new Error(`[ClawAgentService] daily-brief settings GET ${response.status}: ${await safeReadText(response)}`);
+  }
+  return response.json();
+}
+
+/** PUT the org's Daily Brief agent ({ agentSlug: string | null }). Org-admin only. */
+export async function saveDailyBriefSettings(
+  req: { headers?: { cookie?: string } },
+  userId: string,
+  body: { agentSlug?: string | null }
+): Promise<{ status: number; json: unknown }> {
+  const response = await fetch(`${DAILY_BRIEF_BASE()}/settings`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...extractCookieHeader(req), ...extractUserIdHeader(userId) },
+    body: JSON.stringify(body),
+  });
+  // Surface 403 (not admin) / 400 (bad agent) to the caller rather than throwing.
+  return { status: response.status, json: await response.json().catch(() => ({})) };
+}
+
+/** GET the user's latest (today's) stored brief. */
+export async function getLatestDailyBrief(
+  req: { headers?: { cookie?: string } },
+  userId: string
+): Promise<unknown> {
+  const response = await fetch(`${DAILY_BRIEF_BASE()}/latest`, {
+    method: 'GET',
+    headers: { ...extractCookieHeader(req), ...extractUserIdHeader(userId) },
+  });
+  if (!response.ok) {
+    throw new Error(`[ClawAgentService] daily-brief latest GET ${response.status}: ${await safeReadText(response)}`);
+  }
+  return response.json();
+}
+
+/** GET the user's recent briefs (history list, newest first). */
+export async function getDailyBriefHistory(
+  req: { headers?: { cookie?: string } },
+  userId: string,
+  limit?: number
+): Promise<unknown> {
+  const qs = typeof limit === 'number' && Number.isFinite(limit) ? `?limit=${encodeURIComponent(limit)}` : '';
+  const response = await fetch(`${DAILY_BRIEF_BASE()}/history${qs}`, {
+    method: 'GET',
+    headers: { ...extractCookieHeader(req), ...extractUserIdHeader(userId) },
+  });
+  if (!response.ok) {
+    throw new Error(`[ClawAgentService] daily-brief history GET ${response.status}: ${await safeReadText(response)}`);
+  }
+  return response.json();
+}
+
+/**
+ * Regenerate the brief now, streaming the SSE straight through to the dashboard.
+ * claw-auth already emits dashboard-facing frames (start / progress / complete /
+ * error), so this is a verbatim pipe — no re-mapping.
+ */
+export async function regenerateDailyBriefStream(
+  req: { headers?: { cookie?: string } },
+  res: import('express').Response,
+  userId: string,
+  opts: { signal?: AbortSignal } = {}
+): Promise<void> {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+
+  const response = await fetch(`${DAILY_BRIEF_BASE()}/regenerate`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'text/event-stream',
+      ...extractCookieHeader(req),
+      ...extractUserIdHeader(userId),
+    },
+    body: '{}',
+    ...(opts.signal ? { signal: opts.signal } : {}),
+  });
+
+  if (!response.ok || !response.body) {
+    const detail = response.body ? await safeReadText(response) : 'no response body';
+    if (!res.writableEnded) {
+      res.write(`event: error\ndata: ${JSON.stringify({ message: `Regenerate failed (${response.status})`, detail })}\n\n`);
+      res.end();
+    }
+    return;
+  }
+
+  const reader = response.body.getReader();
+  try {
+    while (true) {
+      if (opts.signal?.aborted) break;
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value && !res.writableEnded) {
+        if (!res.write(Buffer.from(value))) {
+          await new Promise<void>((resolve) => res.once('drain', () => resolve()));
+        }
+      }
+    }
+  } catch (err) {
+    if (!res.writableEnded) {
+      res.write(`event: error\ndata: ${JSON.stringify({ message: err instanceof Error ? err.message : 'stream error' })}\n\n`);
+    }
+  } finally {
+    try { reader.releaseLock(); } catch { /* ignore */ }
+    if (!res.writableEnded) res.end();
+  }
+}

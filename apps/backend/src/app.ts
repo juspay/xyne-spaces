@@ -144,6 +144,7 @@ import deskMetricsBackfillRoutes from '@/routes/deskMetricsBackfill';
 import aiRetriggerRoutes from '@/routes/aiRetriggerRoutes';
 import testAuthRoutes from '@/routes/testAuth';
 import customInstructionRoutes from '@/routes/customInstruction';
+import dailyBriefRoutes from '@/routes/dailyBrief';
 import userSkillsRoutes from '@/routes/userSkills';
 import scheduledMessageRoutes from '@/routes/scheduledMessages';
 import { tagRoutes, registerDeskEmailTags } from '@/tags';
@@ -634,6 +635,9 @@ export class App {
 
     // Custom instruction routes (auth required)
     this.app.use('/api/custom-instruction', customInstructionRoutes);
+
+    // Daily Brief routes (auth required) — proxies to xyne-claw-auth
+    this.app.use('/api/daily-brief', authMiddleware.authenticate, dailyBriefRoutes);
 
     // User skills routes (auth required)
     this.app.use('/api/user-skills', authMiddleware.authenticate, userSkillsRoutes);

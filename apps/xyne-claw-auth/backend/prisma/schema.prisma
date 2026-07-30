@@ -60,6 +60,17 @@ model User {
   agentMemoryFiles                     AgentMemoryFile[]
   twinBehaviorSignals                  TwinBehaviorSignal[]
 
+  /// Daily Brief opt-in (morning digest). When true, the leader-locked daily
+  /// cron enqueues a brief-generation job for this user; when false the cron
+  /// simply skips them (no per-user scheduler to tear down). Mirrors the
+  /// digitalTwinEnabled opt-in pattern.
+  dailyBriefEnabled   Boolean   @default(false)
+  dailyBriefEnabledAt DateTime?
+  /// Per-user, per-agent custom instructions (injected into every agent run for
+  /// this user) + feature-generated content (first consumer: Daily Brief).
+  agentInstructions   UserAgentInstruction[]
+  generatedContent    GeneratedContent[]
+
   /// Multi-tenancy (phase 1, org-only). Required: every user belongs to exactly
   /// one org (the "Juspay" default until multi-org ships). Enforced NOT NULL by
   /// migration `20260705170000_phase1_orgid_notnull` AFTER the backfill filled
@@ -233,6 +244,10 @@ model Organization {
   createdBy   String
   status      OrgStatus @default(ACTIVE)
   metadata    Json?
+  /// Which agent (by slug) executes this org's Daily Brief. NULL ⇒ fall back to
+  /// the deployment default (CONFIG.dailyBriefAgentSlug / env, default "ask-ai").
+  /// Changed at runtime via the daily-brief settings API (org-admin only).
+  dailyBriefAgentSlug String?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
@@ -571,6 +586,72 @@ model UserAgentConfig {
   @@unique([userId, orgId, agentSlug])
   @@index([orgId])
   @@map("user_agent_configs")
+}
+
+/// Per-user, per-agent free-text custom instructions. Injected into
+/// `additionalInstructions` for EVERY agent run for this user (not just the daily
+/// brief) so users can tune any agent's behaviour for themselves. Same key shape
+/// as UserAgentConfig; kept as its own table so the hot chain-config row stays
+/// narrow and instructions can exist without a chain config. agentSlug is a plain
+/// string (no FK) matching every other per-user agent table.
+model UserAgentInstruction {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  agentSlug    String
+  /// The user's custom instruction text. Length-capped in the app layer.
+  instructions String   @default("") @db.Text
+  /// When false the row is retained but NOT injected (soft toggle, not delete).
+  enabled      Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  /// Denormalized org scope for org-scoped per-user-per-agent uniqueness.
+  orgId String
+
+  @@unique([userId, orgId, agentSlug])
+  @@index([orgId])
+  @@index([userId])
+  @@map("user_agent_instructions")
+}
+
+/// Generic store for feature-generated content. First consumer: Daily Brief.
+/// Named generically so future generated artifacts (weekly digest, agent
+/// summaries, …) reuse it via the `kind` discriminator (plain string per the
+/// repo's enum→text convention). One row per (user, kind, dateBucket).
+///   kind:   "DAILY_BRIEF" | (future) "WEEKLY_DIGEST" | …
+///   status: "generating" | "ready" | "failed"
+model GeneratedContent {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Producing agent's slug (nullable for feature-level content). No FK.
+  agentSlug   String?
+  /// Content-type discriminator. See doc comment above.
+  kind        String    @default("DAILY_BRIEF")
+  /// Calendar bucket this content is FOR (e.g. "2026-07-29" on the user's tz).
+  /// Enables one-per-day idempotency without timestamp math.
+  dateBucket  String
+  /// Rendered content (markdown) for direct display.
+  content     String    @default("") @db.Text
+  /// Structured payload (the emit_brief JSON) alongside the rendered content.
+  data        Json?
+  /// Lifecycle state (plain string per repo convention).
+  status      String    @default("generating")
+  /// Provenance: the claw session that produced this content.
+  sessionId   String?
+  /// When the content was actually produced (distinct from createdAt/the bucket).
+  generatedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  orgId String
+
+  @@unique([userId, kind, dateBucket])
+  @@index([orgId])
+  @@index([userId, kind, dateBucket])
+  @@index([status, kind])
+  @@map("generated_content")
 }
 
 model AgentChainWorkflow {

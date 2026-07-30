@@ -1683,6 +1683,9 @@ importers:
       bullmq:
         specifier: ^5.72.0
         version: 5.81.2(redis@5.12.1(@opentelemetry/api@1.9.1))
+      cron-parser:
+        specifier: ^4.9.0
+        version: 4.9.0
       exceljs:
         specifier: ^4.4.0
         version: 4.4.0
