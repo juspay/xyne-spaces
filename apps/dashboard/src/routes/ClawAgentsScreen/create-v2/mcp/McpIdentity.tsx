@@ -6,13 +6,18 @@ import { McpLogo } from './McpLogo';
 
 export const VerifiedTick = (): ReactElement => (
   <VerificationCheck
+    variant='Solid'
     className='size-4 shrink-0 text-[color:var(--mention-color)]'
     aria-label='Verified connector'
     role='img'
   />
 );
 
-export const EnabledBadge = (): ReactElement => <Pill tone='success'>Enabled</Pill>;
+export const EnabledBadge = (): ReactElement => (
+  <Pill tone='success' size='sm'>
+    Enabled
+  </Pill>
+);
 
 export const StatusBadge = ({
   tone,
@@ -28,6 +33,7 @@ interface McpIdentityProps {
   verified: boolean;
   gap?: 'tight' | 'default';
   muted?: boolean;
+  weight?: 'medium' | 'semibold';
   trailing?: ReactNode;
 }
 
@@ -37,6 +43,7 @@ export function McpIdentity({
   verified,
   gap = 'default',
   muted = false,
+  weight = 'semibold',
   trailing,
 }: McpIdentityProps): ReactElement {
   return (
@@ -45,7 +52,8 @@ export function McpIdentity({
       <span className='flex min-w-0 items-center gap-1'>
         <span
           className={cn(
-            'truncate text-sm font-semibold leading-5',
+            'truncate text-sm leading-5',
+            weight === 'medium' ? 'font-medium' : 'font-semibold',
             muted ? 'text-foreground/80' : 'text-foreground',
           )}
         >

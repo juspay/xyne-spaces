@@ -56,13 +56,17 @@ const SubagentCard = ({
     >
       <span className='flex w-full items-center justify-between gap-2'>
         <span className='flex min-w-0 items-center gap-2'>
-          <span className='truncate text-sm font-semibold leading-5 text-foreground'>
+          <span className='truncate text-sm font-medium leading-5 text-foreground'>
             {entry.name}
           </span>
           {selected ? (
-            <Pill tone='success'>Enabled</Pill>
+            <Pill tone='success' size='sm'>
+              Enabled
+            </Pill>
           ) : (
-            <Pill tone={RISK_TONE[entry.risk]}>{RISK_LABEL[entry.risk]}</Pill>
+            <Pill tone={RISK_TONE[entry.risk]} size='sm'>
+              {RISK_LABEL[entry.risk]}
+            </Pill>
           )}
         </span>
         <span className='flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground'>
@@ -176,7 +180,6 @@ export function BrowseSubagentsDialog({
               <SubagentChip
                 key={`selected-${entry.name}`}
                 label={entry.name}
-                source={entry.source}
                 selected
                 onToggle={() => onSelectionChange(disableSubagent(selection, entry))}
               />
@@ -185,7 +188,6 @@ export function BrowseSubagentsDialog({
               <SubagentChip
                 key={`suggested-${entry.name}`}
                 label={entry.name}
-                source={entry.source}
                 selected={false}
                 onToggle={() => onSelectionChange(toggleSubagent(selection, entry))}
               />

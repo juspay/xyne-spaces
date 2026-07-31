@@ -98,7 +98,7 @@ export function SubagentCapabilityRow({
       <div className='flex w-full items-center justify-between gap-4'>
         <div className='flex min-w-0 items-center gap-4'>
           <div className='flex shrink-0 items-center gap-2'>
-            <span className='text-sm font-semibold leading-[1.2] tracking-[-0.1px] text-foreground'>
+            <span className='text-sm font-medium leading-[1.2] tracking-[-0.1px] text-foreground'>
               Subagent
             </span>
             <Tooltip side='top' content={CAPTION}>
@@ -130,7 +130,6 @@ export function SubagentCapabilityRow({
             <SubagentChip
               key={`selected-${entry.name}`}
               label={entry.name}
-              source={entry.source}
               selected
               onToggle={() => onSelectionChange(disableSubagent(selection, entry))}
             />
@@ -139,7 +138,6 @@ export function SubagentCapabilityRow({
             <SubagentChip
               key={`suggested-${entry.name}`}
               label={entry.name}
-              source={entry.source}
               selected={false}
               onToggle={() => onSelectionChange(enableSubagent(selection, entry))}
             />

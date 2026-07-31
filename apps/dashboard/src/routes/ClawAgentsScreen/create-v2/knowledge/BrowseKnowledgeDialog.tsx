@@ -68,7 +68,7 @@ export function BrowseKnowledgeDialog({
                 <span className='text-sm font-semibold leading-5 text-foreground'>
                   {option.label}
                 </span>
-                <span className='text-xs leading-4 tracking-[-0.24px] text-muted-foreground'>
+                <span className='text-xs font-normal leading-4 tracking-[-0.24px] text-muted-foreground'>
                   {option.hint}
                 </span>
               </button>

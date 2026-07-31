@@ -61,6 +61,7 @@ const McpCard = ({
           label={entry.label}
           iconType={entry.iconType}
           verified={entry.verified}
+          weight='medium'
           {...(state.enabled ? { trailing: <EnabledBadge /> } : {})}
         />
         <span className='flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground'>

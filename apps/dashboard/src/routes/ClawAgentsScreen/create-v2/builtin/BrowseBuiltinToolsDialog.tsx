@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactElement } from 'react';
-import { ChevronRight, Grid01, MultipleCrossCancelDefault, PlusDefault } from '@xyne/icons';
+import { ChevronRight, MultipleCrossCancelDefault, PlusDefault } from '@xyne/icons';
 import { BrowseDialog, type FilterOption } from '../shared/BrowseDialog';
 import { Pill } from '../shared/Pill';
 import { BuiltinChip } from './BuiltinChip';
@@ -53,16 +53,17 @@ const BuiltinCard = ({
     >
       <span className='flex w-full items-center justify-between gap-2'>
         <span className='flex min-w-0 items-center gap-2'>
-          <span className='flex size-7 shrink-0 items-center justify-center rounded-lg border border-border bg-muted text-muted-foreground'>
-            <Grid01 className='size-4' aria-hidden />
-          </span>
-          <span className='truncate text-sm font-semibold leading-5 text-foreground'>
+          <span className='truncate text-sm font-medium leading-5 text-foreground'>
             {entry.label}
           </span>
           {enabled ? (
-            <Pill tone='success'>Enabled</Pill>
+            <Pill tone='success' size='sm'>
+              Enabled
+            </Pill>
           ) : (
-            <Pill tone={RISK_TONE[entry.risk]}>{RISK_LABEL[entry.risk]}</Pill>
+            <Pill tone={RISK_TONE[entry.risk]} size='sm'>
+              {RISK_LABEL[entry.risk]}
+            </Pill>
           )}
         </span>
         <span className='flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground'>

@@ -34,20 +34,22 @@ export function BuiltinDetailPanel({
   const allChosen = chosen.length === entry.tools.length;
 
   return (
-    <div className='flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-[22px] pb-2 pt-2'>
-      <div className='flex items-center justify-between gap-4'>
-        <div className='flex min-w-0 items-center gap-2.5'>
-          <span className='flex size-11 shrink-0 items-center justify-center rounded-xl border border-border bg-muted text-muted-foreground'>
+    <div className='flex min-h-0 flex-1 flex-col gap-8 overflow-y-auto px-[22px] pb-9 pt-2'>
+      <div className='flex w-full items-start gap-12'>
+        <div className='flex min-w-0 flex-1 items-center gap-2.5'>
+          <span className='flex size-11 shrink-0 items-center justify-center rounded-xl border border-border bg-card text-muted-foreground'>
             <Grid01 className='size-5' aria-hidden />
           </span>
-          <div className='flex min-w-0 flex-col gap-2'>
+          <div className='flex min-w-0 flex-col gap-2.5 py-px'>
             <span className='flex min-w-0 items-center gap-1.5'>
-              <span className='truncate text-sm font-bold leading-5 tracking-[-0.28px] text-foreground'>
+              <span className='truncate text-sm font-semibold leading-5 tracking-[-0.28px] text-foreground'>
                 {entry.label}
               </span>
-              <Pill tone={RISK_TONE[entry.risk]}>{RISK_LABEL[entry.risk]}</Pill>
+              <Pill tone={RISK_TONE[entry.risk]} size='sm'>
+                {RISK_LABEL[entry.risk]}
+              </Pill>
             </span>
-            <span className='truncate text-xs leading-4 tracking-[-0.24px] text-muted-foreground'>
+            <span className='truncate text-xs font-semibold leading-4 tracking-[-0.24px] text-muted-foreground'>
               {entry.tools.length} tools available
             </span>
           </div>
@@ -62,7 +64,7 @@ export function BuiltinDetailPanel({
           data-track-category='Claw Agents'
           data-track-name='Create agent v2: toggle built-in group from detail'
           className={cn(
-            'flex h-7 shrink-0 items-center rounded-lg border px-2 text-sm font-medium leading-5 transition-colors',
+            'flex h-7 shrink-0 items-center justify-center rounded-lg border px-2 text-sm font-medium leading-[1.2] transition-colors',
             enabled
               ? 'border-border bg-card text-foreground hover:bg-muted'
               : 'border-border bg-primary text-primary-foreground hover:bg-primary/90',

@@ -1,8 +1,13 @@
 import { type ReactElement, type ReactNode } from 'react';
+import { Staroflife, Tools, UserBot } from '@xyne/icons';
 import { cn } from '@/utils/classNames';
-import { Pill } from '../shared/Pill';
+import { useClawAvailableTools } from '@/hooks/useClawAvailableTools';
+import { McpLogo } from '../mcp/McpLogo';
+import { Clamped } from '../shared/Clamped';
 import { SectionHeading, Separator } from '../shared/Section';
-import { SubagentAvatar } from './SubagentAvatar';
+import { ChipIconTile, TokenChip } from '../shared/TokenChip';
+import { resolveSubagentCapabilities } from './subagentDetail';
+import { useSubagentDetail } from './useSubagentDetail';
 import {
   disableSubagent,
   enableSubagent,
@@ -11,23 +16,52 @@ import {
   type SubagentSelection,
 } from './subagentCatalog';
 
-const RISK_LABEL = {
-  read: 'Read',
-  write: 'Write',
-  destructive: 'Destructive',
-} as const;
+const PROMPT_MAX_HEIGHT = 300;
+const TOOLS_MAX_HEIGHT = 175;
 
-const RISK_TONE = {
-  read: 'success',
-  write: 'warning',
-  destructive: 'danger',
-} as const;
+const Section = ({
+  label,
+  info,
+  children,
+}: {
+  label: string;
+  info: string;
+  children: ReactNode;
+}): ReactElement => (
+  <section className='flex w-full flex-col gap-4'>
+    <SectionHeading label={label} info={info} />
+    {children}
+  </section>
+);
 
-const MetaRow = ({ label, children }: { label: string; children: ReactNode }): ReactElement => (
-  <div className='flex min-h-7 items-center justify-between gap-3'>
-    <span className='text-sm leading-5 text-muted-foreground'>{label}</span>
-    <span className='flex min-w-0 items-center gap-1.5 text-sm leading-5 text-foreground'>
-      {children}
+const ChipRow = ({ children }: { children: ReactNode }): ReactElement => (
+  <div className='flex w-full flex-wrap items-start gap-2.5'>{children}</div>
+);
+
+const EmptyHint = ({ children }: { children: ReactNode }): ReactElement => (
+  <p className='text-sm font-normal leading-5 text-muted-foreground'>{children}</p>
+);
+
+const Field = ({
+  label,
+  value,
+  leading,
+}: {
+  label: string;
+  value: string;
+  leading: 'tight' | 'relaxed';
+}): ReactElement => (
+  <div className='flex w-full flex-col gap-2'>
+    <span className='text-xs font-medium capitalize leading-4 tracking-[0.48px] text-muted-foreground'>
+      {label}
+    </span>
+    <span
+      className={cn(
+        'text-sm font-medium text-foreground',
+        leading === 'tight' ? 'leading-[1.2]' : 'leading-[1.3]',
+      )}
+    >
+      {value}
     </span>
   </div>
 );
@@ -44,24 +78,37 @@ export function SubagentDetailPanel({
   onSelectionChange,
 }: SubagentDetailPanelProps): ReactElement {
   const selected = isSubagentSelected(selection, entry);
-  const { def } = entry;
-  const author = def?.createdByName || def?.createdByEmail;
+  const availableTools = useClawAvailableTools();
+  const { def } = useSubagentDetail(entry.name, entry.def);
+
+  const capabilities = resolveSubagentCapabilities(
+    availableTools.data ?? null,
+    def,
+    entry.serverType,
+  );
+  const author = def?.createdByName || def?.createdByEmail || '';
+  const contributors = def?.shares ?? [];
+  const skills = def?.skills ?? [];
+  const systemPrompt = def?.systemPrompt ?? '';
+  const description = def?.description || entry.description;
 
   return (
-    <div className='flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-[22px] pb-2 pt-2'>
-      <div className='flex items-center justify-between gap-4'>
-        <div className='flex min-w-0 items-center gap-2.5'>
-          <SubagentAvatar source={entry.source} size='lg' />
-          <div className='flex min-w-0 flex-col gap-2'>
-            <span className='flex min-w-0 items-center gap-1.5'>
-              <span className='truncate text-sm font-bold leading-5 tracking-[-0.28px] text-foreground'>
-                {entry.name}
-              </span>
-              <Pill tone={RISK_TONE[entry.risk]}>{RISK_LABEL[entry.risk]}</Pill>
+    <div className='flex min-h-0 flex-1 flex-col gap-8 overflow-y-auto px-[22px] pb-9 pt-2'>
+      <div className='flex w-full items-start gap-12'>
+        <div className='flex min-w-0 flex-1 items-center gap-2.5'>
+          <span
+            className='flex size-11 shrink-0 items-center justify-center rounded-xl border border-border bg-card text-muted-foreground'
+            aria-hidden
+          >
+            <UserBot className='size-6' />
+          </span>
+          <div className='flex min-w-0 flex-col gap-2.5 py-px'>
+            <span className='truncate text-sm font-semibold leading-5 tracking-[-0.28px] text-foreground'>
+              {entry.name}
             </span>
-            {entry.description && (
-              <span className='truncate text-xs leading-4 tracking-[-0.24px] text-muted-foreground'>
-                {entry.description}
+            {author && (
+              <span className='truncate text-xs font-semibold leading-4 tracking-[-0.24px] text-muted-foreground'>
+                Created by {author}
               </span>
             )}
           </div>
@@ -76,65 +123,169 @@ export function SubagentDetailPanel({
           data-track-category='Claw Agents'
           data-track-name='Create agent v2: toggle subagent from detail'
           className={cn(
-            'flex h-7 shrink-0 items-center rounded-lg border px-2 text-sm font-medium leading-5 transition-colors',
+            'flex h-7 shrink-0 items-center justify-center rounded-lg border px-2 text-sm font-medium leading-[1.2] transition-colors',
             selected
               ? 'border-border bg-card text-foreground hover:bg-muted'
               : 'border-border bg-primary text-primary-foreground hover:bg-primary/90',
           )}
         >
-          {selected ? 'Disable' : 'Enable'}
+          {selected ? 'Remove' : 'Add'}
         </button>
       </div>
 
-      <Separator />
+      {description && (
+        <p className='w-full text-sm font-normal leading-5 tracking-[-0.28px] text-foreground'>
+          {description}
+        </p>
+      )}
 
-      <section className='flex flex-col gap-4'>
-        <SectionHeading label='Details' info='Where this subagent comes from and how it runs' />
-        <div className='flex flex-col gap-2'>
-          <MetaRow label='Type'>
-            <Pill tone='neutral'>{entry.source === 'builtin' ? 'Built-in' : 'Custom'}</Pill>
-          </MetaRow>
-          <MetaRow label='Availability'>
-            {def && !def.enabled ? (
-              <Pill tone='neutral'>Disabled</Pill>
-            ) : (
-              <Pill tone='success'>Available</Pill>
-            )}
-          </MetaRow>
-          {entry.progressLabel && <MetaRow label='Progress label'>{entry.progressLabel}</MetaRow>}
-          {author && <MetaRow label='Created by'>{author}</MetaRow>}
-        </div>
-      </section>
+      <div className='flex w-full flex-col gap-4'>
+        <Section label='Instructions' info='The system prompt this subagent runs with'>
+          {systemPrompt ? (
+            <Clamped
+              maxHeight={PROMPT_MAX_HEIGHT}
+              resetKey={entry.name}
+              className='rounded-2xl border border-border bg-card p-4'
+            >
+              <p className='whitespace-pre-wrap text-sm font-normal leading-5 tracking-[-0.28px] text-foreground'>
+                {systemPrompt}
+              </p>
+            </Clamped>
+          ) : (
+            <EmptyHint>No instructions added</EmptyHint>
+          )}
+        </Section>
 
-      <Separator />
+        <Separator />
 
-      <section className='flex flex-col gap-4'>
-        <SectionHeading
-          label='Capabilities'
-          info='Tools and skills this subagent brings with it — they are fixed by its definition'
-        />
-        <div className='flex flex-col gap-2'>
-          <MetaRow label='Tools'>{entry.toolCount}</MetaRow>
-          <MetaRow label='Skills'>{entry.skillCount}</MetaRow>
-        </div>
-        {def && def.skills.length > 0 && (
-          <div className='flex flex-wrap gap-1.5'>
-            {def.skills.map(skill => (
-              <span
-                key={skill.id}
-                className='rounded-md border border-border bg-muted px-2 py-1 text-xs leading-4 text-muted-foreground'
-              >
-                {skill.name}
-              </span>
-            ))}
-          </div>
-        )}
-      </section>
+        <Section label='Contributors' info='People who can edit this subagent'>
+          {contributors.length > 0 ? (
+            <ChipRow>
+              {contributors.map(share => (
+                <TokenChip
+                  key={share.userId}
+                  icon={
+                    <ChipIconTile>
+                      <UserBot className='size-4' />
+                    </ChipIconTile>
+                  }
+                  label={share.name || share.email}
+                  secondary={share.email}
+                />
+              ))}
+            </ChipRow>
+          ) : (
+            <EmptyHint>No contributors added</EmptyHint>
+          )}
+        </Section>
 
-      <p className='text-xs leading-4 text-muted-foreground'>
-        Adding a subagent lets this agent delegate matching work to it. The subagent keeps its own
-        tools and instructions.
-      </p>
+        <Separator />
+
+        <Section label='Parameter' info='What the parent agent passes in when it delegates'>
+          {def?.paramName || def?.paramDescription ? (
+            <>
+              {def.paramName && <Field label='Name' value={def.paramName} leading='tight' />}
+              {def.paramDescription && (
+                <Field label='Description' value={def.paramDescription} leading='relaxed' />
+              )}
+            </>
+          ) : (
+            <EmptyHint>No parameter defined</EmptyHint>
+          )}
+        </Section>
+
+        <Separator />
+
+        <Section label='MCP' info='Connectors this subagent draws its tools from'>
+          {capabilities.mcps.length > 0 ? (
+            <ChipRow>
+              {capabilities.mcps.map(mcp => (
+                <TokenChip
+                  key={mcp.slug}
+                  icon={<McpLogo type={mcp.slug} name={mcp.label} />}
+                  label={mcp.label}
+                />
+              ))}
+            </ChipRow>
+          ) : (
+            <EmptyHint>No MCP connected</EmptyHint>
+          )}
+        </Section>
+
+        <Separator />
+
+        <Section label='Built-in Tools' info='Platform tools this subagent can call'>
+          {capabilities.builtinTools.length > 0 ? (
+            <Clamped maxHeight={TOOLS_MAX_HEIGHT} resetKey={entry.name}>
+              <ChipRow>
+                {capabilities.builtinTools.map(tool => (
+                  <TokenChip
+                    key={tool.key}
+                    icon={
+                      <ChipIconTile>
+                        <Tools className='size-4' />
+                      </ChipIconTile>
+                    }
+                    label={tool.label}
+                  />
+                ))}
+              </ChipRow>
+            </Clamped>
+          ) : (
+            <EmptyHint>No built-in tools added</EmptyHint>
+          )}
+        </Section>
+
+        <Separator />
+
+        <Section label='System Tools' info='Custom tool groups registered for this workspace'>
+          {capabilities.systemTools.length > 0 ? (
+            <ChipRow>
+              {capabilities.systemTools.map(tool => (
+                <TokenChip
+                  key={tool.key}
+                  icon={
+                    <ChipIconTile>
+                      <Tools className='size-4' />
+                    </ChipIconTile>
+                  }
+                  label={tool.label}
+                />
+              ))}
+            </ChipRow>
+          ) : (
+            <EmptyHint>No system tools added</EmptyHint>
+          )}
+        </Section>
+
+        <Separator />
+
+        <Section label='Skills' info='Reference material this subagent consults'>
+          {skills.length > 0 ? (
+            <ChipRow>
+              {skills.map(skill => (
+                <TokenChip
+                  key={skill.id}
+                  icon={
+                    <ChipIconTile>
+                      <Staroflife className='size-4' />
+                    </ChipIconTile>
+                  }
+                  label={skill.name}
+                />
+              ))}
+            </ChipRow>
+          ) : (
+            <EmptyHint>No skills added</EmptyHint>
+          )}
+        </Section>
+      </div>
+
+      {author && (
+        <p className='w-full pt-9 text-xs font-semibold leading-4 tracking-[-0.24px] text-muted-foreground'>
+          Created by {author}
+        </p>
+      )}
     </div>
   );
 }

@@ -12,8 +12,10 @@ import {
   type McpCatalogEntry,
   type McpSelection,
 } from './mcpCatalog';
+import { McpConnectForm } from './McpConnectForm';
 import { StatusBadge, VerifiedTick } from './McpIdentity';
 import { McpLogo } from './McpLogo';
+import { useMcpConnect } from './useMcpConnect';
 import { SectionHeading, Separator } from '../shared/Section';
 import { ToolRow } from '../shared/ToolRow';
 
@@ -38,20 +40,39 @@ function needsUserToken(server: McpServer): boolean {
 }
 
 const Section = ({ children }: { children: ReactNode }): ReactElement => (
-  <section className='flex flex-col gap-4'>{children}</section>
+  <section className='flex w-full flex-col gap-3'>{children}</section>
 );
 
 const MetaRows = ({ children }: { children: ReactNode }): ReactElement => (
-  <div className='flex flex-col gap-2'>{children}</div>
+  <div className='flex w-full flex-col gap-2'>{children}</div>
 );
 
-const MetaRow = ({ label, children }: { label: ReactNode; children: ReactNode }): ReactElement => (
-  <div className='flex min-h-7 items-center justify-between gap-3'>
-    <span className='flex items-center gap-2 text-sm leading-5 text-muted-foreground'>{label}</span>
-    <span className='flex min-w-0 items-center gap-1.5 text-sm leading-5 text-foreground'>
-      {children}
+const MetaRow = ({
+  label,
+  muted = false,
+  children,
+}: {
+  label: ReactNode;
+  muted?: boolean;
+  children: ReactNode;
+}): ReactElement => (
+  <div className='flex h-7 w-full items-center justify-between gap-3'>
+    <span
+      className={cn(
+        'flex items-center gap-2 text-sm font-medium leading-5',
+        muted ? 'text-muted-foreground' : 'text-foreground',
+      )}
+    >
+      {label}
     </span>
+    <span className='flex min-w-0 items-center gap-1.5'>{children}</span>
   </div>
+);
+
+const MetaValue = ({ children }: { children: ReactNode }): ReactElement => (
+  <span className='min-w-0 truncate text-xs font-normal leading-4 tracking-[-0.24px] text-muted-foreground'>
+    {children}
+  </span>
 );
 
 const CopyEndpointButton = ({ value }: { value: string }): ReactElement => {
@@ -105,23 +126,24 @@ export function McpDetailPanel({
   const allChosen = entry.selectable && chosen.length === entry.tools.length;
   const author = SERVER_AUTHOR_MAP[entry.slug] ?? entry.label;
 
+  const [authOpen, setAuthOpen] = useState(false);
+  const connect = useMcpConnect(server, () => setAuthOpen(false));
+
   return (
-    <div className='flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-[22px] pb-2 pt-2'>
-      <div className='flex items-center justify-between gap-4'>
-        <div className='flex min-w-0 items-center gap-2.5'>
+    <div className='flex min-h-0 flex-1 flex-col gap-8 overflow-y-auto px-[22px] pb-9 pt-2'>
+      <div className='flex w-full items-start gap-12'>
+        <div className='flex min-w-0 flex-1 items-center gap-2.5'>
           <McpLogo type={entry.iconType} name={entry.label} size='lg' />
-          <div className='flex min-w-0 flex-col gap-2'>
+          <div className='flex min-w-0 flex-col gap-2.5 py-px'>
             <span className='flex min-w-0 items-center gap-1.5'>
-              <span className='truncate text-sm font-bold leading-5 tracking-[-0.28px] text-foreground'>
+              <span className='truncate text-sm font-semibold leading-[1.3] tracking-[-0.28px] text-foreground'>
                 {entry.label}
               </span>
               {entry.verified && <VerifiedTick />}
             </span>
-            {entry.description && (
-              <span className='truncate text-xs leading-4 tracking-[-0.24px] text-muted-foreground'>
-                {entry.description}
-              </span>
-            )}
+            <span className='truncate text-xs font-semibold leading-4 tracking-[-0.24px] text-muted-foreground'>
+              Built by {author}
+            </span>
           </div>
         </div>
         <button
@@ -138,7 +160,7 @@ export function McpDetailPanel({
           data-track-category='Claw Agents'
           data-track-name='Create agent v2: toggle MCP from detail'
           className={cn(
-            'flex h-7 shrink-0 items-center rounded-lg border px-2 text-sm font-medium leading-5 transition-colors disabled:cursor-not-allowed disabled:opacity-50',
+            'flex h-7 shrink-0 items-center justify-center rounded-lg border px-2 text-sm font-medium leading-[1.2] transition-colors disabled:cursor-not-allowed disabled:opacity-50',
             enabled
               ? 'border-border bg-card text-foreground hover:bg-muted'
               : 'border-border bg-primary text-primary-foreground hover:bg-primary/90',
@@ -148,110 +170,175 @@ export function McpDetailPanel({
         </button>
       </div>
 
-      {server && (
-        <Section>
-          <SectionHeading label='Status' info='How this connector authenticates' />
-          <MetaRows>
-            <MetaRow label='Global token'>
-              <StatusBadge tone={server.enabled === false ? 'neutral' : 'positive'}>
-                {server.enabled === false ? 'Inactive' : 'Active'}
-              </StatusBadge>
-            </MetaRow>
-            <MetaRow label='User token'>
-              {connected ? (
-                <StatusBadge tone='positive'>Connected</StatusBadge>
-              ) : needsUserToken(server) ? (
-                <a
-                  href={`/claw-agents/mcp/${server.id}`}
-                  target='_blank'
-                  rel='noreferrer'
-                  data-track-category='Claw Agents'
-                  data-track-name='Create agent v2: authenticate MCP'
-                  className='font-medium text-[color:var(--mention-color)] underline-offset-2 hover:underline'
-                >
-                  Authenticate
-                </a>
-              ) : (
-                <span>Not required</span>
+      {entry.description && (
+        <p className='w-full text-sm font-normal leading-5 tracking-[-0.28px] text-foreground'>
+          {entry.description}
+        </p>
+      )}
+
+      <div className='flex w-full flex-col gap-4'>
+        {server && (
+          <Section>
+            <SectionHeading label='Status' info='How this connector authenticates' />
+            <MetaRows>
+              <MetaRow label='Global token'>
+                <StatusBadge tone={server.enabled === false ? 'neutral' : 'positive'}>
+                  {server.enabled === false ? 'Inactive' : 'Active'}
+                </StatusBadge>
+              </MetaRow>
+              <MetaRow label='User token'>
+                {connected ? (
+                  <StatusBadge tone='positive'>Connected</StatusBadge>
+                ) : needsUserToken(server) ? (
+                  <button
+                    type='button'
+                    onClick={() => {
+                      connect.reset();
+                      setAuthOpen(open => !open);
+                    }}
+                    data-track-category='Claw Agents'
+                    data-track-name='Create agent v2: authenticate MCP'
+                    className={cn(
+                      'flex items-center rounded-md px-[5px] py-[3px] text-sm font-medium leading-5 text-[color:var(--mention-color)] transition-opacity',
+                      authOpen ? 'opacity-50' : 'hover:underline',
+                    )}
+                  >
+                    {authOpen ? 'Authenticating' : 'Authenticate'}
+                  </button>
+                ) : (
+                  <MetaValue>Not required</MetaValue>
+                )}
+              </MetaRow>
+
+              {authOpen && !connected && (
+                <div className='flex w-full flex-col gap-2 py-1'>
+                  {connect.strategy === 'oauth' ? (
+                    <>
+                      <p className='text-xs leading-4 tracking-[-0.24px] text-muted-foreground'>
+                        {entry.label} signs in through your browser. You will come back here once it
+                        is done.
+                      </p>
+                      {connect.error && (
+                        <p className='text-xs leading-4 text-destructive'>{connect.error}</p>
+                      )}
+                      <div className='flex items-center justify-end gap-1.5'>
+                        <button
+                          type='button'
+                          onClick={() => setAuthOpen(false)}
+                          className='flex h-7 items-center justify-center rounded-lg bg-card px-2 py-1.5 text-sm font-medium leading-5 text-foreground transition-colors hover:bg-muted'
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type='button'
+                          disabled={connect.isPending}
+                          onClick={() => connect.connect({})}
+                          data-track-category='Claw Agents'
+                          data-track-name='Create agent v2: start MCP oauth'
+                          className='flex h-7 items-center justify-center rounded-lg bg-foreground/[0.06] px-2 py-1.5 text-sm font-medium leading-5 text-foreground transition-colors hover:bg-foreground/[0.09] disabled:cursor-not-allowed disabled:opacity-50'
+                        >
+                          {connect.isPending ? 'Redirecting…' : 'Continue'}
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <McpConnectForm
+                      fields={connect.fields}
+                      isPending={connect.isPending}
+                      error={connect.error}
+                      onCancel={() => setAuthOpen(false)}
+                      onSubmit={connect.connect}
+                    />
+                  )}
+                </div>
               )}
-            </MetaRow>
-          </MetaRows>
-        </Section>
-      )}
-
-      {server && <Separator />}
-
-      {server && (
-        <Section>
-          <SectionHeading label='Connection' info='Where this connector runs' />
-          <MetaRows>
-            <MetaRow
-              label={
-                <>
-                  Endpoint
-                  <CopyEndpointButton value={server.url} />
-                </>
-              }
-            >
-              <span className='min-w-0 truncate'>{server.url}</span>
-            </MetaRow>
-            <MetaRow label='Transport'>{server.transport || 'stdio'}</MetaRow>
-          </MetaRows>
-        </Section>
-      )}
-
-      <Separator />
-
-      <Section>
-        <SectionHeading
-          label='Tools'
-          info='Only the tools you select here can be called by this agent'
-          {...(entry.selectable && {
-            action: (
-              <button
-                type='button'
-                onClick={() =>
-                  onSelectionChange(
-                    setToolsSelected(catalog, selection, entry, entry.tools, !allChosen),
-                  )
-                }
-                data-track-category='Claw Agents'
-                data-track-name='Create agent v2: toggle all MCP tools'
-                className='shrink-0 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground'
-              >
-                {allChosen ? 'Clear all' : `Select all (${chosen.length}/${entry.tools.length})`}
-              </button>
-            ),
-          })}
-        />
-
-        {entry.selectable ? (
-          <div className='grid grid-cols-1 gap-x-12 gap-y-4 sm:grid-cols-2'>
-            {entry.tools.map(tool => {
-              const checked = isToolSelected(selection, entry, tool);
-              return (
-                <ToolRow
-                  key={tool.slug}
-                  tool={tool}
-                  checked={checked}
-                  onToggle={() =>
-                    onSelectionChange(setToolsSelected(catalog, selection, entry, [tool], !checked))
-                  }
-                />
-              );
-            })}
-          </div>
-        ) : (
-          <p className='text-xs leading-4 text-muted-foreground'>
-            No tools have synced for this integration yet. They appear here once it is connected.
-          </p>
+            </MetaRows>
+          </Section>
         )}
-      </Section>
 
-      <p className='text-xs leading-4 text-muted-foreground'>
-        Built by {author}. Only connect tools you trust. Connectors are created by third-party
-        developers and may change over time.
-      </p>
+        {server && <Separator />}
+
+        {server && (
+          <Section>
+            <SectionHeading label='Connection' info='Where this connector runs' />
+            <MetaRows>
+              <MetaRow
+                muted
+                label={
+                  <>
+                    Endpoint
+                    <CopyEndpointButton value={server.url} />
+                  </>
+                }
+              >
+                <MetaValue>{server.url}</MetaValue>
+              </MetaRow>
+              <MetaRow muted label='Transport'>
+                <MetaValue>{server.transport || 'stdio'}</MetaValue>
+              </MetaRow>
+            </MetaRows>
+          </Section>
+        )}
+
+        <Separator />
+
+        <section className='flex w-full flex-col gap-4'>
+          <SectionHeading
+            label='Tools'
+            info='Only the tools you select here can be called by this agent'
+            {...(entry.selectable && {
+              action: (
+                <button
+                  type='button'
+                  onClick={() =>
+                    onSelectionChange(
+                      setToolsSelected(catalog, selection, entry, entry.tools, !allChosen),
+                    )
+                  }
+                  data-track-category='Claw Agents'
+                  data-track-name='Create agent v2: toggle all MCP tools'
+                  className='shrink-0 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground'
+                >
+                  {allChosen ? 'Clear all' : `Select all (${chosen.length}/${entry.tools.length})`}
+                </button>
+              ),
+            })}
+          />
+
+          {entry.selectable ? (
+            <div className='grid grid-cols-1 gap-x-12 gap-y-4 sm:grid-cols-2'>
+              {entry.tools.map(tool => {
+                const checked = isToolSelected(selection, entry, tool);
+                return (
+                  <ToolRow
+                    key={tool.slug}
+                    tool={tool}
+                    checked={checked}
+                    onToggle={() =>
+                      onSelectionChange(
+                        setToolsSelected(catalog, selection, entry, [tool], !checked),
+                      )
+                    }
+                  />
+                );
+              })}
+            </div>
+          ) : (
+            <p className='text-sm font-normal leading-5 text-muted-foreground'>
+              No tools have synced for this integration yet. They appear here once it is connected.
+            </p>
+          )}
+        </section>
+      </div>
+
+      <div className='flex w-full flex-col text-xs leading-4 tracking-[-0.24px] text-muted-foreground'>
+        <span className='font-semibold'>Built by {author}</span>
+        <span>&nbsp;</span>
+        <span>
+          Only connect tools you trust. Connectors are created by third-party developers and may
+          change over time.
+        </span>
+      </div>
     </div>
   );
 }

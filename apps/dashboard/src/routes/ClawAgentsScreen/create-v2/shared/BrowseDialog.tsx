@@ -140,7 +140,7 @@ export function BrowseDialog({
       title={title}
       description={description}
       testId={testId}
-      className='flex max-h-[85vh] w-full max-w-[800px] flex-col gap-4 overflow-hidden rounded-2xl border-[0.8px] border-border bg-card p-1'
+      className='flex h-[min(85vh,720px)] w-full max-w-[800px] flex-col gap-4 overflow-hidden rounded-2xl border-[0.8px] border-border bg-card p-1'
     >
       <div
         className={cn(
@@ -149,21 +149,20 @@ export function BrowseDialog({
         )}
       >
         {detail ? (
-          <div className='flex min-w-0 items-center'>
-            <button
-              type='button'
-              onClick={detail.onBack}
-              aria-label='Back'
-              data-track-category='Claw Agents'
-              data-track-name='Create agent v2: browse back'
-              className='flex size-7 shrink-0 items-center justify-center rounded-[10px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
-            >
-              <ChevronBigLeft className='size-4' aria-hidden />
-            </button>
-            <h2 className='min-w-0 truncate text-base font-semibold leading-6 tracking-[-0.16px] text-foreground'>
-              {detail.label}
-            </h2>
-          </div>
+          <button
+            type='button'
+            onClick={detail.onBack}
+            title={`Back to ${title}`}
+            aria-label={`Back to ${title}`}
+            data-track-category='Claw Agents'
+            data-track-name='Create agent v2: browse back'
+            className='flex h-7 shrink-0 items-center gap-1 rounded-[10px] pl-1 pr-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
+          >
+            <ChevronBigLeft className='size-4 shrink-0' aria-hidden />
+            <span className='text-base font-semibold leading-6 tracking-[-0.32px] text-foreground'>
+              Back
+            </span>
+          </button>
         ) : (
           <span className='text-base font-semibold leading-6 tracking-[-0.16px] text-foreground'>
             {title}
@@ -186,7 +185,7 @@ export function BrowseDialog({
       ) : (
         <>
           {onQueryChange && (
-            <div className='px-2'>
+            <div className='shrink-0 px-2'>
               <div className='flex h-9 items-center gap-4 rounded-[10px] bg-muted pl-2.5 pr-1'>
                 <div className='flex h-full min-w-0 flex-1 items-center gap-2'>
                   <SearchBig className='size-4 shrink-0 text-muted-foreground' aria-hidden />
@@ -212,9 +211,9 @@ export function BrowseDialog({
             </div>
           )}
 
-          {toolbar && <div className='px-2'>{toolbar}</div>}
+          {toolbar && <div className='shrink-0 px-2'>{toolbar}</div>}
 
-          {chips}
+          {chips && <div className='max-h-[92px] shrink-0 overflow-y-auto'>{chips}</div>}
 
           <div className='flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-2 py-3'>
             {loading ? (
@@ -224,8 +223,10 @@ export function BrowseDialog({
                 ))}
               </div>
             ) : isError ? (
-              <div className='flex flex-col items-center gap-3 py-16 text-center'>
-                <p className='text-sm text-muted-foreground'>Couldn&apos;t load this list.</p>
+              <div className='flex flex-1 flex-col items-center justify-center gap-3 text-center'>
+                <p className='text-sm font-normal text-muted-foreground'>
+                  Couldn&apos;t load this list.
+                </p>
                 <button
                   type='button'
                   onClick={onRetry}
@@ -237,7 +238,11 @@ export function BrowseDialog({
                 </button>
               </div>
             ) : emptyMessage ? (
-              <p className='py-16 text-center text-sm text-muted-foreground'>{emptyMessage}</p>
+              <div className='flex flex-1 items-center justify-center px-6'>
+                <p className='text-center text-sm font-normal leading-5 text-muted-foreground'>
+                  {emptyMessage}
+                </p>
+              </div>
             ) : (
               children
             )}

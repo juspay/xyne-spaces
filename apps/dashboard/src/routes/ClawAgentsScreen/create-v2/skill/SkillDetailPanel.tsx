@@ -15,8 +15,8 @@ const formatFileSize = (bytes: number): string => {
 
 const MetaRow = ({ label, children }: { label: string; children: ReactNode }): ReactElement => (
   <div className='flex min-h-7 items-center justify-between gap-3'>
-    <span className='text-sm leading-5 text-muted-foreground'>{label}</span>
-    <span className='flex min-w-0 items-center gap-1.5 text-sm leading-5 text-foreground'>
+    <span className='text-sm font-medium leading-5 text-muted-foreground'>{label}</span>
+    <span className='flex min-w-0 items-center gap-1.5 text-sm font-medium leading-5 text-foreground'>
       {children}
     </span>
   </div>
@@ -38,27 +38,22 @@ export function SkillDetailPanel({
   const bundle = files.data ?? [];
 
   return (
-    <div className='flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-[22px] pb-2 pt-2'>
-      <div className='flex items-center justify-between gap-4'>
-        <div className='flex min-w-0 items-center gap-2.5'>
-          <span
-            className={cn(
-              'flex size-11 shrink-0 items-center justify-center rounded-xl border',
-              entry.scope === 'global'
-                ? 'border-border bg-muted text-muted-foreground'
-                : 'border-primary/20 bg-primary/10 text-primary',
-            )}
-          >
+    <div className='flex min-h-0 flex-1 flex-col gap-8 overflow-y-auto px-[22px] pb-9 pt-2'>
+      <div className='flex w-full items-start gap-12'>
+        <div className='flex min-w-0 flex-1 items-center gap-2.5'>
+          <span className='flex size-11 shrink-0 items-center justify-center rounded-xl border border-border bg-card text-muted-foreground'>
             <Notebook className='size-5' aria-hidden />
           </span>
-          <div className='flex min-w-0 flex-col gap-2'>
+          <div className='flex min-w-0 flex-col gap-2.5 py-px'>
             <span className='flex min-w-0 items-center gap-1.5'>
-              <span className='truncate text-sm font-bold leading-5 tracking-[-0.28px] text-foreground'>
+              <span className='truncate text-sm font-semibold leading-5 tracking-[-0.28px] text-foreground'>
                 {entry.label}
               </span>
-              <Pill tone='neutral'>{entry.scope === 'global' ? 'Global' : 'Personal'}</Pill>
+              <Pill tone='neutral' size='sm'>
+                {entry.scope === 'global' ? 'Global' : 'Personal'}
+              </Pill>
             </span>
-            <span className='truncate text-xs leading-4 tracking-[-0.24px] text-muted-foreground'>
+            <span className='truncate text-xs font-semibold leading-4 tracking-[-0.24px] text-muted-foreground'>
               {entry.description || entry.slug}
             </span>
           </div>
@@ -71,7 +66,7 @@ export function SkillDetailPanel({
           data-track-category='Claw Agents'
           data-track-name='Create agent v2: toggle skill from detail'
           className={cn(
-            'flex h-7 shrink-0 items-center rounded-lg border px-2 text-sm font-medium leading-5 transition-colors',
+            'flex h-7 shrink-0 items-center justify-center rounded-lg border px-2 text-sm font-medium leading-[1.2] transition-colors',
             selected
               ? 'border-border bg-card text-foreground hover:bg-muted'
               : 'border-border bg-primary text-primary-foreground hover:bg-primary/90',
@@ -107,11 +102,11 @@ export function SkillDetailPanel({
       <section className='flex flex-col gap-4'>
         <SectionHeading label='Instructions' info='The SKILL.md this agent will read' />
         {entry.skill.content ? (
-          <pre className='max-h-64 overflow-auto whitespace-pre-wrap rounded-xl border border-border bg-muted/50 p-3 font-mono text-xs leading-5 text-muted-foreground'>
+          <pre className='max-h-64 overflow-auto whitespace-pre-wrap rounded-xl border border-border bg-card p-4 font-mono text-xs font-normal leading-5 text-muted-foreground'>
             {entry.skill.content}
           </pre>
         ) : (
-          <p className='text-xs leading-4 text-muted-foreground'>
+          <p className='text-sm font-normal leading-5 text-muted-foreground'>
             This skill has no instructions yet.
           </p>
         )}

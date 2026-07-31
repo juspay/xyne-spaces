@@ -1,6 +1,5 @@
 import { Fragment, useMemo, useState, type ReactElement } from 'react';
-import { ChevronRight, MultipleCrossCancelDefault, Notebook, PlusDefault } from '@xyne/icons';
-import { cn } from '@/utils/classNames';
+import { ChevronRight, MultipleCrossCancelDefault, PlusDefault } from '@xyne/icons';
 import { BrowseDialog, type FilterOption } from '../shared/BrowseDialog';
 import { Pill } from '../shared/Pill';
 import { SectionHeading, Separator } from '../shared/Section';
@@ -45,21 +44,19 @@ const SkillCard = ({
     >
       <span className='flex w-full items-center justify-between gap-2'>
         <span className='flex min-w-0 items-center gap-2'>
-          <span
-            className={cn(
-              'flex size-7 shrink-0 items-center justify-center rounded-lg border',
-              entry.scope === 'global'
-                ? 'border-border bg-muted text-muted-foreground'
-                : 'border-primary/20 bg-primary/10 text-primary',
-            )}
-          >
-            <Notebook className='size-4' aria-hidden />
-          </span>
-          <span className='truncate text-sm font-semibold leading-5 text-foreground'>
+          <span className='truncate text-sm font-medium leading-5 text-foreground'>
             {entry.label}
           </span>
-          {selected && <Pill tone='success'>Enabled</Pill>}
-          {!entry.enabled && <Pill tone='neutral'>Disabled</Pill>}
+          {selected && (
+            <Pill tone='success' size='sm'>
+              Enabled
+            </Pill>
+          )}
+          {!entry.enabled && (
+            <Pill tone='neutral' size='sm'>
+              Disabled
+            </Pill>
+          )}
         </span>
         <span className='flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground'>
           <ChevronRight className='size-4' aria-hidden />
@@ -167,7 +164,6 @@ export function BrowseSkillsDialog({
               <SkillChip
                 key={entry.id}
                 label={entry.label}
-                scope={entry.scope}
                 selected
                 onToggle={() => onChange(disableSkill(selectedIds, entry))}
               />

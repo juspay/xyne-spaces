@@ -32,12 +32,12 @@ export function ToolRow({ tool, checked, onToggle }: ToolRowProps): ReactElement
     >
       <span className='flex items-center gap-2'>
         <ToolCheckbox checked={checked} />
-        <span className='text-sm font-medium leading-5 text-foreground'>
+        <span className='text-sm font-normal leading-5 text-foreground'>
           {humanizeToolName(tool.name)}
         </span>
       </span>
       {tool.description && (
-        <span className='line-clamp-2 w-full pl-7 text-xs leading-4 text-muted-foreground'>
+        <span className='line-clamp-2 w-full pl-7 text-xs font-normal leading-4 text-muted-foreground'>
           {tool.description}
         </span>
       )}

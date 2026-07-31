@@ -1,22 +1,14 @@
 import { type ReactElement } from 'react';
 import { MultipleCrossCancelDefault, PlusDefault } from '@xyne/icons';
 import { cn } from '@/utils/classNames';
-import type { SubagentSource } from '@/services/claw/clawSubagentsTypes';
-import { SubagentAvatar } from './SubagentAvatar';
 
 interface SubagentChipProps {
   label: string;
-  source: SubagentSource;
   selected: boolean;
   onToggle: () => void;
 }
 
-export function SubagentChip({
-  label,
-  source,
-  selected,
-  onToggle,
-}: SubagentChipProps): ReactElement {
+export function SubagentChip({ label, selected, onToggle }: SubagentChipProps): ReactElement {
   return (
     <button
       type='button'
@@ -27,16 +19,15 @@ export function SubagentChip({
       data-track-category='Claw Agents'
       data-track-name='Create agent v2: toggle subagent chip'
       className={cn(
-        'flex shrink-0 items-center gap-1.5 overflow-hidden rounded-[10px] border-[0.8px] border-border py-1 pl-1 pr-2 transition-colors',
+        'flex h-7 shrink-0 items-center gap-1.5 overflow-hidden rounded-[10px] border-[0.8px] border-border px-2 transition-colors',
         selected
           ? 'border-solid bg-muted hover:bg-muted/70'
           : 'border-dashed bg-card hover:bg-muted/50',
       )}
     >
-      <SubagentAvatar source={source} />
       <span
         className={cn(
-          'max-w-[200px] truncate text-sm font-semibold leading-5',
+          'max-w-[200px] truncate text-sm font-medium leading-5',
           selected ? 'text-foreground' : 'text-foreground/80',
         )}
       >

@@ -1,8 +1,8 @@
-import { useCallback, useState, type ReactElement } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useMutation } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Ai01, ArrowUp, AtMark, MinimizeTwoArrow } from '@xyne/icons';
+import { Ai01, ArrowUp, AtMark, MaximizeTwoArrow, MinimizeTwoArrow } from '@xyne/icons';
 import { Loader2 } from 'lucide-react';
 import { cn } from '@/utils/classNames';
 import { Button } from '@/components/ui/Button';
@@ -35,6 +35,13 @@ const ClawAgentCreateV2 = (): ReactElement => {
 
   const { user } = useAuth();
   const builtBy = user?.name ?? user?.email ?? 'you';
+
+  const [aiOpen, setAiOpen] = useState(false);
+  const aiIntentRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (aiOpen) aiIntentRef.current?.focus();
+  }, [aiOpen]);
 
   const [state, setState] = useState<WizardState>(INITIAL_WIZARD_STATE);
   const update = useCallback(
@@ -104,7 +111,7 @@ const ClawAgentCreateV2 = (): ReactElement => {
           <div className='flex w-full items-start gap-4 py-4'>
             <div className='relative shrink-0'>
               <div
-                className='flex size-10 items-center justify-center overflow-hidden rounded-full border-[1.5px] border-border text-base font-semibold text-white'
+                className='flex size-20 items-center justify-center overflow-hidden rounded-full border-[1.5px] border-border text-2xl font-medium text-white'
                 style={{ backgroundColor: state.color }}
                 aria-hidden
               >
@@ -127,7 +134,7 @@ const ClawAgentCreateV2 = (): ReactElement => {
                 autoFocus
                 data-track-category='Claw Agents'
                 data-track-name='Create agent v2: name'
-                className='w-full bg-transparent text-base font-semibold leading-6 tracking-[-0.1px] text-foreground placeholder:text-muted-foreground focus:outline-none'
+                className='w-full bg-transparent text-base font-medium leading-6 tracking-[-0.1px] text-foreground placeholder:font-medium placeholder:text-muted-foreground focus:outline-none'
               />
 
               <div className='flex items-center gap-1.5'>
@@ -144,7 +151,7 @@ const ClawAgentCreateV2 = (): ReactElement => {
                     style={{ width: inlineWidth(slug, 'Agent handle') }}
                     data-track-category='Claw Agents'
                     data-track-name='Create agent v2: handle'
-                    className='bg-transparent text-sm font-semibold leading-5 tracking-[-0.14px] text-foreground placeholder:text-muted-foreground focus:outline-none'
+                    className='bg-transparent text-sm font-medium leading-5 tracking-[-0.14px] text-foreground placeholder:font-medium placeholder:text-muted-foreground focus:outline-none'
                   />
                 </div>
                 {nameCheck.checking && state.name.trim().length > 0 && (
@@ -165,7 +172,7 @@ const ClawAgentCreateV2 = (): ReactElement => {
             <div className='flex w-full flex-col gap-3'>
               <label
                 htmlFor='agent-v2-description'
-                className='text-sm font-semibold leading-[1.2] tracking-[-0.1px] text-foreground'
+                className='text-sm font-medium leading-[1.2] tracking-[-0.1px] text-foreground'
               >
                 Description
               </label>
@@ -183,7 +190,7 @@ const ClawAgentCreateV2 = (): ReactElement => {
             <div className='flex w-full flex-col gap-3'>
               <label
                 htmlFor='agent-v2-prompt'
-                className='text-sm font-semibold leading-[1.2] tracking-[-0.1px] text-foreground'
+                className='text-sm font-medium leading-[1.2] tracking-[-0.1px] text-foreground'
               >
                 What it does
               </label>
@@ -200,44 +207,50 @@ const ClawAgentCreateV2 = (): ReactElement => {
                 />
 
                 <div className='flex flex-col gap-2 bg-muted/60 p-1'>
-                  <div className='flex items-center gap-1 rounded-2xl border-[0.8px] border-border bg-background p-1'>
-                    <input
-                      value={state.aiIntent}
-                      onChange={e => update({ aiIntent: e.target.value })}
-                      onKeyDown={e => {
-                        if (e.key === 'Enter') runGenerate();
-                      }}
-                      placeholder='Describe what this agent should do…'
-                      aria-label='Describe what this agent should do'
-                      data-track-category='Claw Agents'
-                      data-track-name='Create agent v2: AI intent'
-                      className='min-w-0 flex-1 bg-transparent p-2 text-sm leading-5 text-foreground placeholder:text-muted-foreground focus:outline-none'
-                    />
-                    <ComposerVoiceButton
-                      onTranscript={appendIntent}
-                      disabled={generate.isPending}
-                      className='size-9 shrink-0 rounded-xl'
-                    />
-                    <button
-                      type='button'
-                      onClick={runGenerate}
-                      disabled={generate.isPending || !state.aiIntent.trim()}
-                      aria-label='Generate with AI'
-                      data-track-category='Claw Agents'
-                      data-track-name='Create agent v2: generate prompt'
-                      className={cn(
-                        'flex size-9 shrink-0 items-center justify-center rounded-xl bg-foreground text-background transition-opacity',
-                        (generate.isPending || !state.aiIntent.trim()) &&
-                          'cursor-not-allowed opacity-40',
-                      )}
+                  {aiOpen && (
+                    <div
+                      id='agent-v2-ai-intent'
+                      className='flex items-center gap-1 rounded-2xl border-[0.8px] border-border bg-background p-1'
                     >
-                      {generate.isPending ? (
-                        <Loader2 className='size-4 animate-spin' aria-hidden />
-                      ) : (
-                        <ArrowUp className='size-4' aria-hidden />
-                      )}
-                    </button>
-                  </div>
+                      <input
+                        ref={aiIntentRef}
+                        value={state.aiIntent}
+                        onChange={e => update({ aiIntent: e.target.value })}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') runGenerate();
+                        }}
+                        placeholder='Describe what this agent should do…'
+                        aria-label='Describe what this agent should do'
+                        data-track-category='Claw Agents'
+                        data-track-name='Create agent v2: AI intent'
+                        className='min-w-0 flex-1 bg-transparent p-2 text-sm leading-5 text-foreground placeholder:text-muted-foreground focus:outline-none'
+                      />
+                      <ComposerVoiceButton
+                        onTranscript={appendIntent}
+                        disabled={generate.isPending}
+                        className='size-9 shrink-0 rounded-xl'
+                      />
+                      <button
+                        type='button'
+                        onClick={runGenerate}
+                        disabled={generate.isPending || !state.aiIntent.trim()}
+                        aria-label='Generate with AI'
+                        data-track-category='Claw Agents'
+                        data-track-name='Create agent v2: generate prompt'
+                        className={cn(
+                          'flex size-9 shrink-0 items-center justify-center rounded-xl bg-foreground text-background transition-opacity',
+                          (generate.isPending || !state.aiIntent.trim()) &&
+                            'cursor-not-allowed opacity-40',
+                        )}
+                      >
+                        {generate.isPending ? (
+                          <Loader2 className='size-4 animate-spin' aria-hidden />
+                        ) : (
+                          <ArrowUp className='size-4' aria-hidden />
+                        )}
+                      </button>
+                    </div>
+                  )}
 
                   <div className='flex items-center justify-between'>
                     <div className='flex items-center gap-1.5 p-2'>
@@ -246,11 +259,20 @@ const ClawAgentCreateV2 = (): ReactElement => {
                     </div>
                     <button
                       type='button'
-                      disabled
-                      aria-label='Expand'
-                      className='flex size-9 items-center justify-center rounded-xl text-muted-foreground'
+                      onClick={() => setAiOpen(open => !open)}
+                      aria-expanded={aiOpen}
+                      aria-controls='agent-v2-ai-intent'
+                      aria-label={aiOpen ? 'Hide AI prompt' : 'Write a prompt for AI'}
+                      title={aiOpen ? 'Hide AI prompt' : 'Write a prompt for AI'}
+                      data-track-category='Claw Agents'
+                      data-track-name='Create agent v2: toggle AI prompt'
+                      className='flex size-9 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
                     >
-                      <MinimizeTwoArrow className='size-4' aria-hidden />
+                      {aiOpen ? (
+                        <MinimizeTwoArrow className='size-4' aria-hidden />
+                      ) : (
+                        <MaximizeTwoArrow className='size-4' aria-hidden />
+                      )}
                     </button>
                   </div>
                 </div>

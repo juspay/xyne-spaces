@@ -93,7 +93,7 @@ export function BuiltinCapabilityRow({
       <div className='flex w-full items-center justify-between gap-4'>
         <div className='flex min-w-0 items-center gap-4'>
           <div className='flex shrink-0 items-center gap-2'>
-            <span className='text-sm font-semibold leading-[1.2] tracking-[-0.1px] text-foreground'>
+            <span className='text-sm font-medium leading-[1.2] tracking-[-0.1px] text-foreground'>
               Built in tools
             </span>
             <Tooltip side='top' content={CAPTION}>
