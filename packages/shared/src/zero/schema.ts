@@ -4345,7 +4345,7 @@ export const callTableRelationships = relationships(callTable, ({ one, many }) =
 
 export const entityAccessTableRelationships = relationships(
   entityAccessTable,
-  ({ one }) => ({
+  ({ one, many }) => ({
     call: one({
       sourceField: ['entityId'],
       destField: ['id'],
@@ -4356,10 +4356,32 @@ export const entityAccessTableRelationships = relationships(
       destField: ['id'],
       destSchema: userTable,
     }),
+    userGroup: one({
+      sourceField: ['userGroupId'],
+      destField: ['id'],
+      destSchema: userGroupTable,
+    }),
+    channel: one({
+      sourceField: ['channelId'],
+      destField: ['id'],
+      destSchema: channelTable,
+    }),
     workspace: one({
       sourceField: ['workspaceId'],
       destField: ['id'],
       destSchema: workspaceTable,
+    }),
+    // Used to check whether the viewing user is a member of the shared
+    // userGroupId/channelId (see CallsACL.canSelect) — not a direct FK.
+    userGroupMemberships: many({
+      sourceField: ['userGroupId'],
+      destField: ['userGroupId'],
+      destSchema: userGroupMappingTable,
+    }),
+    channelMembers: many({
+      sourceField: ['channelId'],
+      destField: ['channelId'],
+      destSchema: channelParticipantTable,
     }),
   }),
 );

@@ -18,8 +18,14 @@ export class CallsACL extends BaseQueryACL<'calls'> {
             share
               .where('workspaceId', this.ctx.workspaceId)
               .where('shareableEntityType', ShareableEntityType.NOTE_TAKER)
-              .where('userId', this.ctx.userID)
-              .where('entityUserAccess', '!=', EntityUserAccess.REVOKED),
+              .where('entityUserAccess', '!=', EntityUserAccess.REVOKED)
+              .where(({ or: shareOr, cmp: shareCmp, exists: shareExists }) =>
+                shareOr(
+                  shareCmp('userId', this.ctx.userID),
+                  shareExists('userGroupMemberships', m => m.where('userId', this.ctx.userID)),
+                  shareExists('channelMembers', m => m.where('userId', this.ctx.userID)),
+                ),
+              ),
           ),
           exists('participants', (p) => p.where('userId', this.ctx.userID)),
           exists('channel', (ch) =>
@@ -38,8 +44,14 @@ export class CallsACL extends BaseQueryACL<'calls'> {
           share
             .where('workspaceId', this.ctx.workspaceId)
             .where('shareableEntityType', ShareableEntityType.NOTE_TAKER)
-            .where('userId', this.ctx.userID)
-            .where('entityUserAccess', '!=', EntityUserAccess.REVOKED),
+            .where('entityUserAccess', '!=', EntityUserAccess.REVOKED)
+            .where(({ or: shareOr, cmp: shareCmp, exists: shareExists }) =>
+              shareOr(
+                shareCmp('userId', this.ctx.userID),
+                shareExists('userGroupMemberships', m => m.where('userId', this.ctx.userID)),
+                shareExists('channelMembers', m => m.where('userId', this.ctx.userID)),
+              ),
+            ),
         ),
         exists('participants', (p) => p.where('userId', this.ctx.userID)),
         exists('channel', (ch) =>

@@ -5,12 +5,14 @@
 
 import { type ReactElement, useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
+import axios from 'axios';
 import { recordingService, type RecordingDetail } from '../../services/Recording/recordingService';
 import { useShortcut } from '../../shortcuts';
 import {
   AlertCircle,
   ChevronRight,
   FileText,
+  Music,
   PanelRightOpen,
   Sparkles,
   StickyNote,
@@ -21,6 +23,7 @@ import { useSpeakerIdentificationEnabled } from '../../components/SpeakerIdentif
 import { Spinner } from '@xyne/icons';
 import { Button } from '../../components/ui/Button/Button';
 import { Tooltip } from '../../components/ui/Tooltip';
+import { AudioPlayer } from '../../components/ui/AudioPlayer/AudioPlayer';
 import { RecordingDetailV2Header } from './components/RecordingDetailV2Header';
 import { LiveRecordingControlBar } from './components/LiveRecordingControlBar';
 import { SummaryWithCitations } from './components/SummaryWithCitations';
@@ -101,6 +104,43 @@ export default function RecordingDetailV2Screen(): ReactElement {
     if (recordingId) void loadRecording(recordingId);
   }, [recordingId]);
 
+  // Reactive metadata: everything here is a plain Call column (title, status,
+  // labels, markedItems, summaryTemplateId, aiSummary text) so it's kept live
+  // via Zero instead of only refreshing on the next full REST reload — e.g.
+  // if labels/markedItems finish generating, or someone renames the
+  // recording, while this screen is open. The transcript file content and
+  // hasRecording flag still require the REST call below (not stored inline /
+  // not Zero-synced).
+  const [recordingRow] = useCachedQuery(
+    queries.oatsRecordingByExternalId({ callId: recordingId ?? '' }),
+    { enabled: !!recordingId },
+  );
+
+  useEffect(() => {
+    if (!recordingRow) return;
+    setRecording(prev => {
+      if (!prev) return prev;
+      const endedAt = recordingRow.endedAt ? new Date(recordingRow.endedAt).toISOString() : null;
+      const next: RecordingDetail = {
+        ...prev,
+        title: recordingRow.title || prev.title,
+        labels: recordingRow.labels ?? prev.labels,
+        markedItems: recordingRow.markedItems ?? prev.markedItems,
+        summaryTemplateId: recordingRow.summaryTemplateId ?? prev.summaryTemplateId ?? null,
+        aiSummary: recordingRow.aiSummary ?? prev.aiSummary,
+        hasSummary: !!recordingRow.aiSummary,
+        endedAt,
+        durationMs: endedAt
+          ? new Date(endedAt).getTime() - new Date(recordingRow.startedAt).getTime()
+          : prev.durationMs,
+      };
+      if (recordingRow.status) {
+        next.status = recordingRow.status as NonNullable<RecordingDetail['status']>;
+      }
+      return next;
+    });
+  }, [recordingRow]);
+
   const loadRecording = async (id: string): Promise<void> => {
     try {
       if (!recording) setLoading(true);
@@ -109,7 +149,13 @@ export default function RecordingDetailV2Screen(): ReactElement {
       setRecording(data);
     } catch (err) {
       logRecordingError('RecordingDetailV2Screen.loadRecording', err);
-      setError('Failed to load recording. Please try again.');
+      if (axios.isAxiosError(err) && err.response?.status === 403) {
+        setError('You no longer have access to this recording.');
+      } else if (axios.isAxiosError(err) && err.response?.status === 404) {
+        setError('Recording not found.');
+      } else {
+        setError('Failed to load recording. Please try again.');
+      }
     } finally {
       setLoading(false);
     }
@@ -232,6 +278,23 @@ export default function RecordingDetailV2Screen(): ReactElement {
               recording={recording}
               onStopped={() => void loadRecording(recording.externalId)}
             />
+          )}
+
+          {recording.hasRecording && (
+            <div className='mb-6 flex items-center gap-4 rounded-xl border border-border bg-muted/30 p-4'>
+              <div className='flex w-24 shrink-0 items-center gap-2 text-muted-foreground'>
+                <Music className='size-4' />
+                <span className='text-sm'>Audio</span>
+              </div>
+              <div className='max-w-md flex-1'>
+                <AudioPlayer
+                  onLoad={signal => recordingService.downloadRecordingBlob(recording.externalId, signal)}
+                  initialDurationSec={recording.durationMs ? recording.durationMs / 1000 : undefined}
+                  trackCategory='RecordingDetailV2'
+                  showToastOnError
+                />
+              </div>
+            </div>
           )}
 
           {showTabs ? (

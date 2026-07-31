@@ -26,6 +26,13 @@ export interface TicketStageEtaPreviousValue {
   updatedBy: string | null;
 }
 
+export interface EntityAccessPreviousValue {
+  entityUserAccess: string;
+  userId: string | null;
+  userGroupId: string | null;
+  channelId: string | null;
+}
+
 export interface ReactionPreviousValue {
   messageId: string;
   emojiName: string;
@@ -166,6 +173,7 @@ export const SIDE_EFFECT_OPERATION_CONFIG: SideEffectOperationConfigMap = {
   channel_user_status: ['update'],
   conversation_participants: ['update'],
   ticket_stage_requests: ['insert', 'update', 'upsert'],
+  entity_access: ['insert', 'update'],
 };
 
 export function createSideEffectJobsAccumulator(): SideEffectJobsAccumulator {

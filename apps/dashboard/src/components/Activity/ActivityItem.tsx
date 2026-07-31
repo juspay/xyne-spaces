@@ -15,6 +15,7 @@ import { TicketUpdateActivity } from './TicketUpdateActivity';
 import { ScheduledCallActivity } from './ScheduledCallActivity';
 import { EmailFetchActivity } from './EmailFetchActivity';
 import { CanvasSharedActivity } from './CanvasSharedActivity';
+import { RecordingSharedActivity } from './RecordingSharedActivity';
 import { StageApprovalActivity } from './StageApprovalActivity';
 
 interface ActivityItemProps {
@@ -114,6 +115,10 @@ export const ActivityItem = memo(function ActivityItem({
     case 'canvas_role_changed':
     case 'canvas_access_revoked':
       return <CanvasSharedActivity activity={activity} isExpanded={isExpanded} />;
+
+    case 'recording_shared':
+    case 'recording_access_revoked':
+      return <RecordingSharedActivity activity={activity} isExpanded={isExpanded} />;
 
     case 'stage_approval_requested':
     case 'stage_approval_approved':
