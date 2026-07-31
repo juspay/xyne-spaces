@@ -79,6 +79,7 @@
     "@tanstack/react-store": "0.8.0",
     "@tanstack/react-table": "^8.21.3",
     "@tanstack/react-virtual": "^3.14.2",
+    "@terrastruct/d2": "^0.1.33",
     "@tiptap/core": "3.29.2",
     "@tiptap/extension-blockquote": "^3.8.0",
     "@tiptap/extension-bold": "^3.8.0",

@@ -909,6 +909,7 @@ export const mutators = defineMutators({
             userId: ctx.userID,
             content: draftMessage,
             hasAttachment: draft?.hasAttachment || false,
+            origin: 'user',
             updatedAt: timestamp,
             createdAt: draft?.createdAt || timestamp,
           });
@@ -2984,6 +2985,7 @@ export const mutators = defineMutators({
             userId: ctx.userID,
             content: content || '',
             hasAttachment: true,
+            origin: 'user',
             createdAt: timestamp,
             updatedAt: timestamp,
           });
@@ -3533,6 +3535,7 @@ export const mutators = defineMutators({
             userId: ctx.userID,
             content: draftMessage,
             hasAttachment: draft?.hasAttachment || false,
+            origin: 'user',
             updatedAt: timestamp,
             createdAt: draft?.createdAt || timestamp,
           });
@@ -10628,6 +10631,7 @@ export const mutators = defineMutators({
           userId: ctx.userID,
           content: scheduled.content,
           hasAttachment,
+          origin: 'user',
           createdAt: timestamp,
           updatedAt: timestamp,
         });

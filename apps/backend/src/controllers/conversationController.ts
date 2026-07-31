@@ -26,6 +26,20 @@ import { logger } from '../utils/logger';
 import { ChannelUserStatusRepository } from '@/database/repositories/channelUserStatusRepository';
 import { messageMetadataService } from '@/services/messageMetadataService';
 import { unreadService } from '../services/unreadService';
+import {
+  canRecommendThreadSummary,
+  getOrGenerateThreadSummary,
+  getCachedSummary,
+  deleteCachedSummary,
+  isThreadSummaryEnabledForChannel,
+  consumeThreadRecommendation,
+  hasPendingRecommendations,
+} from '@/services/threadSummaryService';
+import {
+  getTwinReplyDraftById,
+  deleteTwinReplyDraftById,
+  type TwinReplyDraft,
+} from '@/services/twinReplyDraftService';
 import { MessagesSideEffectHandler } from '../zero/side-effects/tables/messages-handler';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { messageSchema } from '@/vespa/src/types';
@@ -2064,6 +2078,278 @@ export class ConversationController {
       res.status(200).json({ success: true, data });
     } catch (error) {
       logger.error('[agentProgress/get] error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  /**
+   * GET /:conversationId/summary
+   *
+   * On-demand AI summary of the thread, shared across all members. Cached by
+   * "as of" message — only makes a fresh LLM call if new messages have
+   * landed since the last summary was generated; otherwise returns the
+   * existing one instantly. Manual summary generation is available whenever
+   * the feature is enabled for the channel; only automatic recommendations
+   * are gated by THREAD_SUMMARY_MIN_MESSAGES.
+   */
+  getSummary = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { conversationId } = req.params;
+      const userId = req.user!.id;
+      if (!conversationId) {
+        res.status(400).json({ error: 'Conversation ID is required' });
+        return;
+      }
+
+      const conversation = await this.conversationRepository.findById(conversationId);
+      if (!conversation) {
+        res.status(404).json({ error: 'Conversation not found' });
+        return;
+      }
+
+      const channel = await this.channelRepository.findById(conversation.channelId);
+      if (channel?.visibility === 'PRIVATE') {
+        const isParticipant = await this.channelParticipantRepository.isParticipant(
+          conversation.channelId,
+          userId
+        );
+        if (!isParticipant) {
+          res.status(403).json({
+            error: 'Access denied - not a channel participant',
+            code: 'NOT_CHANNEL_PARTICIPANT',
+          });
+          return;
+        }
+      }
+
+      if (!isThreadSummaryEnabledForChannel(conversation.channelId)) {
+        res.status(204).end();
+        return;
+      }
+
+      const result = await getOrGenerateThreadSummary(conversationId, { enforceMinMessages: false });
+      if (!result) {
+        res.status(204).end();
+        return;
+      }
+
+      res.status(200).json({ success: true, ...result });
+    } catch (error) {
+      logger.error('[getSummary] error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  /**
+   * GET /:conversationId/recommendation
+   *
+   * Whether the requesting user should see the "you were just added" catch-up
+   * summary for this thread — and if so, the summary content itself, in the
+   * same round trip. Backed by a one-time flag set by the real-time
+   * ConversationParticipant insert side effect (not inferred from
+   * lastReadAt/joinedAt timestamps — see threadSummaryService for why
+   * that broke down). Consumes the flag on read, so it's only ever surfaced
+   * once per genuine add.
+   *
+   * Deliberately bundled with a cache READ here (not generation — rather than
+   * making the client separately call GET /summary right after) — this is
+   * the only path that can ever empty out the pending set, so this is also
+   * the only place that needs to check afterward whether to tear the cache
+   * down. Doing the read and that check in the same request means there's no
+   * race to guess a delay around: by the time the pending-check below runs,
+   * `result` is already computed and on its way to the client regardless of
+   * what happens to the cache next. A plain GET /summary (the manual header
+   * button) never touches the pending set at all, so it needs none of this.
+   *
+   * Uses getCachedSummary, NOT getOrGenerateThreadSummary — this
+   * endpoint never triggers an LLM call itself. Generation is exclusively
+   * the job of the two side-effect handlers (pre-warm on add, keep-warm on
+   * message); by the time a genuinely-recommended user opens the thread, the
+   * pre-warm has almost always already populated the cache. If it somehow
+   * hasn't (pre-warm still in flight or failed), this just serves nothing
+   * rather than making the request itself pay for a fresh generation.
+   */
+  getRecommendation = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { conversationId } = req.params;
+      const userId = req.user!.id;
+      if (!conversationId) {
+        res.status(400).json({ error: 'Conversation ID is required' });
+        return;
+      }
+
+      const conversation = await this.conversationRepository.findById(conversationId);
+      if (!conversation || !isThreadSummaryEnabledForChannel(conversation.channelId)) {
+        res.status(200).json({ success: true, recommended: false, enabled: false });
+        return;
+      }
+
+      const channel = await this.channelRepository.findById(conversation.channelId);
+      if (channel?.visibility === 'PRIVATE') {
+        const isParticipant = await this.channelParticipantRepository.isParticipant(
+          conversation.channelId,
+          userId
+        );
+        if (!isParticipant) {
+          res.status(403).json({
+            error: 'Access denied - not a channel participant',
+            code: 'NOT_CHANNEL_PARTICIPANT',
+          });
+          return;
+        }
+      }
+
+      if (!(await canRecommendThreadSummary(conversationId))) {
+        res.status(200).json({ success: true, recommended: false, enabled: true });
+        return;
+      }
+
+      const recommended = await consumeThreadRecommendation(conversationId, userId);
+      if (!recommended) {
+        res.status(200).json({ success: true, recommended: false, enabled: true });
+        return;
+      }
+
+      const cached = await getCachedSummary(conversationId);
+      const summary = cached && { content: cached.content, cached: true, asOfMessageId: cached.asOfMessageId };
+      res.status(200).json({ success: true, recommended: true, enabled: true, summary });
+
+      if (!(await hasPendingRecommendations(conversationId))) {
+        await deleteCachedSummary(conversationId);
+      }
+    } catch (error) {
+      logger.error('[getRecommendation] error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  // ── Digital Twin in-thread reply draft (owner-only) ────────────────────────
+
+  /**
+   * The caller reads their own pending twin proposals directly from Zero (the
+   * `twinDrafts` query → draft_messages where origin='twin'), so there is no
+   * GET endpoint here — only approve/decline (below), keyed by the draft row id.
+   */
+
+  /**
+   * Forward an approve/decline to claw-auth, which owns the Twin's tested
+   * delivery + feedback pipeline (post-as-user / react-as-user / destination
+   * resolution / TwinResponseFeedback). The delivery-execution context is read
+   * from the SERVER-SIDE Redis draft (never the client body), so the client
+   * can't tamper with where the reply lands. S2S-authed with the shared claw key.
+   */
+  private forwardTwinDraftAction = async (
+    draft: TwinReplyDraft,
+    action: 'approve' | 'decline',
+    actorUserId: string,
+    editedMessage?: string,
+  ): Promise<{ ok: boolean; status: number; error?: string; posted?: { channelId: string; conversationId?: string } }> => {
+    const base = config.xyneClaw.authUrl.replace(/\/+$/, '');
+    const url = `${base}/claw/api/v1/internal/twin-draft/action`;
+    try {
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          // Spaces↔claw-auth shared key (Spaces does not hold XYNE_CLAW_S2S_KEY);
+          // claw-auth validates it via requireInternalS2S.
+          ...(config.internalS2sKey ? { 'x-s2s-key': config.internalS2sKey } : {}),
+        },
+        body: JSON.stringify({
+          action,
+          actorUserId,
+          ...(editedMessage !== undefined ? { editedMessage } : {}),
+          draft,
+        }),
+        signal: AbortSignal.timeout(30_000),
+      });
+      const text = await resp.text().catch(() => '');
+      if (!resp.ok) {
+        return { ok: false, status: resp.status, error: text.slice(0, 300) };
+      }
+      let posted: { channelId: string; conversationId?: string } | undefined;
+      try {
+        const parsed = JSON.parse(text) as { posted?: { channelId?: string; conversationId?: string } };
+        if (parsed?.posted?.channelId) {
+          posted = {
+            channelId: parsed.posted.channelId,
+            ...(parsed.posted.conversationId ? { conversationId: parsed.posted.conversationId } : {}),
+          };
+        }
+      } catch {
+        // no posted target (react-only) — fine
+      }
+      return { ok: true, status: 200, ...(posted ? { posted } : {}) };
+    } catch (err) {
+      logger.error('[twin-draft-action] forward to claw-auth failed:', err);
+      return { ok: false, status: 502, error: err instanceof Error ? err.message : String(err) };
+    }
+  };
+
+  /**
+   * POST /reply-drafts/:draftId/approve  { editedMessage? }
+   *
+   * Deliver the (possibly edited) draft. Reads the twin proposal server-side by
+   * its row id (owner-scoped), forwards to claw-auth to post/react as the user +
+   * record accepted feedback, and only removes the row when delivery SUCCEEDED
+   * (a transient failure leaves it intact for retry). Deleting the row clears the
+   * dock/badge on every open client via Zero replication — no socket needed.
+   */
+  approveReplyDraft = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { draftId } = req.params;
+      const userId = req.user!.id;
+      if (!draftId) {
+        res.status(400).json({ error: 'Draft ID is required' });
+        return;
+      }
+      const draft = await getTwinReplyDraftById(draftId, userId);
+      if (!draft) {
+        res.status(404).json({ error: 'No draft to approve', code: 'NO_DRAFT' });
+        return;
+      }
+      const editedRaw = (req.body as { editedMessage?: unknown } | undefined)?.editedMessage;
+      const editedMessage = typeof editedRaw === 'string' ? editedRaw : undefined;
+
+      const result = await this.forwardTwinDraftAction(draft, 'approve', userId, editedMessage);
+      if (!result.ok) {
+        // Keep the draft — the user can retry the approval.
+        res.status(502).json({ error: 'Failed to deliver reply', detail: result.error });
+        return;
+      }
+      await deleteTwinReplyDraftById(draftId, userId);
+      res.status(200).json({ success: true, ...(result.posted ? { posted: result.posted } : {}) });
+    } catch (error) {
+      logger.error('[approveReplyDraft] error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  /**
+   * POST /reply-drafts/:draftId/decline
+   *
+   * The user rejects the draft. Records declined feedback (best-effort) and drops
+   * the row regardless — declining is the user's choice, so it always clears even
+   * if the feedback callback fails.
+   */
+  declineReplyDraft = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { draftId } = req.params;
+      const userId = req.user!.id;
+      if (!draftId) {
+        res.status(400).json({ error: 'Draft ID is required' });
+        return;
+      }
+      const draft = await getTwinReplyDraftById(draftId, userId);
+      if (!draft) {
+        res.status(204).end(); // already gone — treat as success
+        return;
+      }
+      await this.forwardTwinDraftAction(draft, 'decline', userId); // best-effort feedback
+      await deleteTwinReplyDraftById(draftId, userId);
+      res.status(200).json({ success: true });
+    } catch (error) {
+      logger.error('[declineReplyDraft] error:', error);
       res.status(500).json({ error: 'Internal server error' });
     }
   };

@@ -380,6 +380,10 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
     queries.getUserGroupMappingsByUserId(),
   );
 
+  // One owner-scoped subscription for all of the user's drafts — composer drafts
+  // (origin='user') and Digital Twin proposals (origin='twin'). The stateMachine
+  // splits them by origin into draftMessages / twinDrafts, so pending proposals
+  // arrive/clear live via the same Zero replication — no bespoke fetch/socket.
   const [userDrafts, userDraftsDetails] = useCachedQuery(queries.userDrafts(), { ttl: '10m' });
   const [userDelayedMessages, userDelayedMessagesDetails] = useCachedQuery(
     queries.userDelayedMessages(),

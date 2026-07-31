@@ -129,6 +129,30 @@ class RedisService {
     }
   }
 
+  /**
+   * Remove one or more members from a Redis set using SREM.
+   * Returns the number removed; 0 if Redis isn't initialized.
+   */
+  async srem(key: string, ...members: string[]): Promise<number> {
+    if (!this.redis) {
+      logger.warn('[REDIS] Cannot srem - Redis not initialized');
+      return 0;
+    }
+    return await this.redis.srem(key, ...members);
+  }
+
+  /**
+   * Get the number of members in a Redis set using SCARD.
+   * Returns 0 if the key doesn't exist.
+   */
+  async scard(key: string): Promise<number> {
+    if (!this.redis) {
+      logger.warn('[REDIS] Cannot scard - Redis not initialized');
+      return 0;
+    }
+    return await this.redis.scard(key);
+  }
+
   // Session participant management
   async addParticipantToSession(sessionId: string, userId: string): Promise<void> {
     if (!this.redis) throw new Error('Redis not initialized');
