@@ -77,6 +77,7 @@ import { logger, Event } from '../../utils/logger';
 import Tooltip, { TruncatedTooltip } from '../../components/ui/Tooltip';
 import { useZero } from '../../hooks/useZero';
 import { queries } from '../../zero/queries';
+import { useTicketKeysetWindow } from '../../hooks/useTicketKeysetWindow';
 import { QueryResultType } from '@rocicorp/zero';
 import ThreadList from '../../components/Chat/ThreadList/ThreadList';
 import { ChatInput } from '../../components/Chat/ChatInput/ChatInput';
@@ -1522,7 +1523,7 @@ const SupportScreen = (): ReactElement => {
   // Only the setter is read (onTicketsLoaded callbacks below); the loaded ticket
   // array itself is not consumed here since the merge dialog is built from the
   // selection map. See mergeDialogTickets for the rationale.
-  const [, setKanbanTickets] = useState<Ticket[]>([]);
+  const [kanbanTickets, setKanbanTickets] = useState<Ticket[]>([]);
 
   const [showMergeDialog, setShowMergeDialog] = useState(false);
 
@@ -3074,6 +3075,7 @@ const SupportScreen = (): ReactElement => {
                 ticketFilter={ticketFilter}
                 isMember={isSelectedChannelJoined}
                 onMailtoClick={handleMailtoClick}
+                navTickets={kanbanTickets}
               />
             </div>
           </Panel>
@@ -3308,6 +3310,14 @@ type SupportTicketDetailProps = {
    * channel ticket list.
    */
   onBack?: () => void;
+  navTickets?: ReadonlyArray<{
+    id: string;
+    xyneId?: string | null;
+    channelId?: string | null;
+    conversationId: string;
+    title: string;
+    lastEmailAt?: number | null;
+  }>;
 };
 
 export const SupportTicketDetail = ({
@@ -3316,6 +3326,7 @@ export const SupportTicketDetail = ({
   onMailtoClick,
   navBasePath,
   onBack,
+  navTickets,
 }: SupportTicketDetailProps): ReactElement => {
   const {
     workspaceId: routeWorkspaceId,
@@ -3681,6 +3692,52 @@ export const SupportTicketDetail = ({
     });
   };
 
+  type DeskNavRow = {
+    id: string;
+    xyneId?: string | null;
+    channelId?: string | null;
+    conversationId: string;
+    title: string;
+    lastEmailAt?: number | null;
+  };
+  const currentNavRow: DeskNavRow | null = ticket
+    ? {
+        id: ticket.id,
+        xyneId: ticket.xyneId,
+        channelId: ticket.channelId,
+        conversationId: ticket.conversationId,
+        title: ticket.title,
+        lastEmailAt: ticket.lastEmailAt,
+      }
+    : null;
+  const { prev: windowPrev, next: windowNext } = useTicketKeysetWindow<
+    DeskNavRow,
+    { id: string; lastEmailAt: number }
+  >({
+    currentId: ticket?.id ?? null,
+    currentRow: currentNavRow,
+    seed: navTickets,
+    idOf: r => r.id,
+    cursorOf: r => ({ id: r.id, lastEmailAt: r.lastEmailAt ?? 0 }),
+    fetchPage: async (start, dir, limit) => {
+      if (!channelId) return [];
+      const { conversationIdWhitelist: _ciw, ...restTicketFilter } = ticketFilter;
+      return (await zero.run(
+        queries.supportTicketsPageV3({
+          channelId,
+          isMember,
+          ...restTicketFilter,
+          ...(_ciw !== undefined ? { conversationIds: _ciw } : {}),
+          limit,
+          start,
+          dir,
+        }),
+        { type: 'complete' },
+      )) as DeskNavRow[];
+    },
+    enabled: !!channelId && !!ticket?.id,
+  });
+
   const goBackToTicketList = useCallback((): void => {
     if (onBack) {
       onBack();
@@ -3702,6 +3759,11 @@ export const SupportTicketDetail = ({
   }, [channelIdParam, navBasePath, navigate, onBack, routerState?.returnToUrl, supportBase]);
 
   const navigateAdjacent = async (dir: 'forward' | 'backward'): Promise<void> => {
+    const windowTarget = dir === 'forward' ? windowNext : windowPrev;
+    if (windowTarget) {
+      goToTicket(windowTarget);
+      return;
+    }
     if (!cursorStart || !channelId) return;
     try {
       const { conversationIdWhitelist: _ciw, ...restTicketFilter } = ticketFilter;
