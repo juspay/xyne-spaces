@@ -8,7 +8,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { DatabaseClient } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
-import { DEFAULT_SUMMARY_FIELDS, MessageType } from '@xyne/shared';
+import { DEFAULT_SUMMARY_FIELDS, EntityUserAccess, MessageType, ShareableEntityType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { formatToISTLocaleString } from '@/utils/dateUtils';
 import { CanvasRole } from '@prisma/client';
@@ -1067,7 +1067,11 @@ export class CallDocumentService {
         citationCtx
       );
 
-      // Create canvas with empty content (Y-Sweet is source of truth)
+      // Create canvas with empty content (Y-Sweet is source of truth).
+      // PRIVATE — note-taker recordings are shared per-user/group/channel via
+      // entity_access, and canvas_participants (added below + kept in sync by
+      // EntityAccessSideEffectHandler) is what actually gates access; a PUBLIC
+      // canvas would let anyone in the workspace open it regardless of sharing.
       await prisma.canvas.create({
         data: {
           id: canvasId,
@@ -1076,7 +1080,7 @@ export class CallDocumentService {
           channelId,
           workspaceId,
           createdBy: createdByUserId,
-          visibility: 'PUBLIC',
+          visibility: 'PRIVATE',
           isTemplate: false,
           isCollaborative: true,
           lastEditedBy: createdByUserId,
@@ -1120,6 +1124,48 @@ export class CallDocumentService {
           updatedAt: now,
         },
       });
+
+      // Backfill canvas access for anyone the recording is already shared
+      // with. Summary generation is async and can finish before or after a
+      // user shares the recording, so this canvas may not have existed yet
+      // when entity_access rows were created — sync from current state here
+      // so ordering never leaves a shared recipient locked out.
+      try {
+        const callRow = await prisma.call.findUnique({ where: { externalId: callId }, select: { id: true } });
+        if (callRow) {
+          const activeShares = await prisma.entityAccess.findMany({
+            where: {
+              shareableEntityType: ShareableEntityType.NOTE_TAKER,
+              entityId: callRow.id,
+              entityUserAccess: { not: EntityUserAccess.REVOKED },
+            },
+            select: { userId: true, userGroupId: true, channelId: true },
+          });
+          for (const share of activeShares) {
+            if (share.userId) {
+              await prisma.canvasParticipant.upsert({
+                where: { canvasId_userId: { canvasId, userId: share.userId } },
+                create: { canvasId, workspaceId, userId: share.userId, role: CanvasRole.VIEWER },
+                update: {},
+              });
+            } else if (share.userGroupId) {
+              await prisma.canvasParticipant.upsert({
+                where: { canvasId_userGroupId: { canvasId, userGroupId: share.userGroupId } },
+                create: { canvasId, workspaceId, userGroupId: share.userGroupId, role: CanvasRole.VIEWER },
+                update: {},
+              });
+            } else if (share.channelId) {
+              await prisma.canvasParticipant.upsert({
+                where: { canvasId_channelId: { canvasId, channelId: share.channelId } },
+                create: { canvasId, workspaceId, channelId: share.channelId, role: CanvasRole.VIEWER },
+                update: {},
+              });
+            }
+          }
+        }
+      } catch (backfillError) {
+        logger.error(`[CallDocumentService] Failed to backfill canvas participants from existing recording shares for canvas ${canvasId}:`, backfillError);
+      }
 
       // Initialize Y-Sweet for collaborative editing
       const ysweetInitialized = await initializeYSweetDoc(canvasId, sanitizedContent as unknown as BlockNoteBlock[]);
