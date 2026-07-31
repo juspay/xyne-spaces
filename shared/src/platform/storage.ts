@@ -23,5 +23,10 @@ export interface StorageAdapter {
 
   readChannelConversationsSync?(channelId: string): unknown[] | null;
 
+  // Native warm-start path for the newest, server-backed channel rows. This
+  // is intentionally bounded and synchronous so a foreground app kill cannot
+  // outrun the normal debounced query-cache persistence.
+  primeChannelTail?(channelId: string, conversations: unknown[]): void;
+
   loadContextPropertySync?(key: string): unknown;
 }

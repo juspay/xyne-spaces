@@ -56,18 +56,21 @@ export const reconcileConversationWindow = (
  *     window sits far above `latest` and eager merging would drag the
  *     bottom of the list onto the tail and hide the anchor context.
  *   - Empty latest: pass fetched through unchanged.
- *   - Empty fetched: post-initial-load only, promote latest to the main list.
+ *   - Empty fetched: promote latest after initial load, or immediately for a
+ *     normal unanchored open. Anchored opens keep waiting for their
+ *     authoritative window.
  */
 export const mergeConversationsWithLatest = (
   fetched: Conversation[],
   latest: Conversation[],
   isInitialLoadComplete: boolean,
+  allowProvisionalPromotion = false,
 ): { merged: Conversation[]; latestClear: boolean } => {
   if (latest.length === 0) {
     return { merged: dedupeAndSortConversations(fetched, []), latestClear: false };
   }
   if (fetched.length === 0) {
-    return isInitialLoadComplete
+    return isInitialLoadComplete || allowProvisionalPromotion
       ? { merged: dedupeAndSortConversations(latest, []), latestClear: true }
       : { merged: [], latestClear: false };
   }

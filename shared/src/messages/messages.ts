@@ -6,6 +6,8 @@ import {
 } from '../machines/queryCacheMachine.js';
 import type { ChannelRef, ConversationRef, ThreadRef } from './conversationRef.js';
 
+const WARM_CHANNEL_TAIL_SIZE = 25;
+
 /**
  * Sync cache snapshot for a channel. Returns [] when the channel has never
  * been cached (cold start on this device / evicted by LRU).
@@ -88,6 +90,10 @@ export function primeChannelCache(
     channelId: ref.channelId,
     conversations,
   });
+  const tail = conversations.slice(-WARM_CHANNEL_TAIL_SIZE);
+  if (tail.length > 0) {
+    getStorageAdapter()?.primeChannelTail?.(ref.channelId, tail);
+  }
 }
 
 /**

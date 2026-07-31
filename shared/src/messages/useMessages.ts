@@ -41,6 +41,10 @@ import { usePendingForChannel, usePendingForThread } from './usePending.js';
 export type UseMessagesOptions = {
   channelPageSize?: number;
   channelLatestLimit?: number;
+  // Opt-in only: mobile chat uses the latest tail as a provisional first
+  // window while the complete page resolves. Dashboard/Electron keep their
+  // existing complete-page behavior unless they explicitly enable this.
+  promoteLatestTailOnColdOpen?: boolean;
   enabled?: boolean;
   linkedConversationId?: string | null | undefined;
   linkedItemCreatedAt?: { createdAt: number } | null | undefined;
@@ -121,6 +125,7 @@ function useChannelMessagesImpl(
   const isMember = ref.isMember ?? true;
   const pageSize = opts.channelPageSize ?? DEFAULT_CHANNEL_PAGE_SIZE;
   const latestLimit = opts.channelLatestLimit ?? Math.max(1, Math.floor(pageSize / 2));
+  const promoteLatestTailOnColdOpen = opts.promoteLatestTailOnColdOpen ?? false;
   const { channelId } = ref;
   const key = refKey(ref);
   const linkedConversationId = opts.linkedConversationId ?? null;
@@ -137,18 +142,14 @@ function useChannelMessagesImpl(
   const conversationsRef = useRef<Conversation[]>(cachedConversations);
   const setConversationsState = useCallback(
     (next: Conversation[] | ((prev: Conversation[]) => Conversation[])): void => {
-      if (typeof next !== 'function') {
-        conversationsRef.current = next;
-        setConversations(next);
-        if (enabled && channelId) primeChannelCache(ref, next);
-        return;
-      }
-      setConversations(prev => {
-        const resolved = next(prev);
-        conversationsRef.current = resolved;
-        if (enabled && channelId) primeChannelCache(ref, resolved);
-        return resolved;
-      });
+      // Keep actor/MMKV writes out of React's state-updater callback. XState
+      // notifies subscribed components synchronously, so dispatching there
+      // causes a render-time update warning in ChatList.
+      const resolved =
+        typeof next === 'function' ? next(conversationsRef.current) : next;
+      conversationsRef.current = resolved;
+      setConversations(resolved);
+      if (enabled && channelId) primeChannelCache(ref, resolved);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [channelId, enabled, key],
@@ -181,6 +182,9 @@ function useChannelMessagesImpl(
 
   const [latestConversationsList, setLatestConversationsList] = useState<Conversation[]>([]);
   const latestConversationsListRef = useRef<Conversation[]>([]);
+  // A normal cold open may temporarily use the latest tail while the complete
+  // page is still resolving. Preserve that tail when the complete page lands.
+  const hasProvisionalWindowRef = useRef(false);
 
   const [isInitialLoadComplete, setIsInitialLoadComplete] = useState(false);
   const isFetchingRef = useRef(false);
@@ -190,6 +194,8 @@ function useChannelMessagesImpl(
 
   const shouldUseCutoffQuery =
     conversationSeenCutoffAt !== null && isMember && !linkedConversationId;
+  const hasLinkedAnchor = linkedConversationId !== null || linkedItemCreatedAt !== null;
+  const allowProvisionalPromotion = promoteLatestTailOnColdOpen && !hasLinkedAnchor;
 
   const activityCutoffCreatedAt = linkedCutoffCreatedAt?.createdAt ?? null;
   const channelSeenCutoffCreatedAt = !linkedConversationId
@@ -266,7 +272,10 @@ function useChannelMessagesImpl(
       .then(([older, newerNullable]) => {
         const newer = newerNullable ?? [];
         const fetched = dedupeAndSortConversations(older, newer);
-        const mergedWithCached = mergeCachedConversations(conversationsRef.current, fetched);
+        const cachedWindow = conversationsRef.current;
+        const mergedWithCached = hasProvisionalWindowRef.current
+          ? dedupeAndSortConversations(cachedWindow, fetched)
+          : mergeCachedConversations(cachedWindow, fetched);
         const { merged, latestClear } = mergeConversationsWithLatest(
           mergedWithCached,
           latestConversationsListRef.current,
@@ -286,6 +295,7 @@ function useChannelMessagesImpl(
         }
 
         setConversationsState(merged);
+        hasProvisionalWindowRef.current = false;
         setIsInitialLoadComplete(true);
       })
       .catch(err => {
@@ -521,32 +531,34 @@ function useChannelMessagesImpl(
     if (!enabled) return;
     if (latestConversationsDetails.type !== 'complete') return;
     if (latestConversations.length === 0) {
-      if (isInitialLoadComplete) {
+      if (!promoteLatestTailOnColdOpen && isInitialLoadComplete) {
         setConversationsState(prev => (prev.length > 0 ? [] : prev));
       }
+      // A transient empty latest emission must never erase an existing warm
+      // mobile window. Dashboard/Electron retain their existing behavior above.
       return;
     }
     const sortedLatest = [...latestConversations].sort((a, b) => a.createdAt - b.createdAt);
 
-    setConversationsState(prev => {
-      const { merged, latestClear } = mergeConversationsWithLatest(
-        prev,
-        sortedLatest,
-        isInitialLoadComplete,
-      );
-      if (latestClear) {
-        return isSameConversationList(prev, merged) ? prev : merged;
-      }
-      return prev;
-    });
-
-    const { latestClear: latestClearForSideEffects } = mergeConversationsWithLatest(
-      conversationsRef.current,
+    const currentWindow = conversationsRef.current;
+    const { merged, latestClear } = mergeConversationsWithLatest(
+      currentWindow,
       sortedLatest,
       isInitialLoadComplete,
+      allowProvisionalPromotion,
     );
 
-    if (latestClearForSideEffects) {
+    if (latestClear) {
+      if (
+        allowProvisionalPromotion &&
+        !isInitialLoadComplete &&
+        currentWindow.length === 0
+      ) {
+        hasProvisionalWindowRef.current = true;
+      }
+      if (!isSameConversationList(currentWindow, merged)) {
+        setConversationsState(merged);
+      }
       setLatestConversationsList([]);
       latestConversationsListRef.current = [];
       setNewConversationsAnchor(null);
@@ -560,6 +572,8 @@ function useChannelMessagesImpl(
     latestConversations,
     latestConversationsDetails.type,
     isInitialLoadComplete,
+    allowProvisionalPromotion,
+    promoteLatestTailOnColdOpen,
   ]);
 
   const pendingForChannel = usePendingForChannel(channelId);
@@ -641,4 +655,3 @@ function useThreadMessagesImpl(
     } as ThreadConversation;
   }, [base, pendingForThread]);
 }
-
