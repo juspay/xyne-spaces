@@ -85,7 +85,7 @@ services:
 
   # LiveKit Egress Service (audio recording)
   livekit-egress:
-    image: livekit/egress:latest
+    image: mirror.gcr.io/livekit/egress:latest
     container_name: ${COMPOSE_PROJECT_NAME:-xyne}-livekit-egress
     environment:
       - EGRESS_CONFIG_FILE=/etc/egress.yaml
@@ -124,7 +124,7 @@ services:
 
   # MinIO (local S3-compatible storage for testing)
   minio:
-    image: minio/minio:latest
+    image: mirror.gcr.io/minio/minio:latest
     container_name: ${COMPOSE_PROJECT_NAME:-xyne}-minio
     ports:
       - "${MINIO_API_BIND_PORT:-9000}:9000"
@@ -228,7 +228,7 @@ services:
 
   # --- OpenTelemetry Collector ---
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:latest
+    image: mirror.gcr.io/otel/opentelemetry-collector-contrib:latest
     container_name: ${COMPOSE_PROJECT_NAME:-xyne}-otel-collector
     command: ["--config=/etc/otel-collector-config.yaml"]
     volumes:
@@ -243,7 +243,7 @@ services:
 
   # Victoria Metrics - Metrics Collection
   victoriametrics:
-    image: victoriametrics/victoria-metrics:latest
+    image: mirror.gcr.io/victoriametrics/victoria-metrics:latest
     container_name: ${COMPOSE_PROJECT_NAME:-xyne}-victoriametrics
     ports:
       - "${VICTORIAMETRICS_BIND_PORT:-8428}:8428"
@@ -259,7 +259,7 @@ services:
 
   # Grafana - Metrics Visualization & Dashboards
   grafana:
-    image: grafana/grafana:latest
+    image: mirror.gcr.io/grafana/grafana:latest
     container_name: ${COMPOSE_PROJECT_NAME:-xyne}-grafana
     ports:
       - "${GRAFANA_BIND_PORT:-3333}:3000"
@@ -315,39 +315,6 @@ services:
   #   container_name: xyne-dashboard
   #   ... (rest of config omitted)
 
-  common-postgres:
-    image: public.ecr.aws/docker/library/postgres:16-alpine
-    container_name: ${COMPOSE_PROJECT_NAME:-xyne}-common-postgres
-    environment:
-      POSTGRES_USER: xyne
-      POSTGRES_PASSWORD: xyne123
-      POSTGRES_DB: xyne_common
-    ports:
-      - "${COMMON_POSTGRES_BIND_PORT:-5434}:5432"
-    volumes:
-      - common_postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U xyne -d xyne_common"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
-  claw-auth-postgres:
-    image: public.ecr.aws/docker/library/postgres:16-alpine
-    container_name: ${COMPOSE_PROJECT_NAME:-xyne}-claw-auth-postgres
-    environment:
-      POSTGRES_USER: claw
-      POSTGRES_PASSWORD: claw123
-      POSTGRES_DB: claw_auth_db
-    ports:
-      - "${CLAW_AUTH_POSTGRES_BIND_PORT:-5435}:5432"
-    volumes:
-      - claw_auth_postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U claw -d claw_auth_db"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
 volumes:
   ysweet_data:
     driver: local
@@ -366,8 +333,4 @@ volumes:
   minio_data:
     driver: local
   transcription-agent-cache:
-    driver: local
-  common_postgres_data:
-    driver: local
-  claw_auth_postgres_data:
     driver: local

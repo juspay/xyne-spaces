@@ -1,0 +1,198 @@
+# =============================================================================
+# docker-compose.local.yml — Local development with consolidated containers.
+#
+# Usage:
+#   ENABLE_STORAGE=1 ENABLE_OBSERVABILITY=0 ENABLE_CALLS=0 ENABLE_FEATURE_FLAGS=0 \
+#   COMPOSE_PROFILES=calls,search \
+#   docker compose -f docker-compose.local.yml up -d
+#
+# The interactive script (scripts/start-services.sh) sets these automatically.
+#
+# Architecture:
+#   - dev-infra: ONE container (supervisord) running PostgreSQL, Redis,
+#     Zero-cache, and optionally Fake GCS, MinIO, Y-Sweet, LiveKit,
+#     Superposition, OTEL, VictoriaMetrics, Grafana.
+#     Controlled by ENABLE_STORAGE / ENABLE_CALLS / ENABLE_FEATURE_FLAGS /
+#     ENABLE_OBSERVABILITY env vars.
+#   - transcription-agent / livekit-egress: separate containers (profile: calls)
+#     — too heavy (torch, ffmpeg, headless Chrome) to bundle into dev-infra.
+#   - vespa: separate container (profile: search)
+#
+# Network aliases on dev-infra (postgres, redis, fake-gcs, minio, ysweet,
+# livekit, superposition, otel-collector, victoriametrics, grafana) let
+# external containers reach services inside dev-infra using the same
+# hostnames as before.
+# =============================================================================
+
+services:
+  # ---- Consolidated dev-infra container (always starts) ---------------------
+  dev-infra:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.dev-infra
+    image: xyne-dev-infra
+    container_name: ${COMPOSE_PROJECT_NAME:-xyne}-dev-infra
+    env_file:
+      - path: ./backend/.env.local
+        required: false
+    environment:
+      # Which supervisord program groups to enable
+      - ENABLE_STORAGE=${ENABLE_STORAGE:-0}
+      - ENABLE_OBSERVABILITY=${ENABLE_OBSERVABILITY:-0}
+      - ENABLE_CALLS=${ENABLE_CALLS:-0}
+      - ENABLE_FEATURE_FLAGS=${ENABLE_FEATURE_FLAGS:-0}
+      # Zero-cache overrides (postgres is localhost inside this container)
+      - ZERO_UPSTREAM_DB=postgresql://xyne:xyne123@localhost:5432/xyne_dev_db
+      - ZERO_CVR_DB=postgresql://xyne:xyne123@localhost:5432/xyne_dev_db
+      - ZERO_CHANGE_DB=postgresql://xyne:xyne123@localhost:5432/xyne_dev_db
+      - ZERO_REPLICA_FILE=/var/zero/replica.db
+      - ZERO_LOG_LEVEL=info
+      - ZERO_ADMIN_PASSWORD=dev-admin-password
+      - ZERO_MUTATE_URL=http://host.docker.internal:3001/api/zero/push
+      - ZERO_QUERY_URL=http://host.docker.internal:3001/api/zero/query
+      - ZERO_QUERY_FORWARD_COOKIES=true
+      - ZERO_MUTATE_FORWARD_COOKIES=true
+      - ZERO_CVR_MAX_CONNS=10
+      - ZERO_UPSTREAM_MAX_CONNS=10
+      - ZERO_NUM_SYNC_WORKERS=5
+      - NODE_ENV=development
+      - ZERO_PORT=4848
+      # OTEL metrics export — only set when observability is enabled, otherwise
+      # zero-cache floods logs with ECONNREFUSED and may crash.
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      - OTEL_RESOURCE_ATTRIBUTES=service.name=zero-cache,service.version=1.6.0
+      - OTEL_NODE_RESOURCE_DETECTORS=env,host,os
+    ports:
+      # Core
+      - "${POSTGRES_BIND_PORT:-5433}:5432"
+      - "${REDIS_BIND_PORT:-6379}:6379"
+      - "${ZERO_BIND_PORT_1:-4848}:4848"
+      - "${ZERO_BIND_PORT_2:-4849}:4849"
+      # Storage (only active when ENABLE_STORAGE=1)
+      - "${FAKE_GCS_BIND_PORT:-4443}:4443"
+      - "${MINIO_API_BIND_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_BIND_PORT:-9001}:9001"
+      - "${YSWEET_BIND_PORT:-8080}:8080"
+      # Calls — LiveKit (only active when ENABLE_CALLS=1)
+      - "${LIVEKIT_HTTP_BIND_PORT:-7880}:7880"
+      - "${LIVEKIT_HTTPS_BIND_PORT:-7881}:7881"
+      - "${LIVEKIT_UDP_BIND_PORT:-7882}:7882/udp"
+      # Feature Flags — Superposition (only active when ENABLE_FEATURE_FLAGS=1)
+      - "${SUPERPOSITION_BIND_PORT:-9999}:8080"
+      # Observability (only active when ENABLE_OBSERVABILITY=1)
+      - "${OTEL_HTTP_BIND_PORT:-4318}:4318"
+      - "${OTEL_GRPC_BIND_PORT:-4317}:4317"
+      - "${OTEL_METRICS_BIND_PORT:-8888}:8888"
+      - "${VICTORIAMETRICS_BIND_PORT:-8428}:8428"
+      - "${GRAFANA_BIND_PORT:-3333}:3000"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - zero_cache_data:/var/zero
+      - fake_gcs_data:/data/gcs
+      - minio_data:/data/minio
+      - ysweet_data:/data/ysweet
+      - livekit_data:/data/livekit
+      - victoriametrics_data:/data/victoriametrics
+      - grafana_data:/var/lib/grafana
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      default:
+        aliases:
+          - postgres
+          - redis
+          - fake-gcs
+          - minio
+          - ysweet
+          - livekit
+          - superposition
+          - otel-collector
+          - victoriametrics
+          - grafana
+
+  # ---- Transcription + Egress (single container, separate features) ---------
+  # Starts if either "transcription" or "egress" profile is active.
+  # ENABLE_TRANSCRIPTION / ENABLE_EGRESS env vars control which programs run.
+  call-services:
+    profiles: ["transcription", "egress"]
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.call-services
+    image: xyne-call-services
+    container_name: ${COMPOSE_PROJECT_NAME:-xyne}-call-services
+    shm_size: '512mb'
+    env_file:
+      - path: ./backend/.env.local
+        required: false
+    environment:
+      - ENABLE_TRANSCRIPTION=${ENABLE_TRANSCRIPTION:-0}
+      - ENABLE_EGRESS=${ENABLE_EGRESS:-0}
+      - LIVEKIT_URL=ws://livekit:7880
+      - LIVEKIT_API_KEY=devkey
+      - LIVEKIT_API_SECRET=devsecret
+      - BACKEND_URL=http://host.docker.internal:3001
+      - REDIS_URL=redis://redis:6379
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - STORAGE_EMULATOR_HOST=http://fake-gcs:4443
+    ports:
+      - "${TRANSCRIPTION_AGENT_BIND_PORT:-8001}:8080"
+    volumes:
+      - ./backend/python-agent/transcriptions:/app/transcriptions
+      - ./backend/python-agent:/app
+      - transcription-agent-cache:/app/.cache/huggingface
+      - ./docker/egress.yaml:/etc/egress.yaml
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  # ---- Search feature (separate container) ----------------------------------
+  vespa:
+    profiles: ["search"]
+    image: vespaengine/vespa
+    container_name: ${COMPOSE_PROJECT_NAME:-xyne}-vespa
+    user: "1000:1000"
+    hostname: vespa-container
+    mem_limit: ${VESPA_MEM_LIMIT:-3g}
+    cpus: ${VESPA_CPUS:-2}
+    ulimits:
+      nproc: 409600
+    ports:
+      - "${VESPA_FEED_PORT:-8083}:8080"
+      - "${VESPA_QUERY_PORT:-8081}:8081"
+      - "19071:19071"
+    volumes:
+      - vespa_data:/opt/vespa/var
+    environment:
+      - VESPA_CONFIGSERVER_JVMARGS=-Xms64m -Xmx512m -XX:+UseSerialGC
+      - VESPA_CONFIGPROXY_JVMARGS=-Xms32m -Xmx128m -XX:+UseSerialGC
+      - VESPA_IGNORE_NOT_ENOUGH_MEMORY=true
+      - VESPA_SKIP_UPGRADE_CHECK=true
+    restart: always
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "6"
+
+volumes:
+  postgres_data:
+    driver: local
+  zero_cache_data:
+    driver: local
+  fake_gcs_data:
+    driver: local
+  minio_data:
+    driver: local
+  ysweet_data:
+    driver: local
+  livekit_data:
+    driver: local
+  victoriametrics_data:
+    driver: local
+  grafana_data:
+    driver: local
+  transcription-agent-cache:
+    driver: local
+  vespa_data:
+    driver: local
