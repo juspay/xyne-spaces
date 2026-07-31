@@ -10,6 +10,7 @@ import { GoogleService } from '@/services/googleService';
 import { ExternalMessageRepository } from '@/database/repositories/externalMessageRepository';
 import { preDownloadGmailAttachments } from './attachments';
 import { GooglePubSubMessage, GooglePubSubData } from './types';
+import { config } from '@/config/env';
 
 const TAG = '[GoogleFlow]';
 const externalMessageRepo = new ExternalMessageRepository();
@@ -27,14 +28,26 @@ export class GoogleFlow extends BaseFlow {
 
       const googleService = GoogleService.fromEncryptedCredentials(source.credentials, source.id);
 
-      // Resume from the persisted cursor, not the push's own historyId — self-heals anything an earlier push missed.
-      const { messageIds, cursor } = await this.resolveMessages(
-        googleService,
-        source.lastSyncCursor ?? pubsubData.historyId,
-      );
+      const isBetaChannel = !!source.channelId && config.desk.betaChannels.includes(source.channelId);
+      if (isBetaChannel) {
+        logger.info(`${TAG} using beta desk ingestion path`, { channelId: source.channelId });
+      }
+
+      let messageIds: string[];
+      let targetHistoryId: string;
+      if (isBetaChannel) {
+        const resolved = await this.resolveMessages(
+          googleService,
+          source.lastSyncCursor ?? pubsubData.historyId,
+        );
+        messageIds = resolved.messageIds;
+        targetHistoryId = resolved.cursor ?? pubsubData.historyId;
+      } else {
+        messageIds = await this.resolveMessageIds(googleService, pubsubData.historyId);
+        targetHistoryId = pubsubData.historyId;
+      }
       if (messageIds.length === 0) return { authenticated: false };
 
-      const targetHistoryId = cursor ?? pubsubData.historyId;
       logger.info(`${TAG} [BATCH_RESOLVED] channelId=${source.channelId}`, {
         sourceName: source.name,
         historyId: targetHistoryId,
@@ -80,7 +93,7 @@ export class GoogleFlow extends BaseFlow {
         const parsedEmailNoAttachments = { ...parsedEmail, attachments: [] };
 
         payloads.push({
-          pubsubData: { ...pubsubData, historyId: undefined },
+          pubsubData: isBetaChannel ? { ...pubsubData, historyId: undefined } : pubsubData,
           parsedEmail: parsedEmailNoAttachments,
           ...(preDownloadedAttachments.length > 0 && { preDownloadedAttachments }),
         });
@@ -88,7 +101,7 @@ export class GoogleFlow extends BaseFlow {
       }
 
       // Cursor only advances once every message in the batch has synced.
-      if (lastRealIndex >= 0) payloads[lastRealIndex].pubsubData.historyId = targetHistoryId;
+      if (isBetaChannel && lastRealIndex >= 0) payloads[lastRealIndex].pubsubData.historyId = targetHistoryId;
 
       return payloads;
     } catch (error: any) {
@@ -144,6 +157,22 @@ export class GoogleFlow extends BaseFlow {
     } catch {
       logger.error(`${TAG} Failed to fetch recent messages`);
       return { messageIds: [], cursor: null };
+    }
+  }
+
+  /** Try history first, fall back to most recent message (stable/default path) */
+  private async resolveMessageIds(googleService: GoogleService, historyId: string): Promise<string[]> {
+    try {
+      return await googleService.listMessagesFromHistory(historyId);
+    } catch {
+      logger.warn(`${TAG} History fetch failed, trying recent messages`);
+    }
+
+    try {
+      return await googleService.listRecentMessages(1);
+    } catch {
+      logger.error(`${TAG} Failed to fetch recent messages`);
+      return [];
     }
   }
 }
