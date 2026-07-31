@@ -25,6 +25,8 @@ export interface RecordingsV2PillProps {
   >;
   creator: User | null;
   tags?: string[];
+  /** Resolves a tag value (Tag id) to its display text. Defaults to identity. */
+  resolveLabel?: (label: string) => string;
   onOpen: (recordingId: string) => void;
 }
 
@@ -113,6 +115,7 @@ const RecordingsV2Pill = ({
   recording,
   creator,
   tags = [],
+  resolveLabel = (label: string) => label,
   onOpen,
 }: RecordingsV2PillProps): ReactElement => {
   const title = recording.title?.trim() || 'Untitled Recording';
@@ -183,10 +186,10 @@ const RecordingsV2Pill = ({
                 className='inline-flex items-center gap-1.5 rounded-md border border-border bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground transition-colors'
               >
                 <span
-                  className={cn('size-1.5 rounded-full', getRecordingTagDotColor(tag))}
+                  className={cn('size-1.5 rounded-full', getRecordingTagDotColor(resolveLabel(tag)))}
                   aria-hidden='true'
                 />
-                <span className='max-w-32 truncate'>{tag}</span>
+                <span className='max-w-32 truncate'>{resolveLabel(tag)}</span>
               </span>
             ))}
           </span>

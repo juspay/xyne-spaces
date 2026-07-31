@@ -20,6 +20,7 @@ import { RecordingLabelFilter } from './components/RecordingLabelFilter';
 import { RecordingPeopleFilter } from './components/RecordingPeopleFilter';
 import RecordingsV2Pill, { RecordingsV2LivePill } from './components/RecordingsV2Pill';
 import { RecordingsV2Skeleton } from './components/RecordingsV2Skeleton';
+import { useResolvedRecordingLabels } from './hooks/useResolvedRecordingLabels';
 import {
   buildRecordingRows,
   filterRecordingsByLabels,
@@ -94,6 +95,10 @@ const RecordingsV2Screen = (): ReactElement => {
       ),
     [recordings],
   );
+  // recording.labels stores Tag ids (no FK), not display text — resolve them
+  // to their actual value once here so both the filter dropdown and the
+  // per-row chips show real label names instead of raw ids.
+  const { resolveLabel } = useResolvedRecordingLabels(availableLabels);
 
   const ownershipFilteredRecordings = useMemo(
     () => filterRecordingsByOwnership(recordings, selectedCreatorId),
@@ -276,6 +281,7 @@ const RecordingsV2Screen = (): ReactElement => {
                   labels={availableLabels}
                   selectedLabels={selectedLabels}
                   onSelectedLabelsChange={setSelectedLabels}
+                  resolveLabel={resolveLabel}
                 />
               </div>
 
@@ -423,6 +429,7 @@ const RecordingsV2Screen = (): ReactElement => {
                         recording={row.recording}
                         creator={usersById.get(row.recording.createdByUserId) ?? null}
                         tags={row.recording.labels}
+                        resolveLabel={resolveLabel}
                         onOpen={handleOpenRecording}
                       />
                     </div>

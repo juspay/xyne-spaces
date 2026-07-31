@@ -18,6 +18,8 @@ interface RecordingLabelFilterProps {
   labels: string[];
   selectedLabels: string[];
   onSelectedLabelsChange: (labels: string[]) => void;
+  /** Resolves a label value (Tag id) to its display text. Defaults to identity. */
+  resolveLabel?: (label: string) => string;
 }
 
 const TRIGGER_CLASS_NAME = 'h-9 gap-1.5 rounded-xl border-border px-3 font-medium shadow-none';
@@ -26,6 +28,7 @@ export function RecordingLabelFilter({
   labels,
   selectedLabels,
   onSelectedLabelsChange,
+  resolveLabel = (label: string) => label,
 }: RecordingLabelFilterProps): ReactElement {
   const [isOpen, setIsOpen] = useState(false);
   const [searchValue, setSearchValue] = useState('');
@@ -36,8 +39,10 @@ export function RecordingLabelFilter({
 
   const visibleLabels = useMemo(() => {
     const query = searchValue.trim().toLowerCase();
-    return query ? labels.filter(label => label.toLowerCase().includes(query)) : labels;
-  }, [labels, searchValue]);
+    return query
+      ? labels.filter(label => resolveLabel(label).toLowerCase().includes(query))
+      : labels;
+  }, [labels, searchValue, resolveLabel]);
 
   /** Filtering reshuffles the list, so park the cursor back on the first match. */
   useEffect(() => {
@@ -227,10 +232,13 @@ export function RecordingLabelFilter({
                     data-track-name='toggle_label_filter'
                   >
                     <span
-                      className={cn('size-2 shrink-0 rounded-full', getRecordingTagDotColor(label))}
+                      className={cn(
+                        'size-2 shrink-0 rounded-full',
+                        getRecordingTagDotColor(resolveLabel(label)),
+                      )}
                       aria-hidden='true'
                     />
-                    <span className='min-w-0 flex-1 truncate'>{label}</span>
+                    <span className='min-w-0 flex-1 truncate'>{resolveLabel(label)}</span>
                     {isSelected && (
                       <CheckTickSingle
                         className='size-4 shrink-0 text-primary'
