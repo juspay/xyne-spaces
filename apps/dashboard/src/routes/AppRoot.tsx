@@ -210,7 +210,7 @@ import AIScreen from './AIScreen/AIScreen';
 import AILibraryScreen from './AIScreen/AILibraryScreen';
 import AIAgentCreateScreen from './AIScreen/AIAgentCreateScreen';
 import AIKnowledgeScreen from './AIScreen/AIKnowledgeScreen';
-import AISectionScreen from './AIScreen/AISectionScreen';
+import AISectionLayout from './AIScreen/AISectionLayout';
 import UserGuideScreen from './UserGuideScreen';
 import DailyBriefScreen from './DailyBriefScreen';
 import AutomationsListScreen from './AutomationsScreen/AutomationsListScreen';
@@ -828,9 +828,26 @@ export const router = createBrowserRouter([
                   { path: 'library', element: <AILibraryScreen /> },
                   { path: 'library/agent/create', element: <AIAgentCreateScreen /> },
                   { path: 'knowledge', element: <AIKnowledgeScreen /> },
-                  { path: 'digital-twin', element: <AISectionScreen title='Digital twin' /> },
-                  { path: 'metrics', element: <AISectionScreen title='Metrics' /> },
-                  { path: 'workflow', element: <AISectionScreen title='Workflow' /> },
+                  {
+                    element: <AISectionLayout />,
+                    children: [
+                      {
+                        path: 'digital-twin',
+                        element: <ClawDigitalTwinScreen />,
+                        children: [
+                          { index: true, element: <DigitalTwinMemoriesTab /> },
+                          { path: 'hot', element: <DigitalTwinHotTab /> },
+                          { path: 'proposals', element: <DigitalTwinProposalsTab /> },
+                          { path: 'recall', element: <DigitalTwinRecallTab /> },
+                          { path: 'graph', element: <DigitalTwinGraphTab /> },
+                          { path: 'metrics', element: <ClawDigitalTwinMetricsScreen /> },
+                          { path: 'settings', element: <DigitalTwinSettingsTab /> },
+                        ],
+                      },
+                      { path: 'metrics', element: <ClawMetricsScreen /> },
+                      { path: 'settings', element: <ClawSettingsScreen /> },
+                    ],
+                  },
                 ],
               },
               {

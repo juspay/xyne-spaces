@@ -4,11 +4,11 @@ import {
   ChatPlus,
   ChevronBigDown,
   DeleteDustbin01,
-  GitFork01,
   LayoutGridStackDown,
   Notebook,
   PencilEditBox,
   Piechart01,
+  Settings01,
   ThreeDotsMenuVertical,
   UserTwo,
 } from '@xyne/icons';
@@ -58,7 +58,7 @@ const NAV_ITEMS: AINavItem[] = [
   { key: 'library', label: 'Library', icon: LayoutGridStackDown as NavIcon, to: '/ai/library' },
   { key: 'digital-twin', label: 'Digital twin', icon: UserTwo as NavIcon, to: '/ai/digital-twin' },
   { key: 'metrics', label: 'Metrics', icon: Piechart01 as NavIcon, to: '/ai/metrics' },
-  { key: 'workflow', label: 'Workflow', icon: GitFork01 as NavIcon, to: '/ai/workflow' },
+  { key: 'settings', label: 'Settings', icon: Settings01 as NavIcon, to: '/ai/settings' },
 ];
 
 // ═══════════════════════════════════════════════════════════════════════════════
