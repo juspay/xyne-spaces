@@ -66,8 +66,8 @@ import {
   loadDeepwikiTools,
   loadContext7Tools,
   loadPlaywrightTools,
-  type SkillTrigger,
 } from "../subagent-tools.js";
+import { resolveTriggers, type SkillTrigger } from "../skill-trigger-dispatcher.js";
 import {
   buildFastModeDirectTools,
   buildFastModeMetaTools,
@@ -1793,27 +1793,8 @@ async function processTask(
 
     // Extract skill triggers from agent config (needed by both subagent tools and runTask)
     const rawTriggers =
-      (agentConfig?.["skillTriggers"] as Array<{
-        toolName: string;
-        skillSlug: string;
-        when: string;
-        prompt?: string;
-      }>) ?? [];
-    const resolvedTriggers = rawTriggers
-      .filter((t) => t.toolName && t.skillSlug)
-      .map((t) => {
-        const skill = skills?.find((s) => s.name === t.skillSlug);
-        return skill
-          ? {
-              toolName: t.toolName,
-              skillSlug: t.skillSlug,
-              skillContent: skill.content,
-              when: t.when as "before" | "after",
-              prompt: t.prompt,
-            }
-          : null;
-      })
-      .filter((t): t is NonNullable<typeof t> => t !== null);
+      (agentConfig?.["skillTriggers"] as import("../skill-trigger-dispatcher.js").RawSkillTrigger[]) ?? [];
+    const resolvedTriggers = resolveTriggers(rawTriggers, skills, { log: console.log });
 
     // Extract prompt injections (per-turn system reminders)
     const rawInjections =

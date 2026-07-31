@@ -425,6 +425,8 @@ async function loadMcpTools(
 // ── Subagent factory (creates child AgentSession) ─────────────────────────
 
 export interface SkillTrigger {
+  /** How toolName should be matched against the actual tool name. */
+  matchMode?: "exact" | "suffix" | "prefix" | "contains";
   toolName: string;
   skillSlug: string;
   skillContent: string;
