@@ -132,6 +132,14 @@ function revealMoreWords(target: string, shown: string, words: number): string {
 
 export interface VoiceInputHandle {
   toggle: () => void;
+  /** Push-to-talk START: begin recording if currently idle. No-op if already
+   *  recording, transcribing, disabled, or the composer is sending. Idempotent,
+   *  and race-safe against an in-flight getUserMedia() (a stop requested before
+   *  capture actually begins is honoured the moment it does). */
+  startRecording: () => void;
+  /** Push-to-talk STOP: stop an in-progress (or still-starting) recording.
+   *  No-op if nothing is recording or starting. */
+  stopRecording: () => void;
   /** Called by the composer right before it sends: strips any unfinalized interim
    *  text from the editor and aborts an active voice stream (no drain), so nothing
    *  in flight leaks into the next message. No-op when no stream is active. */
@@ -644,11 +652,60 @@ export const VoiceInput = forwardRef<VoiceInputHandle, VoiceInputProps>(
       clearVoiceStreamCloseTimer,
     ]);
 
-    // Expose toggle() so MobileEditor's onVoiceToggle can call it via ref
-    useImperativeHandle(ref, () => ({ toggle: handleVoiceToggle, abortForSend }), [
-      handleVoiceToggle,
-      abortForSend,
+    // Push-to-talk plumbing. startVoiceRecording() is async (it awaits
+    // getUserMedia), so a release that lands DURING that await must not leak a
+    // hot mic: we remember that a stop was requested and apply it as soon as the
+    // recorder actually exists.
+    const pttStartingRef = useRef(false);
+    const pttStopRequestedRef = useRef(false);
+
+    const startRecordingHold = useCallback((): void => {
+      if (isVoiceRecording || isVoiceTranscribing || disabled || isSending) return;
+      if (pttStartingRef.current) return;
+      pttStartingRef.current = true;
+      pttStopRequestedRef.current = false;
+      void (async () => {
+        try {
+          await startVoiceRecording();
+        } finally {
+          pttStartingRef.current = false;
+          if (pttStopRequestedRef.current) {
+            pttStopRequestedRef.current = false;
+            stopVoiceRecording();
+          }
+        }
+      })();
+    }, [
+      isVoiceRecording,
+      isVoiceTranscribing,
+      disabled,
+      isSending,
+      startVoiceRecording,
+      stopVoiceRecording,
     ]);
+
+    const stopRecordingHold = useCallback((): void => {
+      // Still awaiting getUserMedia: defer the stop until capture begins.
+      if (pttStartingRef.current) {
+        pttStopRequestedRef.current = true;
+        return;
+      }
+      if (!isVoiceRecording) return;
+      stopVoiceRecording();
+    }, [isVoiceRecording, stopVoiceRecording]);
+
+    // Expose toggle() (button / mod+shift+m) plus explicit start/stop for
+    // hold-to-talk, so a held gesture never inverts an already-active toggle.
+    useImperativeHandle(
+      ref,
+      () => ({
+        toggle: handleVoiceToggle,
+        startRecording: startRecordingHold,
+        stopRecording: stopRecordingHold,
+        abortForSend,
+      }),
+      [handleVoiceToggle, startRecordingHold, stopRecordingHold, abortForSend],
+    );
 
     // Release microphone, WebSocket, the reveal timer, and the force-close safety net
     // on unmount — otherwise the safety-net timeout can outlive this component and
