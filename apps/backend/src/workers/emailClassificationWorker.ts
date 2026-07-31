@@ -9,7 +9,7 @@ import { ticketAssignmentService, primaryUserIdOf } from '@/services/ticketAssig
 import { syncUserWorkload } from '@/utils/workloadUtils';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { activityService } from '@/services/activity/activityService';
-import { ActivityClassification, ActivityType } from '@prisma/client';
+import { ActivityClassification, ActivityType, EmailType } from '@prisma/client';
 import type { BoardMetadata } from '@xyne/shared';
 import { emitTicketUpdated } from '@/automations/triggers/ticket-updated.trigger';
 import { runWithContext } from '@/database/tenant/context';
@@ -200,7 +200,7 @@ class EmailClassificationWorker {
     let newAssignedTo: string | undefined;
     let assignmentSucceeded = false;
 
-    if (shouldAssignPerson && emailRecord.type !== 'COMPOSE') {
+    if (shouldAssignPerson && emailRecord.type !== EmailType.COMPOSE) {
       try {
         const boardRow = await prisma.board.findUnique({
           where: { id: ticket.boardId! },
