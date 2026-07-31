@@ -55,6 +55,7 @@ import type {
   ProviderModelOption,
   ReasoningEffort,
 } from '@/services/claw/clawSettingsTypes';
+import LocalHarnessSection from './LocalHarnessSection';
 
 const PROVIDER_META: Record<ProviderId, { name: string; description: string; icon: typeof Plane }> =
   {
@@ -1224,6 +1225,7 @@ const ClawSettingsScreen = (): ReactElement => {
           onMutate={invalidateSettings}
           onSaving={setSaving}
         />
+        <LocalHarnessSection />
         <AdvancedSettingsSection />
       </div>
     </div>
