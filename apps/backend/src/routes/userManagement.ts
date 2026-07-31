@@ -1,6 +1,5 @@
 import { Router } from 'express';
 import { userManagementController } from '../controllers/userManagementController';
-import { authMiddleware } from '../middleware/auth';
 
 const router = Router();
 
@@ -32,25 +31,25 @@ router.get('/groups', userManagementController.getAllGroups);
 router.get('/groups/:id', userManagementController.getGroupById);
 
 // Create a new user group
-router.post('/groups', authMiddleware.requireAdminOrOwner, userManagementController.createGroup);
+router.post('/groups', userManagementController.createGroup);
 
 // Update a user group
-router.put('/groups/:id', authMiddleware.requireAdminOrOwner, userManagementController.updateGroup);
+router.put('/groups/:id', userManagementController.updateGroup);
 
 // Delete a user group
-router.delete('/groups/:id', authMiddleware.requireAdminOrOwner, userManagementController.deleteGroup);
+router.delete('/groups/:id', userManagementController.deleteGroup);
 
 // Deactivate a user group (soft delete)
-router.patch('/groups/:id/deactivate', authMiddleware.requireAdminOrOwner, userManagementController.deactivateGroup);
+router.patch('/groups/:id/deactivate', userManagementController.deactivateGroup);
 
 // Reactivate a user group
-router.patch('/groups/:id/reactivate', authMiddleware.requireAdminOrOwner, userManagementController.reactivateGroup);
+router.patch('/groups/:id/reactivate', userManagementController.reactivateGroup);
 
 // Assign user to group
-router.post('/groups/:groupId/users/:userId', authMiddleware.requireAdminOrOwner, userManagementController.assignUserToGroup);
+router.post('/groups/:groupId/users/:userId', userManagementController.assignUserToGroup);
 
 // Remove user from group (assigns to default group)
-router.delete('/groups/:groupId/users/:userId', authMiddleware.requireAdminOrOwner, userManagementController.removeUserFromGroup);
+router.delete('/groups/:groupId/users/:userId', userManagementController.removeUserFromGroup);
 
 // ==================== GROUP PERMISSION MANAGEMENT ROUTES ====================
 
@@ -58,6 +57,6 @@ router.delete('/groups/:groupId/users/:userId', authMiddleware.requireAdminOrOwn
 router.get('/groups/:id/permissions', userManagementController.getGroupPermissions);
 
 // Update group permissions
-router.put('/groups/:id/permissions', authMiddleware.requireAdminOrOwner, userManagementController.updateGroupPermissions);
+router.put('/groups/:id/permissions', userManagementController.updateGroupPermissions);
 
 export default router;
