@@ -43,6 +43,7 @@ import { classifySessionSubsystemForBank, distillSession } from "./sessionCurato
 import type { SubsystemUpdate } from "./sessionCurator.js";
 import { runNightlyMemoryHygiene } from "./memoryHygieneService.js";
 import { runRetentionSweep } from "./memoryRetentionService.js";
+import { resolveOrgLitellmApiKey } from "../lib/agent-provider-config.js";
 
 const logger = createLogger("memory-cron", createTraceId());
 
@@ -279,7 +280,11 @@ async function createBatchReviews(
       // and wait for a click; that step is removed (the digests were noise
       // and blocked candidate creation).
       try {
-        await runBatchCuration(batch.id, included, dateStr, agentSlug);
+        // Resolve the ORG's key once per (org, agent) batch so the distill calls
+        // bill the org (curation builds the agent's SHARED memory — an org-identity
+        // task, no per-user billing). A miss → undefined → claw skips.
+        const orgLitellmApiKey = await resolveOrgLitellmApiKey(orgId).catch(() => undefined);
+        await runBatchCuration(batch.id, included, dateStr, agentSlug, orgLitellmApiKey);
       } catch (err) {
         logger.error("[memory-cron] Auto-curation failed for batch — batch left as 'pending' for retry", {
           agentSlug,
@@ -317,6 +322,7 @@ async function runBatchCuration(
   sessionIds: string[],
   reviewDate: string,
   agentSlug: string,
+  orgLitellmApiKey?: string,
 ): Promise<void> {
   const retainedByid: Record<string, string[]> = {};
   const failedSessions: string[] = [];
@@ -334,7 +340,7 @@ async function runBatchCuration(
       continue;
     }
     try {
-      const reviewIds = await curateApprovedTranscript(transcript, reviewDate);
+      const reviewIds = await curateApprovedTranscript(transcript, reviewDate, orgLitellmApiKey);
       retainedByid[sid] = reviewIds;
       totalCandidates += reviewIds.length;
       curated++;
@@ -690,6 +696,7 @@ const INGEST_TRANSCRIPT_MAX_CHARS = 200_000;
 export async function curateApprovedTranscript(
   transcript: SessionTranscript,
   reviewDate: string,
+  orgLitellmApiKey?: string,
 ): Promise<string[]> {
   // NEVER shared-curate the digital twin. Twin sessions are private per-user
   // conversations with their OWN user-memory pipeline (user-tagged facts, the
@@ -735,6 +742,7 @@ export async function curateApprovedTranscript(
       agentName: agentRow?.name ?? transcript.agentSlug,
       task: transcript.task,
       transcript: content,
+      ...(orgLitellmApiKey ? { litellmApiKey: orgLitellmApiKey } : {}),
     });
     const tags = [
       "shared",
@@ -799,7 +807,7 @@ export async function curateApprovedTranscript(
     result: transcript.result,
     toolsUsed: transcript.toolsUsed,
     transcript: buildTranscriptBlob(transcript),
-  });
+  }, orgLitellmApiKey);
 
   if (candidates.length === 0) {
     logger.info("[memory-cron] Curator returned 0 subsystem updates — no review rows created", {

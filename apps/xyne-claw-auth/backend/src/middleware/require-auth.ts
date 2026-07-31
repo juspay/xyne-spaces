@@ -1,7 +1,7 @@
 import type { Request, Response, NextFunction } from "express";
 import { timingSafeEqual } from "node:crypto";
 import { CONFIG } from "../config.js";
-import { ensureUserExists } from "../lib/users-jit.js";
+import { ensureUserExists, resolveClawUserIdForSpacesIdentity } from "../lib/users-jit.js";
 import { checkResultCallbackToken } from "../lib/session-tokens.js";
 import { verify as verifyCliToken } from "../lib/cli-tokens.js";
 import { prisma } from "../db.js";
@@ -152,9 +152,20 @@ export async function requireAuth(
     await ensureUserExists(userId, "require-auth").catch((err) => {
       log.warn(`[require-auth] ensureUserExists(${userId}) failed:`, err instanceof Error ? err.message : err);
     });
-    req.headers["x-user-id"] = userId;
+    // Derive the claw user identity WITHOUT the client-supplied x-workspace-id.
+    // The workspace header is forwarded to Spaces /api/auth/me above (which
+    // validates session scope), but must not be trusted for local identity
+    // resolution — a client could supply any workspace ID to select a different
+    // org's identity. resolveClawUserIdForSpacesIdentity finds the most recently
+    // active UserSurfaceIdentity for this Spaces user instead.
+    const clawUserId = await resolveClawUserIdForSpacesIdentity(userId).catch((err) => {
+      log.warn(`[require-auth] resolveClawUserIdForSpacesIdentity(${userId}) failed:`, err instanceof Error ? err.message : err);
+      return undefined;
+    });
+    req.headers["x-spaces-user-id"] = userId;
+    req.headers["x-user-id"] = clawUserId ?? userId;
     // Phase-1 org context (additive; requireAuth only).
-    await attachOrgContext(req, userId);
+    await attachOrgContext(req, clawUserId ?? userId);
     next();
     return;
   }
@@ -219,8 +230,15 @@ export async function requireS2S(
     await ensureUserExists(userId, "require-auth").catch((err) => {
       log.warn(`[require-auth/s2s] ensureUserExists(${userId}) failed:`, err instanceof Error ? err.message : err);
     });
-    req.headers["x-user-id"] = userId;
-    await attachOrgContext(req, userId);
+    // Derive the claw user identity WITHOUT the client-supplied x-workspace-id
+    // (same fix as requireAuth — see comment there).
+    const clawUserId = await resolveClawUserIdForSpacesIdentity(userId).catch((err) => {
+      log.warn(`[require-auth/s2s] resolveClawUserIdForSpacesIdentity(${userId}) failed:`, err instanceof Error ? err.message : err);
+      return undefined;
+    });
+    req.headers["x-spaces-user-id"] = userId;
+    req.headers["x-user-id"] = clawUserId ?? userId;
+    await attachOrgContext(req, clawUserId ?? userId);
     next();
     return;
   }

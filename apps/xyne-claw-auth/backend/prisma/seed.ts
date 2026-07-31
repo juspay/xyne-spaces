@@ -590,10 +590,13 @@ async function main() {
     update: {},
   });
 
-  // Create "spaces" Surface if it doesn't exist
+  // Create "spaces" Surface if it doesn't exist. id is set to "spaces"
+  // (matching the slice0_surface_foundation migration) instead of letting
+  // Prisma generate a cuid — db push skips migration SQL, so the seed is
+  // the only thing that creates this row in dev.
   const spacesSurface = await prisma.surface.upsert({
     where: { key: "spaces" },
-    create: { key: "spaces", identityMode: "USER_ID", supportsUserResolution: true },
+    create: { id: "spaces", key: "spaces", identityMode: "USER_ID", supportsUserResolution: true },
     update: {},
   });
 

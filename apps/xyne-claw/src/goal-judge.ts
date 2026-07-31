@@ -44,6 +44,8 @@ export interface GoalJudgeInput {
    *  judge so goals like "produce an HTML dashboard" aren't falsely failed
    *  because the judge can only see the text body otherwise. */
   attachmentsThisTurn?: GoalJudgeAttachmentMeta[];
+  /** Per-user LiteLLM key shipped from claw-auth. Absent → fail-open to judge_unavailable. */
+  litellmApiKey?: string;
 }
 
 export interface GoalJudgeDecision {
@@ -107,7 +109,8 @@ const DECIDE_TOOL = {
 };
 
 export async function judgeGoalProgress(input: GoalJudgeInput): Promise<GoalJudgeDecision> {
-  if (!LITELLM.apiKey) {
+  const apiKey = input.litellmApiKey ?? LITELLM.apiKey; // fall back to env server key
+  if (!apiKey) {
     return { done: false, reason: "judge_unavailable" };
   }
 
@@ -144,7 +147,7 @@ export async function judgeGoalProgress(input: GoalJudgeInput): Promise<GoalJudg
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${LITELLM.apiKey}`,
+        Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
         model: LITELLM.fastModel,

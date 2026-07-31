@@ -15,6 +15,7 @@
 
 import { activeGoalRepository } from "../repositories/activeGoalRepository.js";
 import { judgeGoalViaClaw } from "./goalJudgeClient.js";
+import { resolveUserLitellmApiKey } from "../lib/agent-provider-config.js";
 import type { Prisma } from "@prisma/client";
 
 const NEXT_TURN_TASK_TEMPLATE = (
@@ -304,6 +305,11 @@ export async function recordTurnAndDecide(args: {
   }
   // ────────────────────────────────────────────────────────────────────────
 
+  // Resolve the user's key (personal, else provisioned SYSTEM) so the boss judge
+  // charges the user's budget. `updated.userId` is the id provisioning stored the
+  // key against. A miss omits the field → claw fails-open to judge_unavailable.
+  const litellmApiKey = await resolveUserLitellmApiKey(updated.userId).catch(() => undefined);
+
   const decision = await judgeGoalViaClaw({
     condition: updated.condition,
     lastTurnOutput: lastTurnResult,
@@ -313,6 +319,7 @@ export async function recordTurnAndDecide(args: {
     ...(attachmentsThisTurn && attachmentsThisTurn.length > 0
       ? { attachmentsThisTurn }
       : {}),
+    ...(litellmApiKey ? { litellmApiKey } : {}),
   });
 
   if (decision.done) {

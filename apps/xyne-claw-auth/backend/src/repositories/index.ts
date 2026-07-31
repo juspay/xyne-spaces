@@ -13,6 +13,7 @@ export { generatedContentRepository, DAILY_BRIEF_KIND } from "./generatedContent
 export { userProviderCredentialsRepository } from "./userProviderCredentialsRepository.js";
 export { agentProviderCredentialsRepository } from "./agentProviderCredentialsRepository.js";
 export { sharedProviderCredentialRepository } from "./sharedProviderCredentialRepository.js";
+export { orgProviderCredentialsRepository } from "./orgProviderCredentialsRepository.js";
 export { userSubagentConfigRepository } from "./userSubagentConfigRepository.js";
 export { userRepository } from "./userRepository.js";
 export { skillRepository } from "./skillRepository.js";
