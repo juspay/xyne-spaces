@@ -93,10 +93,10 @@ export async function resolveCollectionAccess(
     }
 
     if (!role && !collection.isPrivate) {
-        // Public collections grant implicit EDITOR — mirrors prior behaviour at
-        // collectionController.ts:191-193. Kept here so the legacy controller's
-        // upload/edit paths still permit non-private collections.
-        role = CollectionRole.EDITOR;
+        // Public collections are readable by any workspace member but not writable without an
+        // explicit grant — resolve non-grantees to VIEWER so the accessible-list / UI advertises
+        // read-only, consistent with the write endpoints (which reject VIEWER).
+        role = CollectionRole.VIEWER;
     }
 
     return { role };

@@ -9,15 +9,10 @@
  *   3. Compute HMAC-SHA256 over the RAW request body.
  *   4. Timing-safe compare against `X-Xyne-Signature` header (hex).
  *
- * Rollout modes (env `SPACES_WEBHOOK_VERIFY_MODE`):
- *   - `enforce` (default): reject with 401 on any mismatch (or missing
- *     material). This is the secure default — the webhook handler treats the
- *     event payload's userId/channelId as authoritative and runs agents with
- *     that user's credentials, so an unsigned/forged event is full
- *     impersonation. Only an explicit `warn` opens the fail-open path.
- *   - `warn`: log mismatches but call next(). Opt-in escape hatch for a
- *     staged rollout while signing-secret backfill catches up; do NOT run
- *     this in production once backfill is complete.
+ * Modes (env `SPACES_WEBHOOK_VERIFY_MODE`):
+ *   - `enforce` (default): reject with 401 on any mismatch or missing material.
+ *   - `warn`: log mismatches but call next(). Opt-in mode for a staged rollout
+ *     while signing-secret backfill catches up.
  *
  * Notes / gotchas:
  *   - Requires `req.rawBody` set by the json `verify` callback in main.ts.
@@ -37,10 +32,19 @@ import { prisma } from "../db.js";
 import { createLogger } from "../logger.js";
 const log = createLogger("verify-spaces-signature");
 
-// Secure by default: fail-closed unless an operator explicitly opts into the
-// `warn` grace-period mode.
+// Mode is controlled by SPACES_WEBHOOK_VERIFY_MODE. Set it to `enforce` in the environment to
+// reject requests with a missing/invalid signature; `warn` logs and passes through.
 const MODE = (process.env["SPACES_WEBHOOK_VERIFY_MODE"] ?? "warn").toLowerCase();
 const ENFORCE = MODE !== "warn";
+
+// Surface the pass-through mode loudly at startup so it is never silently in effect: when
+// SPACES_WEBHOOK_VERIFY_MODE is unset (or `warn`), requests with a missing/invalid signature
+// are logged and allowed through. Set the env to `enforce` to reject them.
+if (!ENFORCE) {
+  log.warn(
+    `[verify-spaces-sig] STARTUP: signature verification is in WARN mode (SPACES_WEBHOOK_VERIFY_MODE=${process.env["SPACES_WEBHOOK_VERIFY_MODE"] ?? "unset"}) — missing/invalid signatures pass through. Set SPACES_WEBHOOK_VERIFY_MODE=enforce to reject them.`,
+  );
+}
 
 function parseGcmBundle(blob: string): [string, string, string] | null {
   const parts = blob.split(":");

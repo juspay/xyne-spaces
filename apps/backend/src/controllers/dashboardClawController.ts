@@ -241,6 +241,10 @@ export class DashboardClawController {
     const parsed = runQueryBody.safeParse(req.body);
     if (!parsed.success) return this.badRequest(res, parsed);
     const { dataSourceId, queryPlan } = parsed.data;
+    // Pin the model-supplied dataSourceId to the caller's workspace before
+    // executing. executeQueryPlan does not itself verify workspace ownership of the
+    // source.
+    if (!(await this.requireDataSource(ctx, dataSourceId, res))) return;
 
     const plan = { ...queryPlan, dataSourceId, take: MAX_EXPLORATION_ROWS };
     try {
@@ -278,6 +282,9 @@ export class DashboardClawController {
       const parsedBody = emitBody.safeParse(req.body);
       if (!parsedBody.success) return this.badRequest(res, parsedBody);
       const { dataSourceId, draftId, args } = parsedBody.data;
+      // Same workspace pin as run-query — the emit path also runs the plan
+      // (take:1 validation) against the supplied source before persisting.
+      if (!(await this.requireDataSource(ctx, dataSourceId, res))) return;
 
       // Pin any query plan to the request's data source BEFORE validation:
       // QueryPlanSchema requires dataSourceId, and the stamp stops the model

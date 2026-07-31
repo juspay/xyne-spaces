@@ -20,9 +20,12 @@ export class OrganizationsACL extends BaseQueryACL<
       return denyGuestWhere('orgId')
     }
 
-    if (this.ctx.orgRole === 'ADMIN' || this.ctx.orgRole === 'OWNER') {
-      return {}
+    // Without a resolved memberId, scope to nothing so results stay bounded to the caller's org.
+    if (!this.ctx.memberId) {
+      return { orgId: { in: [] } }
     }
+    // Org role (ADMIN/OWNER) is an intra-org tier, not a platform-admin grant — an admin
+    // may only see the org(s) they are an active member of.
     return {
       members: {
         some: {
@@ -34,8 +37,19 @@ export class OrganizationsACL extends BaseQueryACL<
   }
 
   async getMutateWhere(): Promise<Prisma.OrganizationWhereInput> {
+    if (!this.ctx.memberId) {
+      return { orgId: { in: [] } }
+    }
     if (this.ctx.orgRole === 'ADMIN' || this.ctx.orgRole === 'OWNER') {
-      return {}
+      // Admins/owners may mutate only the org(s) they belong to — not every tenant's org.
+      return {
+        members: {
+          some: {
+            memberId: this.ctx.memberId,
+            leftAt: null,
+          },
+        },
+      }
     }
     return { createdBy: this.ctx.userId }
   }

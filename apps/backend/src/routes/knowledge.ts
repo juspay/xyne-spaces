@@ -1,5 +1,7 @@
 import { Router, Request, Response } from 'express';
+import { AccessType } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
+import { repositories } from '@/database/repositories';
 import {
   approveKnowledgeCanvas,
   convertBlockNoteToMarkdown,
@@ -46,10 +48,17 @@ router.post('/approve', async (req: Request, res: Response): Promise<void> => {
       resolvedCanvasId = canvas.id;
     }
 
-    const result = await approveKnowledgeCanvas(resolvedCanvasId, userId);
+    const workspaceId = req.user?.workspaceId;
+    if (!workspaceId) {
+      res.status(400).json({ error: 'Missing workspaceId' });
+      return;
+    }
+
+    const result = await approveKnowledgeCanvas(resolvedCanvasId, userId, workspaceId);
 
     if (!result.success) {
-      res.status(400).json({ error: result.error });
+      // Non-owner approval attempts are rejected with 403.
+      res.status(result.forbidden ? 403 : 400).json({ error: result.error });
       return;
     }
 
@@ -105,6 +114,19 @@ router.get('/documents', async (req: Request, res: Response): Promise<void> => {
     }
 
     const prisma = DatabaseClient.getInstance();
+
+    // Verify the requested project is in the caller's workspace before returning its SOP
+    // content. KnowledgeDocument is workspace-scoped by the ACL-wrapped client; resolving the
+    // project (also workspace-scoped) makes the workspace boundary explicit and avoids
+    // returning counts for a project id outside the caller's workspace.
+    const listProject = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: { workspaceId: true },
+    });
+    if (!listProject || listProject.workspaceId !== req.user?.workspaceId) {
+      res.status(404).json({ error: 'Project not found' });
+      return;
+    }
 
     const documents = await prisma.knowledgeDocument.findMany({
       where: {
@@ -163,6 +185,17 @@ router.get('/documents/:id', async (req: Request, res: Response): Promise<void> 
       return;
     }
 
+    // Gate single-document reads on the owning project's workspace, mirroring the list gate
+    // above.
+    const docProject = await prisma.project.findUnique({
+      where: { id: document.projectId },
+      select: { workspaceId: true },
+    });
+    if (!docProject || docProject.workspaceId !== req.user?.workspaceId) {
+      res.status(404).json({ error: 'Knowledge document not found' });
+      return;
+    }
+
     res.status(200).json(document);
   } catch (error) {
     logger.error('[Knowledge] Error fetching document:', error);
@@ -196,6 +229,31 @@ router.delete('/documents/:id', async (req: Request, res: Response): Promise<voi
 
     if (!document) {
       res.status(404).json({ error: 'Knowledge document not found' });
+      return;
+    }
+
+    // Restrict SOP deletion to the owning project's creator. The document is already
+    // workspace-scoped by the ACL-wrapped client; the project (also workspace-scoped) gives us
+    // the owner. KnowledgeDocument has no createdBy of its own, so project ownership is the
+    // authorization anchor.
+    const docProject = await prisma.project.findUnique({
+      where: { id: document.projectId },
+      select: { workspaceId: true, createdBy: true },
+    });
+    if (!docProject || docProject.workspaceId !== req.user?.workspaceId) {
+      res.status(404).json({ error: 'Knowledge document not found' });
+      return;
+    }
+    // Deletion is allowed for the project's creator or a projects-admin (there is no
+    // project-membership model; project administration is the LISTPROJECTS admin resource).
+    let canDelete = docProject.createdBy === userId;
+    if (!canDelete) {
+      const projectsResource = await repositories.resources.findByName('LISTPROJECTS');
+      canDelete = !!projectsResource &&
+        (await repositories.resourceAccess.hasAccess(userId, projectsResource.id, AccessType.ADMIN));
+    }
+    if (!canDelete) {
+      res.status(403).json({ error: 'Only the project owner or a projects admin can delete knowledge documents' });
       return;
     }
 

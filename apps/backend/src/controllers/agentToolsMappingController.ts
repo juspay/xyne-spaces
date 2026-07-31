@@ -9,14 +9,54 @@ import {logger} from '@/utils/logger';
 
 export class AgentToolsMappingController {
 
+  /**
+   * Verify the referenced agent and/or tool belong to the caller's workspace before a
+   * mapping is created connecting them. A create stamps the caller's workspaceId onto the
+   * mapping, so the referenced agentId/toolId must be confirmed to belong to that workspace.
+   * Returns a structured failure the handler maps to 401/404.
+   */
+  private assertAgentAndToolInWorkspace = async (
+    req: Request,
+    agentId?: string,
+    toolId?: string,
+  ): Promise<{ ok: true } | { ok: false; status: number; error: string }> => {
+    const workspaceId = req.user?.workspaceId;
+    if (!workspaceId) {
+      return { ok: false, status: 401, error: 'Authentication required' };
+    }
+    if (agentId) {
+      const agent = await repositories.agents.findById(agentId);
+      if (!agent || agent.workspaceId !== workspaceId) {
+        return { ok: false, status: 404, error: 'Agent not found' };
+      }
+    }
+    if (toolId) {
+      const tool = await repositories.tools.findById(toolId);
+      if (!tool || tool.workspaceId !== workspaceId) {
+        return { ok: false, status: 404, error: 'Tool not found' };
+      }
+    }
+    return { ok: true };
+  };
+
   createMapping = async (req: Request, res: Response): Promise<void> => {
     try {
       const mappingData: CreateAgentToolsMappingInput = req.body;
 
       if (!mappingData.agent || !mappingData.tool) {
-        res.status(400).json({ 
-          error: 'Missing required fields: agent and tool are required' 
+        res.status(400).json({
+          error: 'Missing required fields: agent and tool are required'
         });
+        return;
+      }
+
+      // Verify the target agent and tool belong to the caller's workspace before connecting
+      // them — the stamped workspaceId alone does not prevent connecting a foreign agent/tool.
+      const agentId = (mappingData.agent as { connect?: { id?: string } }).connect?.id;
+      const toolId = (mappingData.tool as { connect?: { id?: string } }).connect?.id;
+      const access = await this.assertAgentAndToolInWorkspace(req, agentId, toolId);
+      if (!access.ok) {
+        res.status(access.status).json({ error: access.error });
         return;
       }
 
@@ -204,6 +244,14 @@ export class AgentToolsMappingController {
     try {
       const { agentId, toolId } = req.params;
 
+      // enableToolForAgent creates the mapping (stamped with the agent's own workspace) when
+      // none exists, so the agentId/toolId must be confirmed to belong to the caller's workspace.
+      const access = await this.assertAgentAndToolInWorkspace(req, agentId, toolId);
+      if (!access.ok) {
+        res.status(access.status).json({ error: access.error });
+        return;
+      }
+
       const mapping = await repositories.agentToolsMappings.enableToolForAgent(agentId, toolId);
       res.status(200).json(mapping);
     } catch (error) {
@@ -354,6 +402,13 @@ export class AgentToolsMappingController {
             continue;
           }
 
+          // Both agent and tool must belong to the caller's workspace before connecting them.
+          const access = await this.assertAgentAndToolInWorkspace(req, agentId, toolId);
+          if (!access.ok) {
+            errors.push({ mapping, error: access.error });
+            continue;
+          }
+
           // Check if mapping already exists
           const existingMapping = await repositories.agentToolsMappings.findByAgentAndTool(agentId, toolId);
           
@@ -411,14 +466,14 @@ export class AgentToolsMappingController {
       const { agentId } = req.params;
       const { status = 'Enabled', specialDescription } = req.body;
 
-      // Verify agent exists
+      // Verify agent exists and belongs to the caller's workspace
       const agent = await repositories.agents.findById(agentId);
-      if (!agent) {
+      if (!agent || agent.workspaceId !== req.user?.workspaceId) {
         res.status(404).json({ error: 'Agent not found' });
         return;
       }
 
-      // Get all tools
+      // Get all tools (ACL-scoped to the caller's workspace)
       const tools = await repositories.tools.findMany();
       
       const results = [];
@@ -489,14 +544,14 @@ export class AgentToolsMappingController {
       const { toolId } = req.params;
       const { status = 'Enabled', specialDescription } = req.body;
 
-      // Verify tool exists
+      // Verify tool exists and belongs to the caller's workspace
       const tool = await repositories.tools.findById(toolId);
-      if (!tool) {
+      if (!tool || tool.workspaceId !== req.user?.workspaceId) {
         res.status(404).json({ error: 'Tool not found' });
         return;
       }
 
-      // Get all agents
+      // Get all agents (ACL-scoped to the caller's workspace)
       const agents = await repositories.agents.findMany();
       
       const results = [];

@@ -42,8 +42,16 @@ router.post('/', async (req: Request, res: Response) => {
     // Translate AST to Prisma query
     const translated = translateQueryAST(ast)
 
-    // Apply ACLs
-    const aclContext = { userId, workspaceId }
+    // Apply ACLs. Include memberId/orgRole so the org / org_member / workspace ACLs (which
+    // scope by org membership and fail closed when memberId is absent) resolve correctly —
+    // matching the context built in acl-extension.ts.
+    const aclContext = {
+      userId,
+      workspaceId,
+      memberId: req.user?.memberId,
+      orgRole: req.user?.orgRole,
+      role: req.user?.role,
+    }
     const acl = ACLFactory.getACL(
       translated.modelName as Uncapitalize<Prisma.ModelName>,
       aclContext,

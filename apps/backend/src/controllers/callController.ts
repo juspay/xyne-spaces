@@ -685,6 +685,37 @@ export class CallController {
       // Verify room exists in LiveKit
       const roomInfo = await livekitService.getRoomInfo(callId);
 
+      // Joining is gated by CHANNEL membership + workspace — not by a LiveKit room merely being
+      // live. Resolve the gating channel from the call record, or — during the webhook-lag
+      // window before the call row exists — from the live room's metadata, then verify
+      // membership.
+      let gateChannelId: string | null = call?.channelId ?? null;
+      if (!gateChannelId) {
+        const rawMeta = (roomInfo as { metadata?: string } | null)?.metadata;
+        if (rawMeta) {
+          try { gateChannelId = (JSON.parse(rawMeta) as { channelId?: string })?.channelId ?? null; }
+          catch { gateChannelId = null; }
+        }
+      }
+      if (!gateChannelId) {
+        res.status(404).json({ success: false, error: 'Call not found' });
+        return;
+      }
+      const gateChannel = callChannel && callChannel.id === gateChannelId
+        ? callChannel
+        : await repositories.channels.findById(gateChannelId);
+      if (!gateChannel || (gateChannel.workspaceId && gateChannel.workspaceId !== user.workspaceId)) {
+        res.status(404).json({ success: false, error: 'Call not found' });
+        return;
+      }
+      if (gateChannel.visibility === 'PRIVATE') {
+        const isMember = await repositories.channelParticipants.isParticipant(gateChannelId, user.id);
+        if (!isMember) {
+          res.status(403).json({ success: false, error: 'Not authorized to join this call' });
+          return;
+        }
+      }
+
       if (!roomInfo || (call && call.status === CallStatus.SCHEDULED)) {
         // Room doesn't exist - create it if we have a call record
         if (!call) {
@@ -1374,6 +1405,15 @@ export class CallController {
         return;
       }
 
+      // messageId is caller-supplied and its conversationId is used below as the PRD post
+      // target. Verify it actually belongs to THIS call before using it.
+      const prdMessageCallId = (callMessage.metadata as { callId?: string } | null)?.callId;
+      if (prdMessageCallId !== callId) {
+        logger.warn(`[generatePRD] message ${callMessage.messageId} does not belong to call ${callId}`);
+        res.status(400).json({ success: false, error: 'Message does not belong to the specified call' });
+        return;
+      }
+
       // 3. Get transcript content
       const transcriptContent = await transcriptService.getTranscriptContent(call.externalId);
       if (!transcriptContent) {
@@ -1463,6 +1503,15 @@ export class CallController {
 
       if (!callMessage) {
         res.status(404).json({ success: false, error: 'Call message not found' });
+        return;
+      }
+
+      // Verify the caller-supplied messageId belongs to THIS call before using its
+      // conversationId as the post target (see generatePRD).
+      const summaryMessageCallId = (callMessage.metadata as { callId?: string } | null)?.callId;
+      if (summaryMessageCallId !== callId) {
+        logger.warn(`[generateDetailedSummary] message ${callMessage.messageId} does not belong to call ${callId}`);
+        res.status(400).json({ success: false, error: 'Message does not belong to the specified call' });
         return;
       }
 
@@ -2150,7 +2199,7 @@ export class CallController {
         res.status(403).json({ success: false, error: 'Access denied' });
         return;
       }
-      // Starter-only, fail closed: a null startedBy (e.g. starter hard-deleted) means nobody qualifies.
+      // Only the starter may rename: a null startedBy (e.g. starter hard-deleted) means nobody qualifies.
       if (recording.startedBy !== userId) {
         res.status(403).json({ success: false, error: 'Only the participant who started the recording can rename it' });
         return;

@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { productInsightsService } from '../services/productInsightsService';
 import { logger } from '../utils/logger';
 import { z } from 'zod';
+import { DatabaseClient } from '@/database/client';
 
 // Validation schema
 const ProductInsightsQuerySchema = z.object({
@@ -28,6 +29,28 @@ export class ProductInsightsController {
       }
 
       const { project_id } = result.data;
+
+      // The insights blob is keyed purely by project_id. Projects are workspace-visible in this
+      // product, so a workspace match is the correct gate: resolve the project and confirm it
+      // belongs to the caller's workspace before touching storage.
+      const workspaceId = req.user?.workspaceId;
+      if (!workspaceId) {
+        res.status(401).json({ success: false, error: 'Unauthorized' });
+        return;
+      }
+      const prisma = DatabaseClient.getInstance();
+      const project = await prisma.project.findUnique({
+        where: { id: project_id },
+        select: { workspaceId: true },
+      });
+      if (!project || project.workspaceId !== workspaceId) {
+        // 404 (not 403) so project-id existence is not confirmed for a foreign workspace.
+        res.status(404).json({
+          success: false,
+          error: 'Insights file not found for the specified parameters',
+        });
+        return;
+      }
 
       logger.info(`Fetching product insights: project_id=${project_id}`);
 

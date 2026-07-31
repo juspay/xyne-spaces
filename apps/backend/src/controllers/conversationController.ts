@@ -2020,6 +2020,34 @@ export class ConversationController {
         res.status(400).json({ error: 'conversationId is required' });
         return;
       }
+      const userId = req.user?.id;
+      if (!userId) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+
+      // Require the caller to have access to this conversation's channel before returning its
+      // live agent-progress. Resolve conversation -> channel and require the same workspace +
+      // membership as reading the conversation itself (PUBLIC channel = any workspace member,
+      // PRIVATE = participant).
+      const conversation = await this.conversationRepository.findById(conversationId);
+      if (!conversation) {
+        res.status(404).json({ error: 'Conversation not found' });
+        return;
+      }
+      const progressChannel = await this.channelRepository.findById(conversation.channelId);
+      if (!progressChannel || (progressChannel.workspaceId && progressChannel.workspaceId !== req.user?.workspaceId)) {
+        res.status(404).json({ error: 'Conversation not found' });
+        return;
+      }
+      if (progressChannel.visibility === 'PRIVATE') {
+        const isParticipant = await this.channelParticipantRepository.isParticipant(conversation.channelId, userId);
+        if (!isParticipant) {
+          res.status(403).json({ error: 'Access denied - not a channel participant' });
+          return;
+        }
+      }
+
       const key = `agent_progress:conversation:${conversationId}`;
       const raw = await redisService.getAllHashFields(key);
 

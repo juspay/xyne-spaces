@@ -281,6 +281,15 @@ export class BrowserNotificationSubscriptionRepository extends BaseRepository<Br
     auth: string;
     userAgent?: string;
   }): Promise<BrowserNotificationSubscription> {
+    // The upsert keys on the globally unique endpoint; reject when the endpoint already
+    // maps to a different user so ownership cannot be reassigned.
+    const existing = await this.db.browserNotificationSubscription.findUnique({
+      where: { endpoint: data.endpoint },
+      select: { userId: true },
+    });
+    if (existing && existing.userId !== data.userId) {
+      throw new Error('Push subscription endpoint already belongs to another user');
+    }
     const workspaceId = await resolveWorkspaceIdFromModel(this.db, 'user', { id: data.userId });
     return this.db.browserNotificationSubscription.upsert({
       where: { endpoint: data.endpoint },

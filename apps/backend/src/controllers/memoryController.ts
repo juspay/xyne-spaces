@@ -208,6 +208,20 @@ export class MemoryController {
 
       logger.info('Updating memory document', { docId });
 
+      // Only the owner may modify a memory document. The doc's `userId` field stores the
+      // owner's email (buildMemoryYql scope 'my'); accept the caller's email OR id to match
+      // the stored convention.
+      const existingDoc = await getMemoryById(docId);
+      if (!existingDoc) {
+        res.status(404).json({ success: false, error: 'Memory document not found' });
+        return;
+      }
+      if (existingDoc.userId !== req.user?.email && existingDoc.userId !== req.user?.id) {
+        logger.warn('Blocked cross-user memory update', { docId, owner: existingDoc.userId });
+        res.status(403).json({ success: false, error: 'Forbidden' });
+        return;
+      }
+
       const updated = await updateMemory(docId, req.body);
 
       if (!updated) {
@@ -253,6 +267,19 @@ export class MemoryController {
       }
 
       logger.info('Deleting memory document', { docId });
+
+      // Only the owner may delete a memory document (see updateMemoryDocument). The doc's
+      // `userId` holds the owner's email.
+      const docToDelete = await getMemoryById(docId);
+      if (!docToDelete) {
+        res.status(404).json({ success: false, error: 'Memory document not found' });
+        return;
+      }
+      if (docToDelete.userId !== req.user?.email && docToDelete.userId !== req.user?.id) {
+        logger.warn('Blocked cross-user memory delete', { docId, owner: docToDelete.userId });
+        res.status(403).json({ success: false, error: 'Forbidden' });
+        return;
+      }
 
       await deleteMemory(docId);
 
@@ -455,6 +482,20 @@ export class MemoryController {
         userId,
       );
       const contextDoc = existing.documents[0];
+
+      // Verify this session's memory belongs to the caller before replacing it. replaceSession
+      // deletes the existing docs for `sessionId`. The doc's `userId` field stores the owner's
+      // email; contextDoc is the session's first existing doc.
+      if (
+        contextDoc?.userId &&
+        contextDoc.userId !== user.email &&
+        contextDoc.userId !== userId
+      ) {
+        logger.warn('Blocked cross-user replaceSession', { sessionId, owner: contextDoc.userId });
+        res.status(403).json({ success: false, error: 'Forbidden' });
+        return;
+      }
+
       const repoUrl  = contextDoc?.repoUrl  ?? '';
       const commitId = contextDoc?.commitId ?? '';
       const ticketId = contextDoc?.ticketId ?? '';
@@ -506,10 +547,13 @@ export class MemoryController {
       const prisma = DatabaseClient.getInstance();
       const record = await (prisma as any).sessionRecordingFile.findUnique({
         where:  { sessionId },
-        select: { url: true },
+        select: { url: true, userId: true },
       });
 
-      if (!record?.url) {
+      // Require the session recording to belong to the caller; sessionRecordingFile is keyed by
+      // a caller-supplied sessionId. Return 404 (not 403) so a foreign id is indistinguishable
+      // from a missing one.
+      if (!record?.url || record.userId !== userId) {
         res.status(404).json({ success: false, error: `No recording found for sessionId=${sessionId}` });
         return;
       }

@@ -1796,11 +1796,34 @@ export class TicketController {
         return;
       }
 
-      // Validate conversation exists
-      const conversation = await this.conversationRepository.findById(sourceConversationId);
+      // Validate the source conversation exists AND belongs to the caller's workspace.
+      const conversation = await this.conversationRepository.findByIdAndWorkspace(
+        sourceConversationId,
+        req.user!.workspaceId,
+      );
       if (!conversation) {
         res.status(400).json({ error: 'Source conversation not found' });
         return;
+      }
+
+      // Enforce access to the source conversation's channel (PRIVATE = participant only).
+      const sourceChannel = await this.channelRepository.findById(conversation.channelId);
+      if (!sourceChannel || sourceChannel.workspaceId !== req.user!.workspaceId) {
+        res.status(400).json({ error: 'Source conversation not found' });
+        return;
+      }
+      if (sourceChannel.visibility === 'PRIVATE') {
+        const isParticipant = await this.channelParticipantRepository.isParticipant(
+          conversation.channelId,
+          userId,
+        );
+        if (!isParticipant) {
+          res.status(403).json({
+            error: 'Access denied - you do not have permission to access this conversation',
+            code: 'NOT_CONVERSATION_PARTICIPANT',
+          });
+          return;
+        }
       }
 
       // Determine which message to pull attachments from:
@@ -1810,6 +1833,15 @@ export class TicketController {
       if (!messageId) {
         res.json({ count: 0 });
         return;
+      }
+
+      // A client-supplied sourceMessageId must belong to the authorized source conversation.
+      if (sourceMessageId) {
+        const sourceMessage = await this.messageRepository.findById(sourceMessageId);
+        if (!sourceMessage || sourceMessage.conversationId !== sourceConversationId) {
+          res.status(403).json({ error: 'Access denied - message does not belong to the source conversation' });
+          return;
+        }
       }
 
       const attachments = await this.messageAttachmentRepository.findByMessageId(messageId);

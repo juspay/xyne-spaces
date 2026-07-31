@@ -16,6 +16,10 @@ export class ReposACL extends BaseACL<'repos'> {
       throw new MutationACLError('Repo update failed: repo does not exist', 'repos');
     }
     assertWorkspaceMatch(this.ctx, row.workspaceId, 'repos');
+    // Only the repo creator may modify it.
+    if (row.createdBy && row.createdBy !== this.ctx.userID) {
+      throw new MutationACLError('Cannot modify a repo you did not create', 'repos');
+    }
   }
 
   async canDelete(args: DeleteID<TableSchema<'repos'>>, tx: Transaction<Schema>): Promise<void> {
@@ -24,6 +28,10 @@ export class ReposACL extends BaseACL<'repos'> {
       throw new MutationACLError('Repo delete failed: repo does not exist', 'repos');
     }
     assertWorkspaceMatch(this.ctx, row.workspaceId, 'repos');
+    // Only the repo creator may delete it.
+    if (row.createdBy && row.createdBy !== this.ctx.userID) {
+      throw new MutationACLError('Cannot delete a repo you did not create', 'repos');
+    }
   }
 
   async canUpsert(_args: UpsertValue<TableSchema<'repos'>>, _tx: Transaction<Schema>): Promise<void> {

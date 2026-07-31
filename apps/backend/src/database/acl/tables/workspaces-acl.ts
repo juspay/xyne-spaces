@@ -22,12 +22,18 @@ export class WorkspacesACL extends BaseQueryACL<
       return denyGuestWhere('id')
     }
 
+    // Without a memberId, scope to nothing so results stay bounded to the caller's orgs.
+    if (!this.ctx.memberId) {
+      return { id: { in: [] } }
+    }
     return {
       status: 'ACTIVE',
       organization: {
         members: {
           some: {
             memberId: this.ctx.memberId,
+            // Only active memberships (leftAt null) grant access to the org's workspaces.
+            leftAt: null,
           },
         },
       },

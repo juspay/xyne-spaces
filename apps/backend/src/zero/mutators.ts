@@ -143,6 +143,7 @@ import { z } from 'zod';
 import { generateKeyBetween } from 'fractional-indexing';
 import { zql } from './queries';
 import { hasGuestChannelAccess } from './acl/core/guest-access';
+import { hasProjectAdminAccess } from './acl/core/admin-access';
 import vespaClient from '@/vespa/client';
 import { fileSchema } from '@/vespa/src/types';
 
@@ -15513,6 +15514,13 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           const board = await tx.run(zql.boards.where('id', boardId).one());
           if (!board) throw new Error('Board not found');
           if (board.workspaceId !== authData.workspaceId) throw new Error('Board not found');
+
+          // Editing a board's stage transitions/approvers rewrites the approval workflow,
+          // which is a board-admin action — restrict to the board creator or a project
+          // admin, mirroring BoardAcl.canUpdate.
+          if (board.createdBy !== authData.sub && !(await hasProjectAdminAccess({ userID: authData.sub }, tx))) {
+            throw new Error('Not authorized to edit board transitions');
+          }
 
           // Validate the incoming edges before persisting. These guards prevent configs that
           // the runtime can't satisfy (and that the UI may not block on non-UI paths):

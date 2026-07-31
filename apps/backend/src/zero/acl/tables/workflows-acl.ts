@@ -66,8 +66,8 @@ export class WOrkflowsAcl extends BaseACL<'workflows'> {
     tx: Transaction<Schema>,
   ): Promise<void> {
     assertGuestWriteBlocked(this.ctx, 'workflows', 'insert', 'Workflow');
-    // workspaceId is NOT NULL in Postgres; the DB rejects missing values
-    // but we still enforce the cross-tenant check here for clarity.
+    // workspaceId is NOT NULL in Postgres; the DB rejects missing values, but we
+    // also validate it against the caller's workspace here.
     if (args.workspaceId !== this.ctx.workspaceId) {
       throw new MutationACLError(
         'Workflow insert failed: workspaceId must match current workspace',

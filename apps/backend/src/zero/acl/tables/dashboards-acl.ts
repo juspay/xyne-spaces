@@ -16,6 +16,10 @@ export class DashboardsACL extends BaseACL<'dashboards'> {
       throw new MutationACLError('Dashboard update failed: dashboard does not exist', 'dashboards');
     }
     assertWorkspaceMatch(this.ctx, row.workspaceId, 'dashboards');
+    // Only the dashboard owner may modify it.
+    if (row.createdBy && row.createdBy !== this.ctx.userID) {
+      throw new MutationACLError('Cannot modify a dashboard you did not create', 'dashboards');
+    }
   }
 
   async canDelete(args: DeleteID<TableSchema<'dashboards'>>, tx: Transaction<Schema>): Promise<void> {
@@ -24,13 +28,26 @@ export class DashboardsACL extends BaseACL<'dashboards'> {
       throw new MutationACLError('Dashboard delete failed: dashboard does not exist', 'dashboards');
     }
     assertWorkspaceMatch(this.ctx, row.workspaceId, 'dashboards');
+    // Only the dashboard owner may delete it.
+    if (row.createdBy && row.createdBy !== this.ctx.userID) {
+      throw new MutationACLError('Cannot delete a dashboard you did not create', 'dashboards');
+    }
   }
 
-  async canUpsert(_args: UpsertValue<TableSchema<'dashboards'>>, _tx: Transaction<Schema>): Promise<void> {
-    // TEMPORARY (workspaceId-non-optional PR): allow upsert without a per-table
-    // tenant check so live callers don't break. The row's workspaceId is stamped
-    // from trusted authData in the mutators, not client args. A proper canUpsert
-    // (delegate to canInsert/canUpdate by row existence) lands in a follow-up PR.
-    return;
+  async canUpsert(args: UpsertValue<TableSchema<'dashboards'>>, tx: Transaction<Schema>): Promise<void> {
+    // On an existing row require ownership; on a new row pin createdBy to the
+    // caller and enforce the caller's workspace.
+    const existing = await tx.run(zql.dashboards.where('id', args.id).one());
+    if (existing) {
+      assertWorkspaceMatch(this.ctx, existing.workspaceId, 'dashboards');
+      if (existing.createdBy && existing.createdBy !== this.ctx.userID) {
+        throw new MutationACLError('Cannot modify a dashboard you did not create', 'dashboards');
+      }
+      return;
+    }
+    assertWorkspaceMatch(this.ctx, args.workspaceId as string, 'dashboards');
+    if (args.createdBy && args.createdBy !== this.ctx.userID) {
+      throw new MutationACLError('Cannot create a dashboard for another user', 'dashboards');
+    }
   }
 }

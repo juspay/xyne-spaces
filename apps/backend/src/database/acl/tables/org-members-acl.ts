@@ -19,8 +19,18 @@ export class OrgMembersACL extends BaseQueryACL<
       return denyGuestWhere('memberId')
     }
 
+    // Without a memberId, scope to nothing so results stay bounded to the caller's org.
+    if (!this.ctx.memberId) {
+      return { memberId: { in: [] } }
+    }
     if (this.ctx.orgRole === 'ADMIN' || this.ctx.orgRole === 'OWNER') {
-      return {}
+      // See all members of the caller's OWN org(s) — scoped via the organization relation,
+      // NOT every tenant's members. Org role is intra-org, not platform admin.
+      return {
+        organization: {
+          members: { some: { memberId: this.ctx.memberId, leftAt: null } },
+        },
+      }
     }
     return {
       memberId: this.ctx.memberId,
@@ -28,8 +38,15 @@ export class OrgMembersACL extends BaseQueryACL<
   }
 
   async getMutateWhere(): Promise<Prisma.OrgMemberWhereInput> {
+    if (!this.ctx.memberId) {
+      return { memberId: { in: [] } }
+    }
     if (this.ctx.orgRole === 'ADMIN' || this.ctx.orgRole === 'OWNER') {
-      return {}
+      return {
+        organization: {
+          members: { some: { memberId: this.ctx.memberId, leftAt: null } },
+        },
+      }
     }
     return { memberId: this.ctx.memberId }
   }
