@@ -98,7 +98,10 @@ const IFRAME_STYLES = `
     overflow-wrap: anywhere;
     overflow-y: hidden;
   }
-  html { overflow-x: auto; }
+  html {
+    overflow-x: auto;
+    overscroll-behavior: contain;
+  }
   body { padding: 4px 2px; }
   img { max-width: 100%; height: auto; }
   table { max-width: 100%; }
@@ -514,34 +517,30 @@ export const EmailBodyRenderer = ({
         });
       }
 
+      const hasNestedScrollable = (el: HTMLElement, deltaY: number): boolean => {
+        for (let cur: HTMLElement | null = el; cur; cur = cur.parentElement) {
+          const overflowY = contentDoc.defaultView?.getComputedStyle(cur).overflowY;
+          if (
+            (overflowY !== 'auto' && overflowY !== 'scroll') ||
+            cur.scrollHeight <= cur.clientHeight
+          )
+            continue;
+          const atTop = cur.scrollTop <= 0;
+          const atBottom = cur.scrollTop + cur.clientHeight >= cur.scrollHeight - 1;
+          if ((deltaY < 0 && !atTop) || (deltaY > 0 && !atBottom)) return true;
+        }
+        return false;
+      };
+
       contentDoc.addEventListener(
         'wheel',
         e => {
-          let target = e.target as HTMLElement | null;
-          while (target && target !== contentDoc.body && target !== contentDoc.documentElement) {
-            const style = target.ownerDocument.defaultView?.getComputedStyle(target);
-            const overflowY = style?.overflowY;
-            if (
-              (overflowY === 'auto' || overflowY === 'scroll') &&
-              target.scrollHeight > target.clientHeight
-            ) {
-              return;
-            }
-            target = target.parentElement;
-          }
-
-          const docEl = contentDoc.documentElement;
-          const hasHScroll = !!docEl && docEl.scrollWidth > docEl.clientWidth;
-          if (hasHScroll && Math.abs(e.deltaX) > 0) {
-            if (e.deltaY !== 0) {
-              const container = findScrollContainer(iframe);
-              container.scrollBy({ top: e.deltaY, left: 0 });
-            }
-            return;
-          }
+          if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+          const target = e.target as HTMLElement | null;
+          if (target && hasNestedScrollable(target, e.deltaY)) return;
 
           const container = findScrollContainer(iframe);
-          container.scrollBy({ top: e.deltaY, left: e.deltaX });
+          container.scrollBy({ top: e.deltaY, left: 0 });
           e.preventDefault();
         },
         { passive: false },
