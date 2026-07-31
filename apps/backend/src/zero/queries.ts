@@ -2274,6 +2274,7 @@ export const queries = defineQueries({
 
   userActiveCalls: defineQuery(() => {
     return zql.calls
+      .where(helpers => helpers.cmp('callType', 'NOT IN', [CallType.HEADLESS]))
       .where('status', CallStatus.ACTIVE)
       .orderBy('startedAt', 'desc')
       .related('participants');
