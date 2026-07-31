@@ -2114,11 +2114,6 @@ export const queries = defineQueries({
     return zql.activities.where('isRead', false).orderBy('updatedAt', 'desc').related('channel');
   }),
   userDrafts: defineQuery(({ ctx }) => {
-    // All of the caller's OWN draft_messages rows, both origins: composer drafts
-    // (origin='user') and pending Digital Twin proposals (origin='twin', whose
-    // userId IS the mentioned owner). A single owner-scoped query keeps one Zero
-    // subscription; the stateMachine splits them into `draftMessages` (user) and
-    // `twinDrafts` (twin) so the composer/Drafts UI never sees twin rows.
     return zql.draft_messages.where('userId', ctx.userID).related('attachments');
   }),
   // Query for message with sender and channel info for activity display

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useThreadCatchupSummary } from '../ThreadCatchupSummary/useThreadCatchupSummary';
 import type { ThreadCatchupMessages } from '../ThreadCatchupSummary/ThreadCatchupSummary.utils';
-import { useTwinReplyDraft } from './useTwinReplyDraft';
+import { useTwinReplyDraft } from '../../../hooks/useTwinReplyDraft';
 import type { TwinReplyDraftView, PostedTarget } from './twinReplyDraftApi';
 
 export type AssistTab = 'recap' | 'reply';
