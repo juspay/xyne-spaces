@@ -22,6 +22,15 @@ export function isDeviceOnline(device: Pick<LocalHarnessDevice, "lastSeenAt">, n
   return !!device.lastSeenAt && now - device.lastSeenAt.getTime() < LOCAL_HARNESS_ONLINE_WINDOW_MS;
 }
 
+export function authenticatedProviders(device: Pick<LocalHarnessDevice, "installations">): string[] {
+  const installations = Array.isArray(device.installations) ? device.installations : [];
+  return installations.flatMap((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
+    const record = entry as Record<string, unknown>;
+    return record["authenticated"] === true && typeof record["provider"] === "string" ? [record["provider"]] : [];
+  });
+}
+
 export const localHarnessRepository = {
   registerDevice: async (args: {
     userId: string;
@@ -80,15 +89,16 @@ export const localHarnessRepository = {
   listOnlineDevicesForProvider: async (userId: string, provider: string): Promise<LocalHarnessDevice[]> => {
     const devices = await prisma.localHarnessDevice.findMany({ where: { userId, revokedAt: null } });
     const now = Date.now();
-    return devices.filter((device) => {
-      if (!isDeviceOnline(device, now)) return false;
-      const installations = Array.isArray(device.installations) ? device.installations : [];
-      return installations.some((entry) => {
-        if (!entry || typeof entry !== "object" || Array.isArray(entry)) return false;
-        const record = entry as Record<string, unknown>;
-        return record["provider"] === provider && record["authenticated"] === true;
-      });
+    return devices.filter((device) => isDeviceOnline(device, now) && authenticatedProviders(device).includes(provider));
+  },
+
+  listOnlineDevices: async (userId: string): Promise<LocalHarnessDevice[]> => {
+    const devices = await prisma.localHarnessDevice.findMany({
+      where: { userId, revokedAt: null },
+      orderBy: { lastSeenAt: "desc" },
     });
+    const now = Date.now();
+    return devices.filter((device) => isDeviceOnline(device, now));
   },
 
   revokeDevice: async (userId: string, deviceId: string): Promise<boolean> => {

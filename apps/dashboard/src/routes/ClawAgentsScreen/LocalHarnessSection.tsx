@@ -119,6 +119,8 @@ const LocalHarnessSection = (): ReactElement | null => {
     );
   }
 
+  if (!status?.supported) return null;
+
   const installations = status?.installations ?? [];
   const usable = installations.filter(i => i.authenticated);
   const connected = status?.connected ?? false;

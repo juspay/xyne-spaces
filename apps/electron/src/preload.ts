@@ -1,5 +1,4 @@
 const { contextBridge, ipcRenderer } = require('electron');
-const { ENABLE_LOCAL_HARNESS } = require('./app/config') as { ENABLE_LOCAL_HARNESS: boolean };
 
 // Preload runs in the renderer, but the electron tsconfig omits the DOM lib.
 // Declare the minimal `window` surface the origin check actually reads.
@@ -364,16 +363,12 @@ const electronAPI = {
     },
   },
 
-  ...(ENABLE_LOCAL_HARNESS
-    ? {
-        localHarness: {
-          getStatus: () => ipcRenderer.invoke('local-harness:status'),
-          detect: () => ipcRenderer.invoke('local-harness:detect'),
-          connect: () => ipcRenderer.invoke('local-harness:connect'),
-          disconnect: () => ipcRenderer.invoke('local-harness:disconnect'),
-        },
-      }
-    : {}),
+  localHarness: {
+    getStatus: () => ipcRenderer.invoke('local-harness:status'),
+    detect: () => ipcRenderer.invoke('local-harness:detect'),
+    connect: () => ipcRenderer.invoke('local-harness:connect'),
+    disconnect: () => ipcRenderer.invoke('local-harness:disconnect'),
+  },
 };
 
 if (isTrustedOrigin()) {

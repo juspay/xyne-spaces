@@ -67,6 +67,9 @@ export const CONFIG = {
   localHarnessEnabled: ["1", "true", "on", "yes"].includes(
     (process.env["LOCAL_HARNESS_ENABLED"] ?? "").trim().toLowerCase(),
   ),
+  localHarnessDefaultAll: ["1", "true", "on", "yes"].includes(
+    (process.env["LOCAL_HARNESS_DEFAULT_ALL"] ?? "").trim().toLowerCase(),
+  ),
   localHarnessPollTimeoutMs: Number(process.env["LOCAL_HARNESS_POLL_TIMEOUT_MS"] ?? 25_000),
   localHarnessRunTimeoutMs: Number(process.env["LOCAL_HARNESS_RUN_TIMEOUT_MS"] ?? 900_000),
   xyneSpacesCallbackUrl: process.env["XYNE_SPACES_CALLBACK_URL"] ?? "",
