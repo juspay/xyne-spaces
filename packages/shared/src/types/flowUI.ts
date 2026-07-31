@@ -24,6 +24,7 @@ export type FlowComponentType =
   | 'link'
   | 'table'
   | 'plan'
+  | 'ask_question'
   | 'pr'
   | 'pr_approval'
   | 'call_schedule';

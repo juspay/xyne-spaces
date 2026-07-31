@@ -21,7 +21,7 @@ import { verifySpacesSignature } from "../middleware/verify-spaces-signature.js"
 import { agentRunRepository } from "../repositories/index.js";
 import { recordTwinApprovalOutcome } from "../services/twinResponseFeedback.js";
 import type { FlowDefinition } from "xyne-claw-shared";
-import { mdToMrkdwn, buildWriteResultFlow, buildPlanFlow, PLAN_COMPONENT_ID } from "xyne-claw-shared";
+import { mdToMrkdwn, buildWriteResultFlow, buildPlanFlow, buildAskQuestionFlow, PLAN_COMPONENT_ID } from "xyne-claw-shared";
 import { clearActivePlanCard, setPlanExecMeta, clearPlanExecMeta, normalizePlanTitle } from "../lib/session-context.js";
 import { executeTool as executeGatewayTool } from "../mcpgateway/services/execution.js";
 import { GATEWAY_KEY_PREFIX, parseGatewayCatalogSource } from "../mcpgateway/key-format.js";
@@ -989,9 +989,9 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       // Acknowledge immediately so the widget closes
       resp = { type: "close_screen", finalMessage: `✅ You answered: "${answer}"` };
       res.json(resp);
-      void replaceFlowCardWithText(messageId, answerAgentSlug, `✅ You answered: **"${answer}"**`, answerConversationId);
 
-      // Fire-and-forget: start new /run with the answer as context
+      // Fire-and-forget: start new /run with the answer as context and update
+      // the question card in place to the answered phase.
       try {
         const { getQuestion, deleteQuestion } = await import("./pending-questions.js");
         const { setSession } = await import("./webhook.js");
@@ -999,6 +999,38 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         const question = await getQuestion(questionId);
         const questionText = question?.question ?? "a question";
         const optionsList = question?.options?.join(", ") ?? "";
+
+        // Resolve the answering user's display name for the audit footer.
+        const answerUser = callerUserId
+          ? await prisma.user.findUnique({ where: { id: callerUserId }, select: { name: true } })
+          : null;
+
+        const answeredFlow = buildAskQuestionFlow(
+          questionText,
+          question?.options ?? [],
+          {
+            questionId,
+            agentSlug: answerAgentSlug,
+            channelId: answerChannelId,
+            conversationId: answerConversationId,
+            userId: answerUserId,
+            spacesAppId: answerSpacesAppId,
+          },
+          {
+            phase: 'answered',
+            answer,
+            answeredBy: answerUser?.name ?? undefined,
+            answeredAt: new Date().toISOString(),
+          },
+        );
+        void replaceFlowCardWithFlow(
+          messageId,
+          answerAgentSlug,
+          answeredFlow,
+          answerConversationId,
+          undefined,
+          answerSpacesAppId,
+        );
 
         const agent = await findAgentForFlow(answerAgentSlug, answerSpacesAppId);
         const appToken = agent?.spacesAppToken

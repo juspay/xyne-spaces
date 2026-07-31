@@ -88,7 +88,7 @@ import {
 } from "../lib/session-context.js";
 import { emitAgentWorkingSignal } from "../surfaces/spaces/client.js";
 import JSZip from "jszip";
-import { buildWriteApprovalFlow, buildTwinApprovalFlow, buildUserQuestionFlow, buildPromoteProviderFlow, buildGoalSuggestionFlow, buildPlanFlow, isTwinDelivery } from "xyne-claw-shared";
+import { buildWriteApprovalFlow, buildTwinApprovalFlow, buildAskQuestionFlow, buildPromoteProviderFlow, buildGoalSuggestionFlow, buildPlanFlow, isTwinDelivery } from "xyne-claw-shared";
 import type { TwinDelivery } from "xyne-claw-shared";
 import type { Todo } from "xyne-claw-shared";
 
@@ -4908,7 +4908,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     const pendingQuestions = (payload as { pendingQuestions?: Array<{ questionId: string; question: string; options: string[] }> }).pendingQuestions;
     if (pendingQuestions?.length) {
       for (const q of pendingQuestions) {
-        const questionFlow = withSpacesAppId(buildUserQuestionFlow(q.question, q.options, {
+        const questionFlow = withSpacesAppId(buildAskQuestionFlow(q.question, q.options, {
           questionId: q.questionId,
           agentSlug: ctx.agentSlug ?? "",
           channelId: ctx.channelId,
