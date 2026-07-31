@@ -180,7 +180,7 @@ const RecordingsV2Pill = ({
             {visibleTags.map(tag => (
               <span
                 key={tag}
-                className='inline-flex h-6 items-center gap-1.5 rounded-md border border-border bg-background px-2 text-xs text-muted-foreground'
+                className='inline-flex items-center gap-1.5 rounded-md border border-border bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground transition-colors'
               >
                 <span
                   className={cn('size-1.5 rounded-full', getRecordingTagDotColor(tag))}

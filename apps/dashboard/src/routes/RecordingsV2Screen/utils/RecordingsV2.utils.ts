@@ -227,6 +227,23 @@ export function filterRecordingsByOwnership(
 }
 
 /**
+ * Keeps recordings carrying at least one of the selected labels, so picking more
+ * labels widens the result set rather than narrowing it.
+ *
+ * @example
+ * filterRecordingsByLabels(recordings, ['infra']);
+ */
+export function filterRecordingsByLabels(
+  recordings: OatsRecordingEntry[],
+  selectedLabels: string[],
+): OatsRecordingEntry[] {
+  if (selectedLabels.length === 0) return recordings;
+
+  const wanted = new Set(selectedLabels);
+  return recordings.filter(recording => recording.labels.some(label => wanted.has(label)));
+}
+
+/**
  * Finds the closest recording row at or after a visible index, falling back to the row before it.
  *
  * @example

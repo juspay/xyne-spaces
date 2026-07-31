@@ -175,7 +175,9 @@ export const RecordingShareModal: React.FC<RecordingShareModalProps> = ({
         <SearchParticipants
           options={options}
           selectedValues={selectedValues}
-          onMultiSelect={handleMultiSelect}
+          onMultiSelect={values => {
+            void handleMultiSelect(values);
+          }}
           searchQuery={searchQuery}
           setSearchQuery={setSearchQuery}
         />

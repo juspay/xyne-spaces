@@ -16,16 +16,19 @@ import { cn } from '../../utils/classNames';
 import { RecordingsEmptyStateIllustration } from './components/RecordingsEmptyStateIllustration';
 import { RecordingDateFilter } from './components/RecordingDateFilter';
 import RecordingControlsOverlay from './components/RecordingControlsOverlay';
+import { RecordingLabelFilter } from './components/RecordingLabelFilter';
 import { RecordingPeopleFilter } from './components/RecordingPeopleFilter';
 import RecordingsV2Pill, { RecordingsV2LivePill } from './components/RecordingsV2Pill';
 import { RecordingsV2Skeleton } from './components/RecordingsV2Skeleton';
 import {
   buildRecordingRows,
+  filterRecordingsByLabels,
   filterRecordingsByOwnership,
   findNearestVisibleRecording,
   getRecordingDatePresetLabel,
   isRecordingInDatePreset,
   LIST_TAB_CLASS_NAME,
+  normalizeRecordingTags,
   type RecordingDatePreset,
   type RecordingOwnershipTab,
 } from './utils/RecordingsV2.utils';
@@ -38,6 +41,7 @@ const RecordingsV2Screen = (): ReactElement => {
   const [activeListTab, setActiveListTab] = useState<RecordingOwnershipTab>('created');
   const [selectedCreatorId, setSelectedCreatorId] = useState<string | null>(null);
   const [selectedDatePreset, setSelectedDatePreset] = useState<RecordingDatePreset>('this-week');
+  const [selectedLabels, setSelectedLabels] = useState<string[]>([]);
   const {
     recordings,
     hasMoreRecordings,
@@ -53,6 +57,7 @@ const RecordingsV2Screen = (): ReactElement => {
   const recordingStatus = useRecordingStore(context => context.status);
   const recordingStartTime = useRecordingStore(context => context.startTime);
   const recordingCallId = useRecordingStore(context => context.externalId);
+  const recordingTitle = useRecordingStore(context => context.title);
   const recordingPauseStartedAt = useRecordingStore(context => context.pauseStartedAt);
   const recordingAccumulatedPausedMs = useRecordingStore(context => context.accumulatedPausedMs);
   const pendingAutoStart = useRecordingStore(context => context.pendingAutoStart);
@@ -82,26 +87,33 @@ const RecordingsV2Screen = (): ReactElement => {
     return users.filter(user => creatorIds.has(user.id));
   }, [recordings, users]);
 
+  const availableLabels = useMemo(
+    () =>
+      normalizeRecordingTags(recordings.flatMap(recording => recording.labels)).sort(
+        (left, right) => left.localeCompare(right),
+      ),
+    [recordings],
+  );
+
   const ownershipFilteredRecordings = useMemo(
     () => filterRecordingsByOwnership(recordings, selectedCreatorId),
     [recordings, selectedCreatorId],
   );
 
-  const liveRecording = useMemo(
-    () =>
-      ownershipFilteredRecordings.find(
-        recording =>
-          recording.status === CallStatus.ACTIVE &&
-          (!recordingCallId || recording.externalId === recordingCallId),
-      ) ??
-      ownershipFilteredRecordings.find(recording => recording.status === CallStatus.ACTIVE) ??
-      null,
-    [ownershipFilteredRecordings, recordingCallId],
-  );
+  const liveRecording = useMemo(() => {
+    const activeRecordings = ownershipFilteredRecordings.filter(
+      recording => recording.status === CallStatus.ACTIVE,
+    );
+    if (recordingCallId) {
+      return activeRecordings.find(recording => recording.externalId === recordingCallId) ?? null;
+    }
+    return activeRecordings[0] ?? null;
+  }, [ownershipFilteredRecordings, recordingCallId]);
   const isLocalRecordingActive = recordingStatus === 'recording' || recordingStatus === 'paused';
   const showRecordingLauncher = !isLocalRecordingActive;
   const liveRecordingStartedAt =
     liveRecording?.startedAt ?? (isLocalRecordingActive ? recordingStartTime : null);
+  const liveRecordingTitle = liveRecording?.title ?? recordingTitle ?? DEFAULT_RECORDING_TITLE;
   const isOwnRecordingView =
     activeListTab === 'created' && (!selectedCreatorId || selectedCreatorId === currentUser?.id);
   const showLiveRecording =
@@ -109,12 +121,16 @@ const RecordingsV2Screen = (): ReactElement => {
 
   const filteredRecordings = useMemo(
     () =>
-      ownershipFilteredRecordings.filter(
-        recording =>
-          recording.status !== CallStatus.ACTIVE &&
-          isRecordingInDatePreset(recording.startedAt, selectedDatePreset),
+      filterRecordingsByLabels(
+        ownershipFilteredRecordings.filter(
+          // Hide only the recording currently shown in the live pill.
+          recording =>
+            recording.externalId !== recordingCallId &&
+            isRecordingInDatePreset(recording.startedAt, selectedDatePreset),
+        ),
+        selectedLabels,
       ),
-    [ownershipFilteredRecordings, selectedDatePreset],
+    [ownershipFilteredRecordings, recordingCallId, selectedDatePreset, selectedLabels],
   );
   const recordingsCapturedThisWeek = useMemo(
     () =>
@@ -133,6 +149,7 @@ const RecordingsV2Screen = (): ReactElement => {
   const handleTabChange = useCallback((tab: RecordingOwnershipTab): void => {
     setActiveListTab(tab);
     setSelectedCreatorId(null);
+    setSelectedLabels([]);
   }, []);
 
   const handleCreatorChange = useCallback(
@@ -254,6 +271,12 @@ const RecordingsV2Screen = (): ReactElement => {
                   selectedUserId={selectedCreatorId}
                   onUserChange={handleCreatorChange}
                 />
+
+                <RecordingLabelFilter
+                  labels={availableLabels}
+                  selectedLabels={selectedLabels}
+                  onSelectedLabelsChange={setSelectedLabels}
+                />
               </div>
 
               <Button
@@ -288,7 +311,7 @@ const RecordingsV2Screen = (): ReactElement => {
                 }
               >
                 <motion.div
-                  className='pb-4'
+                  className='pb-4 pt-2'
                   initial={
                     shouldReduceMotion ? { opacity: 1 } : { y: -14, scale: 0.99, opacity: 0 }
                   }
@@ -301,14 +324,15 @@ const RecordingsV2Screen = (): ReactElement => {
                   }
                 >
                   <RecordingsV2LivePill
-                    title={liveRecording?.title ?? DEFAULT_RECORDING_TITLE}
+                    title={liveRecordingTitle}
                     startedAt={liveRecordingStartedAt}
                     isPaused={recordingStatus === 'paused'}
                     pauseStartedAt={recordingPauseStartedAt}
                     accumulatedPausedMs={recordingAccumulatedPausedMs}
-                    onOpenWindow={() =>
-                      liveRecording && handleOpenLiveRecordingWindow(liveRecording.externalId)
-                    }
+                    onOpenWindow={() => {
+                      const openId = recordingCallId ?? liveRecording?.externalId;
+                      if (openId) handleOpenLiveRecordingWindow(openId);
+                    }}
                   />
                 </motion.div>
               </motion.div>
@@ -344,20 +368,24 @@ const RecordingsV2Screen = (): ReactElement => {
               <div className='flex flex-1 flex-col items-center justify-center px-6 pb-28 text-center'>
                 <RecordingsEmptyStateIllustration />
                 <h2 className='text-base font-semibold text-foreground'>
-                  {selectedCreatorId || ownershipFilteredRecordings.length > 0
+                  {selectedCreatorId ||
+                  selectedLabels.length > 0 ||
+                  ownershipFilteredRecordings.length > 0
                     ? 'No matching recordings'
                     : activeListTab === 'shared'
                       ? 'No shared recordings yet'
                       : 'Start your first recording'}
                 </h2>
                 <p className='mt-1 min-h-10 max-w-sm text-sm text-muted-foreground'>
-                  {ownershipFilteredRecordings.length > 0
-                    ? `No recordings found for ${getRecordingDatePresetLabel(selectedDatePreset).toLowerCase()}.`
-                    : selectedCreatorId
-                      ? 'Try another ownership tab or person.'
-                      : activeListTab === 'shared'
-                        ? 'Recordings shared with you by others will appear here.'
-                        : 'Capture a conversation and explore it with Ask AI.'}
+                  {selectedLabels.length > 0
+                    ? 'No recordings match the selected labels.'
+                    : ownershipFilteredRecordings.length > 0
+                      ? `No recordings found for ${getRecordingDatePresetLabel(selectedDatePreset).toLowerCase()}.`
+                      : selectedCreatorId
+                        ? 'Try another ownership tab or person.'
+                        : activeListTab === 'shared'
+                          ? 'Recordings shared with you by others will appear here.'
+                          : 'Capture a conversation and explore it with Ask AI.'}
                 </p>
               </div>
             ) : filteredRecordings.length > 0 && scrollContainer ? (

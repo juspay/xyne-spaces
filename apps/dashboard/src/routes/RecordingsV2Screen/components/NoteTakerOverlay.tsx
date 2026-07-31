@@ -10,14 +10,18 @@ import {
 import {
   ChevronDown,
   ChevronUp,
+  Flag,
   PauseBig,
   PlayBig,
   SearchBig,
   Spinner,
   StopBig,
   MultipleCrossCancelDefault,
+  CloudDisabled,
 } from '@xyne/icons';
+import { Maximize2, Minimize2 } from 'lucide-react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import { useWorkspaceNavigate } from '../../../hooks/useWorkspaceNavigate';
 import { Button } from '../../../components/ui/Button/Button';
 import Input from '../../../components/ui/Input';
 import { CollaborativeCanvasEditor } from '../../../components/Canvas/CollaborativeCanvasEditor';
@@ -39,10 +43,12 @@ interface NoteTakerOverlayProps {
   accumulatedPausedMs: number;
   transcripts: TranscriptEntry[];
   channelId: string | null;
+  recordingId: string | null;
   notesCanvasId: string | null;
   isCreatingNotes: boolean;
   notesCreationFailed: boolean;
   onCreateNotes: () => void;
+  isOffline: boolean;
   title?: string | undefined;
   onStop: () => void;
   onPause: () => void;
@@ -52,13 +58,18 @@ interface NoteTakerOverlayProps {
 type TabId = 'notes' | 'transcript';
 
 interface RecordingPanelHeaderProps {
-  elapsed: number;
   isPaused: boolean;
   displayTitle: string;
   isCollapsed: boolean;
+  recordingId: string | null;
+  onToggleCollapsed: () => void;
+}
+
+interface RecordingControlBarProps {
+  elapsed: number;
+  isPaused: boolean;
   onPause: () => void;
   onResume: () => void;
-  onToggleCollapsed: () => void;
   onStop: () => void;
 }
 
@@ -93,56 +104,153 @@ interface NotesTabProps {
 
 const FOLLOW_THRESHOLD_PX = 40;
 const TRACK_CATEGORY = 'NoteTakerOverlay';
+/** Matches the `h-8` inner row; needed as a number so the bar can animate open. */
+const OFFLINE_BAR_HEIGHT_PX = 32;
 
 // ─── Sub-components ─────────────────────────────────────────────────────────
 
 const RecordingPanelHeader = ({
-  elapsed,
   isPaused,
   displayTitle,
   isCollapsed,
+  recordingId,
+  onToggleCollapsed,
+}: RecordingPanelHeaderProps): ReactElement => {
+  const navigate = useWorkspaceNavigate();
+
+  const handleOpenDetails = (): void => {
+    if (!recordingId) return;
+    void navigate(`/recordings/${recordingId}`);
+  };
+
+  return (
+    <header
+      className={cn(
+        'flex h-12 shrink-0 items-center gap-2.5 border-b pr-3 pl-3.5 transition-colors duration-150',
+        isCollapsed ? 'border-transparent' : 'border-border',
+      )}
+      aria-label='Recording status and controls'
+    >
+      <span
+        className={cn(
+          'size-2.5 shrink-0 rounded-full',
+          isPaused ? 'bg-muted-foreground' : 'bg-destructive',
+        )}
+        aria-hidden='true'
+      />
+      <span className='sr-only' role='status'>
+        {isPaused ? 'Recording paused' : 'Recording'}
+      </span>
+      <h2
+        className='min-w-0 flex-1 truncate text-sm font-semibold tracking-tight text-foreground'
+        title={displayTitle}
+      >
+        {displayTitle}
+      </h2>
+      <Button
+        type='button'
+        variant='ghost'
+        size='iconSm'
+        onClick={handleOpenDetails}
+        disabled={!recordingId}
+        className='size-7 rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-35'
+        aria-label='Open recording details'
+        title='Open recording details'
+        data-track-category={TRACK_CATEGORY}
+        data-track-name='open_recording_details'
+      >
+        <Maximize2 size={15} strokeWidth={2.2} />
+      </Button>
+      <Button
+        type='button'
+        variant='ghost'
+        size='iconSm'
+        onClick={onToggleCollapsed}
+        className='size-7 rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground'
+        aria-label={isCollapsed ? 'Expand live transcript' : 'Collapse live transcript'}
+        title={isCollapsed ? 'Expand live transcript' : 'Collapse live transcript'}
+        data-track-category={TRACK_CATEGORY}
+        data-track-name={isCollapsed ? 'expand_transcript' : 'collapse_transcript'}
+      >
+        {isCollapsed ? (
+          <ChevronUp size={16} strokeWidth={2.5} />
+        ) : (
+          <ChevronDown size={16} strokeWidth={2.5} />
+        )}
+      </Button>
+    </header>
+  );
+};
+
+const OfflineStatusBar = (): ReactElement => {
+  const shouldReduceMotion = useReducedMotion();
+
+  return (
+    <motion.div
+      initial={shouldReduceMotion ? false : { height: 0, opacity: 0 }}
+      animate={{ height: OFFLINE_BAR_HEIGHT_PX, opacity: 1 }}
+      exit={shouldReduceMotion ? { opacity: 0 } : { height: 0, opacity: 0 }}
+      transition={{ duration: shouldReduceMotion ? 0 : 0.18, ease: [0.22, 1, 0.36, 1] }}
+      className='shrink-0 overflow-hidden border-b border-border bg-muted/40'
+    >
+      <div className='flex h-8 items-center gap-2 px-3.5 text-xs' role='status'>
+        <CloudDisabled size={14} strokeWidth={2} className='shrink-0 text-muted-foreground' />
+        <span className='shrink-0 font-medium text-foreground'>Offline — saving locally</span>
+        <span className='truncate text-muted-foreground'>· syncs when you reconnect</span>
+      </div>
+    </motion.div>
+  );
+};
+
+const RecordingControlBar = ({
+  elapsed,
+  isPaused,
   onPause,
   onResume,
-  onToggleCollapsed,
   onStop,
-}: RecordingPanelHeaderProps): ReactElement => (
-  <header
-    className={cn(
-      'flex h-14 shrink-0 items-center gap-3 border-b pr-3 pl-4 transition-colors duration-150',
-      isCollapsed ? 'border-transparent' : 'border-border',
-    )}
-    aria-label='Recording status and controls'
+}: RecordingControlBarProps): ReactElement => (
+  <div
+    className='flex h-13 shrink-0 items-center gap-1.5 border-t border-border px-4 py-2'
+    aria-label='Recording controls'
   >
     <span
-      className={cn(
-        'size-2.5 shrink-0 rounded-full',
-        isPaused ? 'bg-muted-foreground' : 'bg-destructive',
-      )}
-      aria-hidden='true'
-    />
-    <span className='sr-only' role='status'>
-      {isPaused ? 'Recording paused' : 'Recording'}
-    </span>
-    <h2
-      className='min-w-0 flex-1 truncate text-sm font-semibold tracking-tight text-foreground'
-      title={displayTitle}
-    >
-      {displayTitle}
-    </h2>
-    <span
-      className='w-14 shrink-0 text-center font-mono text-xs font-semibold tabular-nums text-muted-foreground'
+      className='shrink-0 font-mono text-sm font-thin tabular-nums text-muted-foreground'
       role='timer'
       aria-label={`Elapsed time ${formatElapsedTime(elapsed)}`}
     >
       {formatElapsedTime(elapsed)}
     </span>
-    <div className='flex items-center gap-0.5 rounded-xl bg-muted p-0.5'>
+    <div className='flex flex-1 shrink-0 items-center justify-end gap-1.5'>
       <Button
         type='button'
         variant='ghost'
         size='iconSm'
+        className='rounded-xl text-muted-foreground hover:bg-muted hover:text-foreground'
+        aria-label='Mark moment'
+        title='Mark moment'
+        data-track-category={TRACK_CATEGORY}
+        data-track-name='mark_moment'
+      >
+        <Flag size={17} strokeWidth={2} />
+      </Button>
+      <Button
+        type='button'
+        variant='ghost'
+        size='iconSm'
+        className='rounded-xl text-muted-foreground hover:bg-muted hover:text-foreground'
+        aria-label='Minimize panel'
+        title='Minimize panel'
+        data-track-category={TRACK_CATEGORY}
+        data-track-name='minimize_panel'
+      >
+        <Minimize2 size={16} strokeWidth={2.2} />
+      </Button>
+      <Button
+        type='button'
+        variant='outline'
+        size='icon'
         onClick={isPaused ? onResume : onPause}
-        className='rounded-xl text-muted-foreground hover:bg-background hover:text-foreground'
+        className='size-9 rounded-xl shadow-sm transition-transform active:scale-95 motion-reduce:transform-none'
         aria-label={isPaused ? 'Resume recording' : 'Pause recording'}
         title={isPaused ? 'Resume recording' : 'Pause recording'}
         data-track-category={TRACK_CATEGORY}
@@ -156,36 +264,19 @@ const RecordingPanelHeader = ({
       </Button>
       <Button
         type='button'
-        variant='ghost'
-        size='iconSm'
-        onClick={onToggleCollapsed}
-        className='rounded-xl text-muted-foreground hover:bg-background hover:text-foreground'
-        aria-label={isCollapsed ? 'Expand live transcript' : 'Collapse live transcript'}
-        title={isCollapsed ? 'Expand live transcript' : 'Collapse live transcript'}
+        variant='destructive'
+        size='icon'
+        onClick={onStop}
+        className='size-9 rounded-xl shadow-sm transition-transform active:scale-95 motion-reduce:transform-none'
+        aria-label='Stop recording'
+        title='Stop recording'
         data-track-category={TRACK_CATEGORY}
-        data-track-name={isCollapsed ? 'expand_transcript' : 'collapse_transcript'}
+        data-track-name='stop_recording'
       >
-        {isCollapsed ? (
-          <ChevronUp size={17} strokeWidth={2.5} />
-        ) : (
-          <ChevronDown size={17} strokeWidth={2.5} />
-        )}
+        <StopBig size={16} variant='Solid' />
       </Button>
     </div>
-    <Button
-      type='button'
-      variant='destructive'
-      size='icon'
-      onClick={onStop}
-      className='size-9 rounded-xl shadow-sm transition-transform active:scale-95 motion-reduce:transform-none'
-      aria-label='Stop recording'
-      title='Stop recording'
-      data-track-category={TRACK_CATEGORY}
-      data-track-name='stop_recording'
-    >
-      <StopBig size={16} variant='Solid' />
-    </Button>
-  </header>
+  </div>
 );
 
 const TranscriptSearchBar = ({
@@ -463,10 +554,12 @@ export function NoteTakerOverlay({
   accumulatedPausedMs,
   transcripts,
   channelId,
+  recordingId,
   notesCanvasId,
   isCreatingNotes,
   notesCreationFailed,
   onCreateNotes,
+  isOffline,
   title,
   onStop,
   onPause,
@@ -572,19 +665,16 @@ export function NoteTakerOverlay({
         onTransitionEnd={handlePanelTransitionEnd}
         className={cn(
           'pointer-events-auto flex w-full max-h-[calc(100vh-3rem)] flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl ring-1 ring-foreground/5 transition-[height] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[height] motion-reduce:transition-none',
-          isCollapsed ? 'h-14' : 'h-[min(70vh,600px)] min-[700px]:h-[min(40rem,calc(100vh-3rem))]',
+          isCollapsed ? 'h-12' : 'h-[min(70vh,600px)] min-[700px]:h-[min(40rem,calc(100vh-3rem))]',
         )}
         aria-label={isCollapsed ? 'Collapsed recording controls' : 'Live recording transcript'}
       >
         <RecordingPanelHeader
-          elapsed={elapsed}
           isPaused={isPaused}
           displayTitle={displayTitle}
           isCollapsed={isCollapsed}
-          onPause={onPause}
-          onResume={onResume}
+          recordingId={recordingId}
           onToggleCollapsed={handleToggleCollapsed}
-          onStop={onStop}
         />
 
         <div
@@ -597,6 +687,8 @@ export function NoteTakerOverlay({
               : 'opacity-100 duration-150 delay-100',
           )}
         >
+          <AnimatePresence initial={false}>{isOffline && <OfflineStatusBar />}</AnimatePresence>
+
           <div
             className='flex h-9 shrink-0 items-stretch gap-1.5 border-b border-border px-4'
             role='tablist'
@@ -658,6 +750,14 @@ export function NoteTakerOverlay({
               onCreateNotes={onCreateNotes}
             />
           </div>
+
+          <RecordingControlBar
+            elapsed={elapsed}
+            isPaused={isPaused}
+            onPause={onPause}
+            onResume={onResume}
+            onStop={onStop}
+          />
         </div>
       </section>
     </motion.div>

@@ -5,6 +5,7 @@ import Avatar from '../../../components/ui/Avatar/Avatar';
 import { Button } from '../../../components/ui/Button/Button';
 import { EntitySelector } from '../../../components/ui/EntitySelector/EntitySelector';
 import type { SelectorOption } from '../../../components/ui/EntitySelector/EntitySelector.types';
+import { cn } from '../../../utils/classNames';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 
 interface RecordingPeopleFilterProps {
@@ -92,7 +93,10 @@ export function RecordingPeopleFilter({
         onSelect={onUserChange}
         placeholder='People'
         searchPlaceholder='Search people...'
-        inputClassName='h-9 rounded-xl pl-3 pr-7 text-sm font-medium shadow-sm'
+        inputClassName={cn(
+          'h-9 rounded-xl pl-3 pr-7 text-sm font-medium shadow-sm',
+          selectedUserId && '!border-foreground',
+        )}
         onSearchChange={setSearchValue}
         disableClientFiltering
         showIndicator={false}
