@@ -9,10 +9,15 @@ const router = Router();
 const backfillAdminAuth = authorize('TICKET-MIGRATION', AccessType.ADMIN);
 
 /**
- * @route POST /api/admin/conversation-participant-backfill
- * @desc Backfill lastActivityAt and channelId on conversation_participants
+ * @route POST /migrate/api/admin/conversation-participant-backfill
+ * @desc Backfill or reconcile denormalized conversation_participant fields
  * @access TICKET-MIGRATION Admin only
- * @body { types?: ('lastActivityAt' | 'channelId')[], batchSize?: number, delayMs?: number, dryRun?: boolean }
+ * @body {
+ *   types?: ('lastReplyAt' | 'staleLastReplyAt' | 'channelId' | 'orphanedParticipants')[],
+ *   batchSize?: number,
+ *   delayMs?: number,
+ *   dryRun?: boolean
+ * }
  */
 router.post(
   '/',
