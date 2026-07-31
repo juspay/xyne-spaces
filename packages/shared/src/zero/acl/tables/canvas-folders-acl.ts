@@ -11,9 +11,7 @@ export class CanvasFoldersACL extends BaseQueryACL<'canvas_folders'> {
   canSelect<TReturn>(query: Query<'canvas_folders', Schema, TReturn>): Query<'canvas_folders', Schema, TReturn> {
     if (isGuestContext(this.ctx)) {
       return query
-        .whereExists('createdByUser', (u) =>
-          u.where('workspaceId', '=', this.ctx.workspaceId),
-        )
+        .where('workspaceId', '=', this.ctx.workspaceId)
         .where(({ or, cmp, exists }) =>
           or(
             cmp('createdBy', '=', this.ctx.userID),
@@ -24,8 +22,8 @@ export class CanvasFoldersACL extends BaseQueryACL<'canvas_folders'> {
         );
     }
 
-    return query.whereExists('createdByUser', u =>
-      u.where('workspaceId', '=', this.ctx.workspaceId),
-    );
+    // Scope by the folder's own workspaceId (same multi-workspace footgun as canvases —
+    // the createdByUser hop keyed off the creator's home workspace).
+    return query.where('workspaceId', '=', this.ctx.workspaceId);
   }
 }

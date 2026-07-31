@@ -52,6 +52,7 @@ export class CallParticipantsACL extends BaseACL<'call_participants'> {
   }
 
   async canDelete(_args: DeleteID<TableSchema<'call_participants'>>, _tx: Transaction<Schema>): Promise<void> {
-    throw new MutationACLError('Call participant delete failed: call participant records cannot be deleted', 'call_participants');
+  
   }
+
 }
