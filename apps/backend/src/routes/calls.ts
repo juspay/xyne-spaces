@@ -4,6 +4,7 @@ import { callHostControlController } from '@/controllers/callHostControlControll
 import { scheduleCallController } from '@/controllers/scheduleCallController';
 import { callChatController, requireInternalCallParticipant } from '@/controllers/callChatController';
 import { uploadSingle } from '@/middleware/upload';
+import { summaryTemplateController } from '@/controllers/summaryTemplateController';
 
 const router = Router();
 
@@ -21,6 +22,9 @@ router.post('/recordings/bulk-delete', callController.bulkDeleteRecordings);
 router.get('/recordings/:callId', callController.getRecordingDetail);
 router.patch('/recordings/:callId', callController.updateRecordingTitle);
 router.delete('/recordings/:callId', callController.deleteRecording);
+router.get('/summary-templates', summaryTemplateController.list);
+router.post('/summary-templates', summaryTemplateController.create);
+router.patch('/summary-templates/:templateId', summaryTemplateController.update);
 // Pulse org list proxy (must be before /:callId wildcard)
 router.get('/pulse-orgs', callController.getPulseOrgs);
 

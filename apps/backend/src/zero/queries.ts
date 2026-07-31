@@ -5,9 +5,11 @@ import {
   CallType,
   defineQuery,
   DocType,
+  EntityUserAccess,
   FormContextType,
   FormEntityType,
   LookupType,
+  ShareableEntityType,
 } from '@xyne/shared';
 import { z } from 'zod';
 import {
@@ -2367,9 +2369,10 @@ export const queries = defineQueries({
       limit: z.number(),
       start: z.object({ id: z.string(), startedAt: z.number() }).nullable(),
     }),
-    ({ args: { limit, start } }) => {
+    ({ ctx, args: { limit, start } }) => {
       let query = zql.calls
         .where('callType', CallType.HEADLESS)
+        .where('createdByUserId', ctx.userID)
         .orderBy('startedAt', 'desc')
         .orderBy('id', 'desc');
 
@@ -2379,6 +2382,95 @@ export const queries = defineQueries({
 
       return query.limit(limit);
     },
+  ),
+
+  createdOatsRecordings: defineQuery(
+    z.object({
+      limit: z.number(),
+      start: z.object({ id: z.string(), startedAt: z.number() }).nullable(),
+    }),
+    ({ ctx, args: { limit, start } }) => {
+      let query = zql.calls
+        .where('workspaceId', ctx.workspaceId)
+        .where('callType', CallType.HEADLESS)
+        .where('createdByUserId', ctx.userID)
+        .orderBy('startedAt', 'desc')
+        .orderBy('id', 'desc')
+        .related('createdByUser')
+        .related('shares', shares =>
+          shares
+            .where('shareableEntityType', ShareableEntityType.NOTE_TAKER)
+            .where('entityUserAccess', '!=', EntityUserAccess.REVOKED)
+            .related('user'),
+        )
+        .related('summaryTemplate');
+
+      if (start) {
+        query = query.start({ id: start.id, startedAt: start.startedAt }, { inclusive: false });
+      }
+      return query.limit(limit);
+    },
+  ),
+
+  sharedOatsRecordings: defineQuery(
+    z.object({
+      limit: z.number(),
+      start: z.object({ id: z.string(), startedAt: z.number() }).nullable(),
+    }),
+    ({ ctx, args: { limit, start } }) => {
+      let query = zql.calls
+        .where('workspaceId', ctx.workspaceId)
+        .where('callType', CallType.HEADLESS)
+        .where('createdByUserId', '!=', ctx.userID)
+        .whereExists('shares', share =>
+          share
+            .where('shareableEntityType', ShareableEntityType.NOTE_TAKER)
+            .where('userId', ctx.userID)
+            .where('entityUserAccess', '!=', EntityUserAccess.REVOKED),
+        )
+        .orderBy('startedAt', 'desc')
+        .orderBy('id', 'desc')
+        .related('createdByUser')
+        .related('shares', shares =>
+          shares
+            .where('shareableEntityType', ShareableEntityType.NOTE_TAKER)
+            .where('entityUserAccess', '!=', EntityUserAccess.REVOKED)
+            .related('user'),
+        )
+        .related('summaryTemplate');
+
+      if (start) {
+        query = query.start({ id: start.id, startedAt: start.startedAt }, { inclusive: false });
+      }
+      return query.limit(limit);
+    },
+  ),
+
+  oatsRecordingByCallId: defineQuery(
+    z.object({ callId: z.string() }),
+    ({ ctx, args: { callId } }) =>
+      zql.calls
+        .where('workspaceId', ctx.workspaceId)
+        .where('callType', CallType.HEADLESS)
+        .where('id', callId)
+        .related('createdByUser')
+        .related('shares', shares =>
+          shares
+            .where('shareableEntityType', ShareableEntityType.NOTE_TAKER)
+            .where('entityUserAccess', '!=', EntityUserAccess.REVOKED)
+            .related('user'),
+        )
+        .related('summaryTemplate')
+        .one(),
+  ),
+
+  summaryTemplates: defineQuery(
+    z.object({}),
+    ({ ctx }) =>
+      zql.summary_templates
+        .where('workspaceId', ctx.workspaceId)
+        .orderBy('name', 'asc')
+        .orderBy('version', 'desc'),
   ),
 
   recurringSeriesById: defineQuery(

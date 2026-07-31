@@ -23,6 +23,11 @@ import type {
   BlockNoteTableBlock,
   BlockNoteInlineContent,
 } from '@/types/blockNoteTypes';
+import {
+  buildSummaryTemplateSelectionPrompt,
+  parseSelectedSummaryTemplate,
+  type SummaryTemplateCandidate,
+} from './summaryTemplateSelection';
 
 // PRD Document structure
 interface PRDDocument {
@@ -504,7 +509,7 @@ export class CallDocumentService {
    */
   private async prepareCanvasContent(
     markdownSummary: string,
-    channelId: string,
+    channelId: string | null,
     callStartedAt?: Date,
     callTitle?: string | null
   ): Promise<{
@@ -531,8 +536,9 @@ export class CallDocumentService {
       }
     }
 
-    // Build participant map from channel members for mention resolution
-    const participantMap = await buildParticipantMap(channelId);
+    // Build participant map from channel members for mention resolution.
+    // NOTE_TAKER calls have no channel — mentions simply resolve to none.
+    const participantMap = channelId ? await buildParticipantMap(channelId) : new Map();
     const logContext = callStartedAt ? '' : ' (update)';
     logger.info(`[CallDocumentService] Built channel participant map with ${participantMap.size} participants for mentions${logContext}`);
 
@@ -624,9 +630,70 @@ export class CallDocumentService {
   }
 
   /**
+   * Select the most suitable workspace summary template for a transcript.
+   * A null result means the caller should use the hardcoded default summary.
+   */
+  async selectSummaryTemplateForTranscript(
+    transcript: string,
+    workspaceId: string,
+    callId: string,
+  ): Promise<SummaryTemplateCandidate | null> {
+    let templates: SummaryTemplateCandidate[];
+    try {
+      templates = await repositories.summaryTemplates.listByWorkspace(workspaceId);
+    } catch (error) {
+      logger.error(`[${callId}] summary_template_lookup_failed`, { error });
+      return null;
+    }
+
+    if (templates.length === 0) {
+      logger.info(`[${callId}] summary_template_selection_skipped`, {
+        reason: 'no_templates',
+        fallback: 'hardcoded_default',
+      });
+      return null;
+    }
+
+    const result = await executeStreamingLlmRequest({
+      userPrompt: buildSummaryTemplateSelectionPrompt(transcript, templates),
+      operation: 'summary_template_selection',
+      callId,
+    });
+
+    if (!result.ok) {
+      logger.error(`[${callId}] summary_template_selection_failed`, {
+        reason: result.reason,
+        fallback: 'hardcoded_default',
+      });
+      return null;
+    }
+
+    const selectedTemplate = parseSelectedSummaryTemplate(result.content, templates);
+    if (!selectedTemplate) {
+      logger.error(`[${callId}] summary_template_selection_invalid`, {
+        fallback: 'hardcoded_default',
+      });
+      return null;
+    }
+
+    logger.info(`[${callId}] summary_template_selected`, {
+      template_id: selectedTemplate.id,
+      template_name: selectedTemplate.name,
+      template_version: selectedTemplate.version,
+    });
+    return selectedTemplate;
+  }
+
+  /**
    * Generate detailed summary from transcript with explicit retry loop.
    */
-  async generateDetailedSummary(transcript: string, callId: string, customPrompt?: string, summaryFields?: string): Promise<string | null> {
+  async generateDetailedSummary(
+    transcript: string,
+    callId: string,
+    customPrompt?: string,
+    summaryFields?: string,
+    systemPrompt?: string,
+  ): Promise<string | null> {
     // Resolve channelId and build participant map once (expensive DB lookups)
     const call = await repositories.calls.findByExternalId(callId);
     const channelId = call?.channelId;
@@ -642,6 +709,7 @@ export class CallDocumentService {
     const sanitizedTranscript = sanitizeInput(transcript);
     const sanitizedCustomPrompt = customPrompt ? sanitizeInput(customPrompt) : '';
     const sanitizedFields = summaryFields?.trim() ? sanitizeInput(summaryFields) : '';
+    const sanitizedSystemPrompt = systemPrompt ? sanitizeInput(systemPrompt) : '';
 
     const buildPrompt = () => {
       let prompt = renderPromptTemplate(DETAILED_SUMMARY_PROMPT, {
@@ -660,6 +728,7 @@ export class CallDocumentService {
       userPrompt: buildPrompt(),
       operation: 'detailed_summary_generation',
       callId,
+      ...(sanitizedSystemPrompt ? { systemPrompt: sanitizedSystemPrompt } : {}),
     });
 
     if (!result.ok) {
@@ -800,11 +869,12 @@ export class CallDocumentService {
     callId: string,
     markdownSummary: string,
     createdByUserId: string,
-    conversationId: string,
-    channelId: string,
+    conversationId: string | null,
+    channelId: string | null,
     callStartedAt: Date,
     callCreatorUserId: string,
-    callTitle?: string | null
+    callTitle?: string | null,
+    workspaceIdOverride?: string
   ): Promise<string | null> {
     try {
       const prisma = DatabaseClient.getInstance();
@@ -812,7 +882,10 @@ export class CallDocumentService {
 
       const canvasId = uuidv4();
       const participantId = uuidv4();
-      const workspaceId = await repositories.channels.getWorkspaceId(channelId);
+      const workspaceId = workspaceIdOverride ?? (channelId ? await repositories.channels.getWorkspaceId(channelId) : undefined);
+      if (!workspaceId) {
+        throw new Error(`Cannot resolve workspaceId for detailed summary canvas (call ${callId})`);
+      }
 
       // Prepare canvas content (title, content, mentions)
       const { title, content: sanitizedContent, mentionedUserIds } = await this.prepareCanvasContent(
@@ -933,7 +1006,7 @@ export class CallDocumentService {
     canvasId: string,
     markdownSummary: string,
     updatedByUserId: string,
-    channelId: string,
+    channelId: string | null,
     currentVersion: number,
     callId: string,
     callTitle?: string | null
@@ -999,11 +1072,12 @@ export class CallDocumentService {
     callId: string,
     markdownSummary: string,
     createdByUserId: string,
-    conversationId: string,
-    channelId: string,
+    conversationId: string | null,
+    channelId: string | null,
     callStartedAt: Date,
     callCreatorUserId: string,
-    callTitle?: string | null
+    callTitle?: string | null,
+    workspaceIdOverride?: string
   ): Promise<{ canvasId: string | null; version: number }> {
     // Check if an existing canvas exists for this call
     const existingCanvas = await findExistingDetailedSummaryCanvas(callId);
@@ -1035,7 +1109,8 @@ export class CallDocumentService {
       channelId,
       callStartedAt,
       callCreatorUserId,
-      callTitle
+      callTitle,
+      workspaceIdOverride
     );
 
     return {

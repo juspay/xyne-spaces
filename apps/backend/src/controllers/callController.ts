@@ -40,9 +40,22 @@ import { callDocumentService } from '@/services/callDocumentService';
 import {
   type CallParticipantMetadata,
   SUMMARY_PROMPT_MAX_LENGTH,
+  ShareableEntityType,
 } from '@xyne/shared';
 import { storageService } from '@/services/storage';
 import { CallVespaFeedSource, queueCallVespaFeed } from '@/services/callVespaQueue';
+import { callShareService } from '@/services/callShareService';
+
+const UpdateHeadlessRecordingSchema = z
+  .object({
+    title: z.string().trim().min(1).max(255).optional(),
+    labels: z.array(z.string().trim().min(1).max(80)).max(50).optional(),
+    markedItems: z.array(z.record(z.unknown())).max(200).optional(),
+    summaryTemplateId: z.string().min(1).nullable().optional(),
+  })
+  .refine(value => Object.keys(value).length > 0, {
+    message: 'At least one recording field is required',
+  });
 
 export class CallController {
   private async cancelOtherActiveJoinRequests(
@@ -379,22 +392,66 @@ export class CallController {
         return;
       }
 
+      // NOTE_TAKER (HEADLESS / "Xyne Oats") recordings never live inside a channel
+      // and never create a message/conversation — they're created directly via
+      // noteTakerCallRepository (see noteTakerWebhookController) once the first
+      // participant joins. Handle this entirely separately from the channel-based
+      // flow below.
+      if (isHeadless) {
+        if (!['AUDIO', 'VIDEO'].includes(callType)) {
+          res.status(400).json({ success: false, error: 'Invalid call type' });
+          return;
+        }
+
+        callExternalId = uuidv4();
+        const roomLink = `${livekitService.getClientUrl()}/call/${callExternalId}?type=${callType}`;
+        const roomMetadata = JSON.stringify({
+          callType: 'HEADLESS',
+          sttModel: sttModel || 'azure',
+          createdBy: userId,
+          workspaceId: req.user!.workspaceId,
+        });
+
+        stage = 'livekit_room_creation';
+        await livekitService.createRoom({
+          name: callExternalId,
+          maxParticipants: 100,
+          emptyTimeout: 120,
+          metadata: roomMetadata,
+        });
+        logger.info(`[${callExternalId}] livekit_room_created | user_id=${userId}, path=note_taker`);
+
+        stage = 'initiator_user_lookup';
+        const initiator = await db.user.findUnique({ where: { id: userId }, select: { picture: true } });
+        stage = 'token_generation_new_call';
+        const token = await livekitService.generateAccessToken({
+          userIdentity: userId,
+          roomName: callExternalId,
+          userName: userName || userEmail || 'Unknown',
+          metadata: JSON.stringify({ picture: initiator?.picture || null }),
+        });
+
+        void userActivityTrackingService.trackCallInitiated(userId, {
+          callId: callExternalId,
+          callType,
+        });
+
+        res.json({
+          success: true,
+          token,
+          livekitUrl: livekitService.getServerUrl(),
+          externalId: callExternalId,
+          callId: callExternalId,
+          roomLink,
+          channelId: null,
+        });
+        return;
+      }
+
       let finalChannelId = channelId;
 
-      // Handle headless recording - create DM with bot
-      if (isHeadless && !channelId && !invitedUserIds) {
-        stage = 'bot_user_lookup';
-        const botUser = await this.getOrCreateBotUser(req.user!.workspaceId!);
-        stage = 'dm_channel_resolution';
-        finalChannelId = await repositories.channels.findOrCreateDMChannel(
-          userId,
-          [botUser.id],
-          repositories.channelParticipants,
-          req.user!.workspaceId!
-        );
-      }
       // If no channelId but invitedUserIds is provided, find or create channel
-      else if (!channelId && invitedUserIds && invitedUserIds.length > 0) {
+      if (!channelId && invitedUserIds && invitedUserIds.length > 0) {
         stage = 'dm_channel_resolution';
         finalChannelId = await repositories.channels.findOrCreateDMChannel(
           userId,
@@ -422,11 +479,9 @@ export class CallController {
       stage = 'existing_call_lookup';
       // If conversationId is provided, check for calls matching both channelId and conversationId
       // Otherwise, check for calls matching only channelId
-      const existingCall = isHeadless
-        ? null
-        : conversationId
-          ? await repositories.calls.findActiveCallByChannelIdAndConversationId(finalChannelId, conversationId)
-          : await repositories.calls.findActiveCallByChannelId(finalChannelId);
+      const existingCall = conversationId
+        ? await repositories.calls.findActiveCallByChannelIdAndConversationId(finalChannelId, conversationId)
+        : await repositories.calls.findActiveCallByChannelId(finalChannelId);
 
       // Fetch channel to get scopeType (needed for existing call path)
       stage = 'channel_lookup';
@@ -512,6 +567,7 @@ export class CallController {
             token,
             livekitUrl: livekitService.getServerUrl(),
             externalId: existingCall.externalId,
+            callId: existingCall.externalId,
             roomLink: existingCall.roomLink || `${livekitService.getClientUrl()}/call/${existingCall.externalId}?type=${callType}`,
             channelId: finalChannelId,
             scopeType: channel.scopeType, // Add scopeType for CallKit filtering
@@ -552,7 +608,7 @@ export class CallController {
         channelId: channel.id,
         projectId: channel.projectId,
         callOrigin: conversationId ? CallOrigin.CONVERSATION : CallOrigin.CHANNEL,
-        callType: isHeadless ? 'HEADLESS' : callType,
+        callType,
         sttModel: sttModel || 'azure',
         createdBy: userId,
         ...(conversationId && { conversationId }),
@@ -609,6 +665,7 @@ export class CallController {
         token,
         livekitUrl: livekitService.getServerUrl(),
         externalId: callExternalId,
+        callId: callExternalId,
         roomLink,
         channelId: finalChannelId,
         scopeType: channel.scopeType, // Add scopeType for CallKit filtering
@@ -994,6 +1051,8 @@ export class CallController {
           id: call.id,
           externalId: call.externalId,
           title: call.title || 'Untitled Recording',
+          status: call.status,
+          createdByUserId: call.createdByUserId,
           startedAt: call.startedAt,
           endedAt: call.endedAt,
           durationMs: call.endedAt
@@ -1002,6 +1061,9 @@ export class CallController {
           hasTranscript: !!call.transcript,
           hasSummary: !!call.aiSummary,
           hasRecording: callsWithRecording.has(call.id),
+          labels: call.labels,
+          markedItems: call.markedItems,
+          summaryTemplateId: call.summaryTemplateId,
           messageId: metadata?.systemMessageId || null,
         };
       });
@@ -1034,13 +1096,17 @@ export class CallController {
     try {
       const call = await repositories.calls.findByExternalId(callId);
 
-      if (!call) {
+      if (
+        !call ||
+        call.callType !== CallType.HEADLESS ||
+        (call.workspaceId !== null && call.workspaceId !== req.user!.workspaceId)
+      ) {
         res.status(404).json({ success: false, error: 'Recording not found' });
         return;
       }
 
-      // Verify ownership
-      if (call.createdByUserId !== userId) {
+      const canView = await callShareService.canView(call, userId, req.user!.workspaceId);
+      if (!canView) {
         res.status(403).json({ success: false, error: 'Access denied' });
         return;
       }
@@ -1103,6 +1169,8 @@ export class CallController {
           id: call.id,
           externalId: call.externalId,
           title: call.title || 'Untitled Recording',
+          status: call.status,
+          createdByUserId: call.createdByUserId,
           startedAt: call.startedAt,
           endedAt: call.endedAt,
           durationMs: call.endedAt
@@ -1115,6 +1183,9 @@ export class CallController {
           hasIdentifiedTranscript: !!identifiedTranscriptContent,
           aiSummary: call.aiSummary,
           aiSummaryFormat,
+          labels: call.labels,
+          markedItems: call.markedItems,
+          summaryTemplateId: call.summaryTemplateId,
           messageId,
           conversationId,
           channelId,
@@ -1136,22 +1207,21 @@ export class CallController {
   updateRecordingTitle = async (req: Request, res: Response): Promise<void> => {
     const userId = req.user?.id;
     const { callId } = req.params;
-    const { title } = req.body;
 
     if (!userId) {
       res.status(401).json({ success: false, error: 'Unauthorized' });
       return;
     }
 
-    if (!title || typeof title !== 'string') {
-      res.status(400).json({ success: false, error: 'Title is required' });
-      return;
-    }
-
     try {
+      const input = UpdateHeadlessRecordingSchema.parse(req.body);
       const call = await repositories.calls.findByExternalId(callId);
 
-      if (!call) {
+      if (
+        !call ||
+        call.callType !== CallType.HEADLESS ||
+        (call.workspaceId !== null && call.workspaceId !== req.user!.workspaceId)
+      ) {
         res.status(404).json({ success: false, error: 'Recording not found' });
         return;
       }
@@ -1162,17 +1232,34 @@ export class CallController {
         return;
       }
 
-      await repositories.calls.update(call.id, { title: title.trim() });
+      if (input.summaryTemplateId) {
+        const template = await repositories.summaryTemplates.findById(input.summaryTemplateId);
+        if (!template || template.workspaceId !== req.user!.workspaceId) {
+          res.status(400).json({ success: false, error: 'Invalid summary template' });
+          return;
+        }
+      }
+
+      await repositories.calls.update(call.id, {
+        ...(input.title ? { title: input.title } : {}),
+        ...(input.labels ? { labels: [...new Set(input.labels)] } : {}),
+        ...(input.markedItems !== undefined
+          ? { markedItems: input.markedItems as Prisma.InputJsonValue[] }
+          : {}),
+        ...(input.summaryTemplateId !== undefined
+          ? { summaryTemplateId: input.summaryTemplateId }
+          : {}),
+      });
 
       // For headless recordings, update the system message content
-      if (call.callType === CallType.HEADLESS) {
+      if (input.title) {
         try {
           // Find the message associated with this call using repository method
           const callMessage = await repositories.messages.findHeadMessageByCallId(callId);
 
           if (callMessage) {
             await repositories.messages.update(callMessage.messageId, {
-              content: `Recording Saved: ${title.trim()}`,
+              content: `Recording Saved: ${input.title}`,
               metadata: {
                 ...(callMessage.metadata as Record<string, any> || {}),
                 operation: 'call_ended',
@@ -1187,10 +1274,14 @@ export class CallController {
         }
       }
 
-      res.json({ success: true, message: 'Title updated' });
+      res.json({ success: true, message: 'Recording updated' });
     } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ success: false, error: error.errors[0]?.message });
+        return;
+      }
       logger.error('Failed to update recording title:', error);
-      res.status(500).json({ success: false, error: 'Failed to update title' });
+      res.status(500).json({ success: false, error: 'Failed to update recording' });
     }
   };
 
@@ -1222,6 +1313,11 @@ export class CallController {
       if (!call) {
         logger.warn(`[${callId}] download_transcript_call_not_found | user_id=${userId}`);
         res.status(404).json({ success: false, error: 'Call not found' });
+        return;
+      }
+
+      if (!(await this.assertCanViewCallRecordings(callId, userId))) {
+        res.status(403).json({ success: false, error: 'Access denied' });
         return;
       }
 
@@ -1295,17 +1391,9 @@ export class CallController {
         return;
       }
 
-      // Headless recordings are only ever created by the owner — check ownership.
-      // For regular calls the creator is already a participant, so the participant
-      // check below still covers them.  Doing ownership first avoids a DB query
-      // in the common case.
-      const isOwner = call.createdByUserId === userId;
-      if (!isOwner) {
-        const participant = await repositories.calls.findParticipant(call.id, userId);
-        if (!participant) {
-          res.status(403).json({ success: false, error: 'Access denied' });
-          return;
-        }
+      if (!(await this.assertCanViewCallRecordings(callId, userId))) {
+        res.status(403).json({ success: false, error: 'Access denied' });
+        return;
       }
 
       const recording = await callRecordingService.streamRecordingById(latest.id);
@@ -1351,6 +1439,13 @@ export class CallController {
       const call = await repositories.calls.findByExternalId(callId);
       if (!call) {
         res.status(404).json({ success: false, error: 'Call not found' });
+        return;
+      }
+      if (
+        call.callType === CallType.HEADLESS &&
+        !(await callShareService.canView(call, userId, req.user!.workspaceId))
+      ) {
+        res.status(403).json({ success: false, error: 'Access denied' });
         return;
       }
 
@@ -1443,6 +1538,13 @@ export class CallController {
       const call = await repositories.calls.findByExternalId(callId);
       if (!call) {
         res.status(404).json({ success: false, error: 'Call not found' });
+        return;
+      }
+      if (
+        call.callType === CallType.HEADLESS &&
+        !(await callShareService.canView(call, userId, req.user!.workspaceId))
+      ) {
+        res.status(403).json({ success: false, error: 'Access denied' });
         return;
       }
 
@@ -1989,6 +2091,13 @@ export class CallController {
     const call = await repositories.calls.findByExternalId(callId);
     if (!call) return false;
     if (call.createdByUserId === userId) return true;
+    if (
+      call.callType === CallType.HEADLESS &&
+      call.workspaceId &&
+      (await callShareService.canView(call, userId, call.workspaceId))
+    ) {
+      return true;
+    }
     const participant = await repositories.calls.findParticipant(call.id, userId);
     if (participant) return true;
     if (call.channelId) {
@@ -2347,6 +2456,8 @@ export class CallController {
         callId: call.id,
       },
     });
+
+    await repositories.entityAccess.deleteForResource(ShareableEntityType.NOTE_TAKER, call.id);
 
     // Delete the call record
     await repositories.calls.delete(call.id);

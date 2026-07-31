@@ -2471,6 +2471,39 @@ export const callTable = table("calls")
     callUpdatesChannel: string().optional(),
     participantCount: number().optional(),
     participantPreviewUserIds: string().optional(),
+    summaryTemplateId: string().optional(),
+    labels: json<string[]>(),
+    markedItems: json<any[]>(),
+  })
+  .primaryKey("id");
+
+export const entityAccessTable = table("entity_access")
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    shareableEntityType: string(),
+    entityId: string(),
+    userId: string().optional(),
+    userGroupId: string().optional(),
+    channelId: string().optional(),
+    entityUserAccess: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
+export const summaryTemplateTable = table("summary_templates")
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    name: string(),
+    autoTriggerPrompt: string().optional(),
+    sections: json(),
+    version: number(),
+    systemPrompt: string(),
+    defaultOutlet: string(),
+    createdBy: string(),
+    createdAt: number(),
   })
   .primaryKey("id");
 
@@ -5418,6 +5451,8 @@ export const schema = createSchema(
       notificationPreferenceTable,
       browserNotificationSubscriptionTable,
       callTable,
+      entityAccessTable,
+      summaryTemplateTable,
       callParticipantTable,
       callRecordingTable,
       recurringCallSeriesTable,
@@ -5692,6 +5727,8 @@ export type Notification = Row<typeof schema.tables.notifications>;
 export type NotificationPreference = Row<typeof schema.tables.notification_preferences>;
 export type BrowserNotificationSubscription = Row<typeof schema.tables.browser_notification_subscriptions>;
 export type Call = Row<typeof schema.tables.calls>;
+export type EntityAccess = Row<typeof schema.tables.entity_access>;
+export type SummaryTemplate = Row<typeof schema.tables.summary_templates>;
 export type CallParticipant = Row<typeof schema.tables.call_participants>;
 export type CallRecording = Row<typeof schema.tables.call_recordings>;
 export type RecurringCallSeries = Row<typeof schema.tables.recurring_call_series>;
