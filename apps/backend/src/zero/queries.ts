@@ -2796,6 +2796,18 @@ export const queries = defineQueries({
     return zql.canvas_participants.where('canvasId', canvasId).related('canvas');
   }),
 
+  canvasCommentThreads: defineQuery(
+    z.object({ canvasId: z.string() }),
+    ({ args: { canvasId } }) => {
+      return zql.canvas_comment_threads
+        .where('canvasId', canvasId)
+        .orderBy('createdAt', 'asc')
+        .related('comments', comments =>
+          comments.orderBy('createdAt', 'asc'),
+        );
+    },
+  ),
+
   getCanvas: defineQuery(z.object({ canvasId: z.string() }), ({ ctx, args: { canvasId } }) => {
     // Backward-compat lookup: match by canonical id, userRepo (Quarto), and
     // the legacy viewAccessId/editAccessId columns so historical chat URLs

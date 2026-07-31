@@ -58,6 +58,7 @@ interface NotificationData {
       messageType?: string;
       canvasId?: string;
       blockId?: string;
+      commentThreadId?: string;
       conversation?: Conversation;
       notificationType?: string;
     };
@@ -179,9 +180,19 @@ export const NotificationHandler: React.FC = () => {
         // For canvas notifications, construct actionUrl from data if not provided
         const canvasRedirectUrl =
           !data.notification.actionUrl && data.notification.data?.canvasId
-            ? data.notification.data.blockId
-              ? `/redirected?type=canvas&canvasId=${encodeURIComponent(data.notification.data.canvasId)}&blockId=${encodeURIComponent(data.notification.data.blockId)}`
-              : `/redirected?type=canvas&canvasId=${encodeURIComponent(data.notification.data.canvasId)}`
+            ? (() => {
+                const canvasParams = new URLSearchParams({
+                  type: 'canvas',
+                  canvasId: data.notification.data.canvasId,
+                });
+                if (data.notification.data.blockId) {
+                  canvasParams.set('blockId', data.notification.data.blockId);
+                }
+                if (data.notification.data.commentThreadId) {
+                  canvasParams.set('commentThreadId', data.notification.data.commentThreadId);
+                }
+                return `/redirected?${canvasParams.toString()}`;
+              })()
             : undefined;
         const fallbackChatActionUrl = buildChatActionUrl(data.notification);
         const notificationWorkspaceId = data.notification.workspaceId;

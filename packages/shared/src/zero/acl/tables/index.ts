@@ -21,6 +21,8 @@ export { CanvasFoldersACL } from './canvas-folders-acl';
 export { CanvasParticipantsACL } from './canvas-participants-acl';
 export { CanvasUserStatusACL } from './canvas-user-status-acl';
 export { CanvasesACL } from './canvases-acl';
+export { CanvasCommentThreadsACL } from './canvas-comment-threads-acl';
+export { CanvasCommentsACL } from './canvas-comments-acl';
 export { ChannelParticipantsACL } from './channel-participants-acl';
 export { ChannelStatsACL } from './channel-stats-acl';
 export { ChannelsACL } from './channels-acl';

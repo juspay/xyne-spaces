@@ -1279,7 +1279,9 @@ class NotificationService {
     workspaceId: string,
     channelName?: string,
     blockId?: string,
+    commentThreadId?: string,
     channelId?: string | null,
+    mentionContext: 'canvas' | 'comment' = 'canvas',
   ): Promise<{ deliveredUserIds: string[] }> {
     const recipientIds = userIds.filter(id => id !== senderId);
     if (recipientIds.length === 0) {
@@ -1302,13 +1304,18 @@ class NotificationService {
 
     getNotificationJobsExpected().add(desktopUsers.length + mobileUsers.length, { platform: 'desktop', message_type: 'channel' });
 
-    // Mirror message mentions: "You were mentioned in #channelName" when canvas is in a channel
-    const title = channelName
-      ? `You were mentioned in #${channelName}`
-      : `You were mentioned in ${canvasTitle}`;
-    const message = channelName
-      ? `${senderName} mentioned you in #${channelName}`
-      : `${senderName} mentioned you in a canvas`;
+    // Mirror message mentions for canvas body; make comment mentions explicit.
+    const isCommentMention = mentionContext === 'comment';
+    const title = isCommentMention
+      ? `You were mentioned in a comment on ${canvasTitle}`
+      : channelName
+        ? `You were mentioned in #${channelName}`
+        : `You were mentioned in ${canvasTitle}`;
+    const message = isCommentMention
+      ? ''
+      : channelName
+        ? `${senderName} mentioned you in #${channelName}`
+        : `${senderName} mentioned you in a canvas`;
 
     const notificationData = {
       title,
@@ -1320,14 +1327,20 @@ class NotificationService {
         canvasId,
         canvasTitle,
         senderId,
-        senderName,
+        ...(!isCommentMention ? { senderName } : {}),
         workspaceId,
+        mentionContext,
         ...(blockId ? { blockId } : {}),
+        ...(commentThreadId ? { commentThreadId } : {}),
       },
     };
 
-    const actionUrl = blockId
-      ? `/${workspaceId}/chat/canvas/${canvasId}?blockId=${encodeURIComponent(blockId)}`
+    const canvasQueryParams = new URLSearchParams();
+    if (blockId) canvasQueryParams.set('blockId', blockId);
+    if (commentThreadId) canvasQueryParams.set('commentThreadId', commentThreadId);
+    const queryString = canvasQueryParams.toString();
+    const actionUrl = queryString
+      ? `/${workspaceId}/chat/canvas/${canvasId}?${queryString}`
       : `/${workspaceId}/chat/canvas/${canvasId}`;
 
     // Send desktop-only notifications

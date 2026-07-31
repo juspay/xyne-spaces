@@ -26,6 +26,7 @@ import {
   AutoDraftMode,
   CanvasVisibility,
   CanvasRole,
+  CanvasCommentThreadStatus,
   BookmarkEntityType,
   UserPresenceStatus,
   FormContextType,
@@ -203,6 +204,9 @@ async function updateCallParticipantPreview(
 }
 
 const storageService = getStorageService();
+
+const serializeCanvasCommentMentionedUserIds = (mentionedUserIds: string[]): string =>
+  JSON.stringify([...new Set(mentionedUserIds)]);
 
 const XYNE_USER_IDS = new Set([
   'cmhesdd48001ghu4rc6bcb9m0', 'ou9fi7t9tmq2eeiss09km8j3',
@@ -522,6 +526,36 @@ async function hasCanvasVersionEditAccess(
   );
 
   return Boolean(participant);
+}
+
+async function assertCanvasCommentEditAccess(
+  tx: Transaction<Schema>,
+  canvasId: string,
+  userId: string,
+): Promise<{ id: string; createdBy: string }> {
+  const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
+  if (!canvas) {
+    throw new Error('Canvas not found');
+  }
+
+  const canEdit = await hasCanvasVersionEditAccess(tx, canvas, userId);
+  if (!canEdit) {
+    throw new Error('You do not have permission to comment on this canvas');
+  }
+
+  return canvas;
+}
+
+async function assertCanvasThreadManageAccess(
+  tx: Transaction<Schema>,
+  thread: { canvasId: string; createdBy: string },
+  userId: string,
+): Promise<void> {
+  if (thread.createdBy === userId) {
+    return;
+  }
+
+  await assertCanvasCommentEditAccess(tx, thread.canvasId, userId);
 }
 
 /**
@@ -8981,6 +9015,180 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             isStarred: true,
             createdAt: timestamp,
             updatedAt: timestamp,
+          });
+        },
+      ),
+    },
+    canvasComment: {
+      createThread: defineMutator(
+        z.object({
+          threadId: z.string(),
+          commentId: z.string(),
+          canvasId: z.string(),
+          blockId: z.string().min(1),
+          anchorText: z.string().optional(),
+          body: z.string().min(1),
+          mentionedUserIds: z.array(z.string()).default([]),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { threadId, commentId, canvasId, blockId, anchorText, body, mentionedUserIds, timestamp } }) => {
+          await assertCanvasCommentEditAccess(tx, canvasId, authData.sub);
+
+          await tx.mutate.canvas_comment_threads.insert({
+            id: threadId,
+            canvasId,
+            blockId,
+            anchorText: anchorText || null,
+            status: CanvasCommentThreadStatus.OPEN,
+            statusUpdatedBy: null,
+            statusUpdatedAt: null,
+            createdBy: authData.sub,
+            createdAt: timestamp,
+          });
+
+          await tx.mutate.canvas_comments.insert({
+            id: commentId,
+            threadId,
+            canvasId,
+            body,
+            mentionedUserIds: serializeCanvasCommentMentionedUserIds(mentionedUserIds),
+            createdBy: authData.sub,
+            editedAt: null,
+            deletedAt: null,
+            createdAt: timestamp,
+          });
+        },
+      ),
+      reply: defineMutator(
+        z.object({
+          commentId: z.string(),
+          threadId: z.string(),
+          canvasId: z.string(),
+          body: z.string().min(1),
+          mentionedUserIds: z.array(z.string()).default([]),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { commentId, threadId, canvasId, body, mentionedUserIds, timestamp } }) => {
+          const thread = await tx.run(zql.canvas_comment_threads.where('id', threadId).one());
+          if (!thread || thread.canvasId !== canvasId) {
+            throw new Error('Comment thread not found');
+          }
+
+          await assertCanvasCommentEditAccess(tx, canvasId, authData.sub);
+
+          await tx.mutate.canvas_comments.insert({
+            id: commentId,
+            threadId,
+            canvasId,
+            body,
+            mentionedUserIds: serializeCanvasCommentMentionedUserIds(mentionedUserIds),
+            createdBy: authData.sub,
+            editedAt: null,
+            deletedAt: null,
+            createdAt: timestamp,
+          });
+
+          if (thread.status === CanvasCommentThreadStatus.RESOLVED) {
+            await tx.mutate.canvas_comment_threads.update({
+              id: threadId,
+              status: CanvasCommentThreadStatus.OPEN,
+              statusUpdatedBy: authData.sub,
+              statusUpdatedAt: timestamp,
+            });
+          }
+        },
+      ),
+      updateComment: defineMutator(
+        z.object({
+          commentId: z.string(),
+          body: z.string().min(1),
+          mentionedUserIds: z.array(z.string()).default([]),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { commentId, body, mentionedUserIds, timestamp } }) => {
+          const comment = await tx.run(zql.canvas_comments.where('id', commentId).one());
+          if (!comment) {
+            throw new Error('Comment not found');
+          }
+          if (comment.createdBy !== authData.sub) {
+            throw new Error('Only the comment author can edit this comment');
+          }
+          if (comment.deletedAt) {
+            throw new Error('Deleted comments cannot be edited');
+          }
+
+          await tx.mutate.canvas_comments.update({
+            id: commentId,
+            body,
+            mentionedUserIds: serializeCanvasCommentMentionedUserIds(mentionedUserIds),
+            editedAt: timestamp,
+          });
+        },
+      ),
+      deleteComment: defineMutator(
+        z.object({
+          commentId: z.string(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { commentId, timestamp } }) => {
+          const comment = await tx.run(zql.canvas_comments.where('id', commentId).one());
+          if (!comment) {
+            throw new Error('Comment not found');
+          }
+          if (comment.createdBy !== authData.sub) {
+            throw new Error('Only the comment author can delete this comment');
+          }
+          if (comment.deletedAt) {
+            return;
+          }
+
+          await tx.mutate.canvas_comments.update({
+            id: commentId,
+            body: '',
+            mentionedUserIds: '[]',
+            deletedAt: timestamp,
+          });
+        },
+      ),
+      resolveThread: defineMutator(
+        z.object({
+          threadId: z.string(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { threadId, timestamp } }) => {
+          const thread = await tx.run(zql.canvas_comment_threads.where('id', threadId).one());
+          if (!thread) {
+            throw new Error('Comment thread not found');
+          }
+
+          await assertCanvasThreadManageAccess(tx, thread, authData.sub);
+
+          await tx.mutate.canvas_comment_threads.update({
+            id: threadId,
+            status: CanvasCommentThreadStatus.RESOLVED,
+            statusUpdatedBy: authData.sub,
+            statusUpdatedAt: timestamp,
+          });
+        },
+      ),
+      reopenThread: defineMutator(
+        z.object({
+          threadId: z.string(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { threadId, timestamp } }) => {
+          const thread = await tx.run(zql.canvas_comment_threads.where('id', threadId).one());
+          if (!thread) {
+            throw new Error('Comment thread not found');
+          }
+
+          await assertCanvasThreadManageAccess(tx, thread, authData.sub);
+
+          await tx.mutate.canvas_comment_threads.update({
+            id: threadId,
+            status: CanvasCommentThreadStatus.OPEN,
+            statusUpdatedBy: authData.sub,
+            statusUpdatedAt: timestamp,
           });
         },
       ),
