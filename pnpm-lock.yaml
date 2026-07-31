@@ -1735,7 +1735,7 @@ importers:
         specifier: 7.28.0
         version: 7.28.0
       xyne-claw-shared:
-        specifier: workspace:*
+        specifier: file:../../../packages/xyne-claw-shared
         version: link:../../../packages/xyne-claw-shared
       yaml:
         specifier: ^2.8.3
@@ -2083,7 +2083,7 @@ importers:
         specifier: 1.29.0
         version: 1.29.0(@cfworker/json-schema@4.1.1)(zod@4.3.6)
       '@xyne/kata-sdk':
-        specifier: workspace:*
+        specifier: file:../kata-sdk
         version: link:../kata-sdk
       marked:
         specifier: ^18.0.4
