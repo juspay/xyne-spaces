@@ -238,6 +238,10 @@ const envSchema = Joi.object({
   METTLE_USER_SYNC_API_KEY: Joi.string().allow('').default(''),
   // Team intelligence sync API Key (for S2S authentication)
   TEAM_INTELLIGENCE_SYNC_API_KEY: Joi.string().allow('').default(''),
+  // Telepresence monitoring sync API Key (for S2S authentication)
+  TELEPRESENCE_MONITORING_API_KEY: Joi.string().allow('').default(''),
+  // Max allowed range (in days) for telepresence health time-series queries
+  TELEPRESENCE_MONITORING_LIFESPAN: Joi.number().integer().positive().default(7),
   // API-support CSAT sync API Key (for S2S authentication) — shared by any external system posting CSAT results
   API_SUPPORT_CSAT_API_KEY: Joi.string().allow('').default(''),
   // Mettle API Configuration (for fetching employee details)
@@ -706,6 +710,8 @@ export const config = {
   transcriptionAgentApiKey: envVars.TRANSCRIPTION_AGENT_API_KEY,
   mettleUserSyncApiKey: envVars.METTLE_USER_SYNC_API_KEY,
   teamIntelligenceSyncApiKey: envVars.TEAM_INTELLIGENCE_SYNC_API_KEY,
+  telepresenceMonitoringApiKey: envVars.TELEPRESENCE_MONITORING_API_KEY,
+  telepresenceMonitoringLifespanDays: envVars.TELEPRESENCE_MONITORING_LIFESPAN,
   apiSupportCsatApiKey: envVars.API_SUPPORT_CSAT_API_KEY,
   mettleApiBaseUrl: envVars.METTLE_API_BASE_URL,
   mettleToken: envVars.METTLE_TOKEN,
