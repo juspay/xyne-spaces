@@ -173,6 +173,7 @@ function reconcileConversationWindow(
 }
 
 type CombinedMessage = ReturnType<typeof useCombinedMesseges>['combinedMessages'][number];
+const VISIBLE_CONVERSATION_EPSILON_PX = 1;
 
 function computeNewConvIdx(
   messages: CombinedMessage[],
@@ -369,6 +370,26 @@ const ChatListV4: React.FC<ChatListProps> = ({
   };
 
   const virtualItems = virtualizer.getVirtualItems();
+  const isConversationFullyVisible = useCallback(
+    (conversationId: string, index: number): boolean => {
+      if (!virtualizer.getVirtualItems().some(item => item.index === index)) return false;
+
+      const scrollElement = parentRef.current;
+      if (!scrollElement) return false;
+
+      const conversationElement = document.getElementById(`conv-${conversationId}`);
+      if (!conversationElement || !scrollElement.contains(conversationElement)) return false;
+
+      const scrollRect = scrollElement.getBoundingClientRect();
+      const conversationRect = conversationElement.getBoundingClientRect();
+
+      return (
+        conversationRect.top >= scrollRect.top - VISIBLE_CONVERSATION_EPSILON_PX &&
+        conversationRect.bottom <= scrollRect.bottom + VISIBLE_CONVERSATION_EPSILON_PX
+      );
+    },
+    [virtualizer],
+  );
 
   // ── Queries ───────────────────────────────────────────────────────────────────
   const [updatedConversations, updatedConversationsDetails] = useQuery(
@@ -753,12 +774,16 @@ const ChatListV4: React.FC<ChatListProps> = ({
     );
     if (idx !== -1) {
       const isLast = idx === combinedMessages.length - 1;
+
       requestAnimationFrame(() => {
-        const scrollToLinkedConversation = (): void => {
+        const scrollToLinkedConversation = (): boolean => {
+          if (isConversationFullyVisible(linkedConversationId, idx)) return false;
           virtualizer.scrollToIndex(idx, { align: isLast ? 'end' : 'center', behavior: 'auto' });
+          return true;
         };
-        scrollToLinkedConversation();
-        window.setTimeout(scrollToLinkedConversation, 80);
+        if (scrollToLinkedConversation()) {
+          window.setTimeout(scrollToLinkedConversation, 80);
+        }
       });
     } else {
       if (linkedCutoffCreatedAt) {
@@ -774,7 +799,12 @@ const ChatListV4: React.FC<ChatListProps> = ({
         fetchOlderMessages();
       }, 0);
     }
-  }, [linkedConversationId, activityNavigationNonce, isInitialLoadComplete]);
+  }, [
+    linkedConversationId,
+    activityNavigationNonce,
+    isInitialLoadComplete,
+    isConversationFullyVisible,
+  ]);
 
   // ── Auto-scroll when the last conversation changes in-place (streaming,
   // edits, unfurls) — followOnAppend only fires on append, not on in-place
@@ -1002,11 +1032,19 @@ const ChatListV4: React.FC<ChatListProps> = ({
     if (idx === -1) return;
 
     const timer = setTimeout(() => {
-      virtualizer.scrollToIndex(idx, { align: 'center' });
+      requestAnimationFrame(() => {
+        if (isConversationFullyVisible(activeThreadConversationId, idx)) return;
+        virtualizer.scrollToIndex(idx, { align: 'center' });
+      });
     }, 100);
 
     return () => clearTimeout(timer);
-  }, [activeThreadConversationId, combinedMessages, isInitialLoadComplete]);
+  }, [
+    activeThreadConversationId,
+    combinedMessages,
+    isInitialLoadComplete,
+    isConversationFullyVisible,
+  ]);
 
   const handleOpenThread = useCallback(
     (conversationId: string, e?: React.MouseEvent): void => {
