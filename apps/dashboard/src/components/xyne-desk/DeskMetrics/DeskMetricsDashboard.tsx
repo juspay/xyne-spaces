@@ -57,7 +57,6 @@ import {
 import { showDownloadCompleteToast } from '../../../utils/downloadToast';
 import { CHART_COLORS as VIZ_CHART_COLORS } from '../../QueryVisualizations/constants';
 
-/** A desk the user may add to the comparison. */
 export interface DeskMetricsSelectableDesk {
   id: string;
   name: string;
@@ -66,14 +65,8 @@ export interface DeskMetricsSelectableDesk {
 export interface DeskMetricsDashboardProps {
   open: boolean;
   onClose: () => void;
-  /** The desk the dashboard was opened from; always part of the selection. */
   channelId: string;
   channelName?: string;
-  /**
-   * Desks offered in the "Desks" picker. Metrics may not be enabled on all of
-   * them — the backend reports those as skipped and the header says so, since
-   * enablement is per-desk state the caller cannot cheaply know up front.
-   */
   availableDesks?: DeskMetricsSelectableDesk[];
 }
 
@@ -354,8 +347,6 @@ const MetricsAgentTable = ({
     rows.sort((a, b) => {
       const av = agentSortValue(a, sortKey);
       const bv = agentSortValue(b, sortKey);
-      // Agents with no data for the sorted column always sink to the bottom,
-      // so flipping direction never fills the first page with blanks.
       if (av === null && bv === null) return 0;
       if (av === null) return 1;
       if (bv === null) return -1;
@@ -804,11 +795,6 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
   const [deskPickerOpen, setDeskPickerOpen] = useState(false);
   const [deskSearch, setDeskSearch] = useState('');
 
-  /**
-   * The primary desk is always first and cannot be deselected — closing the
-   * dashboard is how you leave it. Stale ids in the persisted list are filtered
-   * against availableDesks so a deleted desk cannot wedge a saved selection.
-   */
   const selectedDeskIds = useMemo(() => {
     const selectable = new Set(availableDesks.map(d => d.id));
     return [channelId, ...comparedChannelIds.filter(id => selectable.has(id) && id !== channelId)];
@@ -915,8 +901,6 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
   const skippedDesks: DeskMetricsSkippedDesk[] = data?.skipped ?? [];
   const perDeskRows: DeskMetricsPerDeskRow[] = data?.perDesk ?? [];
 
-  // A desk contributing nothing is indistinguishable from a desk with no
-  // activity unless we say why, so name the reason against the desk's label.
   const deskNameById = useMemo(() => {
     const map = new Map<string, string>();
     map.set(channelId, channelName ?? 'This desk');
@@ -999,9 +983,6 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
   };
 
   const channelAssignees = useMemo(() => {
-    // `participants` only covers the primary desk. When comparing desks, union
-    // in the assignees the aggregate actually returned, otherwise agents who
-    // only work the other desks would be missing from the filter.
     const memberIds = new Set((participants ?? []).map(p => p.userId));
     for (const agent of data?.agents ?? []) {
       if (agent.assigneeId) memberIds.add(agent.assigneeId);
@@ -1058,7 +1039,6 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
     showDownloadCompleteToast(filename);
   }, [data?.tickets]);
 
-  // Stable identity so the agent memos below don't recompute on every render.
   const agents = useMemo(() => data?.agents ?? [], [data?.agents]);
 
   const agentTotals = useMemo(
@@ -1114,7 +1094,6 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                       : 'Desk Metrics'}
                 </span>
               </div>
-              {/* Tabs — ticket-level overview vs agent-level performance */}
               <div
                 role='tablist'
                 aria-label='Metrics view'
@@ -1161,7 +1140,6 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
               </div>
             </div>
             <div className='flex items-center gap-3'>
-              {/* Desk multi-select — compare several desks in one dashboard */}
               {availableDesks.length > 1 && (
                 <Popover
                   open={deskPickerOpen}
@@ -1805,8 +1783,6 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
 
           {/* Body */}
           <div className='min-h-0 flex-1 overflow-y-auto p-6'>
-            {/* A requested desk that contributed nothing must say so — otherwise
-                its absence reads as "this desk had no activity". */}
             {skippedDesks.length > 0 && (
               <div className='mb-4 flex items-start gap-2 rounded-[10px] border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-900/40 dark:bg-amber-900/15'>
                 <AlertCircle size={14} className='mt-0.5 shrink-0 text-amber-600' />
@@ -1864,8 +1840,6 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                 </button>
               </div>
             ) : !data ? null : activeTab === 'desks' ? (
-              /* Per-desk comparison — the point of a multi-desk selection is
-                 seeing which desk is the outlier, not just the blended total. */
               <div className='overflow-x-auto rounded-[12px] border border-desk-border dark:border-border'>
                 <table className='w-full min-w-[720px] text-sm'>
                   <thead>
@@ -1964,7 +1938,6 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                   </div>
                 ) : (
                   <>
-                    {/* Agent KPI row */}
                     <div className='grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5'>
                       <KpiCard
                         label='Agents'
@@ -1993,7 +1966,6 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                       <KpiCard label='Replies Sent' value={String(agentTotals.replies)} />
                     </div>
 
-                    {/* Assigned vs resolved per agent */}
                     <div className='flex flex-col rounded-[12px] border border-desk-border bg-background p-4 dark:border-border'>
                       <div className='mb-3 text-sm font-medium text-foreground'>
                         Assigned vs resolved by agent

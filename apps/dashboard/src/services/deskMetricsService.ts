@@ -26,11 +26,6 @@ export async function getDeskMetrics(
   return data;
 }
 
-/**
- * Combined metrics across several desks. Same payload shape as the single-desk
- * call plus `perDesk` and `skipped`, so callers can render one dashboard for
- * any number of desks.
- */
 export async function getAggregateDeskMetrics(
   channelIds: string[],
   timeRange: string,

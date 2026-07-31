@@ -81,11 +81,6 @@ interface StoredFilters {
   selectedCustomFieldKeys: string[];
   // Per-key checkbox selections: { Tag: ['EMI', 'UPI'], Tone: ['Neutral'] }
   selectedCustomFieldValues: Record<string, string[]>;
-  /**
-   * Extra desks compared alongside the desk the dashboard was opened from.
-   * Excludes that primary channelId, so the stored value stays correct even if
-   * the same saved selection is reopened from a different desk.
-   */
   comparedChannelIds: string[];
 }
 
@@ -223,7 +218,6 @@ export const usePersistedDeskMetricsFilters = (
 
   const setComparedChannelIds = useCallback(
     (ids: string[]) => {
-      // Never store the primary desk here: it is always included implicitly.
       const extras = [...new Set(ids.filter(id => id !== channelId))];
       persist(prev => ({ ...prev, comparedChannelIds: extras }));
     },

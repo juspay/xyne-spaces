@@ -59,11 +59,6 @@ export class DeskMetricsController {
     return { ok: true };
   }
 
-  /**
-   * Parses the query params shared by the single-desk and aggregate endpoints.
-   * Returns a 400 payload rather than writing the response, so the aggregate
-   * handler can validate once before fanning out.
-   */
   private parseMetricsQuery(
     req: Request,
   ):
@@ -139,10 +134,6 @@ export class DeskMetricsController {
       };
   }
 
-  /**
-   * Computes one desk's metrics, honouring that desk's own frtStageNames
-   * preference. Assumes access has already been asserted.
-   */
   private async metricsForChannel(
     channelId: string,
     preference: { frtStageNames?: string | null },
@@ -166,9 +157,6 @@ export class DeskMetricsController {
     });
   }
 
-  /**
-   * GET /channels/:channelId/metrics?timeRange=startMs_endMs
-   */
   getMetrics = async (req: Request, res: Response): Promise<void> => {
     const { channelId } = req.params;
 
@@ -199,16 +187,6 @@ export class DeskMetricsController {
     }
   };
 
-  /**
-   * GET /desk-metrics/aggregate?channelIds=a,b,c&timeRange=startMs_endMs
-   *
-   * Fans out to the per-desk query and combines the results. Desks the caller
-   * cannot see, or that never enabled metrics, are reported in `skipped`
-   * instead of failing the whole request — one stale id in a saved selection
-   * must not blank the dashboard. A 403 is returned only when every desk is
-   * definitively unavailable; internal failures preserve the single-desk
-   * endpoint's 500 behavior.
-   */
   getAggregateMetrics = async (req: Request, res: Response): Promise<void> => {
     const rawIds = typeof req.query.channelIds === 'string' ? req.query.channelIds : '';
     const channelIds = [
@@ -243,9 +221,7 @@ export class DeskMetricsController {
       const contributions: DeskMetricsContribution[] = [];
       const skipped: DeskMetricsSkippedDesk[] = [];
 
-      // Sequential on purpose: each getMetrics already issues several queries,
-      // so fanning N desks out concurrently would multiply peak DB connections
-      // by N for a feature whose N is user-controlled.
+      // Keep per-desk fan-out sequential to bound peak DB connections.
       for (const channelId of channelIds) {
         try {
           const access = await this.assertChannelAccess(req, channelId);
@@ -267,16 +243,12 @@ export class DeskMetricsController {
           const metrics = await this.metricsForChannel(channelId, preference, query);
           contributions.push({ channelId, channelName: channel?.name ?? null, metrics });
         } catch (error) {
-          // One bad desk degrades to a skip rather than losing the others.
           logger.error('[DeskMetrics] Aggregate: desk failed, skipping', { channelId, error });
           skipped.push({ channelId, reason: 'error' });
         }
       }
 
       if (contributions.length === 0) {
-        // Match the single-desk endpoint: a computation failure is a server
-        // error, not an authorization failure. Partial success still returns
-        // the usable desks above with failed desks listed in `skipped`.
         if (skipped.some(desk => desk.reason === 'error')) {
           res.status(500).json({
             error: 'Failed to compute desk metrics',

@@ -102,9 +102,6 @@ export class DeskMetricsRepository {
       (SELECT MAX(ta."timestamp") FROM "public"."ticket_activities" ta
         WHERE ta."ticketId" = c."ticketId" AND ${resolvedPredicate})`;
 
-    // Distinct-ticket reopen flag for the agent cohort. A reopen is specifically
-    // a COMPLETED ticket returning to an active status; moving to CANCELLED is
-    // terminal and must not be counted.
     const reopenedPredicate = Prisma.sql`(
       ta."activityType" = 'STATUS'
       AND ta.value->>'field' = 'statusV2'
@@ -381,16 +378,6 @@ export class DeskMetricsRepository {
     });
   }
 
-  /**
-   * Per-agent leaderboard. Two attributions, deliberately mixed (see
-   * DeskMetricsAgentRow docs):
-   *  - ownership: cohort tickets grouped by tickets."assignedTo"
-   *  - actor:     EMAIL_SENT grouped by ticket_activities."updatedBy"
-   * FRT/RT reuse the caller's frtStop/resolvedAt SQL verbatim so a row here can
-   * never disagree with the headline FRT/RT cards.
-   * Agents who only ever replied (own no cohort ticket) still get a row, so a
-   * shared desk does not silently drop their work.
-   */
   private async agentPerformance(
     db: ReturnType<DeskMetricsRepository['getDbInstance']>,
     cohortCte: Prisma.Sql,
@@ -403,9 +390,6 @@ export class DeskMetricsRepository {
     assigneeId?: string | null,
     customFieldExists: Prisma.Sql = Prisma.sql``,
   ): Promise<DeskMetricsAgentRow[]> {
-    // Ownership-attributed metrics use the assignee-filtered cohort above.
-    // Replies are actor-attributed, so selecting an agent must filter on the
-    // person who sent the reply rather than the ticket's current owner.
     const replyActorFilter = assigneeId
       ? Prisma.sql`AND ta."updatedBy" = ${assigneeId}`
       : Prisma.sql``;
@@ -542,7 +526,6 @@ export class DeskMetricsRepository {
         existing.emailReplies = r.replies;
         continue;
       }
-      // Replied but owns none of the cohort — surface as a zero-ownership row.
       byAgent.set(r.user_id, {
         assigneeId: r.user_id,
         assigneeName: r.user_name,
@@ -561,7 +544,6 @@ export class DeskMetricsRepository {
       });
     }
 
-    // Defensive final filter; the reply query is already actor-filtered.
     const rows = [...byAgent.values()].filter(a => !assigneeId || a.assigneeId === assigneeId);
     rows.sort(
       (a, b) =>

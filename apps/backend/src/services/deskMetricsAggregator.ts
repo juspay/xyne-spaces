@@ -1,35 +1,15 @@
-/**
- * Combines several single-desk DeskMetricsResponse payloads into one.
- *
- * Why aggregate in JS instead of widening the repository SQL to `channelId IN
- * (...)`: every desk carries its own frtStageNames preference and its own
- * board-resolved "resolved" stage names, so a single query would have to encode
- * per-desk stage sets to keep FRT/resolution correct. Fanning out to the
- * existing (indexed, tested) per-desk query preserves those semantics exactly.
- *
- * Averages are recombined as weighted means using each desk's own denominator,
- * never as a mean-of-means — a desk with 2 tickets must not pull the same
- * weight as a desk with 2000.
- */
-
 import type {
   DeskMetricsAgentRow,
   DeskMetricsResponse,
   DeskMetricsTicketRow,
 } from '@xyne/shared';
 
-/** One desk's contribution to the aggregate. */
 export interface DeskMetricsContribution {
   channelId: string;
   channelName: string | null;
   metrics: DeskMetricsResponse;
 }
 
-/**
- * Weighted mean of (value, weight) pairs. Entries with a null value or a
- * non-positive weight contribute nothing. Returns null when no entry carries
- * weight, so "no data" stays distinguishable from a genuine 0.
- */
 const weightedMean = (entries: Array<{ value: number | null; weight: number }>): number | null => {
   let weightedTotal = 0;
   let weightSum = 0;
@@ -41,7 +21,6 @@ const weightedMean = (entries: Array<{ value: number | null; weight: number }>):
   return weightSum > 0 ? weightedTotal / weightSum : null;
 };
 
-/** Sums counts keyed by `key`, preserving the first-seen display label. */
 const mergeCounts = <T extends string>(
   groups: Array<Array<Record<string, unknown>>>,
   keyField: T,
@@ -107,12 +86,6 @@ const mergeAgentStageCounts = (
     .sort((a, b) => b.count - a.count || a.stageName.localeCompare(b.stageName));
 };
 
-/**
- * Merges agent rows across desks by assigneeId. The same person working two
- * desks becomes one row whose averages are weighted by that person's own
- * per-desk denominators (responded for FRT, resolved for RT, responses for
- * CSAT). The `null` assigneeId (Unassigned) bucket merges like any other.
- */
 const mergeAgents = (contributions: DeskMetricsContribution[]): DeskMetricsAgentRow[] => {
   type Accumulator = {
     row: DeskMetricsAgentRow;
@@ -124,7 +97,6 @@ const mergeAgents = (contributions: DeskMetricsContribution[]): DeskMetricsAgent
 
   for (const { metrics } of contributions) {
     for (const agent of metrics.agents) {
-      // Distinct sentinel: a real assignee id can never be the empty string.
       const key = agent.assigneeId ?? '';
       const existing = byAssignee.get(key);
       if (!existing) {
@@ -177,16 +149,11 @@ const mergeAgents = (contributions: DeskMetricsContribution[]): DeskMetricsAgent
     .sort((a, b) => b.assigned - a.assigned || b.emailReplies - a.emailReplies);
 };
 
-/** Merged drill-down rows, newest first. */
 const mergeTickets = (contributions: DeskMetricsContribution[]): DeskMetricsTicketRow[] =>
   contributions
     .flatMap(({ metrics }) => metrics.tickets)
     .sort((a, b) => b.createdAt - a.createdAt);
 
-/**
- * Aggregates one-or-more desks. `contributions` must be non-empty; the caller
- * is responsible for the all-desks-skipped case, which has no range to report.
- */
 export const aggregateDeskMetrics = (
   contributions: DeskMetricsContribution[],
 ): Omit<DeskMetricsResponse, never> & {
@@ -213,8 +180,6 @@ export const aggregateDeskMetrics = (
     contributions.reduce((total, { metrics }) => total + pick(metrics), 0);
 
   return {
-    // Every fan-out call used the same resolved timeRange, so any desk's range
-    // is the aggregate range.
     range: first.metrics.range,
     frt: {
       avgSeconds: weightedMean(

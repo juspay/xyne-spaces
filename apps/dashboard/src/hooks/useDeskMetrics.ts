@@ -21,14 +21,6 @@ export function useDeskMetrics(
   });
 }
 
-/**
- * Metrics for a set of desks.
- *
- * A single desk still goes through the aggregate endpoint so the payload shape
- * — and therefore the rendered dashboard — does not change as desks are added
- * or removed: `perDesk` and `skipped` are always present. Ids are sorted in the
- * query key so reordering the same selection is a cache hit rather than a refetch.
- */
 export function useAggregateDeskMetrics(
   channelIds: string[],
   timeRange: string,

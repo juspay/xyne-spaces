@@ -1329,12 +1329,6 @@ const SupportScreen = (): ReactElement => {
   // channel they haven't joined yet.
   const isSelectedChannelJoined = !!selectedChannelId && joinedChannelIds.has(selectedChannelId);
 
-  /**
-   * Desks offered in the metrics dashboard's desk picker: the EMAIL channels the
-   * user has joined. Metrics may be disabled on some of them — the aggregate
-   * endpoint reports those back as skipped rather than us fetching a preference
-   * per channel just to build this list.
-   */
   const metricsSelectableDesks = useMemo(
     () =>
       sortedEmailChannels
