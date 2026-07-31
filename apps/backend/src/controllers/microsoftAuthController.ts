@@ -16,6 +16,7 @@ import { jwtVerify, createRemoteJWKSet } from 'jose';
 import { WorkspaceType } from '@xyne/shared';
 import {
   OrganizationDomainConflictError,
+  PublicEmailDomainError,
   organizationDomainService,
 } from '@/services/organizationDomainService';
 
@@ -393,12 +394,31 @@ export class MicrosoftAuthController {
           const userExistsButRemoved = await this.userService.userExistsButNoActiveWorkspaces(
             microsoftUserData.email,
           );
-          const domainConflict = !userExistsButRemoved
-            ? await organizationDomainService.findEnterpriseWorkspaceByEmailDomain(microsoftUserData.email)
-            : null;
-          const domainConflictError = domainConflict
-            ? new OrganizationDomainConflictError(domainConflict.domain, domainConflict)
-            : null;
+
+          let domainConflict = null;
+          let domainConflictError = null;
+          let publicEmailError = null;
+
+          if (!userExistsButRemoved) {
+            if (peekedState?.enterpriseLogin) {
+              try {
+                await organizationDomainService.assertCanCreateOrgForEmail(microsoftUserData.email);
+              } catch (error) {
+                if (error instanceof PublicEmailDomainError) {
+                  publicEmailError = error;
+                } else if (error instanceof OrganizationDomainConflictError) {
+                  domainConflictError = error;
+                }
+              }
+            }
+
+            if (!domainConflictError && !publicEmailError) {
+              domainConflict = await organizationDomainService.findEnterpriseWorkspaceByEmailDomain(microsoftUserData.email);
+              domainConflictError = domainConflict
+                ? new OrganizationDomainConflictError(domainConflict.domain, domainConflict)
+                : null;
+            }
+          }
 
           res.cookie('google_access_token', jwt.sign({
             providerUserId: microsoftUserData.providerUserId,
@@ -426,9 +446,11 @@ export class MicrosoftAuthController {
           });
           if (domainConflictError && domainConflict) {
             params.set('domainConflictError', domainConflictError.message);
-            params.set('enterpriseJoinWorkspaceId', domainConflict.workspace.id);
-            params.set('enterpriseJoinWorkspaceName', domainConflict.workspace.name);
             params.set('enterpriseJoinOrgName', domainConflict.name);
+            params.set('enterpriseJoinWorkspaces', JSON.stringify(domainConflict.workspaces));
+          }
+          if (publicEmailError) {
+            params.set('publicEmailDomainError', publicEmailError.message);
           }
 
           logger.info(

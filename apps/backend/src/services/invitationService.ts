@@ -13,6 +13,7 @@ import crypto from 'crypto';
 import { hashPassword } from '../utils/passwordUtils';
 import { organizationDomainService } from './organizationDomainService';
 import { ChannelUserStatusRepository } from '@/database/repositories/channelUserStatusRepository';
+import { aiProvisioningService } from './aiProvisioningService';
 
 type TxClient = Parameters<Parameters<PrismaClient['$transaction']>[0]>[0];
 
@@ -762,12 +763,14 @@ export class InvitationService {
       }
 
       // Fetch existing orgMember by email
-      let orgMember = await this.prisma.orgMember.findUnique({
+      const existingOrgMember = await this.prisma.orgMember.findUnique({
         where: { email: userData.email.toLowerCase() },
-        select: { memberId: true }
+        select: { memberId: true, role: true }
       });
 
-      if (!orgMember) {
+      let orgMember: { memberId: string };
+
+      if (!existingOrgMember) {
         if (!resolvedOrgId) {
           throw new Error(`orgMember not found for email ${userData.email}. User must be invited to the organization first.`);
         }
@@ -781,8 +784,9 @@ export class InvitationService {
           select: { memberId: true },
         });
       } else if (resolvedOrgId) {
+        const wasCommunityMember = existingOrgMember.role === 'COMMUNITY_MEMBER';
         orgMember = await this.prisma.orgMember.update({
-          where: { memberId: orgMember.memberId },
+          where: { memberId: existingOrgMember.memberId },
           data: {
             leftAt: null,
             orgId: resolvedOrgId,
@@ -790,6 +794,12 @@ export class InvitationService {
           },
           select: { memberId: true },
         });
+
+        if (wasCommunityMember) {
+          await aiProvisioningService.upgradeCommunityToEnterpriseBudget(orgMember.memberId);
+        }
+      } else {
+        orgMember = { memberId: existingOrgMember.memberId };
       }
 
       // Create new user in the workspace

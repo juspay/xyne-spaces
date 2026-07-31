@@ -28,10 +28,10 @@ export interface ExistingOrganizationForDomain {
 }
 
 export interface ExistingEnterpriseWorkspaceForDomain extends ExistingOrganizationForDomain {
-  workspace: {
+  workspaces: Array<{
     id: string;
     name: string;
-  };
+  }>;
 }
 
 export class OrganizationDomainConflictError extends Error {
@@ -168,7 +168,7 @@ export class OrganizationDomainService {
       return null;
     }
 
-    const workspace = await this.prisma.workspace.findFirst({
+    const workspaces = await this.prisma.workspace.findMany({
       where: {
         orgId: existingOrg.orgId,
         status: Status.ACTIVE,
@@ -181,13 +181,13 @@ export class OrganizationDomainService {
       },
     });
 
-    if (!workspace) {
+    if (workspaces.length === 0) {
       return null;
     }
 
     return {
       ...existingOrg,
-      workspace,
+      workspaces,
     };
   }
 
