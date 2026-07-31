@@ -630,27 +630,41 @@ export function setupIpcHandlers(): void {
     }
   });
 
-  if (ENABLE_LOCAL_HARNESS) {
-    ipcMain.handle('local-harness:status', async (event) => {
-      if (!isMainWindowSender(event)) throw new Error('Unauthorized sender');
-      return localHarnessBridge.status();
-    });
+  const requireLocalHarness = (event: IpcMainInvokeEvent): void => {
+    if (!isMainWindowSender(event)) throw new Error('Unauthorized sender');
+    if (!ENABLE_LOCAL_HARNESS) throw new Error('Local harness is not available in this build');
+  };
 
-    ipcMain.handle('local-harness:detect', async (event) => {
-      if (!isMainWindowSender(event)) throw new Error('Unauthorized sender');
-      return localHarnessBridge.refreshInstallations();
-    });
+  ipcMain.handle('local-harness:status', async (event) => {
+    if (!isMainWindowSender(event)) throw new Error('Unauthorized sender');
+    if (!ENABLE_LOCAL_HARNESS) {
+      return {
+        supported: false,
+        connected: false,
+        deviceId: null,
+        deviceName: '',
+        platform: process.platform,
+        installations: [],
+        lastError: null,
+      };
+    }
+    return localHarnessBridge.status();
+  });
 
-    ipcMain.handle('local-harness:connect', async (event) => {
-      if (!isMainWindowSender(event)) throw new Error('Unauthorized sender');
-      return localHarnessBridge.connect(await xyneCookieHeader());
-    });
+  ipcMain.handle('local-harness:detect', async (event) => {
+    requireLocalHarness(event);
+    return localHarnessBridge.refreshInstallations();
+  });
 
-    ipcMain.handle('local-harness:disconnect', async (event) => {
-      if (!isMainWindowSender(event)) throw new Error('Unauthorized sender');
-      return localHarnessBridge.disconnect(await xyneCookieHeader());
-    });
-  }
+  ipcMain.handle('local-harness:connect', async (event) => {
+    requireLocalHarness(event);
+    return localHarnessBridge.connect(await xyneCookieHeader());
+  });
+
+  ipcMain.handle('local-harness:disconnect', async (event) => {
+    requireLocalHarness(event);
+    return localHarnessBridge.disconnect(await xyneCookieHeader());
+  });
 }
 
 async function xyneCookieHeader(): Promise<string> {

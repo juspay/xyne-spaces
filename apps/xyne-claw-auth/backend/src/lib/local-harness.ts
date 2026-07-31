@@ -9,7 +9,7 @@ import { LOCAL_HARNESS_PROVIDERS, LOCAL_HARNESS_PROTOCOL_VERSION, isLocalHarness
 import { CONFIG } from "../config.js";
 import { createLogger } from "../logger.js";
 import { mintSessionToken } from "./session-tokens.js";
-import { localHarnessRepository } from "../repositories/localHarnessRepository.js";
+import { authenticatedProviders, localHarnessRepository } from "../repositories/localHarnessRepository.js";
 
 const log = createLogger("local-harness");
 
@@ -39,7 +39,18 @@ export async function resolveLocalHarnessTarget(args: {
   const ordered = [args.personalProvider, ...args.providerOrder].filter(
     (p): p is LocalHarnessProvider => isLocalHarnessProvider(p),
   );
-  if (ordered.length === 0) return undefined;
+  if (ordered.length === 0) {
+    if (!CONFIG.localHarnessDefaultAll || args.personalProvider) return undefined;
+    const devices = await localHarnessRepository.listOnlineDevices(args.userId).catch(() => [] as LocalHarnessDevice[]);
+    for (const device of devices) {
+      const provider = authenticatedProviders(device).find(isLocalHarnessProvider);
+      if (provider) {
+        log.info(`[local-harness] auto-routing user=${args.userId} to ${provider} on device=${device.id}`);
+        return { provider, device };
+      }
+    }
+    return undefined;
+  }
 
   for (const provider of ordered) {
     const devices = await localHarnessRepository

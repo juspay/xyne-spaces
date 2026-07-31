@@ -45,7 +45,7 @@ export class LocalHarnessBridge {
   private readonly harnessSessions = new Map<string, string>();
 
   private baseUrl(): string {
-    return new URL('/claw/api/v1', config.FRONTEND_URL).toString().replace(/\/+$/, '');
+    return new URL('/claw/api/v1', config.CLAW_AUTH_URL).toString().replace(/\/+$/, '');
   }
 
   private deviceToken(): string | null {
