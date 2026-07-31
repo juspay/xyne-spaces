@@ -1,12 +1,39 @@
-import { Agent, createUserMessage } from '@framework';
+import { Agent, LLMClient, createUserMessage } from '@framework';
+import { config } from '@/config/env';
 import { extractAgentContent } from '@/utils/agentUtils';
 import { logger } from '@/utils/logger';
 
 const MAX_ATTEMPTS = 5;
 const BASE_DELAY_MS = 120_000; // 2 minutes
 const MAX_DELAY_MS = 960_000; // 16 minutes
+const DEFAULT_MODEL = 'glm-latest';
+// The non-streaming agent path for the same workload uses a 300s request
+// timeout. Long transcripts producing multi-phase markdown responses can
+// exceed the 120s LLM_REQUEST_TIMEOUT_MS default, so the streaming client
+// matches the agent path rather than the global default.
+const STREAMING_REQUEST_TIMEOUT_MS = 300_000; // 5 minutes
 
 type ExtractedContent = ReturnType<typeof extractAgentContent>;
+
+export type StreamingLlmFailureReason =
+  | 'cancelled'
+  | 'empty_content'
+  | 'litellm_credentials_missing'
+  | 'exception';
+
+export type StreamingLlmResult =
+  | { ok: true; content: string }
+  | { ok: false; reason: StreamingLlmFailureReason; error?: string };
+
+export interface ExecuteStreamingLlmOptions {
+  userPrompt: string;
+  systemPrompt?: string;
+  operation: string;
+  callId?: string;
+  abortSignal?: AbortSignal;
+}
+
+let streamingLlmClient: LLMClient | null = null;
 
 const sleep = (ms: number): Promise<void> =>
   new Promise(resolve => setTimeout(resolve, ms));
@@ -125,4 +152,174 @@ export async function executeCallLlmWithRetry(
   }
 
   return failedResult('exhausted');
+}
+
+/**
+ * Returns a singleton LLMClient for streaming requests against the call LiteLLM
+ * deployment. Returns null when credentials are not configured.
+ */
+function getStreamingLlmClient(): LLMClient | null {
+  const apiKey = config.llm.callLitellmApiKey;
+  const baseUrl = config.llm.litellmBaseUrl;
+
+  if (!apiKey || !baseUrl) {
+    return null;
+  }
+
+  if (!streamingLlmClient) {
+    streamingLlmClient = new LLMClient({
+      provider: {
+        type: 'litellm',
+        config: {
+          apiKey,
+          baseUrl,
+          timeout: STREAMING_REQUEST_TIMEOUT_MS,
+        },
+      },
+      defaultModel: config.llm.callLitellmModel || DEFAULT_MODEL,
+      retry: {
+        maxAttempts: MAX_ATTEMPTS,
+        baseDelay: BASE_DELAY_MS,
+        maxDelay: MAX_DELAY_MS,
+        exponentialBackoff: true,
+      },
+    });
+  }
+
+  return streamingLlmClient;
+}
+
+/**
+ * Requests a streaming completion through the shared framework client,
+ * fully drains the stream, and returns the accumulated final message.
+ * The full drain is required: the framework only resolves `finalMessage`
+ * once the consumer has iterated the stream to completion.
+ */
+export async function executeStreamingLlmRequest(
+  options: ExecuteStreamingLlmOptions,
+): Promise<StreamingLlmResult> {
+  const callId = options.callId || 'unknown';
+  const totalStart = Date.now();
+
+  if (options.abortSignal?.aborted) {
+    return { ok: false, reason: 'cancelled' };
+  }
+
+  const client = getStreamingLlmClient();
+
+  if (!client) {
+    logger.warn(`[${callId}] ${options.operation}_skipped`, {
+      reason: 'litellm_credentials_missing',
+    });
+
+    return {
+      ok: false,
+      reason: 'litellm_credentials_missing',
+    };
+  }
+
+  // The framework's client-level retry is a no-op for streaming: it retries the
+  // synchronous call that constructs the async generator, which always
+  // "succeeds" before any network work happens. The real request runs while the
+  // stream below is drained, so retries have to live here — mirroring
+  // executeCallLlmWithRetry. Only transient exceptions are retried; cancelled,
+  // empty_content, and missing credentials are terminal.
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const attemptStart = Date.now();
+    const isLastAttempt = attempt === MAX_ATTEMPTS;
+
+    if (options.abortSignal?.aborted) {
+      return { ok: false, reason: 'cancelled' };
+    }
+
+    logger.info(`[${callId}] ${options.operation}_attempt ${attempt}/${MAX_ATTEMPTS}`, {
+      input_length: options.userPrompt.length,
+      has_system_prompt: Boolean(options.systemPrompt),
+    });
+
+    try {
+      const streamResult = await client.generateStream({
+        systemPrompt: options.systemPrompt,
+        messages: [createUserMessage(options.userPrompt)],
+        abortSignal: options.abortSignal,
+      });
+
+      try {
+        for await (const chunk of streamResult.stream) {
+          if (chunk.type === 'error') {
+            throw new Error(chunk.error || 'LLM stream returned an error chunk');
+          }
+        }
+      } catch (error) {
+        // Prevent an unhandled rejection when stream accumulation fails.
+        await streamResult.finalMessage.catch(() => undefined);
+        throw error;
+      }
+
+      const finalMessage = await streamResult.finalMessage;
+      const content = finalMessage.content.trim();
+
+      if (!content) {
+        // Deterministic empty response — retrying only burns the backoff budget.
+        logger.warn(`[${callId}] ${options.operation}_failed`, {
+          reason: 'empty_content',
+          attempt,
+          duration_ms: Date.now() - attemptStart,
+        });
+
+        return {
+          ok: false,
+          reason: 'empty_content',
+        };
+      }
+
+      logger.info(`[${callId}] ${options.operation}_success`, {
+        attempts_used: attempt,
+        duration_ms: Date.now() - attemptStart,
+        total_duration_ms: Date.now() - totalStart,
+      });
+
+      return {
+        ok: true,
+        content,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+
+      // Cancellation is terminal; do not consume retries on an aborted request.
+      if (options.abortSignal?.aborted) {
+        return {
+          ok: false,
+          reason: 'cancelled',
+          error: message,
+        };
+      }
+
+      logger.warn(`[${callId}] ${options.operation}_attempt_threw`, {
+        attempt,
+        max_attempts: MAX_ATTEMPTS,
+        ...getErrorDetails(error),
+        duration_ms: Date.now() - attemptStart,
+      });
+
+      if (isLastAttempt) {
+        logger.error(`[${callId}] ${options.operation}_failed_after_retries`, {
+          attempts: MAX_ATTEMPTS,
+          ...getErrorDetails(error),
+          total_duration_ms: Date.now() - totalStart,
+        });
+
+        return {
+          ok: false,
+          reason: 'exception',
+          error: message,
+        };
+      }
+    }
+
+    await waitBeforeRetry(callId, options.operation, attempt);
+  }
+
+  // Unreachable: the final attempt always returns above.
+  return { ok: false, reason: 'exception' };
 }
