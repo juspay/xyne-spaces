@@ -163,7 +163,8 @@ const LocalHarnessOnboardingStep: React.FC<Props> = ({ installations, userId, on
                 className={cn(
                   'flex items-center gap-3 py-3 text-left transition-opacity',
                   i > 0 && 'border-t border-border',
-                  !single && 'cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground',
+                  !single &&
+                    'cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground',
                   !single && !isSelected && 'opacity-45 hover:opacity-80',
                   busy && 'pointer-events-none',
                 )}
@@ -213,7 +214,8 @@ const LocalHarnessOnboardingStep: React.FC<Props> = ({ installations, userId, on
             <Check className='mt-0.5 size-4 shrink-0 text-emerald-600' strokeWidth={2.5} />
             {wiredAgent ? (
               <span>
-                Connected. <span className='font-medium'>{wiredAgent}</span> will run on this {noun}.
+                Connected. <span className='font-medium'>{wiredAgent}</span> will run on this {noun}
+                .
               </span>
             ) : (
               <span>

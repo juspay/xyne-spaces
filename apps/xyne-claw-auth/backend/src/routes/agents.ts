@@ -2530,7 +2530,13 @@ router.get("/:slug/user-config/:userId", pinUserIdParam, async (req: Request<{ s
 router.put("/:slug/user-config/:userId", pinUserIdParam, async (req: Request<{ slug: string; userId: string }>, res: Response) => {
   try {
     const { provider } = req.body as { provider?: string };
-    const allowedProviders = ["spaces", "copilot", "claude", "codex", ...LOCAL_HARNESS_PROVIDERS];
+    const allowedProviders = [
+      "spaces",
+      "copilot",
+      "claude",
+      "codex",
+      ...(CONFIG.localHarnessEnabled ? LOCAL_HARNESS_PROVIDERS : []),
+    ];
     if (!provider || !allowedProviders.includes(provider)) {
       res.status(400).json({ success: false, error: `provider must be one of: ${allowedProviders.join(", ")}` });
       return;

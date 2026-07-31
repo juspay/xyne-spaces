@@ -30,6 +30,7 @@ import {
   type ModelProviderDraft,
 } from '@/services/claw/modelProviderConfig';
 import type { Agent } from '@/services/claw/clawAuthAgentTypes';
+import { isLocalHarnessAvailable } from '@/config';
 import PersonalHarnessSection from './PersonalHarnessSection';
 
 interface ModelProviderTabProps {
@@ -118,9 +119,9 @@ const ModelProviderTab = ({ agent, isActualOwner }: ModelProviderTabProps): Reac
   const [saving, setSaving] = useState(false);
   const [customModels, setCustomModels] = useState<Set<string>>(new Set());
 
-  // Seed on mount / when the agent identity changes.
   useEffect(() => {
     setDraft(readModelProviderDraft(agent.config));
+    setCustomModels(new Set());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agent.id]);
 
@@ -128,9 +129,15 @@ const ModelProviderTab = ({ agent, isActualOwner }: ModelProviderTabProps): Reac
   const set = (patch: Partial<ModelProviderDraft>): void =>
     setDraft(prev => ({ ...prev, ...patch }));
 
+  const localHarnessAvailable = isLocalHarnessAvailable();
+
   const remaining = useMemo(
-    () => ALL_PROVIDERS.filter(p => !draft.providerOrder.includes(p)),
-    [draft.providerOrder],
+    () =>
+      ALL_PROVIDERS.filter(
+        p =>
+          !draft.providerOrder.includes(p) && (localHarnessAvailable || !isLocalHarnessProvider(p)),
+      ),
+    [draft.providerOrder, localHarnessAvailable],
   );
 
   const moveProvider = (idx: number, dir: -1 | 1): void => {
@@ -148,8 +155,11 @@ const ModelProviderTab = ({ agent, isActualOwner }: ModelProviderTabProps): Reac
     draft.temperature.trim() !== '' && draft.thinkingLevel !== '' && draft.thinkingLevel !== 'off';
 
   const localHarnesses = useMemo(
-    () => draft.providerOrder.filter((p): p is LocalHarnessProviderKey => isLocalHarnessProvider(p)),
-    [draft.providerOrder],
+    () =>
+      localHarnessAvailable
+        ? draft.providerOrder.filter((p): p is LocalHarnessProviderKey => isLocalHarnessProvider(p))
+        : [],
+    [draft.providerOrder, localHarnessAvailable],
   );
 
   const handleSave = async (): Promise<void> => {
@@ -236,6 +246,7 @@ const ModelProviderTab = ({ agent, isActualOwner }: ModelProviderTabProps): Reac
                   onClick={() => removeProvider(i)}
                   data-track-category='Claw Agents'
                   data-track-name='Remove provider'
+                  disabled={!localHarnessAvailable && isLocalHarnessProvider(p)}
                   aria-label={`Remove ${PROVIDER_DISPLAY[p] ?? p}`}
                   className={cn(iconBtn, 'hover:text-destructive')}
                 >
@@ -311,7 +322,9 @@ const ModelProviderTab = ({ agent, isActualOwner }: ModelProviderTabProps): Reac
                     <Input
                       value={current}
                       onChange={e => setModel(e.target.value)}
-                      placeholder={harness === 'claude-code' ? 'e.g. claude-opus-4-5' : 'e.g. gpt-5.5'}
+                      placeholder={
+                        harness === 'claude-code' ? 'e.g. claude-opus-4-5' : 'e.g. gpt-5.5'
+                      }
                       aria-label={`Custom model for ${PROVIDER_DISPLAY[harness] ?? harness}`}
                     />
                   )}
@@ -319,8 +332,8 @@ const ModelProviderTab = ({ agent, isActualOwner }: ModelProviderTabProps): Reac
               );
             })}
             <span className='text-xs text-muted-foreground'>
-              Requires the Xyne desktop app with that harness connected. If no device is online, runs
-              fall back to the next provider in the order.
+              Requires the Xyne desktop app with that harness connected. If no device is online,
+              runs fall back to the next provider in the order.
             </span>
           </div>
         </Section>

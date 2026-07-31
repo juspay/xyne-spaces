@@ -1,7 +1,7 @@
 import { app, dialog, Menu, MenuItem, MenuItemConstructorOptions } from 'electron';
 import path from 'path';
 import log from 'electron-log/main';
-import { config } from './config';
+import { config, ENABLE_LOCAL_HARNESS } from './config';
 import { setupDeepLinks } from '../services/deep-links';
 import { setupIpcHandlers } from '../ipc/handlers';
 import { createMainWindow, getMainWindow, setWindowReferences } from '../window/manager';
@@ -239,6 +239,7 @@ function startAgentAuthServerInBackground(): void {
 }
 
 function startLocalHarnessBridgeInBackground(): void {
+  if (!ENABLE_LOCAL_HARNESS) return;
   try {
     localHarnessBridge.start();
   } catch (error) {

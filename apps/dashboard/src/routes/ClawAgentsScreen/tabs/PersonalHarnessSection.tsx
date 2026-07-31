@@ -96,7 +96,8 @@ const PersonalHarnessSection = ({ agentSlug }: Props): ReactElement | null => {
 
       <div className='flex flex-col'>
         {options.map((option, i) => {
-          const selected = option.value === current || (i === 0 && !isLocalHarnessProvider(current));
+          const selected =
+            option.value === current || (i === 0 && !isLocalHarnessProvider(current));
           return (
             <button
               key={option.value}

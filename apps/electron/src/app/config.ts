@@ -134,6 +134,8 @@ const sandboxConfig: AppConfig = {
 const baseConfig: AppConfig = process.env.NODE_ENV === 'development' ? devConfig
   : (APP_ENV === 'sandbox' ? sandboxConfig : prodConfig);
 
+export const ENABLE_LOCAL_HARNESS = baseConfig.APP_CONFIG !== 'prod';
+
 export const config: AppConfig = {
   ...baseConfig,
   useBundledUI: process.env.USE_BUNDLED_UI === 'true' ? true : baseConfig.useBundledUI,
