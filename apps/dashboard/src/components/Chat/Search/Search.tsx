@@ -1,10 +1,11 @@
 import { ReactElement, useEffect } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import ComposeDmPanel from '../AddDmForm/ComposeDmPanel';
 import BrowseChannels from '../BrowseChannels/BrowseChannels';
 
 const Search = (): ReactElement => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   const mode = searchParams.get('mode');
 
@@ -22,7 +23,11 @@ const Search = (): ReactElement => {
   }
 
   if (mode === 'dm') {
-    return <ComposeDmPanel />;
+    // Key by the draft id (or navigation key) so re-opening a different draft from Drafts &
+    // Sent remounts the panel and re-runs its restore effect.
+    const composePanelKey =
+      (location.state as { composePanelKey?: string } | null)?.composePanelKey ?? location.key;
+    return <ComposeDmPanel key={composePanelKey} />;
   }
 
   // Default fallback - could be a search mode selector or default search view

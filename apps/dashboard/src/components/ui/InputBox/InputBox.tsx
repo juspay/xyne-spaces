@@ -191,6 +191,9 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       sendDisabled = false,
       bottomLeftSlot,
       disableDraftUpload = false,
+      onComposeDmAttachmentAdded,
+      onComposeDmAttachmentRemoved,
+      initialAttachments,
     },
 
     ref,
@@ -227,9 +230,15 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     const agentVisible = bothActive ? showAgentTurn : hasAgentActivity;
 
     // State for attachments map (async loaded) - supports both File and UploadedFile
-    const [attachmentsMap, setAttachmentsMap] = useState<Map<string, File | UploadedFile>>(
-      new Map(),
-    );
+    const [attachmentsMap, setAttachmentsMap] = useState<Map<string, File | UploadedFile>>(() => {
+      // Seed with restored compose-DM draft attachments so they render in InputBox on mount.
+      // These are UploadedFile refs; send only re-collects local File objects.
+      const seeded = new Map<string, File | UploadedFile>();
+      if (initialAttachments) {
+        for (const att of initialAttachments) seeded.set(att.id, att);
+      }
+      return seeded;
+    });
 
     // Load attachments from provider when channelId or conversationId changes
     React.useEffect(() => {
@@ -354,9 +363,9 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     const addDraftAttachments = useCallback(
       async (files: File[]) => {
         if (disableDraftUpload) {
-          // Generate temporary attachment IDs for local tracking
+          // Generate attachment IDs for local tracking
           const newAttachments = files.map(file => ({
-            attachmentId: `local-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            attachmentId: uuidv4(),
             file,
           }));
 
@@ -368,6 +377,13 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             });
             return newMap;
           });
+
+          // Let the consumer persist each new attachment to the DB exactly once.
+          if (onComposeDmAttachmentAdded) {
+            newAttachments.forEach(({ attachmentId, file }) => {
+              onComposeDmAttachmentAdded(attachmentId, file);
+            });
+          }
           return;
         }
 
@@ -1068,6 +1084,14 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         focus: (): void => {
           editor?.commands.focus();
         },
+        removeAttachment: (attachmentId: string): void => {
+          setAttachmentsMap(prev => {
+            if (!prev.has(attachmentId)) return prev;
+            const newMap = new Map(prev);
+            newMap.delete(attachmentId);
+            return newMap;
+          });
+        },
       }),
       [
         editor,
@@ -1263,6 +1287,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       async ({ attachmentId }: { attachmentId: string; file: File | UploadedFile }) => {
         if (!disableDraftUpload) {
           await providerRemoveDroppedFile(attachmentId);
+        } else if (onComposeDmAttachmentRemoved) {
+          onComposeDmAttachmentRemoved(attachmentId);
         }
         // Update local state immediately for responsiveness
         setAttachmentsMap(prev => {
@@ -1271,7 +1297,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           return newMap;
         });
       },
-      [providerRemoveDroppedFile, disableDraftUpload],
+      [providerRemoveDroppedFile, disableDraftUpload, onComposeDmAttachmentRemoved],
     );
 
     const handlePreview = (file: File | UploadedFile): void => {

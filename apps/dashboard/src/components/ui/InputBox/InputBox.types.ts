@@ -1,6 +1,7 @@
 export type { MentionResult } from '@xyne/shared';
 export type { CommandItem, ChannelResult } from '../Selectors/Selectors.types';
 import type { FocusPosition } from '@tiptap/react';
+import type { UploadedFile } from '../files/Files.types';
 
 export interface TypingUser {
   userId: string;
@@ -71,4 +72,11 @@ export interface InputBoxProps {
   /** Extra buttons rendered in the left side of the desktop bottom action bar, after the # button */
   bottomLeftSlot?: React.ReactNode;
   disableDraftUpload?: boolean;
+  onComposeDmAttachmentAdded?: (attachmentId: string, file: File) => void;
+  onComposeDmAttachmentRemoved?: (attachmentId: string) => void;
+  /**
+   * Seed the attachment tray on mount with already-uploaded files (compose-DM draft restore).
+   * Only honoured when `disableDraftUpload` is true
+   */
+  initialAttachments?: UploadedFile[];
 }

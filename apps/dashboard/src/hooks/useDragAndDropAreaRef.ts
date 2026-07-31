@@ -9,6 +9,8 @@ export interface InputBoxHandle {
   insertContent: (content: string) => void;
   isSuggestionOpen: () => boolean;
   focus: () => void;
+  /** Remove a single attachment from the tray by id (compose dm). */
+  removeAttachment?: (attachmentId: string) => void;
 }
 
 interface UseDragAndDropAreaRefReturn {
