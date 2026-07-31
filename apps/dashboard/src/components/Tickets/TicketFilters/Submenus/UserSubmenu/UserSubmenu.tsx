@@ -36,6 +36,8 @@ interface UserSubmenuProps {
   priorityUserIds?: string[] | undefined;
   /** Sink deactivated users to the bottom of the list (used by the assignee filter). */
   demoteDeactivated?: boolean;
+  /** Requires `channelId`. Restrict the list to members of that channel (plus already-selected users). */
+  membersOnly?: boolean;
 }
 
 // A row is either a user or the pinned "Unassigned" option.
@@ -57,6 +59,7 @@ export const UserSubmenu = ({
   channelId,
   priorityUserIds,
   demoteDeactivated = false,
+  membersOnly = false,
 }: UserSubmenuProps): ReactElement => {
   // The invert marker rides inside the selection array; strip it for all
   // selection/ordering logic so it never behaves like a user id.
@@ -146,6 +149,13 @@ export const UserSubmenu = ({
       baseUsers = users;
     }
 
+    if (channelId && membersOnly) {
+      const selectedForFilter = new Set(selectedUsers);
+      baseUsers = baseUsers.filter(
+        user => memberIds.has(user.id) || selectedForFilter.has(user.id),
+      );
+    }
+
     // Order (each group alphabetical):
     //   1. selected filter chips (stay on top so they can be deselected)
     //   2. the current user ("You")
@@ -192,6 +202,9 @@ export const UserSubmenu = ({
     priorityUserIdSet,
     demoteDeactivated,
     selfId,
+    channelId,
+    membersOnly,
+    memberIds,
   ]);
 
   // Re-attach the invert marker on every write; inverting an empty selection
