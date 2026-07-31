@@ -21,7 +21,7 @@ import { usePlatform } from '../../../hooks/usePlatform';
 import { conversationService, ThreadListEntry } from '../../../services/Chat/conversationService';
 import { useUnreadThreadConversationIds } from '../../../hooks/useUnreadThreadsCount';
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 10;
 
 // Optimize ThreadRow with memo to prevent unnecessary re-renders of existing rows
 // during scrolling or when new data loads at the bottom.
