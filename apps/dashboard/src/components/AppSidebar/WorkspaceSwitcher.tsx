@@ -278,8 +278,8 @@ export const WorkspaceSwitcher: React.FC = () => {
   const initial = displayName?.[0]?.toUpperCase() ?? '?';
   const bgColor = displayName ? getInitialColor(displayName) : '#607d8b';
 
-  // Total unread across all workspaces
-  const totalUnread = Array.from(activityCounts.values()).reduce((sum, c) => sum + c, 0);
+  // Show only the active workspace's unread count on the switcher trigger.
+  const totalUnread = workspaceId ? (activityCounts.get(workspaceId) ?? 0) : 0;
   const createLabel = 'Create enterprise workspace';
 
   return (

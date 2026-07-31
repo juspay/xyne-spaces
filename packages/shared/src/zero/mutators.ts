@@ -1426,16 +1426,6 @@ export const mutators = defineMutators({
           throw new Error("Cannot modify the channel creator's role");
         }
 
-        // Only creators can grant admin role
-        if (newRole === ChannelRole.ADMIN && !isCreator) {
-          throw new Error('Only channel creators can grant admin role');
-        }
-
-        // Non-creators cannot change admin roles
-        if (targetParticipant.role === ChannelRole.ADMIN && !isCreator) {
-          throw new Error('Only channel creators can modify admin roles');
-        }
-
         // Update the participant's role
         await tx.mutate.channel_participants.update({
           id: targetParticipant.id,
