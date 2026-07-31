@@ -396,7 +396,19 @@ export class PersonalizationSyncWorker {
             personalizationLastUpdated: Date.now()
         };
 
-        await vespaService.crudService.update([{ docId: userId, fields: updateFields as any }], userSchema);
+        // `docId: userId` is the document KEY, not a field we store. Vespa keys this doc by its
+        // documentid `id:namespace:user::<userId>`, so this worker and setupUserVespaSync write
+        // to the SAME doc — no duplicate. We write ONLY weights here; identity fields
+        // (docId/docType/name/workspaceId) are the middleware's job (a worker that also wrote
+        // them would need a DB fetch and would re-index static fields on every sync).
+        //
+        // create=true so the first sync creates the doc if it doesn't exist yet — a plain
+        // partial update no-ops on a missing doc, silently dropping the weights.
+        await vespaService.crudService.update(
+            [{ docId: userId, fields: updateFields as any }],
+            userSchema,
+            { create: true },
+        );
     }
 
     /**

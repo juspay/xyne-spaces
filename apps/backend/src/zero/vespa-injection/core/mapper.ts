@@ -1,14 +1,15 @@
 import { extractMentionsFromContent } from '@/utils/mentionUtils';
 import { extractChannelMentions } from '@/utils/mentionParser';
-import { appSchema, callSchema, channelSchema, InsertDocument, mailSchema, messageSchema, projectSchema, schemaToDocType, SubApp, ticketSchema, VespaAppDocument, VespaCallDocument, VespaChatContainerDocument, VespaChatMessageDocument, VespaDocType, VespaFileDocument, VespaMailDocument, VespaProjectDocument, VespaSchema, VespaTicketDocument, samTranscriptSchema } from '@/vespa/src/types';
+import { appSchema, callSchema, channelSchema, InsertDocument, mailSchema, messageSchema, projectSchema, schemaToDocType, SubApp, ticketSchema, userSchema, VespaAppDocument, VespaCallDocument, VespaChatContainerDocument, VespaChatMessageDocument, VespaDocType, VespaFileDocument, VespaMailDocument, VespaProjectDocument, VespaSchema, VespaTicketDocument, samTranscriptSchema } from '@/vespa/src/types';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import type { InsertValue } from '@rocicorp/zero';
 import { CanvasVisibility, ChannelScopeType, ChannelVisibility, TicketStatus, TicketStatusV2, type Schema } from '@xyne/shared';
 import { FormFieldType } from '@xyne/shared';
 import { VespaJobType, VespaPayload } from './types';
 import { db } from '@/database/client';
-import { Channel, Message, Project, Ticket, Email, AttachmentEntityType, VespaOperationType as VespaOpType, Canvas, Call, CollectionItem, Apps } from '@prisma/client';
+import { Channel, Message, Project, Ticket, Email, User, AttachmentEntityType, VespaOperationType as VespaOpType, Canvas, Call, CollectionItem, Apps } from '@prisma/client';
 import { FileProcessor } from '@/services/fileProcessor';
+import { transformUserToVespa } from '@/services/vespaTransformers';
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
 import vespaClient from '@/vespa/client';
 import { messageSignalService } from '@/services/personalization';
@@ -1526,6 +1527,9 @@ export const mapBySchema = async (
 
   if (jobType === 'update') {
     switch (schemaName) {
+      case userSchema:
+        // Full profile incl. workspaceId; weights are NOT set, so the partial update preserves them.
+        return transformUserToVespa(args as User) as Partial<InsertDocument>;
       case channelSchema:
         throw new Error(`${schemaName}:Schema not defined for update`);
       case messageSchema:
@@ -1544,8 +1548,13 @@ export const fetchDataBySchema = async (
   schema: VespaSchema,
   docId: string,
   app?: SubApp
-): Promise<Channel | Message | Project | Ticket | Email | RCAWithRelations | Canvas | Call | CollectionItem | Apps | null> => {
+): Promise<Channel | Message | Project | Ticket | Email | RCAWithRelations | Canvas | Call | CollectionItem | Apps | User | null> => {
   switch (schema) {
+    case userSchema:
+      return await db.user.findUnique({
+        where: { id: docId }
+      });
+
     case channelSchema:
       return await db.channel.findUnique({
         where: { id: docId }

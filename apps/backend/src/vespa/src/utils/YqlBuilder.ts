@@ -388,7 +388,15 @@ export class YqlBuilder {
    * Applies to user schemas
    */
   private buildUserConditions(): string {
-    // User search is simple - just filter by docType
+    // People-search filters only on `docType contains "user"` today — with two known gaps:
+    //  1. transformUserToVespa stamps docType='user' on EVERY user (human/BOT/APP alike), so
+    //     docType cannot exclude bots/apps. The real discriminator is `userType` (USER/BOT/APP
+    //     on the User model) — NOT written to Vespa yet. Write it there, then add
+    //     `and userType contains "USER"` here to keep bots/apps out of people-search.
+    //  2. The personalization worker creates weight-only stubs with NO docType/docId (it writes
+    //     by document key, not identity fields), and pre-middleware users were never ingested —
+    //     so those docs won't match this filter. The users schema likely needs a BACKFILL
+    //     (partial upsert of docType/userType/workspaceId/name) before people-search is complete.
     return `docType contains "user"`;
   }
   /**
