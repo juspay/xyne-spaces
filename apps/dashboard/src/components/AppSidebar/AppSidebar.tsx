@@ -54,7 +54,7 @@ import { useKeyboard } from '../../contexts/KeyboardContext';
 import { useAILandingDefault } from '../../hooks/useAILandingDefault';
 import XyneAISidebarIcon from '../icons/xyne-ai/XyneAISidebarIcon';
 import { cn } from '../../utils/classNames';
-import { APP_DRAG_STYLE } from '../../utils/electronApp';
+import { APP_DRAG_STYLE, isElectronApp } from '../../utils/electronApp';
 import { ErrorReportModal } from '../ErrorReportModal/ErrorReportModal';
 import { isDMChannel } from '../Chat/ChatDirectory/ChatDirectory.utils';
 import { SupportRail } from './SupportRail';
@@ -359,7 +359,7 @@ const AppSidebar = (): ReactElement => {
       {/* Top spacer aligns with the header strip / macOS traffic lights; make it a
           drag region so the window can be moved by its top-left corner in Electron. */}
       <div className='w-full h-[52px] shrink-0' style={APP_DRAG_STYLE} />
-      <div className='flex-1 min-h-0 p-3 flex flex-col items-center justify-between border-t border-r border-border'>
+      <div className='flex-1 min-h-0 p-3 flex flex-col items-center justify-between border-t border-r border-sidebar-border-muted'>
         <WorkspaceSwitcher />
         <div className='flex-1 mt-5 space-y-8 overflow-y-auto scrollbar-none min-h-0 pr-2 -mr-2'>
           {isSupportContext ? (
@@ -400,7 +400,7 @@ const AppSidebar = (): ReactElement => {
                           'size-8 flex items-center justify-center rounded-lg cursor-pointer transition-colors',
                           activeRoute === '/ai'
                             ? 'text-sidebar-accent-foreground'
-                            : 'bg-transparent text-sidebar-foreground',
+                            : 'bg-transparent text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
                         )}
                       >
                         <XyneAISidebarIcon size={16} />
@@ -443,7 +443,7 @@ const AppSidebar = (): ReactElement => {
                             'relative size-8 flex items-center justify-center rounded-lg cursor-pointer transition-colors',
                             isActive
                               ? 'text-sidebar-accent-foreground'
-                              : 'bg-transparent text-sidebar-foreground',
+                              : 'bg-transparent text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
                           )}
                         >
                           <Icon
@@ -491,10 +491,10 @@ const AppSidebar = (): ReactElement => {
                         data-track-category='App_Sidebar'
                         data-track-name='Sidebar_More_Toggle'
                         className={cn(
-                          'size-8 flex items-center justify-center rounded-lg cursor-pointer transition-colors',
+                          'size-8 flex items-center justify-center rounded-lg cursor-pointer border border-transparent transition-colors',
                           isMoreActive || isMoreOpen
-                            ? 'bg-sidebar-accent text-sidebar-accent-foreground'
-                            : 'bg-transparent text-sidebar-foreground',
+                            ? 'bg-sidebar-accent border-sidebar-border text-sidebar-accent-foreground'
+                            : 'bg-transparent text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
                         )}
                       >
                         <ThreeDotsMenuHorizontal size={16} />
@@ -515,7 +515,9 @@ const AppSidebar = (): ReactElement => {
           )}
         </div>
 
-        <div className='flex flex-col items-center justify-center'>
+        <div
+          className={cn('flex flex-col items-center justify-center', !isElectronApp() && 'pb-4')}
+        >
           <Popover
             open={isSupportOpen}
             onOpenChange={setIsSupportOpen}
@@ -534,9 +536,9 @@ const AppSidebar = (): ReactElement => {
                 data-track-category='App_Sidebar'
                 data-track-name='Sidebar_Support_Toggle'
                 className={cn(
-                  'size-8 mb-2 flex items-center justify-center rounded-lg cursor-pointer transition-colors',
+                  'size-8 mb-2 flex items-center justify-center rounded-lg cursor-pointer border border-transparent transition-colors',
                   isSupportOpen
-                    ? 'bg-sidebar-accent text-sidebar-accent-foreground'
+                    ? 'bg-sidebar-accent border-sidebar-border text-sidebar-accent-foreground'
                     : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
                 )}
               >

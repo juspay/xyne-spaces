@@ -7,7 +7,7 @@ import { APP_DRAG_STYLE, APP_NO_DRAG_STYLE } from '../../utils/electronApp';
 
 const buttonClass = cn(
   'size-7 flex items-center justify-center rounded-[10px] border border-transparent transition-colors',
-  'text-sidebar-secondary-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent hover:border-sidebar-border',
+  'text-sidebar-secondary-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent',
 );
 
 /**

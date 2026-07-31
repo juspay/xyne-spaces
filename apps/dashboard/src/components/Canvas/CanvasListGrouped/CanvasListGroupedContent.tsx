@@ -57,7 +57,7 @@ const SECTION_HEADER_CLASS =
   'flex min-w-0 flex-1 items-center gap-2 h-9 px-3 text-left text-sm font-medium tracking-[-0.14px] text-sidebar-foreground hover:text-sidebar-accent-foreground transition-colors';
 
 const ROW_CLASS =
-  'group flex items-center gap-3 h-9 px-3 rounded-[10px] border border-transparent text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:border-sidebar-border hover:text-sidebar-accent-foreground';
+  'group flex items-center gap-3 h-9 px-3 rounded-[10px] border border-transparent text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground';
 
 /** Hover-revealed control: `display`, not `opacity`, so it reserves no width. */
 const HOVER_ACTION_CLASS =

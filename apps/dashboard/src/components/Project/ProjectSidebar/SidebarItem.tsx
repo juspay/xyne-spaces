@@ -81,9 +81,7 @@ const SidebarItem = ({
       className={cn(
         'w-full flex items-center gap-3 px-3 py-2 rounded-[10px] border border-transparent transition-colors group',
         'text-sm font-medium tracking-[-0.14px]',
-        isActive
-          ? 'bg-sidebar-accent'
-          : 'bg-transparent hover:bg-sidebar-accent hover:border-sidebar-border',
+        isActive ? 'bg-sidebar-accent' : 'bg-transparent hover:bg-sidebar-accent',
       )}
       data-track-category='Projects'
       data-track-name='SelectSidebarItem'

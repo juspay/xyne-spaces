@@ -867,7 +867,7 @@ const ActivityListView = (): ReactElement => {
         data-id='activity-list-view'
         className={cn(
           'relative flex-1 min-h-0 flex flex-col gap-2 max-w-full overflow-hidden pt-3',
-          !isMobile && 'border-t border-border',
+          !isMobile && 'border-t border-sidebar-border-muted',
         )}
       >
         <div className='flex items-center justify-between gap-2 px-3'>

@@ -937,6 +937,9 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       ...(!isMessageDeleted && shouldShowCopyButton && { onCopyMessage: handleCopyMessage }),
       ...(!isMessageDeleted && { onEmojiPickerOpenChange: setIsEmojiPickerOpen }),
       isChannelArchived: channel?.isArchived ?? false,
+      // The thread parent sits flush under the thread header, so the default
+      // lift above the row would render the toolbar on top of it.
+      placement: context === 'thread' && isFirstInThread ? 'below' : 'above',
       ...(context === 'channel' &&
         !isSystemMessage &&
         !isMessageDeleted &&

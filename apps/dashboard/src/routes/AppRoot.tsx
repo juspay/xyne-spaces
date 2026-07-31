@@ -96,6 +96,7 @@ import DraftsAndSentPage from '../pages/DraftsAndSentPage';
 import UserThreads from '../components/Chat/UserThreads/UserThreads';
 import { RecapPanel } from '../components/RecapPanel';
 import { RouterErrorFallback } from '../components/ErrorBoundary';
+import NotFoundScreen from './NotFoundScreen/NotFoundScreen';
 import ChatRedirect from '../components/Chat/ChatRedirect/ChatRedirect';
 import DirectoryRedirect from '../components/Chat/DirectoryRedirect/DirectoryRedirect';
 import CallHistoryScreen from './CallHistoryScreen/CallHistoryScreen';
@@ -785,6 +786,7 @@ const AppRoot = (): ReactElement => {
 export const router = createBrowserRouter([
   {
     element: <ProtectedRoute />,
+    errorElement: <RouterErrorFallback />,
     children: [
       {
         path: '/newWindow/claw',
@@ -1532,5 +1534,11 @@ export const router = createBrowserRouter([
         element: <SystemPalette />,
       },
     ],
+  },
+  // Last, so it only matches once every route above has failed to.
+  {
+    path: '*',
+    element: <NotFoundScreen />,
+    errorElement: <RouterErrorFallback />,
   },
 ]);

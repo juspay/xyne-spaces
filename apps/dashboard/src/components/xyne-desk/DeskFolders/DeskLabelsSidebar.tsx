@@ -134,7 +134,7 @@ export const DeskLabelsSidebar = ({
                   'group flex items-center h-9 rounded-[10px] pr-2 border border-transparent text-sm font-medium tracking-[-0.14px] transition-colors',
                   active
                     ? 'text-sidebar-accent-foreground bg-sidebar-accent border-sidebar-border'
-                    : 'text-sidebar-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent hover:border-sidebar-border',
+                    : 'text-sidebar-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent',
                 )}
               >
                 <button

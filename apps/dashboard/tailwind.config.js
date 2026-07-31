@@ -98,6 +98,13 @@ export default {
           accent: 'hsl(var(--action-accent) / <alpha-value>)',
           'primary-foreground': 'var(--action-primary-foreground)',
         },
+        'chat-composer': {
+          border: 'var(--chat-composer-border)',
+          'border-active': 'var(--chat-composer-border-active)',
+        },
+        activity: {
+          'sidebar-primary': 'var(--activity-sidebar-primary)',
+        },
         desk: {
           helper: 'var(--desk-helper-foreground)',
           muted: 'var(--desk-muted-foreground)',
@@ -128,6 +135,7 @@ export default {
           accent: 'var(--sidebar-accent)',
           'accent-foreground': 'var(--sidebar-accent-foreground)',
           border: 'var(--sidebar-border)',
+          'border-muted': 'var(--sidebar-border-muted)',
           'accent-ring': 'var(--sidebar-accent-ring)',
         },
         stage: {

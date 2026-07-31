@@ -23,7 +23,7 @@ import type { ConversationHistory as ConversationHistoryType } from '../Chat/Xyn
 import { cn } from '../../utils/classNames';
 
 const NAV_ITEM_CLASS =
-  'flex items-center justify-start gap-3 w-full px-3 py-2 text-sm font-medium tracking-[-0.14px] rounded-[10px] border border-transparent transition-colors hover:bg-sidebar-accent hover:border-sidebar-border';
+  'flex items-center justify-start gap-3 w-full px-3 py-2 text-sm font-medium tracking-[-0.14px] rounded-[10px] border border-transparent transition-colors hover:bg-sidebar-accent';
 
 const NAV_ITEM_IDLE_CLASS = 'text-sidebar-foreground hover:text-sidebar-accent-foreground';
 
@@ -31,13 +31,13 @@ const NAV_ITEM_ACTIVE_CLASS =
   'text-sidebar-accent-foreground bg-sidebar-accent border-sidebar-border';
 
 const LIST_ROW_CLASS =
-  'flex items-center gap-3 h-9 group rounded-[10px] px-3 border border-transparent transition-colors';
+  'flex items-center gap-3 h-9 mt-px group rounded-[10px] px-3 border border-transparent transition-colors';
 
 const LIST_ROW_ACTIVE_CLASS =
   'text-sidebar-accent-foreground font-medium bg-sidebar-accent border-sidebar-border';
 
 const LIST_ROW_IDLE_CLASS =
-  'text-sidebar-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent hover:border-sidebar-border';
+  'text-sidebar-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent';
 
 type NavIcon = ComponentType<SVGProps<SVGSVGElement> & { size?: number }>;
 
@@ -312,7 +312,7 @@ export function AISidebar({
       <div className='h-[52px] w-full shrink-0'>
         <AppNavigator />
       </div>
-      <div className='flex min-h-0 flex-1 flex-col gap-3 border-t border-border px-3 pb-12 pt-3 sm:pb-3'>
+      <div className='flex min-h-0 flex-1 flex-col gap-3 border-t border-sidebar-border-muted px-3 pb-12 pt-3 sm:pb-3'>
         <div className='flex shrink-0 items-center px-3 py-1'>
           <h2 className='text-base font-bold leading-7 tracking-[-0.32px] text-sidebar-accent-foreground'>
             Xyne AI

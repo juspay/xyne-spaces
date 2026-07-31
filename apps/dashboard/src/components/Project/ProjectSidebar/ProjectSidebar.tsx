@@ -114,7 +114,7 @@ const ProjectSidebar = ({
       <div className='w-full h-[52px] shrink-0'>
         <AppNavigator />
       </div>
-      <div className='flex-1 min-h-0 px-3 pt-3 pb-12 sm:pb-0 flex flex-col border-t border-border'>
+      <div className='flex-1 min-h-0 px-3 pt-3 pb-12 sm:pb-0 flex flex-col border-t border-sidebar-border-muted'>
         {/* Header */}
         <div className='hidden sm:flex pt-2 pb-3 px-2 h-10 items-center justify-between mb-2'>
           <h2 className='text-base font-semibold leading-normal text-sidebar-accent-foreground'>

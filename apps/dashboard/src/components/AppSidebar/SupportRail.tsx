@@ -155,9 +155,9 @@ export const SupportRail = ({
               data-track-name='Support_Rail_Item'
               data-track-metadata={JSON.stringify({ path: item.path, label: item.label })}
               className={cn(
-                'size-8 flex items-center justify-center rounded-lg transition-colors',
+                'size-8 flex items-center justify-center rounded-lg border border-transparent transition-colors',
                 active
-                  ? 'bg-sidebar-accent text-sidebar-accent-foreground'
+                  ? 'bg-sidebar-accent border-sidebar-border text-sidebar-accent-foreground'
                   : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
               )}
             >
