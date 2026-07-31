@@ -21,6 +21,7 @@ router.post("/eval-judge", validateS2SKey, async (req: Request, res: Response): 
     prompt?: unknown;
     model?: unknown;
     copilot?: { token?: unknown; model?: unknown };
+    litellmApiKey?: unknown;
   } | undefined;
 
   if (!body || typeof body.expected !== "string" || typeof body.generated !== "string") {
@@ -38,13 +39,18 @@ router.post("/eval-judge", validateS2SKey, async (req: Request, res: Response): 
       body.copilot && typeof body.copilot.token === "string" && typeof body.copilot.model === "string"
         ? { token: body.copilot.token, model: body.copilot.model }
         : undefined,
+    litellmApiKey: typeof body.litellmApiKey === "string" && body.litellmApiKey ? body.litellmApiKey : undefined,
   });
 
   res.json({ success: true, ...result });
 });
 
-router.get("/eval-models", validateS2SKey, async (_req: Request, res: Response): Promise<void> => {
-  const models = await listJudgeModels();
+router.get("/eval-models", validateS2SKey, async (req: Request, res: Response): Promise<void> => {
+  // admin's key via x-litellm-api-key; absent → empty list
+  const litellmApiKey = typeof req.headers["x-litellm-api-key"] === "string" && req.headers["x-litellm-api-key"]
+    ? req.headers["x-litellm-api-key"]
+    : undefined;
+  const models = await listJudgeModels(litellmApiKey);
   // defaultModel = what an empty model resolves to (judge + extraction fallback).
   res.json({ success: true, models, defaultModel: LITELLM.fastModel });
 });

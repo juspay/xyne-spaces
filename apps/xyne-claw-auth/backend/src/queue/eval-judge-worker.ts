@@ -9,6 +9,7 @@ import { redisService } from "../redis.js";
 import { judgeEvalTurn, listEvalModels } from "../services/evalJudgeClient.js";
 import { getUserCopilotConfig, COPILOT_MODEL_SENTINEL } from "../services/providerCredentials.js";
 import { evalRepository } from "../repositories/index.js";
+import { resolveUserLitellmApiKey } from "../lib/agent-provider-config.js";
 import {
   isEvalJudgeCancelRequested,
   clearEvalJudgeCancel,
@@ -55,7 +56,7 @@ async function processJob(job: Job<EvalJudgeJobData>): Promise<EvalJudgeProgress
   // Resolve what "default" means right now so scores are stored under the REAL
   // model name — otherwise "default" and the same model picked explicitly would
   // show up as two different graders in the UI.
-  const resolvedDefault = await listEvalModels()
+  const resolvedDefault = await listEvalModels(data.userId)
     .then((r) => r.defaultModel)
     .catch(() => "");
 
@@ -66,6 +67,10 @@ async function processJob(job: Job<EvalJudgeJobData>): Promise<EvalJudgeProgress
   if (needsCopilot && !copilotCfg) {
     throw new Error("Copilot is selected for judging but no Copilot connection was found for this user");
   }
+
+  // Resolve the triggering admin's key once per job (evals are admin-triggered, so
+  // data.userId is the spend-owner). Miss → undefined → claw fails-open. Copilot turns keep their own token.
+  const userLitellmApiKey = data.userId ? await resolveUserLitellmApiKey(data.userId).catch(() => undefined) : undefined;
 
   const scope = data.conversationIds?.length ? new Set(data.conversationIds) : null;
   const turns = (run.turnResults as unknown as GradableTurn[]).filter(
@@ -110,6 +115,7 @@ async function processJob(job: Job<EvalJudgeJobData>): Promise<EvalJudgeProgress
           message: t.inputMessage,
           prompt: j.prompt,
           ...(viaCopilot ? { copilot: copilotCfg! } : judgeModel ? { model: judgeModel } : {}),
+          ...(userLitellmApiKey ? { litellmApiKey: userLitellmApiKey } : {}),
         });
         await evalRepository.setTurnJudgeScore(t.id, {
           judgeId: j.id,

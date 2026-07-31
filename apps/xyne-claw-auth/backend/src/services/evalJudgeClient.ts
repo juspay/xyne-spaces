@@ -9,6 +9,7 @@
  * score. listModels() returns [] on failure.
  */
 import { CONFIG } from "../config.js";
+import { resolveUserLitellmApiKey } from "../lib/agent-provider-config.js";
 
 const JUDGE_TIMEOUT_MS = Number(process.env["EVAL_JUDGE_TIMEOUT_MS"] ?? 300_000);
 
@@ -19,6 +20,9 @@ export interface EvalJudgeRequest {
   prompt?: string | undefined;
   model?: string | undefined;
   copilot?: { token: string; model: string } | undefined;
+  /** Admin's LiteLLM key (user budget). Absent → claw fails-open to judge_unavailable.
+   *  Copilot-graded turns use their own token and ignore this. */
+  litellmApiKey?: string | undefined;
 }
 
 export interface EvalJudgeResult {
@@ -67,6 +71,7 @@ export async function extractEvalPairs(
   kind: "chat" | "email",
   model?: string,
   copilot?: { token: string; model: string },
+  litellmApiKey?: string,
 ): Promise<ExtractedPair[]> {
   if (!CONFIG.xyneClawS2sKey) return [];
   const url = `${CONFIG.xyneClawUrl.replace(/\/$/, "")}/eval-extract`;
@@ -74,7 +79,7 @@ export async function extractEvalPairs(
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-s2s-key": CONFIG.xyneClawS2sKey },
-      body: JSON.stringify({ messages, kind, ...(model ? { model } : {}), ...(copilot ? { copilot } : {}) }),
+      body: JSON.stringify({ messages, kind, ...(model ? { model } : {}), ...(copilot ? { copilot } : {}), ...(litellmApiKey ? { litellmApiKey } : {}) }),
       signal: AbortSignal.timeout(JUDGE_TIMEOUT_MS),
     });
     if (!res.ok) return [];
@@ -86,12 +91,18 @@ export async function extractEvalPairs(
   }
 }
 
-export async function listEvalModels(): Promise<{ models: string[]; defaultModel: string }> {
+export async function listEvalModels(userId?: string): Promise<{ models: string[]; defaultModel: string }> {
   if (!CONFIG.xyneClawS2sKey) return { models: [], defaultModel: "" };
+  // Resolve the admin's key so the list reflects what that user's key can call
+  // (matches the eval judge). Absent → empty list.
+  const userLitellmApiKey = userId ? await resolveUserLitellmApiKey(userId).catch(() => undefined) : undefined;
   const url = `${CONFIG.xyneClawUrl.replace(/\/$/, "")}/eval-models`;
   try {
     const res = await fetch(url, {
-      headers: { "x-s2s-key": CONFIG.xyneClawS2sKey },
+      headers: {
+        "x-s2s-key": CONFIG.xyneClawS2sKey,
+        ...(userLitellmApiKey ? { "x-litellm-api-key": userLitellmApiKey } : {}),
+      },
       signal: AbortSignal.timeout(15_000),
     });
     if (!res.ok) return { models: [], defaultModel: "" };

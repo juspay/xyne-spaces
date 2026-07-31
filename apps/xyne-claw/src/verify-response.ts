@@ -66,6 +66,8 @@ export interface VerifyResponseInput {
    *  semantics: for these, missing/absent evidence IS a failure (e.g. "must
    *  have posted a POT video"). Empty/undefined → default check only. */
   criteria?: string | undefined;
+  /** Per-user LiteLLM key for this run. Absent → fail-open to { ok: true }. */
+  litellmApiKey?: string | undefined;
 }
 
 interface TranscriptMessage {
@@ -210,11 +212,12 @@ const VERDICT_TOOL = {
 };
 
 export async function verifyResponse(input: VerifyResponseInput): Promise<ResponseVerdict> {
+  const apiKey = input.litellmApiKey ?? LITELLM.apiKey; // fall back to env server key
   // Fail open when the verifier can't run. The no-evidence fast-pass applies
   // ONLY to the default check (nothing to contradict). When per-agent criteria
   // are set, empty evidence means the requirements weren't shown to be met —
   // so we must still run the verifier rather than wave it through.
-  if (!LITELLM.apiKey) return { ok: true, errors: [] };
+  if (!apiKey) return { ok: true, errors: [] };
   if (!input.evidenceDigest.trim() && !input.criteria?.trim()) return { ok: true, errors: [] };
 
   const systemPrompt = input.criteria?.trim()
@@ -236,7 +239,7 @@ export async function verifyResponse(input: VerifyResponseInput): Promise<Respon
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${LITELLM.apiKey}`,
+        Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
         model: LITELLM.model,

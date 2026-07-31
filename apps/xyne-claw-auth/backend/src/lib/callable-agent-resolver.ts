@@ -99,9 +99,20 @@ export async function hydrateCallableAgentSpec(
   prisma: PrismaClient,
   callee: AgentRowWithSkills,
   identityMode: DelegationIdentityMode,
+  userId?: string,
 ): Promise<CallableAgentSpec> {
   const agentConfig = stripPlatformConfigKeys(callee.config as Record<string, unknown>);
-  const providerResolution = await resolveAgentProviderConfigs({ id: callee.id, config: callee.config });
+  // `user` → fold the user's provisioned key; `callee_app` (callee's own app identity,
+  // not the delegating user) → attach the ORG's key (folding the user's would
+  // mis-attribute their budget; confused-deputy). Miss → no slot → shared server key.
+  const providerResolution = await resolveAgentProviderConfigs(
+    { id: callee.id, config: callee.config },
+    identityMode === "user" && userId
+      ? { userId }
+      : identityMode === "callee_app"
+        ? { orgId: callee.orgId }
+        : undefined,
+  );
   const requestedSubagents = parseToolsConfig(agentConfig)?.subagents ?? [];
   const customSubagents = requestedSubagents.length > 0
     ? await resolveCustomSubagentsForRun(prisma, requestedSubagents, callee.orgId)
@@ -208,7 +219,12 @@ export async function resolveCallableAgentsForRun(
       log.info(`[a2a] callee ${callee.slug} not visible to user ${opts.runningUserId ?? "anonymous"} — dropped`);
       continue;
     }
-    specs.push(await hydrateCallableAgentSpec(prisma, callee, g.identityMode === "callee_app" ? "callee_app" : "user"));
+    specs.push(await hydrateCallableAgentSpec(
+      prisma,
+      callee,
+      g.identityMode === "callee_app" ? "callee_app" : "user",
+      opts.runningUserId,
+    ));
   }
 
   const dropped = wanted.length - specs.length;
@@ -316,7 +332,7 @@ export async function resolveCallableAgentSpecForOrchestratorCall(
   if (!visible) return { error: "Callee is not visible to the running user", status: 403 };
 
   if (callee.scope === "global") {
-    return { spec: await hydrateCallableAgentSpec(prisma, callee, "user"), callerOrgId: caller.orgId };
+    return { spec: await hydrateCallableAgentSpec(prisma, callee, "user", args.userId), callerOrgId: caller.orgId };
   }
 
   const grant = await prisma.agentDelegationGrant.findUnique({
@@ -328,7 +344,12 @@ export async function resolveCallableAgentSpecForOrchestratorCall(
   }
 
   return {
-    spec: await hydrateCallableAgentSpec(prisma, callee, grant.identityMode === "callee_app" ? "callee_app" : "user"),
+    spec: await hydrateCallableAgentSpec(
+      prisma,
+      callee,
+      grant.identityMode === "callee_app" ? "callee_app" : "user",
+      args.userId,
+    ),
     callerOrgId: caller.orgId,
   };
 }
