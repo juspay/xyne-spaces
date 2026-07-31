@@ -184,7 +184,7 @@ export const RecordingShareModal: React.FC<RecordingShareModalProps> = ({
       <div className='flex justify-end'>
         <Button
           size='sm'
-          onClick={handleShare}
+          onClick={() => void handleShare()}
           disabled={selectedValues.length === 0 || sharing}
           data-track-category='RecordingDetailV2'
           data-track-name='share_recording_confirm'
