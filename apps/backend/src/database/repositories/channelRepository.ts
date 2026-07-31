@@ -224,17 +224,17 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
     return await this.findMany({ projectId });
   }
 
-  async getDMChannel(userId1: string, userId2: string): Promise<Channel | null> {
+  async getDMChannel(userId1: string, userId2: string, workspaceId: string): Promise<Channel | null> {
     // Self-DM: channel name is stored as single userId, scopeType DM
     if (userId1 === userId2) {
       return await this.db.channel.findFirst({
-        where: { name: userId1, scopeType: ChannelScopeType.DM },
+        where: { name: userId1, scopeType: ChannelScopeType.DM, workspaceId },
       });
     }
     // For 1:1 DM channels, name is sorted user IDs joined by comma
     const name = [userId1, userId2].sort().join(",");
     return await this.db.channel.findFirst({
-      where: { name },
+      where: { name, workspaceId },
     });
   }
 
@@ -272,13 +272,14 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
     });
   }
 
-  async getGroupChannelByMembers(memberIds: string[]): Promise<Channel | null> {
+  async getGroupChannelByMembers(memberIds: string[], workspaceId: string): Promise<Channel | null> {
     // Get all GROUP_DM scope channels
     const name = memberIds.sort().join(",");
     return await this.db.channel.findFirst({
       where: {
         scopeType: 'GROUP_DM',
-        name: name
+        name: name,
+        workspaceId
       }
     });
   }
@@ -343,7 +344,7 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
       const targetUserId = invitedUserIds[0];
 
       // Check if DM channel exists
-      let dmChannel = await this.getDMChannel(userId, targetUserId);
+      let dmChannel = await this.getDMChannel(userId, targetUserId, workspaceId);
 
       if (dmChannel) {
         return dmChannel.id;
@@ -378,7 +379,7 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
 
     if (!isLargeGroup) {
       // Check if group DM already exists with these exact participants
-      const existingGroupDM = await this.getGroupChannelByMembers(allUserIds);
+      const existingGroupDM = await this.getGroupChannelByMembers(allUserIds, workspaceId);
 
       if (existingGroupDM) {
         return existingGroupDM.id;

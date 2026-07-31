@@ -584,7 +584,6 @@ export enum NotificationType {
   EMAIL_FETCH_COMPLETED = "EMAIL_FETCH_COMPLETED",
   EMAIL_FETCH_FAILED = "EMAIL_FETCH_FAILED",
   CANVAS_SHARED = "CANVAS_SHARED",
-  RECORDING_SHARED = "RECORDING_SHARED",
   EMAIL_REPLY_RECEIVED = "EMAIL_REPLY_RECEIVED",
   MESSAGE_DELETED = "MESSAGE_DELETED",
   MESSAGE_EDITED = "MESSAGE_EDITED",
@@ -866,6 +865,20 @@ export enum TagMethod {
   MANUAL = "MANUAL",
   LLM = "LLM",
   AUTOMATED = "AUTOMATED",
+}
+
+export enum TelepresenceDeviceType {
+  TV = "TV",
+  CAMERA = "CAMERA",
+  MICROPHONE = "MICROPHONE",
+  SPEAKER = "SPEAKER",
+}
+
+export enum TelepresenceHealthStatus {
+  HEALTHY = "HEALTHY",
+  DEGRADED = "DEGRADED",
+  UNAVAILABLE = "UNAVAILABLE",
+  UNKNOWN = "UNKNOWN",
 }
 
 // Define tables
@@ -2472,39 +2485,6 @@ export const callTable = table("calls")
     callUpdatesChannel: string().optional(),
     participantCount: number().optional(),
     participantPreviewUserIds: string().optional(),
-    summaryTemplateId: string().optional(),
-    labels: json<string[]>(),
-    markedItems: json<any[]>(),
-  })
-  .primaryKey("id");
-
-export const entityAccessTable = table("entity_access")
-  .columns({
-    id: string(),
-    workspaceId: string(),
-    shareableEntityType: string(),
-    entityId: string(),
-    userId: string().optional(),
-    userGroupId: string().optional(),
-    channelId: string().optional(),
-    entityUserAccess: string(),
-    createdAt: number(),
-    updatedAt: number(),
-  })
-  .primaryKey("id");
-
-export const summaryTemplateTable = table("summary_templates")
-  .columns({
-    id: string(),
-    workspaceId: string(),
-    name: string(),
-    autoTriggerPrompt: string().optional(),
-    sections: json(),
-    version: number(),
-    systemPrompt: string(),
-    defaultOutlet: string(),
-    createdBy: string(),
-    createdAt: number(),
   })
   .primaryKey("id");
 
@@ -3610,6 +3590,38 @@ export const entityAliasTable = table("entity_aliases")
     surfaceForm: string(),
     normalizedForm: string(),
     count: number(),
+    createdAt: number(),
+  })
+  .primaryKey("id");
+
+export const telepresenceHealthViewTable = table("telepresence_health_view")
+  .columns({
+    id: string(),
+    userId: string(),
+    deviceType: enumeration<TelepresenceDeviceType>(),
+    name: string(),
+    status: enumeration<TelepresenceHealthStatus>(),
+    connected: number(),
+    detected: number(),
+    cpuTemperature: number(),
+    lastReportedAt: number(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
+export const telepresenceHealthLogTable = table("telepresence_health_log")
+  .columns({
+    id: string(),
+    userId: string(),
+    deviceType: enumeration<TelepresenceDeviceType>(),
+    name: string().optional(),
+    status: enumeration<TelepresenceHealthStatus>(),
+    connected: number(),
+    detected: number(),
+    cpuTemperature: number(),
+    description: string().optional(),
+    reportedAt: number(),
     createdAt: number(),
   })
   .primaryKey("id");
@@ -5494,8 +5506,6 @@ export const schema = createSchema(
       notificationPreferenceTable,
       browserNotificationSubscriptionTable,
       callTable,
-      entityAccessTable,
-      summaryTemplateTable,
       callParticipantTable,
       callRecordingTable,
       recurringCallSeriesTable,
@@ -5568,6 +5578,8 @@ export const schema = createSchema(
       doclingAsyncPartTable,
       entityTable,
       entityAliasTable,
+      telepresenceHealthViewTable,
+      telepresenceHealthLogTable,
     ],
     relationships: [
       agentTableRelationships,
@@ -5774,8 +5786,6 @@ export type Notification = Row<typeof schema.tables.notifications>;
 export type NotificationPreference = Row<typeof schema.tables.notification_preferences>;
 export type BrowserNotificationSubscription = Row<typeof schema.tables.browser_notification_subscriptions>;
 export type Call = Row<typeof schema.tables.calls>;
-export type EntityAccess = Row<typeof schema.tables.entity_access>;
-export type SummaryTemplate = Row<typeof schema.tables.summary_templates>;
 export type CallParticipant = Row<typeof schema.tables.call_participants>;
 export type CallRecording = Row<typeof schema.tables.call_recordings>;
 export type RecurringCallSeries = Row<typeof schema.tables.recurring_call_series>;
@@ -5848,3 +5858,5 @@ export type DoclingAsyncFile = Row<typeof schema.tables.docling_async_files>;
 export type DoclingAsyncPart = Row<typeof schema.tables.docling_async_parts>;
 export type Entity = Row<typeof schema.tables.entities>;
 export type EntityAlias = Row<typeof schema.tables.entity_aliases>;
+export type TelepresenceHealthView = Row<typeof schema.tables.telepresence_health_view>;
+export type TelepresenceHealthLog = Row<typeof schema.tables.telepresence_health_log>;
