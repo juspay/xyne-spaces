@@ -447,6 +447,7 @@ export class App {
     this.app.use('/api/admin/desk-metrics-backfill', deskMetricsBackfillRoutes);
     this.app.use('/migrate/api/admin/desk-metrics-backfill', deskMetricsBackfillRoutes);
     this.app.use('/api/admin/conversation-participant-backfill', conversationParticipantBackfillRoutes);
+    this.app.use('/migrate/api/admin/conversation-participant-backfill', conversationParticipantBackfillRoutes);
     this.app.use('/api/admin/call-participant-count-backfill', callParticipantCountBackfillRoutes);
     this.app.use('/migrate/api/admin/call-participant-count-backfill', callParticipantCountBackfillRoutes);
     this.app.use('/migrate/api/admin/form-field-sequence-backfill', formFieldSequenceBackfillRoutes);
