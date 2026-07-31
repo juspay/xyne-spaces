@@ -1,5 +1,5 @@
 import { ReactElement, useEffect, useRef, useState } from 'react';
-import { Navigate, useSearchParams, useLocation } from 'react-router-dom';
+import { Navigate, useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import Cookies from 'js-cookie';
 import { AxiosError } from 'axios';
 import { apiInstance } from '../../services/clients/apiClient';
@@ -46,7 +46,7 @@ interface CommunityWorkspaceOrganization {
  * - Modern, minimalist design with Xyne branding
  * - Smooth transitions and hover states
  */
-const AuthScreen = (): ReactElement => {
+const AuthScreen = (): ReactElement | null => {
   const {
     isAuthenticated,
     isLoading,
@@ -67,6 +67,7 @@ const AuthScreen = (): ReactElement => {
     communityJoinRequest,
     enterpriseJoinTarget,
   } = useAuth();
+  const navigate = useNavigate();
   const { data: providers } = useOAuthProviders();
   const [searchParams] = useSearchParams();
   const [isEnrollmentFlow, setIsEnrollmentFlow] = useState(false);
@@ -191,14 +192,17 @@ const AuthScreen = (): ReactElement => {
   // Redirect multi-workspace selection to the dedicated workspace hub
   useEffect(() => {
     if (isSelectingWorkspace && workspaces.length > 0 && !isAuthenticated) {
-      const params = new URLSearchParams();
-      params.set('workspaces', JSON.stringify(workspaces));
-      if (user?.email) params.set('email', user.email);
-      if (user?.name) params.set('name', user.name);
-      if (user?.picture) params.set('picture', user.picture);
-      window.location.href = `/workspaces?${params.toString()}`;
+      navigate('/workspaces', {
+        replace: true,
+        state: {
+          workspaces,
+          email: user?.email ?? '',
+          name: user?.name ?? '',
+          picture: user?.picture ?? '',
+        },
+      });
     }
-  }, [isSelectingWorkspace, workspaces, isAuthenticated, user]);
+  }, [isSelectingWorkspace, workspaces, isAuthenticated, user, navigate]);
 
   useEffect(() => {
     if (isMobile) return;
@@ -409,6 +413,12 @@ const AuthScreen = (): ReactElement => {
         replace={true}
       />
     );
+  }
+
+  // When the machine enters selectingWorkspace with workspaces, redirect to the
+  // dedicated /workspaces screen. Return early so the old inline list never flashes.
+  if (isSelectingWorkspace && workspaces.length > 0) {
+    return null;
   }
 
   const googleSignInButton = (

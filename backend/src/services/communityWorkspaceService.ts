@@ -19,6 +19,7 @@ import { grantPermissionsForRole } from '@/services/permissionMatrix';
 import { aiProvisioningService } from '@/services/aiProvisioningService';
 import { organizationDomainService } from '@/services/organizationDomainService';
 import { repositories } from '@/database/repositories';
+import { ensureUserInGeneralChannel as joinUserToGeneralChannel } from '@/utils/workspaceGeneralChannel';
 
 const COMMUNITY_MEMBER_WORKSPACE_ROLE = 'COMMUNITY_MEMBER' as WorkspaceRole;
 const TEMPLATE_TOKEN_PATTERN = /{{\s*(workspaceName|workspaceId|joinLink|email)\s*}}/g;
@@ -386,6 +387,22 @@ export class CommunityWorkspaceService {
       COMMUNITY_MEMBER_WORKSPACE_ROLE,
       params.workspace.id
     );
+
+    // Join the community workspace's general channel (idempotent)
+    try {
+      await joinUserToGeneralChannel(
+        this.prisma,
+        params.workspace.id,
+        result.workspaceUser.id,
+        'MEMBER'
+      );
+    } catch (error) {
+      logger.error('[CommunityWorkspaceService] Failed to join user to general channel', {
+        workspaceId: params.workspace.id,
+        userId: result.workspaceUser.id,
+        error,
+      });
+    }
 
     try {
       await aiProvisioningService.enqueueUserSync(result.workspaceUser.id);

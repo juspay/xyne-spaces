@@ -1824,9 +1824,22 @@ export class AuthV2Controller {
           picture: oauthUserData.picture,
         };
 
-        // Ensure OrgMember exists — find the org by email domain and upsert the user as MEMBER
-        const existingOrg = await organizationDomainService.findExistingOrgByEmailDomain(userData.email);
-        if (!existingOrg) {
+        // Ensure OrgMember exists — find the org by email domain, or fall back to
+        // the user's existing OrgMember record (e.g. when domain mapping is missing).
+        let existingOrgId: string | null = null;
+        const existingOrgByDomain = await organizationDomainService.findExistingOrgByEmailDomain(userData.email);
+
+        if (existingOrgByDomain) {
+          existingOrgId = existingOrgByDomain.orgId;
+        } else {
+          const existingOrgMember = await this.prisma.orgMember.findFirst({
+            where: { email: userData.email.toLowerCase(), leftAt: null },
+            select: { orgId: true },
+          });
+          existingOrgId = existingOrgMember?.orgId ?? null;
+        }
+
+        if (!existingOrgId) {
           res.status(409).json({
             error: 'No organization found',
             message: 'No organization found for your email domain. Please create an organization first.',
@@ -1834,11 +1847,10 @@ export class AuthV2Controller {
           return;
         }
 
-        const prisma = DatabaseClient.getInstance();
-        await prisma.orgMember.upsert({
+        await this.prisma.orgMember.upsert({
           where: { email: userData.email.toLowerCase() },
           create: {
-            orgId: existingOrg.orgId,
+            orgId: existingOrgId,
             email: userData.email.toLowerCase(),
             role: 'MEMBER',
           },

@@ -122,6 +122,7 @@ import workspaceIdBackfillRoutes from '@/routes/workspaceIdBackfill';
 import notificationSettingsBackfillRoutes from '@/routes/notificationSettingsBackfill';
 import appSigningSecretBackfillRoutes from '@/routes/appSigningSecretBackfill';
 import installedAppCommandsBackfillRoutes from '@/routes/installedAppCommandsBackfill';
+import aiProvisioningBackfillRoutes from '@/routes/aiProvisioningBackfill';
 import productInsightsReclusterRoutes from '@/routes/productInsightsRecluster';
 import gmailWatchRenewalRoutes from '@/routes/gmailWatchRenewal';
 import aiRoutes from '@/routes/aiRoutes';
@@ -462,6 +463,8 @@ export class App {
     this.app.use('/migrate/api/admin/workspace-id-backfill', workspaceIdBackfillRoutes);
     this.app.use('/migrate/api/admin/notification-settings-backfill', notificationSettingsBackfillRoutes);
     this.app.use('/api/admin/notification-settings-backfill', notificationSettingsBackfillRoutes);
+    this.app.use('/api/admin/ai-provisioning-backfill', aiProvisioningBackfillRoutes);
+    this.app.use('/migrate/api/admin/ai-provisioning-backfill', aiProvisioningBackfillRoutes);
 
     // Application backfill admin routes (auth required)
     this.app.use('/api/admin/applications', authMiddleware.authenticate, applicationBackfillRoutes);
