@@ -44,23 +44,25 @@ RUN corepack enable && corepack prepare pnpm@10.15.0 --activate
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
 COPY packages/kata-sdk/package.json         packages/kata-sdk/
+COPY packages/litellm-client/package.json   packages/litellm-client/
 COPY packages/xyne-claw-shared/package.json packages/xyne-claw-shared/
 COPY apps/xyne-claw/package.json            apps/xyne-claw/
 
-# `...` pulls in xyne-claw-shared and kata-sdk automatically.
-# --ignore-scripts: only the manifests are present at this layer, so the
-# `prepare` hooks on @xyne/shared and @xyne/icons (which run tsc) would fail
-# with no sources or tsconfig.json. The explicit build steps after the source
-# COPY below do that work instead.
+# `...` pulls in litellm-client, xyne-claw-shared, and kata-sdk automatically.
+# --ignore-scripts: only manifests are present at this cacheable layer, so
+# litellm-client's `prepare` build has no sources or tsconfig yet. Its explicit
+# build runs after the source COPY below.
 RUN pnpm install --frozen-lockfile --prod=false --ignore-scripts --filter xyne-claw...
 
 COPY packages/kata-sdk         packages/kata-sdk
+COPY packages/litellm-client   packages/litellm-client
 COPY packages/xyne-claw-shared packages/xyne-claw-shared
 COPY apps/xyne-claw/tsconfig.json apps/xyne-claw/
 COPY apps/xyne-claw/src           apps/xyne-claw/src
 COPY apps/xyne-claw/skills        apps/xyne-claw/skills
 COPY apps/xyne-claw/scripts       apps/xyne-claw/scripts
-RUN pnpm --filter xyne-claw run typecheck
+RUN pnpm --filter @xyne/litellm-client run build && \
+    pnpm --filter xyne-claw run typecheck
 
 # Production image
 FROM base AS runner
