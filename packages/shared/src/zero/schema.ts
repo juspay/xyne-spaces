@@ -304,6 +304,7 @@ export const OrgLLMServiceAccountPurpose = {
   SUMMARISER: 'SUMMARISER',
   WORKFLOW: 'WORKFLOW',
   DEFAULT: 'DEFAULT',
+  CLAW_ORG_KEY: 'CLAW_ORG_KEY',
 } as const;
 
 export type OrgLLMServiceAccountPurpose =

@@ -15,9 +15,11 @@ import type { WorkspaceJoinPolicy as WorkspaceJoinPolicyValue, WorkspaceType as 
 
 import '../types/express';
 import { config } from '@/config/env';
+import { DatabaseClient } from '@/database/client';
 import { getFrontendUrl, resolveConfiguredOAuthRedirectUrl } from '@/utils/publicUrls';
 import {
   OrganizationDomainConflictError,
+  PublicEmailDomainError,
   isOrganizationPolicyError,
   organizationDomainService,
 } from '@/services/organizationDomainService';
@@ -47,6 +49,7 @@ export class AuthV2Controller {
   private userService: UserService;
   private userSessionService: UserSessionService;
   private microsoftAuthController: MicrosoftAuthController;
+  private prisma = DatabaseClient.getInstance();
 
   constructor() {
     const clientId = process.env.GOOGLE_CLIENT_ID;
@@ -448,12 +451,31 @@ export class AuthV2Controller {
       const pendingInvitationId = cookieInvitationId || stateInvitationId;
       
       const userExistsButRemoved = await this.userService.userExistsButNoActiveWorkspaces(googleUserData.email);
-      const domainConflict = workspaces.length === 0 && !userExistsButRemoved
-        ? await organizationDomainService.findEnterpriseWorkspaceByEmailDomain(googleUserData.email)
-        : null;
-      const domainConflictError = domainConflict
-        ? new OrganizationDomainConflictError(domainConflict.domain, domainConflict)
-        : null;
+
+      let domainConflict = null;
+      let domainConflictError = null;
+      let publicEmailError = null;
+
+      if (workspaces.length === 0 && !userExistsButRemoved) {
+        if (stateData.enterpriseLogin) {
+          try {
+            await organizationDomainService.assertCanCreateOrgForEmail(googleUserData.email);
+          } catch (error) {
+            if (error instanceof PublicEmailDomainError) {
+              publicEmailError = error;
+            } else if (error instanceof OrganizationDomainConflictError) {
+              domainConflictError = error;
+            }
+          }
+        }
+
+        if (!domainConflictError && !publicEmailError) {
+          domainConflict = await organizationDomainService.findEnterpriseWorkspaceByEmailDomain(googleUserData.email);
+          domainConflictError = domainConflict
+            ? new OrganizationDomainConflictError(domainConflict.domain, domainConflict)
+            : null;
+        }
+      }
 
       const isProduction = process.env.NODE_ENV === 'production';
       res.cookie('google_access_token', jwt.sign({
@@ -568,9 +590,11 @@ export class AuthV2Controller {
       });
       if (domainConflictError && domainConflict) {
         params.set('domainConflictError', domainConflictError.message);
-        params.set('enterpriseJoinWorkspaceId', domainConflict.workspace.id);
-        params.set('enterpriseJoinWorkspaceName', domainConflict.workspace.name);
         params.set('enterpriseJoinOrgName', domainConflict.name);
+        params.set('enterpriseJoinWorkspaces', JSON.stringify(domainConflict.workspaces));
+      }
+      if (publicEmailError) {
+        params.set('publicEmailDomainError', publicEmailError.message);
       }
 
       res.redirect(`${frontendUrl}?${params.toString()}`);
@@ -1302,6 +1326,11 @@ export class AuthV2Controller {
       await this.userService.ensureUserPresence(workspaceUser.id, workspaceId);
       const selfDmChannelId = await this.ensureSelfDmForUser(workspaceUser.id, workspaceId);
 
+      const workspace = await this.prisma.workspace.findUnique({
+        where: { id: workspaceId },
+        select: { landingChannelId: true },
+      });
+
       let sessionId = null;
 
       if (pendingRefreshToken) {
@@ -1404,6 +1433,7 @@ export class AuthV2Controller {
         },
         isNewUser,
         selfDmChannelId,
+        landingChannelId: workspace?.landingChannelId ?? null,
       });
     } catch (error) {
       logger.error('Error logging into workspace:', error);
@@ -1478,6 +1508,11 @@ export class AuthV2Controller {
       // Ensure user presence for workspace-scoped user
       await this.userService.ensureUserPresence(workspaceUser.id, workspace.id);
       const selfDmChannelId = await this.ensureSelfDmForUser(workspaceUser.id, workspace.id);
+
+      const workspaceRecord = await this.prisma.workspace.findUnique({
+        where: { id: workspace.id },
+        select: { landingChannelId: true },
+      });
 
       let sessionId = null;
 
@@ -1579,6 +1614,7 @@ export class AuthV2Controller {
         },
         isNewUser: true,
         selfDmChannelId,
+        landingChannelId: workspaceRecord?.landingChannelId ?? null,
       });
 
     } catch (error) {
@@ -1656,6 +1692,11 @@ export class AuthV2Controller {
       await this.userService.ensureUserPresence(targetUser.id, workspaceId);
       const selfDmChannelId = await this.ensureSelfDmForUser(targetUser.id, workspaceId);
 
+      const workspace = await this.prisma.workspace.findUnique({
+        where: { id: workspaceId },
+        select: { landingChannelId: true },
+      });
+
       // Get existing session from global session cookie
       // We reuse the same session across workspaces (session belongs to user, not workspace)
       const sessionId = req.cookies?.user_session_id;
@@ -1708,6 +1749,7 @@ export class AuthV2Controller {
           memberId: targetUser.orgMemberId,
         },
         selfDmChannelId,
+        landingChannelId: workspace?.landingChannelId ?? null,
       });
     } catch (error) {
       logger.error('Error switching workspace:', error);
@@ -1719,7 +1761,206 @@ export class AuthV2Controller {
   };
 
   /**
-   * Create a new org + workspace while already authenticated (no google_auth_pending cookie needed).
+   * Create a new workspace in an existing org via pending auth cookie (like create-org).
+   * POST /api/auth/create-workspace-pending
+   */
+  createWorkspaceWithPendingAuth = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const pendingAuthCookie = req.cookies?.google_access_token;
+      if (!pendingAuthCookie) {
+        res.status(401).json({
+          error: 'Unauthorized',
+          message: 'Pending auth data not found or expired'
+        });
+        return;
+      }
+
+      const parsedAuth = this.parsePendingAuthCookie(pendingAuthCookie);
+      if (!parsedAuth) {
+        res.status(401).json({
+          error: 'Invalid auth data',
+          message: 'Pending auth data is corrupted or expired'
+        });
+        return;
+      }
+      const { oauthUserData, provider, pendingRefreshToken } = parsedAuth;
+        if (!oauthUserData?.email) {
+          res.status(401).json({
+            error: 'Invalid auth data',
+            message: 'User data missing from pending auth'
+          });
+          return;
+        }
+
+        const { workspaceName, workspaceType, joinPolicy } = req.body as {
+          workspaceName?: string;
+          workspaceType?: string;
+          joinPolicy?: string;
+        };
+
+        if (!workspaceName) {
+          res.status(400).json({ error: 'Missing required fields', message: 'workspaceName is required' });
+          return;
+        }
+        if (
+          workspaceType &&
+          workspaceType !== WorkspaceType.ENTERPRISE &&
+          workspaceType !== WorkspaceType.COMMUNITY
+        ) {
+          res.status(400).json({ error: 'Invalid workspace type', message: 'workspaceType must be ENTERPRISE or COMMUNITY' });
+          return;
+        }
+        if (joinPolicy && !Object.values(WorkspaceJoinPolicy).includes(joinPolicy as WorkspaceJoinPolicyValue)) {
+          res.status(400).json({ error: 'Invalid join policy', message: 'joinPolicy must be INVITE_ONLY, OPEN, or REQUEST_TO_JOIN' });
+          return;
+        }
+
+        logger.info(`[CREATE-WORKSPACE-PENDING] User ${oauthUserData.email} creating workspace "${workspaceName}" via ${provider}`);
+
+        const userData = {
+          providerUserId: (oauthUserData.providerUserId || oauthUserData.googleId)!,
+          email: oauthUserData.email.toLowerCase(),
+          name: oauthUserData.name,
+          picture: oauthUserData.picture,
+        };
+
+        // Ensure OrgMember exists — find the org by email domain and upsert the user as MEMBER
+        const existingOrg = await organizationDomainService.findExistingOrgByEmailDomain(userData.email);
+        if (!existingOrg) {
+          res.status(409).json({
+            error: 'No organization found',
+            message: 'No organization found for your email domain. Please create an organization first.',
+          });
+          return;
+        }
+
+        const prisma = DatabaseClient.getInstance();
+        await prisma.orgMember.upsert({
+          where: { email: userData.email.toLowerCase() },
+          create: {
+            orgId: existingOrg.orgId,
+            email: userData.email.toLowerCase(),
+            role: 'MEMBER',
+          },
+          update: {
+            leftAt: null,
+          },
+        });
+
+        const { organization, workspace, workspaceUser } = await this.userService.createWorkspaceInOrg(
+          { userId: '', providerUserId: userData.providerUserId, email: userData.email, name: userData.name, picture: userData.picture },
+          workspaceName,
+          {
+            workspaceType: (workspaceType ?? WorkspaceType.ENTERPRISE) as WorkspaceTypeValue,
+            joinPolicy: joinPolicy as WorkspaceJoinPolicyValue | undefined,
+          },
+        );
+
+        await this.userService.ensureUserPresence(workspaceUser.id, workspace.id);
+        const selfDmChannelId = await this.ensureSelfDmForUser(workspaceUser.id, workspace.id);
+
+        const workspaceRecord = await this.prisma.workspace.findUnique({
+          where: { id: workspace.id },
+          select: { landingChannelId: true },
+        });
+
+        let sessionId = null;
+        if (pendingRefreshToken) {
+          try {
+            const refreshTokenExpiry = new Date();
+            refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + 30);
+            const deviceInfo = JSON.stringify({
+              userAgent: req.headers['user-agent'],
+              acceptLanguage: req.headers['accept-language'],
+              timestamp: new Date().toISOString(),
+              appVersion: req.headers['x-app-version'],
+            });
+            const session = await this.userSessionService.createSession({
+              userId: workspaceUser.id,
+              refreshToken: pendingRefreshToken,
+              refreshTokenExpiry,
+              deviceInfo,
+              ipAddress: req.ip || req.connection.remoteAddress || undefined,
+            });
+            sessionId = session.id;
+          } catch (sessionError) {
+            logger.error(`[CREATE-WORKSPACE-PENDING] Session creation failed:`, sessionError);
+          }
+        }
+
+        const token = jwtService.generateToken({
+          sub: workspaceUser.id,
+          email: workspaceUser.email,
+          name: workspaceUser.name,
+          picture: workspaceUser.picture || undefined,
+          workspaceId: workspaceUser.workspaceId ?? undefined,
+          memberId: workspaceUser.orgMemberId,
+        });
+
+        const isProduction = process.env.NODE_ENV === 'production';
+        const cookieOptions = {
+          httpOnly: true,
+          secure: isProduction,
+          sameSite: 'strict' as const,
+          path: '/',
+        };
+
+        const targetWorkspaceId = workspaceUser.workspaceId;
+        res.cookie(`xyne_ws_${targetWorkspaceId}_token`, token, {
+          ...cookieOptions,
+          maxAge: config.jwt.expirationSeconds * 1000,
+        });
+
+        if (sessionId) {
+          res.cookie('user_session_id', sessionId, {
+            ...cookieOptions,
+            maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
+          });
+        }
+
+        res.cookie('xyne_last_workspace', targetWorkspaceId, {
+          ...cookieOptions,
+          maxAge: 30 * 24 * 60 * 60 * 1000,
+        });
+
+        res.cookie('is_new_user', 'true', {
+          httpOnly: false,
+          secure: isProduction,
+          sameSite: 'strict' as const,
+          path: '/',
+          maxAge: 24 * 60 * 60 * 1000,
+        });
+
+        res.clearCookie('google_access_token', { path: '/' });
+
+        logger.info(`[CREATE-WORKSPACE-PENDING] Created workspace "${workspaceName}" for ${oauthUserData.email} in org ${organization.orgId}`);
+
+        res.status(201).json({
+          organization: { id: organization.orgId, name: organization.name },
+          workspace: { id: workspace.id, name: workspace.name },
+          user: {
+            id: workspaceUser.id,
+            email: workspaceUser.email,
+            name: workspaceUser.name,
+            picture: workspaceUser.picture,
+            workspaceId: workspaceUser.workspaceId,
+          },
+          selfDmChannelId,
+          landingChannelId: workspaceRecord?.landingChannelId ?? null,
+        });
+    } catch (error) {
+      logger.error('Error creating workspace (pending auth):', error);
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      const statusCode = (error as Error & { statusCode?: number }).statusCode;
+      res.status(statusCode ?? (message.includes('already exists') ? 409 : 500)).json({
+        error: 'Failed to create workspace',
+        message,
+      });
+    }
+  };
+
+  /**
+   * Create a new workspace in an existing org via authenticated session.
    * POST /api/auth/create-workspace
    */
   createWorkspaceAuth = async (req: Request, res: Response): Promise<void> => {
@@ -1771,6 +2012,11 @@ export class AuthV2Controller {
 
       await this.userService.ensureUserPresence(workspaceUser.id, workspace.id);
       const selfDmChannelId = await this.ensureSelfDmForUser(workspaceUser.id, workspace.id);
+
+      const workspaceRecord = await this.prisma.workspace.findUnique({
+        where: { id: workspace.id },
+        select: { landingChannelId: true },
+      });
 
       // Reuse refresh token from current session
       // Get global session cookie
@@ -1835,6 +2081,7 @@ export class AuthV2Controller {
         },
         isNewUser: true,
         selfDmChannelId,
+        landingChannelId: workspaceRecord?.landingChannelId ?? null,
       });
     } catch (error) {
       logger.error('Error creating workspace:', error);

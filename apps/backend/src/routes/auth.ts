@@ -5,7 +5,9 @@ import { userManagementController } from '../controllers/userManagementControlle
 import { channelService } from '../services/channelService';
 import { canCreateWorkspace } from '../middleware/workspaceAuth';
 import { logger } from '../utils/logger';
+import { DatabaseClient } from '../database/client';
 
+const prisma = DatabaseClient.getInstance();
 const router = express.Router();
 const authV2Controller = new AuthV2Controller();
 
@@ -47,6 +49,10 @@ router.get('/validate', authV2Middleware.authenticate, async (req, res) => {
     logger.warn(`[DEBUG] [/validate] ⚠️ User already has a session but pending_invitation_id cookie exists (${pendingInvitation}). OAuth callback will be skipped — invitation will NOT be auto-accepted via callback flow.`);
   }
   const selfDmChannelId = await channelService.getSelfDmId(req.user!.id);
+  const workspace = await prisma.workspace.findUnique({
+    where: { id: req.user!.workspaceId },
+    select: { landingChannelId: true },
+  });
   return res.json({
     success: true,
     user: {
@@ -61,6 +67,7 @@ router.get('/validate', authV2Middleware.authenticate, async (req, res) => {
       authProvider: req.user!.authProvider,
     },
     selfDmChannelId,
+    landingChannelId: workspace?.landingChannelId ?? null,
   });
 });
 
@@ -72,6 +79,7 @@ router.post('/create-org', authV2Controller.createOrg);
 
 router.get('/workspaces', authV2Middleware.authenticate, authV2Controller.getWorkspaces);
 router.post('/switch-workspace', authV2Middleware.authenticate, authV2Controller.switchWorkspace);
+router.post('/create-workspace-pending', authV2Controller.createWorkspaceWithPendingAuth);
 router.post('/create-workspace', authV2Middleware.authenticate, canCreateWorkspace, authV2Controller.createWorkspaceAuth);
 
 export default router;

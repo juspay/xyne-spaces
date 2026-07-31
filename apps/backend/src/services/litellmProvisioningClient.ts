@@ -196,6 +196,22 @@ class LiteLLMProvisioningClient {
     };
   }
 
+  async storeOrgKey(params: {
+    orgId: string;
+    teamId: string;
+    key: string;
+    tokenId?: string;
+    keyName?: string;
+    keyAlias?: string;
+    expires?: string;
+  }): Promise<unknown> {
+    return this.postClawStore('/org-key', params);
+  }
+
+  async deleteUser(litellmUserId: string): Promise<void> {
+    await this.postLiteLLM('/user/delete', { user_ids: [litellmUserId] });
+  }
+
   async storeTeam(params: StoreTeamParams): Promise<void> {
     await this.postClawStore('/team', {
       orgId: params.orgId,
