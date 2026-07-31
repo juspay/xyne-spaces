@@ -150,6 +150,11 @@ bridgeRouter.get("/runs/next", async (req: Request, res: Response) => {
   while (!aborted && Date.now() < deadline) {
     const run = await localHarnessRepository.claimNextRun(device, providers).catch(() => null);
     if (run) {
+      if (aborted) {
+        await localHarnessRepository.releaseRun(run.id).catch(() => {});
+        log.info(`[local-harness] run released id=${run.id} — device disconnected mid-claim`);
+        return;
+      }
       const envelope = run.envelope as unknown as LocalHarnessRunEnvelope;
       log.info(`[local-harness] run claimed id=${run.id} device=${device.id} agent=${run.agentSlug}`);
       const payload: LocalHarnessPollResult = { status: "run", run: { ...envelope, runId: run.id } };
@@ -239,7 +244,11 @@ bridgeRouter.post("/runs/:runId/result", async (req: Request<{ runId: string }>,
   const result = req.body;
   res.json({ success: true });
 
-  await localHarnessRepository.finishRun(run.id, result.status, result.error).catch(() => {});
+  const won = await localHarnessRepository.finishRun(run.id, result.status, result.error).catch(() => false);
+  if (!won) {
+    log.warn(`[local-harness] result ignored id=${run.id} — run already finished (expired or cancelled)`);
+    return;
+  }
   log.info(
     `[local-harness] run finished id=${run.id} status=${result.status} provider=${run.provider} ` +
       `requestedModel=${run.model ?? "(cli default)"} effectiveModel=${result.effectiveModel ?? "(not reported)"} ` +

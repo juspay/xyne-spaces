@@ -178,7 +178,7 @@ export async function callToolForRun(
   const body = (await res.json().catch(() => ({}))) as {
     success?: boolean;
     error?: string;
-    data?: { content?: string } | string;
+    data?: { content?: string; pendingAction?: unknown } | string;
   };
 
   if (!res.ok || body.success === false) {
@@ -189,6 +189,15 @@ export async function callToolForRun(
 
   const data = body.data;
   const content = typeof data === "string" ? data : (data?.content ?? "");
+
+  if (typeof data !== "string" && data?.pendingAction) {
+    log.info(`[local-harness] write tool needs approval run=${run.id} tool=${call.serverType}/${call.toolName} — not supported from a local harness`);
+    return {
+      ok: false,
+      content: `${call.toolName} needs approval before it can run, which isn't supported from a local harness yet. Re-run this agent on Xyne's servers to approve the action.`,
+    };
+  }
+
   return { ok: true, content };
 }
 

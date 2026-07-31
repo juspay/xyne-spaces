@@ -23,7 +23,9 @@ const InstallationRow = ({ install }: { install: LocalHarnessInstallation }): Re
   <div className='flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2'>
     <div className='min-w-0'>
       <div className='flex items-center gap-2'>
-        <span className='text-sm font-medium text-foreground'>{HARNESS_LABEL[install.provider]}</span>
+        <span className='text-sm font-medium text-foreground'>
+          {HARNESS_LABEL[install.provider]}
+        </span>
         {install.version && (
           <span className='truncate text-xs text-muted-foreground'>{install.version}</span>
         )}
@@ -38,7 +40,7 @@ const InstallationRow = ({ install }: { install: LocalHarnessInstallation }): Re
   </div>
 );
 
-const LocalHarnessSection = (): ReactElement => {
+const LocalHarnessSection = (): ReactElement | null => {
   const api = typeof window !== 'undefined' ? window.electronAPI?.localHarness : undefined;
 
   const [status, setStatus] = useState<LocalHarnessStatus | null>(null);
@@ -83,7 +85,9 @@ const LocalHarnessSection = (): ReactElement => {
     try {
       const next = status?.connected ? await api.disconnect() : await api.connect();
       setStatus(next);
-      toast.success(next.connected ? 'This device is now connected' : 'This device was disconnected');
+      toast.success(
+        next.connected ? 'This device is now connected' : 'This device was disconnected',
+      );
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to update connection');
     } finally {
@@ -104,16 +108,7 @@ const LocalHarnessSection = (): ReactElement => {
     </div>
   );
 
-  if (!api) {
-    return (
-      <section data-testid='claw-settings-local-harness'>
-        {header}
-        <div className='rounded-2xl border border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground'>
-          Available in the Xyne desktop app. Open Settings there to connect this machine.
-        </div>
-      </section>
-    );
-  }
+  if (!api) return null;
 
   if (loading) {
     return (

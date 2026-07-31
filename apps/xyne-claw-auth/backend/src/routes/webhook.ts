@@ -2191,20 +2191,29 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
 
     let body: { success: boolean; sessionId?: string };
     if (localTarget) {
-      const dispatched = await dispatchLocalHarnessRun({
-        target: localTarget,
-        userId: targetUserId,
-        orgId: agent.orgId,
-        conversationId: payload.conversationId,
-        agentSlug: runAgentSlug,
-        agentName: agentRow?.name ?? agent.slug,
-        systemPrompt: agentRow?.systemPrompt ?? "",
-        model: pinnedModelForProvider(agentRow?.config, localTarget.provider),
-        task,
-        context: dispatchContext || null,
-        progressUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`,
-        callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
-      });
+      let dispatched: Awaited<ReturnType<typeof dispatchLocalHarnessRun>>;
+      try {
+        dispatched = await dispatchLocalHarnessRun({
+          target: localTarget,
+          userId: targetUserId,
+          orgId: agent.orgId,
+          conversationId: payload.conversationId,
+          agentSlug: runAgentSlug,
+          agentName: agentRow?.name ?? agent.slug,
+          systemPrompt: agentRow?.systemPrompt ?? "",
+          model: pinnedModelForProvider(agentRow?.config, localTarget.provider),
+          task,
+          context: dispatchContext || null,
+          progressUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`,
+          callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
+        });
+      } catch (err) {
+        if (globalTwinSlotToken !== null) void releaseTwinSlot(globalTwinSlotToken);
+        if (twinConvSlotToken !== null && payload.conversationId) {
+          await drainNextQueued(payload.conversationId, runAgentSlug, twinConvSlotToken, twinUserScope).catch(() => {});
+        }
+        throw err;
+      }
       body = { success: true, sessionId: dispatched.sessionId };
     } else {
       let runRes: Awaited<ReturnType<typeof fetchRun>>;

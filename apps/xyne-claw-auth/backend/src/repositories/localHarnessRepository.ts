@@ -154,6 +154,12 @@ export const localHarnessRepository = {
     return null;
   },
 
+  releaseRun: (runId: string): Promise<unknown> =>
+    prisma.localHarnessRun.updateMany({
+      where: { id: runId, status: "claimed" },
+      data: { status: "queued", deviceId: null, claimedAt: null },
+    }),
+
   findOwnedRun: async (runId: string, device: LocalHarnessDevice): Promise<LocalHarnessRun | null> => {
     const run = await prisma.localHarnessRun.findUnique({ where: { id: runId } });
     if (!run) return null;
@@ -164,11 +170,13 @@ export const localHarnessRepository = {
   markRunning: (runId: string): Promise<unknown> =>
     prisma.localHarnessRun.updateMany({ where: { id: runId, status: "claimed" }, data: { status: "running" } }),
 
-  finishRun: (runId: string, status: "done" | "failed" | "cancelled", error?: string): Promise<unknown> =>
-    prisma.localHarnessRun.updateMany({
+  finishRun: async (runId: string, status: "done" | "failed" | "cancelled", error?: string): Promise<boolean> => {
+    const result = await prisma.localHarnessRun.updateMany({
       where: { id: runId, status: { in: ["queued", "claimed", "running"] } },
       data: { status, finishedAt: new Date(), ...(error ? { error } : {}) },
-    }),
+    });
+    return result.count > 0;
+  },
 
   findBySessionId: (sessionId: string): Promise<LocalHarnessRun | null> =>
     prisma.localHarnessRun.findUnique({ where: { sessionId } }),

@@ -10,6 +10,9 @@ export const isTestEnv =
 export const isSandBox = hostname.includes('sandbox');
 export const isProd = !isLocalhost && !isSandBox && !isSandboxLocal;
 
+export const isLocalHarnessAvailable = (): boolean =>
+  typeof window !== 'undefined' && !!window.electronAPI?.localHarness;
+
 const protocol = isLocalhost || isTestEnv || isSandboxLocal ? 'http' : 'https';
 
 const ELECTRON_BACKEND_URL = isProd

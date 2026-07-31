@@ -6,7 +6,7 @@ import { clearAllCookies, clearBrowserTabsData, syncXyneCookiesToBrowserPanel } 
 import { showNotification, NotificationData, showCallNotification, closeCallNotification, CallNotificationData } from '../services/notifications';
 import { getMainWindow, loadApp, toggleWindowCompactMode } from '../window/manager';
 import { setupMTLSIpcHandlers } from './mtls-handlers';
-import { config } from '../app/config';
+import { config, ENABLE_LOCAL_HARNESS } from '../app/config';
 import { performHardReload } from '../services/version-checker';
 import { Logger, errorLogger } from '../services/logger/Logger';
 import ElectronEvent from '../services/logger/electron-events';
@@ -607,25 +607,27 @@ export function setupIpcHandlers(): void {
     }
   });
 
-  ipcMain.handle('local-harness:status', async (event) => {
-    if (!isMainWindowSender(event)) throw new Error('Unauthorized sender');
-    return localHarnessBridge.status();
-  });
+  if (ENABLE_LOCAL_HARNESS) {
+    ipcMain.handle('local-harness:status', async (event) => {
+      if (!isMainWindowSender(event)) throw new Error('Unauthorized sender');
+      return localHarnessBridge.status();
+    });
 
-  ipcMain.handle('local-harness:detect', async (event) => {
-    if (!isMainWindowSender(event)) throw new Error('Unauthorized sender');
-    return localHarnessBridge.refreshInstallations();
-  });
+    ipcMain.handle('local-harness:detect', async (event) => {
+      if (!isMainWindowSender(event)) throw new Error('Unauthorized sender');
+      return localHarnessBridge.refreshInstallations();
+    });
 
-  ipcMain.handle('local-harness:connect', async (event) => {
-    if (!isMainWindowSender(event)) throw new Error('Unauthorized sender');
-    return localHarnessBridge.connect(await xyneCookieHeader());
-  });
+    ipcMain.handle('local-harness:connect', async (event) => {
+      if (!isMainWindowSender(event)) throw new Error('Unauthorized sender');
+      return localHarnessBridge.connect(await xyneCookieHeader());
+    });
 
-  ipcMain.handle('local-harness:disconnect', async (event) => {
-    if (!isMainWindowSender(event)) throw new Error('Unauthorized sender');
-    return localHarnessBridge.disconnect(await xyneCookieHeader());
-  });
+    ipcMain.handle('local-harness:disconnect', async (event) => {
+      if (!isMainWindowSender(event)) throw new Error('Unauthorized sender');
+      return localHarnessBridge.disconnect(await xyneCookieHeader());
+    });
+  }
 }
 
 async function xyneCookieHeader(): Promise<string> {

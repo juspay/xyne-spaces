@@ -29,7 +29,10 @@ export const PROVIDER_DISPLAY: Record<string, string> = {
   'codex-cli': 'Codex CLI (this device)',
 };
 
-export const LOCAL_HARNESS_MODEL_OPTIONS: Record<LocalHarnessProviderKey, ReadonlyArray<{ value: string; label: string }>> = {
+export const LOCAL_HARNESS_MODEL_OPTIONS: Record<
+  LocalHarnessProviderKey,
+  ReadonlyArray<{ value: string; label: string }>
+> = {
   'claude-code': [
     { value: '', label: 'CLI default' },
     { value: 'opus', label: 'Opus — most capable' },
@@ -185,7 +188,8 @@ export function applyModelProvider(
   const existing = (config ?? {}) as ProviderConfigShape;
   const existingMs = existing.modelSettings ?? {};
   const settings: Record<string, unknown> = {};
-  if (typeof existingMs.model === 'string' && existingMs.model) settings['model'] = existingMs.model;
+  if (typeof existingMs.model === 'string' && existingMs.model)
+    settings['model'] = existingMs.model;
 
   const temperatureSet = draft.temperature.trim() !== '';
   if (temperatureSet) settings['temperature'] = Number(draft.temperature);

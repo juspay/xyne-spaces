@@ -96,6 +96,7 @@ export function spawnJsonLines(opts: SpawnJsonLinesOptions): Promise<SpawnJsonLi
     });
     child.on('close', (code) => settle(code));
 
+    child.stdin.on('error', () => {});
     if (opts.stdin !== undefined) child.stdin.write(opts.stdin);
     child.stdin.end();
   });

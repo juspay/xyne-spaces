@@ -36,8 +36,7 @@ const OnboardingScreen: React.FC = () => {
         if (cancelled || currentStepRef.current !== 0) return;
         setLocalHarnesses(found.filter(install => install.authenticated));
       })
-      .catch(() => {
-      });
+      .catch(() => {});
     return (): void => {
       cancelled = true;
     };
