@@ -6,6 +6,7 @@ import { agentRepository, agentShareRepository, agentRequestRepository, userRepo
 import { validateSubagentInput, ValidationError as SubagentValidationError } from "../lib/subagent-resolver.js";
 import { getSubagentDefinition, buildCloneApprovalFlow } from "xyne-claw-shared";
 import { spacesAppFetch } from "../lib/spaces-api.js";
+import { gcsService } from "../services/gcsService.js";
 import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
 import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
@@ -55,8 +56,10 @@ function logAgentScopedMiss(req: Request, routeName: string, slug: string | unde
 function sanitizeAgent<T extends Record<string, unknown>>(agent: T): T {
   if (!agent || typeof agent !== "object") return agent;
   const owner = agent["owner"] as { id?: string; name?: string; email?: string } | null | undefined;
+  const { avatarKey: _avatarKey, ...agentRest } = agent as Record<string, unknown>;
   return {
-    ...agent,
+    ...agentRest,
+    hasAvatar: Boolean(agent["avatarKey"]),
     signingSecret: agent["signingSecret"] ? "(set)" : null,
     spacesAppToken: agent["spacesAppToken"] ? "(set)" : null,
     ...(owner ? { owner: { id: owner.id, name: owner.name, email: owner.email } } : {}),
@@ -72,6 +75,7 @@ function lightAgentProjection(agent: Record<string, unknown>, orgNames?: Map<str
     name: agent["name"],
     description: agent["description"],
     color: agent["color"],
+    hasAvatar: Boolean(agent["avatarKey"]),
     scope: agent["scope"],
     delegationTier: agent["delegationTier"] ?? "standard",
     ownerUserId: agent["ownerUserId"],
@@ -2459,7 +2463,14 @@ router.post("/:slug/grant-permissions", async (req: Request<{ slug: string }>, r
   }
 });
 
-// ── Upload bot picture (proxies to spaces /api/apps/upload-picture/:appId) ──────────
+// ── Agent profile picture (avatar) ─────────────────────────────────────────────
+// Stored on the AGENT (GCS object key in `agent.avatarKey`) so it exists in ALL
+// lifecycle states, including DRAFT (before a Spaces app / bot user exists). When
+// the agent is already a live Spaces app we ALSO best-effort mirror the image to
+// its bot user so it shows the same face inside Spaces — but that mirror is a
+// derived copy, never the source of truth.
+const AVATAR_ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"] as const;
+const AVATAR_EXT: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
 const pictureUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 },
@@ -2467,47 +2478,114 @@ const pictureUpload = multer({
 
 router.post(
   "/:slug/upload-picture",
+  requireAgentOwnerContributorOrAdmin,
   pictureUpload.single("picture"),
   async (req: Request<{ slug: string }>, res: Response) => {
     try {
-      const userToken = extractUserToken(req);
-      if (!userToken) { res.status(401).json({ success: false, error: "User token required" }); return; }
-
       const agent = await agentRepository.findBySlug(req.params.slug, getOrgId(req));
       if (!agent) { logAgentScopedMiss(req, "agents/upload-picture", req.params.slug); res.status(404).json({ success: false, error: "Agent not found" }); return; }
-      if (!agent.spacesAppId) { res.status(400).json({ success: false, error: "Create app first" }); return; }
 
       const file = req.file;
       if (!file) { res.status(400).json({ success: false, error: "picture file is required" }); return; }
-
-      const form = new FormData();
-      const blob = new Blob([new Uint8Array(file.buffer)], { type: file.mimetype });
-      form.append("picture", blob, file.originalname);
-
-      const spacesUrl = CONFIG.spacesInternalUrl;
-      const sessionId = extractSessionId(req);
-      const workspaceId = extractWorkspaceId(req);
-      const uploadRes = await fetch(`${spacesUrl}/api/apps/upload-picture/${agent.spacesAppId}`, {
-        method: "POST",
-        headers: spacesUserAuthHeaders(userToken, sessionId, workspaceId),
-        body: form,
-      });
-
-      if (!uploadRes.ok) {
-        const text = await uploadRes.text().catch(() => "");
-        res.status(uploadRes.status).json({ success: false, error: `Spaces: ${text.slice(0, 300)}` });
+      // Server-side validation — never trust the client. This image is rendered
+      // across surfaces, so restrict to safe raster image types + a 5MB cap
+      // (already enforced by multer, re-checked here for a clean error).
+      if (!AVATAR_ALLOWED_TYPES.includes(file.mimetype as typeof AVATAR_ALLOWED_TYPES[number])) {
+        res.status(400).json({ success: false, error: "Invalid file type. Only JPG, PNG, and WebP are allowed." });
         return;
       }
+      if (file.size > 5 * 1024 * 1024) { res.status(413).json({ success: false, error: "File too large. Maximum size is 5MB." }); return; }
 
-      const body = await uploadRes.json().catch(() => ({})) as { pictureUrl?: string };
-      log.info(`[agents] Uploaded picture for ${req.params.slug}`);
-      res.json({ success: true, data: body });
+      // Store on the agent itself (draft-safe): GCS key does not depend on a Spaces app.
+      const ext = AVATAR_EXT[file.mimetype] ?? "img";
+      const destPath = `agent-avatars/${agent.orgId}/${agent.slug}/${Date.now()}-${crypto.randomUUID()}.${ext}`;
+      await gcsService.uploadFile(file.buffer, destPath, file.mimetype);
+
+      const previousKey = (agent as { avatarKey?: string | null }).avatarKey ?? null;
+      await agentRepository.update(agent.slug, agent.orgId, { avatarKey: destPath });
+      // Best-effort cleanup of the superseded object so avatars don't accumulate.
+      if (previousKey && previousKey !== destPath) {
+        gcsService.deleteFile(previousKey).catch((e) => log.warn(`[agents] avatar cleanup failed for ${previousKey}: ${String(e)}`));
+      }
+
+      // Best-effort mirror to the Spaces bot user when the agent is already published.
+      let mirroredToSpaces = false;
+      const userToken = extractUserToken(req);
+      if (agent.spacesAppId && userToken) {
+        try {
+          const form = new FormData();
+          const blob = new Blob([new Uint8Array(file.buffer)], { type: file.mimetype });
+          form.append("picture", blob, file.originalname);
+          const spacesUrl = CONFIG.spacesInternalUrl;
+          const mirrorRes = await fetch(`${spacesUrl}/api/apps/upload-picture/${agent.spacesAppId}`, {
+            method: "POST",
+            headers: spacesUserAuthHeaders(userToken, extractSessionId(req), extractWorkspaceId(req)),
+            body: form,
+          });
+          mirroredToSpaces = mirrorRes.ok;
+          if (!mirrorRes.ok) {
+            const text = await mirrorRes.text().catch(() => "");
+            log.warn(`[agents] avatar Spaces-mirror failed for ${req.params.slug}: ${mirrorRes.status} ${text.slice(0, 200)}`);
+          }
+        } catch (e) {
+          log.warn(`[agents] avatar Spaces-mirror error for ${req.params.slug}: ${String(e)}`);
+        }
+      }
+
+      log.info(`[agents] Uploaded avatar for ${req.params.slug} (mirroredToSpaces=${mirroredToSpaces})`);
+      res.json({ success: true, data: { hasAvatar: true, mirroredToSpaces } });
     } catch (err) {
       log.error("[agents] upload-picture error:", err);
       res.status(500).json({ success: false, error: "Internal server error" });
     }
   },
 );
+
+// GET /:slug/picture — stream the agent's avatar (org-scoped). 404 when unset.
+router.get("/:slug/picture", async (req: Request<{ slug: string }>, res: Response) => {
+  try {
+    const agent = await agentRepository.findBySlug(req.params.slug, getOrgId(req));
+    if (!agent) { logAgentScopedMiss(req, "agents/get-picture", req.params.slug); res.status(404).json({ success: false, error: "Agent not found" }); return; }
+    const key = (agent as { avatarKey?: string | null }).avatarKey ?? null;
+    if (!key) { res.status(404).json({ success: false, error: "No avatar set" }); return; }
+
+    let contentType = "image/jpeg";
+    try {
+      const meta = await gcsService.getMetadata(key);
+      if (meta.contentType) contentType = meta.contentType;
+    } catch { /* fall back to jpeg */ }
+
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Cache-Control", "private, max-age=3600");
+    const stream = gcsService.createReadStream(key);
+    stream.on("error", (err) => {
+      log.error("[agents] avatar stream error:", err);
+      if (!res.headersSent) res.status(500).end(); else res.end();
+    });
+    stream.pipe(res);
+  } catch (err) {
+    log.error("[agents] get-picture error:", err);
+    if (!res.headersSent) res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+// DELETE /:slug/picture — clear the agent's avatar (falls back to color initials).
+router.delete("/:slug/picture", requireAgentOwnerContributorOrAdmin, async (req: Request<{ slug: string }>, res: Response) => {
+  try {
+    const agent = await agentRepository.findBySlug(req.params.slug, getOrgId(req));
+    if (!agent) { logAgentScopedMiss(req, "agents/delete-picture", req.params.slug); res.status(404).json({ success: false, error: "Agent not found" }); return; }
+    const key = (agent as { avatarKey?: string | null }).avatarKey ?? null;
+    if (key) {
+      await agentRepository.update(agent.slug, agent.orgId, { avatarKey: null });
+      gcsService.deleteFile(key).catch((e) => log.warn(`[agents] avatar delete failed for ${key}: ${String(e)}`));
+    }
+    log.info(`[agents] Cleared avatar for ${req.params.slug}`);
+    res.json({ success: true, data: { hasAvatar: false } });
+  } catch (err) {
+    log.error("[agents] delete-picture error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
 
 // ── User Agent Config (per-user provider override) ──────────────────
 

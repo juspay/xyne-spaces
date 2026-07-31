@@ -866,6 +866,12 @@ model Agent {
   enabled               Boolean                    @default(true)
   isDefault             Boolean                    @default(false)
   color                 String                     @default("#6366f1")
+  /// GCS object key for the agent's profile picture (avatar). Stored on the
+  /// agent itself so it exists in ALL lifecycle states, including DRAFT (before
+  /// a Spaces app / bot user exists). Null = fall back to the color-initials
+  /// badge. Never returned raw to clients — the API exposes it via the
+  /// GET /:slug/picture stream endpoint and a `hasAvatar` flag.
+  avatarKey             String?
   modelId               String                     @default("")
   config                Json                       @default("{}")
   spacesAppId           String?                    @unique
