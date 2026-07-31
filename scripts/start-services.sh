@@ -332,10 +332,14 @@ export COMPOSE_PROFILES
 # =============================================================================
 # Compose pulls upstream images and builds only the three thin local ones
 # (postgres, livekit, transcription-agent) — and only when they are selected.
+# --build is deliberate: without it compose reuses whatever image already carries
+# the tag, so a postgres image built from an older docker/init-db.sh keeps
+# initialising new volumes with the old script. The three images are a COPY on
+# top of an upstream base, so a no-op rebuild is nearly free.
 echo -e "${BLUE}Starting containers...${NC}"
 echo -e "${CYAN}  $(echo "$SERVICES" | wc -w | tr -d ' ') services: ${SERVICES}${NC}"
 # shellcheck disable=SC2086 — SERVICES is a deliberately word-split list
-$COMPOSE_CMD -f "$COMPOSE_FILE" up -d $SERVICES
+$COMPOSE_CMD -f "$COMPOSE_FILE" up -d --build $SERVICES
 
 # Vespa ships its own compose file with its own volume. -p pins it to the same
 # project as everything else; without it compose would name the project after the
@@ -372,6 +376,43 @@ for i in {1..30}; do
     fi
     sleep 1
 done
+
+# The claw role, claw_auth_db and xyne_common come from docker/init-db.sh, which
+# only runs when the container initialises an *empty* data directory — and only
+# with the copy of the script baked into the image at build time. A volume older
+# than those additions, or a stale locally-built postgres image, leaves the
+# cluster without them and claw-auth then dies with "P1000: Authentication failed
+# ... for `claw`". Creating them here is idempotent: it is a no-op whenever
+# init-db.sh already did the work.
+CLAW_DB_USER="${CLAW_DB_USER:-claw}"
+CLAW_DB_PASSWORD="${CLAW_DB_PASSWORD:-claw123}"
+
+psql_postgres() {
+    $COMPOSE_CMD -f "$COMPOSE_FILE" exec -T postgres \
+        psql -v ON_ERROR_STOP=1 --username xyne --dbname postgres "$@"
+}
+
+ensure_database() {
+    local db_name="$1" db_owner="$2"
+    if ! psql_postgres -tAc "SELECT 1 FROM pg_database WHERE datname = '${db_name}'" 2>/dev/null | grep -q 1; then
+        echo -e "${YELLOW}  Creating missing database ${db_name}...${NC}"
+        psql_postgres -c "CREATE DATABASE ${db_name} OWNER ${db_owner};" > /dev/null
+    fi
+}
+
+if ! psql_postgres -tAc "SELECT 1 FROM pg_roles WHERE rolname = '${CLAW_DB_USER}'" 2>/dev/null | grep -q 1; then
+    echo -e "${YELLOW}  Creating missing role ${CLAW_DB_USER}...${NC}"
+    psql_postgres -c "CREATE ROLE ${CLAW_DB_USER} LOGIN PASSWORD '${CLAW_DB_PASSWORD}';" > /dev/null
+fi
+
+ensure_database "xyne_common" "xyne"
+ensure_database "claw_auth_db" "$CLAW_DB_USER"
+
+# The backend's common schema lives in a named schema, not public — see
+# COMMON_DATABASE_URL's ?schema=common.
+$COMPOSE_CMD -f "$COMPOSE_FILE" exec -T postgres \
+    psql -v ON_ERROR_STOP=1 --username xyne --dbname xyne_common \
+    -c "CREATE SCHEMA IF NOT EXISTS common AUTHORIZATION xyne;" > /dev/null
 
 # =============================================================================
 # 7. Wait for Redis
@@ -417,8 +458,10 @@ if [ "$ENABLE_STORAGE" = "1" ]; then
           -H "Content-Type: application/json" -d '{"name":"transcription-dev-v2"}' > /dev/null 2>&1
         curl -s $CURL_TIMEOUT -X POST "http://localhost:4443/storage/v1/b?project=xyne-spaces" \
           -H "Content-Type: application/json" -d '{"name":"xyne-spaces-canvas-documents"}' > /dev/null 2>&1
-        # Agent session archives — xyne-claw refuses to start a run when it
-        # cannot verify the archive, so this bucket must exist.
+        # claw-auth's bucket (GCS_BUCKET_NAME): agent attachments *and* the
+        # claw-sessions/ archive xyne-claw restores a chat from. xyne-claw
+        # refuses to start a run when it cannot verify that archive, so this
+        # bucket must exist.
         curl -s $CURL_TIMEOUT -X POST "http://localhost:4443/storage/v1/b?project=xyne-spaces" \
           -H "Content-Type: application/json" -d '{"name":"xyne-claw-chat-attachments"}' > /dev/null 2>&1
         echo -e "${GREEN}  fake-gcs buckets created${NC}"
@@ -637,10 +680,14 @@ for i in {1..30}; do
 done
 
 # claw_auth_db is a logical database inside the shared postgres container, created
-# by docker/init-db.sh — there is nothing extra to start, only to wait for.
+# by docker/init-db.sh (or by the fallback in section 6 when that script did not
+# run) — there is nothing extra to start, only to wait for. The check actually
+# opens a session as the claw role: pg_isready only probes the server and reports
+# success even when the role or the database is missing.
 echo -e "${BLUE}⏳ Waiting for claw_auth_db...${NC}"
 for i in {1..30}; do
-    if $COMPOSE_CMD -f "$COMPOSE_FILE" exec -T postgres pg_isready -U claw -d claw_auth_db > /dev/null 2>&1; then
+    if $COMPOSE_CMD -f "$COMPOSE_FILE" exec -T postgres \
+        psql --username "${CLAW_DB_USER:-claw}" --dbname claw_auth_db -tAc "SELECT 1" > /dev/null 2>&1; then
         echo -e "${GREEN}✓ claw_auth_db is ready${NC}"
         break
     fi
@@ -727,6 +774,22 @@ fi
 if ! grep -q "^SPACES_DB_URL=" apps/xyne-claw-auth/backend/.env 2>/dev/null; then
     echo 'SPACES_DB_URL=postgresql://xyne:xyne123@localhost:5433/xyne_dev_db' >> apps/xyne-claw-auth/backend/.env
     echo -e "${GREEN}  Added SPACES_DB_URL to apps/xyne-claw-auth/backend/.env${NC}"
+fi
+
+# Point claw-auth at fake-gcs. Left empty, its GCS client falls back to real GCS
+# through Application Default Credentials; a missing or expired ADC token makes
+# the session archive endpoints fail with "invalid_grant", and xyne-claw reads
+# that as "restore failed" and refuses to open the chat at all rather than fork a
+# session that may exist in the archive.
+if [ "$ENABLE_STORAGE" = "1" ] && [ -f "apps/xyne-claw-auth/backend/.env" ]; then
+    if grep -q "^FAKE_GCS_HOST=[[:space:]]*$" apps/xyne-claw-auth/backend/.env 2>/dev/null; then
+        sed -i.bak 's|^FAKE_GCS_HOST=[[:space:]]*$|FAKE_GCS_HOST=localhost:4443|' apps/xyne-claw-auth/backend/.env
+        rm -f apps/xyne-claw-auth/backend/.env.bak
+        echo -e "${GREEN}  Pointed claw-auth at fake-gcs (FAKE_GCS_HOST=localhost:4443)${NC}"
+    elif ! grep -q "^FAKE_GCS_HOST=" apps/xyne-claw-auth/backend/.env 2>/dev/null; then
+        echo 'FAKE_GCS_HOST=localhost:4443' >> apps/xyne-claw-auth/backend/.env
+        echo -e "${GREEN}  Added FAKE_GCS_HOST to apps/xyne-claw-auth/backend/.env${NC}"
+    fi
 fi
 
 if [ -f "apps/xyne-claw-auth/backend/.env" ]; then
