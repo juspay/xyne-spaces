@@ -10,8 +10,13 @@ export class MessageSearchRepository {
 
   /**
    * Insert or update a message in the search index
-   * 
+   *
    * SECURITY: Uses parameterized queries to prevent SQL injection
+   *
+   * NOTE: This is raw SQL, so it bypasses the ACL/tenant Prisma extensions — workspaceId
+   * must be passed explicitly and written into the row, or the NOT NULL constraint on
+   * message_search.workspaceId rejects every insert. On conflict the row's workspaceId is
+   * left untouched (a message never changes workspace).
    */
   async upsert(messageId: string, plaintextContent: string, workspaceId: string): Promise<void> {
     await this.db.$executeRawUnsafe(`

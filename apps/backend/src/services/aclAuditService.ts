@@ -32,6 +32,8 @@ export class ACLAuditService {
     try {
       const workspaceId = getContextOrNull()?.workspaceId;
       if (!workspaceId) {
+        // System/seed operations (e.g. seed-acl creating global resources) run with no tenant
+        // context. Audit logging is best-effort — skip it rather than fail the caller's write.
         logger.warn(`ACL audit skipped (no tenant context): ${eventType} - ${description}`);
         return null;
       }

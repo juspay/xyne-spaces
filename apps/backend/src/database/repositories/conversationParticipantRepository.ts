@@ -2,7 +2,7 @@ import { BaseRepository } from './base';
 import { ConversationParticipant, ConversationParticipation, Prisma } from '@prisma/client';
 import { QueryOptions } from '@/types/database';
 import { ThreadListCursor, ThreadListSection } from '@/utils/threadListCursor';
-import { ACLFactory } from '@/services/pythonQuery/acl';
+import { ACLFactory } from '@/database/acl';
 import { getContextOrNull } from '@/database/tenant/context';
 
 export interface ThreadListEntry {

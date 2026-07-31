@@ -16,7 +16,22 @@
 import { AsyncLocalStorage } from 'async_hooks';
 import type { Request, Response, NextFunction } from 'express';
 
-export type TenantCtx = { userId: string; workspaceId: string; system?: boolean };
+/**
+ * `system`      — cross-workspace/migration scope: bypasses BOTH stamping and read scoping.
+ * `serviceCall` — trusted service actor bound to ONE workspace (workers/webhooks that impersonate
+ *                 a synthetic userId for attribution). Reads are workspace-scoped like a normal
+ *                 tenant, but the per-table user-ACL is skipped — the synthetic userId is not a
+ *                 real participant, so relational ACLs would otherwise wrongly return nothing.
+ */
+export type TenantCtx = {
+  userId: string;
+  workspaceId: string;
+  role?: string;
+  orgRole?: string;
+  memberId?: string;
+  system?: boolean;
+  serviceCall?: boolean;
+};
 
 type CtxSource = { kind: 'explicit'; ctx: TenantCtx } | { kind: 'request'; req: Request };
 
@@ -27,7 +42,13 @@ function resolve(source: CtxSource | undefined): TenantCtx | null {
   if (source.kind === 'explicit') return source.ctx;
   const user = source.req.user;
   if (!user?.id || !user?.workspaceId) return null;
-  return { userId: user.id, workspaceId: user.workspaceId };
+  return {
+    userId: user.id,
+    workspaceId: user.workspaceId,
+    role: user.role,
+    orgRole: user.orgRole,
+    memberId: user.memberId,
+  };
 }
 
 /** Read the current tenant context, or null when none is open / resolvable. */

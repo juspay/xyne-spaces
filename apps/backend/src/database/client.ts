@@ -3,7 +3,7 @@ import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
 import { setupUserSessionLogging } from './middleware/userSessionLogging';
 import { setupMessageMetadataSync } from './middleware/messageMetadataSync';
-import { withWorkspaceReadFilter } from './tenant/read-filter';
+import { withAclExtension } from './tenant/acl-extension';
 import { withWorkspaceStamp } from './tenant/stamp';
 import { setupTicketActivityChannelSync } from './middleware/ticketActivityChannelSync';
 import { setupTicketCreatedActivity } from './middleware/ticketCreatedActivity';
@@ -30,9 +30,9 @@ export class DatabaseClient {
           },
         },
       });
-      // Scope reads to the caller's workspace (defense-in-depth read filter).
-      // Stamp workspaceId onto every INSERT + nested create from tenant context.
-      DatabaseClient.wrappedReplicaInstance = withWorkspaceStamp(withWorkspaceReadFilter(DatabaseClient.readReplicaInstance));
+      // ACL-scope reads and authorize writes per the current tenant context.
+      // Stamp workspaceId onto INSERT + nested creates from tenant context.
+      DatabaseClient.wrappedReplicaInstance = withWorkspaceStamp(withAclExtension(DatabaseClient.readReplicaInstance));
     }
     return DatabaseClient.wrappedReplicaInstance ?? DatabaseClient.readReplicaInstance;
   }
@@ -76,9 +76,9 @@ export class DatabaseClient {
         logger.warn('Database warning:', e.message);
       });
 
-      // Scope reads to the caller's workspace (defense-in-depth read filter).
-      // Stamp workspaceId onto every INSERT + nested create from tenant context.
-      DatabaseClient.wrappedInstance = withWorkspaceStamp(withWorkspaceReadFilter(DatabaseClient.instance));
+      // ACL-scope reads and authorize writes per the current tenant context.
+      // Stamp workspaceId onto INSERT + nested creates from tenant context.
+      DatabaseClient.wrappedInstance = withWorkspaceStamp(withAclExtension(DatabaseClient.instance));
     }
 
     return DatabaseClient.wrappedInstance ?? DatabaseClient.instance;

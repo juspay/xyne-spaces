@@ -131,7 +131,7 @@ import ysweetRoutes from '@/routes/ysweet';
 import canvasRoutes from '@/routes/canvas';
 import internalCanvasRoutes from '@/routes/internalCanvas';
 import { dashboardRouter, dashboardCrudRouter } from '@/routes/dashboard';
-import pythonQueryRoutes from '@/routes/pythonQuery';
+import prismaQueryRoutes from '@/routes/prismaQuery';
 import formsRoutes from '@/routes/forms';
 import unifiedBotRoutes from '@/routes/unifiedBotRoutes';
 import emailRoutes from '@/routes/email';
@@ -336,8 +336,8 @@ export class App {
     this.app.use('/api/automation-webhooks', webhookLimiter, automationWebhookRoutes);
 
     // Claw MCP route (user + app auth) — must be before /api/query
-    this.app.use('/api/query/claw', authenticateUserOrApp, pythonQueryRoutes);
-    this.app.use('/api/query', authMiddleware.authenticate, pythonQueryRoutes);
+    this.app.use('/api/query/claw', authenticateUserOrApp, prismaQueryRoutes);
+    this.app.use('/api/query', authMiddleware.authenticate, prismaQueryRoutes);
 
     // Commit analysis routes (auth and ACL required)
     this.app.use('/api/commits/analyze', authMiddleware.authenticate, commitAnalysisRoutes);
