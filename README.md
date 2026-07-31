@@ -218,7 +218,6 @@ records in PostgreSQL, indexed into Vespa, behind the same ACLs as everything el
 | **Microsoft 365** | Live sync | Mail and calendar |
 | **Jira** | Migration | Projects, issues and history |
 | **Confluence** | Migration | Spaces, page trees and attachments |
-| **Zoho · Ozonetel · WhatsApp** | Live sync / migration | Support desk and telephony conversations |
 
 The pipeline is platform-agnostic: each connector is an adapter — resolve, authenticate,
 transform, sync — and everything after it is shared. Adding a platform means writing an
