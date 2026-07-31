@@ -89,6 +89,12 @@ export interface HoverActionsToolbarProps {
   onRunShortcut?: (shortcut: AppShortcutWithApp) => void;
   /** Called when user clicks “Show all shortcuts” */
   onShowAllShortcuts?: () => void;
+  /**
+   * Vertical placement relative to the hovered row. Defaults to 'above', which
+   * lifts the bar clear of the row. Set from ChatBubble's registered actions;
+   * only the thread parent passes 'below'.
+   */
+  placement?: 'above' | 'below';
 }
 
 export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
@@ -123,6 +129,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
   messageShortcuts,
   onRunShortcut,
   onShowAllShortcuts,
+  placement = 'above',
 }) => {
   const { toggleReaction } = useReactions();
   const { user } = useAuth();
@@ -165,7 +172,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
   return (
     <div
       key={`hover-actions-toolbar-${messageId}`}
-      className='absolute -top-7 right-4 z-50 p-1 flex items-center gap-1 rounded-lg border border-border bg-popover shadow-md'
+      className={`absolute ${placement === 'below' ? 'top-1' : '-top-7'} right-4 z-50 p-1 flex items-center gap-1 rounded-lg border border-border bg-popover shadow-md`}
     >
       {/* Emojis */}
       {onEmojiPickerOpenChange && (

@@ -1,6 +1,7 @@
 import { Component, ReactNode, ReactElement } from 'react';
-import { useRouteError } from 'react-router-dom';
+import { isRouteErrorResponse, useRouteError } from 'react-router-dom';
 import { logger, Event } from '../../utils/logger';
+import NotFoundScreen from '../../routes/NotFoundScreen/NotFoundScreen';
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -100,6 +101,10 @@ export const ErrorFallback = ({ error, errorInfo }: ErrorFallbackProps): ReactEl
 
 export const RouterErrorFallback = (): ReactElement => {
   const error = useRouteError();
+  // A missing page isn't a crash — no stack trace, no "something went wrong".
+  if (isRouteErrorResponse(error) && error.status === 404) {
+    return <NotFoundScreen />;
+  }
   return <ErrorUI error={error} errorInfo={null} />;
 };
 export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {

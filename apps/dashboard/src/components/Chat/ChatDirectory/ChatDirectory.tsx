@@ -481,7 +481,7 @@ const ChatDirectory = ({
       <div className='w-full h-[52px] shrink-0'>
         <AppNavigator />
       </div>
-      <div className='flex-1 min-h-0 px-3 pt-3 pb-12 sm:pb-0 flex flex-col border-t border-border'>
+      <div className='flex-1 min-h-0 px-3 pt-3 pb-12 sm:pb-0 flex flex-col border-t border-sidebar-border-muted'>
         <div className='block sm:hidden -mx-2 px-2 bg-background/70 backdrop-blur-md rounded-b-3xl border-b border-black/10'>
           <div className='px-2 pt-2 pb-3 flex items-center justify-between'>
             <div className='flex items-center gap-2'>

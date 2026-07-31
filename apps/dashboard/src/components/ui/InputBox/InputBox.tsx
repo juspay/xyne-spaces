@@ -1417,8 +1417,14 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           <div
             className={`
             overflow-hidden transition-all flex flex-col relative
-            ${isMobile ? 'bg-muted rounded-[26px] text-foreground shadow-sm' : 'bg-card rounded-2xl border text-foreground shadow-none'}
-            ${!isMobile && isFocused ? 'border-ring' : !isMobile ? 'border-input' : ''}
+            ${isMobile ? 'bg-background rounded-[26px] text-foreground shadow-sm' : 'bg-background rounded-2xl border text-foreground shadow-none'}
+            ${
+              !isMobile && isFocused
+                ? 'border-chat-composer-border-active'
+                : !isMobile
+                  ? 'border-chat-composer-border'
+                  : ''
+            }
             ${isSending ? 'opacity-60 pointer-events-none' : ''}
           `}
           >

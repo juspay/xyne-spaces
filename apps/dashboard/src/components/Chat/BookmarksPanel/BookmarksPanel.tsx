@@ -267,7 +267,7 @@ const BookmarksPanel = (): ReactElement => {
       <div className='w-full h-[52px] shrink-0'>
         <AppNavigator />
       </div>
-      <div className='flex-1 min-h-0 flex flex-col overflow-hidden border-t border-border'>
+      <div className='flex-1 min-h-0 flex flex-col overflow-hidden border-t border-sidebar-border-muted'>
         {/* Header */}
         <div className='relative px-4 pt-3'>
           <div className='flex items-center gap-2 mb-3 h-10'>

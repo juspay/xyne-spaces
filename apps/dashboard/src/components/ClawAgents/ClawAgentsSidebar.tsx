@@ -50,7 +50,7 @@ const ClawAgentsSidebar = (): ReactElement => {
       <div className='w-full h-[52px] shrink-0'>
         <AppNavigator />
       </div>
-      <div className='flex-1 min-h-0 px-3 pt-3 pb-12 sm:pb-0 flex flex-col border-t border-border'>
+      <div className='flex-1 min-h-0 px-3 pt-3 pb-12 sm:pb-0 flex flex-col border-t border-sidebar-border-muted'>
         <div className='hidden sm:flex pt-2 pb-3 px-2 h-10 items-center justify-between mb-2'>
           <h2 className='text-base font-semibold leading-normal text-sidebar-accent-foreground'>
             Agent Hub
@@ -68,7 +68,7 @@ const ClawAgentsSidebar = (): ReactElement => {
                 aria-current={isActive ? 'page' : undefined}
                 data-testid={`claw-agents-nav-${label.toLowerCase()}`}
                 className={cn(
-                  'flex items-center justify-start gap-3 w-full px-3 py-2 text-sm font-medium tracking-[-0.14px] rounded-[10px] border border-transparent transition-colors hover:bg-sidebar-accent hover:border-sidebar-border',
+                  'flex items-center justify-start gap-3 w-full px-3 py-2 text-sm font-medium tracking-[-0.14px] rounded-[10px] border border-transparent transition-colors hover:bg-sidebar-accent',
                   isActive
                     ? 'text-sidebar-accent-foreground font-medium bg-sidebar-accent'
                     : 'text-sidebar-foreground hover:text-sidebar-accent-foreground',

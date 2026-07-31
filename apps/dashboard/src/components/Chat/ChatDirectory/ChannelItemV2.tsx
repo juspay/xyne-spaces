@@ -182,10 +182,10 @@ const ChannelItemV2 = memo(
       >
         <div
           className={cn(
-            'flex items-center gap-3 h-9 group rounded-[10px] px-3 border border-transparent transition-colors',
+            'flex items-center gap-3 h-9 mt-px group rounded-[10px] px-3 border border-transparent transition-colors',
             isActive
               ? 'text-sidebar-accent-foreground font-medium bg-sidebar-accent border-sidebar-border'
-              : 'text-sidebar-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent hover:border-sidebar-border',
+              : 'text-sidebar-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent',
             shouldShowBold && !isActive && '!font-semibold text-sidebar-accent-foreground',
           )}
           style={shouldShowBold && !isActive ? { fontWeight: '700' } : undefined}

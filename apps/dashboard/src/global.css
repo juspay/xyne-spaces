@@ -54,9 +54,10 @@
     --sidebar-foreground: #232229cc;
     --sidebar-primary: #fd6b6b;
     --sidebar-primary-foreground: #ffffff;
-    --sidebar-accent: #f7f9f6;
+    --sidebar-accent: #ffffff;
     --sidebar-accent-foreground: #181b1d;
-    --sidebar-border: #e5ebf0;
+    --sidebar-border: rgba(35 34 41 / 0.16);
+    --sidebar-border-muted: rgba(35, 34, 41, 0.06);
     --sidebar-accent-ring: #fd6b6b66;
     --action-primary: #57ab02;
     --action-accent: 90 98% 34%;
@@ -139,8 +140,9 @@
     --claw-ai-solid-hover: #6d28d9;
 
     --activity-sidebar-primary: hsl(0 0% 100% / 0.5);
-    --activity-sidebar-accent: #ffffff;
-    --activity-sidebar-border: rgba(35 34 41 / 0.16);
+
+    --chat-composer-border: rgba(35, 34, 41, 0.06);
+    --chat-composer-border-active: rgba(35, 34, 41, 0.2);
   }
 
   /* Classic theme - default theme with current design */
@@ -179,9 +181,10 @@
     --sidebar-foreground: #232229cc;
     --sidebar-primary: #fd6b6b;
     --sidebar-primary-foreground: #ffffff;
-    --sidebar-accent: #f7f9f6;
+    --sidebar-accent: #ffffff;
     --sidebar-accent-foreground: #181b1d;
-    --sidebar-border: #e5ebf0;
+    --sidebar-border: rgba(35 34 41 / 0.16);
+    --sidebar-border-muted: rgba(35, 34, 41, 0.06);
     --sidebar-accent-ring: #fd6b6b66;
     --action-primary: #6e7aa6;
     --action-accent: 225 24% 54%;
@@ -256,8 +259,9 @@
     --claw-ai-solid-hover: #6d28d9;
 
     --activity-sidebar-primary: hsl(0 0% 100% / 0.5);
-    --activity-sidebar-accent: #ffffff;
-    --activity-sidebar-border: rgba(35 34 41 / 0.15);
+
+    --chat-composer-border: rgba(35, 34, 41, 0.06);
+    --chat-composer-border-active: rgba(35, 34, 41, 0.2);
   }
 
   /* Midnight theme - dark theme variant */
@@ -300,9 +304,10 @@
     --sidebar-foreground: rgba(255, 255, 255, 0.6);
     --sidebar-primary: #fd6b6b;
     --sidebar-primary-foreground: #ffffff;
-    --sidebar-accent: rgba(255, 255, 255, 0.12);
+    --sidebar-accent: #2d2e34;
     --sidebar-accent-foreground: #ffffff;
-    --sidebar-border: #36373f; /* same as --border */
+    --sidebar-border: rgba(255, 255, 255, 0.2);
+    --sidebar-border-muted: rgba(255, 255, 255, 0.04);
     --sidebar-accent-ring: #fd6b6b66;
     --action-primary: #0073bf;
     --action-accent: 204 100% 37%;
@@ -387,8 +392,9 @@
     --claw-ai-solid-hover: #8b5cf6;
 
     --activity-sidebar-primary: rgba(45, 46, 52, 0.5);
-    --activity-sidebar-accent: #2d2e34;
-    --activity-sidebar-border: rgba(255, 255, 255, 0.2);
+
+    --chat-composer-border: rgba(255, 255, 255, 0.06);
+    --chat-composer-border-active: rgba(255, 255, 255, 0.2);
   }
 }
 
@@ -3825,6 +3831,19 @@ img.inline-emoji,
 /* Hide the decorative sky background on the AI landing page in midnight (dark) mode */
 [data-theme="midnight"] .ai-landing-bg {
   display: none;
+}
+
+/* 404 illustration. A background rather than an <img> so the container stays free
+   to hold markup (e.g. the 404 numerals as HTML) layered over the artwork. */
+.not-found-illustration {
+  background-image: url("/images/404-light.png");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+}
+
+[data-theme="midnight"] .not-found-illustration {
+  background-image: url("/images/404-dark.png");
 }
 
 /* AI page background — soft neutral for light themes, near-black for midnight */
