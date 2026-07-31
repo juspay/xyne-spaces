@@ -320,12 +320,16 @@ type LooseBlock = {
 // defaults. ServerBlockNoteEditor.create() only knows the default schema, so any
 // of these custom inline nodes make blocksToMarkdownLossy throw
 // "node type <x> not found in schema". We rewrite them to plain text first.
-const CUSTOM_INLINE_TYPES = new Set(['mention']);
+const CUSTOM_INLINE_TYPES = new Set(['mention', 'citation']);
 
 // Render a custom inline node as plain text, mirroring the frontend display
 // logic (CanvasMentionSpec: prefer the group name for group mentions, otherwise
 // the username).
 function customInlineToText(inline: LooseInline): string {
+  // Citation chips are annotations that point at a transcript segment; in a
+  // plain-text/markdown export (or Vespa index text) they carry no useful prose
+  // — the cited words already live in the transcript — so drop them to empty.
+  if (inline.type === 'citation') return '';
   const props = inline.props || {};
   const groupId = props['groupId'] as string | undefined;
   const groupName = props['groupName'] as string | undefined;

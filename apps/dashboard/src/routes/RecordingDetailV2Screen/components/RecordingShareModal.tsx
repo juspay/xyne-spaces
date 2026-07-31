@@ -39,9 +39,7 @@ const GRANTABLE_ACCESS_LEVELS = [
   EntityUserAccess.ADMIN,
 ] as const;
 
-export const RecordingShareModal: React.FC<RecordingShareModalProps> = ({
-  recording,
-}) => {
+export const RecordingShareModal: React.FC<RecordingShareModalProps> = ({ recording }) => {
   const zero = useZero();
   const { user: currentUser } = useAuth();
   const activeUsers = useActiveUsers();
@@ -135,7 +133,9 @@ export const RecordingShareModal: React.FC<RecordingShareModalProps> = ({
       }
       if (failures < targetUserIds.length) {
         toast.success(
-          targetUserIds.length === 1 ? 'Recording shared' : `Shared with ${targetUserIds.length} people`,
+          targetUserIds.length === 1
+            ? 'Recording shared'
+            : `Shared with ${targetUserIds.length} people`,
         );
       }
       setSelectedValues([]);
@@ -145,7 +145,10 @@ export const RecordingShareModal: React.FC<RecordingShareModalProps> = ({
     }
   };
 
-  const handleAccessChange = async (targetUserId: string, entityUserAccess: EntityUserAccess): Promise<void> => {
+  const handleAccessChange = async (
+    targetUserId: string,
+    entityUserAccess: EntityUserAccess,
+  ): Promise<void> => {
     const result = zero.mutate(
       mutators.calls.updateRecordingShare({
         callId: recording.externalId,
@@ -222,7 +225,10 @@ export const RecordingShareModal: React.FC<RecordingShareModalProps> = ({
                     </DropdownMenuItem>
                   ))}
                   <DropdownMenuItem
-                    onSelect={() => share.userId && void handleAccessChange(share.userId, EntityUserAccess.REVOKED)}
+                    onSelect={() =>
+                      share.userId &&
+                      void handleAccessChange(share.userId, EntityUserAccess.REVOKED)
+                    }
                   >
                     Remove access
                   </DropdownMenuItem>

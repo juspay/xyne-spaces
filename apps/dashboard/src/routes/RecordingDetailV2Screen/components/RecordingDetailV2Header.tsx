@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import * as Popover from '@radix-ui/react-popover';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
-import { LinkChainSlant, CalendarEvent, Tag, Share02, Spinner, UturnLeft } from '@xyne/icons';
+import { LinkChainSlant, CalendarEvent, Tag, Share02, Spinner, UturnLeft, } from '@xyne/icons';
 import { Button } from '../../../components/ui/Button/Button';
 import { Dialog } from '../../../components/ui/Dialog';
 import { Tooltip } from '../../../components/ui/Tooltip';

@@ -1,9 +1,10 @@
 import { BlockNoteSchema, defaultBlockSpecs, defaultInlineContentSpecs } from '@blocknote/core';
 import { whiteboardBlockSpecs } from 'blocknote-layout-extensions';
 import { mentionInlineContentSpec } from './CanvasMentionSpec';
+import { citationInlineContentSpec } from './CanvasCitationSpec';
 import { knownBlockTypesOf } from '../../utils/canvasUtils';
 
-// Default blocks + whiteboard, then extended with mention inline content.
+// Default blocks + whiteboard, then extended with mention and citation inline content.
 // Shared by the canvas editors and the read-only previews: a preview built on a
 // different schema silently drops blocks the editor can render, so the two must
 // come from one place.
@@ -15,6 +16,7 @@ function createCanvasSchema() {
     inlineContentSpecs: {
       ...defaultInlineContentSpecs,
       mention: mentionInlineContentSpec,
+      citation: citationInlineContentSpec,
     },
   });
 }

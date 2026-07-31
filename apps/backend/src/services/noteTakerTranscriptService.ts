@@ -5,7 +5,7 @@ import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
 import { acquireLock, releaseLock } from '@/utils/distributedLock';
 import { transcriptService, type TranscriptEntry, type MarkedItem } from '@/services/transcriptService';
-import { callDocumentService } from '@/services/callDocumentService';
+import { callDocumentService, numberTranscriptSegments, type CitationContext } from '@/services/callDocumentService';
 import { formatSummaryTemplateSections } from '@/services/summaryTemplateSelection';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { tagService, TagServiceError } from '@/tags/service';
@@ -269,7 +269,11 @@ class NoteTakerTranscriptService {
   private async generateAndSaveSummary(call: Call, formattedTranscript: string): Promise<void> {
     const callId = call.externalId;
 
-    const summary = await transcriptService.generateCallSummary(formattedTranscript, callId).catch((err) => {
+    // Number the transcript so the LLM can cite segments with [clf-N] tokens.
+    // The tokens stay inline in the stored aiSummary and are parsed client-side.
+    const { numbered: numberedTranscript } = numberTranscriptSegments(formattedTranscript);
+
+    const summary = await transcriptService.generateCallSummary(numberedTranscript, callId).catch((err) => {
       logger.error(`[${callId}] generate_summary_threw`, {
         path: 'note_taker',
         error: err,
@@ -320,6 +324,16 @@ class NoteTakerTranscriptService {
     }
 
     try {
+      // Number the transcript segments so the LLM can cite them, and build the
+      // token→segment map used to turn `[clf-n]` tokens into canvas citation chips.
+      // Note-taker calls have no channel, so speaker→userId resolution is skipped
+      // (the frontend falls back to initials for unknown speakers).
+      const { numbered: numberedTranscript, segments } = numberTranscriptSegments(formattedTranscript);
+      const citationCtx: CitationContext = {
+        callId,
+        segments: new Map(segments.map(s => [s.n, s])),
+      };
+
       const selectedTemplate = await callDocumentService.selectSummaryTemplateForTranscript(
         formattedTranscript,
         call.workspaceId,
@@ -330,7 +344,7 @@ class NoteTakerTranscriptService {
         : undefined;
 
       const detailedSummaryMarkdown = await callDocumentService.generateDetailedSummary(
-        formattedTranscript,
+        numberedTranscript,
         callId,
         undefined,
         summaryFields || undefined,
@@ -356,6 +370,7 @@ class NoteTakerTranscriptService {
         call.startedAt,
         call.createdByUserId,
         call.title,
+        citationCtx,
         call.workspaceId,
       );
       if (!canvasId) {

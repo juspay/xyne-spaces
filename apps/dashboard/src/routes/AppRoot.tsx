@@ -180,6 +180,7 @@ import { AttachmentGalleryModal } from '../components/FileViewer/FileViewerModal
 import { CreateTicketWindow } from '../components/Tickets/CreateTicketModal/CreateTicketWindow';
 import { AttachmentCitationPreview } from '../components/FileViewer/AttachmentCitationPreview';
 import { ThreadCitationModal } from '../components/xyne-desk/ThreadCitationModal/ThreadCitationModal';
+import { TranscriptCitationModal } from '../components/Chat/TranscriptCitationModal';
 import { sharedChatRoutes } from './SharedChatRoutes';
 import { ResourceAccessScreen } from './ResourceAccessScreen/ResourceAccessScreen';
 import { RoleManagementScreen } from './RoleManagementScreen';
@@ -715,6 +716,7 @@ const AppRoot = (): ReactElement => {
                 )}
                 <AttachmentGalleryModal />
                 <ThreadCitationModal />
+                <TranscriptCitationModal />
                 <AttachmentCitationPreview />
                 <ErrorReportModal
                   isOpen={isErrorReportOpen}
@@ -1467,6 +1469,7 @@ export const router = createBrowserRouter([
                   <AttachmentGalleryModal />
                   <AttachmentCitationPreview />
                   <ThreadCitationModal />
+                  <TranscriptCitationModal />
                 </EditProvider>
               </InitialStateLoader>
             </ZeroFallbackProvider>
