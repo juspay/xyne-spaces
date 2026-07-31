@@ -1,4 +1,4 @@
-import type { DeskMetricsResponse } from '@xyne/shared';
+import type { DeskMetricsAggregateResponse, DeskMetricsResponse } from '@xyne/shared';
 import { apiInstance } from './clients/apiClient';
 
 export type PerKeyFilter = { values?: string[]; textTerms?: string[] };
@@ -21,6 +21,33 @@ export async function getDeskMetrics(
       params['customFieldPerKeyFilters'] = JSON.stringify(customFieldFilter.perKeyFilters);
   }
   const { data } = await apiInstance.get<DeskMetricsResponse>(`/channels/${channelId}/metrics`, {
+    params,
+  });
+  return data;
+}
+
+/**
+ * Combined metrics across several desks. Same payload shape as the single-desk
+ * call plus `perDesk` and `skipped`, so callers can render one dashboard for
+ * any number of desks.
+ */
+export async function getAggregateDeskMetrics(
+  channelIds: string[],
+  timeRange: string,
+  assigneeId?: string | null,
+  customFieldFilter?: CustomFieldFilter,
+): Promise<DeskMetricsAggregateResponse> {
+  const params: Record<string, string> = {
+    timeRange,
+    channelIds: channelIds.join(','),
+  };
+  if (assigneeId) params['assigneeId'] = assigneeId;
+  if (customFieldFilter && customFieldFilter.keys.length > 0) {
+    params['customFieldKeys'] = JSON.stringify(customFieldFilter.keys);
+    if (customFieldFilter.perKeyFilters)
+      params['customFieldPerKeyFilters'] = JSON.stringify(customFieldFilter.perKeyFilters);
+  }
+  const { data } = await apiInstance.get<DeskMetricsAggregateResponse>('/desk-metrics/aggregate', {
     params,
   });
   return data;

@@ -1,6 +1,6 @@
 import { Prisma, TicketStatusV2 } from '@prisma/client';
 import { DatabaseClient, readReplicaDb } from '../client';
-import { DeskMetricsResponse, DeskMetricsTicketRow } from '@xyne/shared';
+import { DeskMetricsAgentRow, DeskMetricsResponse, DeskMetricsTicketRow } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 
 /**
@@ -102,6 +102,27 @@ export class DeskMetricsRepository {
       (SELECT MAX(ta."timestamp") FROM "public"."ticket_activities" ta
         WHERE ta."ticketId" = c."ticketId" AND ${resolvedPredicate})`;
 
+    // Distinct-ticket reopen flag for the agent cohort. A reopen is specifically
+    // a COMPLETED ticket returning to an active status; moving to CANCELLED is
+    // terminal and must not be counted.
+    const reopenedPredicate = Prisma.sql`(
+      ta."activityType" = 'STATUS'
+      AND ta.value->>'field' = 'statusV2'
+      AND ta.value->>'oldValue' = ${TicketStatusV2.COMPLETED}
+      AND ta.value->>'newValue' IN (${Prisma.join([
+        TicketStatusV2.TODO,
+        TicketStatusV2.STARTED,
+        TicketStatusV2.PAUSED,
+      ])})
+    )`;
+    const reopenedSql = Prisma.sql`EXISTS (
+      SELECT 1
+      FROM "public"."ticket_activities" ta
+      WHERE ta."ticketId" = c."ticketId"
+        AND ta."timestamp" >= ${gte} AND ta."timestamp" <= ${lte}
+        AND ${reopenedPredicate}
+    )`;
+
     // Cohort: tickets created in range. Optionally filtered by assignee and/or custom field.
     const assigneeJoin = assigneeId
       ? Prisma.sql`JOIN "public"."tickets" tf ON tf.id = ta."ticketId" AND tf."assignedTo" = ${assigneeId}`
@@ -156,7 +177,7 @@ export class DeskMetricsRepository {
       )`;
 
     const frtStop = frtStopSql();
-    const [aggregates, tickets, emailRepliesInRange, stageCounts, priority, csat, trend] =
+    const [aggregates, tickets, emailRepliesInRange, stageCounts, priority, csat, trend, agents] =
       await Promise.all([
         this.frtRtAggregates(db, cohortCte, frtStop, resolvedAtSql),
         this.ticketRows(db, cohortCte, frtStop, resolvedAtSql),
@@ -165,6 +186,18 @@ export class DeskMetricsRepository {
         this.priorityBreakdown(db, cohortCte),
         this.csatStats(db, channelId, gte, lte, assigneeId, customFieldExists),
         this.trendByDay(db, channelId, gte, lte, resolvedPredicate, assigneeId, customFieldExists),
+        this.agentPerformance(
+          db,
+          cohortCte,
+          frtStop,
+          resolvedAtSql,
+          reopenedSql,
+          channelId,
+          gte,
+          lte,
+          assigneeId,
+          customFieldExists,
+        ),
       ]);
 
     return {
@@ -180,6 +213,7 @@ export class DeskMetricsRepository {
       priority,
       trend,
       tickets,
+      agents,
     };
   }
 
@@ -347,6 +381,198 @@ export class DeskMetricsRepository {
     });
   }
 
+  /**
+   * Per-agent leaderboard. Two attributions, deliberately mixed (see
+   * DeskMetricsAgentRow docs):
+   *  - ownership: cohort tickets grouped by tickets."assignedTo"
+   *  - actor:     EMAIL_SENT grouped by ticket_activities."updatedBy"
+   * FRT/RT reuse the caller's frtStop/resolvedAt SQL verbatim so a row here can
+   * never disagree with the headline FRT/RT cards.
+   * Agents who only ever replied (own no cohort ticket) still get a row, so a
+   * shared desk does not silently drop their work.
+   */
+  private async agentPerformance(
+    db: ReturnType<DeskMetricsRepository['getDbInstance']>,
+    cohortCte: Prisma.Sql,
+    frtStopSql: Prisma.Sql,
+    resolvedAtSql: Prisma.Sql,
+    reopenedSql: Prisma.Sql,
+    channelId: string,
+    gte: Date,
+    lte: Date,
+    assigneeId?: string | null,
+    customFieldExists: Prisma.Sql = Prisma.sql``,
+  ): Promise<DeskMetricsAgentRow[]> {
+    // Ownership-attributed metrics use the assignee-filtered cohort above.
+    // Replies are actor-attributed, so selecting an agent must filter on the
+    // person who sent the reply rather than the ticket's current owner.
+    const replyActorFilter = assigneeId
+      ? Prisma.sql`AND ta."updatedBy" = ${assigneeId}`
+      : Prisma.sql``;
+
+    const [ownershipRows, replyRows, stageRows] = await Promise.all([
+      db.$queryRaw<
+        Array<{
+          assignee_id: string | null;
+          assignee_name: string | null;
+          assigned: number;
+          responded: number;
+          avg_frt: number | null;
+          resolved: number;
+          reopened: number;
+          avg_rt: number | null;
+          csat_avg: number | null;
+          csat_scored: number;
+          csat_good: number;
+          csat_bad: number;
+        }>
+      >(
+        Prisma.sql`
+          WITH ${cohortCte},
+          latest_csat AS (
+            SELECT DISTINCT ON (ta."ticketId")
+              ta."ticketId" AS ticket_id,
+              NULLIF(ta.value->>'score', '')::numeric AS score,
+              ta.value->>'rating' AS rating
+            FROM "public"."ticket_activities" ta
+            WHERE ta."ticketId" IN (SELECT "ticketId" FROM cohort)
+              AND ta."activityType" = 'CSAT_RECEIVED'
+            ORDER BY ta."ticketId", ta."timestamp" DESC
+          ),
+          per_ticket AS (
+            SELECT
+              t."assignedTo" AS assignee_id,
+              COALESCE(u."displayName", u.name) AS assignee_name,
+              c.created_at,
+              ${frtStopSql} AS stop_at,
+              ${resolvedAtSql} AS resolved_at,
+              ${reopenedSql} AS reopened,
+              lc.score AS csat_score,
+              lc.rating AS csat_rating
+            FROM cohort c
+            JOIN "public"."tickets" t ON t.id = c."ticketId"
+            LEFT JOIN "public"."users" u ON u.id = t."assignedTo"
+            LEFT JOIN latest_csat lc ON lc.ticket_id = c."ticketId"
+          )
+          SELECT
+            assignee_id,
+            assignee_name,
+            COUNT(*)::int AS assigned,
+            COUNT(*) FILTER (WHERE stop_at IS NOT NULL AND stop_at >= created_at)::int AS responded,
+            AVG(EXTRACT(EPOCH FROM (stop_at - created_at)))
+              FILTER (WHERE stop_at IS NOT NULL AND stop_at >= created_at)::float AS avg_frt,
+            COUNT(*) FILTER (WHERE resolved_at IS NOT NULL AND resolved_at >= created_at)::int AS resolved,
+            COUNT(*) FILTER (WHERE reopened)::int AS reopened,
+            AVG(EXTRACT(EPOCH FROM (resolved_at - created_at)))
+              FILTER (WHERE resolved_at IS NOT NULL AND resolved_at >= created_at)::float AS avg_rt,
+            AVG(csat_score)::float AS csat_avg,
+            COUNT(csat_score)::int AS csat_scored,
+            COUNT(*) FILTER (WHERE csat_rating = 'GOOD')::int AS csat_good,
+            COUNT(*) FILTER (WHERE csat_rating = 'BAD')::int AS csat_bad
+          FROM per_ticket
+          GROUP BY assignee_id, assignee_name
+        `,
+      ),
+      db.$queryRaw<Array<{ user_id: string; user_name: string | null; replies: number }>>(
+        Prisma.sql`
+          SELECT
+            ta."updatedBy" AS user_id,
+            COALESCE(u."displayName", u.name) AS user_name,
+            COUNT(*)::int AS replies
+          FROM "public"."ticket_activities" ta
+          LEFT JOIN "public"."users" u ON u.id = ta."updatedBy"
+          WHERE ta."channelId" = ${channelId}
+            AND ta."activityType" = 'EMAIL_SENT'
+            AND ta."timestamp" >= ${gte} AND ta."timestamp" <= ${lte}
+            ${replyActorFilter}
+            ${customFieldExists}
+          GROUP BY ta."updatedBy", COALESCE(u."displayName", u.name)
+        `,
+      ),
+      db.$queryRaw<Array<{ assignee_id: string | null; stage_name: string; count: number }>>(
+        Prisma.sql`
+          WITH ${cohortCte}
+          SELECT
+            t."assignedTo" AS assignee_id,
+            COALESCE(t."stageName", 'Unassigned') AS stage_name,
+            COUNT(*)::int AS count
+          FROM cohort c
+          JOIN "public"."tickets" t ON t.id = c."ticketId"
+          WHERE t."isArchived" = false
+          GROUP BY t."assignedTo", t."stageName"
+        `,
+      ),
+    ]);
+
+    const UNASSIGNED = '__unassigned__';
+    const stageCountsByAgent = new Map<string, Array<{ stageName: string; count: number }>>();
+    for (const row of stageRows) {
+      const key = row.assignee_id ?? UNASSIGNED;
+      const counts = stageCountsByAgent.get(key) ?? [];
+      counts.push({ stageName: row.stage_name, count: row.count });
+      stageCountsByAgent.set(key, counts);
+    }
+    for (const counts of stageCountsByAgent.values()) {
+      counts.sort((a, b) => b.count - a.count || a.stageName.localeCompare(b.stageName));
+    }
+
+    const byAgent = new Map<string, DeskMetricsAgentRow>();
+    for (const r of ownershipRows) {
+      const key = r.assignee_id ?? UNASSIGNED;
+      byAgent.set(key, {
+        assigneeId: r.assignee_id,
+        assigneeName: r.assignee_name,
+        assigned: r.assigned,
+        stageCounts: stageCountsByAgent.get(key) ?? [],
+        responded: r.responded,
+        resolved: r.resolved,
+        reopened: r.reopened,
+        avgFrtSeconds: r.avg_frt,
+        avgRtSeconds: r.avg_rt,
+        csatAvgScore: r.csat_avg,
+        csatScoredResponses: r.csat_scored,
+        csatGood: r.csat_good,
+        csatBad: r.csat_bad,
+        emailReplies: 0,
+      });
+    }
+    for (const r of replyRows) {
+      const existing = byAgent.get(r.user_id);
+      if (existing) {
+        existing.emailReplies = r.replies;
+        continue;
+      }
+      // Replied but owns none of the cohort — surface as a zero-ownership row.
+      byAgent.set(r.user_id, {
+        assigneeId: r.user_id,
+        assigneeName: r.user_name,
+        assigned: 0,
+        stageCounts: [],
+        responded: 0,
+        resolved: 0,
+        reopened: 0,
+        avgFrtSeconds: null,
+        avgRtSeconds: null,
+        csatAvgScore: null,
+        csatScoredResponses: 0,
+        csatGood: 0,
+        csatBad: 0,
+        emailReplies: r.replies,
+      });
+    }
+
+    // Defensive final filter; the reply query is already actor-filtered.
+    const rows = [...byAgent.values()].filter(a => !assigneeId || a.assigneeId === assigneeId);
+    rows.sort(
+      (a, b) =>
+        b.assigned - a.assigned ||
+        b.resolved - a.resolved ||
+        b.emailReplies - a.emailReplies ||
+        (a.assigneeName ?? '').localeCompare(b.assigneeName ?? ''),
+    );
+    return rows;
+  }
+
   /** Count email replies sent in range, optionally scoped to tickets assigned to assigneeId and/or matching a custom field. */
   private async emailRepliesCount(
     db: ReturnType<DeskMetricsRepository['getDbInstance']>,
@@ -416,16 +642,17 @@ export class DeskMetricsRepository {
     lte: Date,
     assigneeId?: string | null,
     customFieldExists: Prisma.Sql = Prisma.sql``,
-  ): Promise<{ avgScore: number | null; good: number; bad: number }> {
+  ): Promise<{ avgScore: number | null; scoredResponses: number; good: number; bad: number }> {
     const assigneeFilter = assigneeId
       ? Prisma.sql`AND EXISTS (SELECT 1 FROM "public"."tickets" t WHERE t.id = ta."ticketId" AND t."assignedTo" = ${assigneeId})`
       : Prisma.sql``;
     const rows = await db.$queryRaw<
-      Array<{ avg_score: number | null; good: number; bad: number }>
+      Array<{ avg_score: number | null; scored_responses: number; good: number; bad: number }>
     >(
       Prisma.sql`
         SELECT
           AVG(NULLIF(ta.value->>'score', '')::numeric)::float AS avg_score,
+          COUNT(NULLIF(ta.value->>'score', ''))::int AS scored_responses,
           COUNT(*) FILTER (WHERE ta.value->>'rating' = 'GOOD')::int AS good,
           COUNT(*) FILTER (WHERE ta.value->>'rating' = 'BAD')::int AS bad
         FROM "public"."ticket_activities" ta
@@ -438,6 +665,7 @@ export class DeskMetricsRepository {
     );
     return {
       avgScore: rows[0]?.avg_score ?? null,
+      scoredResponses: rows[0]?.scored_responses ?? 0,
       good: rows[0]?.good ?? 0,
       bad: rows[0]?.bad ?? 0,
     };

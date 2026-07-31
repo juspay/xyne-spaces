@@ -73,7 +73,11 @@ export function useBoardTicketNav(ticketId: string): BoardTicketNavState {
         }),
         { type: 'complete' },
       )) as KanbanTicketsPageRow[];
-      return rows.map(r => ({ id: r.id, conversationId: r.conversationId, createdAt: r.createdAt }));
+      return rows.map(r => ({
+        id: r.id,
+        conversationId: r.conversationId,
+        createdAt: r.createdAt,
+      }));
     },
     [baseArgs, columnType, zero],
   );
