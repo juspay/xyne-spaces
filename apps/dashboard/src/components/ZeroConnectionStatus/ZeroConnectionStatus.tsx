@@ -1,74 +1,130 @@
 import { useConnectionState } from '@rocicorp/zero/react';
-import { ReactElement, useCallback } from 'react';
-import { RefreshCw } from 'lucide-react';
-import { useZero } from '../../hooks/useZero';
+import { ComponentType, ReactElement, useCallback } from 'react';
+import {
+  WifiExclamationMark,
+  WifiOff,
+  WifiOn,
+  type PikaIconProps,
+  type PikaStyle,
+} from '@xyne/icons';
+import { Tooltip } from '../ui/Tooltip/Tooltip';
+import { cn } from '../../utils/classNames';
 import { logger, Event as LoggerEvent } from '../../utils/logger';
 import { stateMachineActor } from '../../machines/stateMachine';
 
-export const ZeroConnectionStatus = (): ReactElement => {
+type ConnectionStateName = ReturnType<typeof useConnectionState>['name'];
+
+interface StatusPresentation {
+  icon: ComponentType<PikaIconProps>;
+  iconVariant: PikaStyle;
+  label: string;
+  /** Appended to the tooltip when clicking the icon does something. */
+  hint?: string;
+  tone: string;
+  /** Only the states Zero won't recover from on its own are clickable. */
+  actionable: boolean;
+}
+
+// `connected` is absent on purpose — the healthy state renders nothing at all so
+// the 60px rail stays quiet, and the icon appearing is itself the signal.
+const CONNECTION_STATUS: Record<Exclude<ConnectionStateName, 'connected'>, StatusPresentation> = {
+  connecting: {
+    icon: WifiOn,
+    iconVariant: 'Duo Stroke',
+    label: 'Connecting…',
+    tone: 'text-amber-500 dark:text-amber-400 animate-pulse',
+    actionable: false,
+  },
+  disconnected: {
+    icon: WifiOff,
+    iconVariant: 'Stroke',
+    label: 'Disconnected',
+    hint: 'click to reconnect',
+    tone: 'text-red-500 dark:text-red-400',
+    actionable: true,
+  },
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- key comes from Zero's ConnectionState union
+  'needs-auth': {
+    icon: WifiExclamationMark,
+    iconVariant: 'Stroke',
+    label: 'Session expired',
+    hint: 'click to reconnect',
+    tone: 'text-amber-500 dark:text-amber-400',
+    actionable: true,
+  },
+  error: {
+    icon: WifiExclamationMark,
+    iconVariant: 'Stroke',
+    label: 'Connection error',
+    hint: 'click to retry',
+    tone: 'text-red-500 dark:text-red-400',
+    actionable: true,
+  },
+  closed: {
+    icon: WifiOff,
+    iconVariant: 'Duo Stroke',
+    label: 'Connection closed',
+    hint: 'click to reconnect',
+    tone: 'text-muted-foreground',
+    actionable: true,
+  },
+};
+
+export const ZeroConnectionStatus = ({
+  className,
+}: {
+  className?: string;
+}): ReactElement | null => {
   const connectionState = useConnectionState();
-  const zero = useZero();
 
   const refreshConnection = useCallback(() => {
     logger.info(LoggerEvent.ZERO_ERROR_RECONNECT_INITIATED, {
       trigger: 'USER_CLICK_REFRESH_ICON',
     });
     stateMachineActor.send({ type: 'REFRESH_ZERO' });
-  }, [zero, connectionState.name]);
+  }, []);
 
-  let statusText = '';
-  let statusColor = '';
+  if (connectionState.name === 'connected') return null;
 
-  switch (connectionState.name) {
-    case 'connected':
-      statusText = 'Connected';
-      statusColor = '#00C851'; // Green
-      break;
-    case 'connecting':
-      statusText = 'Connecting...';
-      statusColor = '#FFD600'; // Yellow
-      break;
-    case 'disconnected':
-      statusText = 'Disconnected';
-      statusColor = '#FF5252'; // Red
-      break;
-    default:
-      statusText = connectionState.name;
-      statusColor = '#9E9E9E'; // Gray
-  }
+  const status = CONNECTION_STATUS[connectionState.name] ?? CONNECTION_STATUS.disconnected;
+  const Icon = status.icon;
+  const tooltip = status.hint ? `${status.label} — ${status.hint}` : status.label;
+  const shell = cn(
+    'size-8 flex items-center justify-center rounded-lg border border-transparent transition-colors',
+    status.tone,
+    className,
+  );
+  const icon = <Icon size={16} variant={status.iconVariant} />;
 
-  const isConnecting = connectionState.name === 'connecting';
-  const isDisconnected = connectionState.name === 'disconnected';
-  const isError = connectionState.name === 'error';
-
-  // Show refresh button when disconnected or error state
-  const showRefreshButton = isDisconnected || isError;
-
+  // `connecting` is passive — rendering it as a <div> keeps globalClickTracker from
+  // logging a REFRESH_CONNECTION_STATUS event for a click that reconnects nothing,
+  // and keeps a no-op button out of the tab order.
   return (
-    <div className='flex items-center gap-2 mr-2'>
-      <div className='w-2 h-2 rounded-full' style={{ backgroundColor: statusColor }} />
-      <span className='font-sans font-normal text-xs leading-none tracking-normal text-[var(--metrics-bar-color)]'>
-        {statusText}
-      </span>
-      {showRefreshButton && (
+    <Tooltip content={tooltip} side='right' delayDuration={0}>
+      {status.actionable ? (
         <button
+          type='button'
           onClick={refreshConnection}
-          disabled={isConnecting}
-          className={`
-            p-1 rounded hover:bg-[var(--metrics-bar-hover-bg)]
-            transition-colors duration-150
-            ${!isConnecting ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}
-          `}
-          title={isConnecting ? 'Connecting...' : 'Refresh connection'}
+          aria-label={`Connection status: ${status.label}. ${status.hint ?? ''}`.trim()}
+          data-testid='zero-connection-status'
+          data-connection-state={connectionState.name}
           data-track-category='ZERO_CONNECTION'
           data-track-name='REFRESH_CONNECTION_STATUS'
+          className={cn(shell, 'cursor-pointer hover:bg-sidebar-accent')}
         >
-          <RefreshCw
-            className={`w-3 h-3 text-[var(--metrics-bar-color)] ${isConnecting ? 'animate-spin' : ''}`}
-            strokeWidth={2.5}
-          />
+          {icon}
         </button>
+      ) : (
+        <div
+          role='status'
+          aria-label={`Connection status: ${status.label}`}
+          data-testid='zero-connection-status'
+          data-connection-state={connectionState.name}
+          className={cn(shell, 'cursor-default')}
+        >
+          {icon}
+        </div>
       )}
-    </div>
+    </Tooltip>
   );
 };

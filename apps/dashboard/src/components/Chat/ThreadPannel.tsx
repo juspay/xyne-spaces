@@ -520,6 +520,7 @@ export const ThreadMessages = ({
 
     return {
       conversationId: derivedConversationId,
+      ...(derivedChannelId && { channelId: derivedChannelId }),
       senderName,
       previewText,
       ...(initialMessage.senderId && { senderId: initialMessage.senderId }),
@@ -528,7 +529,7 @@ export const ThreadMessages = ({
       // so the pill should navigate back into it.
       isThreadMessage: true,
     };
-  }, [derivedConversationId, initialMessage, initialMessageSender]);
+  }, [derivedConversationId, derivedChannelId, initialMessage, initialMessageSender]);
 
   // Check if any message has a ticketId in metadata
   const hasTicketInMessages = useMemo(() => {

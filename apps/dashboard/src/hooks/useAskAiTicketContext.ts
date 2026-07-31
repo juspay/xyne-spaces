@@ -35,6 +35,7 @@ export function useAskAiTicketContext({
 
     const threadInfo: ThreadInfo = {
       conversationId,
+      channelId,
       previewText: previewText ?? '',
       ...(attachmentIds && attachmentIds.length > 0 && { attachmentIds }),
     };

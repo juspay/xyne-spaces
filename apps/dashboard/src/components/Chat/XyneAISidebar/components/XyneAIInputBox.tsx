@@ -842,7 +842,15 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
 
     // Handle clicking thread pill to navigate
     const handleThreadPillClick = (): void => {
-      if (!activeThreadInfo || !channelId) return;
+      if (!activeThreadInfo) return;
+
+      // The channel pinned on the context at capture time, not the one the
+      // sidebar currently points at — `SET_CHANNEL` repoints that on every chat
+      // route change while the pill stays attached, so using it would route the
+      // captured conversation into whatever channel happens to be open. Sessions
+      // persisted before `threadInfo.channelId` existed fall back to it.
+      const targetChannelId = activeThreadInfo.channelId ?? channelId;
+      if (!targetChannelId) return;
 
       // Mirrors `navigateToMessage` in utils/searchNavigation.ts.
       //
@@ -858,12 +866,12 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       const { conversationId, messageId, isThreadMessage } = activeThreadInfo;
 
       if (isThreadMessage === false) {
-        void navigate(`/chat/dir/${channelId}#origin=${conversationId}`);
+        void navigate(`/chat/dir/${targetChannelId}#origin=${conversationId}`);
       } else {
         const hash = messageId
           ? `#origin=${conversationId}&messageId=${messageId}`
           : `#origin=${conversationId}`;
-        void navigate(`/chat/dir/${channelId}/${conversationId}${hash}`);
+        void navigate(`/chat/dir/${targetChannelId}/${conversationId}${hash}`);
       }
 
       // Close XyneAI modal on mobile after navigation
