@@ -264,6 +264,241 @@ export const CHANNELS: ChannelSpec[] = [
       },
     ],
   },
+  {
+    slug: 'onboarding',
+    purpose: 'New joiners finding their feet. No question too small.',
+    members: [0, 2, 4, 5, 1],
+    conversations: [
+      {
+        lines: [
+          { from: 5, text: 'First week here. What is the one thing you wish someone had told you on day one?' },
+          { from: 0, text: 'Star the three channels you actually need. The sidebar sorts starred first and everything else stops competing for your attention.', to: 0 },
+          { from: 2, text: 'And turn off notifications for the noisy ones rather than muting the whole app at 4pm and forgetting to unmute.', to: 0, react: '👍' },
+          { from: 4, text: 'Mine: search before you ask. Half my questions were already answered in a thread from March.', to: 0 },
+          { from: 1, text: 'Counterpoint — ask anyway. The thread from March might be wrong and nobody will notice until you ask.', to: 0, react: '😄' },
+
+          { from: 5, text: 'What is the difference between a channel and a space? I keep using them interchangeably.' },
+          { from: 0, text: 'A space is the whole workspace for a team — its channels, tickets, docs, calls. A channel is one room inside it.', to: 5 },
+          { from: 5, text: 'So space is the building, channel is a room. That I can remember.', to: 5 },
+
+          { from: 2, text: 'Tip nobody tells you: you can drag a message into a ticket to attach it as context. Saves the copy-paste-and-explain dance.' },
+          { from: 5, text: 'Just tried it on the import bug. The customer message is right there in the ticket now.', to: 8, react: '🙌' },
+
+          { from: 4, text: 'If you are ever unsure who to ask, check the channel members list — roles show next to names.' },
+          { from: 5, text: 'That is how I found out who owns billing. I had been asking in the wrong channel for two days.', to: 10 },
+        ],
+      },
+    ],
+  },
+
+  {
+    slug: 'incidents',
+    purpose: 'Live incidents. Calls, timelines, and the postmortem trail.',
+    members: [1, 0, 5, 3],
+    conversations: [
+      {
+        lines: [
+          { from: 1, text: 'Checkout error rate crossed threshold at 14:02. Opening a call in this channel — join if you are around.', react: '👀' },
+          { from: 5, text: 'Joining. Do we have the dashboard up?', to: 0 },
+          { from: 1, text: 'Pinned it to the channel. Error rate, latency, and deploy markers on one view.', to: 0 },
+          { from: 0, text: 'For anyone reading later: the call recording and transcript will be on this thread when we are done.', to: 0 },
+
+          { from: 1, text: 'Cause was the config change at 13:58, not the deploy. Rolled back, error rate is normal.' },
+          { from: 3, text: 'How long from alert to rollback?', to: 4 },
+          { from: 1, text: 'Eleven minutes. The agent opened the ticket automatically at 14:02, which is where the clock started.', to: 4, react: '🔥' },
+          { from: 0, text: 'That is the fastest one yet. Last quarter the same shape took forty minutes because nobody knew where to look.', to: 4 },
+
+          { from: 0, text: 'Postmortem is on a canvas, linked from the incident ticket. Comment there rather than here so it stays in one place.' },
+          { from: 5, text: 'Added a note about the missing alert on config changes — that is the real gap.', to: 8 },
+          { from: 3, text: 'Turning that into a follow-up ticket so it does not evaporate when the adrenaline wears off.', to: 8, react: '💯' },
+
+          { from: 1, text: 'Reminder that the transcript is searchable. "what did we decide about the rollback" gets you the exact minute.' },
+          { from: 5, text: 'Used that this morning to write the customer update. Took four minutes instead of re-watching the call.', to: 11 },
+        ],
+      },
+    ],
+  },
+
+  {
+    slug: 'releases',
+    purpose: 'What is shipping, what is blocked, and what broke.',
+    members: [0, 1, 3, 5],
+    conversations: [
+      {
+        lines: [
+          { from: 0, text: 'Release board is cut for this week. Anything not in Done by Thursday rolls to next.' },
+          { from: 3, text: 'Two tickets are sitting in Review with no reviewer. Is that a process gap or just this week?', to: 0 },
+          { from: 0, text: 'Process gap. The stage has no ETA, so nothing nags anyone. Fixing it today.', to: 0 },
+          { from: 1, text: 'Once the ETA is set the reminder fires at two days and it stops being a memory game.', to: 0, react: '👍' },
+
+          { from: 1, text: 'Deployed 2.14 to staging. The board moved the three linked tickets to Verifying on its own.' },
+          { from: 5, text: 'That automation is quietly one of the best things we have. No more "did you move the ticket".', to: 4 },
+
+          { from: 3, text: 'Question: should a hotfix get its own board or go on the main one with a flag?' },
+          { from: 0, text: 'Main board, priority flag. A separate board means two places to look during an incident, which is exactly when you cannot afford it.', to: 6 },
+          { from: 1, text: 'Agreed. We tried the separate board last year and quietly abandoned it.', to: 6 },
+        ],
+      },
+    ],
+  },
+
+  {
+    slug: 'customer-voice',
+    purpose: 'What customers are actually telling us, unfiltered.',
+    members: [4, 3, 0, 2],
+    conversations: [
+      {
+        lines: [
+          { from: 4, text: 'Three separate customers this week asked for the same thing: export a filtered ticket view to CSV.' },
+          { from: 3, text: 'Do we have that anywhere on the roadmap?', to: 0 },
+          { from: 4, text: 'No, but I linked all three desk conversations to one ticket so the demand is visible rather than anecdotal.', to: 0, react: '💯' },
+          { from: 3, text: 'That is much more persuasive than me saying "customers keep asking".', to: 0 },
+
+          { from: 4, text: 'Pattern worth naming: the complaints are rarely about the feature, they are about not knowing the feature exists.' },
+          { from: 2, text: 'Which is a design problem wearing a support costume.', to: 4, react: '😅' },
+          { from: 0, text: 'Say more — is there a specific one you keep re-explaining?', to: 4 },
+          { from: 4, text: 'Threads. People reply in the channel because they never noticed the reply-in-thread option on hover.', to: 4 },
+          { from: 2, text: 'Taking that. If it is only discoverable on hover, it is not discoverable.', to: 4 },
+
+          { from: 4, text: 'Positive one for balance: two customers specifically praised search finding things in call transcripts.' },
+          { from: 0, text: 'Worth putting in the changelog. We shipped that quietly and never told anyone.', to: 9 },
+        ],
+      },
+    ],
+  },
+
+  {
+    slug: 'automations',
+    purpose: 'Recipes that removed a chore. Steal freely.',
+    members: [1, 0, 3, 4, 5],
+    conversations: [
+      {
+        lines: [
+          { from: 1, text: 'Thread for automations that actually earned their keep. Post yours with what it replaced.' },
+          { from: 0, text: 'Stale tickets back to triage after seven days. Replaced me scrolling the board every Monday.', to: 0, react: '🙌' },
+          { from: 4, text: 'Desk conversations waiting on us over a day move to the escalation view. Replaced a spreadsheet and a reminder.', to: 0 },
+          { from: 3, text: 'Ticket hits Done, summary posts back to the channel it came from. Replaced the "whatever happened to that" question.', to: 0 },
+          { from: 5, text: 'Nightly failure summary in #engineering. Replaced me starting the day in a log viewer.', to: 0 },
+          { from: 1, text: 'Good haul. The common thread is they all replaced a thing a human had to remember.', to: 0, react: '💯' },
+
+          { from: 3, text: 'Anti-pattern warning: I built one that pinged on every ticket update and turned it off within a day.' },
+          { from: 1, text: 'The test is whether it tells you something you would have missed, or just repeats what you already saw.', to: 6 },
+          { from: 5, text: 'Writing that on a sticky note.', to: 6 },
+        ],
+      },
+      {
+        lines: [
+          { from: 0, text: 'Before you enable an automation on a live board: run it against last week in your head and count how many times it would have fired.' },
+          { from: 3, text: 'Mine would have fired sixty times. Which told me the condition was wrong, not the idea.', to: 0, react: '😅' },
+          { from: 1, text: 'That is the whole test. If the number is huge it is a notification, not an automation.', to: 0 },
+          { from: 5, text: 'And if the number is zero the trigger never matches and you will not find out for a month.', to: 0 },
+
+          { from: 4, text: 'How do you debug one that is not firing? There is no error, it just does nothing.' },
+          { from: 1, text: 'Check the trigger first, then the condition. Nine times out of ten the condition compares a stage name that was renamed.', to: 4 },
+          { from: 4, text: 'It was exactly that. "In Review" versus "Review". Renamed the stage in March and never touched the automation.', to: 4 },
+          { from: 0, text: 'Worth a ticket — a stage rename should warn about automations that reference it.', to: 4, react: '💯' },
+
+          { from: 5, text: 'Anyone automated anything for the desk yet, or is it all ticket-side so far?' },
+          { from: 4, text: 'Two: auto-tag by keyword on arrival, and escalate anything waiting on us over a day.', to: 8 },
+          { from: 5, text: 'Does the auto-tag get it wrong often?', to: 8 },
+          { from: 4, text: 'Sometimes, but a wrong tag is cheap to fix and an untagged queue is expensive to search. Asymmetric, so I keep it.', to: 8 },
+
+          { from: 1, text: 'Rule I keep coming back to: automations should remove a chore, not add a decision. If it makes you think, it belongs to a human.' },
+          { from: 3, text: 'The stale-ticket one passes that. The one I built that suggested a priority did not — I second-guessed it every time.', to: 12 },
+          { from: 0, text: 'Suggesting is the trap. Either it decides and you trust it, or it stays out of the way.', to: 12, react: '👍' },
+
+          { from: 3, text: 'Can two automations fight each other? Genuinely asking before I add a third.' },
+          { from: 1, text: 'Yes. We had stale-to-triage and auto-assign-on-triage ping-ponging a ticket for an afternoon.', to: 15 },
+          { from: 3, text: 'How did you notice?', to: 15 },
+          { from: 1, text: 'The activity feed on the ticket was forty entries of the two of them taking turns. Added an exemption and it stopped.', to: 15, react: '😂' },
+          { from: 0, text: 'Which is an argument for reading the activity trail when something feels off, rather than the automation config.', to: 15 },
+        ],
+      },
+    ],
+  },
+
+  {
+    slug: 'knowledge',
+    purpose: 'Canvases, decisions, and the things worth writing down.',
+    members: [2, 0, 3, 1],
+    conversations: [
+      {
+        lines: [
+          { from: 0, text: 'Decision log is a canvas now, not a doc. One row per decision: what, why, who, when.' },
+          { from: 3, text: 'Does anything link back to it automatically?', to: 0 },
+          { from: 0, text: 'Not automatically — but you can link a decision into a ticket and the link stays live, so the ticket always shows the current wording.', to: 0 },
+          { from: 1, text: 'That solves the thing where a doc says one thing and the ticket says an older version of it.', to: 0, react: '👍' },
+
+          { from: 2, text: 'Put the component library on a canvas with the spacing scale. Mentioning someone on it notifies them, which I did not know for a month.' },
+          { from: 3, text: 'I found that out the same way — three comments nobody saw.', to: 4, react: '😄' },
+
+          { from: 1, text: 'Ask AI is surprisingly good at "why did we do it this way" if the decision was written down anywhere at all.' },
+          { from: 0, text: 'Which is the real argument for writing it down. Not for us, for the version of us in six months.', to: 6 },
+          { from: 2, text: 'Or for the person who joins in six months and would otherwise ask all of us separately.', to: 6 },
+        ],
+      },
+    ],
+  },
+
+  {
+    slug: 'claw-lab',
+    purpose: 'Building, testing and breaking agents before anyone else has to.',
+    members: [1, 0, 3, 5, 4],
+    conversations: [
+      {
+        lines: [
+          { from: 1, text: 'Standing rule before an agent goes anywhere near a real channel: run it ten times on the same input and read every run.' },
+          { from: 5, text: 'Ten feels like a lot. What are you looking for that three would not show?', to: 0 },
+          { from: 1, text: 'Variance. Three good runs hides the one where it invents a ticket ID. Ten makes the tail visible.', to: 0, react: '💯' },
+          { from: 3, text: 'We caught the fabricated-merchant bug exactly that way. Nine clean, one confidently wrong.', to: 0 },
+          { from: 0, text: 'The confidently wrong one is the only run that matters. Everything else is decoration.', to: 0 },
+
+          { from: 5, text: 'How do you actually debug a bad agent run? I stare at the output and guess.' },
+          { from: 1, text: 'Open the run history — every step and tool call is there with its arguments. Half the time the prompt was fine and the tool got the wrong ID.', to: 5 },
+          { from: 5, text: 'Found it. It searched with the display name instead of the workspace ID, got nothing, and then made something up rather than saying so.', to: 5 },
+          { from: 1, text: 'Classic. Empty result plus a helpful personality equals fiction.', to: 5, react: '😅' },
+          { from: 0, text: 'Worth adding to the prompt: if a lookup returns nothing, say so and stop. Do not infer.', to: 5 },
+
+          { from: 3, text: 'Do we have a way to test an agent without it touching anything real?' },
+          { from: 1, text: 'Sandbox agent runs in an isolated VM, so code execution cannot reach the workspace. For write tools there is the approval gate — it asks before it acts.', to: 10 },
+          { from: 3, text: 'So the safe loop is: sandbox for anything that runs code, approvals for anything that writes.', to: 10 },
+          { from: 1, text: 'Right. The dangerous middle is read tools with a wide scope — they cannot break anything but they can leak into the answer.', to: 10 },
+
+          { from: 5, text: 'Prompt iteration question: do you edit the system prompt or add a skill?' },
+          { from: 0, text: 'Skill, if it is knowledge. System prompt, if it is behaviour. Stuffing facts into the prompt makes it long and it still forgets them.', to: 14 },
+          { from: 3, text: 'That distinction would have saved me two days last month.', to: 14, react: '👍' },
+          { from: 5, text: 'So "how our tickets are structured" is a skill, "never fabricate" is the prompt.', to: 14 },
+          { from: 0, text: 'Exactly that.', to: 14 },
+
+          { from: 1, text: 'Reminder that agents only see what the asker can see. If your test account has narrow access, the agent looks stupid for reasons that are not its fault.' },
+          { from: 4, text: 'This explains an hour of my life last Tuesday.', to: 19, react: '😄' },
+          { from: 1, text: 'Test with the account that will actually use it, not with admin.', to: 19 },
+
+          { from: 3, text: 'What is the actual difference between the digital twin and ask-ai? They feel like the same thing from outside.' },
+          { from: 0, text: 'Ask AI answers about the workspace. The twin answers as you — your context, your history, your way of putting things.', to: 22 },
+          { from: 3, text: 'And Claw itself is the concierge that points you at whichever agent you actually wanted.', to: 22 },
+          { from: 1, text: 'Which is why Claw has no tools. It routes, it does not do.', to: 22 },
+
+          { from: 5, text: 'Tried the google agent against my calendar. It answered "when am I free Thursday" correctly, which I did not expect first time.' },
+          { from: 4, text: 'Does it need its own OAuth or does it borrow the workspace connection?', to: 26 },
+          { from: 5, text: 'Its own, scoped to me. Which is the right answer — I would not want it reading the workspace calendar as somebody else.', to: 26, react: '🔒' },
+        ],
+      },
+      {
+        lines: [
+          { from: 1, text: 'Eval set for the ask-ai agent is up: twenty real questions from the last month with the answer we would have accepted.' },
+          { from: 0, text: 'Real questions is the important part. Synthetic ones are always easier than what people actually type.', to: 0, react: '💯' },
+          { from: 3, text: 'Half our real questions are three words and a typo.', to: 0 },
+          { from: 1, text: 'And that is the corpus. If it only works on well-formed questions it does not work.', to: 0 },
+
+          { from: 5, text: 'Are we scoring these by hand or is something grading them?' },
+          { from: 1, text: 'By hand for now. Twenty is small enough, and the disagreements are where the interesting bits are.', to: 4 },
+          { from: 0, text: 'Keep it manual until we know what good looks like. Automating a bad rubric just scales the wrongness.', to: 4 },
+        ],
+      },
+    ],
+  },
+
 ];
 
 /** Tickets seeded onto the demo board, referencing the conversations above. */
@@ -448,6 +683,181 @@ export const TICKETS = [
       { from: 0, text: 'Test case is the pricing call — search \'pricing decision\' and it should come back.' },
       { from: 1, text: 'It does now. Weighting adjusted, and it\'s above the messages that just mention pricing in passing.' },
       { from: 0, text: 'That\'s the one I\'ve wanted since we turned recording on.' },
+    ],
+  },
+  {
+    title: 'Reply-in-thread is only discoverable on hover',
+    description:
+      'Support keeps re-explaining threads because the affordance appears on hover only. Raised in #customer-voice with three desk conversations linked. Needs a persistent affordance or an onboarding hint.',
+    status: 'TODO' as const,
+    priority: 'HIGH' as const,
+    assignee: 2,
+    reporter: 4,
+    thread: [
+      { from: 4, text: 'Third customer this month replying in-channel because they never saw the thread option.' },
+      { from: 2, text: 'If it is only discoverable on hover it is not discoverable. That is on us, not them.' },
+      { from: 0, text: 'Is it worth an inline hint on the first few messages a new user sends?' },
+      { from: 2, text: 'Cheaper than redesigning the toolbar, and we can drop it once they have used it twice.' },
+    ],
+  },
+  {
+    title: 'Export a filtered ticket view to CSV',
+    description:
+      'Three customers asked independently in the same week; all three desk conversations are linked here so the demand is visible rather than anecdotal. Scope: current filters, current columns, nothing clever.',
+    status: 'TODO' as const,
+    priority: 'MEDIUM' as const,
+    assignee: 3,
+    reporter: 4,
+    thread: [
+      { from: 4, text: 'All three wanted it for the same reason — sharing a view with someone who does not have an account.' },
+      { from: 3, text: 'Then the real ask might be a shareable read-only link, not a CSV.' },
+      { from: 4, text: 'Possibly. Two said "export", one said "send them the list". Worth asking before we build the wrong thing.' },
+      { from: 0, text: 'Ask them. A CSV is easy and wrong is still wrong.' },
+    ],
+  },
+  {
+    title: 'Alert on config changes, not just deploys',
+    description:
+      'Follow-up from the checkout incident. The cause was a config change at 13:58 and nothing flagged it; we only saw the error rate move four minutes later. Deploy markers exist, config markers do not.',
+    status: 'STARTED' as const,
+    priority: 'HIGH' as const,
+    assignee: 1,
+    reporter: 5,
+    thread: [
+      { from: 5, text: 'The dashboard shows deploy markers, so everyone assumed a deploy. Cost us the first four minutes.' },
+      { from: 1, text: 'Config changes go through a different path entirely, which is why they never made it onto the timeline.' },
+      { from: 0, text: 'Same treatment as deploys — a marker on the dashboard and a line in the incident channel.' },
+      { from: 1, text: 'Doing markers first. The channel post is noisier and we can decide after living with markers for a week.' },
+    ],
+  },
+  {
+    title: 'Onboarding hint: star your channels',
+    description:
+      'Every new joiner independently discovers starring in week two. Suggest it on first login instead, when the sidebar is still short enough to make the point.',
+    status: 'TODO' as const,
+    priority: 'LOW' as const,
+    assignee: 2,
+    reporter: 5,
+    thread: [
+      { from: 5, text: 'I had eleven channels before someone mentioned starring existed.' },
+      { from: 2, text: 'The moment to say it is when you join your third channel, not on a welcome screen nobody reads.' },
+      { from: 0, text: 'Agreed — contextual beats upfront every time.' },
+    ],
+  },
+  {
+    title: 'Changelog entry for transcript search',
+    description:
+      'Search covering call transcripts shipped quietly and two customers found it by accident and praised it. Write it up so everyone else knows it exists.',
+    status: 'COMPLETED' as const,
+    priority: 'LOW' as const,
+    assignee: 3,
+    reporter: 0,
+    thread: [
+      { from: 0, text: 'We shipped a genuinely good thing and told nobody.' },
+      { from: 3, text: 'Draft is up. Leading with the "find the decision from a call you were not on" framing.' },
+      { from: 0, text: 'That is the story. Not "we index transcripts now".' },
+    ],
+  },
+  {
+    title: 'Decision log links should stay live in tickets',
+    description:
+      'A decision linked into a ticket must always render the current wording, not a snapshot from the day it was linked. Confirm behaviour matches the canvas link case and document both together.',
+    status: 'STARTED' as const,
+    priority: 'MEDIUM' as const,
+    assignee: 1,
+    reporter: 0,
+    thread: [
+      { from: 0, text: 'Otherwise the ticket slowly becomes a record of what we used to think.' },
+      { from: 1, text: 'Canvas links already behave this way, so it is a question of whether the decision log uses the same mechanism.' },
+      { from: 2, text: 'It should. Two link types with different staleness rules is a trap.' },
+    ],
+  },
+  {
+    title: 'Agent fabricates results when a lookup returns nothing',
+    description:
+      'Found during ask-ai eval runs: one run in ten invents a plausible ticket ID rather than reporting an empty result. Prompt needs an explicit "say so and stop" rule, and the eval set should keep a case that returns nothing.',
+    status: 'STARTED' as const,
+    priority: 'CRITICAL' as const,
+    assignee: 1,
+    reporter: 3,
+    thread: [
+      { from: 3, text: 'Nine clean runs, one confidently wrong. The wrong one is the only interesting run.' },
+      { from: 1, text: 'Run history shows it searched with a display name, got zero rows, then answered anyway.' },
+      { from: 0, text: 'Empty result plus a helpful personality equals fiction. The prompt has to close that door.' },
+      { from: 1, text: 'Adding the rule plus an eval case that must return "nothing found".' },
+    ],
+  },
+  {
+    title: 'Warn when renaming a stage that automations reference',
+    description:
+      'A stage renamed in March silently broke an automation whose condition still compared the old name. No error, it just stopped firing. Renaming should list the automations that reference the stage.',
+    status: 'TODO' as const,
+    priority: 'HIGH' as const,
+    assignee: 5,
+    reporter: 4,
+    thread: [
+      { from: 4, text: '"In Review" became "Review" and the automation quietly did nothing for weeks.' },
+      { from: 1, text: 'Failing silently is the worst option available. Even a log line would have found it.' },
+      { from: 5, text: 'Cheapest version: block nothing, but show which automations mention the old name.' },
+      { from: 0, text: 'Do the cheap version now. Deciding whether to auto-rewrite them can wait.' },
+    ],
+  },
+  {
+    title: 'Two automations can ping-pong the same ticket',
+    description:
+      'Stale-to-triage and auto-assign-on-triage took turns on one ticket for an afternoon, producing forty activity entries. Needs loop detection, or at minimum a per-ticket rate limit on automated transitions.',
+    status: 'STARTED' as const,
+    priority: 'HIGH' as const,
+    assignee: 1,
+    reporter: 3,
+    thread: [
+      { from: 3, text: 'Spotted it in the activity trail, not the config. Forty entries of the two of them arguing.' },
+      { from: 1, text: 'An exemption stopped this pair, but the general case is still open.' },
+      { from: 0, text: 'Rate limit first — a ticket moved by automation more than twice in an hour is a bug regardless of cause.' },
+      { from: 1, text: 'Agreed, and log it loudly so we find the pair rather than just suppressing the symptom.' },
+    ],
+  },
+  {
+    title: 'Dry-run mode for automations',
+    description:
+      'Everyone currently estimates how often a new automation would fire by reasoning about last week. Let it run against history and report the count and the affected items without acting.',
+    status: 'TODO' as const,
+    priority: 'MEDIUM' as const,
+    assignee: 5,
+    reporter: 0,
+    thread: [
+      { from: 0, text: 'Mine would have fired sixty times. I only found out because I guessed before enabling it.' },
+      { from: 3, text: 'Zero is just as informative and much easier to miss.' },
+      { from: 5, text: 'Replay over the last seven days, show the count and a sample. No writes.' },
+      { from: 1, text: 'That turns "enable and hope" into a decision you can actually make.' },
+    ],
+  },
+  {
+    title: 'Agent test accounts should not be admin',
+    description:
+      'Agents see exactly what the asker sees, so testing as admin hides permission problems and testing as a narrow account makes the agent look broken. Document the intended test persona and seed one.',
+    status: 'TODO' as const,
+    priority: 'MEDIUM' as const,
+    assignee: 0,
+    reporter: 1,
+    thread: [
+      { from: 1, text: 'An hour lost to an agent that was behaving correctly for an account with no access.' },
+      { from: 4, text: 'Same, on Tuesday. It is not obvious the account is the variable.' },
+      { from: 0, text: 'Seed a plain member account specifically for agent testing and say so in the docs.' },
+    ],
+  },
+  {
+    title: 'Keep ask-ai evals manual until the rubric settles',
+    description:
+      'Twenty real questions from the last month, scored by hand. Automating the grading now would scale whichever rubric we happen to have today; the disagreements between reviewers are currently the most useful signal.',
+    status: 'STARTED' as const,
+    priority: 'LOW' as const,
+    assignee: 1,
+    reporter: 0,
+    thread: [
+      { from: 1, text: 'Real questions only. Synthetic ones are always better formed than what people type.' },
+      { from: 3, text: 'Half of ours are three words and a typo, which is the actual corpus.' },
+      { from: 0, text: 'Manual until we know what good looks like. Then automate the rubric, not before.' },
     ],
   },
 ];
