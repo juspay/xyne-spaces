@@ -3,6 +3,7 @@ import {
   OrgLLMServiceAccountProvider,
   OrgLLMServiceAccountPurpose,
 } from '@xyne/shared';
+import { config } from '@/config/env';
 import { DatabaseClient } from '@/database/client';
 import { decrypt } from '@/services/encryptionService';
 import { logger } from '@/utils/logger';
@@ -37,7 +38,7 @@ class OrgLLMCredentialService {
     purpose: OrgLLMServiceAccountPurpose,
   ): Promise<OrgLLMCredential | null> {
     if (!orgId) {
-      return null;
+      return this.getEnvFallbackCredential(purpose);
     }
 
     const preferred = await this.getCredentialForPurpose(orgId, purpose);
@@ -46,10 +47,15 @@ class OrgLLMCredentialService {
     }
 
     if (purpose === OrgLLMServiceAccountPurpose.DEFAULT) {
-      return null;
+      return this.getEnvFallbackCredential(purpose);
     }
 
-    return this.getCredentialForPurpose(orgId, OrgLLMServiceAccountPurpose.DEFAULT);
+    const fallback = await this.getCredentialForPurpose(orgId, OrgLLMServiceAccountPurpose.DEFAULT);
+    if (fallback) {
+      return fallback;
+    }
+
+    return this.getEnvFallbackCredential(purpose);
   }
 
   async getCredentialByOrgId(
@@ -64,7 +70,7 @@ class OrgLLMCredentialService {
     purpose: OrgLLMServiceAccountPurpose,
   ): Promise<OrgLLMCredential | null> {
     if (!userId) {
-      return null;
+      return this.getEnvFallbackCredential(purpose);
     }
 
     const user = await this.prisma.user.findUnique({
@@ -84,7 +90,7 @@ class OrgLLMCredentialService {
     purpose: OrgLLMServiceAccountPurpose,
   ): Promise<OrgLLMCredential | null> {
     if (!workspaceId) {
-      return null;
+      return this.getEnvFallbackCredential(purpose);
     }
 
     const workspace = await this.prisma.workspace.findUnique({
@@ -100,7 +106,7 @@ class OrgLLMCredentialService {
     purpose: OrgLLMServiceAccountPurpose,
   ): Promise<OrgLLMCredential | null> {
     if (!projectId) {
-      return null;
+      return this.getEnvFallbackCredential(purpose);
     }
 
     const project = await this.prisma.project.findUnique({
@@ -120,7 +126,7 @@ class OrgLLMCredentialService {
     purpose: OrgLLMServiceAccountPurpose,
   ): Promise<OrgLLMCredential | null> {
     if (!ticketId) {
-      return null;
+      return this.getEnvFallbackCredential(purpose);
     }
 
     const ticket = await this.prisma.ticket.findUnique({
@@ -144,7 +150,7 @@ class OrgLLMCredentialService {
     purpose: OrgLLMServiceAccountPurpose,
   ): Promise<OrgLLMCredential | null> {
     if (!channelId) {
-      return null;
+      return this.getEnvFallbackCredential(purpose);
     }
 
     const channel = await this.prisma.channel.findUnique({
@@ -168,7 +174,7 @@ class OrgLLMCredentialService {
     purpose: OrgLLMServiceAccountPurpose,
   ): Promise<OrgLLMCredential | null> {
     if (!vespaDocId) {
-      return null;
+      return this.getEnvFallbackCredential(purpose);
     }
 
     const attachment = await this.prisma.messageAttachment.findUnique({
@@ -283,6 +289,37 @@ class OrgLLMCredentialService {
         expiresAt: now + NEGATIVE_CACHE_TTL_MS,
       });
       return null;
+    }
+  }
+
+  private getEnvFallbackCredential(
+    purpose: OrgLLMServiceAccountPurpose,
+  ): OrgLLMCredential | null {
+    const apiKey = this.getEnvApiKeyForPurpose(purpose);
+    const baseUrl = config.litellm.baseUrl;
+
+    if (!apiKey) {
+      return null;
+    }
+
+    return {
+      apiKey,
+      baseUrl: baseUrl || '',
+      defaultModel: null,
+      purpose,
+    };
+  }
+
+  private getEnvApiKeyForPurpose(purpose: OrgLLMServiceAccountPurpose): string {
+    switch (purpose) {
+      case OrgLLMServiceAccountPurpose.ASK_AI:
+        return config.litellm.askAiApiKey;
+      case OrgLLMServiceAccountPurpose.CALL_TRANSCRIPT:
+        return config.llm.callLitellmApiKey;
+      case OrgLLMServiceAccountPurpose.ACTIVITY_CLASSIFICATION:
+        return config.activityClassification.litellmApiKey || config.litellm.apiKey;
+      default:
+        return config.litellm.apiKey;
     }
   }
 
