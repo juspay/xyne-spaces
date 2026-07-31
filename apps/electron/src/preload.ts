@@ -249,7 +249,7 @@ const electronAPI = {
 
   // Generic IPC send (used by standalone HTML windows like meeting-popup)
   ipcSend: (channel: string, ...args: unknown[]) => {
-    const allowed = ['meeting-popup:content-height', 'recording-pill:content-size', 'recording-pill:recording-stopped'];
+    const allowed = ['meeting-popup:content-height', 'recording-pill:recording-stopped', 'recording:state-changed'];
     if (allowed.includes(channel)) ipcRenderer.send(channel, ...args);
   },
 
@@ -327,7 +327,10 @@ const electronAPI = {
       return () => ipcRenderer.removeListener('recording-pill:hide', listener);
     },
     stopRecording: () => ipcRenderer.send('recording-pill:stop-recording'),
-    cancelRecording: () => ipcRenderer.send('recording-pill:cancel-recording'),
+    openApp: () => ipcRenderer.send('recording-pill:open-app'),
+    setIgnoreMouse: (ignore: boolean) => ipcRenderer.send('recording-pill:set-ignore-mouse', ignore),
+    dragStart: () => ipcRenderer.send('recording-pill:drag-start'),
+    dragEnd: () => ipcRenderer.send('recording-pill:drag-end'),
   },
 
   clawOverlay: {

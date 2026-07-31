@@ -18,6 +18,8 @@ import { EnrollmentEvent } from '../services/logger/enrollment-events';
 import { startVersionChecker, stopVersionChecker } from '../services/version-checker';
 import ElectronEvent from '../services/logger/electron-events';
 import { meetingDetectorService } from '../services/meeting-detector';
+import { initTray } from '../services/tray';
+import { registerGlobalShortcuts } from '../services/global-shortcuts';
 import { initClawOverlayAuthGate } from '../services/claw-overlay-window';
 import { registerProtocolScheme, setupCustomProtocol } from '../services/custom-protocol';
 import { initializeUIUpdater } from '../services/ui-updater';
@@ -198,6 +200,9 @@ async function initializeApp(): Promise<void> {
 
   // Start meeting detector (macOS only, event-driven)
   startMeetingDetectorInBackground();
+
+  initTray();
+  registerGlobalShortcuts();
 
   initClawOverlayAuthGate();
 

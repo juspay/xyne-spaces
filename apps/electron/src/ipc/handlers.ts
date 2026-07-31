@@ -16,7 +16,14 @@ import {
 } from '../services/media-permission';
 import { setCustomScreenPickerEnabled, setCachedUser } from '../services/request-interceptor';
 import { hideMeetingPopup, hideMeetingPopupAfter } from '../services/meeting-popup-window';
-import { showRecordingPill, hideRecordingPill } from '../services/recording-pill-window';
+import { isPillSender } from '../services/recording-pill-window';
+import {
+  focusMainWindow,
+  markExternalStartPending,
+  markRendererReady,
+  stopRecording,
+  syncRecordingState,
+} from '../services/recording-controller';
 import { meetingDetectorService } from '../services/meeting-detector';
 import { browserSettingsService, BrowserSettings } from '../services/browser-settings';
 import { errorReportRecorder } from '../services/error-report-recorder';
@@ -539,34 +546,35 @@ export function setupIpcHandlers(): void {
       mainWindow.webContents.send('navigate-to', '/recordings');
       mainWindow.webContents.send('meeting:start-recording');
     }
-    // Delay close so the popup can show the recording-started state for 3 seconds,
-    // then show the persistent recording pill
-    const recordingStartTime = Date.now();
+    // Delay close so the popup can show the recording-started state for 3 seconds
+    markExternalStartPending();
     hideMeetingPopupAfter(3000);
-    setTimeout(() => showRecordingPill(recordingStartTime), 3000);
   });
 
   // Stop recording from the persistent floating pill — focus the app, navigate to
   // /recordings, and fire requestStop so RecordingsScreen shows the title modal
-  ipcMain.on('recording-pill:stop-recording', () => {
-    const mainWindow = getMainWindow();
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.show();
-      mainWindow.focus();
-      mainWindow.webContents.send('navigate-to', '/recordings');
-      mainWindow.webContents.send('meeting:stop-recording');
-    }
-    hideRecordingPill();
+  ipcMain.on('recording-pill:stop-recording', (event) => {
+    if (!isPillSender(event)) return;
+    stopRecording('pill');
   });
 
-  // Cancel just closes the pill — recording continues unaffected
-  ipcMain.on('recording-pill:cancel-recording', () => {
-    hideRecordingPill();
+  ipcMain.on('recording-pill:open-app', (event) => {
+    if (!isPillSender(event)) return;
+    focusMainWindow('/recordings');
   });
 
-  // Renderer notifies main that recording stopped (e.g. user stopped manually in UI)
-  ipcMain.on('recording-pill:recording-stopped', () => {
-    hideRecordingPill();
+  ipcMain.on(
+    'recording:state-changed',
+    (event, state: { active: boolean; startTime?: number }) => {
+      if (!isMainWindowSender(event)) return;
+      markRendererReady();
+      syncRecordingState(!!state?.active, state?.startTime);
+    },
+  );
+
+  ipcMain.on('recording-pill:recording-stopped', (event) => {
+    if (!isMainWindowSender(event)) return;
+    syncRecordingState(false);
   });
 
   // Meeting detection toggle (user preference from settings)
