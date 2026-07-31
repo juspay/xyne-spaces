@@ -2421,6 +2421,8 @@ const SupportScreen = (): ReactElement => {
                                   handleFilterChange('assignee', users)
                                 }
                                 label='Assignee'
+                                channelId={selectedChannelId ?? undefined}
+                                membersOnly
                               />
                             </Popover.Content>
                           </Popover.Root>
