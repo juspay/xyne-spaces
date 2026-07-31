@@ -1,3 +1,5 @@
+import type { TicketCustomFormData } from '@/database/repositories/formsRepository';
+
 /**
  * Enum for chat event types
  */
@@ -373,6 +375,7 @@ export interface MerchantTicketListItem {
   projectId?: string;
   senderEmail?: string;
   senderName?: string;
+  customFormData?: TicketCustomFormData | null;
 }
 
 export interface MerchantTicketsListResponse extends PaginatedResponse<MerchantTicketListItem> {}
