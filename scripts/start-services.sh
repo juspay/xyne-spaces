@@ -417,6 +417,10 @@ if [ "$ENABLE_STORAGE" = "1" ]; then
           -H "Content-Type: application/json" -d '{"name":"transcription-dev-v2"}' > /dev/null 2>&1
         curl -s $CURL_TIMEOUT -X POST "http://localhost:4443/storage/v1/b?project=xyne-spaces" \
           -H "Content-Type: application/json" -d '{"name":"xyne-spaces-canvas-documents"}' > /dev/null 2>&1
+        # Agent session archives — xyne-claw refuses to start a run when it
+        # cannot verify the archive, so this bucket must exist.
+        curl -s $CURL_TIMEOUT -X POST "http://localhost:4443/storage/v1/b?project=xyne-spaces" \
+          -H "Content-Type: application/json" -d '{"name":"xyne-claw-chat-attachments"}' > /dev/null 2>&1
         echo -e "${GREEN}  fake-gcs buckets created${NC}"
     fi
 
