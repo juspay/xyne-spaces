@@ -1,4 +1,5 @@
 import { ReactElement, useMemo } from 'react';
+import { Loader2 } from 'lucide-react';
 import Avatar from '../../components/ui/Avatar/Avatar';
 import { Button } from '../../components/ui/Button/Button';
 import { Dialog } from '../../components/ui/Dialog/Dialog';
@@ -7,6 +8,13 @@ import { useUsers } from '../../hooks/useUsers';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { type Call } from './callHistoryItem.utils';
 import { CallStatus } from '@xyne/shared';
+import { getPreviewParticipantUserIds } from './callHistoryItem.utils';
+
+type CallParticipant = NonNullable<Call['participants']>[number];
+type ParticipantRow = Partial<CallParticipant> & {
+  userId: string;
+  isCurrentUser?: boolean;
+};
 
 interface CallParticipantsContentProps {
   call: Call;
@@ -26,10 +34,12 @@ function CallParticipantsContent({
     (call.participantCount !== null &&
       call.participantCount !== undefined &&
       call.participantCount <= (call.participants?.length ?? 0));
-  const [fullParticipants] = useCachedQuery(queries.callParticipantsByCallId({ callId: call.id }), {
-    enabled: isOpen && !hasFullParticipants,
-  });
-  const allParticipants = fullParticipants ?? call.participants ?? [];
+  const [fullParticipants, fullParticipantsDetails] = useCachedQuery(
+    queries.callParticipantsByCallId({ callId: call.id }),
+    {
+      enabled: isOpen && !hasFullParticipants,
+    },
+  );
 
   const allUsers = useUsers();
   const usersById = useMemo(() => {
@@ -39,6 +49,53 @@ function CallParticipantsContent({
     }
     return map;
   }, [allUsers]);
+
+  const previewParticipantUserIds = useMemo(
+    () => getPreviewParticipantUserIds(call.participantPreviewUserIds, currentUserId).slice(0, 3),
+    [call.participantPreviewUserIds, currentUserId],
+  );
+
+  const previewParticipants = useMemo(() => {
+    const nextParticipants: ParticipantRow[] = [];
+    const seen = new Set<string>();
+
+    for (const participant of call.participants ?? []) {
+      if (participant.userId && !seen.has(participant.userId)) {
+        nextParticipants.push({
+          ...participant,
+          userId: participant.userId,
+          isCurrentUser: participant.userId === currentUserId,
+        });
+        seen.add(participant.userId);
+      }
+    }
+
+    for (const userId of previewParticipantUserIds) {
+      if (!seen.has(userId)) {
+        nextParticipants.push({ userId, isCurrentUser: userId === currentUserId });
+        seen.add(userId);
+      }
+    }
+
+    return nextParticipants;
+  }, [call.participants, currentUserId, previewParticipantUserIds]);
+
+  const allParticipants = useMemo(() => {
+    const merged = [...previewParticipants];
+    const seen = new Set(merged.map(participant => participant.userId));
+
+    for (const participant of fullParticipants ?? []) {
+      if (participant.userId && !seen.has(participant.userId)) {
+        merged.push({ ...participant, isCurrentUser: participant.userId === currentUserId });
+        seen.add(participant.userId);
+      }
+    }
+
+    return merged;
+  }, [currentUserId, fullParticipants, previewParticipants]);
+
+  const isLoadingParticipants =
+    isOpen && !hasFullParticipants && fullParticipantsDetails.type !== 'complete';
 
   return (
     <div className='p-6'>
@@ -59,7 +116,7 @@ function CallParticipantsContent({
                 {participant.isExternal
                   ? participant.displayName || 'Guest'
                   : (usersById.get(participant.userId)?.name ?? 'Unknown User')}
-                {participant.userId === currentUserId && (
+                {participant.isCurrentUser && (
                   <span className='text-muted-foreground font-normal'> (you)</span>
                 )}
                 {participant.isExternal && (
@@ -76,6 +133,12 @@ function CallParticipantsContent({
             </div>
           </div>
         ))}
+        {isLoadingParticipants && (
+          <div className='flex items-center justify-center gap-2 rounded-lg border border-dashed border-border px-4 py-3 text-sm text-muted-foreground'>
+            <Loader2 className='size-4 animate-spin' />
+            Loading full participant list...
+          </div>
+        )}
       </div>
 
       <Button
