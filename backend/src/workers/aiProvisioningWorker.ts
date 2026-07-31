@@ -38,6 +38,7 @@ interface OrgLiteLLMServiceAccountCredentials {
   keyAlias?: string;
   providerUrl: string;
   defaultModel?: string | null;
+  defaultModels?: string[];
   serviceAccountName?: string;
   serviceAccountAlias?: string;
   expires?: string;
@@ -474,7 +475,8 @@ class AIProvisioningWorker {
       keyName,
       keyAlias,
       providerUrl: config.litellm.baseUrl,
-      defaultModel: null,
+      defaultModel: config.aiProvisioning.orgDefaultModels[0] ?? null,
+      defaultModels: config.aiProvisioning.orgDefaultModels,
       serviceAccountName,
       serviceAccountAlias,
       expires,

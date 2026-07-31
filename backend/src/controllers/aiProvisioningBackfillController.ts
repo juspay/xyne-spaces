@@ -62,6 +62,7 @@ interface OrgLiteLLMServiceAccountCredentials {
   keyAlias?: string;
   providerUrl: string;
   defaultModel?: string | null;
+  defaultModels?: string[];
   serviceAccountName?: string;
   serviceAccountAlias?: string;
   expires?: string;
@@ -342,7 +343,8 @@ export class AiProvisioningBackfillController {
       litellmTeamId,
       ...rest,
       providerUrl: config.litellm.baseUrl,
-      defaultModel: null,
+      defaultModel: config.aiProvisioning.orgDefaultModels[0] ?? null,
+      defaultModels: config.aiProvisioning.orgDefaultModels,
       teamAlias: orgPayload.name,
       purpose,
       provisionedAt: now.toISOString(),
