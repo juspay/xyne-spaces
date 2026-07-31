@@ -430,6 +430,7 @@ export const useDragAndDrop = ({
                     stageName: newStageName,
                     ...(newStatus && { statusV2: newStatus }),
                     ...(kanbanPosition !== undefined && { kanbanPosition }),
+                    updatedAt: Date.now(),
                   }
                 : t,
             ),
@@ -610,7 +611,11 @@ export const useDragAndDrop = ({
             );
 
             setLocalTickets(prev =>
-              prev.map(t => (t.id === activeTicket.id ? { ...t, kanbanPosition: newPosition } : t)),
+              prev.map(t =>
+                t.id === activeTicket.id
+                  ? { ...t, kanbanPosition: newPosition, updatedAt: Date.now() }
+                  : t,
+              ),
             );
 
             void zero.mutate(
@@ -635,7 +640,9 @@ export const useDragAndDrop = ({
         if (newStatus && activeTicket.statusV2 !== newStatus) {
           // Update local state immediately for smooth UI
           setLocalTickets(prev =>
-            prev.map(t => (t.id === activeTicket.id ? { ...t, statusV2: newStatus } : t)),
+            prev.map(t =>
+              t.id === activeTicket.id ? { ...t, statusV2: newStatus, updatedAt: Date.now() } : t,
+            ),
           );
 
           // Update database
