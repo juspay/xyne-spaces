@@ -1195,7 +1195,11 @@ export class CallController {
         logger.warn(`Failed to find message for call ${callId}: ${msgError}`);
       }
 
-      const recordingAttachment = await repositories.messageAttachments.findRecordingByCallId(callId).catch(() => null);
+      // hasRecording is derived from the call_recordings table (single source of
+      // truth — the legacy calls.recordingUrl column is frozen), same as the
+      // recordings-list endpoint. Not message-attachment-based: NOTE_TAKER
+      // (headless) calls never create a message/attachment for their recording.
+      const uploadedRecording = await repositories.callRecordings.findLatestUploadedByCallId(call.id).catch(() => null);
       // Backward-compat: historical call rows stored the notes canvas link as
       // `notesCanvasViewAccessId`. Fall back to that key if the new one isn't
       // present so the notes tab keeps rendering for pre-migration calls.
@@ -1236,7 +1240,7 @@ export class CallController {
               ? callMetadata.detailedSummaryCanvasId
               : null,
           citationSegments,
-          hasRecording: !!recordingAttachment,
+          hasRecording: !!uploadedRecording,
         },
       });
     } catch (error) {
