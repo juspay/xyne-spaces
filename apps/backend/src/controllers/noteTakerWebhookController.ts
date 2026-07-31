@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import type { WebhookEvent } from 'livekit-server-sdk';
 import { ParticipantInfo_Kind } from '@livekit/protocol';
+import { RecordingType } from '@prisma/client';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { repositories } from '@/database/repositories';
@@ -109,6 +110,21 @@ class NoteTakerWebhookController {
 
     logger.info(`[NoteTaker Webhook] Created note taker call record for ${roomName}`, { callId: call.id });
 
+    // Auto-start an audio recording for the whole call — note-taker calls have
+    // no manual "start recording" UI action, so this replaces that trigger.
+    // Stopped automatically in handleParticipantLeft when the last participant
+    // leaves (shouldEndCall). Non-fatal: a failure here shouldn't block call
+    // creation or the transcription pipeline.
+    try {
+      await callRecordingService.startRecording({
+        call,
+        recordingType: RecordingType.AUDIO_ONLY,
+        startedBy: createdBy,
+      });
+    } catch (recordingError) {
+      logger.error(`[NoteTaker Webhook] Failed to auto-start recording for call ${roomName}:`, recordingError);
+    }
+
     emitCallStarted({
       id: call.id,
       externalId: call.externalId,
@@ -172,6 +188,15 @@ class NoteTakerWebhookController {
     if (!result?.call) {
       logger.error(`[NoteTaker Webhook] Call not found for room_finished: ${roomName}`);
       return;
+    }
+
+    // Safety net alongside handleParticipantLeft's stop-on-last-leave: covers
+    // room teardowns that don't go through a clean participant_left (crash,
+    // forced close). stopActiveRecordingsForCall is a no-op if nothing is active.
+    try {
+      await callRecordingService.stopActiveRecordingsForCall(roomName);
+    } catch (stopErr) {
+      logger.error(`[NoteTaker Webhook] Failed to stop recording for call ${roomName} on room_finished:`, stopErr);
     }
 
     if (result.shouldEndCall) {

@@ -1,5 +1,5 @@
 import { EgressClient, EgressStatus, SegmentedFileOutput, SegmentedFileProtocol, GCPUpload, S3Upload, EgressInfo } from 'livekit-server-sdk';
-import { AttachmentEntityType, RecordingType, type Call, type CallRecording } from '@prisma/client';
+import { AttachmentEntityType, CallType, RecordingType, type Call, type CallRecording } from '@prisma/client';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
@@ -325,10 +325,18 @@ class CallRecordingService {
       logger.info(`[CallRecording] recording ${recordingId} UPLOADED (stitched), path=${paths.mp4Path}`);
       await this.deleteSegments(recording.segmentPrefix);
 
-      try {
-        await this.postRecordingMessageAndAttachment(call, { ...recording, storagePath: paths.mp4Path });
-      } catch (err) {
-        logger.error(`[CallRecording] Failed to post recording message/attachment for recording ${recordingId}:`, err);
+      // NOTE_TAKER (headless) calls never create messages/attachments — the
+      // call_recordings row (storagePath, status=UPLOADED) is the only record
+      // of the file; getRecordingDetail/download-recording already read from
+      // this table directly, so there's nothing further to post.
+      if (call.callType === CallType.HEADLESS) {
+        logger.info(`[CallRecording] Skipping message/attachment post for HEADLESS call ${call.externalId} (recording ${recordingId})`);
+      } else {
+        try {
+          await this.postRecordingMessageAndAttachment(call, { ...recording, storagePath: paths.mp4Path });
+        } catch (err) {
+          logger.error(`[CallRecording] Failed to post recording message/attachment for recording ${recordingId}:`, err);
+        }
       }
     } catch (err) {
       await repositories.callRecordings.markProcessingFailed(recordingId).catch(() => {});
