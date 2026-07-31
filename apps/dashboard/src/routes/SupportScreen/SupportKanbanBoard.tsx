@@ -26,6 +26,7 @@ import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { dataLoadDuration, safeRecordMetric } from '../../services/otel';
 import { logger, Event } from '../../utils/logger';
 import { useGetChannelUserStatus } from '../../hooks/useChannels';
+import { useAuthContextValues } from '../../hooks/useAuth';
 import { useBoardsSlaPolicies } from '../../hooks/useChannelSlaPolicy';
 import { useDragAndDrop, type StageTransitionInfo } from '../../hooks/useDragAndDrop';
 import { KanbanColumns } from '../../components/Tickets/KanbanColumns/KanbanColumns';
@@ -91,6 +92,7 @@ export const SupportKanbanBoard = ({
   activeTicketId,
 }: SupportKanbanBoardProps): ReactElement => {
   const zero = useZero();
+  const { userID } = useAuthContextValues();
 
   const channelUserStatus = useGetChannelUserStatus(channelId);
   const isMember = !!channelUserStatus;
@@ -302,10 +304,37 @@ export const SupportKanbanBoard = ({
   // drag-and-drop hook reads the live `localTickets` directly, so reordering is
   // unaffected — only the settled column layout is deferred a frame.
   const deferredLocalTickets = useDeferredValue(localTickets);
-  const ticketsByStage = useMemo(
-    () => groupTicketsByStage(deferredLocalTickets, stageColumns),
-    [deferredLocalTickets, stageColumns],
+
+  // A ticket with a new/unread email reply (the current user hasn't read up to
+  // its latest email yet) is surfaced at the top of its column, most recent first.
+  const emailReplyRank = useCallback(
+    (ticket: Ticket): number => {
+      const t = ticket as Ticket & {
+        emailReads?: ReadonlyArray<{ userId: string; lastReadEmailAt: number }>;
+        emailCount?: number;
+        lastEmailAt?: number;
+      };
+      const emailCount = t.emailCount ?? 0;
+      if (emailCount === 0) return -1;
+      const lastEmailAt = t.lastEmailAt ?? 0;
+      const userReadRow = t.emailReads?.find(r => r.userId === userID);
+      const hasUnreadReply = !userReadRow || userReadRow.lastReadEmailAt < lastEmailAt;
+      return hasUnreadReply ? lastEmailAt : -1;
+    },
+    [userID],
   );
+
+  const ticketsByStage = useMemo(() => {
+    const grouped = groupTicketsByStage(deferredLocalTickets, stageColumns);
+    for (const stageId of Object.keys(grouped)) {
+      const stageTickets = grouped[stageId];
+      if (!stageTickets) continue;
+      // Stable sort: unread-reply tickets float to the top (most recent reply
+      // first); everything else keeps its existing relative order.
+      grouped[stageId] = [...stageTickets].sort((a, b) => emailReplyRank(b) - emailReplyRank(a));
+    }
+    return grouped;
+  }, [deferredLocalTickets, stageColumns, emailReplyRank]);
 
   // Stage form modal state — shown when moving a ticket to a stage that has a form.
   const [stageFormModal, setStageFormModal] = useState<{
