@@ -49,7 +49,7 @@ import {
   renderTemplate,
   type StructuredOutputRef,
 } from "../agent-model-settings.js";
-import { fetchLiteLLMWithRetry } from "../litellm-retry.js";
+import { fetchLiteLLMWithRetry } from "@xyne/litellm-client";
 import {
   asFollowUpPendingQuestion,
   buildFollowUpGenerationEndEvent,
