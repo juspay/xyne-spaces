@@ -440,6 +440,9 @@ export function transformUserToVespa(
   const vespaDoc = {
     docId: user.id,
     docType: 'user',
+    // The field people-search scopes on (ACL). Populated here so the user doc is complete
+    // for every caller, rather than each one having to patch workspaceId back in.
+    workspaceId: user.workspaceId,
     name: user.name || '',
     email: user.email || '',
     status: user.status || 'ACTIVE',

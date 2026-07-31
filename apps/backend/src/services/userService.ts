@@ -205,6 +205,10 @@ export class UserService {
       // Create user preference entry
       await this.ensureUserPreference(user.id);
 
+      // NOTE: Vespa indexing for the user is handled uniformly by the setupUserVespaSync
+      // Prisma middleware (fires on every user create/upsert), not here — so invitation,
+      // provisioning, community, controller and bot creates are all covered too.
+
       return user;
     } catch (error) {
       logger.error('Error creating user:', error);

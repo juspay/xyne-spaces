@@ -5,6 +5,7 @@ import { setupUserSessionLogging } from './middleware/userSessionLogging';
 import { setupMessageMetadataSync } from './middleware/messageMetadataSync';
 import { setupTicketActivityChannelSync } from './middleware/ticketActivityChannelSync';
 import { setupTicketCreatedActivity } from './middleware/ticketCreatedActivity';
+import { setupUserVespaSync } from './middleware/userVespaSync';
 
 export class DatabaseClient {
   private static instance: PrismaClient | null = null;
@@ -54,6 +55,7 @@ export class DatabaseClient {
       setupMessageMetadataSync(DatabaseClient.instance);
       setupTicketActivityChannelSync(DatabaseClient.instance);
       setupTicketCreatedActivity(DatabaseClient.instance);
+      setupUserVespaSync(DatabaseClient.instance);
 
       (DatabaseClient.instance as any).$on('error', (e: any) => {
         logger.error('Database error:', e);
