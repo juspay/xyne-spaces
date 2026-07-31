@@ -1,16 +1,16 @@
 import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
+import { useLocation } from 'react-router-dom';
+import { useZeroOfflineState } from '@xyne/shared/hooks';
 import { AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
-import { removeRecordingsFromCache } from '../../../hooks/usePaginatedRecordings';
+import { refreshOatsRecordings } from '../../../hooks/usePaginatedOatsRecordings';
 import { sendRecordingEvent, useRecordingStore } from '../../../hooks/useRecordingStore';
 import { useZero } from '../../../hooks/useZero';
 import { canvasService } from '../../../services/Canvas/canvasService';
 import { recordingService } from '../../../services/Recording/recordingService';
-import { DEFAULT_NOTES_TITLE } from '../../../stores/recordingStore';
-import { generateRecordingTitle } from '../../../utils/recordingUtils';
+import { DEFAULT_NOTES_TITLE, DEFAULT_RECORDING_TITLE } from '../../../stores/recordingStore';
 import { mutators } from '../../../zero/mutators';
-import { SaveTitleModal } from '../../RecordingsScreen/components/SaveTitleModal';
 import NoteTakerOverlay from './NoteTakerOverlay';
 
 export function NoteTakerOverlayHost(): ReactElement {
@@ -20,31 +20,29 @@ export function NoteTakerOverlayHost(): ReactElement {
   const accumulatedPausedMs = useRecordingStore(context => context.accumulatedPausedMs);
   const externalId = useRecordingStore(context => context.externalId);
   const channelId = useRecordingStore(context => context.channelId);
+  const title = useRecordingStore(context => context.title);
   const notesCanvasId = useRecordingStore(context => context.notesCanvasId);
   const pendingStop = useRecordingStore(context => context.pendingStop);
   const agentLeft = useRecordingStore(context => context.agentLeft);
   const transcripts = useRecordingStore(context => context.transcripts);
   const zero = useZero();
-  const [showTitleModal, setShowTitleModal] = useState(false);
-  const [savingTitle, setSavingTitle] = useState(false);
-  const [endedByAgentDrop, setEndedByAgentDrop] = useState(false);
+  const { showOfflineBanner } = useZeroOfflineState();
   const [isCreatingNotes, setIsCreatingNotes] = useState(false);
   const [notesCreationFailed, setNotesCreationFailed] = useState(false);
   const isCreatingNotesRef = useRef(false);
   const notesCreationAttemptRef = useRef(0);
   const activeRecordingIdRef = useRef<string | null>(externalId);
   const lastExternalIdRef = useRef<string | null>(null);
-  const lastStartTimeRef = useRef<number | null>(null);
   const isActive = status === 'recording' || status === 'paused';
+  const { pathname } = useLocation();
+  // hide the overlay when live recording detail screen entered.
+  const isViewingThisRecording =
+    Boolean(externalId) && pathname.replace(/\/+$/, '').endsWith(`/recordings/${externalId}`);
 
   useEffect(() => {
     activeRecordingIdRef.current = externalId;
     if (externalId) lastExternalIdRef.current = externalId;
   }, [externalId]);
-
-  useEffect(() => {
-    if (startTime) lastStartTimeRef.current = startTime;
-  }, [startTime]);
 
   useEffect(() => {
     if (isActive) return;
@@ -108,45 +106,35 @@ export function NoteTakerOverlayHost(): ReactElement {
   }, [isActive, externalId, notesCanvasId, handleCreateNotes]);
 
   const handleStop = useCallback((): void => {
+    const stoppedRecordingId = externalId;
+    const alreadyTitled = Boolean(title?.trim());
+
     activeRecordingIdRef.current = null;
-    lastExternalIdRef.current = externalId;
+    lastExternalIdRef.current = stoppedRecordingId;
     sendRecordingEvent({ type: 'stopRecording' });
-    setShowTitleModal(true);
-  }, [externalId]);
+
+    if (!stoppedRecordingId) return;
+    if (alreadyTitled) {
+      refreshOatsRecordings();
+      return;
+    }
+
+    void recordingService
+      .updateRecordingTitle(stoppedRecordingId, DEFAULT_RECORDING_TITLE)
+      .catch(() => toast.error('Recording saved, but its title could not be set.'))
+      .finally(refreshOatsRecordings);
+  }, [externalId, title]);
 
   useEffect(() => {
     if (!isActive) return;
-    if (agentLeft) setEndedByAgentDrop(true);
+    if (agentLeft) toast.warning('Recording ended because the note taker left the call.');
     if (pendingStop || agentLeft) handleStop();
   }, [agentLeft, handleStop, isActive, pendingStop]);
-
-  const handleSaveTitle = useCallback(async (title: string): Promise<void> => {
-    setSavingTitle(true);
-    try {
-      if (!lastExternalIdRef.current) {
-        setShowTitleModal(false);
-        sendRecordingEvent({ type: 'clearTranscripts' });
-        toast.warning('Recording saved without title - no recording ID available');
-        return;
-      }
-
-      await recordingService.updateRecordingTitle(lastExternalIdRef.current, title);
-      removeRecordingsFromCache([lastExternalIdRef.current]);
-      setShowTitleModal(false);
-      setEndedByAgentDrop(false);
-      sendRecordingEvent({ type: 'clearTranscripts' });
-      toast.success('Recording saved', { description: title });
-    } catch {
-      toast.error('Failed to save title');
-    } finally {
-      setSavingTitle(false);
-    }
-  }, []);
 
   return (
     <>
       <AnimatePresence initial={false}>
-        {isActive && startTime !== null && (
+        {isActive && startTime !== null && !isViewingThisRecording && (
           <NoteTakerOverlay
             key='floating-recording-transcript'
             status={status}
@@ -155,24 +143,19 @@ export function NoteTakerOverlayHost(): ReactElement {
             accumulatedPausedMs={accumulatedPausedMs}
             transcripts={transcripts}
             channelId={channelId}
+            recordingId={externalId}
             notesCanvasId={notesCanvasId}
             isCreatingNotes={isCreatingNotes}
             notesCreationFailed={notesCreationFailed}
             onCreateNotes={() => void handleCreateNotes()}
+            isOffline={showOfflineBanner}
+            title={title ?? undefined}
             onStop={handleStop}
             onPause={() => sendRecordingEvent({ type: 'pauseRecording' })}
             onResume={() => sendRecordingEvent({ type: 'resumeRecording' })}
           />
         )}
       </AnimatePresence>
-
-      <SaveTitleModal
-        isOpen={showTitleModal}
-        defaultTitle={generateRecordingTitle(lastStartTimeRef.current)}
-        onSave={handleSaveTitle}
-        isSaving={savingTitle}
-        endedByAgentDrop={endedByAgentDrop}
-      />
     </>
   );
 }

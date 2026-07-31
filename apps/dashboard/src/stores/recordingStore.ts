@@ -46,6 +46,7 @@ export interface RecordingState {
   room: Room | null;
   externalId: string | null;
   channelId: string | null;
+  title: string | null;
   status: RecordingStatus;
   isRecording: boolean;
   startTime: number | null;
@@ -73,6 +74,7 @@ const initialContext: RecordingState = {
   room: null,
   externalId: null,
   channelId: null,
+  title: null,
   status: 'idle',
   isRecording: false,
   startTime: null,
@@ -357,6 +359,7 @@ export const recordingStore = createStore({
         room: null,
         externalId: null,
         channelId: null,
+        title: null,
         status: 'idle',
         isRecording: false,
         startTime: null,
@@ -410,6 +413,7 @@ export const recordingStore = createStore({
       room: null,
       externalId: null,
       channelId: null,
+      title: null,
       status: 'idle',
       isRecording: false,
       startTime: null,
@@ -469,6 +473,11 @@ export const recordingStore = createStore({
     setNotesCanvasTitle: (context, event: { title: string }): RecordingState => ({
       ...context,
       notesCanvasTitle: event.title,
+    }),
+
+    setTitle: (context, event: { title: string }): RecordingState => ({
+      ...context,
+      title: event.title,
     }),
 
     setActiveLayout: (context, event: { layout: RecordingLayout }): RecordingState => ({

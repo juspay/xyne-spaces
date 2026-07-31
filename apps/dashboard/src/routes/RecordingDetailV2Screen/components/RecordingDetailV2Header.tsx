@@ -1,20 +1,17 @@
 import { type ReactElement, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import * as Popover from '@radix-ui/react-popover';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
-import {
-  PencilEdit,
-  LinkChainSlant,
-  CalendarEvent,
-  Tag,
-  Share02,
-  Spinner,
-  UturnLeft
-} from '@xyne/icons';
+import { LinkChainSlant, CalendarEvent, Tag, Share02, Spinner, UturnLeft } from '@xyne/icons';
 import { Button } from '../../../components/ui/Button/Button';
 import { Dialog } from '../../../components/ui/Dialog';
+import { Tooltip } from '../../../components/ui/Tooltip';
 import XyneAIStar from '../../../components/icons/xyne-ai/XyneAIStar';
-import { recordingService, type RecordingDetail } from '../../../services/Recording/recordingService';
+import {
+  recordingService,
+  type RecordingDetail,
+} from '../../../services/Recording/recordingService';
 import { logRecordingError } from '../../../utils/recordingUtils';
 import { RecordingShareModal } from './RecordingShareModal';
 
@@ -36,9 +33,10 @@ export const RecordingDetailV2Header = ({
   const [editedTitle, setEditedTitle] = useState(recording.title);
   const [isSavingTitle, setIsSavingTitle] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
+  const [showLiveAskAIHint, setShowLiveAskAIHint] = useState(false);
 
   const displayTitle = recording.title?.trim() || 'Untitled Recording';
-  const formattedDate = format(new Date(recording.startedAt), "MMM d, yyyy · h:mm a");
+  const formattedDate = format(new Date(recording.startedAt), 'MMM d, yyyy · h:mm a');
 
   const handleSaveTitle = async (): Promise<void> => {
     if (isSavingTitle) return;
@@ -87,6 +85,14 @@ export const RecordingDetailV2Header = ({
     }
   };
 
+  const handleAskAIClick = (): void => {
+    if (isLive) {
+      setShowLiveAskAIHint(true);
+      return;
+    }
+    onAskAI();
+  };
+
   const handleStartEdit = (): void => {
     if (isEditingTitle || isSavingTitle) return;
     setEditedTitle(recording.title);
@@ -128,7 +134,10 @@ export const RecordingDetailV2Header = ({
                 </span>
               )}
               <div className='relative inline-flex max-w-full overflow-hidden'>
-                <span className='invisible whitespace-pre text-3xl font-medium truncate' aria-hidden='true'>
+                <span
+                  className='invisible whitespace-pre text-3xl font-medium truncate'
+                  aria-hidden='true'
+                >
                   {editedTitle || ' '}
                 </span>
                 <input
@@ -170,67 +179,68 @@ export const RecordingDetailV2Header = ({
           )}
         </div>
 
-        <Button
-          type='button'
-          variant='ghost'
-          onClick={handleStartEdit}
-          disabled={isEditingTitle || isSavingTitle}
-          className='flex size-8 shrink-0 items-center justify-center text-muted-foreground transition-colors hover:bg-muted hover:text-foreground rounded-lg disabled:opacity-50'
-          aria-label='Edit recording title'
-          data-track-category='RecordingDetailV2'
-          data-track-name='edit_title'
-        >
-          {isSavingTitle ? (
+        {isSavingTitle && (
+          <span
+            className='flex size-8 shrink-0 items-center justify-center text-muted-foreground'
+            role='status'
+            aria-label='Saving title'
+          >
             <Spinner size={16} className='animate-spin' />
-          ) : (
-            <PencilEdit className='size-3.5' variant='Stroke' />
-          )}
-        </Button>
+          </span>
+        )}
       </div>
 
       {/* Actions row */}
       <div className='flex flex-wrap items-center justify-between gap-3'>
         <div className='flex flex-wrap items-center gap-2'>
-          <div className='inline-flex items-center gap-1.5 rounded-lg border border-border hover:bg-muted px-3 py-1 text-xs text-muted-foreground'>
-            <CalendarEvent size={16} variant='Stroke' />
-            <span>{formattedDate}</span>
-          </div>
-          <Button
-            type='button'
-            variant='outline'
-            size='sm'
-            onClick={() => toast.info('Link sharing coming soon')}
-            className='h-7 gap-1.5 rounded-lg px-3 text-xs font-normal border-dashed border-muted-foreground/40 text-muted-foreground hover:border-foreground/30 hover:text-foreground'
-            data-track-category='RecordingDetailV2'
-            data-track-name='copy_link_dummy'
-          >
-            <LinkChainSlant className='size-3.5' />
-            Link
-          </Button>
-          <Button
-            type='button'
-            variant='outline'
-            size='sm'
-            onClick={() => toast.info('Labels coming soon')}
-            className='h-7 gap-1.5 rounded-lg px-3 text-xs font-normal border-dashed border-muted-foreground/40 text-muted-foreground hover:border-foreground/30 hover:text-foreground'
-            data-track-category='RecordingDetailV2'
-            data-track-name='add_label_dummy'
-          >
-            <Tag className='size-3.5' />
-            Add label
-          </Button>
-          <Button
-            type='button'
-            variant='outline'
-            size='iconSm'
-            onClick={() => setShowShareModal(true)}
-            className='w-8 h-7 rounded-lg text-muted-foreground hover:border-foreground/30 hover:text-foreground'
-            aria-label='Share recording'
-            data-track-category='RecordingDetailV2'
-            data-track-name='share_recording'
-          >
-            <Share02 className='size-3.5' />
-          </Button>
+          <Tooltip content='Recording started' side='top'>
+            <div className='inline-flex items-center gap-1.5 rounded-lg border border-border hover:bg-muted px-3 py-1 text-xs text-muted-foreground'>
+              <CalendarEvent size={16} variant='Stroke' />
+              <span>{formattedDate}</span>
+            </div>
+          </Tooltip>
+          <Tooltip content='Link a ticket or thread' side='top'>
+            <Button
+              type='button'
+              variant='outline'
+              size='sm'
+              onClick={() => toast.info('Link sharing coming soon')}
+              className='h-7 gap-1.5 rounded-lg px-3 text-xs font-normal border-dashed border-muted-foreground/40 text-muted-foreground hover:border-foreground/30 hover:text-foreground'
+              data-track-category='RecordingDetailV2'
+              data-track-name='copy_link_dummy'
+            >
+              <LinkChainSlant className='size-3.5' />
+              Link
+            </Button>
+          </Tooltip>
+          <Tooltip content='Labels' side='top'>
+            <Button
+              type='button'
+              variant='outline'
+              size='sm'
+              onClick={() => toast.info('Labels coming soon')}
+              className='h-7 gap-1.5 rounded-lg px-3 text-xs font-normal border-dashed border-muted-foreground/40 text-muted-foreground hover:border-foreground/30 hover:text-foreground'
+              data-track-category='RecordingDetailV2'
+              data-track-name='add_label_dummy'
+            >
+              <Tag className='size-3.5' />
+              Add label
+            </Button>
+          </Tooltip>
+          <Tooltip content='Share' side='top'>
+            <Button
+              type='button'
+              variant='outline'
+              size='iconSm'
+              onClick={() => setShowShareModal(true)}
+              className='w-8 h-7 rounded-lg text-muted-foreground hover:border-foreground/30 hover:text-foreground'
+              aria-label='Share recording'
+              data-track-category='RecordingDetailV2'
+              data-track-name='share_recording'
+            >
+              <Share02 className='size-3.5' />
+            </Button>
+          </Tooltip>
         </div>
 
         {showShareModal && (
@@ -244,18 +254,42 @@ export const RecordingDetailV2Header = ({
           </Dialog>
         )}
 
-        <Button
-          type='button'
-          variant='outline'
-          size='sm'
-          onClick={onAskAI}
-          className='h-8 gap-2 rounded-xl w-24 text-[13px] font-medium border-muted-foreground/20'
-          data-track-category='RecordingDetailV2'
-          data-track-name='ask_ai_recording'
-        >
-          <XyneAIStar  />
-          Ask AI
-        </Button>
+        <Popover.Root open={showLiveAskAIHint} onOpenChange={setShowLiveAskAIHint}>
+          <Tooltip content='Ask AI about this recording' side='top'>
+            <Popover.Anchor asChild>
+              <Button
+                type='button'
+                variant='outline'
+                size='sm'
+                onClick={handleAskAIClick}
+                className='h-8 gap-2 rounded-xl w-24 text-[13px] font-medium border-muted-foreground/20'
+                data-track-category='RecordingDetailV2'
+                data-track-name={isLive ? 'ask_ai_live_hint' : 'ask_ai_recording'}
+              >
+                <XyneAIStar />
+                Ask AI
+              </Button>
+            </Popover.Anchor>
+          </Tooltip>
+
+          <Popover.Portal>
+            <Popover.Content
+              side='bottom'
+              align='end'
+              sideOffset={8}
+              className='z-50 w-64 rounded-xl border border-border bg-popover p-3.5 shadow-2xl'
+            >
+              <div className='mb-2 flex items-center gap-1.5'>
+                <XyneAIStar size={14} />
+                <h3 className='text-sm font-semibold text-foreground'>Ask AI</h3>
+              </div>
+              <p className='text-pretty text-xs leading-relaxed text-muted-foreground/70'>
+                Ask about decisions, action items, and anything said. Available on the full
+                recording once you stop.
+              </p>
+            </Popover.Content>
+          </Popover.Portal>
+        </Popover.Root>
       </div>
     </header>
   );

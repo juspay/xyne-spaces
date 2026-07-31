@@ -18,6 +18,7 @@ import { Button } from '../../components/ui/Button/Button';
 import { RecordingDetailV2Header } from './components/RecordingDetailV2Header';
 import { LiveRecordingControlBar } from './components/LiveRecordingControlBar';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
+import { sendRecordingEvent, useRecordingStore } from '../../hooks/useRecordingStore';
 import { queries } from '../../zero/queries';
 import { xyneAIActor } from '../../machines/xyneAIMachine';
 
@@ -45,7 +46,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
   const navState = location.state as RecordingNavState | null;
   const recordingIds = navState?.recordingIds;
   const currentIndex = useMemo(
-    () => (recordingId ? recordingIds?.indexOf(recordingId) ?? -1 : -1),
+    () => (recordingId ? (recordingIds?.indexOf(recordingId) ?? -1) : -1),
     [recordingId, recordingIds],
   );
   const canNavigateNext = currentIndex >= 0 && currentIndex < (recordingIds?.length ?? 0) - 1;
@@ -96,9 +97,15 @@ export default function RecordingDetailV2Screen(): ReactElement {
     }
   };
 
+  const activeRecordingId = useRecordingStore(context => context.externalId);
+
   const handleTitleUpdated = (title: string): void => {
     if (!recording) return;
     setRecording({ ...recording, title });
+    // Keep the live overlay's header in step when renaming the in-progress recording.
+    if (recording.externalId === activeRecordingId) {
+      sendRecordingEvent({ type: 'setTitle', title });
+    }
   };
 
   const [message] = useCachedQuery(

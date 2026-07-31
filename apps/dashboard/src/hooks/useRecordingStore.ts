@@ -37,6 +37,7 @@ export type RecordingStoreEvent =
   | { type: 'clearTranscripts' }
   | { type: 'setNotesCanvas'; canvasId: string; title?: string }
   | { type: 'setNotesCanvasTitle'; title: string }
+  | { type: 'setTitle'; title: string }
   | { type: 'setActiveLayout'; layout: RecordingLayout }
   | { type: 'setTranscriptMinimized'; isMinimized: boolean }
   | { type: 'agentLeftUnexpectedly' };

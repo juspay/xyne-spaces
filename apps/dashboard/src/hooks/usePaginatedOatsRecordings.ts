@@ -5,20 +5,24 @@ import { useCachedQuery } from './useCachedQuery';
 import { useZero } from './useZero';
 
 export type OatsRecordingScope = 'created' | 'shared';
-export type OatsRecordingEntry = QueryResultType<
-  typeof queries.createdOatsRecordings
->[number];
+export type OatsRecordingEntry = QueryResultType<typeof queries.createdOatsRecordings>[number];
 
 const FETCH_LIMIT = 20;
+
+const refreshListeners = new Set<() => void>();
+
+/**
+ * Refetch every mounted Oats list from the server.
+ */
+export function refreshOatsRecordings(): void {
+  for (const listener of refreshListeners) listener();
+}
 type RecordingCursor = { id: string; startedAt: number } | null;
 type OatsRecordingQuery =
   | ReturnType<typeof queries.createdOatsRecordings>
   | ReturnType<typeof queries.sharedOatsRecordings>;
 
-const recordingQuery = (
-  scope: OatsRecordingScope,
-  start: RecordingCursor,
-): OatsRecordingQuery =>
+const recordingQuery = (scope: OatsRecordingScope, start: RecordingCursor): OatsRecordingQuery =>
   scope === 'created'
     ? queries.createdOatsRecordings({ limit: FETCH_LIMIT, start })
     : queries.sharedOatsRecordings({ limit: FETCH_LIMIT, start });
@@ -56,11 +60,7 @@ export function usePaginatedOatsRecordings(
 
     setRecordings(current => {
       const rows = cursor ? [...current, ...page] : [...page];
-      return [
-        ...new Map(
-          rows.map(recording => [recording.id, recording] as const),
-        ).values(),
-      ];
+      return [...new Map(rows.map(recording => [recording.id, recording] as const)).values()];
     });
     setHasMoreRecordings(page.length === FETCH_LIMIT);
   }, [cursor, details.type, page]);
@@ -82,6 +82,13 @@ export function usePaginatedOatsRecordings(
       })
       .catch(() => undefined);
   }, [scope, zero]);
+
+  useEffect(() => {
+    refreshListeners.add(refreshRecordings);
+    return (): void => {
+      refreshListeners.delete(refreshRecordings);
+    };
+  }, [refreshRecordings]);
 
   return {
     recordings,
