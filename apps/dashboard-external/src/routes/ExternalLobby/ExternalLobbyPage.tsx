@@ -1,4 +1,12 @@
-import { useRef, useState, useCallback, useEffect, useReducer } from 'react';
+import {
+  Component,
+  useRef,
+  useState,
+  useCallback,
+  useEffect,
+  useReducer,
+  type ReactNode,
+} from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
@@ -16,6 +24,7 @@ import { CallType } from '@xyne/shared';
 import { callLobbyService, type CallInfo } from '@/services/Call/callLobbyService';
 import { usePlatform } from '@/hooks/usePlatform';
 import { ExternalCallView } from './ExternalCallView';
+import { useUnifiedCallInviteRouting } from './useUnifiedCallInviteRouting';
 
 // ---------------------------------------------------------------------------
 // State types
@@ -31,6 +40,7 @@ type LobbyStage =
   | 'JOINING'
   | 'IN_CALL'
   | 'REJECTED'
+  | 'CONNECTION_FAILED'
   | 'DISCONNECTED';
 
 interface LobbyState {
@@ -43,6 +53,7 @@ interface LobbyState {
   serverUrl?: string;
   externalId?: string;
   callType?: CallType;
+  connectionError?: string;
 }
 
 type LobbyAction =
@@ -62,7 +73,8 @@ type LobbyAction =
       callType: CallType;
       participantId: string;
     }
-  | { type: 'SET_DISCONNECTED' };
+  | { type: 'SET_DISCONNECTED' }
+  | { type: 'SET_CONNECTION_FAILED'; error?: string };
 
 const initialState: LobbyState = { stage: 'LOADING' };
 
@@ -106,6 +118,8 @@ function lobbyReducer(state: LobbyState, action: LobbyAction): LobbyState {
       };
     case 'SET_DISCONNECTED':
       return { ...state, stage: 'DISCONNECTED' };
+    case 'SET_CONNECTION_FAILED':
+      return { ...state, stage: 'CONNECTION_FAILED', connectionError: action.error };
     default:
       return state;
   }
@@ -132,13 +146,15 @@ export function ExternalLobbyPage() {
   const [micDenied, setMicDenied] = useState(false);
   const [camDenied, setCamDenied] = useState(false);
 
+  const { canLoadGuestLobby } = useUnifiedCallInviteRouting(externalId);
+
   // -------------------------------------------------------------------------
-  // 1. Load call info
+  // 1. Load call info after detection has failed open to the guest lobby
   // -------------------------------------------------------------------------
   const callInfoQuery = useQuery({
     queryKey: ['call-lobby-info', externalId],
     queryFn: () => callLobbyService.getCallInfo(externalId!),
-    enabled: !!externalId && state.stage === 'LOADING',
+    enabled: canLoadGuestLobby && state.stage === 'LOADING',
     retry: false,
   });
 
@@ -409,6 +425,10 @@ export function ExternalLobbyPage() {
     dispatch({ type: 'SET_DISCONNECTED' });
   }, []);
 
+  const handleConnectionFailed = useCallback((error?: string) => {
+    dispatch({ type: 'SET_CONNECTION_FAILED', error });
+  }, []);
+
   // Rejoin handler — cookie handles identity, no participantId needed
   const handleRejoin = useCallback(() => {
     rejoinMutation.mutate();
@@ -421,15 +441,18 @@ export function ExternalLobbyPage() {
   // Full-screen call
   if (state.stage === 'IN_CALL') {
     return (
-      <ExternalCallView
-        token={state.token!}
-        serverUrl={state.serverUrl!}
-        callId={state.externalId!}
-        externalId={state.externalId!}
-        callType={state.callType || CallType.AUDIO}
-        participantId={state.participantId!}
-        onDisconnected={handleDisconnected}
-      />
+      <ExternalCallErrorBoundary onError={handleConnectionFailed}>
+        <ExternalCallView
+          token={state.token!}
+          serverUrl={state.serverUrl!}
+          callId={state.externalId!}
+          externalId={state.externalId!}
+          callType={state.callType || CallType.AUDIO}
+          participantId={state.participantId!}
+          onDisconnected={handleDisconnected}
+          onConnectionFailed={handleConnectionFailed}
+        />
+      </ExternalCallErrorBoundary>
     );
   }
 
@@ -536,6 +559,45 @@ export function ExternalLobbyPage() {
         </button>
         {rejoinMutation.isError && (
           <p className='text-red-400 text-xs mt-3'>Failed to rejoin. The call may have ended.</p>
+        )}
+      </StatusScreen>
+    );
+  }
+
+  if (state.stage === 'CONNECTION_FAILED') {
+    return (
+      <StatusScreen>
+        <div className='w-16 h-16 rounded-full bg-red-900/30 flex items-center justify-center mb-4'>
+          <AlertTriangle size={28} className='text-red-400' />
+        </div>
+        <h2 className='text-xl font-semibold text-white mb-2'>Couldn’t connect to the call</h2>
+        <p className='text-gray-400 text-sm mb-6'>Check your connection and try joining again.</p>
+        {state.connectionError && (
+          <p className='text-red-300/80 text-xs mb-6 max-w-sm break-words'>
+            {state.connectionError}
+          </p>
+        )}
+        <button
+          onClick={handleRejoin}
+          disabled={rejoinMutation.isPending}
+          data-track-category='CALLS'
+          data-track-name='EXTERNAL_RETRY_CONNECTION'
+          className='inline-flex items-center gap-2 px-6 py-2.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+        >
+          {rejoinMutation.isPending ? (
+            <>
+              <LoadingSpinner size='sm' />
+              Retrying...
+            </>
+          ) : (
+            <>
+              <RotateCcw size={16} />
+              Retry connection
+            </>
+          )}
+        </button>
+        {rejoinMutation.isError && (
+          <p className='text-red-400 text-xs mt-3'>Unable to retry. The call may have ended.</p>
         )}
       </StatusScreen>
     );
@@ -679,4 +741,30 @@ function LoadingSpinner({ size = 'md' }: { size?: 'sm' | 'md' }) {
   return (
     <div className={`${sizeClasses} border-gray-700 border-t-blue-500 rounded-full animate-spin`} />
   );
+}
+
+interface ExternalCallErrorBoundaryProps {
+  children: ReactNode;
+  onError: (error: string) => void;
+}
+
+class ExternalCallErrorBoundary extends Component<
+  ExternalCallErrorBoundaryProps,
+  { hasError: boolean }
+> {
+  state = { hasError: false };
+
+  static getDerivedStateFromError(): { hasError: boolean } {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error): void {
+    console.error('External call UI crashed after connecting', error);
+    this.props.onError(error.message);
+  }
+
+  render(): ReactNode {
+    if (this.state.hasError) return null;
+    return this.props.children;
+  }
 }

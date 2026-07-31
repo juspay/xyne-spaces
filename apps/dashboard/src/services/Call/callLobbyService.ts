@@ -39,6 +39,10 @@ export interface CallLobbyRecordingStateResponse {
   activeRecording: CallLobbyActiveRecording | null;
 }
 
+export type DetectInternalResponse =
+  | { result: 'internal'; redirectUrl: string; workspaceId: string }
+  | { result: 'external' };
+
 // Re-export shared type for backward compatibility
 export type { CallChatMessage } from '@xyne/shared';
 
@@ -53,6 +57,14 @@ export interface ExternalJoinResponse {
 const BASE = '/call-lobby';
 
 export const callLobbyService = {
+  /** Decide whether a unified invite should enter through the authenticated app. */
+  async detectInternal(externalId: string): Promise<DetectInternalResponse> {
+    const response = await apiInstance.post<DetectInternalResponse>(
+      `${BASE}/${externalId}/detect-internal`,
+    );
+    return response.data;
+  },
+
   /**
    * Fetch public call info for the pre-join lobby page.
    * Returns null if the call has ended, throws on not-found.

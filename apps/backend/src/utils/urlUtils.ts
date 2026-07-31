@@ -265,3 +265,11 @@ export function isValidUrl(url: string): boolean {
 export function buildCallInviteUrl(externalId: string): string {
   return `${config.externalCallInviteBaseUrl}/call/${externalId}`;
 }
+
+/** Build a trusted main-dashboard destination for unified call invite routing. */
+export function buildInternalCallUrl(externalId: string, callType: string): string {
+  const frontendOrigin = new URL(config.frontendUrl).origin;
+  const url = new URL(`/call/${encodeURIComponent(externalId)}`, frontendOrigin);
+  url.searchParams.set('type', callType);
+  return url.toString();
+}

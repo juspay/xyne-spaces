@@ -34,6 +34,11 @@ function sanitizeUrl(url: string): string {
   );
 }
 
+export function isPublicExternalAppPath(pathname: string): boolean {
+  const normalizedPath = pathname.replace(/\/+$/, '');
+  return normalizedPath === '/external' || normalizedPath.startsWith('/external/');
+}
+
 /**
  * Helper function to track API latency with mixpanel
  * @param config - The axios request config
@@ -248,7 +253,7 @@ apiConfig.interceptors.response.use(
       });
     });
 
-    if (axiosError.response?.status === 401) {
+    if (axiosError.response?.status === 401 && !isPublicExternalAppPath(window.location.pathname)) {
       logger.warn(Logger.Event.AUTH_SESSION_EXPIRED, {
         url: sanitizedUrl,
         message: 'Received 401 Unauthorized. Logging out.',

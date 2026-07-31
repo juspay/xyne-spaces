@@ -45,10 +45,12 @@ export default tseslint.config(
             '../dashboard/src/components/Call/CallViews/FullCallView.tsx',
             '../dashboard/src/services/Call/callLobbyService.ts',
             '../dashboard/src/components/Call/hooks/useHandRaise.ts',
+            '../dashboard/src/config.ts',
+            '../dashboard/src/hooks/usePlatform.ts',
           ],
           message:
             'dashboard-external may only import the approved entry points from dashboard/src ' +
-            '(roomMachine, FullCallView, callLobbyService, useHandRaise). ' +
+            '(roomMachine, FullCallView, callLobbyService, useHandRaise, config, usePlatform). ' +
             'To add a new one update .dependency-cruiser.cjs and get a review.',
         }],
       }],

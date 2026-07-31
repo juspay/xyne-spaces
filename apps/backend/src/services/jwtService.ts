@@ -91,6 +91,34 @@ export class JwtService {
   }
 
   /**
+   * Verify every JWT property except expiry. This is intentionally separate
+   * from decodeToken: callers may use the returned identity only to attempt a
+   * tightly-scoped refresh of an expired session.
+   */
+  verifyTokenIgnoringExpiration(token: string): JwtPayload {
+    try {
+      const decoded = jwt.verify(token, this.secret, {
+        issuer: this.issuer,
+        audience: this.audience,
+        ignoreExpiration: true,
+      }) as JwtPayload;
+
+      const forceLogoutBefore = config.jwt.forceLogoutBefore;
+      if (forceLogoutBefore && decoded.iat && decoded.iat < forceLogoutBefore) {
+        throw new Error('JWT token has expired');
+      }
+
+      return decoded;
+    } catch (error) {
+      if (error instanceof jwt.JsonWebTokenError) {
+        throw new Error('Invalid JWT token');
+      }
+      logger.error('Error verifying expired JWT token:', error);
+      throw new Error('Failed to verify JWT token');
+    }
+  }
+
+  /**
    * Decode a JWT token without verification (for debugging)
    */
   decodeToken(token: string): JwtPayload | null {

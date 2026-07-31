@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import type { Request, Response, NextFunction } from 'express';
-import { CallStatus } from '@prisma/client';
 import { callLobbyController } from '@/controllers/callLobbyController';
+import { detectInternalCallInvite } from '@/controllers/callInviteDetectionController';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';
@@ -11,17 +11,12 @@ import {
   clearExtCallCookie,
 } from '@/services/externalCallTokenService';
 import type { CallLobbyRequest } from '@/types/express';
+import { isCallLobbyJoinable } from '@/services/callLobbyPolicy';
 
 // Statuses a call may be in when external users try to enter the lobby.
 // SCHEDULED is included so externals who click the invitation link before the
 // host starts the call land on the pre-join / waiting view instead of being
 // told "call ended".
-const JOINABLE_STATUSES: CallStatus[] = [
-  CallStatus.SCHEDULED,
-  CallStatus.ACTIVE,
-  CallStatus.IN_PROGRESS,
-];
-
 const router = Router();
 
 // ---------------------------------------------------------------------------
@@ -44,7 +39,7 @@ async function resolveCallSession(req: Request, res: Response, next: NextFunctio
       return;
     }
 
-    if (!JOINABLE_STATUSES.includes(call.status)) {
+    if (!isCallLobbyJoinable(call.status)) {
       clearExtCallCookie(res, externalId);
       res.json({ status: 'ended' });
       return;
@@ -118,9 +113,12 @@ async function requireCallParticipant(
 }
 
 // ---------------------------------------------------------------------------
-// Routes — ALL :externalId routes go through resolveCallSession
+// Routes — guest-lobby routes go through resolveCallSession
 // ---------------------------------------------------------------------------
 
+// Detection is intentionally outside resolveCallSession: expected misses must
+// stay privacy-neutral and must not read or mutate external participant state.
+router.post('/:externalId/detect-internal', detectInternalCallInvite);
 router.get('/:externalId', resolveCallSession, callLobbyController.getCallInfo);
 router.post('/:externalId/request', resolveCallSession, callLobbyController.requestToJoin);
 router.get('/:externalId/status', resolveCallSession, callLobbyController.getLobbyStatus);

@@ -45,7 +45,8 @@ module.exports = {
       comment:
         'dashboard-external/src directly imported a dashboard/src module that is not ' +
         'on the approved entry-point list. ' +
-        'Approved entry points: roomMachine, FullCallView, callLobbyService, useHandRaise. ' +
+        'Approved entry points: roomMachine, FullCallView, callLobbyService, useHandRaise, ' +
+        'config, usePlatform, Tooltip. ' +
         'To add a new one, update this rule and get a code-review.',
       severity: 'error',
       from: {
@@ -60,6 +61,9 @@ module.exports = {
           'dashboard/src/components/Call/CallViews/FullCallView\\.tsx$',
           'dashboard/src/services/Call/callLobbyService\\.ts$',
           'dashboard/src/components/Call/hooks/useHandRaise\\.ts$',
+          'dashboard/src/config\\.ts$',
+          'dashboard/src/hooks/usePlatform\\.ts$',
+          'dashboard/src/components/ui/Tooltip/index\\.ts$',
         ],
       },
     },

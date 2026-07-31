@@ -1,9 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import { REACTION_EMOJIS } from '../hooks/useReactions';
 import {
   Users,
-  Share2,
   Mic,
   MicOff,
   Video,
@@ -38,9 +36,9 @@ import {
 import { DeviceSelector } from '../DeviceSelector/DeviceSelector';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useShortcutById, useShortcut } from '../../../shortcuts';
-import { callLobbyService } from '../../../services/Call/callLobbyService';
 import { InvitationResponse, type RecordingType } from '@xyne/shared';
 import { RecordingButton } from './RecordingButton';
+import { CallInviteControl } from './CallInviteControl';
 import {
   getAiButtonColorClass,
   getAiButtonDisabled,
@@ -127,7 +125,6 @@ export function CallControls({
   aiController,
   localParticipantId,
   callId: callId,
-  roomLink,
   onToggleMic,
   onToggleCamera,
   onToggleScreenShare,
@@ -158,22 +155,12 @@ export function CallControls({
   onTogglePresentationMode,
   isPresentationMode = false,
 }: CallControlsProps): React.ReactElement {
-  const [showCopied, setShowCopied] = useState(false);
   const [showCameraMenu, setShowCameraMenu] = useState(false);
   const [showMicMenu, setShowMicMenu] = useState(false);
   const [showReactionPicker, setShowReactionPicker] = useState(false);
-  const [showShareMenu, setShowShareMenu] = useState(false);
   const reactionPickerRef = useRef<HTMLDivElement>(null);
-  const shareMenuRef = useRef<HTMLDivElement>(null);
   const { isMobile, isMac } = usePlatform();
   const modKey = isMac ? '⌘' : 'Ctrl';
-
-  const inviteUrlQuery = useQuery({
-    queryKey: ['call-invite-url', callId],
-    queryFn: () => callLobbyService.getInviteUrl(callId),
-    staleTime: Infinity,
-    enabled: !!callId,
-  });
 
   const micMenuRef = useRef<HTMLDivElement>(null);
   const cameraMenuRef = useRef<HTMLDivElement>(null);
@@ -307,9 +294,6 @@ export function CallControls({
       if (reactionPickerRef.current && !reactionPickerRef.current.contains(event.target as Node)) {
         setShowReactionPicker(false);
       }
-      if (shareMenuRef.current && !shareMenuRef.current.contains(event.target as Node)) {
-        setShowShareMenu(false);
-      }
     };
 
     document.addEventListener('mousedown', handleClickOutside);
@@ -329,23 +313,6 @@ export function CallControls({
   const handleCameraDeviceChange = async (deviceId: string): Promise<void> => {
     await setActiveCameraDevice(deviceId);
     // Keep the main menu open so user can see the selection
-  };
-
-  const handleCopyInviteLink = (): void => {
-    const webUrl = inviteUrlQuery.data ?? '';
-    void navigator.clipboard.writeText(webUrl).then(() => {
-      setShowShareMenu(false);
-      setShowCopied(true);
-      setTimeout(() => setShowCopied(false), 2000);
-    });
-  };
-
-  const handleCopyAppLink = (): void => {
-    void navigator.clipboard.writeText(roomLink).then(() => {
-      setShowShareMenu(false);
-      setShowCopied(true);
-      setTimeout(() => setShowCopied(false), 2000);
-    });
   };
 
   // Determine if custom sizing is being used (for mini view with dynamic sizing)
@@ -856,94 +823,14 @@ export function CallControls({
           )}
         </button>
 
-        {/* Share Link Button */}
-        {isExternalUser ? (
-          <button
-            onClick={handleCopyInviteLink}
-            className={cn(buttonClasses, 'relative bg-gray-700 hover:bg-gray-600 text-white')}
-            style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
-            title='Copy call link'
-            data-track-category='CALLS'
-            data-track-name='SHARE_CALL_LINK'
-            data-track-metadata={JSON.stringify({ callId })}
-          >
-            <Share2
-              className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
-              style={
-                hasCustomSizing ? { width: `${iconSize}px`, height: `${iconSize}px` } : undefined
-              }
-            />
-            {showCopied && (
-              <span className='absolute -top-8 sm:-top-10 left-1/2 transform -translate-x-1/2 bg-green-500 text-white text-xs sm:text-sm px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg shadow-lg whitespace-nowrap'>
-                Copied!
-              </span>
-            )}
-          </button>
-        ) : (
-          <div className='relative' ref={shareMenuRef}>
-            <button
-              onClick={() => setShowShareMenu(prev => !prev)}
-              className={cn(
-                buttonClasses,
-                showShareMenu
-                  ? 'bg-blue-600 hover:bg-blue-700 text-white'
-                  : 'bg-gray-700 hover:bg-gray-600 text-white',
-              )}
-              style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
-              title='Share call link'
-              data-track-category='CALLS'
-              data-track-name='SHARE_CALL_LINK'
-              data-track-metadata={JSON.stringify({ callId })}
-            >
-              <Share2
-                className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
-                style={
-                  hasCustomSizing ? { width: `${iconSize}px`, height: `${iconSize}px` } : undefined
-                }
-              />
-              {showCopied && (
-                <span className='absolute -top-8 sm:-top-10 left-1/2 transform -translate-x-1/2 bg-green-500 text-white text-xs sm:text-sm px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg shadow-lg whitespace-nowrap'>
-                  Copied!
-                </span>
-              )}
-            </button>
-
-            {showShareMenu && (
-              <div className='absolute bottom-full mb-3 left-1/2 -translate-x-1/2 bg-gray-800 border border-gray-700 rounded-xl shadow-2xl overflow-hidden min-w-max'>
-                <div className='px-4 pt-2.5 pb-1.5 text-[10px] font-semibold uppercase tracking-widest text-gray-500'>
-                  Share call link
-                </div>
-                <button
-                  onClick={handleCopyInviteLink}
-                  className='flex items-center gap-3 w-full px-4 py-2.5 text-sm text-gray-200 hover:bg-gray-700 transition-colors text-left'
-                  data-track-category='CALLS'
-                  data-track-name='COPY_INVITE_LINK'
-                >
-                  <Share2 className='w-4 h-4 text-blue-400 flex-shrink-0 mt-0.5' />
-                  <div>
-                    <div className='font-medium'>Invite external participants</div>
-                    <div className='text-xs text-gray-400'>Opens in browser — no app needed</div>
-                  </div>
-                </button>
-                <div className='h-px bg-gray-700/60 mx-3' />
-                <button
-                  onClick={handleCopyAppLink}
-                  className='flex items-center gap-3 w-full px-4 py-2.5 text-sm text-gray-200 hover:bg-gray-700 transition-colors text-left'
-                  data-track-category='CALLS'
-                  data-track-name='COPY_APP_LINK'
-                >
-                  <Monitor className='w-4 h-4 text-purple-400 flex-shrink-0 mt-0.5' />
-                  <div>
-                    <div className='font-medium flex items-center gap-1.5'>
-                      Share with team members
-                    </div>
-                    <div className='text-xs text-gray-400'>Opens directly in Xyne app</div>
-                  </div>
-                </button>
-              </div>
-            )}
-          </div>
-        )}
+        <CallInviteControl
+          callId={callId}
+          isExternalUser={isExternalUser}
+          buttonClasses={buttonClasses}
+          hasCustomSizing={hasCustomSizing}
+          buttonPadding={buttonPadding}
+          iconSize={iconSize}
+        />
 
         {iconSize >= 16 && (
           <div className={cn('hidden sm:block w-px h-8 mx-0.5', midnightSeparatorClass)}></div>

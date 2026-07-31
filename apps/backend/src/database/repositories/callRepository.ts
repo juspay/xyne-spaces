@@ -1586,6 +1586,30 @@ export class CallRepository {
   }
 
   /**
+   * Return the private routing fields needed by the unified invite detector.
+   * Unlike getPublicCallInfo, this result must never be returned directly from
+   * a public endpoint because it contains the owning workspace ID.
+   */
+  async getCallInviteRoutingInfo(externalId: string): Promise<{
+    id: string;
+    externalId: string;
+    callType: CallType;
+    status: CallStatus;
+    workspaceId: string | null;
+  } | null> {
+    return DatabaseClient.getInstance().call.findUnique({
+      where: { externalId },
+      select: {
+        id: true,
+        externalId: true,
+        callType: true,
+        status: true,
+        workspaceId: true,
+      },
+    });
+  }
+
+  /**
    * Create a CallParticipant row for an external lobby request.
    * userId is a random UUID (external users have no real account).
    */

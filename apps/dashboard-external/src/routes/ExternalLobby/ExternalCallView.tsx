@@ -18,6 +18,8 @@ interface ExternalCallViewProps {
   participantId: string;
   /** Called when the external user disconnects (room goes idle) */
   onDisconnected: () => void;
+  /** Called when the initial LiveKit connection cannot be established */
+  onConnectionFailed: (error?: string) => void;
 }
 
 /**
@@ -38,26 +40,11 @@ export function ExternalCallView({
   callType,
   participantId,
   onDisconnected,
+  onConnectionFailed,
 }: ExternalCallViewProps) {
   const wasConnectedRef = useRef(false);
-
-  // Connect to LiveKit room via the global XState machine
-  useEffect(() => {
-    if (token && serverUrl) {
-      roomActor.send({
-        type: 'CONNECT',
-        token,
-        serverUrl,
-        callType,
-        externalId,
-        zero: null,
-      });
-    }
-    return () => {
-      roomActor.send({ type: 'DISCONNECT', endForAll: false });
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, serverUrl, callType, externalId]);
+  const connectionAttemptedRef = useRef(false);
+  const connectionFailureReportedRef = useRef(false);
 
   // Subscribe to room state
   const snapshot = useSelector(roomActor, s => s);
@@ -75,11 +62,44 @@ export function ExternalCallView({
   }, [isConnected]);
 
   useEffect(() => {
+    if (
+      isIdle &&
+      connectionAttemptedRef.current &&
+      !wasConnectedRef.current &&
+      snapshot.context.error &&
+      !connectionFailureReportedRef.current
+    ) {
+      connectionFailureReportedRef.current = true;
+      onConnectionFailed(snapshot.context.error);
+    }
+  }, [isIdle, onConnectionFailed, snapshot.context.error]);
+
+  useEffect(() => {
     if (isIdle && wasConnectedRef.current) {
       wasConnectedRef.current = false;
       onDisconnected();
     }
   }, [isIdle, onDisconnected]);
+
+  // Connect only after the lightweight connection screen has mounted. The
+  // shared dashboard call UI is intentionally rendered after this succeeds so
+  // a UI render error cannot interrupt LiveKit signalling.
+  useEffect(() => {
+    if (token && serverUrl) {
+      connectionAttemptedRef.current = true;
+      roomActor.send({
+        type: 'CONNECT',
+        token,
+        serverUrl,
+        callType,
+        externalId,
+        zero: null,
+      });
+    }
+    return () => {
+      roomActor.send({ type: 'DISCONNECT', endForAll: false });
+    };
+  }, [token, serverUrl, callType, externalId]);
 
   // Poll participants from the API so external users can see who's in the call
   const participantsQuery = useQuery({
@@ -151,6 +171,18 @@ export function ExternalCallView({
       roomActor.send({ type: 'INCREMENT_UNREAD_CALL_CHAT' });
     }
   }, [isCallChatOpen]);
+
+  if (!isConnected) {
+    return (
+      <div className='min-h-screen bg-gradient-to-br from-gray-900 to-gray-950 flex items-center justify-center p-4'>
+        <div className='flex flex-col items-center text-center'>
+          <div className='w-8 h-8 border-[3px] border-gray-700 border-t-blue-500 rounded-full animate-spin' />
+          <p className='text-white font-semibold mt-4'>Joining call...</p>
+          <p className='text-gray-400 text-sm mt-1'>Establishing a secure connection</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <>
