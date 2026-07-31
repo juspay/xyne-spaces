@@ -91,6 +91,7 @@ import { FileBubble } from '../../ui/FileBubble/FileBubble';
 import { StageFormModal } from '../StageFormModal/StageFormModal';
 import { StageFormInlinePanel } from '../StageFormInlinePanel/StageFormInlinePanel';
 import { FormViewerDialog } from './FormViewerDialog';
+import { BoardTicketNav } from '../BoardTicketNav';
 import Tooltip from '../../ui/Tooltip';
 import { useShareableOrigin } from '../../../hooks/useShareableOrigin';
 import { useEmailChannelPreference } from '../../../hooks/useEmailChannelPreference';
@@ -381,6 +382,9 @@ const StageFormSubmissions: React.FC<StageFormSubmissionsProps> = ({ stageVisitF
   );
 };
 const TICKET_ATTACHMENT_PREVIEW_LIMIT = 5;
+
+// Debounce window for title/description auto-save while the user is typing.
+const FIELD_AUTOSAVE_DEBOUNCE_MS = 600;
 
 interface TicketDetailsProps {
   ticketId: string;
@@ -1499,13 +1503,19 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     return filteredTags.some(tag => tag.toLowerCase() === tagSearchQuery.toLowerCase());
   }, [filteredTags, tagSearchQuery]);
 
-  // Initialize edit values when ticket changes
+  // Initialize edit values when ticket changes. Skip the field currently being
+  // edited: a debounced auto-save mutates `ticket`, and re-syncing here mid-edit
+  // would clobber the user's in-progress text (and jump the caret).
   useEffect(() => {
-    if (ticket) {
+    if (ticket && !editingTitle) {
       setTitleValue(ticket.title);
+    }
+  }, [ticket, editingTitle]);
+  useEffect(() => {
+    if (ticket && !editingDescription) {
       setDescriptionValue(ticket.description);
     }
-  }, [ticket]);
+  }, [ticket, editingDescription]);
   // Initialize stage ETA edit value when current stage changes
   useEffect(() => {
     if (currentStageEntry?.stageEta) {
@@ -1534,6 +1544,66 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     el.style.height = '0px';
     el.style.height = `${Math.min(el.scrollHeight, window.innerHeight * 0.4)}px`;
   }, [editingDescription, descriptionValue]);
+
+  // Consume the Zero mutator's server result so ticket-detail field edits surface
+  // rejections instead of silently rolling back the optimistic update. Server-side
+  // rules (e.g. Euler board constraints) reject some updates; previously the error was
+  // dropped via `void zero.mutate(...)`, so the user got no feedback (e.g. an unassign
+  // appeared to do nothing). Declared before the loading guard so the debounced
+  // auto-save effects below can reuse it.
+  const applyTicketUpdate = useCallback(
+    async (
+      update: Parameters<typeof mutators.ticket.update>[0],
+      errorFallback = 'Failed to update ticket',
+    ): Promise<void> => {
+      try {
+        const result = await zero.mutate(mutators.ticket.update(update)).server;
+        if (result.type === 'error') {
+          toast.error(result.error.message || errorFallback);
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        toast.error(message || errorFallback);
+      }
+    },
+    [zero],
+  );
+
+  // Debounced auto-save while editing — persist the title as the user types
+  // rather than only on blur/exit. The blur/Enter handler still flushes an
+  // immediate save; leaving edit mode flips `editingTitle`, whose cleanup clears
+  // any pending debounce, so there's no duplicate write. Email-desk tickets are
+  // excluded: a title change there rewrites the email subject via a confirmation
+  // dialog, which must not fire on every keystroke.
+  useEffect(() => {
+    if (!ticket || !editingTitle || isEmailDeskTicket) return;
+    const trimmed = titleValue.trim();
+    if (!trimmed || trimmed === ticket.title) return;
+    const ticketId = ticket.id;
+    const timeoutId = setTimeout(() => {
+      void applyTicketUpdate(
+        { id: ticketId, title: trimmed, updatedAt: Date.now() },
+        'Failed to update title',
+      );
+    }, FIELD_AUTOSAVE_DEBOUNCE_MS);
+    return (): void => clearTimeout(timeoutId);
+  }, [titleValue, editingTitle, isEmailDeskTicket, ticket, applyTicketUpdate]);
+
+  // Debounced auto-save while editing the description (no subject side effect, so
+  // it applies to all ticket types).
+  useEffect(() => {
+    if (!ticket || !editingDescription) return;
+    const next = descriptionValue.trim();
+    if (next === ticket.description) return;
+    const ticketId = ticket.id;
+    const timeoutId = setTimeout(() => {
+      void applyTicketUpdate(
+        { id: ticketId, description: next, updatedAt: Date.now() },
+        'Failed to update description',
+      );
+    }, FIELD_AUTOSAVE_DEBOUNCE_MS);
+    return (): void => clearTimeout(timeoutId);
+  }, [descriptionValue, editingDescription, ticket, applyTicketUpdate]);
 
   // Auto-focus tag input when dropdown opens
   useEffect(() => {
@@ -1681,26 +1751,6 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       }
     } catch {
       toast.error('Failed to unmerge ticket');
-    }
-  };
-
-  // Consume the Zero mutator's server result so ticket-detail field edits surface
-  // rejections instead of silently rolling back the optimistic update. Server-side
-  // rules (e.g. Euler board constraints) reject some updates; previously the error was
-  // dropped via `void zero.mutate(...)`, so the user got no feedback (e.g. an unassign
-  // appeared to do nothing).
-  const applyTicketUpdate = async (
-    update: Parameters<typeof mutators.ticket.update>[0],
-    errorFallback = 'Failed to update ticket',
-  ): Promise<void> => {
-    try {
-      const result = await zero.mutate(mutators.ticket.update(update)).server;
-      if (result.type === 'error') {
-        toast.error(result.error.message || errorFallback);
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      toast.error(message || errorFallback);
     }
   };
 
@@ -2618,6 +2668,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             </span>
           </div>
           <div className='flex items-center gap-x-2'>
+            <BoardTicketNav ticketId={ticketId} />
             <Tooltip content='Copy Ticket Link'>
               <Button
                 className='p-2 border border-border rounded-lg h-8 w-8'

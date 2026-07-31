@@ -109,6 +109,7 @@ const kanbanTicketPageV2FiltersSchema = kanbanTicketPageFiltersSchema.extend({
 
 const kanbanTicketsPageV2ArgsSchema = kanbanTicketsPageArgsSchema.extend({
   filters: kanbanTicketPageV2FiltersSchema.optional(),
+  dir: z.literal('forward').or(z.literal('backward')).optional(),
 });
 
 type KanbanTicketsPageV2Args = z.infer<typeof kanbanTicketsPageV2ArgsSchema>;
@@ -223,14 +224,16 @@ const applyKanbanTicketPageConditions = (
     overdueReferenceTime,
   } = args;
 
-  query =
-    columnType === 'status'
-      ? query.where('statusV2', stageName as TicketStatusV2)
-      : query.where('stageName', stageName);
+  if (stageName) {
+    query =
+      columnType === 'status'
+        ? query.where('statusV2', stageName as TicketStatusV2)
+        : query.where('stageName', stageName);
+  }
 
   query = query.where('isArchived', false);
 
-  if (columnType !== 'status' && filters?.stages?.length && !filters.stages.includes(stageName)) {
+  if (stageName && columnType !== 'status' && filters?.stages?.length && !filters.stages.includes(stageName)) {
     return query.where('id', '__kanban_stage_filter_no_match__');
   }
 
@@ -972,9 +975,10 @@ export const queries = defineQueries({
   kanbanTicketsPageV2: defineQuery(
     kanbanTicketsPageV2ArgsSchema,
     ({ ctx, args }) => {
+      const dir = args.dir ?? 'forward';
       let query = applyKanbanTicketPageV2Conditions(zql.tickets, ctx, args)
-        .orderBy('createdAt', 'desc')
-        .orderBy('id', 'asc');
+        .orderBy('createdAt', dir === 'forward' ? 'desc' : 'asc')
+        .orderBy('id', dir === 'forward' ? 'asc' : 'desc');
 
       if (args.start) {
         query = query.start({ createdAt: args.start.createdAt, id: args.start.id }, { inclusive: false });
