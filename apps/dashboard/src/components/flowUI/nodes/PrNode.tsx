@@ -1,14 +1,15 @@
-import React, { useState } from 'react';
-import { GitBranch, MultipleCrossCancelDefault } from '@xyne/icons';
-import type { FlowComponent, PrProps, PrStatus } from '@xyne/shared';
-import Dialog from '../../ui/Dialog';
+import React, { useContext, useState } from 'react';
+import { GitBranch } from '@xyne/icons';
+import type { FlowComponent, PrProps, PrStatus, PrProvider } from '@xyne/shared';
+import { useFlow } from '../FlowContext';
+import { PrPreview, InsidePrPreviewContext } from './PrPreview';
 import { cn } from '../../../utils/classNames';
 
 /**
  * PR artifact — an agent-authored, read-only status card for a pull request.
  *
- * `props.status` is a flat enum (created | merged | reverted | deleted), NOT a
- * discriminated union: every status carries the same fields, and the only thing
+ * `props.status` is a flat enum (created | merged | reverted | deleted | declined),
+ * NOT a discriminated union: every status carries the same fields, and the only thing
  * that varies by status is presentation (badge colour + label), which is derived
  * here in STATUS_META — never shipped on the wire. There is no illegal field
  * combination to prevent, so a union would be four identical branches.
@@ -18,46 +19,53 @@ import { cn } from '../../../utils/classNames';
  *   merged   → purple (--pr-badge-merged-*)
  *   reverted → red    (--pr-badge-danger-*)
  *   deleted  → red    (--pr-badge-danger-*)
- * One GitBranch glyph for all four, recoloured via the badge fg (currentColor).
+ *   declined → red    (--pr-badge-danger-*)   (webhook-driven: closed unmerged)
+ * One GitBranch glyph for every status/provider, recoloured via the badge
+ * fg (currentColor). `provider` drives only the "Open in <Provider>" link label
+ * (text), not the icon.
  *
- * The card reads nothing from useFlow and has no flow-action — all data comes
- * from props. The only local state is the detail dialog's open/close, held in a
+ * The card reads conversationId/messageId from useFlow (to feed the detail
+ * preview's thread panel) and has no flow-action — all display data comes from
+ * props. The only local state is the detail preview's open/close, held in a
  * plain useState (ephemeral UI state, NOT flow state — nothing to persist).
  *
  * Footer:
- *   "View Details" (bordered <button>) ALWAYS renders — it opens an in-app
- *     centered dialog built from the card's own props (full title + un-clamped
- *     desc + the two URLs as link-buttons). There is always detail to show, so
- *     this is not gated on any URL. detailsUrl is instead an optional link
- *     INSIDE the dialog.
- *   "Open in Bitbucket" (plain <a target="_blank">) renders only when
- *     bitbucketUrl is present — a direct external link, no dialog.
+ *   "View Details" (bordered <button>) opens PrPreview — the SAME split-screen
+ *     shell the plan preview / attachment viewer use (PreviewSplitDialog): LEFT =
+ *     the PR detail (status badge + ticketId/title + full markdown description +
+ *     the PR/ticket links), RIGHT = the live thread. Hidden when the card is
+ *     rendered INSIDE that preview's own thread panel (InsidePrPreviewContext),
+ *     so a nested preview can't be stacked.
+ *   "Open in <Provider>" (plain <a target="_blank">) renders only when `url`
+ *     is present — a direct external link, no preview.
  * Optional URLs mean "no link" is `undefined` (honest), never "".
  *
- * The dialog (shared ui/Dialog → Radix, portals to <body>) renders OUTSIDE the
- * `.jp-message-html` container, so the global underline/blue link rule does not
- * reach its links. The card's own Bitbucket link IS inside that container, so it
+ * PrPreview (via PreviewSplitDialog → Radix, portals to <body>) renders OUTSIDE
+ * the `.jp-message-html` container, so the global underline/blue link rule does
+ * not reach its links. The card's own PR link IS inside that container, so it
  * carries the `!text-foreground !no-underline` override to beat that rule.
  *
  * ── Wire contract (backend emits this) ───────────────────────────────────────
  * The PR is one component inside a FlowJSON FlowDefinition. Source of truth +
  * zod validation: shared/src/validation/flowSchema.ts (`prComponentSchema`).
  * The whole FlowDefinition is JSON-stringified, `"`→`&quot;` escaped, and stored
- * in messages.content as: <div data-flow-json="…">Flow JSON</div>. Each status is
- * a FRESH post with a UNIQUE screenId — the card never updates in place.
+ * in messages.content as: <div data-flow-json="…">Flow JSON</div>. The backend
+ * posts once with a screenId keyed on PR identity, then `updateMessage`s the
+ * SAME screenId to advance status (one evolving card per PR).
  *
- *   { version: '2.0', screenId: 'agent-pr-<unique>', title: 'Pull Request',
+ *   { version: '2.0', screenId: 'agent-pr-<identity>', title: 'Pull Request',
  *     state: { values:{}, touched:{}, errors:{}, submitting:false,
  *              submitted:false, history:[], loadingComponentIds:[] },  // always empty
  *     components: [{
  *       id: 'pr', type: 'pr',
  *       props: {
- *         status: 'created' | 'merged' | 'reverted' | 'deleted',  // required
- *         title: string,                                          // required
- *         ticketId?: string,                                      // optional
- *         desc?: string,                                          // optional
- *         detailsUrl?: string,                                    // optional
- *         bitbucketUrl?: string,                                  // optional
+ *         status: 'created' | 'merged' | 'reverted' | 'deleted' | 'declined', // required
+ *         provider: 'github' | 'bitbucket' | 'gitlab' | 'other',   // required
+ *         title: string,                                           // required
+ *         ticketId?: string,                                       // optional
+ *         desc?: string,                                           // optional
+ *         detailsUrl?: string,                                     // optional (ticket)
+ *         url?: string,                                            // optional (the PR)
  *       },
  *     }] }
  *
@@ -67,6 +75,16 @@ interface PrNodeProps {
   node: FlowComponent;
   children?: React.ReactNode;
 }
+
+// provider → external-link label only. The badge glyph is a single GitBranch for
+// every provider (no per-provider icons); `provider` still drives the "Open in
+// <Provider>" text so the link reads correctly across hosts.
+const PROVIDER_OPEN_LABEL: Record<PrProvider, string> = {
+  github: 'Open in GitHub',
+  bitbucket: 'Open in Bitbucket',
+  gitlab: 'Open in GitLab',
+  other: 'Open pull request',
+};
 
 const STATUS_META: Record<PrStatus, { label: string; bgVar: string; fgVar: string }> = {
   created: {
@@ -89,12 +107,26 @@ const STATUS_META: Record<PrStatus, { label: string; bgVar: string; fgVar: strin
     bgVar: 'var(--pr-badge-danger-bg)',
     fgVar: 'var(--pr-badge-danger-fg)',
   },
+  // Webhook-driven: a PR closed without merging. Shares the danger palette with
+  // reverted/deleted (no new CSS var needed).
+  declined: {
+    label: 'PR Declined',
+    bgVar: 'var(--pr-badge-danger-bg)',
+    fgVar: 'var(--pr-badge-danger-fg)',
+  },
 };
 
 export const PrNode: React.FC<PrNodeProps> = ({ node }) => {
   const props = node.props as PrProps | undefined;
+  // conversationId/messageId feed the preview's thread panel (same as PlanNode).
+  const { conversationId, messageId } = useFlow();
+  // True when this card is re-rendered inside the preview's own thread panel —
+  // hide the "View Details" affordance (and skip mounting a nested preview).
+  const insidePreview = useContext(InsidePrPreviewContext);
   const [detailsOpen, setDetailsOpen] = useState(false);
   if (!props) return null;
+
+  const hasActions = Boolean(props.detailsUrl) || Boolean(props.url);
 
   return (
     <CardShell style={node.style}>
@@ -104,19 +136,35 @@ export const PrNode: React.FC<PrNodeProps> = ({ node }) => {
       </div>
 
       <div className='flex items-center gap-2 border-t border-border bg-foreground/[0.03] px-4 py-3'>
-        <button
-          type='button'
-          onClick={() => setDetailsOpen(true)}
-          className='rounded-lg border border-border bg-background px-2 py-1.5 text-sm font-medium leading-[1.2] text-foreground'
-          data-track-category='PR_ARTIFACT'
-          data-track-name='OPEN_DETAILS_DIALOG'
-        >
-          View Details
-        </button>
-        {props.bitbucketUrl && <FooterLink href={props.bitbucketUrl}>Open in Bitbucket</FooterLink>}
+        {!insidePreview && (
+          <button
+            type='button'
+            onClick={() => setDetailsOpen(true)}
+            className='rounded-lg border border-border bg-background px-2 py-1.5 text-sm font-medium leading-[1.2] text-foreground'
+            data-track-category='PR_ARTIFACT'
+            data-track-name='OPEN_DETAILS_PREVIEW'
+          >
+            View Details
+          </button>
+        )}
+        {props.url && (
+          <FooterLink href={props.url}>{PROVIDER_OPEN_LABEL[props.provider]}</FooterLink>
+        )}
       </div>
 
-      <PrDetailsDialog open={detailsOpen} onOpenChange={setDetailsOpen} props={props} />
+      {!insidePreview && (
+        <PrPreview
+          open={detailsOpen}
+          onOpenChange={setDetailsOpen}
+          messageId={messageId ?? ''}
+          conversationId={conversationId ?? undefined}
+          title={props.title}
+          ticketId={props.ticketId}
+          desc={props.desc}
+          badge={<StatusBadge status={props.status} />}
+          footer={hasActions ? <PrPreviewFooter props={props} /> : undefined}
+        />
+      )}
     </CardShell>
   );
 };
@@ -160,7 +208,7 @@ const TitleBlock: React.FC<{
   </div>
 );
 
-// Card-footer "Open in Bitbucket" link. This lives INSIDE the `.jp-message-html`
+// Card-footer "Open in <Provider>" link. This lives INSIDE the `.jp-message-html`
 // container, so `!text-foreground !no-underline` are needed to beat the global
 // `.jp-message-html a` rule (blue + underline) that otherwise wins by specificity.
 const FooterLink: React.FC<{
@@ -173,80 +221,29 @@ const FooterLink: React.FC<{
     rel='noopener noreferrer'
     className='rounded-lg px-2 py-1.5 text-sm font-medium leading-[1.2] !text-foreground !no-underline hover:!text-foreground'
     data-track-category='PR_ARTIFACT'
-    data-track-name='CLICK_OPEN_BITBUCKET'
+    data-track-name='CLICK_OPEN_PR'
   >
     {children}
   </a>
 );
 
-// ── Detail dialog ─────────────────────────────────────────────────────────
-// Centered modal (shared ui/Dialog → Radix, portals to <body>, mobile→Drawer).
-// Shows the full, un-clamped PR detail built entirely from props. Its links are
-// outside `.jp-message-html`, so plain `text-foreground no-underline` suffice.
-const PrDetailsDialog: React.FC<{
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  props: PrProps;
-}> = ({ open, onOpenChange, props }) => {
-  const heading = props.ticketId ? `${props.ticketId} ${props.title}` : props.title;
-  const hasActions = Boolean(props.detailsUrl) || Boolean(props.bitbucketUrl);
+// ── Preview footer ──────────────────────────────────────────────────────────
+// The PR / ticket link-buttons shown in the PrPreview left-panel footer, passed
+// into PrPreview as `footer`. Only rendered when at least one URL is present
+// (PrNode gates on hasActions). Portaled (outside `.jp-message-html`), so plain
+// `text-foreground no-underline` tokens suffice.
+const PrPreviewFooter: React.FC<{ props: PrProps }> = ({ props }) => (
+  <div className='flex items-center gap-2'>
+    {props.detailsUrl && (
+      <DialogLink href={props.detailsUrl} bordered>
+        {props.ticketId ? 'Open ticket' : 'View details'}
+      </DialogLink>
+    )}
+    {props.url && <DialogLink href={props.url}>{PROVIDER_OPEN_LABEL[props.provider]}</DialogLink>}
+  </div>
+);
 
-  return (
-    <Dialog
-      open={open}
-      onOpenChange={onOpenChange}
-      title={heading}
-      description={props.desc ?? 'Pull request details'}
-      className='max-w-lg overflow-hidden'
-    >
-      <div className='flex flex-col'>
-        {/* Header: status badge + close */}
-        <div className='flex items-center justify-between gap-3 px-5 py-4 pb-0'>
-          <StatusBadge status={props.status} />
-          <button
-            type='button'
-            onClick={() => onOpenChange(false)}
-            aria-label='Close'
-            className='rounded-md p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
-            data-track-category='PR_ARTIFACT'
-            data-track-name='CLOSE_DETAILS_DIALOG'
-          >
-            <MultipleCrossCancelDefault size={18} />
-          </button>
-        </div>
-
-        {/* Body: full title + un-clamped description */}
-        <div className='flex max-h-[60vh] flex-col gap-3 overflow-y-auto px-5 py-4'>
-          <p className='text-base font-semibold leading-[1.35] text-foreground'>
-            {props.ticketId && <span className='text-muted-foreground'>{props.ticketId} </span>}
-            {props.title}
-          </p>
-          {props.desc && (
-            <p className='whitespace-pre-wrap text-sm leading-[1.55] text-muted-foreground'>
-              {props.desc}
-            </p>
-          )}
-        </div>
-
-        {/* Footer: the two URLs as link-buttons, each only if present */}
-        {hasActions && (
-          <div className='flex items-center gap-2 border-t border-border bg-foreground/[0.03] px-5 py-4'>
-            {props.detailsUrl && (
-              <DialogLink href={props.detailsUrl} bordered>
-                {props.ticketId ? 'Open ticket' : 'View details'}
-              </DialogLink>
-            )}
-            {props.bitbucketUrl && (
-              <DialogLink href={props.bitbucketUrl}>Open in Bitbucket</DialogLink>
-            )}
-          </div>
-        )}
-      </div>
-    </Dialog>
-  );
-};
-
-// Link-button inside the dialog. Portaled to <body>, i.e. outside
+// Link-button inside the preview footer. Portaled to <body>, i.e. outside
 // `.jp-message-html`, so the global link rule does not apply — plain tokens work.
 const DialogLink: React.FC<{
   href: string;
@@ -262,7 +259,7 @@ const DialogLink: React.FC<{
       bordered && 'border border-border bg-background',
     )}
     data-track-category='PR_ARTIFACT'
-    data-track-name={bordered ? 'DIALOG_OPEN_DETAILS_URL' : 'DIALOG_OPEN_BITBUCKET'}
+    data-track-name={bordered ? 'DIALOG_OPEN_DETAILS_URL' : 'DIALOG_OPEN_PR'}
   >
     {children}
   </a>

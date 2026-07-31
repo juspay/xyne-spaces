@@ -1097,6 +1097,7 @@ function makeSseProgressEmitter(initialRes: Response, sessionId: string): SsePro
     attachment: (sid, attachment: ClawAttachmentPayload) => write({ event: "attachment", seq: next(), sessionId: sid, attachment }),
     sandboxPreview: (sid, payload: ClawSandboxPreviewPayload) => write({ event: "sandbox-preview", seq: next(), sessionId: sid, payload }),
     plan: (sid, todos: Todo[]) => write({ event: "plan", seq: next(), sessionId: sid, todos }),
+    pr: (sid, pr: Record<string, unknown>) => write({ event: "pr", seq: next(), sessionId: sid, pr }),
     streamChunk: (sid, payload) => {
       if (payload.reasoningDelta !== undefined) {
         write({ event: "reasoning", seq: next(), sessionId: sid, reasoningDelta: payload.reasoningDelta });
@@ -2963,7 +2964,7 @@ async function processTask(
         "- To send a file BACK to the user, you MUST call `sandbox-deliver-files` with the path(s). Returning file contents as text in your reply is NOT delivery — Spaces won't render it as an attachment.",
         "- Reuse a single sandbox session across many commands when possible. Avoid one-shot `sandbox-run` calls if you need to keep state.",
         "- For URLs of the form `http://localhost:<port>` (dashboard :5173, backend :3001) use `sandbox-pw-*` tools, NOT `sandbox-run` with inline Playwright. The browser inside the sandbox can reach those addresses.",
-        "- Git/GitHub PRs: make + commit your changes in the sandbox and `git push` the branch from there (the sandbox has push credentials). The sandbox has NO `gh` CLI — do NOT try `gh pr create`. To OPEN the PR, hand it to the **github** subagent's `create_pull_request` tool (head=<your branch>, base=<default branch>); that runs against the GitHub API and needs no `gh`. Only fall back to giving the user a compare URL if `create_pull_request` actually returns an error — and report that real error.",
+        "- Opening PRs (any git host): make + commit your changes in the sandbox and `git push` the branch from there (the sandbox has push credentials). There is NO `gh`/`glab`/host CLI — do NOT try `gh pr create`. The push only creates the branch; to OPEN the PR, hand it to the subagent that MATCHES the repo's host: for a **GitHub** repo use the **github** subagent's `create_pull_request` (`head`=<your branch>, `base`=<default branch>); for a **Bitbucket** repo use the **bitbucket** subagent's `create_pull_request` (`workspace`=<project key, e.g. XYNE>, `repository`=<repo slug>, `source_branch`=<your branch>, `destination_branch`=<default branch>). Do NOT use the github subagent for a Bitbucket repo (or vice-versa) — it hits the wrong API and fails. Only fall back to giving the user a compare URL if `create_pull_request` actually returns an error — and report that real error.",
         "- NEVER claim a branch was pushed or a PR was opened from memory. Verify first: a push is only real if `git ls-remote --heads origin <branch>` shows the ref (or `git push` printed the upstream-tracking/'new branch' line). State exactly what the command returned — do not narrate a success or a failure you did not observe.",
       ];
       // Surface an active session for this conversation so the agent reuses

@@ -262,7 +262,14 @@ export class ChatController {
         }
 
         const escapedJSON = JSON.stringify(flowResult.data).replace(/"/g, '&quot;');
-        content = `<div data-flow-json="${escapedJSON}" data-flow-appid="${encodeHtmlAttr(appId)}" data-flow-id="${encodeHtmlAttr(flowId)}">Flow JSON</div>`;
+        // Inner text = notification/preview fallback (shown when the widget
+        // isn't rendered). Prefer flow.data.fallbackText, then the flow title,
+        // else a generic label — never worse than the old hardcoded "Flow JSON".
+        const fbRaw = (flowResult.data.data as Record<string, unknown> | undefined)?.['fallbackText'];
+        const flowFallback = encodeHtmlAttr(
+          (typeof fbRaw === 'string' && fbRaw.trim() ? fbRaw : flowResult.data.title) || 'Flow JSON',
+        );
+        content = `<div data-flow-json="${escapedJSON}" data-flow-appid="${encodeHtmlAttr(appId)}" data-flow-id="${encodeHtmlAttr(flowId)}">${flowFallback}</div>`;
         isMarkdown = false;
       } else if (markdownText) {
         content = sanitizeMessageContent(markdownText);
@@ -356,7 +363,12 @@ export class ChatController {
         }
         const flowId = (flowResult.data.screenId) ?? crypto.randomUUID();
         const escapedJSON = JSON.stringify(flowResult.data).replace(/"/g, '&quot;');
-        content = `<div data-flow-json="${escapedJSON}" data-flow-appid="${encodeHtmlAttr(appId)}" data-flow-id="${encodeHtmlAttr(flowId)}">Flow JSON</div>`;
+        // Inner text = notification/preview fallback (see postMessage above).
+        const fbRaw = (flowResult.data.data as Record<string, unknown> | undefined)?.['fallbackText'];
+        const flowFallback = encodeHtmlAttr(
+          (typeof fbRaw === 'string' && fbRaw.trim() ? fbRaw : flowResult.data.title) || 'Flow JSON',
+        );
+        content = `<div data-flow-json="${escapedJSON}" data-flow-appid="${encodeHtmlAttr(appId)}" data-flow-id="${encodeHtmlAttr(flowId)}">${flowFallback}</div>`;
       } else if (markdownText) {
         content = sanitizeMessageContent(markdownText);
       } else {
