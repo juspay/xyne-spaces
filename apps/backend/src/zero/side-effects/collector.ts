@@ -233,6 +233,21 @@ export async function collectSideEffectJobs(
     }
   }
 
+  // Capture previous EntityAccess state so the handler can tell a REVOKED ->
+  // active reactivation (should notify, like a fresh share) apart from a
+  // no-op or access-level-only update (should not re-notify).
+  if (operation === 'update' && table === 'entity_access') {
+    const entity = await tx.run(zql.entity_access.where('id', entityId).one());
+    if (entity) {
+      previousValue = {
+        entityUserAccess: entity.entityUserAccess,
+        userId: entity.userId ?? null,
+        userGroupId: entity.userGroupId ?? null,
+        channelId: entity.channelId ?? null,
+      };
+    }
+  }
+
   accumulator.push({
     entityType: table,
     entityId,
@@ -339,7 +354,8 @@ function extractEntityId(table: TableName, args: any): string | null {
     case 'links':
     case 'link_access':
     case 'rcas':
-    case 'ticket_stage_requests': {
+    case 'ticket_stage_requests':
+    case 'entity_access': {
       const typedArgs = args as { id: string };
       return typedArgs.id;
     }

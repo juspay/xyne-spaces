@@ -34,6 +34,34 @@ export class EntityAccessRepository {
     });
   }
 
+  /**
+   * Active share for a viewer, matched via direct userId share OR via
+   * membership in a shared userGroupId/channelId (mirrors CallsACL.canSelect).
+   */
+  findActiveForViewer(params: {
+    workspaceId: string;
+    shareableEntityType: string;
+    entityId: string;
+    userId: string;
+    userGroupIds: string[];
+    channelIds: string[];
+  }): Promise<EntityAccess | null> {
+    const { workspaceId, shareableEntityType, entityId, userId, userGroupIds, channelIds } = params;
+    return this.db.entityAccess.findFirst({
+      where: {
+        workspaceId,
+        shareableEntityType,
+        entityId,
+        entityUserAccess: { not: EntityUserAccess.REVOKED },
+        OR: [
+          { userId },
+          ...(userGroupIds.length ? [{ userGroupId: { in: userGroupIds } }] : []),
+          ...(channelIds.length ? [{ channelId: { in: channelIds } }] : []),
+        ],
+      },
+    });
+  }
+
   listForResource(params: {
     workspaceId: string;
     shareableEntityType: string;

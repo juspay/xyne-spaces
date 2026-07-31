@@ -25,6 +25,7 @@ import { RcasSideEffectHandler } from './tables/rcas-handler';
 import { TicketSubTicketMappingsSideEffectHandler } from './tables/ticket-sub-ticket-mappings-handler';
 import { TicketReferenceMappingsSideEffectHandler } from './tables/ticket-reference-mappings-handler';
 import { TicketStageRequestsSideEffectHandler } from './tables/ticket-stage-requests-handler';
+import { EntityAccessSideEffectHandler } from './tables/entity-access-handler';
 
 export class SideEffectHandlerFactory {
 
@@ -80,6 +81,8 @@ export class SideEffectHandlerFactory {
         return new FormEntityValuesSideEffectHandler(ctx);
       case 'ticket_stage_requests':
         return new TicketStageRequestsSideEffectHandler(ctx);
+      case 'entity_access':
+        return new EntityAccessSideEffectHandler(ctx);
 
       default:
         return new BaseSideEffectHandler(ctx);

@@ -2401,7 +2401,9 @@ export const queries = defineQueries({
           shares
             .where('shareableEntityType', ShareableEntityType.NOTE_TAKER)
             .where('entityUserAccess', '!=', EntityUserAccess.REVOKED)
-            .related('user'),
+            .related('user')
+            .related('userGroup')
+            .related('channel'),
         )
         .related('summaryTemplate');
 
@@ -2425,8 +2427,14 @@ export const queries = defineQueries({
         .whereExists('shares', share =>
           share
             .where('shareableEntityType', ShareableEntityType.NOTE_TAKER)
-            .where('userId', ctx.userID)
-            .where('entityUserAccess', '!=', EntityUserAccess.REVOKED),
+            .where('entityUserAccess', '!=', EntityUserAccess.REVOKED)
+            .where(({ or, cmp, exists }) =>
+              or(
+                cmp('userId', ctx.userID),
+                exists('userGroupMemberships', m => m.where('userId', ctx.userID)),
+                exists('channelMembers', m => m.where('userId', ctx.userID)),
+              ),
+            ),
         )
         .orderBy('startedAt', 'desc')
         .orderBy('id', 'desc')
@@ -2435,7 +2443,9 @@ export const queries = defineQueries({
           shares
             .where('shareableEntityType', ShareableEntityType.NOTE_TAKER)
             .where('entityUserAccess', '!=', EntityUserAccess.REVOKED)
-            .related('user'),
+            .related('user')
+            .related('userGroup')
+            .related('channel'),
         )
         .related('summaryTemplate');
 
@@ -2446,19 +2456,24 @@ export const queries = defineQueries({
     },
   ),
 
-  oatsRecordingByCallId: defineQuery(
+  // Fetches the HEADLESS recording (+ shares/summaryTemplate) by its public
+  // externalId (what's in the URL / RecordingDetail.externalId) — used by
+  // the Share modal and the detail screen alike.
+  oatsRecordingByExternalId: defineQuery(
     z.object({ callId: z.string() }),
     ({ ctx, args: { callId } }) =>
       zql.calls
         .where('workspaceId', ctx.workspaceId)
         .where('callType', CallType.HEADLESS)
-        .where('id', callId)
+        .where('externalId', callId)
         .related('createdByUser')
         .related('shares', shares =>
           shares
             .where('shareableEntityType', ShareableEntityType.NOTE_TAKER)
             .where('entityUserAccess', '!=', EntityUserAccess.REVOKED)
-            .related('user'),
+            .related('user')
+            .related('userGroup')
+            .related('channel'),
         )
         .related('summaryTemplate')
         .one(),
@@ -2500,6 +2515,7 @@ export const queries = defineQueries({
       .related('message', (m) => m.related('conversation').related('attachments'))
       .related('reaction')
       .related('canvas')
+      .related('call')
       .related('ticket');
   }),
 
@@ -2598,6 +2614,7 @@ export const queries = defineQueries({
         .related('message', (m) => m.related('conversation').related('attachments'))
         .related('reaction')
         .related('canvas')
+        .related('call')
         .related('ticket');
     }
   ),

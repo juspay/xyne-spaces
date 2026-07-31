@@ -3137,20 +3137,35 @@ export const mutators = defineMutators({
         });
       },
     ),
-    // Share a HEADLESS recording with another workspace user. Only the recording's
-    // creator or a workspace OWNER/ADMIN may share it. `id` is the client-generated
-    // entity_access row id, used when no existing share row is found.
+    // Share a HEADLESS recording with a workspace user, user group, or channel.
+    // Exactly one of targetUserId/targetUserGroupId/targetChannelId must be set.
+    // Only the recording's creator or a workspace OWNER/ADMIN may share it.
+    // `id` is the client-generated entity_access row id, used when no existing
+    // share row is found.
     shareRecording: defineMutator(
-      z.object({
-        id: z.string(),
-        callId: z.string(),
-        targetUserId: z.string(),
-        entityUserAccess: z
-          .enum([EntityUserAccess.VIEW, EntityUserAccess.EDIT, EntityUserAccess.ADMIN])
-          .optional(),
-        timestamp: z.number(),
-      }),
-      async ({ tx, ctx, args: { id, callId, targetUserId, entityUserAccess, timestamp } }) => {
+      z
+        .object({
+          id: z.string(),
+          callId: z.string(),
+          targetUserId: z.string().optional(),
+          targetUserGroupId: z.string().optional(),
+          targetChannelId: z.string().optional(),
+          entityUserAccess: z
+            .enum([EntityUserAccess.VIEW, EntityUserAccess.EDIT, EntityUserAccess.ADMIN])
+            .optional(),
+          timestamp: z.number(),
+        })
+        .refine(
+          data =>
+            [data.targetUserId, data.targetUserGroupId, data.targetChannelId].filter(Boolean)
+              .length === 1,
+          { message: 'Exactly one of targetUserId, targetUserGroupId, targetChannelId is required' },
+        ),
+      async ({
+        tx,
+        ctx,
+        args: { id, callId, targetUserId, targetUserGroupId, targetChannelId, entityUserAccess, timestamp },
+      }) => {
         const call = await tx.run(zql.calls.where('externalId', callId).one());
         // Headless recording calls are fetched via the oats* named queries and may not be
         // synced into the client's optimistic cache yet. Skip and let the authoritative
@@ -3169,59 +3184,110 @@ export const mutators = defineMutators({
           throw new Error('Only the recording owner or a workspace admin can manage sharing');
         }
 
-        if (targetUserId === call.createdByUserId) {
-          throw new Error('The recording owner already has access');
+        const access = entityUserAccess ?? EntityUserAccess.VIEW;
+        const baseInsert = {
+          id,
+          workspaceId: ctx.workspaceId,
+          shareableEntityType: ShareableEntityType.NOTE_TAKER,
+          entityId: call.id,
+          entityUserAccess: access,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        };
+
+        if (targetUserId) {
+          if (targetUserId === call.createdByUserId) {
+            throw new Error('The recording owner already has access');
+          }
+          const targetUser = await tx.run(zql.users.where('id', targetUserId).one());
+          if (!targetUser || targetUser.workspaceId !== ctx.workspaceId || targetUser.leftAt) {
+            throw new Error('User not found in this workspace');
+          }
+          const existing = await tx.run(
+            zql.entity_access
+              .where('workspaceId', ctx.workspaceId)
+              .where('shareableEntityType', ShareableEntityType.NOTE_TAKER)
+              .where('entityId', call.id)
+              .where('userId', targetUserId)
+              .one(),
+          );
+          if (existing) {
+            await tx.mutate.entity_access.update({ id: existing.id, entityUserAccess: access, updatedAt: timestamp });
+            return;
+          }
+          await tx.mutate.entity_access.insert({ ...baseInsert, userId: targetUserId });
+          return;
         }
 
-        const targetUser = await tx.run(zql.users.where('id', targetUserId).one());
-        if (!targetUser || targetUser.workspaceId !== ctx.workspaceId || targetUser.leftAt) {
-          throw new Error('User not found in this workspace');
+        if (targetUserGroupId) {
+          const userGroup = await tx.run(zql.user_groups.where('id', targetUserGroupId).one());
+          if (!userGroup || userGroup.workspaceId !== ctx.workspaceId) {
+            throw new Error('User group not found in this workspace');
+          }
+          const existing = await tx.run(
+            zql.entity_access
+              .where('workspaceId', ctx.workspaceId)
+              .where('shareableEntityType', ShareableEntityType.NOTE_TAKER)
+              .where('entityId', call.id)
+              .where('userGroupId', targetUserGroupId)
+              .one(),
+          );
+          if (existing) {
+            await tx.mutate.entity_access.update({ id: existing.id, entityUserAccess: access, updatedAt: timestamp });
+            return;
+          }
+          await tx.mutate.entity_access.insert({ ...baseInsert, userGroupId: targetUserGroupId });
+          return;
         }
 
+        // targetChannelId
+        const channel = await tx.run(zql.channels.where('id', targetChannelId!).one());
+        if (!channel || channel.workspaceId !== ctx.workspaceId) {
+          throw new Error('Channel not found in this workspace');
+        }
         const existing = await tx.run(
           zql.entity_access
             .where('workspaceId', ctx.workspaceId)
             .where('shareableEntityType', ShareableEntityType.NOTE_TAKER)
             .where('entityId', call.id)
-            .where('userId', targetUserId)
+            .where('channelId', targetChannelId!)
             .one(),
         );
-
         if (existing) {
-          await tx.mutate.entity_access.update({
-            id: existing.id,
-            entityUserAccess: entityUserAccess ?? EntityUserAccess.VIEW,
-            updatedAt: timestamp,
-          });
+          await tx.mutate.entity_access.update({ id: existing.id, entityUserAccess: access, updatedAt: timestamp });
           return;
         }
-
-        await tx.mutate.entity_access.insert({
-          id,
-          workspaceId: ctx.workspaceId,
-          shareableEntityType: ShareableEntityType.NOTE_TAKER,
-          entityId: call.id,
-          userId: targetUserId,
-          entityUserAccess: entityUserAccess ?? EntityUserAccess.VIEW,
-          createdAt: timestamp,
-          updatedAt: timestamp,
-        });
+        await tx.mutate.entity_access.insert({ ...baseInsert, channelId: targetChannelId });
       },
     ),
     // Update (or revoke, via entityUserAccess: REVOKED) an existing recording share.
+    // Exactly one of targetUserId/targetUserGroupId/targetChannelId must be set.
     updateRecordingShare: defineMutator(
-      z.object({
-        callId: z.string(),
-        targetUserId: z.string(),
-        entityUserAccess: z.enum([
-          EntityUserAccess.VIEW,
-          EntityUserAccess.EDIT,
-          EntityUserAccess.ADMIN,
-          EntityUserAccess.REVOKED,
-        ]),
-        timestamp: z.number(),
-      }),
-      async ({ tx, ctx, args: { callId, targetUserId, entityUserAccess, timestamp } }) => {
+      z
+        .object({
+          callId: z.string(),
+          targetUserId: z.string().optional(),
+          targetUserGroupId: z.string().optional(),
+          targetChannelId: z.string().optional(),
+          entityUserAccess: z.enum([
+            EntityUserAccess.VIEW,
+            EntityUserAccess.EDIT,
+            EntityUserAccess.ADMIN,
+            EntityUserAccess.REVOKED,
+          ]),
+          timestamp: z.number(),
+        })
+        .refine(
+          data =>
+            [data.targetUserId, data.targetUserGroupId, data.targetChannelId].filter(Boolean)
+              .length === 1,
+          { message: 'Exactly one of targetUserId, targetUserGroupId, targetChannelId is required' },
+        ),
+      async ({
+        tx,
+        ctx,
+        args: { callId, targetUserId, targetUserGroupId, targetChannelId, entityUserAccess, timestamp },
+      }) => {
         const call = await tx.run(zql.calls.where('externalId', callId).one());
         if (!call) {
           return;
@@ -3237,14 +3303,16 @@ export const mutators = defineMutators({
           throw new Error('Only the recording owner or a workspace admin can manage sharing');
         }
 
-        const existing = await tx.run(
-          zql.entity_access
-            .where('workspaceId', ctx.workspaceId)
-            .where('shareableEntityType', ShareableEntityType.NOTE_TAKER)
-            .where('entityId', call.id)
-            .where('userId', targetUserId)
-            .one(),
-        );
+        const baseQuery = zql.entity_access
+          .where('workspaceId', ctx.workspaceId)
+          .where('shareableEntityType', ShareableEntityType.NOTE_TAKER)
+          .where('entityId', call.id);
+
+        const existing = targetUserId
+          ? await tx.run(baseQuery.where('userId', targetUserId).one())
+          : targetUserGroupId
+            ? await tx.run(baseQuery.where('userGroupId', targetUserGroupId).one())
+            : await tx.run(baseQuery.where('channelId', targetChannelId!).one());
 
         if (!existing) {
           throw new Error('Share not found');

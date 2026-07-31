@@ -4,6 +4,7 @@
 
 import { ReactElement, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
+import axios from 'axios';
 import { recordingService, RecordingDetail } from '../../services/Recording/recordingService';
 import { useShortcut } from '../../shortcuts';
 import {
@@ -189,7 +190,13 @@ export default function RecordingDetailScreen(): ReactElement {
       setEditedTitle(data.title);
     } catch (err) {
       logRecordingError('RecordingDetailScreen.loadRecording', err);
-      setError('Failed to load recording. Please try again.');
+      if (axios.isAxiosError(err) && err.response?.status === 403) {
+        setError('You no longer have access to this recording.');
+      } else if (axios.isAxiosError(err) && err.response?.status === 404) {
+        setError('Recording not found.');
+      } else {
+        setError('Failed to load recording. Please try again.');
+      }
     } finally {
       setLoading(false);
     }
