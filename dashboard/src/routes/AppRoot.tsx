@@ -5,6 +5,7 @@ import { useActivityTracker } from '../hooks/useActivityTracker';
 import HomeScreen from './HomeScreen';
 import AuthScreen from './AuthScreen/AuthScreen';
 import CommunityWorkspaceSelectionRoute from './AuthScreen/CommunityWorkspaceSelectionRoute';
+import WorkspaceSelectionScreen from './WorkspaceSelectionScreen';
 import OnboardingScreen from './OnboardingScreen/OnboardingScreen';
 import ChatScreen from './ChatScreen/ChatScreen';
 import ThreadMessages from '../components/Chat/ThreadPannel';
@@ -1497,6 +1498,10 @@ export const router = createBrowserRouter([
       {
         path: '/auth',
         element: <AuthScreen />,
+      },
+      {
+        path: '/workspaces',
+        element: <WorkspaceSelectionScreen />,
       },
       {
         path: '/no-access',

@@ -115,7 +115,7 @@ const ChatDirectory = ({
   const listContainerRef = useRef<HTMLDivElement>(null);
   const context = useAuthContextValues();
   const auth = useAuth();
-  const { selfDmChannelId } = auth;
+  const { selfDmChannelId, landingChannelId } = auth;
   const zero = useZero();
   const lastVisitedChannelId = useLastVisitedChannel(workspaceId ?? '');
   const { isMobile } = usePlatform();
@@ -345,6 +345,7 @@ const ChatDirectory = ({
 
     const targetChannelId =
       lastVisitedChannelId ||
+      landingChannelId ||
       selfDmChannelId ||
       starred[0]?.id ||
       channels[0]?.id ||
@@ -362,6 +363,7 @@ const ChatDirectory = ({
     navigate,
     isMobile,
     selfDmChannelId,
+    landingChannelId,
     workspaceId,
   ]);
 

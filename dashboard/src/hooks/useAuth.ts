@@ -28,6 +28,7 @@ export interface UseAuthReturn {
   isLoggingInToWorkspace: boolean;
   userExistsButRemoved: boolean;
   selfDmChannelId: string | null;
+  landingChannelId: string | null;
   communityJoinRequest: CommunityJoinRequestContext | null;
   enterpriseJoinTarget: EnterpriseJoinTarget | null;
 
@@ -173,6 +174,7 @@ export const useAuth = (): UseAuthReturn => {
       state.matches('loggingInToWorkspace') || state.matches('joiningCommunityWorkspace'),
     userExistsButRemoved: state.context.userExistsButRemoved,
     selfDmChannelId: state.context.selfDmChannelId,
+    landingChannelId: state.context.landingChannelId,
     communityJoinRequest: state.context.communityJoinRequest,
     enterpriseJoinTarget: state.context.enterpriseJoinTarget,
 

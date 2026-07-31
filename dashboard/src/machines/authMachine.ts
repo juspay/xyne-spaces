@@ -33,7 +33,10 @@ export interface Workspace {
   id: string;
   name: string;
   role: string;
+  orgId?: string;
+  orgName?: string;
   workspaceType?: string | null;
+  memberCount?: number;
 }
 
 export interface CommunityJoinRequestContext {
@@ -44,9 +47,8 @@ export interface CommunityJoinRequestContext {
 }
 
 export interface EnterpriseJoinTarget {
-  workspaceId: string;
-  workspaceName: string;
   orgName: string;
+  workspaces: Array<{ id: string; name: string }>;
 }
 
 interface AuthContext {
@@ -59,6 +61,7 @@ interface AuthContext {
   orgData: { orgName: string; workspaceName: string } | null;
   userExistsButRemoved: boolean;
   selfDmChannelId: string | null;
+  landingChannelId: string | null;
   communityJoinRequest: CommunityJoinRequestContext | null;
   enterpriseJoinTarget: EnterpriseJoinTarget | null;
 }
@@ -95,6 +98,7 @@ export type AuthState =
 interface ValidateSessionResponse {
   user: User & { workspaceId?: string };
   selfDmChannelId?: string | null;
+  landingChannelId?: string | null;
 }
 
 interface ApiErrorResponse {
@@ -119,10 +123,11 @@ export interface OAuthCallbackOutput {
   isNewUser?: boolean;
   userExistsButRemoved?: boolean;
   domainConflictError?: string;
-  enterpriseJoinWorkspaceId?: string;
-  enterpriseJoinWorkspaceName?: string;
+  publicEmailDomainError?: string;
   enterpriseJoinOrgName?: string;
+  enterpriseJoinWorkspaces?: string;
   selfDmChannelId?: string | null;
+  landingChannelId?: string | null;
 }
 
 interface XStateEvent {
@@ -168,6 +173,7 @@ const createClearedContext = (): AuthContext => ({
   orgData: null,
   userExistsButRemoved: false,
   selfDmChannelId: null,
+  landingChannelId: null,
   communityJoinRequest: null,
   enterpriseJoinTarget: null,
 });
@@ -207,6 +213,7 @@ export const authMachine = createMachine(
       orgData: null,
       userExistsButRemoved: false,
       selfDmChannelId: null,
+      landingChannelId: null,
       communityJoinRequest: null,
       enterpriseJoinTarget: null,
     },
@@ -377,15 +384,15 @@ export const authMachine = createMachine(
                   workspaces: [],
                   pendingUserData: output?.pendingUserData || null,
                   userExistsButRemoved: output?.userExistsButRemoved || false,
-                  error: output?.domainConflictError || null,
+                  error: output?.domainConflictError ?? output?.publicEmailDomainError ?? null,
                   enterpriseJoinTarget:
-                    output?.enterpriseJoinWorkspaceId &&
-                    output.enterpriseJoinWorkspaceName &&
-                    output.enterpriseJoinOrgName
+                    output?.enterpriseJoinOrgName && output.enterpriseJoinWorkspaces
                       ? {
-                          workspaceId: output.enterpriseJoinWorkspaceId,
-                          workspaceName: output.enterpriseJoinWorkspaceName,
                           orgName: output.enterpriseJoinOrgName,
+                          workspaces: JSON.parse(output.enterpriseJoinWorkspaces) as Array<{
+                            id: string;
+                            name: string;
+                          }>,
                         }
                       : null,
                 };
@@ -487,6 +494,7 @@ export const authMachine = createMachine(
                     error: null,
                     isNewUser: output?.isNewUser ?? context.isNewUser,
                     selfDmChannelId: output?.selfDmChannelId ?? null,
+                    landingChannelId: output?.landingChannelId ?? null,
                     workspaces: [],
                     pendingUserData: null,
                     selectedWorkspaceId: null,
@@ -569,6 +577,7 @@ export const authMachine = createMachine(
                   error: null,
                   isNewUser: output?.isNewUser ?? context.isNewUser,
                   selfDmChannelId: output?.selfDmChannelId ?? null,
+                  landingChannelId: output?.landingChannelId ?? null,
                   workspaces: [],
                   pendingUserData: null,
                   selectedWorkspaceId: null,
@@ -647,6 +656,7 @@ export const authMachine = createMachine(
                   error: null,
                   isNewUser: true,
                   selfDmChannelId: output?.selfDmChannelId ?? null,
+                  landingChannelId: output?.landingChannelId ?? null,
                   workspaces: [],
                   pendingUserData: null,
                   orgData: null,
@@ -681,6 +691,7 @@ export const authMachine = createMachine(
                   error: null,
                   isNewUser: output?.isNewUser ?? context.isNewUser,
                   selfDmChannelId: output?.selfDmChannelId ?? null,
+                  landingChannelId: output?.landingChannelId ?? null,
                 };
               }),
             },
@@ -701,6 +712,7 @@ export const authMachine = createMachine(
                   error: null,
                   isNewUser: output?.isNewUser ?? context.isNewUser,
                   selfDmChannelId: output?.selfDmChannelId ?? null,
+                  landingChannelId: output?.landingChannelId ?? null,
                 };
               }),
             },
@@ -1271,10 +1283,9 @@ export const authMachine = createMachine(
         const autoLoginWorkspace = urlParams.get('autoLoginWorkspace');
         const userExistsButRemoved = urlParams.get('userExistsButRemoved') === 'true';
         const domainConflictError = urlParams.get('domainConflictError') || undefined;
-        const enterpriseJoinWorkspaceId = urlParams.get('enterpriseJoinWorkspaceId') || undefined;
-        const enterpriseJoinWorkspaceName =
-          urlParams.get('enterpriseJoinWorkspaceName') || undefined;
+        const publicEmailDomainError = urlParams.get('publicEmailDomainError') || undefined;
         const enterpriseJoinOrgName = urlParams.get('enterpriseJoinOrgName') || undefined;
+        const enterpriseJoinWorkspaces = urlParams.get('enterpriseJoinWorkspaces') || undefined;
 
         window.history.replaceState(window.history.state, document.title, window.location.pathname);
 
@@ -1299,9 +1310,9 @@ export const authMachine = createMachine(
             autoLoginWorkspace: autoLoginWorkspace || undefined,
             userExistsButRemoved,
             domainConflictError,
-            enterpriseJoinWorkspaceId,
-            enterpriseJoinWorkspaceName,
+            publicEmailDomainError,
             enterpriseJoinOrgName,
+            enterpriseJoinWorkspaces,
           });
         }
 
@@ -1337,12 +1348,14 @@ export const authMachine = createMachine(
             user: User;
             isNewUser?: boolean;
             selfDmChannelId?: string;
+            landingChannelId?: string | null;
           };
           if (data.user) {
             return {
               user: data.user,
               isNewUser: data.isNewUser ?? false,
               selfDmChannelId: data.selfDmChannelId,
+              landingChannelId: data.landingChannelId ?? null,
             };
           }
           throw new Error('Login to workspace failed: No user data');
@@ -1387,6 +1400,7 @@ export const authMachine = createMachine(
             status?: CommunityJoinResultStatusType;
             isNewUser?: boolean;
             selfDmChannelId?: string;
+            landingChannelId?: string | null;
             joinRequest?: {
               id: string;
               status: string;
@@ -1398,6 +1412,7 @@ export const authMachine = createMachine(
               user: data.user,
               isNewUser: data.isNewUser ?? false,
               selfDmChannelId: data.selfDmChannelId,
+              landingChannelId: data.landingChannelId ?? null,
             };
           }
           if (
@@ -1455,9 +1470,15 @@ export const authMachine = createMachine(
               user: User;
               isNewUser?: boolean;
               selfDmChannelId?: string;
+              landingChannelId?: string | null;
             };
             if (data.user) {
-              return { user: data.user, isNewUser: true, selfDmChannelId: data.selfDmChannelId };
+              return {
+                user: data.user,
+                isNewUser: true,
+                selfDmChannelId: data.selfDmChannelId,
+                landingChannelId: data.landingChannelId ?? null,
+              };
             }
             throw new Error('Create org failed: No user data');
           } catch (error) {
@@ -1505,6 +1526,7 @@ export const authMachine = createMachine(
             user: data.user,
             isNewUser: isNewUser,
             selfDmChannelId: data.selfDmChannelId ?? null,
+            landingChannelId: data.landingChannelId ?? null,
           };
         } catch (error) {
           if (axios.isAxiosError(error)) {

@@ -51,6 +51,7 @@ const ORG_SERVICE_ACCOUNT_PURPOSES = [
   OrgLLMServiceAccountPurpose.ASK_AI,
   OrgLLMServiceAccountPurpose.CALL_TRANSCRIPT,
   OrgLLMServiceAccountPurpose.ACTIVITY_CLASSIFICATION,
+  OrgLLMServiceAccountPurpose.CLAW_ORG_KEY,
 ] as const;
 
 type AIProvisioningUserPayload = ClawSyncUserPayload & {
@@ -387,6 +388,18 @@ class AIProvisioningWorker {
       serviceAccountAlias: serviceAccount.alias,
       expires: key.expires,
     });
+
+    if (purpose === OrgLLMServiceAccountPurpose.CLAW_ORG_KEY) {
+      await litellmProvisioningClient.storeOrgKey({
+        orgId: orgPayload.spacesOrgId,
+        key: key.key,
+        teamId: litellmTeamId,
+        tokenId: key.tokenId,
+        keyName: key.keyName,
+        keyAlias: key.keyAlias,
+        expires: key.expires,
+      });
+    }
   }
 
   private buildOrgServiceAccountIdentity(

@@ -1,4 +1,5 @@
 import { PrismaClient, User, UserPresenceStatus, AuthProvider, ProjectType, UserStatus, WorkspaceRole, Status } from '@prisma/client';
+import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
 import { logger } from '../utils/logger';
 import { repositories } from '../database/repositories/index';
 import { DatabaseClient } from '@/database/client';
@@ -545,6 +546,7 @@ export class UserService {
     orgId: string;
     orgName: string;
     workspaceType: string | null;
+    memberCount: number;
   }>> {
     try {
       logger.info(`[getWorkspacesByEmail] Querying workspaces for email: ${email}`);
@@ -600,6 +602,27 @@ export class UserService {
         approvedJoinRequestWorkspaces.map(workspace => [workspace.id, workspace]),
       );
 
+      const workspaceIds = [
+        ...new Set([
+          ...visibleWorkspaceUsers.map(wsUser => wsUser.workspaceId),
+          ...approvedJoinRequestWorkspaces.map(ws => ws.id),
+        ].filter((id): id is string => Boolean(id))),
+      ];
+
+      const memberCounts = await this.prisma.user.groupBy({
+        by: ['workspaceId'],
+        where: {
+          workspaceId: { in: workspaceIds },
+          status: UserStatus.ACTIVE,
+          leftAt: null,
+        },
+        _count: { workspaceId: true },
+      });
+
+      const memberCountByWorkspaceId = new Map(
+        memberCounts.map(group => [group.workspaceId, group._count.workspaceId]),
+      );
+
       // Return flat list of workspaces for frontend
       const activeWorkspaces = visibleWorkspaceUsers.map(wsUser => ({
         id: wsUser.workspace!.id,
@@ -608,6 +631,7 @@ export class UserService {
         orgId: wsUser.workspace!.organization.orgId,
         orgName: wsUser.workspace!.organization.name,
         workspaceType: wsUser.workspace!.workspaceType,
+        memberCount: memberCountByWorkspaceId.get(wsUser.workspace!.id) ?? 0,
       }));
 
       const approvedRequestWorkspaces = approvedJoinRequests
@@ -624,6 +648,7 @@ export class UserService {
           orgId: workspace.organization.orgId,
           orgName: workspace.organization.name,
           workspaceType: workspace.workspaceType,
+          memberCount: memberCountByWorkspaceId.get(workspace.id) ?? 0,
         }));
 
       return [...activeWorkspaces, ...approvedRequestWorkspaces];
@@ -913,6 +938,10 @@ export class UserService {
             }
           });
 
+      if (existingOrgMember?.role === (OrgRole.COMMUNITY_MEMBER as any)) {
+        await aiProvisioningService.upgradeCommunityToEnterpriseBudget(orgMember.memberId);
+      }
+
       // Step 5: Create workspace user as OWNER
       const workspaceUser = await this.prisma.user.create({
         data: {
@@ -955,6 +984,15 @@ export class UserService {
           createdBy: workspaceUser.id,
         }
       });
+
+      // Step 8: Create default project with general channel and board/stages
+      const defaults = await createCommunityWorkspaceDefaults({
+        db: this.prisma,
+        workspaceId: workspace.id,
+        workspaceName,
+        createdBy: workspaceUser.id,
+      });
+      await repositories.channelParticipants.addParticipant(defaults.channel.id, workspaceUser.id, 'ADMIN');
 
       // Grant full owner resource access to the workspace owner
       await grantPermissionsForRole(workspaceUser.id, workspaceUser.email, WorkspaceRole.OWNER, workspace.id);
@@ -1029,16 +1067,24 @@ export class UserService {
     }
 
     // Step 1: Create workspace under existing org with temporary createdBy
-    let workspace = await this.prisma.workspace.create({
-      data: {
-        orgId: org.orgId,
-        name: workspaceName,
-        createdBy: userData.providerUserId, // Temporary: will update after user creation
-        status: 'ACTIVE',
-        workspaceType,
-        joinPolicy,
-      },
-    });
+    let workspace;
+    try {
+      workspace = await this.prisma.workspace.create({
+        data: {
+          orgId: org.orgId,
+          name: workspaceName,
+          createdBy: userData.providerUserId, // Temporary: will update after user creation
+          status: 'ACTIVE',
+          workspaceType,
+          joinPolicy,
+        },
+      });
+    } catch (error) {
+      if (error instanceof PrismaClientKnownRequestError && error.code === 'P2002') {
+        this.raiseWorkspaceCreateError('A workspace with this name already exists. Please choose a different name.', 409);
+      }
+      throw error;
+    }
 
     // Step 2: Link workspace to organization
     await this.prisma.workspaceOrganization.create({
@@ -1091,17 +1137,15 @@ export class UserService {
       }
     });
 
-    if (workspaceType === WorkspaceType.COMMUNITY) {
-      const defaults = await createCommunityWorkspaceDefaults({
-        db: this.prisma,
-        workspaceId: workspace.id,
-        workspaceName,
-        createdBy: workspaceUser.id,
-      });
+    const defaults = await createCommunityWorkspaceDefaults({
+      db: this.prisma,
+      workspaceId: workspace.id,
+      workspaceName,
+      createdBy: workspaceUser.id,
+    });
 
-      workspace = { ...workspace, landingChannelId: defaults.workspace.landingChannelId };
-      await repositories.channelParticipants.addParticipant(defaults.channel.id, workspaceUser.id, 'ADMIN');
-    }
+    workspace = { ...workspace, landingChannelId: defaults.workspace.landingChannelId };
+    await repositories.channelParticipants.addParticipant(defaults.channel.id, workspaceUser.id, 'ADMIN');
 
     // Grant full admin resource access to the workspace owner
     await grantPermissionsForRole(workspaceUser.id, workspaceUser.email, WorkspaceRole.OWNER, workspace.id);

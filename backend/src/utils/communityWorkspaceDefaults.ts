@@ -3,23 +3,23 @@ import { sanitizeProjectCode } from '@xyne/shared';
 
 type PrismaClientLike = PrismaClient | Prisma.TransactionClient;
 
-interface CreateCommunityWorkspaceDefaultsParams {
+interface CreateWorkspaceDefaultsParams {
   db: PrismaClientLike;
   workspaceId: string;
   workspaceName: string;
   createdBy: string;
 }
 
-interface CommunityWorkspaceDefaults {
+interface WorkspaceDefaults {
   project: { id: string };
   channel: { id: string };
   workspace: { id: string; landingChannelId: string | null };
 }
 
-export async function createCommunityWorkspaceDefaults(
-  params: CreateCommunityWorkspaceDefaultsParams,
-): Promise<CommunityWorkspaceDefaults> {
-  const projectCode = await generateUniqueCommunityProjectCode(
+export async function createWorkspaceDefaults(
+  params: CreateWorkspaceDefaultsParams,
+): Promise<WorkspaceDefaults> {
+  const projectCode = await generateUniqueProjectCode(
     params.db,
     params.workspaceName,
     params.workspaceId,
@@ -37,10 +37,39 @@ export async function createCommunityWorkspaceDefaults(
     select: { id: true },
   });
 
+  const channel = await params.db.channel.create({
+    data: {
+      name: 'general',
+      scopeType: 'DEFAULT',
+      visibility: 'PUBLIC',
+      createdBy: params.createdBy,
+      projectId: project.id,
+      workspaceId: params.workspaceId,
+    },
+    select: { id: true },
+  });
+
+  const workspace = await params.db.workspace.update({
+    where: { id: params.workspaceId },
+    data: { landingChannelId: channel.id },
+    select: {
+      id: true,
+      landingChannelId: true,
+    },
+  });
+
+  return { project, channel, workspace };
+}
+
+export async function createCommunityWorkspaceDefaults(
+  params: CreateWorkspaceDefaultsParams,
+): Promise<WorkspaceDefaults> {
+  const defaults = await createWorkspaceDefaults(params);
+
   const board = await params.db.board.create({
     data: {
       name: params.workspaceName,
-      projectId: project.id,
+      projectId: defaults.project.id,
       workspaceId: params.workspaceId,
       createdBy: params.createdBy,
     },
@@ -80,37 +109,16 @@ export async function createCommunityWorkspaceDefaults(
     ].map(stage => ({ ...stage, workspaceId: params.workspaceId })),
   });
 
-  const channel = await params.db.channel.create({
-    data: {
-      name: 'general',
-      scopeType: 'DEFAULT',
-      visibility: 'PUBLIC',
-      createdBy: params.createdBy,
-      projectId: project.id,
-      workspaceId: params.workspaceId,
-    },
-    select: { id: true },
-  });
-
-  const workspace = await params.db.workspace.update({
-    where: { id: params.workspaceId },
-    data: { landingChannelId: channel.id },
-    select: {
-      id: true,
-      landingChannelId: true,
-    },
-  });
-
-  return { project, channel, workspace };
+  return defaults;
 }
 
-async function generateUniqueCommunityProjectCode(
+async function generateUniqueProjectCode(
   db: PrismaClientLike,
   workspaceName: string,
   workspaceId: string,
 ): Promise<string> {
   const sanitized = sanitizeProjectCode(workspaceName);
-  const base = sanitized.length >= 2 ? sanitized : 'CM';
+  const base = sanitized.length >= 2 ? sanitized : 'WS';
 
   for (let index = 0; index < 100; index += 1) {
     const suffix = index === 0 ? '' : String(index + 1);
@@ -125,5 +133,5 @@ async function generateUniqueCommunityProjectCode(
     }
   }
 
-  return sanitizeProjectCode(`CM${Date.now().toString(36)}`);
+  return sanitizeProjectCode(`WS${Date.now().toString(36)}`);
 }

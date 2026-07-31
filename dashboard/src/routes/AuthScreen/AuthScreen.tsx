@@ -1,6 +1,7 @@
 import { ReactElement, useEffect, useRef, useState } from 'react';
 import { Navigate, useSearchParams, useLocation } from 'react-router-dom';
 import Cookies from 'js-cookie';
+import { AxiosError } from 'axios';
 import { apiInstance } from '../../services/clients/apiClient';
 import { useAuth } from '../../hooks/useAuth';
 import { useOAuthProviders } from '../../hooks/useOAuthProviders';
@@ -81,6 +82,9 @@ const AuthScreen = (): ReactElement => {
   const [isRequestingEnterpriseJoin, setIsRequestingEnterpriseJoin] = useState(false);
   const [enterpriseJoinRequestMessage, setEnterpriseJoinRequestMessage] = useState('');
   const [enterpriseJoinRequestError, setEnterpriseJoinRequestError] = useState('');
+  const [newEnterpriseWorkspaceName, setNewEnterpriseWorkspaceName] = useState('');
+  const [isCreatingEnterpriseWorkspace, setIsCreatingEnterpriseWorkspace] = useState(false);
+  const [createEnterpriseWorkspaceError, setCreateEnterpriseWorkspaceError] = useState('');
   const orgNameInputRef = useRef<HTMLInputElement>(null);
   const { isMobile } = usePlatform();
   const isOrganizationNameTakenError =
@@ -89,6 +93,7 @@ const AuthScreen = (): ReactElement => {
   const isOrganizationDomainConflictError = error
     ?.toLowerCase()
     .includes('organization already exists for');
+  const isPublicEmailDomainError = error?.toLowerCase().includes('public email domains');
 
   // Forgot password flow
   const [showForgotPassword, setShowForgotPassword] = useState(false);
@@ -183,6 +188,18 @@ const AuthScreen = (): ReactElement => {
     reactNativeBridge.notifyRouteReady(path);
   }, [location]);
 
+  // Redirect multi-workspace selection to the dedicated workspace hub
+  useEffect(() => {
+    if (isSelectingWorkspace && workspaces.length > 0 && !isAuthenticated) {
+      const params = new URLSearchParams();
+      params.set('workspaces', JSON.stringify(workspaces));
+      if (user?.email) params.set('email', user.email);
+      if (user?.name) params.set('name', user.name);
+      if (user?.picture) params.set('picture', user.picture);
+      window.location.href = `/workspaces?${params.toString()}`;
+    }
+  }, [isSelectingWorkspace, workspaces, isAuthenticated, user]);
+
   useEffect(() => {
     if (isMobile) return;
     const rafId = requestAnimationFrame(() => {
@@ -226,29 +243,27 @@ const AuthScreen = (): ReactElement => {
     }
   };
 
-  const handleRequestEnterpriseJoin = async (): Promise<void> => {
-    if (!enterpriseJoinTarget?.workspaceId) {
-      setEnterpriseJoinRequestError('Enterprise workspace is unavailable for this organization.');
-      return;
-    }
-
+  const handleRequestEnterpriseJoin = async (
+    workspaceId: string,
+    workspaceName: string,
+  ): Promise<void> => {
     setIsRequestingEnterpriseJoin(true);
     setEnterpriseJoinRequestMessage('');
     setEnterpriseJoinRequestError('');
     try {
       const response = await apiInstance.post<{
         joinRequest?: { isExisting?: boolean; status?: string };
-      }>(`/community/${enterpriseJoinTarget.workspaceId}/join`, {
+      }>(`/community/${workspaceId}/join`, {
         workspaceType: 'ENTERPRISE',
       });
       const isExisting = response.data.joinRequest?.isExisting;
       const requestStatus = response.data.joinRequest?.status;
       setEnterpriseJoinRequestMessage(
         requestStatus === 'APPROVED'
-          ? `Your request to join ${enterpriseJoinTarget.orgName} is approved. Continue to Enterprise login.`
+          ? `Your request to join ${workspaceName} is approved. Continue to Enterprise login.`
           : isExisting
-            ? `Your request to join ${enterpriseJoinTarget.orgName} is already pending.`
-            : `Your request to join ${enterpriseJoinTarget.orgName} has been submitted.`,
+            ? `Your request to join ${workspaceName} is already pending.`
+            : `Your request to join ${workspaceName} has been submitted.`,
       );
     } catch (err) {
       if (err instanceof Error && err.message) {
@@ -258,6 +273,30 @@ const AuthScreen = (): ReactElement => {
       }
     } finally {
       setIsRequestingEnterpriseJoin(false);
+    }
+  };
+
+  const handleCreateEnterpriseWorkspace = async (): Promise<void> => {
+    if (!newEnterpriseWorkspaceName.trim()) return;
+    setIsCreatingEnterpriseWorkspace(true);
+    setCreateEnterpriseWorkspaceError('');
+    try {
+      const res = await apiInstance.post<{ user: { workspaceId: string; id: string } }>(
+        '/auth/create-workspace-pending',
+        { workspaceName: newEnterpriseWorkspaceName.trim(), workspaceType: 'ENTERPRISE' },
+      );
+      const newWorkspaceId = res.data.user.workspaceId;
+      localStorage.setItem('user_id', res.data.user.id);
+      window.location.href = `/${newWorkspaceId}/chat/dir`;
+    } catch (err) {
+      if (err instanceof AxiosError) {
+        const msg = (err.response?.data as { message?: string } | undefined)?.message;
+        setCreateEnterpriseWorkspaceError(msg ?? 'Failed to create workspace.');
+      } else {
+        setCreateEnterpriseWorkspaceError('Failed to create workspace.');
+      }
+    } finally {
+      setIsCreatingEnterpriseWorkspace(false);
     }
   };
 
@@ -432,15 +471,19 @@ const AuthScreen = (): ReactElement => {
               )}
 
               {/* Error Message */}
-              {error && !(isCreatingOrg && isOrganizationDomainConflictError) && (
-                <div
-                  className='p-3 sm:p-4 bg-red-50 border border-red-200 rounded-lg max-h-24 overflow-y-auto'
-                  role='alert'
-                  aria-live='assertive'
-                >
-                  <p className='text-sm sm:text-base text-red-600 break-words'>{error}</p>
-                </div>
-              )}
+              {error &&
+                !(
+                  isCreatingOrg &&
+                  (isOrganizationDomainConflictError || isPublicEmailDomainError)
+                ) && (
+                  <div
+                    className='p-3 sm:p-4 bg-red-50 border border-red-200 rounded-lg max-h-24 overflow-y-auto'
+                    role='alert'
+                    aria-live='assertive'
+                  >
+                    <p className='text-sm sm:text-base text-red-600 break-words'>{error}</p>
+                  </div>
+                )}
 
               {/* Workspace Selection */}
               {isSelectingWorkspace && (
@@ -513,11 +556,6 @@ const AuthScreen = (): ReactElement => {
                       Organization Already Exists
                     </h3>
                     <p className='text-sm text-amber-700'>{error}</p>
-                    {enterpriseJoinTarget ? (
-                      <p className='mt-2 text-xs text-amber-700'>
-                        Request access to {enterpriseJoinTarget.workspaceName}.
-                      </p>
-                    ) : null}
                   </div>
 
                   {enterpriseJoinRequestMessage ? (
@@ -532,20 +570,78 @@ const AuthScreen = (): ReactElement => {
                     </div>
                   ) : null}
 
-                  {enterpriseJoinTarget ? (
-                    <button
-                      type='button'
-                      onClick={() => {
-                        void handleRequestEnterpriseJoin();
-                      }}
-                      disabled={isRequestingEnterpriseJoin || Boolean(enterpriseJoinRequestMessage)}
-                      className='w-full rounded-lg bg-black px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50'
-                      data-track-category='Auth'
-                      data-track-name='RequestEnterpriseWorkspaceAccess'
-                    >
-                      {isRequestingEnterpriseJoin ? 'Submitting request...' : 'Request to join'}
-                    </button>
+                  {enterpriseJoinTarget?.workspaces?.length ? (
+                    <div className='flex flex-col gap-2'>
+                      <p className='text-sm font-medium text-foreground'>
+                        Request access to a workspace in {enterpriseJoinTarget.orgName}:
+                      </p>
+                      <div className='flex flex-col gap-2 max-h-48 overflow-y-auto'>
+                        {enterpriseJoinTarget.workspaces.map(ws => (
+                          <div
+                            key={ws.id}
+                            className='flex items-center justify-between gap-3 p-3 border border-border rounded-lg'
+                          >
+                            <div className='flex items-center gap-2'>
+                              <Building2 className='w-4 h-4 text-muted-foreground' />
+                              <span className='text-sm font-medium text-foreground'>{ws.name}</span>
+                            </div>
+                            <button
+                              type='button'
+                              onClick={() => {
+                                void handleRequestEnterpriseJoin(ws.id, ws.name);
+                              }}
+                              disabled={
+                                isRequestingEnterpriseJoin || Boolean(enterpriseJoinRequestMessage)
+                              }
+                              className='text-xs font-medium px-3 py-1.5 rounded-md bg-black text-white hover:bg-neutral-800 disabled:opacity-50 disabled:cursor-not-allowed'
+                              data-track-category='Auth'
+                              data-track-name='RequestEnterpriseWorkspaceAccess'
+                              data-track-metadata={JSON.stringify({ workspaceId: ws.id })}
+                            >
+                              {isRequestingEnterpriseJoin ? '...' : 'Request to join'}
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   ) : null}
+
+                  <div className='border-t border-border pt-4'>
+                    <p className='text-sm font-medium text-foreground mb-2'>
+                      Or create a new workspace in{' '}
+                      {enterpriseJoinTarget?.orgName ?? 'your organization'}:
+                    </p>
+                    {createEnterpriseWorkspaceError ? (
+                      <div className='mb-2 rounded-lg border border-red-200 bg-red-50 p-2 text-center text-xs text-red-700'>
+                        {createEnterpriseWorkspaceError}
+                      </div>
+                    ) : null}
+                    <div className='flex gap-2'>
+                      <input
+                        type='text'
+                        value={newEnterpriseWorkspaceName}
+                        onChange={e => setNewEnterpriseWorkspaceName(e.target.value)}
+                        placeholder='Workspace name'
+                        className='flex-1 px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground text-sm'
+                        data-track-category='Auth'
+                        data-track-name='NewEnterpriseWorkspaceNameInput'
+                      />
+                      <button
+                        type='button'
+                        onClick={() => {
+                          void handleCreateEnterpriseWorkspace();
+                        }}
+                        disabled={
+                          isCreatingEnterpriseWorkspace || !newEnterpriseWorkspaceName.trim()
+                        }
+                        className='px-4 py-2 bg-black text-white text-sm font-medium rounded-lg hover:bg-neutral-800 disabled:opacity-50 disabled:cursor-not-allowed'
+                        data-track-category='Auth'
+                        data-track-name='CreateEnterpriseWorkspace'
+                      >
+                        {isCreatingEnterpriseWorkspace ? 'Creating...' : 'Create'}
+                      </button>
+                    </div>
+                  </div>
 
                   <button
                     type='button'
@@ -559,8 +655,33 @@ const AuthScreen = (): ReactElement => {
                 </div>
               )}
 
+              {/* Public Email Domain Blocked */}
+              {isCreatingOrg && isPublicEmailDomainError && (
+                <div className='flex flex-col gap-4'>
+                  <div className='p-4 bg-red-50 border border-red-200 rounded-lg text-center'>
+                    <h3 className='text-base font-semibold text-red-800 mb-2'>
+                      Workspace Unavailable
+                    </h3>
+                    <p className='text-sm text-red-700'>{error}</p>
+                  </div>
+
+                  <button
+                    type='button'
+                    onClick={handleTryDifferentAccount}
+                    className='text-sm text-muted-foreground hover:text-foreground text-center cursor-pointer'
+                    data-track-category='Auth'
+                    data-track-name='TryDifferentAccount'
+                  >
+                    Try with a work email
+                  </button>
+                </div>
+              )}
+
               {/* Create Organization Form - only for new users */}
-              {((isCreatingOrg && !userExistsButRemoved && !isOrganizationDomainConflictError) ||
+              {((isCreatingOrg &&
+                !userExistsButRemoved &&
+                !isOrganizationDomainConflictError &&
+                !isPublicEmailDomainError) ||
                 showCreateOrgForm) && (
                 <form onSubmit={handleCreateOrg} className='flex flex-col gap-4'>
                   <div className='text-center'>
