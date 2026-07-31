@@ -73,6 +73,8 @@ import {
 } from './supportSidebarWidth';
 import { useHasResourceAccess } from '../../hooks/usePermissions';
 import { cn } from '../../utils/classNames';
+import { Hashtag, Star } from '@xyne/icons';
+import ChannelIcon from '../../components/Chat/ChannelIcon/ChannelIcon';
 import { logger, Event } from '../../utils/logger';
 import Tooltip, { TruncatedTooltip } from '../../components/ui/Tooltip';
 import { useZero } from '../../hooks/useZero';
@@ -1334,6 +1336,13 @@ const SupportScreen = (): ReactElement => {
   // CTA (there is nothing to join).
   const isSelectedChannelKnown =
     !!selectedChannelId && sortedEmailChannels.some(c => c.id === selectedChannelId);
+  const isSelectedChannelStarred = !!selectedChannelId && starredChannelIds.has(selectedChannelId);
+  const handleToggleSelectedChannelStar = useCallback((): void => {
+    if (!selectedChannelId || selectedChannelId === ALL_CHANNELS_ID) return;
+    void zero.mutate(
+      mutators.channel.toggleStarred({ channelId: selectedChannelId, updatedAt: Date.now() }),
+    );
+  }, [selectedChannelId, zero]);
 
   useEffect(() => {
     if (!selectedChannelId || !isSelectedChannelJoined) return;
@@ -2171,7 +2180,7 @@ const SupportScreen = (): ReactElement => {
                   )}
                 >
                   <div className='flex h-14 shrink-0 items-center justify-between gap-2 border-b border-border px-4 min-w-0'>
-                    <div className='flex items-center gap-2 font-semibold min-w-0 flex-1'>
+                    <div className='flex items-center gap-2 text-foreground min-w-0 flex-1'>
                       {!isSidebarOpen && (
                         <button
                           onClick={() => setIsSidebarOpen(true)}
@@ -2183,21 +2192,61 @@ const SupportScreen = (): ReactElement => {
                           <ChevronRight size={16} />
                         </button>
                       )}
-                      <Hash size={14} className='text-muted-foreground shrink-0' />
+                      {selectedChannelId &&
+                        selectedChannelId !== ALL_CHANNELS_ID &&
+                        isSelectedChannelJoined && (
+                          <Tooltip content={isSelectedChannelStarred ? 'Unstar' : 'Star'}>
+                            <Button
+                              variant='ghost'
+                              size='sm'
+                              onClick={e => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                handleToggleSelectedChannelStar();
+                              }}
+                              className='h-7 w-7 rounded-lg shrink-0 text-muted-foreground hover:text-foreground'
+                              aria-label={isSelectedChannelStarred ? 'Unstar desk' : 'Star desk'}
+                              data-track-category='Support'
+                              data-track-name='ToggleStarChannel'
+                              data-track-metadata={JSON.stringify({
+                                channelId: selectedChannelId,
+                                isStarred: isSelectedChannelStarred,
+                              })}
+                            >
+                              <Star
+                                size={16}
+                                variant={isSelectedChannelStarred ? 'Solid' : 'Stroke'}
+                                className={isSelectedChannelStarred ? 'text-status-pending' : ''}
+                              />
+                            </Button>
+                          </Tooltip>
+                        )}
                       {selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID ? (
-                        <button
-                          onClick={() => {
-                            setInfoDefaultTab('about');
-                            setIsInfoOpen(true);
-                          }}
-                          className='text-base font-semibold hover:underline tracking-[-0.17px] flex items-center gap-1 truncate'
-                          data-track-category='Support'
-                          data-track-name='OpenChannelInfo'
-                        >
-                          {selectedChannelName}
-                        </button>
+                        <Tooltip content='Get channel details' side='bottom' delayDuration={500}>
+                          <button
+                            onClick={() => {
+                              setInfoDefaultTab('about');
+                              setIsInfoOpen(true);
+                            }}
+                            className='text-base font-semibold tracking-[-0.32px] flex items-center gap-2 min-w-0 px-1.5 py-0.5 rounded-md hover:bg-muted transition-colors duration-100'
+                            data-track-category='Support'
+                            data-track-name='OpenChannelInfo'
+                          >
+                            <span className='shrink-0 inline-flex items-center leading-none'>
+                              {selectedChannelFull ? (
+                                <ChannelIcon channel={selectedChannelFull} />
+                              ) : (
+                                <Hashtag size={16} />
+                              )}
+                            </span>
+                            <span className='truncate'>{selectedChannelName}</span>
+                          </button>
+                        </Tooltip>
                       ) : (
-                        <span className='truncate'>{selectedChannelName}</span>
+                        <span className='flex items-center gap-2 min-w-0 px-1.5 py-0.5'>
+                          <Hashtag size={16} className='shrink-0' />
+                          <span className='truncate'>{selectedChannelName}</span>
+                        </span>
                       )}
                     </div>
                     <div className='flex items-center gap-2 shrink-0'>
