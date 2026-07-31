@@ -80,6 +80,11 @@ import {
   EmailChannelPreferencesACL,
   BoardSlaPoliciesACL,
   DelayedMessagesACL,
+  EmailSignaturesACL,
+  InvitationsACL,
+  ResourceAccessACL,
+  ResourcesACL,
+  WorkspacesACL,
 } from '../tables';
 export class QueryACLFactory {
   static getACL<TTable extends TableName>(
@@ -229,6 +234,16 @@ export class QueryACLFactory {
         return new CollectionItemsACL(ctx) as BaseQueryACL<TTable>;
       case 'collection_permissions':
         return new CollectionPermissionsACL(ctx) as BaseQueryACL<TTable>;
+      case 'email_signatures':
+        return new EmailSignaturesACL(ctx) as BaseQueryACL<TTable>;
+      case 'invitations':
+        return new InvitationsACL(ctx) as BaseQueryACL<TTable>;
+      case 'resource_access':
+        return new ResourceAccessACL(ctx) as BaseQueryACL<TTable>;
+      case 'resources':
+        return new ResourcesACL(ctx) as BaseQueryACL<TTable>;
+      case 'workspaces':
+        return new WorkspacesACL(ctx) as BaseQueryACL<TTable>;
       default:
         return new BaseQueryACL(ctx, table) as BaseQueryACL<TTable>;
       case 'emails':
