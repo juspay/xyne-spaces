@@ -192,7 +192,7 @@ const AuthScreen = (): ReactElement | null => {
   // Redirect multi-workspace selection to the dedicated workspace hub
   useEffect(() => {
     if (isSelectingWorkspace && workspaces.length > 0 && !isAuthenticated) {
-      navigate('/workspaces', {
+      void navigate('/workspaces', {
         replace: true,
         state: {
           workspaces,
