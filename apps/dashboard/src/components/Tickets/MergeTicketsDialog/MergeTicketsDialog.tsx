@@ -1,12 +1,26 @@
 import React, { useState, useMemo, useEffect } from 'react';
+import * as RadioGroupPrimitive from '@radix-ui/react-radio-group';
+import { User } from 'lucide-react';
 import { Dialog } from '../../ui/Dialog';
 import Button from '../../ui/Button';
-import { RadioGroup, Radio } from '../../ui/RadioGroup';
+import Avatar from '../../ui/Avatar/Avatar';
+import Tooltip, { TruncatedTooltip } from '../../ui/Tooltip';
+import { useUser } from '../../../hooks/useUsers';
+import { useUserGroupById } from '../../../hooks/useUserGroup';
+import { TicketStatusWithStages } from '../TicketStatus/TicketStatusIcon';
+import { getPriorityIcon } from '../TicketCard/TicketCard.utils';
+import { cn } from '../../../utils/classNames';
+import type { TicketPriority } from '@xyne/shared';
+
 interface MergeTicket {
   id: string;
-  createdAt?: number | null;
-  title?: string | null;
-  xyneId?: string | null;
+  createdAt?: number | null | undefined;
+  title?: string | null | undefined;
+  xyneId?: string | null | undefined;
+  stageName?: string | null | undefined;
+  priority?: TicketPriority | string | null | undefined;
+  assignedTo?: string | null | undefined;
+  userGroupId?: string | null | undefined;
 }
 
 interface MergeTicketsDialogProps {
@@ -15,6 +29,60 @@ interface MergeTicketsDialogProps {
   tickets: MergeTicket[];
   onMerge: (parentTicketId: string) => void | Promise<void>;
 }
+
+const formatTicketDate = (timestamp?: number | null): string =>
+  new Date(timestamp ?? 0).toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+
+/** Mirrors TicketCard's renderAssignee() — same markup/classes, display-only. */
+const MergeTicketAssignee: React.FC<{
+  assignedTo?: string | null | undefined;
+  userGroupId?: string | null | undefined;
+}> = ({ assignedTo, userGroupId }) => {
+  // Same precedence as TicketCard: a user assignee wins; otherwise fall back to
+  // a legacy `group:<id>` in assignedTo, then the dedicated userGroupId column.
+  const assigneeUserId =
+    assignedTo && !assignedTo.startsWith('group:') ? assignedTo.replace(/^user:/, '') : '';
+  const assigneeGroupId = assigneeUserId
+    ? ''
+    : assignedTo?.startsWith('group:')
+      ? assignedTo.slice('group:'.length)
+      : userGroupId || '';
+  const isGroup = !assigneeUserId && !!assigneeGroupId;
+  const user = useUser(assigneeUserId);
+  const group = useUserGroupById(assigneeGroupId);
+
+  if (!isGroup && user) {
+    return (
+      <Tooltip content={user.name || user.email || 'Unknown user'}>
+        <div className='relative'>
+          <Avatar userId={user.id} showActiveStatus={false} className='size-6' />
+        </div>
+      </Tooltip>
+    );
+  }
+  if (isGroup && group) {
+    return (
+      <Tooltip content={group.name}>
+        <div className='w-6 h-6 rounded-lg bg-border flex items-center justify-center'>
+          <span className='text-xs font-medium text-muted-foreground'>
+            {group.name.charAt(0).toUpperCase()}
+          </span>
+        </div>
+      </Tooltip>
+    );
+  }
+  return (
+    <Tooltip content='Unassigned'>
+      <div className='w-6 h-6 rounded-lg border border-dashed border-muted-foreground bg-background flex items-center justify-center'>
+        <User className='w-3 h-3 text-muted-foreground' strokeWidth={1.5} />
+      </div>
+    </Tooltip>
+  );
+};
 
 export const MergeTicketsDialog: React.FC<MergeTicketsDialogProps> = ({
   open,
@@ -56,36 +124,99 @@ export const MergeTicketsDialog: React.FC<MergeTicketsDialogProps> = ({
     <Dialog open={open} onOpenChange={onOpenChange} title={`Merge ${sortedTickets.length} Tickets`}>
       <div className='p-6 space-y-4'>
         <p className='text-sm text-muted-foreground'>
-          Select the ticket that will be the parent. All other selected tickets will be archived and
-          linked as merged into it.
+          Pick the ticket that stays open. The rest will be archived and linked as merged into it —
+          you can split them back out later with{' '}
+          <span className='font-medium text-foreground'>Unmerge</span>.
         </p>
 
         {sortedTickets.length === 0 ? (
           <p className='text-sm text-destructive'>Could not load ticket details.</p>
         ) : (
-          <div className='space-y-2'>
-            <div className='text-sm font-medium'>Parent ticket</div>
-            <RadioGroup
-              value={selectedParentTicketId ?? ''}
-              onChange={value => setSelectedParentTicketId(value)}
+          <>
+            <div className='text-xs font-medium text-muted-foreground uppercase tracking-wide'>
+              Parent ticket
+            </div>
+            <RadioGroupPrimitive.Root
+              value={selectedParentTicketId}
+              onValueChange={setSelectedParentTicketId}
               aria-label='Parent ticket'
+              className='space-y-1.5 max-h-[360px] overflow-y-auto -mx-1 px-1 py-0.5'
             >
-              {sortedTickets.map(ticket => (
-                <Radio key={ticket.id} value={ticket.id} subtext={ticket.title || 'No subject'}>
-                  <span className='font-mono text-xs text-muted-foreground'>
-                    {ticket.xyneId || ticket.id.slice(0, 8)}
-                  </span>
-                  <span className='text-muted-foreground ml-2'>
-                    {new Date(ticket.createdAt ?? 0).toLocaleDateString(undefined, {
-                      month: 'short',
-                      day: 'numeric',
-                      year: 'numeric',
-                    })}
-                  </span>
-                </Radio>
-              ))}
-            </RadioGroup>
-          </div>
+              {sortedTickets.map(ticket => {
+                const isParent = ticket.id === selectedParentTicketId;
+                const priority = ticket.priority as TicketPriority | undefined;
+                const priorityIcon = priority ? getPriorityIcon(priority) : null;
+
+                return (
+                  <RadioGroupPrimitive.Item
+                    key={ticket.id}
+                    value={ticket.id}
+                    className={cn(
+                      'relative flex w-full flex-col gap-1.5 rounded-md border py-2.5 pl-4 pr-3 text-left',
+                      'shadow-sm transition-all outline-none',
+                      'focus-visible:ring-2 focus-visible:ring-ring/50',
+                      isParent
+                        ? 'border-primary/40 bg-primary/[0.04]'
+                        : 'border-border bg-card hover:border-input hover:shadow',
+                    )}
+                    data-track-category='Support'
+                    data-track-name='SelectMergeParent'
+                  >
+                    {isParent && (
+                      <span className='absolute inset-y-1.5 left-1 w-[3px] rounded-full bg-primary' />
+                    )}
+
+                    <div className='flex items-center gap-2 min-w-0'>
+                      <span className='font-mono text-xs text-muted-foreground shrink-0'>
+                        {ticket.xyneId || ticket.id.slice(0, 8)}
+                      </span>
+                      <TruncatedTooltip content={ticket.title || 'No subject'}>
+                        <h3 className='flex-1 min-w-0 truncate text-[15px] font-semibold text-foreground'>
+                          {ticket.title || 'No subject'}
+                        </h3>
+                      </TruncatedTooltip>
+                      <span
+                        className={cn(
+                          'shrink-0 inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-medium whitespace-nowrap',
+                          isParent
+                            ? 'border-primary/30 bg-primary/10 text-primary'
+                            : 'border-border text-muted-foreground',
+                        )}
+                      >
+                        {isParent ? 'Parent' : 'Merges in'}
+                      </span>
+                    </div>
+
+                    <div className='flex items-center gap-3 pl-0'>
+                      {ticket.stageName !== undefined && (
+                        <TicketStatusWithStages
+                          currentStageName={ticket.stageName}
+                          showLeadingDot={false}
+                          labelClassName='max-w-[120px] truncate'
+                        />
+                      )}
+                      {priorityIcon && (
+                        <Tooltip content={`Priority: ${priority}`}>
+                          <span className='flex items-center'>{priorityIcon}</span>
+                        </Tooltip>
+                      )}
+                      <span className='text-xs text-muted-foreground tabular-nums'>
+                        {formatTicketDate(ticket.createdAt)}
+                      </span>
+                      {(ticket.assignedTo !== undefined || ticket.userGroupId !== undefined) && (
+                        <span className='ml-auto flex items-center'>
+                          <MergeTicketAssignee
+                            assignedTo={ticket.assignedTo}
+                            userGroupId={ticket.userGroupId}
+                          />
+                        </span>
+                      )}
+                    </div>
+                  </RadioGroupPrimitive.Item>
+                );
+              })}
+            </RadioGroupPrimitive.Root>
+          </>
         )}
 
         <div className='flex justify-end gap-3 pt-2'>
