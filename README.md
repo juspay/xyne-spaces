@@ -2,11 +2,13 @@
 
 # Xyne Spaces
 
-**The context layer for your organization — permission-aware by default, and built for agents.**
+**A collaborative workspace that is your organization's context layer — real-time by
+default, permission-aware by default, and built for agents.**
 
-Every conversation, ticket, call, document and calendar in one place, indexed and served
-back to your people *and* your agents — with each read and write filtered through the same
-permission model.
+Chat, threads, tickets, boards, calls and shared canvases — where your team actually does
+the work. And because the work happens here, every conversation, ticket, call, document and
+calendar is already in one place, indexed and served back to your people *and* your
+agents — with each read and write filtered through the same permission model.
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENCE)
 [![CI](https://github.com/juspay/xyne-spaces/actions/workflows/ci.yml/badge.svg)](https://github.com/juspay/xyne-spaces/actions/workflows/ci.yml)
@@ -38,10 +40,16 @@ permission model.
 
 ## Why Xyne Spaces?
 
-An organization's context is scattered across a dozen tools, and the moment you try to
-gather it somewhere useful you hit the same wall: **most of it is not safe to show to
-everyone.** Search that ignores permissions is a leak. An assistant that ignores them is a
-worse one.
+Most "context platforms" are a layer bolted onto tools people work in somewhere else, which
+means the context is always a stale copy of the real thing. Xyne Spaces inverts that: **it
+is the place the work happens.** Teams chat, run calls, file tickets, draft on canvases and
+review each other's work here — collaboratively and in real time — and the context is simply
+the exhaust of that, current by construction rather than by sync schedule.
+
+Which leads to the wall everyone hits next. An organization's context is scattered across a
+dozen tools, and the moment you gather it somewhere useful: **most of it is not safe to show
+to everyone.** Search that ignores permissions is a leak. An assistant that ignores them is
+a worse one.
 
 Xyne Spaces starts from the opposite end. Context is centralized, but **access control
 lives in the data layer, not in a filter bolted on top**:
@@ -194,7 +202,7 @@ Once it finishes:
 | --- | --- |
 | Dashboard | http://localhost:5173 |
 | Backend API | http://localhost:3001 |
-| API docs | http://localhost:3001/api-docs |
+| API reference | [API_DOCUMENTATION.md](API_DOCUMENTATION.md) |
 | Xyne Claw | http://localhost:3002 |
 | Claw Auth | http://localhost:3003 |
 
