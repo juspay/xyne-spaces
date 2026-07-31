@@ -32,7 +32,7 @@ import {
 } from '../utils/searchFilterParser';
 import { sudoQueryService } from '../services/hyperAnalytics/sudoQueryService';
 import { affinityService } from '../services/affinityService';
-import { CMDK_ALL_DEFAULT_RANK_PROFILE } from '../config';
+import { useCmdkAllDefaultRankProfile } from './useCmdkSearchConfig';
 
 // Squashes raw affinity into [0, 1] with diminishing returns.
 // At affinity=50 → sat=0.5; at affinity=200 → sat≈0.9.
@@ -295,6 +295,7 @@ export function filterChannelsBySearchableNames<
 
 export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
   const context = useAuthContextValues();
+  const allDefaultRankProfile = useCmdkAllDefaultRankProfile();
 
   useEffect(() => {
     void affinityService.prefetch();
@@ -989,9 +990,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
             const limit = BACKEND_RESULTS_LIMIT;
             const apps = `${VespaApps.CHAT},${VespaApps.TICKET},${VespaApps.FILE},${VespaApps.MAIL}`;
             const effectiveRankProfile =
-              activeTab === TabType.ALL
-                ? rankProfile || CMDK_ALL_DEFAULT_RANK_PROFILE
-                : rankProfile;
+              activeTab === TabType.ALL ? rankProfile || allDefaultRankProfile : rankProfile;
             const searchFilters: VespaSearchFilters = {
               query: searchText,
               apps: apps,
@@ -1285,11 +1284,12 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       includeBotMessages,
       onlyMyChannels,
       rankProfile,
+      allDefaultRankProfile,
       includeDebugInfo,
     ],
   );
 
-  // Track the last search text, tab, mentions, includeBotMessages, and rankProfile to avoid duplicate calls
+  // Track the last effective search inputs to avoid duplicate calls.
   const lastSearchedParamsRef = useRef<{
     text: string;
     activeTab: TabType;
@@ -1297,6 +1297,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     includeBotMessages: boolean;
     onlyMyChannels: boolean;
     rankProfile: string;
+    allDefaultRankProfile: string;
     includeDebugInfo: boolean;
   }>({
     text: '',
@@ -1305,6 +1306,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     includeBotMessages: false,
     onlyMyChannels: options.defaultOnlyMyChannels ?? false,
     rankProfile: '',
+    allDefaultRankProfile,
     includeDebugInfo: false,
   });
 
@@ -1333,6 +1335,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       onlyMyChannels === lastSearchedParamsRef.current.onlyMyChannels &&
       currentMentionsKey === lastSearchedParamsRef.current.mentionsKey &&
       rankProfile === lastSearchedParamsRef.current.rankProfile &&
+      allDefaultRankProfile === lastSearchedParamsRef.current.allDefaultRankProfile &&
       includeDebugInfo === lastSearchedParamsRef.current.includeDebugInfo &&
       normalizedText !== ''
     ) {
@@ -1346,6 +1349,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         includeBotMessages,
         onlyMyChannels,
         rankProfile,
+        allDefaultRankProfile,
         includeDebugInfo,
         mentionsKey: currentMentionsKey,
       };
@@ -1372,6 +1376,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     includeBotMessages,
     onlyMyChannels,
     rankProfile,
+    allDefaultRankProfile,
     includeDebugInfo,
   ]);
 
@@ -1425,7 +1430,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         const currentOffset = currentPagination.offset;
         const pageSize = BACKEND_RESULTS_LIMIT;
         const effectiveRankProfile =
-          activeTab === TabType.ALL ? rankProfile || CMDK_ALL_DEFAULT_RANK_PROFILE : rankProfile;
+          activeTab === TabType.ALL ? rankProfile || allDefaultRankProfile : rankProfile;
 
         const searchFilters: VespaSearchFilters = {
           query: searchText,
@@ -1591,6 +1596,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     includeBotMessages,
     onlyMyChannels,
     rankProfile,
+    allDefaultRankProfile,
     includeDebugInfo,
     options.isCallSearchPage,
   ]);

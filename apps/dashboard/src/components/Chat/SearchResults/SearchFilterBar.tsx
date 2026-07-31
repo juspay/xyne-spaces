@@ -12,7 +12,7 @@ import { isDMChannel } from '../../Chat/ChatDirectory/ChatDirectory.utils';
 import type { SearchResultsFilters } from '../../../hooks/useSearchResultsScreen';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import type { Channel } from '@xyne/shared';
-import { CMDK_ALL_DEFAULT_RANK_PROFILE } from '../../../config';
+import { useCmdkAllDefaultRankProfile } from '../../../hooks/useCmdkSearchConfig';
 
 interface SearchFilterBarProps {
   filters: SearchResultsFilters;
@@ -219,6 +219,7 @@ function openOnArrowDown(open: boolean, setOpen: (v: boolean) => void) {
 }
 
 export function SearchFilterBar({ filters, onFiltersChange }: SearchFilterBarProps): ReactElement {
+  const allDefaultRankProfile = useCmdkAllDefaultRankProfile();
   const [typeOpen, setTypeOpen] = useState(false);
   const [fromOpen, setFromOpen] = useState(false);
   const [inOpen, setInOpen] = useState(false);
@@ -252,7 +253,7 @@ export function SearchFilterBar({ filters, onFiltersChange }: SearchFilterBarPro
   const isRankActive = filters.rankProfile !== '';
   const rankProfileLabel =
     rankProfileOptions.find(o => o.value === filters.rankProfile)?.label ??
-    (filters.docType === 'all' ? CMDK_ALL_DEFAULT_RANK_PROFILE : 'default_native');
+    (filters.docType === 'all' ? allDefaultRankProfile : 'default_native');
 
   const showFromIn = filters.docType !== 'channels' && filters.docType !== 'people';
   const showAssignee = filters.docType === 'tickets' || filters.docType === 'all';
