@@ -65,19 +65,29 @@ BRAND NAME CORRECTION:
 - When any word that phonetically sounds like "Xyne" appears, replace it with "Xyne"
 - Only apply this correction when the word is clearly a reference to the brand (e.g. "Xyne Spaces", "Xyne Calls")
 
+CITATION RULES:
+- The transcript is numbered: each line starts with [N] (e.g. "[1] [03:24] Alice: ...")
+- After any claim, fact, or outcome derived from the transcript, append a citation token [clf-N]
+  where N is the segment number from the transcript line that supports the claim
+- Place the token AFTER the word and BEFORE any trailing punctuation: "Revenue grew 12%[clf-3]."
+- Multiple consecutive tokens are allowed for multi-segment support: "discussed the roadmap[clf-5][clf-8]"
+- Cite at least one segment per key outcome and per action item when possible
+- Do NOT cite the Summary overview section — it is too high-level for precise citations
+- Do NOT invent segment numbers — only use numbers that appear in the transcript
+
 MARKDOWN TEMPLATE (FOLLOW EXACTLY):
 
 ## Summary:
 [2-3 sentence overview of the call]
 
 ## Key outcomes:
-1. [First key outcome or decision]
-2. [Second key outcome or decision]
-3. [Third key outcome or decision if applicable]
+1. [First key outcome or decision][clf-N]
+2. [Second key outcome or decision][clf-N]
+3. [Third key outcome or decision if applicable][clf-N]
 
 ## Action Items:
-- [Action item 1] or "None"
-- [Action item 2 if applicable]
+- [Action item 1][clf-N] or "None"
+- [Action item 2 if applicable][clf-N]
 
 ## Participants:
 - [Participant 1 name]

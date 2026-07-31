@@ -18,7 +18,10 @@ import {
   formatElapsedTime,
   logRecordingError,
 } from '../../../utils/recordingUtils';
-import { recordingService, type RecordingDetail } from '../../../services/Recording/recordingService';
+import {
+  recordingService,
+  type RecordingDetail,
+} from '../../../services/Recording/recordingService';
 
 const TIMELINE_WINDOW_MS = 60 * 60 * 1000; // 1 hour fixed window for the live timeline
 
@@ -32,9 +35,7 @@ export const LiveRecordingControlBar = ({
   onStopped,
 }: LiveRecordingControlBarProps): ReactElement => {
   const startTime = new Date(recording.startedAt).getTime();
-  const [elapsedMs, setElapsedMs] = useState(() =>
-    calculateRecordingElapsedMs(startTime, null, 0),
-  );
+  const [elapsedMs, setElapsedMs] = useState(() => calculateRecordingElapsedMs(startTime, null, 0));
   const [isStopping, setIsStopping] = useState(false);
 
   useEffect(() => {

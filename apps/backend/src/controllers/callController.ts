@@ -36,7 +36,7 @@ import { scheduledCallNotificationService } from '@/services/scheduledCallNotifi
 import { normalizeStoragePath } from '@/services/storage/pathUtils';
 import { callRecordingService } from '@/services/callRecordingService';
 import { config } from '@/config/env';
-import { callDocumentService } from '@/services/callDocumentService';
+import { callDocumentService, numberTranscriptSegments, buildParticipantMap } from '@/services/callDocumentService';
 import {
   type CallParticipantMetadata,
   SUMMARY_PROMPT_MAX_LENGTH,
@@ -1139,6 +1139,46 @@ export class CallController {
         aiSummaryFormat = (!hasHtmlTags || startsWithMarkdown) ? 'markdown' : 'html';
       }
 
+      // Build citation segment map from the best available transcript so the
+      // frontend can resolve [clf-N] tokens in the AI summary to timestamps/speakers.
+      const transcriptForCitations = identifiedTranscriptContent || transcriptContent;
+      let citationSegments: Array<{
+        n: number;
+        timestamp: string;
+        speaker: string;
+        speakerId?: string;
+        snippet: string;
+      }> = [];
+      if (transcriptForCitations) {
+        const segs = numberTranscriptSegments(transcriptForCitations).segments;
+        // Resolve speaker→userId for avatar display. Channel participants first,
+        // then fall back to workspace users (recordings are HEADLESS — no channel).
+        let participantMap: Map<string, { userId: string }> = new Map();
+        if (call.channelId) {
+          participantMap = await buildParticipantMap(call.channelId).catch(() => new Map());
+        }
+        if (participantMap.size === 0 && call.workspaceId) {
+          const users = await db.user.findMany({
+            where: { workspaceId: call.workspaceId, leftAt: null },
+            select: { id: true, name: true, displayName: true },
+          });
+          for (const u of users) {
+            const n = (u.displayName || u.name).toLowerCase();
+            if (n) participantMap.set(n, { userId: u.id });
+          }
+        }
+        citationSegments = segs.map(s => {
+          const info = participantMap.get(s.speaker.toLowerCase());
+          return {
+            n: s.n,
+            timestamp: s.timestamp,
+            speaker: s.speaker,
+            ...(info?.userId ? { speakerId: info.userId } : {}),
+            snippet: s.text.slice(0, 300),
+          };
+        });
+      }
+
       // Find the call message's messageId for sharing functionality
       let messageId: string | null = null;
       let conversationId: string | null = null;
@@ -1191,6 +1231,11 @@ export class CallController {
           channelId,
           notesCanvasId:
             typeof notesCanvasId === 'string' ? notesCanvasId : null,
+          detailedSummaryCanvasId:
+            typeof callMetadata?.detailedSummaryCanvasId === 'string'
+              ? callMetadata.detailedSummaryCanvasId
+              : null,
+          citationSegments,
           hasRecording: !!recordingAttachment,
         },
       });

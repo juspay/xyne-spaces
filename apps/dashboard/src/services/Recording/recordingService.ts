@@ -61,6 +61,14 @@ export interface BulkDeleteRecordingsResult {
   failed: Array<{ callId: string; reason: string }>;
 }
 
+export interface CitationSegment {
+  n: number;
+  timestamp: string;
+  speaker: string;
+  speakerId?: string;
+  snippet: string;
+}
+
 export interface RecordingDetail extends Recording {
   transcript: string | null;
   identifiedTranscript: string | null;
@@ -71,6 +79,8 @@ export interface RecordingDetail extends Recording {
   channelId: string | null;
   messageId: string | null;
   notesCanvasId: string | null;
+  detailedSummaryCanvasId: string | null;
+  citationSegments: CitationSegment[];
   hasRecording?: boolean;
 }
 
@@ -217,9 +227,7 @@ class RecordingService {
 
   async updateSummaryTemplate(
     templateId: string,
-    update: Partial<
-      Omit<SummaryTemplate, 'id' | 'workspaceId' | 'createdBy' | 'createdAt'>
-    >,
+    update: Partial<Omit<SummaryTemplate, 'id' | 'workspaceId' | 'createdBy' | 'createdAt'>>,
   ): Promise<SummaryTemplate> {
     const response: AxiosResponse<{ success: boolean; template: SummaryTemplate }> =
       await apiInstance.patch(`/calls/summary-templates/${templateId}`, update);
