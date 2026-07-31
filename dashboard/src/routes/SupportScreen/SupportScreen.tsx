@@ -1318,6 +1318,14 @@ const SupportScreen = (): ReactElement => {
   // and to flip the body to a Join-channel CTA when the user is on a public
   // channel they haven't joined yet.
   const isSelectedChannelJoined = !!selectedChannelId && joinedChannelIds.has(selectedChannelId);
+
+  const metricsSelectableDesks = useMemo(
+    () =>
+      sortedEmailChannels
+        .filter(c => joinedChannelIds.has(c.id))
+        .map(c => ({ id: c.id, name: c.name?.trim() || 'Untitled desk' })),
+    [sortedEmailChannels, joinedChannelIds],
+  );
   // A selected channelId that doesn't appear in useEmailChannels() means the
   // channel either doesn't exist or is a private channel the user isn't in —
   // in both cases we show a "Channel not found" message instead of the Join
@@ -2920,6 +2928,7 @@ const SupportScreen = (): ReactElement => {
                   }}
                   channelId={selectedChannelId}
                   channelName={selectedChannelName ?? undefined}
+                  availableDesks={metricsSelectableDesks}
                 />
               )}
               <div className='h-full flex-1 min-h-0 overflow-y-auto no-scrollbar'>
