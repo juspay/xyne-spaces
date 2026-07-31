@@ -2,7 +2,7 @@ import { app, globalShortcut } from 'electron';
 import log from 'electron-log/main';
 import { toggleRecording } from './recording-controller';
 
-export const RECORDING_SHORTCUT = 'CommandOrControl+Shift+2';
+export const RECORDING_SHORTCUT = 'CommandOrControl+Alt+X';
 
 export function registerGlobalShortcuts(): void {
   const registered = globalShortcut.register(RECORDING_SHORTCUT, () => {
