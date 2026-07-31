@@ -939,20 +939,6 @@ const DeveloperSection: FC<{ state: PreferencesState }> = ({ state }) => {
           />
         </div>
 
-        <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
-          <div>
-            <p className='text-sm font-medium text-foreground'>Email id on automation runs</p>
-            <p className='text-xs text-muted-foreground mt-0.5'>
-              Show each run&apos;s trigger email id on the run history list for quick search.
-            </p>
-          </div>
-          <Switch
-            id='show-automation-run-email-id'
-            checked={state.debugSettings.showAutomationRunEmailId}
-            onCheckedChange={state.toggleAutomationRunEmailId}
-          />
-        </div>
-
         {!isMobile && (
           <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
             <div>

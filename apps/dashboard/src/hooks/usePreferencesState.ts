@@ -45,7 +45,6 @@ export function usePreferencesState(enabled: boolean) {
     settings: debugSettings,
     toggleSendIndicators,
     toggleEmailIdCopyButton,
-    toggleAutomationRunEmailId,
   } = useDebugSettings();
   const { enterSendsMessage, setEnterSendsMessage } = useEnterSendsMessage();
   const { showThreadTags, setShowThreadTags } = useShowThreadTags();
@@ -141,7 +140,6 @@ export function usePreferencesState(enabled: boolean) {
     debugSettings,
     toggleSendIndicators,
     toggleEmailIdCopyButton,
-    toggleAutomationRunEmailId,
     enterSendsMessage,
     showThreadTags,
     setShowThreadTags,

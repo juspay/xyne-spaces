@@ -13,7 +13,6 @@ import { Skeleton } from '../../../ui/Skeleton';
 import { Button } from '../../../ui/Button/Button';
 import { fetchAutomationRuns } from '../../../../api/automationsApi';
 import type { AutomationRun, AutomationRunStatus } from '../../Automation.types';
-import { useDebugSettings } from '../../../../hooks/useDebugSettings';
 import type { RunHistoryProps } from './RunHistory.types';
 
 function extractEmailId(run: AutomationRun): string | null {
@@ -220,8 +219,7 @@ export function RunHistory({
 }
 
 function RunRow({ run, onClick }: { run: AutomationRun; onClick: () => void }): React.ReactElement {
-  const { settings } = useDebugSettings();
-  const emailId = settings.showAutomationRunEmailId ? extractEmailId(run) : null;
+  const emailId = extractEmailId(run);
   const isComplete = run.status === 'COMPLETED' || run.status === 'FAILED';
   const duration =
     isComplete && run.completedAt
