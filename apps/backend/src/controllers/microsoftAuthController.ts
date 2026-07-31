@@ -19,6 +19,7 @@ import {
   organizationDomainService,
 } from '@/services/organizationDomainService';
 import { migrateLegacyIdentity } from '@/services/legacyIdentityMigrationHelper';
+import { signMicrosoftInvitationPendingAuthToken } from '@/utils/microsoftPendingAuth';
 
 export class MicrosoftAuthController {
   private oauthClient: AuthorizationCode | undefined;
@@ -414,6 +415,44 @@ export class MicrosoftAuthController {
 
         const refreshToken = token.refresh_token as string | undefined;
         const isProduction = process.env.NODE_ENV === 'production';
+
+        // Microsoft access + refresh tokens can exceed the browser's per-cookie
+        // size limit when nested in our pending-auth JWT. Invitation acceptance
+        // only needs identity, and loginWorkspace can establish the target
+        // workspace session from the refresh token, so use the compact payload
+        // already used by the Microsoft Electron invitation flow.
+        const cookieInvitationId = req.cookies?.pending_invitation_id as string | undefined;
+        const pendingInvitationId = cookieInvitationId || peekedState?.invitationId;
+        if (resolvedPlatform !== 'mobile' && pendingInvitationId) {
+          res.cookie(
+            'google_access_token',
+            signMicrosoftInvitationPendingAuthToken(
+              microsoftUserData,
+              refreshToken,
+              process.env.JWT_SECRET!,
+            ),
+            {
+              httpOnly: true,
+              secure: isProduction,
+              sameSite: 'lax' as const,
+              path: '/',
+              maxAge: 10 * 60 * 1000,
+            },
+          );
+
+          const frontendUrl = peekedState?.redirectTo ?? getFrontendUrl(req);
+          logger.info(
+            `[${requestId}] Pending invitation ${pendingInvitationId} found — redirecting to invite page for ${microsoftUserData.email}`,
+          );
+          res.clearCookie('pending_invitation_id', { path: '/' });
+          const inviteParams = new URLSearchParams({
+            loginComplete: 'true',
+            invitationId: pendingInvitationId,
+            loggedInEmail: microsoftUserData.email,
+          });
+          res.redirect(`${frontendUrl}/invite?${inviteParams.toString()}`);
+          return;
+        }
 
         if (resolvedPlatform !== 'mobile' && workspaces.length === 0) {
           const userExistsButRemoved = await this.userService.userExistsButNoActiveWorkspaces(
