@@ -119,7 +119,7 @@ export const EmailThreadHeader = ({
       <DetailRow label='date' values={[date.full]} />
       {settings.showEmailIdCopyButton && emailId && (
         <div className='flex gap-3 text-sm items-center'>
-          <span className='text-muted-foreground w-14 shrink-0 pt-0.5'>email id:</span>
+          <span className='text-muted-foreground w-14 shrink-0 pt-0.5'>debug id:</span>
           <span className='flex items-center gap-1.5 flex-1 min-w-0'>
             <span className='text-foreground font-mono text-xs truncate' title={emailId}>
               {emailId}
