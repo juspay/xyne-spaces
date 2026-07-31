@@ -39,6 +39,10 @@ import { TranscriptTab } from './TranscriptTab';
 import { ParticipantsModal } from '../CallHistoryScreen/ParticipantsModal';
 import { useAuth } from '../../hooks/useAuth';
 import { useAllVisibleChannels } from '../../hooks/useChannels';
+import {
+  getCallParticipantCount,
+  getPreviewParticipantUsers,
+} from '../CallHistoryScreen/callHistoryItem.utils';
 
 let _userClosedAIForCallId: string | null = null;
 
@@ -206,6 +210,46 @@ export default function CallDetailScreen(): ReactElement {
     };
   }, [call, isMobile, openAI]);
 
+  const title = call?.title ?? 'Untitled Call';
+  const heldOn = call?.startedAt ? format(new Date(call.startedAt), 'MM/dd/yyyy, h:mm a') : null;
+  const participantCount = call ? getCallParticipantCount(call) : 0;
+  const extraParticipantCount = Math.max(participantCount - 3, 0);
+  const previewParticipants = getPreviewParticipantUsers(
+    call?.participantPreviewUserIds,
+    allUsers,
+    user?.id,
+  );
+  const participantRows = useMemo(() => {
+    if (!call) return [];
+
+    return [
+      ...(call.participants ?? []).map(participant => {
+        const participantUser = participant.isExternal
+          ? null
+          : allUsers.find(candidate => candidate.id === participant.userId);
+
+        return {
+          id: participant.id ?? participant.userId,
+          userId: participant.userId,
+          isExternal: Boolean(participant.isExternal),
+          name: participant.isExternal
+            ? (participant.displayName ?? 'Guest')
+            : getUserDisplayName(participantUser),
+        };
+      }),
+      ...previewParticipants
+        .filter(
+          participant =>
+            !(call.participants ?? []).some(existing => existing.userId === participant.id),
+        )
+        .map(participant => ({
+          id: participant.id,
+          userId: participant.id,
+          isExternal: false,
+          name: getUserDisplayName(participant),
+        })),
+    ];
+  }, [allUsers, call, previewParticipants]);
   if (!call) {
     return (
       <div className='flex items-center justify-center h-full'>
@@ -215,10 +259,6 @@ export default function CallDetailScreen(): ReactElement {
       </div>
     );
   }
-
-  const title = call.title ?? 'Untitled Call';
-  const heldOn = call.startedAt ? format(new Date(call.startedAt), 'MM/dd/yyyy, h:mm a') : null;
-  const participants = call.participants ?? [];
   const callUpdatesChannelId = call.callUpdatesChannel ?? call.channelId;
 
   const handleGotoCallMessage = (): void => {
@@ -323,43 +363,43 @@ export default function CallDetailScreen(): ReactElement {
                 </div>
               )}
 
-              {participants.length > 0 && (
+              {participantRows.length > 0 && (
                 <div className='flex items-start gap-4'>
                   <div className='flex items-center gap-2 w-32 shrink-0 text-muted-foreground pt-0.5'>
                     <Users className='size-4' />
                     <span className='text-sm'>Participants</span>
                   </div>
                   <div className='flex items-center gap-3 min-w-0 overflow-hidden'>
-                    {participants.slice(0, 3).map((p, i) => {
-                      const user = p.isExternal ? null : allUsers.find(u => u.id === p.userId);
-                      const name = p.isExternal
-                        ? (p.displayName ?? 'Guest')
-                        : getUserDisplayName(user);
-                      const isLast = i === Math.min(participants.length, 3) - 1;
+                    {participantRows.slice(0, 3).map((participant, i) => {
+                      const isLast = i === Math.min(participantRows.length, 3) - 1;
                       return (
                         <div
-                          key={p.id}
+                          key={participant.id}
                           className={`flex items-center gap-1.5 ${isLast ? 'min-w-0' : 'shrink-0'}`}
                         >
-                          {!p.isExternal && p.userId && (
-                            <Avatar userId={p.userId} size='sm' showActiveStatus={false} />
+                          {!participant.isExternal && participant.userId && (
+                            <Avatar
+                              userId={participant.userId}
+                              size='sm'
+                              showActiveStatus={false}
+                            />
                           )}
                           <span
                             className={`text-sm text-foreground ${isLast ? 'truncate' : 'whitespace-nowrap'}`}
                           >
-                            {name}
+                            {participant.name}
                           </span>
                         </div>
                       );
                     })}
-                    {participants.length > 3 && (
+                    {extraParticipantCount > 0 && (
                       <button
                         onClick={() => setIsParticipantsModalOpen(true)}
                         data-track-category='CallDetail'
                         data-track-name='open-participants-modal'
                         className='text-sm text-primary shrink-0 whitespace-nowrap hover:underline cursor-pointer'
                       >
-                        +{participants.length - 3} more
+                        +{extraParticipantCount} more
                       </button>
                     )}
                   </div>
