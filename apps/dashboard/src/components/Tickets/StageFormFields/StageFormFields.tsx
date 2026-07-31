@@ -1,15 +1,9 @@
 import { useMemo, type Dispatch, type SetStateAction } from 'react';
+import { SelectMenuAlignment, SingleSelect } from '@juspay/blend-design-system';
 import { FormFieldType, isFieldActive, parseFieldOptionValues } from '@xyne/shared';
 import type { FormEntityValues, MessageAttachment } from '@xyne/shared';
 import { StageFormDocField } from '../StageFormModal/StageFormDocField';
 import { MultiSelect } from '../../ui/MultiSelect/MultiSelect';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '../../ui/Select/Select';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
 import type { ResolvedDisplayFormField } from '../../../utils/board/resolveDisplayFormFields';
@@ -190,27 +184,28 @@ export const StageFormFields = ({
               )}
 
               {field.fieldType === FormFieldType.SINGLE_SELECT && (
-                <Select
-                  value={fieldValue[0] ?? ''}
-                  onValueChange={value => updateFieldValue(field.id, [value])}
-                  disabled={disabled}
+                <div
+                  className='w-full'
+                  data-track-category='Tickets'
+                  data-track-name={`${trackNamePrefix}Select`}
+                  data-track-metadata={trackMetadata}
                 >
-                  <SelectTrigger
-                    className='w-full'
-                    data-track-category='Tickets'
-                    data-track-name={`${trackNamePrefix}Select`}
-                    data-track-metadata={trackMetadata}
-                  >
-                    <SelectValue placeholder='Select an option' />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {fieldEnumOptions.map(option => (
-                      <SelectItem key={option} value={option}>
-                        {option}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                  <SingleSelect
+                    fullWidth
+                    placeholder='Select an option'
+                    items={[
+                      {
+                        items: fieldEnumOptions.map(option => ({ label: option, value: option })),
+                      },
+                    ]}
+                    selected={fieldValue[0] ?? ''}
+                    onSelect={value => updateFieldValue(field.id, [value])}
+                    disabled={disabled}
+                    enableSearch
+                    searchPlaceholder='Search options...'
+                    alignment={SelectMenuAlignment.START}
+                  />
+                </div>
               )}
 
               {field.fieldType === FormFieldType.MULTI_SELECT && (
