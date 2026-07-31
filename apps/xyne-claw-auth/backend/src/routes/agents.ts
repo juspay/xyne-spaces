@@ -4,6 +4,7 @@ import crypto from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { agentRepository, agentShareRepository, agentRequestRepository, userRepository, userAgentConfigRepository, userProviderCredentialsRepository, agentProviderCredentialsRepository, sharedProviderCredentialRepository, skillRepository } from "../repositories/index.js";
 import { validateSubagentInput, ValidationError as SubagentValidationError } from "../lib/subagent-resolver.js";
+import { resolveOrgLitellmApiKey } from "../lib/agent-provider-config.js";
 import { getSubagentDefinition, buildCloneApprovalFlow } from "xyne-claw-shared";
 import { spacesAppFetch } from "../lib/spaces-api.js";
 import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
@@ -203,13 +204,18 @@ async function normalizeGatewayServicesInConfig(config: Record<string, unknown> 
 
 router.post("/generate-prompt", async (req: Request, res: Response) => {
   try {
+    // Inject the admin's ORG key so the prompt-gen call bills the org (admin
+    // authoring runs under the org's identity — no end-user task). A miss →
+    // undefined → claw 401s (no server-key fallback).
+    const orgId = getOrgId(req);
+    const orgLitellmApiKey = orgId ? await resolveOrgLitellmApiKey(orgId).catch(() => undefined) : undefined;
     const clawRes = await fetch(`${CONFIG.xyneClawUrl}/generate-prompt`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
       },
-      body: JSON.stringify(req.body),
+      body: JSON.stringify({ ...req.body, ...(orgLitellmApiKey ? { litellmApiKey: orgLitellmApiKey } : {}) }),
       signal: AbortSignal.timeout(35_000),
     });
 
@@ -227,13 +233,16 @@ router.post("/generate-prompt", async (req: Request, res: Response) => {
 
 router.post("/generate-output-format", async (req: Request, res: Response) => {
   try {
+    // Inject the admin's ORG LiteLLM key — same rationale as /generate-prompt above.
+    const orgId = getOrgId(req);
+    const orgLitellmApiKey = orgId ? await resolveOrgLitellmApiKey(orgId).catch(() => undefined) : undefined;
     const clawRes = await fetch(`${CONFIG.xyneClawUrl}/generate-output-format`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
       },
-      body: JSON.stringify(req.body),
+      body: JSON.stringify({ ...req.body, ...(orgLitellmApiKey ? { litellmApiKey: orgLitellmApiKey } : {}) }),
       signal: AbortSignal.timeout(60_000),
     });
 
@@ -292,13 +301,16 @@ router.post("/suggest-tools", async (req: Request, res: Response) => {
       })),
     };
 
+    // Inject the admin's ORG key — same rationale as /generate-prompt (admin
+    // authoring bills the org). A miss → undefined → claw 401s (no server-key fallback).
+    const orgLitellmApiKey = await resolveOrgLitellmApiKey(orgId).catch(() => undefined);
     const clawRes = await fetch(`${CONFIG.xyneClawUrl}/suggest-tools`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
       },
-      body: JSON.stringify({ intent, catalog }),
+      body: JSON.stringify({ intent, catalog, ...(orgLitellmApiKey ? { litellmApiKey: orgLitellmApiKey } : {}) }),
       signal: AbortSignal.timeout(50_000),
     });
 

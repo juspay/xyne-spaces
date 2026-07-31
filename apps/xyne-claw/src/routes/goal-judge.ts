@@ -54,6 +54,8 @@ router.post("/goal-judge", validateS2SKey, async (req: Request, res: Response): 
     maxTurns: body.maxTurns,
     ...(recentTurnsDigest ? { recentTurnsDigest } : {}),
     ...(attachmentsThisTurn.length > 0 ? { attachmentsThisTurn } : {}),
+    // per-user key from claw-auth; absent → fail-open inside the judge
+    ...(typeof body.litellmApiKey === "string" && body.litellmApiKey ? { litellmApiKey: body.litellmApiKey } : {}),
   });
 
   res.json({ success: true, ...decision });

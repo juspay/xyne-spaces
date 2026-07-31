@@ -1,10 +1,11 @@
-import { agentProviderCredentialsRepository, sharedProviderCredentialRepository, userProviderCredentialsRepository } from "../repositories/index.js";
+import { agentProviderCredentialsRepository, sharedProviderCredentialRepository, userProviderCredentialsRepository, orgProviderCredentialsRepository } from "../repositories/index.js";
 import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { extractCodexBearer } from "./codex-creds.js";
 import { extractClaudeBearer } from "./claude-creds.js";
 import { getValidClaudeBearer } from "./claude-oauth-refresh.js";
 import { getValidCodexBearer } from "./codex-oauth-refresh.js";
+import { resolveClawUserIdForSpacesIdentity } from "./users-jit.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("agent-provider-config");
@@ -170,29 +171,110 @@ export function buildProviderConfig(provider: string, row: CredRow): ProviderCon
   }
 }
 
-/**
- * Resolve the provider credentials + fallback order for a HEADLESS run (event
- * trigger, scheduled job, automation) that executes under the agent's app
- * identity — no human session, no personal creds, no `/upgrade` escalation.
+/** User's litellm key for an S2S judge/curator call: personal USER-managed, else
+ *  SYSTEM-provisioned, else undefined (caller omits; claw fails-open). Agent-level
+ *  creds are NOT considered here — the worker turn already prefers them.
  *
- * This is the agent-scoped subset of the human-chat resolver in webhook.ts
- * (~1465–1648): agent-level credentials only, agent's configured provider order,
- * and the same `providerAlwaysOn` policy switch. Without it, headless runs
- * silently drop to the platform default (spaces/LiteLLM) instead of the agent's
- * configured premium provider.
- *
- * Policy:
- *  - `providerAlwaysOn !== false` (default / legacy): the agent's provider wins
- *    — providerOrder → legacy `config.provider` → any provider with creds.
- *  - `providerAlwaysOn === false` (kimi-first): the agent's provider is
- *    escalation-only, and headless runs have no escalation path, so we return
- *    NO order ⇒ the run uses the platform default (the owner's deliberate
- *    cheap-by-default choice). Creds are still returned so a future escalation
- *    path could use them.
- */
+ *  The caller may pass a raw Spaces userId; provisioning stores the key under the
+ *  canonical claw userId (which differs when ensureUserExists email-linked the
+ *  Spaces id to a pre-existing claw row). Translate first so the lookup matches. */
+export async function resolveUserLitellmApiKey(userId: string): Promise<string | undefined> {
+  // Translate a raw Spaces id → canonical claw id (no-op when they're the same).
+  const canonicalId = (await resolveClawUserIdForSpacesIdentity(userId).catch(() => undefined)) ?? userId;
+  for (const managedBy of ["USER", "SYSTEM"] as const) {
+    const row = await userProviderCredentialsRepository
+      .findByUserAndProvider(canonicalId, "litellm", managedBy)
+      .catch(() => null);
+    if (row) {
+      const cfg = buildProviderConfig("litellm", row);
+      if (cfg?.apiKey) return cfg.apiKey;
+    }
+  }
+  return undefined;
+}
+
+/** Org's litellm key for an org-identity call (no user context). NOT a universal
+ *  fallback — a user's key is resolved instead where meaningful; a missing user key
+ *  does NOT fall through to the org key (would re-attribute spend). Miss → claw fails-open. */
+export async function resolveOrgLitellmApiKey(orgId: string): Promise<string | undefined> {
+  const row = await orgProviderCredentialsRepository
+    .findByOrgAndProvider(orgId, "litellm")
+    .catch(() => null);
+  if (!row) return undefined;
+  // OrgProviderCredential has no model/baseUrl/authType — fill null; buildProviderConfig applies litellm defaults.
+  return buildProviderConfig("litellm", {
+    encryptedKey: row.encryptedKey,
+    iv: row.iv,
+    authTag: row.authTag,
+    model: CONFIG.litellmModel,
+    baseUrl: null,
+    authType: null,
+    reasoningEffort: null,
+  })?.apiKey ?? undefined;
+}
+
+/** CredRow + `provider` key; user rows also carry `managedBy` (picks the tier).
+ *  Agent-level rows lack `managedBy` and are always tier 2. */
+export type TieredCredRow = CredRow & { provider: string; managedBy?: string | null };
+
+export type ProviderScope = "user" | "system" | "agent";
+
+/** Per-provider config map for a HUMAN chat dispatch, 3-tier precedence (single
+ *  source of truth — webhook.ts and agent-chat.ts both call this): personal
+ *  USER-managed > agent-level shared > system-managed/provisioned. `allCreds` =
+ *  user rows (USER+SYSTEM), `agentCreds` = agent-level (incl. shared). When
+ *  `userDeferredToAgent` is set (user picked "spaces") tier 1 is skipped so the
+ *  run uses the agent's/shared creds + the system key, not the user's personal keys. */
+export function buildProviderConfigsTiered(
+  allCreds: TieredCredRow[],
+  agentCreds: TieredCredRow[],
+  opts: { userDeferredToAgent?: boolean } = {},
+): {
+  providerConfigs: Record<string, ProviderConfig>;
+  providerScope: Record<string, ProviderScope>;
+} {
+  const providerConfigs: Record<string, ProviderConfig> = {};
+  const providerScope: Record<string, ProviderScope> = {};
+  // Tier 1 — personal USER-managed (highest). Skipped on defer-to-agent.
+  if (!opts.userDeferredToAgent) {
+    for (const row of allCreds) {
+      if (row.managedBy === "SYSTEM") continue; // system applied last (tier 3)
+      const cfg = buildProviderConfig(row.provider, row);
+      if (cfg) {
+        providerConfigs[row.provider] = cfg;
+        providerScope[row.provider] = "user";
+      }
+    }
+  }
+  // Tier 2 — agent-level (incl. shared bindings). Beats system-managed.
+  for (const row of agentCreds) {
+    if (providerConfigs[row.provider]) continue; // personal USER wins
+    const cfg = buildProviderConfig(row.provider, row);
+    if (cfg) {
+      providerConfigs[row.provider] = cfg;
+      providerScope[row.provider] = "agent";
+    }
+  }
+  // Tier 3 — system-managed / provisioned. Fills remaining gaps.
+  for (const row of allCreds) {
+    if (row.managedBy !== "SYSTEM") continue;
+    if (providerConfigs[row.provider]) continue; // personal USER or shared already set
+    const cfg = buildProviderConfig(row.provider, row);
+    if (cfg) {
+      providerConfigs[row.provider] = cfg;
+      providerScope[row.provider] = "system";
+    }
+  }
+  return { providerConfigs, providerScope };
+}
+
+/** Provider creds + fallback order for a HEADLESS run (agent's app identity, no
+ *  human session): agent-level creds + providerOrder + the `providerAlwaysOn` switch.
+ *  kimi-first (`=== false`) ⇒ empty order → platform default (no escalation path
+ *  headless; creds still returned); else the agent's provider wins. */
 export async function resolveAgentProviderConfigs(
   agent: { id: string; config?: unknown },
-  opts: { headlessBulk?: boolean } = {},
+  opts: { headlessBulk?: boolean; userId?: string; orgId?: string } = {},
 ): Promise<ResolvedAgentProviders> {
   const cfg = (agent.config as Record<string, unknown> | null) ?? null;
 
@@ -239,6 +321,44 @@ export async function resolveAgentProviderConfigs(
     if (built) providerConfigs[provider] = built;
   }
 
+  // Gap-fill the user's provisioned (SYSTEM) creds below agent-level (incl. shared)
+  // — a shared cred wins, but the provisioned key serves agents with no premium cred.
+  // Only when a userId is in scope (headless; a user may not be meaningful, e.g. callee_app).
+  if (opts?.userId) {
+    const userSystemCreds = await userProviderCredentialsRepository
+      .listByUser(opts.userId, { managedBy: "SYSTEM" })
+      .catch(() => []);
+    for (const row of userSystemCreds) {
+      if (providerConfigs[row.provider]) continue; // agent-level (incl. shared) wins
+      const built = buildProviderConfig(row.provider, row);
+      if (built) providerConfigs[row.provider] = built;
+    }
+  }
+
+  // Gap-fill the ORG's litellm key (below agent-level AND user SYSTEM). For A2A
+  // `callee_app` runs, which run under the callee's own app identity — NOT the
+  // delegating user — so the user's key is NOT folded (would mis-attribute their
+  // budget; confused-deputy). The org owns the agent's app identity, so it's the
+  // honest spend-owner. Litellm-only; miss → no slot → shared server key (main run
+  // path only). NOT a universal fallback.
+  if (opts?.orgId && !providerConfigs["litellm"]) {
+    const orgRow = await orgProviderCredentialsRepository
+      .findByOrgAndProvider(opts.orgId, "litellm")
+      .catch(() => null);
+    if (orgRow) {
+      const built = buildProviderConfig("litellm", {
+        encryptedKey: orgRow.encryptedKey,
+        iv: orgRow.iv,
+        authTag: orgRow.authTag,
+        model: CONFIG.litellmModel,
+        baseUrl: null,
+        authType: null,
+        reasoningEffort: null,
+      });
+      if (built) providerConfigs["litellm"] = built;
+    }
+  }
+
   // Refresh short-lived OAuth tokens before use (persist the rotated token back
   // to the agent cred row), same as the chat path. api_key / not-yet-expired
   // tokens pass through with no network call.
@@ -271,11 +391,18 @@ export async function resolveAgentProviderConfigs(
     }
   }
 
-  // kimi-first agents: no escalation path headless ⇒ defer to the platform default.
+  // kimi-first: no escalation path headless. If a provisioned litellm cred is
+  // present, run on IT as the primary (carries the user's budget; the platform
+  // default would use the pod's shared server key). Else empty order → shared server.
   const providerAlwaysOn = cfg?.["providerAlwaysOn"] !== false;
   if (!providerAlwaysOn) {
-    log.info(`Provider resolution (headless): agent=${agent.id} mode=kimi-first → platform default; creds=[${Object.keys(providerConfigs).join(",")}]`);
-    return { providerConfigs, providerOrder: [] };
+    const kimiParent = providerConfigs["litellm"] ? "litellm" : undefined;
+    log.info(`Provider resolution (headless): agent=${agent.id} mode=kimi-first parent=${kimiParent ?? "spaces"} creds=[${Object.keys(providerConfigs).join(",")}]`);
+    return {
+      providerConfigs,
+      providerOrder: kimiParent ? [kimiParent] : [],
+      ...(kimiParent ? { provider: kimiParent, parent: kimiParent } : {}),
+    };
   }
 
   // always-on: the agent's provider wins. Resolve the parent, then the order.
@@ -283,6 +410,9 @@ export async function resolveAgentProviderConfigs(
   if (agentProviderOrder.length > 0) parent = agentProviderOrder.find((p) => providerConfigs[p]);
   if (!parent && agentLevelProvider && providerConfigs[agentLevelProvider]) parent = agentLevelProvider;
   if (!parent) parent = Object.keys(providerConfigs)[0];
+  // Provisioned litellm fallback: if nothing higher resolved, default to the user's
+  // provisioned key so the run uses their budgeted identity, not the pod server key.
+  if (!parent && providerConfigs["litellm"]) parent = "litellm";
 
   const providerOrder = agentProviderOrder.length > 0 ? agentProviderOrder : parent ? [parent] : [];
   log.info(`Provider resolution (headless): agent=${agent.id} mode=always-on parent=${parent ?? "spaces"} creds=[${Object.keys(providerConfigs).join(",")}] order=[${providerOrder.join(",")}]`);

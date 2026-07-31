@@ -95,6 +95,25 @@ async function resolveSpacesAppToolsWorkspaceId(
   const userWorkspaceId = await getWorkspaceIdForUser(userId, "mcp-runner").catch(() => null);
   if (userWorkspaceId) return userWorkspaceId;
 
+  const connected = await prisma.connectedSurface.findMany({
+    where: { surfaceId: "spaces", orgId, surfaceTenantId: { not: "" } },
+    select: { surfaceTenantId: true },
+    take: 2,
+  });
+  if (connected.length === 1) {
+    const workspaceId = connected[0]!.surfaceTenantId;
+    log.info(
+      `[creds-loader] xyne-spaces-app-tools userId=${userId} agent=${agentSlug} -> resolved workspaceId=${workspaceId} from agent org connected_surfaces`,
+    );
+    return workspaceId;
+  }
+  if (connected.length > 1) {
+    log.warn(
+      `[creds-loader] xyne-spaces-app-tools userId=${userId} agent=${agentSlug} -> ambiguous connected_surfaces orgId=${orgId}`,
+    );
+    return null;
+  }
+
   const links = await prisma.surfaceTenantLink.findMany({
     where: { surfaceType: "spaces", orgId },
     select: { surfaceTenantId: true },
@@ -103,13 +122,16 @@ async function resolveSpacesAppToolsWorkspaceId(
   if (links.length === 1) {
     const workspaceId = links[0]!.surfaceTenantId;
     log.info(
-      `[creds-loader] xyne-spaces-app-tools userId=${userId} agent=${agentSlug} → resolved workspaceId=${workspaceId} from agent org surface_tenant_links`,
+      `[creds-loader] xyne-spaces-app-tools userId=${userId} agent=${agentSlug} -> resolved workspaceId=${workspaceId} from agent org surface_tenant_links`,
+    );
+    log.warn(
+      `[creds-loader] xyne-spaces-app-tools userId=${userId} agent=${agentSlug} used deprecated surface_tenant_links fallback orgId=${orgId}`,
     );
     return workspaceId;
   }
   if (links.length > 1) {
     log.warn(
-      `[creds-loader] xyne-spaces-app-tools userId=${userId} agent=${agentSlug} → ambiguous spaces surface_tenant_links orgId=${orgId}`,
+      `[creds-loader] xyne-spaces-app-tools userId=${userId} agent=${agentSlug} -> ambiguous spaces surface_tenant_links orgId=${orgId}`,
     );
   }
   return null;

@@ -14,7 +14,7 @@ const router = Router();
 const ROLES = new Set(["customer", "human-agent", "bot", "other"]);
 
 router.post("/eval-extract", validateS2SKey, async (req: Request, res: Response): Promise<void> => {
-  const body = req.body as { messages?: unknown; kind?: unknown; model?: unknown; copilot?: { token?: unknown; model?: unknown } } | undefined;
+  const body = req.body as { messages?: unknown; kind?: unknown; model?: unknown; copilot?: { token?: unknown; model?: unknown }; litellmApiKey?: unknown } | undefined;
   if (!body || !Array.isArray(body.messages)) {
     res.status(400).json({ success: false, error: "messages array is required" });
     return;
@@ -45,6 +45,7 @@ router.post("/eval-extract", validateS2SKey, async (req: Request, res: Response)
     ...(copilot ? { copilot } : {}),
     kind: body.kind === "email" ? "email" : "chat",
     model: typeof body.model === "string" ? body.model : undefined,
+    litellmApiKey: typeof body.litellmApiKey === "string" && body.litellmApiKey ? body.litellmApiKey : undefined,
   });
 
   res.json({ success: true, ...result });

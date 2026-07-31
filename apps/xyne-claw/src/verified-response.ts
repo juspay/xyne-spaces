@@ -50,6 +50,8 @@ export interface VerifiedResponseToolOpts {
   /** Per-agent delivery criteria (agentConfig.verifyResponseCriteria) — passed
    *  to the verifier on top of its default factual check. */
   criteria?: string | undefined;
+  /** Per-user LiteLLM key for this run. Absent → verifier fails open. */
+  litellmApiKey?: string | undefined;
 }
 
 const DESCRIPTION = [
@@ -131,7 +133,7 @@ export function buildVerifiedResponseTool(opts: VerifiedResponseToolOpts): ToolD
         }
       })();
 
-      const verdict = await verifyResponse({ task: opts.task, evidenceDigest, draft: message, criteria: opts.criteria });
+      const verdict = await verifyResponse({ task: opts.task, evidenceDigest, draft: message, criteria: opts.criteria, ...(opts.litellmApiKey ? { litellmApiKey: opts.litellmApiKey } : {}) });
 
       if (verdict.ok) {
         metric.count("response_verify_pass", { agentSlug: opts.agentSlug ?? "", rejections: String(rejections) });

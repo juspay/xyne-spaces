@@ -17,6 +17,7 @@ import { CONFIG } from "../config.js";
 import { prisma } from "../db.js";
 import { interact } from "../mcp/servers/xyne-spaces-client.js";
 import { resolveAuthForUser } from "./userMemoryFetcher.js";
+import { resolveUserLitellmApiKey } from "../lib/agent-provider-config.js";
 import { recordGateEvent } from "./digitalTwinPipelineEvents.js";
 import { createLogger, createTraceId } from "../logger.js";
 
@@ -303,6 +304,10 @@ export async function shouldTwinRespond(userId: string, args: RespondGateArgs): 
   if (!CONFIG.xyneClawS2sKey) return FAIL_CLOSED;
 
   try {
+    // The gate LLM runs on claw under this user's identity — fold their
+    // provisioned litellm key so it bills the user, not the shared server key.
+    // Best-effort: a miss means claw falls back to its server key.
+    const litellmApiKey = await resolveUserLitellmApiKey(userId).catch(() => undefined);
     // EVERY mention goes through the LLM gate — no deterministic short-circuits.
     // DM + thread-participation are still computed and fed to the LLM as strong
     // "respond" signals (the LLM leans respond for them) rather than hard rails.
@@ -336,6 +341,7 @@ export async function shouldTwinRespond(userId: string, args: RespondGateArgs): 
         isDirectMessage: args.channelType === "dm",
         isThreadParticipant: activeInThread,
         includeTrace: true,
+        ...(litellmApiKey ? { litellmApiKey } : {}),
       }),
       signal: AbortSignal.timeout(GATE_TIMEOUT_MS),
     });

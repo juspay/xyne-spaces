@@ -31,6 +31,8 @@ export interface EvalJudgeInput {
   prompt?: string | undefined;
   model?: string | undefined;
   copilot?: { token: string; model: string } | undefined;
+  /** Admin's LiteLLM key (user budget). Absent → fail-open to judge_unavailable. Ignored when `copilot` is set. */
+  litellmApiKey?: string | undefined;
 }
 
 /** Headers Copilot's API requires on direct calls (mirrors settings.ts /models). */
@@ -85,7 +87,8 @@ const SCORE_TOOL = {
 
 export async function judgeSemanticMatch(input: EvalJudgeInput): Promise<EvalJudgeResult> {
   const viaCopilot = !!input.copilot?.token;
-  if (!viaCopilot && !LITELLM.apiKey) {
+  const litellmApiKey = viaCopilot ? undefined : (input.litellmApiKey ?? LITELLM.apiKey); // fall back to env server key
+  if (!viaCopilot && !litellmApiKey) {
     return { score: null, reasoning: "judge_unavailable" };
   }
 
@@ -96,7 +99,7 @@ export async function judgeSemanticMatch(input: EvalJudgeInput): Promise<EvalJud
   const url = viaCopilot ? COPILOT_COMPLETIONS_URL : `${LITELLM.url}/v1/chat/completions`;
   const headers = viaCopilot
     ? copilotHeaders(input.copilot!.token)
-    : { "Content-Type": "application/json", Authorization: `Bearer ${LITELLM.apiKey}` };
+    : { "Content-Type": "application/json", Authorization: `Bearer ${litellmApiKey}` };
 
   const userContent = [
     ...(input.message ? [`User message:\n${input.message.slice(0, 4000)}`, ""] : []),
@@ -178,9 +181,10 @@ export async function judgeSemanticMatch(input: EvalJudgeInput): Promise<EvalJud
  * `/model/info` is unavailable. */
 let lastGoodModels: string[] | null = null;
 
-export async function listJudgeModels(): Promise<string[]> {
-  if (!LITELLM.apiKey) return [];
-  const headers = { Authorization: `Bearer ${LITELLM.apiKey}` };
+export async function listJudgeModels(litellmApiKey?: string): Promise<string[]> {
+  const apiKey = litellmApiKey ?? LITELLM.apiKey; // fall back to env server key
+  if (!apiKey) return [];
+  const headers = { Authorization: `Bearer ${apiKey}` };
   try {
     const res = await fetch(`${LITELLM.url}/model/info`, { headers, signal: AbortSignal.timeout(15_000) });
     if (res.ok) {

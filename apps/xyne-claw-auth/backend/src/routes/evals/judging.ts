@@ -16,9 +16,9 @@ const router = Router();
 
 // GET /evals/models — judge model picker options (proxied from claw's LiteLLM)
 // + what an empty model resolves to (shown as "Default (kimi-latest)" in the UI).
-router.get("/models", async (_req: Request, res: Response) => {
+router.get("/models", async (req: Request, res: Response) => {
   try {
-    const { models, defaultModel } = await listEvalModels();
+    const { models, defaultModel } = await listEvalModels(getRequesterId(req));
     res.json({ success: true, models, defaultModel });
   } catch (err) {
     log.error("[evals] listModels error:", err);
@@ -37,8 +37,8 @@ router.get("/gen-models", async (req: Request, res: Response) => {
   }
   try {
     const [creds, litellmInfo] = await Promise.all([
-      userProviderCredentialsRepository.listByUser(userId).catch(() => []),
-      listEvalModels().catch(() => ({ models: [] as string[], defaultModel: "" })),
+      userProviderCredentialsRepository.listByUser(userId, {}).catch(() => []),
+      listEvalModels(userId).catch(() => ({ models: [] as string[], defaultModel: "" })),
     ]);
     const providers = creds
       .filter((c) => c.encryptedKey) // configured = has a stored key

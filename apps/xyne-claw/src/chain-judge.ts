@@ -15,7 +15,10 @@ export async function judgeChainContinuation(
   taskTemplate?: string,
   userQuery?: string,
   judgeContext?: string,
+  /** Per-user LiteLLM key shipped from claw-auth. Absent → fetch 401s, catch fail-opens. */
+  litellmApiKey?: string,
 ): Promise<{ action: "continue" | "stop"; reason: string }> {
+  const apiKey = litellmApiKey ?? LITELLM.apiKey; // fall back to env server key when no per-user key
   try {
     const contextParts: string[] = [];
     if (userQuery) contextParts.push(`User's original request: "${userQuery}"`);
@@ -35,7 +38,7 @@ export async function judgeChainContinuation(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${LITELLM.apiKey}`,
+        Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
         model: LITELLM.model,

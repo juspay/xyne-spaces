@@ -258,8 +258,11 @@ export interface SpacesUserProfile {
   email: string;
   name: string;
   /// The user's current Spaces workspace (public.users.workspaceId). Used by
-  /// JIT to map the user to a claw org via SurfaceTenantLink. May be null.
+  /// JIT to map the user to a claw org via ConnectedSurface. May be null.
   workspaceId: string | null;
+  /// The upstream Spaces org for workspaceId (public.workspaces.orgId). Used
+  /// to validate connected_surfaces.surfaceOrgId before assigning a claw org.
+  spacesOrgId: string | null;
 }
 
 /**
@@ -282,9 +285,15 @@ export async function getSpacesUserById(
   const started = Date.now();
   try {
     const rows = await client.$queryRaw<Array<SpacesUserProfile>>`
-      SELECT id, email, name, "workspaceId"
-      FROM public.users
-      WHERE id = ${userId}
+      SELECT
+        u.id,
+        u.email,
+        u.name,
+        u."workspaceId",
+        w."orgId" AS "spacesOrgId"
+      FROM public.users u
+      LEFT JOIN public.workspaces w ON w.id = u."workspaceId"
+      WHERE u.id = ${userId}
       LIMIT 1
     `;
     const row = rows[0];
@@ -350,6 +359,53 @@ export async function getWorkspaceIdForUser(
     });
     if (!user?.orgId) return null;
 
+    const identities = await prisma.userSurfaceIdentity.findMany({
+      where: {
+        surfaceId: "spaces",
+        surfaceUserId: userId,
+        orgId: user.orgId,
+        status: "ACTIVE",
+        surfaceWorkspaceId: { not: "" },
+      },
+      select: { surfaceWorkspaceId: true },
+      orderBy: { updatedAt: "desc" },
+      take: 2,
+    });
+    if (identities.length === 1) {
+      const workspaceId = identities[0]!.surfaceWorkspaceId;
+      const elapsed = Date.now() - started;
+      log.info(
+        `[spaces-db] workspace-lookup userId=${userId} caller=${caller} result=hit-user-surface-identity workspaceId=${workspaceId} orgId=${user.orgId} ms=${elapsed}`,
+      );
+      return workspaceId;
+    }
+    if (identities.length > 1) {
+      log.warn(
+        `[spaces-db] workspace-lookup userId=${userId} caller=${caller} result=ambiguous-user-surface-identities orgId=${user.orgId}`,
+      );
+      return null;
+    }
+
+    const connected = await prisma.connectedSurface.findMany({
+      where: { surfaceId: "spaces", orgId: user.orgId, surfaceTenantId: { not: "" } },
+      select: { surfaceTenantId: true },
+      take: 2,
+    });
+    if (connected.length === 1) {
+      const workspaceId = connected[0]!.surfaceTenantId;
+      const elapsed = Date.now() - started;
+      log.info(
+        `[spaces-db] workspace-lookup userId=${userId} caller=${caller} result=hit-connected-surface workspaceId=${workspaceId} orgId=${user.orgId} ms=${elapsed}`,
+      );
+      return workspaceId;
+    }
+    if (connected.length > 1) {
+      log.warn(
+        `[spaces-db] workspace-lookup userId=${userId} caller=${caller} result=ambiguous-connected-surfaces orgId=${user.orgId}`,
+      );
+      return null;
+    }
+
     const links = await prisma.surfaceTenantLink.findMany({
       where: { surfaceType: "spaces", orgId: user.orgId },
       select: { surfaceTenantId: true },
@@ -359,7 +415,10 @@ export async function getWorkspaceIdForUser(
       const workspaceId = links[0]!.surfaceTenantId;
       const elapsed = Date.now() - started;
       log.info(
-        `[spaces-db] workspace-lookup userId=${userId} caller=${caller} result=hit-claw-link workspaceId=${workspaceId} orgId=${user.orgId} ms=${elapsed}`,
+        `[spaces-db] workspace-lookup userId=${userId} caller=${caller} result=hit-legacy-surface-tenant-link workspaceId=${workspaceId} orgId=${user.orgId} ms=${elapsed}`,
+      );
+      log.warn(
+        `[spaces-db] workspace-lookup userId=${userId} caller=${caller} used deprecated surface_tenant_links fallback orgId=${user.orgId}`,
       );
       return workspaceId;
     }

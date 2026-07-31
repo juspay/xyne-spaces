@@ -20,6 +20,7 @@ import {
   getFile,
   upsertFile,
 } from "./agentMemoryFiles.js";
+import { resolveUserLitellmApiKey } from "../lib/agent-provider-config.js";
 import {
   startSynthesisEvent,
   finishSynthesisEvent,
@@ -69,6 +70,8 @@ interface SynthReq {
   maxChars: number;
   currentContent?: string;
   preserveEdits?: boolean;
+  /** User's provisioned litellm key — claw bills the user, not the server key. */
+  litellmApiKey?: string;
 }
 
 async function synthesizeViaClaw(req: SynthReq): Promise<{ content: string | null; error?: string }> {
@@ -105,6 +108,10 @@ export async function synthesizeSoulFilesForUser(
   const eventId = await startSynthesisEvent(userId, trigger);
 
   const factsBySub = await fetchApprovedFactsBySubsystem(userId);
+  // The synthesis LLM runs on claw under this user's identity — fold their
+  // provisioned litellm key so it bills the user, not the shared server key.
+  // Best-effort: a miss means claw falls back to its server key.
+  const litellmApiKey = await resolveUserLitellmApiKey(userId).catch(() => undefined);
   const updated: string[] = [];
   const skipped: string[] = [];
   const fileResults: SynthFileResult[] = [];
@@ -125,6 +132,7 @@ export async function synthesizeSoulFilesForUser(
       maxChars: MAX_FILE_CHARS,
       ...(current?.content ? { currentContent: current.content } : {}),
       ...(userEdited ? { preserveEdits: true } : {}),
+      ...(litellmApiKey ? { litellmApiKey } : {}),
     });
     if (!content) {
       skipped.push(spec.name);

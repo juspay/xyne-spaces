@@ -17,6 +17,7 @@ import {
   isInternalFollowUpInvocation,
   parseLateFollowUpCallback,
 } from "../lib/follow-up-suggestions.js";
+import { userProviderCredentialsRepository } from "../repositories/index.js";
 import { consumeClawStream } from "../lib/consume-claw-stream.js";
 import { publishLiveEvent } from "../lib/live-conversation-bus.js";
 import { pushDelta, endDeltaCoalescer } from "../lib/live-delta-coalescer.js";
@@ -403,14 +404,15 @@ publicRouter.post("/", requireAuth, async (req: Request, res: Response) => {
     }
     const orgId = agentRow.orgId;
 
-    // Resolve the agent's provider credentials so this SSE run uses the agent's
-    // configured provider + model (e.g. a shared LiteLLM key) rather than the env
-    // platform default. run-stream is otherwise a pass-through: the Spaces
-    // backend sends provider="spaces" / no providerConfigs, which fell straight
-    // to claw's env LITELLM_MODEL. Agent-level resolution (the same shared
-    // resolver the headless + automation paths use). Body-supplied values win
-    // only when the agent has no configured creds.
-    const resolvedProviders = await resolveAgentProviderConfigs(agentRow).catch(() => null);
+    // Resolve provider creds: agent-level (incl. shared) first, then the user's
+    // provisioned creds as a gap-fill, litellm as fallback parent. Pass the canonical
+    // claw-auth userId (x-user-id from requireAuth), NOT the body userId (raw Spaces
+    // id, can differ when reuseExistingUser) — so the user's provisioned key folds in.
+    const canonicalUserId = getRequesterId(req) ?? (typeof userId === "string" ? userId : undefined);
+    const resolvedProviders = await resolveAgentProviderConfigs(
+      agentRow,
+      canonicalUserId ? { userId: canonicalUserId } : undefined,
+    ).catch(() => null);
     const resolvedProvider = resolvedProviders?.provider ?? (provider as string | undefined);
     const resolvedProviderConfigs =
       resolvedProviders && Object.keys(resolvedProviders.providerConfigs).length > 0
