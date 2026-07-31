@@ -20,7 +20,7 @@ const log = createLogger("failure-curator");
  * X; the underlying cause is Y; here is the fix Z."
  */
 
-import { fetchLiteLLMWithRetry } from "@xyne/litellm-client";
+import { fetchLiteLLMWithRetry } from "./litellm-retry.js";
 
 const LITELLM_URL = (process.env["LITELLM_URL"] ?? "https://grid.ai.example.com").replace(/\/$/, "");
 // Background job: prefer the low-priority automation key so curator bursts

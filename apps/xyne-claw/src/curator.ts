@@ -22,7 +22,7 @@
 
 import { bankIdForAgent, getMemoryProvider } from "xyne-claw-shared";
 import type { SessionTranscriptForCurator, SubsystemUpdate } from "xyne-claw-shared";
-import { fetchLiteLLMWithRetry } from "@xyne/litellm-client";
+import { fetchLiteLLMWithRetry } from "./litellm-retry.js";
 import { chunkTranscript } from "./claude-session-parse.js";
 
 import { createLogger } from "./logger.js";

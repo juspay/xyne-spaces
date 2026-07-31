@@ -20,7 +20,6 @@ packages:
   - packages/icons
   - packages/framework
   - packages/kata-sdk
-  - packages/litellm-client
   - packages/xyne-claw-shared
   - packages/xyne-claw-mcp
   - packages/xyne-claw-pi-plugin

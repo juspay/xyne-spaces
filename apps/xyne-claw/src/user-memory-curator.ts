@@ -30,7 +30,7 @@ import {
   type UserMemoryRecord,
   type UserMemorySubsystem,
 } from "xyne-claw-shared";
-import { fetchLiteLLMWithRetry } from "@xyne/litellm-client";
+import { fetchLiteLLMWithRetry } from "./litellm-retry.js";
 
 import { createLogger } from "./logger.js";
 const log = createLogger("user-memory-curator");
