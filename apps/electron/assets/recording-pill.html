@@ -20,15 +20,13 @@
       --ease-out: cubic-bezier(0.32, 0.72, 0, 1);
     }
 
-    @media (prefers-color-scheme: dark) {
-      :root {
-        --green: #30bf63;
-        --ink: #f2f2f3;
-        --card-bg: #2c2c2e;
-        --card-border: rgba(255, 255, 255, 0.12);
-        --row-hover: rgba(255, 255, 255, 0.08);
-        --row-active: rgba(255, 255, 255, 0.13);
-      }
+    :root[data-theme="dark"] {
+      --green: #30bf63;
+      --ink: #f2f2f3;
+      --card-bg: #2c2c2e;
+      --card-border: rgba(255, 255, 255, 0.12);
+      --row-hover: rgba(255, 255, 255, 0.08);
+      --row-active: rgba(255, 255, 255, 0.13);
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -328,6 +326,10 @@
       stopTimer();
     }
 
+    function applyTheme(theme) {
+      document.documentElement.dataset.theme = theme === 'dark' ? 'dark' : 'light';
+    }
+
     document.getElementById('btnOpen').addEventListener('click', () => {
       window.electronAPI?.recordingPill?.openApp();
     });
@@ -339,6 +341,7 @@
     if (window.electronAPI?.recordingPill) {
       window.electronAPI.recordingPill.onShow((startTime) => show(startTime));
       window.electronAPI.recordingPill.onHide(hide);
+      window.electronAPI.recordingPill.onThemeChanged(applyTheme);
     }
   </script>
 </body>

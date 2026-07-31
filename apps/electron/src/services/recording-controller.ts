@@ -93,7 +93,7 @@ export function focusMainWindow(pathname?: string): BrowserWindow | null {
   return mainWindow;
 }
 
-export function markExternalStartPending(): void {
+function markExternalStartPending(): void {
   clearExternalStartPending();
   externalStartExpiry = setTimeout(() => {
     externalStartExpiry = null;
@@ -105,18 +105,28 @@ export async function startRecordingFromOutside(trigger: RecordingTrigger): Prom
   if (active) return;
 
   let mainWindow = getMainWindow();
+  let createdMainWindow = false;
   if (!mainWindow || mainWindow.isDestroyed()) {
     rendererReady = false;
     try {
       await createMainWindow({ inactive: true });
       setWindowReferences();
+      createdMainWindow = true;
     } catch (error) {
       log.error(`[RecordingController] Failed to create window for ${trigger} start:`, error);
       return;
     }
   }
 
-  if (!rendererReady) await waitForRenderer();
+  mainWindow = getMainWindow();
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+
+  if (
+    !rendererReady &&
+    (createdMainWindow || mainWindow.webContents.isLoadingMainFrame())
+  ) {
+    await waitForRenderer();
+  }
 
   mainWindow = getMainWindow();
   if (!mainWindow || mainWindow.isDestroyed()) return;

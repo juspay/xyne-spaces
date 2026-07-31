@@ -19,6 +19,9 @@ let displayDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
 let savedPosition: { x: number; y: number } | null = null;
 let currentStartTime: number | null = null;
+let currentTheme: RecordingPillTheme = 'light';
+
+export type RecordingPillTheme = 'light' | 'dark';
 
 const GUTTER = 32;
 const CARD_EXPANDED_WIDTH = 96;
@@ -34,6 +37,12 @@ export function isPillSender(event: Electron.IpcMainEvent): boolean {
     event.sender === pillWindow.webContents &&
     event.senderFrame === pillWindow.webContents.mainFrame
   );
+}
+
+export function setRecordingPillTheme(theme: RecordingPillTheme): void {
+  currentTheme = theme;
+  if (!pillWindow || pillWindow.isDestroyed()) return;
+  pillWindow.webContents.send('recording-pill:theme-changed', currentTheme);
 }
 
 function readStoredPosition(): { x: number; y: number } | null {
@@ -239,6 +248,7 @@ export function showRecordingPill(recordingStartTime?: number): void {
       .catch((error) => log.warn('[RecordingPill] Failed to inject layout CSS', error));
     applyIgnoreMouseEvents(true);
     if (hideTimer) return;
+    pillWindow.webContents.send('recording-pill:theme-changed', currentTheme);
     pillWindow.webContents.send('recording-pill:show', currentStartTime ?? Date.now());
     pillWindow.showInactive();
   });

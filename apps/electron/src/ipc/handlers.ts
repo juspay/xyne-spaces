@@ -16,10 +16,9 @@ import {
 } from '../services/media-permission';
 import { setCustomScreenPickerEnabled, setCachedUser } from '../services/request-interceptor';
 import { hideMeetingPopup, hideMeetingPopupAfter } from '../services/meeting-popup-window';
-import { isPillSender } from '../services/recording-pill-window';
+import { isPillSender, setRecordingPillTheme } from '../services/recording-pill-window';
 import {
   focusMainWindow,
-  markExternalStartPending,
   markRendererReady,
   stopRecording,
   syncRecordingState,
@@ -547,7 +546,6 @@ export function setupIpcHandlers(): void {
       mainWindow.webContents.send('meeting:start-recording');
     }
     // Delay close so the popup can show the recording-started state for 3 seconds
-    markExternalStartPending();
     hideMeetingPopupAfter(3000);
   });
 
@@ -571,6 +569,17 @@ export function setupIpcHandlers(): void {
       syncRecordingState(!!state?.active, state?.startTime);
     },
   );
+
+  ipcMain.on('app:theme-changed', (event, theme: unknown) => {
+    if (!isMainWindowSender(event)) return;
+    if (theme !== 'light' && theme !== 'dark') return;
+    setRecordingPillTheme(theme);
+  });
+
+  ipcMain.on('recording:renderer-ready', (event) => {
+    if (!isMainWindowSender(event)) return;
+    markRendererReady();
+  });
 
   ipcMain.on('recording-pill:recording-stopped', (event) => {
     if (!isMainWindowSender(event)) return;
