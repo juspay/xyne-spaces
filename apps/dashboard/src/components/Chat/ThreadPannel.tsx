@@ -583,6 +583,8 @@ export const ThreadMessages = ({
       .filter(item => !!item.attachment);
   }, [messages, derivedTicketId, ticketAttachments]);
 
+  const fileAttachments = useMemo(() => files.map(f => f.attachment), [files]);
+
   // Build tabs array - exclude Details tab when ticketId is present
   const isFixTicket = ticket?.ticketType === BaseTicketType.Fix;
 
@@ -1244,6 +1246,7 @@ export const ThreadMessages = ({
                       createdBy={file.attachment.createdBy}
                       createdAt={file.attachment.createdAt}
                       attachment={file.attachment}
+                      siblings={fileAttachments}
                     />
                   ))}
                 </div>
