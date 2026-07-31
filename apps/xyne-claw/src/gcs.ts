@@ -26,12 +26,12 @@ import path from "node:path";
 import { pipeline } from "node:stream/promises";
 import { createWriteStream } from "node:fs";
 import { Storage } from "@google-cloud/storage";
+import { GCS } from "./config.js";
 import { createLogger } from "./logger.js";
 
 const log = createLogger("gcs");
 
-// Keep the default in sync with claw-auth config (CONFIG.gcsBucketName).
-const BUCKET = process.env["GCS_BUCKET_NAME"] ?? "xyne-claw-chat-attachments";
+const BUCKET = GCS.bucketName;
 // MUST equal SESSION_PREFIX in claw-auth/routes/sessions-archive.ts.
 const SESSION_PREFIX = "claw-sessions";
 // Per-run debugger snapshots live OUTSIDE the session prefix on purpose:
@@ -75,7 +75,11 @@ function getStorage(): Storage | null {
   if (!storage) {
     storage = new Storage({
       retryOptions: { autoRetry: true, maxRetries: 3 },
+      // apiEndpoint also flips the SDK into customEndpoint mode, which is what
+      // lets the emulator work without any credentials at all.
+      ...(GCS.fakeHost ? { apiEndpoint: GCS.fakeHost } : {}),
     });
+    if (GCS.fakeHost) log.info(`[gcs] using fake-gcs-server at ${GCS.fakeHost} bucket=${BUCKET}`);
   }
   return storage;
 }

@@ -54,6 +54,26 @@ export const AGENT = {
   thinkingLevel: process.env["XYNE_CLAW_THINKING"] ?? "medium",
 } as const;
 
+// Session archive / attachment storage.
+export const GCS = {
+  // Keep the default in sync with claw-auth config (CONFIG.gcsBucketName).
+  bucketName: process.env["GCS_BUCKET_NAME"] ?? "xyne-claw-chat-attachments",
+  // Local dev points at the fake-gcs-server from docker-compose.dev.yml instead
+  // of real GCS — same env var and dev-only gate as claw-auth's gcsService, so
+  // both services talk to the same emulator. Without it, ensureFreshSession
+  // can't verify the archive against real GCS (no/expired ADC) and rejects
+  // every run with SessionRestoreFailedError before the agent starts. Always
+  // empty in production, where the SDK uses ADC / Workload Identity.
+  fakeHost: normalizeFakeGcsHost(),
+} as const;
+
+function normalizeFakeGcsHost(): string {
+  if (process.env["NODE_ENV"] === "production") return "";
+  const raw = process.env["FAKE_GCS_HOST"]?.trim() ?? "";
+  if (!raw) return "";
+  return raw.startsWith("http") ? raw : `http://${raw}`;
+}
+
 // When set, claw publishes a one-shot progress event with a noVNC preview URL
 // the moment a sandbox session is acquired, so claw-auth can post a clickable
 // link into the Spaces channel where the user can watch (and drive) the

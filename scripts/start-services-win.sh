@@ -78,6 +78,7 @@ curl -s -X POST "http://localhost:4443/storage/v1/b?project=xyne-spaces" -H "Con
 curl -s -X POST "http://localhost:4443/storage/v1/b?project=xyne-spaces" -H "Content-Type: application/json" -d '{"name":"xyne-spaces-chat-documents"}' > /dev/null
 curl -s -X POST "http://localhost:4443/storage/v1/b?project=xyne-spaces" -H "Content-Type: application/json" -d '{"name":"transcription-dev-v2"}' > /dev/null
 curl -s -X POST "http://localhost:4443/storage/v1/b?project=xyne-spaces" -H "Content-Type: application/json" -d '{"name":"xyne-spaces-canvas-documents"}' > /dev/null
+curl -s -X POST "http://localhost:4443/storage/v1/b?project=xyne-spaces" -H "Content-Type: application/json" -d '{"name":"xyne-claw-chat-attachments"}' > /dev/null
 echo -e "${GREEN}✓ Buckets created.${NC}"
 
 # --- STEP 6: Database Setup ---
