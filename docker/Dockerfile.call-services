@@ -1,0 +1,89 @@
+# syntax=docker/dockerfile:1
+# =============================================================================
+# call-services — Combined transcription-agent + livekit-egress container.
+#
+# When ENABLE_TRANSCRIPTION=1: runs the Python transcription agent.
+# When ENABLE_EGRESS=1: runs the LiveKit egress service.
+# When both are set: runs both via supervisord.
+#
+# Build:
+#   docker build -f docker/Dockerfile.call-services -t xyne-call-services .
+# =============================================================================
+
+# ---- Multi-stage: extract egress binary from official image -----------------
+FROM livekit/egress:latest AS egress-src
+# The egress binary links against gstreamer libs that are already installed
+# in the transcription-agent base image. We just need the binary.
+RUN cp /usr/bin/egress /tmp/egress
+
+# ---- Main image: transcription-agent + egress -------------------------------
+FROM mirror.gcr.io/library/python:3.11-slim
+
+WORKDIR /app
+
+ARG DIARIZATION_ENABLED=false
+
+ENV HOME=/app \
+    HF_HOME=/app/.cache/huggingface \
+    HF_HUB_CACHE=/app/.cache/huggingface \
+    TRANSFORMERS_CACHE=/app/.cache/huggingface \
+    TORCH_HOME=/app/.cache/torch \
+    XDG_CACHE_HOME=/app/.cache \
+    XDG_CONFIG_HOME=/app/.config \
+    MPLCONFIGDIR=/app/.config/matplotlib \
+    DIARIZATION_ENABLED=${DIARIZATION_ENABLED}
+
+# Install system dependencies: transcription needs (gcc, gstreamer),
+# egress needs (supervisor, ffmpeg). Both share gstreamer libs.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    curl \
+    supervisor \
+    ffmpeg \
+    libglib2.0-0 \
+    libgstreamer1.0-0 \
+    gstreamer1.0-plugins-base \
+    gstreamer1.0-plugins-good \
+    gstreamer1.0-plugins-bad \
+    gstreamer1.0-plugins-ugly \
+    gstreamer1.0-libav \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN mkdir -p /app/transcriptions /app/.cache/huggingface /app/.cache/torch /app/.config/matplotlib \
+    && chmod -R 777 /app/transcriptions /app/.cache /app/.config
+
+# Install transcription Python dependencies
+COPY backend/python-agent/requirements.txt .
+COPY backend/python-agent/requirements-diarization.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+RUN case "$DIARIZATION_ENABLED" in \
+        true|True|TRUE|1|yes|Yes|YES|on|On|ON) \
+            echo "Installing diarization dependencies"; \
+            pip install --no-cache-dir -r requirements-diarization.txt; \
+            ;; \
+        *) \
+            echo "Skipping diarization dependencies because DIARIZATION_ENABLED=$DIARIZATION_ENABLED"; \
+            ;; \
+    esac
+
+# Copy transcription application code
+COPY backend/python-agent/ .
+
+# Pre-download model files
+RUN python download_models.py
+
+# Copy egress binary
+COPY --from=egress-src /tmp/egress /usr/local/bin/egress
+RUN chmod +x /usr/local/bin/egress
+
+# Copy egress config (mounted at runtime, but provide a default path)
+# The egress.yaml is volume-mounted in docker-compose
+
+# Copy supervisord config + entrypoint + program configs
+COPY docker/dev-infra/call-services/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENV CONTAINER_TYPE=call-services
+
+ENTRYPOINT ["/entrypoint.sh"]
