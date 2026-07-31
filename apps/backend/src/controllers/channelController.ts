@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
 import {
   buildAppDeskSourceName,
   buildSlackDeskSourceName,
@@ -839,7 +840,7 @@ export class ChannelController {
           }
           const workspaceId = req.user!.workspaceId!;
           const sharedSource = await db.externalSource.findFirst({
-            where: { workspaceId, sourceType: { in: ['google', 'microsoft'] }, isActive: true },
+            where: { workspaceId, ...WORKSPACE_LEVEL, sourceType: { in: ['google', 'microsoft'] }, isActive: true },
             select: { displayName: true, isActive: true },
           });
           if (!sharedSource) {
@@ -875,15 +876,20 @@ export class ChannelController {
           return;
         }
         const slackWorkspaceSource = await db.externalSource.findFirst({
-          where: { workspaceId: req.user!.workspaceId!, sourceType: 'slack', isActive: true },
+          where: { workspaceId: req.user!.workspaceId!, ...WORKSPACE_LEVEL, sourceType: 'slack', isActive: true },
         });
         if (!slackWorkspaceSource) {
           res.status(503).json({ error: 'Slack is not connected for this workspace. Please connect Slack first.' });
           return;
         }
         const sourceName = buildSlackDeskSourceName(slackChannelId);
-        const existingSource = await db.externalSource.findUnique({
-          where: { name: sourceName },
+        // Scoped to the caller's workspace: `sourceName` is derived from the
+        // caller-supplied slackChannelId, so an unscoped lookup would let one
+        // workspace find — and the reactivate path below repoint — another
+        // workspace's desk source. A row owned elsewhere is simply not found, and
+        // the create falls through to a truthful `name` unique violation.
+        const existingSource = await db.externalSource.findFirst({
+          where: { name: sourceName, workspaceId: req.user!.workspaceId! },
           select: { id: true, isActive: true },
         });
         if (existingSource?.isActive) {
@@ -1151,7 +1157,7 @@ export class ChannelController {
           const sourceName = buildSlackDeskSourceName(slackChannelId);
           // Read bot token from workspace-level Slack source
           const slackWorkspaceSource = await db.externalSource.findFirst({
-            where: { workspaceId: req.user!.workspaceId!, sourceType: 'slack', isActive: true },
+            where: { workspaceId: req.user!.workspaceId!, ...WORKSPACE_LEVEL, sourceType: 'slack', isActive: true },
           });
           if (!slackWorkspaceSource) {
             await db.channel.delete({ where: { id: channel.id } }).catch(() => {});
@@ -1164,9 +1170,10 @@ export class ChannelController {
             botOauthToken: slackCreds.botOauthToken,
           }));
 
-          // Reactivate existing or create new ExternalSource
-          const existingSource = await db.externalSource.findUnique({
-            where: { name: sourceName },
+          // Reactivate existing or create new ExternalSource. Workspace-scoped for
+          // the same reason as the pre-check above.
+          const existingSource = await db.externalSource.findFirst({
+            where: { name: sourceName, workspaceId: req.user!.workspaceId! },
             select: { id: true },
           });
 

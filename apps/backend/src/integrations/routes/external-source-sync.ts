@@ -4,6 +4,7 @@
  */
 
 import express, { Router, Request, Response } from 'express';
+import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
 import { authenticate } from '../core/authenticate';
 import { adapterResolver } from '../middleware/adapterResolver';
 import { externalSourceCore } from '../core/core';
@@ -172,7 +173,7 @@ router.post(
           select: { deskType: true, dlEmail: true, workspaceId: true },
         });
         if (pref?.deskType === DeskType.DL && pref.workspaceId && pref.dlEmail) {
-          source = await db.externalSource.findFirst({ where: { workspaceId: pref.workspaceId, sourceType: { in: ['google', 'microsoft'] }, isActive: true } });
+          source = await db.externalSource.findFirst({ where: { workspaceId: pref.workspaceId, ...WORKSPACE_LEVEL, sourceType: { in: ['google', 'microsoft'] }, isActive: true } });
           if (source?.isActive) {
             targetChannelId = channelId;
             dlEmail = pref.dlEmail;

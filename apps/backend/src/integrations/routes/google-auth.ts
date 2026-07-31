@@ -3,6 +3,7 @@
  */
 
 import express, { Request, Response } from 'express';
+import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
 import { google } from 'googleapis';
 import { logger } from '@/utils/logger';
 import { GoogleService } from '@/services/googleService';
@@ -203,7 +204,7 @@ async function createGoogleWorkspaceConnectAuthUrl(
   }
 
   const existing = await db.externalSource.findFirst({
-    where: { workspaceId, sourceType: ExternalSourcePlatform.GOOGLE },
+    where: { workspaceId, ...WORKSPACE_LEVEL, sourceType: ExternalSourcePlatform.GOOGLE },
   });
   if (existing?.isActive) {
     throw new GoogleAuthRouteError('Workspace already has a shared desk email configured', 409);
@@ -614,7 +615,7 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
 
       // Pre-checks before any network calls — avoids orphaning a Gmail watch /
       // Pub/Sub subscription if a write would fail anyway.
-      const existingForWorkspace = await db.externalSource.findFirst({ where: { workspaceId, sourceType: ExternalSourcePlatform.GOOGLE } });
+      const existingForWorkspace = await db.externalSource.findFirst({ where: { workspaceId, ...WORKSPACE_LEVEL, sourceType: ExternalSourcePlatform.GOOGLE } });
       if (existingForWorkspace?.isActive) {
         redirectError(res, frontendUrl, 'workspace_mailbox_already_exists', stateData.platform, workspaceId);
         return;

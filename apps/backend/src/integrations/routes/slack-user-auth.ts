@@ -11,6 +11,7 @@
  */
 
 import express, { Request, Response } from 'express';
+import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
 import crypto from 'crypto';
 import { authV2Middleware } from '@/middleware/authV2Middleware';
 import { db } from '@/database/client';
@@ -47,7 +48,7 @@ router.get(
 
       // Look up workspace-level Slack ExternalSource for clientId/clientSecret
       const slackSource = await db.externalSource.findFirst({
-        where: { workspaceId, sourceType: 'slack', isActive: true },
+        where: { workspaceId, ...WORKSPACE_LEVEL, sourceType: 'slack', isActive: true },
       });
       if (!slackSource) {
         res.status(503).json({ error: 'Slack is not connected for this workspace' });
@@ -130,7 +131,7 @@ router.get('/callback', async (req: Request, res: Response): Promise<void> => {
 
     // Look up workspace Slack source for clientId/clientSecret
     const slackSource = await db.externalSource.findFirst({
-      where: { workspaceId: stateData.workspaceId, sourceType: 'slack', isActive: true },
+      where: { workspaceId: stateData.workspaceId, ...WORKSPACE_LEVEL, sourceType: 'slack', isActive: true },
     });
     if (!slackSource) {
       res.redirect(`${frontendUrl}/${stateData.workspaceId}/support?slackUserError=slack_not_connected`);

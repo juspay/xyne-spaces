@@ -4,6 +4,7 @@
  */
 
 import { DatabaseClient } from '../client';
+import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
 import { encrypt, decrypt } from '@/services/encryptionService';
 import type { ExternalSource } from '@prisma/client';
 
@@ -87,18 +88,29 @@ export class ExternalSourceRepository {
     isActive?: boolean;
     lastSyncCursor?: string | null;
   }) {
-    // workspaceId is a required tenant key. Prefer the explicit value; otherwise
-    // denormalize from the parent channel (all current callers pass channelId).
+    // workspaceId is a required tenant key — every row must carry one. Prefer the
+    // explicit value, then denormalize from whichever parent the caller supplied:
+    // the channel for channel-bound sources, or the owner for user-scoped ones
+    // (calendar watches, which have no channel).
     let workspaceId = data.workspaceId;
-    if (!workspaceId) {
-      if (!data.channelId) {
-        throw new Error('externalSource create requires a workspaceId or a channelId to derive it from');
-      }
+    if (!workspaceId && data.channelId) {
       const channel = await this.db.channel.findUniqueOrThrow({
         where: { id: data.channelId },
         select: { workspaceId: true },
       });
       workspaceId = channel.workspaceId;
+    }
+    if (!workspaceId && data.ownerUserId) {
+      const owner = await this.db.user.findUniqueOrThrow({
+        where: { id: data.ownerUserId },
+        select: { workspaceId: true },
+      });
+      workspaceId = owner.workspaceId;
+    }
+    if (!workspaceId) {
+      throw new Error(
+        'externalSource create requires a workspaceId, or a channelId/ownerUserId to derive it from',
+      );
     }
 
     return await this.db.externalSource.create({
@@ -175,7 +187,8 @@ export class ExternalSourceRepository {
    */
   async findByChannelId(channelId: string) {
     return await this.db.externalSource.findFirst({
-      where: { channelId }
+      where: { channelId },
+      orderBy: [{ isActive: 'desc' }, { createdAt: 'desc' }],
     });
   }
 
@@ -193,7 +206,7 @@ export class ExternalSourceRepository {
    */
   async findEmailSourceByWorkspaceId(workspaceId: string) {
     return await this.db.externalSource.findFirst({
-      where: { workspaceId, sourceType: { in: ['google', 'microsoft'] }, isActive: true },
+      where: { workspaceId, ...WORKSPACE_LEVEL, sourceType: { in: ['google', 'microsoft'] }, isActive: true },
       orderBy: { createdAt: 'desc' },
     });
   }

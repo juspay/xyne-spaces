@@ -121,8 +121,9 @@ async function validateOzonetelConfig(
 export const ozonetelConfigService = {
   async getConfig(workspaceId: string): Promise<OzonetelConfig | null> {
     const db = DatabaseClient.getInstance();
-    const source = await db.externalSource.findUnique({
-      where: { workspaceId_sourceType: { workspaceId, sourceType: SOURCE_TYPE } },
+    const source = await db.externalSource.findFirst({
+      where: { workspaceId, sourceType: SOURCE_TYPE },
+      orderBy: [{ isActive: 'desc' }, { createdAt: 'desc' }],
     });
     if (!source || !source.isActive) return null;
     const config = JSON.parse(decrypt(source.credentials)) as OzonetelConfig;
@@ -158,18 +159,29 @@ export const ozonetelConfigService = {
     };
     const credentials = encrypt(JSON.stringify(full));
     const name = buildSourceName(workspaceId, full.webhookSecret);
-    await DatabaseClient.getInstance().externalSource.upsert({
-      where: { workspaceId_sourceType: { workspaceId, sourceType: SOURCE_TYPE } },
-      create: {
-        name,
-        sourceType: SOURCE_TYPE,
-        displayName: 'Ozonetel',
-        workspaceId,
-        credentials,
-        isActive: true,
-      },
-      update: { credentials, isActive: true },
+    const db = DatabaseClient.getInstance();
+    const existing = await db.externalSource.findFirst({
+      where: { workspaceId, sourceType: SOURCE_TYPE },
+      orderBy: [{ isActive: 'desc' }, { createdAt: 'desc' }],
+      select: { id: true },
     });
+    if (existing) {
+      await db.externalSource.update({
+        where: { id: existing.id },
+        data: { name, credentials, isActive: true },
+      });
+    } else {
+      await db.externalSource.create({
+        data: {
+          name,
+          sourceType: SOURCE_TYPE,
+          displayName: 'Ozonetel',
+          workspaceId,
+          credentials,
+          isActive: true,
+        },
+      });
+    }
     return full;
   },
 
