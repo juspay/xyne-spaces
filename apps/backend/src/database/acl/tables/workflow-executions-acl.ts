@@ -1,5 +1,6 @@
 import { Prisma, PrismaClient } from '@prisma/client'
 import { BaseQueryACL, ACLContext } from '../base-acl'
+import { getAccessibleWorkflowIds, isGuestContext } from './channel-access-helper'
 
 export class WorkflowExecutionsACL extends BaseQueryACL<
   Prisma.WorkflowExecutionWhereInput,
@@ -10,6 +11,15 @@ export class WorkflowExecutionsACL extends BaseQueryACL<
   }
 
   async getWhereClause(): Promise<Prisma.WorkflowExecutionWhereInput> {
+    const ctx = this.ctx
+    if (isGuestContext(ctx)) {
+      const workflowIds = await getAccessibleWorkflowIds(this.prisma, this.ctx.userId, this.ctx)
+
+      return {
+        workflowId: { in: workflowIds },
+      }
+    }
+
     const workspaceId = this.ctx.workspaceId;
 
     // Scope executions by their parent workflow's workspace using the direct,

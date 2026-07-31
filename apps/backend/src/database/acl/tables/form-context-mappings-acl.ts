@@ -1,5 +1,6 @@
 import { Prisma, PrismaClient } from '@prisma/client'
 import { BaseQueryACL, ACLContext } from '../base-acl'
+import { denyGuestWhere, isGuestContext } from './channel-access-helper'
 
 export class FormContextMappingsACL extends BaseQueryACL<
   Prisma.FormContextMappingWhereInput,
@@ -10,6 +11,11 @@ export class FormContextMappingsACL extends BaseQueryACL<
   }
 
   async getWhereClause(): Promise<Prisma.FormContextMappingWhereInput> {
+    const ctx = this.ctx
+    if (isGuestContext(ctx)) {
+      return denyGuestWhere('id')
+    }
+
     // Simplified: formId → form.workspaceId (direct workspace check)
     const workspaceFormIds = (await this.prisma.form.findMany({
       where: { workspaceId: this.ctx.workspaceId },

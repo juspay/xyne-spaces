@@ -1,5 +1,6 @@
 import { Prisma, PrismaClient, AccessType } from '@prisma/client'
 import { BaseQueryACL, ACLContext } from '../base-acl'
+import { denyGuestWhere, isGuestContext } from './channel-access-helper'
 
 export class UserRoleMappingsACL extends BaseQueryACL<
   Prisma.UserRoleMappingWhereInput,
@@ -10,6 +11,11 @@ export class UserRoleMappingsACL extends BaseQueryACL<
   }
 
   async getWhereClause(): Promise<Prisma.UserRoleMappingWhereInput> {
+    const ctx = this.ctx
+    if (isGuestContext(ctx)) {
+      return denyGuestWhere('id')
+    }
+
     return {
       role: {
         workspaceId: this.ctx.workspaceId,

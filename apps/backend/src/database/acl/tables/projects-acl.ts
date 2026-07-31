@@ -1,6 +1,7 @@
 import { Prisma, PrismaClient } from '@prisma/client'
 import { BaseQueryACL, ACLContext } from '../base-acl'
 import { hasProjectAdminAccess } from '../admin-access'
+import { getGuestAccessibleProjectIds, isGuestContext } from './channel-access-helper'
 
 export class ProjectsACL extends BaseQueryACL<
   Prisma.ProjectWhereInput,
@@ -11,6 +12,19 @@ export class ProjectsACL extends BaseQueryACL<
   }
 
   async getWhereClause(): Promise<Prisma.ProjectWhereInput> {
+    if (isGuestContext(this.ctx)) {
+      const projectIds = await getGuestAccessibleProjectIds(
+        this.prisma,
+        this.ctx.workspaceId ?? '',
+        this.ctx.userId
+      )
+
+      return {
+        workspaceId: this.ctx.workspaceId ?? '',
+        id: { in: projectIds },
+      }
+    }
+
     return { workspaceId: this.ctx.workspaceId }
   }
 

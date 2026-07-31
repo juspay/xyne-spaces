@@ -1,5 +1,6 @@
 import { Prisma, PrismaClient } from '@prisma/client'
 import { BaseQueryACL, ACLContext } from '../base-acl'
+import { getAccessibleChannelIds, isGuestContext } from './channel-access-helper'
 
 export class ChannelParticipantsACL extends BaseQueryACL<
   Prisma.ChannelParticipantWhereInput,
@@ -10,6 +11,23 @@ export class ChannelParticipantsACL extends BaseQueryACL<
   }
 
   async getWhereClause(): Promise<Prisma.ChannelParticipantWhereInput> {
+    const ctx = this.ctx
+    if (isGuestContext(ctx)) {
+      const channelIds = await getAccessibleChannelIds(this.prisma, this.ctx.userId, this.ctx)
+
+      return {
+        AND: [
+          {
+            OR: [
+              { userId: this.ctx.userId },
+              { channelId: { in: channelIds } },
+            ],
+          },
+          { channel: { workspaceId: this.ctx.workspaceId ?? '' } },
+        ],
+      }
+    }
+
     return {
       AND: [
         {

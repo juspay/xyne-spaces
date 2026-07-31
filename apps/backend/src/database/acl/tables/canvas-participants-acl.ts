@@ -1,5 +1,6 @@
 import { CanvasRole, CanvasVisibility, Prisma, PrismaClient } from '@prisma/client'
 import { BaseQueryACL, ACLContext } from '../base-acl'
+import { getGuestAccessibleCanvasIds, isGuestContext } from './channel-access-helper'
 
 export class CanvasParticipantsACL extends BaseQueryACL<
   Prisma.CanvasParticipantWhereInput,
@@ -10,6 +11,22 @@ export class CanvasParticipantsACL extends BaseQueryACL<
   }
 
   async getWhereClause(): Promise<Prisma.CanvasParticipantWhereInput | null> {
+    const ctx = this.ctx
+    if (isGuestContext(ctx)) {
+      const canvasIds = await getGuestAccessibleCanvasIds(
+        this.prisma,
+        this.ctx.workspaceId ?? '',
+        this.ctx.userId
+      )
+
+      return {
+        OR: [
+          { userId: this.ctx.userId },
+          { canvasId: { in: canvasIds } },
+        ],
+      }
+    }
+
     const userGroupMappings = await this.prisma.userGroupMapping.findMany({
       where: { userId: this.ctx.userId },
       select: { userGroupId: true },

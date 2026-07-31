@@ -1,5 +1,6 @@
 import { Prisma, PrismaClient } from '@prisma/client'
 import { BaseQueryACL, ACLContext } from '../base-acl'
+import { getGuestAccessibleCanvasIds, isGuestContext } from './channel-access-helper'
 
 export class CanvasesACL extends BaseQueryACL<
   Prisma.CanvasWhereInput,
@@ -10,6 +11,18 @@ export class CanvasesACL extends BaseQueryACL<
   }
 
   async getWhereClause(): Promise<Prisma.CanvasWhereInput> {
+    if (isGuestContext(this.ctx)) {
+      const canvasIds = await getGuestAccessibleCanvasIds(
+        this.prisma,
+        this.ctx.workspaceId ?? '',
+        this.ctx.userId
+      )
+
+      return {
+        id: { in: canvasIds },
+      }
+    }
+
     // Workspace scope only. NOTE: this does NOT membership-gate private canvases
     // within the workspace — any workspace member can read them. Channel/participant
     // scoping is deferred alongside the ticket read-family decision.

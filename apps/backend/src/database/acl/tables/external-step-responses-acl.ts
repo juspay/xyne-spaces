@@ -1,5 +1,6 @@
 import { Prisma, PrismaClient } from '@prisma/client'
 import { BaseQueryACL, ACLContext } from '../base-acl'
+import { getAccessibleTicketIds, isGuestContext } from './channel-access-helper'
 
 export class ExternalStepResponsesACL extends BaseQueryACL<Prisma.ExternalStepResponseWhereInput> {
   constructor(ctx: ACLContext, prisma: PrismaClient) {
@@ -7,6 +8,19 @@ export class ExternalStepResponsesACL extends BaseQueryACL<Prisma.ExternalStepRe
   }
 
   async getWhereClause(): Promise<Prisma.ExternalStepResponseWhereInput> {
+    const ctx = this.ctx
+    if (isGuestContext(ctx)) {
+      const ticketIds = await getAccessibleTicketIds(this.prisma, this.ctx.userId, this.ctx)
+
+      return {
+        workflowExecution: {
+          workflow: {
+            ticketId: { in: ticketIds },
+          },
+        },
+      }
+    }
+
     return {
       workflowExecution: {
         workflow: {

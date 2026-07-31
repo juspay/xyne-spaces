@@ -1,5 +1,6 @@
 import { Prisma, PrismaClient } from '@prisma/client'
 import { BaseQueryACL, ACLContext } from '../base-acl'
+import { getAccessibleTicketIds, isGuestContext } from './channel-access-helper'
 
 const AUTOMATION_WORKFLOW_TYPE = 'Automations'
 
@@ -12,6 +13,15 @@ export class WorkflowsACL extends BaseQueryACL<
   }
 
   async getWhereClause(): Promise<Prisma.WorkflowWhereInput> {
+    const ctx = this.ctx
+    if (isGuestContext(ctx)) {
+      const ticketIds = await getAccessibleTicketIds(this.prisma, this.ctx.userId, this.ctx)
+
+      return {
+        ticketId: { in: ticketIds },
+      }
+    }
+
     // Scope by the direct, indexed Workflow.workspaceId column so both the
     // ticket-linked and automation (ticketId=null) rows stay workspace-scoped.
     return { workspaceId: this.ctx.workspaceId }

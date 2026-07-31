@@ -1,5 +1,6 @@
 import { Prisma, PrismaClient } from '@prisma/client'
 import { BaseQueryACL, ACLContext } from '../base-acl'
+import { getAccessibleTicketIds, isGuestContext } from './channel-access-helper'
 
 export class TicketsACL extends BaseQueryACL<
   Prisma.TicketWhereInput,
@@ -10,6 +11,16 @@ export class TicketsACL extends BaseQueryACL<
   }
 
   async getWhereClause(): Promise<Prisma.TicketWhereInput> {
+    const ctx = this.ctx
+    if (isGuestContext(ctx)) {
+      const ticketIds = await getAccessibleTicketIds(this.prisma, this.ctx.userId, this.ctx)
+
+      return {
+        workspaceId: this.ctx.workspaceId ?? '',
+        id: { in: ticketIds },
+      }
+    }
+
     return {
       workspaceId: this.ctx.workspaceId,
     }

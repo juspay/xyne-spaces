@@ -1,5 +1,6 @@
 import { Prisma, PrismaClient } from '@prisma/client'
 import { BaseQueryACL, ACLContext } from '../base-acl'
+import { denyGuestWhere, isGuestContext } from './channel-access-helper'
 
 /**
  * Organizations ACL for Python Query Service
@@ -15,6 +16,10 @@ export class OrganizationsACL extends BaseQueryACL<
   }
 
   async getWhereClause(): Promise<Prisma.OrganizationWhereInput> {
+    if (isGuestContext(this.ctx)) {
+      return denyGuestWhere('orgId')
+    }
+
     if (this.ctx.orgRole === 'ADMIN' || this.ctx.orgRole === 'OWNER') {
       return {}
     }

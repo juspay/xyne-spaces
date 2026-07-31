@@ -1,5 +1,6 @@
 import { Prisma, PrismaClient } from '@prisma/client'
 import { BaseQueryACL, ACLContext } from '../base-acl'
+import { denyGuestWhere, isGuestContext } from './channel-access-helper'
 
 /**
  * Invitations ACL for Python Query Service
@@ -15,6 +16,10 @@ export class InvitationsACL extends BaseQueryACL<
   }
 
   async getWhereClause(): Promise<Prisma.InvitationWhereInput> {
+    if (isGuestContext(this.ctx)) {
+      return denyGuestWhere('id')
+    }
+
     // Check if user is ADMIN or OWNER using ctx.role (from JWT, no DB query)
     if (this.ctx.role === 'ADMIN' || this.ctx.role === 'OWNER') {
       // ADMIN or OWNER can see all invitations in the workspace

@@ -1,5 +1,6 @@
 import { Prisma, PrismaClient } from '@prisma/client'
 import { BaseQueryACL, ACLContext } from '../base-acl'
+import { denyGuestWhere, isGuestContext } from './channel-access-helper'
 
 /**
  * Workspaces ACL for Python Query Service
@@ -16,6 +17,11 @@ export class WorkspacesACL extends BaseQueryACL<
   }
 
   async getWhereClause(): Promise<Prisma.WorkspaceWhereInput> {
+    const ctx = this.ctx
+    if (isGuestContext(ctx)) {
+      return denyGuestWhere('id')
+    }
+
     return {
       status: 'ACTIVE',
       organization: {
