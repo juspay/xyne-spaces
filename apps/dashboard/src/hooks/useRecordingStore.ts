@@ -13,6 +13,7 @@ interface RecordingStoreSnapshot {
 
 export type RecordingStoreEvent =
   | { type: 'requestAutoStart' }
+  | { type: 'clearAutoStart' }
   | { type: 'requestStop' }
   | {
       type: 'startRecording';

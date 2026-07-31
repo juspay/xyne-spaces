@@ -138,7 +138,10 @@ export interface ElectronAPI {
     onShow: (callback: (startTime: number) => void) => () => void;
     onHide: (callback: () => void) => () => void;
     stopRecording: () => void;
-    cancelRecording: () => void;
+    openApp: () => void;
+    setIgnoreMouse: (ignore: boolean) => void;
+    dragStart: () => void;
+    dragEnd: () => void;
   };
   clawOverlay?: {
     setIgnoreMouse: (ignore: boolean) => void;

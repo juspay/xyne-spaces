@@ -221,9 +221,9 @@ export function RecordingOverlay(): React.ReactElement | null {
             <div className='flex items-center gap-3 min-w-0'>
               <div className='relative mt-0.5'>
                 {isRecording && (
-                  <span className='flex h-3 w-3'>
+                  <span className='flex h-3.5 w-3.5'>
                     <span className='animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75' />
-                    <span className='relative inline-flex rounded-full h-3 w-3 bg-red-500' />
+                    <span className='relative inline-flex rounded-full h-3.5 w-3.5 bg-red-500' />
                   </span>
                 )}
                 {isPaused && (

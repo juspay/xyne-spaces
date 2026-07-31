@@ -4273,6 +4273,9 @@ img.inline-emoji,
 .rec-overlay-waveform-bar {
   height: var(--rec-wave-height, 6%);
   opacity: var(--rec-wave-opacity, 0.4);
+  transition:
+    height 110ms linear,
+    opacity 110ms linear;
 }
 
 /* Live reasoning streaming: fade in each newly-arrived chunk at the writing edge

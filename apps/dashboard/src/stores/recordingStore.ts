@@ -56,6 +56,7 @@ export interface RecordingState {
   error: string | null;
   sttModel: SttModel;
   pendingAutoStart: boolean;
+  autoStartRequestedAt: number | null;
   pendingStop: boolean;
   /** Canvas (cuid/uuid) for notes taken during this recording — null until the user creates one */
   notesCanvasId: string | null;
@@ -84,6 +85,7 @@ const initialContext: RecordingState = {
   sttModel: 'azure',
   transcripts: [],
   pendingAutoStart: false,
+  autoStartRequestedAt: null,
   pendingStop: false,
   notesCanvasId: null,
   notesCanvasViewAccessId: null,
@@ -101,12 +103,26 @@ export const recordingStore = createStore({
     requestAutoStart: (context): RecordingState => ({
       ...context,
       pendingAutoStart: true,
+      autoStartRequestedAt: Date.now(),
     }),
 
-    requestStop: (context): RecordingState => ({
+    clearAutoStart: (context): RecordingState => ({
       ...context,
-      pendingStop: true,
+      pendingAutoStart: false,
+      autoStartRequestedAt: null,
     }),
+
+    requestStop: (context): RecordingState => {
+      const isInFlight =
+        context.status === 'recording' ||
+        context.status === 'paused' ||
+        context.status === 'starting';
+      if (!isInFlight) return context;
+      return {
+        ...context,
+        pendingStop: true,
+      };
+    },
 
     startRecording: (
       context,
@@ -170,6 +186,7 @@ export const recordingStore = createStore({
         sttModel,
         error: null,
         pendingAutoStart: false,
+        pendingStop: false,
         activeLayout: defaultLayout,
       };
     },
@@ -369,6 +386,7 @@ export const recordingStore = createStore({
         sttModel: context.sttModel, // Preserve STT model preference
         transcripts: [], // Clear transcripts when recording stops
         pendingAutoStart: false,
+        autoStartRequestedAt: null,
         pendingStop: false,
         notesCanvasId: null,
         notesCanvasViewAccessId: null,
@@ -423,6 +441,7 @@ export const recordingStore = createStore({
       sttModel: context.sttModel, // Preserve STT model preference
       transcripts: [], // Clear transcripts
       pendingAutoStart: false,
+      autoStartRequestedAt: null,
       pendingStop: false,
       notesCanvasId: null,
       notesCanvasViewAccessId: null,
