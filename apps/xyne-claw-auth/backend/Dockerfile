@@ -17,18 +17,18 @@ COPY packages/kata-sdk/package*.json /app/packages/kata-sdk/
 RUN cd /app/packages/kata-sdk && npm ci
 COPY packages/kata-sdk/ /app/packages/kata-sdk/
 
-COPY xyne-claw-shared/package*.json /app/xyne-claw-shared/
+COPY packages/xyne-claw-shared/package*.json /app/xyne-claw-shared/
 RUN cd /app/xyne-claw-shared && npm ci
-COPY xyne-claw-shared/ /app/xyne-claw-shared/
+COPY packages/xyne-claw-shared/ /app/xyne-claw-shared/
 
 # Copy service files and install
-COPY xyne-claw-auth/backend/package*.json ./
+COPY apps/xyne-claw-auth/backend/package*.json ./
 RUN npm ci
-COPY xyne-claw-auth/backend/prisma ./prisma
+COPY apps/xyne-claw-auth/backend/prisma ./prisma
 RUN npx prisma generate
-COPY xyne-claw-auth/backend/tsconfig.json ./
-COPY xyne-claw-auth/backend/src ./src
-COPY xyne-claw-auth/backend/scripts ./scripts
+COPY apps/xyne-claw-auth/backend/tsconfig.json ./
+COPY apps/xyne-claw-auth/backend/src ./src
+COPY apps/xyne-claw-auth/backend/scripts ./scripts
 RUN npx tsc --noEmit
 
 # Production image
