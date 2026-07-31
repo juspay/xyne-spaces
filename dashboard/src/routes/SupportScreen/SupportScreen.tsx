@@ -1378,6 +1378,10 @@ const SupportScreen = (): ReactElement => {
     createdAt: number;
     channelId: string;
     conversationId: string;
+    stageName?: string | null | undefined;
+    priority?: string | null | undefined;
+    assignedTo?: string | null | undefined;
+    userGroupId?: string | null | undefined;
   };
   const [selectedTickets, setSelectedTickets] = useState<Map<string, SelectedTicket>>(
     () => new Map(),
@@ -1399,6 +1403,10 @@ const SupportScreen = (): ReactElement => {
       createdAt: number;
       channelId: string;
       conversationId: string;
+      stageName?: string | null | undefined;
+      priority?: string | null | undefined;
+      assignedTo?: string | null | undefined;
+      userGroupId?: string | null | undefined;
     }): void => {
       setSelectedTickets(prev => {
         const next = new Map(prev);
@@ -1414,6 +1422,10 @@ const SupportScreen = (): ReactElement => {
             createdAt: row.createdAt,
             channelId: row.channelId,
             conversationId: row.conversationId,
+            stageName: row.stageName,
+            priority: row.priority,
+            assignedTo: row.assignedTo,
+            userGroupId: row.userGroupId,
           });
         }
         return next;
@@ -1449,6 +1461,10 @@ const SupportScreen = (): ReactElement => {
         createdAt: number;
         channelId: string;
         conversationId: string;
+        stageName?: string | null | undefined;
+        priority?: string | null | undefined;
+        assignedTo?: string | null | undefined;
+        userGroupId?: string | null | undefined;
       }>,
       select: boolean,
     ): void => {
@@ -1465,6 +1481,10 @@ const SupportScreen = (): ReactElement => {
               createdAt: row.createdAt,
               channelId: row.channelId,
               conversationId: row.conversationId,
+              stageName: row.stageName,
+              priority: row.priority,
+              assignedTo: row.assignedTo,
+              userGroupId: row.userGroupId,
             });
           } else {
             next.delete(row.id);
@@ -1475,6 +1495,35 @@ const SupportScreen = (): ReactElement => {
     },
     [],
   );
+
+  const handleTableSelectionChange = useCallback((tickets: Ticket[]): void => {
+    setSelectedTickets(
+      new Map(
+        tickets.map(ticket => [
+          ticket.id,
+          {
+            id: ticket.id,
+            lastEmailAt: ticket.lastEmailAt ?? 0,
+            emailReads:
+              (
+                ticket as Ticket & {
+                  emailReads?: ReadonlyArray<{ userId: string; lastReadEmailAt: number }>;
+                }
+              ).emailReads ?? [],
+            title: ticket.title ?? '',
+            xyneId: ticket.xyneId ?? '',
+            createdAt: ticket.createdAt ?? 0,
+            channelId: ticket.channelId ?? '',
+            conversationId: ticket.conversationId ?? '',
+            stageName: ticket.stageName,
+            priority: ticket.priority,
+            assignedTo: ticket.assignedTo,
+            userGroupId: ticket.userGroupId,
+          },
+        ]),
+      ),
+    );
+  }, []);
 
   const handleMergeSelectedTickets = useCallback(
     async (parentTicketId: string): Promise<void> => {
@@ -3026,6 +3075,8 @@ const SupportScreen = (): ReactElement => {
                         dynamicFieldColumns={tableDynamicFieldColumns}
                         onBoardIdResolved={setChannelBoardId}
                         onTicketsLoaded={setKanbanTickets}
+                        selectedIds={selectedTicketIds}
+                        onSelectionChange={handleTableSelectionChange}
                         onTicketClick={ticket => {
                           void navigate(`${supportBase}/${ticket.channelId}/${ticket.xyneId}`, {
                             state: {
@@ -3463,6 +3514,47 @@ export const SupportTicketDetail = ({
       });
     return Array.from(ids);
   }, [ticket?.conversationId, ticket?.referencesIn]);
+
+  // conversationId -> the manually-merged-in ticket that owns it (needed so its
+  // thread-root email uses the ticket-level unmerge action; see mergedRootEmailSource).
+  const mergedSourceByConversationId = useMemo(() => {
+    const map = new Map<string, { id: string; xyneId?: string | null | undefined }>();
+    (ticket?.referencesIn ?? [])
+      .filter(ref => ref.relationType === TicketReferenceRelation.MERGED_INTO)
+      .forEach(ref => {
+        if (ref.sourceTicket?.id && ref.sourceTicket?.conversationId) {
+          map.set(ref.sourceTicket.conversationId, {
+            id: ref.sourceTicket.id,
+            xyneId: ref.sourceTicket.xyneId,
+          });
+        }
+      });
+    return map;
+  }, [ticket?.referencesIn]);
+
+  const handleUnmergeMergedSource = useCallback(
+    async (sourceTicketId: string, sourceTicketXyneId?: string | null): Promise<void> => {
+      const toastId = toast.loading('Unmerging ticket...');
+      try {
+        await apiInstance.post(`/tickets/${sourceTicketId}/unmerge`);
+        toast.success('Ticket unmerged successfully', {
+          id: toastId,
+          description: sourceTicketXyneId
+            ? `${sourceTicketXyneId} is now a separate ticket`
+            : undefined,
+        });
+        if (sourceTicketXyneId && channelIdParam) {
+          void navigate(`${navBasePath ?? supportBase}/${channelIdParam}/${sourceTicketXyneId}`);
+        }
+      } catch {
+        toast.error('Unmerge Failed', {
+          id: toastId,
+          description: 'Operation failed. Please try again.',
+        });
+      }
+    },
+    [channelIdParam, navigate, navBasePath, supportBase],
+  );
 
   const [allEmails] = useCachedQuery(
     queries.getEmailsForConversations({ conversationIds: allConversationIds }),
@@ -4558,6 +4650,8 @@ export const SupportTicketDetail = ({
                       }}
                       deskEmail={deskEmail}
                       onMailtoClick={onMailtoClick}
+                      mergedSourceByConversationId={mergedSourceByConversationId}
+                      onUnmergeSource={handleUnmergeMergedSource}
                     />
                   )}
                 </div>
@@ -5076,6 +5170,8 @@ const EmailThread = ({
   onReplyToEmail,
   deskEmail,
   onMailtoClick,
+  mergedSourceByConversationId,
+  onUnmergeSource,
 }: {
   collapseState: EmailCollapseState;
   ticketId?: string | null | undefined;
@@ -5084,9 +5180,16 @@ const EmailThread = ({
   onReplyToEmail?: (emailId: string, mode: 'reply' | 'replyAll') => void;
   deskEmail?: string | null | undefined;
   onMailtoClick: (email: string) => void;
+  mergedSourceByConversationId?: ReadonlyMap<
+    string,
+    { id: string; xyneId?: string | null | undefined }
+  >;
+  onUnmergeSource?: (
+    sourceTicketId: string,
+    sourceTicketXyneId?: string | null,
+  ) => void | Promise<void>;
 }): ReactElement => {
   const { sortedEmails, collapsedIds, toggleOne, lastEmailId } = collapseState;
-  const rootEmail = sortedEmails[0];
   // Thread-level: upsert the current user's email_reads row. `isRead` compares
   // the stored lastReadEmailAt snapshot against the ticket's lastEmailAt, so
   // every email header in the thread flips read/unread together.
@@ -5101,29 +5204,56 @@ const EmailThread = ({
     () => sortedEmails.flatMap(e => e.attachments ?? []),
     [sortedEmails],
   );
+  // The first email (by position in this already-createdAt-sorted list) seen for
+  // each conversationId is that conversation's own root. For a foreign
+  // conversationId this is a manually-merged-in ticket's thread root, which must
+  // use the ticket-level unmerge action — see mergedSourceByConversationId. Root status is
+  // tracked per-conversationId (not against the combined thread's overall first
+  // email) because auto-merge demerge eligibility is validated per-conversation
+  // server-side (EmailDemergeController resolves "root" via
+  // findByConversationIdOrdered on that email's own conversationId).
+  const { mergedRootEmailSource, conversationRootEmailIds } = useMemo(() => {
+    const mergedMap = new Map<string, { id: string; xyneId?: string | null | undefined }>();
+    const rootIds = new Set<string>();
+    const seenConversationIds = new Set<string>();
+    for (const e of sortedEmails) {
+      if (!seenConversationIds.has(e.conversationId)) {
+        seenConversationIds.add(e.conversationId);
+        rootIds.add(e.id);
+        const source = mergedSourceByConversationId?.get(e.conversationId);
+        if (source) mergedMap.set(e.id, source);
+      }
+    }
+    return { mergedRootEmailSource: mergedMap, conversationRootEmailIds: rootIds };
+  }, [sortedEmails, mergedSourceByConversationId]);
   return (
     <div className='divide-y divide-gray-200 relative'>
-      {sortedEmails.map(email => (
-        <EmailThreadItem
-          key={email.id}
-          email={email}
-          isCollapsed={collapsedIds.has(email.id)}
-          canCollapse={email.id !== lastEmailId}
-          onToggleCollapse={() => toggleOne(email.id)}
-          isRead={isRead}
-          threadAttachments={threadAttachments}
-          {...(onReplyToEmail &&
-            email.id !== lastEmailId && {
-              // Per-email Reply / Reply all only on older messages — the
-              // latest already has the dedicated bar at the thread footer,
-              // so showing one here would be a duplicate.
-              onReply: (mode: 'reply' | 'replyAll') => onReplyToEmail(email.id, mode),
-            })}
-          deskEmail={deskEmail}
-          rootEmail={rootEmail}
-          onMailtoClick={onMailtoClick}
-        />
-      ))}
+      {sortedEmails.map(email => {
+        const mergedSource = mergedRootEmailSource.get(email.id);
+        return (
+          <EmailThreadItem
+            key={email.id}
+            email={email}
+            isCollapsed={collapsedIds.has(email.id)}
+            canCollapse={email.id !== lastEmailId}
+            onToggleCollapse={() => toggleOne(email.id)}
+            isRead={isRead}
+            threadAttachments={threadAttachments}
+            {...(onReplyToEmail &&
+              email.id !== lastEmailId && {
+                // Per-email Reply / Reply all only on older messages — the
+                // latest already has the dedicated bar at the thread footer,
+                // so showing one here would be a duplicate.
+                onReply: (mode: 'reply' | 'replyAll') => onReplyToEmail(email.id, mode),
+              })}
+            deskEmail={deskEmail}
+            isConversationRoot={conversationRootEmailIds.has(email.id)}
+            onMailtoClick={onMailtoClick}
+            {...(mergedSource && { mergedSource })}
+            {...(onUnmergeSource && { onUnmergeSource })}
+          />
+        );
+      })}
     </div>
   );
 };
@@ -5136,9 +5266,11 @@ const EmailThreadItem = ({
   isRead = true,
   onReply,
   deskEmail,
-  rootEmail,
+  isConversationRoot,
   threadAttachments,
   onMailtoClick,
+  mergedSource,
+  onUnmergeSource,
 }: {
   email: Email;
   isCollapsed?: boolean;
@@ -5147,9 +5279,19 @@ const EmailThreadItem = ({
   isRead?: boolean;
   onReply?: (mode: 'reply' | 'replyAll') => void;
   deskEmail?: string | null | undefined;
-  rootEmail: Email | undefined;
+  /** True when this email is the earliest email in its own conversationId —
+   * scoped per-conversation (not the combined thread's overall first email) to
+   * match the backend's per-conversation root check. See canDemerge below. */
+  isConversationRoot: boolean;
   threadAttachments?: NonNullable<Email['attachments']>;
   onMailtoClick: (email: string) => void;
+  /** Set when this email is the thread-root of a manually-merged-in ticket and
+   * must use the ticket-level unmerge action. */
+  mergedSource?: { id: string; xyneId?: string | null | undefined };
+  onUnmergeSource?: (
+    sourceTicketId: string,
+    sourceTicketXyneId?: string | null,
+  ) => void | Promise<void>;
 }): ReactElement => {
   const { channelId: channelIdParam } = useParams<{ channelId?: string }>();
   const navigate = useNavigate();
@@ -5161,11 +5303,21 @@ const EmailThreadItem = ({
 
   const [isDemerging, setIsDemerging] = useState(false);
 
+  // mergedSource routes to the ticket-level unmerge API; otherwise email-level demerge.
   const handleDemerge = async (): Promise<void> => {
     if (isDemerging) return;
     setIsDemerging(true);
 
-    const toastId = toast.loading('Demerging email...', {
+    if (mergedSource) {
+      try {
+        await onUnmergeSource?.(mergedSource.id, mergedSource.xyneId);
+      } finally {
+        setIsDemerging(false);
+      }
+      return;
+    }
+
+    const toastId = toast.loading('Unmerging email...', {
       description: 'Creating new ticket from this email',
     });
 
@@ -5175,7 +5327,7 @@ const EmailThreadItem = ({
       });
 
       if (response.data?.success && response.data.newTicket) {
-        toast.success('Demerge Successful', {
+        toast.success('Unmerge Successful', {
           id: toastId,
           description: `Created new ticket ${response.data.newTicket.xyneId}`,
         });
@@ -5191,7 +5343,7 @@ const EmailThreadItem = ({
         }
       }
     } catch {
-      toast.error('Demerge Failed', {
+      toast.error('Unmerge Failed', {
         id: toastId,
         description: 'Operation failed. Please try again.',
       });
@@ -5201,10 +5353,10 @@ const EmailThreadItem = ({
   };
 
   const canDemerge =
-    email.type === EmailType.DEFAULT &&
-    !!rootEmail &&
-    email.id !== rootEmail.id &&
-    email.externalThreadId === email.externalMessageId;
+    !!mergedSource ||
+    (email.type === EmailType.DEFAULT &&
+      !isConversationRoot &&
+      email.externalThreadId === email.externalMessageId);
 
   const demergeButton = canDemerge ? (
     <button
@@ -5214,16 +5366,17 @@ const EmailThreadItem = ({
       }}
       disabled={isDemerging}
       className='flex items-center gap-1 px-2 py-0.5 text-xs font-medium text-orange-600 bg-orange-50 hover:bg-orange-100 rounded-full transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed'
-      title='Demerge this email to a new ticket'
+      title={mergedSource ? 'Unmerge this ticket' : 'Unmerge this email to a new ticket'}
       data-track-category='SUPPORT'
-      data-track-name='DemergeEmail'
+      data-track-name={mergedSource ? 'UnmergeTicket' : 'DemergeEmail'}
       data-track-metadata={JSON.stringify({
         emailId: email.id,
         conversationId: email.conversationId,
+        ...(mergedSource && { sourceTicketId: mergedSource.id }),
       })}
     >
       <Split size={12} />
-      {isDemerging ? 'Demerging...' : 'Demerge'}
+      {isDemerging ? 'Unmerging...' : 'Unmerge'}
     </button>
   ) : null;
 
