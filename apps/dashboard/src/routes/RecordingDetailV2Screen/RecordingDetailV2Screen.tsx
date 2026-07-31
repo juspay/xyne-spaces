@@ -10,8 +10,10 @@ import { recordingService, type RecordingDetail } from '../../services/Recording
 import { useShortcut } from '../../shortcuts';
 import {
   AlertCircle,
+  ChevronDown,
   ChevronRight,
   FileText,
+  Hash,
   Music,
   PanelRightOpen,
   Sparkles,
@@ -22,12 +24,14 @@ import { logRecordingError } from '../../utils/recordingUtils';
 import { useSpeakerIdentificationEnabled } from '../../components/SpeakerIdentification/useSpeakerIdentificationEnabled';
 import { Spinner } from '@xyne/icons';
 import { Button } from '../../components/ui/Button/Button';
+import { Dialog } from '../../components/ui/Dialog';
 import { Tooltip } from '../../components/ui/Tooltip';
 import { AudioPlayer } from '../../components/ui/AudioPlayer/AudioPlayer';
 import { RecordingDetailV2Header } from './components/RecordingDetailV2Header';
 import { LiveRecordingControlBar } from './components/LiveRecordingControlBar';
 import { SummaryWithCitations } from './components/SummaryWithCitations';
 import { DetailedSummaryPanel } from './components/DetailedSummaryPanel';
+import { PostRecordingToChannelModal } from './components/PostRecordingToChannelModal';
 import { CollaborativeCanvasEditor } from '../../components/Canvas/CollaborativeCanvasEditor/CollaborativeCanvasEditor';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { sendRecordingEvent, useRecordingStore } from '../../hooks/useRecordingStore';
@@ -56,6 +60,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
   const [activeTab, setActiveTab] = useState<'notes' | 'summary'>('summary');
   const [showDetailedSummary, setShowDetailedSummary] = useState(false);
   const [showTranscriptPanel, setShowTranscriptPanel] = useState(false);
+  const [showPostToChannelModal, setShowPostToChannelModal] = useState(false);
   const [citationNonce, setCitationNonce] = useState(0);
   const [citationRef, setCitationRef] = useState<{
     segment: number;
@@ -340,6 +345,30 @@ export default function RecordingDetailV2Screen(): ReactElement {
                     Default summary
                   </button>
                 </div>
+
+                <div className='inline-flex h-8 items-stretch overflow-hidden rounded-full bg-foreground text-background'>
+                  <button
+                    type='button'
+                    onClick={() => setShowPostToChannelModal(true)}
+                    className='inline-flex items-center gap-1.5 px-3 text-sm font-medium transition-colors hover:bg-foreground/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+                    data-track-category='RecordingDetailV2'
+                    data-track-name='open_post_to_channel_modal'
+                  >
+                    <Hash className='size-3.5' aria-hidden='true' />
+                    Post to channel
+                  </button>
+                  <span className='w-px bg-background/25' aria-hidden='true' />
+                  <button
+                    type='button'
+                    onClick={() => setShowPostToChannelModal(true)}
+                    className='inline-flex items-center px-2 transition-colors hover:bg-foreground/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+                    aria-label='Post to channel options'
+                    data-track-category='RecordingDetailV2'
+                    data-track-name='open_post_to_channel_modal_chevron'
+                  >
+                    <ChevronDown className='size-3.5' aria-hidden='true' />
+                  </button>
+                </div>
               </div>
 
               {visibleTab === 'notes' ? (
@@ -450,6 +479,20 @@ export default function RecordingDetailV2Screen(): ReactElement {
           }}
           className='absolute inset-y-0 right-0 z-30 w-full md:w-[560px]'
         />
+      )}
+
+      {showPostToChannelModal && (
+        <Dialog
+          open={showPostToChannelModal}
+          onOpenChange={open => !open && setShowPostToChannelModal(false)}
+          title='Post to channel'
+          data-testid='post-recording-to-channel-modal'
+        >
+          <PostRecordingToChannelModal
+            recording={recording}
+            onClose={() => setShowPostToChannelModal(false)}
+          />
+        </Dialog>
       )}
     </div>
   );
