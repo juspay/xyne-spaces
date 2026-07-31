@@ -4,6 +4,8 @@
  */
 
 import { FileText, Image, Video, Music, Archive } from 'lucide-react';
+import { FilePdfFormat } from '@xyne/icons';
+import { isPdfFile } from '../../../services/documentThumbnailService';
 import { downloadFile } from '../../../services/clients/fileFetchService';
 import { showDownloadCompleteToast } from '../../../utils/downloadToast';
 import { JSX } from 'react/jsx-runtime';
@@ -215,6 +217,13 @@ export const downloadAttachment = async (attachmentId: string, fileName: string)
 export const getFileIcon = (mimeType: string, size = 16): JSX.Element => {
   const category = getFileCategory(mimeType);
   const iconProps = { size, className: 'text-muted-foreground' };
+
+  // Checked ahead of the switch: `getFileCategory` folds PDFs in with every
+  // other document, which is what left them on the generic sheet glyph. Red
+  // matches the PDF swatch in FilePill so the two render paths agree.
+  if (isPdfFile(mimeType)) {
+    return <FilePdfFormat size={size} className='text-red-500' />;
+  }
 
   switch (category) {
     case 'image':
