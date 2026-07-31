@@ -1,7 +1,9 @@
-import { ChevronDown, User as UserIcon } from 'lucide-react';
+import { Check, ChevronDown, Copy, User as UserIcon } from 'lucide-react';
 import { JSX, ReactNode, useState } from 'react';
+import { toast } from 'sonner';
 import { cn } from '../../../utils/classNames';
 import { useAuth } from '../../../hooks/useAuth';
+import { useDebugSettings } from '../../../hooks/useDebugSettings';
 import { Popover } from '../../ui/Popover/Popover';
 import { EmailTagsBadge } from './TagsBadgePopover';
 import {
@@ -84,6 +86,20 @@ export const EmailThreadHeader = ({
   const { user } = useAuth();
   const meEmail = deskEmail ?? user?.email ?? null;
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const { settings } = useDebugSettings();
+  const [copied, setCopied] = useState(false);
+
+  const copyEmailId = (): void => {
+    if (!emailId) return;
+    void navigator.clipboard
+      .writeText(emailId)
+      .then(() => {
+        setCopied(true);
+        toast.success('Email id copied');
+        setTimeout(() => setCopied(false), 1500);
+      })
+      .catch(() => toast.error('Failed to copy email id'));
+  };
 
   const recipientSummary = summarizeRecipients(to, cc, meEmail);
   const date = formatEmailHeaderDate(createdAt);
@@ -101,6 +117,27 @@ export const EmailThreadHeader = ({
       {bcc && bcc.length > 0 && <DetailRow label='bcc' values={bcc} />}
       {replyTo && replyTo.length > 0 && <DetailRow label='reply-to' values={replyTo} />}
       <DetailRow label='date' values={[date.full]} />
+      {settings.showEmailIdCopyButton && emailId && (
+        <div className='flex gap-3 text-sm items-center'>
+          <span className='text-muted-foreground w-14 shrink-0 pt-0.5'>email id:</span>
+          <span className='flex items-center gap-1.5 flex-1 min-w-0'>
+            <span className='text-foreground font-mono text-xs truncate' title={emailId}>
+              {emailId}
+            </span>
+            <button
+              type='button'
+              onClick={copyEmailId}
+              aria-label='Copy email id'
+              title='Copy email id'
+              data-track-category='Support'
+              data-track-name='CopyEmailId'
+              className='shrink-0 text-muted-foreground hover:text-foreground transition-colors'
+            >
+              {copied ? <Check size={13} className='text-green-600' /> : <Copy size={13} />}
+            </button>
+          </span>
+        </div>
+      )}
     </div>
   );
 
