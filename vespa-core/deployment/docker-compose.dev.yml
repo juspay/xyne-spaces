@@ -1,6 +1,6 @@
 services:
   vespa:
-    image: vespaengine/vespa
+    image: mirror.gcr.io/vespaengine/vespa
     container_name: vespa
     user: "1000:1000"
     hostname: vespa-container
