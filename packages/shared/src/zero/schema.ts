@@ -978,6 +978,35 @@ export enum ApproverType {
   ROLE = 'ROLE',
 }
 
+// Recording / sharing enums. New Prisma enums are frozen at the DB level (see
+// scripts/validate-no-new-enums.sh) — the corresponding columns are plain
+// Strings validated app-side. These consts are the single source of truth for
+// valid values; import them everywhere instead of hardcoding string literals.
+export const ShareableEntityType = {
+  NOTE_TAKER: 'NOTE_TAKER',
+} as const;
+
+export type ShareableEntityType = typeof ShareableEntityType[keyof typeof ShareableEntityType];
+
+export const EntityUserAccess = {
+  VIEW: 'VIEW',
+  EDIT: 'EDIT',
+  ADMIN: 'ADMIN',
+  REVOKED: 'REVOKED',
+} as const;
+
+export type EntityUserAccess = typeof EntityUserAccess[keyof typeof EntityUserAccess];
+
+// Role that may be granted when sharing/updating access. REVOKED is reached via
+// update/revoke, not by explicitly "sharing" with that role.
+export type GrantableEntityUserAccess = Exclude<EntityUserAccess, 'REVOKED'>;
+
+export const DefaultOutlet = {
+  EMAIL: 'EMAIL',
+  MESSAGE: 'MESSAGE',
+} as const;
+
+export type DefaultOutlet = typeof DefaultOutlet[keyof typeof DefaultOutlet];
 
 // Define tables
 
@@ -1999,6 +2028,39 @@ export const callTable = table('calls')
     callUpdatesChannel: string().optional(),
     participantCount: number().optional(),
     participantPreviewUserIds: string().optional(),
+    summaryTemplateId: string().optional(),
+    labels: json<string[]>(),
+    markedItems: json<any[]>(),
+  })
+  .primaryKey('id');
+
+export const entityAccessTable = table('entity_access' /* EntityAccess */)
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    shareableEntityType: string(),
+    entityId: string(),
+    userId: string().optional(),
+    userGroupId: string().optional(),
+    channelId: string().optional(),
+    entityUserAccess: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
+
+export const summaryTemplateTable = table('summary_templates' /* SummaryTemplate */)
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    name: string(),
+    autoTriggerPrompt: string().optional(),
+    sections: json(),
+    version: number(),
+    systemPrompt: string(),
+    defaultOutlet: string(),
+    createdBy: string(),
+    createdAt: number(),
   })
   .primaryKey('id');
 
@@ -4269,7 +4331,54 @@ export const callTableRelationships = relationships(callTable, ({ one, many }) =
     destField: ['callId'],
     destSchema: callParticipantTable,
   }),
+  shares: many({
+    sourceField: ['id'],
+    destField: ['entityId'],
+    destSchema: entityAccessTable,
+  }),
+  summaryTemplate: one({
+    sourceField: ['summaryTemplateId'],
+    destField: ['id'],
+    destSchema: summaryTemplateTable,
+  }),
 }));
+
+export const entityAccessTableRelationships = relationships(
+  entityAccessTable,
+  ({ one }) => ({
+    call: one({
+      sourceField: ['entityId'],
+      destField: ['id'],
+      destSchema: callTable,
+    }),
+    user: one({
+      sourceField: ['userId'],
+      destField: ['id'],
+      destSchema: userTable,
+    }),
+    workspace: one({
+      sourceField: ['workspaceId'],
+      destField: ['id'],
+      destSchema: workspaceTable,
+    }),
+  }),
+);
+
+export const summaryTemplateTableRelationships = relationships(
+  summaryTemplateTable,
+  ({ one }) => ({
+    workspace: one({
+      sourceField: ['workspaceId'],
+      destField: ['id'],
+      destSchema: workspaceTable,
+    }),
+    creator: one({
+      sourceField: ['createdBy'],
+      destField: ['id'],
+      destSchema: userTable,
+    }),
+  }),
+);
 
 export const callParticipantTableRelationships = relationships(callParticipantTable, ({ one }) => ({
   call: one({
@@ -5166,6 +5275,8 @@ export const schema = createSchema({
     surfaceNudgeTable,
     surfaceNudgeCountTable,
     callTable,
+    entityAccessTable,
+    summaryTemplateTable,
     callParticipantTable,
     recurringCallSeriesTable,
     recurringCallParticipantTable,
@@ -5282,6 +5393,8 @@ export const schema = createSchema({
     surfaceNudgeTableRelationships,
     surfaceNudgeCountTableRelationships,
     callTableRelationships,
+    entityAccessTableRelationships,
+    summaryTemplateTableRelationships,
     callParticipantTableRelationships,
     recurringCallSeriesTableRelationships,
     recurringCallParticipantTableRelationships,
@@ -5415,6 +5528,8 @@ export type ProactiveNudge = Row<typeof schema.tables.proactive_nudges>;
 export type SurfaceNudge = Row<typeof schema.tables.surface_nudges>;
 export type SurfaceNudgeCount = Row<typeof schema.tables.surface_nudge_counts>;
 export type Call = Row<typeof schema.tables.calls>;
+export type EntityAccess = Row<typeof schema.tables.entity_access>;
+export type SummaryTemplate = Row<typeof schema.tables.summary_templates>;
 export type CallParticipant = Row<typeof schema.tables.call_participants>;
 export type RecurringCallSeries = Row<typeof schema.tables.recurring_call_series>;
 export type RecurringCallParticipant = Row<typeof schema.tables.recurring_call_participants>;

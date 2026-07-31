@@ -35,6 +35,21 @@ export const formatElapsedTime = (ms: number): string => {
 };
 
 /**
+ * Calculate active recording time, excluding completed and ongoing pauses.
+ */
+export const calculateRecordingElapsedMs = (
+  startTime: number | null,
+  pauseStartedAt: number | null,
+  accumulatedPausedMs: number,
+  now = Date.now(),
+): number => {
+  if (!startTime) return 0;
+
+  const effectiveEndTime = pauseStartedAt ?? now;
+  return Math.max(0, effectiveEndTime - startTime - accumulatedPausedMs);
+};
+
+/**
  * Format timestamp to 12-hour time with AM/PM
  * Used for transcript timestamps
  * @param timestamp - Unix timestamp in milliseconds

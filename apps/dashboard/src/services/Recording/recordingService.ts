@@ -5,14 +5,16 @@
 
 import { apiInstance } from '../clients/apiClient';
 import { AxiosResponse } from 'axios';
-import type { RecordingType } from '@xyne/shared';
+import type { DefaultOutlet, RecordingType } from '@xyne/shared';
 
 export interface RecordingSession {
+  /** Public Call ID used by the recording routes (same value as externalId). */
+  callId: string;
   id: string;
   externalId: string;
   token: string;
   serverUrl: string;
-  channelId: string;
+  channelId: string | null;
   startTime: number;
 }
 
@@ -20,12 +22,37 @@ export interface Recording {
   id: string;
   externalId: string;
   title: string;
+  status?: 'SCHEDULED' | 'ACTIVE' | 'IN_PROGRESS' | 'ENDED' | 'CANCELLED';
+  createdByUserId?: string;
   startedAt: string;
   endedAt: string | null;
   durationMs: number | null;
   hasTranscript: boolean;
   hasSummary: boolean;
   hasRecording?: boolean;
+  labels?: string[];
+  markedItems?: unknown[];
+  summaryTemplateId?: string | null;
+}
+
+export interface SummaryTemplate {
+  id: string;
+  workspaceId: string;
+  name: string;
+  autoTriggerPrompt: string | null;
+  sections: unknown;
+  version: number;
+  systemPrompt: string;
+  defaultOutlet: DefaultOutlet;
+  createdBy: string;
+  createdAt: string;
+}
+
+export interface RecordingUpdate {
+  title?: string;
+  labels?: string[];
+  markedItems?: Record<string, unknown>[];
+  summaryTemplateId?: string | null;
 }
 
 export interface BulkDeleteRecordingsResult {
@@ -85,7 +112,8 @@ interface InitiateCallResponse {
   token: string;
   livekitUrl: string;
   externalId: string;
-  channelId: string;
+  callId?: string;
+  channelId: string | null;
 }
 
 interface RecordingsResponse {
@@ -120,6 +148,7 @@ class RecordingService {
     const data: InitiateCallResponse = response.data;
 
     return {
+      callId: data.callId ?? data.externalId,
       id: data.externalId,
       externalId: data.externalId,
       token: data.token,
@@ -162,7 +191,39 @@ class RecordingService {
    * Update recording title
    */
   async updateRecordingTitle(callId: string, title: string): Promise<void> {
-    await apiInstance.patch(`/calls/recordings/${callId}`, { title });
+    await this.updateRecording(callId, { title });
+  }
+
+  async updateRecording(callId: string, update: RecordingUpdate): Promise<void> {
+    await apiInstance.patch(`/calls/recordings/${callId}`, update);
+  }
+
+  // Recording sharing (share/update/unshare) now goes through Zero mutators —
+  // see mutators.calls.shareRecording / mutators.calls.updateRecordingShare.
+
+  async getSummaryTemplates(): Promise<SummaryTemplate[]> {
+    const response: AxiosResponse<{ success: boolean; templates: SummaryTemplate[] }> =
+      await apiInstance.get('/calls/summary-templates');
+    return response.data.templates;
+  }
+
+  async createSummaryTemplate(
+    input: Omit<SummaryTemplate, 'id' | 'workspaceId' | 'createdBy' | 'createdAt'>,
+  ): Promise<SummaryTemplate> {
+    const response: AxiosResponse<{ success: boolean; template: SummaryTemplate }> =
+      await apiInstance.post('/calls/summary-templates', input);
+    return response.data.template;
+  }
+
+  async updateSummaryTemplate(
+    templateId: string,
+    update: Partial<
+      Omit<SummaryTemplate, 'id' | 'workspaceId' | 'createdBy' | 'createdAt'>
+    >,
+  ): Promise<SummaryTemplate> {
+    const response: AxiosResponse<{ success: boolean; template: SummaryTemplate }> =
+      await apiInstance.patch(`/calls/summary-templates/${templateId}`, update);
+    return response.data.template;
   }
 
   /**

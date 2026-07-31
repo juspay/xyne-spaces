@@ -15,6 +15,7 @@ import { recordingService } from '../services/Recording/recordingService';
 import { toast } from 'sonner';
 import { logger, Event } from '../utils/logger';
 import { formatDuration, normalizeTimestamp } from '../utils/dateUtils';
+import { calculateRecordingElapsedMs } from '../utils/recordingUtils';
 import {
   AGENT_LEFT_CONFIRM_DELAY_MS,
   isTranscriptionAgentIdentity,
@@ -39,6 +40,7 @@ export type SttModel = 'google' | 'azure' | 'deepgram';
 /** Layout state for the active recording workspace */
 export type RecordingLayout = 'transcript' | 'split' | 'notes';
 export const DEFAULT_NOTES_TITLE = 'Untitled Notes';
+export const DEFAULT_RECORDING_TITLE = 'Impromptu Recording';
 
 export interface RecordingState {
   room: Room | null;
@@ -47,6 +49,8 @@ export interface RecordingState {
   status: RecordingStatus;
   isRecording: boolean;
   startTime: number | null;
+  pauseStartedAt: number | null;
+  accumulatedPausedMs: number;
   transcripts: TranscriptEntry[];
   error: string | null;
   sttModel: SttModel;
@@ -72,6 +76,8 @@ const initialContext: RecordingState = {
   status: 'idle',
   isRecording: false,
   startTime: null,
+  pauseStartedAt: null,
+  accumulatedPausedMs: 0,
   error: null,
   sttModel: 'azure',
   transcripts: [],
@@ -270,6 +276,8 @@ export const recordingStore = createStore({
         externalId: event.externalId,
         channelId: event.channelId,
         startTime: event.startTime,
+        pauseStartedAt: null,
+        accumulatedPausedMs: 0,
         status: 'recording',
         isRecording: true,
         error: null,
@@ -279,6 +287,9 @@ export const recordingStore = createStore({
     },
 
     pauseRecording: (context): RecordingState => {
+      if (context.status !== 'recording') return context;
+
+      const pauseStartedAt = Date.now();
       if (context.room) {
         void context.room.localParticipant.setMicrophoneEnabled(false);
       }
@@ -289,10 +300,14 @@ export const recordingStore = createStore({
       return {
         ...context,
         status: 'paused',
+        pauseStartedAt,
       };
     },
 
     resumeRecording: (context): RecordingState => {
+      if (context.status !== 'paused') return context;
+
+      const resumedAt = Date.now();
       if (context.room) {
         void context.room.localParticipant.setMicrophoneEnabled(true);
       }
@@ -302,11 +317,21 @@ export const recordingStore = createStore({
       return {
         ...context,
         status: 'recording',
+        pauseStartedAt: null,
+        accumulatedPausedMs:
+          context.accumulatedPausedMs +
+          (context.pauseStartedAt !== null ? resumedAt - context.pauseStartedAt : 0),
       };
     },
 
     stopRecording: (context): RecordingState => {
-      const durationMs = context.startTime ? Date.now() - context.startTime : null;
+      const durationMs = context.startTime
+        ? calculateRecordingElapsedMs(
+            context.startTime,
+            context.pauseStartedAt,
+            context.accumulatedPausedMs,
+          )
+        : null;
 
       // Cleanup room
       if (context.room) {
@@ -335,6 +360,8 @@ export const recordingStore = createStore({
         status: 'idle',
         isRecording: false,
         startTime: null,
+        pauseStartedAt: null,
+        accumulatedPausedMs: 0,
         error: null,
         sttModel: context.sttModel, // Preserve STT model preference
         transcripts: [], // Clear transcripts when recording stops
@@ -372,6 +399,8 @@ export const recordingStore = createStore({
         ...context,
         status: 'error',
         isRecording: false,
+        pauseStartedAt: null,
+        accumulatedPausedMs: 0,
         error: event.error,
         agentLeft: false,
       };
@@ -384,6 +413,8 @@ export const recordingStore = createStore({
       status: 'idle',
       isRecording: false,
       startTime: null,
+      pauseStartedAt: null,
+      accumulatedPausedMs: 0,
       error: null,
       sttModel: context.sttModel, // Preserve STT model preference
       transcripts: [], // Clear transcripts

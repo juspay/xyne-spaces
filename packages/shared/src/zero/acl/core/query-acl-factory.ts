@@ -80,6 +80,8 @@ import {
   EmailChannelPreferencesACL,
   BoardSlaPoliciesACL,
   DelayedMessagesACL,
+  EntityAccessACL,
+  SummaryTemplatesACL,
 } from '../tables';
 export class QueryACLFactory {
   static getACL<TTable extends TableName>(
@@ -107,6 +109,10 @@ export class QueryACLFactory {
         return new CallParticipantsACL(ctx) as BaseQueryACL<TTable>;
       case 'calls':
         return new CallsACL(ctx) as BaseQueryACL<TTable>;
+      case 'entity_access':
+        return new EntityAccessACL(ctx) as BaseQueryACL<TTable>;
+      case 'summary_templates':
+        return new SummaryTemplatesACL(ctx) as BaseQueryACL<TTable>;
       case 'canvas_folders':
         return new CanvasFoldersACL(ctx) as BaseQueryACL<TTable>;
       case 'canvas_participants':

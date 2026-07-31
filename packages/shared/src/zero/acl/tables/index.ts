@@ -17,6 +17,8 @@ export { EmailChannelPreferencesACL } from './email-channel-preferences-acl';
 export { BoardSlaPoliciesACL } from './board-sla-policies-acl';
 export { CallParticipantsACL } from './call-participants-acl';
 export { CallsACL } from './calls-acl';
+export { EntityAccessACL } from './entity-access-acl';
+export { SummaryTemplatesACL } from './summary-templates-acl';
 export { CanvasFoldersACL } from './canvas-folders-acl';
 export { CanvasParticipantsACL } from './canvas-participants-acl';
 export { CanvasUserStatusACL } from './canvas-user-status-acl';

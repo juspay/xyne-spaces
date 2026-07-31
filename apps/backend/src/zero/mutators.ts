@@ -6,6 +6,8 @@ import {
   ChannelVisibility,
   MessageType,
   CallType,
+  ShareableEntityType,
+  EntityUserAccess,
   CallStatus,
   RecurringCallSeriesStatus,
   CallOrigin,
@@ -4310,6 +4312,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             lastActivityAt: now,
             createdAt: now,
             updatedAt: now,
+            labels: [],
+            markedItems: [],
             metadata: {
               systemMessageId,
               conversationId,
@@ -4574,6 +4578,119 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           await tx.mutate.calls.update({
             id: call.id,
             metadata: { ...currentMetadata, notesCanvasId },
+          });
+        },
+      ),
+      // Share a HEADLESS recording with another workspace user. Only the recording's
+      // creator or a workspace OWNER/ADMIN may share it. `id` is the client-generated
+      // entity_access row id, used when no existing share row is found.
+      // KEEP IN SYNC with shared/src/zero/mutators.ts calls.shareRecording.
+      shareRecording: defineMutator(
+        z.object({
+          id: z.string(),
+          callId: z.string(),
+          targetUserId: z.string(),
+          entityUserAccess: z
+            .enum([EntityUserAccess.VIEW, EntityUserAccess.EDIT, EntityUserAccess.ADMIN])
+            .optional(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { id, callId, targetUserId, entityUserAccess, timestamp } }) => {
+          const call = await tx.run(zql.calls.where('externalId', callId).one());
+          if (!call || call.callType !== CallType.HEADLESS) {
+            throw new Error('Recording not found');
+          }
+
+          const isOwner = call.createdByUserId === authData.sub;
+          const isWorkspaceAdmin =
+            authData.role === WorkspaceRole.OWNER || authData.role === WorkspaceRole.ADMIN;
+          if (!isOwner && !isWorkspaceAdmin) {
+            throw new Error('Only the recording owner or a workspace admin can manage sharing');
+          }
+
+          if (targetUserId === call.createdByUserId) {
+            throw new Error('The recording owner already has access');
+          }
+
+          const targetUser = await tx.run(zql.users.where('id', targetUserId).one());
+          if (!targetUser || targetUser.workspaceId !== authData.workspaceId || targetUser.leftAt) {
+            throw new Error('User not found in this workspace');
+          }
+
+          const existing = await tx.run(
+            zql.entity_access
+              .where('workspaceId', authData.workspaceId)
+              .where('shareableEntityType', ShareableEntityType.NOTE_TAKER)
+              .where('entityId', call.id)
+              .where('userId', targetUserId)
+              .one(),
+          );
+
+          if (existing) {
+            await tx.mutate.entity_access.update({
+              id: existing.id,
+              entityUserAccess: entityUserAccess ?? EntityUserAccess.VIEW,
+              updatedAt: timestamp,
+            });
+            return;
+          }
+
+          await tx.mutate.entity_access.insert({
+            id,
+            workspaceId: authData.workspaceId,
+            shareableEntityType: ShareableEntityType.NOTE_TAKER,
+            entityId: call.id,
+            userId: targetUserId,
+            entityUserAccess: entityUserAccess ?? EntityUserAccess.VIEW,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          });
+        },
+      ),
+      // Update (or revoke, via entityUserAccess: REVOKED) an existing recording share.
+      // KEEP IN SYNC with shared/src/zero/mutators.ts calls.updateRecordingShare.
+      updateRecordingShare: defineMutator(
+        z.object({
+          callId: z.string(),
+          targetUserId: z.string(),
+          entityUserAccess: z.enum([
+            EntityUserAccess.VIEW,
+            EntityUserAccess.EDIT,
+            EntityUserAccess.ADMIN,
+            EntityUserAccess.REVOKED,
+          ]),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { callId, targetUserId, entityUserAccess, timestamp } }) => {
+          const call = await tx.run(zql.calls.where('externalId', callId).one());
+          if (!call || call.callType !== CallType.HEADLESS) {
+            throw new Error('Recording not found');
+          }
+
+          const isOwner = call.createdByUserId === authData.sub;
+          const isWorkspaceAdmin =
+            authData.role === WorkspaceRole.OWNER || authData.role === WorkspaceRole.ADMIN;
+          if (!isOwner && !isWorkspaceAdmin) {
+            throw new Error('Only the recording owner or a workspace admin can manage sharing');
+          }
+
+          const existing = await tx.run(
+            zql.entity_access
+              .where('workspaceId', authData.workspaceId)
+              .where('shareableEntityType', ShareableEntityType.NOTE_TAKER)
+              .where('entityId', call.id)
+              .where('userId', targetUserId)
+              .one(),
+          );
+
+          if (!existing) {
+            throw new Error('Share not found');
+          }
+
+          await tx.mutate.entity_access.update({
+            id: existing.id,
+            entityUserAccess,
+            updatedAt: timestamp,
           });
         },
       ),

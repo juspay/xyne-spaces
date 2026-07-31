@@ -47,6 +47,9 @@ export interface UpdateCallInput {
   transcript?: string;
   startedAt?: Date;
   recordingUrl?: string | null;
+  labels?: string[];
+  markedItems?: Prisma.InputJsonValue[];
+  summaryTemplateId?: string | null;
 }
 
 export interface CreateCallWithParticipantsInput {
