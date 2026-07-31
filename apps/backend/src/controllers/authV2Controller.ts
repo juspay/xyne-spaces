@@ -23,6 +23,7 @@ import {
   isOrganizationPolicyError,
   organizationDomainService,
 } from '@/services/organizationDomainService';
+import { migrateLegacyIdentity } from '@/services/legacyIdentityMigrationHelper';
 
 /**
  * Result type for single workspace auto-login
@@ -436,6 +437,32 @@ export class AuthV2Controller {
 
       logger.info(`[${requestId}] [DEBUG] Google auth success for: ${googleUserData.email}`);
 
+      await migrateLegacyIdentity({
+        email: googleUserData.email,
+        authProvider: AuthProvider.GOOGLE,
+        providerUserId: googleUserData.googleId,
+      });
+
+      // SECURITY: reject provider mismatch before issuing any pending-auth cookie
+      // or touching workspace state. Account linking is intentionally NOT done here
+      // (it enables account takeover). If an account already exists for this email
+      // under a different login method (providerUserId differs — e.g. Microsoft or a
+      // different Google account), stop and tell the UI to use the original method.
+      const existingIdentity = await this.userService.findAuthIdentityByEmail(googleUserData.email);
+      if (existingIdentity && existingIdentity.providerUserId !== googleUserData.googleId) {
+        logger.warn(
+          `[${requestId}] Provider mismatch for ${googleUserData.email}: account registered with ${existingIdentity.authProvider}, attempted login with GOOGLE`,
+        );
+        const frontendUrl = stateData.redirectTo ?? getFrontendUrl(req);
+        const params = new URLSearchParams({
+          error: 'provider_mismatch',
+          message: 'This account uses a different login method. Please continue with your original sign-in method.',
+          existingProvider: existingIdentity.authProvider,
+        });
+        res.redirect(`${frontendUrl}?${params.toString()}`);
+        return;
+      }
+
       const workspaces = this.getEnterpriseAwareWorkspaces(
         await this.userService.getWorkspacesByEmail(googleUserData.email),
         stateData.enterpriseLogin,
@@ -802,6 +829,29 @@ export class AuthV2Controller {
         picture: payload.picture,
       };
 
+      await migrateLegacyIdentity({
+        email: googleUserData.email,
+        authProvider: AuthProvider.GOOGLE,
+        providerUserId: googleUserData.googleId,
+      });
+
+      // SECURITY: reject provider mismatch before issuing any pending-auth cookie
+      // or touching workspace state. Account linking is intentionally not done here
+      // (it enables account takeover). Mirrors the web callback + Microsoft/email.
+      const existingIdentity = await this.userService.findAuthIdentityByEmail(googleUserData.email);
+      if (existingIdentity && existingIdentity.providerUserId !== googleUserData.googleId) {
+        logger.warn(
+          `[${requestId}] Provider mismatch for ${googleUserData.email}: account registered with ${existingIdentity.authProvider}, attempted login with GOOGLE`,
+        );
+        res.status(403).json({
+          success: false,
+          error: 'provider_mismatch',
+          message: 'This account uses a different login method. Please continue with your original sign-in method.',
+          existingProvider: existingIdentity.authProvider,
+        });
+        return;
+      }
+
       logger.info(`[${requestId}] Getting workspaces for: ${googleUserData.email}`);
       const workspaces = this.getEnterpriseAwareWorkspaces(
         await this.userService.getWorkspacesByEmail(googleUserData.email),
@@ -1027,6 +1077,28 @@ export class AuthV2Controller {
       };
 
       logger.info(`[${requestId}] Google auth success for: ${googleUserData.email}`);
+
+      await migrateLegacyIdentity({
+        email: googleUserData.email,
+        authProvider: AuthProvider.GOOGLE,
+        providerUserId: googleUserData.googleId,
+      });
+
+      // SECURITY: reject provider mismatch before issuing any pending-auth cookie
+      // or touching workspace state. Account linking is intentionally not done here
+      // (it enables account takeover). Mirrors the web callback + Microsoft/email.
+      const existingIdentity = await this.userService.findAuthIdentityByEmail(googleUserData.email);
+      if (existingIdentity && existingIdentity.providerUserId !== googleUserData.googleId) {
+        logger.warn(
+          `[${requestId}] Provider mismatch for ${googleUserData.email}: account registered with ${existingIdentity.authProvider}, attempted login with GOOGLE`,
+        );
+        sendError(
+          'provider_mismatch',
+          'This account uses a different login method. Please continue with your original sign-in method.',
+          403,
+        );
+        return;
+      }
 
       const workspaces = await this.userService.getWorkspacesByEmail(googleUserData.email);
       const userExistsButRemoved = await this.userService.userExistsButNoActiveWorkspaces(googleUserData.email);

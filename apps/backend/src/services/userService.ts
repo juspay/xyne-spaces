@@ -98,6 +98,66 @@ export class UserService {
   }
 
   /**
+   * Migrate a user's stored provider identity from an old id to a new one for
+   * every workspace row matching this email + provider. Used to move legacy
+   * Microsoft users off the tenant-scoped `oid` and onto the stable, app-wide
+   * `sub` claim (which is what multi-tenant logins can rely on).
+   *
+   * Safe against the (providerUserId, workspaceId) unique constraint: a given
+   * (email, workspaceId) has at most one row, so no two rows can collide on the
+   * new id. No-op when the ids are equal. Returns the number of rows updated.
+   */
+  async migrateProviderUserId(
+    email: string,
+    authProvider: AuthProvider,
+    oldProviderUserId: string,
+    newProviderUserId: string,
+  ): Promise<number> {
+    if (!oldProviderUserId || !newProviderUserId || oldProviderUserId === newProviderUserId) {
+      return 0;
+    }
+    try {
+      const result = await this.prisma.user.updateMany({
+        where: { email, authProvider, providerUserId: oldProviderUserId },
+        data: { providerUserId: newProviderUserId },
+      });
+      if (result.count > 0) {
+        logger.info(
+          `[migrateProviderUserId] Migrated ${result.count} ${authProvider} row(s) for ${email} to new providerUserId`,
+        );
+      }
+      return result.count;
+    } catch (error) {
+      logger.error('Error migrating providerUserId:', error);
+      throw new Error('Failed to migrate providerUserId');
+    }
+  }
+
+  /**
+   * Returns the auth identity (provider + providerUserId) already associated
+   * with this email across any workspace, if a user record exists.
+   * Used to detect logins that use a different method than the account was
+   * originally created with. Looks at the earliest-created record.
+   */
+  async findAuthIdentityByEmail(
+    email: string,
+  ): Promise<{ authProvider: AuthProvider; providerUserId: string } | null> {
+    try {
+      const user = await this.prisma.user.findFirst({
+        where: { email },
+        select: { authProvider: true, providerUserId: true },
+        orderBy: { createdAt: 'asc' },
+      });
+      return user
+        ? { authProvider: user.authProvider, providerUserId: user.providerUserId }
+        : null;
+    } catch (error) {
+      logger.error('Error finding auth identity by email:', error);
+      throw new Error('Failed to find auth identity');
+    }
+  }
+
+  /**
    * Create a new user from OAuth data
    */
   async createUser(userData: OAuthUserData | GoogleUserData, workspaceId?: string): Promise<User> {
@@ -722,42 +782,25 @@ export class UserService {
       }
 
       // Also check by email (for users created by seed script or when providerUserId is unavailable)
-      workspaceUser = await this.prisma.user.findUnique({
-        where: {
-          email_workspaceId: {
-            email: userData.email,
-            workspaceId: userData.workspaceId
-          }
-        }
-      });
+      // workspaceUser = await this.prisma.user.findUnique({
+      //   where: {
+      //     email_workspaceId: {
+      //       email: userData.email,
+      //       workspaceId: userData.workspaceId
+      //     }
+      //   }
+      // });
 
-      if (workspaceUser) {
-        // NOTE: This is NOT cross-account linking of two different people. It is
-        // reached only when a row for this (email, workspaceId) already exists but
-        // did NOT match on providerUserId above — in practice the seed/invite path:
-        // a pre-provisioned row (e.g. a seed user with a placeholder providerUserId
-        // like 'admin-seed-user-001') binding its real OAuth subject on first login.
-        // After that first bind, later logins match on providerUserId and return
-        // early above, so this branch is not hit again for that user.
-        //
-        // Cross-provider rebind is safe because every login path verifies email
-        // ownership before reaching here: Google via Workspace domain verification,
-        // Microsoft via the xms_edov ("email domain owner verified") claim
-        // (microsoftAuthController — rejects tokens where xms_edov !== true). A
-        // provider can therefore only assert an email whose domain it owns, so the
-        // only way two providers resolve to the same email is the same real principal
-        // on a shared domain. If a future caller ever reaches this method with an
-        // UNVERIFIED email, add a provider/subject guard here (and in
-        // findOrCreateOAuthUser, which shares this pattern) before trusting the rebind.
-        workspaceUser = await this.prisma.user.update({
-          where: { id: workspaceUser.id },
-          data: {
-            ...(userData.providerUserId ? { providerUserId: userData.providerUserId } : {}),
-            authProvider: normalizedAuthProvider
-          }
-        });
-        return { user: workspaceUser, isNewUser: false };
-      }
+      // if (workspaceUser) {
+      //   workspaceUser = await this.prisma.user.update({
+      //     where: { id: workspaceUser.id },
+      //     data: {
+      //       ...(userData.providerUserId ? { providerUserId: userData.providerUserId } : {}),
+      //       authProvider: normalizedAuthProvider
+      //     }
+      //   });
+      //   return { user: workspaceUser, isNewUser: false };
+      // }
 
       // Get workspace to check org membership
       const workspace = await this.prisma.workspace.findUnique({
