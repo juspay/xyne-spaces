@@ -179,7 +179,7 @@ export const recordingStore = createStore({
       event: {
         room: Room;
         externalId: string;
-        channelId: string;
+        channelId: string | null;
         startTime: number;
         defaultLayout?: RecordingLayout;
       },
