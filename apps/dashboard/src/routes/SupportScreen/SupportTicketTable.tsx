@@ -34,6 +34,8 @@ export interface SupportTicketTableProps {
   onBoardIdResolved: (boardId: string) => void;
   onTicketClick: (ticket: Ticket) => void;
   onTicketsLoaded?: (tickets: Ticket[]) => void;
+  selectedIds?: ReadonlySet<string>;
+  onSelectionChange?: (tickets: Ticket[]) => void;
 }
 
 /**
@@ -50,6 +52,8 @@ export const SupportTicketTable = ({
   onBoardIdResolved,
   onTicketClick,
   onTicketsLoaded,
+  selectedIds,
+  onSelectionChange,
 }: SupportTicketTableProps): ReactElement => {
   const channelUserStatus = useGetChannelUserStatus(channelId);
   const isMember = !!channelUserStatus;
@@ -188,6 +192,8 @@ export const SupportTicketTable = ({
       ticketTags={tagsByTicketId}
       availableTags={availableTags}
       onTitleClick={onTicketClick}
+      {...(selectedIds !== undefined ? { selectedIds } : {})}
+      {...(onSelectionChange !== undefined ? { onSelectionChange } : {})}
       {...(visibleColumns ? { visibleColumns } : {})}
       extraColumns={extraColumns}
     />

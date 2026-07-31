@@ -76,6 +76,10 @@ export interface SelectableRow {
   createdAt: number;
   channelId: string;
   conversationId: string;
+  stageName?: string | null;
+  priority?: TicketListItem['priority'];
+  assignedTo?: string | null;
+  userGroupId?: string | null;
 }
 
 export const TicketListView = function TicketListView({
@@ -477,6 +481,10 @@ export const TicketListView = function TicketListView({
                       createdAt: row.createdAt ?? 0,
                       channelId: row.channelId ?? '',
                       conversationId: row.conversationId ?? '',
+                      stageName: row.stageName,
+                      priority: row.priority,
+                      assignedTo: row.assignedTo,
+                      userGroupId: row.userGroupId,
                       ...(emailReads ? { emailReads } : {}),
                     });
                   },
@@ -503,6 +511,10 @@ export const TicketListView = function TicketListView({
       createdAt: t.createdAt ?? 0,
       channelId: t.channelId ?? '',
       conversationId: t.conversationId ?? '',
+      stageName: t.stageName,
+      priority: t.priority,
+      assignedTo: t.assignedTo,
+      userGroupId: t.userGroupId,
     };
     const emailReads = t.emailReads as
       | ReadonlyArray<{ userId: string; lastReadEmailAt: number }>
