@@ -13,6 +13,12 @@ export const createVideoExplainer: ToolDefinition = {
   description:
     "Render an approved storyboard into a narrated MP4 inside the current writable sandbox. " +
     "Always show the storyboard to the user and obtain approval before calling this tool. " +
+    "Choose the renderer deliberately: use renderer='motion' for anything the user will " +
+    "watch as a finished piece — product, launch, marketing, or demo videos — because the " +
+    "Ken Burns push-in and per-scene fades read as a real camera move rather than a frozen " +
+    "slide; keep the default renderer='slides' for quick internal or technical explainers " +
+    "where static frames are fine. Motion adds no new dependency and takes the same storyboard, " +
+    "so it is safe to prefer for viewer-facing cuts. It does NOT add avatars or lip-sync. " +
     "After it succeeds, deliver the returned filePath with sandbox-deliver-files.",
   source: "custom:sandbox",
   configSchema: SANDBOX_CONFIG_SCHEMA,
@@ -23,6 +29,23 @@ export const createVideoExplainer: ToolDefinition = {
       voice: {
         type: "string",
         description: "Optional Azure TTS voice. Use 'default' to use the configured voice.",
+      },
+      renderer: {
+        type: "string",
+        enum: ["slides", "motion"],
+        description:
+          "Render backend. 'slides' (default) renders static narrated slides. " +
+          "'motion' adds cinematic camera movement (a slow Ken Burns push-in) plus " +
+          "fade-in/out on every scene, using only the sandbox's existing ffmpeg. " +
+          "Same storyboard contract; no avatars or lip-sync.",
+      },
+      theme: {
+        type: "string",
+        enum: ["light", "dark"],
+        description:
+          "Visual theme. 'light' (default) is a minimal, clean, mostly-white " +
+          "background suited to product/launch/explainer videos. 'dark' is the " +
+          "original high-contrast tech look. Prefer 'light' unless the user asks for dark.",
       },
       scenes: {
         type: "array",

@@ -19,9 +19,17 @@ export type DiffScene = {
 export type BulletsScene = { kind: "bullets"; items: string[]; narration: string };
 export type VideoScene = TitleScene | DiagramScene | CodeScene | DiffScene | BulletsScene;
 
+export type Renderer = "slides" | "motion";
+
+// Visual theme for the rendered frames. "light" (default) is a minimal, clean
+// background suited to product/launch videos; "dark" is the original tech look.
+export type Theme = "light" | "dark";
+
 export interface Storyboard {
   title: string;
   voice?: string;
+  renderer: Renderer;
+  theme: Theme;
   scenes: VideoScene[];
 }
 
@@ -128,6 +136,22 @@ export function validateStoryboard(value: unknown): Storyboard {
   if (voiceValue !== undefined && (typeof voiceValue !== "string" || !voiceValue.trim())) {
     throw new StoryboardValidationError("voice must be a non-empty string");
   }
+  const rendererValue = input["renderer"];
+  let renderer: Renderer = "slides";
+  if (rendererValue !== undefined) {
+    if (rendererValue !== "slides" && rendererValue !== "motion") {
+      throw new StoryboardValidationError('renderer must be "slides" or "motion"');
+    }
+    renderer = rendererValue;
+  }
+  const themeValue = input["theme"];
+  let theme: Theme = "light";
+  if (themeValue !== undefined) {
+    if (themeValue !== "light" && themeValue !== "dark") {
+      throw new StoryboardValidationError('theme must be "light" or "dark"');
+    }
+    theme = themeValue;
+  }
   const scenesValue = input["scenes"];
   if (
     !Array.isArray(scenesValue) ||
@@ -145,6 +169,8 @@ export function validateStoryboard(value: unknown): Storyboard {
   }
   return {
     title,
+    renderer,
+    theme,
     ...(typeof voiceValue === "string" && voiceValue.trim() !== "default"
       ? { voice: voiceValue.trim() }
       : {}),

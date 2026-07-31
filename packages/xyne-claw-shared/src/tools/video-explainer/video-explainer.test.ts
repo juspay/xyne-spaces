@@ -103,3 +103,32 @@ describe("generateSceneHtml", () => {
     expect(html).toContain("Diagram preview unavailable");
   });
 });
+
+describe("validateStoryboard renderer", () => {
+  it("defaults renderer to slides when omitted", () => {
+    const storyboard = validateStoryboard({
+      title: "Default renderer",
+      scenes: [{ kind: "title", narration: "Hello." }],
+    });
+    expect(storyboard.renderer).toBe("slides");
+  });
+
+  it("accepts the motion renderer", () => {
+    const storyboard = validateStoryboard({
+      title: "Motion renderer",
+      renderer: "motion",
+      scenes: [{ kind: "title", narration: "Hello." }],
+    });
+    expect(storyboard.renderer).toBe("motion");
+  });
+
+  it("rejects an unknown renderer", () => {
+    expect(() =>
+      validateStoryboard({
+        title: "Bad renderer",
+        renderer: "cinematic",
+        scenes: [{ kind: "title", narration: "Hello." }],
+      }),
+    ).toThrow(/renderer must be/);
+  });
+});
