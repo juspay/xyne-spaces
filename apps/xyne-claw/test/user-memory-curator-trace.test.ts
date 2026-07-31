@@ -3,7 +3,7 @@ import type { UserMemoryRecord } from "xyne-claw-shared";
 
 // Mock the LiteLLM transport so we script the tool-call `arguments` per test.
 const fetchMock = vi.fn();
-vi.mock("@xyne/litellm-client", () => ({
+vi.mock("../src/litellm-retry.js", () => ({
   fetchLiteLLMWithRetry: fetchMock,
 }));
 
