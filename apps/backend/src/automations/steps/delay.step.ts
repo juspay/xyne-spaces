@@ -8,6 +8,7 @@ import { automationContextStorage } from '../engine/automation-context-storage';
 import { automationScheduleQueue } from '../queue/automation-schedule.queue';
 import { logger } from '@/utils/logger';
 import { calculateETADeadline } from '@/utils/etaCalculation';
+import { triggerRegistry } from '../triggers/trigger-registry';
 
 const MAX_DELAY_SECONDS = 30 * 24 * 60 * 60;
 
@@ -113,12 +114,33 @@ export class DelayStep extends BaseActionStep<typeof DelayConfigSchema, DelayOut
   async onResume(
     rowData: Record<string, unknown>,
     _config: z.infer<typeof DelayConfigSchema>,
-    _context: AutomationContext,
+    context: AutomationContext,
   ): Promise<DelayOutput> {
     const output = rowData['output'] as Partial<DelayOutput> | undefined;
     if (!output?.delayedUntil) {
       throw new Error('[DELAY] onResume called with no delayedUntil on the step row');
     }
+
+    const triggerType = context.trigger.type;
+    if (triggerRegistry.has(triggerType)) {
+      const triggerImpl = triggerRegistry.get(triggerType);
+      if (typeof triggerImpl.hydratePayload === 'function') {
+        try {
+          const hydratedTriggerData = await triggerImpl.hydratePayload(context.trigger.data ?? {});
+          context.trigger = {
+            type: triggerType,
+            ...hydratedTriggerData,
+            data: hydratedTriggerData,
+          } as unknown as AutomationContext['trigger'];
+        } catch (err) {
+          logger.warn(
+            `[DELAY] trigger rehydration failed for trigger=${triggerType}, using snapshot:`,
+            err,
+          );
+        }
+      }
+    }
+
     return { delayedUntil: output.delayedUntil };
   }
 }

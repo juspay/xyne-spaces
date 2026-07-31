@@ -20,10 +20,10 @@ export const CSAT_FIELD_COMMENT = 'CSAT Comment';
 
 export const CSAT_MAX_SCORE = 5;
 
-const CSAT_FIELD_DEFS: Array<{ fieldName: string; fieldType: FormFieldType; fieldEnum?: string[] }> = [
-  { fieldName: CSAT_FIELD_RATING, fieldType: FormFieldType.SINGLE_SELECT, fieldEnum: ['GOOD', 'BAD'] },
-  { fieldName: CSAT_FIELD_SCORE, fieldType: FormFieldType.NUMBER },
-  { fieldName: CSAT_FIELD_COMMENT, fieldType: FormFieldType.STRING },
+const CSAT_FIELD_DEFS: Array<{ fieldName: string; fieldType: FormFieldType; fieldEnum?: string[]; isOptional: boolean }> = [
+  { fieldName: CSAT_FIELD_RATING, fieldType: FormFieldType.SINGLE_SELECT, fieldEnum: ['GOOD', 'BAD'], isOptional: true },
+  { fieldName: CSAT_FIELD_SCORE, fieldType: FormFieldType.NUMBER, isOptional: true },
+  { fieldName: CSAT_FIELD_COMMENT, fieldType: FormFieldType.STRING, isOptional: true },
 ];
 
 /**
@@ -91,7 +91,8 @@ export async function ensureCsatFormFields(boardId: string, workspaceId: string,
   const existingFields = await repositories.forms.findFormFields(mapping.formId);
   const existingNames = new Set(existingFields.map(f => f.fieldName));
   const missing = CSAT_FIELD_DEFS.filter(d => !existingNames.has(d.fieldName));
-  if (missing.length === 0) return;
+  const needsRepair = existingFields.some(f => !f.isOptional && CSAT_FIELD_DEFS.some(d => d.fieldName === f.fieldName));
+  if (missing.length === 0 && !needsRepair) return;
 
   await repositories.forms.updateWithFields(mapping.formId, {
     formName: form.formName,
@@ -102,7 +103,7 @@ export async function ensureCsatFormFields(boardId: string, workspaceId: string,
         fieldName: f.fieldName,
         fieldType: f.fieldType as unknown as FormFieldType,
         fieldEnum: f.fieldEnum ?? undefined,
-        isOptional: f.isOptional,
+        isOptional: CSAT_FIELD_DEFS.some(d => d.fieldName === f.fieldName) ? true : f.isOptional,
       })),
       ...missing,
     ],
