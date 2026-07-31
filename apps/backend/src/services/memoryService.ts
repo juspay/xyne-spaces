@@ -268,7 +268,7 @@ export async function searchMemory(
   // Add query and embedding input only when query is present
   if (query && query.trim()) {
     payload.query = query;
-    payload['input.query(e)'] = 'embed(@query)';
+    payload['input.query(e)'] = 'embed(hf-embedder, @query)';
     payload['input.query(alpha)'] = 0.5;
     payload['input.query(includeSummary)'] = Number(includeSummary);
     payload['input.query(includeQuery)'] = Number(includeQuery);

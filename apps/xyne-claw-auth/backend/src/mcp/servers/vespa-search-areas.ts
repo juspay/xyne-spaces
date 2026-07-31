@@ -679,7 +679,7 @@ function buildAreaClauses(
 
   // 1. Retrieval primitive — hybrid when the query will be SCORED: OR the
   // lexical userInput with a vector nearestNeighbor on the schema's embedding
-  // field(s). queryDirect supplies input.query(e)=embed(@query) for scoring
+  // field(s). queryDirect supplies input.query(e)=embed(hf-embedder, @query) for scoring
   // profiles, so `e` is only available then — skip the NN when the query would
   // run unranked (grouping, or an explicit `unranked` profile) or when the
   // schema has no embedding field (user/project). Mirrors backend YqlBuilder.
@@ -851,7 +851,7 @@ export function buildYqlFromParams(
     rankProfile = params.rankProfile;
   } else if (query) {
     // A text query always scores (hybrid retrieval), EVEN when grouping — pin
-    // default_native so queryDirect sends input.query(e)=embed(@query) that the
+    // default_native so queryDirect sends input.query(e)=embed(hf-embedder, @query) that the
     // nearestNeighbor clause needs. (Its auto-pick would fall to `unranked` for
     // a grouping query and drop `e`, breaking the vector clause.)
     rankProfile = "default_native";

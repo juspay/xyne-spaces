@@ -70,7 +70,7 @@ export function defaultNativeInputs(query: string): Record<string, unknown> {
     "input.query(filtering_weight)": 0.0,
     "input.query(time_from)": 0,
     "input.query(time_to)": Date.now(),
-    ...(text ? { "input.query(e)": "embed(@query)" } : {}),
+    ...(text ? { "input.query(e)": "embed(hf-embedder, @query)" } : {}),
   };
 }
 

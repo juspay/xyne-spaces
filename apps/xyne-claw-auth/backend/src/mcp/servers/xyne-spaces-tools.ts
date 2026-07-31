@@ -5155,7 +5155,7 @@ const spacesVespaQuery: ToolDef = {
         description:
           "Optional inputs for the chosen rank profile, read from its `inputs { query(...) }` block in the .sd. " +
           "Keys may be bare (`alpha`) or wrapped (`query(alpha)`); each is sent as `input.query(<name>)`. " +
-          "For an embedding input use `{ \"e\": \"embed(@query)\" }`. Ignored when the profile is `unranked`; if omitted with a scoring profile, the standard default_native inputs are used.",
+          "For an embedding input use `{ \"e\": \"embed(hf-embedder, @query)\" }` (the embedder id is required — the cluster defines more than one). Ignored when the profile is `unranked`; if omitted with a scoring profile, the standard default_native inputs are used.",
       },
     },
     required: ["yql"],

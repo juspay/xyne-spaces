@@ -220,7 +220,7 @@ export class SearchService {
       'input.query(alpha)': 0.35,
       timeout: '15s',
       'presentation.summary': 'lean',
-      ...(useSemantic ? { 'input.query(e)': 'embed(@query)' } : {}),
+      ...(useSemantic ? { 'input.query(e)': 'embed(hf-embedder, @query)' } : {}),
     };
 
     try {
@@ -433,7 +433,7 @@ export class SearchService {
           "input.query(chunk_limit)": chunkLimit,
           "input.query(query_length)": queryWordCount,
           timeout: '30s',
-          ...(shouldEmbed ? { 'input.query(e)': 'embed(@query)' } : {}),
+          ...(shouldEmbed ? { 'input.query(e)': 'embed(hf-embedder, @query)' } : {}),
           ...(useFuzzy ? { "gram.match": "weakAnd" } : {}),
           "input.query(freshness_weight)": freshnessWeight,
           "input.query(filtering_weight)": filteringWeight,
