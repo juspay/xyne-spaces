@@ -333,6 +333,10 @@ else
     echo -e "${BLUE}Creating developer user...${NC}"
     pnpm exec dotenv -e .env.local -- pnpm exec tsx scripts/assign-user-group.ts
     echo -e "${GREEN}✓ Developer user created${NC}"
+
+    echo -e "${BLUE}🌱 Seeding app permission registry...${NC}"
+    pnpm exec dotenv -e .env.local -- pnpm exec tsx scripts/seed-app-permissions.ts
+    echo -e "${GREEN}✓ App permissions seeded${NC}"
   else
     # User table exists - just sync schema changes without dropping data
     echo -e "${BLUE}Syncing database schema...${NC}"
@@ -538,8 +542,10 @@ echo ""
 
 # Read dev user email from .env.local for credentials display
 DEV_EMAIL=$(grep -m 1 '^DEFAULT_ADMIN_EMAIL=' apps/backend/.env.local 2>/dev/null | sed 's/^DEFAULT_ADMIN_EMAIL=//' || true)
+DEV_EMAIL_IS_DEFAULT=false
 if [ -z "$DEV_EMAIL" ] || [[ "$DEV_EMAIL" == definition* ]]; then
     DEV_EMAIL="admin@xyne.ai"
+    DEV_EMAIL_IS_DEFAULT=true
 fi
 
 echo -e "${GREEN}========================================${NC}"
@@ -548,5 +554,7 @@ echo -e "${GREEN}========================================${NC}"
 echo -e "  ${BLUE}Email:${NC}     ${DEV_EMAIL}"
 echo -e "  ${BLUE}Password:${NC}  ${GREEN}xynelocal@123${NC}"
 echo -e "${GREEN}========================================${NC}"
-echo -e "${YELLOW}💡 Tip: update DEFAULT_ADMIN_EMAIL in apps/backend/.env.local and re-run 'pnpm run services' to use your own email.${NC}"
+if [ "$DEV_EMAIL_IS_DEFAULT" = true ]; then
+    echo -e "${YELLOW}💡 Tip: update DEFAULT_ADMIN_EMAIL in apps/backend/.env.local and re-run 'pnpm run services' to use your own email.${NC}"
+fi
 echo ""
