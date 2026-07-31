@@ -10,6 +10,7 @@ import { prisma } from "../db.js";
 import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { KNOWN_PROVIDERS, buildProviderConfig, agentCredRefreshTarget, userCredRefreshTarget } from "../lib/agent-provider-config.js";
+import { dispatchLocalHarnessRun, isLocalHarnessProvider, pinnedModelForProvider, resolveLocalHarnessTarget } from "../lib/local-harness.js";
 import { resolveFastMode } from "../lib/fast-mode.js";
 import { extractFollowUpSuggestionsFromInvocations } from "../lib/follow-up-suggestions.js";
 import { getRequesterId, getOrgId, getAgentEditAccess, isClawAdmin } from "../middleware/agent-acl.js";
@@ -1156,14 +1157,16 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
     const rawPersonalProvider = userAgentConfig?.provider;
     // "spaces" is the platform-default sentinel, not a real personal credential —
     // saving it should not override the agent-level providerOrder/credentials.
-    const personalProvider = rawPersonalProvider && rawPersonalProvider !== "spaces"
+    const selectedPersonalProvider = rawPersonalProvider && rawPersonalProvider !== "spaces"
       ? rawPersonalProvider
       : undefined;
+    const personalProvider = isLocalHarnessProvider(selectedPersonalProvider) ? undefined : selectedPersonalProvider;
     const agentLevelProvider = (agent.config as Record<string, unknown> | null)?.["provider"] as string | undefined;
     const rawProviderOrder = (agent.config as Record<string, unknown> | null)?.["providerOrder"];
-    const agentProviderOrder: string[] = Array.isArray(rawProviderOrder)
-      ? rawProviderOrder.filter((p): p is string => typeof p === "string" && KNOWN_PROVIDERS.has(p))
+    const configuredProviderOrder: string[] = Array.isArray(rawProviderOrder)
+      ? rawProviderOrder.filter((p): p is string => typeof p === "string")
       : [];
+    const agentProviderOrder: string[] = configuredProviderOrder.filter((p) => KNOWN_PROVIDERS.has(p));
     const userProvider = personalProvider ?? agentLevelProvider;
 
     const allCreds = await userProviderCredentialsRepository.listByUser(userId).catch(() => []);
@@ -1304,6 +1307,15 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       fastMode: fastModeEnabled,
     };
 
+    const localTarget = await resolveLocalHarnessTarget({
+      userId,
+      providerOrder: configuredProviderOrder,
+      personalProvider: selectedPersonalProvider,
+    }).catch((err: unknown) => {
+      log.warn("[agent-chat] local-harness resolution failed — using server run:", err instanceof Error ? err.message : err);
+      return undefined;
+    });
+
     // SSE consumer path. We send Accept: text/event-stream so the /run proxy
     // routes us through SSE pass-through (one ordered TCP connection from
     // claw → claw-auth) instead of falling back to the legacy POST bridge,
@@ -1316,7 +1328,23 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
     // run-stream.ts — so all the finalize + persistAssistantResult + resolve
     // wiring stays in one place.
     let runBody: { success: boolean; sessionId?: string; error?: string; deferred?: boolean };
-    if (CONFIG.clawSseTransport) {
+    if (localTarget) {
+      const dispatched = await dispatchLocalHarnessRun({
+        target: localTarget,
+        userId,
+        orgId: agent.orgId,
+        conversationId,
+        agentSlug: slug,
+        agentName: agent.name,
+        systemPrompt: agent.systemPrompt,
+        model: pinnedModelForProvider(runAgentConfig, localTarget.provider),
+        task: message.trim(),
+        context: resolvedContext.promptPrefix || null,
+        progressUrl,
+        callbackUrl,
+      });
+      runBody = { success: true, sessionId: dispatched.sessionId };
+    } else if (CONFIG.clawSseTransport) {
       runBody = await runAgentChatViaSse({
         forwardBody,
         callbackId,

@@ -1,4 +1,4 @@
-import { ipcMain, shell, app, BrowserView, BrowserWindow, desktopCapturer, dialog } from 'electron';
+import { ipcMain, shell, app, session, BrowserView, BrowserWindow, desktopCapturer, dialog } from 'electron';
 import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron';
 import { promises as fs } from 'fs';
 import * as path from 'path';
@@ -27,6 +27,7 @@ import {
 import { meetingDetectorService } from '../services/meeting-detector';
 import { browserSettingsService, BrowserSettings } from '../services/browser-settings';
 import { errorReportRecorder } from '../services/error-report-recorder';
+import { localHarnessBridge } from '../services/local-harness';
 
 
 let previewBrowserView: BrowserView | null = null;
@@ -628,4 +629,29 @@ export function setupIpcHandlers(): void {
       return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
   });
+
+  ipcMain.handle('local-harness:status', async (event) => {
+    if (!isMainWindowSender(event)) throw new Error('Unauthorized sender');
+    return localHarnessBridge.status();
+  });
+
+  ipcMain.handle('local-harness:detect', async (event) => {
+    if (!isMainWindowSender(event)) throw new Error('Unauthorized sender');
+    return localHarnessBridge.refreshInstallations();
+  });
+
+  ipcMain.handle('local-harness:connect', async (event) => {
+    if (!isMainWindowSender(event)) throw new Error('Unauthorized sender');
+    return localHarnessBridge.connect(await xyneCookieHeader());
+  });
+
+  ipcMain.handle('local-harness:disconnect', async (event) => {
+    if (!isMainWindowSender(event)) throw new Error('Unauthorized sender');
+    return localHarnessBridge.disconnect(await xyneCookieHeader());
+  });
+}
+
+async function xyneCookieHeader(): Promise<string> {
+  const cookies = await session.defaultSession.cookies.get({ url: config.FRONTEND_URL });
+  return cookies.map((c) => `${c.name}=${c.value}`).join('; ');
 }

@@ -57,6 +57,8 @@ import { dailyBriefRouter } from "./routes/daily-brief.js";
 import { pendingQuestionsRouter } from "./routes/pending-questions.js";
 import { ttsRouter } from "./routes/tts.js";
 import { settingsRouter } from "./routes/settings.js";
+import { localHarnessBridgeRouter, localHarnessRouter } from "./routes/local-harness.js";
+import { initLocalHarnessExpirySweep } from "./services/localHarnessExpiry.js";
 import { runsRouter } from "./routes/runs.js";
 import { metricsRouter } from "./routes/metrics.js";
 import { memoryRouter } from "./routes/memory.js";
@@ -263,6 +265,8 @@ app.use(`${BASE}/scheduled-jobs`, requireAuth, scheduledJobsRouter);
 // read other users' pending questions by ID.
 app.use(`${BASE}/pending-questions`, requireStrictS2S, pendingQuestionsRouter);
 app.use(`${BASE}/settings`, requireAuth, settingsRouter);
+app.use(`${BASE}/local-harness`, requireUserAuth, localHarnessRouter);
+app.use(`${BASE}/local-harness-bridge`, localHarnessBridgeRouter);
 app.use(`${BASE}/runs`, requireAuth, runsRouter);
 app.use(`${BASE}/metrics`, requireAuth, metricsRouter);
 // Mount-level baseline auth (defense-in-depth): every memory route also has
@@ -329,6 +333,7 @@ listen(CONFIG.port, () => {
     initDailyBriefCron();
     initFailureCuratorWorker();
     initOrphanFinalizerWorker();
+    initLocalHarnessExpirySweep();
   // Upsert custom tools from the shared registry so newly added tools (e.g.
     // google-sheets-create, google-forms-create) show up in the agent UI on
     // restart without needing a manual POST /tools/sync call.
