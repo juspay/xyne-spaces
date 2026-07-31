@@ -13,6 +13,7 @@ import { debugRouter } from "./routes/debug.js";
 import { evalJudgeRouter } from "./routes/eval-judge.js";
 import { evalExtractRouter } from "./routes/eval-extract.js";
 import { entityLlmRouter } from "./routes/entity-llm.js";
+import { attachmentsRouter } from "./routes/attachments.js";
 import { startSessionCleanup, flushAllActiveSessions } from "./session-store.js";
 import { beginDraining, isDraining } from "./drain.js";
 import { createLogger } from "./logger.js";
@@ -68,6 +69,7 @@ app.use(debugRouter);
 app.use(evalJudgeRouter);
 app.use(evalExtractRouter);
 app.use(entityLlmRouter);
+app.use(attachmentsRouter);
 
 const server = app.listen(SERVER.port, () => {
   log.info(`[xyne-claw] Server listening on port ${SERVER.port}`);
