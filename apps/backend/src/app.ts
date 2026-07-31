@@ -114,7 +114,6 @@ import queriesEntityTypeBackfillRoutes from '@/routes/queriesEntityTypeBackfill'
 import onCallSetNumbersBackfillRoutes from '@/routes/onCallSetNumbersBackfill';
 import ticketDuplicateBackfillRoutes from '@/routes/ticketDuplicateBackfill';
 import conversationParticipantBackfillRoutes from '@/routes/conversationParticipantBackfill';
-import callParticipantCountBackfillRoutes from '@/routes/callParticipantCountBackfill';
 import formFieldSequenceBackfillRoutes from '@/routes/formFieldSequenceBackfill';
 import dualWriteSequenceNumberBackfillRoutes from '@/routes/dualWriteSequenceNumberBackfill';
 import dmChannelProjectBackfillRoutes from '@/routes/dmChannelProjectBackfill';
