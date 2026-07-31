@@ -124,7 +124,7 @@ export class ConversationParticipantRepository extends BaseRepository<
     return conversation?.channelId;
   }
 
-  private async resolveConversationWorkspaceId(conversationId: string): Promise<string | null> {
+  private async resolveConversationWorkspaceId(conversationId: string): Promise<string> {
     const conversation = await this.db.conversation.findUniqueOrThrow({
       where: { conversationId },
       select: { workspaceId: true },

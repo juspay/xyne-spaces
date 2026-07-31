@@ -1,6 +1,7 @@
 import { repositories } from '../database/repositories/index';
 import { AccessType } from '@prisma/client';
 import { logger } from '../utils/logger';
+import { db } from '../database/client';
 
 /**
  * ACL Service for handling access control logic
@@ -170,10 +171,15 @@ export class ACLService {
       }
 
       // Grant access
+      const user = await db.user.findUniqueOrThrow({
+        where: { id: userId },
+        select: { workspaceId: true },
+      });
       await repositories.resourceAccess.grantAccess({
         userId,
         resourceId: resource.id,
-        accessType
+        accessType,
+        workspaceId: user.workspaceId,
       });
 
       logger.info(`Granted ${accessType} access to user ${userId} for resource ${resourceName}`);
@@ -209,10 +215,15 @@ export class ACLService {
       }
 
       // Grant access
+      const group = await db.userGroup.findUniqueOrThrow({
+        where: { id: groupId },
+        select: { workspaceId: true },
+      });
       await repositories.resourceAccess.grantAccess({
         groupId,
         resourceId: resource.id,
-        accessType
+        accessType,
+        workspaceId: group.workspaceId,
       });
 
       logger.info(`Granted ${accessType} access to group ${groupId} for resource ${resourceName}`);

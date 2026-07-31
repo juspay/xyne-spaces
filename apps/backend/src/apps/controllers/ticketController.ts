@@ -1226,11 +1226,11 @@ export class TicketController {
       let conversationIdsBySender: string[] | undefined;
       const emailWhere: Prisma.EmailWhereInput = {
         type: EmailType.DEFAULT,
-         // Narrow the sender lookup by channel, else by workspace (the ticket query is the
-        // real isolation boundary). Include null-workspace emails — legacy rows aren't backfilled.
+        // Narrow the sender lookup by channel, else by workspace (the ticket query is the
+        // real isolation boundary). workspaceId is now non-nullable, so scope directly to it.
         ...(channelIds.length > 0
           ? { channelId: { in: channelIds } }
-          : { OR: [{ workspaceId }, { workspaceId: null }] }),
+          : { workspaceId }),
       };
 
       if (senderEmail) {

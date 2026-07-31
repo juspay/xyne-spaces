@@ -15,6 +15,7 @@ import { notificationService as realTimeNotificationService } from '@/notificati
 import { fcmPushService, type MobilePushRegistration } from './fcmService';
 import { getNotificationJobsExpected } from '@/services/otel';
 import { DatabaseClient } from '@/database/client';
+import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import * as notificationFilterService from './notificationFilterService';
 import type { PrefetchedFilterData } from './notificationFilterService';
 import { serializeInitialMessageMd, isDeskChannelType, type InitialMessageSummary } from '@xyne/shared';
@@ -141,6 +142,13 @@ export interface NotificationData {
   actionUrl?: string;
   metadata?: any;
   imageUrl?: string;
+  /**
+   * Workspace the notification belongs to. Optional at the call sites; when
+   * omitted, createSessionNotification derives it from the recipient's
+   * (workspace-scoped) User row. Callers that already know the event's workspace
+   * should pass it to avoid the extra lookup.
+   */
+  workspaceId?: string;
 }
 
 interface NotificationOptions {
@@ -169,7 +177,13 @@ class NotificationService {
     data: NotificationData,
     deliveryMethod: NotificationDeliveryMethod = NotificationDeliveryMethod.BROWSER
   ) {
+    // Prefer a caller-provided workspace (the event's workspace); otherwise derive
+    // it from the recipient's own workspace-scoped User row. resolveWorkspaceIdFromModel
+    // resolves under a system context, so it is safe even for cross-workspace recipients.
+    const workspaceId =
+      data.workspaceId ?? (await resolveWorkspaceIdFromModel(prisma, 'user', { id: userId }));
     return await repositories.notifications.create({
+      workspaceId,
       userId,
       type: data.type,
       title: data.title,

@@ -67,6 +67,9 @@ import {
   DraftMessagesACL,
   ScheduledMessagesACL,
   EmailDraftsACL,
+  AgentsACL,
+  AgentStepsACL,
+  WorkflowStepsACL,
 } from './tables'
 import { UserActivityEventsAcl } from './tables/user_activity_acl'
 
@@ -221,6 +224,16 @@ export class ACLFactory {
 
       case 'workflowExecution':
         return new WorkflowExecutionsACL(ctx, prisma)
+
+      case 'workflowStep':
+        return new WorkflowStepsACL(ctx, prisma)
+
+      case 'agent':
+        return new AgentsACL(ctx, prisma)
+
+      case 'agentStep':
+        return new AgentStepsACL(ctx, prisma)
+
       case 'userActivityEvent':
         return new UserActivityEventsAcl(ctx, prisma)
 
@@ -263,9 +276,14 @@ export class ACLFactory {
       case 'savedUserConfigurationValue':
         return new SavedUserConfigurationValuesACL(ctx, prisma)
 
-      // Default: no ACL restriction (pass-through)
+      // Fail closed: an unmapped model must never fall through to an unfiltered
+      // pass-through ACL. Every entry in ALLOWED_MODELS (validator.ts) has an
+      // explicit case above, and the validator rejects any non-allowlisted model
+      // before this factory is reached — so this branch is only hit if a model is
+      // added to the allowlist without a matching ACL, which must be a hard error
+      // rather than a silent cross-tenant read.
       default:
-        return new BaseQueryACL(ctx, prisma) as BaseQueryACL
+        throw new Error(`pythonQuery ACL: no ACL registered for model '${modelName}'`)
     }
   }
 }

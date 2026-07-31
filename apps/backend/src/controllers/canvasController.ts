@@ -164,6 +164,9 @@ export class CanvasController {
       const finalWidth = parsedWidth || uploadedFile.width;
       const finalHeight = parsedHeight || uploadedFile.height;
 
+      if (!req.user?.workspaceId) {
+        throw new Error('workspaceId required: no authenticated workspace');
+      }
       const attachment = await this.messageAttachmentRepository.create({
         entityId: canvasId,
         entityType: AttachmentEntityType.CANVAS,
@@ -178,7 +181,7 @@ export class CanvasController {
         uploadedByUserId: userId,
         createdBy: userId,
         storageProvider: config.fileStorage.provider,
-        workspaceId: req.user?.workspaceId ?? '',
+        workspaceId: req.user.workspaceId,
         metadata: {
           ...uploadedFile.metadata,
           canvasId,

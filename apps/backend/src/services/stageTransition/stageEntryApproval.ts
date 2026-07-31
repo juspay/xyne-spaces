@@ -170,7 +170,7 @@ export async function maybeCreateEntryApprovalRequest(
  */
 async function claimEntryApprovalRequest(
   tx: Prisma.TransactionClient,
-  ticket: { id: string; conversationId: string; workspaceId: string | null },
+  ticket: { id: string; conversationId: string; workspaceId: string },
   stageId: string,
   landedStageName: string,
   targetStageName: string | null,
@@ -228,7 +228,7 @@ async function claimEntryApprovalRequest(
       messageId: randomUUID(),
       conversationId: ticket.conversationId,
       senderId: actorId,
-      ...(ticket.workspaceId ? { workspaceId: ticket.workspaceId } : {}),
+      workspaceId: ticket.workspaceId,
       content: `${actorName} requested approval for ${targetStageName ?? ''}`.trim(),
       msgType: MessageType.SYSTEM,
       showInChannel: false,

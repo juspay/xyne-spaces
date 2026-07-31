@@ -3,13 +3,17 @@ import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
 import { setupUserSessionLogging } from './middleware/userSessionLogging';
 import { setupMessageMetadataSync } from './middleware/messageMetadataSync';
+import { withWorkspaceReadFilter } from './tenant/read-filter';
+import { withWorkspaceStamp } from './tenant/stamp';
 import { setupTicketActivityChannelSync } from './middleware/ticketActivityChannelSync';
 import { setupTicketCreatedActivity } from './middleware/ticketCreatedActivity';
 import { setupUserVespaSync } from './middleware/userVespaSync';
 
 export class DatabaseClient {
   private static instance: PrismaClient | null = null;
+  private static wrappedInstance: PrismaClient | null = null;
   private static readReplicaInstance: PrismaClient | null = null;
+  private static wrappedReplicaInstance: PrismaClient | null = null;
   private static isConnected = false;
 
   static getReadReplicaInstance(): PrismaClient | null {
@@ -26,8 +30,11 @@ export class DatabaseClient {
           },
         },
       });
+      // Scope reads to the caller's workspace (defense-in-depth read filter).
+      // Stamp workspaceId onto every INSERT + nested create from tenant context.
+      DatabaseClient.wrappedReplicaInstance = withWorkspaceStamp(withWorkspaceReadFilter(DatabaseClient.readReplicaInstance));
     }
-    return DatabaseClient.readReplicaInstance;
+    return DatabaseClient.wrappedReplicaInstance ?? DatabaseClient.readReplicaInstance;
   }
 
   static getInstance(): PrismaClient {
@@ -69,9 +76,12 @@ export class DatabaseClient {
         logger.warn('Database warning:', e.message);
       });
 
+      // Scope reads to the caller's workspace (defense-in-depth read filter).
+      // Stamp workspaceId onto every INSERT + nested create from tenant context.
+      DatabaseClient.wrappedInstance = withWorkspaceStamp(withWorkspaceReadFilter(DatabaseClient.instance));
     }
 
-    return DatabaseClient.instance;
+    return DatabaseClient.wrappedInstance ?? DatabaseClient.instance;
   }
 
   static async connect(): Promise<void> {
@@ -95,6 +105,7 @@ export class DatabaseClient {
       try {
         await DatabaseClient.instance.$disconnect();
         DatabaseClient.instance = null;
+        DatabaseClient.wrappedInstance = null;
         DatabaseClient.isConnected = false;
         logger.info('Database disconnected successfully');
       } catch (error) {
@@ -107,6 +118,7 @@ export class DatabaseClient {
       try {
         await DatabaseClient.readReplicaInstance.$disconnect();
         DatabaseClient.readReplicaInstance = null;
+        DatabaseClient.wrappedReplicaInstance = null;
         logger.info('Read replica disconnected successfully');
       } catch (error) {
         logger.error('Error disconnecting from read replica:', error);

@@ -1424,7 +1424,10 @@ export class EmailService {
       }
 
       // Create MessageAttachment entries for email attachments
-      await this.createEmailAttachments(email.id, conversation.conversationId, conversation.createdBy, channel?.workspaceId ?? '', uploadedFiles);
+      if (!channel?.workspaceId) {
+        throw new Error(`workspaceId required: channel not found for email ${email.id} attachments`);
+      }
+      await this.createEmailAttachments(email.id, conversation.conversationId, conversation.createdBy, channel.workspaceId, uploadedFiles);
 
       if (ticketRow) {
         void this.triggerAutoDraft({

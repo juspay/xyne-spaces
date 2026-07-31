@@ -4,6 +4,7 @@ import { Notification, NotificationPreference, BrowserNotificationSubscription, 
 
 // Define create/update input types
 type NotificationCreateInput = {
+  workspaceId: string;
   userId: string;
   type: NotificationType;
   title: string;
@@ -25,8 +26,9 @@ export class NotificationRepository extends BaseRepository<Notification, Notific
   }
 
   async create(data: NotificationCreateInput): Promise<Notification> {
-    const workspaceId = await resolveWorkspaceIdFromModel(this.db, 'user', { id: data.userId });
-    return this.db.notification.create({ data: { ...data, workspaceId } as any });
+    // Pure writer: workspaceId is a required part of the input (see NotificationData /
+    // createSessionNotification, which source the tenant for the recipient).
+    return this.db.notification.create({ data });
   }
 
   async findById(id: string): Promise<Notification | null> {
@@ -142,6 +144,7 @@ export class NotificationRepository extends BaseRepository<Notification, Notific
 
 // Define types for NotificationPreference
 type NotificationPreferenceCreateInput = {
+  workspaceId: string;
   userId: string;
   notificationType: string;
   browserEnabled?: boolean;
@@ -157,8 +160,9 @@ export class NotificationPreferenceRepository extends BaseRepository<Notificatio
   }
 
   async create(data: NotificationPreferenceCreateInput): Promise<NotificationPreference> {
-    const workspaceId = await resolveWorkspaceIdFromModel(this.db, 'user', { id: data.userId });
-    return this.db.notificationPreference.create({ data: { ...data, workspaceId } as any });
+    // Pure writer: workspaceId is a required part of the input. (`as any` only
+    // bridges the pre-existing notificationType string↔enum mismatch.)
+    return this.db.notificationPreference.create({ data: data as any });
   }
 
   async findById(id: string): Promise<NotificationPreference | null> {
@@ -213,6 +217,7 @@ export class NotificationPreferenceRepository extends BaseRepository<Notificatio
 
 // Define types for BrowserNotificationSubscription
 type BrowserNotificationSubscriptionCreateInput = {
+  workspaceId: string;
   userId: string;
   endpoint: string;
   p256dh: string;
@@ -230,8 +235,8 @@ export class BrowserNotificationSubscriptionRepository extends BaseRepository<Br
   }
 
   async create(data: BrowserNotificationSubscriptionCreateInput): Promise<BrowserNotificationSubscription> {
-    const workspaceId = await resolveWorkspaceIdFromModel(this.db, 'user', { id: data.userId });
-    return this.db.browserNotificationSubscription.create({ data: { ...data, workspaceId } as any });
+    // Pure writer: workspaceId is a required part of the input.
+    return this.db.browserNotificationSubscription.create({ data });
   }
 
   async findById(id: string): Promise<BrowserNotificationSubscription | null> {

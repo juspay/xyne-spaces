@@ -138,13 +138,13 @@ export const PERMISSION_MATRIX: Record<WorkspaceRole, readonly PermissionEntry[]
  * @param userId      The user to grant permissions to.
  * @param email       User email (for logging).
  * @param role        The workspace role determining which permissions to grant.
- * @param workspaceId Optional workspace ID (for logging context only).
+ * @param workspaceId Workspace ID used for resource access rows and log context.
  */
 export async function grantPermissionsForRole(
   userId: string,
   email: string,
   role: WorkspaceRole,
-  workspaceId?: string,
+  workspaceId: string,
 ): Promise<void> {
   const logPrefix = '[grantPermissionsForRole]';
   const wsContext = workspaceId ? ` (workspace: ${workspaceId})` : '';
@@ -254,8 +254,12 @@ export async function syncResourceAdminAccess(
     );
 
     if (shouldHaveAccess && !hasAdminAccess) {
+      const user = await db.user.findUniqueOrThrow({
+        where: { id: userId },
+        select: { workspaceId: true },
+      });
       await repositories.resourceAccess.grantAccess(
-        { userId, resourceId: resource.id, accessType: AccessType.ADMIN },
+        { userId, resourceId: resource.id, accessType: AccessType.ADMIN, workspaceId: user.workspaceId },
         actorUserId,
       );
       logger.debug(`${logPrefix} Granted ADMIN access to ${resourceName} for user ${userId}.`);

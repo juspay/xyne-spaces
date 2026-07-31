@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express'
 import { readReplicaDb } from '@/database/client'
 import { logger } from '@/utils/logger'
 import { validateQueryAST, translateQueryAST, ACLFactory } from '@/services/pythonQuery'
+import { isWorkspaceScopedModel } from '@/database/tenant/read-filter'
 const router = Router()
 
 router.post('/', async (req: Request, res: Response) => {
@@ -43,6 +44,16 @@ router.post('/', async (req: Request, res: Response) => {
     const acl = ACLFactory.getACL(translated.modelName, aclContext, readReplicaDb)
     const whereWithAcl = await acl.applyToWhere(translated.args.where as Record<string, unknown>)
 
+    // Tenant backstop: scope reads to the caller's workspace (also enforced by the Prisma
+    // read-filter extension on readReplicaDb; explicit here so it doesn't depend on it).
+    const workspaceId = req.user?.workspaceId
+    const scopedWhere =
+      workspaceId && isWorkspaceScopedModel(translated.modelName)
+        ? (whereWithAcl && Object.keys(whereWithAcl).length
+            ? { AND: [whereWithAcl, { workspaceId }] }
+            : { workspaceId })
+        : whereWithAcl
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const model = (readReplicaDb as any)[translated.modelName]
 
@@ -56,12 +67,12 @@ router.post('/', async (req: Request, res: Response) => {
 
     if (translated.operation === 'count') {
       result = await model.count({
-        where: whereWithAcl,
+        where: scopedWhere,
       })
     } else {
       const findManyArgs = {
         ...translated.args,
-        where: whereWithAcl,
+        where: scopedWhere,
       }
 
       result = await model.findMany(findManyArgs)

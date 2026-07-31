@@ -1,4 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
+import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import {
   InvitationResponse,
   MeetingStatus,
@@ -16,36 +17,6 @@ function normalizeUserIds(userIds: string[] | undefined, organizerId: string): s
 export class RecurringCallParticipantRepository {
   private client(tx?: Prisma.TransactionClient) {
     return tx ?? DatabaseClient.getInstance();
-  }
-
-  /**
-   * Resolve the tenant for a participant row from the series, falling back to the series'
-   * channel (Channel.workspaceId is NOT NULL). RecurringCallSeries.workspaceId is nullable
-   * and null for un-backfilled series, so resolving it directly would throw for legacy rows;
-   * the channel hop resolves reliably even before the backfill runs.
-   */
-  private async resolveSeriesWorkspaceId(
-    client: Prisma.TransactionClient | ReturnType<typeof DatabaseClient.getInstance>,
-    recurringSeriesId: string,
-  ): Promise<string> {
-    const series = await client.recurringCallSeries.findUnique({
-      where: { id: recurringSeriesId },
-      select: { workspaceId: true, channelId: true },
-    });
-    if (!series) {
-      throw new Error(`workspaceId required: recurring call series ${recurringSeriesId} not found`);
-    }
-    if (series.workspaceId) return series.workspaceId;
-    const channel = await client.channel.findUnique({
-      where: { id: series.channelId },
-      select: { workspaceId: true },
-    });
-    if (!channel) {
-      throw new Error(
-        `workspaceId required: channel ${series.channelId} for series ${recurringSeriesId} not found`,
-      );
-    }
-    return channel.workspaceId;
   }
 
   async replaceInternalParticipants(params: {
@@ -66,7 +37,7 @@ export class RecurringCallParticipantRepository {
       },
     });
 
-    const workspaceId = await this.resolveSeriesWorkspaceId(client, recurringSeriesId);
+    const workspaceId = await resolveWorkspaceIdFromModel(client, 'recurringCallSeries', { id: recurringSeriesId });
 
     await client.recurringCallParticipant.createMany({
       data: participantUserIds.map(userId => ({
@@ -129,7 +100,7 @@ export class RecurringCallParticipantRepository {
       },
     });
 
-    const workspaceId = await this.resolveSeriesWorkspaceId(client, recurringSeriesId);
+    const workspaceId = await resolveWorkspaceIdFromModel(client, 'recurringCallSeries', { id: recurringSeriesId });
 
     await client.recurringCallParticipant.createMany({
       data: normalizedExternalInvitees.map(email => {

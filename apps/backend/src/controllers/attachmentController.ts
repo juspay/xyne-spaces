@@ -531,6 +531,10 @@ export class AttachmentController {
 
       const uploadedFiles = await uploadFiles(files, undefined, fileMetadataArray);
 
+      const workspaceId = req.user?.workspaceId;
+      if (!workspaceId) {
+        throw new Error('workspaceId required: no authenticated workspace');
+      }
       const attachmentData: CreateMessageAttachmentInput[] = uploadedFiles.map(file => ({
         entityId,
         entityType,
@@ -545,7 +549,7 @@ export class AttachmentController {
         createdBy: userId,
         storageProvider: config.fileStorage.provider,
         conversationId: null,
-        workspaceId: req.user?.workspaceId ?? '',
+        workspaceId,
         metadata: file.metadata || {},
       }));
 

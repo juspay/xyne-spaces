@@ -898,12 +898,15 @@ export class UserManagementService {
         return { success: false, message: 'User is already in this group' };
       }
 
-      // Create new mapping
+      // Create new mapping. Use the GROUP's workspace (the mapping belongs to the
+      // group's tenant), not user.workspaceId — users are multi-workspace and their
+      // workspaceId is only their home workspace, which would mis-scope/hide the
+      // mapping when assigning to a group in another workspace.
       await this.prisma.userGroupMapping.create({
         data: {
           userId,
           userGroupId: groupId,
-          workspaceId: user.workspaceId,
+          workspaceId: group.workspaceId,
         }
       });
 
