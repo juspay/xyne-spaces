@@ -225,6 +225,8 @@ export function McpDetailPanel({
                         <button
                           type='button'
                           onClick={() => setAuthOpen(false)}
+                          data-track-category='Claw Agents'
+                          data-track-name='Create agent v2: cancel MCP oauth'
                           className='flex h-7 items-center justify-center rounded-lg bg-card px-2 py-1.5 text-sm font-medium leading-5 text-foreground transition-colors hover:bg-muted'
                         >
                           Cancel

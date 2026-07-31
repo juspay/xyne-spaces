@@ -68,6 +68,9 @@ const FilterMenu = ({
                 onChange(option.id);
                 setOpen(false);
               }}
+              data-track-category='Claw Agents'
+              data-track-name={trackName}
+              data-track-metadata={JSON.stringify({ option: option.label })}
               className={cn(
                 'rounded-lg px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted',
                 active === option.id ? 'font-medium text-foreground' : 'text-muted-foreground',
