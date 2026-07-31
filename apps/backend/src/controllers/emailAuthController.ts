@@ -1,7 +1,9 @@
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import { Request, Response } from 'express';
+import { AuthProvider } from '@prisma/client';
 import { UserSessionService } from '../services/userSessionService';
+import { UserService } from '../services/userService';
 import { jwtService } from '../services/jwtService';
 import {
   verifyPassword,
@@ -12,6 +14,7 @@ import { DatabaseClient } from '@/database/client';
 import { emailService } from '@/services/email/factory';
 import { redisService } from '@/services/redisService';
 import '../types/express';
+import { migrateLegacyIdentity } from '@/services/legacyIdentityMigrationHelper';
 
 interface ResetCodePayload {
   code: string;
@@ -24,10 +27,12 @@ const PASSWORD_RESET_REQUEST_MESSAGE = 'If an account exists, a reset code has b
 
 export class EmailAuthController {
   private userSessionService: UserSessionService;
+  private userService: UserService;
   private prisma = DatabaseClient.getInstance();
 
   constructor() {
     this.userSessionService = new UserSessionService();
+    this.userService = new UserService();
   }
 
   /**
@@ -123,6 +128,27 @@ export class EmailAuthController {
         res.status(401).json({
           error: 'Invalid credentials',
           message: 'Email or password is incorrect',
+        });
+        return;
+      }
+
+      await migrateLegacyIdentity({
+        email: normalizedEmail,
+        authProvider: AuthProvider.EMAIL,
+        providerUserId: `email-${normalizedEmail}`,
+      });
+
+      // SECURITY: if this email is already registered with an SSO provider
+      // (Google/Microsoft), do not allow email+password login. Account linking is
+      // intentionally unsupported (it enables account takeover) — mirrors the
+      // provider-mismatch guard in the OAuth callbacks. This also blocks an SSO
+      // user who set a password via the reset flow from bypassing SSO.
+      const existingIdentity = await this.userService.findAuthIdentityByEmail(normalizedEmail);
+      if (existingIdentity && existingIdentity.authProvider !== AuthProvider.EMAIL) {
+        res.status(403).json({
+          error: 'provider_mismatch',
+          message: 'This account uses a different login method. Please continue with your original sign-in method.',
+          existingProvider: existingIdentity.authProvider,
         });
         return;
       }
@@ -247,6 +273,7 @@ export class EmailAuthController {
         workspaceId: workspaceUser.workspaceId,
         memberId: workspaceUser.orgMemberId,
         providerUserId: `email-${workspaceUser.email}`,
+        provider: AuthProvider.EMAIL,
       });
 
       res.cookie('google_access_token', jwtToken, {
