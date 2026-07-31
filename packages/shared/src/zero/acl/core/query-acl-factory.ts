@@ -85,6 +85,40 @@ import {
   ResourceAccessACL,
   ResourcesACL,
   WorkspacesACL,
+  AgentToolsMappingsACL,
+  AgentsACL,
+  ApplicationReleaseTicketsACL,
+  ApplicationsACL,
+  CanvasVersionsACL,
+  ChannelUserStatusACL,
+  ClassificationMappingsACL,
+  CoesACL,
+  CustomEmojisACL,
+  DashboardQueriesMappingACL,
+  DashboardsACL,
+  DraftMessagesACL,
+  EmailReadsACL,
+  ImpactsACL,
+  LinkAccessACL,
+  LinksACL,
+  LookupValuesACL,
+  MerchantsACL,
+  ModelsACL,
+  ProactiveNudgesACL,
+  QueriesACL,
+  RcasACL,
+  RecurringCallSeriesACL,
+  ReleaseAttributionsACL,
+  ReleaseChangeTypesACL,
+  ReleaseChangesACL,
+  ReleaseEventsACL,
+  SavedUserConfigurationValuesACL,
+  StageApproversACL,
+  SurfaceLinksACL,
+  SurfaceNudgeCountsACL,
+  SurfaceNudgesACL,
+  ToolsACL,
+  WorkspaceOrganizationsACL,
 } from '../tables';
 export class QueryACLFactory {
   static getACL<TTable extends TableName>(
@@ -99,9 +133,9 @@ export class QueryACLFactory {
       case 'installed_apps':
         return new InstalledAppsACL(ctx) as BaseQueryACL<TTable>;
       case 'agent_tools_mappings':
-        return new BaseQueryACL(ctx, table) as BaseQueryACL<TTable>;
+        return new AgentToolsMappingsACL(ctx) as BaseQueryACL<TTable>;
       case 'agents':
-        return new BaseQueryACL(ctx, table) as BaseQueryACL<TTable>;
+        return new AgentsACL(ctx) as BaseQueryACL<TTable>;
       case 'board_complexity_scores':
         return new BoardComplexityScoresACL(ctx) as BaseQueryACL<TTable>;
       case 'boards':
@@ -123,7 +157,7 @@ export class QueryACLFactory {
       case 'channel_participants':
         return new ChannelParticipantsACL(ctx) as BaseQueryACL<TTable>;
       case 'channel_user_status':
-        return new BaseQueryACL(ctx, table) as BaseQueryACL<TTable>;
+        return new ChannelUserStatusACL(ctx) as BaseQueryACL<TTable>;
       case 'channel_sections':
         return new ChannelSectionsACL(ctx) as BaseQueryACL<TTable>;
       case 'channel_daily_recaps':
@@ -141,7 +175,7 @@ export class QueryACLFactory {
       case 'message_attachments':
         return new MessageAttachmentsACL(ctx) as BaseQueryACL<TTable>;
       case 'models':
-        return new BaseQueryACL(ctx, table) as BaseQueryACL<TTable>;
+        return new ModelsACL(ctx) as BaseQueryACL<TTable>;
       case 'messages':
         return new MessagesACL(ctx) as BaseQueryACL<TTable>;
       case 'notification_preferences':
@@ -185,7 +219,7 @@ export class QueryACLFactory {
       case 'ticket_tag_mappings':
         return new TicketTagMappingsACL(ctx) as BaseQueryACL<TTable>;
       case 'tools':
-        return new BaseQueryACL(ctx, table) as BaseQueryACL<TTable>;
+        return new ToolsACL(ctx) as BaseQueryACL<TTable>;
       case 'tickets':
         return new TicketsACL(ctx) as BaseQueryACL<TTable>;
       case 'user_assignment_states':
@@ -225,7 +259,7 @@ export class QueryACLFactory {
       case 'saved_user_configurations':
         return new SavedUserConfigurationsACL(ctx) as BaseQueryACL<TTable>;
       case 'saved_user_configuration_values':
-        return new BaseQueryACL(ctx, table) as BaseQueryACL<TTable>;
+        return new SavedUserConfigurationValuesACL(ctx) as BaseQueryACL<TTable>;
       case 'delayed_messages':
         return new DelayedMessagesACL(ctx) as BaseQueryACL<TTable>;
       case 'collections':
@@ -244,6 +278,62 @@ export class QueryACLFactory {
         return new ResourcesACL(ctx) as BaseQueryACL<TTable>;
       case 'workspaces':
         return new WorkspacesACL(ctx) as BaseQueryACL<TTable>;
+      case 'application_release_tickets':
+        return new ApplicationReleaseTicketsACL(ctx) as BaseQueryACL<TTable>;
+      case 'applications':
+        return new ApplicationsACL(ctx) as BaseQueryACL<TTable>;
+      case 'canvas_versions':
+        return new CanvasVersionsACL(ctx) as BaseQueryACL<TTable>;
+      case 'classification_mappings':
+        return new ClassificationMappingsACL(ctx) as BaseQueryACL<TTable>;
+      case 'coes':
+        return new CoesACL(ctx) as BaseQueryACL<TTable>;
+      case 'custom_emojis':
+        return new CustomEmojisACL(ctx) as BaseQueryACL<TTable>;
+      case 'dashboard_queries_mapping':
+        return new DashboardQueriesMappingACL(ctx) as BaseQueryACL<TTable>;
+      case 'dashboards':
+        return new DashboardsACL(ctx) as BaseQueryACL<TTable>;
+      case 'draft_messages':
+        return new DraftMessagesACL(ctx) as BaseQueryACL<TTable>;
+      case 'email_reads':
+        return new EmailReadsACL(ctx) as BaseQueryACL<TTable>;
+      case 'impacts':
+        return new ImpactsACL(ctx) as BaseQueryACL<TTable>;
+      case 'link_access':
+        return new LinkAccessACL(ctx) as BaseQueryACL<TTable>;
+      case 'links':
+        return new LinksACL(ctx) as BaseQueryACL<TTable>;
+      case 'lookup_values':
+        return new LookupValuesACL(ctx) as BaseQueryACL<TTable>;
+      case 'merchants':
+        return new MerchantsACL(ctx) as BaseQueryACL<TTable>;
+      case 'proactive_nudges':
+        return new ProactiveNudgesACL(ctx) as BaseQueryACL<TTable>;
+      case 'queries':
+        return new QueriesACL(ctx) as BaseQueryACL<TTable>;
+      case 'rcas':
+        return new RcasACL(ctx) as BaseQueryACL<TTable>;
+      case 'recurring_call_series':
+        return new RecurringCallSeriesACL(ctx) as BaseQueryACL<TTable>;
+      case 'release_attributions':
+        return new ReleaseAttributionsACL(ctx) as BaseQueryACL<TTable>;
+      case 'release_change_types':
+        return new ReleaseChangeTypesACL(ctx) as BaseQueryACL<TTable>;
+      case 'release_changes':
+        return new ReleaseChangesACL(ctx) as BaseQueryACL<TTable>;
+      case 'release_events':
+        return new ReleaseEventsACL(ctx) as BaseQueryACL<TTable>;
+      case 'stage_approvers':
+        return new StageApproversACL(ctx) as BaseQueryACL<TTable>;
+      case 'surface_links':
+        return new SurfaceLinksACL(ctx) as BaseQueryACL<TTable>;
+      case 'surface_nudge_counts':
+        return new SurfaceNudgeCountsACL(ctx) as BaseQueryACL<TTable>;
+      case 'surface_nudges':
+        return new SurfaceNudgesACL(ctx) as BaseQueryACL<TTable>;
+      case 'workspace_organizations':
+        return new WorkspaceOrganizationsACL(ctx) as BaseQueryACL<TTable>;
       default:
         return new BaseQueryACL(ctx, table) as BaseQueryACL<TTable>;
       case 'emails':
