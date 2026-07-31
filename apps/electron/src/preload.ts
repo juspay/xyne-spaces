@@ -249,7 +249,13 @@ const electronAPI = {
 
   // Generic IPC send (used by standalone HTML windows like meeting-popup)
   ipcSend: (channel: string, ...args: unknown[]) => {
-    const allowed = ['meeting-popup:content-height', 'recording-pill:recording-stopped', 'recording:state-changed'];
+    const allowed = [
+      'app:theme-changed',
+      'meeting-popup:content-height',
+      'recording-pill:recording-stopped',
+      'recording:renderer-ready',
+      'recording:state-changed',
+    ];
     if (allowed.includes(channel)) ipcRenderer.send(channel, ...args);
   },
 
@@ -325,6 +331,11 @@ const electronAPI = {
       const listener = () => callback();
       ipcRenderer.on('recording-pill:hide', listener);
       return () => ipcRenderer.removeListener('recording-pill:hide', listener);
+    },
+    onThemeChanged: (callback: (theme: 'light' | 'dark') => void) => {
+      const listener = (_event: unknown, theme: 'light' | 'dark') => callback(theme);
+      ipcRenderer.on('recording-pill:theme-changed', listener);
+      return () => ipcRenderer.removeListener('recording-pill:theme-changed', listener);
     },
     stopRecording: () => ipcRenderer.send('recording-pill:stop-recording'),
     openApp: () => ipcRenderer.send('recording-pill:open-app'),

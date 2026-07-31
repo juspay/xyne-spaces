@@ -495,9 +495,11 @@ export const NotificationHandler: React.FC = () => {
     if (!isElectron || !meetingDetector) return;
     // Sync stored preference to main process on startup
     meetingDetector.setEnabled(localStorage.getItem(MEETING_DETECTION_ENABLED_KEY) !== 'false');
-    return meetingDetector.onStartRecordingFromMeeting(() => {
+    const cleanup = meetingDetector.onStartRecordingFromMeeting(() => {
       sendRecordingEvent({ type: 'requestAutoStart' });
     });
+    window.electronAPI?.ipcSend?.('recording:renderer-ready');
+    return cleanup;
   }, [isElectron]);
 
   // Handle stop signal from the floating recording pill's Stop button
