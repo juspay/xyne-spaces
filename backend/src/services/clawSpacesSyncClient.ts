@@ -1,4 +1,5 @@
 import { config } from '@/config/env';
+import { logger } from '@/utils/logger';
 
 export interface ClawSyncOrgPayload {
   spacesOrgId: string;
@@ -35,11 +36,17 @@ export class ClawSpacesSyncError extends Error {
   statusCode?: number;
   retryable: boolean;
 
-  constructor(message: string, options: { statusCode?: number; retryable: boolean }) {
+  constructor(
+    message: string,
+    options: { statusCode?: number; retryable: boolean; cause?: unknown },
+  ) {
     super(message);
     this.name = 'ClawSpacesSyncError';
     this.statusCode = options.statusCode;
     this.retryable = options.retryable;
+    if (options.cause !== undefined) {
+      (this as { cause?: unknown }).cause = options.cause;
+    }
   }
 }
 
@@ -111,10 +118,30 @@ class ClawSpacesSyncClient {
         throw error;
       }
 
-      const message = error instanceof Error ? error.message : String(error);
-      throw new ClawSpacesSyncError(`Claw spaces sync request failed: ${message}`, {
-        retryable: true,
+      const url = `${baseUrl}/claw/api/v1/internal/spaces-sync${path}`;
+      const isAbortError = error instanceof Error && error.name === 'AbortError';
+      const errorCode =
+        error instanceof Error ? (error as { code?: string }).code : undefined;
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+
+      logger.error('Claw spaces sync network failure', {
+        path,
+        url,
+        method: 'POST',
+        errorName: error instanceof Error ? error.name : typeof error,
+        errorMessage,
+        errorCode,
+        isTimeout: isAbortError,
+        timeoutMs: config.aiProvisioning.requestTimeoutMs,
+        payload: this.summarizePayload(payload),
+        ...(error instanceof Error ? { originalError: error } : {}),
       });
+
+      throw new ClawSpacesSyncError(
+        `Claw spaces sync ${path} request failed: ${errorMessage}`,
+        { retryable: true, cause: error },
+      );
     } finally {
       clearTimeout(timeout);
     }
