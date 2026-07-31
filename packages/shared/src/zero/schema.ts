@@ -1574,6 +1574,7 @@ export const workspaceTable = table('workspaces')
     workspaceType: string().optional(),
     joinPolicy: string().optional(),
     landingChannelId: string().optional(),
+    logo: string().optional(),
   })
   .primaryKey('id');
 

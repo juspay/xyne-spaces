@@ -1,5 +1,5 @@
 import { ReactElement, useState, useEffect, useMemo, useRef } from 'react';
-import { Save, Users, Search, Shield, User, X, Loader2, AlertTriangle } from 'lucide-react';
+import { Save, Users, Search, Shield, User, X, Loader2, AlertTriangle, ImagePlus, Trash2 } from 'lucide-react';
 import { Button } from '../../components/ui/Button/Button';
 import Input from '../../components/ui/Input/Input';
 import { useSelf, useUsers, useUserSearch } from '../../hooks/useUsers';
@@ -20,6 +20,8 @@ import type { User as UserType } from '../../machines/stateMachine';
 import { WorkspaceRole } from '@xyne/shared';
 import { usePlatform } from '../../hooks/usePlatform';
 import { WorkspaceChannelEmailCard } from '../../components/xyne-desk/WorkspaceChannelEmailCard/WorkspaceChannelEmailCard';
+import { useWorkspaceLogoUrl } from '../../hooks/useWorkspaceLogo';
+import { uploadWorkspaceLogo, deleteWorkspaceLogo } from '../../services/workspace/workspaceLogoService';
 
 const Card = ({
   children,
@@ -71,6 +73,11 @@ export const GeneralAndMembersTab = ({
   const [hasChanges, setHasChanges] = useState(false);
   const { isMobile } = usePlatform();
   const workspaceNameInputRef = useRef<HTMLInputElement>(null);
+  const logoInputRef = useRef<HTMLInputElement>(null);
+  const [isUploadingLogo, setIsUploadingLogo] = useState(false);
+  const isWorkspaceAdmin =
+    self?.role === WorkspaceRole.ADMIN || self?.role === WorkspaceRole.OWNER;
+  const { url: logoUrl } = useWorkspaceLogoUrl(workspaceId, workspace?.logo);
 
   // Load workspace data when available
   useEffect(() => {
@@ -121,6 +128,32 @@ export const GeneralAndMembersTab = ({
     );
     toast.success('Workspace settings saved');
     setHasChanges(false);
+  };
+
+  const handleLogoSelect = async (e: React.ChangeEvent<HTMLInputElement>): Promise<void> => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !workspaceId) return;
+    setIsUploadingLogo(true);
+    try {
+      await uploadWorkspaceLogo(workspaceId, file);
+    } catch {
+      // error toast handled in service
+    } finally {
+      setIsUploadingLogo(false);
+    }
+  };
+
+  const handleRemoveLogo = async (): Promise<void> => {
+    if (!workspaceId) return;
+    setIsUploadingLogo(true);
+    try {
+      await deleteWorkspaceLogo(workspaceId);
+    } catch {
+      // error toast handled in service
+    } finally {
+      setIsUploadingLogo(false);
+    }
   };
 
   // Members section state
@@ -209,6 +242,62 @@ export const GeneralAndMembersTab = ({
         {/* Settings Form */}
         <Card className='p-6'>
           <div className='space-y-6'>
+            {/* Workspace Logo */}
+            <div>
+              <label className='block text-sm font-medium text-foreground mb-2'>
+                Workspace Logo
+              </label>
+              <div className='flex items-center gap-4'>
+                <div className='h-16 w-16 rounded-xl border border-border bg-muted overflow-hidden flex items-center justify-center shrink-0'>
+                  {logoUrl ? (
+                    <img src={logoUrl} alt='Workspace logo' className='h-full w-full object-cover' />
+                  ) : (
+                    <span className='text-lg font-semibold text-muted-foreground'>
+                      {(workspace?.name || '?').charAt(0).toUpperCase()}
+                    </span>
+                  )}
+                </div>
+                {isWorkspaceAdmin && (
+                  <div className='flex items-center gap-2'>
+                    <input
+                      ref={logoInputRef}
+                      type='file'
+                      accept='image/jpeg,image/png,image/webp'
+                      className='hidden'
+                      onChange={e => void handleLogoSelect(e)}
+                    />
+                    <Button
+                      variant='outline'
+                      onClick={() => logoInputRef.current?.click()}
+                      disabled={isUploadingLogo}
+                      className='gap-2'
+                    >
+                      {isUploadingLogo ? (
+                        <Loader2 className='w-4 h-4 animate-spin' />
+                      ) : (
+                        <ImagePlus className='w-4 h-4' />
+                      )}
+                      {workspace?.logo ? 'Change' : 'Upload'}
+                    </Button>
+                    {workspace?.logo && (
+                      <Button
+                        variant='ghost'
+                        onClick={() => void handleRemoveLogo()}
+                        disabled={isUploadingLogo}
+                        className='gap-2 text-destructive hover:text-destructive'
+                      >
+                        <Trash2 className='w-4 h-4' />
+                        Remove
+                      </Button>
+                    )}
+                  </div>
+                )}
+              </div>
+              <p className='text-xs text-muted-foreground mt-1.5'>
+                JPG, PNG, or WebP. Max 5MB. Shown across the workspace.
+              </p>
+            </div>
+
             {/* Workspace Name */}
             <div>
               <label
