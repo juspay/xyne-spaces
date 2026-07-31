@@ -81,6 +81,7 @@ interface StoredFilters {
   selectedCustomFieldKeys: string[];
   // Per-key checkbox selections: { Tag: ['EMI', 'UPI'], Tone: ['Neutral'] }
   selectedCustomFieldValues: Record<string, string[]>;
+  comparedChannelIds: string[];
 }
 
 const DEFAULT_STORED: StoredFilters = {
@@ -90,6 +91,7 @@ const DEFAULT_STORED: StoredFilters = {
   selectedAssigneeId: null,
   selectedCustomFieldKeys: [],
   selectedCustomFieldValues: {},
+  comparedChannelIds: [],
 };
 
 const readStorage = (key: string): StoredFilters => {
@@ -119,6 +121,7 @@ const readStorage = (key: string): StoredFilters => {
       selectedCustomFieldValues: isPerKeyValues(p['selectedCustomFieldValues'])
         ? p['selectedCustomFieldValues']
         : {},
+      comparedChannelIds: isStringArray(p['comparedChannelIds']) ? p['comparedChannelIds'] : [],
     };
     if (typeof p['customStart'] === 'string') result.customStart = p['customStart'];
     if (typeof p['customEnd'] === 'string') result.customEnd = p['customEnd'];
@@ -143,10 +146,12 @@ export interface PersistedDeskMetricsFilters {
   selectedAssigneeId: string | null;
   selectedCustomFieldKeys: string[];
   selectedCustomFieldValues: Record<string, string[]>;
+  comparedChannelIds: string[];
   setDateRange: (dr: DateRangeValue, st: string, et: string) => void;
   setSelectedAssigneeId: (id: string | null) => void;
   setSelectedCustomFieldKeys: (keys: string[]) => void;
   setSelectedCustomFieldValues: (vals: Record<string, string[]>) => void;
+  setComparedChannelIds: (ids: string[]) => void;
 }
 
 export const usePersistedDeskMetricsFilters = (
@@ -211,6 +216,14 @@ export const usePersistedDeskMetricsFilters = (
     [persist],
   );
 
+  const setComparedChannelIds = useCallback(
+    (ids: string[]) => {
+      const extras = [...new Set(ids.filter(id => id !== channelId))];
+      persist(prev => ({ ...prev, comparedChannelIds: extras }));
+    },
+    [persist, channelId],
+  );
+
   return {
     dateRange,
     startTime: stored.startTime,
@@ -218,9 +231,11 @@ export const usePersistedDeskMetricsFilters = (
     selectedAssigneeId: stored.selectedAssigneeId,
     selectedCustomFieldKeys: stored.selectedCustomFieldKeys,
     selectedCustomFieldValues: stored.selectedCustomFieldValues,
+    comparedChannelIds: stored.comparedChannelIds,
     setDateRange,
     setSelectedAssigneeId,
     setSelectedCustomFieldKeys,
     setSelectedCustomFieldValues,
+    setComparedChannelIds,
   };
 };

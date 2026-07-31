@@ -10,10 +10,25 @@ import { deskMetricsRepository } from '../database/repositories/deskMetricsRepos
 import { EmailChannelPreferenceRepository } from '../database/repositories/emailChannelPreferenceRepository.js';
 import { ChannelParticipantRepository } from '../database/repositories/channelParticipantRepository.js';
 import { ChannelRepository } from '../database/repositories/channelRepository.js';
+import {
+  aggregateDeskMetrics,
+  type DeskMetricsContribution,
+} from '../services/deskMetricsAggregator.js';
 import { logger } from '../utils/logger.js';
+import { DESK_METRICS_MAX_AGGREGATE_DESKS } from '@xyne/shared';
+import type {
+  DeskMetricsAggregateResponse,
+  DeskMetricsResponse,
+  DeskMetricsSkippedDesk,
+} from '@xyne/shared';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MAX_CUSTOM_RANGE_MS = 31 * DAY_MS;
+
+type CustomFieldFilterArg = {
+  keys: string[];
+  perKeyFilters?: Record<string, { values?: string[]; textTerms?: string[] }>;
+};
 
 export class DeskMetricsController {
   private channelRepo = new ChannelRepository();
@@ -44,25 +59,11 @@ export class DeskMetricsController {
     return { ok: true };
   }
 
-  /**
-   * GET /channels/:channelId/metrics?timeRange=startMs_endMs
-   */
-  getMetrics = async (req: Request, res: Response): Promise<void> => {
-    const { channelId } = req.params;
-
-    try {
-      const access = await this.assertChannelAccess(req, channelId);
-      if (!access.ok) {
-        res.status(access.status).json({ error: access.error });
-        return;
-      }
-
-      const preference = await this.preferenceRepo.findByChannelId(channelId);
-      if (!preference?.metricsEnabled) {
-        res.status(403).json({ error: 'Metrics are not enabled for this desk' });
-        return;
-      }
-
+  private parseMetricsQuery(
+    req: Request,
+  ):
+    | { ok: true; timeRange: string; assigneeId: string | null; customFieldFilter?: CustomFieldFilterArg }
+    | { ok: false; error: string } {
       const defaultEndMs = Date.now();
       const rawTimeRange =
         typeof req.query.timeRange === 'string'
@@ -70,20 +71,17 @@ export class DeskMetricsController {
           : `${defaultEndMs - 7 * DAY_MS}_${defaultEndMs}`;
       const parts = rawTimeRange.split('_');
       if (parts.length !== 2) {
-        res.status(400).json({ error: 'Invalid timeRange. Use startMs_endMs' });
-        return;
+        return { ok: false, error: 'Invalid timeRange. Use startMs_endMs' };
       }
       const fromMs = Number(parts[0]);
       const toMs = Number(parts[1]);
       const from = new Date(fromMs);
       const to = new Date(toMs);
       if (isNaN(from.getTime()) || isNaN(to.getTime()) || from > to) {
-        res.status(400).json({ error: 'Invalid time range' });
-        return;
+        return { ok: false, error: 'Invalid time range' };
       }
       if (toMs - fromMs > MAX_CUSTOM_RANGE_MS) {
-        res.status(400).json({ error: 'Custom time range cannot exceed 31 days' });
-        return;
+        return { ok: false, error: 'Custom time range cannot exceed 31 days' };
       }
       const timeRange = rawTimeRange;
       const assigneeId = typeof req.query.assigneeId === 'string' ? req.query.assigneeId : null;
@@ -128,26 +126,148 @@ export class DeskMetricsController {
           ? { keys: customFieldKeys, ...(Object.keys(perKeyFilters).length > 0 ? { perKeyFilters } : {}) }
           : undefined;
 
-      const frtStageNames: string[] = (() => {
-        try {
-          const parsed: unknown = JSON.parse(preference.frtStageNames ?? '[]');
-          return Array.isArray(parsed) ? parsed.filter((s): s is string => typeof s === 'string') : [];
-        } catch {
-          return [];
-        }
-      })();
-
-      const metrics = await deskMetricsRepository.getMetrics({
-        channelId,
+      return {
+        ok: true,
         timeRange,
-        frtStageNames,
         assigneeId,
-        customFieldFilter,
-      });
+        ...(customFieldFilter ? { customFieldFilter } : {}),
+      };
+  }
 
+  private async metricsForChannel(
+    channelId: string,
+    preference: { frtStageNames?: string | null },
+    query: { timeRange: string; assigneeId: string | null; customFieldFilter?: CustomFieldFilterArg },
+  ): Promise<DeskMetricsResponse> {
+    const frtStageNames: string[] = (() => {
+      try {
+        const parsed: unknown = JSON.parse(preference.frtStageNames ?? '[]');
+        return Array.isArray(parsed) ? parsed.filter((s): s is string => typeof s === 'string') : [];
+      } catch {
+        return [];
+      }
+    })();
+
+    return deskMetricsRepository.getMetrics({
+      channelId,
+      timeRange: query.timeRange,
+      frtStageNames,
+      assigneeId: query.assigneeId,
+      customFieldFilter: query.customFieldFilter,
+    });
+  }
+
+  getMetrics = async (req: Request, res: Response): Promise<void> => {
+    const { channelId } = req.params;
+
+    try {
+      const access = await this.assertChannelAccess(req, channelId);
+      if (!access.ok) {
+        res.status(access.status).json({ error: access.error });
+        return;
+      }
+
+      const preference = await this.preferenceRepo.findByChannelId(channelId);
+      if (!preference?.metricsEnabled) {
+        res.status(403).json({ error: 'Metrics are not enabled for this desk' });
+        return;
+      }
+
+      const query = this.parseMetricsQuery(req);
+      if (!query.ok) {
+        res.status(400).json({ error: query.error });
+        return;
+      }
+
+      const metrics = await this.metricsForChannel(channelId, preference, query);
       res.json(metrics);
     } catch (error) {
       logger.error('[DeskMetrics] Failed to compute metrics', { channelId, error });
+      res.status(500).json({ error: 'Failed to compute desk metrics' });
+    }
+  };
+
+  getAggregateMetrics = async (req: Request, res: Response): Promise<void> => {
+    const rawIds = typeof req.query.channelIds === 'string' ? req.query.channelIds : '';
+    const channelIds = [
+      ...new Set(
+        rawIds
+          .split(',')
+          .map(id => id.trim())
+          .filter(id => id.length > 0),
+      ),
+    ];
+
+    if (channelIds.length === 0) {
+      res.status(400).json({ error: 'channelIds is required (comma-separated)' });
+      return;
+    }
+    if (channelIds.length > DESK_METRICS_MAX_AGGREGATE_DESKS) {
+      res
+        .status(400)
+        .json({
+          error: `Cannot aggregate more than ${DESK_METRICS_MAX_AGGREGATE_DESKS} desks at once`,
+        });
+      return;
+    }
+
+    try {
+      const query = this.parseMetricsQuery(req);
+      if (!query.ok) {
+        res.status(400).json({ error: query.error });
+        return;
+      }
+
+      const contributions: DeskMetricsContribution[] = [];
+      const skipped: DeskMetricsSkippedDesk[] = [];
+
+      // Keep per-desk fan-out sequential to bound peak DB connections.
+      for (const channelId of channelIds) {
+        try {
+          const access = await this.assertChannelAccess(req, channelId);
+          if (!access.ok) {
+            skipped.push({
+              channelId,
+              reason: access.status === 404 ? 'not_found' : 'forbidden',
+            });
+            continue;
+          }
+
+          const preference = await this.preferenceRepo.findByChannelId(channelId);
+          if (!preference?.metricsEnabled) {
+            skipped.push({ channelId, reason: 'metrics_disabled' });
+            continue;
+          }
+
+          const channel = await this.channelRepo.findById(channelId);
+          const metrics = await this.metricsForChannel(channelId, preference, query);
+          contributions.push({ channelId, channelName: channel?.name ?? null, metrics });
+        } catch (error) {
+          logger.error('[DeskMetrics] Aggregate: desk failed, skipping', { channelId, error });
+          skipped.push({ channelId, reason: 'error' });
+        }
+      }
+
+      if (contributions.length === 0) {
+        if (skipped.some(desk => desk.reason === 'error')) {
+          res.status(500).json({
+            error: 'Failed to compute desk metrics',
+            skipped,
+          });
+          return;
+        }
+
+        res.status(403).json({
+          error: 'None of the selected desks have metrics available',
+          skipped,
+        });
+        return;
+      }
+
+      const aggregate = aggregateDeskMetrics(contributions);
+      res.json({ ...aggregate, skipped } satisfies DeskMetricsAggregateResponse);
+    } catch (error) {
+      logger.error('[DeskMetrics] Failed to compute aggregate metrics', { channelIds, error });
       res.status(500).json({ error: 'Failed to compute desk metrics' });
     }
   };
