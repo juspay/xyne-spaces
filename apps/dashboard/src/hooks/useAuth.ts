@@ -107,14 +107,16 @@ export const useAuth = (): UseAuthReturn => {
           } as OAuthCallbackOutput,
         });
       } catch (err) {
-        if (axios.isAxiosError(err)) {
-          const data = err.response?.data as { error?: string; message?: string } | undefined;
-          if (data?.message) {
-            send({ type: 'AUTH_ERROR', message: data.message });
-            return;
-          }
-        }
-        send({ type: 'AUTH_ERROR', message: 'Email login failed. Please check your credentials.' });
+        const serverMessage =
+          (err as { responseData?: { message?: string } })?.responseData?.message ??
+          (axios.isAxiosError(err)
+            ? (err.response?.data as { message?: string } | undefined)?.message
+            : undefined);
+
+        send({
+          type: 'AUTH_ERROR',
+          message: serverMessage ?? 'Email login failed. Please check your credentials.',
+        });
       }
     },
     [send],

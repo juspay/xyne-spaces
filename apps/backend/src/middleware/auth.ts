@@ -624,6 +624,8 @@ export class AuthMiddleware {
         picture: session.user.picture,
         workspaceId: session.user.workspaceId,
         memberId: session.user.orgMemberId,
+        providerUserId: session.user.providerUserId,
+        provider: session.user.authProvider,
       });
 
       // Update session activity
