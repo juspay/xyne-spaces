@@ -2877,6 +2877,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                   createdBy={attachment.createdBy}
                   createdAt={attachment.createdAt}
                   attachment={attachment}
+                  siblings={ticketAttachments}
                 />
               ))}
             </div>

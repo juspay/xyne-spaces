@@ -16,6 +16,7 @@ type MessageType = QueryResultType<typeof queries.conversationMessagesV2>[number
 
 interface FileBubbleProps {
   attachment: MessageType['attachments'][number];
+  siblings?: readonly MessageType['attachments'][number][];
   onClick?: () => void;
   createdBy: string;
   createdAt: number;
@@ -24,6 +25,7 @@ interface FileBubbleProps {
 
 export const FileBubble: React.FC<FileBubbleProps> = ({
   attachment,
+  siblings,
   onClick,
   createdBy,
   createdAt,
@@ -40,18 +42,22 @@ export const FileBubble: React.FC<FileBubbleProps> = ({
       onClick();
       return;
     }
-    const attachmentRef: AttachmentRef = {
-      attachmentId: attachment.id,
-      fileName: attachment.originalFilename,
-      fileUrl: `/attachments/${attachment.id}/download`,
-      mimeType: attachment.mimetype,
-      fileSize: attachment.size,
-      thumbnailUrl: attachment.thumbnailUrl,
-    };
+    const gallery = siblings?.length ? siblings : [attachment];
+    const attachmentRefs: AttachmentRef[] = gallery.map(att => ({
+      attachmentId: att.id,
+      fileName: att.originalFilename,
+      fileUrl: `/attachments/${att.id}/download`,
+      mimeType: att.mimetype,
+      fileSize: att.size,
+      thumbnailUrl: att.thumbnailUrl,
+    }));
     attachmentViewerActor.send({
       type: isOpen ? 'UPDATE' : 'OPEN',
-      attachments: [attachmentRef],
-      startIndex: 0,
+      attachments: attachmentRefs,
+      startIndex: Math.max(
+        0,
+        gallery.findIndex(att => att.id === attachment.id),
+      ),
     });
   };
 
