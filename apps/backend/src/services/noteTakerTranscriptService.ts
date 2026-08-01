@@ -381,13 +381,27 @@ class NoteTakerTranscriptService {
       return;
     }
 
+    // `call` was snapshotted when processing started, which by now can be a minute
+    // ago — long enough for the user to have renamed the recording while the LLM was
+    // working. Re-read the title so the generated one never lands on a name they typed.
+    const titleToSave =
+      title && !(await repositories.calls.findByExternalId(callId))?.title ? title : null;
+
+    if (!summary && !titleToSave) {
+      logger.info(`[${callId}] ai_title_discarded`, {
+        reason: 'renamed_during_processing',
+        path: 'note_taker',
+      });
+      return;
+    }
+
     try {
       await repositories.calls.update(call.id, {
         ...(summary ? { aiSummary: summary } : {}),
-        ...(title && !call.title ? { title } : {}),
+        ...(titleToSave ? { title: titleToSave } : {}),
       });
       logger.info(`[${callId}] call_record_updated`, {
-        fields_updated: [summary ? 'aiSummary' : '', title ? 'title' : '']
+        fields_updated: [summary ? 'aiSummary' : '', titleToSave ? 'title' : '']
           .filter(Boolean)
           .join(','),
         path: 'note_taker',

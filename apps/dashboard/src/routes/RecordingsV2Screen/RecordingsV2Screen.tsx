@@ -34,7 +34,7 @@ import {
   type RecordingOwnershipTab,
 } from './utils/RecordingsV2.utils';
 import { normalizeRecordingTags } from '../../utils/recordingUtils';
-import { DEFAULT_RECORDING_TITLE } from '@/stores/recordingStore';
+import { DEFAULT_RECORDING_TITLE } from '@/utils/recordingUtils';
 
 const RecordingsV2Screen = (): ReactElement => {
   const navigate = useNavigate();

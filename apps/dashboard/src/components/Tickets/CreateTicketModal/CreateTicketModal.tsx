@@ -91,7 +91,7 @@ import {
   type TicketFormSnapshot,
 } from './createTicket.utils';
 import { DatePicker } from '../../ui/DatePicker/DatePicker';
-import { TextShimmer } from './ShimmerText';
+import { TextShimmer } from '../../ui/ShimmerText';
 import { SearchUserV2 } from '../../ui/SearchUser/SearchUserV2';
 import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
