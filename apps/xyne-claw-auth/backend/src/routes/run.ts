@@ -44,6 +44,14 @@ const router = Router();
 
 const RUN_RETRY_DELAY_MS = 250;
 
+/** Loose shape check for the /experiment epoch context forwarded to the runtime. */
+function isExperimentContext(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  const obj = value as Record<string, unknown>;
+  return typeof obj["id"] === "string" && obj["id"].trim() !== "" &&
+    typeof obj["deadlineAt"] === "string" && obj["deadlineAt"].trim() !== "";
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -1095,6 +1103,13 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
       ...(effectiveMode ? { mode: effectiveMode } : {}),
       ...((req.body as { planContinuation?: boolean }).planContinuation === true ? { planContinuation: true } : {}),
       ...(generateFollowUpSuggestions === true ? { generateFollowUpSuggestions: true } : {}),
+      // /experiment epoch context (id/epoch/deadlineAt/focus) — set only by
+      // dispatchExperimentEpoch (lib/experiment.ts) via this same S2S proxy.
+      // Must be threaded through the allowlist or the runtime never injects the
+      // experiment tools and the mode is silently inert.
+      ...(isExperimentContext((req.body as { experiment?: unknown }).experiment)
+        ? { experiment: (req.body as { experiment?: unknown }).experiment }
+        : {}),
     };
 
     if (detached === true) {

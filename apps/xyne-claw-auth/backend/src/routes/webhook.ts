@@ -20,6 +20,7 @@ import {
   chatMessageRepository,
   agentChainWorkflowRepository,
   activeGoalRepository,
+  experimentRepository,
 } from "../repositories/index.js";
 import { getValidClaudeBearer } from "../lib/claude-oauth-refresh.js";
 import { getValidCodexBearer } from "../lib/codex-oauth-refresh.js";
@@ -33,6 +34,7 @@ import { mintSessionToken } from "../lib/session-tokens.js";
 import { verifySpacesSignature } from "../middleware/verify-spaces-signature.js";
 import { coerceAutomationForwardResult } from "../lib/automation-result.js";
 import { parseSlashCommand } from "../lib/parseSlashCommand.js";
+import { parseExperimentCommand, formatDuration, dispatchExperimentEpoch, EXPERIMENT_PROVIDERS } from "../lib/experiment.js";
 import { resolveFastMode, setFastModeOverride } from "../lib/fast-mode.js";
 import { acquireTwinSlot, renameTwinSlot, releaseTwinSlot } from "../lib/twin-limiter.js";
 import { handleSlashCommandBeforeRun, persistGoalStart, recordTurnAndDecide } from "../services/goalRelooper.js";
@@ -72,6 +74,7 @@ import { getSpacesAuthForUser, spacesDbAvailable, getSpacesUserWorkspaceId, getW
 import { ensureUserExists, orgIdForSpacesUser } from "../lib/users-jit.js";
 import { finalizeOrphanedRun } from "../services/orphan-run-finalizer.js";
 import { requireStrictS2S, s2sKeyMatches, requireResultToken } from "../middleware/require-auth.js";
+import { isClawAdmin } from "../middleware/agent-acl.js";
 import { renderAttachmentsToPdf } from "../lib/result-pdf.js";
 import { renderMarkdownToHtml } from "../lib/result-html.js";
 import { sendStoredExternalResultCallback, type ExternalResultCallbackConfig } from "../surfaces/external-api/delivery.js";
@@ -450,6 +453,87 @@ import {
   zipAttachmentsToBuffer,
   prepareAgentResultForPosting,
 } from "../surfaces/spaces/attachments.js";
+
+function experimentCounts(findings: Array<{ status: string }>): { conjecture: number; proved: number; refuted: number } {
+  return {
+    conjecture: findings.filter((f) => f.status === "conjecture").length,
+    proved: findings.filter((f) => f.status === "proved").length,
+    refuted: findings.filter((f) => f.status === "refuted").length,
+  };
+}
+
+function formatExperimentStatus(
+  run: Awaited<ReturnType<typeof experimentRepository.findActiveByConversation>>,
+  findings: Array<{ status: string; title: string; epoch: number; createdAt: Date }>,
+): string {
+  if (!run) return "No active /experiment in this thread.";
+  const elapsedMs = Date.now() - run.createdAt.getTime();
+  const remainingMs = Math.max(0, run.deadlineAt.getTime() - Date.now());
+  const counts = experimentCounts(findings);
+  const recent = [...findings]
+    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+    .slice(0, 5);
+  const icon = (status: string) => status === "proved" ? "✓" : status === "refuted" ? "✗" : "◉";
+  return [
+    `**/experiment status** — epoch ${run.epoch}`,
+    `Elapsed: ${formatDuration(elapsedMs)} · Remaining: ${formatDuration(remainingMs)}`,
+    ...(run.provider ? [`Model: ${formatExperimentModel(run.provider, run.modelId)}`] : []),
+    `Now: ${run.currentHypothesis?.trim() || "(no current hypothesis recorded)"}`,
+    `Findings: ${counts.conjecture} open · ${counts.proved} proved · ${counts.refuted} refuted`,
+    recent.length
+      ? ["", ...recent.map((f) => `${icon(f.status)} [epoch ${f.epoch}] ${f.title}`)].join("\n")
+      : "\nNo findings recorded yet.",
+  ].join("\n");
+}
+
+function formatExperimentModel(provider: string, modelId?: string | null): string {
+  return modelId?.trim() ? `${provider}/${modelId.trim()}` : `${provider} (default)`;
+}
+
+async function continueExperimentAfterResult(ctx: SessionContext, sessionId: string): Promise<boolean> {
+  const active = await experimentRepository.findActiveByConversation(ctx.conversationId);
+  if (!active) return false;
+  if (active.currentSessionId && active.currentSessionId !== sessionId) return false;
+
+  const now = Date.now();
+  if (active.status === "finishing") {
+    await experimentRepository.update(active.id, { status: "done", lastEpochEndedAt: new Date() });
+    return false;
+  }
+
+  // Rapid-fail brake: an epoch that died within seconds of STARTING (model
+  // outage, misconfig) must NOT chain instantly — that's an unbounded tight
+  // dispatch loop. Measured against the session's own startedAt (not the
+  // experiment row's updatedAt, which ledger writes also bump). Deferring
+  // leaves the run inactive; the supervisor's stale sweep re-dispatches after
+  // its window, turning a hot loop into ~1 retry/10min.
+  const MIN_EPOCH_MS = 30_000;
+  const epochRun = await agentRunRepository.findBySessionId(sessionId).catch(() => null);
+  const epochRanMs = epochRun?.startedAt ? now - epochRun.startedAt.getTime() : Number.POSITIVE_INFINITY;
+  if (epochRanMs < MIN_EPOCH_MS) {
+    clog.warn(`[experiment] epoch for ${active.id} lived only ${Math.round(epochRanMs / 1000)}s — deferring next epoch to supervisor (rapid-fail brake)`);
+    await experimentRepository.update(active.id, { lastEpochEndedAt: new Date() }).catch(() => undefined);
+    return true; // treated as handled: keep this thread's queue-drain semantics unchanged
+  }
+
+  if (now < active.deadlineAt.getTime()) {
+    const next = await experimentRepository.update(active.id, {
+      epoch: { increment: 1 },
+      lastEpochEndedAt: new Date(),
+    });
+    await dispatchExperimentEpoch(next);
+    return true;
+  }
+
+  const finishing = await experimentRepository.update(active.id, {
+    status: "finishing",
+    epoch: { increment: 1 },
+    lastEpochEndedAt: new Date(),
+  });
+  await dispatchExperimentEpoch(finishing);
+  return true;
+}
+
 function recordParam(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
@@ -1287,6 +1371,86 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
   const slash =
     rawSlash ??
     (autoGoalEnabled ? parseSlashCommand(`/goal ${userText}`) : null);
+  const experimentCommand = parseExperimentCommand(userText);
+
+  if (experimentCommand) {
+    const postExperimentReply = (markdownText: string) => spacesAppFetch("/chat/postMessage", {
+      channelId: payload.channelId,
+      conversationId: payload.conversationId,
+      markdownText,
+      userId: agent.spacesAppUserId,
+      metadata: { contentFormat: "markdown" },
+    }, agent.appToken).catch((err) => {
+      log.warn("Failed to post /experiment reply", { error: err instanceof Error ? err.message : String(err) });
+    });
+
+    if (experimentCommand.sub === "status") {
+      const run = await experimentRepository.findActiveByConversation(payload.conversationId);
+      const findings = run ? await experimentRepository.listFindings(run.id) : [];
+      await postExperimentReply(formatExperimentStatus(run, findings));
+      return;
+    }
+
+    if (experimentCommand.sub === "stop") {
+      const run = await experimentRepository.findActiveByConversation(payload.conversationId);
+      if (!run) {
+        await postExperimentReply("No active /experiment to stop.");
+        return;
+      }
+      const allowed = run.userId === payload.userId || await isClawAdmin(payload.userId);
+      if (!allowed) {
+        await postExperimentReply("Only the requester or a claw admin can stop this /experiment.");
+        return;
+      }
+      await experimentRepository.update(run.id, { status: "aborted", lastEpochEndedAt: new Date() });
+      await postExperimentReply("Stopped /experiment.");
+      return;
+    }
+
+    if (experimentCommand.invalidProvider !== undefined) {
+      await postExperimentReply([
+        `Invalid /experiment provider: ${experimentCommand.invalidProvider || "(empty)"}`,
+        `Valid providers: ${Array.from(EXPERIMENT_PROVIDERS).join(", ")}`,
+      ].join("\n"));
+      return;
+    }
+
+    const existing = await experimentRepository.findActiveByConversation(payload.conversationId);
+    if (existing) {
+      await postExperimentReply("An active /experiment is already running in this thread. Use `/experiment status` or `/experiment stop`.");
+      return;
+    }
+    const run = await experimentRepository.createRun({
+      conversationId: payload.conversationId,
+      channelId: payload.channelId,
+      agentSlug: agent.slug,
+      userId: payload.userId,
+      orgId: agent.orgId,
+      focus: experimentCommand.focus ?? null,
+      provider: experimentCommand.provider ?? null,
+      modelId: experimentCommand.model ?? null,
+      deadlineAt: new Date(Date.now() + experimentCommand.durationMs),
+    });
+    await postExperimentReply([
+      "**/experiment started**",
+      `Mode: time-boxed autonomous exploration`,
+      `Duration: ${formatDuration(experimentCommand.durationMs)}`,
+      ...(experimentCommand.provider ? [`Model: ${formatExperimentModel(experimentCommand.provider, experimentCommand.model)}`] : []),
+      `Focus: ${experimentCommand.focus?.trim() || "(none)"}`,
+      `Use \`/experiment status\` to inspect progress.`,
+    ].join("\n"));
+    try {
+      await dispatchExperimentEpoch(run);
+    } catch (err) {
+      // A silent failure here strands a zombie "active" run that blocks every
+      // future /experiment in this thread. Abort it and tell the user why.
+      const msg = err instanceof Error ? err.message : String(err);
+      log.warn("[experiment] initial dispatch failed", { error: msg });
+      await experimentRepository.update(run.id, { status: "aborted", lastEpochEndedAt: new Date() }).catch(() => undefined);
+      await postExperimentReply(`⚠️ /experiment could not start: ${msg.slice(0, 300)}\nThe experiment was aborted — fix the issue and start again.`);
+    }
+    return;
+  }
 
   // ── /queue ── show messages waiting behind the active run, then stop.
   if (slash?.kind === "queueShow") {
@@ -1324,6 +1488,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         "**Slash commands**",
         "- `/goal <condition>` — work autonomously until the condition is met",
         "- `/goal status` — show the active goal",
+        "- `/experiment <duration> [focus...]` — explore until the deadline · `/experiment status` · `/experiment stop`",
         "- `/stop` (or `/goal clear`) — stop the current run, drop queued messages, and clear any active goal",
         "- `/clear` — wipe this thread's context and start fresh",
         "- `/compact [focus]` — summarize & shrink the context, then continue",
@@ -3448,6 +3613,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
   // releases the slot — UNLESS a /goal turn is continuing (goalContinues),
   // which keeps the slot so the loop owns the conversation across turns.
   let goalContinues = false;
+  let experimentContinues = false;
   let skipQueueDrain = false;
   let resultConversationId = payload.conversationId ?? "";
   let resultAgentSlug = payload.agentSlug ?? "";
@@ -3683,6 +3849,12 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     await handleRunCompletion(sessionId, "completed").catch((err) => {
       clog.warn(`[webhook/result] Failed to mark ${sessionId} completed in run recovery:`, err instanceof Error ? err.message : err);
     });
+    if (ctx?.conversationId && ctx.agentSlug) {
+      experimentContinues = await continueExperimentAfterResult(ctx, sessionId).catch((err) => {
+        clog.warn(`[experiment] continuation hook failed session=${sessionId}:`, err instanceof Error ? err.message : String(err));
+        return false;
+      });
+    }
   }
 
   const isSessionLockedFailure = payload.status === "failed" && payload.error === "session_locked";
@@ -5396,7 +5568,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         // Best-effort cleanup; the ingress key also has a TTL.
       }
     }
-    if (QUEUE_ENABLED && resultConversationId && resultAgentSlug && !goalContinues && !skipQueueDrain) {
+    if (QUEUE_ENABLED && resultConversationId && resultAgentSlug && !goalContinues && !experimentContinues && !skipQueueDrain) {
       await drainNextQueued(resultConversationId, resultAgentSlug, undefined, resultUserScope || undefined).catch(() => {});
     }
   }
