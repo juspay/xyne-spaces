@@ -1,104 +1,266 @@
 /**
  * Live Recording Control Bar
  *
- * Displays active-recording controls for the V2 recording detail screen:
+ * Displays the timeline strip for the V2 recording detail screen.
+ *
+ * While the recording is live:
  *   • Stop button
+ *   • Pause / resume button (only when this browser owns the recording session)
  *   • Elapsed timer
- *   • Read-only timeline with flagged moments and current position
- *   • LIVE badge
+ *   • Read-only timeline with the current position and any flagged moments
+ *   • LIVE / PAUSED status label
  *   • Audio-level visualizer
+ *
+ * Once the recording has ended it collapses to a static timeline: the start
+ * marker, the track and the total duration.
+ *
+ * Decision/action markers are intentionally left out for now.
  */
 
 import { useCallback, useEffect, useState, type CSSProperties, type ReactElement } from 'react';
-import { toast } from 'sonner';
-import { StopSmall, Spinner } from '@xyne/icons';
+import { StopSmall, Spinner, PauseBig, PlayBig, Flag } from '@xyne/icons';
 import { Button } from '../../../components/ui/Button/Button';
-import {
-  calculateRecordingElapsedMs,
-  formatElapsedTime,
-  logRecordingError,
-} from '../../../utils/recordingUtils';
-import {
-  recordingService,
-  type RecordingDetail,
-} from '../../../services/Recording/recordingService';
+import { cn } from '../../../utils/classNames';
+import { sendRecordingEvent, useRecordingStore } from '../../../hooks/useRecordingStore';
+import { calculateRecordingElapsedMs, formatElapsedTime } from '../../../utils/recordingUtils';
+import { useAudioPlayback } from '../../../components/ui/AudioPlayer/useAudioPlayback';
+import type { RecordingDetail } from '../../../services/Recording/recordingService';
+import type { MarkedMoment } from '../../../stores/recordingStore';
+import { parseMarkedItems, type MarkedItemType } from './markedItems';
 
-const TIMELINE_WINDOW_MS = 60 * 60 * 1000; // 1 hour fixed window for the live timeline
+const TIMELINE_WINDOW_MS = 40 * 60 * 1000; // 40 min fixed window for the live timeline
 
 interface LiveRecordingControlBarProps {
   recording: RecordingDetail;
+  /** True while the recording is still in progress. */
+  isLive: boolean;
   onStopped?: () => void;
+  /** Supplied for an ended recording whose audio is ready, turning the bar into a player. */
+  onLoadAudio?: (signal: AbortSignal) => Promise<Blob>;
 }
+
+/** Stands in when there is no audio to load, so the playback hook can stay unconditional. */
+const EMPTY_AUDIO_LOADER = (): Promise<Blob> => Promise.reject(new Error('No audio available'));
 
 export const LiveRecordingControlBar = ({
   recording,
+  isLive,
   onStopped,
-}: LiveRecordingControlBarProps): ReactElement => {
-  const startTime = new Date(recording.startedAt).getTime();
-  const [elapsedMs, setElapsedMs] = useState(() => calculateRecordingElapsedMs(startTime, null, 0));
-  const [isStopping, setIsStopping] = useState(false);
+  onLoadAudio,
+}: LiveRecordingControlBarProps): ReactElement | null => {
+  // Recording session state — only meaningful when this tab owns the live session.
+  const activeExternalId = useRecordingStore(context => context.externalId);
+  const sessionStatus = useRecordingStore(context => context.status);
+  const sessionStartTime = useRecordingStore(context => context.startTime);
+  const pauseStartedAt = useRecordingStore(context => context.pauseStartedAt);
+  const accumulatedPausedMs = useRecordingStore(context => context.accumulatedPausedMs);
+  const markedMoments = useRecordingStore(context => context.markedMoments);
+
+  const ownsSession =
+    activeExternalId === recording.externalId &&
+    (sessionStatus === 'recording' || sessionStatus === 'paused');
+  const isPaused = ownsSession && sessionStatus === 'paused';
+
+  const startTime =
+    (ownsSession ? sessionStartTime : null) ?? new Date(recording.startedAt).getTime();
+
+  const [elapsedMs, setElapsedMs] = useState(0);
+  const [stopRequested, setStopRequested] = useState(false);
+  /** The session is torn down asynchronously, so keep the spinner until it's gone. */
+  const isStopping = stopRequested && ownsSession;
 
   useEffect(() => {
-    setElapsedMs(calculateRecordingElapsedMs(startTime, null, 0));
+    if (!isLive) return;
 
-    const interval = window.setInterval(() => {
-      setElapsedMs(calculateRecordingElapsedMs(startTime, null, 0));
-    }, 1000);
+    const pausedAt = ownsSession ? pauseStartedAt : null;
+    const pausedMs = ownsSession ? accumulatedPausedMs : 0;
 
+    const tick = (): void =>
+      setElapsedMs(calculateRecordingElapsedMs(startTime, pausedAt, pausedMs));
+
+    tick();
+    if (isPaused) return; // the timer is frozen while paused
+
+    const interval = window.setInterval(tick, 1000);
     return (): void => window.clearInterval(interval);
-  }, [startTime]);
+  }, [isLive, isPaused, ownsSession, pauseStartedAt, accumulatedPausedMs, startTime]);
 
-  const handleStop = useCallback(async (): Promise<void> => {
-    if (isStopping) return;
+  const handleStop = useCallback((): void => {
+    if (!ownsSession || stopRequested) return;
+    setStopRequested(true);
+    sendRecordingEvent({ type: 'requestStop' });
+  }, [ownsSession, stopRequested]);
 
-    setIsStopping(true);
-    try {
-      await recordingService.stopCallRecording(recording.externalId);
-      onStopped?.();
-      toast.success('Recording stopped');
-    } catch (err) {
-      logRecordingError('LiveRecordingControlBar.stopRecording', err);
-      toast.error('Failed to stop recording');
-    } finally {
-      setIsStopping(false);
-    }
-  }, [isStopping, onStopped, recording.externalId]);
+  // The call is only marked ENDED once LiveKit reports the room finished, so give
+  // the webhook a moment before reloading the detail.
+  useEffect(() => {
+    if (!stopRequested || ownsSession) return;
+
+    const timer = window.setTimeout(() => onStopped?.(), 1500);
+    return (): void => window.clearTimeout(timer);
+  }, [stopRequested, ownsSession, onStopped]);
+
+  const handleTogglePause = useCallback((): void => {
+    sendRecordingEvent({ type: isPaused ? 'resumeRecording' : 'pauseRecording' });
+  }, [isPaused]);
+
+  // Once the l ocal session is gone the recording is over, even if the API hasn't
+  // caught up yet.
+  if (!isLive || (stopRequested && !ownsSession)) {
+    return <RecordedTimelineBar recording={recording} {...(onLoadAudio ? { onLoadAudio } : {})} />;
+  }
 
   return (
-    <div className='mb-6 flex items-center gap-4 rounded-2xl border border-border bg-card p-5'>
-      <Button
-        type='button'
-        variant='destructive'
-        size='icon'
-        onClick={() => void handleStop()}
-        disabled={isStopping}
-        className='size-11 shrink-0 rounded-full transition-transform active:scale-95 motion-reduce:transform-none disabled:opacity-50'
-        aria-label='Stop recording'
-        title='Stop recording'
-        data-track-category='RecordingDetailV2'
-        data-track-name='stop_live_recording'
-      >
-        {isStopping ? (
-          <Spinner size={24} className='animate-spin' />
-        ) : (
-          <div className='flex items-center justify-center'>
-            <StopSmall className='size-10' variant='Solid' />
-          </div>
-        )}
-      </Button>
+    <div className='mb-6 flex items-center gap-4 rounded-2xl border border-border bg-card/10 px-5 py-4'>
+      {/* Only the tab running the session can stop or pause it. */}
+      {ownsSession && (
+        <>
+          <Button
+            type='button'
+            variant='destructive'
+            size='icon'
+            onClick={handleStop}
+            disabled={isStopping}
+            className='size-11 shrink-0 rounded-full transition-transform active:scale-95 motion-reduce:transform-none'
+            aria-label='Stop recording'
+            title='Recording — click to stop and finalize'
+            data-track-category='RecordingDetailV2'
+            data-track-name='stop_live_recording'
+          >
+            {isStopping ? (
+              <Spinner size={22} className='animate-spin' />
+            ) : (
+              <StopSmall className='size-10' variant='Solid' />
+            )}
+          </Button>
 
-      <span className='shrink-0 font-mono text-xs text-muted-foreground pl-2'>
+          <Button
+            type='button'
+            variant='outline'
+            size='icon'
+            onClick={handleTogglePause}
+            disabled={isStopping}
+            className='size-8 shrink-0 rounded-full border-border bg-card text-muted-foreground transition-colors hover:text-foreground'
+            aria-label={isPaused ? 'Resume recording' : 'Pause recording'}
+            title={isPaused ? 'Resume recording' : 'Pause recording'}
+            data-track-category='RecordingDetailV2'
+            data-track-name={isPaused ? 'resume_live_recording' : 'pause_live_recording'}
+          >
+            {isPaused ? (
+              <PlayBig size={14} variant='Solid' />
+            ) : (
+              <PauseBig size={14} strokeWidth={4} variant='Solid' />
+            )}
+          </Button>
+        </>
+      )}
+
+      <span className='w-12 shrink-0 text-right font-mono text-xs text-foreground'>
         {formatElapsedTime(elapsedMs)}
       </span>
 
-      <LiveRecordingTimeline elapsedMs={elapsedMs} className='flex-1' />
+      <LiveRecordingTimeline
+        elapsedMs={elapsedMs}
+        isPaused={isPaused}
+        // Moments only exist locally, on the tab running the session.
+        moments={ownsSession ? markedMoments : []}
+        className='flex-1'
+      />
 
-      <div className='flex items-center gap-1.5 pr-2'>
-        <span className='text-xs font-medium uppercase tracking-wide text-destructive'>Live</span>
-      </div>
+      <span
+        className={[
+          'shrink-0 font-mono text-xs font-medium uppercase tracking-wide w-12',
+          isPaused ? 'text-muted-foreground' : 'text-destructive',
+        ].join(' ')}
+      >
+        {isPaused ? 'Paused' : 'Live'}
+      </span>
 
-      <RecordingVisualizer />
+      <RecordingVisualizer isPaused={isPaused} />
     </div>
+  );
+};
+
+/* -------------------------------------------------------------------------- */
+/* Timeline markers                                                           */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Decisions and actions the summary pipeline extracted, as dots sitting on the track
+ * itself — moments get a flag above it instead
+ */
+const MARKER_DOT_COLOR: Record<Exclude<MarkedItemType, 'moment'>, string> = {
+  decision: 'bg-yellow-500',
+  action: 'bg-orange-500',
+};
+
+interface MomentFlagProps {
+  percent: number;
+  title: string;
+  onSelect?: () => void;
+}
+
+/** Flag pinned to a point on either timeline — a button only when it can seek. */
+const MomentFlag = ({ percent, title, onSelect }: MomentFlagProps): ReactElement => {
+  const className = cn(
+    'absolute bottom-1.5 z-10 flex -translate-x-0.5',
+    onSelect && 'cursor-pointer',
+  );
+  const glyph = <Flag size={14} variant='Solid' className='text-primary' aria-hidden='true' />;
+
+  if (!onSelect) {
+    return (
+      <span className={className} style={{ left: `${percent}%` }} title={title}>
+        {glyph}
+      </span>
+    );
+  }
+
+  return (
+    <button
+      type='button'
+      onClick={onSelect}
+      data-track-category='RecordingDetailV2'
+      data-track-name='marker_seek_moment'
+      className={className}
+      style={{ left: `${percent}%` }}
+      title={title}
+      aria-label={title}
+    >
+      {glyph}
+    </button>
+  );
+};
+
+interface MarkerDotProps {
+  percent: number;
+  type: Exclude<MarkedItemType, 'moment'>;
+  title: string;
+  onSelect?: () => void;
+}
+
+const MarkerDot = ({ percent, type, title, onSelect }: MarkerDotProps): ReactElement => {
+  const className = cn(
+    'absolute top-1/2 z-10 size-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full ring-2 ring-background',
+    MARKER_DOT_COLOR[type],
+    onSelect && 'cursor-pointer',
+  );
+
+  if (!onSelect) {
+    return <span className={className} style={{ left: `${percent}%` }} title={title} />;
+  }
+
+  return (
+    <button
+      type='button'
+      onClick={onSelect}
+      data-track-category='RecordingDetailV2'
+      data-track-name='marker_seek_item'
+      className={className}
+      style={{ left: `${percent}%` }}
+      title={title}
+      aria-label={title}
+    />
   );
 };
 
@@ -108,14 +270,16 @@ export const LiveRecordingControlBar = ({
 
 interface LiveRecordingTimelineProps {
   elapsedMs: number;
-  /** Flagged moments in milliseconds from the start of the recording. */
-  moments?: number[];
+  isPaused: boolean;
+  /** Moments flagged during this session, positioned by their `elapsedMs`. */
+  moments: MarkedMoment[];
   className?: string;
 }
 
 const LiveRecordingTimeline = ({
   elapsedMs,
-  moments = [],
+  isPaused,
+  moments,
   className = '',
 }: LiveRecordingTimelineProps): ReactElement => {
   const progressPercent = Math.min((elapsedMs / TIMELINE_WINDOW_MS) * 100, 100);
@@ -128,23 +292,24 @@ const LiveRecordingTimeline = ({
           style={{ width: `${progressPercent}%` }}
         />
 
-        {moments.map((momentMs, index) => {
-          const percent = Math.min((momentMs / TIMELINE_WINDOW_MS) * 100, 100);
-          return (
-            <div
-              key={index}
-              className='absolute top-1/2 size-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-destructive'
-              style={{ left: `${percent}%` }}
-            />
-          );
-        })}
+        {moments.map((moment, index) => (
+          <MomentFlag
+            key={index}
+            percent={Math.min((moment.elapsedMs / TIMELINE_WINDOW_MS) * 100, 100)}
+            title={`Marked moment at ${formatElapsedTime(moment.elapsedMs)}`}
+          />
+        ))}
 
+        {/* Playhead: the halo and the dot share the wrapper's box so the ping
+            always expands from the dot's centre. */}
         <div
-          className='absolute top-1/2 -translate-x-1/2 -translate-y-1/2'
+          className='absolute top-1/2 size-3.5 -translate-x-1/2 -translate-y-1/2'
           style={{ left: `${progressPercent}%` }}
         >
-          <span className='absolute inline-flex size-4 animate-ping rounded-full bg-destructive opacity-75' />
-          <span className='relative inline-flex size-3 rounded-full border-2 border-background bg-destructive shadow-sm' />
+          {!isPaused && (
+            <span className='absolute inset-0 animate-ping rounded-full bg-destructive opacity-40' />
+          )}
+          <span className='absolute inset-0 rounded-full border-2 border-background bg-destructive shadow-sm' />
         </div>
       </div>
     </div>
@@ -152,21 +317,177 @@ const LiveRecordingTimeline = ({
 };
 
 /* -------------------------------------------------------------------------- */
+/* Ended recording — static timeline                                          */
+/* -------------------------------------------------------------------------- */
+
+interface RecordedTimelineBarProps {
+  recording: RecordingDetail;
+  /** Supplied once the audio is stitched; without it the bar is read-only. */
+  onLoadAudio?: (signal: AbortSignal) => Promise<Blob>;
+}
+
+const RecordedTimelineBar = ({
+  recording,
+  onLoadAudio,
+}: RecordedTimelineBarProps): ReactElement | null => {
+  const fallbackDurationMs =
+    recording.durationMs ??
+    (recording.endedAt
+      ? new Date(recording.endedAt).getTime() - new Date(recording.startedAt).getTime()
+      : null);
+
+  const playback = useAudioPlayback({
+    onLoad: onLoadAudio ?? EMPTY_AUDIO_LOADER,
+    initialDurationSec: fallbackDurationMs ? fallbackDurationMs / 1000 : undefined,
+    showToastOnError: true,
+  });
+
+  if (!fallbackDurationMs || fallbackDurationMs <= 0) return null;
+
+  // Prefer the media's own duration once it has loaded — the call's wall-clock span
+  // can differ from the recorded audio by a second or two.
+  const durationMs = playback.duration > 0 ? playback.duration * 1000 : fallbackDurationMs;
+  const markedItems = parseMarkedItems(recording.markedItems);
+  const hasMarkedItems = markedItems.length > 0;
+  const elapsedMs = playback.currentTime * 1000;
+  const progressPercent = durationMs > 0 ? Math.min((elapsedMs / durationMs) * 100, 100) : 0;
+  const isPlaying = playback.state === 'playing';
+
+  return (
+    <div className='mb-6 rounded-2xl border border-border bg-card px-5 py-4'>
+      <div className='flex items-center gap-4'>
+        {onLoadAudio && (
+          <Button
+            type='button'
+            variant='outline'
+            size='icon'
+            onClick={() => void playback.toggle()}
+            disabled={playback.state === 'loading'}
+            className='size-8 shrink-0 rounded-full border-border bg-card text-muted-foreground transition-colors hover:text-foreground'
+            aria-label={isPlaying ? 'Pause recording' : 'Play recording'}
+            title={isPlaying ? 'Pause recording' : 'Play recording'}
+            data-track-category='RecordingDetailV2'
+            data-track-name={isPlaying ? 'pause_recording' : 'play_recording'}
+          >
+            {playback.state === 'loading' ? (
+              <Spinner size={14} className='animate-spin' />
+            ) : isPlaying ? (
+              <PauseBig size={14} strokeWidth={4} variant='Solid' />
+            ) : (
+              <PlayBig size={14} variant='Solid' />
+            )}
+          </Button>
+        )}
+
+        <span className='w-12 shrink-0 text-right font-mono text-xs text-foreground'>
+          {formatElapsedTime(elapsedMs)}
+        </span>
+
+        <div className='relative h-1.5 flex-1 rounded-full bg-muted'>
+          <div
+            className='absolute inset-y-0 left-0 rounded-full bg-foreground'
+            style={{ width: `${progressPercent}%` }}
+          />
+
+          {markedItems.map((item, index) => {
+            const percent = Math.min((item.timestampSeconds * 1000 * 100) / durationMs, 100);
+            // Seeking is only meaningful once the media exists.
+            const onSelect = playback.canSeek
+              ? (): void => playback.seek(item.timestampSeconds)
+              : undefined;
+
+            return item.type === 'moment' ? (
+              <MomentFlag
+                key={index}
+                percent={percent}
+                title={
+                  item.text || `Marked moment at ${formatElapsedTime(item.timestampSeconds * 1000)}`
+                }
+                {...(onSelect ? { onSelect } : {})}
+              />
+            ) : (
+              <MarkerDot
+                key={index}
+                percent={percent}
+                type={item.type}
+                title={item.text}
+                {...(onSelect ? { onSelect } : {})}
+              />
+            );
+          })}
+
+          {playback.canSeek && (
+            <>
+              <span
+                className='absolute top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-background bg-foreground shadow-sm'
+                style={{ left: `${progressPercent}%` }}
+                aria-hidden='true'
+              />
+              {/* Invisible range on top of the track so the bar is scrubbable. */}
+              <input
+                type='range'
+                min={0}
+                max={durationMs / 1000}
+                step={0.1}
+                value={playback.currentTime}
+                onChange={event => playback.seek(parseFloat(event.target.value))}
+                className='absolute inset-y-0 -inset-x-1 w-full cursor-pointer opacity-0'
+                aria-label='Seek recording'
+                data-track-category='RecordingDetailV2'
+                data-track-name='seek_recording'
+              />
+            </>
+          )}
+        </div>
+
+        <span className='w-12 shrink-0 font-mono text-xs font-medium text-muted-foreground'>
+          {formatElapsedTime(durationMs)}
+        </span>
+
+        <RecordingVisualizer isPaused={!isPlaying} />
+      </div>
+
+      {/* Only worth explaining the markers once there are some to explain. */}
+      {hasMarkedItems && <MarkerLegend />}
+    </div>
+  );
+};
+
+/** Reads the marker vocabulary of the track above it. */
+const MarkerLegend = (): ReactElement => (
+  <div className='mt-3 flex items-center gap-5 pl-1 text-xs text-muted-foreground'>
+    <span className='flex items-center gap-1.5'>
+      <span className={cn('size-2 rounded-full', MARKER_DOT_COLOR.decision)} aria-hidden='true' />
+      Decisions
+    </span>
+    <span className='flex items-center gap-1.5'>
+      <span className={cn('size-2 rounded-full', MARKER_DOT_COLOR.action)} aria-hidden='true' />
+      Actions
+    </span>
+    <span className='flex items-center gap-1.5'>
+      <Flag size={12} variant='Solid' className='text-primary' aria-hidden='true' />
+      Marked moments
+    </span>
+  </div>
+);
+
+/* -------------------------------------------------------------------------- */
 /* Audio visualizer                                                           */
 /* -------------------------------------------------------------------------- */
 
-const RecordingVisualizer = (): ReactElement => (
-  <div className='inline-flex h-7 w-14 items-center justify-center gap-[3px] rounded-lg border border-border px-1.5'>
+const RecordingVisualizer = ({ isPaused }: { isPaused: boolean }): ReactElement => (
+  <div className='inline-flex h-7 w-14 items-center justify-center gap-0.5 rounded-lg border border-border px-2'>
     {Array.from({ length: 4 }, (_, i) => {
+      if (isPaused) {
+        return <div key={i} className='size-1 rounded-full bg-muted-foreground' />;
+      }
+
       const style: CSSProperties = {
         animation: `recWaveBar 0.55s ease-in-out ${i * 0.08}s infinite alternate`,
       };
       return (
         <div key={i} className='flex h-4 items-center'>
-          <div
-            className='rec-overlay-waveform-bar w-[3px] rounded-full bg-destructive'
-            style={style}
-          />
+          <div className='rec-overlay-waveform-bar w-1 rounded-full bg-destructive' style={style} />
         </div>
       );
     })}

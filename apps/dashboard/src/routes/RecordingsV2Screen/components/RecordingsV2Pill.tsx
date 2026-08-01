@@ -9,14 +9,12 @@ import {
   calculateRecordingElapsedMs,
   formatElapsedTime,
   formatRecordingDuration,
+  getRecordingTagDotColor,
+  normalizeRecordingTags,
 } from '../../../utils/recordingUtils';
 import { cn } from '../../../utils/classNames';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
-import {
-  formatRecordingTimestamp,
-  getRecordingTagDotColor,
-  normalizeRecordingTags,
-} from '../utils/RecordingsV2.utils';
+import { formatRecordingTimestamp } from '../utils/RecordingsV2.utils';
 
 export interface RecordingsV2PillProps {
   recording: Pick<
@@ -186,7 +184,10 @@ const RecordingsV2Pill = ({
                 className='inline-flex items-center gap-1.5 rounded-md border border-border bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground transition-colors'
               >
                 <span
-                  className={cn('size-1.5 rounded-full', getRecordingTagDotColor(resolveLabel(tag)))}
+                  className={cn(
+                    'size-1.5 rounded-full',
+                    getRecordingTagDotColor(resolveLabel(tag)),
+                  )}
                   aria-hidden='true'
                 />
                 <span className='max-w-32 truncate'>{resolveLabel(tag)}</span>

@@ -69,15 +69,6 @@ const FIXED_GROUP_DEFINITIONS: ReadonlyArray<{
   { id: 'this-month', label: 'This month' },
 ];
 
-const TAG_DOT_COLORS = [
-  'bg-cyan-600',
-  'bg-yellow-600',
-  'bg-purple-600',
-  'bg-green-600',
-  'bg-pink-600',
-  'bg-blue-600',
-] as const;
-
 /**
  * Checks whether a recording falls inside a calendar preset.
  * Weeks start on Monday, and completed periods use an exclusive upper bound.
@@ -215,15 +206,19 @@ export function buildRecordingRows(recordings: OatsRecordingEntry[]): RecordingL
 
 /**
  * Applies the optional creator filter after the server has already enforced
- * the selected Created/Shared scope.
+ * the selected Created/Shared scope. An empty list means "every creator".
+ *
+ * @example
+ * filterRecordingsByOwnership(recordings, ['user-1', 'user-2']);
  */
 export function filterRecordingsByOwnership(
   recordings: OatsRecordingEntry[],
-  selectedCreatorId: string | null,
+  selectedCreatorIds: string[],
 ): OatsRecordingEntry[] {
-  return selectedCreatorId
-    ? recordings.filter(recording => recording.createdByUserId === selectedCreatorId)
-    : recordings;
+  if (selectedCreatorIds.length === 0) return recordings;
+
+  const wanted = new Set(selectedCreatorIds);
+  return recordings.filter(recording => wanted.has(recording.createdByUserId));
 }
 
 /**
@@ -279,23 +274,4 @@ export function formatRecordingTimestamp(startedAt: number): string {
     return format(startedDate, "'Yesterday,' h:mm a");
   }
   return format(startedDate, 'EEE, MMM d');
-}
-
-/**
- * Assigns the same palette color to a tag on every render using a stable string hash.
- *
- * @example
- * getRecordingTagDotColor('customer-call'); // e.g. 'bg-purple-600'
- */
-export function getRecordingTagDotColor(tag: string): (typeof TAG_DOT_COLORS)[number] {
-  let hash = 0;
-  for (let index = 0; index < tag.length; index += 1) {
-    hash = tag.charCodeAt(index) + ((hash << 5) - hash);
-  }
-
-  return TAG_DOT_COLORS[Math.abs(hash) % TAG_DOT_COLORS.length] ?? TAG_DOT_COLORS[0];
-}
-
-export function normalizeRecordingTags(tags: string[]): string[] {
-  return [...new Set(tags.map(tag => tag.trim()).filter(Boolean))];
 }

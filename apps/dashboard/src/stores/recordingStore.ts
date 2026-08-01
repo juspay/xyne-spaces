@@ -34,6 +34,24 @@ export interface TranscriptEntry {
   spokenAt: number;
 }
 
+/**
+ * A moment the user flagged during the recording. Held locally so the transcript
+ * divider appears the instant the flag is clicked; persistence to Call.markedItems
+ * happens separately through the calls.markMoment mutator.
+ */
+export interface MarkedMoment {
+  /** Id of the transcript entry the divider sits above; null when marked before any line arrived. */
+  transcriptId: number | null;
+  /** Seconds from the first transcript line — the basis the stored transcript uses. */
+  timestampSeconds: number;
+  /**
+   * Pause-adjusted elapsed time from the recording's start. Only for placing the
+   * marker on the live timeline, which measures its playhead the same way — the
+   * transcript basis above would drift from it by the lead-in silence.
+   */
+  elapsedMs: number;
+}
+
 export type RecordingStatus = 'idle' | 'starting' | 'recording' | 'paused' | 'stopping' | 'error';
 export type SttModel = 'google' | 'azure' | 'deepgram';
 
@@ -53,6 +71,7 @@ export interface RecordingState {
   pauseStartedAt: number | null;
   accumulatedPausedMs: number;
   transcripts: TranscriptEntry[];
+  markedMoments: MarkedMoment[];
   error: string | null;
   sttModel: SttModel;
   pendingAutoStart: boolean;
@@ -84,6 +103,7 @@ const initialContext: RecordingState = {
   error: null,
   sttModel: 'azure',
   transcripts: [],
+  markedMoments: [],
   pendingAutoStart: false,
   autoStartRequestedAt: null,
   pendingStop: false,
@@ -385,6 +405,7 @@ export const recordingStore = createStore({
         error: null,
         sttModel: context.sttModel, // Preserve STT model preference
         transcripts: [], // Clear transcripts when recording stops
+        markedMoments: [],
         pendingAutoStart: false,
         autoStartRequestedAt: null,
         pendingStop: false,
@@ -440,6 +461,7 @@ export const recordingStore = createStore({
       error: null,
       sttModel: context.sttModel, // Preserve STT model preference
       transcripts: [], // Clear transcripts
+      markedMoments: [],
       pendingAutoStart: false,
       autoStartRequestedAt: null,
       pendingStop: false,
@@ -460,6 +482,16 @@ export const recordingStore = createStore({
     clearTranscripts: (context): RecordingState => ({
       ...context,
       transcripts: [],
+      markedMoments: [],
+    }),
+
+    /**
+     * Record a flagged moment locally. The caller (NoteTakerOverlayHost) derives the
+     * anchor and timestamp and owns persisting it, so this is a plain append.
+     */
+    markMoment: (context, event: { moment: MarkedMoment }): RecordingState => ({
+      ...context,
+      markedMoments: [...context.markedMoments, event.moment],
     }),
 
     /**

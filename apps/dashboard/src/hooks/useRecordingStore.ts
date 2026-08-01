@@ -36,6 +36,7 @@ export type RecordingStoreEvent =
   | { type: 'reset' }
   | { type: 'addTranscript'; entry: RecordingState['transcripts'][number] }
   | { type: 'clearTranscripts' }
+  | { type: 'markMoment'; moment: RecordingState['markedMoments'][number] }
   | { type: 'setNotesCanvas'; canvasId: string; title?: string }
   | { type: 'setNotesCanvasTitle'; title: string }
   | { type: 'setTitle'; title: string }

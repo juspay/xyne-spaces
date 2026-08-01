@@ -3,22 +3,25 @@ import { useNavigate } from 'react-router-dom';
 import * as Popover from '@radix-ui/react-popover';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
-import { LinkChainSlant, CalendarEvent, Tag, Share02, Spinner, UturnLeft, } from '@xyne/icons';
+import { LinkChainSlant, CalendarEvent, Share02, Spinner, UturnLeft } from '@xyne/icons';
 import { Button } from '../../../components/ui/Button/Button';
 import { Dialog } from '../../../components/ui/Dialog';
 import { Tooltip } from '../../../components/ui/Tooltip';
 import XyneAIStar from '../../../components/icons/xyne-ai/XyneAIStar';
+import { useSelf } from '../../../hooks/useUsers';
 import {
   recordingService,
   type RecordingDetail,
 } from '../../../services/Recording/recordingService';
 import { logRecordingError } from '../../../utils/recordingUtils';
+import { RecordingLabelPicker } from './RecordingLabelPicker';
 import { RecordingShareModal } from './RecordingShareModal';
 
 export interface RecordingDetailV2HeaderProps {
   recording: RecordingDetail;
   isLive: boolean;
   onTitleUpdated: (title: string) => void;
+  onLabelsUpdated: (labels: string[]) => void;
   onAskAI: () => void;
 }
 
@@ -26,16 +29,20 @@ export const RecordingDetailV2Header = ({
   recording,
   isLive,
   onTitleUpdated,
+  onLabelsUpdated,
   onAskAI,
 }: RecordingDetailV2HeaderProps): ReactElement => {
   const navigate = useNavigate();
+  const currentUser = useSelf();
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editedTitle, setEditedTitle] = useState(recording.title);
   const [isSavingTitle, setIsSavingTitle] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
   const [showLiveAskAIHint, setShowLiveAskAIHint] = useState(false);
 
-  const displayTitle = recording.title?.trim() || 'Untitled Recording';
+  // Only the creator can rename or relabel; a recording shared with you is read-only.
+  const isOwner = recording.createdByUserId === currentUser?.id;
+  const displayTitle = recording.title?.trim() || 'Impromptu Recording';
   const formattedDate = format(new Date(recording.startedAt), 'MMM d, yyyy · h:mm a');
 
   const handleSaveTitle = async (): Promise<void> => {
@@ -66,6 +73,20 @@ export const RecordingDetailV2Header = ({
     } finally {
       setIsSavingTitle(false);
       setIsEditingTitle(false);
+    }
+  };
+
+  /** Labels apply optimistically and roll back if the recording rejects the write. */
+  const handleLabelsChange = async (labels: string[]): Promise<void> => {
+    const previousLabels = recording.labels ?? [];
+    onLabelsUpdated(labels);
+
+    try {
+      await recordingService.updateRecording(recording.externalId, { labels });
+    } catch (err) {
+      logRecordingError('RecordingDetailV2Header.updateLabels', err);
+      toast.error('Failed to update labels');
+      onLabelsUpdated(previousLabels);
     }
   };
 
@@ -156,7 +177,7 @@ export const RecordingDetailV2Header = ({
                 />
               </div>
             </div>
-          ) : (
+          ) : isOwner ? (
             <div
               role='button'
               tabIndex={0}
@@ -176,6 +197,13 @@ export const RecordingDetailV2Header = ({
                 <span className='truncate'>{displayTitle}</span>
               </h1>
             </div>
+          ) : (
+            /* Shared-with-me: the title is someone else's to change, so it isn't
+               focusable or clickable — no affordance to discover and be refused. */
+            <h1 className='flex min-w-0 items-baseline gap-2 text-3xl font-medium text-foreground'>
+              {isLive && <span className='shrink-0 text-muted-foreground/70'>Capturing:</span>}
+              <span className='truncate'>{displayTitle}</span>
+            </h1>
           )}
         </div>
 
@@ -213,20 +241,11 @@ export const RecordingDetailV2Header = ({
               Link
             </Button>
           </Tooltip>
-          <Tooltip content='Labels' side='top'>
-            <Button
-              type='button'
-              variant='outline'
-              size='sm'
-              onClick={() => toast.info('Labels coming soon')}
-              className='h-7 gap-1.5 rounded-lg px-3 text-xs font-normal border-dashed border-muted-foreground/40 text-muted-foreground hover:border-foreground/30 hover:text-foreground'
-              data-track-category='RecordingDetailV2'
-              data-track-name='add_label_dummy'
-            >
-              <Tag className='size-3.5' />
-              Add label
-            </Button>
-          </Tooltip>
+          <RecordingLabelPicker
+            labels={recording.labels ?? []}
+            canEdit={recording.createdByUserId === currentUser?.id}
+            onChange={labels => void handleLabelsChange(labels)}
+          />
           <Tooltip content='Share' side='top'>
             <Button
               type='button'

@@ -21,9 +21,7 @@ export interface RecordingShareModalProps {
   onClose?: () => void;
 }
 
-export const RecordingShareModal: React.FC<RecordingShareModalProps> = ({
-  recording,
-}) => {
+export const RecordingShareModal: React.FC<RecordingShareModalProps> = ({ recording }) => {
   const zero = useZero();
   const { user: currentUser } = useAuth();
   const activeUsers = useActiveUsers();
@@ -35,7 +33,9 @@ export const RecordingShareModal: React.FC<RecordingShareModalProps> = ({
   const userGroups = useUserGroupSearch(searchQuery, 10);
   const channels = useChannelSearch(searchQuery, 10);
 
-  const [recordingRow] = useCachedQuery(queries.oatsRecordingByExternalId({ callId: recording.externalId }));
+  const [recordingRow] = useCachedQuery(
+    queries.oatsRecordingByExternalId({ callId: recording.externalId }),
+  );
   const shares = useMemo(() => recordingRow?.shares ?? [], [recordingRow]);
 
   const isOwner = Boolean(currentUser?.id && currentUser.id === recording.createdByUserId);
@@ -88,7 +88,15 @@ export const RecordingShareModal: React.FC<RecordingShareModalProps> = ({
       }));
 
     return [...userOptions, ...groupOptions, ...channelOptions];
-  }, [activeUsers, userGroups, channels, sharedUserIds, sharedUserGroupIds, sharedChannelIds, recording.createdByUserId]);
+  }, [
+    activeUsers,
+    userGroups,
+    channels,
+    sharedUserIds,
+    sharedUserGroupIds,
+    sharedChannelIds,
+    recording.createdByUserId,
+  ]);
 
   const handleShare = async (): Promise<void> => {
     if (selectedValues.length === 0) return;
@@ -121,7 +129,9 @@ export const RecordingShareModal: React.FC<RecordingShareModalProps> = ({
       }
       if (failures < selectedValues.length) {
         toast.success(
-          selectedValues.length === 1 ? 'Recording shared' : `Shared with ${selectedValues.length} recipients`,
+          selectedValues.length === 1
+            ? 'Recording shared'
+            : `Shared with ${selectedValues.length} recipients`,
         );
       }
       setSelectedValues([]);
@@ -132,10 +142,7 @@ export const RecordingShareModal: React.FC<RecordingShareModalProps> = ({
   };
 
   const handleAccessChange = async (
-    target:
-      | { targetUserId: string }
-      | { targetUserGroupId: string }
-      | { targetChannelId: string },
+    target: { targetUserId: string } | { targetUserGroupId: string } | { targetChannelId: string },
   ): Promise<void> => {
     const result = zero.mutate(
       mutators.calls.updateRecordingShare({
@@ -162,7 +169,9 @@ export const RecordingShareModal: React.FC<RecordingShareModalProps> = ({
   return (
     <div className='flex flex-col w-full p-5 gap-4'>
       <div className='space-y-2'>
-        <p className='text-muted-foreground text-[13px] leading-5'>Share with people, groups, or channels</p>
+        <p className='text-muted-foreground text-[13px] leading-5'>
+          Share with people, groups, or channels
+        </p>
         <SearchParticipants
           options={options}
           selectedValues={selectedValues}
@@ -189,46 +198,46 @@ export const RecordingShareModal: React.FC<RecordingShareModalProps> = ({
         <div className='space-y-2 border-t border-border pt-3'>
           <p className='text-muted-foreground text-[13px]'>People with access</p>
           <div className='space-y-3.5 max-h-60 overflow-y-auto pr-1'>
-          {shares.map(share => {
-            const target = share.userGroupId
-              ? { targetUserGroupId: share.userGroupId }
-              : share.channelId
-                ? { targetChannelId: share.channelId }
-                : { targetUserId: share.userId! };
-            const label = share.userGroupId
-              ? (share.userGroup?.name ?? share.userGroupId)
-              : share.channelId
-                ? `#${share.channel?.name ?? share.channelId}`
-                : share.user
-                  ? getUserDisplayName(share.user)
-                  : share.userId;
-            const icon = share.userGroupId ? (
-              <Users className='size-4 text-muted-foreground shrink-0' />
-            ) : share.channelId ? (
-              <Hash className='size-4 text-muted-foreground shrink-0' />
-            ) : (
-              <Avatar userId={share.userId ?? null} size='sm' showActiveStatus={false} />
-            );
+            {shares.map(share => {
+              const target = share.userGroupId
+                ? { targetUserGroupId: share.userGroupId }
+                : share.channelId
+                  ? { targetChannelId: share.channelId }
+                  : { targetUserId: share.userId! };
+              const label = share.userGroupId
+                ? (share.userGroup?.name ?? share.userGroupId)
+                : share.channelId
+                  ? `#${share.channel?.name ?? share.channelId}`
+                  : share.user
+                    ? getUserDisplayName(share.user)
+                    : share.userId;
+              const icon = share.userGroupId ? (
+                <Users className='size-4 text-muted-foreground shrink-0' />
+              ) : share.channelId ? (
+                <Hash className='size-4 text-muted-foreground shrink-0' />
+              ) : (
+                <Avatar userId={share.userId ?? null} size='sm' showActiveStatus={false} />
+              );
 
-            return (
-              <div key={share.id} className='group flex items-center justify-between gap-2'>
-                <div className='flex items-center gap-2 min-w-0'>
-                  {icon}
-                  <span className='text-sm truncate'>{label}</span>
+              return (
+                <div key={share.id} className='group flex items-center justify-between gap-2'>
+                  <div className='flex items-center gap-2 min-w-0'>
+                    {icon}
+                    <span className='text-sm truncate'>{label}</span>
+                  </div>
+                  <button
+                    type='button'
+                    onClick={() => void handleAccessChange(target)}
+                    className='shrink-0 rounded p-1 text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground group-hover:opacity-100'
+                    aria-label='Remove access'
+                    data-track-category='RecordingDetailV2'
+                    data-track-name='revoke_recording_share'
+                  >
+                    <X className='size-3.5' />
+                  </button>
                 </div>
-                <button
-                  type='button'
-                  onClick={() => void handleAccessChange(target)}
-                  className='shrink-0 rounded p-1 text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground group-hover:opacity-100'
-                  aria-label='Remove access'
-                  data-track-category='RecordingDetailV2'
-                  data-track-name='revoke_recording_share'
-                >
-                  <X className='size-3.5' />
-                </button>
-              </div>
-            );
-          })}
+              );
+            })}
           </div>
         </div>
       )}
@@ -237,4 +246,3 @@ export const RecordingShareModal: React.FC<RecordingShareModalProps> = ({
 };
 
 export default RecordingShareModal;
-

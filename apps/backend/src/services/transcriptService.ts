@@ -285,7 +285,7 @@ export interface TicketSuggestion {
 }
 
 export interface MarkedItem {
-  type: 'decision' | 'action';
+  type: 'decision' | 'action' | 'moment';
   text: string;
   timestampSeconds: number;
 }
