@@ -47,7 +47,11 @@ import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { sendRecordingEvent, useRecordingStore } from '../../hooks/useRecordingStore';
 import { useMarkMoment } from '../../hooks/useMarkMoment';
 import { queries } from '../../zero/queries';
-import { TranscriptSidePanel } from '../../components/Chat/TranscriptCitationModal/TranscriptSidePanel';
+import {
+  TranscriptSidePanel,
+  type TranscriptPanelTarget,
+} from '../../components/Chat/TranscriptCitationModal/TranscriptSidePanel';
+import type { MarkedItem } from './components/markedItems';
 import type { Canvas } from '../../components/Canvas/Canvas.types';
 import { xyneAIActor } from '../../machines/xyneAIMachine';
 
@@ -88,6 +92,9 @@ export default function RecordingDetailV2Screen(): ReactElement {
   const [isRegeneratingSummary, setIsRegeneratingSummary] = useState(false);
   const [summaryCanvasNonce, setSummaryCanvasNonce] = useState(0);
   const [citationNonce, setCitationNonce] = useState(0);
+  // Which line the transcript panel opens on: set by a timeline marker, null when the
+  // panel is opened from the toolbar with no particular moment in mind.
+  const [citationRef, setCitationRef] = useState<TranscriptPanelTarget | null>(null);
 
   const isLive = recording ? isRecordingLive(recording) : false;
 
@@ -353,7 +360,14 @@ export default function RecordingDetailV2Screen(): ReactElement {
       ? (recording.identifiedTranscript ?? recording.transcript)
       : recording.transcript;
 
+  const handleMarkerSelect = (item: MarkedItem): void => {
+    setCitationRef({ timestampSeconds: item.timestampSeconds });
+    setCitationNonce(value => value + 1);
+    setShowTranscriptPanel(true);
+  };
+
   const openTranscriptPanel = (): void => {
+    setCitationRef(null);
     setCitationNonce(value => value + 1);
     setShowTranscriptPanel(true);
   };
@@ -387,9 +401,6 @@ export default function RecordingDetailV2Screen(): ReactElement {
             onTicketLinkUpdated={handleTicketLinkUpdated}
             onAskAI={handleAskAI}
           />
-          {/* layoutRoot: a sticky element moves as you scroll, so the tab indicator
-              inside it must be measured against this wrapper rather than the page —
-              otherwise switching tabs mid-scroll animates the pill from a stale spot. */}
           <motion.div
             layoutRoot
             className='sticky top-0 z-10 -mx-4 flex flex-col bg-background px-4 pt-2'
@@ -407,6 +418,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
                       recordingService.downloadRecordingBlob(recording.externalId, signal),
                   }
                 : {})}
+              {...(transcriptText ? { onMarkerSelect: handleMarkerSelect } : {})}
             />
 
             {showTabs && (
@@ -574,9 +586,12 @@ export default function RecordingDetailV2Screen(): ReactElement {
       {showTranscriptPanel && transcriptText && (
         <TranscriptSidePanel
           transcript={transcriptText}
-          target={null}
+          target={citationRef}
           openNonce={citationNonce}
-          onClose={() => setShowTranscriptPanel(false)}
+          onClose={() => {
+            setShowTranscriptPanel(false);
+            setCitationRef(null);
+          }}
           className='absolute inset-y-0 right-0 z-30 w-full md:w-[560px]'
         />
       )}
