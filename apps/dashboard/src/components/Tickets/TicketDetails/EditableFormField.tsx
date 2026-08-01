@@ -204,7 +204,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
       return (
         <div className='flex items-center gap-2 w-full'>
           <span
-            className='text-sm text-muted-foreground w-[120px] flex-shrink-0 truncate overflow-hidden'
+            className='text-sm text-muted-foreground w-[120px] flex-shrink-0 overflow-x-auto whitespace-nowrap'
             title={fieldName}
           >
             {fieldName}
@@ -232,7 +232,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
       return (
         <div className='flex items-center gap-2 w-full'>
           <span
-            className='text-sm text-muted-foreground w-[120px] flex-shrink-0 truncate overflow-hidden'
+            className='text-sm text-muted-foreground w-[120px] flex-shrink-0 overflow-x-auto whitespace-nowrap'
             title={fieldName}
           >
             {fieldName}
@@ -261,7 +261,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
       return (
         <div className='flex items-center gap-2 w-full'>
           <span
-            className='text-sm text-muted-foreground w-[120px] flex-shrink-0 truncate overflow-hidden'
+            className='text-sm text-muted-foreground w-[120px] flex-shrink-0 overflow-x-auto whitespace-nowrap'
             title={fieldName}
           >
             {fieldName}
@@ -294,7 +294,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
       return (
         <div className='flex items-center gap-2 w-full'>
           <span
-            className='text-sm text-muted-foreground w-[120px] flex-shrink-0 truncate overflow-hidden'
+            className='text-sm text-muted-foreground w-[120px] flex-shrink-0 overflow-x-auto whitespace-nowrap'
             title={fieldName}
           >
             {fieldName}
@@ -321,7 +321,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
       return (
         <div className='flex items-start gap-2 w-full'>
           <span
-            className='text-sm text-muted-foreground w-[120px] flex-shrink-0 truncate overflow-hidden'
+            className='text-sm text-muted-foreground w-[120px] flex-shrink-0 overflow-x-auto whitespace-nowrap'
             title={fieldName}
           >
             {fieldName}
@@ -347,7 +347,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
     return (
       <div className='flex items-center gap-2 w-full'>
         <span
-          className='text-sm text-muted-foreground w-[120px] flex-shrink-0 truncate overflow-hidden'
+          className='text-sm text-muted-foreground w-[120px] flex-shrink-0 overflow-x-auto whitespace-nowrap'
           title={fieldName}
         >
           {fieldName}
@@ -376,7 +376,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
     return (
       <div className='flex items-start gap-2 w-full'>
         <span
-          className='text-sm text-muted-foreground w-[120px] flex-shrink-0 pt-0.5 truncate overflow-hidden'
+          className='text-sm text-muted-foreground w-[120px] flex-shrink-0 pt-0.5 overflow-x-auto whitespace-nowrap'
           title={fieldName}
         >
           {fieldName}
@@ -423,7 +423,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
   return (
     <div className='flex items-center gap-2 w-full'>
       <span
-        className='text-sm text-muted-foreground w-[120px] flex-shrink-0 truncate overflow-hidden'
+        className='text-sm text-muted-foreground w-[120px] flex-shrink-0 overflow-x-auto whitespace-nowrap'
         title={fieldName}
       >
         {fieldName}
