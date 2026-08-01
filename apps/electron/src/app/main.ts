@@ -20,6 +20,7 @@ import ElectronEvent from '../services/logger/electron-events';
 import { meetingDetectorService } from '../services/meeting-detector';
 import { initTray } from '../services/tray';
 import { registerGlobalShortcuts } from '../services/global-shortcuts';
+import { initRecordingPillVisibility } from '../services/recording-controller';
 import { initClawOverlayAuthGate } from '../services/claw-overlay-window';
 import { registerProtocolScheme, setupCustomProtocol } from '../services/custom-protocol';
 import { initializeUIUpdater } from '../services/ui-updater';
@@ -203,6 +204,7 @@ async function initializeApp(): Promise<void> {
 
   initTray();
   registerGlobalShortcuts();
+  initRecordingPillVisibility();
 
   initClawOverlayAuthGate();
 
