@@ -254,6 +254,7 @@ const electronAPI = {
       'meeting-popup:content-height',
       'recording-pill:recording-stopped',
       'recording:renderer-ready',
+      'recording:set-minimized',
       'recording:state-changed',
     ];
     if (allowed.includes(channel)) ipcRenderer.send(channel, ...args);
@@ -336,6 +337,11 @@ const electronAPI = {
       const listener = (_event: unknown, theme: 'light' | 'dark') => callback(theme);
       ipcRenderer.on('recording-pill:theme-changed', listener);
       return () => ipcRenderer.removeListener('recording-pill:theme-changed', listener);
+    },
+    onMinimizedChanged: (callback: (minimized: boolean) => void) => {
+      const listener = (_event: unknown, minimized: boolean) => callback(minimized);
+      ipcRenderer.on('recording:minimized-changed', listener);
+      return () => ipcRenderer.removeListener('recording:minimized-changed', listener);
     },
     stopRecording: () => ipcRenderer.send('recording-pill:stop-recording'),
     openApp: () => ipcRenderer.send('recording-pill:open-app'),

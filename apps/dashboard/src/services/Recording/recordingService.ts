@@ -229,11 +229,10 @@ class RecordingService {
     callId: string,
     summaryTemplateId: BuiltinRecordingSummaryTemplateId,
   ): Promise<RegenerateRecordingSummaryResult> {
-    const response: AxiosResponse<
-      { success: true } & RegenerateRecordingSummaryResult
-    > = await apiInstance.post(`/calls/recordings/${callId}/generate-summary`, {
-      summaryTemplateId,
-    });
+    const response: AxiosResponse<{ success: true } & RegenerateRecordingSummaryResult> =
+      await apiInstance.post(`/calls/recordings/${callId}/generate-summary`, {
+        summaryTemplateId,
+      });
     return response.data;
   }
 

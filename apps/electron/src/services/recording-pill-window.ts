@@ -30,6 +30,10 @@ const WINDOW_WIDTH = CARD_EXPANDED_WIDTH + GUTTER * 2;
 const WINDOW_HEIGHT = CARD_MAX_HEIGHT + GUTTER * 2;
 const EDGE_MARGIN = 20;
 
+export function isPillWindow(win: BrowserWindow | null | undefined): boolean {
+  return !!win && !!pillWindow && !pillWindow.isDestroyed() && win === pillWindow;
+}
+
 export function isPillSender(event: Electron.IpcMainEvent): boolean {
   return (
     !!pillWindow &&

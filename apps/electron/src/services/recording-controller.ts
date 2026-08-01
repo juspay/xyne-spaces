@@ -1,7 +1,7 @@
 import { app, BrowserWindow } from 'electron';
 import log from 'electron-log/main';
 import { getMainWindow, createMainWindow, setWindowReferences } from '../window/manager';
-import { showRecordingPill, hideRecordingPill } from './recording-pill-window';
+import { showRecordingPill, hideRecordingPill, isPillWindow } from './recording-pill-window';
 
 export type RecordingTrigger = 'tray' | 'shortcut' | 'pill';
 
@@ -12,10 +12,17 @@ export interface RecordingSnapshot {
 
 const RENDERER_READY_TIMEOUT_MS = 10_000;
 const EXTERNAL_START_TIMEOUT_MS = 5 * 60_000;
+/** Long enough to outlast a Space-switch animation's focus churn, short enough
+ * that the pill still feels like it responds to leaving the app. */
+const PILL_SYNC_DEBOUNCE_MS = 150;
+
+let pillSyncTimer: ReturnType<typeof setTimeout> | null = null;
 
 let active = false;
 let startTime: number | null = null;
 let externalStartExpiry: ReturnType<typeof setTimeout> | null = null;
+
+let minimized = false;
 
 let rendererReady = false;
 let rendererReadyWaiters: Array<() => void> = [];
@@ -98,24 +105,55 @@ function isMainWindowFocused(): boolean {
   return !!mainWindow && !mainWindow.isDestroyed() && mainWindow.isFocused();
 }
 
+function cancelPendingPillSync(): void {
+  if (pillSyncTimer) {
+    clearTimeout(pillSyncTimer);
+    pillSyncTimer = null;
+  }
+}
+
 function syncPillVisibility(): void {
-  if (active && !isMainWindowFocused()) {
+  cancelPendingPillSync();
+  if (active && (minimized || !isMainWindowFocused())) {
     showRecordingPill(startTime ?? Date.now());
   } else {
     hideRecordingPill();
   }
 }
 
+function scheduleSyncPillVisibility(): void {
+  cancelPendingPillSync();
+  pillSyncTimer = setTimeout(() => {
+    pillSyncTimer = null;
+    syncPillVisibility();
+  }, PILL_SYNC_DEBOUNCE_MS);
+}
+
+export function setOverlayMinimized(next: boolean): void {
+  if (minimized === next) return;
+  minimized = next;
+  syncPillVisibility();
+  const mainWindow = getMainWindow();
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('recording:minimized-changed', minimized);
+  }
+}
+
 export function initRecordingPillVisibility(): void {
-  const handleWindowFocus = (): void => syncPillVisibility();
-  const handleWindowBlur = (): void => {
-    setTimeout(syncPillVisibility, 0);
+  const handleWindowFocus = (_event: Electron.Event, window: BrowserWindow): void => {
+    if (isPillWindow(window)) return;
+    scheduleSyncPillVisibility();
+  };
+  const handleWindowBlur = (_event: Electron.Event, window: BrowserWindow): void => {
+    if (isPillWindow(window)) return;
+    scheduleSyncPillVisibility();
   };
 
   app.on('browser-window-focus', handleWindowFocus);
   app.on('browser-window-blur', handleWindowBlur);
 
   app.once('will-quit', () => {
+    cancelPendingPillSync();
     app.removeListener('browser-window-focus', handleWindowFocus);
     app.removeListener('browser-window-blur', handleWindowBlur);
   });
@@ -166,6 +204,8 @@ export async function startRecordingFromOutside(trigger: RecordingTrigger): Prom
 }
 
 export function stopRecording(trigger: RecordingTrigger): void {
+  minimized = false;
+  cancelPendingPillSync();
   focusMainWindow('/recordings')?.webContents.send('meeting:stop-recording');
   hideRecordingPill();
   log.info(`[RecordingController] Stop requested from ${trigger}`);
@@ -189,6 +229,7 @@ export function syncRecordingState(nextActive: boolean, nextStartTime?: number):
   if (nextActive && !wasActive) {
     clearExternalStartPending();
   }
+  if (!nextActive) minimized = false;
 
   syncPillVisibility();
 
