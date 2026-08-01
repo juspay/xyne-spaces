@@ -1,4 +1,5 @@
 import type { OutgoingAttachment } from '@/integrations/core/baseMailReplySender';
+import { logger } from '@/utils/logger';
 
 interface PreparedAttachment {
   name: string;
@@ -15,14 +16,22 @@ interface ApplyInlineResult {
 
 const cidFor = (attachmentId: string): string => `inline-${attachmentId}`;
 
-/** Pull every `data-att-id` value out of the body's `<img>` tags. */
+/** Attachment id for an `<img>` tag: `data-att-id`, or recovered from its `/attachments/<id>/download` src. */
+const extractAttachmentIdFromImgTag = (tag: string): string | null => {
+  const dataAttMatch = /data-att-id="([^"]+)"/i.exec(tag);
+  if (dataAttMatch) return dataAttMatch[1];
+  const srcMatch = /\ssrc="[^"]*\/attachments\/([^/"]+)\/download[^"]*"/i.exec(tag);
+  return srcMatch ? srcMatch[1] : null;
+};
+
+/** Pull every attachment id out of the body's `<img>` tags. */
 const extractInlineIdsFromBody = (body: string): Set<string> => {
   const ids = new Set<string>();
   const imgRe = /<img\b[^>]*>/gi;
   let match: RegExpExecArray | null;
   while ((match = imgRe.exec(body)) !== null) {
-    const idMatch = /data-att-id="([^"]+)"/i.exec(match[0]);
-    if (idMatch) ids.add(idMatch[1]);
+    const id = extractAttachmentIdFromImgTag(match[0]);
+    if (id) ids.add(id);
   }
   return ids;
 };
@@ -50,11 +59,14 @@ export const applyInlineAttachments = (
   });
 
   const rewrittenBody = body.replace(/<img\b[^>]*>/gi, tag => {
-    const idMatch = tag.match(/data-att-id="([^"]+)"/i);
-    if (!idMatch) return tag;
-    const id = idMatch[1];
-    if (!inlineSet.has(id)) return tag;
-    const cid = cidFor(id);
+    const id = extractAttachmentIdFromImgTag(tag);
+    if (!id) return tag;
+    // inlineSet is derived from this body, so it can't tell a matched id from an unmatched one.
+    const cid = inlineCidByAttachmentId.get(id);
+    if (!cid) {
+      logger.warn(`[inlineAttachments] no prepared attachment for data-att-id=${id}; leaving src unchanged`);
+      return tag;
+    }
     let next = tag.replace(/\ssrc="[^"]*"/i, ` src="cid:${cid}"`);
     if (!/\ssrc="/i.test(next)) {
       next = next.replace(/>$/, ` src="cid:${cid}">`);
