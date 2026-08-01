@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
-import { Flag, PauseBig, PlayBig, Spinner, StopBig, CloudDisabled } from '@xyne/icons';
+import { Flag, PauseBig, PlayBig, StopBig, CloudDisabled } from '@xyne/icons';
 import { Maximize2, Minimize2 } from 'lucide-react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { useWorkspaceNavigate } from '../../../hooks/useWorkspaceNavigate';
@@ -26,9 +26,6 @@ interface NoteTakerOverlayProps {
   channelId: string | null;
   recordingId: string | null;
   notesCanvasId: string | null;
-  isCreatingNotes: boolean;
-  notesCreationFailed: boolean;
-  onCreateNotes: () => void;
   isOffline: boolean;
   title?: string | undefined;
   onStop: () => void;
@@ -59,9 +56,6 @@ interface RecordingControlBarProps {
 interface NotesTabProps {
   notesCanvasId: string | null;
   channelId: string | null;
-  isCreatingNotes: boolean;
-  notesCreationFailed: boolean;
-  onCreateNotes: () => void;
 }
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -229,9 +223,6 @@ const RecordingControlBar = ({
 const NotesTab = ({
   notesCanvasId,
   channelId,
-  isCreatingNotes,
-  notesCreationFailed,
-  onCreateNotes,
 }: NotesTabProps): ReactElement => {
   const handleFileUpload = useCallback(
     (file: File): Promise<string> => canvasService.uploadCanvasFile(notesCanvasId!, file),
@@ -263,32 +254,8 @@ const NotesTab = ({
   }
 
   return (
-    <div className='flex h-full flex-col items-center justify-center gap-3 px-6 text-center'>
-      {isCreatingNotes ? (
-        <>
-          <Spinner size={20} className='animate-spin text-muted-foreground' />
-          <p className='text-xs text-muted-foreground'>Creating collaborative notes…</p>
-        </>
-      ) : (
-        <>
-          <p className='text-xs text-muted-foreground'>
-            {notesCreationFailed
-              ? 'Notes could not be created.'
-              : 'Collaborative notes are not ready yet.'}
-          </p>
-          <Button
-            type='button'
-            variant='outline'
-            size='sm'
-            onClick={onCreateNotes}
-            className='rounded-lg'
-            data-track-category={TRACK_CATEGORY}
-            data-track-name='retry_create_notes'
-          >
-            Try again
-          </Button>
-        </>
-      )}
+    <div className='flex h-full items-center justify-center px-6 text-center'>
+      <p className='text-xs text-muted-foreground'>Collaborative notes are unavailable.</p>
     </div>
   );
 };
@@ -305,9 +272,6 @@ export function NoteTakerOverlay({
   channelId,
   recordingId,
   notesCanvasId,
-  isCreatingNotes,
-  notesCreationFailed,
-  onCreateNotes,
   isOffline,
   title,
   onStop,
@@ -474,9 +438,6 @@ export function NoteTakerOverlay({
             <NotesTab
               notesCanvasId={notesCanvasId}
               channelId={channelId}
-              isCreatingNotes={isCreatingNotes}
-              notesCreationFailed={notesCreationFailed}
-              onCreateNotes={onCreateNotes}
             />
           </div>
 

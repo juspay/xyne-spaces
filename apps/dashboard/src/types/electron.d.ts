@@ -138,6 +138,7 @@ export interface ElectronAPI {
     onShow: (callback: (startTime: number) => void) => () => void;
     onHide: (callback: () => void) => () => void;
     onThemeChanged: (callback: (theme: 'light' | 'dark') => void) => () => void;
+    onMinimizedChanged: (callback: (minimized: boolean) => void) => () => void;
     stopRecording: () => void;
     openApp: () => void;
     setIgnoreMouse: (ignore: boolean) => void;

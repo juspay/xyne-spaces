@@ -46,6 +46,7 @@ import { storageService } from '@/services/storage';
 import { CallVespaFeedSource, queueCallVespaFeed } from '@/services/callVespaQueue';
 import { callShareService } from '@/services/callShareService';
 import { noteTakerTranscriptService } from '@/services/noteTakerTranscriptService';
+import { canvasAuthService } from '@/services/canvasAuthService';
 import {
   getBuiltinRecordingSummaryTemplate,
   type BuiltinRecordingSummaryTemplateId,
@@ -388,6 +389,7 @@ export class CallController {
   initiateCall = async (req: Request, res: Response): Promise<void> => {
     const correlationId = uuidv4();
     let callExternalId: string | undefined;
+    let headlessNotesCanvasId: string | undefined;
     // Tracks which stage was active when an error is thrown; used in catch log.
     let stage = 'setup';
 
@@ -416,12 +418,20 @@ export class CallController {
         }
 
         callExternalId = uuidv4();
+        const notesCanvasId = uuidv4();
+        headlessNotesCanvasId = notesCanvasId;
+        stage = 'notes_canvas_creation';
+        await canvasAuthService.createCanvasForUser(notesCanvasId, userId, {
+          title: 'Untitled Notes',
+        });
+
         const roomLink = `${livekitService.getClientUrl()}/call/${callExternalId}?type=${callType}`;
         const roomMetadata = JSON.stringify({
           callType: 'HEADLESS',
           sttModel: sttModel || 'azure',
           createdBy: userId,
           workspaceId: req.user!.workspaceId,
+          notesCanvasId,
         });
 
         stage = 'livekit_room_creation';
@@ -456,6 +466,7 @@ export class CallController {
           callId: callExternalId,
           roomLink,
           channelId: null,
+          notesCanvasId,
         });
         return;
       }
@@ -685,6 +696,16 @@ export class CallController {
     } catch (error) {
       const callIdForLog = callExternalId ?? correlationId;
       logger.error(`[${callIdForLog}] call_initiation_failed`, { stage, error: error, stack: error instanceof Error ? error.stack : undefined });
+      if (headlessNotesCanvasId) {
+        try {
+          await db.canvas.deleteMany({ where: { id: headlessNotesCanvasId } });
+        } catch (cleanupError) {
+          logger.error(`[${callIdForLog}] headless_notes_canvas_cleanup_failed`, {
+            canvasId: headlessNotesCanvasId,
+            cleanupError,
+          });
+        }
+      }
       // If room was already created but token generation failed, the LiveKit room is now
       // orphaned. It will auto-close after emptyTimeout=120s, but this log makes it searchable.
       if (callExternalId && stage === 'token_generation_new_call') {

@@ -90,9 +90,15 @@ class NoteTakerWebhookController {
 
     const workspaceId = typeof roomMetadata.workspaceId === 'string' ? roomMetadata.workspaceId : undefined;
     const createdBy = typeof roomMetadata.createdBy === 'string' ? roomMetadata.createdBy : participant.identity;
+    const notesCanvasId =
+      typeof roomMetadata.notesCanvasId === 'string' ? roomMetadata.notesCanvasId : undefined;
 
     if (!workspaceId) {
       logger.error(`[NoteTaker Webhook] Missing workspaceId in room metadata for ${roomName}`);
+      return;
+    }
+    if (!notesCanvasId) {
+      logger.error(`[NoteTaker Webhook] Missing notesCanvasId in room metadata for ${roomName}`);
       return;
     }
 
@@ -104,6 +110,7 @@ class NoteTakerWebhookController {
       roomName,
       workspaceId,
       createdBy,
+      notesCanvasId,
       roomLink,
       now: new Date(),
     });
