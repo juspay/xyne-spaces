@@ -88,9 +88,13 @@ import {
 } from "../lib/session-context.js";
 import { emitAgentWorkingSignal } from "../surfaces/spaces/client.js";
 import JSZip from "jszip";
-import { buildWriteApprovalFlow, buildTwinApprovalFlow, buildUserQuestionFlow, buildPromoteProviderFlow, buildGoalSuggestionFlow, buildPlanFlow, isTwinDelivery } from "xyne-claw-shared";
+import { buildWriteApprovalFlow, buildAgentCreationFlow, agentCreationPropsFromToolParams, buildSkillCreationFlow, skillCreationPropsFromToolParams, buildTwinApprovalFlow, buildUserQuestionFlow, buildPromoteProviderFlow, buildGoalSuggestionFlow, buildPlanFlow, buildMcpConfigureFlow, isTwinDelivery, SUBAGENT_DEFINITIONS } from "xyne-claw-shared";
 import type { TwinDelivery } from "xyne-claw-shared";
 import type { Todo } from "xyne-claw-shared";
+import { buildGoogleConsentUrl } from "./google-oauth.js";
+import { buildMicrosoftConsentUrl } from "./microsoft-oauth.js";
+import { OAUTH_SERVER_TYPES } from "../lib/oauth-server-types.js";
+import { resolveConnectorDefinition } from "../mcp/connector-definitions.js";
 
 const clog = createLogger("webhook");
 
@@ -101,6 +105,16 @@ const clog = createLogger("webhook");
 // on every Spaces version. Once the Spaces fix is live in prod, set
 // SPACES_SUPPORTS_AGENT_PROGRESS=true in the deployment env, no code change.
 const USE_EPHEMERAL_PROGRESS = true;
+
+const AGENT_CREATION_OAUTH_TOOLS = new Map<string, { serverType: string; displayName: string }>([
+  ['google', { serverType: 'google', displayName: 'Google' }],
+  ['gmail', { serverType: 'google', displayName: 'Google' }],
+  ['google-drive', { serverType: 'google', displayName: 'Google' }],
+  ['drive', { serverType: 'google', displayName: 'Google' }],
+  ['microsoft', { serverType: 'microsoft', displayName: 'Microsoft' }],
+  ['outlook', { serverType: 'microsoft', displayName: 'Microsoft' }],
+  ['office', { serverType: 'microsoft', displayName: 'Microsoft' }],
+]);
 
 // Per-process dedup for the one-shot sandbox preview announce. Claw also
 // guards against re-emit on its side; this Set is the second layer in case
@@ -507,6 +521,128 @@ async function pendingActionTargetValidation(
   }
 }
 
+async function agentCreationConnectLinksForUser(
+  params: Record<string, unknown>,
+  userId: string,
+): Promise<Array<{ serverType: string; displayName: string; authUrl: string }>> {
+  const selectedTools = Array.isArray(params["tools"])
+    ? (params["tools"] as unknown[]).filter((tool): tool is string => typeof tool === "string")
+    : [];
+  if (selectedTools.length === 0) return [];
+
+  const wanted = new Map<string, string>();
+  for (const tool of selectedTools) {
+    const normalized = tool.trim().toLowerCase().replace(/[_\s]+/g, "-");
+    const oauthTool = AGENT_CREATION_OAUTH_TOOLS.get(normalized);
+    if (oauthTool) wanted.set(oauthTool.serverType, oauthTool.displayName);
+  }
+  if (wanted.size === 0) return [];
+
+  const existing = await prisma.userMcpConnection.findMany({
+    where: { userId, mcpServer: { type: { in: [...wanted.keys()] } } },
+    select: { mcpServer: { select: { type: true } } },
+  });
+  for (const conn of existing) wanted.delete(conn.mcpServer.type);
+
+  const links: Array<{ serverType: string; displayName: string; authUrl: string }> = [];
+  for (const [serverType, displayName] of wanted) {
+    try {
+      const authUrl = serverType === "google"
+        ? buildGoogleConsentUrl(userId)
+        : buildMicrosoftConsentUrl(userId);
+      links.push({ serverType, displayName, authUrl });
+    } catch (err) {
+      clog.warn(`[webhook/result] could not build ${serverType} connect URL for create-agent card: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  return links;
+}
+
+async function agentCreationCredentialSetupFlowsForUser(
+  params: Record<string, unknown>,
+  userId: string,
+  ctx: SessionContext,
+): Promise<ReturnType<typeof buildMcpConfigureFlow>[]> {
+  const selectedTools = Array.isArray(params["tools"])
+    ? (params["tools"] as unknown[]).filter((tool): tool is string => typeof tool === "string")
+    : [];
+  if (selectedTools.length === 0) return [];
+
+  const selected = new Set(selectedTools.map((tool) => tool.trim()).filter(Boolean));
+  const candidateServerTypes: string[] = [];
+  for (const def of SUBAGENT_DEFINITIONS) {
+    if (!selected.has(def.name)) continue;
+    candidateServerTypes.push(def.serverType, ...(def.serverTypeAliases ?? []));
+  }
+
+  const uniqueCandidates = [...new Set(candidateServerTypes)].filter((serverType) => !OAUTH_SERVER_TYPES.has(serverType));
+  if (uniqueCandidates.length === 0) return [];
+
+  const existing = await prisma.userMcpConnection.findMany({
+    where: { userId, mcpServer: { type: { in: uniqueCandidates } } },
+    select: { mcpServer: { select: { type: true } } },
+  });
+  const connected = new Set(existing.map((conn) => conn.mcpServer.type));
+
+  const flows: ReturnType<typeof buildMcpConfigureFlow>[] = [];
+  const emittedSubagents = new Set<string>();
+  for (const def of SUBAGENT_DEFINITIONS) {
+    if (!selected.has(def.name) || emittedSubagents.has(def.name)) continue;
+    const candidates = [def.serverType, ...(def.serverTypeAliases ?? [])].filter((serverType) => !OAUTH_SERVER_TYPES.has(serverType));
+    if (candidates.some((serverType) => connected.has(serverType))) continue;
+
+    for (const serverType of candidates) {
+      const definition = await resolveConnectorDefinition(serverType);
+      if (!definition || definition.credentialFields.length === 0) continue;
+
+      const row = await prisma.mcpServer.findUnique({
+        where: { type: serverType },
+        select: { id: true, name: true, enabled: true },
+      });
+      if (!row?.enabled) continue;
+
+      emittedSubagents.add(def.name);
+      flows.push(buildMcpConfigureFlow({
+        serverType,
+        serverName: row.name || def.name,
+        mcpServerId: row.id,
+        fields: definition.credentialFields.map((field) => ({
+          name: field.name,
+          label: field.label,
+          type: field.type,
+          ...(field.placeholder ? { placeholder: field.placeholder } : {}),
+          ...(field.optional ? { optional: true } : {}),
+        })),
+        userId,
+        reason: `Required for the ${def.name} subagent.`,
+        ...(ctx.agentSlug ? { agentSlug: ctx.agentSlug } : {}),
+        ...(ctx.spacesAppId ? { spacesAppId: ctx.spacesAppId } : {}),
+      }));
+      break;
+    }
+  }
+  return flows;
+}
+
+async function postAgentCreationCredentialSetupCards(
+  params: Record<string, unknown>,
+  userId: string,
+  ctx: SessionContext,
+  appToken: string,
+): Promise<void> {
+  const flows = await agentCreationCredentialSetupFlowsForUser(params, userId, ctx);
+  for (const flow of flows) {
+    await spacesAppFetch("/chat/postMessage", {
+      channelId: ctx.channelId,
+      conversationId: ctx.conversationId,
+      flow: withSpacesAppId(flow, ctx.spacesAppId),
+      userId: ctx.spacesAppUserId,
+    }, appToken).catch((err) => {
+      clog.warn(`[webhook/result] failed to post MCP credential setup card: ${err instanceof Error ? err.message : String(err)}`);
+    });
+  }
+}
+
 
 /**
  * Digital Twin (approval mode): open a DM with the mentioned user and send the
@@ -856,6 +992,37 @@ function formatActionDescription(tool: string, params: Record<string, unknown>, 
     if (slug) lines.push(`**Slug:** \`${slug}\``);
     if (description) lines.push(`**Description:** ${description}`);
     lines.push(``, `**Content (${content.length} chars):**`, "```md", content.slice(0, 1500) + (content.length > 1500 ? "\n…(truncated)" : ""), "```");
+    return lines.join("\n");
+  }
+
+  if (tool === "create-agent") {
+    const name = (params["name"] as string) ?? "";
+    const slug = (params["slug"] as string) ?? "";
+    const description = (params["description"] as string) ?? "";
+    const systemPrompt = (params["systemPrompt"] as string) ?? "";
+    const modelId = (params["modelId"] as string) ?? "";
+    const tools = Array.isArray(params["tools"]) ? (params["tools"] as unknown[]).filter((t): t is string => typeof t === "string") : [];
+    const lines = [`**Create Agent**`, ``, `**Name:** ${name}`];
+    if (slug) lines.push(`**Slug:** \`${slug}\``);
+    if (description) lines.push(`**Description:** ${description}`);
+    if (modelId) lines.push(`**Model:** \`${modelId}\``);
+    if (tools.length > 0) lines.push(`**Tools:** ${tools.map((t) => `\`${t}\``).join(", ")}`);
+    lines.push(``, `**System prompt (${systemPrompt.length} chars):**`, "```md", systemPrompt.slice(0, 1500) + (systemPrompt.length > 1500 ? "\n…(truncated)" : ""), "```");
+    return lines.join("\n");
+  }
+
+  if (tool === "create-subagent") {
+    const name = (params["name"] as string) ?? "";
+    const description = (params["description"] as string) ?? "";
+    const systemPrompt = (params["systemPrompt"] as string) ?? "";
+    const paramName = (params["paramName"] as string) ?? "";
+    const paramDescription = (params["paramDescription"] as string) ?? "";
+    const tools = Array.isArray(params["tools"]) ? (params["tools"] as unknown[]).filter((t): t is string => typeof t === "string") : [];
+    const lines = [`**Create Subagent**`, ``, `**Name:** ${name}`];
+    if (description) lines.push(`**Description:** ${description}`);
+    if (paramName) lines.push(`**Input:** \`${paramName}\`${paramDescription ? ` — ${paramDescription}` : ""}`);
+    if (tools.length > 0) lines.push(`**Tools:** ${tools.map((t) => `\`${t}\``).join(", ")}`);
+    lines.push(``, `**System prompt (${systemPrompt.length} chars):**`, "```md", systemPrompt.slice(0, 1500) + (systemPrompt.length > 1500 ? "\n…(truncated)" : ""), "```");
     return lines.join("\n");
   }
 
@@ -4559,7 +4726,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
 
           const actionDesc = formatActionDescription(action["tool"] as string, action["params"] as Record<string, unknown>, targetValidation);
 
-          const writeFlow = withSpacesAppId(buildWriteApprovalFlow(actionDesc, {
+          const writeAction = {
             serverType: action["serverType"] as string,
             tool: action["tool"] as string,
             params: action["params"] as Record<string, unknown>,
@@ -4568,7 +4735,21 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
             agentSlug: ctx.agentSlug ?? "",
             channelId: ctx.channelId,
             conversationId: ctx.conversationId,
-          }), ctx.spacesAppId);
+          };
+          // create-agent/create-skill → rich artifact cards (pending phase,
+          // updates in place on approve/decline). Other write tools use the
+          // generic approval card. All carry the SAME signed action data.
+          const writeFlow = withSpacesAppId(
+            action["tool"] === "create-agent"
+              ? buildAgentCreationFlow("pending", {
+                ...agentCreationPropsFromToolParams(writeAction.params),
+                connectLinks: await agentCreationConnectLinksForUser(writeAction.params, writeAction.userId),
+              }, writeAction)
+              : action["tool"] === "create-skill"
+                ? buildSkillCreationFlow("pending", skillCreationPropsFromToolParams(writeAction.params), writeAction)
+                : buildWriteApprovalFlow(actionDesc, writeAction),
+            ctx.spacesAppId,
+          );
 
           if (action["tool"] === "spaces-memory-create" && (action["params"] as Record<string, unknown>)?.["content"]) {
             const memParams = action["params"] as Record<string, unknown>;
@@ -4582,16 +4763,19 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
             form.append("userId", ctx.spacesAppUserId);
             form.append("flow", JSON.stringify(writeFlow));
             await spacesAppFetchMultipart("/files/filesUpload", form, token);
-          } else {
-            await spacesAppFetch("/chat/postMessage", {
-              channelId: ctx.channelId,
-              conversationId: ctx.conversationId,
-              flow: writeFlow,
-              userId: ctx.spacesAppUserId,
-            }, token);
-          }
-          copilotApprovalCardsSent += 1;
-        }
+	          } else {
+	            await spacesAppFetch("/chat/postMessage", {
+	              channelId: ctx.channelId,
+	              conversationId: ctx.conversationId,
+	              flow: writeFlow,
+	              userId: ctx.spacesAppUserId,
+	            }, token);
+	          }
+	          if (action["tool"] === "create-agent") {
+	            await postAgentCreationCredentialSetupCards(writeAction.params, writeAction.userId, ctx, token);
+	          }
+	          copilotApprovalCardsSent += 1;
+	        }
         log.info(`Copilot: posted ${copilotApprovalCardsSent}/${copilotPendingActions.length} write action approval(s)`);
       }
 
@@ -4972,7 +5156,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
 
         const actionDesc = formatActionDescription(action["tool"] as string, action["params"] as Record<string, unknown>, targetValidation);
 
-        const writeFlow = withSpacesAppId(buildWriteApprovalFlow(actionDesc, {
+        const writeAction = {
           serverType: action["serverType"] as string,
           tool: action["tool"] as string,
           params: action["params"] as Record<string, unknown>,
@@ -4981,7 +5165,21 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           agentSlug: ctx.agentSlug ?? "",
           channelId: ctx.channelId,
           conversationId: ctx.conversationId,
-        }), ctx.spacesAppId);
+        };
+        // create-agent/create-skill → rich artifact cards (pending phase,
+        // updates in place on approve/decline). Other write tools use the
+        // generic approval card. All carry the SAME signed action data.
+        const writeFlow = withSpacesAppId(
+          action["tool"] === "create-agent"
+            ? buildAgentCreationFlow("pending", {
+              ...agentCreationPropsFromToolParams(writeAction.params),
+              connectLinks: await agentCreationConnectLinksForUser(writeAction.params, writeAction.userId),
+            }, writeAction)
+            : action["tool"] === "create-skill"
+              ? buildSkillCreationFlow("pending", skillCreationPropsFromToolParams(writeAction.params), writeAction)
+              : buildWriteApprovalFlow(actionDesc, writeAction),
+          ctx.spacesAppId,
+        );
 
         // Post in the same thread where the conversation happened
         if (action["tool"] === "spaces-memory-create" && (action["params"] as Record<string, unknown>)?.["content"]) {
@@ -4996,16 +5194,19 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           form.append("userId", ctx.spacesAppUserId);
           form.append("flow", JSON.stringify(writeFlow));
           await spacesAppFetchMultipart("/files/filesUpload", form, token);
-        } else {
-          await spacesAppFetch("/chat/postMessage", {
-            channelId: ctx.channelId,
-            conversationId: ctx.conversationId,
-            flow: writeFlow,
-            userId: ctx.spacesAppUserId,
-          }, token);
-        }
-        approvalCardsSent += 1;
-      }
+	        } else {
+	          await spacesAppFetch("/chat/postMessage", {
+	            channelId: ctx.channelId,
+	            conversationId: ctx.conversationId,
+	            flow: writeFlow,
+	            userId: ctx.spacesAppUserId,
+	          }, token);
+	        }
+	        if (action["tool"] === "create-agent") {
+	          await postAgentCreationCredentialSetupCards(writeAction.params, writeAction.userId, ctx, token);
+	        }
+	        approvalCardsSent += 1;
+	      }
 
       log.info(`Sent ${approvalCardsSent}/${pendingActionsPayload.length} write action approval(s) to ${ctx.senderId}`);
     }

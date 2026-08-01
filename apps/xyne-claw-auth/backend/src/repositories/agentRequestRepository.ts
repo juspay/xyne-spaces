@@ -172,4 +172,78 @@ export const agentRequestRepository = {
       where: { id },
       data: { status: "pending", reviewerId: null, reviewNote: null },
     }),
+
+  // ── Agent / subagent update requests ──────────────────────────────────────
+  // Same shape as the skill-update rows (proposedContent holds the proposal —
+  // for agents/subagents a JSON payload of systemPrompt + scalar fields), but
+  // targetType is "agent" | "subagent" and the target key (agent slug or
+  // subagent name) is stored in agentSlug. There is no partial-unique index for
+  // these, so the transactional supersede is what keeps one pending proposal per
+  // (target, proposer): a new proposal rejects the proposer's prior pending one.
+
+  findPendingEntityUpdate: (targetType: "agent" | "subagent", targetKey: string, requesterId: string) =>
+    prisma.agentRequest.findFirst({
+      where: { targetType, agentSlug: targetKey, requesterId, requestType: `${targetType}_update`, status: "pending" },
+    }),
+
+  supersedeAndCreateEntityUpdate: (data: {
+    targetType: "agent" | "subagent";
+    agentId?: string | null;
+    /** agent slug or subagent name — stored in agentSlug. */
+    targetKey: string;
+    requesterId: string;
+    orgId: string;
+    proposedContent: string;
+    baseContentHash: string;
+    proposedContentHash: string;
+    requestNote?: string | null;
+  }) =>
+    prisma.$transaction(async (tx) => {
+      const requestType = `${data.targetType}_update`;
+      const superseded = await tx.agentRequest.updateMany({
+        where: {
+          targetType: data.targetType,
+          agentSlug: data.targetKey,
+          requesterId: data.requesterId,
+          requestType,
+          status: "pending",
+        },
+        data: {
+          status: "rejected",
+          reviewerId: data.requesterId,
+          reviewNote: "Superseded by a newer proposal from the same proposer",
+        },
+      });
+      const request = await tx.agentRequest.create({
+        data: {
+          targetType: data.targetType,
+          requestType,
+          agentId: data.agentId ?? null,
+          agentSlug: data.targetKey,
+          requesterId: data.requesterId,
+          orgId: data.orgId,
+          proposedContent: data.proposedContent,
+          baseContentHash: data.baseContentHash,
+          proposedContentHash: data.proposedContentHash,
+          requestNote: data.requestNote ?? null,
+        },
+      });
+      return { request, supersededCount: superseded.count };
+    }),
+
+  /** Atomically claim a pending agent/subagent update (pending→status only if
+   *  still pending). count===1 → this caller owns applying it. Scoped by
+   *  requestType so it can never claim a clone / skill-update row. */
+  claimPendingEntityUpdate: (id: string, requestType: string, status: "approved" | "rejected", reviewerId: string, reviewNote?: string | null) =>
+    prisma.agentRequest.updateMany({
+      where: { id, requestType, status: "pending" },
+      data: { status, reviewerId, reviewNote: reviewNote ?? null },
+    }),
+
+  /** Roll a claimed agent/subagent update back to pending if applying fails. */
+  revertEntityUpdateToPending: (id: string) =>
+    prisma.agentRequest.update({
+      where: { id },
+      data: { status: "pending", reviewerId: null, reviewNote: null },
+    }),
 };

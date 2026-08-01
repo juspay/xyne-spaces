@@ -5,7 +5,7 @@ import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { listToolsForUser, callTool } from "../mcp/runner.js";
 import { agentRunRepository } from "../repositories/index.js";
-import type { McpToolInfo, McpServerTools } from "../mcp/types.js";
+import type { CredentialField, McpToolInfo, McpServerTools } from "../mcp/types.js";
 import { hasConnectorDefinition, resolveConnectorDefinition } from "../mcp/connector-definitions.js";
 import { BITBUCKET_CUSTOM_TOOLS, handleUploadPrScreenshot, handleGetPrComments, handleGetPrTemplate, buildUpstreamBitbucketCitation } from "../mcp/adapters/bitbucket.js";
 import { GRAFANA_CUSTOM_TOOLS, handleGrafanaQueryLogs, handleGrafanaListMetrics, handleGrafanaQueryMetrics, handleGrafanaQueryDatabase, buildUpstreamGrafanaCitation, prefixChunk } from "../mcp/adapters/grafana.js";
@@ -43,7 +43,10 @@ import {
   parseGatewayToolSelectionKey,
 } from "../mcpgateway/key-format.js";
 import { requiresGatewayToolApproval } from "../mcpgateway/tool-approval.js";
-import { buildAgentCallProposalFlow, parseToolsConfig, type AgentToolsConfig } from "xyne-claw-shared";
+import { buildAgentCallProposalFlow, buildConnectAccountFlow, buildMcpConfigureFlow, parseToolsConfig, type AgentToolsConfig, SUBAGENT_DEFINITIONS } from "xyne-claw-shared";
+import { OAUTH_SERVER_TYPES } from "../lib/oauth-server-types.js";
+import { buildGoogleConsentUrl } from "./google-oauth.js";
+import { buildMicrosoftConsentUrl } from "./microsoft-oauth.js";
 import { visibleAgentWhereForRunningUser } from "../lib/callable-agent-resolver.js";
 import { isClawAdmin } from "../middleware/agent-acl.js";
 import {
@@ -639,6 +642,80 @@ export function verifyActionSignature(action: Record<string, unknown>, signature
   }
 }
 
+/**
+ * A per-user OAuth provider the agent is configured to use but that the current
+ * user has NOT connected. Surfaced in the /mcp/tools response so the runtime can
+ * tell the model "you haven't connected X" instead of the tool silently vanishing.
+ */
+interface NeedsConnectionEntry {
+  serverType: string;
+  displayName: string;
+}
+
+interface ConnectableServer {
+  serverType: string;
+  displayName: string;
+  mode: "oauth" | "credentials";
+  mcpServerId?: string;
+  credentialFields?: readonly CredentialField[];
+}
+
+/** Friendly labels for the connectable OAuth providers. */
+const OAUTH_PROVIDER_LABELS: Record<string, string> = {
+  google: "Google (Gmail, Calendar, Drive, Contacts, Tasks)",
+  microsoft: "Microsoft 365 (Outlook, Calendar, OneDrive)",
+};
+
+async function resolveConnectableServer(serverType: string): Promise<ConnectableServer | null> {
+  if (OAUTH_SERVER_TYPES.has(serverType)) {
+    return { serverType, displayName: OAUTH_PROVIDER_LABELS[serverType] ?? serverType, mode: "oauth" };
+  }
+
+  const definition = await resolveConnectorDefinition(serverType);
+  if (!definition || definition.credentialFields.length === 0) return null;
+
+  const row = await prisma.mcpServer.findUnique({
+    where: { type: serverType },
+    select: { id: true, name: true, enabled: true },
+  });
+  if (!row?.enabled) return null;
+
+  return {
+    serverType,
+    displayName: row.name || serverType,
+    mode: "credentials",
+    mcpServerId: row.id,
+    credentialFields: definition.credentialFields,
+  };
+}
+
+async function computeNeedsConnection(
+  toolsConfig: AgentToolsConfig | undefined,
+  resolvedServerTypes: Set<string>,
+): Promise<NeedsConnectionEntry[]> {
+  if (!toolsConfig) return [];
+  const referenced: string[][] = [];
+  for (const name of toolsConfig.subagents ?? []) {
+    const def = SUBAGENT_DEFINITIONS.find((d) => d.name === name);
+    if (!def) continue;
+    referenced.push([def.serverType, ...(def.serverTypeAliases ?? [])]);
+  }
+
+  const out: NeedsConnectionEntry[] = [];
+  const emitted = new Set<string>();
+  for (const candidates of referenced) {
+    if (candidates.some((st) => resolvedServerTypes.has(st))) continue;
+    for (const st of candidates) {
+      const connectable = await resolveConnectableServer(st);
+      if (!connectable || emitted.has(connectable.serverType)) continue;
+      emitted.add(connectable.serverType);
+      out.push({ serverType: connectable.serverType, displayName: connectable.displayName });
+      break;
+    }
+  }
+  return out;
+}
+
 const router = Router();
 
 // Scope the Bearer gate to the subpaths this router actually serves
@@ -934,9 +1011,110 @@ router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, 
       data.splice(0, data.length, ...enforceMcpToolsListing(data, strictAgentToolsConfig, sessionAgentTools.slug, entryTypes, sessionAgentTools.subagentToolRefs));
     }
 
-    res.json({ success: true, data });
+    // Which per-user providers the agent is configured for but this user hasn't
+    // connected/configured. Computed from the final resolved server set, so it
+    // reflects exactly what the model will and won't see.
+    const needsConnection = await computeNeedsConnection(
+      sessionAgentTools?.toolsConfig,
+      new Set(data.map((d) => d.serverType)),
+    );
+    if (needsConnection.length > 0) {
+      log.info(`[mcp/tools] needsConnection userId=${userId} agent=${agentSlug ?? "(none)"}: ${needsConnection.map((n) => n.serverType).join(",")}`);
+    }
+
+    res.json({ success: true, data, needsConnection });
   } catch (err) {
     log.error("[mcp/tools] error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+/**
+ * POST /:sessionId/mcp/connect-card  body { serverType }
+ *
+ * Posts a connect/configure card into the run's Spaces thread so the user can
+ * authorize a provider the agent is configured for but hasn't connected. Called
+ * by the runtime's suggest-connection tool when the model decides the user needs
+ * it (see needsConnection in /mcp/tools).
+ * Posting lives here because this side owns the agent's Spaces app token + the
+ * signed consent-URL builders. Conversation/channel are resolved from the live
+ * session, mirroring propose-agent-call.
+ */
+router.post("/:sessionId/mcp/connect-card", async (req: Request<{ sessionId: string }>, res: Response) => {
+  try {
+    const userId = req.session!.userId;
+    const agentSlug = req.session?.agentSlug;
+    const spacesAppId = req.session?.spacesAppId;
+    const serverType = String((req.body as { serverType?: string })?.serverType ?? "").trim();
+
+    const connectable = await resolveConnectableServer(serverType);
+    if (!connectable) {
+      res.status(400).json({ success: false, error: `Unsupported connect provider: ${serverType || "(none)"}` });
+      return;
+    }
+
+    const orgId = await resolveSessionAgentOrgId(userId, spacesAppId);
+    const { getSession } = await import("./webhook.js");
+    const runContext = await getSession(req.params.sessionId);
+    const fallbackRun = runContext ? null : await agentRunRepository.findBySessionId(req.params.sessionId).catch(() => null);
+    const conversationId = runContext?.conversationId ?? fallbackRun?.conversationId ?? undefined;
+    const channelId = runContext?.channelId ?? fallbackRun?.channelId ?? undefined;
+    if (!conversationId || !channelId) {
+      res.status(409).json({ success: false, error: "current Spaces conversation/channel context is unavailable" });
+      return;
+    }
+
+    const agent = spacesAppId
+      ? await prisma.agent.findUnique({ where: { spacesAppId } })
+      : agentSlug && orgId
+        ? await prisma.agent.findUnique({ where: { orgId_slug: { orgId, slug: agentSlug } } })
+        : null;
+    if (!agent?.spacesAppToken || !agent.spacesAppUserId || !agent.spacesAppId) {
+      res.status(409).json({ success: false, error: "running agent has no Spaces app identity" });
+      return;
+    }
+
+    const flow = connectable.mode === "oauth"
+      ? buildConnectAccountFlow({
+        displayName: connectable.displayName,
+        authUrl: serverType === "google" ? buildGoogleConsentUrl(userId) : buildMicrosoftConsentUrl(userId),
+        serverType,
+      })
+      : buildMcpConfigureFlow({
+        serverType: connectable.serverType,
+        serverName: connectable.displayName,
+        mcpServerId: connectable.mcpServerId!,
+        fields: (connectable.credentialFields ?? []).map((field) => ({
+          name: field.name,
+          label: field.label,
+          type: field.type,
+          ...(field.placeholder ? { placeholder: field.placeholder } : {}),
+          ...(field.optional ? { optional: true } : {}),
+        })),
+        userId,
+        ...(agentSlug ? { agentSlug } : {}),
+        spacesAppId: agent.spacesAppId,
+      });
+    flow.data = { ...(flow.data ?? {}), spacesAppId: agent.spacesAppId };
+
+    const appToken = decryptStoredToken(agent.spacesAppToken);
+    const postRes = await fetch(`${CONFIG.spacesInternalUrl}/api/apps/chat/postMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${appToken}` },
+      body: JSON.stringify({ channelId, conversationId, flow, userId: agent.spacesAppUserId }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!postRes.ok) {
+      const body = await postRes.text().catch(() => "");
+      log.error(`[mcp/connect-card] postMessage failed (${postRes.status}): ${body.slice(0, 200)}`);
+      res.status(502).json({ success: false, error: `could not post connect card (${postRes.status})` });
+      return;
+    }
+
+    log.info(`[mcp/connect-card] posted serverType=${serverType} userId=${userId} agent=${agent.slug}`);
+    res.json({ success: true, data: { posted: true, serverType } });
+  } catch (err) {
+    log.error("[mcp/connect-card] error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });

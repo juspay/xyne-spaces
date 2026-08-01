@@ -98,26 +98,32 @@ export const googleOAuthProvider: OAuthTokenProvider = {
  * Start the Google OAuth flow. Returns the consent URL.
  * The frontend redirects the user to this URL.
  */
+/**
+ * Build the Google consent URL for a user. Extracted from the authorize route
+ * so other surfaces (e.g. the in-chat "Connect Google" card) can generate the
+ * same signed consent link without going through HTTP.
+ */
+export function buildGoogleConsentUrl(userId: string, redirectUri?: string): string {
+  // Default to the browser-based GET callback
+  const callbackUri = redirectUri ?? `${process.env["AUTH_SERVICE_URL"] ?? "http://localhost:3003"}/claw/api/v1/google/callback`;
+  const { clientId } = getGoogleCredentials();
+
+  const authUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+  authUrl.searchParams.set("client_id", clientId);
+  authUrl.searchParams.set("redirect_uri", callbackUri);
+  authUrl.searchParams.set("response_type", "code");
+  authUrl.searchParams.set("scope", GOOGLE_SCOPES.join(" "));
+  authUrl.searchParams.set("access_type", "offline");
+  authUrl.searchParams.set("prompt", "consent");
+  authUrl.searchParams.set("state", signOAuthState(userId));
+  return authUrl.toString();
+}
+
 router.post("/:userId/oauth/google/authorize", async (req: Request<{ userId: string }>, res: Response) => {
   try {
     const { userId } = req.params;
     const { redirectUri } = req.body as { redirectUri?: string };
-
-    // Default to the browser-based GET callback
-    const callbackUri = redirectUri ?? `${process.env["AUTH_SERVICE_URL"] ?? "http://localhost:3003"}/claw/api/v1/google/callback`;
-
-    const { clientId } = getGoogleCredentials();
-
-    const authUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
-    authUrl.searchParams.set("client_id", clientId);
-    authUrl.searchParams.set("redirect_uri", callbackUri);
-    authUrl.searchParams.set("response_type", "code");
-    authUrl.searchParams.set("scope", GOOGLE_SCOPES.join(" "));
-    authUrl.searchParams.set("access_type", "offline");
-    authUrl.searchParams.set("prompt", "consent");
-    authUrl.searchParams.set("state", signOAuthState(userId));
-
-    res.json({ success: true, data: { authUrl: authUrl.toString() } });
+    res.json({ success: true, data: { authUrl: buildGoogleConsentUrl(userId, redirectUri) } });
   } catch (err) {
     log.error("[google-oauth] authorize error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });

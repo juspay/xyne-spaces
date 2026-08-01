@@ -15,13 +15,13 @@
 import { Router, type NextFunction, type Request, type Response } from "express";
 import { CONFIG } from "../config.js";
 import { prisma } from "../db.js";
-import { decrypt } from "../crypto.js";
+import { decrypt, encrypt } from "../crypto.js";
 import { executeTwinApprovalDelivery } from "../lib/twin-delivery.js";
 import { verifySpacesSignature } from "../middleware/verify-spaces-signature.js";
 import { agentRunRepository } from "../repositories/index.js";
 import { recordTwinApprovalOutcome } from "../services/twinResponseFeedback.js";
 import type { FlowDefinition } from "xyne-claw-shared";
-import { mdToMrkdwn, buildWriteResultFlow, buildPlanFlow, PLAN_COMPONENT_ID } from "xyne-claw-shared";
+import { mdToMrkdwn, buildWriteResultFlow, buildPlanFlow, buildAgentCreationFlow, agentCreationPropsFromToolParams, buildSkillCreationFlow, skillCreationPropsFromToolParams, PLAN_COMPONENT_ID } from "xyne-claw-shared";
 import { clearActivePlanCard, setPlanExecMeta, clearPlanExecMeta, normalizePlanTitle } from "../lib/session-context.js";
 import { executeTool as executeGatewayTool } from "../mcpgateway/services/execution.js";
 import { GATEWAY_KEY_PREFIX, parseGatewayCatalogSource } from "../mcpgateway/key-format.js";
@@ -38,16 +38,69 @@ import { visibleAgentWhereForRunningUser } from "../lib/callable-agent-resolver.
 import { emitAgentWorkingSignal } from "../surfaces/spaces/client.js";
 import { resolveFastMode } from "../lib/fast-mode.js";
 import { isClawAdmin } from "../middleware/agent-acl.js";
+import { buildGoogleConsentUrl } from "./google-oauth.js";
+import { buildMicrosoftConsentUrl } from "./microsoft-oauth.js";
 import { registerRunRecovery } from "../queue/run-recovery-worker.js";
+import { validateCredentials } from "../validation.js";
+import { hasConnectorDefinition, resolveConnectorDefinition } from "../mcp/connector-definitions.js";
+import { evictSession } from "../mcp/runner.js";
+import { syncToolsForServer } from "../tool-sync.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("flow-action");
+
+const AGENT_CREATION_OAUTH_TOOLS = new Map<string, { serverType: string; displayName: string }>([
+  ["google", { serverType: "google", displayName: "Google" }],
+  ["gmail", { serverType: "google", displayName: "Google" }],
+  ["google-drive", { serverType: "google", displayName: "Google" }],
+  ["drive", { serverType: "google", displayName: "Google" }],
+  ["microsoft", { serverType: "microsoft", displayName: "Microsoft" }],
+  ["outlook", { serverType: "microsoft", displayName: "Microsoft" }],
+  ["office", { serverType: "microsoft", displayName: "Microsoft" }],
+]);
 
 const router = Router();
 const DEFAULT_GATEWAY_TENANT = process.env.ALLOWED_TENANTS
   ?.split(",")
   .map((tenant) => tenant.trim())
   .find((tenant) => tenant.length > 0);
+
+async function agentCreationConnectLinksForUser(
+  params: Record<string, unknown>,
+  userId: string,
+): Promise<Array<{ serverType: string; displayName: string; authUrl: string }>> {
+  const selectedTools = Array.isArray(params["tools"])
+    ? (params["tools"] as unknown[]).filter((tool): tool is string => typeof tool === "string")
+    : [];
+  if (selectedTools.length === 0) return [];
+
+  const wanted = new Map<string, string>();
+  for (const tool of selectedTools) {
+    const normalized = tool.trim().toLowerCase().replace(/[_\s]+/g, "-");
+    const oauthTool = AGENT_CREATION_OAUTH_TOOLS.get(normalized);
+    if (oauthTool) wanted.set(oauthTool.serverType, oauthTool.displayName);
+  }
+  if (wanted.size === 0) return [];
+
+  const existing = await prisma.userMcpConnection.findMany({
+    where: { userId, mcpServer: { type: { in: [...wanted.keys()] } } },
+    select: { mcpServer: { select: { type: true } } },
+  });
+  for (const conn of existing) wanted.delete(conn.mcpServer.type);
+
+  const links: Array<{ serverType: string; displayName: string; authUrl: string }> = [];
+  for (const [serverType, displayName] of wanted) {
+    try {
+      const authUrl = serverType === "google"
+        ? buildGoogleConsentUrl(userId)
+        : buildMicrosoftConsentUrl(userId);
+      links.push({ serverType, displayName, authUrl });
+    } catch (err) {
+      log.warn(`[flow-action] could not build ${serverType} connect URL for create-agent card:`, err instanceof Error ? err.message : String(err));
+    }
+  }
+  return links;
+}
 
 function resolveGatewayTenantForApproval(): string | null {
   return DEFAULT_GATEWAY_TENANT ?? null;
@@ -509,6 +562,88 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
   let resp: AppActionResponse;
 
   try {
+    if (actionType === "mcp-configure") {
+      const configureUserId = data["userId"] as string | undefined;
+      const mcpServerId = data["mcpServerId"] as string | undefined;
+      const serverType = data["serverType"] as string | undefined;
+      const serverName = data["serverName"] as string | undefined;
+      const agentSlug = data["agentSlug"] as string | undefined;
+      const spacesAppId = data["spacesAppId"] as string | undefined;
+
+      if (actionId !== "mcp-configure-submit") {
+        res.status(400).json({ type: "error", message: "Unknown MCP configure action" } satisfies AppActionResponse);
+        return;
+      }
+      if (!configureUserId || !mcpServerId || !serverType) {
+        res.status(400).json({ type: "error", message: "Missing MCP configure fields" } satisfies AppActionResponse);
+        return;
+      }
+      if (!callerUserId || callerUserId !== configureUserId) {
+        log.error(`[flow-action] mcp-configure: unauthorized — caller ${callerUserId ?? "(none)"} != expected ${configureUserId}`);
+        res.status(403).json({ type: "error", message: "Unauthorized" } satisfies AppActionResponse);
+        return;
+      }
+
+      const server = await prisma.mcpServer.findUnique({ where: { id: mcpServerId } });
+      if (!server || server.type !== serverType || !server.enabled) {
+        res.status(404).json({ type: "error", message: "MCP server not found" } satisfies AppActionResponse);
+        return;
+      }
+
+      const definition = await resolveConnectorDefinition(server.type);
+      const fields = definition?.credentialFields ?? [];
+      if (!definition || fields.length === 0) {
+        res.status(400).json({ type: "error", message: `${server.name} does not accept user credentials` } satisfies AppActionResponse);
+        return;
+      }
+
+      const credentials: Record<string, unknown> = {};
+      for (const field of fields) {
+        const value = values[field.name];
+        if (typeof value === "string") {
+          const trimmed = value.trim();
+          if (trimmed.length > 0 || !field.optional) credentials[field.name] = trimmed;
+        }
+      }
+
+      const validation = await validateCredentials(server.type, credentials);
+      if (!validation.valid) {
+        res.status(400).json({ type: "error", message: validation.error ?? "Invalid credentials" } satisfies AppActionResponse);
+        return;
+      }
+
+      const encrypted = encrypt(JSON.stringify(credentials), CONFIG.encryptionKey);
+      await prisma.userMcpConnection.upsert({
+        where: { userId_mcpServerId: { userId: configureUserId, mcpServerId } },
+        create: {
+          userId: configureUserId,
+          mcpServerId,
+          encryptedCreds: encrypted.ciphertext,
+          iv: encrypted.iv,
+          authTag: encrypted.authTag,
+        },
+        update: {
+          encryptedCreds: encrypted.ciphertext,
+          iv: encrypted.iv,
+          authTag: encrypted.authTag,
+        },
+      });
+
+      await evictSession(configureUserId, server.type).catch((err) => {
+        log.error(`[flow-action] mcp-configure: evictSession failed for ${server.type}:`, err);
+      });
+      if (await hasConnectorDefinition(server.type)) {
+        syncToolsForServer(configureUserId, server.type, server.name, credentials).catch((err) => {
+          log.error(`[flow-action] mcp-configure: tool sync failed for ${server.type}:`, err);
+        });
+      }
+
+      const label = serverName || server.name;
+      void replaceFlowCardWithText(messageId, agentSlug, `✅ **${label} configured.**`, conversationId, undefined, spacesAppId);
+      res.json({ type: "close_screen", finalMessage: `${label} configured.` } satisfies AppActionResponse);
+      return;
+    }
+
     // ── 1. Write tool approval (HITL) ─────────────────────────────────────────
     if (actionType === "write") {
       const serverType = data["serverType"] as string;
@@ -535,6 +670,38 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       }
 
       if (actionId === "decline-write") {
+        // create-agent: update the SAME card in place to the 'rejected' phase
+        // (matches the pending → rejected transition) instead of a text line.
+        if (serverType === "agent" && tool === "create-agent") {
+          try {
+            const p = JSON.parse(paramsStr) as Record<string, unknown>;
+            const rejectedFlow = buildAgentCreationFlow("rejected", {
+              ...agentCreationPropsFromToolParams(p),
+              decidedAt: new Date().toISOString(),
+            });
+            resp = { type: "close_screen", finalMessage: "❌ Agent creation declined." };
+            res.json(resp);
+            void replaceFlowCardWithFlow(messageId, agentSlug, rejectedFlow, conversationId, undefined, spacesAppId);
+            return;
+          } catch (err) {
+            log.warn(`[flow-action] create-agent decline card build failed, falling back to text:`, err instanceof Error ? err.message : String(err));
+          }
+        }
+        if (serverType === "agent" && tool === "create-skill") {
+          try {
+            const p = JSON.parse(paramsStr) as Record<string, unknown>;
+            const rejectedFlow = buildSkillCreationFlow("rejected", {
+              ...skillCreationPropsFromToolParams(p),
+              decidedAt: new Date().toISOString(),
+            });
+            resp = { type: "close_screen", finalMessage: "❌ Skill creation declined." };
+            res.json(resp);
+            void replaceFlowCardWithFlow(messageId, agentSlug, rejectedFlow, conversationId, undefined, spacesAppId);
+            return;
+          } catch (err) {
+            log.warn(`[flow-action] create-skill decline card build failed, falling back to text:`, err instanceof Error ? err.message : String(err));
+          }
+        }
         resp = { type: "close_screen", finalMessage: "❌ Action declined." };
         res.json(resp);
         void replaceFlowCardWithText(messageId, agentSlug, "❌ **Action declined.**", conversationId, undefined, spacesAppId);
@@ -784,11 +951,12 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       }
 
       // ── create-skill: persist an agent-authored skill on approval ──────────
-      // serverType "skill" has no MCP connector; the write is applied directly
-      // via skillRepository, owned by the approving user (writeUserId, already
+      // create-skill now shares the "agent" serverType (grouped under the Agent
+      // tool source) — routed by tool name. The write is applied directly via
+      // skillRepository, owned by the approving user (writeUserId, already
       // verified === callerUserId above) in their org. HMAC over {serverType,
       // tool, params, userId} was verified above, so params are trusted here.
-      if (serverType === "skill") {
+      if (serverType === "agent" && tool === "create-skill") {
         const { skillRepository } = await import("../repositories/index.js");
         const name = String(params["name"] ?? "").trim();
         const description = String(params["description"] ?? "").trim();
@@ -830,7 +998,162 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         log.info(`[flow-action] create-skill approved slug=${slug} owner=${writeUserId} org=${skillOrgId}`);
         resp = { type: "close_screen", finalMessage: `✅ Skill "${name}" created.` };
         res.json(resp);
-        void replaceFlowCardWithText(messageId, agentSlug, `✅ **Skill created:** ${name} (\`${slug}\`)`, conversationId, undefined, spacesAppId);
+        void replaceFlowCardWithFlow(
+          messageId,
+          agentSlug,
+          buildSkillCreationFlow("created", {
+            ...skillCreationPropsFromToolParams(params),
+            decidedAt: new Date().toISOString(),
+          }),
+          conversationId,
+          undefined,
+          spacesAppId,
+        );
+        return;
+      }
+
+      // ── create-agent: persist an agent-authored agent on approval ──────────
+      // serverType "agent" has no MCP connector; the write is applied directly
+      // via agentRepository, owned by the approving user (writeUserId) in their
+      // org. Mirrors the "skill" branch above. tools[] is categorized into
+      // config.tools; unknown tokens are reported, never mis-wired.
+      if (serverType === "agent" && tool === "create-agent") {
+        const { agentRepository } = await import("../repositories/index.js");
+        const name = String(params["name"] ?? "").trim();
+        const description = String(params["description"] ?? "").trim();
+        const systemPrompt = String(params["systemPrompt"] ?? "");
+        const modelId = String(params["modelId"] ?? "").trim();
+        const color = String(params["color"] ?? "").trim();
+        const rawTools = Array.isArray(params["tools"])
+          ? (params["tools"] as unknown[]).filter((t): t is string => typeof t === "string")
+          : [];
+        let slug = String(params["slug"] ?? "").trim().toLowerCase();
+        if (!slug) slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80);
+        if (!name || !systemPrompt.trim() || !slug) {
+          res.json({ type: "error", message: "Agent name, slug and system prompt are required." } satisfies AppActionResponse);
+          return;
+        }
+        if (!/^[a-z0-9-]+$/.test(slug) || slug.startsWith("-") || slug.endsWith("-") || slug.includes("--")) {
+          res.json({ type: "error", message: "Invalid agent slug (use lowercase letters, digits and single hyphens)." } satisfies AppActionResponse);
+          return;
+        }
+        const user = await prisma.user.findUnique({ where: { id: writeUserId }, select: { orgId: true } });
+        const agentOrgId = user?.orgId;
+        if (!agentOrgId) {
+          res.json({ type: "error", message: "Could not resolve your organization to create the agent." } satisfies AppActionResponse);
+          return;
+        }
+        const existing = await agentRepository.findBySlug(slug, agentOrgId);
+        if (existing) {
+          const msg = `An agent with slug "${slug}" already exists.`;
+          resp = { type: "close_screen", finalMessage: `⚠️ ${msg}` };
+          res.json(resp);
+          void replaceFlowCardWithText(messageId, agentSlug, `⚠️ ${msg}`, conversationId, undefined, spacesAppId);
+          return;
+        }
+        let configTools: { subagents?: string[]; custom?: string[] } = {};
+        let unknownTools: string[] = [];
+        if (rawTools.length > 0) {
+          const { buildAvailableToolsCatalog } = await import("./tools.js");
+          const { categorizeToolSelection, toConfigTools } = await import("../lib/agent-tool-selection.js");
+          const catalog = await buildAvailableToolsCatalog(undefined, agentOrgId);
+          const sel = categorizeToolSelection(rawTools, catalog, { allowSubagents: true });
+          configTools = toConfigTools(sel);
+          unknownTools = sel.unknown;
+        }
+        const config = Object.keys(configTools).length > 0 ? { tools: configTools } : {};
+        await agentRepository.create({
+          slug,
+          name,
+          description,
+          systemPrompt: systemPrompt.trim(),
+          scope: "personal",
+          color: color || "#6366f1",
+          modelId: modelId || "",
+          config,
+          kbScope: "COLLECTIONS",
+          org: { connect: { id: agentOrgId } },
+          owner: { connect: { id: writeUserId } },
+        });
+        const note = unknownTools.length > 0 ? ` (skipped unknown tools: ${unknownTools.join(", ")})` : "";
+        log.info(`[flow-action] create-agent approved slug=${slug} owner=${writeUserId} org=${agentOrgId}${note}`);
+        resp = { type: "close_screen", finalMessage: `✅ Agent "${name}" created.${note}` };
+        res.json(resp);
+        void replaceFlowCardWithFlow(
+          messageId,
+          agentSlug,
+          buildAgentCreationFlow("created", {
+            ...agentCreationPropsFromToolParams(params),
+            connectLinks: await agentCreationConnectLinksForUser(params, writeUserId),
+            ...(note.trim() ? { note } : {}),
+            decidedAt: new Date().toISOString(),
+          }),
+          conversationId,
+          undefined,
+          spacesAppId,
+        );
+        return;
+      }
+
+      // ── create-subagent: persist an agent-authored subagent on approval ────
+      // serverType "subagent" mirrors "agent" but targets subagent_definitions
+      // (keyed by org+name). Subagents cannot nest subagents, so tool selection
+      // resolves custom tools only.
+      if (serverType === "agent" && tool === "create-subagent") {
+        const { subagentDefinitionRepository } = await import("../repositories/index.js");
+        const name = String(params["name"] ?? "").trim();
+        const description = String(params["description"] ?? "").trim();
+        const systemPrompt = String(params["systemPrompt"] ?? "");
+        const paramName = String(params["paramName"] ?? "").trim();
+        const paramDescription = String(params["paramDescription"] ?? "").trim();
+        const rawTools = Array.isArray(params["tools"])
+          ? (params["tools"] as unknown[]).filter((t): t is string => typeof t === "string")
+          : [];
+        if (!name || !systemPrompt.trim() || !paramName || !paramDescription) {
+          res.json({ type: "error", message: "Subagent name, system prompt, paramName and paramDescription are required." } satisfies AppActionResponse);
+          return;
+        }
+        const user = await prisma.user.findUnique({ where: { id: writeUserId }, select: { orgId: true } });
+        const subagentOrgId = user?.orgId;
+        if (!subagentOrgId) {
+          res.json({ type: "error", message: "Could not resolve your organization to create the subagent." } satisfies AppActionResponse);
+          return;
+        }
+        const existing = await subagentDefinitionRepository.findByName(name, subagentOrgId);
+        if (existing) {
+          const msg = `A subagent named "${name}" already exists.`;
+          resp = { type: "close_screen", finalMessage: `⚠️ ${msg}` };
+          res.json(resp);
+          void replaceFlowCardWithText(messageId, agentSlug, `⚠️ ${msg}`, conversationId, undefined, spacesAppId);
+          return;
+        }
+        let toolsConfig: { custom?: string[] } = {};
+        let unknownTools: string[] = [];
+        if (rawTools.length > 0) {
+          const { buildAvailableToolsCatalog } = await import("./tools.js");
+          const { categorizeToolSelection } = await import("../lib/agent-tool-selection.js");
+          const catalog = await buildAvailableToolsCatalog(undefined, subagentOrgId);
+          const sel = categorizeToolSelection(rawTools, catalog, { allowSubagents: false });
+          if (sel.custom.length > 0) toolsConfig = { custom: sel.custom };
+          unknownTools = sel.unknown;
+        }
+        await subagentDefinitionRepository.create({
+          name,
+          description,
+          systemPrompt: systemPrompt.trim(),
+          paramName,
+          paramDescription,
+          progressLabels: [],
+          tools: toolsConfig,
+          enabled: true,
+          createdByUserId: writeUserId,
+          org: { connect: { id: subagentOrgId } },
+        });
+        const note = unknownTools.length > 0 ? ` (skipped unknown tools: ${unknownTools.join(", ")})` : "";
+        log.info(`[flow-action] create-subagent approved name=${name} owner=${writeUserId} org=${subagentOrgId}${note}`);
+        resp = { type: "close_screen", finalMessage: `✅ Subagent "${name}" created.${note}` };
+        res.json(resp);
+        void replaceFlowCardWithText(messageId, agentSlug, `✅ **Subagent created:** ${name}${note}`, conversationId, undefined, spacesAppId);
         return;
       }
 
@@ -1385,6 +1708,68 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       resp = { type: "close_screen", finalMessage: finalText };
       res.json(resp);
       void replaceFlowCardWithText(messageId, skillAgentSlug, finalText, conversationId, undefined, skillSpacesAppId);
+      return;
+    }
+
+    // Agent / subagent update approval — sibling of skill-update. The card
+    // carries only requestId + approverUserId; resolveEntityUpdateRequest
+    // re-reads the live definition and re-derives the owner authoritatively.
+    if (actionType === "agent-update" || actionType === "subagent-update") {
+      const kind = actionType === "agent-update" ? "agent" : "subagent";
+      const requestId = data["requestId"] as string | undefined;
+      const approverUserId = data["approverUserId"] as string | undefined;
+      const entityAgentSlug = data["agentSlug"] as string | undefined;
+      const entitySpacesAppId = data["spacesAppId"] as string | undefined;
+
+      if (!requestId || !approverUserId) {
+        res.status(400).json({ type: "error", message: `Missing ${kind}-update fields in flowJSON.data` } satisfies AppActionResponse);
+        return;
+      }
+      if (!callerUserId || callerUserId !== approverUserId) {
+        log.error(`[flow-action] ${kind}-update: unauthorized — caller ${callerUserId ?? "(none)"} != expected ${approverUserId}`);
+        res.status(403).json({ type: "error", message: "Unauthorized" } satisfies AppActionResponse);
+        return;
+      }
+
+      const { resolveEntityUpdateRequest } = await import("../lib/entity-update.js");
+      const decision = actionId === `${kind}-update-approve` ? "approve" : "reject";
+      const result = await resolveEntityUpdateRequest(kind, requestId, callerUserId, decision);
+
+      if (!result.ok) {
+        resp = { type: "close_screen", finalMessage: result.error };
+        res.json(resp);
+        void replaceFlowCardWithText(messageId, entityAgentSlug, `⚠️ ${result.error}`, conversationId, undefined, entitySpacesAppId);
+        return;
+      }
+
+      const label = kind === "agent" ? "Agent" : "Subagent";
+      const finalText = result.alreadyResolved
+        ? (result.status === "approved" ? `✅ **${label} update already applied.**` : `❌ **${label} update already declined.**`)
+        : (result.status === "approved" ? `✅ **${label} update approved & applied.**` : `❌ **${label} update declined.**`);
+      resp = { type: "close_screen", finalMessage: finalText };
+      res.json(resp);
+
+      // Flip the SAME entityUpdate card to its decided phase in place (like the
+      // agentCreation card): clone the node's props from the incoming flowJSON
+      // and stamp phase + decidedAt. Old-format cards (plain text/card
+      // primitives, still in flight from before the node existed) have no
+      // entityUpdate component — those fall back to the text replacement.
+      const entityNode = (flowJSON.components ?? []).find((c) => c.type === "entityUpdate");
+      if (entityNode?.props) {
+        const decidedProps: Record<string, unknown> = {
+          ...(entityNode.props as Record<string, unknown>),
+          phase: result.status === "approved" ? "approved" : "rejected",
+          decidedAt: new Date().toISOString(),
+          ...(result.alreadyResolved ? { note: "This request was already resolved when the button was tapped." } : {}),
+        };
+        const decidedFlow: FlowDefinition = {
+          ...flowJSON,
+          components: [{ id: "entity-update", type: "entityUpdate", props: decidedProps }],
+        };
+        void replaceFlowCardWithFlow(messageId, entityAgentSlug, decidedFlow, conversationId, undefined, entitySpacesAppId);
+      } else {
+        void replaceFlowCardWithText(messageId, entityAgentSlug, finalText, conversationId, undefined, entitySpacesAppId);
+      }
       return;
     }
 

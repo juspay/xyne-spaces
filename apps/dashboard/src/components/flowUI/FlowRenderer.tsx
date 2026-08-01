@@ -192,7 +192,7 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
       }
       console.log(
         `[FlowRenderer] → sending ${action.type} actionId=${action.actionId} values=`,
-        stateRef.current.values,
+        redactFlowValuesForLog(stateRef.current.values),
       );
       try {
         const response = await flowActionService.execute({
@@ -331,6 +331,16 @@ function findFieldInComponents(components: FlowComponent[], name: string): FlowC
     }
   }
   return null;
+}
+
+function redactFlowValuesForLog(values: Record<string, unknown>): Record<string, unknown> {
+  const sensitive = /token|password|secret|key|credential|auth/i;
+  return Object.fromEntries(
+    Object.entries(values).map(([key, value]) => [
+      key,
+      sensitive.test(key) && value !== undefined && value !== '' ? '[redacted]' : value,
+    ]),
+  );
 }
 
 function validateRule(rule: ValidationRule, value: unknown): string | null {

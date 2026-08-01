@@ -335,6 +335,184 @@ export type ExecTodoStatus = ExecTodo['status'];
 export type PlanProps = z.infer<typeof planPropsSchema>;
 export type PlanPhase = PlanProps['phase'];
 
+// ── Agent-creation artifact ─────────────────────────────────────────────────
+// A single card for the create-agent HITL flow that updates IN PLACE across
+// three phases on the same message (like the plan card):
+//   pending  → shows the proposed agent + Approve/Decline buttons (the buttons
+//              reuse the write-tool actionIds; the signed action rides in
+//              flowJSON.data, not props).
+//   created  → approved; Created chip, no buttons.
+//   rejected → declined; Rejected chip, no buttons.
+// The system prompt is carried on every phase so the card can reveal it when the
+// node is expanded. Field set is phase-INVARIANT (presentation varies, not the
+// shape) so a flat object beats a four-branch discriminated union — same
+// reasoning as the PR card above. `.strict()` so the emitter can't drift.
+export const agentCreationPhaseSchema = z.enum(['pending', 'created', 'rejected']);
+
+export const agentCreationPropsSchema = z
+  .object({
+    phase: agentCreationPhaseSchema,
+    name: z.string().min(1),
+    slug: z.string().min(1),
+    description: z.string().optional(),
+    // The full system prompt — revealed in the expanded view. Optional so a
+    // rejected card can omit it if the emitter chooses.
+    systemPrompt: z.string().optional(),
+    modelId: z.string().optional(),
+    // Granted tool/subagent identifiers, shown as capability chips.
+    tools: z.array(z.string()).optional(),
+    connectLinks: z.array(z.object({
+      serverType: z.string().min(1),
+      displayName: z.string().min(1),
+      authUrl: z.string().url(),
+    }).strict()).optional(),
+    // A muted footnote (e.g. "skipped unknown tools: …").
+    note: z.string().optional(),
+    // Audit for the decided phases.
+    decidedBy: z.string().optional(),
+    decidedAt: z.string().optional(),
+  })
+  .strict();
+
+export const agentCreationComponentSchema = baseComponentSchema.extend({
+  type: z.literal('agentCreation'),
+  props: agentCreationPropsSchema,
+});
+
+export type AgentCreationProps = z.infer<typeof agentCreationPropsSchema>;
+export type AgentCreationPhase = AgentCreationProps['phase'];
+
+// ── Entity-update artifact ──────────────────────────────────────────────────
+// The owner-facing approval card for a proposed agent/subagent update. ONE node
+// type serves both kinds (they differ only in labels), updated IN PLACE across
+// phases on the same message, exactly like the agentCreation card:
+//   pending  → diff + field changes + Approve/Decline (actionIds
+//              `${kind}-update-approve` / `-decline`; request identity rides in
+//              flowJSON.data, not props).
+//   approved → applied; Approved chip, no buttons.
+//   rejected → declined; Rejected chip, no buttons.
+// The diff is precomputed server-side (computeSkillDiff) and shipped as
+// structured hunks so the renderer owns presentation; `truncated` says the
+// visible diff was capped (the FULL content is applied via the integrity hash).
+export const entityUpdatePhaseSchema = z.enum(['pending', 'approved', 'rejected']);
+export const entityUpdateKindSchema = z.enum(['agent', 'subagent']);
+
+export const entityUpdateDiffLineSchema = z
+  .object({
+    kind: z.enum(['ctx', 'add', 'del']),
+    text: z.string(),
+  })
+  .strict();
+
+export const entityUpdateDiffHunkSchema = z
+  .object({
+    header: z.string(),
+    lines: z.array(entityUpdateDiffLineSchema),
+  })
+  .strict();
+
+export const entityUpdatePropsSchema = z
+  .object({
+    phase: entityUpdatePhaseSchema,
+    kind: entityUpdateKindSchema,
+    /** Display name of the target definition. */
+    targetName: z.string().min(1),
+    /** slug (agent) or name (subagent) of the target. */
+    targetKey: z.string().min(1),
+    proposerName: z.string().min(1),
+    summary: z.string().optional(),
+    /** Changed scalar fields (rename, model swap, …). */
+    fieldChanges: z.array(z.object({ label: z.string(), from: z.string(), to: z.string() }).strict()).optional(),
+    /** systemPrompt diff. Absent when only scalars changed. */
+    diff: z
+      .object({
+        added: z.number().int().nonnegative(),
+        removed: z.number().int().nonnegative(),
+        hunks: z.array(entityUpdateDiffHunkSchema),
+      })
+      .strict()
+      .optional(),
+    /** True when the visible hunks were capped for display. */
+    truncated: z.boolean().optional(),
+    /** Muted footnote (e.g. "already resolved elsewhere"). */
+    note: z.string().optional(),
+    // Audit for the decided phases.
+    decidedBy: z.string().optional(),
+    decidedAt: z.string().optional(),
+  })
+  .strict();
+
+export const entityUpdateComponentSchema = baseComponentSchema.extend({
+  type: z.literal('entityUpdate'),
+  props: entityUpdatePropsSchema,
+});
+
+export type EntityUpdateProps = z.infer<typeof entityUpdatePropsSchema>;
+export type EntityUpdatePhase = EntityUpdateProps['phase'];
+export type EntityUpdateDiffHunk = z.infer<typeof entityUpdateDiffHunkSchema>;
+
+// ── Skill creation / update artifacts ───────────────────────────────────────
+// Skill creation reuses the write-tool approval path (`approve-write` /
+// `decline-write`) but renders as a first-class artifact so the proposed
+// SKILL.md can be reviewed as rich markdown in the expanded document preview.
+export const skillCreationPhaseSchema = z.enum(['pending', 'created', 'rejected']);
+
+export const skillCreationPropsSchema = z
+  .object({
+    phase: skillCreationPhaseSchema,
+    name: z.string().min(1),
+    slug: z.string().min(1),
+    description: z.string().optional(),
+    content: z.string().optional(),
+    note: z.string().optional(),
+    decidedBy: z.string().optional(),
+    decidedAt: z.string().optional(),
+  })
+  .strict();
+
+export const skillCreationComponentSchema = baseComponentSchema.extend({
+  type: z.literal('skillCreation'),
+  props: skillCreationPropsSchema,
+});
+
+export type SkillCreationProps = z.infer<typeof skillCreationPropsSchema>;
+export type SkillCreationPhase = SkillCreationProps['phase'];
+
+// Skill update mirrors entityUpdate's structured diff, but the target is always
+// a SKILL.md document and the buttons use the dedicated skill-update action ids.
+export const skillUpdatePhaseSchema = z.enum(['pending', 'approved', 'rejected']);
+
+export const skillUpdatePropsSchema = z
+  .object({
+    phase: skillUpdatePhaseSchema,
+    skillName: z.string().min(1),
+    skillSlug: z.string().min(1),
+    proposerName: z.string().min(1),
+    summary: z.string().optional(),
+    diff: z
+      .object({
+        added: z.number().int().nonnegative(),
+        removed: z.number().int().nonnegative(),
+        hunks: z.array(entityUpdateDiffHunkSchema),
+      })
+      .strict()
+      .optional(),
+    diffText: z.string().optional(),
+    truncated: z.boolean().optional(),
+    note: z.string().optional(),
+    decidedBy: z.string().optional(),
+    decidedAt: z.string().optional(),
+  })
+  .strict();
+
+export const skillUpdateComponentSchema = baseComponentSchema.extend({
+  type: z.literal('skillUpdate'),
+  props: skillUpdatePropsSchema,
+});
+
+export type SkillUpdateProps = z.infer<typeof skillUpdatePropsSchema>;
+export type SkillUpdatePhase = SkillUpdateProps['phase'];
+
 // ── PR artifact ───────────────────────────────────────────────────────────
 // A read-only status card for a pull request. Unlike the plan, the field set is
 // status-INVARIANT: every status carries the same fields, and the only thing
@@ -500,6 +678,50 @@ export type DurationMinutes = z.infer<typeof durationMinutesSchema>;
 export type CallScheduleProps = z.infer<typeof callSchedulePropsSchema>;
 export type CallSchedulePhase = CallScheduleProps['phase'];
 
+export const connectAccountPropsSchema = z
+  .object({
+    displayName: z.string().min(1),
+    authUrl: z.string().url(),
+    reason: z.string().optional(),
+    serverType: z.string().optional(),
+  })
+  .strict();
+
+export const connectAccountComponentSchema = baseComponentSchema.extend({
+  type: z.literal('connectAccount'),
+  props: connectAccountPropsSchema,
+});
+
+export type ConnectAccountProps = z.infer<typeof connectAccountPropsSchema>;
+
+export const mcpCredentialFieldSchema = z
+  .object({
+    name: z.string().min(1),
+    label: z.string().min(1),
+    type: z.enum(['text', 'password']),
+    placeholder: z.string().optional(),
+    optional: z.boolean().optional(),
+  })
+  .strict();
+
+export const mcpConfigurePropsSchema = z
+  .object({
+    serverType: z.string().min(1),
+    serverName: z.string().min(1),
+    mcpServerId: z.string().min(1),
+    reason: z.string().optional(),
+    fields: z.array(mcpCredentialFieldSchema).min(1),
+  })
+  .strict();
+
+export const mcpConfigureComponentSchema = baseComponentSchema.extend({
+  type: z.literal('mcpConfigure'),
+  props: mcpConfigurePropsSchema,
+});
+
+export type McpCredentialField = z.infer<typeof mcpCredentialFieldSchema>;
+export type McpConfigureProps = z.infer<typeof mcpConfigurePropsSchema>;
+
 // Recursive container schemas need z.lazy
 export const flowComponentSchema: z.ZodType<any> = z.lazy(() =>
   z.discriminatedUnion('type', [
@@ -520,6 +742,12 @@ export const flowComponentSchema: z.ZodType<any> = z.lazy(() =>
     prComponentSchema,
     prApprovalComponentSchema,
     callScheduleComponentSchema,
+    connectAccountComponentSchema,
+    mcpConfigureComponentSchema,
+    agentCreationComponentSchema,
+    entityUpdateComponentSchema,
+    skillCreationComponentSchema,
+    skillUpdateComponentSchema,
     // Container types — inline here so they can reference flowComponentSchema
     baseComponentSchema.extend({
       type: z.literal('row'),

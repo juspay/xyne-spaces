@@ -12,7 +12,9 @@ const MCP_ICON_BASE = '/assets/mcp';
 const MCP_SVG_ONLY = new Set(['gmail', 'google-drive', 'sequentialthinking', 'xyne-spaces']);
 const MCP_ICON_BG: Record<string, string> = { 'xyne-spaces': 'bg-transparent' };
 
-const SIZE: Record<'sm' | 'md' | 'lg', string> = {
+const SIZE: Record<'sm' | 'chip' | 'sm' | 'md' | 'lg', string> = {
+  sm: 'size-4 rounded p-0.5 text-[8px]',
+  chip: 'size-7 rounded-lg p-1.5 text-[10px]',
   sm: 'size-8 rounded-lg p-1 text-[10px]',
   md: 'size-10 rounded-lg p-1.5 text-xs',
   lg: 'size-12 rounded-xl p-2 text-sm',
@@ -32,8 +34,8 @@ export const McpServerIcon = ({
   server,
   size = 'md',
 }: {
-  server: McpServer;
-  size?: 'sm' | 'md' | 'lg';
+  server: Pick<McpServer, 'type' | 'name'>;
+  size?: 'sm' | 'chip' | 'sm' | 'md' | 'lg';
 }): ReactElement => {
   const [errored, setErrored] = useState(false);
   // `bg-card` (white), not `bg-muted` (grey), so brand logos sit on the same

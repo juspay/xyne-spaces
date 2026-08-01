@@ -4,7 +4,7 @@ import crypto from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { agentRepository, agentShareRepository, agentRequestRepository, userRepository, userAgentConfigRepository, userProviderCredentialsRepository, agentProviderCredentialsRepository, sharedProviderCredentialRepository, skillRepository } from "../repositories/index.js";
 import { validateSubagentInput, ValidationError as SubagentValidationError } from "../lib/subagent-resolver.js";
-import { getSubagentDefinition, buildCloneApprovalFlow } from "xyne-claw-shared";
+import { getSubagentDefinition, buildCloneApprovalFlow, hashSkillContent } from "xyne-claw-shared";
 import { spacesAppFetch } from "../lib/spaces-api.js";
 import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
 import { prisma } from "../db.js";
@@ -21,7 +21,15 @@ import {
   getRequesterId,
   getOrgId,
   isClawAdmin,
+  getAgentEditAccess,
 } from "../middleware/agent-acl.js";
+import { canProposerPostAsAgent } from "./skills.js";
+import {
+  computeEntityUpdate,
+  resolveEntityUpdateRequest,
+  notifyApproverOfEntityUpdateInSpaces,
+  agentToolSelectionFromConfig,
+} from "../lib/entity-update.js";
 import { pinUserIdParam } from "../middleware/pin-user-id-param.js";
 import { writeAuditLog } from "../lib/audit.js";
 import { buildAvailableToolsCatalog } from "./tools.js";
@@ -4073,5 +4081,129 @@ router.delete(
     }
   },
 );
+
+// ── update-agent: propose a change to an existing agent ────────────────────
+// The update-agent tool POSTs here. Applies systemPrompt edits + scalar changes
+// to a working copy, records an agent_update AgentRequest, and DMs the owner the
+// diff. Never applies here — see resolveEntityUpdateRequest (flow-action.ts).
+// Mirrors POST /skills/:slug/propose-update.
+router.post("/:slug/propose-update", async (req: Request<{ slug: string }>, res: Response) => {
+  try {
+    const requesterId = getRequesterId(req);
+    if (!requesterId) { res.status(401).json({ success: false, error: "x-user-id required" }); return; }
+    const orgId = getOrgId(req);
+    if (!orgId) { res.status(400).json({ success: false, error: "orgId is required" }); return; }
+
+    const body = req.body as {
+      promptEdits?: Array<{ oldText?: string; newText?: string }>;
+      systemPrompt?: string; name?: string; description?: string; modelId?: string; color?: string;
+      tools?: string[]; summary?: string; agentSlug?: string;
+    };
+
+    const agent = await agentRepository.findBySlug(req.params.slug, orgId);
+    if (!agent) { res.status(404).json({ success: false, error: "Agent not found" }); return; }
+
+    // Only the owner or a contributor (share role EDITOR/CONTRIBUTOR) may
+    // propose an update. Unlike skills (open-propose), agents are owned
+    // resources with an ACL — reject the proposal outright otherwise.
+    const editAccess = await getAgentEditAccess(requesterId, agent.slug, orgId);
+    if (!editAccess?.canEdit) {
+      res.status(403).json({ success: false, error: "Only the agent owner or a contributor can propose updates." });
+      return;
+    }
+
+    const computed = computeEntityUpdate("agent", {
+      systemPrompt: agent.systemPrompt,
+      name: agent.name,
+      description: agent.description ?? "",
+      modelId: agent.modelId,
+      color: agent.color,
+      currentToolSelection: agentToolSelectionFromConfig(agent.config),
+    }, body);
+    if (!computed.ok) { res.status(computed.code).json({ success: false, error: computed.error }); return; }
+
+    if (!agent.ownerUserId) { res.status(409).json({ success: false, error: "This agent has no owner to approve an update." }); return; }
+
+    const proposedContent = JSON.stringify(computed.payload);
+    const outcome = await agentRequestRepository.supersedeAndCreateEntityUpdate({
+      targetType: "agent",
+      agentId: agent.id,
+      targetKey: agent.slug,
+      requesterId,
+      orgId,
+      proposedContent,
+      baseContentHash: computed.baseContentHash,
+      proposedContentHash: hashSkillContent(proposedContent),
+      requestNote: body.summary?.trim() || null,
+    });
+    if (outcome.supersededCount > 0) {
+      log.info(`[agents/propose-update] superseded ${outcome.supersededCount} stale pending proposal(s) for ${agent.slug} by ${requesterId}`);
+    }
+
+    await writeAuditLog({ actorUserId: requesterId, eventType: "REQUEST_CREATED", targetId: agent.id, description: `agent_update request for "${agent.name}" (${agent.slug})` });
+
+    const requester = await userRepository.findById(requesterId);
+    const proposerName = requester?.name ?? requester?.email ?? "A user";
+    if (body.agentSlug) {
+      const access = await getAgentEditAccess(requesterId, body.agentSlug, orgId);
+      if (canProposerPostAsAgent(access)) {
+        void notifyApproverOfEntityUpdateInSpaces({
+          kind: "agent",
+          approverUserId: agent.ownerUserId,
+          requestId: outcome.request.id,
+          targetKey: agent.slug,
+          targetName: agent.name,
+          proposerName,
+          ...(computed.diff ? { diff: computed.diff } : {}),
+          fieldChanges: computed.fieldChanges,
+          summary: body.summary?.trim() || null,
+          agent: access.agent,
+        });
+      } else {
+        log.warn(`[agents/propose-update] owner DM skipped for ${agent.slug}: requester ${requesterId} not authorized to post as agent ${body.agentSlug}`);
+      }
+    }
+
+    res.status(202).json({
+      success: true,
+      data: {
+        requestId: outcome.request.id,
+        status: "pending_approval",
+        ...(outcome.supersededCount > 0 ? { supersededPreviousProposal: true } : {}),
+      },
+    });
+  } catch (err) {
+    log.error("[agents] propose-update error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+// REST parity (used by tests / non-card callers). The card path in
+// flow-action.ts calls resolveEntityUpdateRequest directly.
+router.post("/agent-update-requests/:requestId/approve", async (req: Request<{ requestId: string }>, res: Response) => {
+  try {
+    const callerUserId = getRequesterId(req);
+    if (!callerUserId) { res.status(401).json({ success: false, error: "x-user-id required" }); return; }
+    const result = await resolveEntityUpdateRequest("agent", req.params.requestId, callerUserId, "approve");
+    if (!result.ok) { res.status(result.code).json({ success: false, error: result.error }); return; }
+    res.json({ success: true, alreadyResolved: result.alreadyResolved ?? false });
+  } catch (err) {
+    log.error("[agents] approve agent-update error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+router.post("/agent-update-requests/:requestId/reject", async (req: Request<{ requestId: string }>, res: Response) => {
+  try {
+    const callerUserId = getRequesterId(req);
+    if (!callerUserId) { res.status(401).json({ success: false, error: "x-user-id required" }); return; }
+    const result = await resolveEntityUpdateRequest("agent", req.params.requestId, callerUserId, "reject");
+    if (!result.ok) { res.status(result.code).json({ success: false, error: result.error }); return; }
+    res.json({ success: true, alreadyResolved: result.alreadyResolved ?? false });
+  } catch (err) {
+    log.error("[agents] reject agent-update error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
 
 export { router as agentsRouter };

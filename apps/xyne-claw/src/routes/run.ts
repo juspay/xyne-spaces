@@ -33,7 +33,7 @@ import { SessionLockedError } from "../session-lock.js";
 import { isSafeId } from "../safe-id.js";
 import { sanitizeCitations } from "../citation-sanitizer.js";
 import { validateS2SKey } from "../middleware/auth.js";
-import { loadMcpToolsForUser } from "../mcp.js";
+import { loadMcpToolsForUser, buildSuggestConnectionTool } from "../mcp.js";
 import { loadCustomTools } from "../custom-tools.js";
 import { buildCopilotTool } from "../copilot.js";
 import {
@@ -1589,6 +1589,7 @@ async function processTask(
     const mcpOutputDir = toolOutputBaseDir(conversationId, workspaceDir);
     const {
       groups: mcpGroups,
+      needsConnection,
       cleanup,
       getPendingActions,
       getAttachments: getMcpAttachments,
@@ -2518,6 +2519,16 @@ async function processTask(
       log("Copilot mode — injected respond-to-user tool");
     }
 
+    // Connect-account suggestion tool: only present when the agent is configured
+    // for a per-user OAuth provider (Google/Microsoft) the user hasn't connected.
+    // Lets the model post a one-tap "Connect X" card instead of only mentioning
+    // the gap in prose. Default-on (bypasses the tools.custom gate) but scoped to
+    // the needsConnection set, so agents that need nothing never get it.
+    if (needsConnection.length > 0) {
+      allTools.push(buildSuggestConnectionTool(sessionId, sessionToken, needsConnection));
+      log(`Injected suggest-connection tool for: ${needsConnection.map((n) => n.serverType).join(",")}`);
+    }
+
     if (agentSlug && memoryEnabled) {
       allTools.push(buildMemorySearchTool(agentSlug, userId, sessionId, memoryBankId));
       log("Memory enabled — injected memory-search tool");
@@ -3206,9 +3217,15 @@ async function processTask(
           ...(channelName ? { channelName } : {}),
         })
       : "";
-    const effectiveSystemPrompt = (channelId
+    // Accounts the agent is configured to use but the user hasn't connected or
+    // configured. Told to the model so it surfaces the gap instead of
+    // fabricating results from a tool it never received.
+    const notConnectedGuide = needsConnection.length > 0
+      ? `\n\n## Accounts not connected\nThis agent is configured to use tools that require the user to connect an account or add credentials, but the user has NOT connected/configured: ${needsConnection.map((n) => `${n.displayName} [provider: ${n.serverType}]`).join("; ")}.\nIf the user asks for something that needs one of these (e.g. reading email/calendar/files or checking code tools), do NOT pretend to have access or fabricate results. Instead, call the \`suggest-connection\` tool with the matching provider to post a setup card in the thread, and briefly tell the user you've added it. Call it once per provider; then continue with whatever you can do without that account.`
+      : "";
+    const effectiveSystemPrompt = ((channelId
       ? `${basePrompt}${citationGuide}${SPACES_MENTION_GUIDE}`
-      : `${basePrompt}${citationGuide}`) + twinMandate;
+      : `${basePrompt}${citationGuide}`) + twinMandate) + notConnectedGuide;
     // Proof (twin mention flow only) that BOTH prompt changes actually reach the
     // model: the twin_deliver mandate + its who/where line in the SYSTEM prompt,
     // and the "@mentioned by" note in the USER-prompt context. Grep the run logs

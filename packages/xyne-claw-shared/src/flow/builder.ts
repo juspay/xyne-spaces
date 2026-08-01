@@ -27,7 +27,13 @@ type FlowComponentType =
   | 'divider'
   | 'image'
   | 'link'
-  | 'plan';
+  | 'plan'
+  | 'connectAccount'
+  | 'mcpConfigure'
+  | 'agentCreation'
+  | 'entityUpdate'
+  | 'skillCreation'
+  | 'skillUpdate';
 
 interface FlowComponentStyle {
   padding?: string;
@@ -314,21 +320,47 @@ export class FlowBuilder {
 // ── Pre-built Flow factories used by webhook.ts ───────────────────────────────
 
 /**
+ * An HMAC-signed pending write action, as produced by claw-auth's /actions/sign.
+ * Rides in flowJSON.data so flow-action.ts can verify + execute it on approval.
+ */
+export interface WriteAction {
+  serverType: string;
+  tool: string;
+  params: Record<string, unknown>;
+  userId: string;
+  signature: string;
+  agentSlug: string;
+  channelId?: string;
+  conversationId?: string;
+}
+
+/**
+ * The flowJSON.data payload flow-action's `actionType === "write"` branch reads.
+ * SINGLE source of truth for this shape — every card that carries a signed write
+ * action (generic approval card, agentCreation card, …) must build its data
+ * here, so a new field can never be added to one card and missed on another.
+ */
+function writeActionData(action: WriteAction): Record<string, unknown> {
+  return {
+    actionType: 'write',
+    serverType: action.serverType,
+    tool: action.tool,
+    params: JSON.stringify(action.params),
+    userId: action.userId,
+    signature: action.signature,
+    agentSlug: action.agentSlug,
+    ...(action.channelId !== undefined ? { channelId: action.channelId } : {}),
+    ...(action.conversationId !== undefined ? { conversationId: action.conversationId } : {}),
+  };
+}
+
+/**
  * Write tool approval — Approve/Decline buttons for HITL write actions.
  * Context data is stored in flowJSON.data so flow-action.ts can execute the tool.
  */
 export function buildWriteApprovalFlow(
   actionDesc: string,
-  action: {
-    serverType: string;
-    tool: string;
-    params: Record<string, unknown>;
-    userId: string;
-    signature: string;
-    agentSlug: string;
-    channelId?: string;
-    conversationId?: string;
-  },
+  action: WriteAction,
 ): FlowDefinition {
   return new FlowBuilder(`write-approval-${crypto.randomUUID()}`)
     .setTitle('Action Approval')
@@ -346,17 +378,7 @@ export function buildWriteApprovalFlow(
       FlowBuilder.button('approve-continue', '✓  Approve & Continue', { type: 'submit', actionId: 'approve-continue', successMessage: 'Approved — continuing' }, { variant: 'secondary' }),
       FlowBuilder.button('decline', '✕  Decline', { type: 'submit', actionId: 'decline-write' }, { variant: 'destructive' }),
     ])
-    .setData({
-      actionType: 'write',
-      serverType: action.serverType,
-      tool: action.tool,
-      params: JSON.stringify(action.params),
-      userId: action.userId,
-      signature: action.signature,
-      agentSlug: action.agentSlug,
-      ...(action.channelId !== undefined ? { channelId: action.channelId } : {}),
-      ...(action.conversationId !== undefined ? { conversationId: action.conversationId } : {}),
-    })
+    .setData(writeActionData(action))
     .build();
 }
 
@@ -372,16 +394,9 @@ export function buildWriteResultFlow(opts: {
   heading: string;
   details: Array<{ label: string; value: string }>;
   errorText?: string;
-  retry?: {
-    serverType: string;
-    params: Record<string, unknown>;
-    userId: string;
-    signature: string;
-    agentSlug: string;
-    channelId?: string;
-    conversationId?: string;
-    spacesAppId?: string;
-  };
+  /** The same signed action, re-submitted verbatim by the Retry buttons
+   *  (params unchanged → signature still valid). `tool` comes from opts.tool. */
+  retry?: Omit<WriteAction, 'tool'> & { spacesAppId?: string };
 }): FlowDefinition {
   const b = new FlowBuilder(`write-result-${crypto.randomUUID()}`)
     .setTitle(opts.ok ? 'Action Completed' : 'Action Failed')
@@ -402,15 +417,7 @@ export function buildWriteResultFlow(opts: {
       FlowBuilder.button('retry', '↻  Retry', { type: 'submit', actionId: 'retry-write', successMessage: 'Retrying' }, { variant: 'primary' }),
       FlowBuilder.button('retry-continue', '↻  Retry & Continue', { type: 'submit', actionId: 'retry-continue', successMessage: 'Retrying' }, { variant: 'secondary' }),
     ]).setData({
-      actionType: 'write',
-      serverType: opts.retry.serverType,
-      tool: opts.tool,
-      params: JSON.stringify(opts.retry.params),
-      userId: opts.retry.userId,
-      signature: opts.retry.signature,
-      agentSlug: opts.retry.agentSlug,
-      ...(opts.retry.channelId !== undefined ? { channelId: opts.retry.channelId } : {}),
-      ...(opts.retry.conversationId !== undefined ? { conversationId: opts.retry.conversationId } : {}),
+      ...writeActionData({ ...opts.retry, tool: opts.tool }),
       ...(opts.retry.spacesAppId !== undefined ? { spacesAppId: opts.retry.spacesAppId } : {}),
     });
   }
@@ -718,6 +725,205 @@ export function buildAgentCallProposalFlow(
     .build();
 }
 
+export function buildConnectAccountFlow(context: {
+  displayName: string;
+  authUrl: string;
+  reason?: string;
+  serverType?: string;
+}): FlowDefinition {
+  return new FlowBuilder(`connect-account-${crypto.randomUUID()}`)
+    .addComponent({
+      id: 'connect-account',
+      type: 'connectAccount',
+      props: {
+        displayName: context.displayName,
+        authUrl: context.authUrl,
+        ...(context.reason?.trim() ? { reason: context.reason.trim() } : {}),
+        ...(context.serverType?.trim() ? { serverType: context.serverType.trim() } : {}),
+      },
+    })
+    .setData({ actionType: 'connect-account' })
+    .build();
+}
+
+export function buildMcpConfigureFlow(context: {
+  serverType: string;
+  serverName: string;
+  mcpServerId: string;
+  fields: Array<{ name: string; label: string; type: 'text' | 'password'; placeholder?: string; optional?: boolean }>;
+  reason?: string;
+  userId: string;
+  agentSlug?: string;
+  spacesAppId?: string;
+}): FlowDefinition {
+  return new FlowBuilder(`mcp-configure-${context.serverType}-${crypto.randomUUID()}`)
+    .addComponent({
+      id: 'mcp-configure',
+      type: 'mcpConfigure',
+      props: {
+        serverType: context.serverType,
+        serverName: context.serverName,
+        mcpServerId: context.mcpServerId,
+        fields: context.fields.map((field) => ({
+          name: field.name,
+          label: field.label,
+          type: field.type,
+          ...(field.placeholder ? { placeholder: field.placeholder } : {}),
+          ...(field.optional ? { optional: true } : {}),
+        })),
+        ...(context.reason?.trim() ? { reason: context.reason.trim() } : {}),
+      },
+    })
+    .setData({
+      actionType: 'mcp-configure',
+      userId: context.userId,
+      mcpServerId: context.mcpServerId,
+      serverType: context.serverType,
+      serverName: context.serverName,
+      ...(context.agentSlug ? { agentSlug: context.agentSlug } : {}),
+      ...(context.spacesAppId ? { spacesAppId: context.spacesAppId } : {}),
+    })
+    .build();
+}
+
+/**
+ * create-agent HITL card — a single `agentCreation` node that updates IN PLACE
+ * across phases (like the plan card), keyed on the SAME message:
+ *
+ *   pending  → proposed agent + Approve/Decline. The buttons (rendered by the
+ *              node) submit the write-tool actionIds; the HMAC-signed action is
+ *              carried in flowJSON.data (identical shape to buildWriteApprovalFlow)
+ *              so the existing write persistence path runs unchanged.
+ *   created  → approved. Created chip, prompt still expandable, setup hint.
+ *   rejected → declined. Rejected chip.
+ *
+ * Rendered by apps/dashboard AgentCreationNode; validated by @xyne/shared
+ * agentCreationComponentSchema (both must ship together — the dashboard rejects
+ * an unknown component type). screenId is keyed on the slug so phase updates to
+ * the same agent reconcile to the same card.
+ */
+/**
+ * Derive the agentCreation card's display props from a create-agent tool's raw
+ * params. Shared by the pending (webhook), created, and rejected (flow-action)
+ * emit sites so the in-place card update always shows the same agent details.
+ * Only present fields are assigned (no explicit `undefined`).
+ */
+/** The displayable fields of an agentCreation card, shared by all three phases. */
+export interface AgentCreationCardProps {
+  name: string;
+  slug: string;
+  description?: string;
+  systemPrompt?: string;
+  modelId?: string;
+  tools?: string[];
+  connectLinks?: Array<{ serverType: string; displayName: string; authUrl: string }>;
+}
+
+/** Trimmed non-empty string, or undefined. */
+function trimmedOrUndefined(value: unknown): string | undefined {
+  const trimmed = typeof value === 'string' ? value.trim() : '';
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+export function agentCreationPropsFromToolParams(params: Record<string, unknown>): AgentCreationCardProps {
+  const name = trimmedOrUndefined(params['name']);
+  // Mirror flow-action's create branch: an omitted slug derives from the name.
+  const slug =
+    trimmedOrUndefined(params['slug'])?.toLowerCase() ??
+    name?.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80);
+
+  const description = trimmedOrUndefined(params['description']);
+  const systemPrompt = trimmedOrUndefined(params['systemPrompt']);
+  const modelId = trimmedOrUndefined(params['modelId']);
+  const tools = Array.isArray(params['tools'])
+    ? (params['tools'] as unknown[]).filter((t): t is string => typeof t === 'string')
+    : [];
+
+  const props: AgentCreationCardProps = { name: name ?? 'Agent', slug: slug || 'agent' };
+  if (description) props.description = description;
+  if (systemPrompt) props.systemPrompt = systemPrompt;
+  if (modelId) props.modelId = modelId;
+  if (tools.length > 0) props.tools = tools;
+  return props;
+}
+
+export function buildAgentCreationFlow(
+  phase: 'pending' | 'created' | 'rejected',
+  agent: AgentCreationCardProps & {
+    note?: string;
+    decidedBy?: string;
+    decidedAt?: string;
+  },
+  action?: WriteAction,
+): FlowDefinition {
+  // Node props: phase + name/slug always; every other field only when non-empty
+  // (the zod schema is .strict(), and empty strings would render as blank rows).
+  const props: Record<string, unknown> = { phase, name: agent.name, slug: agent.slug };
+  const optionalStringProps = ['description', 'systemPrompt', 'modelId', 'note', 'decidedBy', 'decidedAt'] as const;
+  for (const field of optionalStringProps) {
+    const value = agent[field]?.trim();
+    if (value) props[field] = value;
+  }
+  if (agent.tools && agent.tools.length > 0) props['tools'] = agent.tools;
+  if (agent.connectLinks && agent.connectLinks.length > 0) props['connectLinks'] = agent.connectLinks;
+
+  const builder = new FlowBuilder(`agent-creation-${agent.slug}`)
+    .setTitle('Agent')
+    .addComponent({ id: 'agent-creation', type: 'agentCreation', props });
+
+  // Pending carries the signed write action (the node's Approve/Decline buttons
+  // submit the standard approve-write/decline-write actionIds against it);
+  // decided phases have no action to run.
+  builder.setData(phase === 'pending' && action ? writeActionData(action) : { actionType: `agent-${phase}` });
+  return builder.build();
+}
+
+/** The displayable fields of a create-skill approval card. */
+export interface SkillCreationCardProps {
+  name: string;
+  slug: string;
+  description?: string;
+  content?: string;
+}
+
+export function skillCreationPropsFromToolParams(params: Record<string, unknown>): SkillCreationCardProps {
+  const name = trimmedOrUndefined(params['name']);
+  const slug =
+    trimmedOrUndefined(params['slug'])?.toLowerCase() ??
+    name?.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80);
+  const description = trimmedOrUndefined(params['description']);
+  const content = trimmedOrUndefined(params['content']);
+
+  const props: SkillCreationCardProps = { name: name ?? 'Skill', slug: slug || 'skill' };
+  if (description) props.description = description;
+  if (content) props.content = content;
+  return props;
+}
+
+export function buildSkillCreationFlow(
+  phase: 'pending' | 'created' | 'rejected',
+  skill: SkillCreationCardProps & {
+    note?: string;
+    decidedBy?: string;
+    decidedAt?: string;
+  },
+  action?: WriteAction,
+): FlowDefinition {
+  const props: Record<string, unknown> = { phase, name: skill.name, slug: skill.slug };
+  const optionalStringProps = ['description', 'content', 'note', 'decidedBy', 'decidedAt'] as const;
+  for (const field of optionalStringProps) {
+    const value = skill[field]?.trim();
+    if (value) props[field] = value;
+  }
+
+  const builder = new FlowBuilder(`skill-creation-${skill.slug}`)
+    .setTitle('Skill')
+    .addComponent({ id: 'skill-creation', type: 'skillCreation', props });
+
+  builder.setData(phase === 'pending' && action ? writeActionData(action) : { actionType: `skill-${phase}` });
+  return builder.build();
+}
+
 /**
  * Agent clone approval — raised when a viewer without owner/contributor
  * rights requests a clone. DM'd to the SOURCE agent's owner with
@@ -785,32 +991,6 @@ const DIFF_CARD_MAX_HUNKS = 6;
 const DIFF_CARD_MAX_LINES = 60;
 const DIFF_LINE_MAX_CHARS = 160;
 
-/** mrkdwn-neutralize a raw diff line so `*`/`_`/backticks in skill content
- *  don't format-bomb the card. Zero-width-space after each marker keeps the
- *  visible text identical while defeating the parser. */
-function neutralizeMrkdwn(line: string): string {
-  return line.replace(/([*_~`])/g, "$1​");
-}
-
-function diffLineComponent(id: string, kind: 'ctx' | 'add' | 'del', text: string): FlowComponent {
-  const clipped = text.length > DIFF_LINE_MAX_CHARS ? `${text.slice(0, DIFF_LINE_MAX_CHARS)}…` : text;
-  const prefix = kind === 'add' ? '+ ' : kind === 'del' ? '− ' : '  ';
-  const style: FlowComponentStyle =
-    kind === 'add'
-      ? { backgroundColor: 'rgba(46,160,67,0.15)', borderLeft: '3px solid #2ea043', padding: '1px 8px' }
-      : kind === 'del'
-        ? { backgroundColor: 'rgba(248,81,73,0.15)', borderLeft: '3px solid #f85149', padding: '1px 8px' }
-        : { padding: '1px 8px', borderLeft: '3px solid transparent' };
-  return {
-    id,
-    type: 'text',
-    // Bypass mdToMrkdwn (FlowBuilder.text would convert) — diff content must
-    // render verbatim, so neutralize markers instead.
-    props: { content: prefix + neutralizeMrkdwn(clipped), size: 'sm', ...(kind === 'ctx' ? { variant: 'muted' } : {}) },
-    style,
-  };
-}
-
 /**
  * Skill-update approval — raised by the `update-skill` tool, DM'd to the
  * skill's owner. Git-style rendering (2026-07-15 redesign): header + stat
@@ -840,68 +1020,39 @@ export function buildSkillUpdateApprovalFlow(
     spacesBaseUrl?: string;
   },
 ): FlowDefinition {
-  const b = new FlowBuilder(`skill-update-${crypto.randomUUID()}`)
-    .setTitle('Skill Update Request')
-    .addHeading('title', `Skill update: ${context.skillName}`, 3);
-
-  const stats = context.diff ? `  ·  *+${context.diff.added}* / *−${context.diff.removed}*  ·  ${context.diff.hunks.length} hunk${context.diff.hunks.length === 1 ? '' : 's'}` : '';
-  b.addText('meta', `proposed by *${context.proposerName}* on \`${context.skillSlug}\`${stats}`, { variant: 'muted', size: 'sm' });
-
-  if (context.summary) {
-    b.addText('summary', `*Summary:* ${context.summary.length > 300 ? `${context.summary.slice(0, 300)}…` : context.summary}`);
-  }
-
-  // Shrink warning — a proposal that deletes much more than it adds is the
-  // signature of truncated tool arguments (a "full replacement" that lost its
-  // tail), which destroyed a 318-rule skill on 2026-07-15. Make it unmissable.
-  if (context.diff && context.diff.removed > 30 && context.diff.removed > context.diff.added * 3) {
-    b.addCard('shrink-warning', [
-      FlowBuilder.text(
-        'shrink-warning-text',
-        `⚠️ *This update REMOVES ${context.diff.removed} lines but adds only ${context.diff.added}.* If the proposer claimed a "full replacement", the content may have been truncated — verify the tail of the skill before approving.`,
-        { variant: 'danger' },
-      ),
-    ], { border: '1px solid #f85149', borderRadius: '6px', padding: '8px' });
-  }
-
-  b.addDivider('d1');
-
-  if (context.diff && context.diff.hunks.length > 0) {
+  let diff = context.diff;
+  let truncated = false;
+  if (diff && diff.hunks.length > 0) {
     let linesUsed = 0;
-    let hunksRendered = 0;
-    let truncated = false;
-    for (const [hi, hunk] of context.diff.hunks.entries()) {
-      if (hunksRendered >= DIFF_CARD_MAX_HUNKS || linesUsed >= DIFF_CARD_MAX_LINES) { truncated = true; break; }
-      const children: FlowComponent[] = [
-        { id: `h${hi}-header`, type: 'text', props: { content: hunk.header, variant: 'muted', size: 'xs' }, style: { padding: '2px 8px' } },
-      ];
-      for (const [li, line] of hunk.lines.entries()) {
+    const hunks: typeof diff.hunks = [];
+    for (const hunk of diff.hunks) {
+      if (hunks.length >= DIFF_CARD_MAX_HUNKS || linesUsed >= DIFF_CARD_MAX_LINES) { truncated = true; break; }
+      const lines: typeof hunk.lines = [];
+      for (const line of hunk.lines) {
         if (linesUsed >= DIFF_CARD_MAX_LINES) { truncated = true; break; }
-        children.push(diffLineComponent(`h${hi}-l${li}`, line.kind, line.text));
+        const text = line.text.length > DIFF_LINE_MAX_CHARS ? `${line.text.slice(0, DIFF_LINE_MAX_CHARS)}…` : line.text;
+        lines.push({ ...line, text });
         linesUsed++;
       }
-      b.addCard(`hunk-${hi}`, children, {
-        border: '1px solid rgba(128,128,128,0.25)',
-        borderRadius: '6px',
-        padding: '4px 0',
-        margin: '4px 0',
-        maxHeight: '320px',
-        overflowY: 'auto',
-      });
-      hunksRendered++;
+      hunks.push({ header: hunk.header, lines });
     }
-    if (truncated) {
-      b.addText('diff-truncated', `_… diff truncated for display (showing ${linesUsed} lines across ${hunksRendered} hunks). The FULL proposed content is stored on the request and applied exactly as reviewed by the integrity hash._`, { variant: 'muted', size: 'sm' });
-    }
-  } else if (context.diffText) {
-    b.addText('diff', context.diffText);
+    diff = { ...diff, hunks };
   }
 
-  b.addDivider('d2')
-    .addRow('actions', [
-      FlowBuilder.button('approve', '✓  Approve', { type: 'submit', actionId: 'skill-update-approve', successMessage: 'Approved' }, { variant: 'primary' }),
-      FlowBuilder.button('decline', '✕  Decline', { type: 'submit', actionId: 'skill-update-decline' }, { variant: 'destructive' }),
-    ])
+  const props: Record<string, unknown> = {
+    phase: 'pending',
+    skillName: context.skillName,
+    skillSlug: context.skillSlug,
+    proposerName: context.proposerName,
+  };
+  if (context.summary?.trim()) props['summary'] = context.summary.trim();
+  if (diff && diff.hunks.length > 0) props['diff'] = diff;
+  if (!diff && context.diffText?.trim()) props['diffText'] = context.diffText.trim();
+  if (truncated) props['truncated'] = true;
+
+  return new FlowBuilder(`skill-update-${context.skillSlug}`)
+    .setTitle('Skill Update Request')
+    .addComponent({ id: 'skill-update', type: 'skillUpdate', props })
     .setData({
       actionType: 'skill-update',
       requestId: context.requestId,
@@ -909,6 +1060,94 @@ export function buildSkillUpdateApprovalFlow(
       skillSlug: context.skillSlug,
       ...(context.agentSlug ? { agentSlug: context.agentSlug } : {}),
       ...(context.spacesAppId ? { spacesAppId: context.spacesAppId } : {}),
-    });
-  return b.build();
+    })
+    .build();
+}
+
+/**
+ * Agent- / subagent-update approval — raised by the `update-agent` /
+ * `update-subagent` tools and DM'd to the definition's owner. Emits ONE
+ * `entityUpdate` node (rendered by the dashboard's EntityUpdateNode, shared by
+ * both kinds) in phase 'pending'; flow-action.ts flips the SAME card to
+ * 'approved' / 'rejected' in place on the owner's decision.
+ *
+ * The systemPrompt diff and scalar "Field changes" ship as STRUCTURED props —
+ * presentation lives entirely in the renderer. The diff is capped here for
+ * display (`truncated`); the FULL proposed content is stored on the request and
+ * applied exactly as reviewed via the integrity hash. `kind` drives the labels
+ * and the actionType / actionIds the owner's click routes to (`agent-update` /
+ * `subagent-update`, resolved in flow-action.ts).
+ */
+export function buildEntityUpdateApprovalFlow(
+  context: {
+    kind: 'agent' | 'subagent';
+    requestId: string;
+    approverUserId: string;
+    /** slug (agent) or name (subagent) of the target definition. */
+    targetKey: string;
+    /** Display name shown in the heading. */
+    targetName: string;
+    proposerName: string;
+    /** systemPrompt diff (computeSkillDiff). Omit when only scalars changed. */
+    diff?: { hunks: Array<{ header: string; lines: Array<{ kind: 'ctx' | 'add' | 'del'; text: string }> }>; added: number; removed: number };
+    /** Unused by the node renderer; kept for signature compatibility. */
+    diffText?: string;
+    /** Changed scalar fields, rendered as a compact "Field changes" list. */
+    fieldChanges?: Array<{ label: string; from: string; to: string }>;
+    summary?: string;
+    /** The posting agent's slug (for card collapse after approve/decline). */
+    agentSlug?: string;
+    spacesAppId?: string;
+    spacesBaseUrl?: string;
+  },
+): FlowDefinition {
+  const kindLabel = context.kind === 'agent' ? 'Agent' : 'Subagent';
+  const clip = (s: string, max: number): string => (s.length > max ? `${s.slice(0, max)}…` : s);
+
+  // Cap the SHIPPED diff — messages should stay small and the renderer bounded.
+  let diff: { added: number; removed: number; hunks: Array<{ header: string; lines: Array<{ kind: 'ctx' | 'add' | 'del'; text: string }> }> } | undefined;
+  let truncated = false;
+  if (context.diff) {
+    const hunks: NonNullable<typeof diff>['hunks'] = [];
+    let linesUsed = 0;
+    for (const hunk of context.diff.hunks) {
+      if (hunks.length >= DIFF_CARD_MAX_HUNKS || linesUsed >= DIFF_CARD_MAX_LINES) { truncated = true; break; }
+      const lines = hunk.lines.slice(0, DIFF_CARD_MAX_LINES - linesUsed);
+      if (lines.length < hunk.lines.length) truncated = true;
+      linesUsed += lines.length;
+      hunks.push({ header: hunk.header, lines });
+    }
+    diff = { added: context.diff.added, removed: context.diff.removed, hunks };
+  }
+
+  const props: Record<string, unknown> = {
+    phase: 'pending',
+    kind: context.kind,
+    targetName: context.targetName,
+    targetKey: context.targetKey,
+    proposerName: context.proposerName,
+  };
+  if (context.summary?.trim()) props['summary'] = clip(context.summary.trim(), 300);
+  if (context.fieldChanges && context.fieldChanges.length > 0) {
+    props['fieldChanges'] = context.fieldChanges.map((fc) => ({
+      label: fc.label,
+      from: clip(fc.from, 120),
+      to: clip(fc.to, 120),
+    }));
+  }
+  if (diff) props['diff'] = diff;
+  if (truncated) props['truncated'] = true;
+
+  return new FlowBuilder(`${context.kind}-update-${crypto.randomUUID()}`)
+    .setTitle(`${kindLabel} Update Request`)
+    .addComponent({ id: 'entity-update', type: 'entityUpdate', props })
+    .setData({
+      actionType: `${context.kind}-update`,
+      requestId: context.requestId,
+      approverUserId: context.approverUserId,
+      targetKey: context.targetKey,
+      ...(context.agentSlug ? { agentSlug: context.agentSlug } : {}),
+      ...(context.spacesAppId ? { spacesAppId: context.spacesAppId } : {}),
+    })
+    .build();
 }

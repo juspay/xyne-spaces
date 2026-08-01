@@ -21,13 +21,22 @@ import {
   subagentDefinitionRepository,
   subagentShareRepository,
   userRepository,
+  agentRequestRepository,
 } from "../repositories/index.js";
-import { getRequesterId, getOrgId, isClawAdmin } from "../middleware/agent-acl.js";
+import { getRequesterId, getOrgId, isClawAdmin, getAgentEditAccess } from "../middleware/agent-acl.js";
 import {
   ValidationError,
   validateSubagentInput,
 } from "../lib/subagent-resolver.js";
-import { SUBAGENT_DEFINITIONS } from "xyne-claw-shared";
+import { SUBAGENT_DEFINITIONS, hashSkillContent } from "xyne-claw-shared";
+import { canProposerPostAsAgent } from "./skills.js";
+import {
+  computeEntityUpdate,
+  resolveEntityUpdateRequest,
+  notifyApproverOfEntityUpdateInSpaces,
+  subagentToolSelectionFromConfig,
+} from "../lib/entity-update.js";
+import { writeAuditLog } from "../lib/audit.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("subagents");
@@ -481,6 +490,124 @@ router.delete("/:name/shares/:userId", async (req: Request, res: Response) => {
     return res.json({ success: true });
   } catch (err) {
     log.error("[subagents] remove share error:", err);
+    return res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+// ── update-subagent: propose a change to an existing subagent ──────────────
+// The update-subagent tool POSTs here. Mirrors POST /agents/:slug/propose-update
+// but targets subagent_definitions (keyed by org+name); the approver is the
+// subagent's creator. Never applies here — see resolveEntityUpdateRequest.
+router.post("/:name/propose-update", async (req: Request<{ name: string }>, res: Response) => {
+  try {
+    const requesterId = getRequesterId(req);
+    if (!requesterId) return res.status(401).json({ success: false, error: "x-user-id required" });
+    const orgId = getOrgId(req);
+    if (!orgId) return res.status(400).json({ success: false, error: "orgId is required" });
+
+    const body = req.body as {
+      promptEdits?: Array<{ oldText?: string; newText?: string }>;
+      systemPrompt?: string; description?: string; paramName?: string; paramDescription?: string;
+      tools?: string[]; summary?: string; agentSlug?: string;
+    };
+
+    const sub = await subagentDefinitionRepository.findByName(req.params.name, orgId);
+    if (!sub) return res.status(404).json({ success: false, error: "Subagent not found" });
+
+    // Only the owner, a contributor (EDITOR share), or a CLAW_ADMIN may propose
+    // an update — same ACL as every other subagent edit route. Reject otherwise.
+    if (!(await canEditSubagent(sub, requesterId))) {
+      return res.status(403).json({ success: false, error: "Only the subagent owner or a contributor can propose updates." });
+    }
+
+    const computed = computeEntityUpdate("subagent", {
+      systemPrompt: sub.systemPrompt,
+      name: sub.name,
+      description: sub.description,
+      paramName: sub.paramName,
+      paramDescription: sub.paramDescription,
+      currentToolSelection: subagentToolSelectionFromConfig(sub.tools),
+    }, body);
+    if (!computed.ok) return res.status(computed.code).json({ success: false, error: computed.error });
+
+    if (!sub.createdByUserId) return res.status(409).json({ success: false, error: "This subagent has no owner to approve an update." });
+
+    const proposedContent = JSON.stringify(computed.payload);
+    const outcome = await agentRequestRepository.supersedeAndCreateEntityUpdate({
+      targetType: "subagent",
+      targetKey: sub.name,
+      requesterId,
+      orgId,
+      proposedContent,
+      baseContentHash: computed.baseContentHash,
+      proposedContentHash: hashSkillContent(proposedContent),
+      requestNote: body.summary?.trim() || null,
+    });
+    if (outcome.supersededCount > 0) {
+      log.info(`[subagents/propose-update] superseded ${outcome.supersededCount} stale pending proposal(s) for ${sub.name} by ${requesterId}`);
+    }
+
+    await writeAuditLog({ actorUserId: requesterId, eventType: "REQUEST_CREATED", targetId: sub.id, description: `subagent_update request for "${sub.name}"` });
+
+    const requester = await userRepository.findById(requesterId);
+    const proposerName = requester?.name ?? requester?.email ?? "A user";
+    if (body.agentSlug) {
+      const access = await getAgentEditAccess(requesterId, body.agentSlug, orgId);
+      if (canProposerPostAsAgent(access)) {
+        void notifyApproverOfEntityUpdateInSpaces({
+          kind: "subagent",
+          approverUserId: sub.createdByUserId,
+          requestId: outcome.request.id,
+          targetKey: sub.name,
+          targetName: sub.name,
+          proposerName,
+          ...(computed.diff ? { diff: computed.diff } : {}),
+          fieldChanges: computed.fieldChanges,
+          summary: body.summary?.trim() || null,
+          agent: access.agent,
+        });
+      } else {
+        log.warn(`[subagents/propose-update] owner DM skipped for ${sub.name}: requester ${requesterId} not authorized to post as agent ${body.agentSlug}`);
+      }
+    }
+
+    return res.status(202).json({
+      success: true,
+      data: {
+        requestId: outcome.request.id,
+        status: "pending_approval",
+        ...(outcome.supersededCount > 0 ? { supersededPreviousProposal: true } : {}),
+      },
+    });
+  } catch (err) {
+    log.error("[subagents] propose-update error:", err);
+    return res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+// REST parity (tests / non-card callers). Card path calls resolveEntityUpdateRequest.
+router.post("/subagent-update-requests/:requestId/approve", async (req: Request<{ requestId: string }>, res: Response) => {
+  try {
+    const callerUserId = getRequesterId(req);
+    if (!callerUserId) return res.status(401).json({ success: false, error: "x-user-id required" });
+    const result = await resolveEntityUpdateRequest("subagent", req.params.requestId, callerUserId, "approve");
+    if (!result.ok) return res.status(result.code).json({ success: false, error: result.error });
+    return res.json({ success: true, alreadyResolved: result.alreadyResolved ?? false });
+  } catch (err) {
+    log.error("[subagents] approve subagent-update error:", err);
+    return res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+router.post("/subagent-update-requests/:requestId/reject", async (req: Request<{ requestId: string }>, res: Response) => {
+  try {
+    const callerUserId = getRequesterId(req);
+    if (!callerUserId) return res.status(401).json({ success: false, error: "x-user-id required" });
+    const result = await resolveEntityUpdateRequest("subagent", req.params.requestId, callerUserId, "reject");
+    if (!result.ok) return res.status(result.code).json({ success: false, error: result.error });
+    return res.json({ success: true, alreadyResolved: result.alreadyResolved ?? false });
+  } catch (err) {
+    log.error("[subagents] reject subagent-update error:", err);
     return res.status(500).json({ success: false, error: "Internal server error" });
   }
 });

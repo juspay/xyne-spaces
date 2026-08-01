@@ -33,6 +33,7 @@ const messageSanitizeSchema = {
   attributes: {
     ...defaultSchema.attributes,
     span: [...(defaultSchema.attributes?.['span'] ?? []), 'className', ...MENTION_DATA_ATTRS],
+    input: [...(defaultSchema.attributes?.['input'] ?? []), 'checked'],
   },
   // Preserve the synthetic `cite:` / `cite-group:` link schemes emitted by
   // `linkifyAndGroupClawCitations` — rehype-sanitize strips unknown href

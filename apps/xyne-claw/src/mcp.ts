@@ -86,6 +86,39 @@ async function authFetch<T>(path: string, sessionToken: string, init?: RequestIn
   return body.data;
 }
 
+/** A per-user OAuth provider the agent is configured for but the user hasn't connected. */
+export interface NeedsConnectionEntry {
+  serverType: string;
+  displayName: string;
+}
+
+/**
+ * Like authFetch but returns the FULL envelope, so sidecar fields (e.g.
+ * `needsConnection` on /mcp/tools) survive — authFetch discards everything but
+ * `.data`.
+ */
+async function authFetchEnvelope<T>(
+  path: string,
+  sessionToken: string,
+  init?: RequestInit,
+): Promise<AuthResponse<T> & { needsConnection?: NeedsConnectionEntry[] }> {
+  const url = `${SERVER.authServiceUrl}${path}`;
+  const res = await fetch(url, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${sessionToken}`,
+      "x-s2s-key": SERVER.s2sKey,
+      ...init?.headers,
+    },
+  });
+  const body = (await res.json()) as AuthResponse<T> & { needsConnection?: NeedsConnectionEntry[] };
+  if (!body.success || body.data === undefined) {
+    throw new Error(body.error ?? `Auth service error: ${res.status}`);
+  }
+  return body;
+}
+
 function injectToolCallIdIntoClawCitations(content: string, toolCallId: string): string {
   if (!content || !toolCallId) return content;
   return content.split("__TOOL_CALL_ID__").join(toolCallId);
@@ -218,18 +251,21 @@ export async function loadMcpToolsForUser(
   onAttachment?: (a: Attachment) => void,
 ): Promise<{
   groups: McpToolGroup[];
+  needsConnection: NeedsConnectionEntry[];
   cleanup: () => Promise<void>;
   getPendingActions: () => Array<Record<string, unknown>>;
   getAttachments: () => Attachment[];
 }> {
   const permissions = toolPermissions ?? {};
-  const servers = await authFetch<McpServerTools[]>(
+  const toolsEnvelope = await authFetchEnvelope<McpServerTools[]>(
     `/claw/api/v1/sessions/${encodeURIComponent(sessionId)}/mcp/tools`,
     sessionToken,
   );
+  const servers = toolsEnvelope.data ?? [];
+  const needsConnection = toolsEnvelope.needsConnection ?? [];
 
   if (servers.length === 0) {
-    return { groups: [], cleanup: async () => {}, getPendingActions: () => [], getAttachments: () => [] };
+    return { groups: [], needsConnection, cleanup: async () => {}, getPendingActions: () => [], getAttachments: () => [] };
   }
 
   const pendingActions: Array<Record<string, unknown>> = [];
@@ -387,5 +423,59 @@ export async function loadMcpToolsForUser(
   const totalTools = groups.reduce((sum, g) => sum + g.tools.length, 0);
   log.info(`[mcp] Loaded ${totalTools} tools in ${groups.length} groups for session ${sessionId}`);
 
-  return { groups, cleanup: async () => {}, getPendingActions: () => pendingActions, getAttachments: () => mcpAttachments };
+  return { groups, needsConnection, cleanup: async () => {}, getPendingActions: () => pendingActions, getAttachments: () => mcpAttachments };
+}
+
+/**
+ * In-process tool the model calls to post a connect/configure card into the
+ * thread for per-user providers the agent is configured for but the user hasn't
+ * connected (see `needsConnection`). It delegates to claw-auth's connect-card
+ * endpoint, which owns the agent's Spaces app token plus OAuth and credential
+ * form construction. Injected only when `needsConnection` is non-empty.
+ */
+export function buildSuggestConnectionTool(
+  sessionId: string,
+  sessionToken: string,
+  needsConnection: NeedsConnectionEntry[],
+): ToolDefinition {
+  const providers = needsConnection.map((n) => n.serverType);
+  const byType = new Map(needsConnection.map((n) => [n.serverType, n.displayName]));
+  return {
+    name: "suggest-connection",
+    label: "Suggest account connection",
+    description:
+      "Post a connect/configure card in the current thread so the user can authorize or add credentials for an account this agent " +
+      "needs but hasn't connected. Call this ONCE when the user asks for something requiring an unconnected provider. " +
+      `Valid provider values: ${providers.join(", ")}.`,
+    parameters: Type.Object({
+      provider: Type.Unsafe<string>({
+        type: "string",
+        enum: providers,
+        description: "Which account to prompt the user to connect.",
+      }),
+    }),
+    async execute(_toolCallId: string, params: unknown) {
+      const provider = String((params as Record<string, unknown> | undefined)?.["provider"] ?? "").trim();
+      if (!byType.has(provider)) {
+        return {
+          content: [{ type: "text" as const, text: `suggest-connection failed: unknown provider "${provider}". Valid: ${providers.join(", ")}.` }],
+          details: {},
+        };
+      }
+      try {
+        await authFetchEnvelope<{ posted: boolean }>(
+          `/claw/api/v1/sessions/${encodeURIComponent(sessionId)}/mcp/connect-card`,
+          sessionToken,
+          { method: "POST", body: JSON.stringify({ serverType: provider }) },
+        );
+        return {
+          content: [{ type: "text" as const, text: `Posted a setup card for ${byType.get(provider)} in the thread. Do not call suggest-connection again for the same provider.` }],
+          details: {},
+        };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return { content: [{ type: "text" as const, text: `suggest-connection failed: ${msg}` }], details: {} };
+      }
+    },
+  };
 }

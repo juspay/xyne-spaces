@@ -16,6 +16,12 @@ import { LinkNode } from './LinkNode';
 import { PlanNode } from './PlanNode';
 import { PrNode } from './PrNode';
 import { CallScheduleNode } from './CallScheduleNode';
+import { AgentCreationNode } from './AgentCreationNode';
+import { EntityUpdateNode } from './EntityUpdateNode';
+import { SkillCreationNode } from './SkillCreationNode';
+import { SkillUpdateNode } from './SkillUpdateNode';
+import { ConnectAccountNode } from './ConnectAccountNode';
+import { McpConfigureNode } from './McpConfigureNode';
 // PrApprovalNode is intentionally NOT imported/registered for now — the component
 // is kept in ./PrApprovalNode.tsx but unlinked so 'pr_approval' isn't a live artifact.
 
@@ -64,6 +70,12 @@ NodeRegistry.register('plan', PlanNode);
 NodeRegistry.register('pr', PrNode);
 // NodeRegistry.register('pr_approval', PrApprovalNode); // unlinked for now
 NodeRegistry.register('call_schedule', CallScheduleNode);
+NodeRegistry.register('connectAccount', ConnectAccountNode);
+NodeRegistry.register('mcpConfigure', McpConfigureNode);
+NodeRegistry.register('agentCreation', AgentCreationNode);
+NodeRegistry.register('entityUpdate', EntityUpdateNode);
+NodeRegistry.register('skillCreation', SkillCreationNode);
+NodeRegistry.register('skillUpdate', SkillUpdateNode);
 
 /**
  * Kept for backward compatibility with existing callers/imports.

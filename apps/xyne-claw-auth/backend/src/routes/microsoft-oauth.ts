@@ -114,25 +114,31 @@ export const microsoftOAuthProvider: OAuthTokenProvider = {
  * Start the Microsoft OAuth flow. Returns the consent URL.
  * The frontend redirects the user to this URL.
  */
+/**
+ * Build the Microsoft consent URL for a user. Extracted from the authorize
+ * route so other surfaces (e.g. the in-chat "Connect Microsoft" card) can
+ * generate the same signed consent link without going through HTTP.
+ */
+export function buildMicrosoftConsentUrl(userId: string, redirectUri?: string): string {
+  const callbackUri = redirectUri ?? `${process.env["AUTH_SERVICE_URL"] ?? "http://localhost:3003"}/claw/api/v1/microsoft/callback`;
+  const { clientId, tenantId } = getMicrosoftCredentials();
+
+  const authUrl = new URL(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/authorize`);
+  authUrl.searchParams.set("client_id", clientId);
+  authUrl.searchParams.set("redirect_uri", callbackUri);
+  authUrl.searchParams.set("response_type", "code");
+  authUrl.searchParams.set("scope", MICROSOFT_SCOPES.join(" "));
+  authUrl.searchParams.set("response_mode", "query");
+  authUrl.searchParams.set("prompt", "consent");
+  authUrl.searchParams.set("state", signOAuthState(userId));
+  return authUrl.toString();
+}
+
 router.post("/:userId/oauth/microsoft/authorize", async (req: Request<{ userId: string }>, res: Response) => {
   try {
     const { userId } = req.params;
     const { redirectUri } = req.body as { redirectUri?: string };
-
-    const callbackUri = redirectUri ?? `${process.env["AUTH_SERVICE_URL"] ?? "http://localhost:3003"}/claw/api/v1/microsoft/callback`;
-
-    const { clientId, tenantId } = getMicrosoftCredentials();
-
-    const authUrl = new URL(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/authorize`);
-    authUrl.searchParams.set("client_id", clientId);
-    authUrl.searchParams.set("redirect_uri", callbackUri);
-    authUrl.searchParams.set("response_type", "code");
-    authUrl.searchParams.set("scope", MICROSOFT_SCOPES.join(" "));
-    authUrl.searchParams.set("response_mode", "query");
-    authUrl.searchParams.set("prompt", "consent");
-    authUrl.searchParams.set("state", signOAuthState(userId));
-
-    res.json({ success: true, data: { authUrl: authUrl.toString() } });
+    res.json({ success: true, data: { authUrl: buildMicrosoftConsentUrl(userId, redirectUri) } });
   } catch (err) {
     log.error("[microsoft-oauth] authorize error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });

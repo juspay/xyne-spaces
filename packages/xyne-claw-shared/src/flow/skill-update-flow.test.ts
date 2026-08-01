@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { buildSkillUpdateApprovalFlow } from "./builder.js";
-import { computeSkillDiff, formatSkillDiffForCard } from "../skill-diff/index.js";
+import { computeSkillDiff } from "../skill-diff/index.js";
 
 function flatten(flow: any): any[] {
   const out: any[] = [];
@@ -14,14 +14,14 @@ function flatten(flow: any): any[] {
 }
 
 describe("buildSkillUpdateApprovalFlow", () => {
-  const diff = formatSkillDiffForCard(computeSkillDiff("old body", "new body\nmore"));
+  const diff = computeSkillDiff("old body", "new body\nmore");
   const flow = buildSkillUpdateApprovalFlow({
     requestId: "req-1",
     approverUserId: "owner-1",
     skillSlug: "jenkins-investigation",
     skillName: "Jenkins Investigation",
     proposerName: "Anurag",
-    diffText: diff,
+    diff,
     summary: "add step",
     agentSlug: "architect",
     spacesBaseUrl: "https://spaces.example.com",
@@ -39,19 +39,21 @@ describe("buildSkillUpdateApprovalFlow", () => {
     expect(JSON.stringify(data)).not.toContain("```diff");
   });
 
-  it("renders the diff inside a fenced block in a text node", () => {
+  it("renders a dedicated skillUpdate node with structured diff props", () => {
     const nodes = flatten(flow);
-    const textWithDiff = nodes.find((n) => n.type === "text" && String(n.props?.content ?? "").includes("```diff"));
-    expect(textWithDiff).toBeTruthy();
-    expect(String(textWithDiff.props.content)).toContain("+new body");
+    const skillNode = nodes.find((n) => n.type === "skillUpdate");
+    expect(skillNode).toBeTruthy();
+    expect(skillNode.props.skillName).toBe("Jenkins Investigation");
+    expect(skillNode.props.skillSlug).toBe("jenkins-investigation");
+    expect(skillNode.props.summary).toBe("add step");
+    expect(skillNode.props.diff.added).toBe(diff.added);
+    expect(skillNode.props.diff.removed).toBe(diff.removed);
+    expect(JSON.stringify(skillNode.props.diff)).toContain("new body");
   });
 
-  it("has Approve and Decline submit buttons with the skill-update action ids", () => {
+  it("uses node-owned Approve and Decline buttons via the skill-update action ids", () => {
     const nodes = flatten(flow);
-    const buttons = nodes.filter((n) => n.type === "button");
-    const actionIds = buttons.map((b) => b.props?.action?.actionId);
-    expect(actionIds).toContain("skill-update-approve");
-    expect(actionIds).toContain("skill-update-decline");
-    for (const b of buttons) expect(b.props.action.type).toBe("submit");
+    expect(nodes.some((n) => n.type === "button")).toBe(false);
+    expect(nodes.some((n) => n.type === "skillUpdate")).toBe(true);
   });
 });

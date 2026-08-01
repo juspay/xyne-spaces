@@ -24,6 +24,11 @@ export interface ClawCitationContext {
   toolNumbers: ReadonlyMap<string, number>;
 }
 
+export interface MarkdownComponentOptions {
+  /** Enables allowlisted rich blocks for artifact documents. Normal chat stays plain markdown. */
+  richArtifactContent?: boolean;
+}
+
 // ─── Code Block ──────────────────────────────────────────────────────────────
 
 interface CodeProps extends React.HTMLAttributes<HTMLElement> {
@@ -36,8 +41,10 @@ const CodeBlock = ({
   className,
   children,
   node: _node,
+  messageId,
+  richArtifactContent,
   ...props
-}: CodeProps & { messageId: string }): React.ReactElement => {
+}: CodeProps & { messageId: string; richArtifactContent?: boolean }): React.ReactElement => {
   const [copied, setCopied] = useState(false);
 
   const match = /language-(\w+)/.exec(String(className ?? ''));
@@ -49,10 +56,14 @@ const CodeBlock = ({
       ? children.replace(/\n$/, '')
       : '';
 
+  if (richArtifactContent && (language === 'badge' || language === 'badges')) {
+    return <BadgeFence source={codeString} />;
+  }
+
   // ── Mermaid ──
   if (language === 'mermaid') {
     return (
-      <MermaidBlock chart={codeString} messageId={(props as { messageId: string }).messageId} />
+      <MermaidBlock chart={codeString} messageId={messageId} />
     );
   }
 
@@ -61,7 +72,7 @@ const CodeBlock = ({
     return (
       <FilesystemBlock
         jsonSource={codeString}
-        messageId={(props as { messageId: string }).messageId}
+        messageId={messageId}
       />
     );
   }
@@ -124,6 +135,52 @@ const CodeBlock = ({
   );
 };
 
+type BadgeTone = 'neutral' | 'info' | 'success' | 'warning' | 'danger';
+
+const BADGE_TONES: Record<BadgeTone, string> = {
+  neutral: 'border-border bg-muted text-muted-foreground',
+  info: 'border-blue-500/30 bg-blue-500/10 text-blue-600 dark:text-blue-400',
+  success: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
+  warning: 'border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400',
+  danger: 'border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-400',
+};
+
+const parseBadgeLine = (raw: string): { tone: BadgeTone; label: string } | null => {
+  const line = raw.trim();
+  if (!line) return null;
+  const match = /^(neutral|info|success|warning|danger)\s*:\s*(.+)$/i.exec(line);
+  if (!match) return { tone: 'neutral', label: line };
+  const [, tone, label] = match;
+  if (!tone || !label) return null;
+  return { tone: tone.toLowerCase() as BadgeTone, label: label.trim() };
+};
+
+const BadgeFence: React.FC<{ source: string }> = ({ source }) => {
+  const badges = source
+    .split(/[\n,]/)
+    .map(parseBadgeLine)
+    .filter((badge): badge is { tone: BadgeTone; label: string } => !!badge && badge.label.length > 0);
+
+  if (badges.length === 0) return <></>;
+
+  return (
+    <div className='my-3 flex flex-wrap gap-1.5'>
+      {badges.map((badge, index) => (
+        <span
+          key={`${badge.tone}-${badge.label}-${index}`}
+          className={[
+            'inline-flex max-w-full items-center rounded-md border px-1.5 py-0.5',
+            'text-xs font-medium leading-[1.4]',
+            BADGE_TONES[badge.tone],
+          ].join(' ')}
+        >
+          {badge.label}
+        </span>
+      ))}
+    </div>
+  );
+};
+
 // ─── createMarkdownComponents ─────────────────────────────────────────────────
 
 /**
@@ -136,9 +193,16 @@ const CodeBlock = ({
 export const createMarkdownComponents = (
   messageId: string,
   citationCtx?: ClawCitationContext,
+  options?: MarkdownComponentOptions,
 ): Components => ({
   // Override <code> — handles both inline and block (via className presence)
-  code: (props: CodeProps): React.ReactElement => <CodeBlock {...props} messageId={messageId} />,
+  code: (props: CodeProps): React.ReactElement => (
+    <CodeBlock
+      {...props}
+      messageId={messageId}
+      richArtifactContent={options?.richArtifactContent === true}
+    />
+  ),
 
   // Override <pre> to render a plain fragment — CodeBlock renders its own <pre>
   // internally, so we don't want a double-wrapped <pre><pre>.

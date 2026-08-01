@@ -173,6 +173,16 @@ sessionsArchiveRouter.get("/restore/:conversationId", async (req: Request, res: 
     res.json({ success: true, files });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
+    // A "Not Found" from GCS (missing bucket/objects) means the conversation
+    // was never archived — the documented "start fresh" case, not an error.
+    // Real GCS surfaces this via an empty listFiles(), but some backends (e.g.
+    // the local fake-gcs-server) throw a Not Found instead; normalize both to
+    // an empty archive so the caller starts a fresh local session.
+    if (/not\s*found/i.test(msg)) {
+      log.info(`[sessions-archive] no archive for conversationId=${conversationId} — treating as fresh`);
+      res.json({ success: true, files: [] });
+      return;
+    }
     log.error(`[sessions-archive] restore failed conversationId=${conversationId}: ${msg}`);
     res.status(500).json({ success: false, error: msg });
   }

@@ -28,6 +28,7 @@ import * as todo from "./todo/index.js";
 import * as orchestrator from "./orchestrator/index.js";
 import * as agentIntrospect from "./agent-introspect/index.js";
 import * as skillManagement from "./skill-management/index.js";
+import * as agentManagement from "./agent-management/index.js";
 import * as videoExplainer from "./video-explainer/index.js";
 
 /** All custom tools, keyed by slug */
@@ -179,6 +180,15 @@ register(postmanSbx.postmanSbxRunCollection);
 // personal skill) and update-skill (proposes a diff to the skill owner via DM).
 register(skillManagement.createSkillTool);
 register(skillManagement.updateSkillTool);
+
+// Register agent-management tools — create-agent / create-subagent (write tools:
+// draft + approve → personal agent/subagent owned by the approver) and
+// update-agent / update-subagent (propose a diff to the owner via DM). Mirrors
+// the skill-management tools above; approval + persistence live in claw-auth.
+register(agentManagement.createAgentTool);
+register(agentManagement.createSubagentTool);
+register(agentManagement.updateAgentTool);
+register(agentManagement.updateSubagentTool);
 
 // Register plan-tracking tools (todo-write / todo-read). The agent maintains an
 // explicit todo list that renders as a live, in-place-updating card in the
