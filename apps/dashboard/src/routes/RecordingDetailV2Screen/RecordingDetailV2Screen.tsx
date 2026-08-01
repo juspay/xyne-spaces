@@ -14,6 +14,7 @@ import {
   ChevronRight,
   FileText,
   Hash,
+  Mail,
   Music,
   PanelRightOpen,
   Sparkles,
@@ -26,12 +27,19 @@ import { Spinner } from '@xyne/icons';
 import { Button } from '../../components/ui/Button/Button';
 import { Dialog } from '../../components/ui/Dialog';
 import { Tooltip } from '../../components/ui/Tooltip';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '../../components/ui/dropdown-menu';
 import { AudioPlayer } from '../../components/ui/AudioPlayer/AudioPlayer';
 import { RecordingDetailV2Header } from './components/RecordingDetailV2Header';
 import { LiveRecordingControlBar } from './components/LiveRecordingControlBar';
 import { SummaryWithCitations } from './components/SummaryWithCitations';
 import { DetailedSummaryPanel } from './components/DetailedSummaryPanel';
 import { PostRecordingToChannelModal } from './components/PostRecordingToChannelModal';
+import { PostRecordingToEmailModal } from './components/PostRecordingToEmailModal';
 import { CollaborativeCanvasEditor } from '../../components/Canvas/CollaborativeCanvasEditor/CollaborativeCanvasEditor';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { sendRecordingEvent, useRecordingStore } from '../../hooks/useRecordingStore';
@@ -61,6 +69,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
   const [showDetailedSummary, setShowDetailedSummary] = useState(false);
   const [showTranscriptPanel, setShowTranscriptPanel] = useState(false);
   const [showPostToChannelModal, setShowPostToChannelModal] = useState(false);
+  const [showPostToEmailModal, setShowPostToEmailModal] = useState(false);
   const [citationNonce, setCitationNonce] = useState(0);
   const [citationRef, setCitationRef] = useState<{
     segment: number;
@@ -346,29 +355,52 @@ export default function RecordingDetailV2Screen(): ReactElement {
                   </button>
                 </div>
 
-                <div className='inline-flex h-8 items-stretch overflow-hidden rounded-full bg-foreground text-background'>
-                  <button
-                    type='button'
-                    onClick={() => setShowPostToChannelModal(true)}
-                    className='inline-flex items-center gap-1.5 px-3 text-sm font-medium transition-colors hover:bg-foreground/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
-                    data-track-category='RecordingDetailV2'
-                    data-track-name='open_post_to_channel_modal'
-                  >
-                    <Hash className='size-3.5' aria-hidden='true' />
-                    Post to channel
-                  </button>
-                  <span className='w-px bg-background/25' aria-hidden='true' />
-                  <button
-                    type='button'
-                    onClick={() => setShowPostToChannelModal(true)}
-                    className='inline-flex items-center px-2 transition-colors hover:bg-foreground/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
-                    aria-label='Post to channel options'
-                    data-track-category='RecordingDetailV2'
-                    data-track-name='open_post_to_channel_modal_chevron'
-                  >
-                    <ChevronDown className='size-3.5' aria-hidden='true' />
-                  </button>
-                </div>
+                <DropdownMenu>
+                  <div className='inline-flex h-8 items-stretch overflow-hidden rounded-full bg-foreground text-background'>
+                    <button
+                      type='button'
+                      onClick={() => setShowPostToChannelModal(true)}
+                      className='inline-flex items-center gap-1.5 px-3 text-sm font-medium transition-colors hover:bg-foreground/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+                      data-track-category='RecordingDetailV2'
+                      data-track-name='open_post_to_channel_modal'
+                    >
+                      <Hash className='size-3.5' aria-hidden='true' />
+                      Post to channel
+                    </button>
+                    <span className='w-px bg-background/25' aria-hidden='true' />
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type='button'
+                        className='inline-flex items-center px-2 transition-colors hover:bg-foreground/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+                        aria-label='Share recording options'
+                        data-track-category='RecordingDetailV2'
+                        data-track-name='open_recording_share_menu'
+                      >
+                        <ChevronDown className='size-3.5' aria-hidden='true' />
+                      </button>
+                    </DropdownMenuTrigger>
+                  </div>
+                  <DropdownMenuContent align='end' className='min-w-[184px]'>
+                    <DropdownMenuItem
+                      onSelect={() => setShowPostToChannelModal(true)}
+                      className='flex cursor-pointer items-center gap-2'
+                      data-track-category='RecordingDetailV2'
+                      data-track-name='open_post_to_channel_from_menu'
+                    >
+                      <Hash className='size-4 text-muted-foreground' aria-hidden='true' />
+                      Post to channel
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onSelect={() => setShowPostToEmailModal(true)}
+                      className='flex cursor-pointer items-center gap-2'
+                      data-track-category='RecordingDetailV2'
+                      data-track-name='open_post_to_email_modal'
+                    >
+                      <Mail className='size-4 text-muted-foreground' aria-hidden='true' />
+                      Post to email
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
 
               {visibleTab === 'notes' ? (
@@ -491,6 +523,22 @@ export default function RecordingDetailV2Screen(): ReactElement {
           <PostRecordingToChannelModal
             recording={recording}
             onClose={() => setShowPostToChannelModal(false)}
+          />
+        </Dialog>
+      )}
+
+      {showPostToEmailModal && (
+        <Dialog
+          open={showPostToEmailModal}
+          onOpenChange={open => !open && setShowPostToEmailModal(false)}
+          title='Review draft email'
+          description='Review the recording recap before sending it by email.'
+          className='max-w-[1120px] overflow-hidden rounded-xl p-0'
+          testId='post-recording-to-email-dialog'
+        >
+          <PostRecordingToEmailModal
+            recording={recording}
+            onClose={() => setShowPostToEmailModal(false)}
           />
         </Dialog>
       )}
