@@ -221,7 +221,7 @@ You are analyzing a call transcript to generate a small set of short topical lab
 
 CRITICAL RULES:
 - Output ONLY valid JSON
-- Generate 2-6 short labels that best describe the topics/themes discussed
+- Generate 1-4 short labels that best describe the topics/themes discussed
 - Each label must be 1-3 words, lowercase, describing a topic (e.g. "pricing", "bug report", "onboarding")
 - Do NOT include people's names, company names, or dates as labels
 - Do NOT duplicate labels
@@ -1291,7 +1291,7 @@ Output ONLY the processed transcript, nothing else.`;
 
       const labels = parsed.labels
         .filter((l: unknown): l is string => typeof l === 'string' && l.trim().length > 0)
-        .slice(0, 10);
+        .slice(0, 4);
 
       logger.info(`Generated ${labels.length} call labels`);
       return labels;

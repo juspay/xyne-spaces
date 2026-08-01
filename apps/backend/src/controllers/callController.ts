@@ -45,6 +45,11 @@ import {
 import { storageService } from '@/services/storage';
 import { CallVespaFeedSource, queueCallVespaFeed } from '@/services/callVespaQueue';
 import { callShareService } from '@/services/callShareService';
+import { noteTakerTranscriptService } from '@/services/noteTakerTranscriptService';
+import {
+  getBuiltinRecordingSummaryTemplate,
+  type BuiltinRecordingSummaryTemplateId,
+} from '@/services/recordingSummaryTemplates';
 
 const UpdateHeadlessRecordingSchema = z
   .object({
@@ -56,6 +61,13 @@ const UpdateHeadlessRecordingSchema = z
   .refine(value => Object.keys(value).length > 0, {
     message: 'At least one recording field is required',
   });
+
+const RegenerateHeadlessSummarySchema = z.object({
+  summaryTemplateId: z.string().refine(
+    value => !!getBuiltinRecordingSummaryTemplate(value),
+    'Invalid recording summary template',
+  ),
+});
 
 export class CallController {
   private async cancelOtherActiveJoinRequests(
@@ -1331,6 +1343,60 @@ export class CallController {
       }
       logger.error('Failed to update recording title:', error);
       res.status(500).json({ success: false, error: 'Failed to update recording' });
+    }
+  };
+
+  /**
+   * POST /api/calls/recordings/:callId/generate-summary
+   * Replace a headless recording's visible summary using a built-in template.
+   */
+  regenerateRecordingSummary = async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user?.id;
+    const { callId } = req.params;
+
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    try {
+      const input = RegenerateHeadlessSummarySchema.parse(req.body);
+      const call = await repositories.calls.findByExternalId(callId);
+
+      if (
+        !call ||
+        call.callType !== CallType.HEADLESS ||
+        (call.workspaceId !== null && call.workspaceId !== req.user!.workspaceId)
+      ) {
+        res.status(404).json({ success: false, error: 'Recording not found' });
+        return;
+      }
+
+      if (call.createdByUserId !== userId) {
+        res.status(403).json({ success: false, error: 'Access denied' });
+        return;
+      }
+
+      const result = await noteTakerTranscriptService.regenerateSummary(
+        call,
+        input.summaryTemplateId as BuiltinRecordingSummaryTemplateId,
+      );
+      if (!result) {
+        res.status(404).json({
+          success: false,
+          error: 'Transcript is not available or summary generation failed',
+        });
+        return;
+      }
+
+      res.json({ success: true, ...result });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ success: false, error: error.errors[0]?.message });
+        return;
+      }
+      logger.error(`[${callId}] Failed to regenerate recording summary`, error);
+      res.status(500).json({ success: false, error: 'Failed to regenerate recording summary' });
     }
   };
 
