@@ -93,8 +93,8 @@ async function main() {
       data: {
         name: email.split('@')[0],
         email,
-        authProvider: AuthProvider.GOOGLE,
-        providerUserId: `dev-login-${memberId}`,
+        authProvider: AuthProvider.EMAIL,
+        providerUserId: `email-dev-login-${memberId}`,
         status: UserStatus.ACTIVE,
         role: WorkspaceRole.ADMIN,
         workspaceId: workspace.id,
