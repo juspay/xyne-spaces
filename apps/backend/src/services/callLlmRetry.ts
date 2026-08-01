@@ -31,6 +31,13 @@ export interface ExecuteStreamingLlmOptions {
   operation: string;
   callId?: string;
   abortSignal?: AbortSignal;
+  /**
+   * Invoked as content deltas arrive, with the full text accumulated so far.
+   * Lets a caller render partial output live (e.g. stream into a canvas).
+   * Errors thrown here are swallowed so they never interrupt generation;
+   * throttling is the caller's responsibility.
+   */
+  onDelta?: (accumulatedContent: string) => void | Promise<void>;
 }
 
 let streamingLlmClient: LLMClient | null = null;
@@ -57,6 +64,7 @@ async function waitBeforeRetry(
   callId: string,
   operation: string,
   attempt: number,
+  abortSignal?: AbortSignal,
 ): Promise<void> {
   const delay = getRetryDelayMs(attempt);
 
@@ -65,7 +73,29 @@ async function waitBeforeRetry(
     delay_ms: delay,
   });
 
-  await sleep(delay);
+  if (!abortSignal) {
+    await sleep(delay);
+    return;
+  }
+
+  if (abortSignal.aborted) {
+    return;
+  }
+
+  // Resolve as soon as the delay elapses OR the request is aborted, whichever
+  // comes first, so a cancelled call doesn't sit through the full backoff (up
+  // to MAX_DELAY_MS) before the loop notices the abort.
+  await new Promise<void>((resolve) => {
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      abortSignal.removeEventListener('abort', onAbort);
+      resolve();
+    }, delay);
+    abortSignal.addEventListener('abort', onAbort, { once: true });
+  });
 }
 
 export async function executeCallLlmWithRetry(
@@ -247,9 +277,21 @@ export async function executeStreamingLlmRequest(
       });
 
       try {
+        let accumulated = '';
         for await (const chunk of streamResult.stream) {
           if (chunk.type === 'error') {
             throw new Error(chunk.error || 'LLM stream returned an error chunk');
+          }
+          if (options.onDelta && chunk.type === 'content' && chunk.content) {
+            accumulated += chunk.content;
+            try {
+              await options.onDelta(accumulated);
+            } catch (deltaError) {
+              // A consumer-side render failure must not abort generation.
+              logger.warn(`[${callId}] ${options.operation}_on_delta_failed`, {
+                error: deltaError instanceof Error ? deltaError.message : String(deltaError),
+              });
+            }
           }
         }
       } catch (error) {
@@ -319,7 +361,7 @@ export async function executeStreamingLlmRequest(
       }
     }
 
-    await waitBeforeRetry(callId, options.operation, attempt);
+    await waitBeforeRetry(callId, options.operation, attempt, options.abortSignal);
   }
 
   // Unreachable: the final attempt always returns above.

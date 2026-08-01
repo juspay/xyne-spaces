@@ -721,6 +721,37 @@ export class CallDocumentService {
     return { title, content: sanitizedContent, mentionedUserIds };
   }
 
+  private async createCanvasSideEffectHandler(
+    createdByUserId: string,
+  ): Promise<{ canvasHandler: CanvasSideEffectHandler; workspaceId: string }> {
+    const user = await db.user.findUnique({
+      where: { id: createdByUserId },
+      select: { id: true, email: true, workspaceId: true, role: true },
+    });
+    if (!user || !user.workspaceId) {
+      throw new Error(`User ${createdByUserId} not found or has no workspace assigned`);
+    }
+
+    // Email is globally unique in orgMember, single lookup is sufficient.
+    const orgMember = await db.orgMember.findUnique({
+      where: { email: user.email },
+    });
+    if (!orgMember) {
+      throw new Error(`User ${createdByUserId} is not a member of any organization`);
+    }
+
+    return {
+      canvasHandler: new CanvasSideEffectHandler({
+        userID: user.id,
+        workspaceId: user.workspaceId,
+        role: user.role,
+        memberId: orgMember.memberId,
+        orgRole: orgMember.role,
+      }),
+      workspaceId: user.workspaceId,
+    };
+  }
+
   /**
    * Queue Vespa indexing for a canvas.
    */
@@ -941,6 +972,7 @@ export class CallDocumentService {
     systemPrompt?: string,
     promptTemplate = DETAILED_SUMMARY_PROMPT,
     defaultSummaryFields = DEFAULT_SUMMARY_FIELDS,
+    onDelta?: (accumulatedContent: string) => void | Promise<void>,
   ): Promise<string | null> {
     // Resolve channelId and build participant map once (expensive DB lookups)
     const call = await repositories.calls.findByExternalId(callId);
@@ -989,6 +1021,7 @@ export class CallDocumentService {
       operation: 'detailed_summary_generation',
       callId,
       ...(sanitizedSystemPrompt ? { systemPrompt: sanitizedSystemPrompt } : {}),
+      onDelta,
     });
 
     if (!result.ok) {
@@ -1135,7 +1168,8 @@ export class CallDocumentService {
     callCreatorUserId: string,
     callTitle?: string | null,
     citationCtx?: CitationContext,
-    workspaceIdOverride?: string
+    workspaceIdOverride?: string,
+    options: { deferInsertSideEffects?: boolean } = {},
   ): Promise<string | null> {
     try {
       const prisma = DatabaseClient.getInstance();
@@ -1222,39 +1256,20 @@ export class CallDocumentService {
 
       logger.info(`[CallDocumentService] Created collaborative detailed summary canvas ${canvasId} for call ${callId} with Xyne Automatic and call creator as owners`);
 
-      // Fetch complete context for the user to pass to side-effect handler
-      const user = await db.user.findUnique({
-        where: { id: createdByUserId },
-        select: { id: true, email: true, workspaceId: true, role: true },
-      });
-      if (!user || !user.workspaceId) {
-        throw new Error(`User ${createdByUserId} not found or has no workspace assigned`);
-      }
-      // Email is globally unique in orgMember, single lookup is sufficient
-      const orgMember = await db.orgMember.findUnique({
-        where: { email: user.email },
-      });
-      if (!orgMember) {
-        throw new Error(`User ${createdByUserId} is not a member of any organization`);
-      }
+      // A streaming canvas is initially empty. Defer creation activity, mention
+      // notifications, and indexing until final metadata/content are available.
+      if (!options.deferInsertSideEffects) {
+        const { canvasHandler, workspaceId: sideEffectWorkspaceId } =
+          await this.createCanvasSideEffectHandler(createdByUserId);
 
-      // Manually call canvas handler for activities and notifications
-      // (Canvas is created via Prisma, not Zero mutator, so handler won't auto-trigger)
-      const canvasHandler = new CanvasSideEffectHandler({
-        userID: user.id,
-        workspaceId: user.workspaceId,
-        role: user.role,
-        memberId: orgMember.memberId,
-        orgRole: orgMember.role,
-      });
-      canvasHandler.onInsert({
-        entityId: canvasId,
-        entityType: 'canvases',
-        operation: 'insert'
-      }).catch(err => logger.error('[CallDocumentService] Canvas side-effect handler error:', err));
+        canvasHandler.onInsert({
+          entityId: canvasId,
+          entityType: 'canvases',
+          operation: 'insert'
+        }).catch(err => logger.error('[CallDocumentService] Canvas side-effect handler error:', err));
 
-      // Queue Vespa indexing for the canvas
-      await this.queueVespaIndexing(canvasId, createdByUserId, 'create', user.workspaceId);
+        await this.queueVespaIndexing(canvasId, createdByUserId, 'create', sideEffectWorkspaceId);
+      }
 
       return canvasId;
     } catch (error) {
@@ -1292,6 +1307,16 @@ export class CallDocumentService {
 
       const newVersion = currentVersion + 1;
 
+      // Sync to Y-Sweet (the source of truth) FIRST. If it fails, don't bump the
+      // DB version/metadata — return null so the caller reports the failure
+      // instead of leaving a canvas whose recorded version doesn't match its
+      // (unchanged) content.
+      const ysweetSynced = await syncToYSweet(canvasId, sanitizedContent as unknown as BlockNoteBlock[]);
+      if (!ysweetSynced) {
+        logger.error(`[CallDocumentService] Y-Sweet sync failed for canvas ${canvasId}; aborting update`);
+        return null;
+      }
+
       // Update existing canvas; content is kept empty in DB (Y-Sweet is source of truth)
       await prisma.canvas.update({
         where: { id: canvasId },
@@ -1315,12 +1340,6 @@ export class CallDocumentService {
 
       logger.info(`[CallDocumentService] Updated detailed summary canvas ${canvasId} for call ${callId}, version ${currentVersion} -> ${newVersion}`);
 
-      // Sync to Y-Sweet for collaborative editing
-      const ysweetSynced = await syncToYSweet(canvasId, sanitizedContent as unknown as BlockNoteBlock[]);
-      if (!ysweetSynced) {
-        logger.warn(`[CallDocumentService] Y-Sweet sync failed for canvas ${canvasId}`);
-      }
-
       // Queue Vespa re-indexing for the updated canvas
       await this.queueVespaIndexing(canvasId, updatedByUserId, 'update');
 
@@ -1328,6 +1347,85 @@ export class CallDocumentService {
     } catch (error) {
       logger.error('[CallDocumentService] Failed to update detailed summary canvas:', error);
       return null;
+    }
+  }
+
+  /**
+   * Write the final, complete detailed-summary content into a canvas that was
+   * created empty for live streaming. Keeps the version the provisional message
+   * already announced (no extra increment) and returns false if the Y-Sweet
+   * write fails, so the caller can surface it rather than reporting success.
+   */
+  private async finalizeDetailedSummaryCanvas(
+    canvasId: string,
+    markdownSummary: string,
+    updatedByUserId: string,
+    channelId: string | null,
+    callId: string,
+    callTitle?: string | null,
+    citationCtx?: CitationContext,
+  ): Promise<boolean> {
+    try {
+      const prisma = DatabaseClient.getInstance();
+      const now = new Date();
+
+      const { title, content: sanitizedContent, mentionedUserIds } = await this.prepareCanvasContent(
+        markdownSummary,
+        channelId,
+        undefined,
+        callTitle,
+        citationCtx,
+      );
+
+      // Y-Sweet is the source of truth; write the authoritative content first and
+      // bail out if it fails rather than reporting a success that never landed.
+      const ysweetSynced = await syncToYSweet(canvasId, sanitizedContent as unknown as BlockNoteBlock[]);
+      if (!ysweetSynced) {
+        logger.error(`[CallDocumentService] Final Y-Sweet sync failed for canvas ${canvasId}`);
+        return false;
+      }
+
+      // Refresh title + mentions metadata at the SAME reserved version (1).
+      await prisma.canvas.update({
+        where: { id: canvasId },
+        data: {
+          title,
+          content: [],
+          lastEditedBy: updatedByUserId,
+          lastEditedAt: now,
+          updatedAt: now,
+          metadata: {
+            source: 'call_detailed_summary',
+            callId,
+            isAiGenerated: true,
+            generatedAt: now.toISOString(),
+            mentionedUserIds,
+            version: 1,
+          },
+        },
+      });
+
+      // Queue the authoritative index before notifying anyone about the finalized
+      // canvas. The deferred insert handler skips its own Vespa job.
+      await this.queueVespaIndexing(canvasId, updatedByUserId, 'update');
+
+      // Creation side effects were intentionally deferred while this canvas was
+      // empty. Run them now so the handler reads the finalized mention metadata.
+      try {
+        const { canvasHandler } = await this.createCanvasSideEffectHandler(updatedByUserId);
+        await canvasHandler.onDeferredInsert({
+          entityId: canvasId,
+          entityType: 'canvases',
+          operation: 'insert',
+        });
+      } catch (sideEffectError) {
+        logger.error('[CallDocumentService] Failed to run finalized canvas insert side effects:', sideEffectError);
+      }
+
+      return true;
+    } catch (error) {
+      logger.error('[CallDocumentService] Failed to finalize detailed summary canvas:', error);
+      return false;
     }
   }
 
@@ -1585,7 +1683,7 @@ A comprehensive detailed summary has been generated from this call.
     conversationId: string,
     callId: string,
     metadataKey: string,
-    canvasUrl: string
+    canvasUrl: string | null
   ): Promise<void> {
     try {
       const prisma = DatabaseClient.getInstance();
@@ -1612,15 +1710,18 @@ A comprehensive detailed summary has been generated from this call.
       });
 
       if (callMessage) {
-        // Update metadata with canvas URL
+        // Set the canvas URL, or drop the key entirely when clearing (null).
         const currentMetadata = (callMessage.metadata as Record<string, any>) || {};
+        const nextMetadata = { ...currentMetadata };
+        if (canvasUrl === null) {
+          delete nextMetadata[metadataKey];
+        } else {
+          nextMetadata[metadataKey] = canvasUrl;
+        }
         await prisma.message.update({
           where: { messageId: callMessage.messageId },
           data: {
-            metadata: {
-              ...currentMetadata,
-              [metadataKey]: canvasUrl,
-            },
+            metadata: nextMetadata,
           },
         });
         logger.info(`[CallDocumentService] Updated call message ${callMessage.messageId} with ${metadataKey}`);
@@ -1630,6 +1731,80 @@ A comprehensive detailed summary has been generated from this call.
     } catch (error) {
       // Don't throw - this is a non-critical update
       logger.error(`[CallDocumentService] Failed to update call message with ${metadataKey}:`, error);
+    }
+  }
+
+  /**
+   * Undo the artifacts published up-front for a brand-new streaming canvas when
+   * generation ultimately fails: delete the posted summary message (and its
+   * reply-count bump), clear the detailedSummaryCanvasUrl stamped on the call
+   * message, clear the live Y-Sweet content, remove all canvas database rows,
+   * and remove the Vespa document. Best-effort — each step is independent so
+   * one failure doesn't block the others.
+   */
+  private async cleanupFailedDetailedSummaryCanvas(
+    canvasId: string,
+    conversationId: string,
+    callId: string,
+  ): Promise<void> {
+    logger.warn(`[CallDocumentService] Cleaning up failed detailed summary canvas ${canvasId} for call ${callId}`);
+
+    try {
+      const message = await repositories.messages.findExistingDetailedSummaryMessage(conversationId, callId);
+      if (message) {
+        await repositories.messages.delete(message.messageId);
+        await repositories.conversations.decrementReplyCount(conversationId);
+      }
+    } catch (error) {
+      logger.error('[CallDocumentService] Cleanup: failed to remove detailed summary message:', error);
+    }
+
+    try {
+      await this.updateCallMessageMetadata(conversationId, callId, 'detailedSummaryCanvasUrl', null);
+    } catch (error) {
+      logger.error('[CallDocumentService] Cleanup: failed to clear call metadata:', error);
+    }
+
+    // The installed Y-Sweet SDK has no document-deletion API. Clear the shared
+    // fragment so connected clients no longer see partial generated content.
+    // This is not physical deletion: CRDT history remains subject to Y-Sweet's
+    // own retention policy until its SDK exposes a supported delete operation.
+    try {
+      const ysweetCleared = await syncToYSweet(canvasId, []);
+      if (!ysweetCleared) {
+        logger.warn(`[CallDocumentService] Cleanup: failed to clear Y-Sweet canvas ${canvasId}`);
+      }
+    } catch (error) {
+      logger.error('[CallDocumentService] Cleanup: failed to clear Y-Sweet content:', error);
+    }
+
+    try {
+      const prisma = DatabaseClient.getInstance();
+      // CanvasParticipant and CanvasUserStatus do not declare cascading deletes
+      // in relationMode="prisma", so remove dependent rows explicitly. deleteMany
+      // also keeps this cleanup idempotent if a previous attempt partially ran.
+      await prisma.$transaction([
+        prisma.canvasVersion.deleteMany({ where: { canvasId } }),
+        prisma.canvasParticipant.deleteMany({ where: { canvasId } }),
+        prisma.canvasUserStatus.deleteMany({ where: { canvasId } }),
+        prisma.canvas.deleteMany({ where: { id: canvasId } }),
+      ]);
+    } catch (error) {
+      logger.error('[CallDocumentService] Cleanup: failed to delete canvas database rows:', error);
+    }
+
+    // A feed is queued when the provisional canvas is created. Always enqueue a
+    // matching delete so a feed that already completed cannot leave a searchable
+    // Vespa document after generation fails.
+    try {
+      await vespaQueue.addJob({
+        schema: fileSchema,
+        docId: canvasId,
+        jobType: 'delete',
+        app: SubApp.CANVAS,
+      });
+    } catch (error) {
+      logger.error('[CallDocumentService] Cleanup: failed to queue Vespa deletion:', error);
     }
   }
 
@@ -1713,6 +1888,9 @@ A comprehensive detailed summary has been generated from this call.
     conversationId: string,
     customPrompt?: string
   ): Promise<{ success: boolean; canvasUrl?: string; error?: string }> {
+    // Tracks a brand-new canvas published up-front (streaming path) so the catch
+    // below can tear it down if generation throws after it was created.
+    let newCanvasId: string | null = null;
     try {
       const call = await repositories.calls.findByExternalId(callId);
       if (!call) {
@@ -1749,51 +1927,177 @@ A comprehensive detailed summary has been generated from this call.
         segments: new Map(segments.map(s => [s.n, s])),
       };
 
-      const detailedSummaryMarkdown = await this.generateDetailedSummary(numberedTranscript, callId, customPrompt, channel.callSummaryPrompt ?? undefined);
-      if (!detailedSummaryMarkdown) {
-        return { success: false, error: 'Failed to generate detailed summary' };
-      }
-
       // Get Xyne Automatic bot
       const xyneAutomaticBot = await unifiedBotUserService.getBotByBotId('xyne-automatic', channel.workspaceId);
       if (!xyneAutomaticBot) {
         throw new Error('Xyne Automatic bot not found');
       }
 
-      // 2. Create or Update Canvas (handles rejoin scenario)
-      const { canvasId, version } = await this.createOrUpdateDetailedSummaryCanvas(
+      const suffix = call.title || formatToISTLocaleString(new Date(call.startedAt));
+      const canvasTitle = `Detailed Summary - ${suffix}`;
+
+      // Only a brand-new canvas streams live. A rerun keeps its existing (valid)
+      // content untouched and is written exactly once at the end, so a
+      // mid-generation failure can never leave a previously-good summary erased.
+      const existingCanvas = await findExistingDetailedSummaryCanvas(callId);
+
+      if (existingCanvas) {
+        const detailedSummaryMarkdown = await this.generateDetailedSummary(
+          numberedTranscript,
+          callId,
+          customPrompt,
+          channel.callSummaryPrompt ?? undefined,
+        );
+        if (!detailedSummaryMarkdown) {
+          return { success: false, error: 'Failed to generate detailed summary' };
+        }
+
+        // Single update reserves one version for this generation; the message
+        // announces that same version.
+        const { canvasId, version } = await this.createOrUpdateDetailedSummaryCanvas(
+          callId,
+          detailedSummaryMarkdown,
+          xyneAutomaticBot.id,
+          conversationId,
+          conversation.channelId,
+          call.startedAt,
+          call.createdByUserId,
+          call.title,
+          citationCtx,
+        );
+        if (!canvasId) {
+          return { success: false, error: 'Failed to update detailed summary canvas' };
+        }
+
+        const canvasUrl = getCanvasUrl(canvasId);
+        await this.postDetailedSummaryToConversation(
+          conversationId,
+          callId,
+          canvasUrl,
+          canvasTitle,
+          channel.workspaceId,
+          version
+        );
+        return { success: true, canvasUrl };
+      }
+
+      // New canvas: create it empty (reserving id + version 1), post the link,
+      // then stream the summary into it live.
+      const canvasId = await this.createDetailedSummaryCanvas(
         callId,
-        detailedSummaryMarkdown,
+        '',
         xyneAutomaticBot.id,
         conversationId,
         conversation.channelId,
         call.startedAt,
         call.createdByUserId,
         call.title,
-        citationCtx
+        citationCtx,
+        undefined,
+        { deferInsertSideEffects: true },
       );
       if (!canvasId) {
-        return { success: false, error: 'Failed to create or update detailed summary canvas' };
+        return { success: false, error: 'Failed to create detailed summary canvas' };
       }
+      newCanvasId = canvasId;
 
       const canvasUrl = getCanvasUrl(canvasId);
-      // Use call title as suffix, or fall back to IST timestamp
-      const suffix = call.title || formatToISTLocaleString(new Date(call.startedAt));
-      const canvasTitle = `Detailed Summary - ${suffix}`;
-
-      // 3. Post to conversation (or update existing message)
+      // Post the message now so the user can open the canvas and watch it fill in.
       await this.postDetailedSummaryToConversation(
         conversationId,
         callId,
         canvasUrl,
         canvasTitle,
         channel.workspaceId,
-        version
+        1
       );
+
+      // Coalescing background writer: onDelta only records the newest accumulated
+      // text (instant, never blocking the LLM stream); a separate loop renders +
+      // syncs at most once per interval, always writing the latest snapshot and
+      // collapsing everything in between.
+      const participantMap = await buildParticipantMap(conversation.channelId);
+      const SYNC_INTERVAL_MS = 300;
+      const sleepMs = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
+      let latestMarkdown = '';
+      let renderedMarkdown = '';
+      let writerActive = true;
+      const flushLatest = async (): Promise<void> => {
+        if (latestMarkdown === renderedMarkdown) {
+          return;
+        }
+        const snapshot = latestMarkdown;
+        renderedMarkdown = snapshot;
+        try {
+          const { blocks } = await convertMarkdownToBlockNote(snapshot, participantMap, citationCtx);
+          if (blocks.length > 0) {
+            await syncToYSweet(canvasId, sanitizeBlockNoteContent(blocks) as unknown as BlockNoteBlock[]);
+          }
+        } catch (writeError) {
+          logger.warn(`[${callId}] detailed_summary_stream_write_failed`, {
+            error: writeError instanceof Error ? writeError.message : String(writeError),
+          });
+        }
+      };
+      const writerLoop = (async (): Promise<void> => {
+        while (writerActive) {
+          await flushLatest();
+          await sleepMs(SYNC_INTERVAL_MS);
+        }
+      })();
+
+      let detailedSummaryMarkdown: string | null;
+      try {
+        detailedSummaryMarkdown = await this.generateDetailedSummary(
+          numberedTranscript,
+          callId,
+          customPrompt,
+          channel.callSummaryPrompt ?? undefined,
+          undefined,
+          DETAILED_SUMMARY_PROMPT,
+          DEFAULT_SUMMARY_FIELDS,
+          (accumulated: string) => { latestMarkdown = accumulated; },
+        );
+      } finally {
+        // Stop the live writer on success, a handled LLM failure, or an exception
+        // before generation can return. This prevents a leaked 300 ms timer from
+        // continuing after the outer catch tears down the provisional canvas.
+        writerActive = false;
+        await writerLoop;
+      }
+
+      if (!detailedSummaryMarkdown) {
+        // Generation failed on a brand-new canvas: tear down the empty canvas and
+        // the link/message we published up-front so nothing dangling remains.
+        await this.cleanupFailedDetailedSummaryCanvas(canvasId, conversationId, callId);
+        return { success: false, error: 'Failed to generate detailed summary' };
+      }
+
+      // Finalize at the SAME version (1): authoritative content + title/mentions
+      // + re-index. Returns false if the Y-Sweet write fails so we don't report
+      // success on a lost final write.
+      const finalized = await this.finalizeDetailedSummaryCanvas(
+        canvasId,
+        detailedSummaryMarkdown,
+        xyneAutomaticBot.id,
+        conversation.channelId,
+        callId,
+        call.title,
+        citationCtx,
+      );
+      if (!finalized) {
+        await this.cleanupFailedDetailedSummaryCanvas(canvasId, conversationId, callId);
+        return { success: false, error: 'Failed to write final detailed summary content' };
+      }
 
       return { success: true, canvasUrl };
     } catch (error) {
       logger.error('[CallDocumentService] Error in generateAndPostDetailedSummary:', error);
+      // If a brand-new canvas + link was already published before the throw,
+      // tear it down so an exception doesn't leave a dangling canvas/message.
+      if (newCanvasId) {
+        await this.cleanupFailedDetailedSummaryCanvas(newCanvasId, conversationId, callId);
+      }
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error',
