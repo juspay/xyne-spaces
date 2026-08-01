@@ -131,7 +131,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
     const search = params.toString();
     void navigate(
       { pathname: location.pathname, ...(search ? { search: `?${search}` } : {}) },
-      { replace: true, state: location.state },
+      { replace: true, state: location.state as RecordingNavState | null },
     );
   }, [location.pathname, location.search, location.state, navigate]);
 

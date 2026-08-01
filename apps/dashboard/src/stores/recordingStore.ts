@@ -21,6 +21,7 @@ import {
   isTranscriptionAgentIdentity,
   shouldConfirmTranscriptionAgentLeft,
 } from '../utils/livekitAgent';
+import { playAudio, AUDIO_PATHS } from '../utils/audioPlayer';
 
 let transcriptUnsubscribe: (() => void) | null = null;
 let transcriptIdCounter = 0;
@@ -107,6 +108,8 @@ const initialContext: RecordingState = {
   isTranscriptMinimized: false,
   agentLeft: false,
 };
+
+const ACTIVE_STATUSES: ReadonlySet<RecordingStatus> = new Set(['recording', 'paused', 'stopping']);
 
 export const recordingStore = createStore({
   context: initialContext,
@@ -303,6 +306,8 @@ export const recordingStore = createStore({
         room.off(RoomEvent.ParticipantConnected, handleParticipantConnected);
       };
 
+      playAudio(AUDIO_PATHS.RECORDING_START);
+
       return {
         ...context,
         room: event.room,
@@ -379,6 +384,10 @@ export const recordingStore = createStore({
       }
       transcriptIdCounter = 0;
 
+      if (ACTIVE_STATUSES.has(context.status)) {
+        playAudio(AUDIO_PATHS.RECORDING_END);
+      }
+
       // Show toast
       const duration = durationMs ? formatDuration(durationMs) : 'Unknown duration';
       toast.success('Recording stopped', {
@@ -432,6 +441,10 @@ export const recordingStore = createStore({
       }
       transcriptIdCounter = 0;
 
+      if (ACTIVE_STATUSES.has(context.status)) {
+        playAudio(AUDIO_PATHS.RECORDING_END);
+      }
+
       return {
         ...context,
         status: 'error',
@@ -443,31 +456,37 @@ export const recordingStore = createStore({
       };
     },
 
-    reset: (context): RecordingState => ({
-      room: null,
-      externalId: null,
-      channelId: null,
-      title: null,
-      status: 'idle',
-      isRecording: false,
-      startTime: null,
-      pauseStartedAt: null,
-      accumulatedPausedMs: 0,
-      error: null,
-      sttModel: context.sttModel, // Preserve STT model preference
-      transcripts: [], // Clear transcripts
-      markedMoments: [],
-      pendingAutoStart: false,
-      autoStartRequestedAt: null,
-      pendingStop: false,
-      notesCanvasId: null,
-      notesCanvasViewAccessId: null,
-      notesCanvasTitle: DEFAULT_NOTES_TITLE,
-      isCanvasPaneOpen: false,
-      activeLayout: 'transcript',
-      isTranscriptMinimized: false,
-      agentLeft: false,
-    }),
+    reset: (context): RecordingState => {
+      if (ACTIVE_STATUSES.has(context.status)) {
+        playAudio(AUDIO_PATHS.RECORDING_END);
+      }
+
+      return {
+        room: null,
+        externalId: null,
+        channelId: null,
+        title: null,
+        status: 'idle',
+        isRecording: false,
+        startTime: null,
+        pauseStartedAt: null,
+        accumulatedPausedMs: 0,
+        error: null,
+        sttModel: context.sttModel, // Preserve STT model preference
+        transcripts: [], // Clear transcripts
+        markedMoments: [],
+        pendingAutoStart: false,
+        autoStartRequestedAt: null,
+        pendingStop: false,
+        notesCanvasId: null,
+        notesCanvasViewAccessId: null,
+        notesCanvasTitle: DEFAULT_NOTES_TITLE,
+        isCanvasPaneOpen: false,
+        activeLayout: 'transcript',
+        isTranscriptMinimized: false,
+        agentLeft: false,
+      };
+    },
 
     addTranscript: (context, event: { entry: TranscriptEntry }): RecordingState => ({
       ...context,
