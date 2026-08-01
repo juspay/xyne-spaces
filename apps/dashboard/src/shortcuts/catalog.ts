@@ -139,6 +139,19 @@ export const shortcuts = {
     category: 'Composer',
     preventDefault: true,
   },
+  // Push-to-talk: HOLD this combo to dictate, release to stop. Handled by a raw
+  // key listener in the composer (a hold gesture, not a keydown dispatch), so it
+  // is NOT registered via useShortcutById — but it lives in the catalog so it is
+  // listed in the shortcut configurator and remappable like any other binding.
+  'composer.voiceInputHold': {
+    keys: 'mod+shift+space',
+    scope: 'composer',
+    allowInInputs: true,
+    priority: 100,
+    description: 'Hold to talk (push-to-talk voice input)',
+    category: 'Composer',
+    preventDefault: true,
+  },
   'global.toggleBrowser': {
     keys: 'mod+shift+b',
     scope: 'global',

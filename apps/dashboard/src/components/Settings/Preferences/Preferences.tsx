@@ -20,6 +20,7 @@ import {
   Shield,
   Eye,
   EyeOff,
+  Keyboard,
 } from 'lucide-react';
 import {
   NotificationLevel,
@@ -53,6 +54,9 @@ import { useNotificationKeywords } from '../../../hooks/useNotificationKeywords'
 import { Badge } from '../../ui/Badge/Badge';
 
 import { usePreferencesState, type PreferencesState } from '../../../hooks/usePreferencesState';
+import { useShortcutConfig } from '../../../hooks/useShortcutConfig';
+import { getShortcutsByCategory, shortcuts } from '../../../shortcuts';
+import type { ShortcutId, ShortcutDefinition } from '../../../shortcuts';
 import {
   CALL_MEDIA_QUALITY_OPTIONS,
   type CallMediaQuality,
@@ -87,6 +91,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'calendar', label: 'Calendar', icon: <Calendar className='size-4' /> },
   { id: 'password', label: 'Password', icon: <Shield className='size-4' /> },
   { id: 'developer', label: 'Developer', icon: <Code2 className='size-4' /> },
+  { id: 'shortcuts', label: 'Shortcuts', icon: <Keyboard className='size-4' /> },
 ];
 
 const THEMES: Array<{ id: Theme; label: string; bg: string }> = [
@@ -1035,6 +1040,252 @@ const ToolbarSection: FC<{ state: PreferencesState }> = () => {
 };
 
 // ─── Section registry ───────────────────────────────────────────────────────
+// ─── Shortcuts ──────────────────────────────────────────────────────────────
+
+// Human-readable rendering of a platform-neutral combo (e.g. 'mod+shift+space').
+const formatCombo = (combo: string, isMac: boolean): string =>
+  combo
+    .replace('mod+', isMac ? '⌘' : 'Ctrl+')
+    .replace('shift+', isMac ? '⇧' : 'Shift+')
+    .replace('alt+', isMac ? '⌥' : 'Alt+')
+    .replace('ctrl+', isMac ? '⌃' : 'Ctrl+')
+    .split('+')
+    .map(part => part.trim())
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(isMac ? ' ' : ' + ');
+
+// Categories intentionally hidden from the user-facing configurator.
+const HIDDEN_SHORTCUT_CATEGORIES = new Set(['Viewer']);
+
+// Turn a raw keydown into a platform-neutral combo string, ordered
+// mod → shift → alt → key to match the catalog convention. Returns null while
+// only modifier keys are held (so the capture waits for a real key).
+const serializeKeyEvent = (event: KeyboardEvent): string | null => {
+  const { key, code } = event;
+  if (['Meta', 'Control', 'Shift', 'Alt', 'OS'].includes(key)) return null;
+
+  const tokens: string[] = [];
+  if (event.metaKey || event.ctrlKey) tokens.push('mod');
+  if (event.shiftKey) tokens.push('shift');
+  if (event.altKey) tokens.push('alt');
+
+  let main = '';
+  if (code === 'Space' || key === ' ') main = 'space';
+  else if (/^Key[A-Z]$/.test(code)) main = code.slice(3).toLowerCase();
+  else if (/^Digit[0-9]$/.test(code)) main = code.slice(5);
+  else if (key.startsWith('Arrow')) main = key.slice(5).toLowerCase();
+  else if (key.length === 1) main = key.toLowerCase();
+  else main = key.toLowerCase();
+
+  if (!main) return null;
+  tokens.push(main);
+  return tokens.join('+');
+};
+
+const ShortcutRow: FC<{
+  id: ShortcutId;
+  description: string;
+  resolvedKeys: string[];
+  isMac: boolean;
+  isCustomized: boolean;
+  isCapturing: boolean;
+  conflictLabel: string | null;
+  onStartCapture: () => void;
+  onReset: () => void;
+}> = ({
+  id,
+  description,
+  resolvedKeys,
+  isMac,
+  isCustomized,
+  isCapturing,
+  conflictLabel,
+  onStartCapture,
+  onReset,
+}) => {
+  const isUnbound = resolvedKeys.length === 0;
+  return (
+    <div className='flex items-center justify-between gap-4 py-2'>
+      <div className='min-w-0'>
+        <div className='flex items-center gap-2'>
+          <p className='text-sm text-foreground truncate'>{description}</p>
+          {isCustomized && (
+            <Badge variant='secondary' className='text-[10px] px-1.5 py-0'>
+              Custom
+            </Badge>
+          )}
+        </div>
+        {isCapturing && conflictLabel && (
+          <p className='text-xs text-destructive mt-0.5'>
+            Already used by “{conflictLabel}”. Try another combination.
+          </p>
+        )}
+      </div>
+
+      <div className='flex items-center gap-2 shrink-0'>
+        {isCapturing ? (
+          <span className='text-xs text-primary animate-pulse'>Press keys… (Esc to cancel)</span>
+        ) : (
+          <button
+            type='button'
+            onClick={onStartCapture}
+            className='inline-flex items-center gap-1 rounded-md border border-border bg-background px-2 py-1 hover:bg-muted transition-colors'
+            data-track-category='PREFERENCES'
+            data-track-name='EditShortcut'
+            data-track-metadata={JSON.stringify({ shortcutId: id })}
+            aria-label={`Edit shortcut: ${description}`}
+          >
+            {isUnbound ? (
+              <span className='text-xs text-muted-foreground'>Unbound</span>
+            ) : (
+              resolvedKeys.slice(0, 1).map(combo => (
+                <KeyCap key={combo}>{formatCombo(combo, isMac)}</KeyCap>
+              ))
+            )}
+          </button>
+        )}
+        {isCustomized && !isCapturing && (
+          <button
+            type='button'
+            onClick={onReset}
+            className='text-xs text-muted-foreground hover:text-foreground transition-colors'
+            data-track-category='PREFERENCES'
+            data-track-name='ResetShortcut'
+            data-track-metadata={JSON.stringify({ shortcutId: id })}
+          >
+            Reset
+          </button>
+        )}
+      </div>
+    </div>
+  );
+};
+
+const ShortcutsSection: FC<{ state: PreferencesState }> = () => {
+  const { isMac } = usePlatform();
+  const { overrides, setOverride, resetOverride, resetAll, isCustomized } = useShortcutConfig();
+  const [capturingId, setCapturingId] = useState<ShortcutId | null>(null);
+  const [conflictLabel, setConflictLabel] = useState<string | null>(null);
+
+  const grouped = useMemo(() => getShortcutsByCategory(), []);
+
+  // Effective binding for a shortcut: user override wins over the catalog default.
+  const resolveKeys = (id: ShortcutId): string[] => {
+    const override = overrides[id];
+    if (override) return override;
+    const defKeys = shortcuts[id]?.keys ?? [];
+    return Array.isArray(defKeys) ? defKeys : [defKeys];
+  };
+
+  // Return the description of a conflicting shortcut in an overlapping scope, else null.
+  const findConflict = (combo: string, targetId: ShortcutId): string | null => {
+    const targetScope = shortcuts[targetId]?.scope ?? 'global';
+    for (const rawId of Object.keys(shortcuts) as ShortcutId[]) {
+      if (rawId === targetId) continue;
+      const definition = shortcuts[rawId] as ShortcutDefinition;
+      const scope = definition.scope ?? 'global';
+      const overlaps = scope === targetScope || scope === 'global' || targetScope === 'global';
+      if (!overlaps) continue;
+      if (resolveKeys(rawId).includes(combo)) return definition.description ?? rawId;
+    }
+    return null;
+  };
+
+  useEffect(() => {
+    if (!capturingId) return;
+
+    const onKeyDown = (event: KeyboardEvent): void => {
+      event.preventDefault();
+      event.stopPropagation();
+
+      if (event.key === 'Escape') {
+        setCapturingId(null);
+        setConflictLabel(null);
+        return;
+      }
+
+      const combo = serializeKeyEvent(event);
+      if (!combo) return; // still holding only modifiers
+
+      const conflict = findConflict(combo, capturingId);
+      if (conflict) {
+        setConflictLabel(conflict);
+        return; // block save on conflict; user tries another combo
+      }
+
+      setOverride(capturingId, [combo]);
+      setCapturingId(null);
+      setConflictLabel(null);
+    };
+
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [capturingId, overrides]);
+
+  const hasAnyCustom = Object.keys(overrides).length > 0;
+
+  return (
+    <div className='space-y-4'>
+      <div className='flex items-start justify-between gap-4'>
+        <SectionHeader
+          title='Shortcuts'
+          subtitle='Customize keyboard shortcuts. Changes sync across your devices.'
+        />
+        {hasAnyCustom && (
+          <Button
+            variant='ghost'
+            size='sm'
+            onClick={() => {
+              resetAll();
+              setCapturingId(null);
+              setConflictLabel(null);
+            }}
+            data-track-category='PREFERENCES'
+            data-track-name='ResetAllShortcuts'
+          >
+            Reset all
+          </Button>
+        )}
+      </div>
+
+      {Object.entries(grouped)
+        .filter(([category]) => !HIDDEN_SHORTCUT_CATEGORIES.has(category))
+        .map(([category, items]) => {
+          const rows = items.filter(item => item.description);
+          if (rows.length === 0) return null;
+          return (
+            <div key={category} className='rounded-lg border border-border bg-muted/20 px-3'>
+              <p className='text-xs font-semibold uppercase tracking-wide text-muted-foreground pt-3 pb-1'>
+                {category}
+              </p>
+              <div className='divide-y divide-border/60'>
+                {rows.map(item => (
+                  <ShortcutRow
+                    key={item.id}
+                    id={item.id}
+                    description={item.description ?? item.id}
+                    resolvedKeys={resolveKeys(item.id)}
+                    isMac={isMac}
+                    isCustomized={isCustomized(item.id)}
+                    isCapturing={capturingId === item.id}
+                    conflictLabel={capturingId === item.id ? conflictLabel : null}
+                    onStartCapture={() => {
+                      setConflictLabel(null);
+                      setCapturingId(item.id);
+                    }}
+                    onReset={() => resetOverride(item.id)}
+                  />
+                ))}
+              </div>
+            </div>
+          );
+        })}
+    </div>
+  );
+};
+
+
 const SECTIONS: Record<PreferenceSection, FC<{ state: PreferencesState }>> = {
   appearance: AppearanceSection,
   notifications: NotificationsSection,
@@ -1048,6 +1299,7 @@ const SECTIONS: Record<PreferenceSection, FC<{ state: PreferencesState }>> = {
   calendar: CalendarSection,
   password: PasswordSection as FC<{ state: PreferencesState }>,
   developer: DeveloperSection,
+  shortcuts: ShortcutsSection,
 };
 
 // ════════════════════════════════════════════════════════════════════════════
