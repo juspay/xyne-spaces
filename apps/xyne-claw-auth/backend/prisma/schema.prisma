@@ -1771,6 +1771,51 @@ model ActiveGoal {
   @@map("active_goals")
 }
 
+model ExperimentRun {
+  id                String              @id @default(cuid())
+  conversationId    String
+  channelId         String
+  agentSlug         String
+  userId            String
+  orgId             String?
+  focus             String?
+  /// Per-experiment LLM pin, forwarded as providerOverride on every epoch
+  /// dispatch. NULL = the agent's normal provider resolution.
+  provider          String?
+  modelId           String?
+  status            String              @default("running") /// running | finishing | done | aborted
+  epoch             Int                 @default(1)
+  deadlineAt        DateTime
+  currentHypothesis String?             @db.Text
+  currentSessionId  String?
+  lastEpochEndedAt  DateTime?
+  sandboxNote       String?
+  finalReport       String?             @db.Text
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  findings          ExperimentFinding[]
+
+  @@index([conversationId, status])
+  @@map("experiment_runs")
+}
+
+model ExperimentFinding {
+  id                String        @id @default(cuid())
+  experimentId      String
+  experiment        ExperimentRun @relation(fields: [experimentId], references: [id], onDelete: Cascade)
+  epoch             Int
+  status            String /// conjecture | proved | refuted
+  title             String
+  hypothesis        String        @db.Text
+  note              String?       @db.Text
+  proofArtifactPath String?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  @@index([experimentId])
+  @@map("experiment_findings")
+}
+
 /// Output of the FailureCurator — a structured "why this agent is
 /// failing and what to change" finding, evidenced by 2+ AgentRun
 /// sessionIds. Generated hourly by the curator worker; reviewed and

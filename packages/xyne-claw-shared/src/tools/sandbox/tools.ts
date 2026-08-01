@@ -3,8 +3,11 @@ import type { Session } from "@xyne/kata-sdk";
 import type { ToolDefinition, ToolExecutionContext } from "../types.js";
 import { redactSecrets, redactAndStringify } from "./redact.js";
 import { rotateTemplate, isSameTemplateFamily } from "./template-rotation.js";
+import { createLogger } from "../../logger.js";
 import { readFile } from "node:fs/promises";
 import { resolve, join, sep } from "node:path";
+
+const sandboxLog = createLogger("sandbox-tools");
 
 // Build a redacted `Error: ...` string from a caught error. Several tool
 // catch blocks interpolate err.message straight into tool output, which can
@@ -175,6 +178,36 @@ function storeKeyFromContext(context: { meta?: Record<string, string> } | undefi
     context?.meta?.["conversationId"],
     context?.meta?.["agentSlug"],
   );
+}
+
+const EXPERIMENT_IDLE_SLACK_MS = 20 * 60_000;
+const EXPERIMENT_IDLE_FLOOR_MS = 30 * 60_000;
+const EXPERIMENT_IDLE_CAP_MS = 3 * 60 * 60_000;
+
+export function experimentIdleTimeoutMs(ctx: ToolExecutionContext): number | undefined {
+  const raw = ctx.meta?.["experimentDeadlineAt"];
+  if (!raw) return undefined;
+  const deadlineMs = Date.parse(raw);
+  if (!Number.isFinite(deadlineMs)) return undefined;
+  const wantedMs = deadlineMs - Date.now() + EXPERIMENT_IDLE_SLACK_MS;
+  return Math.min(EXPERIMENT_IDLE_CAP_MS, Math.max(EXPERIMENT_IDLE_FLOOR_MS, wantedMs));
+}
+
+function idleTimeoutForSessionCreation(
+  context: ToolExecutionContext,
+  explicitIdleTimeoutMs: number | undefined,
+  fallbackIdleTimeoutMs: number,
+): number {
+  if (explicitIdleTimeoutMs !== undefined) return explicitIdleTimeoutMs;
+  const experimentIdleMs = experimentIdleTimeoutMs(context);
+  if (experimentIdleMs !== undefined) {
+    sandboxLog.info(
+      `[sandbox] applying experiment idle timeout default: ${Math.ceil(experimentIdleMs / 60_000)} min`,
+      { experimentIdleTimeoutMs: experimentIdleMs },
+    );
+    return experimentIdleMs;
+  }
+  return fallbackIdleTimeoutMs;
 }
 
 function rememberSession(storeKey: string | undefined, session: Session, template?: string, owner?: SessionOwner): void {
@@ -430,7 +463,11 @@ export const sandboxCreate: ToolDefinition = {
     const storeKey = storeKeyFromContext(context);
     if (!storeKey) return "Error: No userId/conversationId in context.";
     const timeoutMs = (params["timeoutMs"] as number | undefined) ?? 60 * 60 * 1000;
-    const idleTimeoutMs = (params["idleTimeoutMs"] as number | undefined) ?? 10 * 60 * 1000;
+    const idleTimeoutMs = idleTimeoutForSessionCreation(
+      context,
+      params["idleTimeoutMs"] as number | undefined,
+      10 * 60 * 1000,
+    );
     // A UI-pinned sandbox repo wins over whatever template the LLM passed —
     // a pinned agent must always get its own sandbox, never the legacy kata one.
     const pinnedTemplate = await pinnedTemplateForContext(context);
@@ -1188,7 +1225,7 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
         const client = makeClient(context.config, config.template);
         const session = await client.createSession({
           timeoutMs: noRepoDuration,
-          idleTimeoutMs: config.idleTimeoutMs || 60 * 60 * 1000,
+          idleTimeoutMs: idleTimeoutForSessionCreation(context, undefined, config.idleTimeoutMs || 60 * 60 * 1000),
           template: config.template,
         });
         rememberSession(storeKey, session, config.template, ownerFromContext(context));
@@ -1332,7 +1369,7 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
       const client = makeClient(context.config, claimTemplate);
       const session = await client.createSession({
         timeoutMs: sessionDurationMs,
-        idleTimeoutMs: config.idleTimeoutMs || 60 * 60 * 1000,
+        idleTimeoutMs: idleTimeoutForSessionCreation(context, undefined, config.idleTimeoutMs || 60 * 60 * 1000),
         template: claimTemplate,
         readyTimeoutMs: config.readyTimeoutMs || 10 * 60 * 1000,
       });
@@ -1790,7 +1827,11 @@ async function resolveSbxGit(requestedRepo: string, context: ToolExecutionContex
   // Boot the one shared read-only sandbox (repos are cloned in its prebake).
   try {
     const client = makeClient(context.config, SBX_GIT.template);
-    const session = await client.createSession({ timeoutMs: SBX_GIT.sessionTimeoutMs, template: SBX_GIT.template });
+    const session = await client.createSession({
+      timeoutMs: SBX_GIT.sessionTimeoutMs,
+      idleTimeoutMs: idleTimeoutForSessionCreation(context, undefined, 10 * 60 * 1000),
+      template: SBX_GIT.template,
+    });
     // No owner → shared across conversations; mark it so ownership checks pass.
     rememberSession(key, session, SBX_GIT.template);
     bindCaller(session);

@@ -34,6 +34,7 @@ import { adminBackfillSigningSecretsRouter } from "./routes/admin-backfill-signi
 import { dashboardRouter } from "./routes/dashboard.js";
 import { agentChatRouter, agentChatInternalRouter } from "./routes/agent-chat.js";
 import { sessionsArchiveRouter } from "./routes/sessions-archive.js";
+import { experimentsInternalRouter } from "./routes/experiments-internal.js";
 import { errorPipelineIngestRouter, errorPipelineInternalRouter } from "./routes/error-pipeline.js";
 import { ERROR_PIPELINE } from "./config.js";
 import { runner as errorPipelineRunner } from "./error-pipeline/runner/runner.js";
@@ -74,6 +75,7 @@ import { initDailyBriefWorker, closeDailyBriefWorker } from "./queue/daily-brief
 import { closeDailyBriefQueue } from "./queue/daily-brief-queue.js";
 import { initDailyBriefCron } from "./services/dailyBriefCron.js";
 import { initRunRecoveryWorker, closeRunRecoveryWorker } from "./queue/run-recovery-worker.js";
+import { initExperimentSupervisor, closeExperimentSupervisor } from "./queue/experiment-supervisor.js";
 import { initDigitalTwinBackfillWorker } from "./queue/digital-twin-backfill-worker.js";
 import { initAgentBackfillWorker, closeAgentBackfillWorker } from "./queue/agent-backfill-worker.js";
 import { closeAgentBackfillQueue } from "./queue/agent-backfill-queue.js";
@@ -187,6 +189,7 @@ app.use(`${BASE}/daily-brief`, requireAuth, dailyBriefRouter);
 app.use(`${BASE}/internal/agent-chat`, requireStrictS2S, agentChatInternalRouter); // progress/callback from xyne-claw
 app.use(`${BASE}/internal/twin-draft`, requireInternalS2S, twinDraftInternalRouter);  // Spaces → approve/decline an in-thread Twin reply draft (INTERNAL_S2S_KEY)
 app.use(`${BASE}/internal/sessions`, requireStrictS2S, sessionsArchiveRouter);     // archive/restore session JSONLs to GCS — S2S only (transcripts)
+app.use(`${BASE}/internal/experiments`, requireStrictS2S, experimentsInternalRouter);
 app.use(`${BASE}/error-pipeline`, errorPipelineIngestRouter); // Grafana webhook ingest (JWT-authed inside)
 app.use(`${BASE}/internal/error-pipeline`, requireStrictS2S, errorPipelineInternalRouter); // run-result callback from xyne-claw (S2S only)
 app.use(`${BASE}/internal/tts`, requireStrictS2S, ttsRouter);
@@ -313,6 +316,7 @@ listen(CONFIG.port, () => {
     // Normal API pod: the full background fleet, no runner.
     initScheduledJobsWorker();
     initRunRecoveryWorker();
+    initExperimentSupervisor();
     initDigitalTwinBackfillWorker();
     initAgentBackfillWorker();
     initEvalImportWorker();
@@ -351,6 +355,7 @@ async function shutdown(signal: string): Promise<void> {
     stopBitbucketStatsBackgroundRefresh();
     await closeWorker().catch(() => {});
     await closeRunRecoveryWorker().catch(() => {});
+    closeExperimentSupervisor();
     await closeEvalImportWorker().catch(() => {});
     await closeEvalGenerationWorker().catch(() => {});
     await closeEvalJudgeWorker().catch(() => {});

@@ -36,6 +36,7 @@ import { validateS2SKey } from "../middleware/auth.js";
 import { loadMcpToolsForUser } from "../mcp.js";
 import { loadCustomTools } from "../custom-tools.js";
 import { buildCopilotTool } from "../copilot.js";
+import { buildExperimentTools, type ExperimentContext } from "../experiment.js";
 import {
   buildVerifiedResponseTool,
   SUBMIT_RESPONSE_SYSTEM_INSTRUCTION,
@@ -173,6 +174,43 @@ function configFastModeEnabled(agentConfig: Record<string, unknown> | undefined)
 
 function effectiveFastMode(fastMode: boolean | undefined, agentConfig: Record<string, unknown> | undefined): boolean {
   return typeof fastMode === "boolean" ? fastMode : configFastModeEnabled(agentConfig);
+}
+
+function normalizeExperimentContext(raw: unknown): ExperimentContext | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const obj = raw as Record<string, unknown>;
+  const id = typeof obj["id"] === "string" ? obj["id"].trim() : "";
+  const deadlineAt = typeof obj["deadlineAt"] === "string" ? obj["deadlineAt"].trim() : "";
+  if (!id || !deadlineAt) return undefined;
+  const epochValue = obj["epoch"];
+  const epoch = typeof epochValue === "number" && Number.isFinite(epochValue)
+    ? epochValue
+    : typeof epochValue === "string" && epochValue.trim()
+      ? Number(epochValue)
+      : 0;
+  const focus = typeof obj["focus"] === "string" && obj["focus"].trim()
+    ? obj["focus"].trim()
+    : undefined;
+  return {
+    id,
+    epoch: Number.isFinite(epoch) ? epoch : 0,
+    deadlineAt,
+    ...(focus ? { focus } : {}),
+  };
+}
+
+function experimentRemaining(deadlineAt: string): string {
+  const deadlineMs = Date.parse(deadlineAt);
+  if (!Number.isFinite(deadlineMs)) return "unknown";
+  const totalMinutes = Math.max(0, Math.ceil((deadlineMs - Date.now()) / 60_000));
+  const days = Math.floor(totalMinutes / 1440);
+  const hours = Math.floor((totalMinutes % 1440) / 60);
+  const minutes = totalMinutes % 60;
+  const parts: string[] = [];
+  if (days > 0) parts.push(`${days}d`);
+  if (hours > 0 || days > 0) parts.push(`${hours}h`);
+  parts.push(`${minutes}m`);
+  return parts.join(" ");
 }
 
 function dedupeToolsByName(tools: ToolDefinition[]): ToolDefinition[] {
@@ -385,6 +423,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     senderName,
     channelName,
     mode,
+    experiment: rawExperiment,
     planContinuation,
     generateFollowUpSuggestions: shouldGenerateFollowUpSuggestions,
   } = req.body as {
@@ -499,12 +538,20 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
      *  and STOPS. 'auto' (or absent) ⇒ today's behavior, unchanged. Set by
      *  claw-auth, trust-gated on the matching agent config flag. */
     mode?: "plan" | "auto" | "daily_brief";
+    /** /experiment autonomous exploration mode context, forwarded by claw-auth. */
+    experiment?: {
+      id?: string;
+      epoch?: number;
+      deadlineAt?: string;
+      focus?: string;
+    };
     /** True when this run is Turn 2 (auto) dispatched right after a plan was
      *  approved (or a trivial plan auto-continued). Used only to emit a
      *  mode_switch debug event; behavior is identical to any other auto run. */
     planContinuation?: boolean;
     generateFollowUpSuggestions?: boolean;
   };
+  const experiment = normalizeExperimentContext(rawExperiment);
 
   // [AUTODBG] claw-side receipt of every /run forward (esp. automations). Confirms
   // the request crossed claw-auth → claw and which session id it arrived under
@@ -748,6 +795,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
       senderName,
       channelName,
       mode,
+      experiment,
       planContinuation,
       shouldGenerateFollowUpSuggestions,
       typeof callbackUrl === "string" ? callbackUrl : undefined,
@@ -871,6 +919,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
         senderName,
         channelName,
         mode,
+        experiment,
         planContinuation,
         shouldGenerateFollowUpSuggestions,
         typeof callbackUrl === "string" ? callbackUrl : undefined,
@@ -971,6 +1020,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     senderName,
     channelName,
     mode,
+    experiment,
     planContinuation,
     shouldGenerateFollowUpSuggestions,
     typeof callbackUrl === "string" ? callbackUrl : undefined,
@@ -1320,6 +1370,7 @@ async function processTask(
   senderName?: string,
   channelName?: string,
   mode?: "plan" | "auto" | "daily_brief",
+  experiment?: ExperimentContext,
   planContinuation?: boolean,
   shouldGenerateFollowUpSuggestions?: boolean,
   lateFollowUpCallbackUrl?: string,
@@ -1615,6 +1666,11 @@ async function processTask(
     if (agentSlug) meta["agentSlug"] = agentSlug;
     if (channelId) meta["channelId"] = channelId;
     if (conversationId) meta["conversationId"] = conversationId;
+    if (experiment) {
+      meta["experimentId"] = experiment.id;
+      meta["experimentEpoch"] = String(experiment.epoch);
+      meta["experimentDeadlineAt"] = experiment.deadlineAt;
+    }
     // Surface the run's trigger type so the sandbox tools can route scheduled /
     // automation runs to the shared read-only sbx-git sandbox instead of cloning
     // a per-project golden snapshot (see sandboxRepoSetup → resolveSbxGit).
@@ -2495,6 +2551,12 @@ async function processTask(
       allTools.push(buildEmitBriefTool(emitBriefRef, abortRun));
       log("Daily brief mode — injected terminal emit_brief tool");
     }
+    if (experiment) {
+      allTools.push(...buildExperimentTools(experiment, abortRun));
+      log(
+        `Experiment mode — injected experiment tools (epoch ${experiment.epoch}, remaining ${experimentRemaining(experiment.deadlineAt)})`,
+      );
+    }
 
     // Inject copilot respond-to-user tool if provider is copilot.
     // Defence-in-depth: also require an actual copilot config. Without this
@@ -3206,9 +3268,15 @@ async function processTask(
           ...(channelName ? { channelName } : {}),
         })
       : "";
-    const effectiveSystemPrompt = (channelId
+    // Accounts the agent is configured to use but the user hasn't connected or
+    // configured. Told to the model so it surfaces the gap instead of
+    // fabricating results from a tool it never received.
+    const experimentGuide = experiment
+      ? `\n\n## Experiment mode\nYou are in a time-boxed experiment (epoch ${experiment.epoch}; deadline ${experiment.deadlineAt}; focus ${experiment.focus ?? "unspecified"}). You cannot finish early — end-experiment refuses before the deadline. Loop: read the ledger → declare a hypothesis (experiment-ledger action=hypothesis) → gather PROOF in the sandbox (failing test, benchmark delta, profile) → record the finding with its proof path. Never re-test refuted hypotheses. If your current lead dies, pick a different subsystem. Prose without a recorded finding is wasted time.`
+      : "";
+    const effectiveSystemPrompt = ((channelId
       ? `${basePrompt}${citationGuide}${SPACES_MENTION_GUIDE}`
-      : `${basePrompt}${citationGuide}`) + twinMandate;
+      : `${basePrompt}${citationGuide}`) + twinMandate) + experimentGuide;
     // Proof (twin mention flow only) that BOTH prompt changes actually reach the
     // model: the twin_deliver mandate + its who/where line in the SYSTEM prompt,
     // and the "@mentioned by" note in the USER-prompt context. Grep the run logs

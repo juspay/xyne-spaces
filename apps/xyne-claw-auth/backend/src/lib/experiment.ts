@@ -1,0 +1,270 @@
+import type { ExperimentFinding, ExperimentRun } from "@prisma/client";
+import { CONFIG } from "../config.js";
+import { experimentRepository, agentRepository } from "../repositories/index.js";
+import { setSession, type SessionContext } from "./session-context.js";
+import { registerRunRecovery } from "../queue/run-recovery-worker.js";
+import { createTraceId, createLogger } from "../logger.js";
+import { decryptStoredField } from "../surfaces/spaces/client.js";
+
+const log = createLogger("experiment");
+
+const MAX_DURATION_MS = 8 * 60 * 60 * 1000;
+const DEFAULT_DURATION_MS = 60 * 60 * 1000;
+
+export type ExperimentCommand =
+  | { sub: "start"; durationMs: number; focus?: string; provider?: string; model?: string; invalidProvider?: string }
+  | { sub: "status" }
+  | { sub: "stop" };
+
+/** Providers a /experiment run may pin (must stay a subset of the /internal/run
+ *  proxy's OVERRIDABLE set — personal-cred providers still require the
+ *  requester's own key, enforced by the proxy at dispatch time). */
+export const EXPERIMENT_PROVIDERS = new Set(["spaces", "litellm", "claude", "codex", "copilot"]);
+
+const LEADING_MENTIONS = /^(?:@[\w.\-]+(?:\s+[\w.\-]+)*\s*)+/;
+
+export function parseExperimentCommand(text: string | undefined | null): ExperimentCommand | null {
+  if (!text) return null;
+  const trimmed = text.trim().replace(LEADING_MENTIONS, "");
+  if (!trimmed.toLowerCase().startsWith("/experiment")) return null;
+  const rest = trimmed.slice("/experiment".length).trim();
+  if (!rest) return { sub: "start", durationMs: DEFAULT_DURATION_MS };
+  const [first, ...tail] = rest.split(/\s+/);
+  const firstLower = first?.toLowerCase() ?? "";
+  if (firstLower === "status") return { sub: "status" };
+  if (firstLower === "stop") return { sub: "stop" };
+
+  let durationMs = DEFAULT_DURATION_MS;
+  let focusParts = rest.split(/\s+/);
+  const durationMatch = /^(\d+)(m|h)$/i.exec(firstLower);
+  if (durationMatch) {
+    const amount = Number(durationMatch[1]);
+    durationMs = durationMatch[2]!.toLowerCase() === "h"
+      ? amount * 60 * 60 * 1000
+      : amount * 60 * 1000;
+    focusParts = tail;
+  }
+  durationMs = Math.min(Math.max(durationMs, 1), MAX_DURATION_MS);
+  const { focusParts: cleanedFocusParts, provider, model, invalidProvider } = extractProviderOverride(focusParts);
+  const focus = normalizeFocus(cleanedFocusParts.join(" "));
+  const resolvedProvider = invalidProvider === undefined
+    ? provider ?? (model ? "spaces" : undefined)
+    : undefined;
+  return {
+    sub: "start",
+    durationMs,
+    ...(focus ? { focus } : {}),
+    ...(resolvedProvider ? { provider: resolvedProvider } : {}),
+    ...(model ? { model } : {}),
+    ...(invalidProvider !== undefined ? { invalidProvider } : {}),
+  };
+}
+
+function normalizeFocus(raw: string): string | undefined {
+  const value = raw.trim().replace(/^focus=/i, "").trim();
+  return value ? value.slice(0, 1000) : undefined;
+}
+
+function extractProviderOverride(parts: string[]): {
+  focusParts: string[];
+  provider?: string;
+  model?: string;
+  invalidProvider?: string;
+} {
+  let provider: string | undefined;
+  let model: string | undefined;
+  let invalidProvider: string | undefined;
+  const focusParts: string[] = [];
+
+  for (const part of parts) {
+    const match = /^([^=]+)=(.*)$/.exec(part);
+    const key = match?.[1]?.toLowerCase();
+    if (key === "provider") {
+      const rawProvider = match?.[2] ?? "";
+      const normalizedProvider = rawProvider.toLowerCase();
+      if (EXPERIMENT_PROVIDERS.has(normalizedProvider)) {
+        provider = normalizedProvider;
+      } else {
+        invalidProvider = rawProvider;
+      }
+      continue;
+    }
+    if (key === "model") {
+      const rawModel = match?.[2] ?? "";
+      if (rawModel) model = rawModel;
+      continue;
+    }
+    focusParts.push(part);
+  }
+
+  return {
+    focusParts,
+    ...(provider !== undefined ? { provider } : {}),
+    ...(model !== undefined ? { model } : {}),
+    ...(invalidProvider !== undefined ? { invalidProvider } : {}),
+  };
+}
+
+function formatRemaining(deadlineAt: Date): string {
+  const ms = Math.max(0, deadlineAt.getTime() - Date.now());
+  const minutes = Math.ceil(ms / 60_000);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const rem = minutes % 60;
+  return rem ? `${hours}h ${rem}m` : `${hours}h`;
+}
+
+export function formatDuration(ms: number): string {
+  const minutes = Math.round(ms / 60_000);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const rem = minutes % 60;
+  return rem ? `${hours}h ${rem}m` : `${hours}h`;
+}
+
+export function buildLedgerMarkdown(run: ExperimentRun, findings: ExperimentFinding[]): string {
+  const groups = {
+    conjecture: findings.filter((f) => f.status === "conjecture"),
+    proved: findings.filter((f) => f.status === "proved"),
+    refuted: findings.filter((f) => f.status === "refuted"),
+  };
+  const lines = [
+    `# /experiment ledger`,
+    ``,
+    `- Epoch: ${run.epoch}`,
+    `- Deadline: ${run.deadlineAt.toISOString()}`,
+    `- Remaining: ${formatRemaining(run.deadlineAt)}`,
+    `- Focus: ${run.focus?.trim() || "(none)"}`,
+    ``,
+  ];
+  // Cap what each group renders: this markdown is injected into EVERY later
+  // epoch's task, so unbounded growth compounds over an 8h run. Newest entries
+  // win (they carry the freshest context); older ones stay in the DB and the
+  // status/report paths, just not in the per-epoch prompt.
+  const MAX_PER_GROUP = 20;
+  const appendGroup = (heading: string, rows: ExperimentFinding[]) => {
+    lines.push(`## ${heading}`);
+    if (rows.length === 0) {
+      lines.push(`- (none)`, ``);
+      return;
+    }
+    const shown = rows.slice(-MAX_PER_GROUP);
+    if (rows.length > shown.length) {
+      lines.push(`- (… ${rows.length - shown.length} older entr${rows.length - shown.length === 1 ? "y" : "ies"} omitted — full ledger is in the database)`);
+    }
+    for (const f of shown) {
+      lines.push(`- [epoch ${f.epoch}] ${f.title}`);
+      lines.push(`  Hypothesis: ${f.hypothesis}`);
+      if (f.note?.trim()) lines.push(`  Note: ${f.note.trim()}`);
+      if (f.proofArtifactPath?.trim()) lines.push(`  Proof: ${f.proofArtifactPath.trim()}`);
+    }
+    lines.push(``);
+  };
+  appendGroup("Open conjectures", groups.conjecture);
+  appendGroup("Proved", groups.proved);
+  appendGroup("Refuted", groups.refuted);
+  return lines.join("\n").trimEnd();
+}
+
+export function buildEpochTask(run: ExperimentRun, ledgerMarkdown: string): string {
+  const remaining = formatRemaining(run.deadlineAt);
+  const finalInstruction = run.status === "finishing"
+    ? "\n\nDeadline reached - call end-experiment with your final report now."
+    : "";
+  return [
+    `You are in /experiment mode, epoch ${run.epoch}.`,
+    `Deadline: ${run.deadlineAt.toISOString()} (${remaining} remaining).`,
+    ``,
+    `Read the ledger below before doing anything. Do NOT re-test refuted hypotheses. Pick or advance ONE hypothesis. Use your sandbox tools to gather PROOF: a failing test, benchmark, profile, trace, log, or other concrete artifact. Record every conjecture/proof/refutation via the experiment-ledger tool.`,
+    `You cannot end before the deadline - end-experiment will refuse until the deadline has been reached.`,
+    run.sandboxNote?.trim() ? `\nSandbox note:\n${run.sandboxNote.trim()}` : "",
+    finalInstruction,
+    ``,
+    ledgerMarkdown,
+  ].filter((part) => part !== "").join("\n");
+}
+
+export async function dispatchExperimentEpoch(run: ExperimentRun): Promise<{ sessionId: string }> {
+  const findings = await experimentRepository.listFindings(run.id);
+  const ledger = buildLedgerMarkdown(run, findings);
+  const task = buildEpochTask(run, ledger);
+  const traceId = createTraceId();
+  const agent = run.orgId
+    ? await agentRepository.findBySlug(run.agentSlug, run.orgId)
+    : null;
+  if (!agent) throw new Error(`Experiment dispatch missing agent ${run.agentSlug} org=${run.orgId ?? ""}`);
+  if (!agent.spacesAppToken || !agent.spacesAppId || !agent.spacesAppUserId) {
+    throw new Error(`Experiment dispatch agent ${run.agentSlug} missing Spaces app identity`);
+  }
+  const appToken = decryptStoredField(agent.spacesAppToken);
+
+  const dispatchPayload = {
+    userId: run.userId,
+    task,
+    conversationId: run.conversationId,
+    agentSlug: run.agentSlug,
+    orgId: run.orgId ?? agent.orgId,
+    eventType: "APP_MENTIONED",
+    traceId,
+    callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
+    progressUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`,
+    channelId: run.channelId,
+    ...(run.provider
+      ? { providerOverride: { provider: run.provider, ...(run.modelId ? { model: run.modelId } : {}) } }
+      : {}),
+    experiment: {
+      id: run.id,
+      epoch: run.epoch,
+      deadlineAt: run.deadlineAt.toISOString(),
+      ...(run.focus ? { focus: run.focus } : {}),
+    },
+  };
+
+  const res = await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+    },
+    body: JSON.stringify(dispatchPayload),
+  });
+  const body = await res.json() as { success?: boolean; sessionId?: string; error?: string };
+  if (!res.ok || !body.success || !body.sessionId) {
+    throw new Error(`Experiment dispatch failed: HTTP ${res.status} ${body.error ?? ""}`.trim());
+  }
+
+  const sessionContext: SessionContext = {
+    mentionedUserId: agent.spacesAppUserId,
+    targetUserId: run.userId,
+    senderId: run.userId,
+    senderName: run.userId,
+    channelId: run.channelId,
+    channelName: run.channelId,
+    conversationId: run.conversationId,
+    task,
+    agentId: agent.id,
+    agentOrgId: run.orgId ?? agent.orgId,
+    agentSlug: run.agentSlug,
+    responseMode: "conversation",
+    appToken,
+    spacesAppId: agent.spacesAppId,
+    spacesAppUserId: agent.spacesAppUserId,
+    traceId,
+    rootAgentSlug: run.agentSlug,
+  };
+  await setSession(body.sessionId, sessionContext);
+  await registerRunRecovery({
+    rootSessionId: body.sessionId,
+    maxRetries: CONFIG.runRecoveryMaxRetries,
+    timeoutMs: CONFIG.runRecoveryTimeoutMs,
+    retryBackoffMs: CONFIG.runRecoveryBackoffMs,
+    dispatchPayload,
+    sessionContext,
+  });
+  await experimentRepository.update(run.id, {
+    currentSessionId: body.sessionId,
+    epoch: run.epoch,
+  });
+  log.info(`[experiment] dispatched epoch=${run.epoch} id=${run.id} session=${body.sessionId}`);
+  return { sessionId: body.sessionId };
+}
