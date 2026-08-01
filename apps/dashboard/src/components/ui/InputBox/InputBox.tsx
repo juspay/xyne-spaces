@@ -362,8 +362,20 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         .split('+')
         .map(part => part.trim())
         .filter(Boolean);
-      const MODIFIER_TOKENS = ['mod', 'meta', 'cmd', 'command', 'ctrl', 'control', 'shift', 'alt', 'option'];
-      const needMod = parts.some(p => ['mod', 'meta', 'cmd', 'command', 'ctrl', 'control'].includes(p));
+      const MODIFIER_TOKENS = [
+        'mod',
+        'meta',
+        'cmd',
+        'command',
+        'ctrl',
+        'control',
+        'shift',
+        'alt',
+        'option',
+      ];
+      const needMod = parts.some(p =>
+        ['mod', 'meta', 'cmd', 'command', 'ctrl', 'control'].includes(p),
+      );
       const needShift = parts.includes('shift');
       const needAlt = parts.some(p => ['alt', 'option'].includes(p));
       const mainKey = parts.find(p => !MODIFIER_TOKENS.includes(p)) ?? '';

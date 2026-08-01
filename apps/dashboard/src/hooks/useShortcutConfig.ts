@@ -33,7 +33,7 @@ export interface UseShortcutConfig {
 export const useShortcutConfig = (): UseShortcutConfig => {
   const zero = useZero();
   const userPreference = useSelector(stateMachineActor, state => state.context.userPreference);
-  const raw = (userPreference?.keyboardShortcuts) ?? null;
+  const raw = userPreference?.keyboardShortcuts ?? null;
 
   const overrides = useMemo(() => parseShortcutOverrides(raw), [raw]);
 

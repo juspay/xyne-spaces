@@ -1138,9 +1138,9 @@ const ShortcutRow: FC<{
             {isUnbound ? (
               <span className='text-xs text-muted-foreground'>Unbound</span>
             ) : (
-              resolvedKeys.slice(0, 1).map(combo => (
-                <KeyCap key={combo}>{formatCombo(combo, isMac)}</KeyCap>
-              ))
+              resolvedKeys
+                .slice(0, 1)
+                .map(combo => <KeyCap key={combo}>{formatCombo(combo, isMac)}</KeyCap>)
             )}
           </button>
         )}
@@ -1284,7 +1284,6 @@ const ShortcutsSection: FC<{ state: PreferencesState }> = () => {
     </div>
   );
 };
-
 
 const SECTIONS: Record<PreferenceSection, FC<{ state: PreferencesState }>> = {
   appearance: AppearanceSection,
