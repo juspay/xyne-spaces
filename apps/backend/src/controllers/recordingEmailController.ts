@@ -28,6 +28,7 @@ type RecordingCall = NonNullable<Awaited<ReturnType<typeof repositories.calls.fi
 const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 const MAX_TOTAL_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 const MAX_RECIPIENTS = 50;
+const RECORDING_EMAIL_SOURCE_TYPE = 'google-recording-email';
 
 const SendRecordingEmailSchema = z
   .object({
@@ -206,6 +207,41 @@ export class RecordingEmailController {
       name: user.displayName?.trim() || user.name,
       email: normalizedEmail(user.email),
     };
+
+    const personalSource = await db.externalSource.findFirst({
+      where: {
+        workspaceId,
+        ownerUserId: userId,
+        channelId: null,
+        sourceType: RECORDING_EMAIL_SOURCE_TYPE,
+        isActive: true,
+      },
+      select: {
+        id: true,
+        name: true,
+        displayName: true,
+        credentials: true,
+      },
+    });
+    if (personalSource && extractEmailAddress(personalSource.displayName) === account.email) {
+      try {
+        const adapter = adapterRegistry.getAdapter(personalSource.name);
+        if (adapter.sendMailNew) {
+          return {
+            account,
+            sender: {
+              channelId: null,
+              sourceId: personalSource.id,
+              sourceName: personalSource.name,
+              encryptedCredentials: personalSource.credentials,
+              email: account.email,
+              name: account.name,
+            },
+          };
+        }
+      } catch {
+      }
+    }
 
     const emailChannels = await db.channel.findMany({
       where: {

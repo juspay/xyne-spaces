@@ -222,6 +222,7 @@ export const PostRecordingToEmailModal = ({
     [],
   );
   const [isSending, setIsSending] = useState(false);
+  const [isConnectingGoogle, setIsConnectingGoogle] = useState(false);
   const initializedAttachmentsRef = useRef(false);
   const initializedBodyRef = useRef(false);
 
@@ -328,6 +329,21 @@ export const PostRecordingToEmailModal = ({
       toast.error(message);
     } finally {
       setIsSending(false);
+    }
+  };
+
+  const handleConnectGoogle = async (): Promise<void> => {
+    setIsConnectingGoogle(true);
+    try {
+      const returnPath = `${window.location.pathname}${window.location.search}`;
+      const authUrl = await recordingEmailService.connectGoogle(returnPath);
+      window.location.assign(authUrl);
+    } catch (error) {
+      const message =
+        (error as { response?: { data?: { error?: string } } })?.response?.data?.error ||
+        (error instanceof Error ? error.message : 'Unable to start Google email connection');
+      toast.error(message);
+      setIsConnectingGoogle(false);
     }
   };
 
@@ -451,7 +467,20 @@ export const PostRecordingToEmailModal = ({
         {context && !context.canSend ? (
           <div className='mx-6 mt-4 flex gap-2 rounded-md border border-amber-300/70 bg-amber-50 px-3 py-2.5 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-950/30 dark:text-amber-100 sm:mx-8'>
             <Mail className='mt-0.5 size-4 shrink-0' aria-hidden='true' />
-            <p>{context.unavailableReason ?? 'No outbound email account is available.'}</p>
+            <div className='flex min-w-0 flex-1 flex-wrap items-center justify-between gap-3'>
+              <p>{context.unavailableReason ?? 'No outbound email account is available.'}</p>
+              <Button
+                size='sm'
+                variant='outline'
+                onClick={() => void handleConnectGoogle()}
+                disabled={isConnectingGoogle || isSending}
+                loading={isConnectingGoogle}
+                data-track-category='RecordingDetailV2'
+                data-track-name='recording_email_connect_google'
+              >
+                Connect Google email
+              </Button>
+            </div>
           </div>
         ) : null}
 
