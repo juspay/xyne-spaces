@@ -1362,6 +1362,7 @@ export class CallDocumentService {
     updatedByUserId: string,
     channelId: string | null,
     callId: string,
+    callStartedAt: Date,
     callTitle?: string | null,
     citationCtx?: CitationContext,
   ): Promise<boolean> {
@@ -1372,7 +1373,7 @@ export class CallDocumentService {
       const { title, content: sanitizedContent, mentionedUserIds } = await this.prepareCanvasContent(
         markdownSummary,
         channelId,
-        undefined,
+        callStartedAt,
         callTitle,
         citationCtx,
       );
@@ -2082,6 +2083,7 @@ A comprehensive detailed summary has been generated from this call.
         xyneAutomaticBot.id,
         conversation.channelId,
         callId,
+        call.startedAt,
         call.title,
         citationCtx,
       );
