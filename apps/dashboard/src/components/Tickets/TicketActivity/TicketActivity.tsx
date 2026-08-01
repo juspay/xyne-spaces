@@ -24,6 +24,7 @@ import {
 import { formatReferenceLabel } from '../../../hooks/useTicketReferences';
 import { formatDistanceToNow, format } from 'date-fns';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
+import { Switch } from '../../ui/Switch';
 import { TicketPriorityIcon } from '../../../assets/icons';
 import { TicketStatusIcon } from '../../../assets/icons';
 import SmallUserAvatar from '../../UserAvatar/SmallUserAvatar';
@@ -78,7 +79,7 @@ const formatTimestamp = (timestamp: number | Date): string => {
   }
 };
 
-// Full, exact timestamp shown in the hover tooltip (the row itself shows the relative time).
+// Full, exact timestamp shown in the hover tooltip or when exact time is enabled.
 const formatExactTimestamp = (timestamp: number | Date): string => {
   try {
     const date = typeof timestamp === 'number' ? new Date(timestamp) : timestamp;
@@ -633,6 +634,7 @@ export const TicketActivity = ({
   stageVisitFormValues = [],
 }: TicketActivityProps): ReactElement => {
   const [sortOrder, setSortOrder] = useState<SortOrder>('newest');
+  const [showExactTime, setShowExactTime] = useState(false);
 
   const sortedActivities = useMemo(() => {
     if (!activities) return [];
@@ -681,17 +683,28 @@ export const TicketActivity = ({
           Activity
         </h3>
 
-        <button
-          onClick={toggleSort}
-          className='flex items-center text-[13px] text-muted-foreground gap-2'
-          title={sortOrder === 'newest' ? 'Newest to oldest' : 'Oldest to newest'}
-          data-track-category='Tickets'
-          data-track-name='ToggleActivitySort'
-          data-track-metadata={JSON.stringify({ sortOrder })}
-        >
-          <ArrowUpDown size={13} />
-          {sortOrder === 'newest' ? <p>Oldest</p> : <p>Newest</p>}
-        </button>
+        <div className='flex items-center gap-3'>
+          <div className='flex items-center gap-2'>
+            <span className='text-[13px] text-muted-foreground'>Exact time</span>
+            <Switch
+              checked={showExactTime}
+              onCheckedChange={setShowExactTime}
+              aria-label='Show exact activity time'
+            />
+          </div>
+
+          <button
+            onClick={toggleSort}
+            className='flex items-center text-[13px] text-muted-foreground gap-2'
+            title={sortOrder === 'newest' ? 'Newest to oldest' : 'Oldest to newest'}
+            data-track-category='Tickets'
+            data-track-name='ToggleActivitySort'
+            data-track-metadata={JSON.stringify({ sortOrder })}
+          >
+            <ArrowUpDown size={13} />
+            {sortOrder === 'newest' ? <p>Oldest</p> : <p>Newest</p>}
+          </button>
+        </div>
       </div>
 
       {sortedActivities.length > 0 ? (
@@ -705,6 +718,7 @@ export const TicketActivity = ({
               userGroups={userGroups}
               {...(boards !== undefined ? { boards } : {})}
               activities={sortedActivities}
+              showExactTime={showExactTime}
               stageVisitFormValues={stageVisitFormValues}
               customFieldAttachmentFilenameById={customFieldAttachmentFilenameById}
             />
@@ -727,6 +741,7 @@ export const ActivityComponent = ({
   boards,
   userGroups,
   activities,
+  showExactTime,
   stageVisitFormValues = [],
   customFieldAttachmentFilenameById,
 }: {
@@ -736,6 +751,7 @@ export const ActivityComponent = ({
   boards?: { id: string; name: string }[];
   userGroups: UserGroup[] | undefined;
   activities: TicketActivityType[];
+  showExactTime: boolean;
   stageVisitFormValues?: StageVisitFormValues[];
   customFieldAttachmentFilenameById?: ReadonlyMap<string, string>;
 }) => {
@@ -787,7 +803,9 @@ export const ActivityComponent = ({
           </p>
           <Tooltip content={formatExactTimestamp(activity.timestamp)}>
             <span className='text-xs text-muted-foreground whitespace-nowrap flex-shrink-0 cursor-default'>
-              {formatTimestamp(activity.timestamp)}
+              {showExactTime
+                ? formatExactTimestamp(activity.timestamp)
+                : formatTimestamp(activity.timestamp)}
             </span>
           </Tooltip>
         </div>
