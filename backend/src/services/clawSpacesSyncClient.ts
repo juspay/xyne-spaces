@@ -118,34 +118,19 @@ class ClawSpacesSyncClient {
         throw error;
       }
 
-      const url = `${baseUrl}/claw/api/v1/internal/spaces-sync${path}`;
-      const isAbortError = error instanceof Error && error.name === 'AbortError';
-      const serialized = this.serializeFetchError(error);
-      const causeMessage =
-        serialized.cause instanceof Error
-          ? serialized.cause.message
-          : typeof serialized.cause === 'object' &&
-              serialized.cause !== null &&
-              'message' in serialized.cause
-            ? String((serialized.cause as { message: unknown }).message)
-            : undefined;
       const errorMessage =
         error instanceof Error ? error.message : String(error);
 
       logger.error('Claw spaces sync network failure', {
         path,
-        url,
+        url: `${baseUrl}/claw/api/v1/internal/spaces-sync${path}`,
         method: 'POST',
-        isTimeout: isAbortError,
-        timeoutMs: config.aiProvisioning.requestTimeoutMs,
         payload: this.summarizePayload(payload),
-        fetchError: serialized,
+        error: String(error),
       });
 
       throw new ClawSpacesSyncError(
-        causeMessage
-          ? `Claw spaces sync ${path} request failed: ${causeMessage}`
-          : `Claw spaces sync ${path} request failed: ${errorMessage}`,
+        `Claw spaces sync ${path} request failed: ${errorMessage}`,
         { retryable: true, cause: error },
       );
     } finally {
@@ -193,53 +178,6 @@ class ClawSpacesSyncClient {
       'success' in body &&
       (body as { success?: unknown }).success === false
     );
-  }
-
-  private serializeFetchError(error: unknown): Record<string, unknown> {
-    if (!(error instanceof Error)) {
-      return {
-        value: String(error),
-      };
-    }
-
-    const result: Record<string, unknown> = {
-      name: error.name,
-      message: error.message,
-      stack: error.stack,
-    };
-
-    const cause = (error as { cause?: unknown }).cause;
-
-    if (cause instanceof Error) {
-      const systemCause = cause as Error & {
-        code?: string;
-        errno?: string | number;
-        syscall?: string;
-        hostname?: string;
-        address?: string;
-        port?: string | number;
-        localAddress?: string;
-        localPort?: string | number;
-      };
-
-      result.cause = {
-        name: systemCause.name,
-        message: systemCause.message,
-        stack: systemCause.stack,
-        code: systemCause.code,
-        errno: systemCause.errno,
-        syscall: systemCause.syscall,
-        hostname: systemCause.hostname,
-        address: systemCause.address,
-        port: systemCause.port,
-        localAddress: systemCause.localAddress,
-        localPort: systemCause.localPort,
-      };
-    } else if (cause !== undefined) {
-      result.cause = cause;
-    }
-
-    return result;
   }
 }
 

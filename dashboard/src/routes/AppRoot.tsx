@@ -155,7 +155,6 @@ import UserGroupSidePanel from '../components/UserGroup/UserGroupSidePanel/UserG
 import GlobalCommandMenu from '../components/GlobalCommandMenu/GlobalCommandMenu';
 import ProductInsightsScreen from './ProductInsightsScreen/ProductInsightsScreen';
 import LaunchScreen from './LaunchScreen/LaunchScreen';
-import CommunityWorkspaceInviteRedirect from './CommunityWorkspaceInvite/CommunityWorkspaceInviteRedirect';
 import { AssignmentConfigWrapper } from '../components/UserGroup/AssignmentConfigScreen';
 import { ShortcutsHelpModal } from '../components/ShortcutsHelpModal/ShortcutsHelpModal';
 import { useShortcutById } from '../shortcuts';
@@ -1486,10 +1485,6 @@ export const router = createBrowserRouter([
       {
         path: '/invite',
         element: <AcceptInvitation />,
-      },
-      {
-        path: '/community/join',
-        element: <CommunityWorkspaceInviteRedirect />,
       },
       {
         path: '/community',

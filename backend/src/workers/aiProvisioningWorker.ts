@@ -175,6 +175,12 @@ class AIProvisioningWorker {
         await this.provisionWorkspace(subjectId);
         return;
       case AIProvisioningSubjectType.USER:
+        if (!config.aiProvisioning.enableUserProvisioning) {
+          logger.info('[AI-PROVISIONING-WORKER] User provisioning is disabled, skipping', {
+            subjectId,
+          });
+          return;
+        }
         await this.provisionUser(subjectId);
         return;
       default:

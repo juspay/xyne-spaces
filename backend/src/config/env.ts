@@ -97,6 +97,7 @@ const envSchema = Joi.object({
   TAG_GENERATION_LLM_TIMEOUT_MS: Joi.number().integer().min(1000).default(120000),
   ENABLE_STITCH_WORKER: Joi.boolean().default(false),
   ENABLE_AI_PROVISIONING_WORKER: Joi.boolean().default(false),
+  ENABLE_USER_AI_PROVISIONING: Joi.boolean().default(false),
   XYNE_CLAW_AUTH_INTERNAL_URL: Joi.string().uri().allow('').default(''),
   AI_PROVISIONING_QUEUE_ATTEMPTS: Joi.number().integer().min(1).default(3),
   AI_PROVISIONING_QUEUE_BACKOFF_MS: Joi.number().integer().min(0).default(5000),
@@ -552,6 +553,7 @@ export const config = {
   enableAiProvisioningWorker: envVars.ENABLE_AI_PROVISIONING_WORKER,
   aiProvisioning: {
     xyneClawAuthInternalUrl: envVars.XYNE_CLAW_AUTH_INTERNAL_URL as string,
+    enableUserProvisioning: envVars.ENABLE_USER_AI_PROVISIONING as boolean,
     s2sKey: envVars.XYNE_CLAW_S2S_KEY as string,
     queueAttempts: envVars.AI_PROVISIONING_QUEUE_ATTEMPTS as number,
     queueBackoffMs: envVars.AI_PROVISIONING_QUEUE_BACKOFF_MS as number,

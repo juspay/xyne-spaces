@@ -33,9 +33,8 @@ import { apiInstance } from '../../services/clients/apiClient';
 import { TicketPriorityIcon } from '../../assets/icons/TicketPriorityIcon';
 import { cn } from '../../utils/classNames';
 import {
-  ENTERPRISE_WORKSPACE_LOGIN_INTENT_KEY,
-  PENDING_COMMUNITY_WORKSPACE_ID_KEY,
-  PENDING_COMMUNITY_WORKSPACE_NAME_KEY,
+  PENDING_WORKSPACE_ID_KEY,
+  PENDING_WORKSPACE_NAME_KEY,
   type CommunityJoinRequestContext,
 } from '../../machines/authMachine';
 
@@ -1127,9 +1126,8 @@ export const CommunityWorkspaceScreen = ({
 
   const handleJoinCommunityWorkspace = (workspace: CommunityWorkspace): void => {
     clearError();
-    localStorage.removeItem(ENTERPRISE_WORKSPACE_LOGIN_INTENT_KEY);
-    localStorage.setItem(PENDING_COMMUNITY_WORKSPACE_ID_KEY, workspace.id);
-    localStorage.setItem(PENDING_COMMUNITY_WORKSPACE_NAME_KEY, workspace.name);
+    localStorage.setItem(PENDING_WORKSPACE_ID_KEY, workspace.id);
+    localStorage.setItem(PENDING_WORKSPACE_NAME_KEY, workspace.name);
 
     if (pendingUserData || Cookies.get('user_session_id')) {
       joinCommunityWorkspace(workspace.id);
@@ -1142,9 +1140,8 @@ export const CommunityWorkspaceScreen = ({
   const handleContinueWithWorkEmail = (): void => {
     clearError();
     startEnterpriseLogin();
-    localStorage.setItem(ENTERPRISE_WORKSPACE_LOGIN_INTENT_KEY, 'true');
-    localStorage.removeItem(PENDING_COMMUNITY_WORKSPACE_ID_KEY);
-    localStorage.removeItem(PENDING_COMMUNITY_WORKSPACE_NAME_KEY);
+    localStorage.removeItem(PENDING_WORKSPACE_ID_KEY);
+    localStorage.removeItem(PENDING_WORKSPACE_NAME_KEY);
     onContinueToAuth();
   };
 

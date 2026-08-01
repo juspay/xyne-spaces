@@ -15,11 +15,7 @@ import { ThemeProvider } from '@juspay/blend-design-system';
 import { reactNativeBridge } from '../../utils/reactNativeBridge';
 import { usePlatform } from '../../hooks/usePlatform';
 import { dropAllDatabases } from '@rocicorp/zero';
-import {
-  ENTERPRISE_WORKSPACE_LOGIN_INTENT_KEY,
-  PENDING_COMMUNITY_WORKSPACE_ID_KEY,
-  PENDING_COMMUNITY_WORKSPACE_NAME_KEY,
-} from '../../machines/authMachine';
+import { PENDING_WORKSPACE_ID_KEY, PENDING_WORKSPACE_NAME_KEY } from '../../machines/authMachine';
 
 interface CommunityWorkspaceListItem {
   id: string;
@@ -78,7 +74,7 @@ const AuthScreen = (): ReactElement | null => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [pendingCommunityWorkspaceName, setPendingCommunityWorkspaceName] = useState<string | null>(
-    () => localStorage.getItem(PENDING_COMMUNITY_WORKSPACE_NAME_KEY),
+    () => localStorage.getItem(PENDING_WORKSPACE_NAME_KEY),
   );
   const [isRequestingEnterpriseJoin, setIsRequestingEnterpriseJoin] = useState(false);
   const [enterpriseJoinRequestMessage, setEnterpriseJoinRequestMessage] = useState('');
@@ -122,21 +118,20 @@ const AuthScreen = (): ReactElement | null => {
   }, [searchParams]);
 
   useEffect(() => {
-    const communityWorkspaceId = searchParams.get('communityWorkspaceId')?.trim();
-    if (!communityWorkspaceId) return;
-    localStorage.removeItem(ENTERPRISE_WORKSPACE_LOGIN_INTENT_KEY);
-    localStorage.setItem(PENDING_COMMUNITY_WORKSPACE_ID_KEY, communityWorkspaceId);
-    localStorage.removeItem(PENDING_COMMUNITY_WORKSPACE_NAME_KEY);
+    const pendingWorkspaceId = searchParams.get('workspaceId')?.trim();
+    if (!pendingWorkspaceId) return;
+    localStorage.setItem(PENDING_WORKSPACE_ID_KEY, pendingWorkspaceId);
+    localStorage.removeItem(PENDING_WORKSPACE_NAME_KEY);
     setPendingCommunityWorkspaceName(null);
   }, [searchParams]);
 
   useEffect(() => {
     const pendingWorkspaceId =
-      searchParams.get('communityWorkspaceId')?.trim() ||
-      localStorage.getItem(PENDING_COMMUNITY_WORKSPACE_ID_KEY)?.trim();
+      searchParams.get('workspaceId')?.trim() ||
+      localStorage.getItem(PENDING_WORKSPACE_ID_KEY)?.trim();
 
     if (!pendingWorkspaceId) {
-      localStorage.removeItem(PENDING_COMMUNITY_WORKSPACE_NAME_KEY);
+      localStorage.removeItem(PENDING_WORKSPACE_NAME_KEY);
       setPendingCommunityWorkspaceName(null);
       return;
     }
@@ -152,17 +147,17 @@ const AuthScreen = (): ReactElement | null => {
           .find(workspace => workspace.id === pendingWorkspaceId);
 
         if (communityWorkspace) {
-          localStorage.setItem(PENDING_COMMUNITY_WORKSPACE_NAME_KEY, communityWorkspace.name);
+          localStorage.setItem(PENDING_WORKSPACE_NAME_KEY, communityWorkspace.name);
           setPendingCommunityWorkspaceName(communityWorkspace.name);
           return;
         }
 
-        localStorage.removeItem(PENDING_COMMUNITY_WORKSPACE_NAME_KEY);
+        localStorage.removeItem(PENDING_WORKSPACE_NAME_KEY);
         setPendingCommunityWorkspaceName(null);
       })
       .catch(() => {
         if (isCancelled) return;
-        localStorage.removeItem(PENDING_COMMUNITY_WORKSPACE_NAME_KEY);
+        localStorage.removeItem(PENDING_WORKSPACE_NAME_KEY);
         setPendingCommunityWorkspaceName(null);
       });
 
@@ -397,10 +392,7 @@ const AuthScreen = (): ReactElement | null => {
     return <Navigate to={dest} replace={true}></Navigate>;
   }
 
-  const hasEnterpriseWorkspaceLoginIntent =
-    localStorage.getItem(ENTERPRISE_WORKSPACE_LOGIN_INTENT_KEY) === 'true';
-
-  if (communityJoinRequest && !hasEnterpriseWorkspaceLoginIntent) {
+  if (communityJoinRequest) {
     return <Navigate to='/community' replace={true} />;
   }
 

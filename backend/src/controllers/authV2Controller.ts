@@ -23,6 +23,7 @@ import {
   isOrganizationPolicyError,
   organizationDomainService,
 } from '@/services/organizationDomainService';
+import { aiProvisioningService } from '@/services/aiProvisioningService';
 
 /**
  * Result type for single workspace auto-login
@@ -1312,6 +1313,18 @@ export class AuthV2Controller {
         workspaceId,
         authProvider: provider,
       });
+
+      if (isNewUser) {
+        try {
+          await aiProvisioningService.enqueueUserSync(workspaceUser.id);
+        } catch (error) {
+          logger.error('[LOGIN-WORKSPACE] Failed to enqueue AI user provisioning', {
+            userId: workspaceUser.id,
+            workspaceId,
+            error,
+          });
+        }
+      }
 
       // Check if user is inactive or has left the workspace
       if (workspaceUser.status === UserStatus.INACTIVE || workspaceUser.leftAt !== null) {
