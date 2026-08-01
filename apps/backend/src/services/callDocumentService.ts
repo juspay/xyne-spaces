@@ -58,14 +58,6 @@ interface ParticipantInfo {
   userPicture?: string;
 }
 
-// Participant information for mentions
-interface ParticipantInfo {
-  userId: string;
-  username: string;
-  userEmail: string;
-  userPicture?: string;
-}
-
 import { executeStreamingLlmRequest } from './callLlmRetry';
 import { initializeYSweetDoc, syncToYSweet } from '@/utils/ysweetUtils.js';
 
@@ -882,15 +874,14 @@ export class CallDocumentService {
       }),
     );
 
-    const extracted = await executeCallLlmWithRetry(
-      () => this.createAgent(),
-      () => buildSummaryTemplateSelectionPrompt(transcript, candidates),
-      'recording_summary_template_selection',
+    const result = await executeStreamingLlmRequest({
+      userPrompt: buildSummaryTemplateSelectionPrompt(transcript, candidates),
+      operation: 'recording_summary_template_selection',
       callId,
-    );
+    });
 
-    if (extracted.ok) {
-      const selected = parseSelectedSummaryTemplate(extracted.content, candidates);
+    if (result.ok) {
+      const selected = parseSelectedSummaryTemplate(result.content, candidates);
       const template = selected ? getBuiltinRecordingSummaryTemplate(selected.id) : undefined;
       if (template) {
         logger.info(`[${callId}] recording_summary_template_selected`, {
@@ -903,7 +894,7 @@ export class CallDocumentService {
 
     logger.warn(`[${callId}] recording_summary_template_selection_fallback`, {
       template_id: 'default',
-      reason: extracted.ok ? 'invalid_selection' : extracted.reason,
+      reason: result.ok ? 'invalid_selection' : result.reason,
     });
     return getBuiltinRecordingSummaryTemplate('default')!;
   }
