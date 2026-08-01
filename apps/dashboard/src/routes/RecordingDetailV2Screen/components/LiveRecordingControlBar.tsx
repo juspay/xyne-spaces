@@ -37,6 +37,7 @@ interface LiveRecordingControlBarProps {
   onStopped?: () => void;
   onLoadAudio?: (signal: AbortSignal) => Promise<Blob>;
   onMarkerSelect?: (item: MarkedItem) => void;
+  isAudioPreparing?: boolean;
 }
 
 /** Stands in when there is no audio to load, so the playback hook can stay unconditional. */
@@ -48,6 +49,7 @@ export const LiveRecordingControlBar = ({
   onStopped,
   onLoadAudio,
   onMarkerSelect,
+  isAudioPreparing = false,
 }: LiveRecordingControlBarProps): ReactElement | null => {
   // Recording session state — only meaningful when this tab owns the live session.
   const activeExternalId = useRecordingStore(context => context.externalId);
@@ -111,6 +113,7 @@ export const LiveRecordingControlBar = ({
     return (
       <RecordedTimelineBar
         recording={recording}
+        isAudioPreparing={isAudioPreparing}
         {...(onLoadAudio ? { onLoadAudio } : {})}
         {...(onMarkerSelect ? { onMarkerSelect } : {})}
       />
@@ -343,12 +346,15 @@ interface RecordedTimelineBarProps {
   onLoadAudio?: (signal: AbortSignal) => Promise<Blob>;
   /** Supplied once there is a transcript to open at the marker's timestamp. */
   onMarkerSelect?: (item: MarkedItem) => void;
+  /** True while the stitched audio is still on its way. */
+  isAudioPreparing?: boolean;
 }
 
 const RecordedTimelineBar = ({
   recording,
   onLoadAudio,
   onMarkerSelect,
+  isAudioPreparing = false,
 }: RecordedTimelineBarProps): ReactElement => {
   const fallbackDurationMs =
     recording.durationMs ??
@@ -373,12 +379,18 @@ const RecordedTimelineBar = ({
   const elapsedMs = playback.currentTime * 1000;
   const progressPercent = durationMs > 0 ? Math.min((elapsedMs / durationMs) * 100, 100) : 0;
   const isPlaying = playback.state === 'playing';
-  const audioControlLabel = !onLoadAudio
-    ? 'Audio is still being prepared'
-    : isPlaying
-      ? 'Pause recording'
-      : 'Play recording';
-  const audioIconKey = playback.state === 'loading' ? 'loading' : isPlaying ? 'pause' : 'play';
+  const isStitching = !onLoadAudio && isAudioPreparing;
+  const isAudioBusy = isStitching || playback.state === 'loading';
+  const audioControlLabel = isStitching
+    ? 'Preparing audio'
+    : !onLoadAudio
+      ? 'Audio is unavailable for this recording'
+      : playback.state === 'loading'
+        ? 'Loading audio'
+        : isPlaying
+          ? 'Pause recording'
+          : 'Play recording';
+  const audioIconKey = isAudioBusy ? 'loading' : isPlaying ? 'pause' : 'play';
 
   const selectMarker =
     playback.canSeek || onMarkerSelect
@@ -407,6 +419,7 @@ const RecordedTimelineBar = ({
             size='icon'
             onClick={() => void playback.toggle()}
             disabled={!onLoadAudio || playback.state === 'loading'}
+            aria-busy={isAudioBusy}
             className='size-8 rounded-full border-border bg-card text-muted-foreground hover:text-foreground'
             aria-label={audioControlLabel}
             title={audioControlLabel}
@@ -422,7 +435,7 @@ const RecordedTimelineBar = ({
                 exit={{ opacity: 0, scale: 0.6 }}
                 transition={{ duration: shouldReduceMotion ? 0 : 0.14 }}
               >
-                {playback.state === 'loading' ? (
+                {isAudioBusy ? (
                   <Spinner size={14} className='animate-spin' />
                 ) : isPlaying ? (
                   <PauseBig size={14} strokeWidth={4} variant='Solid' />

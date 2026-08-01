@@ -11,6 +11,7 @@ export interface TranscriptCitationRef {
 }
 
 type Listener = () => void;
+type CitationHandler = (ref: TranscriptCitationRef) => boolean;
 
 interface StoreState {
   isOpen: boolean;
@@ -21,11 +22,22 @@ interface StoreState {
 class TranscriptCitationStore {
   private state: StoreState = { isOpen: false, ref: null, nonce: 0 };
   private listeners = new Set<Listener>();
+  private handler: CitationHandler | null = null;
 
   subscribe(fn: Listener): () => void {
     this.listeners.add(fn);
     return () => {
       this.listeners.delete(fn);
+    };
+  }
+
+  /**
+   Let inline transcript screens handle citations in their own panel, falling back to the modal when needed.
+   */
+  setHandler(handler: CitationHandler): () => void {
+    this.handler = handler;
+    return () => {
+      if (this.handler === handler) this.handler = null;
     };
   }
 
@@ -38,6 +50,7 @@ class TranscriptCitationStore {
   }
 
   open(ref: TranscriptCitationRef): void {
+    if (this.handler?.(ref)) return;
     this.state = { isOpen: true, ref, nonce: this.state.nonce + 1 };
     this.notify();
   }

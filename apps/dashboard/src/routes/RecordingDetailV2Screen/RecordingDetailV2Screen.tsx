@@ -60,7 +60,8 @@ import {
   TranscriptSidePanel,
   type TranscriptPanelTarget,
 } from '../../components/Chat/TranscriptCitationModal/TranscriptSidePanel';
-import type { MarkedItem } from './components/markedItems';
+import { transcriptCitationStore } from '../../components/Chat/TranscriptCitationModal';
+import { parseMarkedItems, type MarkedItem } from './components/markedItems';
 import type { Canvas } from '../../components/Canvas/Canvas.types';
 import { xyneAIActor } from '../../machines/xyneAIMachine';
 import { useSelf } from '../../hooks/useUsers';
@@ -107,6 +108,8 @@ export default function RecordingDetailV2Screen(): ReactElement {
   const [summaryCanvasNonce, setSummaryCanvasNonce] = useState(0);
   const [awaitingSummary, setAwaitingSummary] = useState(false);
   const [citationNonce, setCitationNonce] = useState(0);
+  /** Set once the audio poll below gives up, so the player stops implying progress. */
+  const [audioPollExhausted, setAudioPollExhausted] = useState(false);
   // Which line the transcript panel opens on: set by a timeline marker, null when the
   // panel is opened from the toolbar with no particular moment in mind.
   const [citationRef, setCitationRef] = useState<TranscriptPanelTarget | null>(null);
@@ -307,11 +310,13 @@ export default function RecordingDetailV2Screen(): ReactElement {
   useEffect(() => {
     if (!recordingId || isLive || !recording || recording.hasRecording) return;
 
+    setAudioPollExhausted(false);
     let attempts = 0;
     const timer = window.setInterval(() => {
       attempts += 1;
       if (attempts > AUDIO_POLL_MAX_ATTEMPTS) {
         window.clearInterval(timer);
+        setAudioPollExhausted(true);
         return;
       }
       // Patch only the fields being polled for: a failed refresh must not tear down
@@ -473,6 +478,38 @@ export default function RecordingDetailV2Screen(): ReactElement {
     });
   }, [recording, message]);
 
+  const transcriptText =
+    speakerIdentificationEnabled && recording?.hasIdentifiedTranscript
+      ? (recording.identifiedTranscript ?? recording.transcript)
+      : recording?.transcript;
+
+  const markedMomentSeconds = useMemo(
+    () =>
+      parseMarkedItems(recording?.markedItems)
+        .filter(item => item.type === 'moment')
+        .map(item => item.timestampSeconds),
+    [recording?.markedItems],
+  );
+
+  /**
+   * Route canvas citations into this screen's own transcript panel instead of the
+   * global TranscriptCitationModal, so clicking a citation behaves like the toolbar
+   */
+  useEffect(() => {
+    if (!recordingId || !transcriptText?.trim()) return;
+    return transcriptCitationStore.setHandler(ref => {
+      if (ref.callId !== recordingId) return false;
+      setCitationRef({
+        ...(ref.timestamp ? { timestamp: ref.timestamp } : {}),
+        ...(ref.speaker ? { speaker: ref.speaker } : {}),
+        ...(ref.segment ? { segment: ref.segment } : {}),
+      });
+      setCitationNonce(value => value + 1);
+      setShowTranscriptPanel(true);
+      return true;
+    });
+  }, [recordingId, transcriptText]);
+
   if (loading) {
     return (
       <div className='flex h-full w-full items-center justify-center'>
@@ -511,16 +548,17 @@ export default function RecordingDetailV2Screen(): ReactElement {
   const secondTab = isLive ? 'transcript' : 'summary';
   const visibleTab = tabPreference === 'notes' ? 'notes' : secondTab;
 
-  const transcriptText =
-    speakerIdentificationEnabled && recording.hasIdentifiedTranscript
-      ? (recording.identifiedTranscript ?? recording.transcript)
-      : recording.transcript;
   // Nothing to summarize without a transcript, so the offer waits for one to exist.
   const hasTranscript =
     !!transcriptText?.trim() || !!recordingRow?.transcript || !!recording.hasTranscript;
 
   const handleMarkerSelect = (item: MarkedItem): void => {
-    setCitationRef({ timestampSeconds: item.timestampSeconds });
+    // A moment already announces itself in the transcript with a divider, so only
+    // decisions and actions need the amber line highlight to be findable.
+    setCitationRef({
+      timestampSeconds: item.timestampSeconds,
+      ...(item.type === 'moment' ? {} : { highlight: 'marker' as const }),
+    });
     setCitationNonce(value => value + 1);
     setShowTranscriptPanel(true);
   };
@@ -578,6 +616,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
               recording={recording}
               isLive={isLive}
               onStopped={() => void loadRecording(recording.externalId)}
+              isAudioPreparing={!showAudioPlayer && !audioPollExhausted}
               {...(showAudioPlayer
                 ? {
                     onLoadAudio: (signal: AbortSignal) =>
@@ -748,6 +787,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
           transcript={transcriptText}
           target={citationRef}
           openNonce={citationNonce}
+          markedTimestampsSeconds={markedMomentSeconds}
           onClose={() => {
             setShowTranscriptPanel(false);
             setCitationRef(null);

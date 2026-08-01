@@ -1,10 +1,14 @@
 import { callService } from '../../../services/Call/callService';
 
 // Shared highlight for the cited transcript line — used by BOTH the hover preview
-// and the full modal so they stay in sync. Soft blue (not yellow). Lives in a
-// className string (never runtime classList.add) so Tailwind reliably generates it.
-export const CITATION_HIGHLIGHT =
-  'border-l-2 border-orange-400 bg-orange-50/80 text-foreground ring-1 ring-inset ring-orange-200/80 dark:border-orange-300 dark:bg-orange-400/10 dark:ring-orange-400/30';
+// and the full side panel so they stay in sync. A neutral filled block rather than a
+// coloured accent: the panel now shows marked-moment dividers, which own the red/
+// primary accent, so a tinted citation would read as a second kind of flag. Lives in
+// a className string (never runtime classList.add) so Tailwind reliably generates it.
+export const CITATION_HIGHLIGHT = 'bg-muted text-foreground ring-1 ring-inset ring-border/50';
+
+export const MARKER_HIGHLIGHT =
+  'bg-yellow-500/15 text-foreground ring-1 ring-inset ring-yellow-500/40';
 
 // Shared transcript fetch + parse used by BOTH the transcript hover-card
 // (CanvasCitationSpec) and the full transcript modal (TranscriptCitationModal).
@@ -86,6 +90,19 @@ export function findIndexByTimeSeconds(lines: TranscriptLine[], seconds: number)
 
   // A marker placed before the first spoken line still belongs to it.
   return match >= 0 ? match : lines.findIndex(line => line.timestamp !== null);
+}
+
+export function markedMomentLineIndices(
+  lines: TranscriptLine[],
+  timestampsSeconds: readonly number[],
+): Set<number> {
+  const indices = new Set<number>();
+  for (const seconds of timestampsSeconds) {
+    if (!Number.isFinite(seconds)) continue;
+    const index = findIndexByTimeSeconds(lines, seconds);
+    if (index >= 0) indices.add(index);
+  }
+  return indices;
 }
 
 /** Resolve the line index for a citation: prefer the stable segment number
