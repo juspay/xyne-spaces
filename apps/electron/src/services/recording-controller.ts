@@ -1,4 +1,4 @@
-import { BrowserWindow } from 'electron';
+import { app, BrowserWindow } from 'electron';
 import log from 'electron-log/main';
 import { getMainWindow, createMainWindow, setWindowReferences } from '../window/manager';
 import { showRecordingPill, hideRecordingPill } from './recording-pill-window';
@@ -93,6 +93,34 @@ export function focusMainWindow(pathname?: string): BrowserWindow | null {
   return mainWindow;
 }
 
+function isMainWindowFocused(): boolean {
+  const mainWindow = getMainWindow();
+  return !!mainWindow && !mainWindow.isDestroyed() && mainWindow.isFocused();
+}
+
+function syncPillVisibility(): void {
+  if (active && !isMainWindowFocused()) {
+    showRecordingPill(startTime ?? Date.now());
+  } else {
+    hideRecordingPill();
+  }
+}
+
+export function initRecordingPillVisibility(): void {
+  const handleWindowFocus = (): void => syncPillVisibility();
+  const handleWindowBlur = (): void => {
+    setTimeout(syncPillVisibility, 0);
+  };
+
+  app.on('browser-window-focus', handleWindowFocus);
+  app.on('browser-window-blur', handleWindowBlur);
+
+  app.once('will-quit', () => {
+    app.removeListener('browser-window-focus', handleWindowFocus);
+    app.removeListener('browser-window-blur', handleWindowBlur);
+  });
+}
+
 function markExternalStartPending(): void {
   clearExternalStartPending();
   externalStartExpiry = setTimeout(() => {
@@ -159,13 +187,10 @@ export function syncRecordingState(nextActive: boolean, nextStartTime?: number):
   startTime = nextActive ? (nextStartTime ?? Date.now()) : null;
 
   if (nextActive && !wasActive) {
-    if (externalStartExpiry) {
-      clearExternalStartPending();
-      showRecordingPill(startTime ?? Date.now());
-    }
-  } else if (!nextActive && wasActive) {
-    hideRecordingPill();
+    clearExternalStartPending();
   }
+
+  syncPillVisibility();
 
   notifyListeners();
 }
