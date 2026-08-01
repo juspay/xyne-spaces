@@ -5,7 +5,6 @@ import {
   useState,
   type ReactElement,
   type TransitionEvent,
-  type UIEvent,
 } from 'react';
 import {
   ChevronDown,
@@ -13,26 +12,22 @@ import {
   Flag,
   PauseBig,
   PlayBig,
-  SearchBig,
   Spinner,
   StopBig,
-  MultipleCrossCancelDefault,
   CloudDisabled,
 } from '@xyne/icons';
 import { Maximize2, Minimize2 } from 'lucide-react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { useWorkspaceNavigate } from '../../../hooks/useWorkspaceNavigate';
 import { Button } from '../../../components/ui/Button/Button';
-import Input from '../../../components/ui/Input';
 import { CollaborativeCanvasEditor } from '../../../components/Canvas/CollaborativeCanvasEditor';
+import { LiveTranscriptList } from '../../../components/Notetaker/LiveTranscriptList';
 import { useDraggableOverlay } from '../../../hooks/useDraggableOverlay';
-import { useTextSearch } from '../../../hooks/useTextSearch';
-import type { RecordingState, TranscriptEntry } from '../../../stores/recordingStore';
+import type { MarkedMoment, RecordingState, TranscriptEntry } from '../../../stores/recordingStore';
 import { DEFAULT_RECORDING_TITLE } from '../../../stores/recordingStore';
 import { cn } from '../../../utils/classNames';
 import { calculateRecordingElapsedMs, formatElapsedTime } from '../../../utils/recordingUtils';
 import { canvasService } from '../../../services/Canvas/canvasService';
-import { HighlightedText } from '../../RecordingsScreen/components/HighlightedText';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -42,6 +37,7 @@ interface NoteTakerOverlayProps {
   pauseStartedAt: number | null;
   accumulatedPausedMs: number;
   transcripts: TranscriptEntry[];
+  markedMoments: MarkedMoment[];
   channelId: string | null;
   recordingId: string | null;
   notesCanvasId: string | null;
@@ -53,6 +49,7 @@ interface NoteTakerOverlayProps {
   onStop: () => void;
   onPause: () => void;
   onResume: () => void;
+  onMarkMoment: () => void;
 }
 
 type TabId = 'notes' | 'transcript';
@@ -71,25 +68,7 @@ interface RecordingControlBarProps {
   onPause: () => void;
   onResume: () => void;
   onStop: () => void;
-}
-
-interface TranscriptSearchBarProps {
-  query: string;
-  matchCount: number;
-  currentIndex: number;
-  onQueryChange: (value: string) => void;
-  onFocus: () => void;
-  onKeyDown: (event: React.KeyboardEvent<HTMLInputElement>) => void;
-  onPrevious: () => void;
-  onNext: () => void;
-  onClear: () => void;
-}
-
-interface TranscriptTabProps {
-  transcripts: TranscriptEntry[];
-  isPaused: boolean;
-  isCollapsed: boolean;
-  isPanelTransitioning: boolean;
+  onMarkMoment: () => void;
 }
 
 interface NotesTabProps {
@@ -102,7 +81,6 @@ interface NotesTabProps {
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
-const FOLLOW_THRESHOLD_PX = 40;
 const TRACK_CATEGORY = 'NoteTakerOverlay';
 /** Matches the `h-8` inner row; needed as a number so the bar can animate open. */
 const OFFLINE_BAR_HEIGHT_PX = 32;
@@ -208,6 +186,7 @@ const RecordingControlBar = ({
   onPause,
   onResume,
   onStop,
+  onMarkMoment,
 }: RecordingControlBarProps): ReactElement => (
   <div
     className='flex h-13 shrink-0 items-center gap-1.5 border-t border-border px-4 py-2'
@@ -225,6 +204,7 @@ const RecordingControlBar = ({
         type='button'
         variant='ghost'
         size='iconSm'
+        onClick={onMarkMoment}
         className='rounded-xl text-muted-foreground hover:bg-muted hover:text-foreground'
         aria-label='Mark moment'
         title='Mark moment'
@@ -278,205 +258,6 @@ const RecordingControlBar = ({
     </div>
   </div>
 );
-
-const TranscriptSearchBar = ({
-  query,
-  matchCount,
-  currentIndex,
-  onQueryChange,
-  onFocus,
-  onKeyDown,
-  onPrevious,
-  onNext,
-  onClear,
-}: TranscriptSearchBarProps): ReactElement => (
-  <div className='shrink-0 p-2.5'>
-    <div className='flex h-8 items-center gap-1 rounded-lg border border-border bg-muted/30 px-2.5 text-muted-foreground shadow-xs'>
-      <SearchBig size={12} strokeWidth={2.2} className='shrink-0 text-muted-foreground/75 mb-0.5' />
-      <Input
-        id='floating-transcript-search'
-        type='text'
-        value={query}
-        onFocus={onFocus}
-        onChange={event => onQueryChange(event.target.value)}
-        onKeyDown={onKeyDown}
-        placeholder='Search transcript…'
-        className='h-auto min-w-0 flex-1 rounded-none border-0 p-0 text-xs md:text-xs shadow-none placeholder:text-muted-foreground/75 focus-visible:border-transparent focus-visible:ring-0'
-        aria-label='Search transcript'
-        data-track-category={TRACK_CATEGORY}
-        data-track-name='transcript_search_input'
-      />
-      {query && (
-        <>
-          <span className='shrink-0 text-[10px] tabular-nums text-muted-foreground'>
-            {matchCount > 0 ? `${currentIndex + 1} of ${matchCount}` : 'No matches'}
-          </span>
-          <Button
-            type='button'
-            variant='ghost'
-            size='iconSm'
-            onClick={onPrevious}
-            disabled={matchCount === 0}
-            className='size-5 rounded-full hover:bg-muted disabled:opacity-35'
-            aria-label='Previous match'
-            data-track-category={TRACK_CATEGORY}
-            data-track-name='transcript_search_previous'
-          >
-            <ChevronUp size={14} />
-          </Button>
-          <Button
-            type='button'
-            variant='ghost'
-            size='iconSm'
-            onClick={onNext}
-            disabled={matchCount === 0}
-            className='size-5 rounded-full hover:bg-muted disabled:opacity-35'
-            aria-label='Next match'
-            data-track-category={TRACK_CATEGORY}
-            data-track-name='transcript_search_next'
-          >
-            <ChevronDown size={14} />
-          </Button>
-          <Button
-            type='button'
-            variant='ghost'
-            size='iconSm'
-            onClick={onClear}
-            className='size-5 rounded-full hover:bg-muted'
-            aria-label='Clear transcript search'
-            data-track-category={TRACK_CATEGORY}
-            data-track-name='transcript_search_clear'
-          >
-            <MultipleCrossCancelDefault className='size-3' />
-          </Button>
-        </>
-      )}
-    </div>
-  </div>
-);
-
-const TranscriptTab = ({
-  transcripts,
-  isPaused,
-  isCollapsed,
-  isPanelTransitioning,
-}: TranscriptTabProps): ReactElement => {
-  const shouldReduceMotion = useReducedMotion();
-  const transcriptViewportRef = useRef<HTMLDivElement>(null);
-  const [isFollowing, setIsFollowing] = useState(true);
-  const getTranscriptText = useCallback((entry: TranscriptEntry) => entry.text, []);
-  const search = useTextSearch({ items: transcripts, getText: getTranscriptText });
-
-  const scrollToCurrent = useCallback((behavior: ScrollBehavior = 'smooth'): void => {
-    const viewport = transcriptViewportRef.current;
-    if (!viewport) return;
-    viewport.scrollTo({ top: viewport.scrollHeight, behavior });
-  }, []);
-
-  /** Auto-scroll to the latest transcript entry when following is active. */
-  useEffect(() => {
-    if (!isCollapsed && !isPanelTransitioning && isFollowing && !search.query.trim()) {
-      scrollToCurrent('auto');
-    }
-  }, [isCollapsed, isFollowing, isPanelTransitioning, scrollToCurrent, search.query, transcripts]);
-
-  const handleTranscriptScroll = (event: UIEvent<HTMLDivElement>): void => {
-    const viewport = event.currentTarget;
-    const distanceFromBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
-    setIsFollowing(distanceFromBottom <= FOLLOW_THRESHOLD_PX);
-  };
-
-  return (
-    <div className='flex min-h-0 flex-1 flex-col'>
-      <TranscriptSearchBar
-        query={search.query}
-        matchCount={search.matchCount}
-        currentIndex={search.currentIndex}
-        onQueryChange={search.setQuery}
-        onFocus={search.open}
-        onKeyDown={search.handleKeyDown}
-        onPrevious={search.goToPrevious}
-        onNext={search.goToNext}
-        onClear={search.close}
-      />
-
-      <div className='relative min-h-0 flex-1 overflow-hidden'>
-        <div
-          ref={transcriptViewportRef}
-          onScroll={handleTranscriptScroll}
-          className='thin-scrollbar h-full scroll-smooth overflow-y-auto px-4 pb-5 '
-        >
-          <div className='flex min-h-full flex-col'>
-            {transcripts.length > 0 && (
-              <div className='mt-auto space-y-2.5 text-sm leading-[21px] text-foreground/85'>
-                {transcripts.map((entry, index) => (
-                  <p key={entry.id}>
-                    <HighlightedText
-                      text={entry.text}
-                      matches={search.matches}
-                      itemIndex={index}
-                      currentMatchIndex={search.currentIndex}
-                      matchRefs={search.matchRefs}
-                      currentMatchClassName='bg-primary text-background [[data-theme=midnight]_&]:text-foreground py-0.5'
-                      otherMatchClassName='bg-yellow-200 [[data-theme=midnight]_&]:bg-yellow-300 text-yellow-950 py-0.5'
-                    />
-                  </p>
-                ))}
-              </div>
-            )}
-
-            <div
-              className={cn(
-                'flex items-center gap-1 pt-3 text-xs italic text-muted-foreground/65',
-                transcripts.length === 0 && 'mt-auto',
-              )}
-            >
-              <span
-                className='relative h-4 w-[2px] shrink-0 overflow-hidden rounded-full bg-muted'
-                aria-hidden='true'
-              >
-                <span
-                  className={cn(
-                    'absolute inset-0 motion-reduce:animate-none',
-                    isPaused
-                      ? 'bg-muted'
-                      : 'animate-[rec-blink_800ms_steps(1,end)_infinite] bg-primary',
-                  )}
-                />
-              </span>
-              <span>{isPaused ? 'paused' : 'transcribing...'}</span>
-            </div>
-          </div>
-        </div>
-
-        <AnimatePresence>
-          {!isCollapsed && !isPanelTransitioning && !isFollowing && transcripts.length > 0 && (
-            <motion.div
-              initial={shouldReduceMotion ? false : { opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, y: 6 }}
-              transition={{ duration: shouldReduceMotion ? 0 : 0.12 }}
-              className='pointer-events-none absolute inset-x-0 bottom-3 flex justify-center'
-            >
-              <Button
-                type='button'
-                variant='outline'
-                size='sm'
-                onClick={() => scrollToCurrent()}
-                className='pointer-events-auto flex h-7 items-center gap-1.5 rounded-full border border-border/70 bg-foreground px-3 text-xs font-medium text-background shadow-lg backdrop-blur-sm outline-none transition-colors hover:bg-foregorund hover:text-background'
-                data-track-category={TRACK_CATEGORY}
-                data-track-name='return_to_current'
-              >
-                Return to current
-                <ChevronDown size={13} strokeWidth={2.5} />
-              </Button>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
-    </div>
-  );
-};
 
 const NotesTab = ({
   notesCanvasId,
@@ -553,6 +334,7 @@ export function NoteTakerOverlay({
   pauseStartedAt,
   accumulatedPausedMs,
   transcripts,
+  markedMoments,
   channelId,
   recordingId,
   notesCanvasId,
@@ -564,6 +346,7 @@ export function NoteTakerOverlay({
   onStop,
   onPause,
   onResume,
+  onMarkMoment,
 }: NoteTakerOverlayProps): ReactElement | null {
   const shouldReduceMotion = useReducedMotion();
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -733,11 +516,13 @@ export function NoteTakerOverlay({
           <div
             className={cn('flex min-h-0 flex-1 flex-col', activeTab !== 'transcript' && 'hidden')}
           >
-            <TranscriptTab
+            <LiveTranscriptList
+              variant='panel'
               transcripts={transcripts}
+              markedMoments={markedMoments}
               isPaused={isPaused}
-              isCollapsed={isCollapsed}
-              isPanelTransitioning={isPanelTransitioning}
+              isScrollSuspended={isCollapsed || isPanelTransitioning}
+              trackCategory={TRACK_CATEGORY}
             />
           </div>
 
@@ -757,6 +542,7 @@ export function NoteTakerOverlay({
             onPause={onPause}
             onResume={onResume}
             onStop={onStop}
+            onMarkMoment={onMarkMoment}
           />
         </div>
       </section>

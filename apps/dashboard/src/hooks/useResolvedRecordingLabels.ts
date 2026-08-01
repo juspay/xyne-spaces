@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { tagsApi } from '../../../api/tagsApi';
+import { tagsApi } from '../api/tagsApi';
 
 // Module-level cache shared across mounts/pagination so re-rendering with an
 // overlapping set of ids (e.g. scrolling the recordings list) never re-fetches

@@ -222,6 +222,15 @@ export class CallRepository {
     return result;
   }
 
+  async appendMarkedItem(externalId: string, item: Prisma.InputJsonValue): Promise<boolean> {
+    const rowsUpdated = await DatabaseClient.getInstance().$executeRaw`
+      UPDATE "calls"
+      SET "markedItems" = "markedItems" || ${JSON.stringify(item)}::jsonb
+      WHERE "externalId" = ${externalId}
+    `;
+    return rowsUpdated > 0;
+  }
+
   async findById(id: string): Promise<Call | null> {
     const result = await DatabaseClient.getInstance().call.findUnique({
       where: { id }

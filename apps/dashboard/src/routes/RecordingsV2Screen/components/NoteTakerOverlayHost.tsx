@@ -5,6 +5,7 @@ import { AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
 import { refreshOatsRecordings } from '../../../hooks/usePaginatedOatsRecordings';
+import { useMarkMoment } from '../../../hooks/useMarkMoment';
 import { sendRecordingEvent, useRecordingStore } from '../../../hooks/useRecordingStore';
 import { useZero } from '../../../hooks/useZero';
 import { canvasService } from '../../../services/Canvas/canvasService';
@@ -25,7 +26,9 @@ export function NoteTakerOverlayHost(): ReactElement {
   const pendingStop = useRecordingStore(context => context.pendingStop);
   const agentLeft = useRecordingStore(context => context.agentLeft);
   const transcripts = useRecordingStore(context => context.transcripts);
+  const markedMoments = useRecordingStore(context => context.markedMoments);
   const zero = useZero();
+  const { markMoment } = useMarkMoment();
   const { showOfflineBanner } = useZeroOfflineState();
   const [isCreatingNotes, setIsCreatingNotes] = useState(false);
   const [notesCreationFailed, setNotesCreationFailed] = useState(false);
@@ -142,6 +145,7 @@ export function NoteTakerOverlayHost(): ReactElement {
             pauseStartedAt={pauseStartedAt}
             accumulatedPausedMs={accumulatedPausedMs}
             transcripts={transcripts}
+            markedMoments={markedMoments}
             channelId={channelId}
             recordingId={externalId}
             notesCanvasId={notesCanvasId}
@@ -153,6 +157,7 @@ export function NoteTakerOverlayHost(): ReactElement {
             onStop={handleStop}
             onPause={() => sendRecordingEvent({ type: 'pauseRecording' })}
             onResume={() => sendRecordingEvent({ type: 'resumeRecording' })}
+            onMarkMoment={markMoment}
           />
         )}
       </AnimatePresence>

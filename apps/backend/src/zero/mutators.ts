@@ -4581,6 +4581,50 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           });
         },
       ),
+      // Append a moment the user flagged mid-recording to Call.markedItems. The same
+      // column holds the decisions/actions the summary pipeline extracts once the call
+      // ends (noteTakerTranscriptService.finalizeCallUpdates preserves these), so
+      // entries are told apart by `type`. `timestampSeconds` is measured from the first
+      // transcript line, matching how transcriptService.formatTranscript timestamps the
+      // transcript itself.
+      markMoment: defineMutator(
+        z.object({
+          callId: z.string(),
+          type: z.literal('moment'),
+          timestampSeconds: z.number().nonnegative(),
+          text: z.string(),
+        }),
+        async ({ tx, args: { callId, type, timestampSeconds, text } }) => {
+          const call = await tx.run(zql.calls.where('externalId', callId).one());
+          if (!call) {
+            throw new Error('Call not found');
+          }
+          if (call.createdByUserId !== authData.sub) {
+            throw new Error('Access denied');
+          }
+
+          // tx.mutate can't write markedItems: Zero models the jsonb[] column as plain
+          // json, so Postgres rejects the value. Appended after commit instead, as a
+          // single statement since concurrent marks and the summary pipeline share the
+          // column. See callRepository.appendMarkedItem.
+          asyncTasks.push(async () => {
+            try {
+              const appended = await repositories.calls.appendMarkedItem(callId, {
+                type,
+                text,
+                timestampSeconds,
+              });
+              if (!appended) {
+                logger.warn('mark_moment_not_persisted', { callId, reason: 'call_not_found' });
+              }
+            } catch (error) {
+              // allSettled swallows this, and the client's `.server` promise already
+              // resolved success — a log line is the only trace the moment was lost.
+              logger.error('mark_moment_append_failed', { callId, timestampSeconds, error });
+            }
+          });
+        },
+      ),
       // Share a HEADLESS recording with a workspace user, user group, or channel.
       // Exactly one of targetUserId/targetUserGroupId/targetChannelId must be set.
       // Only the recording's creator or a workspace OWNER/ADMIN may share it.

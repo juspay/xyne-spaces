@@ -28,6 +28,29 @@ interface GeneratedRecordingSummary {
 }
 
 /**
+ * Moments the user flagged during the recording, read back off a Call row.
+ * They share Call.markedItems with the decisions/actions generated here, and the
+ * type filter is what keeps re-runs idempotent: a second pass drops the previous
+ * run's generated items and keeps only the user's.
+ */
+function userMarkedMoments(markedItems: Call['markedItems']): MarkedItem[] {
+  if (!Array.isArray(markedItems)) return [];
+
+  return markedItems.filter(
+    (item): item is MarkedItem & Prisma.JsonObject =>
+      !!item &&
+      typeof item === 'object' &&
+      !Array.isArray(item) &&
+      (item as Record<string, unknown>).type === 'moment',
+  );
+}
+
+/** Marked items come from JSON, so the timestamp can be anything at runtime. */
+function markedItemTimestamp(item: MarkedItem): number {
+  return typeof item.timestampSeconds === 'number' ? item.timestampSeconds : 0;
+}
+
+/**
  * NOTE_TAKER (HEADLESS / "Xyne Oats") call transcript pipeline.
  *
  * Entry points: transcriptionAgentController.transcriptReady and
@@ -228,6 +251,12 @@ class NoteTakerTranscriptService {
    * Metadata entries that are null/undefined are skipped (e.g. canvas
    * generation failed); labels/markedItems are only written when non-empty,
    * so a transient LLM failure never clobbers a previously-saved good result.
+   *
+   * markedItems is a full-column overwrite, but the user's own marked moments
+   * live in that same column (written mid-recording by calls.markMoment), so
+   * they are carried over here — otherwise finishing a call would erase every
+   * moment the user flagged during it. Those are re-read below rather than taken
+   * from `call`, which is the one field where the snapshot is not good enough.
    */
   private async finalizeCallUpdates(
     call: Call,
@@ -259,7 +288,13 @@ class NoteTakerTranscriptService {
       data.labels = updates.labels;
     }
     if (updates.markedItems && updates.markedItems.length > 0) {
-      data.markedItems = updates.markedItems as unknown as Prisma.InputJsonValue[];
+      
+      const current = await repositories.calls.findByExternalId(call.externalId);
+      const existingMoments = userMarkedMoments(current?.markedItems ?? call.markedItems);
+
+      const merged = [...existingMoments, ...updates.markedItems];
+      merged.sort((a, b) => markedItemTimestamp(a) - markedItemTimestamp(b));
+      data.markedItems = merged as unknown as Prisma.InputJsonValue[];
     }
     if (updates.summaryTemplateId !== undefined) {
       data.summaryTemplateId = updates.summaryTemplateId;

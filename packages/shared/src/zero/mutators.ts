@@ -3137,6 +3137,38 @@ export const mutators = defineMutators({
         });
       },
     ),
+    // Append a moment the user flagged mid-recording to Call.markedItems. The same
+    // column holds the decisions/actions the summary pipeline extracts once the call
+    // ends (which preserves these), so entries are told apart by `type`.
+    // `timestampSeconds` is measured from the first transcript line, matching how
+    // transcriptService.formatTranscript timestamps the transcript itself..
+    
+    markMoment: defineMutator(
+      z.object({
+        callId: z.string(),
+        type: z.literal('moment'),
+        timestampSeconds: z.number().nonnegative(),
+        text: z.string(),
+      }),
+      async ({ tx, ctx, args: { callId, type, timestampSeconds, text } }) => {
+        const call = await tx.run(zql.calls.where('externalId', callId).one());
+        // Headless recording calls are fetched via the oats* named queries and may not
+        // be synced into the client's optimistic cache. Skip and let the authoritative
+        // server mutator perform the write against Postgres, where the call exists.
+        if (!call) {
+          return;
+        }
+        if (call.createdByUserId !== ctx.userID) {
+          throw new Error('Access denied');
+        }
+
+        const markedItems = Array.isArray(call.markedItems) ? call.markedItems : [];
+        await tx.mutate.calls.update({
+          id: call.id,
+          markedItems: [...markedItems, { type, text, timestampSeconds }],
+        });
+      },
+    ),
     // Share a HEADLESS recording with a workspace user, user group, or channel.
     // Exactly one of targetUserId/targetUserGroupId/targetChannelId must be set.
     // Only the recording's creator or a workspace OWNER/ADMIN may share it.

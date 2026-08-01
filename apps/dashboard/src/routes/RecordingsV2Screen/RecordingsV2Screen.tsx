@@ -18,9 +18,10 @@ import { RecordingDateFilter } from './components/RecordingDateFilter';
 import RecordingControlsOverlay from './components/RecordingControlsOverlay';
 import { RecordingLabelFilter } from './components/RecordingLabelFilter';
 import { RecordingPeopleFilter } from './components/RecordingPeopleFilter';
+import { RecordingSharedWithMeTab } from './components/RecordingSharedWithMeTab';
 import RecordingsV2Pill, { RecordingsV2LivePill } from './components/RecordingsV2Pill';
 import { RecordingsV2Skeleton } from './components/RecordingsV2Skeleton';
-import { useResolvedRecordingLabels } from './hooks/useResolvedRecordingLabels';
+import { useResolvedRecordingLabels } from '../../hooks/useResolvedRecordingLabels';
 import {
   buildRecordingRows,
   filterRecordingsByLabels,
@@ -29,10 +30,10 @@ import {
   getRecordingDatePresetLabel,
   isRecordingInDatePreset,
   LIST_TAB_CLASS_NAME,
-  normalizeRecordingTags,
   type RecordingDatePreset,
   type RecordingOwnershipTab,
 } from './utils/RecordingsV2.utils';
+import { normalizeRecordingTags } from '../../utils/recordingUtils';
 import { DEFAULT_RECORDING_TITLE } from '@/stores/recordingStore';
 
 const RecordingsV2Screen = (): ReactElement => {
@@ -43,6 +44,7 @@ const RecordingsV2Screen = (): ReactElement => {
   const [selectedCreatorId, setSelectedCreatorId] = useState<string | null>(null);
   const [selectedDatePreset, setSelectedDatePreset] = useState<RecordingDatePreset>('this-week');
   const [selectedLabels, setSelectedLabels] = useState<string[]>([]);
+  const [selectedSharerIds, setSelectedSharerIds] = useState<string[]>([]);
   const {
     recordings,
     hasMoreRecordings,
@@ -100,9 +102,15 @@ const RecordingsV2Screen = (): ReactElement => {
   // per-row chips show real label names instead of raw ids.
   const { resolveLabel } = useResolvedRecordingLabels(availableLabels);
 
+  /** An explicit pick in the People filter wins over the tab's shared-by picker. */
+  const selectedCreatorIds = useMemo(
+    () => (selectedCreatorId ? [selectedCreatorId] : selectedSharerIds),
+    [selectedCreatorId, selectedSharerIds],
+  );
+
   const ownershipFilteredRecordings = useMemo(
-    () => filterRecordingsByOwnership(recordings, selectedCreatorId),
-    [recordings, selectedCreatorId],
+    () => filterRecordingsByOwnership(recordings, selectedCreatorIds),
+    [recordings, selectedCreatorIds],
   );
 
   const liveRecording = useMemo(() => {
@@ -151,11 +159,17 @@ const RecordingsV2Screen = (): ReactElement => {
     [recordings],
   );
 
-  const handleTabChange = useCallback((tab: RecordingOwnershipTab): void => {
-    setActiveListTab(tab);
-    setSelectedCreatorId(null);
-    setSelectedLabels([]);
-  }, []);
+  const handleTabChange = useCallback(
+    (tab: RecordingOwnershipTab): void => {
+      if (tab === activeListTab) return;
+
+      setActiveListTab(tab);
+      setSelectedCreatorId(null);
+      setSelectedLabels([]);
+      setSelectedSharerIds([]);
+    },
+    [activeListTab],
+  );
 
   const handleCreatorChange = useCallback(
     (creatorId: string | null): void => {
@@ -251,21 +265,13 @@ const RecordingsV2Screen = (): ReactElement => {
                   >
                     Created by me
                   </button>
-                  <button
-                    type='button'
-                    aria-pressed={activeListTab === 'shared'}
-                    onClick={() => handleTabChange('shared')}
-                    className={cn(
-                      LIST_TAB_CLASS_NAME,
-                      activeListTab === 'shared'
-                        ? 'bg-background text-foreground font-medium'
-                        : 'text-muted-foreground/80 hover:text-foreground',
-                    )}
-                    data-track-category='RecordingsV2'
-                    data-track-name='show_shared_with_me'
-                  >
-                    Shared with me
-                  </button>
+                  <RecordingSharedWithMeTab
+                    isActive={activeListTab === 'shared'}
+                    onActivate={() => handleTabChange('shared')}
+                    sharers={activeListTab === 'shared' ? availableCreators : []}
+                    selectedSharerIds={selectedSharerIds}
+                    onSelectedSharerIdsChange={setSelectedSharerIds}
+                  />
                 </div>
 
                 <RecordingDateFilter value={selectedDatePreset} onChange={setSelectedDatePreset} />
@@ -374,7 +380,7 @@ const RecordingsV2Screen = (): ReactElement => {
               <div className='flex flex-1 flex-col items-center justify-center px-6 pb-28 text-center'>
                 <RecordingsEmptyStateIllustration />
                 <h2 className='text-base font-semibold text-foreground'>
-                  {selectedCreatorId ||
+                  {selectedCreatorIds.length > 0 ||
                   selectedLabels.length > 0 ||
                   ownershipFilteredRecordings.length > 0
                     ? 'No matching recordings'

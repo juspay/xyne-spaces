@@ -3,7 +3,8 @@
  * Supports both live (ongoing) and past recording flows.
  */
 
-import { type ReactElement, useState, useEffect, useCallback, useMemo } from 'react';
+import { type ReactElement, useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { motion } from 'framer-motion';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
 import {
@@ -12,21 +13,11 @@ import {
   type RecordingDetail,
 } from '../../services/Recording/recordingService';
 import { useShortcut } from '../../shortcuts';
-import {
-  AlertCircle,
-  Check,
-  ChevronDown,
-  Hash,
-  Mail,
-  Music,
-  PanelRightOpen,
-  Sparkles,
-  StickyNote,
-} from 'lucide-react';
+import { AlertCircle, ChevronDown, Hash, Mail, PanelRightOpen, StickyNote } from 'lucide-react';
 import { toast } from 'sonner';
 import { logRecordingError } from '../../utils/recordingUtils';
 import { useSpeakerIdentificationEnabled } from '../../components/SpeakerIdentification/useSpeakerIdentificationEnabled';
-import { Spinner } from '@xyne/icons';
+import { Spinner, Flag } from '@xyne/icons';
 import { Button } from '../../components/ui/Button/Button';
 import { Dialog } from '../../components/ui/Dialog';
 import { Tooltip } from '../../components/ui/Tooltip';
@@ -36,15 +27,20 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '../../components/ui/dropdown-menu';
-import { AudioPlayer } from '../../components/ui/AudioPlayer/AudioPlayer';
 import { RecordingDetailV2Header } from './components/RecordingDetailV2Header';
 import { LiveRecordingControlBar } from './components/LiveRecordingControlBar';
+import { LiveTranscriptSection } from './components/LiveTranscriptSection';
+import {
+  RecordingContentTabs,
+  type RecordingSummaryTemplate,
+} from './components/RecordingContentTabs';
 import { SummaryWithCitations } from './components/SummaryWithCitations';
 import { PostRecordingToChannelModal } from './components/PostRecordingToChannelModal';
 import { PostRecordingToEmailModal } from './components/PostRecordingToEmailModal';
 import { CollaborativeCanvasEditor } from '../../components/Canvas/CollaborativeCanvasEditor/CollaborativeCanvasEditor';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { sendRecordingEvent, useRecordingStore } from '../../hooks/useRecordingStore';
+import { useMarkMoment } from '../../hooks/useMarkMoment';
 import { queries } from '../../zero/queries';
 import { TranscriptSidePanel } from '../../components/Chat/TranscriptCitationModal/TranscriptSidePanel';
 import type { Canvas } from '../../components/Canvas/Canvas.types';
@@ -54,11 +50,7 @@ interface RecordingNavState {
   recordingIds?: string[];
 }
 
-const RECORDING_SUMMARY_TEMPLATES: ReadonlyArray<{
-  id: BuiltinRecordingSummaryTemplateId;
-  name: string;
-  icon: string;
-}> = [
+const RECORDING_SUMMARY_TEMPLATES: ReadonlyArray<RecordingSummaryTemplate> = [
   { id: 'default', name: 'Default summary', icon: '⚡' },
   { id: 'product_sync', name: 'Product sync', icon: '🔁' },
   { id: 'customer_discovery', name: 'Customer: Discovery', icon: '💰' },
@@ -82,7 +74,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
   const [recording, setRecording] = useState<RecordingDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'notes' | 'summary'>('summary');
+  const [activeTab, setActiveTab] = useState<'notes' | 'summary' | 'transcript'>('summary');
   const [showTranscriptPanel, setShowTranscriptPanel] = useState(false);
   const [showPostToChannelModal, setShowPostToChannelModal] = useState(false);
   const [showPostToEmailModal, setShowPostToEmailModal] = useState(false);
@@ -193,6 +185,20 @@ export default function RecordingDetailV2Screen(): ReactElement {
   };
 
   const activeRecordingId = useRecordingStore(context => context.externalId);
+  const liveNotesCanvasId = useRecordingStore(context => context.notesCanvasId);
+  const { markMoment, canMark } = useMarkMoment(recordingId);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+  /**
+   * The panels differ wildly in height — a long transcript against a short notes
+   * canvas — so switching while scrolled leaves the browser clamping the scroll
+   * position as the page shrinks, which reads as the sticky bar lurching. Land at the
+   * top instead, instantly: a smooth scroll here would race the tab animation.
+   */
+  const handleTabSelect = useCallback((tab: 'notes' | 'summary' | 'transcript'): void => {
+    setActiveTab(tab);
+    scrollContainerRef.current?.scrollTo({ top: 0 });
+  }, []);
 
   const handleTitleUpdated = (title: string): void => {
     if (!recording) return;
@@ -201,6 +207,10 @@ export default function RecordingDetailV2Screen(): ReactElement {
     if (recording.externalId === activeRecordingId) {
       sendRecordingEvent({ type: 'setTitle', title });
     }
+  };
+
+  const handleLabelsUpdated = (labels: string[]): void => {
+    setRecording(current => (current ? { ...current, labels } : current));
   };
 
   const handleSummaryTemplateSelect = async (
@@ -226,7 +236,9 @@ export default function RecordingDetailV2Screen(): ReactElement {
             }
           : current,
       );
-      setActiveTab('summary');
+      // Lands on the summary it just generated; goes through the tab handler so the
+      // pane switch resets the scroll position the same way a manual click does.
+      handleTabSelect('summary');
       const selected = RECORDING_SUMMARY_TEMPLATES.find(
         template => template.id === result.summaryTemplateId,
       );
@@ -249,21 +261,29 @@ export default function RecordingDetailV2Screen(): ReactElement {
     { enabled: !!recording?.messageId },
   );
 
+  /**
+   * A note-taker recording has no channel, message or conversation — it is created
+   * from a LiveKit webhook rather than posted anywhere — so none of those can gate
+   * opening Ask AI. Each is passed only when it exists, which is the case for a
+   * channel call viewed on this screen; otherwise the panel opens unscoped, exactly
+   * as the recordings list does.
+   */
   const handleAskAI = useCallback((): void => {
-    if (!recording?.channelId) {
-      toast.error('Cannot open Ask AI for this recording');
-      return;
-    }
     const attachmentIds = (message?.attachments ?? []).map((att: { id: string }) => att.id);
+    const hasThreadContext = !!recording?.conversationId || attachmentIds.length > 0;
+
     xyneAIActor.send({
       type: 'OPEN',
       startFreshChat: true,
-      channelId: recording.channelId,
-      threadInfo: {
-        conversationId: recording.conversationId ?? '',
-        previewText: recording.title || 'Recording Transcript',
-        ...(attachmentIds.length > 0 ? { attachmentIds } : {}),
-      },
+      contextType: 'general',
+      ...(recording?.channelId ? { channelId: recording.channelId } : {}),
+      threadInfo: hasThreadContext
+        ? {
+            conversationId: recording?.conversationId ?? '',
+            previewText: recording?.title || 'Recording Transcript',
+            ...(attachmentIds.length > 0 ? { attachmentIds } : {}),
+          }
+        : null,
     });
   }, [recording, message]);
 
@@ -289,14 +309,29 @@ export default function RecordingDetailV2Screen(): ReactElement {
     );
   }
 
-  const hasNotes = !!recording.notesCanvasId;
+  // While live the notes canvas is created by NoteTakerOverlayHost, so its id only
+  // reaches this screen through the store until the detail is refetched.
+  const notesCanvasId =
+    (isLive && recording.externalId === activeRecordingId ? liveNotesCanvasId : null) ??
+    recording.notesCanvasId;
+  const hasNotes = !!notesCanvasId;
+  // The player replaces the read-only timeline once there is audio to scrub.
+  const showAudioPlayer = !isLive && !!recording.hasRecording;
   const hasSummary = recording.hasSummary && !!recording.aiSummary;
   const selectedSummaryTemplate =
-    RECORDING_SUMMARY_TEMPLATES.find(
-      template => template.id === recording.summaryTemplateId,
-    ) ?? RECORDING_SUMMARY_TEMPLATES[0]!;
-  const showTabs = hasNotes || hasSummary || recording.hasTranscript;
-  const visibleTab = activeTab === 'summary' || !hasNotes ? 'summary' : 'notes';
+    RECORDING_SUMMARY_TEMPLATES.find(template => template.id === recording.summaryTemplateId) ??
+    RECORDING_SUMMARY_TEMPLATES[0]!;
+  // Live recordings pair notes with the streaming transcript; ended ones with the
+  // summary, whose citations are how the finished transcript gets opened. A transcript
+  // alone is enough to show the tabs: the summary is generated minutes after the call
+  // ends, and until it lands the summary pane says so. Only a recording with nothing
+  // at all falls through to the processing placeholder.
+  const showTabs = isLive || hasNotes || hasSummary || recording.hasTranscript;
+  const secondTab = isLive ? 'transcript' : 'summary';
+  const visibleTab =
+    activeTab === 'notes' || (secondTab === 'summary' && !hasSummary && hasNotes)
+      ? 'notes'
+      : secondTab;
 
   const transcriptText =
     speakerIdentificationEnabled && recording.hasIdentifiedTranscript
@@ -324,7 +359,11 @@ export default function RecordingDetailV2Screen(): ReactElement {
       data-testid='recording-detail-v2-page'
       className='relative flex h-full w-full flex-col overflow-hidden bg-background shadow-md md:rounded-2xl'
     >
-      <div
+      {/* layoutScroll: the tab indicator animates inside this scroller, so Motion has
+          to account for its scroll offset when measuring positions. */}
+      <motion.div
+        ref={scrollContainerRef}
+        layoutScroll
         className={[
           'h-full w-full overflow-y-scroll transition-[padding] duration-300',
           showTranscriptPanel ? 'md:pr-[560px]' : '',
@@ -337,168 +376,144 @@ export default function RecordingDetailV2Screen(): ReactElement {
             recording={recording}
             isLive={isLive}
             onTitleUpdated={handleTitleUpdated}
+            onLabelsUpdated={handleLabelsUpdated}
             onAskAI={handleAskAI}
           />
-
-          {isLive && (
+          {/* layoutRoot: a sticky element moves as you scroll, so the tab indicator
+              inside it must be measured against this wrapper rather than the page —
+              otherwise switching tabs mid-scroll animates the pill from a stale spot. */}
+          <motion.div
+            layoutRoot
+            className='sticky top-0 z-10 -mx-4 flex flex-col bg-background px-4 pt-2'
+          >
+            {/* One bar in both states: capturing while live, playing once ended. Passing
+                the loader is what turns it into a player — without it (audio still
+                stitching, or capture failed) the same bar stays read-only. */}
             <LiveRecordingControlBar
               recording={recording}
+              isLive={isLive}
               onStopped={() => void loadRecording(recording.externalId)}
+              {...(showAudioPlayer
+                ? {
+                    onLoadAudio: (signal: AbortSignal) =>
+                      recordingService.downloadRecordingBlob(recording.externalId, signal),
+                  }
+                : {})}
             />
-          )}
 
-          {recording.hasRecording && (
-            <div className='mb-6 flex items-center gap-4 rounded-xl border border-border bg-muted/30 p-4'>
-              <div className='flex w-24 shrink-0 items-center gap-2 text-muted-foreground'>
-                <Music className='size-4' />
-                <span className='text-sm'>Audio</span>
-              </div>
-              <div className='max-w-md flex-1'>
-                <AudioPlayer
-                  onLoad={signal => recordingService.downloadRecordingBlob(recording.externalId, signal)}
-                  initialDurationSec={recording.durationMs ? recording.durationMs / 1000 : undefined}
-                  trackCategory='RecordingDetailV2'
-                  showToastOnError
+            {showTabs && (
+              <div className='mb-4 flex items-center justify-between border-b border-border/70 pb-2'>
+                {/* Templates are only offered once the recording has ended — while live
+                    the second segment is the transcript and there is nothing to
+                    regenerate from yet. */}
+                <RecordingContentTabs
+                  visibleTab={visibleTab}
+                  secondTab={secondTab}
+                  onSelect={handleTabSelect}
+                  {...(isLive
+                    ? {}
+                    : {
+                        templates: RECORDING_SUMMARY_TEMPLATES,
+                        selectedTemplate: selectedSummaryTemplate,
+                        isRegenerating: isRegeneratingSummary,
+                        onTemplateSelect: (templateId: BuiltinRecordingSummaryTemplateId) =>
+                          void handleSummaryTemplateSelect(templateId),
+                      })}
                 />
+
+                {/* The right slot belongs to whichever action the state allows: flag a
+                    moment while capturing, share the finished recording once ended. */}
+                {isLive ? (
+                  <Button
+                    type='button'
+                    variant='outline'
+                    size='sm'
+                    onClick={markMoment}
+                    disabled={!canMark}
+                    className='h-8 gap-2 rounded-full px-5 text-sm font-medium'
+                    title={
+                      canMark
+                        ? 'Mark this moment'
+                        : 'Only the session running this recording can mark moments'
+                    }
+                    data-track-category='RecordingDetailV2'
+                    data-track-name='mark_moment'
+                  >
+                    <Flag size={15} strokeWidth={2.2} variant='Solid' aria-hidden='true' />
+                    Mark this moment
+                  </Button>
+                ) : (
+                  <DropdownMenu>
+                    <div className='inline-flex h-8 items-stretch overflow-hidden rounded-full bg-foreground text-background'>
+                      <button
+                        type='button'
+                        onClick={() => setShowPostToChannelModal(true)}
+                        className='inline-flex items-center gap-1.5 px-3 text-sm font-medium transition-colors hover:bg-foreground/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+                        data-track-category='RecordingDetailV2'
+                        data-track-name='open_post_to_channel_modal'
+                      >
+                        <Hash className='size-3.5' aria-hidden='true' />
+                        Post to channel
+                      </button>
+                      <span className='w-px bg-background/25' aria-hidden='true' />
+                      <DropdownMenuTrigger asChild>
+                        <button
+                          type='button'
+                          className='inline-flex items-center px-2 transition-colors hover:bg-foreground/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+                          aria-label='Share recording options'
+                          data-track-category='RecordingDetailV2'
+                          data-track-name='open_recording_share_menu'
+                        >
+                          <ChevronDown className='size-3.5' aria-hidden='true' />
+                        </button>
+                      </DropdownMenuTrigger>
+                    </div>
+                    <DropdownMenuContent align='end' className='min-w-[184px]'>
+                      <DropdownMenuItem
+                        onSelect={() => setShowPostToChannelModal(true)}
+                        className='flex cursor-pointer items-center gap-2'
+                        data-track-category='RecordingDetailV2'
+                        data-track-name='open_post_to_channel_from_menu'
+                      >
+                        <Hash className='size-4 text-muted-foreground' aria-hidden='true' />
+                        Post to channel
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onSelect={() => setShowPostToEmailModal(true)}
+                        className='flex cursor-pointer items-center gap-2'
+                        data-track-category='RecordingDetailV2'
+                        data-track-name='open_post_to_email_modal'
+                      >
+                        <Mail className='size-4 text-muted-foreground' aria-hidden='true' />
+                        Post to email
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
               </div>
-            </div>
-          )}
+            )}
+          </motion.div>
 
           {showTabs ? (
             <>
-              <div className='mb-7 flex items-center justify-between border-b border-border/70 pb-3'>
-                <div
-                  role='tablist'
-                  aria-label='Recording content'
-                  className='inline-flex items-center gap-1 rounded-full bg-muted/65 p-1'
-                >
-                  <button
-                    type='button'
-                    role='tab'
-                    aria-selected={visibleTab === 'notes'}
-                    onClick={() => setActiveTab('notes')}
-                    data-track-category='RecordingDetailV2'
-                    data-track-name='open_notes'
-                    className={[
-                      'inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                      visibleTab === 'notes'
-                        ? 'bg-background text-foreground shadow-sm'
-                        : 'text-muted-foreground hover:text-foreground',
-                    ].join(' ')}
-                  >
-                    <StickyNote className='size-3.5' aria-hidden='true' />
-                    My notes
-                  </button>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <button
-                        type='button'
-                        role='tab'
-                        aria-selected={visibleTab === 'summary'}
-                        onClick={() => setActiveTab('summary')}
-                        disabled={isRegeneratingSummary}
-                        data-track-category='RecordingDetailV2'
-                        data-track-name='open_summary_templates'
-                        className={[
-                          'inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait disabled:opacity-70',
-                          visibleTab === 'summary'
-                            ? 'bg-background text-foreground shadow-sm'
-                            : 'text-muted-foreground hover:text-foreground',
-                        ].join(' ')}
-                      >
-                        {isRegeneratingSummary ? (
-                          <Spinner size={14} className='animate-spin text-orange-500' />
-                        ) : (
-                          <Sparkles className='size-3.5 text-orange-500' aria-hidden='true' />
-                        )}
-                        {selectedSummaryTemplate.name}
-                        <ChevronDown className='size-3.5' aria-hidden='true' />
-                      </button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align='start' className='w-64'>
-                      {RECORDING_SUMMARY_TEMPLATES.map(template => (
-                        <DropdownMenuItem
-                          key={template.id}
-                          onSelect={() => void handleSummaryTemplateSelect(template.id)}
-                          disabled={isRegeneratingSummary}
-                          data-track-category='RecordingDetailV2'
-                          data-track-name={`generate_summary_${template.id}`}
-                        >
-                          <span aria-hidden='true'>{template.icon}</span>
-                          <span className='flex-1'>{template.name}</span>
-                          {template.id === selectedSummaryTemplate.id ? (
-                            <Check className='size-3.5 text-primary' aria-hidden='true' />
-                          ) : null}
-                        </DropdownMenuItem>
-                      ))}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-
-                <DropdownMenu>
-                  <div className='inline-flex h-8 items-stretch overflow-hidden rounded-full bg-foreground text-background'>
-                    <button
-                      type='button'
-                      onClick={() => setShowPostToChannelModal(true)}
-                      className='inline-flex items-center gap-1.5 px-3 text-sm font-medium transition-colors hover:bg-foreground/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
-                      data-track-category='RecordingDetailV2'
-                      data-track-name='open_post_to_channel_modal'
-                    >
-                      <Hash className='size-3.5' aria-hidden='true' />
-                      Post to channel
-                    </button>
-                    <span className='w-px bg-background/25' aria-hidden='true' />
-                    <DropdownMenuTrigger asChild>
-                      <button
-                        type='button'
-                        className='inline-flex items-center px-2 transition-colors hover:bg-foreground/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
-                        aria-label='Share recording options'
-                        data-track-category='RecordingDetailV2'
-                        data-track-name='open_recording_share_menu'
-                      >
-                        <ChevronDown className='size-3.5' aria-hidden='true' />
-                      </button>
-                    </DropdownMenuTrigger>
-                  </div>
-                  <DropdownMenuContent align='end' className='min-w-[184px]'>
-                    <DropdownMenuItem
-                      onSelect={() => setShowPostToChannelModal(true)}
-                      className='flex cursor-pointer items-center gap-2'
-                      data-track-category='RecordingDetailV2'
-                      data-track-name='open_post_to_channel_from_menu'
-                    >
-                      <Hash className='size-4 text-muted-foreground' aria-hidden='true' />
-                      Post to channel
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onSelect={() => setShowPostToEmailModal(true)}
-                      className='flex cursor-pointer items-center gap-2'
-                      data-track-category='RecordingDetailV2'
-                      data-track-name='open_post_to_email_modal'
-                    >
-                      <Mail className='size-4 text-muted-foreground' aria-hidden='true' />
-                      Post to email
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-
               {visibleTab === 'notes' ? (
                 <section className='mb-8 min-h-[360px]'>
                   <div className='mb-4 flex items-center justify-between'>
                     <h2 className='text-lg font-semibold text-foreground'>My notes</h2>
                   </div>
-                  {hasNotes ? (
-                    <NotesCanvas canvasId={recording.notesCanvasId!} />
+                  {notesCanvasId ? (
+                    <NotesCanvas canvasId={notesCanvasId} />
                   ) : (
                     <div className='flex min-h-[280px] flex-col items-center justify-center gap-2 text-center'>
                       <StickyNote className='size-5 text-muted-foreground/60' aria-hidden='true' />
                       <p className='text-sm text-muted-foreground'>
-                        No notes yet for this recording.
+                        {isLive ? 'Preparing notes…' : 'No notes yet for this recording.'}
                       </p>
                     </div>
                   )}
                 </section>
+              ) : visibleTab === 'transcript' ? (
+                <LiveTranscriptSection recordingExternalId={recording.externalId} />
               ) : (
                 <section className='mb-8 max-w-[780px]'>
                   <div className='mb-4 flex items-center justify-between'>
@@ -519,13 +534,11 @@ export default function RecordingDetailV2Screen(): ReactElement {
                     ) : null}
                   </div>
                   {hasSummary ? (
-                    <>
-                      <SummaryWithCitations
-                        aiSummary={recording.aiSummary!}
-                        citationSegments={recording.citationSegments}
-                        onCitationClick={handleCitationClick}
-                      />
-                    </>
+                    <SummaryWithCitations
+                      aiSummary={recording.aiSummary!}
+                      citationSegments={recording.citationSegments}
+                      onCitationClick={handleCitationClick}
+                    />
                   ) : (
                     <p className='text-sm text-muted-foreground'>
                       Summary is still being prepared.
@@ -536,7 +549,9 @@ export default function RecordingDetailV2Screen(): ReactElement {
             </>
           ) : null}
 
-          {!showTabs && !recording.hasTranscript && (
+          {/* Reached only when the recording has ended with nothing to show yet —
+              showTabs already covers live, notes, summary and transcript. */}
+          {!showTabs && (
             <div className='rounded-xl border border-border p-12 text-center'>
               <p className='text-sm text-muted-foreground'>
                 Transcript and summary are being processed...
@@ -544,7 +559,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
             </div>
           )}
         </div>
-      </div>
+      </motion.div>
 
       {/* Transcript side panel */}
       {showTranscriptPanel && transcriptText && (
