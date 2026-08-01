@@ -42,4 +42,6 @@ export const AUDIO_PATHS = {
   CALL_EXIT: '/sounds/Call_Exit_1.wav',
   PARTICIPANT_JOIN: '/sounds/Call_Join_1.wav',
   AFK_WARNING: '/sounds/notification.wav',
+  RECORDING_START: '/sounds/recording_start.wav',
+  RECORDING_END: '/sounds/recording_end.wav',
 } as const;
