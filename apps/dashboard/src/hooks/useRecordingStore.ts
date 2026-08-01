@@ -24,7 +24,8 @@ export type RecordingStoreEvent =
       type: 'recordingStarted';
       room: unknown;
       externalId: string;
-      channelId: string;
+      channelId: string | null;
+      notesCanvasId: string;
       startTime: number;
       defaultLayout?: RecordingLayout;
     }

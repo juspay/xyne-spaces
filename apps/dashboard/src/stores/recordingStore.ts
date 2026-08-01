@@ -70,7 +70,7 @@ export interface RecordingState {
   pendingAutoStart: boolean;
   autoStartRequestedAt: number | null;
   pendingStop: boolean;
-  /** Canvas (cuid/uuid) for notes taken during this recording — null until the user creates one */
+  /** Canvas created as part of starting a headless recording. */
   notesCanvasId: string | null;
   /** Public view-access id used to build the canvas share link */
   notesCanvasViewAccessId: string | null;
@@ -170,6 +170,7 @@ export const recordingStore = createStore({
             room,
             externalId: session.externalId,
             channelId: session.channelId,
+            notesCanvasId: session.notesCanvasId,
             startTime: session.startTime,
             defaultLayout,
           });
@@ -210,6 +211,7 @@ export const recordingStore = createStore({
         room: Room;
         externalId: string;
         channelId: string | null;
+        notesCanvasId: string;
         startTime: number;
         defaultLayout?: RecordingLayout;
       },
@@ -307,6 +309,7 @@ export const recordingStore = createStore({
         room: event.room,
         externalId: event.externalId,
         channelId: event.channelId,
+        notesCanvasId: event.notesCanvasId,
         startTime: event.startTime,
         pauseStartedAt: null,
         accumulatedPausedMs: 0,

@@ -127,10 +127,6 @@ export class RecordingSharingService {
   ): Promise<RecordingSharingResult> {
     const { shares, activities } = await this.runTransaction(async tx => {
       const recording = await this.loadManageableRecording(tx, callId, actor);
-      const metadata = asMetadata(recording.metadata);
-      if (typeof metadata['detailedSummaryCanvasId'] !== 'string') {
-        throw new RecordingSharingError('Detailed summary canvas is not ready yet', 409);
-      }
       await this.validateTargets(tx, recording, actor.workspaceId, targets);
 
       const shares: Array<{ id: string; target: RecordingShareTarget; access: string }> = [];
@@ -233,10 +229,6 @@ export class RecordingSharingService {
       if (typeof existingTicketId === 'string' || typeof existingMessageId === 'string') {
         throw new RecordingSharingError('Unlink the current ticket before linking another one', 409);
       }
-      if (typeof metadata['detailedSummaryCanvasId'] !== 'string') {
-        throw new RecordingSharingError('Detailed summary canvas is not ready yet', 409);
-      }
-
       const ticket = await tx.ticket.findFirst({
         where: { id: ticketId, workspaceId: actor.workspaceId },
         select: { id: true, channelId: true, conversationId: true },
@@ -630,10 +622,7 @@ export class RecordingSharingService {
     target: RecordingShareTarget,
     action: 'grant' | 'revoke',
   ): Promise<void> {
-    const metadata = asMetadata(recording.metadata);
-    const canvasIds = [metadata['notesCanvasId'], metadata['detailedSummaryCanvasId']].filter(
-      (id): id is string => typeof id === 'string' && id.length > 0,
-    );
+    const canvasIds = this.getShareCanvasIds(recording);
     for (const canvasId of canvasIds) {
       const where =
         target.type === 'user'
@@ -663,6 +652,19 @@ export class RecordingSharingService {
         await tx.canvasParticipant.deleteMany({ where: { canvasId, ...targetFields } });
       }
     }
+  }
+
+  private getShareCanvasIds(recording: LoadedRecording): string[] {
+    const metadata = asMetadata(recording.metadata);
+    const detailedSummaryCanvasId = metadata['detailedSummaryCanvasId'];
+    const notesCanvasId = metadata['notesCanvasId'];
+    if (typeof detailedSummaryCanvasId !== 'string' || detailedSummaryCanvasId.length === 0) {
+      throw new RecordingSharingError('Detailed summary canvas is not ready yet', 409);
+    }
+    if (typeof notesCanvasId !== 'string' || notesCanvasId.length === 0) {
+      throw new RecordingSharingError('Recording notes canvas is not ready yet', 409);
+    }
+    return [...new Set([detailedSummaryCanvasId, notesCanvasId])];
   }
 
 }

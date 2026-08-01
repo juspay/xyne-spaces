@@ -19,6 +19,7 @@ export interface RecordingSession {
   token: string;
   serverUrl: string;
   channelId: string | null;
+  notesCanvasId: string;
   startTime: number;
 }
 
@@ -162,6 +163,7 @@ interface InitiateCallResponse {
   externalId: string;
   callId?: string;
   channelId: string | null;
+  notesCanvasId: string;
 }
 
 interface RecordingsResponse {
@@ -202,6 +204,7 @@ class RecordingService {
       token: data.token,
       serverUrl: data.livekitUrl,
       channelId: data.channelId,
+      notesCanvasId: data.notesCanvasId,
       startTime: Date.now(),
     };
   }

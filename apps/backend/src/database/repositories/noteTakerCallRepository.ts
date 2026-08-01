@@ -7,6 +7,7 @@ export interface CreateNoteTakerCallParams {
   roomName: string;
   workspaceId: string;
   createdBy: string;
+  notesCanvasId: string;
   roomLink: string;
   now: Date;
 }
@@ -25,7 +26,7 @@ export class NoteTakerCallRepository {
   }
 
   async createCall(params: CreateNoteTakerCallParams): Promise<Call> {
-    const { callId, roomName, workspaceId, createdBy, roomLink, now } = params;
+    const { callId, roomName, workspaceId, createdBy, notesCanvasId, roomLink, now } = params;
 
     return this.db.$transaction(async (tx) => {
       const call = await tx.call.create({
@@ -37,6 +38,7 @@ export class NoteTakerCallRepository {
           callType: CallType.HEADLESS,
           status: CallStatus.ACTIVE,
           roomLink,
+          metadata: { notesCanvasId },
           startedAt: now,
           lastActivityAt: now,
         },
