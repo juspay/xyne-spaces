@@ -6,16 +6,17 @@
  * single shared element animated between segments via `layoutId`, which keeps the
  * movement continuous instead of cross-fading two backgrounds.
  *
- * The summary segment doubles as the summary-template picker: it is labelled with
- * the template currently applied and opens the template menu, so regenerating under
- * a different template is one click from the tab you are already on. That is why the
- * template props hang off this control rather than sitting beside it.
+ * The summary segment pairs the tab with a summary-template picker: the tab body
+ * switches panes, and a chevron at its trailing edge opens the template menu, so
+ * regenerating under a different template is one click from the tab you are already
+ * on. That is why the template props hang off this control rather than sitting beside
+ * it.
  */
 
 import type { ReactElement } from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
 import { CaptionOn, Spinner } from '@xyne/icons';
-import { AlignLeft, Check, ChevronDown, Sparkles } from 'lucide-react';
+import { AlignLeft, Check, ChevronDown } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -24,6 +25,7 @@ import {
 } from '../../../components/ui/dropdown-menu';
 import type { BuiltinRecordingSummaryTemplateId } from '../../../services/Recording/recordingService';
 import { cn } from '../../../utils/classNames';
+import { XyneAIStar } from '@/components/icons/xyne-ai';
 
 export type RecordingContentTab = 'notes' | 'transcript' | 'summary';
 
@@ -106,33 +108,91 @@ export const RecordingContentTabs = ({
   };
 
   /**
-   * With templates supplied the segment is also the menu trigger: clicking selects
-   * the summary tab (the button's own onClick) and opens the picker (Radix), so a
-   * template chosen from another tab lands you on the summary it just generated.
+   * With templates supplied the segment is split into two targets: the tab body
+   * switches to the summary pane (the primary action), and the trailing chevron
+   * opens the template picker (the secondary action). Radix anchors the menu to the
+   * chevron itself, so the two actions stop clobbering each other. The pill styling
+   * and the animated indicator live on a wrapper around both buttons.
    */
   const renderSummaryTab = (): ReactElement => {
-    const summaryTab = renderTab(
-      'summary',
-      selectedTemplate?.name ?? 'Default summary',
-      isRegenerating ? (
-        <Spinner size={14} className='animate-spin text-orange-500' />
-      ) : (
-        <Sparkles className='size-4 text-orange-500' aria-hidden='true' />
-      ),
-      templates ? 'open_summary_templates' : 'open_default_summary',
-      templates
-        ? {
-            trailing: <ChevronDown className='size-3.5' aria-hidden='true' />,
-            disabled: isRegenerating,
-          }
-        : undefined,
+    const isActive = visibleTab === 'summary';
+    const label = selectedTemplate?.name ?? 'Default summary';
+
+    const indicator = isActive ? (
+      <motion.span
+        layoutId={TAB_INDICATOR_ID}
+        className='absolute inset-0 rounded-full bg-background shadow-sm ring-1 ring-border/60'
+        transition={
+          shouldReduceMotion ? { duration: 0 } : { type: 'spring', stiffness: 420, damping: 34 }
+        }
+        aria-hidden='true'
+      />
+    ) : null;
+
+    const icon = isRegenerating ? (
+      <Spinner size={14} className='animate-spin text-orange-500' />
+    ) : (
+      <XyneAIStar size={12} />
     );
 
-    if (!templates || !onTemplateSelect) return summaryTab;
+    if (!templates || !onTemplateSelect) {
+      return (
+        <button
+          type='button'
+          role='tab'
+          aria-selected={isActive}
+          onClick={() => onSelect('summary')}
+          data-track-category='RecordingDetailV2'
+          data-track-name='open_default_summary'
+          className={cn(
+            'relative inline-flex h-8 items-center gap-2 rounded-full px-5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait disabled:opacity-70',
+            isActive ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
+          )}
+        >
+          {indicator}
+          <span className='relative z-10 flex items-center gap-2'>
+            {icon}
+            {label}
+          </span>
+        </button>
+      );
+    }
 
     return (
       <DropdownMenu>
-        <DropdownMenuTrigger asChild>{summaryTab}</DropdownMenuTrigger>
+        <div
+          className={cn(
+            'relative inline-flex h-8 items-center rounded-full pl-5 pr-1 text-sm font-medium transition-colors',
+            isActive ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
+          )}
+        >
+          {indicator}
+          <button
+            type='button'
+            role='tab'
+            aria-selected={isActive}
+            onClick={() => onSelect('summary')}
+            disabled={isRegenerating}
+            data-track-category='RecordingDetailV2'
+            data-track-name='open_summary_templates'
+            className='relative z-10 flex h-full items-center gap-2 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait disabled:opacity-70'
+          >
+            {icon}
+            {label}
+          </button>
+          <DropdownMenuTrigger asChild>
+            <button
+              type='button'
+              aria-label='Change summary template'
+              disabled={isRegenerating}
+              className='relative z-10 ml-0.5 flex h-6 w-6 items-center justify-center rounded-full transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait disabled:opacity-70'
+              data-track-category='RecordingDetailV2'
+              data-track-name='open_summary_template_menu'
+            >
+              <ChevronDown className='size-3.5' aria-hidden='true' />
+            </button>
+          </DropdownMenuTrigger>
+        </div>
         <DropdownMenuContent align='start' className='w-64'>
           {templates.map(template => (
             <DropdownMenuItem

@@ -59,18 +59,55 @@ export function fetchTranscriptCached(callId: string): Promise<string> {
   return p;
 }
 
+/** "MM:SS" or "HH:MM:SS" as seconds; null for anything the regex above wouldn't match. */
+export function parseTranscriptTimestamp(timestamp: string): number | null {
+  const parts = timestamp.split(':');
+  if (parts.length < 2 || parts.length > 3) return null;
+
+  const values = parts.map(part => Number(part));
+  if (values.some(value => !Number.isFinite(value))) return null;
+
+  // Folds either shape from the largest unit down: [4,32] -> 272, [1,4,32] -> 3872.
+  return values.reduce((total, value) => total * 60 + value, 0);
+}
+
+export function findIndexByTimeSeconds(lines: TranscriptLine[], seconds: number): number {
+  let match = -1;
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const timestamp = lines[index]?.timestamp;
+    if (!timestamp) continue;
+
+    const lineSeconds = parseTranscriptTimestamp(timestamp);
+    if (lineSeconds === null) continue;
+    if (lineSeconds > seconds) break; // parseTranscript preserves chronological order
+    match = index;
+  }
+
+  // A marker placed before the first spoken line still belongs to it.
+  return match >= 0 ? match : lines.findIndex(line => line.timestamp !== null);
+}
+
 /** Resolve the line index for a citation: prefer the stable segment number
- *  (precise even when timestamps repeat), fall back to the timestamp. */
+ *  (precise even when timestamps repeat), fall back to the timestamp, then to the
+ *  nearest line at or before `timestampSeconds` for targets carrying only an offset. */
 export function findTargetIndex(
   lines: TranscriptLine[],
   segment: string | number | undefined,
   timestamp: string | undefined,
+  timestampSeconds?: number,
 ): number {
   const segNum = segment !== undefined && segment !== '' ? Number(segment) : NaN;
   if (Number.isFinite(segNum)) {
     const bySeg = lines.findIndex(l => l.segment === segNum);
     if (bySeg >= 0) return bySeg;
   }
-  if (timestamp) return lines.findIndex(l => l.timestamp === timestamp);
+  if (timestamp) {
+    const byTimestamp = lines.findIndex(l => l.timestamp === timestamp);
+    if (byTimestamp >= 0) return byTimestamp;
+  }
+  if (timestampSeconds !== undefined && Number.isFinite(timestampSeconds)) {
+    return findIndexByTimeSeconds(lines, timestampSeconds);
+  }
   return -1;
 }

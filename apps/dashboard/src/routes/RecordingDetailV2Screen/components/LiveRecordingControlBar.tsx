@@ -11,10 +11,10 @@
  *   • LIVE / PAUSED status label
  *   • Audio-level visualizer
  *
- * Once the recording has ended it collapses to a static timeline: the start
- * marker, the track and the total duration.
- *
- * Decision/action markers are intentionally left out for now.
+ * Once the recording has ended the bar becomes a player over the full duration,
+ * with every marked item on the track: decision and action dots extracted by the
+ * summary pipeline, and a flag for each moment the user flagged mid-call. Given
+ * `onMarkerSelect`, clicking any of the three opens the transcript at that point.
  */
 
 import { useCallback, useEffect, useState, type CSSProperties, type ReactElement } from 'react';
@@ -26,17 +26,16 @@ import { calculateRecordingElapsedMs, formatElapsedTime } from '../../../utils/r
 import { useAudioPlayback } from '../../../components/ui/AudioPlayer/useAudioPlayback';
 import type { RecordingDetail } from '../../../services/Recording/recordingService';
 import type { MarkedMoment } from '../../../stores/recordingStore';
-import { parseMarkedItems, type MarkedItemType } from './markedItems';
+import { parseMarkedItems, type MarkedItem, type MarkedItemType } from './markedItems';
 
 const TIMELINE_WINDOW_MS = 40 * 60 * 1000; // 40 min fixed window for the live timeline
 
 interface LiveRecordingControlBarProps {
   recording: RecordingDetail;
-  /** True while the recording is still in progress. */
   isLive: boolean;
   onStopped?: () => void;
-  /** Supplied for an ended recording whose audio is ready, turning the bar into a player. */
   onLoadAudio?: (signal: AbortSignal) => Promise<Blob>;
+  onMarkerSelect?: (item: MarkedItem) => void;
 }
 
 /** Stands in when there is no audio to load, so the playback hook can stay unconditional. */
@@ -47,6 +46,7 @@ export const LiveRecordingControlBar = ({
   isLive,
   onStopped,
   onLoadAudio,
+  onMarkerSelect,
 }: LiveRecordingControlBarProps): ReactElement | null => {
   // Recording session state — only meaningful when this tab owns the live session.
   const activeExternalId = useRecordingStore(context => context.externalId);
@@ -107,7 +107,13 @@ export const LiveRecordingControlBar = ({
   // Once the l ocal session is gone the recording is over, even if the API hasn't
   // caught up yet.
   if (!isLive || (stopRequested && !ownsSession)) {
-    return <RecordedTimelineBar recording={recording} {...(onLoadAudio ? { onLoadAudio } : {})} />;
+    return (
+      <RecordedTimelineBar
+        recording={recording}
+        {...(onLoadAudio ? { onLoadAudio } : {})}
+        {...(onMarkerSelect ? { onMarkerSelect } : {})}
+      />
+    );
   }
 
   return (
@@ -194,17 +200,27 @@ const MARKER_DOT_COLOR: Record<Exclude<MarkedItemType, 'moment'>, string> = {
   action: 'bg-orange-500',
 };
 
+/** Names the marker in its tooltip, so the three kinds read apart without the legend. */
+const MARKER_NOUN: Record<MarkedItemType, string> = {
+  decision: 'Decision',
+  action: 'Action',
+  moment: 'Marked moment',
+};
+
+const MARKER_INTERACTIVE =
+  "cursor-pointer transition-transform hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring after:absolute after:-inset-2 after:content-[''] motion-reduce:transform-none";
+
 interface MomentFlagProps {
   percent: number;
   title: string;
   onSelect?: () => void;
 }
 
-/** Flag pinned to a point on either timeline — a button only when it can seek. */
+/** Flag pinned to a point on either timeline — a button only when it can be acted on. */
 const MomentFlag = ({ percent, title, onSelect }: MomentFlagProps): ReactElement => {
   const className = cn(
     'absolute bottom-1.5 z-10 flex -translate-x-0.5',
-    onSelect && 'cursor-pointer',
+    onSelect && MARKER_INTERACTIVE,
   );
   const glyph = <Flag size={14} variant='Solid' className='text-primary' aria-hidden='true' />;
 
@@ -221,7 +237,7 @@ const MomentFlag = ({ percent, title, onSelect }: MomentFlagProps): ReactElement
       type='button'
       onClick={onSelect}
       data-track-category='RecordingDetailV2'
-      data-track-name='marker_seek_moment'
+      data-track-name='marker_open_transcript_moment'
       className={className}
       style={{ left: `${percent}%` }}
       title={title}
@@ -243,7 +259,7 @@ const MarkerDot = ({ percent, type, title, onSelect }: MarkerDotProps): ReactEle
   const className = cn(
     'absolute top-1/2 z-10 size-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full ring-2 ring-background',
     MARKER_DOT_COLOR[type],
-    onSelect && 'cursor-pointer',
+    onSelect && MARKER_INTERACTIVE,
   );
 
   if (!onSelect) {
@@ -255,7 +271,7 @@ const MarkerDot = ({ percent, type, title, onSelect }: MarkerDotProps): ReactEle
       type='button'
       onClick={onSelect}
       data-track-category='RecordingDetailV2'
-      data-track-name='marker_seek_item'
+      data-track-name='marker_open_transcript_item'
       className={className}
       style={{ left: `${percent}%` }}
       title={title}
@@ -324,11 +340,14 @@ interface RecordedTimelineBarProps {
   recording: RecordingDetail;
   /** Supplied once the audio is stitched; without it the bar is read-only. */
   onLoadAudio?: (signal: AbortSignal) => Promise<Blob>;
+  /** Supplied once there is a transcript to open at the marker's timestamp. */
+  onMarkerSelect?: (item: MarkedItem) => void;
 }
 
 const RecordedTimelineBar = ({
   recording,
   onLoadAudio,
+  onMarkerSelect,
 }: RecordedTimelineBarProps): ReactElement | null => {
   const fallbackDurationMs =
     recording.durationMs ??
@@ -352,6 +371,14 @@ const RecordedTimelineBar = ({
   const elapsedMs = playback.currentTime * 1000;
   const progressPercent = durationMs > 0 ? Math.min((elapsedMs / durationMs) * 100, 100) : 0;
   const isPlaying = playback.state === 'playing';
+
+  const selectMarker =
+    playback.canSeek || onMarkerSelect
+      ? (item: MarkedItem): void => {
+          if (playback.canSeek) playback.seek(item.timestampSeconds);
+          onMarkerSelect?.(item);
+        }
+      : null;
 
   return (
     <div className='mb-6 rounded-2xl border border-border bg-card px-5 py-4'>
@@ -391,18 +418,17 @@ const RecordedTimelineBar = ({
 
           {markedItems.map((item, index) => {
             const percent = Math.min((item.timestampSeconds * 1000 * 100) / durationMs, 100);
-            // Seeking is only meaningful once the media exists.
-            const onSelect = playback.canSeek
-              ? (): void => playback.seek(item.timestampSeconds)
-              : undefined;
+            const onSelect = selectMarker ? (): void => selectMarker(item) : undefined;
+            const timeLabel = formatElapsedTime(item.timestampSeconds * 1000);
+            const title = item.text
+              ? `${MARKER_NOUN[item.type]} · ${timeLabel} — ${item.text}`
+              : `${MARKER_NOUN[item.type]} at ${timeLabel}`;
 
             return item.type === 'moment' ? (
               <MomentFlag
                 key={index}
                 percent={percent}
-                title={
-                  item.text || `Marked moment at ${formatElapsedTime(item.timestampSeconds * 1000)}`
-                }
+                title={title}
                 {...(onSelect ? { onSelect } : {})}
               />
             ) : (
@@ -410,7 +436,7 @@ const RecordedTimelineBar = ({
                 key={index}
                 percent={percent}
                 type={item.type}
-                title={item.text}
+                title={title}
                 {...(onSelect ? { onSelect } : {})}
               />
             );

@@ -8,6 +8,7 @@ export interface TranscriptPanelTarget {
   timestamp?: string;
   speaker?: string;
   segment?: string | number;
+  timestampSeconds?: number;
 }
 
 export interface TranscriptSidePanelProps {
@@ -33,8 +34,8 @@ export function TranscriptSidePanel({
   const lineRefs = useRef(new Map<number, HTMLDivElement>());
   const lines = useMemo(() => parseTranscript(transcript), [transcript]);
   const targetIndex = useMemo(
-    () => findTargetIndex(lines, target?.segment, target?.timestamp),
-    [lines, target?.segment, target?.timestamp],
+    () => findTargetIndex(lines, target?.segment, target?.timestamp, target?.timestampSeconds),
+    [lines, target?.segment, target?.timestamp, target?.timestampSeconds],
   );
 
   useEffect(() => {
