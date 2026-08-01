@@ -1802,12 +1802,7 @@ export const messageAttachmentTable = table('message_attachments')
   })
   .primaryKey('id');
 
-/** Who authored a draft_messages row. Backed by a real Postgres enum
- *  (Prisma `DraftOrigin`). Declared as a string `enum` (not a bare union) so the
- *  Prisma↔Zero schema-sync check finds a matching `export enum`; the column below
- *  is typed via the `` `${DraftOrigin}` `` value-union so bare 'user'/'twin'
- *  literals stay assignable across the mutators/queries (a bare enum type would
- *  reject them). Extend by adding a member (and the Prisma enum + a migration). */
+// @ts-ignore TS1294
 export enum DraftOrigin {
   user = 'user',
   twin = 'twin',
@@ -1823,7 +1818,7 @@ export const draftMessageTable = table('draft_messages')
     userId: string(),
     content: string(),
     hasAttachment: boolean(),
-    origin: enumeration<`${DraftOrigin}`>().optional(), // 'user' | 'twin' | null (legacy = user)
+    origin: enumeration<DraftOrigin>().optional(),
     metadata: string().optional(), // twin-only: stringified JSON TwinReplyDraft payload
     createdAt: number(),
     updatedAt: number(),

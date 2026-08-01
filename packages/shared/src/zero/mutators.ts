@@ -57,6 +57,7 @@ import {
   Status,
   OrgRole,
   DelayedMessageStatus,
+  DraftOrigin,
   Schema,
   CollectionRole,
   VCSProviderType,
@@ -909,7 +910,7 @@ export const mutators = defineMutators({
             userId: ctx.userID,
             content: draftMessage,
             hasAttachment: draft?.hasAttachment || false,
-            origin: 'user',
+            origin: DraftOrigin.user,
             updatedAt: timestamp,
             createdAt: draft?.createdAt || timestamp,
           });
@@ -2985,7 +2986,7 @@ export const mutators = defineMutators({
             userId: ctx.userID,
             content: content || '',
             hasAttachment: true,
-            origin: 'user',
+            origin: DraftOrigin.user,
             createdAt: timestamp,
             updatedAt: timestamp,
           });
@@ -3535,7 +3536,7 @@ export const mutators = defineMutators({
             userId: ctx.userID,
             content: draftMessage,
             hasAttachment: draft?.hasAttachment || false,
-            origin: 'user',
+            origin: DraftOrigin.user,
             updatedAt: timestamp,
             createdAt: draft?.createdAt || timestamp,
           });
@@ -10631,7 +10632,7 @@ export const mutators = defineMutators({
           userId: ctx.userID,
           content: scheduled.content,
           hasAttachment,
-          origin: 'user',
+          origin: DraftOrigin.user,
           createdAt: timestamp,
           updatedAt: timestamp,
         });
