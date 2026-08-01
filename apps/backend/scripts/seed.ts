@@ -76,8 +76,8 @@ const DEFAULT_USER_GROUPS = [
 const DEFAULT_ADMIN_USER = {
   name: 'System Administrator',
   email: 'admin@xyne.ai',
-  authProvider: AuthProvider.GOOGLE,
-  providerUserId: 'admin-seed-user-001',
+  authProvider: AuthProvider.EMAIL,
+  providerUserId: 'email-admin-seed-user-001',
   status: UserStatus.ACTIVE,
 };
 
