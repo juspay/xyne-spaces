@@ -42,6 +42,10 @@ export interface SendRecordingEmailResponse {
   threadId?: string;
 }
 
+interface GoogleRecordingEmailConnectionResponse {
+  authUrl: string;
+}
+
 class RecordingEmailService {
   async getComposeContext(callId: string): Promise<RecordingEmailComposeContext> {
     const response = await apiInstance.get<RecordingEmailComposeContext>(
@@ -56,6 +60,14 @@ class RecordingEmailService {
       input,
     );
     return response.data;
+  }
+
+  async connectGoogle(returnPath: string): Promise<string> {
+    const response = await apiInstance.post<GoogleRecordingEmailConnectionResponse>(
+      '/integrations/google/connect/recording-email/init',
+      { returnPath },
+    );
+    return response.data.authUrl;
   }
 }
 

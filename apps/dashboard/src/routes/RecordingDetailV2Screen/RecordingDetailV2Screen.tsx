@@ -99,6 +99,30 @@ export default function RecordingDetailV2Screen(): ReactElement {
   // panel is opened from the toolbar with no particular moment in mind.
   const [citationRef, setCitationRef] = useState<TranscriptPanelTarget | null>(null);
 
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const connected = params.get('recordingEmailConnected') === 'true';
+    const connectionError = params.get('recordingEmailError');
+    if (!connected && !connectionError) return;
+
+    if (connected) {
+      toast.success('Google email connected');
+      setShowPostToEmailModal(true);
+    }
+    if (connectionError) {
+      toast.error(connectionError);
+      setShowPostToEmailModal(true);
+    }
+
+    params.delete('recordingEmailConnected');
+    params.delete('recordingEmailError');
+    const search = params.toString();
+    void navigate(
+      { pathname: location.pathname, ...(search ? { search: `?${search}` } : {}) },
+      { replace: true, state: location.state },
+    );
+  }, [location.pathname, location.search, location.state, navigate]);
+
   const isLive = recording ? isRecordingLive(recording) : false;
 
   // j/k keyboard navigation between recordings
