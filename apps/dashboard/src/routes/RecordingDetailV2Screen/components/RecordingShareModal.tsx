@@ -44,8 +44,7 @@ export const RecordingShareModal: React.FC<RecordingShareModalProps> = ({
     queries.oatsRecordingByExternalId({ callId: recording.externalId }),
   );
   const shares = useMemo(
-    () =>
-      (recordingRow?.shares ?? []).filter(share => !locallyRevokedShareIds.has(share.id)),
+    () => (recordingRow?.shares ?? []).filter(share => !locallyRevokedShareIds.has(share.id)),
     [locallyRevokedShareIds, recordingRow],
   );
 
@@ -147,13 +146,16 @@ export const RecordingShareModal: React.FC<RecordingShareModalProps> = ({
   const handleAccessChange = async (
     target: { targetUserId: string } | { targetUserGroupId: string } | { targetChannelId: string },
   ): Promise<void> => {
-    const apiTarget: RecordingShareTarget = 'targetUserId' in target
-      ? { type: 'user', id: target.targetUserId }
-      : 'targetUserGroupId' in target
-        ? { type: 'user_group', id: target.targetUserGroupId }
-        : { type: 'channel', id: target.targetChannelId };
+    const apiTarget: RecordingShareTarget =
+      'targetUserId' in target
+        ? { type: 'user', id: target.targetUserId }
+        : 'targetUserGroupId' in target
+          ? { type: 'user_group', id: target.targetUserGroupId }
+          : { type: 'channel', id: target.targetChannelId };
     try {
-      const result = await recordingService.revokeRecordingAccess(recording.externalId, [apiTarget]);
+      const result = await recordingService.revokeRecordingAccess(recording.externalId, [
+        apiTarget,
+      ]);
       if (result.shares?.length) {
         setLocallyRevokedShareIds(current => {
           const next = new Set(current);

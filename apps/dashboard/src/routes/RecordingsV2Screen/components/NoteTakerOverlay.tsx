@@ -8,10 +8,13 @@ import { CollaborativeCanvasEditor } from '../../../components/Canvas/Collaborat
 import { LiveTranscriptList } from '../../../components/Notetaker/LiveTranscriptList';
 import { useDraggableOverlay } from '../../../hooks/useDraggableOverlay';
 import type { MarkedMoment, RecordingState, TranscriptEntry } from '../../../stores/recordingStore';
-import { DEFAULT_RECORDING_TITLE } from '../../../stores/recordingStore';
+import { DEFAULT_RECORDING_TITLE } from '../../../utils/recordingUtils';
 import { cn } from '../../../utils/classNames';
 import { calculateRecordingElapsedMs, formatElapsedTime } from '../../../utils/recordingUtils';
-import { getRecordingV2Tab, setRecordingV2Tab } from '../../../utils/recordingTabPreference';
+import {
+  getLiveRecordingV2Tab,
+  setLiveRecordingV2Tab,
+} from '../../../utils/recordingTabPreference';
 import { canvasService } from '../../../services/Canvas/canvasService';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -220,10 +223,7 @@ const RecordingControlBar = ({
   </div>
 );
 
-const NotesTab = ({
-  notesCanvasId,
-  channelId,
-}: NotesTabProps): ReactElement => {
+const NotesTab = ({ notesCanvasId, channelId }: NotesTabProps): ReactElement => {
   const handleFileUpload = useCallback(
     (file: File): Promise<string> => canvasService.uploadCanvasFile(notesCanvasId!, file),
     [notesCanvasId],
@@ -283,9 +283,9 @@ export function NoteTakerOverlay({
   const shouldReduceMotion = useReducedMotion();
   // Read once on mount: the panel stays up for the whole recording, so a preference
   // written by the detail screen mid-recording should not yank the pane out from under
-  // whoever is typing here.
+  // whoever is typing here. A recording nobody has picked a pane for yet opens on notes.
   const [activeTab, setActiveTab] = useState<TabId>(() =>
-    getRecordingV2Tab() === 'notes' ? 'notes' : 'transcript',
+    getLiveRecordingV2Tab(recordingId) === 'notes' ? 'notes' : 'transcript',
   );
   const [elapsed, setElapsed] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -318,7 +318,7 @@ export function NoteTakerOverlay({
 
   const handleTabSelect = (tab: TabId): void => {
     setActiveTab(tab);
-    setRecordingV2Tab(tab === 'notes' ? 'notes' : 'secondary');
+    setLiveRecordingV2Tab(recordingId, tab === 'notes' ? 'notes' : 'secondary');
   };
 
   if (!isActive || !startTime) return null;
@@ -435,10 +435,7 @@ export function NoteTakerOverlay({
           </div>
 
           <div className={cn('min-h-0 flex-1 overflow-hidden', activeTab !== 'notes' && 'hidden')}>
-            <NotesTab
-              notesCanvasId={notesCanvasId}
-              channelId={channelId}
-            />
+            <NotesTab notesCanvasId={notesCanvasId} channelId={channelId} />
           </div>
 
           <RecordingControlBar
