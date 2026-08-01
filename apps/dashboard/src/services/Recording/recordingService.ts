@@ -5,7 +5,11 @@
 
 import { apiInstance } from '../clients/apiClient';
 import { AxiosResponse } from 'axios';
-import type { DefaultOutlet, RecordingType } from '@xyne/shared';
+import type {
+  DefaultOutlet,
+  GrantableEntityUserAccess,
+  RecordingType,
+} from '@xyne/shared';
 
 export interface RecordingSession {
   /** Public Call ID used by the recording routes (same value as externalId). */
@@ -53,7 +57,23 @@ export interface RecordingUpdate {
   labels?: string[];
   markedItems?: Record<string, unknown>[];
   summaryTemplateId?: string | null;
+}
+
+export interface RecordingTicketLinkState {
+  linkedTicketId: string | null;
+  linkedTicketMessageId: string | null;
+}
+
+export type RecordingShareTarget =
+  | { type: 'user'; id: string }
+  | { type: 'user_group'; id: string }
+  | { type: 'channel'; id: string };
+
+export interface RecordingSharingResult {
+  action: 'grant' | 'revoke' | 'link_ticket' | 'unlink_ticket';
   linkedTicketId?: string | null;
+  linkedTicketMessageId?: string | null;
+  shares?: Array<{ id: string; target: RecordingShareTarget; access: string }>;
 }
 
 export type BuiltinRecordingSummaryTemplateId =
@@ -99,6 +119,7 @@ export interface RecordingDetail extends Recording {
   citationSegments: CitationSegment[];
   hasRecording?: boolean;
   linkedTicketId?: string | null;
+  linkedTicketMessageId?: string | null;
 }
 
 /** A single in-call recording session (call_recordings row). */
@@ -236,8 +257,59 @@ class RecordingService {
     return response.data;
   }
 
-  // Recording sharing (share/update/unshare) now goes through Zero mutators —
-  // see mutators.calls.shareRecording / mutators.calls.updateRecordingShare.
+  async grantRecordingAccess(
+    callId: string,
+    targets: RecordingShareTarget[],
+    access?: GrantableEntityUserAccess,
+  ): Promise<RecordingSharingResult> {
+    const response: AxiosResponse<{ success: true } & RecordingSharingResult> =
+      await apiInstance.post(`/calls/recordings/${callId}/sharing`, {
+        action: 'grant',
+        targets,
+        ...(access ? { access } : {}),
+      });
+    return response.data;
+  }
+
+  async revokeRecordingAccess(
+    callId: string,
+    targets: RecordingShareTarget[],
+  ): Promise<RecordingSharingResult> {
+    const response: AxiosResponse<{ success: true } & RecordingSharingResult> =
+      await apiInstance.post(`/calls/recordings/${callId}/sharing`, {
+        action: 'revoke',
+        targets,
+      });
+    return response.data;
+  }
+
+  async linkRecordingToTicket(
+    callId: string,
+    ticketId: string,
+  ): Promise<RecordingTicketLinkState> {
+    const response: AxiosResponse<
+      { success: true } & RecordingSharingResult & RecordingTicketLinkState
+    > = await apiInstance.post(`/calls/recordings/${callId}/sharing`, {
+      action: 'link_ticket',
+      ticketId,
+    });
+    return {
+      linkedTicketId: response.data.linkedTicketId,
+      linkedTicketMessageId: response.data.linkedTicketMessageId,
+    };
+  }
+
+  async unlinkRecordingFromTicket(callId: string): Promise<RecordingTicketLinkState> {
+    const response: AxiosResponse<
+      { success: true } & RecordingSharingResult & RecordingTicketLinkState
+    > = await apiInstance.post(`/calls/recordings/${callId}/sharing`, {
+      action: 'unlink_ticket',
+    });
+    return {
+      linkedTicketId: response.data.linkedTicketId,
+      linkedTicketMessageId: response.data.linkedTicketMessageId,
+    };
+  }
 
   async getSummaryTemplates(): Promise<SummaryTemplate[]> {
     const response: AxiosResponse<{ success: boolean; templates: SummaryTemplate[] }> =

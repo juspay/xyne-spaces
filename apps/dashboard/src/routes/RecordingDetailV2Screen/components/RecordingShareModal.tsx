@@ -1,34 +1,41 @@
 import React, { useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { v4 as uuidv4 } from 'uuid';
 import { Hash, Users, X } from 'lucide-react';
-import { EntityUserAccess, WorkspaceRole } from '@xyne/shared';
 import { useUserGroupSearch, useChannelSearch } from '@xyne/shared/hooks';
 import Avatar from '../../../components/ui/Avatar/Avatar';
 import { Button } from '../../../components/ui/Button/Button';
 import { SearchParticipants } from '../../CallHistoryScreen/SearchParticipants';
 import { useActiveUsers } from '../../../hooks/useUsers';
 import { useAuth } from '../../../hooks/useAuth';
-import { useZero } from '../../../hooks/useZero';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
-import { mutators } from '../../../zero/mutators';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
-import type { RecordingDetail } from '../../../services/Recording/recordingService';
+import {
+  recordingService,
+  type RecordingDetail,
+  type RecordingShareTarget,
+  type RecordingTicketLinkState,
+} from '../../../services/Recording/recordingService';
+import { getApiErrorMessage } from '../../../utils/apiError';
+import { logRecordingError } from '../../../utils/recordingUtils';
 
 export interface RecordingShareModalProps {
   recording: RecordingDetail;
   onClose?: () => void;
+  onTicketLinkUpdated?: (ticketLink: RecordingTicketLinkState) => void;
 }
 
-export const RecordingShareModal: React.FC<RecordingShareModalProps> = ({ recording }) => {
-  const zero = useZero();
+export const RecordingShareModal: React.FC<RecordingShareModalProps> = ({
+  recording,
+  onTicketLinkUpdated,
+}) => {
   const { user: currentUser } = useAuth();
   const activeUsers = useActiveUsers();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedValues, setSelectedValues] = useState<string[]>([]);
   const [sharing, setSharing] = useState(false);
+  const [locallyRevokedShareIds, setLocallyRevokedShareIds] = useState<Set<string>>(new Set());
 
   const userGroups = useUserGroupSearch(searchQuery, 10);
   const channels = useChannelSearch(searchQuery, 10);
@@ -36,12 +43,14 @@ export const RecordingShareModal: React.FC<RecordingShareModalProps> = ({ record
   const [recordingRow] = useCachedQuery(
     queries.oatsRecordingByExternalId({ callId: recording.externalId }),
   );
-  const shares = useMemo(() => recordingRow?.shares ?? [], [recordingRow]);
+  const shares = useMemo(
+    () =>
+      (recordingRow?.shares ?? []).filter(share => !locallyRevokedShareIds.has(share.id)),
+    [locallyRevokedShareIds, recordingRow],
+  );
 
   const isOwner = Boolean(currentUser?.id && currentUser.id === recording.createdByUserId);
-  const isWorkspaceAdmin =
-    currentUser?.role === WorkspaceRole.OWNER || currentUser?.role === WorkspaceRole.ADMIN;
-  const canManage = isOwner || isWorkspaceAdmin;
+  const canManage = isOwner;
 
   const sharedUserIds = useMemo(
     () => new Set(shares.map(share => share.userId).filter((id): id is string => Boolean(id))),
@@ -103,39 +112,33 @@ export const RecordingShareModal: React.FC<RecordingShareModalProps> = ({ record
 
     setSharing(true);
     try {
-      const timestamp = Date.now();
-      let failures = 0;
-      for (const value of selectedValues) {
-        const target = value.startsWith('user_group:')
-          ? { targetUserGroupId: value.replace('user_group:', '') }
+      const targets: RecordingShareTarget[] = selectedValues.map(value =>
+        value.startsWith('user_group:')
+          ? { type: 'user_group', id: value.replace('user_group:', '') }
           : value.startsWith('channel:')
-            ? { targetChannelId: value.replace('channel:', '') }
-            : { targetUserId: value.replace('user:', '') };
-
-        const result = zero.mutate(
-          mutators.calls.shareRecording({
-            id: uuidv4(),
-            callId: recording.externalId,
-            ...target,
-            entityUserAccess: EntityUserAccess.VIEW,
-            timestamp,
-          }),
-        );
-        const res = await result.server;
-        if (res.type === 'error') {
-          failures += 1;
-          toast.error('Failed to share', { description: res.error.message });
-        }
+            ? { type: 'channel', id: value.replace('channel:', '') }
+            : { type: 'user', id: value.replace('user:', '') },
+      );
+      const result = await recordingService.grantRecordingAccess(recording.externalId, targets);
+      if (result.shares?.length) {
+        setLocallyRevokedShareIds(current => {
+          const next = new Set(current);
+          result.shares?.forEach(share => next.delete(share.id));
+          return next;
+        });
       }
-      if (failures < selectedValues.length) {
-        toast.success(
-          selectedValues.length === 1
-            ? 'Recording shared'
-            : `Shared with ${selectedValues.length} recipients`,
-        );
-      }
+      toast.success(
+        selectedValues.length === 1
+          ? 'Recording shared'
+          : `Shared with ${selectedValues.length} recipients`,
+      );
       setSelectedValues([]);
       setSearchQuery('');
+    } catch (error) {
+      logRecordingError('RecordingShareModal.share', error);
+      toast.error('Failed to share', {
+        description: getApiErrorMessage(error, 'Unable to share this recording'),
+      });
     } finally {
       setSharing(false);
     }
@@ -144,24 +147,35 @@ export const RecordingShareModal: React.FC<RecordingShareModalProps> = ({ record
   const handleAccessChange = async (
     target: { targetUserId: string } | { targetUserGroupId: string } | { targetChannelId: string },
   ): Promise<void> => {
-    const result = zero.mutate(
-      mutators.calls.updateRecordingShare({
-        callId: recording.externalId,
-        ...target,
-        entityUserAccess: EntityUserAccess.REVOKED,
-        timestamp: Date.now(),
-      }),
-    );
-    const res = await result.server;
-    if (res.type === 'error') {
-      toast.error('Failed to remove access', { description: res.error.message });
+    const apiTarget: RecordingShareTarget = 'targetUserId' in target
+      ? { type: 'user', id: target.targetUserId }
+      : 'targetUserGroupId' in target
+        ? { type: 'user_group', id: target.targetUserGroupId }
+        : { type: 'channel', id: target.targetChannelId };
+    try {
+      const result = await recordingService.revokeRecordingAccess(recording.externalId, [apiTarget]);
+      if (result.shares?.length) {
+        setLocallyRevokedShareIds(current => {
+          const next = new Set(current);
+          result.shares?.forEach(share => next.add(share.id));
+          return next;
+        });
+      }
+      if (result.linkedTicketId === null) {
+        onTicketLinkUpdated?.({ linkedTicketId: null, linkedTicketMessageId: null });
+      }
+    } catch (error) {
+      logRecordingError('RecordingShareModal.revoke', error);
+      toast.error('Failed to remove access', {
+        description: getApiErrorMessage(error, 'Unable to remove recording access'),
+      });
     }
   };
 
   if (!canManage) {
     return (
       <div className='p-5 text-sm text-muted-foreground'>
-        Only the recording owner or a workspace admin can manage sharing.
+        Only the recording creator can manage sharing.
       </div>
     );
   }

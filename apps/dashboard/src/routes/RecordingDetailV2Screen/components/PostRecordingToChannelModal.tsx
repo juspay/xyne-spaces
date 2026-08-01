@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
 import { Hash } from 'lucide-react';
-import { EntityUserAccess, MessageType } from '@xyne/shared';
+import { MessageType } from '@xyne/shared';
 import { useChannelSearch } from '@xyne/shared/hooks';
 import Avatar from '../../../components/ui/Avatar/Avatar';
 import { Button } from '../../../components/ui/Button/Button';
@@ -13,8 +13,13 @@ import { mutators } from '../../../zero/mutators';
 import { channelService } from '../../../services/Chat/channelService';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { logRecordingError } from '../../../utils/recordingUtils';
+import { getApiErrorMessage } from '../../../utils/apiError';
 import { useShareableOrigin } from '../../../hooks/useShareableOrigin';
-import type { RecordingDetail } from '../../../services/Recording/recordingService';
+import {
+  recordingService,
+  type RecordingDetail,
+  type RecordingShareTarget,
+} from '../../../services/Recording/recordingService';
 
 export interface PostRecordingToChannelModalProps {
   recording: RecordingDetail;
@@ -94,36 +99,6 @@ export const PostRecordingToChannelModal: React.FC<PostRecordingToChannelModalPr
     return parts.join('');
   };
 
-  // Grants a VIEW EntityAccess row for a single target (mirrors
-  // RecordingShareModal's handleShare). Only the recording owner or a
-  // workspace admin can call this successfully — the mutator itself enforces
-  // that server-side and throws otherwise.
-  const grantEntityAccess = async (
-    target: { targetUserId: string } | { targetChannelId: string },
-  ): Promise<boolean> => {
-    try {
-      const result = zero.mutate(
-        mutators.calls.shareRecording({
-          id: uuidv4(),
-          callId: recording.externalId,
-          ...target,
-          entityUserAccess: EntityUserAccess.VIEW,
-          timestamp: Date.now(),
-        }),
-      );
-      const res = await result.server;
-      if (res.type === 'error') {
-        toast.error('Failed to grant access', { description: res.error.message });
-        return false;
-      }
-      return true;
-    } catch (err) {
-      logRecordingError('PostRecordingToChannelModal.grantEntityAccess', err);
-      toast.error('Failed to grant access');
-      return false;
-    }
-  };
-
   const handlePost = async (): Promise<void> => {
     if (selectedValues.length === 0 || posting) return;
 
@@ -139,9 +114,13 @@ export const PostRecordingToChannelModal: React.FC<PostRecordingToChannelModalPr
 
       let successes = 0;
 
+      const accessTargets: RecordingShareTarget[] = [
+        ...channelTargets.map(id => ({ type: 'channel' as const, id })),
+        ...userTargets.map(id => ({ type: 'user' as const, id })),
+      ];
+      await recordingService.grantRecordingAccess(recording.externalId, accessTargets);
+
       for (const channelId of channelTargets) {
-        const granted = await grantEntityAccess({ targetChannelId: channelId });
-        if (!granted) continue;
         try {
           const result = zero.mutate(
             mutators.conversations.send({
@@ -166,19 +145,12 @@ export const PostRecordingToChannelModal: React.FC<PostRecordingToChannelModalPr
       }
 
       if (userTargets.length > 0) {
-        const grantedUserIds: string[] = [];
-        for (const userId of userTargets) {
-          const granted = await grantEntityAccess({ targetUserId: userId });
-          if (granted) grantedUserIds.push(userId);
-        }
-        if (grantedUserIds.length > 0) {
-          try {
-            await channelService.createDm({ participantIds: grantedUserIds, message: content });
-            successes += 1;
-          } catch (err) {
-            logRecordingError('PostRecordingToChannelModal.sendDm', err);
-            toast.error('Failed to send message');
-          }
+        try {
+          await channelService.createDm({ participantIds: userTargets, message: content });
+          successes += 1;
+        } catch (err) {
+          logRecordingError('PostRecordingToChannelModal.sendDm', err);
+          toast.error('Failed to send message');
         }
       }
 
@@ -189,6 +161,11 @@ export const PostRecordingToChannelModal: React.FC<PostRecordingToChannelModalPr
         setNote('');
         onClose?.();
       }
+    } catch (error) {
+      logRecordingError('PostRecordingToChannelModal.grantAccess', error);
+      toast.error('Failed to grant recording access', {
+        description: getApiErrorMessage(error, 'Unable to share this recording'),
+      });
     } finally {
       setPosting(false);
     }

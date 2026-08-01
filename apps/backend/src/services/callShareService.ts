@@ -3,10 +3,8 @@ import { entityAccessService } from '@/services/entityAccessService';
 import { ShareableEntityType } from '@xyne/shared';
 
 /**
- * Read-side check for HEADLESS call (recording) visibility. The write side
- * (share/update/unshare) lives in the Zero mutators (see calls.shareRecording /
- * calls.updateRecordingShare in packages/shared/src/zero/mutators.ts and
- * apps/backend/src/zero/mutators.ts) rather than a REST endpoint.
+ * Read-side check for HEADLESS call (recording) visibility. Recording sharing
+ * writes are owned by RecordingSharingService and its single REST command path.
  */
 export class CallShareService {
   async canView(call: Call, userId: string, workspaceId: string): Promise<boolean> {
@@ -21,4 +19,3 @@ export class CallShareService {
 }
 
 export const callShareService = new CallShareService();
-

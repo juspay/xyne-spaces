@@ -5,14 +5,7 @@ import { ActivityItemCard } from './ActivityItemCard';
 import { useUser } from '../../hooks/useUsers';
 import { getUserDisplayName } from '../../utils/userDisplayName';
 
-/**
- * Renders a recording-shared or recording-access-revoked activity for
- * NOTE_TAKER (headless call) recordings, created by
- * EntityAccessSideEffectHandler when a recording is shared/unshared directly
- * with a user or a user group:
- * - recording_shared: "X shared a recording with you"
- * - recording_access_revoked: "X removed your access to a recording"
- */
+/** Renders recording share and access-revocation activities. */
 export const RecordingSharedActivity = ({
   activity,
   isExpanded,
@@ -27,8 +20,6 @@ export const RecordingSharedActivity = ({
   if (!activity.callId || !call) return null;
 
   const isRevoked = activity.actorAction === 'recording_access_revoked';
-  // Recordings detail is a top-level route (not nested under the activity
-  // panel's baseRoute), so this must be an absolute path — see ScheduledCallActivity.
   const targetPath = `/recordings/${call.externalId}`;
 
   return (

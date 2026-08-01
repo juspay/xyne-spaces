@@ -11,6 +11,7 @@ import {
   recordingService,
   type BuiltinRecordingSummaryTemplateId,
   type RecordingDetail,
+  type RecordingTicketLinkState,
 } from '../../services/Recording/recordingService';
 import { useShortcut } from '../../shortcuts';
 import { AlertCircle, ChevronDown, Hash, Mail, PanelRightOpen, StickyNote } from 'lucide-react';
@@ -54,6 +55,7 @@ import {
 import type { MarkedItem } from './components/markedItems';
 import type { Canvas } from '../../components/Canvas/Canvas.types';
 import { xyneAIActor } from '../../machines/xyneAIMachine';
+import { useSelf } from '../../hooks/useUsers';
 
 interface RecordingNavState {
   recordingIds?: string[];
@@ -79,6 +81,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
   const navigate = useNavigate();
   const location = useLocation();
   const speakerIdentificationEnabled = useSpeakerIdentificationEnabled();
+  const currentUser = useSelf();
 
   const [recording, setRecording] = useState<RecordingDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -154,17 +157,25 @@ export default function RecordingDetailV2Screen(): ReactElement {
     setRecording(prev => {
       if (!prev) return prev;
       const endedAt = recordingRow.endedAt ? new Date(recordingRow.endedAt).toISOString() : null;
-      // The linked ticket has no column of its own — it rides in Call.metadata,
-      // the same place the notes canvas link lives — so it arrives here rather
-      // than on the REST payload.
+      // Ticket linkage has no column of its own — it rides in Call.metadata,
+      // the same place the notes canvas link lives. Keep the REST result live
+      // when another client links or unlinks this recording.
       const metadata = recordingRow.metadata as Record<string, unknown> | null;
       const rawLinkedTicketId = metadata?.['linkedTicketId'];
       const linkedTicketId = typeof rawLinkedTicketId === 'string' ? rawLinkedTicketId : null;
+      const rawLinkedTicketMessageId = metadata?.['linkedTicketMessageId'];
+      const rawDetailedSummaryCanvasId = metadata?.['detailedSummaryCanvasId'];
       const next: RecordingDetail = {
         ...prev,
         title: recordingRow.title || prev.title,
         labels: recordingRow.labels ?? prev.labels,
         linkedTicketId,
+        linkedTicketMessageId:
+          typeof rawLinkedTicketMessageId === 'string' ? rawLinkedTicketMessageId : null,
+        detailedSummaryCanvasId:
+          typeof rawDetailedSummaryCanvasId === 'string'
+            ? rawDetailedSummaryCanvasId
+            : prev.detailedSummaryCanvasId,
         markedItems: recordingRow.markedItems ?? prev.markedItems,
         summaryTemplateId: recordingRow.summaryTemplateId ?? prev.summaryTemplateId ?? null,
         aiSummary: recordingRow.aiSummary ?? prev.aiSummary,
@@ -232,8 +243,8 @@ export default function RecordingDetailV2Screen(): ReactElement {
     setRecording(current => (current ? { ...current, labels } : current));
   };
 
-  const handleTicketLinkUpdated = (linkedTicketId: string | null): void => {
-    setRecording(current => (current ? { ...current, linkedTicketId } : current));
+  const handleTicketLinkUpdated = (ticketLink: RecordingTicketLinkState): void => {
+    setRecording(current => (current ? { ...current, ...ticketLink } : current));
   };
 
   const handleSummaryTemplateSelect = async (
@@ -340,6 +351,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
   // The player replaces the read-only timeline once there is audio to scrub.
   const showAudioPlayer = !isLive && !!recording.hasRecording;
   const hasDetailedSummary = !!recording.detailedSummaryCanvasId;
+  const isOwner = recording.createdByUserId === currentUser?.id;
   const selectedSummaryTemplate =
     RECORDING_SUMMARY_TEMPLATES.find(template => template.id === recording.summaryTemplateId) ??
     RECORDING_SUMMARY_TEMPLATES[0]!;
@@ -462,7 +474,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
                     <Flag size={15} strokeWidth={2.2} variant='Solid' aria-hidden='true' />
                     Mark this moment
                   </Button>
-                ) : (
+                ) : isOwner && hasDetailedSummary ? (
                   <DropdownMenu>
                     <div className='inline-flex h-8 items-stretch overflow-hidden rounded-full bg-foreground text-background'>
                       <button
@@ -509,7 +521,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
-                )}
+                ) : null}
               </div>
             )}
           </motion.div>
@@ -596,7 +608,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
         />
       )}
 
-      {showPostToChannelModal && (
+      {isOwner && showPostToChannelModal && hasDetailedSummary && (
         <Dialog
           open={showPostToChannelModal}
           onOpenChange={open => !open && setShowPostToChannelModal(false)}
@@ -610,7 +622,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
         </Dialog>
       )}
 
-      {showPostToEmailModal && (
+      {isOwner && showPostToEmailModal && hasDetailedSummary && (
         <Dialog
           open={showPostToEmailModal}
           onOpenChange={open => !open && setShowPostToEmailModal(false)}

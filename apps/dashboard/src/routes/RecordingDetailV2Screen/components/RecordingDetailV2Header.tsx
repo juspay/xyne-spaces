@@ -12,18 +12,23 @@ import { useSelf } from '../../../hooks/useUsers';
 import {
   recordingService,
   type RecordingDetail,
+  type RecordingTicketLinkState,
 } from '../../../services/Recording/recordingService';
 import { logRecordingError } from '../../../utils/recordingUtils';
+import { getApiErrorMessage } from '../../../utils/apiError';
 import { RecordingLabelPicker } from './RecordingLabelPicker';
 import { RecordingShareModal } from './RecordingShareModal';
-import { RecordingTicketLink } from './RecordingTicketLink';
+import {
+  RecordingTicketLink,
+  type RecordingTicketTarget,
+} from './RecordingTicketLink';
 
 export interface RecordingDetailV2HeaderProps {
   recording: RecordingDetail;
   isLive: boolean;
   onTitleUpdated: (title: string) => void;
   onLabelsUpdated: (labels: string[]) => void;
-  onTicketLinkUpdated: (ticketId: string | null) => void;
+  onTicketLinkUpdated: (ticketLink: RecordingTicketLinkState) => void;
   onAskAI: () => void;
 }
 
@@ -42,6 +47,7 @@ export const RecordingDetailV2Header = ({
   const [isSavingTitle, setIsSavingTitle] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
   const [showLiveAskAIHint, setShowLiveAskAIHint] = useState(false);
+  const [isUpdatingTicketLink, setIsUpdatingTicketLink] = useState(false);
 
   // Only the creator can rename or relabel; a recording shared with you is read-only.
   const isOwner = recording.createdByUserId === currentUser?.id;
@@ -93,17 +99,39 @@ export const RecordingDetailV2Header = ({
     }
   };
 
-  /** Same optimistic-then-roll-back shape as labels — one ticket, or null to unlink. */
-  const handleTicketLinkChange = async (ticketId: string | null): Promise<void> => {
-    const previousTicketId = recording.linkedTicketId ?? null;
-    onTicketLinkUpdated(ticketId);
+  /**
+   * The backend performs ticket linking/unlinking as one transactional command:
+   * recording access, canvas access, thread message, and recording metadata.
+   */
+  const handleTicketLinkChange = async (
+    ticketId: string | null,
+    ticket?: RecordingTicketTarget,
+  ): Promise<void> => {
+    if (isUpdatingTicketLink) return;
+
+    setIsUpdatingTicketLink(true);
 
     try {
-      await recordingService.updateRecording(recording.externalId, { linkedTicketId: ticketId });
+      if (!ticketId) {
+        const result = await recordingService.unlinkRecordingFromTicket(recording.externalId);
+        onTicketLinkUpdated(result);
+        toast.success('Ticket unlinked');
+        return;
+      }
+      if (!ticket) throw new Error('Ticket details are unavailable');
+      const result = await recordingService.linkRecordingToTicket(
+        recording.externalId,
+        ticketId,
+      );
+      onTicketLinkUpdated(result);
+      toast.success(`Recording linked to ${ticket.label}`);
     } catch (err) {
       logRecordingError('RecordingDetailV2Header.updateTicketLink', err);
-      toast.error(ticketId ? 'Failed to link ticket' : 'Failed to unlink ticket');
-      onTicketLinkUpdated(previousTicketId);
+      toast.error(ticketId ? 'Failed to link ticket' : 'Failed to unlink ticket', {
+        description: getApiErrorMessage(err, 'Unable to update the ticket link'),
+      });
+    } finally {
+      setIsUpdatingTicketLink(false);
     }
   };
 
@@ -244,40 +272,49 @@ export const RecordingDetailV2Header = ({
               <span>{formattedDate}</span>
             </div>
           </Tooltip>
-          <RecordingTicketLink
-            linkedTicketId={recording.linkedTicketId ?? null}
-            canEdit={isOwner}
-            onChange={ticketId => void handleTicketLinkChange(ticketId)}
-          />
+          {recording.detailedSummaryCanvasId && (
+            <RecordingTicketLink
+              linkedTicketId={recording.linkedTicketId ?? null}
+              canEdit={isOwner}
+              isUpdating={isUpdatingTicketLink}
+              onChange={(ticketId, ticket) => void handleTicketLinkChange(ticketId, ticket)}
+            />
+          )}
           <RecordingLabelPicker
             labels={recording.labels ?? []}
             canEdit={recording.createdByUserId === currentUser?.id}
             onChange={labels => void handleLabelsChange(labels)}
           />
-          <Tooltip content='Share' side='top'>
-            <Button
-              type='button'
-              variant='outline'
-              size='iconSm'
-              onClick={() => setShowShareModal(true)}
-              className='w-8 h-7 rounded-lg text-muted-foreground hover:border-foreground/30 hover:text-foreground'
-              aria-label='Share recording'
-              data-track-category='RecordingDetailV2'
-              data-track-name='share_recording'
-            >
-              <Share02 className='size-3.5' />
-            </Button>
-          </Tooltip>
+          {isOwner && recording.detailedSummaryCanvasId && (
+            <Tooltip content='Share' side='top'>
+              <Button
+                type='button'
+                variant='outline'
+                size='iconSm'
+                onClick={() => setShowShareModal(true)}
+                className='w-8 h-7 rounded-lg text-muted-foreground hover:border-foreground/30 hover:text-foreground'
+                aria-label='Share recording'
+                data-track-category='RecordingDetailV2'
+                data-track-name='share_recording'
+              >
+                <Share02 className='size-3.5' />
+              </Button>
+            </Tooltip>
+          )}
         </div>
 
-        {showShareModal && (
+        {isOwner && showShareModal && recording.detailedSummaryCanvasId && (
           <Dialog
             open={showShareModal}
             onOpenChange={open => !open && setShowShareModal(false)}
             title='Share recording'
             data-testid='recording-share-modal'
           >
-            <RecordingShareModal recording={recording} onClose={() => setShowShareModal(false)} />
+            <RecordingShareModal
+              recording={recording}
+              onClose={() => setShowShareModal(false)}
+              onTicketLinkUpdated={onTicketLinkUpdated}
+            />
           </Dialog>
         )}
 
