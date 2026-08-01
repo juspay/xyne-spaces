@@ -14,12 +14,14 @@ import {
 } from '../../../utils/recordingUtils';
 import { cn } from '../../../utils/classNames';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
-import { formatRecordingTimestamp } from '../utils/RecordingsV2.utils';
+import { TextShimmer } from '../../../components/ui/ShimmerText';
+import { useRecordingTitleState } from '../../../hooks/useRecordingTitleState';
+import { formatRecordingTimestamp, toRecordingTitleInput } from '../utils/RecordingsV2.utils';
 
 export interface RecordingsV2PillProps {
   recording: Pick<
     OatsRecordingEntry,
-    'id' | 'externalId' | 'title' | 'startedAt' | 'endedAt' | 'status'
+    'id' | 'externalId' | 'title' | 'startedAt' | 'endedAt' | 'status' | 'aiSummary' | 'transcript'
   >;
   creator: User | null;
   tags?: string[];
@@ -116,7 +118,7 @@ const RecordingsV2Pill = ({
   resolveLabel = (label: string) => label,
   onOpen,
 }: RecordingsV2PillProps): ReactElement => {
-  const title = recording.title?.trim() || 'Untitled Recording';
+  const titleState = useRecordingTitleState(toRecordingTitleInput(recording));
   const durationMs = recording.endedAt
     ? Math.max(0, recording.endedAt - recording.startedAt)
     : null;
@@ -130,7 +132,11 @@ const RecordingsV2Pill = ({
       type='button'
       onClick={handleOpen}
       className='group flex w-full items-start gap-3 rounded-xl px-3 py-3 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background'
-      aria-label={`Open recording ${title}`}
+      aria-label={
+        titleState.kind === 'generating'
+          ? 'Open recording — title is being generated'
+          : `Open recording ${titleState.text}`
+      }
       data-track-category='RecordingsV2'
       data-track-name='open_recording'
       data-track-metadata={JSON.stringify({ recordingId: recording.id })}
@@ -155,7 +161,19 @@ const RecordingsV2Pill = ({
       <span className='flex min-w-0 flex-1 flex-col gap-2'>
         <span className='flex min-w-0 items-start justify-between gap-4'>
           <span className='min-w-0 flex-1'>
-            <span className='block truncate text-sm font-semibold text-foreground'>{title}</span>
+            {titleState.kind === 'generating' ? (
+              <TextShimmer
+                as='span'
+                glassEffect={false}
+                className='shimmer-text-themed block truncate text-sm font-semibold'
+              >
+                Generating title…
+              </TextShimmer>
+            ) : (
+              <span className='block truncate text-sm font-semibold text-foreground'>
+                {titleState.text}
+              </span>
+            )}
             <span className='mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground'>
               <span className='truncate'>
                 {creator ? getUserDisplayName(creator) : 'Unknown creator'}

@@ -51,7 +51,6 @@ export type SttModel = 'google' | 'azure' | 'deepgram';
 /** Layout state for the active recording workspace */
 export type RecordingLayout = 'transcript' | 'split' | 'notes';
 export const DEFAULT_NOTES_TITLE = 'Untitled Notes';
-export const DEFAULT_RECORDING_TITLE = 'Impromptu Recording';
 
 export interface RecordingState {
   room: Room | null;

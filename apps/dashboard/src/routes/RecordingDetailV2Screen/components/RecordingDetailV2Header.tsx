@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import * as Popover from '@radix-ui/react-popover';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
-import { CalendarEvent, Share02, Spinner, UturnLeft } from '@xyne/icons';
+import { CalendarEvent, MinimizeLineArrow, Share02, Spinner, UturnLeft } from '@xyne/icons';
 import { Button } from '../../../components/ui/Button/Button';
 import { Dialog } from '../../../components/ui/Dialog';
 import { Tooltip } from '../../../components/ui/Tooltip';
@@ -14,31 +14,57 @@ import {
   type RecordingDetail,
   type RecordingTicketLinkState,
 } from '../../../services/Recording/recordingService';
-import { logRecordingError } from '../../../utils/recordingUtils';
+import {
+  DEFAULT_RECORDING_TITLE,
+  logRecordingError,
+  type RecordingTitleState,
+} from '../../../utils/recordingUtils';
 import { getApiErrorMessage } from '../../../utils/apiError';
 import { RecordingLabelPicker } from './RecordingLabelPicker';
 import { RecordingShareModal } from './RecordingShareModal';
-import {
-  RecordingTicketLink,
-  type RecordingTicketTarget,
-} from './RecordingTicketLink';
+import { RecordingTicketLink, type RecordingTicketTarget } from './RecordingTicketLink';
 
 export interface RecordingDetailV2HeaderProps {
   recording: RecordingDetail;
   isLive: boolean;
+  titleState?: RecordingTitleState;
   onTitleUpdated: (title: string) => void;
   onLabelsUpdated: (labels: string[]) => void;
   onTicketLinkUpdated: (ticketLink: RecordingTicketLinkState) => void;
   onAskAI: () => void;
+  onMinimize?: () => void;
 }
+
+const HeaderTitle = ({
+  isGenerating,
+  title,
+}: {
+  isGenerating: boolean;
+  title: string;
+}): ReactElement =>
+  isGenerating ? (
+    <span
+      role='status'
+      aria-label='Generating title'
+      className='flex h-9 w-[28rem] max-w-full items-center'
+    >
+      <span aria-hidden='true' className='relative h-7 w-full overflow-hidden rounded-lg bg-muted'>
+        <span className='pointer-events-none absolute inset-0 bg-[linear-gradient(110deg,transparent_25%,hsl(var(--foreground)/0.12)_50%,transparent_75%)] bg-[length:200%_100%] [--duration:3s] motion-safe:animate-shine' />
+      </span>
+    </span>
+  ) : (
+    <span className='truncate'>{title}</span>
+  );
 
 export const RecordingDetailV2Header = ({
   recording,
   isLive,
+  titleState,
   onTitleUpdated,
   onLabelsUpdated,
   onTicketLinkUpdated,
   onAskAI,
+  onMinimize,
 }: RecordingDetailV2HeaderProps): ReactElement => {
   const navigate = useNavigate();
   const currentUser = useSelf();
@@ -51,7 +77,11 @@ export const RecordingDetailV2Header = ({
 
   // Only the creator can rename or relabel; a recording shared with you is read-only.
   const isOwner = recording.createdByUserId === currentUser?.id;
-  const displayTitle = recording.title?.trim() || 'Impromptu Recording';
+  const isGeneratingTitle = titleState?.kind === 'generating';
+  const displayTitle =
+    titleState && titleState.kind !== 'generating'
+      ? titleState.text
+      : recording.title?.trim() || DEFAULT_RECORDING_TITLE;
   const formattedDate = format(new Date(recording.startedAt), 'MMM d, yyyy · h:mm a');
 
   const handleSaveTitle = async (): Promise<void> => {
@@ -119,10 +149,7 @@ export const RecordingDetailV2Header = ({
         return;
       }
       if (!ticket) throw new Error('Ticket details are unavailable');
-      const result = await recordingService.linkRecordingToTicket(
-        recording.externalId,
-        ticketId,
-      );
+      const result = await recordingService.linkRecordingToTicket(recording.externalId, ticketId);
       onTicketLinkUpdated(result);
       toast.success(`Recording linked to ${ticket.label}`);
     } catch (err) {
@@ -185,7 +212,10 @@ export const RecordingDetailV2Header = ({
           <li aria-hidden='true' className='text-muted-foreground'>
             /
           </li>
-          <li className='truncate text-foreground'>{displayTitle}</li>
+          {/* Plain text here — the breadcrumb is a navigation label, not a status. */}
+          <li className='truncate text-foreground'>
+            {isGeneratingTitle ? 'Generating title…' : displayTitle}
+          </li>
         </ol>
       </nav>
 
@@ -239,7 +269,7 @@ export const RecordingDetailV2Header = ({
             >
               <h1 className='flex min-w-0 items-baseline gap-2 text-3xl font-medium text-foreground'>
                 {isLive && <span className='shrink-0 text-muted-foreground/70'>Capturing:</span>}
-                <span className='truncate'>{displayTitle}</span>
+                <HeaderTitle isGenerating={isGeneratingTitle} title={displayTitle} />
               </h1>
             </div>
           ) : (
@@ -247,7 +277,7 @@ export const RecordingDetailV2Header = ({
                focusable or clickable — no affordance to discover and be refused. */
             <h1 className='flex min-w-0 items-baseline gap-2 text-3xl font-medium text-foreground'>
               {isLive && <span className='shrink-0 text-muted-foreground/70'>Capturing:</span>}
-              <span className='truncate'>{displayTitle}</span>
+              <HeaderTitle isGenerating={isGeneratingTitle} title={displayTitle} />
             </h1>
           )}
         </div>
@@ -266,8 +296,8 @@ export const RecordingDetailV2Header = ({
       {/* Actions row */}
       <div className='flex flex-wrap items-center justify-between gap-3'>
         <div className='flex flex-wrap items-center gap-2'>
-          <Tooltip content='Recording started' side='top'>
-            <div className='inline-flex items-center gap-1.5 rounded-lg border border-border hover:bg-muted px-3 py-1 text-xs text-muted-foreground'>
+          <Tooltip content='Recording started at' side='top'>
+            <div className='inline-flex items-center gap-1.5 rounded-lg border border-border hover:bg-muted px-3 h-7 text-xs text-muted-foreground cursor-default'>
               <CalendarEvent size={16} variant='Stroke' />
               <span>{formattedDate}</span>
             </div>
@@ -298,6 +328,22 @@ export const RecordingDetailV2Header = ({
                 data-track-name='share_recording'
               >
                 <Share02 className='size-3.5' />
+              </Button>
+            </Tooltip>
+          )}
+          {onMinimize && (
+            <Tooltip content='Minimize to overlay' side='top'>
+              <Button
+                type='button'
+                variant='outline'
+                size='iconSm'
+                onClick={onMinimize}
+                className='size-7 rounded-lg text-muted-foreground hover:border-foreground/30 hover:text-foreground'
+                aria-label='Minimize to floating overlay'
+                data-track-category='RecordingDetailV2'
+                data-track-name='minimize_to_overlay'
+              >
+                <MinimizeLineArrow className='size-3.5' />
               </Button>
             </Tooltip>
           )}

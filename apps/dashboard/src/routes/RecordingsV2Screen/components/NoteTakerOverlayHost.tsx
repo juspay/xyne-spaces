@@ -7,8 +7,8 @@ import { refreshOatsRecordings } from '../../../hooks/usePaginatedOatsRecordings
 import { useMarkMoment } from '../../../hooks/useMarkMoment';
 import { sendRecordingEvent, useRecordingStore } from '../../../hooks/useRecordingStore';
 import { recordingService } from '../../../services/Recording/recordingService';
-import { DEFAULT_RECORDING_TITLE } from '../../../stores/recordingStore';
 import { isElectronApp } from '../../../utils/electronApp';
+import { logRecordingError, NO_TRANSCRIPT_RECORDING_TITLE } from '../../../utils/recordingUtils';
 import NoteTakerOverlay from './NoteTakerOverlay';
 
 export function NoteTakerOverlayHost(): ReactElement {
@@ -35,21 +35,21 @@ export function NoteTakerOverlayHost(): ReactElement {
 
   const handleStop = useCallback((): void => {
     const stoppedRecordingId = externalId;
+    const capturedNothing = transcripts.length === 0;
     const alreadyTitled = Boolean(title?.trim());
 
     sendRecordingEvent({ type: 'stopRecording' });
 
-    if (!stoppedRecordingId) return;
-    if (alreadyTitled) {
+    if (!stoppedRecordingId || alreadyTitled || !capturedNothing) {
       refreshOatsRecordings();
       return;
     }
 
     void recordingService
-      .updateRecordingTitle(stoppedRecordingId, DEFAULT_RECORDING_TITLE)
-      .catch(() => toast.error('Recording saved, but its title could not be set.'))
+      .updateRecordingTitle(stoppedRecordingId, NO_TRANSCRIPT_RECORDING_TITLE)
+      .catch(err => logRecordingError('NoteTakerOverlayHost.titleUntranscribed', err))
       .finally(refreshOatsRecordings);
-  }, [externalId, title]);
+  }, [externalId, title, transcripts]);
 
   useEffect(() => {
     if (!isActive) return;

@@ -11,7 +11,9 @@ import {
   subMonths,
   subWeeks,
 } from 'date-fns';
+import { CallStatus } from '@xyne/shared';
 import type { OatsRecordingEntry } from '../../../hooks/usePaginatedOatsRecordings';
+import type { RecordingTitleInput } from '../../../utils/recordingUtils';
 
 export type RecordingDatePreset =
   | 'all-time'
@@ -256,6 +258,18 @@ export function findNearestVisibleRecording(
       .find(candidate => candidate.type === 'recording');
 
   return row?.type === 'recording' ? row.recording : undefined;
+}
+
+export function toRecordingTitleInput(
+  recording: Pick<OatsRecordingEntry, 'title' | 'status' | 'endedAt' | 'aiSummary' | 'transcript'>,
+): RecordingTitleInput {
+  return {
+    title: recording.title,
+    isEnded: recording.status === CallStatus.ENDED,
+    endedAtMs: recording.endedAt,
+    hasTranscript: !!recording.transcript?.trim(),
+    hasSummary: !!recording.aiSummary,
+  };
 }
 
 /**
