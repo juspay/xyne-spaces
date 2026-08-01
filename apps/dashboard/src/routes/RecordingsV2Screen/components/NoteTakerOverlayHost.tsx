@@ -1,5 +1,5 @@
 import { useCallback, useEffect, type ReactElement } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useZeroOfflineState } from '@xyne/shared/hooks';
 import { AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
@@ -29,6 +29,7 @@ export function NoteTakerOverlayHost(): ReactElement {
   const { showOfflineBanner } = useZeroOfflineState();
   const isActive = status === 'recording' || status === 'paused';
   const { pathname } = useLocation();
+  const navigate = useNavigate();
   // hide the overlay when live recording detail screen entered.
   const isViewingThisRecording =
     Boolean(externalId) && pathname.replace(/\/+$/, '').endsWith(`/recordings/${externalId}`);
@@ -40,6 +41,11 @@ export function NoteTakerOverlayHost(): ReactElement {
 
     sendRecordingEvent({ type: 'stopRecording' });
 
+    // The recording just transitioned to ENDED — land the user on its detail
+    if (stoppedRecordingId && !isViewingThisRecording) {
+      void navigate(`/recordings/${stoppedRecordingId}`);
+    }
+
     if (!stoppedRecordingId || alreadyTitled || !capturedNothing) {
       refreshOatsRecordings();
       return;
@@ -49,7 +55,7 @@ export function NoteTakerOverlayHost(): ReactElement {
       .updateRecordingTitle(stoppedRecordingId, NO_TRANSCRIPT_RECORDING_TITLE)
       .catch(err => logRecordingError('NoteTakerOverlayHost.titleUntranscribed', err))
       .finally(refreshOatsRecordings);
-  }, [externalId, title, transcripts]);
+  }, [externalId, title, transcripts, isViewingThisRecording, navigate]);
 
   useEffect(() => {
     if (!isActive) return;

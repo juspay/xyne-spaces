@@ -11,7 +11,7 @@
  */
 
 import { Fragment, useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
-import { ChevronDown, ChevronUp, Flag, MultipleCrossCancelDefault, SearchBig } from '@xyne/icons';
+import { ChevronDown, ChevronUp, MultipleCrossCancelDefault, SearchBig } from '@xyne/icons';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { Button } from '../../ui/Button/Button';
 import Input from '../../ui/Input';
@@ -20,27 +20,12 @@ import { cn } from '../../../utils/classNames';
 import { formatElapsedTime } from '../../../utils/recordingUtils';
 import type { TranscriptEntry } from '../../../stores/recordingStore';
 import { HighlightedText } from '../../../routes/RecordingsScreen/components/HighlightedText';
+import { MarkedMomentDivider } from '../MarkedMomentDivider';
 import type { LiveTranscriptListProps } from './LiveTranscriptList.types';
 import { findScrollParent, markedMomentAnchors, VARIANT_STYLES } from './LiveTranscriptList.utils';
 
 /** How close to the bottom still counts as "following the latest line". */
 const FOLLOW_THRESHOLD_PX = 40;
-
-/** Inline separator marking the transcript line the user flagged. */
-const MarkedMomentDivider = (): ReactElement => (
-  <div className='flex items-center gap-2' role='separator' aria-label='Marked moment'>
-    <span
-      className='flex size-5 shrink-0 items-center justify-center rounded-md bg-destructive/10'
-      aria-hidden='true'
-    >
-      <Flag size={11} strokeWidth={2.5} className='text-primary' />
-    </span>
-    <span className='shrink-0 text-xs font-semibold uppercase tracking-wide text-primary'>
-      Marked moment
-    </span>
-    <span className='h-px flex-1 bg-destructive/20' aria-hidden='true' />
-  </div>
-);
 
 export const LiveTranscriptList = ({
   transcripts,
