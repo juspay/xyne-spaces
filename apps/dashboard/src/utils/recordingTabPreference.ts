@@ -16,6 +16,7 @@
 export type RecordingV2Tab = 'notes' | 'secondary';
 
 const RECORDING_V2_TAB_KEY = 'xyne:recording-v2-tab';
+const RECORDING_V2_TAB_OWNER_KEY = 'xyne:recording-v2-tab-recording';
 
 /** Notes is the primary pane, so it is where a user with no stored choice lands. */
 export const DEFAULT_RECORDING_V2_TAB: RecordingV2Tab = 'notes';
@@ -27,4 +28,18 @@ export const getRecordingV2Tab = (): RecordingV2Tab =>
 
 export const setRecordingV2Tab = (tab: RecordingV2Tab): void => {
   localStorage.setItem(RECORDING_V2_TAB_KEY, tab);
+};
+
+export const getLiveRecordingV2Tab = (recordingId: string | null | undefined): RecordingV2Tab =>
+  recordingId && localStorage.getItem(RECORDING_V2_TAB_OWNER_KEY) === recordingId
+    ? getRecordingV2Tab()
+    : DEFAULT_RECORDING_V2_TAB;
+
+/** Stores the pane choice as belonging to `recordingId` as well as to the user. */
+export const setLiveRecordingV2Tab = (
+  recordingId: string | null | undefined,
+  tab: RecordingV2Tab,
+): void => {
+  setRecordingV2Tab(tab);
+  if (recordingId) localStorage.setItem(RECORDING_V2_TAB_OWNER_KEY, recordingId);
 };

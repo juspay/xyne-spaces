@@ -18,6 +18,7 @@
  */
 
 import { useCallback, useEffect, useState, type CSSProperties, type ReactElement } from 'react';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { StopSmall, Spinner, PauseBig, PlayBig, Flag } from '@xyne/icons';
 import { Button } from '../../../components/ui/Button/Button';
 import { cn } from '../../../utils/classNames';
@@ -348,7 +349,7 @@ const RecordedTimelineBar = ({
   recording,
   onLoadAudio,
   onMarkerSelect,
-}: RecordedTimelineBarProps): ReactElement | null => {
+}: RecordedTimelineBarProps): ReactElement => {
   const fallbackDurationMs =
     recording.durationMs ??
     (recording.endedAt
@@ -360,17 +361,24 @@ const RecordedTimelineBar = ({
     initialDurationSec: fallbackDurationMs ? fallbackDurationMs / 1000 : undefined,
     showToastOnError: true,
   });
-
-  if (!fallbackDurationMs || fallbackDurationMs <= 0) return null;
+  const shouldReduceMotion = useReducedMotion();
 
   // Prefer the media's own duration once it has loaded — the call's wall-clock span
-  // can differ from the recorded audio by a second or two.
-  const durationMs = playback.duration > 0 ? playback.duration * 1000 : fallbackDurationMs;
-  const markedItems = parseMarkedItems(recording.markedItems);
-  const hasMarkedItems = markedItems.length > 0;
+  // can differ from the recorded audio by a second or two. It can also be unknown for
+  // a moment after the recording ends, which the bar rides out rather than unmounting.
+  const durationMs = playback.duration > 0 ? playback.duration * 1000 : (fallbackDurationMs ?? 0);
+  // Markers are positioned as a fraction of the duration, so they wait for one.
+  const markedItems = durationMs > 0 ? parseMarkedItems(recording.markedItems) : [];
+  const markedTypes = new Set(markedItems.map(item => item.type));
   const elapsedMs = playback.currentTime * 1000;
   const progressPercent = durationMs > 0 ? Math.min((elapsedMs / durationMs) * 100, 100) : 0;
   const isPlaying = playback.state === 'playing';
+  const audioControlLabel = !onLoadAudio
+    ? 'Audio is still being prepared'
+    : isPlaying
+      ? 'Pause recording'
+      : 'Play recording';
+  const audioIconKey = playback.state === 'loading' ? 'loading' : isPlaying ? 'pause' : 'play';
 
   const selectMarker =
     playback.canSeek || onMarkerSelect
@@ -382,29 +390,49 @@ const RecordedTimelineBar = ({
 
   return (
     <div className='mb-6 rounded-2xl border border-border bg-card px-5 py-4'>
-      <div className='flex items-center gap-4'>
-        {onLoadAudio && (
+      <div className='flex min-h-11 items-center gap-4'>
+        <motion.div
+          className='shrink-0'
+          initial={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.7 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={
+            shouldReduceMotion
+              ? { duration: 0.15 }
+              : { type: 'spring', stiffness: 480, damping: 30 }
+          }
+        >
           <Button
             type='button'
             variant='outline'
             size='icon'
             onClick={() => void playback.toggle()}
-            disabled={playback.state === 'loading'}
-            className='size-8 shrink-0 rounded-full border-border bg-card text-muted-foreground transition-colors hover:text-foreground'
-            aria-label={isPlaying ? 'Pause recording' : 'Play recording'}
-            title={isPlaying ? 'Pause recording' : 'Play recording'}
+            disabled={!onLoadAudio || playback.state === 'loading'}
+            className='size-8 rounded-full border-border bg-card text-muted-foreground hover:text-foreground'
+            aria-label={audioControlLabel}
+            title={audioControlLabel}
             data-track-category='RecordingDetailV2'
             data-track-name={isPlaying ? 'pause_recording' : 'play_recording'}
           >
-            {playback.state === 'loading' ? (
-              <Spinner size={14} className='animate-spin' />
-            ) : isPlaying ? (
-              <PauseBig size={14} strokeWidth={4} variant='Solid' />
-            ) : (
-              <PlayBig size={14} variant='Solid' />
-            )}
+            <AnimatePresence mode='wait' initial={false}>
+              <motion.span
+                key={audioIconKey}
+                className='flex items-center justify-center'
+                initial={{ opacity: 0, scale: 0.6 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.6 }}
+                transition={{ duration: shouldReduceMotion ? 0 : 0.14 }}
+              >
+                {playback.state === 'loading' ? (
+                  <Spinner size={14} className='animate-spin' />
+                ) : isPlaying ? (
+                  <PauseBig size={14} strokeWidth={4} variant='Solid' />
+                ) : (
+                  <PlayBig size={14} variant='Solid' />
+                )}
+              </motion.span>
+            </AnimatePresence>
           </Button>
-        )}
+        </motion.div>
 
         <span className='w-12 shrink-0 text-right font-mono text-xs text-foreground'>
           {formatElapsedTime(elapsedMs)}
@@ -474,26 +502,32 @@ const RecordedTimelineBar = ({
       </div>
 
       {/* Only worth explaining the markers once there are some to explain. */}
-      {hasMarkedItems && <MarkerLegend />}
+      {markedTypes.size > 0 && <MarkerLegend types={markedTypes} />}
     </div>
   );
 };
 
-/** Reads the marker vocabulary of the track above it. */
-const MarkerLegend = (): ReactElement => (
+/** Reads the marker vocabulary of the track above it — only the kinds actually on it. */
+const MarkerLegend = ({ types }: { types: ReadonlySet<MarkedItemType> }): ReactElement => (
   <div className='mt-3 flex items-center gap-5 pl-1 text-xs text-muted-foreground'>
-    <span className='flex items-center gap-1.5'>
-      <span className={cn('size-2 rounded-full', MARKER_DOT_COLOR.decision)} aria-hidden='true' />
-      Decisions
-    </span>
-    <span className='flex items-center gap-1.5'>
-      <span className={cn('size-2 rounded-full', MARKER_DOT_COLOR.action)} aria-hidden='true' />
-      Actions
-    </span>
-    <span className='flex items-center gap-1.5'>
-      <Flag size={12} variant='Solid' className='text-primary' aria-hidden='true' />
-      Marked moments
-    </span>
+    {types.has('decision') && (
+      <span className='flex items-center gap-1.5'>
+        <span className={cn('size-2 rounded-full', MARKER_DOT_COLOR.decision)} aria-hidden='true' />
+        Decisions
+      </span>
+    )}
+    {types.has('action') && (
+      <span className='flex items-center gap-1.5'>
+        <span className={cn('size-2 rounded-full', MARKER_DOT_COLOR.action)} aria-hidden='true' />
+        Actions
+      </span>
+    )}
+    {types.has('moment') && (
+      <span className='flex items-center gap-1.5'>
+        <Flag size={12} variant='Solid' className='text-primary' aria-hidden='true' />
+        Marked moments
+      </span>
+    )}
   </div>
 );
 

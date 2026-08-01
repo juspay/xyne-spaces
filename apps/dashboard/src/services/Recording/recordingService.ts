@@ -5,11 +5,7 @@
 
 import { apiInstance } from '../clients/apiClient';
 import { AxiosResponse } from 'axios';
-import type {
-  DefaultOutlet,
-  GrantableEntityUserAccess,
-  RecordingType,
-} from '@xyne/shared';
+import type { DefaultOutlet, GrantableEntityUserAccess, RecordingType } from '@xyne/shared';
 
 export interface RecordingSession {
   /** Public Call ID used by the recording routes (same value as externalId). */
@@ -286,10 +282,7 @@ class RecordingService {
     return response.data;
   }
 
-  async linkRecordingToTicket(
-    callId: string,
-    ticketId: string,
-  ): Promise<RecordingTicketLinkState> {
+  async linkRecordingToTicket(callId: string, ticketId: string): Promise<RecordingTicketLinkState> {
     const response: AxiosResponse<
       { success: true } & RecordingSharingResult & RecordingTicketLinkState
     > = await apiInstance.post(`/calls/recordings/${callId}/sharing`, {

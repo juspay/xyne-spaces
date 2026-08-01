@@ -38,7 +38,7 @@ export const ResumeRecordingButton = ({
               data-track-name='resume_recording_floating'
             >
               <PlaySmall size={14} variant='Solid' />
-              Resume R ecording
+              Resume recording
             </Button>
           </motion.div>
         )}
