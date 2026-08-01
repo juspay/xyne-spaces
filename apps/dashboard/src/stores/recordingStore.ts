@@ -40,15 +40,8 @@ export interface TranscriptEntry {
  * happens separately through the calls.markMoment mutator.
  */
 export interface MarkedMoment {
-  /** Id of the transcript entry the divider sits above; null when marked before any line arrived. */
   transcriptId: number | null;
-  /** Seconds from the first transcript line — the basis the stored transcript uses. */
   timestampSeconds: number;
-  /**
-   * Pause-adjusted elapsed time from the recording's start. Only for placing the
-   * marker on the live timeline, which measures its playhead the same way — the
-   * transcript basis above would drift from it by the lead-in silence.
-   */
   elapsedMs: number;
 }
 

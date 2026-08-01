@@ -1,5 +1,6 @@
 import { useMemo, useState, type ReactElement } from 'react';
-import { ChevronDown, ChevronUp } from '@xyne/icons';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import { ChevronDown } from '@xyne/icons';
 import type { User } from '@xyne/shared/machines';
 import { SearchableMultiSelect } from '../../../components/ui/SearchableMultiSelect/SearchableMultiSelect';
 import type { SearchableMultiSelectOption } from '../../../components/ui/SearchableMultiSelect/SearchableMultiSelect.types';
@@ -20,7 +21,8 @@ interface RecordingSharedWithMeTabProps {
 
 /**
  * Ownership tab that doubles as a "shared by" picker: it looks like a plain tab
- * until it is selected, and only then reveals the chevron and selection count.
+ * until it is selected and somebody has shared a recording, and only then reveals
+ * the chevron and selection count.
  */
 export function RecordingSharedWithMeTab({
   isActive,
@@ -30,6 +32,7 @@ export function RecordingSharedWithMeTab({
   onSelectedSharerIdsChange,
 }: RecordingSharedWithMeTabProps): ReactElement {
   const [isOpen, setIsOpen] = useState(false);
+  const shouldReduceMotion = useReducedMotion();
 
   const options = useMemo<SearchableMultiSelectOption[]>(
     () =>
@@ -48,10 +51,18 @@ export function RecordingSharedWithMeTab({
     [sharers],
   );
 
-  /** The first click switches scope and opens the picker; later clicks just toggle it. */
+  const hasSharers = options.length > 0;
+
   const handleOpenChange = (open: boolean): void => {
-    if (open) onActivate();
-    setIsOpen(open);
+    if (!open) {
+      setIsOpen(false);
+      return;
+    }
+    if (!isActive) {
+      onActivate();
+      return;
+    }
+    if (hasSharers) setIsOpen(true);
   };
 
   return (
@@ -91,13 +102,29 @@ export function RecordingSharedWithMeTab({
               {selectedSharerIds.length}
             </span>
           )}
-          {/* The tab must not advertise itself as a dropdown until it is selected. */}
-          {isActive &&
-            (isOpen ? (
-              <ChevronUp className='size-4 text-muted-foreground' aria-hidden='true' />
-            ) : (
-              <ChevronDown className='size-4 text-muted-foreground' aria-hidden='true' />
-            ))}
+          {/* Widening as it fades keeps the label from jumping when the chevron
+              arrives, and one rotating icon reads as a flip where swapping an up
+              icon for a down one just blinked. */}
+          <AnimatePresence initial={false}>
+            {isActive && hasSharers && (
+              <motion.span
+                initial={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.6, width: 0 }}
+                animate={{ opacity: 1, scale: 1, width: 16 }}
+                exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.6, width: 0 }}
+                transition={{ duration: shouldReduceMotion ? 0 : 0.16, ease: [0.22, 1, 0.36, 1] }}
+                className='flex shrink-0 items-center justify-center overflow-hidden'
+                aria-hidden='true'
+              >
+                <motion.span
+                  className='flex'
+                  animate={{ rotate: isOpen ? 180 : 0 }}
+                  transition={{ duration: shouldReduceMotion ? 0 : 0.18, ease: [0.22, 1, 0.36, 1] }}
+                >
+                  <ChevronDown className='size-4 text-muted-foreground' />
+                </motion.span>
+              </motion.span>
+            )}
+          </AnimatePresence>
         </button>
       }
     />

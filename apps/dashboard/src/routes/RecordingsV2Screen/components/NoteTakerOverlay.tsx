@@ -27,6 +27,7 @@ import type { MarkedMoment, RecordingState, TranscriptEntry } from '../../../sto
 import { DEFAULT_RECORDING_TITLE } from '../../../stores/recordingStore';
 import { cn } from '../../../utils/classNames';
 import { calculateRecordingElapsedMs, formatElapsedTime } from '../../../utils/recordingUtils';
+import { getRecordingV2Tab, setRecordingV2Tab } from '../../../utils/recordingTabPreference';
 import { canvasService } from '../../../services/Canvas/canvasService';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -350,7 +351,12 @@ export function NoteTakerOverlay({
 }: NoteTakerOverlayProps): ReactElement | null {
   const shouldReduceMotion = useReducedMotion();
   const [isCollapsed, setIsCollapsed] = useState(false);
-  const [activeTab, setActiveTab] = useState<TabId>('transcript');
+  // Read once on mount: the panel stays up for the whole recording, so a preference
+  // written by the detail screen mid-recording should not yank the pane out from under
+  // whoever is typing here.
+  const [activeTab, setActiveTab] = useState<TabId>(() =>
+    getRecordingV2Tab() === 'notes' ? 'notes' : 'transcript',
+  );
   const [isPanelTransitioning, setIsPanelTransitioning] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -380,6 +386,11 @@ export function NoteTakerOverlay({
 
     return (): void => window.clearInterval(interval);
   }, [accumulatedPausedMs, isActive, isPaused, pauseStartedAt, startTime]);
+
+  const handleTabSelect = (tab: TabId): void => {
+    setActiveTab(tab);
+    setRecordingV2Tab(tab === 'notes' ? 'notes' : 'secondary');
+  };
 
   const handleToggleCollapsed = (): void => {
     setIsPanelTransitioning(true);
@@ -482,7 +493,7 @@ export function NoteTakerOverlay({
               variant='ghost'
               role='tab'
               aria-selected={activeTab === 'notes'}
-              onClick={() => setActiveTab('notes')}
+              onClick={() => handleTabSelect('notes')}
               className={cn(
                 'h-full rounded-none border-b-2 px-3 text-xs font-semibold shadow-none',
                 activeTab === 'notes'
@@ -499,7 +510,7 @@ export function NoteTakerOverlay({
               variant='ghost'
               role='tab'
               aria-selected={activeTab === 'transcript'}
-              onClick={() => setActiveTab('transcript')}
+              onClick={() => handleTabSelect('transcript')}
               className={cn(
                 'h-full rounded-none border-b-2 px-3 text-xs font-semibold shadow-none',
                 activeTab === 'transcript'

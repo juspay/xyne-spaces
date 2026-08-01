@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import * as Popover from '@radix-ui/react-popover';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
-import { LinkChainSlant, CalendarEvent, Share02, Spinner, UturnLeft } from '@xyne/icons';
+import { CalendarEvent, Share02, Spinner, UturnLeft } from '@xyne/icons';
 import { Button } from '../../../components/ui/Button/Button';
 import { Dialog } from '../../../components/ui/Dialog';
 import { Tooltip } from '../../../components/ui/Tooltip';
@@ -16,12 +16,14 @@ import {
 import { logRecordingError } from '../../../utils/recordingUtils';
 import { RecordingLabelPicker } from './RecordingLabelPicker';
 import { RecordingShareModal } from './RecordingShareModal';
+import { RecordingTicketLink } from './RecordingTicketLink';
 
 export interface RecordingDetailV2HeaderProps {
   recording: RecordingDetail;
   isLive: boolean;
   onTitleUpdated: (title: string) => void;
   onLabelsUpdated: (labels: string[]) => void;
+  onTicketLinkUpdated: (ticketId: string | null) => void;
   onAskAI: () => void;
 }
 
@@ -30,6 +32,7 @@ export const RecordingDetailV2Header = ({
   isLive,
   onTitleUpdated,
   onLabelsUpdated,
+  onTicketLinkUpdated,
   onAskAI,
 }: RecordingDetailV2HeaderProps): ReactElement => {
   const navigate = useNavigate();
@@ -87,6 +90,20 @@ export const RecordingDetailV2Header = ({
       logRecordingError('RecordingDetailV2Header.updateLabels', err);
       toast.error('Failed to update labels');
       onLabelsUpdated(previousLabels);
+    }
+  };
+
+  /** Same optimistic-then-roll-back shape as labels — one ticket, or null to unlink. */
+  const handleTicketLinkChange = async (ticketId: string | null): Promise<void> => {
+    const previousTicketId = recording.linkedTicketId ?? null;
+    onTicketLinkUpdated(ticketId);
+
+    try {
+      await recordingService.updateRecording(recording.externalId, { linkedTicketId: ticketId });
+    } catch (err) {
+      logRecordingError('RecordingDetailV2Header.updateTicketLink', err);
+      toast.error(ticketId ? 'Failed to link ticket' : 'Failed to unlink ticket');
+      onTicketLinkUpdated(previousTicketId);
     }
   };
 
@@ -227,20 +244,11 @@ export const RecordingDetailV2Header = ({
               <span>{formattedDate}</span>
             </div>
           </Tooltip>
-          <Tooltip content='Link a ticket or thread' side='top'>
-            <Button
-              type='button'
-              variant='outline'
-              size='sm'
-              onClick={() => toast.info('Link sharing coming soon')}
-              className='h-7 gap-1.5 rounded-lg px-3 text-xs font-normal border-dashed border-muted-foreground/40 text-muted-foreground hover:border-foreground/30 hover:text-foreground'
-              data-track-category='RecordingDetailV2'
-              data-track-name='copy_link_dummy'
-            >
-              <LinkChainSlant className='size-3.5' />
-              Link
-            </Button>
-          </Tooltip>
+          <RecordingTicketLink
+            linkedTicketId={recording.linkedTicketId ?? null}
+            canEdit={isOwner}
+            onChange={ticketId => void handleTicketLinkChange(ticketId)}
+          />
           <RecordingLabelPicker
             labels={recording.labels ?? []}
             canEdit={recording.createdByUserId === currentUser?.id}

@@ -16,6 +16,11 @@ import { useShortcut } from '../../shortcuts';
 import { AlertCircle, ChevronDown, Hash, Mail, PanelRightOpen, StickyNote } from 'lucide-react';
 import { toast } from 'sonner';
 import { logRecordingError } from '../../utils/recordingUtils';
+import {
+  getRecordingV2Tab,
+  setRecordingV2Tab,
+  type RecordingV2Tab,
+} from '../../utils/recordingTabPreference';
 import { useSpeakerIdentificationEnabled } from '../../components/SpeakerIdentification/useSpeakerIdentificationEnabled';
 import { Spinner, Flag } from '@xyne/icons';
 import { Button } from '../../components/ui/Button/Button';
@@ -30,6 +35,7 @@ import {
 import { RecordingDetailV2Header } from './components/RecordingDetailV2Header';
 import { LiveRecordingControlBar } from './components/LiveRecordingControlBar';
 import { LiveTranscriptSection } from './components/LiveTranscriptSection';
+import { ResumeRecordingButton } from './components/ResumeRecordingButton';
 import {
   RecordingContentTabs,
   type RecordingSummaryTemplate,
@@ -74,7 +80,9 @@ export default function RecordingDetailV2Screen(): ReactElement {
   const [recording, setRecording] = useState<RecordingDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'notes' | 'summary' | 'transcript'>('summary');
+  // Which of the two panes to show. The concrete second tab (transcript while live,
+  // summary once ended) is derived below, so only the notes/not-notes choice is held.
+  const [tabPreference, setTabPreference] = useState<RecordingV2Tab>(getRecordingV2Tab);
   const [showTranscriptPanel, setShowTranscriptPanel] = useState(false);
   const [showPostToChannelModal, setShowPostToChannelModal] = useState(false);
   const [showPostToEmailModal, setShowPostToEmailModal] = useState(false);
@@ -144,10 +152,17 @@ export default function RecordingDetailV2Screen(): ReactElement {
     setRecording(prev => {
       if (!prev) return prev;
       const endedAt = recordingRow.endedAt ? new Date(recordingRow.endedAt).toISOString() : null;
+      // The linked ticket has no column of its own — it rides in Call.metadata,
+      // the same place the notes canvas link lives — so it arrives here rather
+      // than on the REST payload.
+      const metadata = recordingRow.metadata as Record<string, unknown> | null;
+      const rawLinkedTicketId = metadata?.['linkedTicketId'];
+      const linkedTicketId = typeof rawLinkedTicketId === 'string' ? rawLinkedTicketId : null;
       const next: RecordingDetail = {
         ...prev,
         title: recordingRow.title || prev.title,
         labels: recordingRow.labels ?? prev.labels,
+        linkedTicketId,
         markedItems: recordingRow.markedItems ?? prev.markedItems,
         summaryTemplateId: recordingRow.summaryTemplateId ?? prev.summaryTemplateId ?? null,
         aiSummary: recordingRow.aiSummary ?? prev.aiSummary,
@@ -196,7 +211,9 @@ export default function RecordingDetailV2Screen(): ReactElement {
    * top instead, instantly: a smooth scroll here would race the tab animation.
    */
   const handleTabSelect = useCallback((tab: 'notes' | 'summary' | 'transcript'): void => {
-    setActiveTab(tab);
+    const preference: RecordingV2Tab = tab === 'notes' ? 'notes' : 'secondary';
+    setTabPreference(preference);
+    setRecordingV2Tab(preference);
     scrollContainerRef.current?.scrollTo({ top: 0 });
   }, []);
 
@@ -211,6 +228,10 @@ export default function RecordingDetailV2Screen(): ReactElement {
 
   const handleLabelsUpdated = (labels: string[]): void => {
     setRecording(current => (current ? { ...current, labels } : current));
+  };
+
+  const handleTicketLinkUpdated = (linkedTicketId: string | null): void => {
+    setRecording(current => (current ? { ...current, linkedTicketId } : current));
   };
 
   const handleSummaryTemplateSelect = async (
@@ -329,7 +350,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
   const showTabs = isLive || hasNotes || hasSummary || recording.hasTranscript;
   const secondTab = isLive ? 'transcript' : 'summary';
   const visibleTab =
-    activeTab === 'notes' || (secondTab === 'summary' && !hasSummary && hasNotes)
+    tabPreference === 'notes' || (secondTab === 'summary' && !hasSummary && hasNotes)
       ? 'notes'
       : secondTab;
 
@@ -371,12 +392,16 @@ export default function RecordingDetailV2Screen(): ReactElement {
           .filter(Boolean)
           .join(' ')}
       >
+        {/* Grows with its content rather than being pinned to the viewport: a sticky
+            child cannot outlive its parent's box, so a fixed height here would drop the
+            control bar and tabs out of view one screenful into a long transcript. */}
         <div className='mx-auto flex min-h-full w-full max-w-[860px] flex-col px-4 py-6'>
           <RecordingDetailV2Header
             recording={recording}
             isLive={isLive}
             onTitleUpdated={handleTitleUpdated}
             onLabelsUpdated={handleLabelsUpdated}
+            onTicketLinkUpdated={handleTicketLinkUpdated}
             onAskAI={handleAskAI}
           />
           {/* layoutRoot: a sticky element moves as you scroll, so the tab indicator
@@ -497,10 +522,9 @@ export default function RecordingDetailV2Screen(): ReactElement {
           {showTabs ? (
             <>
               {visibleTab === 'notes' ? (
-                <section className='mb-8 min-h-[360px]'>
-                  <div className='mb-4 flex items-center justify-between'>
-                    <h2 className='text-lg font-semibold text-foreground'>My notes</h2>
-                  </div>
+                /* flex-1 rather than a height: fills the pane on a short note without
+                   pinning the scroll container, which is what sticky depends on. */
+                <section className='mb-8 flex flex-1 flex-col'>
                   {notesCanvasId ? (
                     <NotesCanvas canvasId={notesCanvasId} />
                   ) : (
@@ -561,6 +585,9 @@ export default function RecordingDetailV2Screen(): ReactElement {
         </div>
       </motion.div>
 
+      {/* Floats over the scroller, so it stays reachable at any scroll position. */}
+      <ResumeRecordingButton recordingExternalId={recording.externalId} />
+
       {/* Transcript side panel */}
       {showTranscriptPanel && transcriptText && (
         <TranscriptSidePanel
@@ -620,6 +647,8 @@ function NotesCanvas({ canvasId }: { canvasId: string }): ReactElement {
     );
   }
 
+  // The class overrides mirror the live NoteTakerOverlay's notes tab so the canvas
+  // reads the same whether it is opened here or in the floating panel.
   return (
     <CollaborativeCanvasEditor
       key={canvas.id}
@@ -628,8 +657,18 @@ function NotesCanvas({ canvasId }: { canvasId: string }): ReactElement {
       title={canvas.title}
       editable={true}
       placeholder='Start typing your notes…'
-      className='recording-notes-canvas-editor min-h-[420px]'
-      autoFocus={false}
+      className='min-h-0 w-full flex-1
+        [&_.bn-side-menu]:!hidden
+        [&_.thin-scrollbar]:!pt-2
+        [&_.bn-editor]:!px-0
+        [&_.bn-block-content:has(.ProseMirror-trailingBreak:only-child):after]:!text-base
+        [&_.bn-suggestion-menu]:!w-auto [&_.bn-suggestion-menu]:!no-scrollbar [&_.bn-suggestion-menu]:!max-h-60 [&_.bn-suggestion-menu]:!max-w-[calc(100vw-2rem)]
+        [&_.bn-suggestion-menu-item]:!h-8 [&_.bn-suggestion-menu-item]:!px-2 [&_.bn-suggestion-menu-item]:!py-1
+        [&_.bn-mt-suggestion-menu-item-title]:!text-sm [&_.bn-mt-suggestion-menu-item-title]:!leading-4
+        [&_.bn-mt-suggestion-menu-item-title]:!whitespace-nowrap [&_.bn-mt-suggestion-menu-item-title]:!overflow-hidden [&_.bn-mt-suggestion-menu-item-title]:!text-ellipsis
+        [&_.bn-mt-suggestion-menu-item-section_svg]:!size-4
+        '
+      autoFocus={true}
     />
   );
 }
