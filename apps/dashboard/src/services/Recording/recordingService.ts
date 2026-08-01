@@ -67,7 +67,6 @@ export type BuiltinRecordingSummaryTemplateId =
   | 'customer_feedback';
 
 export interface RegenerateRecordingSummaryResult {
-  summary: string;
   summaryTemplateId: BuiltinRecordingSummaryTemplateId;
   detailedSummaryCanvasId: string | null;
 }
