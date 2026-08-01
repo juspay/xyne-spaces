@@ -21,6 +21,11 @@ import {
 } from '@/services/organizationDomainService';
 import { migrateLegacyIdentity } from '@/services/legacyIdentityMigrationHelper';
 import { signMicrosoftInvitationPendingAuthToken } from '@/utils/microsoftPendingAuth';
+import { redisService } from '@/services/redisService';
+import { randomUUID } from 'crypto';
+
+const PENDING_OAUTH_TOKEN_PREFIX = 'pendingauth:oauth:';
+const PENDING_OAUTH_TOKEN_TTL_SECONDS = 10 * 60;
 
 export class MicrosoftAuthController {
   private oauthClient: AuthorizationCode | undefined;
@@ -29,6 +34,24 @@ export class MicrosoftAuthController {
   private clientId: string | undefined;
   private tenantId: string = '';
   private msJwks!: ReturnType<typeof createRemoteJWKSet>;
+
+  private async storePendingOAuthTokens(
+    refreshToken?: string | null,
+    accessToken?: string | null,
+    accessTokenExpiry?: Date,
+  ): Promise<string> {
+    const tokenKey = randomUUID();
+    await redisService.set(
+      `${PENDING_OAUTH_TOKEN_PREFIX}${tokenKey}`,
+      JSON.stringify({
+        refreshToken: refreshToken ?? null,
+        accessToken: accessToken ?? null,
+        accessTokenExpiry: accessTokenExpiry?.toISOString() ?? null,
+      }),
+      PENDING_OAUTH_TOKEN_TTL_SECONDS,
+    );
+    return tokenKey;
+  }
 
   constructor() {
     const clientId = process.env.MICROSOFT_CLIENT_ID;
@@ -417,19 +440,21 @@ export class MicrosoftAuthController {
         const refreshToken = token.refresh_token as string | undefined;
         const isProduction = process.env.NODE_ENV === 'production';
 
-        // Microsoft access + refresh tokens can exceed the browser's per-cookie
-        // size limit when nested in our pending-auth JWT. Invitation acceptance
-        // only needs identity, and loginWorkspace can establish the target
-        // workspace session from the refresh token, so use the compact payload
-        // already used by the Microsoft Electron invitation flow.
+        // Keep Microsoft provider tokens in Redis; the cookie contains identity
+        // plus only the short-lived Redis lookup key.
         const cookieInvitationId = req.cookies?.pending_invitation_id as string | undefined;
         const pendingInvitationId = cookieInvitationId || peekedState?.invitationId;
         if (resolvedPlatform !== 'mobile' && pendingInvitationId) {
+          const tokenKey = await this.storePendingOAuthTokens(
+            refreshToken,
+            accessToken,
+            accessTokenExpiry,
+          );
           res.cookie(
             'google_access_token',
             signMicrosoftInvitationPendingAuthToken(
               microsoftUserData,
-              refreshToken,
+              tokenKey,
               process.env.JWT_SECRET!,
             ),
             {
@@ -485,13 +510,18 @@ export class MicrosoftAuthController {
             }
           }
 
+          const tokenKey = await this.storePendingOAuthTokens(
+            refreshToken,
+            accessToken,
+            accessTokenExpiry,
+          );
           res.cookie('google_access_token', jwt.sign({
             providerUserId: microsoftUserData.providerUserId,
             email: microsoftUserData.email,
             name: microsoftUserData.name,
             picture: microsoftUserData.picture,
             provider: AuthProvider.MICROSOFT,
-            refreshToken: refreshToken ?? null,
+            tokenKey,
           }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
             httpOnly: true,
             secure: isProduction,
@@ -610,20 +640,19 @@ export class MicrosoftAuthController {
           path: '/',
         };
 
-        // Set pending-auth cookie. This must be a pending-auth JWT (not the
-        // session customToken): loginWorkspace/createOrg read it via
-        // parsePendingAuthCookie, which needs providerUserId AND provider — the
-        // session token has neither, so it would mislabel the user as GOOGLE and
-        // drop the refresh token. Mirrors Google's web callback + MS electron.
+        // Keep provider identity in the signed cookie and provider tokens in Redis.
+        const tokenKey = await this.storePendingOAuthTokens(
+          refreshToken,
+          accessToken,
+          accessTokenExpiry,
+        );
         res.cookie('google_access_token', jwt.sign({
           providerUserId: microsoftUserData.providerUserId,
           email: microsoftUserData.email,
           name: microsoftUserData.name,
           picture: microsoftUserData.picture,
           provider: AuthProvider.MICROSOFT,
-          refreshToken: refreshToken ?? null,
-          accessToken: accessToken ?? null,
-          accessTokenExpiry: accessTokenExpiry?.toISOString(),
+          tokenKey,
         }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
           ...cookieOptions,
           maxAge: 10 * 60 * 1000, // 10 minutes pending auth window
@@ -870,13 +899,18 @@ export class MicrosoftAuthController {
       // This mirrors Google's exchangeElectronCode which always sets google_access_token (line 842).
       if (workspaces.length === 0 && !userExistsButRemoved && !stateData.invitationId && !bodyInvitationId) {
         logger.info(`[${requestId}] User has no workspaces and no invitation - setting google_access_token and returning no-access`);
+        const tokenKey = await this.storePendingOAuthTokens(
+          token.refresh_token as string | undefined,
+          accessToken,
+          accessTokenExpiry,
+        );
         res.cookie('google_access_token', jwt.sign({
           providerUserId: profile.id,
           email,
           name: profile.displayName,
           picture: undefined,
           provider: 'microsoft',
-          refreshToken: (token.refresh_token as string | undefined) ?? null,
+          tokenKey,
         }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
           httpOnly: true,
           secure: isProduction,
@@ -906,13 +940,18 @@ export class MicrosoftAuthController {
         logger.info(`[${requestId}] Invitation detected (${effectiveInvitationId}) — returning hasInvitation signal to Electron`);
         // Use sameSite: 'lax' for Electron invitation flow - cookies need to be sent
         // from the renderer (localhost:5173) to backend (localhost:3001)
+        const tokenKey = await this.storePendingOAuthTokens(
+          token.refresh_token as string | undefined,
+          accessToken,
+          accessTokenExpiry,
+        );
         res.cookie('google_access_token', jwt.sign({
           providerUserId: profile.id,
           email,
           name: profile.displayName,
           picture: undefined,
           provider: 'microsoft',
-          refreshToken: (token.refresh_token as string | undefined) ?? null,
+          tokenKey,
         }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
           httpOnly: true,
           secure: isProduction,
@@ -1031,15 +1070,18 @@ export class MicrosoftAuthController {
           });
         }
 
+        const tokenKey = await this.storePendingOAuthTokens(
+          refreshToken,
+          accessToken,
+          accessTokenExpiry,
+        );
         res.cookie('google_access_token', jwt.sign({
           providerUserId: profile.id,
           email,
           name: profile.displayName,
           picture: undefined,
           provider: 'microsoft',
-          refreshToken: refreshToken ?? null,
-          accessToken,
-          accessTokenExpiry: accessTokenExpiry?.toISOString(),
+          tokenKey,
         }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
           httpOnly: true,
           secure: isProduction,
@@ -1111,15 +1153,18 @@ export class MicrosoftAuthController {
       }
 
       // Store pending auth data for later loginWorkspace / acceptInvitation call
+      const tokenKey = await this.storePendingOAuthTokens(
+        refreshToken,
+        accessToken,
+        accessTokenExpiry,
+      );
       res.cookie('google_access_token', jwt.sign({
         providerUserId: profile.id,
         email,
         name: profile.displayName,
         picture: undefined,
         provider: 'microsoft',
-        refreshToken: refreshToken ?? null,
-        accessToken,
-        accessTokenExpiry: accessTokenExpiry?.toISOString(),
+        tokenKey,
       }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
         httpOnly: true,
         secure: isProduction,
@@ -1380,21 +1425,23 @@ export class MicrosoftAuthController {
         path: '/',
       };
 
-      // Pending-auth cookie must carry provider identity (providerUserId +
-      // provider) so a later loginWorkspace / createOrg / acceptInvitation call
-      // resolves the Microsoft user correctly. Mirrors Google's mobile exchange.
+      // Keep provider identity in the signed cookie and provider tokens in Redis.
       const mobileExpiresIn = token.expires_in as number | undefined;
+      const mobileAccessTokenExpiry = mobileExpiresIn
+        ? new Date(Date.now() + mobileExpiresIn * 1000)
+        : undefined;
+      const tokenKey = await this.storePendingOAuthTokens(
+        refreshToken,
+        accessToken,
+        mobileAccessTokenExpiry,
+      );
       res.cookie('google_access_token', jwt.sign({
         providerUserId: profile.id,
         email,
         name: profile.displayName,
         picture: undefined,
         provider: 'microsoft',
-        refreshToken: refreshToken ?? null,
-        accessToken: accessToken ?? null,
-        accessTokenExpiry: mobileExpiresIn
-          ? new Date(Date.now() + mobileExpiresIn * 1000).toISOString()
-          : undefined,
+        tokenKey,
       }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
         ...cookieOptions,
         maxAge: 10 * 60 * 1000, // 10 minutes pending auth window
