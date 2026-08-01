@@ -19,6 +19,7 @@ router.post('/schedule', scheduleCallController.scheduleCall);
 // Recordings endpoints (HEADLESS calls)
 router.get('/recordings', callController.getRecordings);
 router.post('/recordings/bulk-delete', callController.bulkDeleteRecordings);
+router.post('/recordings/:callId/generate-summary', callController.regenerateRecordingSummary);
 router.get('/recordings/:callId', callController.getRecordingDetail);
 router.patch('/recordings/:callId', callController.updateRecordingTitle);
 router.delete('/recordings/:callId', callController.deleteRecording);

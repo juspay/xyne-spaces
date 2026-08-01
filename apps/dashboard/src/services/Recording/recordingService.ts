@@ -55,6 +55,22 @@ export interface RecordingUpdate {
   summaryTemplateId?: string | null;
 }
 
+export type BuiltinRecordingSummaryTemplateId =
+  | 'default'
+  | 'product_sync'
+  | 'customer_discovery'
+  | 'one_on_one'
+  | 'hiring'
+  | 'standup'
+  | 'sprint_review'
+  | 'customer_feedback';
+
+export interface RegenerateRecordingSummaryResult {
+  summary: string;
+  summaryTemplateId: BuiltinRecordingSummaryTemplateId;
+  detailedSummaryCanvasId: string | null;
+}
+
 export interface BulkDeleteRecordingsResult {
   success: boolean;
   deleted: string[];
@@ -206,6 +222,18 @@ class RecordingService {
 
   async updateRecording(callId: string, update: RecordingUpdate): Promise<void> {
     await apiInstance.patch(`/calls/recordings/${callId}`, update);
+  }
+
+  async regenerateSummary(
+    callId: string,
+    summaryTemplateId: BuiltinRecordingSummaryTemplateId,
+  ): Promise<RegenerateRecordingSummaryResult> {
+    const response: AxiosResponse<
+      { success: true } & RegenerateRecordingSummaryResult
+    > = await apiInstance.post(`/calls/recordings/${callId}/generate-summary`, {
+      summaryTemplateId,
+    });
+    return response.data;
   }
 
   // Recording sharing (share/update/unshare) now goes through Zero mutators —

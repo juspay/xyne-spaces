@@ -28,6 +28,14 @@ import {
   parseSelectedSummaryTemplate,
   type SummaryTemplateCandidate,
 } from './summaryTemplateSelection';
+import {
+  BUILTIN_RECORDING_SUMMARY_TEMPLATES,
+  DEFAULT_RECORDING_SUMMARY_FIELDS,
+  RECORDING_DETAILED_SUMMARY_PROMPT,
+  getBuiltinRecordingSummaryTemplate,
+  type BuiltinRecordingSummaryTemplate,
+  type BuiltinRecordingSummaryTemplateId,
+} from './recordingSummaryTemplates';
 
 // PRD Document structure
 interface PRDDocument {
@@ -855,6 +863,83 @@ export class CallDocumentService {
   }
 
   /**
+   * Select one of the built-in recording templates. These templates are
+   * intentionally code-backed for the v1 rollout, so every workspace gets the
+   * same choices without requiring seed rows in summary_templates.
+   */
+  async selectRecordingSummaryTemplateForTranscript(
+    transcript: string,
+    callId: string,
+  ): Promise<BuiltinRecordingSummaryTemplate> {
+    const candidates: SummaryTemplateCandidate[] = BUILTIN_RECORDING_SUMMARY_TEMPLATES.map(
+      template => ({
+        id: template.id,
+        name: template.name,
+        version: 1,
+        autoTriggerPrompt: template.selectionCriteria,
+        sections: template.fields,
+        systemPrompt: '',
+      }),
+    );
+
+    const extracted = await executeCallLlmWithRetry(
+      () => this.createAgent(),
+      () => buildSummaryTemplateSelectionPrompt(transcript, candidates),
+      'recording_summary_template_selection',
+      callId,
+    );
+
+    if (extracted.ok) {
+      const selected = parseSelectedSummaryTemplate(extracted.content, candidates);
+      const template = selected ? getBuiltinRecordingSummaryTemplate(selected.id) : undefined;
+      if (template) {
+        logger.info(`[${callId}] recording_summary_template_selected`, {
+          template_id: template.id,
+          template_name: template.name,
+        });
+        return template;
+      }
+    }
+
+    logger.warn(`[${callId}] recording_summary_template_selection_fallback`, {
+      template_id: 'default',
+      reason: extracted.ok ? 'invalid_selection' : extracted.reason,
+    });
+    return getBuiltinRecordingSummaryTemplate('default')!;
+  }
+
+  /** Generate a headless-recording summary using the supplied v1 seed prompt. */
+  async generateRecordingSummary(
+    transcript: string,
+    callId: string,
+    templateId?: BuiltinRecordingSummaryTemplateId,
+  ): Promise<{ summary: string; template: BuiltinRecordingSummaryTemplate } | null> {
+    const template = templateId
+      ? getBuiltinRecordingSummaryTemplate(templateId)
+      : await this.selectRecordingSummaryTemplateForTranscript(transcript, callId);
+
+    if (!template) {
+      logger.error(`[${callId}] recording_summary_generation_failed`, {
+        reason: 'invalid_template',
+        template_id: templateId,
+      });
+      return null;
+    }
+
+    const summary = await this.generateDetailedSummary(
+      transcript,
+      callId,
+      undefined,
+      template.fields,
+      undefined,
+      RECORDING_DETAILED_SUMMARY_PROMPT,
+      DEFAULT_RECORDING_SUMMARY_FIELDS,
+    );
+
+    return summary ? { summary, template } : null;
+  }
+
+  /**
    * Generate detailed summary from transcript with explicit retry loop.
    */
   async generateDetailedSummary(
@@ -863,14 +948,28 @@ export class CallDocumentService {
     customPrompt?: string,
     summaryFields?: string,
     systemPrompt?: string,
+    promptTemplate = DETAILED_SUMMARY_PROMPT,
+    defaultSummaryFields = DEFAULT_SUMMARY_FIELDS,
   ): Promise<string | null> {
     // Resolve channelId and build participant map once (expensive DB lookups)
     const call = await repositories.calls.findByExternalId(callId);
     const channelId = call?.channelId;
 
-    const participantMap = channelId
+    const participantMap: Map<string, ParticipantInfo> = channelId
       ? await buildParticipantMap(channelId)
       : new Map<string, ParticipantInfo>();
+
+    if (!channelId && call) {
+      const callParticipants = await repositories.calls.getCallParticipantsWithUserDetails(callId);
+      for (const participant of callParticipants) {
+        participantMap.set(participant.userName.toLowerCase(), {
+          userId: participant.userId,
+          username: participant.userName,
+          userEmail: participant.userEmail,
+          userPicture: participant.userPicture || undefined,
+        });
+      }
+    }
 
     const participantList = Array.from(participantMap.values())
       .map(p => `- ${p.username}`)
@@ -882,8 +981,8 @@ export class CallDocumentService {
     const sanitizedSystemPrompt = systemPrompt ? sanitizeInput(systemPrompt) : '';
 
     const buildPrompt = () => {
-      let prompt = renderPromptTemplate(DETAILED_SUMMARY_PROMPT, {
-        fields: sanitizedFields || DEFAULT_SUMMARY_FIELDS,
+      let prompt = renderPromptTemplate(promptTemplate, {
+        fields: sanitizedFields || defaultSummaryFields,
         participants: participantList || '- No participants found',
         transcript: sanitizedTranscript,
       });

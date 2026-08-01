@@ -6,13 +6,16 @@
 import { type ReactElement, useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
-import { recordingService, type RecordingDetail } from '../../services/Recording/recordingService';
+import {
+  recordingService,
+  type BuiltinRecordingSummaryTemplateId,
+  type RecordingDetail,
+} from '../../services/Recording/recordingService';
 import { useShortcut } from '../../shortcuts';
 import {
   AlertCircle,
+  Check,
   ChevronDown,
-  ChevronRight,
-  FileText,
   Hash,
   Mail,
   Music,
@@ -37,7 +40,6 @@ import { AudioPlayer } from '../../components/ui/AudioPlayer/AudioPlayer';
 import { RecordingDetailV2Header } from './components/RecordingDetailV2Header';
 import { LiveRecordingControlBar } from './components/LiveRecordingControlBar';
 import { SummaryWithCitations } from './components/SummaryWithCitations';
-import { DetailedSummaryPanel } from './components/DetailedSummaryPanel';
 import { PostRecordingToChannelModal } from './components/PostRecordingToChannelModal';
 import { PostRecordingToEmailModal } from './components/PostRecordingToEmailModal';
 import { CollaborativeCanvasEditor } from '../../components/Canvas/CollaborativeCanvasEditor/CollaborativeCanvasEditor';
@@ -51,6 +53,21 @@ import { xyneAIActor } from '../../machines/xyneAIMachine';
 interface RecordingNavState {
   recordingIds?: string[];
 }
+
+const RECORDING_SUMMARY_TEMPLATES: ReadonlyArray<{
+  id: BuiltinRecordingSummaryTemplateId;
+  name: string;
+  icon: string;
+}> = [
+  { id: 'default', name: 'Default summary', icon: '⚡' },
+  { id: 'product_sync', name: 'Product sync', icon: '🔁' },
+  { id: 'customer_discovery', name: 'Customer: Discovery', icon: '💰' },
+  { id: 'one_on_one', name: '1 to 1', icon: '👥' },
+  { id: 'hiring', name: 'Hiring', icon: '💼' },
+  { id: 'standup', name: 'Stand-Up', icon: '🧍' },
+  { id: 'sprint_review', name: 'Sprint review', icon: '📈' },
+  { id: 'customer_feedback', name: 'Customer feedback', icon: '🔄' },
+];
 
 function isRecordingLive(recording: RecordingDetail): boolean {
   return recording.status === 'ACTIVE' || recording.status === 'IN_PROGRESS';
@@ -66,10 +83,10 @@ export default function RecordingDetailV2Screen(): ReactElement {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'notes' | 'summary'>('summary');
-  const [showDetailedSummary, setShowDetailedSummary] = useState(false);
   const [showTranscriptPanel, setShowTranscriptPanel] = useState(false);
   const [showPostToChannelModal, setShowPostToChannelModal] = useState(false);
   const [showPostToEmailModal, setShowPostToEmailModal] = useState(false);
+  const [isRegeneratingSummary, setIsRegeneratingSummary] = useState(false);
   const [citationNonce, setCitationNonce] = useState(0);
   const [citationRef, setCitationRef] = useState<{
     segment: number;
@@ -186,6 +203,47 @@ export default function RecordingDetailV2Screen(): ReactElement {
     }
   };
 
+  const handleSummaryTemplateSelect = async (
+    summaryTemplateId: BuiltinRecordingSummaryTemplateId,
+  ): Promise<void> => {
+    if (!recording || isRegeneratingSummary) return;
+
+    setIsRegeneratingSummary(true);
+    try {
+      const result = await recordingService.regenerateSummary(
+        recording.externalId,
+        summaryTemplateId,
+      );
+      setRecording(current =>
+        current
+          ? {
+              ...current,
+              aiSummary: result.summary,
+              hasSummary: true,
+              summaryTemplateId: result.summaryTemplateId,
+              detailedSummaryCanvasId:
+                result.detailedSummaryCanvasId ?? current.detailedSummaryCanvasId,
+            }
+          : current,
+      );
+      setActiveTab('summary');
+      const selected = RECORDING_SUMMARY_TEMPLATES.find(
+        template => template.id === result.summaryTemplateId,
+      );
+      toast.success(`${selected?.name ?? 'Recording'} summary generated`);
+    } catch (err) {
+      logRecordingError('RecordingDetailV2Screen.regenerateSummary', err);
+      const message = axios.isAxiosError(err)
+        ? (err.response?.data as { error?: string } | undefined)?.error
+        : undefined;
+      toast.error('Failed to generate summary', {
+        description: message ?? 'Please try again.',
+      });
+    } finally {
+      setIsRegeneratingSummary(false);
+    }
+  };
+
   const [message] = useCachedQuery(
     queries.getMessageForActivityV2({ messageId: recording?.messageId ?? '' }),
     { enabled: !!recording?.messageId },
@@ -233,9 +291,12 @@ export default function RecordingDetailV2Screen(): ReactElement {
 
   const hasNotes = !!recording.notesCanvasId;
   const hasSummary = recording.hasSummary && !!recording.aiSummary;
-  const hasDetailedSummary = !!recording.detailedSummaryCanvasId;
-  const showTabs = hasNotes || hasSummary;
-  const visibleTab = hasSummary && (activeTab === 'summary' || !hasNotes) ? 'summary' : 'notes';
+  const selectedSummaryTemplate =
+    RECORDING_SUMMARY_TEMPLATES.find(
+      template => template.id === recording.summaryTemplateId,
+    ) ?? RECORDING_SUMMARY_TEMPLATES[0]!;
+  const showTabs = hasNotes || hasSummary || recording.hasTranscript;
+  const visibleTab = activeTab === 'summary' || !hasNotes ? 'summary' : 'notes';
 
   const transcriptText =
     speakerIdentificationEnabled && recording.hasIdentifiedTranscript
@@ -250,20 +311,12 @@ export default function RecordingDetailV2Screen(): ReactElement {
     setCitationRef(ref);
     setCitationNonce(value => value + 1);
     setShowTranscriptPanel(true);
-    setShowDetailedSummary(false); // only one panel at a time
   };
 
   const openTranscriptPanel = (): void => {
     setCitationRef(null);
     setCitationNonce(value => value + 1);
     setShowTranscriptPanel(true);
-    setShowDetailedSummary(false);
-  };
-
-  const openDetailedSummary = (): void => {
-    setShowDetailedSummary(true);
-    setShowTranscriptPanel(false);
-    setCitationRef(null);
   };
 
   return (
@@ -336,23 +389,50 @@ export default function RecordingDetailV2Screen(): ReactElement {
                     <StickyNote className='size-3.5' aria-hidden='true' />
                     My notes
                   </button>
-                  <button
-                    type='button'
-                    role='tab'
-                    aria-selected={visibleTab === 'summary'}
-                    onClick={() => setActiveTab('summary')}
-                    data-track-category='RecordingDetailV2'
-                    data-track-name='open_default_summary'
-                    className={[
-                      'inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                      visibleTab === 'summary'
-                        ? 'bg-background text-foreground shadow-sm'
-                        : 'text-muted-foreground hover:text-foreground',
-                    ].join(' ')}
-                  >
-                    <Sparkles className='size-3.5 text-orange-500' aria-hidden='true' />
-                    Default summary
-                  </button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type='button'
+                        role='tab'
+                        aria-selected={visibleTab === 'summary'}
+                        onClick={() => setActiveTab('summary')}
+                        disabled={isRegeneratingSummary}
+                        data-track-category='RecordingDetailV2'
+                        data-track-name='open_summary_templates'
+                        className={[
+                          'inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait disabled:opacity-70',
+                          visibleTab === 'summary'
+                            ? 'bg-background text-foreground shadow-sm'
+                            : 'text-muted-foreground hover:text-foreground',
+                        ].join(' ')}
+                      >
+                        {isRegeneratingSummary ? (
+                          <Spinner size={14} className='animate-spin text-orange-500' />
+                        ) : (
+                          <Sparkles className='size-3.5 text-orange-500' aria-hidden='true' />
+                        )}
+                        {selectedSummaryTemplate.name}
+                        <ChevronDown className='size-3.5' aria-hidden='true' />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align='start' className='w-64'>
+                      {RECORDING_SUMMARY_TEMPLATES.map(template => (
+                        <DropdownMenuItem
+                          key={template.id}
+                          onSelect={() => void handleSummaryTemplateSelect(template.id)}
+                          disabled={isRegeneratingSummary}
+                          data-track-category='RecordingDetailV2'
+                          data-track-name={`generate_summary_${template.id}`}
+                        >
+                          <span aria-hidden='true'>{template.icon}</span>
+                          <span className='flex-1'>{template.name}</span>
+                          {template.id === selectedSummaryTemplate.id ? (
+                            <Check className='size-3.5 text-primary' aria-hidden='true' />
+                          ) : null}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
 
                 <DropdownMenu>
@@ -445,21 +525,6 @@ export default function RecordingDetailV2Screen(): ReactElement {
                         citationSegments={recording.citationSegments}
                         onCitationClick={handleCitationClick}
                       />
-                      {hasDetailedSummary ? (
-                        <div className='mt-6 border-t border-border/60 pt-3'>
-                          <button
-                            type='button'
-                            onClick={openDetailedSummary}
-                            className='inline-flex items-center gap-1.5 rounded-md px-1 py-1 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
-                            data-track-category='RecordingDetailV2'
-                            data-track-name='open_detailed_summary'
-                          >
-                            <FileText className='size-3.5' aria-hidden='true' />
-                            Detailed summary
-                            <ChevronRight className='size-3.5' aria-hidden='true' />
-                          </button>
-                        </div>
-                      ) : null}
                     </>
                   ) : (
                     <p className='text-sm text-muted-foreground'>
@@ -480,24 +545,6 @@ export default function RecordingDetailV2Screen(): ReactElement {
           )}
         </div>
       </div>
-
-      {/* Detailed Summary side panel */}
-      {showDetailedSummary && hasDetailedSummary && (
-        <>
-          <button
-            type='button'
-            aria-label='Close detailed summary'
-            className='absolute inset-0 z-20 hidden cursor-default bg-black/20 backdrop-blur-[1px] md:block'
-            onClick={() => setShowDetailedSummary(false)}
-            data-track-category='RecordingDetailV2'
-            data-track-name='close_detailed_summary_backdrop'
-          />
-          <DetailedSummaryPanel
-            canvasId={recording.detailedSummaryCanvasId!}
-            onClose={() => setShowDetailedSummary(false)}
-          />
-        </>
-      )}
 
       {/* Transcript side panel */}
       {showTranscriptPanel && transcriptText && (
