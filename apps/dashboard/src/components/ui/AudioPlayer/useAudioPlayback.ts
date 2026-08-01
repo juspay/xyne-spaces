@@ -15,9 +15,7 @@ import { toast } from 'sonner';
 export type AudioPlayState = 'idle' | 'loading' | 'playing' | 'paused';
 
 export interface UseAudioPlaybackOptions {
-  /** Called once on first play. Resolves to the audio Blob; the signal cancels the fetch. */
   onLoad: (signal: AbortSignal) => Promise<Blob>;
-  /** Pre-known duration in seconds, until the real one arrives with the metadata. */
   initialDurationSec?: number | undefined;
   showToastOnError?: boolean;
 }
@@ -26,9 +24,7 @@ export interface UseAudioPlaybackReturn {
   state: AudioPlayState;
   currentTime: number;
   duration: number;
-  /** True once the media exists, i.e. seeking is meaningful. */
   canSeek: boolean;
-  /** Play, pause, or load-then-play depending on the current state. */
   toggle: () => Promise<void>;
   seek: (seconds: number) => void;
 }

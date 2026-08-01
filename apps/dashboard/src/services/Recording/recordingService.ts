@@ -53,6 +53,7 @@ export interface RecordingUpdate {
   labels?: string[];
   markedItems?: Record<string, unknown>[];
   summaryTemplateId?: string | null;
+  linkedTicketId?: string | null;
 }
 
 export type BuiltinRecordingSummaryTemplateId =
@@ -98,6 +99,7 @@ export interface RecordingDetail extends Recording {
   detailedSummaryCanvasId: string | null;
   citationSegments: CitationSegment[];
   hasRecording?: boolean;
+  linkedTicketId?: string | null;
 }
 
 /** A single in-call recording session (call_recordings row). */

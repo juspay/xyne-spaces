@@ -10,7 +10,6 @@ import { getRecordingTagDotColor, normalizeRecordingTags } from '../../../utils/
 
 export interface RecordingLabelPickerProps {
   labels: string[];
-  /** Only the recording owner can change labels; everyone else sees them read-only. */
   canEdit: boolean;
   onChange: (labels: string[]) => void;
 }
@@ -21,10 +20,6 @@ const MAX_VISIBLE_LABELS = 3;
 const CHIP_CLASS_NAME =
   'inline-flex items-center gap-1.5 rounded-md bg-muted px-1.5 py-0.5 text-xs font-medium text-foreground';
 
-/**
- * Mirrors the owner's trigger — Button `outline` + `sm` with the same overrides
- * applied below — as a static frame, so both states read as the same control.
- */
 const READ_ONLY_TRIGGER_CLASS_NAME =
   'inline-flex h-7 items-center gap-1.5 rounded-lg border bg-background px-2 text-xs font-normal text-foreground shadow-xs';
 
@@ -40,14 +35,6 @@ function LabelChip({ label }: { label: string }): ReactElement {
   );
 }
 
-/**
- * Label picker for the recording detail header: the trigger previews the applied
- * labels and opens a searchable multi-select that can also create new labels.
- *
- * Call.labels holds Tag ids for anything the summary pipeline generated, and the raw
- * text for anything typed in here. Resolving covers both: an id becomes the tag's
- * text, and text that resolves to nothing falls back to itself.
- */
 export function RecordingLabelPicker({
   labels,
   canEdit,
@@ -85,7 +72,6 @@ export function RecordingLabelPicker({
     onChange(normalizeRecordingTags([...labels, label]));
   };
 
-  /** Identical in both states — only the chevron and the interaction differ. */
   const appliedLabels = (
     <>
       {visibleLabels.map(label => (
