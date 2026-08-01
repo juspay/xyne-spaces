@@ -1,9 +1,11 @@
-import React, { useContext, useState } from 'react';
+import React, { useContext, useMemo, useState } from 'react';
 import { GitBranch } from '@xyne/icons';
 import type { FlowComponent, PrProps, PrStatus, PrProvider } from '@xyne/shared';
 import { useFlow } from '../FlowContext';
-import { PrPreview, InsidePrPreviewContext } from './PrPreview';
+import { WidgetPreview, InsideWidgetPreviewContext } from './WidgetPreview';
 import { cn } from '../../../utils/classNames';
+import { MarkdownMessageRenderer } from '../../ui/MessageBubble/MarkdownMessageRenderer';
+import { createMarkdownComponents } from '../../../utils/markdownComponents';
 
 /**
  * PR artifact — an agent-authored, read-only status card for a pull request.
@@ -30,17 +32,17 @@ import { cn } from '../../../utils/classNames';
  * plain useState (ephemeral UI state, NOT flow state — nothing to persist).
  *
  * Footer:
- *   "View Details" (bordered <button>) opens PrPreview — the SAME split-screen
- *     shell the plan preview / attachment viewer use (PreviewSplitDialog): LEFT =
+ *   "View Details" (bordered <button>) opens WidgetPreview — the SAME split-screen
+ *     shell plan, future FlowJSON widgets, and the attachment viewer use: LEFT =
  *     the PR detail (status badge + ticketId/title + full markdown description +
  *     the PR/ticket links), RIGHT = the live thread. Hidden when the card is
- *     rendered INSIDE that preview's own thread panel (InsidePrPreviewContext),
+ *     rendered INSIDE that preview's own thread panel (InsideWidgetPreviewContext),
  *     so a nested preview can't be stacked.
  *   "Open in <Provider>" (plain <a target="_blank">) renders only when `url`
  *     is present — a direct external link, no preview.
  * Optional URLs mean "no link" is `undefined` (honest), never "".
  *
- * PrPreview (via PreviewSplitDialog → Radix, portals to <body>) renders OUTSIDE
+ * WidgetPreview (via PreviewSplitDialog → Radix, portals to <body>) renders OUTSIDE
  * the `.jp-message-html` container, so the global underline/blue link rule does
  * not reach its links. The card's own PR link IS inside that container, so it
  * carries the `!text-foreground !no-underline` override to beat that rule.
@@ -79,11 +81,17 @@ interface PrNodeProps {
 // provider → external-link label only. The badge glyph is a single GitBranch for
 // every provider (no per-provider icons); `provider` still drives the "Open in
 // <Provider>" text so the link reads correctly across hosts.
-const PROVIDER_OPEN_LABEL: Record<PrProvider, string> = {
-  github: 'Open in GitHub',
-  bitbucket: 'Open in Bitbucket',
-  gitlab: 'Open in GitLab',
-  other: 'Open pull request',
+const providerOpenLabel = (provider: PrProvider): string => {
+  switch (provider) {
+    case 'github':
+      return 'Open in GitHub';
+    case 'bitbucket':
+      return 'Open in Bitbucket';
+    case 'gitlab':
+      return 'Open in GitLab';
+    default:
+      return 'Open pull request';
+  }
 };
 
 const STATUS_META: Record<PrStatus, { label: string; bgVar: string; fgVar: string }> = {
@@ -122,11 +130,12 @@ export const PrNode: React.FC<PrNodeProps> = ({ node }) => {
   const { conversationId, messageId } = useFlow();
   // True when this card is re-rendered inside the preview's own thread panel —
   // hide the "View Details" affordance (and skip mounting a nested preview).
-  const insidePreview = useContext(InsidePrPreviewContext);
+  const insidePreview = useContext(InsideWidgetPreviewContext);
   const [detailsOpen, setDetailsOpen] = useState(false);
   if (!props) return null;
 
-  const hasActions = Boolean(props.detailsUrl) || Boolean(props.url);
+  const prUrl = readStringProperty(props, 'url');
+  const hasActions = Boolean(props.detailsUrl) || Boolean(prUrl);
 
   return (
     <CardShell style={node.style}>
@@ -147,23 +156,29 @@ export const PrNode: React.FC<PrNodeProps> = ({ node }) => {
             View Details
           </button>
         )}
-        {props.url && (
-          <FooterLink href={props.url}>{PROVIDER_OPEN_LABEL[props.provider]}</FooterLink>
-        )}
+        {prUrl && <FooterLink href={prUrl}>{providerOpenLabel(props.provider)}</FooterLink>}
       </div>
 
       {!insidePreview && (
-        <PrPreview
+        <WidgetPreview
           open={detailsOpen}
           onOpenChange={setDetailsOpen}
-          messageId={messageId ?? ''}
+          idPrefix='pr-preview'
+          label='Pull Request'
+          title={props.ticketId ? `${props.ticketId} ${props.title}` : props.title}
+          description={props.desc}
           conversationId={conversationId ?? undefined}
-          title={props.title}
-          ticketId={props.ticketId}
-          desc={props.desc}
-          badge={<StatusBadge status={props.status} />}
           footer={hasActions ? <PrPreviewFooter props={props} /> : undefined}
-        />
+          tracking={{ category: 'PR_ARTIFACT', closeName: 'CLOSE_PR_PREVIEW' }}
+        >
+          <PrPreviewContent
+            messageId={messageId ?? ''}
+            title={props.title}
+            ticketId={props.ticketId}
+            desc={props.desc}
+            badge={<StatusBadge status={props.status} />}
+          />
+        </WidgetPreview>
       )}
     </CardShell>
   );
@@ -228,20 +243,29 @@ const FooterLink: React.FC<{
 );
 
 // ── Preview footer ──────────────────────────────────────────────────────────
-// The PR / ticket link-buttons shown in the PrPreview left-panel footer, passed
-// into PrPreview as `footer`. Only rendered when at least one URL is present
+// The PR / ticket link-buttons shown in the WidgetPreview left-panel footer,
+// passed into WidgetPreview as `footer`. Only rendered when at least one URL is present
 // (PrNode gates on hasActions). Portaled (outside `.jp-message-html`), so plain
 // `text-foreground no-underline` tokens suffice.
-const PrPreviewFooter: React.FC<{ props: PrProps }> = ({ props }) => (
-  <div className='flex items-center gap-2'>
-    {props.detailsUrl && (
-      <DialogLink href={props.detailsUrl} bordered>
-        {props.ticketId ? 'Open ticket' : 'View details'}
-      </DialogLink>
-    )}
-    {props.url && <DialogLink href={props.url}>{PROVIDER_OPEN_LABEL[props.provider]}</DialogLink>}
-  </div>
-);
+const PrPreviewFooter: React.FC<{ props: PrProps }> = ({ props }) => {
+  const prUrl = readStringProperty(props, 'url');
+  return (
+    <div className='flex items-center gap-2'>
+      {props.detailsUrl && (
+        <DialogLink href={props.detailsUrl} bordered>
+          {props.ticketId ? 'Open ticket' : 'View details'}
+        </DialogLink>
+      )}
+      {prUrl && <DialogLink href={prUrl}>{providerOpenLabel(props.provider)}</DialogLink>}
+    </div>
+  );
+};
+
+const readStringProperty = (value: unknown, property: string): string | undefined => {
+  if (!value || typeof value !== 'object') return undefined;
+  const candidate = (value as Record<string, unknown>)[property];
+  return typeof candidate === 'string' ? candidate : undefined;
+};
 
 // Link-button inside the preview footer. Portaled to <body>, i.e. outside
 // `.jp-message-html`, so the global link rule does not apply — plain tokens work.
@@ -264,3 +288,32 @@ const DialogLink: React.FC<{
     {children}
   </a>
 );
+
+const PrPreviewContent: React.FC<{
+  messageId: string;
+  title: string;
+  ticketId?: string | undefined;
+  desc?: string | undefined;
+  badge?: React.ReactNode;
+}> = ({ messageId, title, ticketId, desc, badge }) => {
+  const markdownComponents = useMemo(
+    () => createMarkdownComponents(messageId || 'pr-detail'),
+    [messageId],
+  );
+
+  return (
+    <>
+      {badge && <div>{badge}</div>}
+      <h1 className='text-2xl font-semibold leading-[1.2] text-foreground'>
+        {ticketId && <span className='text-muted-foreground'>{ticketId} </span>}
+        {title}
+      </h1>
+      {desc && (
+        <>
+          <div className='h-px w-full bg-border' />
+          <MarkdownMessageRenderer content={desc} markdownComponents={markdownComponents} />
+        </>
+      )}
+    </>
+  );
+};

@@ -1,4 +1,4 @@
-import React, { useContext, useEffect, useState } from 'react';
+import React, { useContext, useEffect, useMemo, useState } from 'react';
 import {
   MaximizeFourArrow,
   Spinner,
@@ -7,9 +7,11 @@ import {
 } from '@xyne/icons';
 import { useFlow } from '../FlowContext';
 import type { FlowComponent, PlanProps, ExecTodoStatus } from '@xyne/shared';
-import { PlanPreview, InsidePlanPreviewContext } from './PlanPreview';
+import { WidgetPreview, InsideWidgetPreviewContext } from './WidgetPreview';
 import { useAgentProgress } from '../../../hooks/useAgentProgress';
 import { cn } from '../../../utils/classNames';
+import { MarkdownMessageRenderer } from '../../ui/MessageBubble/MarkdownMessageRenderer';
+import { createMarkdownComponents } from '../../../utils/markdownComponents';
 
 /**
  * Plan artifact — an agent-authored, interactive plan card.
@@ -89,9 +91,9 @@ const ProposedPlan: React.FC<{
   props: Extract<PlanProps, { phase: 'proposed' }>;
 }> = ({ node, props }) => {
   const { state, updateFieldValue, executeAction, conversationId, messageId } = useFlow();
-  // A copy of this card lives inside its own PlanPreview thread panel; hide the
+  // A copy of this card lives inside its own widget-preview thread panel; hide the
   // Maximize there so it can't open a nested preview.
-  const insidePreview = useContext(InsidePlanPreviewContext);
+  const insidePreview = useContext(InsideWidgetPreviewContext);
   // Which decision is in flight (issue 5): drives the "Approving…"/"Rejecting…"
   // button state until the backend confirms and the card re-renders.
   const [pending, setPending] = useState<'approve' | 'reject' | null>(null);
@@ -281,17 +283,25 @@ const ProposedPlan: React.FC<{
         {terminal ? <AuditLine text={auditText} /> : actionControls}
       </div>
 
-      <PlanPreview
+      <WidgetPreview
         open={expanded}
         onOpenChange={setExpanded}
-        messageId={messageId ?? ''}
+        idPrefix='plan-preview'
+        label='Plan'
         title={props.title}
-        desc={props.desc}
-        document={meta.document}
+        description={props.desc}
         conversationId={conversationId ?? undefined}
         footer={terminal ? <AuditLine text={auditText} /> : actionControls}
-        todos={previewTodos}
-      />
+        tracking={{ category: 'PLAN_ARTIFACT', closeName: 'CLOSE_PLAN_PREVIEW' }}
+      >
+        <PlanPreviewContent
+          messageId={messageId ?? ''}
+          title={props.title}
+          desc={props.desc}
+          todos={previewTodos}
+          document={meta.document}
+        />
+      </WidgetPreview>
     </CardShell>
   );
 };
@@ -301,7 +311,7 @@ const ExecutingPlan: React.FC<{
   props: Extract<PlanProps, { phase: 'executing' | 'done' }>;
 }> = ({ node, props }) => {
   const { messageId, conversationId } = useFlow();
-  const insidePreview = useContext(InsidePlanPreviewContext);
+  const insidePreview = useContext(InsideWidgetPreviewContext);
   const [expanded, setExpanded] = useState(false);
   const doneCount = props.todos.filter(t => t.status === 'done').length;
   const progressText = `${doneCount} of ${props.todos.length} completed`;
@@ -384,17 +394,25 @@ const ExecutingPlan: React.FC<{
         </div>
       )}
 
-      <PlanPreview
+      <WidgetPreview
         open={expanded}
         onOpenChange={setExpanded}
-        messageId={messageId ?? ''}
+        idPrefix='plan-preview'
+        label='Plan'
         title={props.title}
-        desc={props.desc}
-        document={meta.document}
+        description={props.desc}
         conversationId={conversationId ?? undefined}
         footer={previewFooter}
-        todos={previewTodos}
-      />
+        tracking={{ category: 'PLAN_ARTIFACT', closeName: 'CLOSE_PLAN_PREVIEW' }}
+      >
+        <PlanPreviewContent
+          messageId={messageId ?? ''}
+          title={props.title}
+          desc={props.desc}
+          todos={previewTodos}
+          document={meta.document}
+        />
+      </WidgetPreview>
     </CardShell>
   );
 };
@@ -451,7 +469,7 @@ const Header: React.FC<{ chip?: React.ReactNode; onExpand?: (() => void) | undef
       </span>
       {chip}
     </div>
-    {/* No Maximize when the card is rendered inside a PlanPreview's own thread
+    {/* No Maximize when the card is rendered inside a widget preview's own thread
         panel (onExpand omitted) — prevents stacking a second full-screen preview. */}
     {onExpand && (
       <button
@@ -556,3 +574,34 @@ const EmptyCircle: React.FC = () => (
 const TodoText: React.FC<{ text: string }> = ({ text }) => (
   <p className='text-sm leading-[1.2] text-foreground/80'>{text}</p>
 );
+
+const PlanPreviewContent: React.FC<{
+  messageId: string;
+  title: string;
+  desc?: string | undefined;
+  document?: string | undefined;
+  todos?: React.ReactNode;
+}> = ({ messageId, title, desc, document, todos }) => {
+  const markdownComponents = useMemo(
+    () => createMarkdownComponents(messageId || 'plan-document'),
+    [messageId],
+  );
+
+  return (
+    <>
+      <div className='flex flex-col gap-1'>
+        <h1 className='text-2xl font-semibold leading-[1.2] text-foreground'>{title}</h1>
+        {desc && (
+          <p className='text-sm leading-[1.5] tracking-[-0.15px] text-foreground/70'>{desc}</p>
+        )}
+      </div>
+      {todos}
+      {document && (
+        <>
+          <div className='h-px w-full bg-border' />
+          <MarkdownMessageRenderer content={document} markdownComponents={markdownComponents} />
+        </>
+      )}
+    </>
+  );
+};
