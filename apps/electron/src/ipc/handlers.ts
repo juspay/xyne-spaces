@@ -20,6 +20,7 @@ import { isPillSender, setRecordingPillTheme } from '../services/recording-pill-
 import {
   focusMainWindow,
   markRendererReady,
+  setOverlayMinimized,
   stopRecording,
   syncRecordingState,
 } from '../services/recording-controller';
@@ -555,10 +556,15 @@ export function setupIpcHandlers(): void {
     if (!isPillSender(event)) return;
     stopRecording('pill');
   });
-
   ipcMain.on('recording-pill:open-app', (event) => {
     if (!isPillSender(event)) return;
-    focusMainWindow('/recordings');
+    focusMainWindow();
+    setOverlayMinimized(false);
+  });
+
+  ipcMain.on('recording:set-minimized', (event, isMinimized: unknown) => {
+    if (!isMainWindowSender(event)) return;
+    setOverlayMinimized(!!isMinimized);
   });
 
   ipcMain.on(

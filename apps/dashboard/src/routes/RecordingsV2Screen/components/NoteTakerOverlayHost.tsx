@@ -11,6 +11,7 @@ import { useZero } from '../../../hooks/useZero';
 import { canvasService } from '../../../services/Canvas/canvasService';
 import { recordingService } from '../../../services/Recording/recordingService';
 import { DEFAULT_NOTES_TITLE, DEFAULT_RECORDING_TITLE } from '../../../stores/recordingStore';
+import { isElectronApp } from '../../../utils/electronApp';
 import { mutators } from '../../../zero/mutators';
 import NoteTakerOverlay from './NoteTakerOverlay';
 
@@ -27,6 +28,7 @@ export function NoteTakerOverlayHost(): ReactElement {
   const agentLeft = useRecordingStore(context => context.agentLeft);
   const transcripts = useRecordingStore(context => context.transcripts);
   const markedMoments = useRecordingStore(context => context.markedMoments);
+  const isMinimized = useRecordingStore(context => context.isTranscriptMinimized);
   const zero = useZero();
   const { markMoment } = useMarkMoment();
   const { showOfflineBanner } = useZeroOfflineState();
@@ -134,10 +136,31 @@ export function NoteTakerOverlayHost(): ReactElement {
     if (pendingStop || agentLeft) handleStop();
   }, [agentLeft, handleStop, isActive, pendingStop]);
 
+  // ─── Native pill hand-off (Electron only) ─────────────────────────────────
+  const isElectron = isElectronApp();
+
+  useEffect(() => {
+    if (!isElectron) return;
+    window.electronAPI?.ipcSend?.('recording:set-minimized', isActive && isMinimized);
+  }, [isElectron, isActive, isMinimized]);
+
+  useEffect(() => {
+    const recordingPill = window.electronAPI?.recordingPill;
+    if (!isElectron || !recordingPill?.onMinimizedChanged) return;
+    // Expanding the pill is the only way back once minimised.
+    return recordingPill.onMinimizedChanged(minimized => {
+      sendRecordingEvent({ type: 'setTranscriptMinimized', isMinimized: minimized });
+    });
+  }, [isElectron]);
+
+  const handleMinimize = useCallback((): void => {
+    sendRecordingEvent({ type: 'setTranscriptMinimized', isMinimized: true });
+  }, []);
+
   return (
     <>
       <AnimatePresence initial={false}>
-        {isActive && startTime !== null && !isViewingThisRecording && (
+        {isActive && startTime !== null && !isViewingThisRecording && !isMinimized && (
           <NoteTakerOverlay
             key='floating-recording-transcript'
             status={status}
@@ -158,6 +181,7 @@ export function NoteTakerOverlayHost(): ReactElement {
             onPause={() => sendRecordingEvent({ type: 'pauseRecording' })}
             onResume={() => sendRecordingEvent({ type: 'resumeRecording' })}
             onMarkMoment={markMoment}
+            onMinimize={isElectron ? handleMinimize : undefined}
           />
         )}
       </AnimatePresence>

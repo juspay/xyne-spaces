@@ -1,21 +1,5 @@
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type ReactElement,
-  type TransitionEvent,
-} from 'react';
-import {
-  ChevronDown,
-  ChevronUp,
-  Flag,
-  PauseBig,
-  PlayBig,
-  Spinner,
-  StopBig,
-  CloudDisabled,
-} from '@xyne/icons';
+import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
+import { Flag, PauseBig, PlayBig, Spinner, StopBig, CloudDisabled } from '@xyne/icons';
 import { Maximize2, Minimize2 } from 'lucide-react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { useWorkspaceNavigate } from '../../../hooks/useWorkspaceNavigate';
@@ -51,6 +35,7 @@ interface NoteTakerOverlayProps {
   onPause: () => void;
   onResume: () => void;
   onMarkMoment: () => void;
+  onMinimize?: (() => void) | undefined;
 }
 
 type TabId = 'notes' | 'transcript';
@@ -58,9 +43,7 @@ type TabId = 'notes' | 'transcript';
 interface RecordingPanelHeaderProps {
   isPaused: boolean;
   displayTitle: string;
-  isCollapsed: boolean;
   recordingId: string | null;
-  onToggleCollapsed: () => void;
 }
 
 interface RecordingControlBarProps {
@@ -70,6 +53,7 @@ interface RecordingControlBarProps {
   onResume: () => void;
   onStop: () => void;
   onMarkMoment: () => void;
+  onMinimize?: (() => void) | undefined;
 }
 
 interface NotesTabProps {
@@ -91,9 +75,7 @@ const OFFLINE_BAR_HEIGHT_PX = 32;
 const RecordingPanelHeader = ({
   isPaused,
   displayTitle,
-  isCollapsed,
   recordingId,
-  onToggleCollapsed,
 }: RecordingPanelHeaderProps): ReactElement => {
   const navigate = useWorkspaceNavigate();
 
@@ -104,10 +86,7 @@ const RecordingPanelHeader = ({
 
   return (
     <header
-      className={cn(
-        'flex h-12 shrink-0 items-center gap-2.5 border-b pr-3 pl-3.5 transition-colors duration-150',
-        isCollapsed ? 'border-transparent' : 'border-border',
-      )}
+      className='flex h-12 shrink-0 items-center gap-2.5 border-b border-border pr-3 pl-3.5'
       aria-label='Recording status and controls'
     >
       <span
@@ -140,23 +119,6 @@ const RecordingPanelHeader = ({
       >
         <Maximize2 size={15} strokeWidth={2.2} />
       </Button>
-      <Button
-        type='button'
-        variant='ghost'
-        size='iconSm'
-        onClick={onToggleCollapsed}
-        className='size-7 rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground'
-        aria-label={isCollapsed ? 'Expand live transcript' : 'Collapse live transcript'}
-        title={isCollapsed ? 'Expand live transcript' : 'Collapse live transcript'}
-        data-track-category={TRACK_CATEGORY}
-        data-track-name={isCollapsed ? 'expand_transcript' : 'collapse_transcript'}
-      >
-        {isCollapsed ? (
-          <ChevronUp size={16} strokeWidth={2.5} />
-        ) : (
-          <ChevronDown size={16} strokeWidth={2.5} />
-        )}
-      </Button>
     </header>
   );
 };
@@ -188,6 +150,7 @@ const RecordingControlBar = ({
   onResume,
   onStop,
   onMarkMoment,
+  onMinimize,
 }: RecordingControlBarProps): ReactElement => (
   <div
     className='flex h-13 shrink-0 items-center gap-1.5 border-t border-border px-4 py-2'
@@ -214,18 +177,21 @@ const RecordingControlBar = ({
       >
         <Flag size={17} strokeWidth={2} />
       </Button>
-      <Button
-        type='button'
-        variant='ghost'
-        size='iconSm'
-        className='rounded-xl text-muted-foreground hover:bg-muted hover:text-foreground'
-        aria-label='Minimize panel'
-        title='Minimize panel'
-        data-track-category={TRACK_CATEGORY}
-        data-track-name='minimize_panel'
-      >
-        <Minimize2 size={16} strokeWidth={2.2} />
-      </Button>
+      {onMinimize && (
+        <Button
+          type='button'
+          variant='ghost'
+          size='iconSm'
+          onClick={onMinimize}
+          className='rounded-xl text-muted-foreground hover:bg-muted hover:text-foreground'
+          aria-label='Minimize to floating pill'
+          title='Minimize to floating pill'
+          data-track-category={TRACK_CATEGORY}
+          data-track-name='minimize_panel'
+        >
+          <Minimize2 size={16} strokeWidth={2.2} />
+        </Button>
+      )}
       <Button
         type='button'
         variant='outline'
@@ -348,16 +314,15 @@ export function NoteTakerOverlay({
   onPause,
   onResume,
   onMarkMoment,
+  onMinimize,
 }: NoteTakerOverlayProps): ReactElement | null {
   const shouldReduceMotion = useReducedMotion();
-  const [isCollapsed, setIsCollapsed] = useState(false);
   // Read once on mount: the panel stays up for the whole recording, so a preference
   // written by the detail screen mid-recording should not yank the pane out from under
   // whoever is typing here.
   const [activeTab, setActiveTab] = useState<TabId>(() =>
     getRecordingV2Tab() === 'notes' ? 'notes' : 'transcript',
   );
-  const [isPanelTransitioning, setIsPanelTransitioning] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const isPaused = status === 'paused';
@@ -390,22 +355,6 @@ export function NoteTakerOverlay({
   const handleTabSelect = (tab: TabId): void => {
     setActiveTab(tab);
     setRecordingV2Tab(tab === 'notes' ? 'notes' : 'secondary');
-  };
-
-  const handleToggleCollapsed = (): void => {
-    setIsPanelTransitioning(true);
-    setIsCollapsed(current => !current);
-
-    if (shouldReduceMotion) {
-      window.requestAnimationFrame(() => {
-        setIsPanelTransitioning(false);
-      });
-    }
-  };
-
-  const handlePanelTransitionEnd = (event: TransitionEvent<HTMLElement>): void => {
-    if (event.target !== event.currentTarget || event.propertyName !== 'height') return;
-    setIsPanelTransitioning(false);
   };
 
   if (!isActive || !startTime) return null;
@@ -456,31 +405,16 @@ export function NoteTakerOverlay({
         data-track-name='drag_handle'
       />
       <section
-        onTransitionEnd={handlePanelTransitionEnd}
-        className={cn(
-          'pointer-events-auto flex w-full max-h-[calc(100vh-3rem)] flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl ring-1 ring-foreground/5 transition-[height] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[height] motion-reduce:transition-none',
-          isCollapsed ? 'h-12' : 'h-[min(70vh,600px)] min-[700px]:h-[min(40rem,calc(100vh-3rem))]',
-        )}
-        aria-label={isCollapsed ? 'Collapsed recording controls' : 'Live recording transcript'}
+        className='pointer-events-auto flex h-[min(70vh,600px)] max-h-[calc(100vh-3rem)] w-full flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl ring-1 ring-foreground/5 min-[700px]:h-[min(40rem,calc(100vh-3rem))]'
+        aria-label='Live recording transcript'
       >
         <RecordingPanelHeader
           isPaused={isPaused}
           displayTitle={displayTitle}
-          isCollapsed={isCollapsed}
           recordingId={recordingId}
-          onToggleCollapsed={handleToggleCollapsed}
         />
 
-        <div
-          inert={isCollapsed}
-          aria-hidden={isCollapsed}
-          className={cn(
-            'flex min-h-0 flex-1 flex-col transition-opacity motion-reduce:transition-none',
-            isCollapsed
-              ? 'pointer-events-none opacity-0 duration-100'
-              : 'opacity-100 duration-150 delay-100',
-          )}
-        >
+        <div className='flex min-h-0 flex-1 flex-col'>
           <AnimatePresence initial={false}>{isOffline && <OfflineStatusBar />}</AnimatePresence>
 
           <div
@@ -532,7 +466,6 @@ export function NoteTakerOverlay({
               transcripts={transcripts}
               markedMoments={markedMoments}
               isPaused={isPaused}
-              isScrollSuspended={isCollapsed || isPanelTransitioning}
               trackCategory={TRACK_CATEGORY}
             />
           </div>
@@ -554,6 +487,7 @@ export function NoteTakerOverlay({
             onResume={onResume}
             onStop={onStop}
             onMarkMoment={onMarkMoment}
+            onMinimize={onMinimize}
           />
         </div>
       </section>
