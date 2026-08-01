@@ -5,6 +5,7 @@ import {
   Brain,
   ClipboardList,
   Flame,
+  Info,
   Network,
   Power,
   RefreshCw,
@@ -24,18 +25,44 @@ import { DisableModal } from '@/components/ClawAgents/digitalTwin/DisableModal';
 import { UploadModal } from '@/components/ClawAgents/digitalTwin/UploadModal';
 
 // Primary sections + the Metrics view (grouped below a divider, mirroring how
-// the agent-detail left nav separates Activity).
+// the agent-detail left nav separates Activity). Each carries a plain-language
+// `hint` surfaced via the (i) affordance so the tab names are self-explanatory.
 const SECTIONS = [
-  { to: '/claw-agents/digital-twin', label: 'Memories', icon: Brain, end: true },
-  { to: '/claw-agents/digital-twin/hot', label: 'Hot', icon: Flame, end: false },
+  {
+    to: '/claw-agents/digital-twin',
+    label: 'Memories',
+    icon: Brain,
+    end: true,
+    hint: 'Facts your Twin has learned about you and your work. Every one was approved by you before it could be used.',
+  },
+  {
+    to: '/claw-agents/digital-twin/hot',
+    label: 'Hot',
+    icon: Flame,
+    end: false,
+    hint: 'Your most-used memories, ranked by how often the Twin pulls them into answers.',
+  },
   {
     to: '/claw-agents/digital-twin/proposals',
     label: 'Proposals',
     icon: ClipboardList,
     end: false,
+    hint: 'New memories the Twin drafted from your activity, waiting for you to approve or reject before it can use them.',
   },
-  { to: '/claw-agents/digital-twin/recall', label: 'Recall', icon: Search, end: false },
-  { to: '/claw-agents/digital-twin/graph', label: 'Graph', icon: Network, end: false },
+  {
+    to: '/claw-agents/digital-twin/recall',
+    label: 'Recall',
+    icon: Search,
+    end: false,
+    hint: 'Test your Twin — ask a question and see which memories it would recall to answer it.',
+  },
+  {
+    to: '/claw-agents/digital-twin/graph',
+    label: 'Graph',
+    icon: Network,
+    end: false,
+    hint: 'A map of how your memories connect across topics and subsystems.',
+  },
 ] as const;
 
 const navLinkClass = ({ isActive }: { isActive: boolean }): string =>
@@ -46,20 +73,40 @@ const navLinkClass = ({ isActive }: { isActive: boolean }): string =>
       : 'text-muted-foreground hover:bg-muted hover:text-foreground',
   );
 
+/**
+ * Small, always-visible (i) help affordance shown at the right edge of a nav
+ * row. Hover reveals a plain-language description of what the tab is for. It is
+ * a plain <span> (valid inside the NavLink anchor); it has no click handler, so
+ * clicking simply follows the row to its own tab.
+ */
+const NavHint = ({ label, text }: { label: string; text: string }): ReactElement => (
+  <Tooltip side='right' content={text} className='max-w-[240px]'>
+    <span
+      role='img'
+      aria-label={`What is ${label}?`}
+      className='ml-auto flex size-4 shrink-0 items-center justify-center text-muted-foreground/50 transition-colors hover:text-foreground'
+    >
+      <Info className='size-3.5' />
+    </span>
+  </Tooltip>
+);
+
 const HeaderButton = ({
   onClick,
   icon,
   label,
+  hint,
   danger,
 }: {
   onClick: () => void;
   icon: typeof Settings;
   label: string;
+  hint?: string;
   danger?: boolean;
 }): ReactElement => {
   const IconComponent = icon;
   return (
-    <Tooltip side='bottom' content={label}>
+    <Tooltip side='bottom' content={hint ?? label}>
       <button
         type='button'
         onClick={onClick}
@@ -155,6 +202,7 @@ const ClawDigitalTwinScreen = (): ReactElement => {
                   >
                     <IconComponent className='size-4 shrink-0' />
                     {section.label}
+                    <NavHint label={section.label} text={section.hint} />
                   </NavLink>
                 );
               })}
@@ -162,10 +210,18 @@ const ClawDigitalTwinScreen = (): ReactElement => {
               <NavLink to='/claw-agents/digital-twin/metrics' className={navLinkClass}>
                 <BarChart3 className='size-4 shrink-0' />
                 Metrics
+                <NavHint
+                  label='Metrics'
+                  text='Usage and quality stats for your Twin over time.'
+                />
               </NavLink>
               <NavLink to='/claw-agents/digital-twin/settings' className={navLinkClass}>
                 <Settings className='size-4 shrink-0' />
                 Settings
+                <NavHint
+                  label='Settings'
+                  text="Your Twin's reply suffix and the confidence threshold for auto-approving memories."
+                />
               </NavLink>
             </nav>
           </div>
@@ -195,16 +251,19 @@ const ClawDigitalTwinScreen = (): ReactElement => {
                   onClick={() => setShowBackfill(true)}
                   icon={RefreshCw}
                   label='Backfill history'
+                  hint='Import your past Spaces history in bulk to seed memories — each one shows up under Proposals for your review first.'
                 />
                 <HeaderButton
                   onClick={() => setShowUpload(true)}
                   icon={Upload}
                   label='Upload markdown'
+                  hint='Upload a .md file to teach your Twin facts directly, without a backfill.'
                 />
                 <HeaderButton
                   onClick={() => setShowDisable(true)}
                   icon={Power}
                   label='Disable Twin'
+                  hint='Turn the Digital Twin off. Your approved memories are kept but the Twin stops replying.'
                   danger
                 />
               </div>
