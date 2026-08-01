@@ -40,7 +40,6 @@ import {
   RecordingContentTabs,
   type RecordingSummaryTemplate,
 } from './components/RecordingContentTabs';
-import { SummaryWithCitations } from './components/SummaryWithCitations';
 import { PostRecordingToChannelModal } from './components/PostRecordingToChannelModal';
 import { PostRecordingToEmailModal } from './components/PostRecordingToEmailModal';
 import { CollaborativeCanvasEditor } from '../../components/Canvas/CollaborativeCanvasEditor/CollaborativeCanvasEditor';
@@ -87,12 +86,8 @@ export default function RecordingDetailV2Screen(): ReactElement {
   const [showPostToChannelModal, setShowPostToChannelModal] = useState(false);
   const [showPostToEmailModal, setShowPostToEmailModal] = useState(false);
   const [isRegeneratingSummary, setIsRegeneratingSummary] = useState(false);
+  const [summaryCanvasNonce, setSummaryCanvasNonce] = useState(0);
   const [citationNonce, setCitationNonce] = useState(0);
-  const [citationRef, setCitationRef] = useState<{
-    segment: number;
-    timestamp: string;
-    speaker: string;
-  } | null>(null);
 
   const isLive = recording ? isRecordingLive(recording) : false;
 
@@ -249,14 +244,13 @@ export default function RecordingDetailV2Screen(): ReactElement {
         current
           ? {
               ...current,
-              aiSummary: result.summary,
-              hasSummary: true,
               summaryTemplateId: result.summaryTemplateId,
               detailedSummaryCanvasId:
                 result.detailedSummaryCanvasId ?? current.detailedSummaryCanvasId,
             }
           : current,
       );
+      setSummaryCanvasNonce(value => value + 1);
       // Lands on the summary it just generated; goes through the tab handler so the
       // pane switch resets the scroll position the same way a manual click does.
       handleTabSelect('summary');
@@ -338,7 +332,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
   const hasNotes = !!notesCanvasId;
   // The player replaces the read-only timeline once there is audio to scrub.
   const showAudioPlayer = !isLive && !!recording.hasRecording;
-  const hasSummary = recording.hasSummary && !!recording.aiSummary;
+  const hasDetailedSummary = !!recording.detailedSummaryCanvasId;
   const selectedSummaryTemplate =
     RECORDING_SUMMARY_TEMPLATES.find(template => template.id === recording.summaryTemplateId) ??
     RECORDING_SUMMARY_TEMPLATES[0]!;
@@ -347,10 +341,10 @@ export default function RecordingDetailV2Screen(): ReactElement {
   // alone is enough to show the tabs: the summary is generated minutes after the call
   // ends, and until it lands the summary pane says so. Only a recording with nothing
   // at all falls through to the processing placeholder.
-  const showTabs = isLive || hasNotes || hasSummary || recording.hasTranscript;
+  const showTabs = isLive || hasNotes || hasDetailedSummary || recording.hasTranscript;
   const secondTab = isLive ? 'transcript' : 'summary';
   const visibleTab =
-    tabPreference === 'notes' || (secondTab === 'summary' && !hasSummary && hasNotes)
+    tabPreference === 'notes' || (secondTab === 'summary' && !hasDetailedSummary && hasNotes)
       ? 'notes'
       : secondTab;
 
@@ -359,18 +353,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
       ? (recording.identifiedTranscript ?? recording.transcript)
       : recording.transcript;
 
-  const handleCitationClick = (ref: {
-    segment: number;
-    timestamp: string;
-    speaker: string;
-  }): void => {
-    setCitationRef(ref);
-    setCitationNonce(value => value + 1);
-    setShowTranscriptPanel(true);
-  };
-
   const openTranscriptPanel = (): void => {
-    setCitationRef(null);
     setCitationNonce(value => value + 1);
     setShowTranscriptPanel(true);
   };
@@ -557,15 +540,14 @@ export default function RecordingDetailV2Screen(): ReactElement {
                       </Tooltip>
                     ) : null}
                   </div>
-                  {hasSummary ? (
-                    <SummaryWithCitations
-                      aiSummary={recording.aiSummary!}
-                      citationSegments={recording.citationSegments}
-                      onCitationClick={handleCitationClick}
+                  {hasDetailedSummary ? (
+                    <DetailedSummaryCanvas
+                      key={`${recording.detailedSummaryCanvasId}:${summaryCanvasNonce}`}
+                      canvasId={recording.detailedSummaryCanvasId!}
                     />
                   ) : (
                     <p className='text-sm text-muted-foreground'>
-                      Summary is still being prepared.
+                      Detailed summary is still being prepared.
                     </p>
                   )}
                 </section>
@@ -592,12 +574,9 @@ export default function RecordingDetailV2Screen(): ReactElement {
       {showTranscriptPanel && transcriptText && (
         <TranscriptSidePanel
           transcript={transcriptText}
-          target={citationRef}
+          target={null}
           openNonce={citationNonce}
-          onClose={() => {
-            setShowTranscriptPanel(false);
-            setCitationRef(null);
-          }}
+          onClose={() => setShowTranscriptPanel(false)}
           className='absolute inset-y-0 right-0 z-30 w-full md:w-[560px]'
         />
       )}
@@ -669,6 +648,32 @@ function NotesCanvas({ canvasId }: { canvasId: string }): ReactElement {
         [&_.bn-mt-suggestion-menu-item-section_svg]:!size-4
         '
       autoFocus={true}
+    />
+  );
+}
+
+function DetailedSummaryCanvas({ canvasId }: { canvasId: string }): ReactElement {
+  const [canvasData] = useCachedQuery(queries.getCanvas({ canvasId }), { enabled: !!canvasId });
+  const canvas = canvasData as unknown as Canvas | undefined;
+
+  if (!canvas) {
+    return (
+      <div className='flex min-h-[260px] items-center justify-center'>
+        <Spinner size={20} className='animate-spin text-muted-foreground' />
+      </div>
+    );
+  }
+
+  return (
+    <CollaborativeCanvasEditor
+      key={canvas.id}
+      canvasId={canvas.id}
+      channelId={canvas.channelId || undefined}
+      title={canvas.title}
+      editable={true}
+      placeholder='Detailed summary'
+      className='detailed-summary-canvas-editor min-h-[420px]'
+      autoFocus={false}
     />
   );
 }

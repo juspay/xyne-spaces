@@ -20,10 +20,6 @@ const NOTE_TAKER_LABEL_CATEGORY = 'topic';
 
 interface DetailedSummaryCanvasResult {
   canvasId: string;
-}
-
-interface GeneratedRecordingSummary {
-  summary: string;
   summaryTemplateId: BuiltinRecordingSummaryTemplateId;
 }
 
@@ -146,10 +142,8 @@ class NoteTakerTranscriptService {
       const formattedTranscript = await this.getFormattedTranscript(callId, entries);
       if (!formattedTranscript) return;
 
-      const generatedSummary = await this.generateAndSaveSummary(call, formattedTranscript);
-      const detailedSummary = generatedSummary
-        ? await this.generateDetailedSummaryCanvas(call, formattedTranscript, generatedSummary.summary)
-        : null;
+      await this.generateAndSaveSummary(call, formattedTranscript);
+      const detailedSummary = await this.generateDetailedSummaryCanvas(call, formattedTranscript);
       const labelIds = await this.generateAndSaveLabels(call, formattedTranscript);
       const markedItems = await this.generateMarkedItemsList(call, formattedTranscript);
       await this.finalizeCallUpdates(call, {
@@ -159,7 +153,7 @@ class NoteTakerTranscriptService {
         },
         labels: labelIds,
         markedItems,
-        summaryTemplateId: generatedSummary?.summaryTemplateId,
+        summaryTemplateId: detailedSummary?.summaryTemplateId,
       });
       await this.queueVespaIndexing(call);
     } finally {
@@ -168,47 +162,41 @@ class NoteTakerTranscriptService {
   }
 
   /**
-   * Regenerate the visible recording summary with an explicitly selected
-   * built-in template. The same Markdown also refreshes the detailed-summary
-   * canvas so the two views never disagree.
+   * Regenerate only the detailed-summary canvas with an explicitly selected
+   * built-in template. The normal Call.aiSummary remains untouched.
    */
   async regenerateSummary(
     call: Call,
     templateId: BuiltinRecordingSummaryTemplateId,
   ): Promise<{
-    summary: string;
     summaryTemplateId: BuiltinRecordingSummaryTemplateId;
     detailedSummaryCanvasId: string | null;
   } | null> {
     const formattedTranscript = await transcriptService.getTranscriptContent(call.externalId);
     if (!formattedTranscript) return null;
 
-    const generated = await this.generateAndSaveSummary(call, formattedTranscript, templateId);
-    if (!generated) return null;
-
     const detailedSummary = await this.generateDetailedSummaryCanvas(
       call,
       formattedTranscript,
-      generated.summary,
+      templateId,
     );
+    if (!detailedSummary) return null;
 
-    if (detailedSummary) {
-      const currentMetadata =
-        call.metadata && typeof call.metadata === 'object' && !Array.isArray(call.metadata)
-          ? (call.metadata as Record<string, unknown>)
-          : {};
-      await repositories.calls.update(call.id, {
-        metadata: {
-          ...currentMetadata,
-          detailedSummaryCanvasId: detailedSummary.canvasId,
-        },
-      });
-    }
+    const currentMetadata =
+      call.metadata && typeof call.metadata === 'object' && !Array.isArray(call.metadata)
+        ? (call.metadata as Record<string, unknown>)
+        : {};
+    await repositories.calls.update(call.id, {
+      metadata: {
+        ...currentMetadata,
+        detailedSummaryCanvasId: detailedSummary.canvasId,
+      },
+      summaryTemplateId: detailedSummary.summaryTemplateId,
+    });
 
     return {
-      summary: generated.summary,
-      summaryTemplateId: generated.summaryTemplateId,
-      detailedSummaryCanvasId: detailedSummary?.canvasId ?? null,
+      summaryTemplateId: detailedSummary.summaryTemplateId,
+      detailedSummaryCanvasId: detailedSummary.canvasId,
     };
   }
 
@@ -354,16 +342,15 @@ class NoteTakerTranscriptService {
   private async generateAndSaveSummary(
     call: Call,
     formattedTranscript: string,
-    templateId?: BuiltinRecordingSummaryTemplateId,
-  ): Promise<GeneratedRecordingSummary | null> {
+  ): Promise<void> {
     const callId = call.externalId;
 
     // Number the transcript so the LLM can cite segments with [clf-N] tokens.
     // The tokens stay inline in the stored aiSummary and are parsed client-side.
     const { numbered: numberedTranscript } = numberTranscriptSegments(formattedTranscript);
 
-    const [generated, generatedTitle] = await Promise.all([
-      callDocumentService.generateRecordingSummary(numberedTranscript, callId, templateId).catch((err) => {
+    const [summary, generatedTitle] = await Promise.all([
+      transcriptService.generateCallSummary(numberedTranscript, callId).catch((err) => {
         logger.error(`[${callId}] generate_summary_threw`, {
           path: 'note_taker',
           error: err,
@@ -389,23 +376,18 @@ class NoteTakerTranscriptService {
       .replace(/^['"]|['"]$/g, '')
       .slice(0, 100);
 
-    if (!generated && !title) {
+    if (!summary && !title) {
       logger.error(`[${callId}] ai_summary_skipped`, { reason: 'generation_failed', path: 'note_taker' });
-      return null;
+      return;
     }
 
     try {
       await repositories.calls.update(call.id, {
-        ...(generated
-          ? {
-              aiSummary: generated.summary,
-              summaryTemplateId: generated.template.id,
-            }
-          : {}),
+        ...(summary ? { aiSummary: summary } : {}),
         ...(title && !call.title ? { title } : {}),
       });
       logger.info(`[${callId}] call_record_updated`, {
-        fields_updated: [generated ? 'aiSummary,summaryTemplateId' : '', title ? 'title' : '']
+        fields_updated: [summary ? 'aiSummary' : '', title ? 'title' : '']
           .filter(Boolean)
           .join(','),
         path: 'note_taker',
@@ -414,7 +396,7 @@ class NoteTakerTranscriptService {
       // P2025: call was deleted while summary was being generated — ignore gracefully
       if (updateError instanceof Prisma.PrismaClientKnownRequestError && updateError.code === 'P2025') {
         logger.warn(`[${callId}] call_deleted_before_summary_save | skipping update`);
-        return null;
+        return;
       }
       logger.error(`[${callId}] call_record_update_failed`, {
         stage: 'call_record_update',
@@ -422,25 +404,21 @@ class NoteTakerTranscriptService {
         error: updateError,
         stack: updateError instanceof Error ? updateError.stack : undefined,
       });
-      return null;
+      return;
     }
-
-    return generated
-      ? { summary: generated.summary, summaryTemplateId: generated.template.id }
-      : null;
   }
 
   /**
    * Generate the detailed summary and create/update its canvas, exactly like
    * the conversation-based flow — except we stop right there. Returns the canvas
-   * id (or null on failure) for processTranscript to fold into its single
-   * combined Call write. No channel, no message —
+   * and selected template ids (or null on failure) for processTranscript to
+   * fold into its single combined Call write. No channel, no message —
    * workspaceId comes straight off the Call record.
    */
   private async generateDetailedSummaryCanvas(
     call: Call,
     formattedTranscript: string,
-    detailedSummaryMarkdown: string,
+    templateId?: BuiltinRecordingSummaryTemplateId,
   ): Promise<DetailedSummaryCanvasResult | null> {
     const callId = call.externalId;
 
@@ -454,11 +432,24 @@ class NoteTakerTranscriptService {
       // token→segment map used to turn `[clf-n]` tokens into canvas citation chips.
       // Note-taker calls have no channel, so speaker→userId resolution is skipped
       // (the frontend falls back to initials for unknown speakers).
-      const { segments } = numberTranscriptSegments(formattedTranscript);
+      const { numbered: numberedTranscript, segments } = numberTranscriptSegments(formattedTranscript);
       const citationCtx: CitationContext = {
         callId,
         segments: new Map(segments.map(s => [s.n, s])),
       };
+
+      const generated = await callDocumentService.generateRecordingSummary(
+        numberedTranscript,
+        callId,
+        templateId,
+      );
+      if (!generated) {
+        logger.error(`[${callId}] detailed_summary_skipped`, {
+          reason: 'generation_failed',
+          path: 'note_taker',
+        });
+        return null;
+      }
 
       const xyneAutomaticBot = await unifiedBotUserService.getBotByBotId('xyne-automatic', call.workspaceId);
       if (!xyneAutomaticBot) {
@@ -468,7 +459,7 @@ class NoteTakerTranscriptService {
 
       const { canvasId } = await callDocumentService.createOrUpdateDetailedSummaryCanvas(
         callId,
-        detailedSummaryMarkdown,
+        generated.summary,
         xyneAutomaticBot.id,
         null,
         null,
@@ -483,7 +474,7 @@ class NoteTakerTranscriptService {
         return null;
       }
 
-      return { canvasId };
+      return { canvasId, summaryTemplateId: generated.template.id };
     } catch (error) {
       logger.error(`[${callId}] detailed_summary_failed`, {
         stage: 'detailed_summary_generation',
