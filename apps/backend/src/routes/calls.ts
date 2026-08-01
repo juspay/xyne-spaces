@@ -5,6 +5,8 @@ import { scheduleCallController } from '@/controllers/scheduleCallController';
 import { callChatController, requireInternalCallParticipant } from '@/controllers/callChatController';
 import { uploadSingle } from '@/middleware/upload';
 import { summaryTemplateController } from '@/controllers/summaryTemplateController';
+import { recordingEmailController } from '@/controllers/recordingEmailController';
+import { recordingSharingController } from '@/controllers/recordingSharingController';
 
 const router = Router();
 
@@ -20,6 +22,12 @@ router.post('/schedule', scheduleCallController.scheduleCall);
 router.get('/recordings', callController.getRecordings);
 router.post('/recordings/bulk-delete', callController.bulkDeleteRecordings);
 router.post('/recordings/:callId/generate-summary', callController.regenerateRecordingSummary);
+router.get(
+  '/recordings/:callId/email-compose-context',
+  recordingEmailController.getComposeContext,
+);
+router.post('/recordings/:callId/send-email', recordingEmailController.sendRecordingEmail);
+router.post('/recordings/:callId/sharing', recordingSharingController.manage);
 router.get('/recordings/:callId', callController.getRecordingDetail);
 router.patch('/recordings/:callId', callController.updateRecordingTitle);
 router.delete('/recordings/:callId', callController.deleteRecording);

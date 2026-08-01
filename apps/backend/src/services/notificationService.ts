@@ -1431,7 +1431,7 @@ class NotificationService {
     recordingTitle: string,
     actorId: string,
     actorName: string,
-    actorAction: 'recording_shared' | 'recording_access_revoked' = 'recording_shared',
+    actorAction: 'recording_shared' | 'recording_access_revoked',
   ): Promise<{ deliveredUserIds: string[] }> {
     const recipientIds = recipientUserIds.filter(id => id !== actorId);
 
@@ -1439,7 +1439,10 @@ class NotificationService {
       return { deliveredUserIds: [] };
     }
 
-    getNotificationJobsExpected().add(recipientIds.length, { platform: 'desktop', message_type: 'recording' });
+    getNotificationJobsExpected().add(recipientIds.length, {
+      platform: 'desktop',
+      message_type: 'recording',
+    });
 
     const isRevoked = actorAction === 'recording_access_revoked';
     const title = isRevoked
@@ -1465,12 +1468,12 @@ class NotificationService {
           },
         });
         return userId;
-      })
+      }),
     );
 
     const deliveredUserIds = results
-      .filter((r): r is PromiseFulfilledResult<string> => r.status === 'fulfilled')
-      .map(r => r.value);
+      .filter((result): result is PromiseFulfilledResult<string> => result.status === 'fulfilled')
+      .map(result => result.value);
 
     return { deliveredUserIds };
   }

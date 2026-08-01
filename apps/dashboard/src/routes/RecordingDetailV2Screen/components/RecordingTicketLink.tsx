@@ -14,8 +14,15 @@ export interface RecordingTicketLinkProps {
   linkedTicketId: string | null | undefined;
   /** Only the recording owner can link or unlink; everyone else sees it read-only. */
   canEdit: boolean;
+  /** Prevent duplicate link/unlink mutations while the current one is pending. */
+  isUpdating?: boolean;
   /** `null` unlinks. */
-  onChange: (ticketId: string | null) => void;
+  onChange: (ticketId: string | null, ticket?: RecordingTicketTarget) => void;
+}
+
+export interface RecordingTicketTarget {
+  id: string;
+  label: string;
 }
 
 /** Rows per search page. The list is a picker, not a browser — it stays scannable. */
@@ -39,6 +46,7 @@ const CHIP_CLASS_NAME =
 export function RecordingTicketLink({
   linkedTicketId,
   canEdit,
+  isUpdating = false,
   onChange,
 }: RecordingTicketLinkProps): ReactElement | null {
   const [isOpen, setIsOpen] = useState(false);
@@ -69,14 +77,34 @@ export function RecordingTicketLink({
         label: ticket.xyneId || ticket.title || 'Untitled ticket',
         subtitle: ticket.xyneId ? ticket.title : null,
         icon: <TicketToken className='size-3.5 text-muted-foreground' aria-hidden='true' />,
+        disabled: isUpdating,
       })),
-    [searchResults],
+    [isUpdating, searchResults],
   );
 
   /* A recording lives outside any project, so the ticket carries its own route. */
   const ticketHref = linkedTicket
     ? `/projects/${linkedTicket.projectId}/${linkedTicket.boardId}/${linkedTicket.id}`
     : null;
+
+  const handleSelect = (ticketId: string | null): void => {
+    if (isUpdating) return;
+
+    if (!ticketId) {
+      onChange(null);
+      return;
+    }
+
+    const ticket = searchResults?.find(candidate => candidate.id === ticketId);
+    if (!ticket) return;
+
+    onChange(ticketId, {
+      id: ticket.id,
+      label: ticket.xyneId || ticket.title || 'Untitled ticket',
+    });
+    setIsOpen(false);
+    setSearch('');
+  };
 
   if (linkedTicketId) {
     // Either the lookup hasn't resolved yet (a frame or two, since Zero answers
@@ -103,6 +131,7 @@ export function RecordingTicketLink({
           <button
             type='button'
             onClick={() => onChange(null)}
+            disabled={isUpdating}
             className='shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
             aria-label={`Unlink ticket ${label}`}
             data-track-category='RecordingDetailV2'
@@ -123,7 +152,7 @@ export function RecordingTicketLink({
     <EntitySelector
       options={options}
       selectedValue={null}
-      onSelect={onChange}
+      onSelect={handleSelect}
       placeholder='Link'
       searchPlaceholder='Search by ID or title'
       isOpen={isOpen}

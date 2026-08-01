@@ -1251,6 +1251,14 @@ export class CallController {
             typeof callMetadata?.detailedSummaryCanvasId === 'string'
               ? callMetadata.detailedSummaryCanvasId
               : null,
+          linkedTicketId:
+            typeof callMetadata?.linkedTicketId === 'string'
+              ? callMetadata.linkedTicketId
+              : null,
+          linkedTicketMessageId:
+            typeof callMetadata?.linkedTicketMessageId === 'string'
+              ? callMetadata.linkedTicketMessageId
+              : null,
           citationSegments,
           hasRecording: !!uploadedRecording,
         },
