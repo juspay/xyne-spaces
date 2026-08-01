@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { callController } from '@/controllers/callController';
+import { recordingEmailController } from '@/controllers/recordingEmailController';
 import { callHostControlController } from '@/controllers/callHostControlController';
 import { scheduleCallController } from '@/controllers/scheduleCallController';
 import { callChatController, requireInternalCallParticipant } from '@/controllers/callChatController';
@@ -29,6 +30,8 @@ router.get(
 router.post('/recordings/:callId/send-email', recordingEmailController.sendRecordingEmail);
 router.post('/recordings/:callId/sharing', recordingSharingController.manage);
 router.get('/recordings/:callId', callController.getRecordingDetail);
+router.get('/recordings/:callId/email-compose-context', recordingEmailController.getComposeContext);
+router.post('/recordings/:callId/send-email', recordingEmailController.sendRecordingEmail);
 router.patch('/recordings/:callId', callController.updateRecordingTitle);
 router.delete('/recordings/:callId', callController.deleteRecording);
 router.get('/summary-templates', summaryTemplateController.list);
