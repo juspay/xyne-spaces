@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import * as Popover from '@radix-ui/react-popover';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
-import { CalendarEvent, MinimizeLineArrow, Share02, Spinner, UturnLeft } from '@xyne/icons';
+import { MinimizeLineArrow, Share02, Spinner, UturnLeft } from '@xyne/icons';
 import { Button } from '../../../components/ui/Button/Button';
 import { Dialog } from '../../../components/ui/Dialog';
 import { Tooltip } from '../../../components/ui/Tooltip';
@@ -20,8 +20,10 @@ import {
   type RecordingTitleState,
 } from '../../../utils/recordingUtils';
 import { getApiErrorMessage } from '../../../utils/apiError';
+import { formatDuration } from '../../../utils/dateUtils';
 import { RecordingLabelPicker } from './RecordingLabelPicker';
 import { RecordingShareModal } from './RecordingShareModal';
+import { RecordingSharedWithAvatars } from './RecordingSharedWithAvatars';
 import { RecordingTicketLink, type RecordingTicketTarget } from './RecordingTicketLink';
 
 export interface RecordingDetailV2HeaderProps {
@@ -82,7 +84,18 @@ export const RecordingDetailV2Header = ({
     titleState && titleState.kind !== 'generating'
       ? titleState.text
       : recording.title?.trim() || DEFAULT_RECORDING_TITLE;
-  const formattedDate = format(new Date(recording.startedAt), 'MMM d, yyyy · h:mm a');
+  // A still-running recording has no length yet, so the meta line is just when it started.
+  const durationMs =
+    recording.durationMs ??
+    (recording.endedAt
+      ? new Date(recording.endedAt).getTime() - new Date(recording.startedAt).getTime()
+      : null);
+  const formattedDate = [
+    format(new Date(recording.startedAt), 'MMM d, yyyy · h:mm a'),
+    durationMs && durationMs > 0 ? formatDuration(durationMs) : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
 
   const handleSaveTitle = async (): Promise<void> => {
     if (isSavingTitle) return;
@@ -280,6 +293,8 @@ export const RecordingDetailV2Header = ({
               <HeaderTitle isGenerating={isGeneratingTitle} title={displayTitle} />
             </h1>
           )}
+
+          <p className='mt-2.5 text-sm text-muted-foreground'>{formattedDate}</p>
         </div>
 
         {isSavingTitle && (
@@ -296,12 +311,6 @@ export const RecordingDetailV2Header = ({
       {/* Actions row */}
       <div className='flex flex-wrap items-center justify-between gap-3'>
         <div className='flex flex-wrap items-center gap-2'>
-          <Tooltip content='Recording started at' side='top'>
-            <div className='inline-flex items-center gap-1.5 rounded-lg border border-border hover:bg-muted px-3 h-7 text-xs text-muted-foreground cursor-default'>
-              <CalendarEvent size={16} variant='Stroke' />
-              <span>{formattedDate}</span>
-            </div>
-          </Tooltip>
           {recording.detailedSummaryCanvasId && (
             <RecordingTicketLink
               linkedTicketId={recording.linkedTicketId ?? null}
@@ -316,20 +325,26 @@ export const RecordingDetailV2Header = ({
             onChange={labels => void handleLabelsChange(labels)}
           />
           {isOwner && recording.detailedSummaryCanvasId && (
-            <Tooltip content='Share' side='top'>
-              <Button
-                type='button'
-                variant='outline'
-                size='iconSm'
-                onClick={() => setShowShareModal(true)}
-                className='w-8 h-7 rounded-lg text-muted-foreground hover:border-foreground/30 hover:text-foreground'
-                aria-label='Share recording'
-                data-track-category='RecordingDetailV2'
-                data-track-name='share_recording'
-              >
-                <Share02 className='size-3.5' />
-              </Button>
-            </Tooltip>
+            <>
+              <RecordingSharedWithAvatars
+                recordingExternalId={recording.externalId}
+                onOpen={() => setShowShareModal(true)}
+              />
+              <Tooltip content='Share' side='top'>
+                <Button
+                  type='button'
+                  variant='outline'
+                  size='iconSm'
+                  onClick={() => setShowShareModal(true)}
+                  className='w-8 h-7 rounded-lg text-muted-foreground hover:border-foreground/30 hover:text-foreground'
+                  aria-label='Share recording'
+                  data-track-category='RecordingDetailV2'
+                  data-track-name='share_recording'
+                >
+                  <Share02 className='size-3.5' />
+                </Button>
+              </Tooltip>
+            </>
           )}
           {onMinimize && (
             <Tooltip content='Minimize to overlay' side='top'>

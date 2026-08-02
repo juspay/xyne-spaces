@@ -7,7 +7,6 @@ import XyneAIStar from '../../../components/icons/xyne-ai/XyneAIStar';
 export interface SummaryGenerationPanelProps {
   isAwaiting: boolean;
   canGenerate: boolean;
-  isGenerating: boolean;
   onGenerate: () => void;
 }
 
@@ -55,7 +54,6 @@ const GROUP_REST_OPACITY = 0.35;
 export const SummaryGenerationPanel = ({
   isAwaiting,
   canGenerate,
-  isGenerating,
   onGenerate,
 }: SummaryGenerationPanelProps): ReactElement => {
   const shouldReduceMotion = useReducedMotion();
@@ -112,16 +110,12 @@ export const SummaryGenerationPanel = ({
             type='button'
             size='sm'
             onClick={onGenerate}
-            disabled={!canGenerate || isGenerating}
-            className='h-8 shrink-0 gap-2 rounded-xl px-3 text-xs font-medium bg-foreground'
+            disabled={!canGenerate}
+            className='h-8 shrink-0 gap-2 rounded-xl px-3 text-xs font-medium bg-foreground hover:bg-foreground/80'
             data-track-category='RecordingDetailV2'
             data-track-name='generate_summary'
           >
-            {isGenerating ? (
-              <Spinner size={14} className='animate-spin' />
-            ) : (
-              <XyneAIStar size={12} />
-            )}
+            <XyneAIStar size={12} />
             Generate summary
           </Button>
         )}

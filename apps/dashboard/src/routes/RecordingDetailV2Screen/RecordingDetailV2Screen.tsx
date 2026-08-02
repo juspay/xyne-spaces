@@ -13,7 +13,7 @@ import {
   type RecordingTicketLinkState,
 } from '../../services/Recording/recordingService';
 import { useShortcut } from '../../shortcuts';
-import { AlertCircle, ChevronDown, Hash, Mail, StickyNote } from 'lucide-react';
+import { AlertCircle, StickyNote } from 'lucide-react';
 import { toast } from 'sonner';
 import { logRecordingError } from '../../utils/recordingUtils';
 import {
@@ -29,7 +29,14 @@ import {
   markSummaryRequested,
 } from '../../utils/recordingSummaryRequest';
 import { useSpeakerIdentificationEnabled } from '../../components/SpeakerIdentification/useSpeakerIdentificationEnabled';
-import { Spinner, Flag, SidebarRightOpen } from '@xyne/icons';
+import {
+  Spinner,
+  Flag,
+  SidebarRightOpen,
+  ChevronDown,
+  EnvelopeDefault,
+  Hashtag,
+} from '@xyne/icons';
 import { Button } from '../../components/ui/Button/Button';
 import { Dialog } from '../../components/ui/Dialog';
 import { Tooltip } from '../../components/ui/Tooltip';
@@ -84,6 +91,9 @@ const RECORDING_SUMMARY_TEMPLATES: ReadonlyArray<RecordingSummaryTemplate> = [
 const AUDIO_POLL_INTERVAL_MS = 10_000;
 const AUDIO_POLL_MAX_ATTEMPTS = 30;
 
+const POST_SPLIT_BUTTON_CLASS =
+  'text-background hover:bg-foreground/90 hover:text-background dark:hover:bg-foreground/90 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-background';
+
 function isRecordingLive(recording: RecordingDetail): boolean {
   return recording.status === 'ACTIVE' || recording.status === 'IN_PROGRESS';
 }
@@ -105,6 +115,8 @@ export default function RecordingDetailV2Screen(): ReactElement {
   const [showPostToChannelModal, setShowPostToChannelModal] = useState(false);
   const [showPostToEmailModal, setShowPostToEmailModal] = useState(false);
   const [isRegeneratingSummary, setIsRegeneratingSummary] = useState(false);
+  const [pendingSummaryTemplateId, setPendingSummaryTemplateId] =
+    useState<BuiltinRecordingSummaryTemplateId | null>(null);
   const [summaryCanvasNonce, setSummaryCanvasNonce] = useState(0);
   const [awaitingSummary, setAwaitingSummary] = useState(false);
   const [citationNonce, setCitationNonce] = useState(0);
@@ -404,6 +416,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
   ): Promise<void> => {
     if (!recording || isRegeneratingSummary) return;
 
+    setPendingSummaryTemplateId(summaryTemplateId);
     handleTabSelect('summary');
     markSummaryRequested(recordingId);
     setAwaitingSummary(true);
@@ -443,6 +456,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
         description: message ?? 'Please try again.',
       });
     } finally {
+      setPendingSummaryTemplateId(null);
       setIsRegeneratingSummary(false);
     }
   };
@@ -542,8 +556,9 @@ export default function RecordingDetailV2Screen(): ReactElement {
   const hasDetailedSummary = !!recording.detailedSummaryCanvasId;
   const isOwner = recording.createdByUserId === currentUser?.id;
   const selectedSummaryTemplate =
-    RECORDING_SUMMARY_TEMPLATES.find(template => template.id === recording.summaryTemplateId) ??
-    RECORDING_SUMMARY_TEMPLATES[0]!;
+    RECORDING_SUMMARY_TEMPLATES.find(
+      template => template.id === (pendingSummaryTemplateId ?? recording.summaryTemplateId),
+    ) ?? RECORDING_SUMMARY_TEMPLATES[0]!;
 
   const secondTab = isLive ? 'transcript' : 'summary';
   const visibleTab = tabPreference === 'notes' ? 'notes' : secondTab;
@@ -591,131 +606,139 @@ export default function RecordingDetailV2Screen(): ReactElement {
           .filter(Boolean)
           .join(' ')}
       >
-        {/* Grows with its content rather than being pinned to the viewport: a sticky
-            child cannot outlive its parent's box, so a fixed height here would drop the
-            control bar and tabs out of view one screenful into a long transcript. */}
         <div className='mx-auto flex min-h-full w-full max-w-[860px] flex-col px-4 py-6'>
-          <RecordingDetailV2Header
-            recording={recording}
-            isLive={isLive}
-            titleState={titleState}
-            onTitleUpdated={handleTitleUpdated}
-            onLabelsUpdated={handleLabelsUpdated}
-            onTicketLinkUpdated={handleTicketLinkUpdated}
-            onAskAI={handleAskAI}
-            {...(ownsLiveSession ? { onMinimize: handleMinimize } : {})}
-          />
-          <motion.div
-            layoutRoot
-            className='sticky top-0 z-10 -mx-4 flex flex-col bg-background px-4 pt-2'
-          >
-            {/* One bar in both states: capturing while live, playing once ended. Passing
-                the loader is what turns it into a player — without it (audio still
-                stitching, or capture failed) the same bar stays read-only. */}
-            <LiveRecordingControlBar
+          <div className='sticky top-0 z-10 -mx-4 -mt-6 flex flex-col bg-background px-4 pt-6'>
+            <RecordingDetailV2Header
               recording={recording}
               isLive={isLive}
-              onStopped={() => void loadRecording(recording.externalId)}
-              isAudioPreparing={!showAudioPlayer && !audioPollExhausted}
-              {...(showAudioPlayer
-                ? {
-                    onLoadAudio: (signal: AbortSignal) =>
-                      recordingService.downloadRecordingBlob(recording.externalId, signal),
-                  }
-                : {})}
-              {...(transcriptText ? { onMarkerSelect: handleMarkerSelect } : {})}
+              titleState={titleState}
+              onTitleUpdated={handleTitleUpdated}
+              onLabelsUpdated={handleLabelsUpdated}
+              onTicketLinkUpdated={handleTicketLinkUpdated}
+              onAskAI={handleAskAI}
+              {...(ownsLiveSession ? { onMinimize: handleMinimize } : {})}
             />
-
-            <div className='mb-4 flex items-center justify-between border-b border-border/70 pb-2'>
-              {/* Templates are only offered once the recording has ended — while live
-                    the second segment is the transcript and there is nothing to
-                    regenerate from yet. */}
-              <RecordingContentTabs
-                visibleTab={visibleTab}
-                secondTab={secondTab}
-                onSelect={handleTabSelect}
-                selectedTemplate={selectedSummaryTemplate}
-                {...(isLive || !isOwner
-                  ? {}
-                  : {
-                      templates: RECORDING_SUMMARY_TEMPLATES,
-                      isRegenerating: isRegeneratingSummary,
-                      onTemplateSelect: (templateId: BuiltinRecordingSummaryTemplateId) =>
-                        void handleSummaryTemplateSelect(templateId),
-                    })}
+            <motion.div layoutRoot className='flex flex-col pt-2'>
+              
+              <LiveRecordingControlBar
+                recording={recording}
+                isLive={isLive}
+                onStopped={() => void loadRecording(recording.externalId)}
+                isAudioPreparing={!showAudioPlayer && !audioPollExhausted}
+                {...(showAudioPlayer
+                  ? {
+                      onLoadAudio: (signal: AbortSignal) =>
+                        recordingService.downloadRecordingBlob(recording.externalId, signal),
+                    }
+                  : {})}
+                {...(transcriptText ? { onMarkerSelect: handleMarkerSelect } : {})}
               />
 
-              {/* The right slot belongs to whichever action the state allows: flag a
+              <div className='mb-4 flex items-center justify-between border-b border-border/70 pb-2'>
+                {/* Templates are only offered once the recording has ended — while live
+                    the second segment is the transcript and there is nothing to
+                    regenerate from yet. */}
+                <RecordingContentTabs
+                  visibleTab={visibleTab}
+                  secondTab={secondTab}
+                  onSelect={handleTabSelect}
+                  selectedTemplate={selectedSummaryTemplate}
+                  {...(isLive || !isOwner
+                    ? {}
+                    : {
+                        templates: RECORDING_SUMMARY_TEMPLATES,
+                        isRegenerating: isRegeneratingSummary,
+                        onTemplateSelect: (templateId: BuiltinRecordingSummaryTemplateId) =>
+                          void handleSummaryTemplateSelect(templateId),
+                      })}
+                />
+
+                {/* The right slot belongs to whichever action the state allows: flag a
                     moment while capturing, share the finished recording once ended. */}
-              {isLive ? (
-                <Button
-                  type='button'
-                  variant='outline'
-                  size='sm'
-                  onClick={markMoment}
-                  disabled={!ownsLiveSession}
-                  className='h-8 gap-2 rounded-full px-5 text-sm font-medium'
-                  title={
-                    ownsLiveSession
-                      ? 'Mark this moment'
-                      : 'Only the session running this recording can mark moments'
-                  }
-                  data-track-category='RecordingDetailV2'
-                  data-track-name='mark_moment'
-                >
-                  <Flag size={15} strokeWidth={2.2} variant='Solid' aria-hidden='true' />
-                  Mark this moment
-                </Button>
-              ) : isOwner && hasDetailedSummary ? (
-                <DropdownMenu>
-                  <div className='inline-flex h-8 items-stretch overflow-hidden rounded-full bg-foreground text-background'>
-                    <button
-                      type='button'
-                      onClick={() => setShowPostToChannelModal(true)}
-                      className='inline-flex items-center gap-1.5 px-3 text-sm font-medium transition-colors hover:bg-foreground/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
-                      data-track-category='RecordingDetailV2'
-                      data-track-name='open_post_to_channel_modal'
-                    >
-                      <Hash className='size-3.5' aria-hidden='true' />
-                      Post to channel
-                    </button>
-                    <span className='w-px bg-background/25' aria-hidden='true' />
-                    <DropdownMenuTrigger asChild>
-                      <button
+                {isLive ? (
+                  <Button
+                    type='button'
+                    variant='outline'
+                    size='sm'
+                    onClick={markMoment}
+                    disabled={!ownsLiveSession}
+                    className='h-8 gap-2 rounded-full px-5 text-sm font-medium'
+                    title={
+                      ownsLiveSession
+                        ? 'Mark this moment'
+                        : 'Only the session running this recording can mark moments'
+                    }
+                    data-track-category='RecordingDetailV2'
+                    data-track-name='mark_moment'
+                  >
+                    <Flag size={15} strokeWidth={2.2} variant='Solid' aria-hidden='true' />
+                    Mark this moment
+                  </Button>
+                ) : isOwner && hasDetailedSummary ? (
+                  <DropdownMenu>
+                    <div className='inline-flex h-8 items-stretch overflow-hidden rounded-lg bg-foreground text-background shadow-sm'>
+                      <Button
                         type='button'
-                        className='inline-flex items-center px-2 transition-colors hover:bg-foreground/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
-                        aria-label='Share recording options'
+                        variant='ghost'
+                        size='sm'
+                        onClick={() => setShowPostToChannelModal(true)}
+                        className={`${POST_SPLIT_BUTTON_CLASS} text-xs font-semibold !rounded-2xl`}
                         data-track-category='RecordingDetailV2'
-                        data-track-name='open_recording_share_menu'
+                        data-track-name='open_post_to_channel_modal'
                       >
-                        <ChevronDown className='size-3.5' aria-hidden='true' />
-                      </button>
-                    </DropdownMenuTrigger>
-                  </div>
-                  <DropdownMenuContent align='end' className='min-w-[184px]'>
-                    <DropdownMenuItem
-                      onSelect={() => setShowPostToChannelModal(true)}
-                      className='flex cursor-pointer items-center gap-2'
-                      data-track-category='RecordingDetailV2'
-                      data-track-name='open_post_to_channel_from_menu'
+                        <Hashtag className='size-3.5' />
+                        Post to channel
+                      </Button>
+                      <span className='my-1.5 w-px bg-muted-foreground/50' aria-hidden='true' />
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          type='button'
+                          variant='ghost'
+                          size='iconSm'
+                          aria-label='More actions'
+                          className={POST_SPLIT_BUTTON_CLASS}
+                          data-track-category='RecordingDetailV2'
+                          data-track-name='open_recording_share_menu'
+                        >
+                          <ChevronDown className='size-3.5' />
+                        </Button>
+                      </DropdownMenuTrigger>
+                    </div>
+                    <DropdownMenuContent
+                      align='end'
+                      sideOffset={6}
+                      className='w-60 rounded-xl p-1.5 shadow-xl'
                     >
-                      <Hash className='size-4 text-muted-foreground' aria-hidden='true' />
-                      Post to channel
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onSelect={() => setShowPostToEmailModal(true)}
-                      className='flex cursor-pointer items-center gap-2'
-                      data-track-category='RecordingDetailV2'
-                      data-track-name='open_post_to_email_modal'
-                    >
-                      <Mail className='size-4 text-muted-foreground' aria-hidden='true' />
-                      Post to email
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              ) : null}
-            </div>
-          </motion.div>
+                      <p className='px-2.5 pb-1 pt-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground'>
+                        Send this summary to
+                      </p>
+                      <DropdownMenuItem
+                        onSelect={() => setShowPostToChannelModal(true)}
+                        className='rounded-lg px-2.5 py-2'
+                        data-track-category='RecordingDetailV2'
+                        data-track-name='open_post_to_channel_from_menu'
+                      >
+                        <Hashtag className='size-4 text-muted-foreground' />
+                        Post to channel
+                        <span className='ml-auto rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground'>
+                          Default
+                        </span>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onSelect={() => setShowPostToEmailModal(true)}
+                        className='rounded-lg px-2.5 py-2'
+                        data-track-category='RecordingDetailV2'
+                        data-track-name='open_post_to_email_modal'
+                      >
+                        <EnvelopeDefault className='size-4 text-muted-foreground' />
+                        Post to email
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                ) : null}
+              </div>
+            </motion.div>
+          </div>
 
           {visibleTab === 'notes' ? (
             /* flex-1 rather than a height: fills the pane on a short note without
@@ -769,7 +792,6 @@ export default function RecordingDetailV2Screen(): ReactElement {
                 <SummaryGenerationPanel
                   isAwaiting={awaitingSummary}
                   canGenerate={hasTranscript}
-                  isGenerating={isRegeneratingSummary}
                   onGenerate={handleGenerateSummaryClick}
                 />
               )}

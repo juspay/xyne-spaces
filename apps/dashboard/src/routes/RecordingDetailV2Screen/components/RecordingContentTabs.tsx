@@ -15,7 +15,7 @@
 
 import { useState, type ReactElement } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { CaptionOn, Spinner } from '@xyne/icons';
+import { CaptionOn } from '@xyne/icons';
 import { AlignLeft, Check, ChevronDown } from 'lucide-react';
 import { Popover } from '../../../components/ui/Popover';
 import type { BuiltinRecordingSummaryTemplateId } from '../../../services/Recording/recordingService';
@@ -118,7 +118,7 @@ export const RecordingContentTabs = ({
       />
     ) : null;
 
-    const templateIcon =
+    const icon =
       selectedTemplate && selectedTemplate.id !== 'default' ? (
         <span aria-hidden='true' className='leading-none'>
           {selectedTemplate.icon}
@@ -126,12 +126,6 @@ export const RecordingContentTabs = ({
       ) : (
         <XyneAIStar size={12} />
       );
-
-    const icon = isRegenerating ? (
-      <Spinner size={14} className='animate-spin text-orange-500' />
-    ) : (
-      templateIcon
-    );
 
     if (!templates || !onTemplateSelect) {
       return (
@@ -186,11 +180,13 @@ export const RecordingContentTabs = ({
             type='button'
             role='tab'
             aria-selected={isActive}
+            aria-busy={isRegenerating}
             data-track-category='RecordingDetailV2'
             data-track-name='open_summary_templates'
             className={cn(
               'relative inline-flex h-8 items-center gap-2 rounded-full pl-5 pr-4 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
               isActive ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
+              isRegenerating && 'cursor-wait',
             )}
           >
             {indicator}

@@ -1,24 +1,58 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { tagsApi } from '../api/tagsApi';
 
-// Module-level cache shared across mounts/pagination so re-rendering with an
-// overlapping set of ids (e.g. scrolling the recordings list) never re-fetches
-// ids we've already resolved.
+/** Resolved `Tag id -> display text`, shared across mounts so scrolling never re-fetches. */
 const resolvedLabelCache = new Map<string, string>();
+/** Ids currently being fetched, so concurrent hook instances don't request the same id twice. */
+const inFlightLabelRequests = new Map<string, Promise<void>>();
+
+/** Never rejects: a failed batch leaves its ids uncached so a later render retries them. */
+async function fetchLabelBatch(ids: string[]): Promise<void> {
+  try {
+    const tags = await tagsApi.getTagsByIds(ids);
+    for (const { id, tag } of tags) {
+      resolvedLabelCache.set(id, tag);
+    }
+    for (const id of ids) {
+      if (!resolvedLabelCache.has(id)) resolvedLabelCache.set(id, id);
+    }
+  } catch {
+    // Intentionally uncached.
+  } finally {
+    for (const id of ids) inFlightLabelRequests.delete(id);
+  }
+}
+
+async function resolveMissingLabels(ids: string[]): Promise<void> {
+  const idsToFetch: string[] = [];
+  const pending = new Set<Promise<void>>();
+
+  for (const id of ids) {
+    if (resolvedLabelCache.has(id)) continue;
+    const existing = inFlightLabelRequests.get(id);
+    if (existing) pending.add(existing);
+    else idsToFetch.push(id);
+  }
+
+  if (idsToFetch.length > 0) {
+    const request = fetchLabelBatch(idsToFetch);
+    for (const id of idsToFetch) inFlightLabelRequests.set(id, request);
+    pending.add(request);
+  }
+
+  await Promise.all([...pending]);
+}
 
 /**
  * Recording labels (Call.labels) store Tag *ids*, not display text (see
- * Tag model / noteTakerTranscriptService.generateAndSaveLabels) — nothing
- * resolves them back to the tag's actual value before this hook, which is
- * why raw ids used to leak into the UI. This batches all currently-visible
- * label ids into a single request and returns a resolver function.
+ * noteTakerTranscriptService.generateAndSaveLabels). This batches all
+ * currently-visible label ids into one request and returns a resolver.
  */
 export function useResolvedRecordingLabels(labelIds: string[]): {
   resolveLabel: (id: string) => string;
   isResolving: boolean;
 } {
   const [cacheVersion, setCacheVersion] = useState(0);
-  const isResolvingRef = useRef(false);
   const [isResolving, setIsResolving] = useState(false);
 
   const uniqueIds = useMemo(() => [...new Set(labelIds)], [labelIds]);
@@ -30,40 +64,21 @@ export function useResolvedRecordingLabels(labelIds: string[]): {
   const unresolvedKey = unresolvedIds.join(',');
 
   useEffect(() => {
-    if (unresolvedIds.length === 0 || isResolvingRef.current) return;
+    if (unresolvedIds.length === 0) return;
 
-    isResolvingRef.current = true;
-    setIsResolving(true);
     let cancelled = false;
+    setIsResolving(true);
 
-    tagsApi
-      .getTagsByIds(unresolvedIds)
-      .then(tags => {
-        if (cancelled) return;
-        for (const { id, tag } of tags) {
-          resolvedLabelCache.set(id, tag);
-        }
-        // Ids that resolved to nothing (deleted tag, etc.) still need a cache
-        // entry so we don't refetch them forever — fall back to the id itself.
-        for (const id of unresolvedIds) {
-          if (!resolvedLabelCache.has(id)) resolvedLabelCache.set(id, id);
-        }
-        setCacheVersion(value => value + 1);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        for (const id of unresolvedIds) {
-          if (!resolvedLabelCache.has(id)) resolvedLabelCache.set(id, id);
-        }
-        setCacheVersion(value => value + 1);
-      })
-      .finally(() => {
-        if (cancelled) return;
-        isResolvingRef.current = false;
-        setIsResolving(false);
-      });
+    void resolveMissingLabels(unresolvedIds).then(() => {
+      // Cache writes live in the request itself, so a run cancelled by new ids
+      // arriving mid-flight still benefits the render that replaced it.
+      if (cancelled) return;
+      setIsResolving(false);
+      if (!unresolvedIds.some(id => resolvedLabelCache.has(id))) return;
+      setCacheVersion(value => value + 1);
+    });
 
-    return () => {
+    return (): void => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
