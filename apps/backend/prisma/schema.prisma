@@ -3971,12 +3971,14 @@ model DraftMessage {
   userId          String      // User who is drafting (no FK constraint)
   content         String      // Draft content
   hasAttachment   Boolean     @default(false) // Whether the draft has attachments
+  origin          String?     // 'user' | 'twin' | null (legacy user draft)
+  metadata        String?     // twin-only: stringified JSON TwinReplyDraft payload (null for user drafts)
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
 
   @@index([channelId, conversationId, messageId, userId]) // Fast lookup of user's draft for a conversation
   @@index([userId, id]) // for userDrafts
-  @@unique([channelId, conversationId, messageId, userId])
+  @@index([userId, origin])
   @@map("draft_messages")
   @@schema("public")
 }

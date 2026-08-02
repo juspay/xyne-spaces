@@ -65,7 +65,14 @@ export async function executeTwinApprovalDelivery(
 
   const messageContent = ctx.messageContent ?? "";
   const edited = opts.editedContent?.trim();
-  const finalContent = willReply ? (edited && edited.length > 0 ? edited : messageContent) : "";
+  // Trim the model-generated draft too (not just the edited text) so leading/
+  // trailing whitespace/newlines never get posted — the composer path already
+  // trims, this makes the un-edited "Send" path match.
+  const finalContent = willReply
+    ? edited && edited.length > 0
+      ? edited
+      : messageContent.trim()
+    : "";
   const wasEdited = willReply && !!edited && edited.length > 0 && edited !== messageContent.trim();
 
   const s2sKey = process.env["INTERNAL_S2S_KEY"] ?? "";
