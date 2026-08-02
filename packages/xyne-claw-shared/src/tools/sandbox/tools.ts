@@ -210,6 +210,67 @@ function idleTimeoutForSessionCreation(
   return fallbackIdleTimeoutMs;
 }
 
+const AUTH_URL_DEFAULT = "http://xyne-claw-auth.xyne-apps.svc.cluster.local:3003";
+
+/** Persist an experiment's newly-created sandbox id outside the ephemeral claw
+ * process. Best-effort by design: a control-plane outage must never fail the
+ * sandbox tool after the remote session was successfully created. */
+async function reportExperimentSandboxCreated(
+  context: ToolExecutionContext,
+  session: Session,
+  template: string,
+): Promise<void> {
+  const experimentId = context.meta?.["experimentId"]?.trim();
+  if (!experimentId) return;
+
+  const authUrl = (
+    context.config["XYNE_CLAW_AUTH_URL"] ??
+    process.env["XYNE_CLAW_AUTH_URL"] ??
+    AUTH_URL_DEFAULT
+  ).replace(/\/+$/, "");
+  const s2sKey =
+    context.s2sKey ??
+    context.config["XYNE_CLAW_S2S_KEY"] ??
+    process.env["XYNE_CLAW_S2S_KEY"] ??
+    "";
+  const epoch = context.meta?.["experimentEpoch"]?.trim() || "unknown";
+  const note = `sandboxId=${session.id} template=${template} createdAtEpoch=${epoch}`;
+
+  if (!s2sKey) {
+    sandboxLog.warn("[sandbox] cannot persist experiment sandbox id; continuing", {
+      experimentId,
+      sandboxId: session.id,
+      error: "XYNE_CLAW_S2S_KEY is unavailable",
+    });
+    return;
+  }
+
+  try {
+    const response = await fetch(
+      `${authUrl}/claw/api/v1/internal/experiments/${encodeURIComponent(experimentId)}/sandbox-note`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-s2s-key": s2sKey },
+        body: JSON.stringify({ note }),
+        signal: AbortSignal.timeout(10_000),
+      },
+    );
+    if (!response.ok) {
+      sandboxLog.warn("[sandbox] failed to persist experiment sandbox id; continuing", {
+        experimentId,
+        sandboxId: session.id,
+        error: `HTTP ${response.status}`,
+      });
+    }
+  } catch (err) {
+    sandboxLog.warn("[sandbox] failed to persist experiment sandbox id; continuing", {
+      experimentId,
+      sandboxId: session.id,
+      error: redactSecrets(err instanceof Error ? err.message : String(err)),
+    });
+  }
+}
+
 function rememberSession(storeKey: string | undefined, session: Session, template?: string, owner?: SessionOwner): void {
   if (storeKey) SESSION_STORE.set(storeKey, session);
   SESSION_STORE.set(session.id, session);
@@ -489,6 +550,11 @@ export const sandboxCreate: ToolDefinition = {
       const client = makeClient(context.config, template);
       const session = await client.createSession({ timeoutMs, idleTimeoutMs, ...(template ? { template } : {}) });
       rememberSession(storeKey, session, template, ownerFromContext(context));
+      await reportExperimentSandboxCreated(
+        context,
+        session,
+        template ?? context.config["KATA_TEMPLATE"] ?? "kata-workspace-template",
+      );
       return JSON.stringify({ sessionId: session.id, status: "ready" });
     } catch (err) {
       return sandboxErr(err);
@@ -1229,6 +1295,7 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
           template: config.template,
         });
         rememberSession(storeKey, session, config.template, ownerFromContext(context));
+        await reportExperimentSandboxCreated(context, session, config.template);
         return JSON.stringify({ sessionId: session.id, status: "ready", template: config.template, ports: config.ports || {} });
       }
 
@@ -1374,6 +1441,7 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
         readyTimeoutMs: config.readyTimeoutMs || 10 * 60 * 1000,
       });
       rememberSession(storeKey, session, claimTemplate, ownerFromContext(context));
+      await reportExperimentSandboxCreated(context, session, claimTemplate);
       log.push(`Session created: ${session.id}`);
 
       const pollUntilDone = async (jobId: string, label: string, timeoutMs: number) => {
@@ -1837,6 +1905,7 @@ async function resolveSbxGit(requestedRepo: string, context: ToolExecutionContex
     bindCaller(session);
     SHARED_SESSIONS.add(session.id);
     READONLY_SESSIONS.add(session.id);
+    await reportExperimentSandboxCreated(context, session, SBX_GIT.template);
     return sbxGitResultMessage(requestedRepo, session.id, focusRepos, reason);
   } catch (err) {
     return sandboxErr(err);
