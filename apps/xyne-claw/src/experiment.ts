@@ -167,6 +167,7 @@ export function buildExperimentTools(
         "proofArtifactPath. The same title updates the existing finding. For sandbox-note:",
         "Record your sandbox session id here the moment you create it, and REUSE that sandbox",
         "in later epochs instead of creating a new one; only create a fresh one if the old id no longer responds.",
+        "Proof is durable only after sandbox-deliver-files attaches it to the thread; record the DELIVERED filename in proofArtifactPath, and do not mark undelivered proof as proved.",
       ].join(" "),
       // Deliberately FLAT schema — no discriminated union. A union (anyOf) at
       // the parameters root is valid JSON Schema but weaker function-calling
@@ -259,7 +260,7 @@ export function buildExperimentTools(
     {
       name: "end-experiment",
       label: "End Experiment",
-      description: "Complete the experiment after the deadline. This is the ONLY exit.",
+      description: "Complete the experiment after the deadline. This is the ONLY exit. Before ending, ensure every proved finding's artifact has been delivered to the thread.",
       parameters: Type.Object({
         report: Type.String(),
       }, { additionalProperties: false }),
