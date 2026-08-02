@@ -1,7 +1,5 @@
-import { experimentRepository, agentRunRepository, agentRepository } from "../repositories/index.js";
-import { dispatchExperimentEpoch } from "../lib/experiment.js";
-import { spacesAppFetch } from "../lib/spaces-api.js";
-import { decryptStoredField } from "../surfaces/spaces/client.js";
+import { experimentRepository, agentRunRepository } from "../repositories/index.js";
+import { dispatchExperimentEpoch, postExperimentNotice } from "../lib/experiment.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("experiment-supervisor");
@@ -11,22 +9,6 @@ const STALE_MS = 10 * 60_000;
 const FORCE_DONE_AFTER_MS = 15 * 60_000;
 
 let timer: ReturnType<typeof setInterval> | null = null;
-
-async function postNotice(run: { channelId: string; conversationId: string; agentSlug: string; orgId: string | null; finalReport?: string | null }): Promise<void> {
-  if (!run.orgId) return;
-  const agent = await agentRepository.findBySlug(run.agentSlug, run.orgId);
-  if (!agent?.spacesAppToken || !agent.spacesAppUserId) return;
-  const appToken = decryptStoredField(agent.spacesAppToken);
-  await spacesAppFetch("/chat/postMessage", {
-    channelId: run.channelId,
-    conversationId: run.conversationId,
-    markdownText: run.finalReport?.trim()
-      ? `**/experiment ended**\n\n${run.finalReport.trim()}`
-      : "**/experiment ended**\n\n(experiment ended without final report)",
-    userId: agent.spacesAppUserId,
-    metadata: { contentFormat: "markdown" },
-  }, appToken);
-}
 
 async function sessionIsActive(sessionId: string | null): Promise<boolean> {
   if (!sessionId) return false;
@@ -45,7 +27,7 @@ async function tickOnce(): Promise<void> {
           status: "done",
           finalReport: run.finalReport ?? "(experiment ended without final report)",
         });
-        await postNotice({ ...run, finalReport: run.finalReport ?? "(experiment ended without final report)" }).catch((err) => {
+        await postExperimentNotice({ ...run, finalReport: run.finalReport ?? "(experiment ended without final report)" }).catch((err) => {
           log.warn(`[experiment] force-done notice failed id=${run.id}: ${err instanceof Error ? err.message : String(err)}`);
         });
         continue;

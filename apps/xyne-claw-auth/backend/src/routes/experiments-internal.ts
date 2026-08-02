@@ -1,8 +1,10 @@
 import { Router, type Request, type Response } from "express";
 import { experimentRepository } from "../repositories/index.js";
-import { buildLedgerMarkdown } from "../lib/experiment.js";
+import { buildLedgerMarkdown, postExperimentNotice } from "../lib/experiment.js";
+import { createLogger } from "../logger.js";
 
 export const experimentsInternalRouter = Router();
+const log = createLogger("experiments-internal");
 
 function counts(findings: Array<{ status: string }>): { conjecture: number; proved: number; refuted: number } {
   return {
@@ -105,7 +107,9 @@ experimentsInternalRouter.post("/:id/complete", async (req: Request<{ id: string
     res.status(409).json({ success: false, error: `experiment is ${run.status}` });
     return;
   }
-  await experimentRepository.update(run.id, { finalReport: body.report.slice(0, 20000), status: "done" });
+  const updated = await experimentRepository.update(run.id, { finalReport: body.report.slice(0, 20000), status: "done" });
+  void postExperimentNotice(updated).catch((err) => {
+    log.warn(`[experiment] complete notice failed id=${updated.id}: ${err instanceof Error ? err.message : String(err)}`);
+  });
   res.json({ success: true });
 });
-

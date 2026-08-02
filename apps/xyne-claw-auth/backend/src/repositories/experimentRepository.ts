@@ -38,6 +38,13 @@ export const experimentRepository = {
     });
   },
 
+  findLatestByConversation(conversationId: string) {
+    return prisma.experimentRun.findFirst({
+      where: { conversationId },
+      orderBy: { createdAt: "desc" },
+    });
+  },
+
   findById(id: string) {
     return prisma.experimentRun.findUnique({ where: { id } });
   },

@@ -168,29 +168,28 @@ export function buildExperimentTools(
         "Record your sandbox session id here the moment you create it, and REUSE that sandbox",
         "in later epochs instead of creating a new one; only create a fresh one if the old id no longer responds.",
       ].join(" "),
-      parameters: Type.Union([
-        Type.Object({ action: Type.Literal("read") }, { additionalProperties: false }),
-        Type.Object({
-          action: Type.Literal("record"),
-          status: Type.Union([
-            Type.Literal("conjecture"),
-            Type.Literal("proved"),
-            Type.Literal("refuted"),
-          ]),
-          title: Type.String(),
-          hypothesis: Type.String(),
-          note: Type.Optional(Type.String()),
-          proofArtifactPath: Type.Optional(Type.String()),
-        }, { additionalProperties: false }),
-        Type.Object({
-          action: Type.Literal("hypothesis"),
-          text: Type.String(),
-        }, { additionalProperties: false }),
-        Type.Object({
-          action: Type.Literal("sandbox-note"),
-          note: Type.String(),
-        }, { additionalProperties: false }),
-      ]),
+      // Deliberately FLAT schema — no discriminated union. A union (anyOf) at
+      // the parameters root is valid JSON Schema but weaker function-calling
+      // models (observed live: GLM) emit payloads that fail its validation, so
+      // every ledger write bounced and the cross-epoch memory went dark. All
+      // per-action requirements are enforced in execute() below instead.
+      parameters: Type.Object({
+        action: Type.Unsafe<string>({
+          type: "string",
+          enum: ["read", "record", "hypothesis", "sandbox-note"],
+          description: "read = get the ledger; record = save a finding; hypothesis = declare what you're working on; sandbox-note = save sandbox reuse info.",
+        }),
+        status: Type.Optional(Type.Unsafe<string>({
+          type: "string",
+          enum: ["conjecture", "proved", "refuted"],
+          description: "record only: the finding's state.",
+        })),
+        title: Type.Optional(Type.String({ description: "record only: short stable title (same title updates the finding)." })),
+        hypothesis: Type.Optional(Type.String({ description: "record only: the hypothesis being tested." })),
+        note: Type.Optional(Type.String({ description: "record: extra detail. sandbox-note: the note text." })),
+        proofArtifactPath: Type.Optional(Type.String({ description: "record only: path to the repro/test/benchmark artifact." })),
+        text: Type.Optional(Type.String({ description: "hypothesis only: what you are working on right now." })),
+      }),
       async execute(_toolCallId: string, params: unknown) {
         const p = asRecord(params);
         try {
