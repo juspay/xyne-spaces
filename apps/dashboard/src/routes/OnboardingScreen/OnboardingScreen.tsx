@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router';
 import Cookies from 'js-cookie';
 import { useAuth } from '../../hooks/useAuth';
@@ -8,6 +8,8 @@ import { useProfilePictureUrl } from '../../hooks/useProfilePicture';
 import { authActor } from '../../machines/authMachine';
 import { setAIOnboardingPending } from '../../contexts/AIOnboardingContext';
 import Confetti from 'react-confetti';
+import LocalHarnessOnboardingStep from './LocalHarnessOnboardingStep';
+import type { LocalHarnessInstallation } from '../../types/electron';
 
 const OnboardingScreen: React.FC = () => {
   const navigate = useNavigate();
@@ -19,6 +21,26 @@ const OnboardingScreen: React.FC = () => {
 
   // Get migrated channels using the hook
   const migratedChannels = useMigratedChannels();
+
+  const [localHarnesses, setLocalHarnesses] = useState<LocalHarnessInstallation[]>([]);
+  const currentStepRef = useRef(0);
+  currentStepRef.current = currentStep;
+
+  useEffect(() => {
+    const api = window.electronAPI?.localHarness;
+    if (!api) return;
+    let cancelled = false;
+    void api
+      .detect()
+      .then(found => {
+        if (cancelled || currentStepRef.current !== 0) return;
+        setLocalHarnesses(found.filter(install => install.authenticated));
+      })
+      .catch(() => {});
+    return (): void => {
+      cancelled = true;
+    };
+  }, []);
 
   // Build onboarding steps dynamically based on whether user has migrated channels
   const hasMigratedChannels = migratedChannels?.length > 0;
@@ -49,6 +71,15 @@ const OnboardingScreen: React.FC = () => {
           {
             key: 'channels',
             title: '',
+            animation: 'fadeUp',
+          } as const,
+        ]
+      : []),
+    ...(localHarnesses.length > 0
+      ? [
+          {
+            key: 'localHarness',
+            title: 'Run agents on your own machine',
             animation: 'fadeUp',
           } as const,
         ]
@@ -247,6 +278,15 @@ const OnboardingScreen: React.FC = () => {
               </button>
             </div>
           </div>
+        );
+
+      case 'localHarness':
+        return (
+          <LocalHarnessOnboardingStep
+            installations={localHarnesses}
+            userId={targetUserId}
+            onNext={nextStep}
+          />
         );
 
       case 'profile':
