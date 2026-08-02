@@ -15,7 +15,8 @@ export type ExperimentCommand =
   | { sub: "start"; durationMs: number; focus?: string; provider?: string; model?: string; invalidProvider?: string }
   | { sub: "status" }
   | { sub: "stop" }
-  | { sub: "findings" };
+  | { sub: "findings"; id?: string }
+  | { sub: "unknown"; token: string };
 
 /** Providers a /experiment run may pin (must stay a subset of the /internal/run
  *  proxy's OVERRIDABLE set — personal-cred providers still require the
@@ -34,7 +35,7 @@ export function parseExperimentCommand(text: string | undefined | null): Experim
   const firstLower = first?.toLowerCase() ?? "";
   if (firstLower === "status") return { sub: "status" };
   if (firstLower === "stop") return { sub: "stop" };
-  if (firstLower === "findings") return { sub: "findings" };
+  if (firstLower === "findings") return { sub: "findings", ...(tail[0] ? { id: tail[0] } : {}) };
 
   let durationMs = DEFAULT_DURATION_MS;
   let focusParts = rest.split(/\s+/);
@@ -45,6 +46,8 @@ export function parseExperimentCommand(text: string | undefined | null): Experim
       ? amount * 60 * 60 * 1000
       : amount * 60 * 1000;
     focusParts = tail;
+  } else if (focusParts.length === 1 && !/^(?:focus|provider|model)=/i.test(firstLower)) {
+    return { sub: "unknown", token: first! };
   }
   durationMs = Math.min(Math.max(durationMs, 1), MAX_DURATION_MS);
   const { focusParts: cleanedFocusParts, provider, model, invalidProvider } = extractProviderOverride(focusParts);
@@ -60,6 +63,21 @@ export function parseExperimentCommand(text: string | undefined | null): Experim
     ...(model ? { model } : {}),
     ...(invalidProvider !== undefined ? { invalidProvider } : {}),
   };
+}
+
+export async function cancelRunSession(sessionId: string, userId: string): Promise<void> {
+  const cancelRes = await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run/${encodeURIComponent(sessionId)}/cancel`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+      "x-user-id": userId,
+    },
+  });
+  if (!cancelRes.ok) {
+    const body = (await cancelRes.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? `Cancel failed: HTTP ${cancelRes.status}`);
+  }
 }
 
 function normalizeFocus(raw: string): string | undefined {
