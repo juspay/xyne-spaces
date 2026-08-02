@@ -466,6 +466,14 @@ function experimentFindingsFilename(agentSlug: string, date = new Date()): strin
   return `experiment-findings-${safeSlug}-${stamp}.md`;
 }
 
+/**
+ * Upload a generated markdown document as a thread attachment.
+ *
+ * FILE ONLY — deliberately no `flow` parameter. `/files/filesUpload`
+ * (filesController.uploadFiles) does not read a flow field, so a card passed
+ * here is silently dropped and no Approve/Decline buttons ever render. Post
+ * approval cards separately via `/chat/postMessage` with `flow: <FlowDefinition>`.
+ */
 async function postGeneratedMarkdownFile(args: {
   channelId: string;
   conversationId: string;
@@ -475,7 +483,6 @@ async function postGeneratedMarkdownFile(args: {
   filename: string;
   markdown: string;
   summary: string;
-  flow?: unknown;
 }): Promise<void> {
   const form = new FormData();
   form.append("files", new Blob([args.markdown], { type: "text/markdown" }), args.filename);
@@ -485,7 +492,6 @@ async function postGeneratedMarkdownFile(args: {
   if (args.workspaceId) form.append("workspaceId", args.workspaceId);
   form.append("markdownText", args.summary);
   form.append("metadata", JSON.stringify({ contentFormat: "markdown" }));
-  if (args.flow) form.append("flow", JSON.stringify(args.flow));
   await spacesAppFetchMultipart("/files/filesUpload", form, args.appToken);
 }
 
@@ -1081,6 +1087,12 @@ async function postWriteApprovalAction(args: {
     conversationId: ctx.conversationId,
   }), ctx.spacesAppId);
 
+  // Attachment + approval card are TWO separate posts. `/files/filesUpload`
+  // (filesController.uploadFiles) has no flow handling at all — a `flow` field
+  // sent with an upload is silently dropped, so the Approve/Decline card never
+  // appears. Only `/chat/postMessage` renders a card, and its schema calls the
+  // field `flow` (UpdateMessage uses `flowJSON` — different route, different
+  // name). So: upload the file first, then post the card below.
   if (action["tool"] === "spaces-create-bulk-tickets") {
     const filename = bulkTicketsFilename();
     try {
@@ -1093,10 +1105,9 @@ async function postWriteApprovalAction(args: {
         filename,
         markdown: buildBulkTicketsManifestMarkdown(params),
         summary: `Bulk ticket manifest attached: ${filename}`,
-        flow: writeFlow,
       });
-      return;
     } catch (err) {
+      // Non-fatal: the approval card below is what actually gates the write.
       clog.warn("[webhook/result] bulk ticket manifest upload failed; posting approval card without attachment", {
         error: err instanceof Error ? err.message : String(err),
       });
@@ -1106,18 +1117,22 @@ async function postWriteApprovalAction(args: {
   if (action["tool"] === "spaces-memory-create" && params?.["content"]) {
     const memContent = params["content"] as string;
     const memDocType = (params["docType"] as string) ?? "fact";
-    await postGeneratedMarkdownFile({
-      channelId: ctx.channelId,
-      conversationId: ctx.conversationId,
-      ...(ctx.workspaceId ? { workspaceId: ctx.workspaceId } : {}),
-      userId: ctx.spacesAppUserId,
-      appToken: token,
-      filename: `memory-${memDocType}-${Date.now()}.md`,
-      markdown: memContent,
-      summary: "",
-      flow: writeFlow,
-    });
-    return;
+    try {
+      await postGeneratedMarkdownFile({
+        channelId: ctx.channelId,
+        conversationId: ctx.conversationId,
+        ...(ctx.workspaceId ? { workspaceId: ctx.workspaceId } : {}),
+        userId: ctx.spacesAppUserId,
+        appToken: token,
+        filename: `memory-${memDocType}-${Date.now()}.md`,
+        markdown: memContent,
+        summary: "",
+      });
+    } catch (err) {
+      clog.warn("[webhook/result] memory attachment upload failed; posting approval card without attachment", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   await spacesAppFetch("/chat/postMessage", {
