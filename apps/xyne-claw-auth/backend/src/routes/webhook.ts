@@ -34,7 +34,7 @@ import { mintSessionToken } from "../lib/session-tokens.js";
 import { verifySpacesSignature } from "../middleware/verify-spaces-signature.js";
 import { coerceAutomationForwardResult } from "../lib/automation-result.js";
 import { parseSlashCommand } from "../lib/parseSlashCommand.js";
-import { parseExperimentCommand, formatDuration, dispatchExperimentEpoch, EXPERIMENT_PROVIDERS } from "../lib/experiment.js";
+import { parseExperimentCommand, formatDuration, dispatchExperimentEpoch, EXPERIMENT_PROVIDERS, buildFindingsMarkdown } from "../lib/experiment.js";
 import { resolveFastMode, setFastModeOverride } from "../lib/fast-mode.js";
 import { acquireTwinSlot, renameTwinSlot, releaseTwinSlot } from "../lib/twin-limiter.js";
 import { handleSlashCommandBeforeRun, persistGoalStart, recordTurnAndDecide } from "../services/goalRelooper.js";
@@ -446,6 +446,47 @@ function experimentCounts(findings: Array<{ status: string }>): { conjecture: nu
     proved: findings.filter((f) => f.status === "proved").length,
     refuted: findings.filter((f) => f.status === "refuted").length,
   };
+}
+
+const EXPERIMENT_FINDINGS_MAX_BYTES = 200 * 1024;
+
+function capExperimentFindingsMarkdown(markdown: string): string {
+  if (Buffer.byteLength(markdown, "utf8") <= EXPERIMENT_FINDINGS_MAX_BYTES) return markdown;
+  const suffix = "\n\n---\n\n_Report truncated at 200KB for Spaces file delivery._\n";
+  let capped = markdown;
+  while (Buffer.byteLength(capped + suffix, "utf8") > EXPERIMENT_FINDINGS_MAX_BYTES && capped.length > 0) {
+    capped = capped.slice(0, Math.max(0, capped.length - 4096));
+  }
+  return `${capped.trimEnd()}${suffix}`;
+}
+
+function experimentFindingsFilename(agentSlug: string, date = new Date()): string {
+  const safeSlug = agentSlug.replace(/[^\w.\-]+/g, "_").slice(0, 80) || "agent";
+  const stamp = date.toISOString().replace(/\.\d{3}Z$/, "").replace(/:/g, "-");
+  return `experiment-findings-${safeSlug}-${stamp}.md`;
+}
+
+async function postGeneratedMarkdownFile(args: {
+  channelId: string;
+  conversationId: string;
+  workspaceId?: string | null;
+  userId: string;
+  appToken: string;
+  filename: string;
+  markdown: string;
+  summary: string;
+  flow?: unknown;
+}): Promise<void> {
+  const form = new FormData();
+  form.append("files", new Blob([args.markdown], { type: "text/markdown" }), args.filename);
+  form.append("channelId", args.channelId);
+  form.append("conversationId", args.conversationId);
+  form.append("userId", args.userId);
+  if (args.workspaceId) form.append("workspaceId", args.workspaceId);
+  form.append("markdownText", args.summary);
+  form.append("metadata", JSON.stringify({ contentFormat: "markdown" }));
+  if (args.flow) form.append("flow", JSON.stringify(args.flow));
+  await spacesAppFetchMultipart("/files/filesUpload", form, args.appToken);
 }
 
 function formatExperimentStatus(
@@ -910,6 +951,23 @@ function formatActionDescription(tool: string, params: Record<string, unknown>, 
     return lines.join("\n");
   }
 
+  if (tool === "spaces-create-bulk-tickets") {
+    const tickets = Array.isArray(params["tickets"]) ? params["tickets"] as Array<Record<string, unknown>> : [];
+    const lines = [
+      `**Create ${tickets.length} Tickets**`,
+      ``,
+      `**Project/Board/Channel:** ${String(params["projectId"] ?? "")} / ${String(params["boardId"] ?? "")} / ${options?.channelName ? `#${options.channelName}` : String(params["channelId"] ?? "")}`,
+      ``,
+    ];
+    for (const ticket of tickets.slice(0, 10)) {
+      const title = String(ticket["title"] ?? "(untitled)");
+      const priority = String(ticket["priority"] ?? params["defaultPriority"] ?? "");
+      lines.push(`- ${title}${priority ? ` (${priority})` : ""}`);
+    }
+    if (tickets.length > 10) lines.push(`... and ${tickets.length - 10} more (see attached file)`);
+    return lines.join("\n");
+  }
+
   if (tool === "spaces-schedule-call") {
     const title = params["title"] as string ?? "Call";
     const startsAt = params["startsAt"] as string ?? "";
@@ -951,6 +1009,123 @@ function formatActionDescription(tool: string, params: Record<string, unknown>, 
     lines.push(`**${key}:** ${val}`);
   }
   return lines.join("\n");
+}
+
+function bulkTicketsFilename(date = new Date()): string {
+  const stamp = date.toISOString().replace(/\.\d{3}Z$/, "").replace(/:/g, "-");
+  return `bulk-tickets-${stamp}.md`;
+}
+
+function formatMaybe(value: unknown): string {
+  if (Array.isArray(value)) return value.map((v) => String(v)).filter(Boolean).join(", ") || "-";
+  return typeof value === "string" && value.trim() ? value.trim() : "-";
+}
+
+function buildBulkTicketsManifestMarkdown(params: Record<string, unknown>): string {
+  const tickets = Array.isArray(params["tickets"]) ? params["tickets"] as Array<Record<string, unknown>> : [];
+  const lines = [
+    "# Bulk Ticket Approval Manifest",
+    "",
+    `Total tickets: ${tickets.length}`,
+    `Default projectId: ${formatMaybe(params["projectId"])}`,
+    `Default boardId: ${formatMaybe(params["boardId"])}`,
+    `Default channelId: ${formatMaybe(params["channelId"])}`,
+    `Default priority: ${formatMaybe(params["defaultPriority"])}`,
+    `Default assignee: ${formatMaybe(params["defaultAssignedTo"])}`,
+    `Default tags: ${formatMaybe(params["defaultTags"])}`,
+  ];
+
+  tickets.forEach((ticket, index) => {
+    const priority = ticket["priority"] ?? params["defaultPriority"];
+    const assignedTo = ticket["assignedTo"] ?? params["defaultAssignedTo"];
+    const tags = ticket["tags"] ?? params["defaultTags"];
+    lines.push(
+      "",
+      `## ${index + 1}. ${formatMaybe(ticket["title"])}`,
+      "",
+      `Project ID: ${formatMaybe(ticket["projectId"] ?? params["projectId"])}`,
+      `Board ID: ${formatMaybe(ticket["boardId"] ?? params["boardId"])}`,
+      `Channel ID: ${formatMaybe(ticket["channelId"] ?? params["channelId"])}`,
+      `Priority: ${formatMaybe(priority)}`,
+      `Assignee: ${formatMaybe(assignedTo)}`,
+      `Tags: ${formatMaybe(tags)}`,
+      `ETA: ${formatMaybe(ticket["eta"])}`,
+      "",
+      "Description:",
+      "",
+      formatMaybe(ticket["description"]),
+    );
+  });
+
+  return lines.join("\n");
+}
+
+async function postWriteApprovalAction(args: {
+  action: Record<string, unknown>;
+  ctx: SessionContext;
+  token: string;
+  targetValidation: { channelName?: string };
+}): Promise<void> {
+  const { action, ctx, token, targetValidation } = args;
+  const params = action["params"] as Record<string, unknown>;
+  const actionDesc = formatActionDescription(action["tool"] as string, params, targetValidation);
+
+  const writeFlow = withSpacesAppId(buildWriteApprovalFlow(actionDesc, {
+    serverType: action["serverType"] as string,
+    tool: action["tool"] as string,
+    params,
+    userId: action["userId"] as string,
+    signature: action["signature"] as string,
+    agentSlug: ctx.agentSlug ?? "",
+    channelId: ctx.channelId,
+    conversationId: ctx.conversationId,
+  }), ctx.spacesAppId);
+
+  if (action["tool"] === "spaces-create-bulk-tickets") {
+    const filename = bulkTicketsFilename();
+    try {
+      await postGeneratedMarkdownFile({
+        channelId: ctx.channelId,
+        conversationId: ctx.conversationId,
+        ...(ctx.workspaceId ? { workspaceId: ctx.workspaceId } : {}),
+        userId: ctx.spacesAppUserId,
+        appToken: token,
+        filename,
+        markdown: buildBulkTicketsManifestMarkdown(params),
+        summary: `Bulk ticket manifest attached: ${filename}`,
+        flow: writeFlow,
+      });
+      return;
+    } catch (err) {
+      clog.warn("[webhook/result] bulk ticket manifest upload failed; posting approval card without attachment", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  if (action["tool"] === "spaces-memory-create" && params?.["content"]) {
+    const memContent = params["content"] as string;
+    const memDocType = (params["docType"] as string) ?? "fact";
+    await postGeneratedMarkdownFile({
+      channelId: ctx.channelId,
+      conversationId: ctx.conversationId,
+      ...(ctx.workspaceId ? { workspaceId: ctx.workspaceId } : {}),
+      userId: ctx.spacesAppUserId,
+      appToken: token,
+      filename: `memory-${memDocType}-${Date.now()}.md`,
+      markdown: memContent,
+      summary: "",
+      flow: writeFlow,
+    });
+    return;
+  }
+
+  await spacesAppFetch("/chat/postMessage", {
+    channelId: ctx.channelId,
+    conversationId: ctx.conversationId,
+    flow: writeFlow,
+    userId: ctx.spacesAppUserId,
+  }, token);
 }
 
 
@@ -1237,6 +1412,41 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       }
       await experimentRepository.update(run.id, { status: "aborted", lastEpochEndedAt: new Date() });
       await postExperimentReply("Stopped /experiment.");
+      return;
+    }
+
+    if (experimentCommand.sub === "findings") {
+      const run =
+        await experimentRepository.findActiveByConversation(payload.conversationId)
+        ?? await experimentRepository.findLatestByConversation(payload.conversationId);
+      if (!run) {
+        await postExperimentReply("No /experiment has run in this thread.");
+        return;
+      }
+      const findings = await experimentRepository.listFindings(run.id);
+      const counts = experimentCounts(findings);
+      const summary = [
+        `**/experiment findings** — ${run.agentSlug}`,
+        `Status: ${run.status} · Epoch: ${run.epoch} · Findings: ${counts.proved} proved, ${counts.conjecture} open, ${counts.refuted} refuted`,
+      ].join("\n");
+      const markdown = capExperimentFindingsMarkdown(buildFindingsMarkdown(run, findings));
+      const filename = experimentFindingsFilename(run.agentSlug);
+      try {
+        await postGeneratedMarkdownFile({
+          channelId: payload.channelId,
+          conversationId: payload.conversationId,
+          userId: agent.spacesAppUserId,
+          appToken: agent.appToken,
+          filename,
+          markdown,
+          summary,
+        });
+      } catch (err) {
+        log.warn("[experiment] findings file upload failed; posting inline fallback", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+        await postExperimentReply(`${summary}\n\n⚠️ _Couldn't attach ${filename} (upload failed); posting the markdown inline._\n\n${markdown}`);
+      }
       return;
     }
 
@@ -4729,39 +4939,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
             continue;
           }
 
-          const actionDesc = formatActionDescription(action["tool"] as string, action["params"] as Record<string, unknown>, targetValidation);
-
-          const writeFlow = withSpacesAppId(buildWriteApprovalFlow(actionDesc, {
-            serverType: action["serverType"] as string,
-            tool: action["tool"] as string,
-            params: action["params"] as Record<string, unknown>,
-            userId: action["userId"] as string,
-            signature: action["signature"] as string,
-            agentSlug: ctx.agentSlug ?? "",
-            channelId: ctx.channelId,
-            conversationId: ctx.conversationId,
-          }), ctx.spacesAppId);
-
-          if (action["tool"] === "spaces-memory-create" && (action["params"] as Record<string, unknown>)?.["content"]) {
-            const memParams = action["params"] as Record<string, unknown>;
-            const memContent = memParams["content"] as string;
-            const memDocType = (memParams["docType"] as string) ?? "fact";
-            const form = new FormData();
-            const blob = new Blob([memContent], { type: "text/markdown" });
-            form.append("files", blob, `memory-${memDocType}-${Date.now()}.md`);
-            form.append("channelId", ctx.channelId);
-            form.append("conversationId", ctx.conversationId);
-            form.append("userId", ctx.spacesAppUserId);
-            form.append("flow", JSON.stringify(writeFlow));
-            await spacesAppFetchMultipart("/files/filesUpload", form, token);
-          } else {
-            await spacesAppFetch("/chat/postMessage", {
-              channelId: ctx.channelId,
-              conversationId: ctx.conversationId,
-              flow: writeFlow,
-              userId: ctx.spacesAppUserId,
-            }, token);
-          }
+          await postWriteApprovalAction({ action, ctx, token, targetValidation });
           copilotApprovalCardsSent += 1;
         }
         log.info(`Copilot: posted ${copilotApprovalCardsSent}/${copilotPendingActions.length} write action approval(s)`);
@@ -5142,40 +5320,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           continue;
         }
 
-        const actionDesc = formatActionDescription(action["tool"] as string, action["params"] as Record<string, unknown>, targetValidation);
-
-        const writeFlow = withSpacesAppId(buildWriteApprovalFlow(actionDesc, {
-          serverType: action["serverType"] as string,
-          tool: action["tool"] as string,
-          params: action["params"] as Record<string, unknown>,
-          userId: action["userId"] as string,
-          signature: action["signature"] as string,
-          agentSlug: ctx.agentSlug ?? "",
-          channelId: ctx.channelId,
-          conversationId: ctx.conversationId,
-        }), ctx.spacesAppId);
-
-        // Post in the same thread where the conversation happened
-        if (action["tool"] === "spaces-memory-create" && (action["params"] as Record<string, unknown>)?.["content"]) {
-          const memParams = action["params"] as Record<string, unknown>;
-          const memContent = memParams["content"] as string;
-          const memDocType = (memParams["docType"] as string) ?? "fact";
-          const form = new FormData();
-          const blob = new Blob([memContent], { type: "text/markdown" });
-          form.append("files", blob, `memory-${memDocType}-${Date.now()}.md`);
-          form.append("channelId", ctx.channelId);
-          form.append("conversationId", ctx.conversationId);
-          form.append("userId", ctx.spacesAppUserId);
-          form.append("flow", JSON.stringify(writeFlow));
-          await spacesAppFetchMultipart("/files/filesUpload", form, token);
-        } else {
-          await spacesAppFetch("/chat/postMessage", {
-            channelId: ctx.channelId,
-            conversationId: ctx.conversationId,
-            flow: writeFlow,
-            userId: ctx.spacesAppUserId,
-          }, token);
-        }
+        await postWriteApprovalAction({ action, ctx, token, targetValidation });
         approvalCardsSent += 1;
       }
 

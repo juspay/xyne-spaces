@@ -3471,6 +3471,169 @@ const spacesCreateTicket: ToolDef = {
   },
 };
 
+// ── spaces-create-bulk-tickets ──────────────────────────────────────
+
+type TicketPriority = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+
+interface BulkTicketInput {
+  title?: unknown;
+  description?: unknown;
+  projectId?: unknown;
+  boardId?: unknown;
+  channelId?: unknown;
+  priority?: unknown;
+  assignedTo?: unknown;
+  eta?: unknown;
+  tags?: unknown;
+}
+
+interface BulkTicketCreateResult {
+  id: string;
+  xyneId: string;
+  conversationId: string;
+  title: string;
+  priority: string;
+  status: string;
+}
+
+function optionalString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function normalizeTags(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const tags = value
+    .map((v) => typeof v === "string" ? v.trim() : "")
+    .filter(Boolean);
+  return tags.length ? tags : undefined;
+}
+
+const spacesCreateBulkTickets: ToolDef = {
+  name: "spaces-create-bulk-tickets",
+  description:
+    "Create MANY tickets in Spaces behind ONE approval. Prefer this tool over calling spaces-create-ticket repeatedly " +
+    "when turning multiple findings into multiple tickets. Set shared projectId, boardId, channelId, defaultPriority, " +
+    "defaultTags, and defaultAssignedTo once at the top level; each ticket may override projectId, boardId, channelId, " +
+    "priority, assignedTo, eta, and tags. Tickets are created sequentially and partial failures are reported.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      projectId: { type: "string", description: "Default project ID for tickets unless a ticket overrides it." },
+      boardId: { type: "string", description: "Default board ID for tickets unless a ticket overrides it." },
+      channelId: { type: "string", description: "Default channel ID where tickets will live unless a ticket overrides it." },
+      defaultPriority: { type: "string", enum: ["LOW", "MEDIUM", "HIGH", "CRITICAL"], description: "Priority applied to tickets that do not specify priority." },
+      defaultTags: { type: "array", items: { type: "string" }, description: "Tags applied to tickets that do not specify tags." },
+      defaultAssignedTo: { type: "string", description: "Assignee applied to tickets that do not specify assignedTo." },
+      tickets: {
+        type: "array",
+        minItems: 1,
+        items: {
+          type: "object",
+          properties: {
+            title: { type: "string", description: "Ticket title" },
+            description: { type: "string", description: "Ticket description" },
+            projectId: { type: "string", description: "Override project ID for this ticket." },
+            boardId: { type: "string", description: "Override board ID for this ticket." },
+            channelId: { type: "string", description: "Override channel ID for this ticket." },
+            priority: { type: "string", enum: ["LOW", "MEDIUM", "HIGH", "CRITICAL"], description: "Ticket priority" },
+            assignedTo: { type: "string", description: "User ID to assign" },
+            eta: { type: "string", description: "Due date as ISO 8601 string" },
+            tags: { type: "array", items: { type: "string" }, description: "Tags to apply" },
+          },
+          required: ["title", "description"],
+        },
+      },
+    },
+    required: ["projectId", "boardId", "channelId", "tickets"],
+  },
+  async handler(args, ctx) {
+    const tickets = Array.isArray(args["tickets"]) ? args["tickets"] as BulkTicketInput[] : [];
+    if (tickets.length === 0) return err("tickets must contain at least one ticket.");
+
+    const MAX_TICKETS = 100;
+    if (tickets.length > MAX_TICKETS) {
+      return err(`Too many tickets (${tickets.length} > ${MAX_TICKETS}). Create bulk tickets in batches of ${MAX_TICKETS} or fewer.`);
+    }
+
+    const defaultProjectId = optionalString(args["projectId"]);
+    const defaultBoardId = optionalString(args["boardId"]);
+    const defaultChannelId = optionalString(args["channelId"]);
+    if (!defaultProjectId || !defaultBoardId || !defaultChannelId) {
+      return err("projectId, boardId, and channelId are required.");
+    }
+
+    const defaultPriority = optionalString(args["defaultPriority"]) as TicketPriority | undefined;
+    const defaultAssignedTo = optionalString(args["defaultAssignedTo"]);
+    const defaultTags = normalizeTags(args["defaultTags"]);
+    const created: Array<{ index: number; title: string; id: string; xyneId: string; url?: string }> = [];
+    const failures: Array<{ index: number; title: string; reason: string }> = [];
+
+    for (let i = 0; i < tickets.length; i += 1) {
+      const ticket = tickets[i]!;
+      const title = optionalString(ticket.title);
+      const description = optionalString(ticket.description);
+      const projectId = optionalString(ticket.projectId) ?? defaultProjectId;
+      const boardId = optionalString(ticket.boardId) ?? defaultBoardId;
+      const channelId = optionalString(ticket.channelId) ?? defaultChannelId;
+      const priority = optionalString(ticket.priority) ?? defaultPriority;
+      const assignedTo = optionalString(ticket.assignedTo) ?? defaultAssignedTo;
+      const eta = optionalString(ticket.eta);
+      const tags = normalizeTags(ticket.tags) ?? defaultTags;
+      const label = title ?? `ticket ${i + 1}`;
+
+      if (!title || !description) {
+        failures.push({ index: i + 1, title: label, reason: "title and description are required." });
+        continue;
+      }
+
+      try {
+        const body: Record<string, unknown> = { title, description, projectId, boardId, channelId };
+        if (priority) body["priority"] = priority;
+        if (assignedTo) body["assignedTo"] = assignedTo;
+        if (eta) body["eta"] = eta;
+        if (tags) body["tags"] = tags;
+        if (ctx.userId) body["createdBy"] = ctx.userId;
+
+        const data = (await spacesFetch("/api/tickets/claw", {
+          method: "POST",
+          body: JSON.stringify(body),
+        })) as BulkTicketCreateResult;
+
+        created.push({
+          index: i + 1,
+          title,
+          id: data.id,
+          xyneId: data.xyneId,
+          ...(buildTicketUrl(channelId, data.conversationId) ? { url: buildTicketUrl(channelId, data.conversationId)! } : {}),
+        });
+      } catch (e) {
+        failures.push({
+          index: i + 1,
+          title: label,
+          reason: e instanceof Error ? e.message : String(e),
+        });
+      }
+    }
+
+    const lines = [
+      `Bulk ticket creation complete: requested ${tickets.length}, created ${created.length}, failed ${failures.length}.`,
+    ];
+    if (created.length) {
+      lines.push("", "Created:");
+      for (const c of created) {
+        lines.push(`  ${c.index}. ${c.xyneId} (${c.id})${c.url ? ` ${c.url}` : ""}`);
+      }
+    }
+    if (failures.length) {
+      lines.push("", `Failures${failures.length > 10 ? " (first 10)" : ""}:`);
+      for (const f of failures.slice(0, 10)) {
+        lines.push(`  ${f.index}. ${f.title}: ${f.reason}`);
+      }
+    }
+    return ok(lines.join("\n"));
+  },
+};
+
 // ── spaces-update-ticket ────────────────────────────────────────────
 
 const spacesUpdateTicket: ToolDef = {
@@ -6049,6 +6212,7 @@ export const tools: ToolDef[] = [
   spacesFetchAttachment,
   spacesUploadToKb,
   spacesCreateTicket,
+  spacesCreateBulkTickets,
   spacesUpdateTicket,
   spacesScheduleCall,
   spacesReadCanvas,

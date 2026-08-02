@@ -4,7 +4,7 @@ import { experimentRepository, agentRepository } from "../repositories/index.js"
 import { setSession, type SessionContext } from "./session-context.js";
 import { registerRunRecovery } from "../queue/run-recovery-worker.js";
 import { createTraceId, createLogger } from "../logger.js";
-import { decryptStoredField } from "../surfaces/spaces/client.js";
+import { decryptStoredField, spacesAppFetch } from "../surfaces/spaces/client.js";
 
 const log = createLogger("experiment");
 
@@ -14,7 +14,8 @@ const DEFAULT_DURATION_MS = 60 * 60 * 1000;
 export type ExperimentCommand =
   | { sub: "start"; durationMs: number; focus?: string; provider?: string; model?: string; invalidProvider?: string }
   | { sub: "status" }
-  | { sub: "stop" };
+  | { sub: "stop" }
+  | { sub: "findings" };
 
 /** Providers a /experiment run may pin (must stay a subset of the /internal/run
  *  proxy's OVERRIDABLE set — personal-cred providers still require the
@@ -33,6 +34,7 @@ export function parseExperimentCommand(text: string | undefined | null): Experim
   const firstLower = first?.toLowerCase() ?? "";
   if (firstLower === "status") return { sub: "status" };
   if (firstLower === "stop") return { sub: "stop" };
+  if (firstLower === "findings") return { sub: "findings" };
 
   let durationMs = DEFAULT_DURATION_MS;
   let focusParts = rest.split(/\s+/);
@@ -164,6 +166,73 @@ export function buildLedgerMarkdown(run: ExperimentRun, findings: ExperimentFind
   appendGroup("Proved", groups.proved);
   appendGroup("Refuted", groups.refuted);
   return lines.join("\n").trimEnd();
+}
+
+function countsByStatus(findings: ExperimentFinding[]): { conjecture: number; proved: number; refuted: number } {
+  return {
+    conjecture: findings.filter((f) => f.status === "conjecture").length,
+    proved: findings.filter((f) => f.status === "proved").length,
+    refuted: findings.filter((f) => f.status === "refuted").length,
+  };
+}
+
+export function buildFindingsMarkdown(run: ExperimentRun, findings: ExperimentFinding[]): string {
+  const counts = countsByStatus(findings);
+  const model = run.provider?.trim()
+    ? `${run.provider.trim()}${run.modelId?.trim() ? `/${run.modelId.trim()}` : " (default)"}`
+    : "(agent default)";
+  const appendGroup = (lines: string[], heading: string, rows: ExperimentFinding[]) => {
+    lines.push(`## ${heading}`);
+    if (rows.length === 0) {
+      lines.push(``, `(none)`, ``);
+      return;
+    }
+    for (const f of rows) {
+      lines.push(``, `### ${f.title}`, ``);
+      lines.push(`- Epoch: ${f.epoch}`);
+      lines.push(`- Hypothesis: ${f.hypothesis}`);
+      lines.push(`- Note: ${f.note?.trim() || "(none)"}`);
+      lines.push(`- Proof artifact path: ${f.proofArtifactPath?.trim() || "(none)"}`);
+    }
+    lines.push(``);
+  };
+
+  const lines = [
+    `# /experiment findings for ${run.agentSlug} - ${run.createdAt.toISOString().slice(0, 10)}`,
+    ``,
+    `- Experiment id: ${run.id}`,
+    `- Agent: ${run.agentSlug}`,
+    `- Model: ${model}`,
+    `- Focus: ${run.focus?.trim() || "(none)"}`,
+    `- Duration: ${run.createdAt.toISOString()} -> ${run.deadlineAt.toISOString()} (${formatDuration(run.deadlineAt.getTime() - run.createdAt.getTime())})`,
+    `- Status: ${run.status}`,
+    `- Epochs completed: ${Math.max(0, run.epoch - (run.status === "running" ? 1 : 0))}`,
+    `- Counts by status: ${counts.proved} proved, ${counts.conjecture} conjecture, ${counts.refuted} refuted`,
+    ``,
+  ];
+  appendGroup(lines, "Confirmed / Proved", findings.filter((f) => f.status === "proved"));
+  appendGroup(lines, "Open conjectures", findings.filter((f) => f.status === "conjecture"));
+  appendGroup(lines, "Refuted", findings.filter((f) => f.status === "refuted"));
+  if (run.finalReport?.trim()) {
+    lines.push(`## Final report`, ``, run.finalReport.trim(), ``);
+  }
+  return lines.join("\n").trimEnd();
+}
+
+export async function postExperimentNotice(run: { channelId: string; conversationId: string; agentSlug: string; orgId: string | null; finalReport?: string | null }): Promise<void> {
+  if (!run.orgId) return;
+  const agent = await agentRepository.findBySlug(run.agentSlug, run.orgId);
+  if (!agent?.spacesAppToken || !agent.spacesAppUserId) return;
+  const appToken = decryptStoredField(agent.spacesAppToken);
+  await spacesAppFetch("/chat/postMessage", {
+    channelId: run.channelId,
+    conversationId: run.conversationId,
+    markdownText: run.finalReport?.trim()
+      ? `**/experiment ended**\n\n${run.finalReport.trim()}`
+      : "**/experiment ended**\n\n(experiment ended without final report)",
+    userId: agent.spacesAppUserId,
+    metadata: { contentFormat: "markdown" },
+  }, appToken);
 }
 
 export function buildEpochTask(run: ExperimentRun, ledgerMarkdown: string): string {
