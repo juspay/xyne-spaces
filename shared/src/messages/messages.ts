@@ -27,10 +27,16 @@ export function getChannelSnapshot(ref: ChannelRef): Conversation[] {
  * been cached.
  */
 export function getThreadSnapshot(ref: ThreadRef): ThreadConversation | null {
-  return (
+  const fromActor =
     queryCacheActor.getSnapshot().context.threadConversations[
       ref.conversationId
-    ] ?? null
+    ];
+  if (fromActor) return fromActor;
+  return (
+    (getStorageAdapter()?.readChatEntitySync?.('thread', ref.conversationId) as
+      | ThreadConversation
+      | null
+      | undefined) ?? null
   );
 }
 

@@ -1,7 +1,7 @@
 import { getStorageAdapter } from '../machines/queryCacheMachine.js';
 
 const SHADOW_PREFIX = 'warm_shadow:v1';
-const MAX_AGE_MS = 30 * 60 * 1000;
+export const WARM_SHADOW_MAX_AGE_MS = 30 * 60 * 1000;
 
 export type ShadowEntry<T = unknown> = {
   data: [T, { type: 'complete' }];
@@ -45,7 +45,7 @@ export async function readShadow<T = unknown>(
     const raw = await adapter.readShadowValue(key);
     if (!raw || typeof raw !== 'object') return null;
     const entry = raw as ShadowEntry<T>;
-    if (entry.savedAt && Date.now() - entry.savedAt > MAX_AGE_MS) {
+    if (entry.savedAt && Date.now() - entry.savedAt > WARM_SHADOW_MAX_AGE_MS) {
       void adapter.removeShadowValue?.(key);
       return null;
     }

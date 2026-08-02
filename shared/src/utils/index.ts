@@ -1,6 +1,7 @@
 export { searchUsers, searchChannels } from './search.js';
 export {
   canonicalArgsJson,
+  WARM_SHADOW_MAX_AGE_MS,
   shadowKeyFor,
   readShadow,
   consumeShadow,

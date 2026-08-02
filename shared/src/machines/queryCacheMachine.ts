@@ -639,6 +639,8 @@ export const getRecordingsQueryHash = (): string => {
 // persist body immediately (e.g. on pagehide, where debounce + idle callbacks
 // would never fire before the page dies).
 let persistNow: (() => void) | null = null;
+const lastPersistedChannelRefs = new Map<string, Conversation[]>();
+const lastPersistedThreadRefs = new Map<string, ThreadConversation>();
 
 // When false, cache changes do NOT schedule a debounced write; persistence
 // happens only via flushQueryCachePersistence (lotus flushes on background and
@@ -701,6 +703,37 @@ function mergePersistBlob(
   });
 }
 
+function persistChatEntities<T>(
+  storage: StorageAdapter,
+  kind: 'channel' | 'thread',
+  entries: Record<string, T>,
+  fingerprint: string,
+  persistedRefs: Map<string, T>,
+): boolean {
+  // Per-entity persistence is an all-or-nothing adapter capability. A partial
+  // implementation must retain the established blob path so it can still
+  // hydrate and delete entries correctly.
+  if (!storage.loadChatEntities || !storage.writeChatEntity || !storage.removeChatEntity) {
+    return false;
+  }
+
+  for (const [id, value] of Object.entries(entries)) {
+    if (persistedRefs.get(id) === value) continue;
+    persistedRefs.set(id, value);
+    void Promise.resolve(storage.writeChatEntity(kind, id, value, fingerprint)).catch(error => {
+      console.error(`Failed to persist ${kind} chat entity:`, error);
+    });
+  }
+  for (const id of persistedRefs.keys()) {
+    if (id in entries) continue;
+    persistedRefs.delete(id);
+    void Promise.resolve(storage.removeChatEntity?.(kind, id)).catch(error => {
+      console.error(`Failed to remove ${kind} chat entity:`, error);
+    });
+  }
+  return true;
+}
+
 /**
  * Setup persistence middleware for query cache.
  * Accepts a StorageAdapter for platform-agnostic persistence.
@@ -711,6 +744,11 @@ export const setupQueryCachePersistence = (
   schemaVersion: string,
 ): void => {
   setStorageAdapter(storage);
+  // Entity references belong to the storage scope established by this setup.
+  // Never let a previous user/workspace session suppress writes in a new one.
+  lastPersistedRefs.clear();
+  lastPersistedChannelRefs.clear();
+  lastPersistedThreadRefs.clear();
 
   const doPersist = (): void => {
     // Read the LATEST snapshot at flush time (not the one that scheduled
@@ -755,28 +793,46 @@ export const setupQueryCachePersistence = (
       lastPersistedRefs.get("channelConversations") !== channelConversations
     ) {
       lastPersistedRefs.set("channelConversations", channelConversations);
-      mergePersistBlob(
+      const fingerprint = getChannelConversationsQueryHash({ userID: userId });
+      if (!persistChatEntities(
         storage,
-        "channelConversations",
+        'channel',
         channelConversations,
-        FINGERPRINT_FIELD,
-        getChannelConversationsQueryHash({ userID: userId }),
-        "conversations",
-      );
+        fingerprint,
+        lastPersistedChannelRefs,
+      )) {
+        mergePersistBlob(
+          storage,
+          "channelConversations",
+          channelConversations,
+          FINGERPRINT_FIELD,
+          fingerprint,
+          "conversations",
+        );
+      }
     }
 
     if (
       lastPersistedRefs.get(THREAD_CONVERSATIONS_KEY) !== threadConversations
     ) {
       lastPersistedRefs.set(THREAD_CONVERSATIONS_KEY, threadConversations);
-      mergePersistBlob(
+      const fingerprint = getThreadConversationQueryHash({ userID: userId });
+      if (!persistChatEntities(
         storage,
-        THREAD_CONVERSATIONS_KEY,
+        'thread',
         threadConversations,
-        THREAD_FINGERPRINT_FIELD,
-        getThreadConversationQueryHash({ userID: userId }),
-        "thread conversations",
-      );
+        fingerprint,
+        lastPersistedThreadRefs,
+      )) {
+        mergePersistBlob(
+          storage,
+          THREAD_CONVERSATIONS_KEY,
+          threadConversations,
+          THREAD_FINGERPRINT_FIELD,
+          fingerprint,
+          "thread conversations",
+        );
+      }
     }
 
     if (lastPersistedRefs.get(CALL_HISTORY_KEY) !== callHistory) {
@@ -852,9 +908,10 @@ export const hydrateQueryCacheFromStorage = async (
   try {
     await storage.init(userId, schemaVersion);
 
+    const chatEntities = (await storage.loadChatEntities?.()) ?? [];
     const context = await storage.loadContext();
 
-    if (!context) {
+    if (!context && chatEntities.length === 0) {
       return false;
     }
 
@@ -872,7 +929,21 @@ export const hydrateQueryCacheFromStorage = async (
       userID: userId,
     });
 
-    for (const [key, value] of Object.entries(context)) {
+    for (const entity of chatEntities) {
+      if (entity.kind === 'channel') {
+        if (entity.fingerprint && entity.fingerprint !== currentConversationHash) continue;
+        if (Array.isArray(entity.value) && entity.value.length > 0) {
+          conversationsData[entity.id] = entity.value as Conversation[];
+        }
+      } else if (entity.kind === 'thread') {
+        if (entity.fingerprint && entity.fingerprint !== currentThreadHash) continue;
+        if (entity.value && typeof entity.value === 'object') {
+          threadConversationsData[entity.id] = entity.value as ThreadConversation;
+        }
+      }
+    }
+
+    for (const [key, value] of Object.entries(context ?? {})) {
       if (key === "channelConversations") {
         const raw = value as Record<string, unknown>;
 
