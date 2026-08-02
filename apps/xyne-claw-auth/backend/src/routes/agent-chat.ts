@@ -25,6 +25,7 @@ import {
 import { appendCitations, collectCitationIconUrls } from "../lib/citations.js";
 import { getSpacesAuthForUser, getWorkspaceIdForUser } from "../lib/spaces-db.js";
 import { consumeClawStream } from "../lib/consume-claw-stream.js";
+import { cancelRunSession } from "../lib/experiment.js";
 import { redisService } from "../redis.js";
 import { subscribeLive, publishLiveEvent, type LiveEvent } from "../lib/live-conversation-bus.js";
 import { pushDelta, endDeltaCoalescer, liveUserIdForSession } from "../lib/live-delta-coalescer.js";
@@ -1466,21 +1467,11 @@ router.post("/:slug/chat/cancel", async (req: Request<{ slug: string }>, res: Re
       return;
     }
 
-    const cancelRes = await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run/${encodeURIComponent(sessionId)}/cancel`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        // S2S key is now required (xyne-claw fails closed). x-user-id lets
-        // xyne-claw enforce object-level authz on the cancel (ownership was
-        // already checked above, this pins it across the hop).
-        ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
-        "x-user-id": userId,
-      },
-    });
-
-    if (!cancelRes.ok) {
-      const body = (await cancelRes.json().catch(() => ({}))) as { error?: string };
-      res.status(502).json({ success: false, error: body.error ?? `Cancel failed: HTTP ${cancelRes.status}` });
+    // Ownership was checked above; preserve it across the S2S hop.
+    try {
+      await cancelRunSession(sessionId, userId);
+    } catch (err) {
+      res.status(502).json({ success: false, error: err instanceof Error ? err.message : String(err) });
       return;
     }
 

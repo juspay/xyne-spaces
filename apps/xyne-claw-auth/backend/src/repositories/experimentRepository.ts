@@ -1,8 +1,9 @@
-import type { Prisma } from "@prisma/client";
+import type { ExperimentRun, Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
 
 export type ExperimentStatus = "running" | "finishing" | "done" | "aborted";
 export type ExperimentFindingStatus = "conjecture" | "proved" | "refuted";
+export type ExperimentRunWithFindingCount = ExperimentRun & { _count: { findings: number } };
 
 export const experimentRepository = {
   createRun(args: {
@@ -42,6 +43,39 @@ export const experimentRepository = {
     return prisma.experimentRun.findFirst({
       where: { conversationId },
       orderBy: { createdAt: "desc" },
+    });
+  },
+
+  async findBestForFindings(conversationId: string): Promise<ExperimentRun | null> {
+    const rows = await prisma.$queryRaw<ExperimentRun[]>`
+      SELECT run.*
+      FROM "experiment_runs" AS run
+      WHERE run."conversationId" = ${conversationId}
+      ORDER BY
+        CASE
+          WHEN run."status" IN ('running', 'finishing') THEN 0
+          WHEN EXISTS (
+            SELECT 1
+            FROM "experiment_findings" AS finding
+            WHERE finding."experimentId" = run."id"
+          ) THEN 1
+          ELSE 2
+        END,
+        run."createdAt" DESC
+      LIMIT 1
+    `;
+    return rows[0] ?? null;
+  },
+
+  async listRecentByConversationWithFindingCounts(
+    conversationId: string,
+    limit = 6,
+  ): Promise<ExperimentRunWithFindingCount[]> {
+    return prisma.experimentRun.findMany({
+      where: { conversationId },
+      orderBy: { createdAt: "desc" },
+      take: limit,
+      include: { _count: { select: { findings: true } } },
     });
   },
 

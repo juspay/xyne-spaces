@@ -34,7 +34,7 @@ import { mintSessionToken } from "../lib/session-tokens.js";
 import { verifySpacesSignature } from "../middleware/verify-spaces-signature.js";
 import { coerceAutomationForwardResult } from "../lib/automation-result.js";
 import { parseSlashCommand } from "../lib/parseSlashCommand.js";
-import { parseExperimentCommand, formatDuration, dispatchExperimentEpoch, EXPERIMENT_PROVIDERS, buildFindingsMarkdown } from "../lib/experiment.js";
+import { parseExperimentCommand, formatDuration, dispatchExperimentEpoch, EXPERIMENT_PROVIDERS, buildFindingsMarkdown, cancelRunSession } from "../lib/experiment.js";
 import { resolveFastMode, setFastModeOverride } from "../lib/fast-mode.js";
 import { acquireTwinSlot, renameTwinSlot, releaseTwinSlot } from "../lib/twin-limiter.js";
 import { handleSlashCommandBeforeRun, persistGoalStart, recordTurnAndDecide } from "../services/goalRelooper.js";
@@ -1392,6 +1392,16 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       log.warn("Failed to post /experiment reply", { error: err instanceof Error ? err.message : String(err) });
     });
 
+    if (experimentCommand.sub === "unknown") {
+      await postExperimentReply([
+        "/experiment <duration> [provider=…] [model=…] [focus…]",
+        "/experiment status",
+        "/experiment findings [id]",
+        "/experiment stop",
+      ].join("\n"));
+      return;
+    }
+
     if (experimentCommand.sub === "status") {
       const run = await experimentRepository.findActiveByConversation(payload.conversationId);
       const findings = run ? await experimentRepository.listFindings(run.id) : [];
@@ -1411,24 +1421,56 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         return;
       }
       await experimentRepository.update(run.id, { status: "aborted", lastEpochEndedAt: new Date() });
-      await postExperimentReply("Stopped /experiment.");
+      let cancelledEpoch = false;
+      if (run.currentSessionId) {
+        try {
+          await cancelRunSession(run.currentSessionId, run.userId);
+          cancelledEpoch = true;
+        } catch (err) {
+          log.warn("[experiment] failed to cancel running epoch", {
+            experimentId: run.id,
+            sessionId: run.currentSessionId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+      await postExperimentReply(cancelledEpoch
+        ? "Stopped /experiment (cancelled the running epoch)."
+        : "Stopped /experiment.");
       return;
     }
 
     if (experimentCommand.sub === "findings") {
-      const run =
-        await experimentRepository.findActiveByConversation(payload.conversationId)
-        ?? await experimentRepository.findLatestByConversation(payload.conversationId);
+      const run = experimentCommand.id
+        ? await experimentRepository.findById(experimentCommand.id)
+        : await experimentRepository.findBestForFindings(payload.conversationId);
       if (!run) {
-        await postExperimentReply("No /experiment has run in this thread.");
+        await postExperimentReply(experimentCommand.id
+          ? "Experiment not found."
+          : "No /experiment has run in this thread.");
+        return;
+      }
+      if (experimentCommand.id && run.userId !== payload.userId && !(await isClawAdmin(payload.userId))) {
+        await postExperimentReply("Not your experiment.");
         return;
       }
       const findings = await experimentRepository.listFindings(run.id);
+      const recentRuns = await experimentRepository.listRecentByConversationWithFindingCounts(payload.conversationId);
       const counts = experimentCounts(findings);
-      const summary = [
+      const summaryLines = [
         `**/experiment findings** — ${run.agentSlug}`,
         `Status: ${run.status} · Epoch: ${run.epoch} · Findings: ${counts.proved} proved, ${counts.conjecture} open, ${counts.refuted} refuted`,
-      ].join("\n");
+      ];
+      if (!experimentCommand.id && recentRuns[0] && recentRuns[0].id !== run.id) {
+        summaryLines.push(`(showing experiment ${run.id} — the most recent run in this thread had no findings)`);
+      }
+      const otherRuns = recentRuns.filter((candidate) => candidate.id !== run.id).slice(0, 5);
+      if (recentRuns.length > 1 && otherRuns.length > 0) {
+        summaryLines.push(`Other runs in this thread: ${otherRuns.map((candidate) =>
+          `${candidate.id} (${candidate.status}, ${candidate._count.findings} findings, ${candidate.createdAt.toISOString().slice(0, 10)})`
+        ).join(" · ")}`);
+      }
+      const summary = summaryLines.join("\n");
       const markdown = capExperimentFindingsMarkdown(buildFindingsMarkdown(run, findings));
       const filename = experimentFindingsFilename(run.agentSlug);
       try {
