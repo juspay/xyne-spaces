@@ -8,7 +8,7 @@ import {
   REPO_CONFIGS,
 } from "../sandbox/index.js";
 import { generateSceneHtml } from "./scene-html.js";
-import type { Storyboard, VideoScene } from "./storyboard.js";
+import type { Renderer, Storyboard, Theme, VideoScene } from "./storyboard.js";
 
 const WORK_DIR = "/home/nixuser/workspace/.video-explainer";
 export const OUTPUT_PATH = "/home/nixuser/workspace/results/explainer.mp4";
@@ -92,36 +92,28 @@ async function requestNarration(
 }
 
 /**
- * Burned-in caption as an ASS file. NOT srt+force_style: without an explicit
- * PlayRes, libass sizes force_style numbers against its default 384x288
- * canvas, so "FontSize=28, MarginV=72" renders as ~105px text floating in
- * the middle of a 1080p frame. Declaring PlayRes 1920x1080 makes every
- * number below mean real pixels: 44px text, bottom-center, 56px up.
+ * Builds the per-segment ffmpeg -vf chain. "slides" (default) keeps the exact
+ * static-still behavior and applies NO video filter. "motion" adds a slow Ken
+ * Burns push-in (1.0 -> ~1.08 across the whole segment) plus a 0.4s fade in/out,
+ * so each scene reads as a subtle camera move instead of a frozen frame. Uses
+ * only ffmpeg already in the image.
  */
-function captionFile(narration: string, duration: number): string {
-  const centis = Math.max(0, Math.round(duration * 100));
-  const end =
-    `${Math.floor(centis / 360_000)}:` +
-    `${String(Math.floor((centis % 360_000) / 6_000)).padStart(2, "0")}:` +
-    `${String(Math.floor((centis % 6_000) / 100)).padStart(2, "0")}.` +
-    `${String(centis % 100).padStart(2, "0")}`;
-  const safeCaption = narration.replace(/[{}]/g, "").replace(/\r?\n/g, "\\N");
-  return [
-    "[Script Info]",
-    "ScriptType: v4.00+",
-    "PlayResX: 1920",
-    "PlayResY: 1080",
-    "WrapStyle: 0",
-    "",
-    "[V4+ Styles]",
-    "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
-    "Style: Caption,DejaVu Sans,44,&H00FFFFFF,&H00FFFFFF,&H00101824,&H60101824,0,0,0,0,100,100,0,0,3,12,0,2,160,160,56,1",
-    "",
-    "[Events]",
-    "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
-    `Dialogue: 0,0:00:00.00,${end},Caption,,0,0,0,,${safeCaption}`,
-    "",
-  ].join("\n");
+function segmentFilter(renderer: Renderer, segmentSeconds: number): string {
+  if (renderer !== "motion") return "";
+  const fps = 30;
+  const frames = Math.max(1, Math.round(segmentSeconds * fps));
+  const zoomTarget = 1.08;
+  const increment = ((zoomTarget - 1) / frames).toFixed(6);
+  const zoompan =
+    `zoompan=z='min(zoom+${increment}\,${zoomTarget})':d=${frames}:` +
+    `x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1920x1080:fps=${fps}`;
+  const filters = [zoompan];
+  const fadeDur = 0.4;
+  if (segmentSeconds > fadeDur * 3) {
+    filters.push(`fade=t=in:st=0:d=${fadeDur}`);
+    filters.push(`fade=t=out:st=${(segmentSeconds - fadeDur).toFixed(3)}:d=${fadeDur}`);
+  }
+  return filters.join(",");
 }
 
 /**
@@ -191,9 +183,10 @@ async function renderScene(
   index: number,
   mermaidShipped: boolean,
 ): Promise<void> {
-  const options: { code?: string; mermaidLive?: boolean } = {};
+  const options: { code?: string; mermaidLive?: boolean; theme?: Theme } = {};
   if (scene.kind === "code") options.code = await sceneCode(session, context, scene);
   if (scene.kind === "diagram" && mermaidShipped) options.mermaidLive = true;
+  options.theme = storyboard.theme;
   const html = generateSceneHtml(
     storyboard.title,
     scene,
@@ -227,6 +220,7 @@ export async function composeVideo(
       `mkdir -p '${WORK_DIR}' "$(dirname '${OUTPUT_PATH}')"`,
   );
 
+  const renderer = storyboard.renderer;
   const hasDiagram = storyboard.scenes.some((scene) => scene.kind === "diagram");
   const mermaidShipped = hasDiagram ? await shipMermaidRuntime(session) : false;
 
@@ -248,12 +242,12 @@ export async function composeVideo(
       throw new Error(`ffprobe could not measure narration for scene ${index + 1}`);
     }
     const segmentSeconds = narrationSeconds + 0.8;
-    const captionPath = `${WORK_DIR}/scene-${index}.ass`;
-    await session.files.write(captionPath, Buffer.from(captionFile(scene.narration, segmentSeconds)));
+    const filter = segmentFilter(renderer, segmentSeconds);
+    const filterArg = filter ? `-vf "${filter}" ` : "";
     await run(
       session,
       `ffmpeg -y -loop 1 -i '${WORK_DIR}/scene-${index}.png' -i '${audioPath}' ` +
-        `-vf "subtitles='${captionPath}'" ` +
+        filterArg +
         `-af apad -t ${segmentSeconds.toFixed(3)} -r 30 -c:v libx264 -preset medium -pix_fmt yuv420p ` +
         `-c:a aac -b:a 192k '${WORK_DIR}/segment-${index}.mp4'`,
       120_000,
