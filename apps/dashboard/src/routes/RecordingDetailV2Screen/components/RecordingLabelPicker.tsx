@@ -95,6 +95,7 @@ export function RecordingLabelPicker({
     // like a different screen — but with no chevron and nothing to click.
     return (
       <div className={READ_ONLY_TRIGGER_CLASS_NAME} aria-label={`Labels, ${labels.length} applied`}>
+        <Tag className='size-3.5 shrink-0' aria-hidden='true' />
         {appliedLabels}
       </div>
     );
@@ -131,14 +132,8 @@ export function RecordingLabelPicker({
           data-track-category='RecordingDetailV2'
           data-track-name='open_recording_labels'
         >
-          {labels.length === 0 ? (
-            <>
-              <Tag className='size-3.5' aria-hidden='true' />
-              Add label
-            </>
-          ) : (
-            appliedLabels
-          )}
+          <Tag className='size-3.5' aria-hidden='true' />
+          {labels.length === 0 ? 'Add label' : appliedLabels}
           {isOpen ? (
             <ChevronUp className='size-3.5 text-muted-foreground' aria-hidden='true' />
           ) : (
