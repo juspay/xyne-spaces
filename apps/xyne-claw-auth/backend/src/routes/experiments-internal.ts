@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { experimentRepository } from "../repositories/index.js";
+import { proofWasDelivered } from "../repositories/experimentRepository.js";
 import { buildLedgerMarkdown, postExperimentNotice } from "../lib/experiment.js";
 import { createLogger } from "../logger.js";
 
@@ -52,18 +53,83 @@ experimentsInternalRouter.post("/:id/findings", async (req: Request<{ id: string
     res.status(400).json({ success: false, error: "invalid finding body" });
     return;
   }
+  // PROOF DURABILITY GATE. `proved` requires an artifact that was actually
+  // delivered to the thread. Measured on the first three live runs: 125 of 129
+  // proofArtifactPaths pointed at /workspace/... inside sandboxes that were
+  // later destroyed, so every "proved" finding cited a file nobody could open.
+  // A claim whose evidence is gone is a conjecture, so that is what we store —
+  // the finding is kept, only the label is refused, and the agent is told
+  // exactly how to earn it back.
+  let status = body.status;
+  let downgradeNote: string | null = null;
+  if (status === "proved" && !proofWasDelivered(body.proofArtifactPath as string | null, run.deliveredArtifacts)) {
+    status = "conjecture";
+    downgradeNote = body.proofArtifactPath
+      ? `Recorded as conjecture, NOT proved: ${String(body.proofArtifactPath)} was never delivered to the thread. Call sandbox-deliver-files with that exact path, then record this finding again with proofArtifactPath set to the delivered filename.`
+      : "Recorded as conjecture, NOT proved: no proofArtifactPath given. Produce a repro/test/benchmark, deliver it with sandbox-deliver-files, then record this finding again with proofArtifactPath set to the delivered filename.";
+  }
+
   // Length caps: findings feed straight into every later epoch's task prompt
   // (buildLedgerMarkdown), so uncapped text compounds across an 8h run.
   const row = await experimentRepository.upsertFindingByTitle({
     experimentId: run.id,
     epoch: body.epoch,
-    status: body.status,
+    status,
     title: body.title.slice(0, 200),
     hypothesis: body.hypothesis.slice(0, 2000),
     note: typeof body.note === "string" ? body.note.slice(0, 2000) : null,
     proofArtifactPath: typeof body.proofArtifactPath === "string" ? body.proofArtifactPath.slice(0, 500) : null,
   });
+  res.json({ success: true, data: { id: row.id, status, ...(downgradeNote ? { warning: downgradeNote } : {}) } });
+});
+
+const REVIEW_VERDICTS = new Set(["confirms", "contradicts", "stale", "duplicate", "unverifiable"]);
+
+experimentsInternalRouter.post("/:id/reviews", async (req: Request<{ id: string }>, res: Response) => {
+  const run = await experimentRepository.findById(req.params.id);
+  if (!run) return notFound(res);
+  const body = req.body as { findingId?: unknown; epoch?: unknown; verdict?: unknown; reason?: unknown; duplicateOf?: unknown };
+  if (
+    typeof body.findingId !== "string" ||
+    typeof body.epoch !== "number" ||
+    typeof body.verdict !== "string" ||
+    !REVIEW_VERDICTS.has(body.verdict) ||
+    typeof body.reason !== "string"
+  ) {
+    res.status(400).json({ success: false, error: "invalid review body" });
+    return;
+  }
+  // The finding must belong to THIS experiment — a checker must not be able to
+  // write verdicts onto another run's ledger by guessing a cuid.
+  const finding = await experimentRepository.findFindingById(body.findingId);
+  if (!finding || finding.experimentId !== run.id) {
+    res.status(404).json({ success: false, error: "finding not found in this experiment" });
+    return;
+  }
+  const row = await experimentRepository.upsertReview({
+    experimentId: run.id,
+    findingId: body.findingId,
+    epoch: body.epoch,
+    verdict: body.verdict,
+    reason: body.reason,
+    duplicateOf: typeof body.duplicateOf === "string" ? body.duplicateOf : null,
+  });
   res.json({ success: true, data: { id: row.id } });
+});
+
+experimentsInternalRouter.post("/:id/delivered", async (req: Request<{ id: string }>, res: Response) => {
+  const run = await experimentRepository.findById(req.params.id);
+  if (!run) return notFound(res);
+  const body = req.body as { filenames?: unknown };
+  const filenames = Array.isArray(body.filenames)
+    ? body.filenames.filter((name): name is string => typeof name === "string").slice(0, 50)
+    : null;
+  if (!filenames || filenames.length === 0) {
+    res.status(400).json({ success: false, error: "invalid delivered body" });
+    return;
+  }
+  const merged = await experimentRepository.recordDeliveredArtifacts(run.id, filenames);
+  res.json({ success: true, data: { delivered: merged.length } });
 });
 
 experimentsInternalRouter.post("/:id/hypothesis", async (req: Request<{ id: string }>, res: Response) => {

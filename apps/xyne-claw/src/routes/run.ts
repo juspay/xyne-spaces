@@ -196,6 +196,7 @@ function normalizeExperimentContext(raw: unknown): ExperimentContext | undefined
     epoch: Number.isFinite(epoch) ? epoch : 0,
     deadlineAt,
     ...(focus ? { focus } : {}),
+    ...(obj["mode"] === "review" ? { mode: "review" as const } : {}),
   };
 }
 
@@ -2554,7 +2555,9 @@ async function processTask(
     if (experiment) {
       allTools.push(...buildExperimentTools(experiment, abortRun));
       log(
-        `Experiment mode — injected experiment tools (epoch ${experiment.epoch}, remaining ${experimentRemaining(experiment.deadlineAt)})`,
+        experiment.mode === "review"
+          ? `Experiment CHECKER mode — injected review tools (verifying epoch ${experiment.epoch})`
+          : `Experiment mode — injected experiment tools (epoch ${experiment.epoch}, remaining ${experimentRemaining(experiment.deadlineAt)})`,
       );
     }
 
@@ -3271,7 +3274,9 @@ async function processTask(
     // Accounts the agent is configured to use but the user hasn't connected or
     // configured. Told to the model so it surfaces the gap instead of
     // fabricating results from a tool it never received.
-    const experimentGuide = experiment
+    const experimentGuide = experiment?.mode === "review"
+      ? `\n\n## Experiment checker\nYou are the CHECKER for a running experiment, not a participant. Do NOT hunt for new findings, do not start a hypothesis, and do not try to end the experiment — you have neither tool. Verify each finding you were given against the current code and the delivered proof, then call experiment-review once per finding. Your verdict is advisory; it never changes a finding's status. When unsure, say contradicts or unverifiable — a false confirm becomes a ticket a human has to disprove. Finish with ONE short line of verdict counts.`
+      : experiment
       ? `\n\n## Experiment mode\nYou are in a time-boxed experiment (epoch ${experiment.epoch}; deadline ${experiment.deadlineAt}; focus ${experiment.focus ?? "unspecified"}). You cannot finish early — end-experiment refuses before the deadline. Loop: read the ledger → declare a hypothesis (experiment-ledger action=hypothesis) → gather PROOF in the sandbox (failing test, benchmark delta, profile) → record the finding with its proof path. Never re-test refuted hypotheses. If your current lead dies, pick a different subsystem. Prose without a recorded finding is wasted time.`
       : "";
     const effectiveSystemPrompt = ((channelId
