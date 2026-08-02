@@ -34,7 +34,7 @@ import { mintSessionToken } from "../lib/session-tokens.js";
 import { verifySpacesSignature } from "../middleware/verify-spaces-signature.js";
 import { coerceAutomationForwardResult } from "../lib/automation-result.js";
 import { parseSlashCommand } from "../lib/parseSlashCommand.js";
-import { parseExperimentCommand, formatDuration, dispatchExperimentEpoch, EXPERIMENT_PROVIDERS, buildFindingsMarkdown, cancelRunSession } from "../lib/experiment.js";
+import { parseExperimentCommand, formatDuration, dispatchExperimentEpoch, dispatchExperimentChecker, EXPERIMENT_PROVIDERS, buildFindingsMarkdown, cancelRunSession } from "../lib/experiment.js";
 import { resolveFastMode, setFastModeOverride } from "../lib/fast-mode.js";
 import { acquireTwinSlot, renameTwinSlot, releaseTwinSlot } from "../lib/twin-limiter.js";
 import { handleSlashCommandBeforeRun, persistGoalStart, recordTurnAndDecide } from "../services/goalRelooper.js";
@@ -549,6 +549,18 @@ async function continueExperimentAfterResult(ctx: SessionContext, sessionId: str
     return true; // treated as handled: keep this thread's queue-drain semantics unchanged
   }
 
+  // Check the epoch that just ended, in parallel with the next one starting.
+  // Deliberately not awaited: the checker is advisory, and a slow or failing
+  // verification pass must never delay or block the experiment's own progress.
+  // Its verdicts land in the ledger and reach whichever epoch starts after.
+  void dispatchExperimentChecker(active, active.epoch).catch((err) => {
+    clog.warn("[experiment] checker dispatch threw", {
+      experimentId: active.id,
+      epoch: active.epoch,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  });
+
   if (now < active.deadlineAt.getTime()) {
     const next = await experimentRepository.update(active.id, {
       epoch: { increment: 1 },
@@ -934,6 +946,11 @@ export async function fetchConversationHistory(
 
 // ── Action formatting ───────────────────────────────────────────────
 
+/** Tickets rendered in full inside the bulk approval card. The rest are
+ *  summarised by count — every ticket in `params` is still created on approve,
+ *  since the executed payload comes from the HMAC-signed action, not the card. */
+const BULK_TICKETS_CARD_LIMIT = 25;
+
 function formatActionDescription(tool: string, params: Record<string, unknown>, options?: { channelName?: string }): string {
   if (tool === "user-send-message") {
     const content = (params["content"] as string ?? "").slice(0, 300);
@@ -965,12 +982,25 @@ function formatActionDescription(tool: string, params: Record<string, unknown>, 
       `**Project/Board/Channel:** ${String(params["projectId"] ?? "")} / ${String(params["boardId"] ?? "")} / ${options?.channelName ? `#${options.channelName}` : String(params["channelId"] ?? "")}`,
       ``,
     ];
-    for (const ticket of tickets.slice(0, 10)) {
+    // Everything the approver needs lives in THIS card — no companion file
+    // upload. Same shape as spaces-create-ticket above (title + trimmed
+    // description), repeated per ticket. The card body scrolls past 280px
+    // (buildWriteApprovalFlow), so a long batch stays readable in-thread.
+    tickets.slice(0, BULK_TICKETS_CARD_LIMIT).forEach((ticket, index) => {
       const title = String(ticket["title"] ?? "(untitled)");
       const priority = String(ticket["priority"] ?? params["defaultPriority"] ?? "");
-      lines.push(`- ${title}${priority ? ` (${priority})` : ""}`);
+      const assignee = String(ticket["assignedTo"] ?? params["defaultAssignedTo"] ?? "");
+      const tags = Array.isArray(ticket["tags"]) ? (ticket["tags"] as unknown[]).join(", ") : "";
+      const rawDesc = String(ticket["description"] ?? "");
+      const desc = rawDesc.slice(0, 200);
+      const meta = [priority, assignee && `→ ${assignee}`, tags && `[${tags}]`].filter(Boolean).join(" · ");
+      lines.push(`**${index + 1}. ${title}**${meta ? ` — ${meta}` : ""}`);
+      if (desc) lines.push(`${desc}${rawDesc.length > 200 ? "…" : ""}`);
+      lines.push(``);
+    });
+    if (tickets.length > BULK_TICKETS_CARD_LIMIT) {
+      lines.push(`_…and ${tickets.length - BULK_TICKETS_CARD_LIMIT} more — all ${tickets.length} are created on approve._`);
     }
-    if (tickets.length > 10) lines.push(`... and ${tickets.length - 10} more (see attached file)`);
     return lines.join("\n");
   }
 
@@ -1017,55 +1047,6 @@ function formatActionDescription(tool: string, params: Record<string, unknown>, 
   return lines.join("\n");
 }
 
-function bulkTicketsFilename(date = new Date()): string {
-  const stamp = date.toISOString().replace(/\.\d{3}Z$/, "").replace(/:/g, "-");
-  return `bulk-tickets-${stamp}.md`;
-}
-
-function formatMaybe(value: unknown): string {
-  if (Array.isArray(value)) return value.map((v) => String(v)).filter(Boolean).join(", ") || "-";
-  return typeof value === "string" && value.trim() ? value.trim() : "-";
-}
-
-function buildBulkTicketsManifestMarkdown(params: Record<string, unknown>): string {
-  const tickets = Array.isArray(params["tickets"]) ? params["tickets"] as Array<Record<string, unknown>> : [];
-  const lines = [
-    "# Bulk Ticket Approval Manifest",
-    "",
-    `Total tickets: ${tickets.length}`,
-    `Default projectId: ${formatMaybe(params["projectId"])}`,
-    `Default boardId: ${formatMaybe(params["boardId"])}`,
-    `Default channelId: ${formatMaybe(params["channelId"])}`,
-    `Default priority: ${formatMaybe(params["defaultPriority"])}`,
-    `Default assignee: ${formatMaybe(params["defaultAssignedTo"])}`,
-    `Default tags: ${formatMaybe(params["defaultTags"])}`,
-  ];
-
-  tickets.forEach((ticket, index) => {
-    const priority = ticket["priority"] ?? params["defaultPriority"];
-    const assignedTo = ticket["assignedTo"] ?? params["defaultAssignedTo"];
-    const tags = ticket["tags"] ?? params["defaultTags"];
-    lines.push(
-      "",
-      `## ${index + 1}. ${formatMaybe(ticket["title"])}`,
-      "",
-      `Project ID: ${formatMaybe(ticket["projectId"] ?? params["projectId"])}`,
-      `Board ID: ${formatMaybe(ticket["boardId"] ?? params["boardId"])}`,
-      `Channel ID: ${formatMaybe(ticket["channelId"] ?? params["channelId"])}`,
-      `Priority: ${formatMaybe(priority)}`,
-      `Assignee: ${formatMaybe(assignedTo)}`,
-      `Tags: ${formatMaybe(tags)}`,
-      `ETA: ${formatMaybe(ticket["eta"])}`,
-      "",
-      "Description:",
-      "",
-      formatMaybe(ticket["description"]),
-    );
-  });
-
-  return lines.join("\n");
-}
-
 async function postWriteApprovalAction(args: {
   action: Record<string, unknown>;
   ctx: SessionContext;
@@ -1087,33 +1068,16 @@ async function postWriteApprovalAction(args: {
     conversationId: ctx.conversationId,
   }), ctx.spacesAppId);
 
-  // Attachment + approval card are TWO separate posts. `/files/filesUpload`
+  // Any attachment is a SEPARATE post from the card. `/files/filesUpload`
   // (filesController.uploadFiles) has no flow handling at all — a `flow` field
   // sent with an upload is silently dropped, so the Approve/Decline card never
   // appears. Only `/chat/postMessage` renders a card, and its schema calls the
   // field `flow` (UpdateMessage uses `flowJSON` — different route, different
-  // name). So: upload the file first, then post the card below.
-  if (action["tool"] === "spaces-create-bulk-tickets") {
-    const filename = bulkTicketsFilename();
-    try {
-      await postGeneratedMarkdownFile({
-        channelId: ctx.channelId,
-        conversationId: ctx.conversationId,
-        ...(ctx.workspaceId ? { workspaceId: ctx.workspaceId } : {}),
-        userId: ctx.spacesAppUserId,
-        appToken: token,
-        filename,
-        markdown: buildBulkTicketsManifestMarkdown(params),
-        summary: `Bulk ticket manifest attached: ${filename}`,
-      });
-    } catch (err) {
-      // Non-fatal: the approval card below is what actually gates the write.
-      clog.warn("[webhook/result] bulk ticket manifest upload failed; posting approval card without attachment", {
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
-
+  // name).
+  //
+  // spaces-create-bulk-tickets deliberately posts NO file: the batch renders
+  // inline in the approval card itself (formatActionDescription), same as
+  // spaces-create-ticket. One message, one Approve button, nothing to open.
   if (action["tool"] === "spaces-memory-create" && params?.["content"]) {
     const memContent = params["content"] as string;
     const memDocType = (params["docType"] as string) ?? "fact";
@@ -1411,6 +1375,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       await postExperimentReply([
         "/experiment <duration> [provider=…] [model=…] [focus…]",
         "/experiment status",
+        "/experiment list",
         "/experiment findings [id]",
         "/experiment stop",
       ].join("\n"));
@@ -1455,6 +1420,31 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       return;
     }
 
+    if (experimentCommand.sub === "list") {
+      // Thread-scoped, no ownership gate — same visibility as /experiment
+      // status. The run ids printed here are what `/experiment findings <id>`
+      // takes, and THAT path does gate on owner/admin.
+      const runs = await experimentRepository.listRecentByConversationWithFindingCounts(payload.conversationId, 15);
+      if (runs.length === 0) {
+        await postExperimentReply("No /experiment has run in this thread.");
+        return;
+      }
+      const rows = runs.map((run) => {
+        const started = run.createdAt.toISOString().slice(0, 16).replace("T", " ");
+        const model = run.provider ? ` · ${formatExperimentModel(run.provider, run.modelId)}` : "";
+        const live = run.status === "running" || run.status === "finishing" ? " ← active" : "";
+        return `\`${run.id}\` — ${run.status}, ${run._count.findings} findings, epoch ${run.epoch}${model} · ${started}${live}`;
+      });
+      await postExperimentReply([
+        `**/experiment list** — ${runs.length} run${runs.length === 1 ? "" : "s"} in this thread`,
+        "",
+        ...rows,
+        "",
+        "Pull any one with `/experiment findings <id>`.",
+      ].join("\n"));
+      return;
+    }
+
     if (experimentCommand.sub === "findings") {
       const run = experimentCommand.id
         ? await experimentRepository.findById(experimentCommand.id)
@@ -1469,7 +1459,10 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         await postExperimentReply("Not your experiment.");
         return;
       }
-      const findings = await experimentRepository.listFindings(run.id);
+      const [findings, reviews] = await Promise.all([
+        experimentRepository.listFindings(run.id),
+        experimentRepository.listReviews(run.id),
+      ]);
       const recentRuns = await experimentRepository.listRecentByConversationWithFindingCounts(payload.conversationId);
       const counts = experimentCounts(findings);
       const summaryLines = [
@@ -1486,7 +1479,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         ).join(" · ")}`);
       }
       const summary = summaryLines.join("\n");
-      const markdown = capExperimentFindingsMarkdown(buildFindingsMarkdown(run, findings));
+      const markdown = capExperimentFindingsMarkdown(buildFindingsMarkdown(run, findings, reviews));
       const filename = experimentFindingsFilename(run.agentSlug);
       try {
         await postGeneratedMarkdownFile({
