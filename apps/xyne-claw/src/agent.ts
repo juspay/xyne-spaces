@@ -17,6 +17,7 @@ import { createScopedToolMap } from "./scoped-tools.js";
 import { metric } from "./metrics.js";
 import { compactionExtension } from "./compaction-extension.js";
 import { takeCitations, takeDebug } from "./citations.js";
+import { matchTrigger, formatSkillInjection, formatCombinedInjection, type SkillTrigger } from "./skill-trigger-dispatcher.js";
 import { applyAutoCitations } from "./auto-citations.js";
 import { extractSessionClfTokens } from "./citation-sanitizer.js";
 import { getSandboxSession } from "xyne-claw-shared";
@@ -1296,7 +1297,7 @@ export interface RunTaskOptions {
   images?: ImageContent[] | undefined;
   fileAttachments?: FileAttachmentContent[] | undefined;
   skills?: { slug?: string; name: string; description?: string; content: string; files?: { relativePath: string; content: string; contentType?: string | null }[] }[] | undefined;
-  skillTriggers?: import("./subagent-tools.js").SkillTrigger[] | undefined;
+  skillTriggers?: SkillTrigger[] | undefined;
   promptInjections?: PromptInjection[] | undefined;
   /** Task-command contract (routes/run.ts parseTaskCommand): the run may not
    *  finish until this tool has run — enforced by a post-loop nudge pass. */
@@ -1562,6 +1563,9 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   }
 
   // Build skill trigger + prompt injection extensions if configured
+  // Collect before-triggers at tool_execution_start and flush them on the next context event.
+  const pendingBeforeSkills = new Map<string, SkillTrigger>();
+
   const extensions: import("@earendil-works/pi-coding-agent").ExtensionFactory[] = [compactionExtension];
 
   if (promptInjections && promptInjections.length > 0) {
@@ -1585,21 +1589,35 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   if (skillTriggers && skillTriggers.length > 0) {
     const triggers = skillTriggers;
     extensions.push((pi) => {
+      // BEFORE trigger: inject skill content into the next context so the LLM
+      // sees it before reasoning about the tool's result.
+      pi.on("context", (event) => {
+        if (pendingBeforeSkills.size === 0) return undefined;
+        const pending = Array.from(pendingBeforeSkills.values());
+        pendingBeforeSkills.clear();
+        const body = formatCombinedInjection(pending);
+        log.info(`[agent] Skill trigger: ${pending.length} before-trigger(s) applied for next turn`);
+        return {
+          messages: [
+            ...event.messages,
+            {
+              role: "user" as const,
+              content: [{ type: "text" as const, text: `[Skill Trigger Injection]\n\n${body}` }],
+              timestamp: Date.now(),
+            },
+          ],
+        };
+      });
+
+      // AFTER trigger: append skill content to the tool result text.
       pi.on("tool_result", (event) => {
-        const afterTriggers = triggers.filter((t) => t.when === "after" && event.toolName.endsWith(t.toolName));
+        const afterTriggers = triggers.filter((t) => t.when === "after" && matchTrigger(event.toolName, t));
         for (const trigger of afterTriggers) {
           log.info(`[agent] Skill trigger: ${trigger.skillSlug} fired after ${event.toolName}`);
-          const injectedContent = [
-            `\n\n---`,
-            `**[Skill Injected: ${trigger.skillSlug}]** _(configured by user in agent settings)_`,
-            trigger.prompt ? `\nInstruction: ${trigger.prompt}` : "",
-            `\n${trigger.skillContent}`,
-            `---`,
-          ].join("\n");
           return {
             content: [
               ...event.content,
-              { type: "text" as const, text: injectedContent },
+              { type: "text" as const, text: formatSkillInjection(trigger) },
             ],
           };
         }
@@ -1805,6 +1823,23 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     : allCustomTools;
 
   const { session } = await createAgentSession(options);
+
+  // Record before-triggers when a tool starts executing so they can be flushed
+  // into the next context event before the LLM reasons about the result.
+  if (skillTriggers && skillTriggers.length > 0) {
+    const triggers = skillTriggers;
+    session.subscribe((event) => {
+      if (event.type === "tool_execution_start") {
+        for (const trigger of triggers) {
+          if (trigger.when === "before" && matchTrigger(event.toolName, trigger)) {
+            const key = `${event.toolCallId}:${trigger.skillSlug}`;
+            pendingBeforeSkills.set(key, trigger);
+            log.info(`[agent] Skill trigger: ${trigger.skillSlug} queued before ${event.toolName}`);
+          }
+        }
+      }
+    });
+  }
 
   if (fastMode && fastToolController && fastCatalogNameSet.size > 0) {
     const activeSet = new Set(restoredFastActiveToolSet);
