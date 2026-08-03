@@ -35,8 +35,8 @@ export function visibleAgentWhereForRunningUser(
   return isAdmin
     ? {}
     : runningUserId
-      ? { OR: [{ scope: "global" }, { ownerUserId: runningUserId }, { shares: { some: { userId: runningUserId } } }] }
-      : { scope: "global" };
+      ? { OR: [{ scope: "global" }, { scope: "platform" }, { ownerUserId: runningUserId }, { shares: { some: { userId: runningUserId } } }] }
+      : { OR: [{ scope: "global" }, { scope: "platform" }] };
 }
 
 /** Wire shape forwarded to xyne-claw (matches CallableAgentSpec there). */
@@ -263,6 +263,19 @@ export async function resolveOrchestratorCallableAgentsForRun(
     orderBy: { name: "asc" },
   });
 
+  // Platform agents are visible across all orgs — include them as callable
+  // callees for orchestrators. They belong to a different org, so the
+  // orgId filter above excludes them.
+  const platformCallees = await prisma.agent.findMany({
+    where: {
+      enabled: true,
+      scope: "platform",
+      NOT: { id: callerAgentId },
+    },
+    select: { id: true, slug: true, name: true, description: true },
+    orderBy: { name: "asc" },
+  });
+
   const grants = await prisma.agentDelegationGrant.findMany({
     where: { callerAgentId, enabled: true, status: "approved" },
     select: { calleeAgentId: true, identityMode: true },
@@ -286,6 +299,9 @@ export async function resolveOrchestratorCallableAgentsForRun(
 
   const bySlug = new Map<string, CallableAgentLightSpec>();
   for (const callee of globalCallees) {
+    bySlug.set(callee.slug, toLightweightCallableAgentSpec(callee, "user"));
+  }
+  for (const callee of platformCallees) {
     bySlug.set(callee.slug, toLightweightCallableAgentSpec(callee, "user"));
   }
   for (const callee of grantedCallees) {
@@ -314,24 +330,31 @@ export async function resolveCallableAgentSpecForOrchestratorCall(
   if (!caller || !caller.enabled) return { error: "Caller agent not found or disabled", status: 404 };
   if (caller.delegationTier !== "orchestrator") return { error: "Caller is not orchestrator-tier", status: 403 };
 
-  const callee = await prisma.agent.findUnique({
+  let callee = await prisma.agent.findUnique({
     where: { orgId_slug: { orgId: caller.orgId, slug: args.calleeSlug } },
     include: { skills: { include: { skill: { include: { files: true } } } } },
   });
+  if (!callee) {
+    // Platform fallback: platform agents belong to a different org.
+    callee = await prisma.agent.findFirst({
+      where: { slug: args.calleeSlug, scope: "platform" },
+      include: { skills: { include: { skill: { include: { files: true } } } } },
+    });
+  }
   if (!callee || !callee.enabled) return { error: "Callee agent not found or disabled", status: 404 };
   if (callee.id === caller.id) return { error: "An agent cannot delegate to itself", status: 403 };
 
   const visible = await prisma.agent.findFirst({
     where: {
       id: callee.id,
-      orgId: caller.orgId,
+      OR: [{ orgId: caller.orgId }, { scope: "platform" }],
       ...visibleAgentWhereForRunningUser(args.userId, admin),
     },
     select: { id: true },
   });
   if (!visible) return { error: "Callee is not visible to the running user", status: 403 };
 
-  if (callee.scope === "global") {
+  if (callee.scope === "global" || callee.scope === "platform") {
     return { spec: await hydrateCallableAgentSpec(prisma, callee, "user", args.userId), callerOrgId: caller.orgId };
   }
 

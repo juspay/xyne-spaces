@@ -48,23 +48,34 @@ const INCLUDE_TOOLS_SKILLS = {
 } as const;
 
 export const agentRepository = {
-  findBySlug: (slug: string, orgId?: string | null) => {
+  findBySlug: async (slug: string, orgId?: string | null) => {
     if (!orgId) {
       log.error("[agentRepository.findBySlug] missing orgId; refusing global slug lookup", { slug });
-      return Promise.resolve(null);
+      return null;
     }
-    return prisma.agent.findUnique({
+    const agent = await prisma.agent.findUnique({
       where: { orgId_slug: { orgId, slug } },
+    });
+    if (agent) return agent;
+    // Platform fallback: platform agents are visible across all orgs.
+    return prisma.agent.findFirst({
+      where: { slug, scope: "platform" },
     });
   },
 
-  findBySlugWithRelations: (slug: string, orgId?: string | null) => {
+  findBySlugWithRelations: async (slug: string, orgId?: string | null) => {
     if (!orgId) {
       log.error("[agentRepository.findBySlugWithRelations] missing orgId; refusing global slug lookup", { slug });
-      return Promise.resolve(null);
+      return null;
     }
-    return prisma.agent.findUnique({
+    const agent = await prisma.agent.findUnique({
       where: { orgId_slug: { orgId, slug } },
+      include: { ...INCLUDE_TOOLS_SKILLS, owner: true },
+    });
+    if (agent) return agent;
+    // Platform fallback: platform agents are visible across all orgs.
+    return prisma.agent.findFirst({
+      where: { slug, scope: "platform" },
       include: { ...INCLUDE_TOOLS_SKILLS, owner: true },
     });
   },
@@ -140,7 +151,10 @@ export const agentRepository = {
     // Phase-2: AND the caller's org when provided. Admin-within-org (`?scope=all`
     // + orgId) sees every agent in THAT org; a platform admin with no orgId still
     // sees all orgs (the CLAW_ADMIN cross-org decision stays at the route layer).
-    const where: Prisma.AgentWhereInput = opts.orgId ? { AND: [{ orgId: opts.orgId }, base] } : base;
+    // Platform agents (scope='platform') are OR'd in — they're visible across all orgs.
+    const where: Prisma.AgentWhereInput = opts.orgId
+      ? { OR: [{ AND: [{ orgId: opts.orgId }, base] }, { scope: "platform" }] }
+      : base;
     return prisma.agent.findMany({
       where,
       include: { ...INCLUDE_TOOLS_SKILLS, owner: true },

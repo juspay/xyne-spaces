@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   WarningCircleIcon,
+  InfoIcon,
   ChatCircleIcon,
   PencilSimpleIcon,
   GlobeIcon,
@@ -71,6 +72,16 @@ function ScopeBadge({ agent, userId }: { agent: AgentLight; userId: string }) {
       <span className="text-[12px] font-medium px-[10px] py-[2px] rounded-full bg-xyne-brand/10 text-xyne-brand border border-xyne-brand/20">
         shared
       </span>
+    );
+  }
+  if (agent.scope === "platform") {
+    return (
+      <Badge
+        as="span"
+        label="platform"
+        variant="info"
+        size="sm"
+      />
     );
   }
   if (agent.scope === "global") {
@@ -346,7 +357,8 @@ export function AgentSlideOver({
 
   const isOwner = agent.ownerUserId === userId;
   const isGlobal = agent.scope === "global";
-  const canPublish = isOwner && !isGlobal;
+  const isPlatform = agent.scope === "platform";
+  const canPublish = isOwner && !isGlobal && !isPlatform;
 
   const handlePublish = async () => {
     if (!canPublish || publishing) return;
@@ -545,6 +557,19 @@ export function AgentSlideOver({
             />
             <span className="text-[13px] text-xyne-warning-fg">
               This agent is paused
+            </span>
+          </div>
+        )}
+
+        {/* Platform read-only banner */}
+        {isPlatform && (
+          <div className="flex items-center gap-2 p-2.5 bg-xyne-brand/5 border border-xyne-brand/20 rounded-lg">
+            <InfoIcon
+              size={16}
+              className="text-xyne-brand shrink-0"
+            />
+            <span className="text-[13px] text-xyne-fg-secondary">
+              This is a platform agent — read-only. Duplicate it to your own agent to customize.
             </span>
           </div>
         )}

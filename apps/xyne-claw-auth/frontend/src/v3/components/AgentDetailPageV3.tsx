@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import { InfoIcon } from "@phosphor-icons/react";
 import type { Agent, AgentLight, AgentShare, ScheduledJob } from "../../lib/types";
 import type {
   ClaudeModelInfo,
@@ -984,6 +985,17 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
           cloning={cloning}
           cloneNeedsApproval={!permissions?.canEdit}
         />
+
+        {agent.scope === "platform" && (
+          <div className="flex items-center justify-between gap-3 px-5 py-2.5 bg-xyne-brand/5 border-b border-xyne-brand/20">
+            <div className="flex items-center gap-2">
+              <InfoIcon size={16} className="text-xyne-brand" />
+              <span className="text-[13px] text-xyne-fg-secondary">
+                This is a platform agent — read-only. Duplicate it to create your own editable copy.
+              </span>
+            </div>
+          </div>
+        )}
 
         <div className="flex flex-1 overflow-hidden">
           <AgentDetailLeftColumn
