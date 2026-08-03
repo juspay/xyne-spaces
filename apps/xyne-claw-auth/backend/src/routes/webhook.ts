@@ -2651,7 +2651,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       throw err;
     }
 
-    const body = (await runRes.json()) as { success: boolean; sessionId?: string };
+    const body = (await runRes.json()) as { success: boolean; sessionId?: string; error?: string };
 
     // Re-key the GLOBAL twin slot to the real sessionId (released by
     // /webhook/result); free it immediately if the dispatch didn't produce a run.
@@ -2754,6 +2754,28 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       // the slot) so the conversation isn’t wedged until the busy TTL expires.
       // We hold the token here, so release is owner-checked.
       await drainNextQueued(payload.conversationId, runAgentSlug, slotToken).catch(() => {});
+    }
+
+    // A refused dispatch (agent disabled, no provider, resolution failure)
+    // previously left the thread SILENT — the user mentioned the agent and
+    // nothing happened. Surface the refusal for interactive mentions. Twin
+    // mentions stay silent (background persona; a refusal notice would be
+    // noise), and resultForward callers get the failure via their callback.
+    if (!(body.success && body.sessionId) && eventType !== "USER_MENTIONED" && !resultForwardUrl && payload.conversationId) {
+      const refusal = body.error ?? "the run could not be started";
+      const notice = /disabled/i.test(refusal)
+        ? `🚫 **${agent.slug}** is currently disabled — an admin can re-enable it in the agent dashboard.`
+        : `⚠️ I couldn't start this request: ${refusal}`;
+      await spacesAppFetch("/chat/postMessage", {
+        channelId: payload.channelId,
+        conversationId: payload.conversationId,
+        markdownText: notice,
+        userId: agent.spacesAppUserId,
+        metadata: { contentFormat: "markdown" },
+      }, agent.appToken).catch((err) =>
+        log.warn("Failed to post dispatch-refusal notice", { error: err instanceof Error ? err.message : String(err) }),
+      );
+      log.warn(`Dispatch refused for agent=${agent.slug} conv=${payload.conversationId}: ${refusal}`);
     }
     }; // end dispatchRunForTarget
 
