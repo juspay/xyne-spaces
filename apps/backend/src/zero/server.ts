@@ -316,8 +316,16 @@ export async function handleMutate(request: Request): Promise<unknown> {
     // from authData.workspaceId so the stamp fills workspaceId on every side-effect create (message,
     // conversation, ticketActivity, …). Fire-and-forget is fine — AsyncLocalStorage propagates to the
     // async chain scheduled inside the callback.
+    // Runs as the requesting user so handler ACLs stay in force; the workspace-wide fan-outs
+    // inside elevate themselves via elevateToServiceActor.
     void runWithContext(
-      { userId: authData.sub, workspaceId: authData.workspaceId },
+      {
+        userId: authData.sub,
+        workspaceId: authData.workspaceId,
+        role: authData.role,
+        orgRole: authData.orgRole,
+        memberId: authData.memberId,
+      },
       () => processSideEffectJobs(sideEffectJobs, context),
     );
 
@@ -633,7 +641,13 @@ export async function handleMutateFallback(request: Request): Promise<unknown> {
     // conversation, ticketActivity, …). Fire-and-forget is fine — AsyncLocalStorage propagates to the
     // async chain scheduled inside the callback.
     void runWithContext(
-      { userId: authData.sub, workspaceId: authData.workspaceId },
+      {
+        userId: authData.sub,
+        workspaceId: authData.workspaceId,
+        role: authData.role,
+        orgRole: authData.orgRole,
+        memberId: authData.memberId,
+      },
       () => processSideEffectJobs(sideEffectJobs, { userID: authData.sub, workspaceId: authData.workspaceId, role: authData.role, orgRole: authData.orgRole, memberId: authData.memberId }),
     );
     return { success: true };
