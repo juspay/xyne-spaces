@@ -68,8 +68,19 @@ import type { CommandItem } from '../../ui/Selectors/Selectors.types';
 import { setThreadLastRead } from '../../../machines/stateMachine';
 import { BlockNoteEditor } from '@blocknote/core';
 import { sanitizeHtmlString } from '../../../utils/sanitizer';
+import type { TwinEditSession } from '../TwinReplyDraft/twinReplyDraftApi';
 
 const CHAT_MESSAGE_SENT_EVENT = 'xyne:chat-message-sent';
+
+/** Convert Twin-draft text to safe editor HTML while preserving blank lines. */
+function draftTextToHtml(text: string): string {
+  const escape = (value: string): string =>
+    value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return text
+    .split('\n')
+    .map(line => `<p>${line ? escape(line) : '<br>'}</p>`)
+    .join('');
+}
 
 function dispatchChatMessageSentEvent(channelId: string): void {
   window.dispatchEvent(new CustomEvent(CHAT_MESSAGE_SENT_EVENT, { detail: { channelId } }));
@@ -100,6 +111,14 @@ interface ChatInputProps {
   hasTicket?: boolean;
   isForwardedContent?: boolean;
   threadParticipantIds?: ReadonlySet<string>;
+  /** A dock (e.g. the Twin drafts tray) rendered above the editor inside the
+   *  composer, so the composer's activity indicator floats above the whole unit.
+   *  Forwarded straight to InputBox's dockSlot. */
+  dockSlot?: React.ReactNode;
+  /** When set, the composer is editing a Digital Twin draft: it loads the draft
+   *  text, highlights itself, suppresses draft persistence, and routes Send to
+   *  the twin approve endpoint instead of a plain thread post. */
+  twinEdit?: TwinEditSession | undefined;
 }
 
 const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
@@ -119,6 +138,8 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
       hasTicket = false,
       isForwardedContent = false,
       threadParticipantIds,
+      dockSlot,
+      twinEdit,
     },
     ref,
   ) => {
@@ -405,6 +426,36 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
       return undefined;
     }, [initialContent, messageId, draft]);
 
+    // Drive the composer's content across Twin-edit sessions. On entering (or
+    // switching to) a draft we SNAPSHOT the user's own composer HTML, then load
+    // the draft text; on leaving we restore that snapshot verbatim. Keyed on the
+    // draft id so re-renders while editing never clobber the user's in-progress
+    // edits. Snapshotting (rather than re-reading the debounced channel draft)
+    // preserves the last keystrokes; clearTextOnly (not clearContent) leaves the
+    // user's staged attachments intact — clearContent would delete them.
+    const twinEditDraftIdRef = useRef<string | null>(null);
+    const preTwinEditHtmlRef = useRef<string>('');
+    useEffect(() => {
+      const activeId = twinEdit?.draftId ?? null;
+      // twinEdit.message is consumed only on entry; the guard makes a mid-session
+      // message re-sync a deliberate no-op so it can't overwrite the user's edits.
+      if (activeId === twinEditDraftIdRef.current) return;
+      const box = inputBoxRef.current;
+      if (activeId) {
+        preTwinEditHtmlRef.current = box?.getHtml?.() ?? '';
+        box?.clearTextOnly();
+        if (twinEdit?.message) box?.insertContent(draftTextToHtml(twinEdit.message));
+        box?.focus();
+      } else {
+        // Leaving edit mode: restore the user's own content exactly as it was.
+        box?.clearTextOnly();
+        const restore = preTwinEditHtmlRef.current;
+        if (restore) box?.insertContent(restore);
+        preTwinEditHtmlRef.current = '';
+      }
+      twinEditDraftIdRef.current = activeId;
+    }, [twinEdit?.draftId, twinEdit?.message]);
+
     const { displayName: channelName, avatarUserId } = useChannelDisplayName(
       channel,
       context.userID,
@@ -500,8 +551,10 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
       (html: string, text: string): void => {
         try {
           const processedHtml = processMessageForSending(html, allUsersForMentionResolution);
-          // Do not save drafts while editing a message
-          if (messageId) return;
+          // Do not save drafts while editing a message, or while editing a Twin
+          // draft in the composer (its text isn't the user's own channel draft —
+          // persisting it would clobber the real draft we restore on exit).
+          if (messageId || twinEdit) return;
           // Save or remove draft
           if (text.trim()) {
             saveDraft(lookupId, processedHtml, text);
@@ -512,11 +565,30 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
           // Unable to save draft
         }
       },
-      [lookupId, messageId],
+      [lookupId, messageId, twinEdit],
     );
 
     const handleSendMessage = useCallback(
       (_plainText: string, html: string, files: File[]): void => {
+        // Editing a Twin draft in the composer: Send approves the draft — the
+        // approve endpoint posts to the draft's server-resolved destination (which
+        // may not be this thread) and records the twin's learning feedback, so it
+        // must NOT fall through to a plain thread post. Empty content is a no-op.
+        if (twinEdit) {
+          if (isOffline) {
+            toast.warning("You're offline", {
+              description: 'You can send this reply once you reconnect.',
+            });
+            return;
+          }
+          const edited = _plainText.trim();
+          if (!edited) return;
+          // onApprove owns the outcome: on success it clears the session (which
+          // restores the composer via the effect above); on failure it toasts and
+          // keeps the session so the edit survives — so we must NOT clear here.
+          twinEdit.onApprove(edited);
+          return;
+        }
         if (isOffline) {
           toast.warning("You're offline", {
             description: messageId
@@ -812,6 +884,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
         user?.id,
         context.workspaceId,
         allowThreadBroadcastMentions,
+        twinEdit,
       ],
     );
 
@@ -892,6 +965,10 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
           </div>
         ) : (
           <>
+            <AgentProgressIndicator
+              sessionId={agentProgressConversationId ?? currentSessionId}
+              conversationId={agentProgressConversationId}
+            />
             {showOfflineBanner && (
               <div className='px-3 py-1.5 bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 rounded text-xs text-amber-700 dark:text-amber-300 flex items-center justify-between mx-3 mb-1'>
                 <div className='flex items-center gap-1.5'>
@@ -969,10 +1046,11 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               }
               commandItems={channelCommands}
               onCommandSelect={handleCommandSelect}
-              {...(editorValue !== undefined && { value: editorValue })}
+              {...(!twinEdit && editorValue !== undefined && { value: editorValue })}
               {...(messageId && onCancel && { onCancel: handleCancelEdit })}
               {...(conversationId && { conversationId })}
               className={className}
+              dockSlot={dockSlot}
               features={{
                 richText: true,
                 commands: true,

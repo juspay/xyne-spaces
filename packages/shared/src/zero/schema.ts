@@ -1802,6 +1802,12 @@ export const messageAttachmentTable = table('message_attachments')
   })
   .primaryKey('id');
 
+// @ts-ignore TS1294
+export enum DraftOrigin {
+  user = 'user',
+  twin = 'twin',
+}
+
 export const draftMessageTable = table('draft_messages')
   .columns({
     workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
@@ -1812,6 +1818,8 @@ export const draftMessageTable = table('draft_messages')
     userId: string(),
     content: string(),
     hasAttachment: boolean(),
+    origin: enumeration<DraftOrigin>().optional(),
+    metadata: string().optional(), // twin-only: stringified JSON TwinReplyDraft payload
     createdAt: number(),
     updatedAt: number(),
   })

@@ -9,6 +9,10 @@ export interface InputBoxHandle {
   insertContent: (content: string) => void;
   isSuggestionOpen: () => boolean;
   focus: () => void;
+  /** Current editor HTML — used to snapshot in-progress content before a
+   *  temporary takeover (e.g. editing a Twin draft in place) so it can be
+   *  restored losslessly, including keystrokes not yet flushed to the draft. */
+  getHtml?: () => string;
 }
 
 interface UseDragAndDropAreaRefReturn {

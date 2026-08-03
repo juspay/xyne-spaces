@@ -191,6 +191,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       sendDisabled = false,
       bottomLeftSlot,
       disableDraftUpload = false,
+      dockSlot,
     },
 
     ref,
@@ -1052,6 +1053,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           editor?.commands.insertContent(content);
           editor?.commands.focus();
         },
+        getHtml: (): string => editor?.getHTML() ?? '',
         isSuggestionOpen: (): boolean => {
           if (!editor) return false;
           const state = editor.state;
@@ -1409,6 +1411,12 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             {agentSlot}
           </div>
         </div>
+
+        {/* A detached dock (e.g. the Twin drafts tray) sits above the editor but
+            INSIDE this positioning root, so the activity bar above (which is
+            translated up off this root's top) floats over the whole unit rather
+            than colliding with the dock. */}
+        {dockSlot}
 
         <div
           className={isVoiceRecording ? 'xyne-voice-border-wrap' : undefined}

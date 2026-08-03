@@ -5,6 +5,7 @@ import AvatarGroup from '../../ui/Avatar/AvatarGroup';
 import { formatRelativeTime } from '../../../utils/dateUtils';
 import { ViewNewerRepliesButton } from '../../ui/MessageBubble/ThreadMessageIndicators';
 import { parseRepliesMd } from '@xyne/shared';
+import { useTwinDraftBadge } from '../TwinReplyDraft/TwinDraftBadgeContext';
 
 const ReplyLayoutV2: React.FC<{
   replies: ThreadData;
@@ -30,6 +31,13 @@ const ReplyLayoutV2: React.FC<{
   messageId,
 }) => {
   const { channelId } = useParams<{ channelId: string }>();
+  // A pending Twin draft for THIS thread (from the bulk badge context). Shown as
+  // the "Twin draft" pill even when the thread has no replies yet — the freshest,
+  // highest-value case, which the reply-count guards below would otherwise hide.
+  const twinBadge = useTwinDraftBadge(replies?.conversation?.conversationId);
+  // Surface a pending Twin draft using the SAME "1 draft" / "and 1 draft"
+  // treatment as a user's own draft — no separate pill in the channel list.
+  const showTwinDraft = !isThreadOpen && !!twinBadge;
 
   // For showInChannel messages, show "View newer replies" only if there are newer replies in the parent thread
   // parentReplyCount is the current reply count in the original thread
@@ -50,7 +58,15 @@ const ReplyLayoutV2: React.FC<{
   if (showInChannel && !isCallMessage) return null;
 
   const hasDraft = draft || hasDraftAttachments;
-  if ((!replies || replies.replyCount === 0) && (!hasDraft || isThreadOpen)) return null;
+  if ((!replies || replies.replyCount === 0) && (!hasDraft || isThreadOpen) && !showTwinDraft)
+    return null;
+
+  // A thread can carry BOTH the user's own composer draft AND a pending Twin
+  // draft — count each so the indicator reads "1 draft" or "2 drafts". Same
+  // neutral draft UI for both (no separate Twin styling in the channel list).
+  const zeroReplyDraftCount = (hasDraft ? 1 : 0) + (showTwinDraft ? 1 : 0);
+  const inlineDraftCount = (draft && !isThreadOpen ? 1 : 0) + (showTwinDraft ? 1 : 0);
+  const draftWord = (n: number): string => `${n} draft${n > 1 ? 's' : ''}`;
 
   const repliesData = parseRepliesMd(replies.conversation?.replies_md);
   const repliers = repliesData.repliers;
@@ -76,14 +92,16 @@ const ReplyLayoutV2: React.FC<{
         {/* Replier Avatars */}
         {repliers.length > 0 && <AvatarGroup userIds={repliers} size='sm' count={3} />}
         {!replies || replies.replyCount === 0 ? (
-          <div className='flex items-center gap-1 font-medium text-primary'>
-            <PencilIcon size={10} />
-            {'1 draft'}
-          </div>
+          zeroReplyDraftCount > 0 ? (
+            <div className='flex items-center gap-1 font-medium text-primary'>
+              <PencilIcon size={10} />
+              {draftWord(zeroReplyDraftCount)}
+            </div>
+          ) : null
         ) : (
           <span className='font-medium text-foreground'>
-            {replies.replyCount} {replies.replyCount === 1 ? 'reply' : 'replies'}{' '}
-            {draft && !isThreadOpen && ' and 1 draft'}
+            {replies.replyCount} {replies.replyCount === 1 ? 'reply' : 'replies'}
+            {inlineDraftCount > 0 && ` and ${draftWord(inlineDraftCount)}`}
           </span>
         )}
 

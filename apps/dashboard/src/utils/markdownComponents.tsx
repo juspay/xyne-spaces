@@ -6,6 +6,7 @@ import type { Element } from 'hast';
 import type { Components } from 'react-markdown';
 import { MermaidBlock } from '../components/Markdown/MermaidBlock';
 import { FilesystemBlock } from '../components/Markdown/FilesystemBlock';
+import { D2Block } from '../components/Markdown/D2Block';
 import { ClawCitationGroup } from '../components/Chat/XyneAISidebar/components/ClawCitationGroup';
 import { ThreadCitationChip } from '../components/ui/MessageBubble/ThreadCitationChip';
 import { parseCiteGroupHref } from '../components/ui/TipTapExtensions/CitationMark';
@@ -56,13 +57,31 @@ const CodeBlock = ({
     );
   }
 
-  // ── Filesystem interactive graph ──
-  if (language === 'filesystem' || language === 'd2') {
+  // ── Filesystem interactive graph (nested JSON tree) ──
+  if (language === 'filesystem') {
     return (
       <FilesystemBlock
         jsonSource={codeString}
         messageId={(props as { messageId: string }).messageId}
       />
+    );
+  }
+
+  // ── D2 fence ──
+  // The `d2` fence historically aliased the filesystem JSON renderer, but agents
+  // (esp. ask-ai v2) legitimately emit real D2-language source here. Route by
+  // content: a JSON object → the drillable FilesystemBlock (back-compat); any
+  // other D2 source → the real D2 (@terrastruct/d2 WASM) renderer. The sniff is
+  // on the first non-space char so it stays stable across streaming deltas.
+  if (language === 'd2') {
+    const looksLikeFilesystemJson = codeString.trimStart().startsWith('{');
+    return looksLikeFilesystemJson ? (
+      <FilesystemBlock
+        jsonSource={codeString}
+        messageId={(props as { messageId: string }).messageId}
+      />
+    ) : (
+      <D2Block source={codeString} messageId={(props as { messageId: string }).messageId} />
     );
   }
 
