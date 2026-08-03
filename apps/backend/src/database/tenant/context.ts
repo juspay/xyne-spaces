@@ -57,6 +57,9 @@ type CtxSource = { kind: 'explicit'; ctx: TenantCtx } | { kind: 'request'; req: 
 
 const storage = new AsyncLocalStorage<CtxSource>();
 
+/** Marks a request whose route declared itself workspace-scoped (see `workspaceScopedRoute`). */
+const WORKSPACE_SCOPED = Symbol('workspaceScoped');
+
 function resolve(source: CtxSource | undefined): TenantCtx | null {
   if (!source) return null;
   if (source.kind === 'explicit') return source.ctx;
@@ -81,7 +84,9 @@ function resolve(source: CtxSource | undefined): TenantCtx | null {
  * as one of its members, so a per-user predicate would match nothing.
  */
 export function isRequestContext(): boolean {
-  return storage.getStore()?.kind === 'request';
+  const source = storage.getStore();
+  if (!source || source.kind !== 'request') return false;
+  return !(source.req as unknown as Record<symbol, boolean>)[WORKSPACE_SCOPED];
 }
 
 /** Read the current tenant context, or null when none is open / resolvable. */
@@ -157,4 +162,19 @@ export function isSystemWorkspaceId(workspaceId: string | null | undefined): boo
  */
 export function tenantScopeMiddleware(req: Request, _res: Response, next: NextFunction): void {
   storage.run({ kind: 'request', req }, () => next());
+}
+
+/**
+ * Declare a route as acting FOR the workspace rather than for the caller — admin sweeps,
+ * backfills and migrations. Mount it after the route's auth/authorization middleware: the
+ * caller is still authenticated and authorized as themselves, but the work that follows is
+ * scoped to the workspace instead of to their own rows.
+ *
+ * Applies to everything downstream, including work the handler leaves running after it has
+ * responded. Without a resolvable principal it defers to the request scope, so a missing
+ * context can only ever narrow, never widen.
+ */
+export function workspaceScopedRoute(req: Request, _res: Response, next: NextFunction): void {
+  (req as unknown as Record<symbol, boolean>)[WORKSPACE_SCOPED] = true;
+  next();
 }

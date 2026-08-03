@@ -1,7 +1,6 @@
 import { BaseSideEffectHandler } from '../base-handler';
 import type { FormEntityValuePreviousValue, SideEffectJobConfig } from '../types';
 import { db } from '@/database/client';
-import { withWorkspaceScope } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import { emitEventToWorkspaceApps } from '@/apps/core/eventSubscriptionUtils';
 import { AppEventType, AdditionalFormFieldUpdatedPayload, BaseAppEvent } from '@/apps/types';
@@ -112,13 +111,10 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
       });
       if (!ticket?.conversationId) return;
 
-      // Re-feeds the whole thread regardless of who can see it, so it runs above the caller's own scope.
-      const emails = await withWorkspaceScope(() =>
-        db.email.findMany({
-          where: { conversationId: ticket.conversationId },
-          select: { id: true },
-        }),
-      );
+      const emails = await db.email.findMany({
+        where: { conversationId: ticket.conversationId },
+        select: { id: true },
+      });
       await Promise.all(
         emails.map(email => vespaQueue.addJob({
           schema: mailSchema,
@@ -393,30 +389,28 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
         ? 'added'
         : 'removed';
 
-    await withWorkspaceScope(() =>
-      db.ticketActivity.create({
-        data: {
-          ticketId,
-          updatedBy: this.ctx.userID,
-          workspaceId: this.ctx.workspaceId,
-          activityType: ActivityType.METADATA,
-          value: {
-            field: 'stageFormFile',
-            fieldName,
-            action,
-            ...(stage?.name ? { stageName: stage.name } : {}),
-            ...(previousAttachmentId ? { oldValue: previousAttachmentId } : {}),
-            ...(nextAttachmentId ? { newValue: nextAttachmentId } : {}),
-            ...(previousAttachment?.originalFilename
-              ? { oldFilename: previousAttachment.originalFilename }
-              : {}),
-            ...(nextAttachment?.originalFilename
-              ? { newFilename: nextAttachment.originalFilename }
-              : {}),
-          },
+    await db.ticketActivity.create({
+      data: {
+        ticketId,
+        updatedBy: this.ctx.userID,
+        workspaceId: this.ctx.workspaceId,
+        activityType: ActivityType.METADATA,
+        value: {
+          field: 'stageFormFile',
+          fieldName,
+          action,
+          ...(stage?.name ? { stageName: stage.name } : {}),
+          ...(previousAttachmentId ? { oldValue: previousAttachmentId } : {}),
+          ...(nextAttachmentId ? { newValue: nextAttachmentId } : {}),
+          ...(previousAttachment?.originalFilename
+            ? { oldFilename: previousAttachment.originalFilename }
+            : {}),
+          ...(nextAttachment?.originalFilename
+            ? { newFilename: nextAttachment.originalFilename }
+            : {}),
         },
-      }),
-    );
+      },
+    });
 
     if (previousAttachmentId && previousAttachmentId !== nextAttachmentId) {
       await db.messageAttachment.delete({ where: { id: previousAttachmentId } });
