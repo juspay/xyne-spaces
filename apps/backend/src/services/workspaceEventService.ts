@@ -8,6 +8,7 @@
 
 import Redis from 'ioredis';
 import { logger } from '@/utils/logger';
+import { createRedisClient } from './redisFactory';
 
 // File tree node structure (matches frontend FileTreeNode)
 export interface FileTreeNode {
@@ -94,29 +95,9 @@ class WorkspaceEventService {
 
   private initializeRedis(): void {
     try {
-      const config = {
-        host: process.env.REDIS_HOST || 'localhost',
-        port: parseInt(process.env.REDIS_PORT || '6379', 10),
-        maxRetriesPerRequest: 3,
-        lazyConnect: true,
-        ...(process.env.REDIS_PASSWORD && { password: process.env.REDIS_PASSWORD }),
-        ...(process.env.REDIS_TLS === 'true' && {
-          tls: { rejectUnauthorized: false }
-        })
-      };
-
-      this.redis = new Redis(config);
-      this.publisher = new Redis(config);
-      this.subscriber = new Redis(config);
-
-      this.redis.on('connect', () => {
-        logger.info('📁 [WORKSPACE-REDIS] Redis connected');
-      });
-
-      this.redis.on('error', (error) => {
-        logger.error('❌ [WORKSPACE-REDIS] Redis error:', error);
-      });
-
+      this.redis = createRedisClient('workspace');
+      this.publisher = createRedisClient('workspace-publisher');
+      this.subscriber = createRedisClient('workspace-subscriber');
     } catch (error) {
       logger.error('Failed to initialize workspace Redis:', error);
     }

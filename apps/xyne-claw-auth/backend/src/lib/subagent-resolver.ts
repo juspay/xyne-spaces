@@ -12,7 +12,8 @@
  * gets sent to xyne-claw as part of the run payload.
  */
 
-import type { PrismaClient, SubagentDefinition, Skill, SkillFile } from "@prisma/client";
+import type { SubagentDefinition, Skill, SkillFile } from "@prisma/client";
+import type { AppPrismaClient } from "../db.js";
 import { SUBAGENT_DEFINITIONS, type SubagentDefinition as BuiltinDef } from "xyne-claw-shared";
 
 import { createLogger } from "../logger.js";
@@ -183,7 +184,7 @@ function validateToolsConfig(raw: unknown): SubagentToolsConfig {
   return out;
 }
 
-async function validateSkillIds(prisma: PrismaClient, raw: unknown): Promise<string[]> {
+async function validateSkillIds(prisma: AppPrismaClient, raw: unknown): Promise<string[]> {
   if (raw === undefined || raw === null) return [];
   if (!Array.isArray(raw)) throw new ValidationError("skillIds", "must be an array of skill IDs");
   const ids = raw.map((x, i) => {
@@ -232,7 +233,7 @@ function validateMcpInstanceMap(raw: unknown): Record<string, string> {
 }
 
 export async function validateSubagentInput(
-  prisma: PrismaClient,
+  prisma: AppPrismaClient,
   input: SubagentInput,
   options: { isCreate: boolean; orgId?: string | null },
 ): Promise<ValidatedSubagentInput> {
@@ -334,7 +335,7 @@ export interface ResolvedSubagent {
  * crash the /run handler.
  */
 export async function resolveSubagentsForRun(
-  prisma: PrismaClient,
+  prisma: AppPrismaClient,
   requestedNames: string[],
   orgId?: string,
 ): Promise<ResolvedSubagent[]> {
@@ -374,7 +375,7 @@ export async function resolveSubagentsForRun(
  * bundled code and don't need to be sent.
  */
 export async function resolveCustomSubagentsForRun(
-  prisma: PrismaClient,
+  prisma: AppPrismaClient,
   requestedNames: string[],
   orgId?: string,
 ): Promise<CustomSubagentSpec[]> {

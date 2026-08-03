@@ -38,7 +38,6 @@ class WebSocketService {
   private socket: Socket | null = null;
   private isConnected = false;
   private reconnectAttempts = 0;
-  private maxReconnectAttempts = 5;
   private connectionStartTime: number | null = null;
   private reconnectionStartTime: number | null = null;
   private connectionPromise: Promise<void> | null = null;
@@ -78,6 +77,18 @@ class WebSocketService {
         path: '/api/socket.io/',
         withCredentials: true, // Important: send cookies with socket connection
         transports: ['websocket', 'polling'],
+        reconnection: true,
+        reconnectionAttempts: Infinity,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 30000,
+        randomizationFactor: 0.5,
+      });
+
+      this.socket.io.on('reconnect_attempt', (attempt: number) => {
+        this.reconnectAttempts = attempt;
+        safeRecordMetric(() => {
+          socketEventsTotal.add(1, { event: 'retry', reason: `attempt_${attempt}` });
+        });
       });
 
       this.socket.on('connect', () => {
@@ -165,13 +176,9 @@ class WebSocketService {
           });
         });
 
-        // Auto-reconnect on unexpected disconnection
         if (reason === 'io server disconnect') {
-          // Server initiated disconnect, don't reconnect
-          return;
+          this.socket?.connect();
         }
-
-        this.attemptReconnect();
       });
 
       this.socket.on('connect_error', error => {
@@ -229,32 +236,6 @@ class WebSocketService {
     return this.connectionPromise;
   }
 
-  private attemptReconnect(): void {
-    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      return;
-    }
-
-    this.reconnectAttempts++;
-    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000); // Exponential backoff
-
-    safeRecordMetric(() => {
-      socketEventsTotal.add(1, {
-        event: 'retry',
-        reason: `attempt_${this.reconnectAttempts}`,
-      });
-    });
-
-    setTimeout(() => {
-      if (!this.isConnected && this.socket) {
-        // Force a fresh connection by disconnecting first
-        this.socket.disconnect();
-
-        // Reconnect (this will trigger our connect event handler with rejoin logic)
-        this.socket.connect();
-      }
-    }, delay);
-  }
-
   disconnect(): void {
     if (this.socket) {
       safeRecordMetric(() => {
@@ -276,7 +257,7 @@ class WebSocketService {
   }
 
   reconnect(): void {
-    void this.attemptReconnect();
+    this.forceReconnect();
   }
 
   forceReconnect(): void {
