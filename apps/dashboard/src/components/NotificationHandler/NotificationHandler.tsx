@@ -495,9 +495,11 @@ export const NotificationHandler: React.FC = () => {
     if (!isElectron || !meetingDetector) return;
     // Sync stored preference to main process on startup
     meetingDetector.setEnabled(localStorage.getItem(MEETING_DETECTION_ENABLED_KEY) !== 'false');
-    return meetingDetector.onStartRecordingFromMeeting(() => {
+    const cleanup = meetingDetector.onStartRecordingFromMeeting(() => {
       sendRecordingEvent({ type: 'requestAutoStart' });
     });
+    window.electronAPI?.ipcSend?.('recording:renderer-ready');
+    return cleanup;
   }, [isElectron]);
 
   // Handle stop signal from the floating recording pill's Stop button
@@ -509,18 +511,23 @@ export const NotificationHandler: React.FC = () => {
     });
   }, [isElectron]);
 
-  // Hide the floating pill when recording transitions from active to inactive
-  // (user stopped it manually in the recordings UI, not just via the pill Stop button)
   const recordingStatus = useRecordingStore(ctx => ctx.status);
-  const wasRecordingActiveRef = useRef(false);
+  const recordingStartTime = useRecordingStore(ctx => ctx.startTime);
+  const wasRecordingActiveRef = useRef<boolean | null>(null);
   useEffect(() => {
     if (!isElectron) return;
     const isActive = recordingStatus === 'recording' || recordingStatus === 'paused';
-    if (wasRecordingActiveRef.current && !isActive) {
-      window.electronAPI?.ipcSend?.('recording-pill:recording-stopped', true);
+    if (isActive !== wasRecordingActiveRef.current) {
+      window.electronAPI?.ipcSend?.('recording:state-changed', {
+        active: isActive,
+        startTime: recordingStartTime ?? undefined,
+      });
+      if (!isActive) {
+        window.electronAPI?.ipcSend?.('recording-pill:recording-stopped', true);
+      }
     }
     wasRecordingActiveRef.current = isActive;
-  }, [isElectron, recordingStatus]);
+  }, [isElectron, recordingStatus, recordingStartTime]);
 
   const handleNotificationRef = useRef(handleNotification);
   const notificationReceivedListenerRef = useRef((n: NotificationData): void =>

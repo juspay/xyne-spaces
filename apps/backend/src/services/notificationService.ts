@@ -1425,6 +1425,59 @@ class NotificationService {
     return { deliveredUserIds };
   }
 
+  async createRecordingSharedNotifications(
+    recipientUserIds: string[],
+    callId: string,
+    recordingTitle: string,
+    actorId: string,
+    actorName: string,
+    actorAction: 'recording_shared' | 'recording_access_revoked',
+  ): Promise<{ deliveredUserIds: string[] }> {
+    const recipientIds = recipientUserIds.filter(id => id !== actorId);
+
+    if (recipientIds.length === 0) {
+      return { deliveredUserIds: [] };
+    }
+
+    getNotificationJobsExpected().add(recipientIds.length, {
+      platform: 'desktop',
+      message_type: 'recording',
+    });
+
+    const isRevoked = actorAction === 'recording_access_revoked';
+    const title = isRevoked
+      ? `${actorName} removed your access to a recording`
+      : `${actorName} shared a recording with you`;
+    const message = isRevoked
+      ? `${actorName} removed your access to "${recordingTitle}"`
+      : `${actorName} shared "${recordingTitle}" with you`;
+
+    const results = await Promise.allSettled(
+      recipientIds.map(async userId => {
+        await this.createNotification(userId, {
+          title,
+          message,
+          type: 'RECORDING_SHARED' as NotificationType,
+          relatedEntityType: 'call',
+          relatedEntityId: callId,
+          metadata: {
+            callId,
+            actorId,
+            actorName,
+            actorAction,
+          },
+        });
+        return userId;
+      }),
+    );
+
+    const deliveredUserIds = results
+      .filter((result): result is PromiseFulfilledResult<string> => result.status === 'fulfilled')
+      .map(result => result.value);
+
+    return { deliveredUserIds };
+  }
+
   async createThreadReplyNotifications(
     userIds: string[],
     replyMessageId: string,

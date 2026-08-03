@@ -137,8 +137,13 @@ export interface ElectronAPI {
   recordingPill?: {
     onShow: (callback: (startTime: number) => void) => () => void;
     onHide: (callback: () => void) => () => void;
+    onThemeChanged: (callback: (theme: 'light' | 'dark') => void) => () => void;
+    onMinimizedChanged: (callback: (minimized: boolean) => void) => () => void;
     stopRecording: () => void;
-    cancelRecording: () => void;
+    openApp: () => void;
+    setIgnoreMouse: (ignore: boolean) => void;
+    dragStart: () => void;
+    dragEnd: () => void;
   };
   clawOverlay?: {
     setIgnoreMouse: (ignore: boolean) => void;

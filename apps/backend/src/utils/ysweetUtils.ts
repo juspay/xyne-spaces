@@ -11,6 +11,7 @@ import { BlockNoteSchema, defaultBlockSpecs, defaultInlineContentSpecs } from '@
 import { mentionServerSpec } from 'blocknote-layout-server-utils';
 import { config } from '@/config/env.js';
 import { logger } from '@/utils/logger.js';
+import { citationServerSpec } from '@/utils/canvasCitationSpec.js';
 import type { BlockNoteBlock } from '@/types/blockNoteTypes.js';
 
 function createServerSchema() {
@@ -19,6 +20,9 @@ function createServerSchema() {
     inlineContentSpecs: {
       ...defaultInlineContentSpecs,
       mention: mentionServerSpec,
+      // Register "citation" so blocksToYDoc/blocksToYXmlFragment preserve the
+      // call-summary citation chips into Y-Sweet instead of silently dropping them.
+      citation: citationServerSpec,
     },
   });
 }

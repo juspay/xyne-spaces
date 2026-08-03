@@ -17,6 +17,7 @@ import {
   setManualTags,
   getCategoriesCatalog,
   getUniqueTagValues,
+  getTagsByIds,
   getConfig,
   listConfigs,
   createConfig,
@@ -30,6 +31,7 @@ const deskCtrl = new DeskTagsConfigController();
 export const tagRoutes = Router();
 
 tagRoutes.get('/unique-values', authMiddleware.authenticate, getUniqueTagValues);
+tagRoutes.get('/by-ids', authMiddleware.authenticate, getTagsByIds);
 tagRoutes.get('/', authMiddleware.authenticate, listTags);
 tagRoutes.post('/', authMiddleware.authenticate, validateZod(CreateTagBodySchema), createTag);
 tagRoutes.put('/', authMiddleware.authenticate, validateZod(SetManualTagsBodySchema), setManualTags);
