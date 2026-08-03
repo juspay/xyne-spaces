@@ -107,8 +107,7 @@ export class DeskMetricsBackfillController {
             b."createdAt",
             'TICKET_CREATED',
             b."channelId",
-            jsonb_build_object('field', 'ticketCreated', 'priority', b."priority"::text, 'stageName', b."stageName", 'statusV2', b."statusV2"::text),
-            b."workspaceId"
+            jsonb_build_object('field', 'ticketCreated', 'priority', b."priority"::text, 'stageName', b."stageName", 'statusV2', b."statusV2"::text)
           FROM batch b
         `;
 
