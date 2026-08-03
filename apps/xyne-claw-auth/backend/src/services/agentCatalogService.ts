@@ -21,13 +21,15 @@ export async function buildAgentCatalog(userId: string, orgId: string | undefine
   }
   const agents = await prisma.agent.findMany({
     where: {
-      orgId,
       enabled: true,
       slug: { not: CLAW_SLUG },
       OR: [
-        { scope: "global" },
-        { ownerUserId: userId },
-        { shares: { some: { userId } } },
+        { AND: [{ orgId }, { OR: [
+          { scope: "global" },
+          { ownerUserId: userId },
+          { shares: { some: { userId } } },
+        ] }] },
+        { scope: "platform" },
       ],
     },
     select: {
@@ -63,7 +65,7 @@ export async function buildAgentCatalog(userId: string, orgId: string | undefine
   ];
 
   for (const agent of agents) {
-    const visibility = agent.scope === "global" ? "global" : "personal";
+    const visibility = agent.scope === "platform" ? "platform" : agent.scope === "global" ? "global" : "personal";
     const defaultLabel = agent.isDefault ? " · default" : "";
 
     lines.push(`### ${agent.slug} — ${agent.name} (${visibility}${defaultLabel})`);

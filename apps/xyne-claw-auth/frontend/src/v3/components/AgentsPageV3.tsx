@@ -113,6 +113,9 @@ function getScopeBadgeProps(agent: AgentLight, userId: string): ScopeBadgeResult
   if (userShare) {
     return { type: "brand", label: userShare.role };
   }
+  if (agent.scope === "platform") {
+    return { type: "badge", label: "platform", variant: "info" };
+  }
   if (agent.scope === "global") {
     return { type: "badge", label: "global", variant: "info" };
   }
@@ -621,7 +624,7 @@ export function AgentsPageV3({ userId, isAdmin = false }: AgentsPageV3Props) {
         a.description.toLowerCase().includes(q);
       if (!matchesSearch) return false;
       if (validScope === "mine") return a.ownerUserId === userId;
-      if (validScope === "global") return a.scope === "global";
+      if (validScope === "global") return a.scope === "global" || a.scope === "platform";
       return true;
     });
   }, [agents, searchQuery, validScope, userId]);

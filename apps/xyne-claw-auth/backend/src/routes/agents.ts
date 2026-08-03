@@ -497,6 +497,13 @@ router.post("/", async (req: Request, res: Response) => {
     // Determine scope: only admins can create global agents
     const requesterId = getRequesterId(req);
     const admin = requesterId ? await isClawAdmin(requesterId) : false;
+
+    // Platform scope can only be set via seed script, never via the API.
+    if (scope === "platform") {
+      res.status(403).json({ success: false, error: "Platform agents can only be created via the seed script" });
+      return;
+    }
+
     const effectiveScope = scope === "global" && admin ? "global" : "personal";
 
     // For personal agents, owner is required
@@ -582,6 +589,12 @@ router.put("/:slug", async (req: Request<{ slug: string }>, res: Response) => {
     if (!existing) {
       logAgentScopedMiss(req, "agents/update", req.params.slug, orgId);
       res.status(404).json({ success: false, error: "Agent not found" });
+      return;
+    }
+
+    // Platform agents are read-only — duplicate to edit.
+    if (existing.scope === "platform") {
+      res.status(403).json({ success: false, error: "Platform agents are read-only. Duplicate this agent to edit it." });
       return;
     }
 
@@ -1361,6 +1374,12 @@ router.delete("/:slug", requireAgentOwnerOrAdmin, async (req: Request<{ slug: st
       return;
     }
 
+    // Platform agents are read-only — cannot be deleted.
+    if (agent.scope === "platform") {
+      res.status(403).json({ success: false, error: "Platform agents are read-only and cannot be deleted" });
+      return;
+    }
+
     await agentRepository.delete(req.params.slug, agent.orgId);
 
     await writeAuditLog({
@@ -1638,7 +1657,11 @@ async function notifyOwnerOfCloneRequestInSpaces(args: {
  * Resolve the caller's relationship to an agent: owner (real ownership, not
  * admin-derived), contributor (EDITOR/CONTRIBUTOR share), or admin.
  */
-async function resolveCloneRelation(agent: { id: string; ownerUserId: string | null }, requesterId: string) {
+async function resolveCloneRelation(agent: { id: string; ownerUserId: string | null; scope: string }, requesterId: string) {
+  // Platform agents are cloneable by anyone — no approval flow (no owner to approve).
+  if (agent.scope === "platform") {
+    return { isOwner: false, admin: false, isContributor: false, privileged: true };
+  }
   const isOwner = agent.ownerUserId === requesterId;
   const admin = await isClawAdmin(requesterId);
   let isContributor = false;
@@ -1922,6 +1945,10 @@ router.post("/:slug/promote", requireClawAdmin, async (req: Request<{ slug: stri
       res.status(400).json({ success: false, error: "Agent is already global" });
       return;
     }
+    if (agent.scope === "platform") {
+      res.status(403).json({ success: false, error: "Platform agents are read-only and cannot be promoted" });
+      return;
+    }
 
     const updated = await agentRepository.update(req.params.slug, agent.orgId, { scope: "global", promotedBy: requesterId, promotedAt: new Date() });
 
@@ -1949,6 +1976,10 @@ router.post("/:slug/demote", requireClawAdmin, async (req: Request<{ slug: strin
     if (!agent) {
       logAgentScopedMiss(req, "agents/demote", req.params.slug);
       res.status(404).json({ success: false, error: "Agent not found" });
+      return;
+    }
+    if (agent.scope === "platform") {
+      res.status(403).json({ success: false, error: "Platform agents are read-only and cannot be demoted" });
       return;
     }
     if (agent.scope !== "global") {
@@ -1989,6 +2020,13 @@ router.post("/:slug/shares", requireAgentOwnerContributorOrAdmin, async (req: Re
     const requesterId = getRequesterId(req)!;
     const ctx = (req as Request & { agentContext: import("../middleware/agent-acl.js").AgentContext }).agentContext;
     const agent = ctx.agent;
+
+    // Platform agents cannot be shared.
+    if (agent.scope === "platform") {
+      res.status(403).json({ success: false, error: "Platform agents are read-only and cannot be shared" });
+      return;
+    }
+
     // Contributors can only add new contributors on GLOBAL agents.
     // On personal agents they must be promoted to owner/admin first.
     if (!ctx.isOwner && !ctx.isAdmin && agent.scope !== "global") {
