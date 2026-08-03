@@ -2,7 +2,6 @@ import { Request, Response } from 'express';
 import { TicketReferenceRelation } from '@prisma/client';
 import { ApiResponse } from '@/types/express';
 import { DatabaseClient } from '@/database/client';
-import { withWorkspaceScope } from '@/database/tenant/context';
 import { logger as baseLogger } from '@/utils/logger';
 import { vespaService } from '@/services/vespaSearch';
 import { transformVespaResults } from '@/services/vespaSearch/resultTransform';
@@ -354,8 +353,7 @@ export class TicketDuplicateBackfillController {
 
               // Sweep write: the reference is attributed to the ticket's own creator, so it
               // runs above the operator's own row scope.
-              const result = await withWorkspaceScope(() =>
-                prisma.ticketReferenceMapping.createMany({
+              const result = await prisma.ticketReferenceMapping.createMany({
                   data: [
                     {
                       sourceTicketId: ticket.id,
@@ -366,8 +364,7 @@ export class TicketDuplicateBackfillController {
                     },
                   ],
                   skipDuplicates: true,
-                }),
-              );
+                });
               stats.referencesCreated += result.count;
             }
           } catch (error) {

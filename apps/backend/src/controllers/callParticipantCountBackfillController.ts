@@ -1,6 +1,5 @@
 import { Request, Response } from 'express';
 import { db } from '@/database/client';
-import { withWorkspaceScope } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import { ApiResponse } from '@/types/express';
 import { Prisma } from '@prisma/client';
@@ -115,122 +114,121 @@ export class CallParticipantCountBackfillController {
   }
 
   private static async runBackfill(options: BackfillOptions): Promise<BackfillSummary> {
-    return await withWorkspaceScope(async () => {
-      const summary: BackfillSummary = { processed: 0, updated: 0, skipped: 0, errors: 0 };
-      let cursor: string | null = null;
-      let batchNumber = 0;
-      const updatedAtFilter: Prisma.DateTimeFilter = {};
-      if (options.fromTimestamp) updatedAtFilter.gte = options.fromTimestamp;
-      if (options.toTimestamp) updatedAtFilter.lte = options.toTimestamp;
-      const where: Prisma.CallWhereInput = Object.keys(updatedAtFilter).length > 0
-        ? { updatedAt: updatedAtFilter }
-        : {};
+    const summary: BackfillSummary = { processed: 0, updated: 0, skipped: 0, errors: 0 };
+    let cursor: string | null = null;
+    let batchNumber = 0;
+    const updatedAtFilter: Prisma.DateTimeFilter = {};
+    if (options.fromTimestamp) updatedAtFilter.gte = options.fromTimestamp;
+    if (options.toTimestamp) updatedAtFilter.lte = options.toTimestamp;
+    const where: Prisma.CallWhereInput = Object.keys(updatedAtFilter).length > 0
+      ? { updatedAt: updatedAtFilter }
+      : {};
 
-      do {
-        batchNumber += 1;
-        const calls: CallParticipantCountRow[] = await db.call.findMany({
-          where,
-          select: { id: true, updatedAt: true, participantCount: true, participantPreviewUserIds: true },
-          orderBy: { id: 'asc' },
-          take: options.batchSize,
-          ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-        });
+    do {
+      batchNumber += 1;
+      const calls: CallParticipantCountRow[] = await db.call.findMany({
+        where,
+        select: { id: true, updatedAt: true, participantCount: true, participantPreviewUserIds: true },
+        orderBy: { id: 'asc' },
+        take: options.batchSize,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      });
 
-        if (calls.length === 0) break;
+      if (calls.length === 0) break;
 
-        logger.info(`${TAG} Selected calls for batch #${batchNumber}`, {
-          batchSize: calls.length,
-          updatedAtFilter: {
-            fromTimestamp: options.fromTimestamp?.toISOString() ?? null,
-            toTimestamp: options.toTimestamp?.toISOString() ?? null,
-          },
-          calls: calls.map(call => ({
-            id: call.id,
-            updatedAt: call.updatedAt.toISOString(),
-          })),
-        });
+      logger.info(`${TAG} Selected calls for batch #${batchNumber}`, {
+        batchSize: calls.length,
+        updatedAtFilter: {
+          fromTimestamp: options.fromTimestamp?.toISOString() ?? null,
+          toTimestamp: options.toTimestamp?.toISOString() ?? null,
+        },
+        calls: calls.map(call => ({
+          id: call.id,
+          updatedAt: call.updatedAt.toISOString(),
+        })),
+      });
 
-        const callIds = calls.map(call => call.id);
-        const counts = await db.callParticipant.groupBy({
-          by: ['callId'],
-          where: { callId: { in: callIds } },
-          _count: { _all: true },
-        });
-        const countByCallId = new Map(counts.map(row => [row.callId, row._count._all]));
-        const participants = await db.callParticipant.findMany({
-          where: { callId: { in: callIds } },
-          select: {
-            id: true,
-            callId: true,
-            userId: true,
-            isExternal: true,
-            invitedAt: true,
-            respondedAt: true,
-            joinedAt: true,
-          },
-        });
-        const participantsByCallId = new Map<string, CallParticipantPreviewRow[]>();
-        for (const participant of participants) {
-          const callParticipants = participantsByCallId.get(participant.callId) ?? [];
-          callParticipants.push(participant);
-          participantsByCallId.set(participant.callId, callParticipants);
+      const callIds = calls.map(call => call.id);
+      const counts = await db.callParticipant.groupBy({
+        by: ['callId'],
+        where: { callId: { in: callIds } },
+        _count: { _all: true },
+      });
+      const countByCallId = new Map(counts.map(row => [row.callId, row._count._all]));
+      const participants = await db.callParticipant.findMany({
+        where: { callId: { in: callIds } },
+        select: {
+          id: true,
+          callId: true,
+          userId: true,
+          isExternal: true,
+          invitedAt: true,
+          respondedAt: true,
+          joinedAt: true,
+        },
+      });
+      const participantsByCallId = new Map<string, CallParticipantPreviewRow[]>();
+      for (const participant of participants) {
+        const callParticipants = participantsByCallId.get(participant.callId) ?? [];
+        callParticipants.push(participant);
+        participantsByCallId.set(participant.callId, callParticipants);
+      }
+
+      for (const call of calls) {
+        summary.processed += 1;
+        const nextCount = countByCallId.get(call.id) ?? 0;
+        const nextPreviewUserIds = buildCallParticipantPreviewUserIdsFromRows(
+          participantsByCallId.get(call.id) ?? [],
+        );
+        const currentPreviewUserIds = normalizeParticipantPreview(call.participantPreviewUserIds);
+        const nextPreviewPayload = normalizeParticipantPreview(nextPreviewUserIds);
+        const previewUnchanged =
+          currentPreviewUserIds.length === nextPreviewPayload.length &&
+          currentPreviewUserIds.every(
+            (entry, index) =>
+              entry.userId === nextPreviewPayload[index]?.userId &&
+              entry.hasJoined === nextPreviewPayload[index]?.hasJoined,
+          );
+        const previewStorageUnchanged = call.participantPreviewUserIds === nextPreviewUserIds;
+
+        if (call.participantCount === nextCount && previewUnchanged && previewStorageUnchanged) {
+          summary.skipped += 1;
+          continue;
         }
 
-        for (const call of calls) {
-          summary.processed += 1;
-          const nextCount = countByCallId.get(call.id) ?? 0;
-          const nextPreviewUserIds = buildCallParticipantPreviewUserIdsFromRows(
-            participantsByCallId.get(call.id) ?? [],
-          );
-          const currentPreviewUserIds = normalizeParticipantPreview(call.participantPreviewUserIds);
-          const nextPreviewPayload = normalizeParticipantPreview(nextPreviewUserIds);
-          const previewUnchanged =
-            currentPreviewUserIds.length === nextPreviewPayload.length &&
-            currentPreviewUserIds.every(
-              (entry, index) =>
-                entry.userId === nextPreviewPayload[index]?.userId &&
-                entry.hasJoined === nextPreviewPayload[index]?.hasJoined,
-            );
-          const previewStorageUnchanged = call.participantPreviewUserIds === nextPreviewUserIds;
-
-          if (call.participantCount === nextCount && previewUnchanged && previewStorageUnchanged) {
-            summary.skipped += 1;
-            continue;
-          }
-
-          try {
-            if (!options.dryRun) {
-              await db.call.update({
-                where: { id: call.id },
-                data: {
-                  participantCount: nextCount,
-                  participantPreviewUserIds: nextPreviewUserIds,
-                },
-              });
-            }
-            summary.updated += 1;
-          } catch (error) {
-            summary.errors += 1;
-            logger.warn(`${TAG} Failed to update call`, {
-              callId: call.id,
-              error: error instanceof Error ? error.message : String(error),
+        try {
+          if (!options.dryRun) {
+            await db.call.update({
+              where: { id: call.id },
+              data: {
+                participantCount: nextCount,
+                participantPreviewUserIds: nextPreviewUserIds,
+              },
             });
           }
+          summary.updated += 1;
+        } catch (error) {
+          summary.errors += 1;
+          logger.warn(`${TAG} Failed to update call`, {
+            callId: call.id,
+            error: error instanceof Error ? error.message : String(error),
+          });
         }
+      }
 
-        cursor = calls[calls.length - 1]?.id ?? null;
-        logger.info(`${TAG} Batch #${batchNumber} completed`, {
-          batchSize: calls.length,
-          ...summary,
-        });
+      cursor = calls[calls.length - 1]?.id ?? null;
+      logger.info(`${TAG} Batch #${batchNumber} completed`, {
+        batchSize: calls.length,
+        ...summary,
+      });
 
-        if (options.delayMs > 0) {
-          await CallParticipantCountBackfillController.sleep(options.delayMs);
-        }
-      } while (cursor);
+      if (options.delayMs > 0) {
+        await CallParticipantCountBackfillController.sleep(options.delayMs);
+      }
+    } while (cursor);
 
-      return summary;
-    });
+    return summary;
+
   }
 
   static async triggerBackfill(req: Request, res: Response<ApiResponse>): Promise<void> {
