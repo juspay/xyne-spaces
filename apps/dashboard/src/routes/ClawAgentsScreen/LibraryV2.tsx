@@ -96,95 +96,94 @@ const LibraryV2 = (): ReactElement => {
 
   return (
     <div className='mx-auto flex w-full max-w-[800px] flex-col px-6 pb-16'>
-      <div className='flex items-center gap-5 pt-5'>
-        <div className='flex min-w-0 flex-1 flex-col justify-center gap-1'>
-          <h1 className='text-2xl font-semibold leading-[1.2] tracking-[-0.24px] text-foreground'>
-            Library
-          </h1>
-          <p className='text-[15px] leading-[1.2] text-muted-foreground'>
-            View and manage agents, subagent, skills and MCP.
-          </p>
-        </div>
-        {activeTab.create && (
-          <Button
-            type='button'
-            className='shrink-0'
-            onClick={() => void navigate(prefixWs(activeTab.create.path))}
-            data-track-category='Claw Agents'
-            data-track-name={activeTab.create.label}
-          >
-            <PlusDefault className='size-4' />
-            {activeTab.create.label}
-          </Button>
-        )}
-      </div>
-
-      {/* Tabs + search/filter pin to the top of the scroll container so the
-            switcher stays reachable while a long list scrolls under it. The
-            background is opaque so cards don't show through. */}
-      <div className='sticky top-0 z-10 mt-3 flex flex-col gap-5 bg-background pb-3 pt-2'>
-        <div className='flex items-center justify-between gap-4'>
-          <div className='flex items-start gap-1'>
-            {LIBRARY_TABS.map(tab => (
-              <button
-                key={tab.id}
-                type='button'
-                onClick={() => setActiveTab(tab.id)}
-                aria-current={tab.id === activeTab.id ? 'page' : undefined}
-                data-track-category='Claw Agents'
-                data-track-name={`Library tab: ${tab.label}`}
-                className={cn(
-                  'flex h-8 items-center justify-center rounded-[10px] px-3 py-1 text-sm transition-colors',
-                  tab.id === activeTab.id
-                    ? 'bg-muted text-foreground'
-                    : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
-                )}
-              >
-                {tab.label}
-              </button>
-            ))}
+      <div className='sticky top-0 z-10 flex flex-col bg-background'>
+        <div className='flex items-center gap-5 pt-5'>
+          <div className='flex min-w-0 flex-1 flex-col justify-center gap-1'>
+            <h1 className='text-2xl font-semibold leading-[1.2] tracking-[-0.24px] text-foreground'>
+              Library
+            </h1>
+            <p className='text-[15px] leading-[1.2] text-muted-foreground'>
+              View and manage agents, subagent, skills and MCP.
+            </p>
           </div>
-
-          <div className='flex items-center justify-center gap-1.5'>
-            <button
+          {activeTab.create && (
+            <Button
               type='button'
-              onClick={toggleSearch}
-              aria-label={activeTab.searchPlaceholder}
-              aria-expanded={searchOpen}
-              className={cn(
-                'flex size-7 items-center justify-center rounded-[10px] transition-colors hover:bg-muted',
-                searchOpen ? 'bg-muted text-foreground' : 'text-muted-foreground',
-              )}
+              className='shrink-0'
+              onClick={() => void navigate(prefixWs(activeTab.create.path))}
               data-track-category='Claw Agents'
-              data-track-name='Toggle library search'
+              data-track-name={activeTab.create.label}
             >
-              <SearchDefault className='size-4' />
-            </button>
-            <div ref={setToolbarSlot} className='flex items-center' />
-          </div>
+              <PlusDefault className='size-4' />
+              {activeTab.create.label}
+            </Button>
+          )}
         </div>
 
-        {searchOpen && (
-          <div className='relative'>
-            <SearchDefault className='pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground' />
-            <input
-              ref={searchRef}
-              type='text'
-              value={query}
-              onChange={e => setQuery(e.target.value)}
-              onKeyDown={e => {
-                if (e.key === 'Escape') {
-                  setQuery('');
-                  setSearchOpen(false);
-                }
-              }}
-              data-track-category='Claw Agents'
-              data-track-name='Search library'
-              placeholder={activeTab.searchPlaceholder}
-              className='h-9 w-full rounded-[10px] border border-border bg-background pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
-            />
+        <div className='mt-3 flex flex-col gap-5 pb-3 pt-2'>
+          <div className='flex items-center justify-between gap-4'>
+            <div className='flex items-start gap-1'>
+              {LIBRARY_TABS.map(tab => (
+                <button
+                  key={tab.id}
+                  type='button'
+                  onClick={() => setActiveTab(tab.id)}
+                  aria-current={tab.id === activeTab.id ? 'page' : undefined}
+                  data-track-category='Claw Agents'
+                  data-track-name={`Library tab: ${tab.label}`}
+                  className={cn(
+                    'flex h-8 items-center justify-center rounded-[10px] px-3 py-1 text-sm transition-colors',
+                    tab.id === activeTab.id
+                      ? 'bg-muted text-foreground'
+                      : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+                  )}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            <div className='flex items-center justify-center gap-1.5'>
+              <button
+                type='button'
+                onClick={toggleSearch}
+                aria-label={activeTab.searchPlaceholder}
+                aria-expanded={searchOpen}
+                className={cn(
+                  'flex size-7 items-center justify-center rounded-[10px] transition-colors hover:bg-muted',
+                  searchOpen ? 'bg-muted text-foreground' : 'text-muted-foreground',
+                )}
+                data-track-category='Claw Agents'
+                data-track-name='Toggle library search'
+              >
+                <SearchDefault className='size-4' />
+              </button>
+              <div ref={setToolbarSlot} className='flex items-center' />
+            </div>
           </div>
-        )}
+
+          {searchOpen && (
+            <div className='relative'>
+              <SearchDefault className='pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground' />
+              <input
+                ref={searchRef}
+                type='text'
+                value={query}
+                onChange={e => setQuery(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Escape') {
+                    setQuery('');
+                    setSearchOpen(false);
+                  }
+                }}
+                data-track-category='Claw Agents'
+                data-track-name='Search library'
+                placeholder={activeTab.searchPlaceholder}
+                className='h-9 w-full rounded-[10px] border border-border bg-background pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
+              />
+            </div>
+          )}
+        </div>
       </div>
 
       <LibraryToolbarSlotProvider value={toolbarSlot}>
