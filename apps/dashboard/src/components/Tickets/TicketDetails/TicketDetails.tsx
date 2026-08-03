@@ -1,5 +1,6 @@
 import React, { useMemo, useState, useRef, useEffect, useCallback } from 'react';
 import { useZero } from '../../../hooks/useZero';
+import { useDebugSettings } from '../../../hooks/useDebugSettings';
 import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
 import {
@@ -21,6 +22,7 @@ import {
   ClipboardCheck,
   ArrowRight,
   Archive,
+  Copy,
 } from 'lucide-react';
 import type {
   SubTicket,
@@ -512,6 +514,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const location = useLocation();
   const { isMobile } = usePlatform();
   const { baseRoute, buildChannelRoute } = useRouteContext();
+  const { settings: debugSettings } = useDebugSettings();
+  const [ticketIdCopied, setTicketIdCopied] = useState(false);
 
   // State declarations
   const [editingTitle, setEditingTitle] = useState(false);
@@ -2468,6 +2472,17 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     });
   };
 
+  const handleCopyTicketId = (): void => {
+    if (!ticket) return;
+    void navigator.clipboard.writeText(ticket.id);
+    setTicketIdCopied(true);
+    toast.success('Ticket id copied', {
+      description: 'Internal ticket id copied to clipboard',
+      duration: 3000,
+    });
+    setTimeout(() => setTicketIdCopied(false), 2000);
+  };
+
   const handleFormFieldSave = (
     formEntityValueId: string,
     newValue: string[],
@@ -2786,6 +2801,26 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             >
               {ticket.title}
             </div>
+          )}
+          {debugSettings.showTicketIdCopyButton && (
+            <Tooltip content='Copy ticket id (internal)'>
+              <Button
+                className='p-2 border border-border rounded-lg h-8 w-8 shrink-0'
+                variant='ghost'
+                size='sm'
+                onClick={handleCopyTicketId}
+                aria-label='Copy internal ticket id'
+                data-track-category='Tickets'
+                data-track-name='CopyTicketId'
+                data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
+              >
+                {ticketIdCopied ? (
+                  <Check size={20} className='text-green-600' />
+                ) : (
+                  <Copy size={20} />
+                )}
+              </Button>
+            </Tooltip>
           )}
         </div>
         <div>

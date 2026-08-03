@@ -5,11 +5,13 @@ const DEBUG_STORAGE_KEY = 'xyne-debug-settings';
 export interface DebugSettings {
   showSendIndicators: boolean;
   showEmailIdCopyButton: boolean;
+  showTicketIdCopyButton: boolean;
 }
 
 const DEFAULT_DEBUG_SETTINGS: DebugSettings = {
   showSendIndicators: true,
   showEmailIdCopyButton: false,
+  showTicketIdCopyButton: false,
 };
 
 export const useDebugSettings = () => {
@@ -46,5 +48,12 @@ export const useDebugSettings = () => {
     }));
   }, []);
 
-  return { settings, toggleSendIndicators, toggleEmailIdCopyButton };
+  const toggleTicketIdCopyButton = useCallback(() => {
+    setSettings(prev => ({
+      ...prev,
+      showTicketIdCopyButton: !prev.showTicketIdCopyButton,
+    }));
+  }, []);
+
+  return { settings, toggleSendIndicators, toggleEmailIdCopyButton, toggleTicketIdCopyButton };
 };

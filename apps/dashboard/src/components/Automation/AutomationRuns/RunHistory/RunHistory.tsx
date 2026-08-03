@@ -20,6 +20,11 @@ function extractEmailId(run: AutomationRun): string | null {
   return typeof emailId === 'string' && emailId.length > 0 ? emailId : null;
 }
 
+function extractTicketId(run: AutomationRun): string | null {
+  const ticketId = run.triggerData?.['ticketId'];
+  return typeof ticketId === 'string' && ticketId.length > 0 ? ticketId : null;
+}
+
 const PAGE_SIZE = 50;
 const SKELETON_ROWS = 6;
 
@@ -220,6 +225,7 @@ export function RunHistory({
 
 function RunRow({ run, onClick }: { run: AutomationRun; onClick: () => void }): React.ReactElement {
   const emailId = extractEmailId(run);
+  const ticketId = extractTicketId(run);
   const isComplete = run.status === 'COMPLETED' || run.status === 'FAILED';
   const duration =
     isComplete && run.completedAt
@@ -253,6 +259,11 @@ function RunRow({ run, onClick }: { run: AutomationRun; onClick: () => void }): 
           {emailId && (
             <span className='font-mono text-[11px] text-muted-foreground' title='Trigger email id'>
               {emailId}
+            </span>
+          )}
+          {ticketId && (
+            <span className='font-mono text-[11px] text-muted-foreground' title='Trigger ticket id'>
+              {ticketId}
             </span>
           )}
           <span
