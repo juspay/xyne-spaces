@@ -132,10 +132,12 @@ export const TicketFiltersDropdown = ({
   hasActiveView,
   workspaceView = false,
   leadingControl,
+  trailingControl,
 }: TicketFiltersProps & {
   searchValue?: string;
   onSearchChange?: (searchTerm: string) => void;
   leadingControl?: ReactElement;
+  trailingControl?: ReactElement | undefined;
 }): ReactElement => {
   const [boardOpen, setBoardOpen] = useState(false);
   const [hasBoardDropdownOpened, setHasBoardDropdownOpened] = useState(false);

@@ -1,0 +1,21 @@
+-- CreateTable
+CREATE TABLE "public"."ticket_exports" (
+    "id" TEXT NOT NULL,
+    "workspaceId" TEXT NOT NULL,
+    "requestedBy" TEXT NOT NULL,
+    "status" TEXT NOT NULL,
+    "filters" JSONB NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "ticket_exports_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateIndex
+CREATE INDEX "ticket_exports_workspaceId_status_idx" ON "public"."ticket_exports"("workspaceId", "status");
+
+-- CreateIndex
+CREATE INDEX "ticket_exports_workspaceId_requestedBy_idx" ON "public"."ticket_exports"("workspaceId", "requestedBy");
+
+-- CreateIndex
+CREATE INDEX "ticket_exports_workspaceId_createdAt_idx" ON "public"."ticket_exports"("workspaceId", "createdAt");
