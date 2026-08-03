@@ -226,6 +226,27 @@ class WebSocketService {
 
     socket.join(`user:${userId}`);
 
+    // Observe-only: log (once per window) when a socket exceeds the candidate
+    // inbound-event budget, but never drop events. Enforcement is deferred.
+    let evtCount = 0;
+    let evtWindowStart = Date.now();
+    let evtWindowLogged = false;
+    const SOCKET_EVT_OBSERVE_THRESHOLD = 300;
+    const SOCKET_EVT_WINDOW_MS = 10_000;
+    socket.use((_packet, next) => {
+      const now = Date.now();
+      if (now - evtWindowStart > SOCKET_EVT_WINDOW_MS) {
+        evtWindowStart = now;
+        evtCount = 0;
+        evtWindowLogged = false;
+      }
+      if (++evtCount > SOCKET_EVT_OBSERVE_THRESHOLD && !evtWindowLogged) {
+        evtWindowLogged = true;
+        logger.warn(`[WS-EVT-OBSERVE] Socket ${socket.id} (user ${userId}) exceeded ${SOCKET_EVT_OBSERVE_THRESHOLD} events in ${SOCKET_EVT_WINDOW_MS}ms (not enforced)`);
+      }
+      next();
+    });
+
     // Debug: Check connections after adding
     const userConnections = await redisService.getUserConnections(userId);
     logger.info(`🔌 [CONNECT] User ${userId} now has ${userConnections.length} connections: [${userConnections.join(', ')}]`);
@@ -236,10 +257,19 @@ class WebSocketService {
     // Register for cross-workspace broadcast
     try {
       const userWithWorkspace = await repositories.users.findByIdWithWorkspace(userId);
-      if (userWithWorkspace?.orgMemberId) {
-        socket.orgMemberId = userWithWorkspace.orgMemberId;
+
+      // Resolve the socket's workspace independently of org-membership. WS channel/
+      // conversation access is keyed on socket.workspaceId, so a user with a home
+      // workspace but no orgMemberId (pre-onboarding / guest / service user) must
+      // still get workspaceId set. Only the cross-workspace broadcast registration
+      // below is org-member-scoped.
+      if (userWithWorkspace?.workspaceId) {
         socket.workspaceId = userWithWorkspace.workspaceId;
         socket.workspaceName = userWithWorkspace.workspace?.name;
+      }
+
+      if (userWithWorkspace?.orgMemberId) {
+        socket.orgMemberId = userWithWorkspace.orgMemberId;
 
         await redisService.addOrgMemberConnection(userWithWorkspace.orgMemberId, socket.id, platform);
         await this.setupOrgMemberEventSubscription(userWithWorkspace.orgMemberId);
@@ -379,9 +409,13 @@ class WebSocketService {
 
     // Handle user activity events (for analytics tracking)
     socket.on('user_activity_event', (event: ActivityEventPayload) => {
+      // Attribute the event to the authenticated socket user, never the
+      // client-supplied user_id.
+      if (!socket.userId) return;
+      const authoredEvent: ActivityEventPayload = { ...event, user_id: socket.userId };
       // Fire and forget - non-blocking
-      activityTrackingService.saveActivityEvent(event).catch(error => {
-        logger.error('Error saving activity event from WebSocket:', event, error);
+      activityTrackingService.saveActivityEvent(authoredEvent).catch(error => {
+        logger.error('Error saving activity event from WebSocket:', authoredEvent, error);
       });
     });
 
@@ -600,6 +634,16 @@ class WebSocketService {
       // Determine if this is a channel or conversation
       const isChannel = await this.isChannelSession(sessionId);
 
+      // Only broadcast typing if the socket user can access the target
+      // channel/conversation (same check as subscribe_to_channels).
+      const canAccess = isChannel
+        ? await this.canAccessChannel(socket, sessionId)
+        : await this.canAccessConversation(socket, sessionId);
+      if (!canAccess) {
+        logger.warn(`[TYPING] Unauthorized typing event by user ${socket.userId} in session ${sessionId}`);
+        return;
+      }
+
       let allTypingUsers: TypingUser[] = [];
 
       if (isChannel) {
@@ -627,6 +671,16 @@ class WebSocketService {
 
       // Determine if this is a channel or conversation
       const isChannel = await this.isChannelSession(sessionId);
+
+      // Only broadcast typing if the socket user can access the target
+      // channel/conversation (same check as subscribe_to_channels).
+      const canAccess = isChannel
+        ? await this.canAccessChannel(socket, sessionId)
+        : await this.canAccessConversation(socket, sessionId);
+      if (!canAccess) {
+        logger.warn(`[TYPING] Unauthorized typing event by user ${socket.userId} in session ${sessionId}`);
+        return;
+      }
 
       let allTypingUsers: TypingUser[] = [];
 
@@ -884,6 +938,13 @@ class WebSocketService {
       const { userId } = socket;
       const channels = Array.isArray(data?.channels) ? data.channels : [];
       const conversations = Array.isArray(data?.conversations) ? data.conversations : [];
+      // Observe-only: no cap enforced (see needs-design). Log large requests so
+      // real subscription counts inform the eventual bound.
+      const BULK_SUB_OBSERVE_THRESHOLD = 500;
+      const requestedCount = channels.length + conversations.length;
+      if (requestedCount > BULK_SUB_OBSERVE_THRESHOLD) {
+        logger.warn(`[BULK-SUB-OBSERVE] Socket ${socket.id} (user ${userId}) requested ${requestedCount} subscriptions (no cap enforced)`);
+      }
 
       // 🔒 Authorize every requested session against the user's channel membership /
       // workspace BEFORE subscribing. Mirrors the HTTP ACL in conversationController.
@@ -935,8 +996,10 @@ class WebSocketService {
       const channel = await repositories.channels.findById(channelId);
       if (!channel) return false;
 
-      // Tenant boundary — never allow a socket to subscribe across workspaces.
-      if (socket.workspaceId && channel.workspaceId && channel.workspaceId !== socket.workspaceId) {
+      // Tenant boundary (fail-closed): a socket with no resolved workspace is denied,
+      // and a channel whose workspaceId is set must match it.
+      if (!socket.workspaceId) return false;
+      if (channel.workspaceId && channel.workspaceId !== socket.workspaceId) {
         return false;
       }
 
@@ -960,7 +1023,9 @@ class WebSocketService {
       const conversation = await repositories.conversations.findById(conversationId);
       if (!conversation) return false;
 
-      if (socket.workspaceId && conversation.workspaceId && conversation.workspaceId !== socket.workspaceId) {
+      // Tenant boundary (fail-closed) — see canAccessChannel.
+      if (!socket.workspaceId) return false;
+      if (conversation.workspaceId && conversation.workspaceId !== socket.workspaceId) {
         return false;
       }
 
@@ -1445,7 +1510,22 @@ class WebSocketService {
   }
 
   private handleTicketCountsSubscription(socket: AuthenticatedSocket, room: string): void {
-    if (!room) return;
+    if (!room || typeof room !== 'string') return;
+
+    // Only allow well-formed ticket-counts rooms — never an arbitrary room string.
+    if (!/^ticket-counts:(project|board|user|group):[^:]+$/.test(room)) {
+      logger.warn(`[TICKET-COUNTS] Rejected malformed room "${room}" from user ${socket.userId}`);
+      return;
+    }
+    // A user may only subscribe to their OWN per-user ticket-counts room. The
+    // project/board/group rooms remain open (workspace-scoped ids). Consequently the
+    // "view a teammate's tickets" board (?assignee=<other>) gets no live count pushes;
+    // it still renders from the REST snapshot. Re-opening it needs a same-workspace
+    // membership check.
+    if (room.startsWith('ticket-counts:user:') && room !== `ticket-counts:user:${socket.userId}`) {
+      logger.warn(`[TICKET-COUNTS] Rejected cross-user room "${room}" from user ${socket.userId}`);
+      return;
+    }
 
     socket.join(room);
   }
