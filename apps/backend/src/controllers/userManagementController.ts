@@ -3,7 +3,6 @@ import { UserManagementService } from '../services/userManagementService';
 import { getStorageService } from '../services/storage';
 import { GuestEntity, AccessType, CalendarVisibility, WorkspaceRole } from '@xyne/shared';
 import { logger } from '../utils/logger';
-import { withWorkspaceScope } from '@/database/tenant/context';
 import { setSafeInlineImageHeaders } from '../utils/safeAttachmentDownload';
 
 const storageService = getStorageService();

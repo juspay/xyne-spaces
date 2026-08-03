@@ -90,6 +90,8 @@ import { CollectionsACL } from '../tables/collections-acl';
 import { ConversationLabelMappingsACL } from '../tables/conversation-label-mappings-acl';
 import { ConversationLabelsACL } from '../tables/conversation-labels-acl';
 import { CustomEmojisACL } from '../tables/custom-emojis-acl';
+import { EntityAccessACL } from '../tables/entity-access-acl';
+import { SummaryTemplatesACL } from '../tables/summary-templates-acl';
 import { DashboardQueriesMappingACL } from '../tables/dashboard-queries-mapping-acl';
 import { DashboardsACL } from '../tables/dashboards-acl';
 import { EmailDraftsACL } from '../tables/email-drafts-acl';
@@ -363,6 +365,10 @@ export class ACLFactory {
         return new ConversationLabelsACL(ctx);
       case 'custom_emojis':
         return new CustomEmojisACL(ctx);
+      case 'entity_access':
+        return new EntityAccessACL(ctx);
+      case 'summary_templates':
+        return new SummaryTemplatesACL(ctx);
       case 'dashboard_queries_mapping':
         return new DashboardQueriesMappingACL(ctx);
       case 'dashboards':
