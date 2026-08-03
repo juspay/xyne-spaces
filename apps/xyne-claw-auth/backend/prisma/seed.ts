@@ -809,6 +809,7 @@ Anyone in the company. A nervous intern. A staff engineer. An HR partner. A PM, 
 - Never narrate your process. No "Let me search…", "I'll look into…", "I'll need to check…", "The user is asking…". Just deliver the answer.
 - Mirror the asker's energy and formality. Match the seriousness of the question. If they're casual, be casual; if they're terse, be terse.
 - **Default to BRIEF.** Lead with the answer in 1–3 sentences, then only the bits that matter. No giant headers, no decorative bullets, no fake structure. People should be able to read the whole reply, not skim for a TL;DR.
+- **A chart of real numbers is not decoration.** "Brief" governs your WORDS, not your evidence. The moment your answer carries a breakdown (per team, per status, per service), a trend over time, a split of a whole, or a before/after — call \`visualize\` and show it, instead of spelling the figures out in prose. Then add the one line the chart can't say: what it means. Reach for it on your own; nobody should have to ask you to chart.
 - Go long only when they ask for depth ("explain in detail", "write it up", "full background") or when one paragraph genuinely can't cover it. Even then — structured but tight.
 - No emojis. No "Here's what I found:" preambles. Open with the answer itself.
 - One-sentence offers of follow-up are great ("Want me to dig into any of these?"). Long sign-offs aren't.
@@ -850,6 +851,7 @@ You have direct access to Spaces tools, a \`spaces\` subagent, and a \`google\` 
 # Other tools you can reach for
 - **genius-analytics** — business metrics (GMV, revenue, success rates, KPIs). Pass the question in natural language.
 - **genius-investigation** — root-cause analysis on incidents, fraud, disputes, outages.
+- **visualize** — turn metrics you ALREADY have into a chart (bar, line, area, pie/donut, KPI, scatter, table). Reach for it whenever your answer carries counts, totals, trends, breakdowns, proportions, or a before/after comparison — from any source, not just analytics tools. It renders only if you copy its \`\`\`chart block back verbatim. See the \`charts\` skill for chart choice and payload shapes.
 - **query-codebase** / **review-pull-request** — high-level code/PR understanding. **Require** a repo/product selected in the research context; if none is selected, tell the user to pick one — don't call.
 - **web-search** / **deep-research** — for things outside the workspace (when enabled).
 - **generate-image** — image from a detailed text prompt.
@@ -953,7 +955,7 @@ You:
             "spaces-create-canvas",
             "spaces-edit-canvas",
           ],
-          custom: ["genius-analytics", "genius-investigation", "query-codebase", "review-pull-request", "web-search", "deep-research", "generate-image", "add-citations"]
+          custom: ["genius-analytics", "genius-investigation", "query-codebase", "review-pull-request", "web-search", "deep-research", "generate-image", "add-citations", "visualize"]
         },
         toolPermissions: {
           "xyne-spaces__spaces-create-ticket": "ask",
@@ -1033,7 +1035,7 @@ You:
             "spaces-create-canvas",
             "spaces-edit-canvas",
           ],
-          custom: ["genius-analytics", "genius-investigation", "query-codebase", "review-pull-request", "web-search", "deep-research", "generate-image", "add-citations"]
+          custom: ["genius-analytics", "genius-investigation", "query-codebase", "review-pull-request", "web-search", "deep-research", "generate-image", "add-citations", "visualize"]
         },
         toolPermissions: {
           "xyne-spaces__spaces-create-ticket": "ask",
@@ -1119,6 +1121,19 @@ You:
     console.log("[seed] Attached generate-image tool to ask-ai agent");
   }
 
+  // Attach visualize tool
+  const visualizeTool = await prisma.tool.findUnique({
+    where: { slug: "visualize" },
+  });
+  if (visualizeTool) {
+    await prisma.agentTool.upsert({
+      where: { agentId_toolId: { agentId: askAIAgent.id, toolId: visualizeTool.id } },
+      create: { agentId: askAIAgent.id, toolId: visualizeTool.id, permission: "allow" },
+      update: { permission: "allow" },
+    });
+    console.log("[seed] Attached visualize tool to ask-ai agent");
+  }
+
   // Seed ask-ai skills — domain knowledge and tool-usage guidance that
   // pi auto-loads based on the SKILL.md frontmatter `description`. Splitting
   // these out of the system prompt keeps the prompt focused on identity,
@@ -1132,6 +1147,7 @@ You:
     { slug: "spaces-citations", name: "Spaces Citations", description: "How to attach inline source citations to claims drawn from Spaces tool results — token format, verbatim rule, what to cite vs not.", file: "spaces-citations.md", source: "seeded" },
     { slug: "spaces-email-drafting", name: "Spaces Email Drafting", description: "Drafting email replies and outbound messages from a Spaces thread — tone matching, sign-off rules, output-body-only.", file: "spaces-email-drafting.md", source: "seeded" },
     { slug: "google-workspace", name: "Google Workspace", description: "The asker's connected Google Workspace — Gmail, Calendar, Drive, Docs/Sheets/Slides, Contacts, Tasks — read via the `google` subagent. What it can do and when to reach for it instead of (or alongside) Spaces. Load whenever a question touches the asker's email, meetings, schedule, Drive files, contacts, or tasks.", file: "google-workspace.md", source: "seeded" },
+    { slug: "charts", name: "Charts", description: "When and how to turn metrics in your answer into a chart with the `visualize` tool — which visualType fits which shape of data, the exact `data` payload each type expects, and the rules for emitting the chart block so it actually renders. Load before answering anything whose answer contains counts, totals, trends, breakdowns, proportions, or before/after comparisons.", file: "charts.md", source: "seeded" },
   ];
 
   for (const def of askAISkillDefs) {
