@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Setup is failing
+    url: https://github.com/juspay/xyne-spaces/blob/main/docs/setup/troubleshooting.md
+    about: Most `pnpm run up` and local environment failures are already covered here — please check before opening an issue.
+  - name: Questions and discussion
+    url: https://github.com/juspay/xyne-spaces/discussions
+    about: Ask how something works, float an idea, or share what you are building.
+  - name: Contributing guidelines
+    url: https://github.com/juspay/xyne-spaces/blob/main/CONTRIBUTING.md
+    about: Branch naming, commit format, and what CI enforces before you send a pull request.
