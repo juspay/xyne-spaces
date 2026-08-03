@@ -2,7 +2,7 @@ import { PrismaClient } from '@prisma/client';
 import { ActivityClassification, ActivityClassificationJobType } from '@xyne/shared';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
-import { currentWorkspaceId, elevateToServiceActor, runAsSystem } from '@/database/tenant/context';
+import { currentWorkspaceId, withWorkspaceScope, runAsSystem } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 
 export interface CreateActivityParams {
@@ -368,7 +368,7 @@ export class ActivityService {
   }
 
   async deleteActivitiesBySource(actionSource: string, actionSourceId: string): Promise<void> {
-    return elevateToServiceActor(async () => {
+    return withWorkspaceScope(async () => {
       await this.prisma.activity.deleteMany({
         where: {
           actionSource,
@@ -379,7 +379,7 @@ export class ActivityService {
   }
 
   async deleteActivitiesBySourceIds(actionSource: string, actionSourceIds: string[]): Promise<void> {
-    return elevateToServiceActor(async () => {
+    return withWorkspaceScope(async () => {
       if (actionSourceIds.length === 0) return;
 
       await this.prisma.activity.deleteMany({
@@ -404,7 +404,7 @@ export class ActivityService {
     messageAuthorId: string;
     isThreadActivity?: boolean;
   }): Promise<'created' | 'updated'> {
-    return elevateToServiceActor(async () => {
+    return withWorkspaceScope(async () => {
       const { messageId, channelId, workspaceId, actorId, messageAuthorId, isThreadActivity } = params;
 
       const existingActivity = await this.prisma.activity.findFirst({
@@ -500,7 +500,7 @@ export class ActivityService {
 
 
   async deleteReactionActivityV2(messageId: string, messageAuthorId: string): Promise<void> {
-    return elevateToServiceActor(async () => {
+    return withWorkspaceScope(async () => {
       await this.prisma.activity.deleteMany({
         where: {
           userId: messageAuthorId,
@@ -546,7 +546,7 @@ export class ActivityService {
     recipientUserId: string;
     latestReplyMessageId: string;
   }): Promise<'created' | 'updated'> {
-    return elevateToServiceActor(async () => {
+    return withWorkspaceScope(async () => {
       const {
         conversationId,
         channelId,

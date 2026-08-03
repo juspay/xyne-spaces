@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { db } from '@/database/client';
-import { elevateToServiceActor } from '@/database/tenant/context';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import { ApiResponse } from '@/types/express';
 
@@ -37,7 +37,7 @@ export class OnCallSetNumbersBackfillController {
 
     // Maintenance sweep: reads and rewrites every mapping in the workspace, above the
     // operator's own row scope.
-    await elevateToServiceActor(async () => {
+    await withWorkspaceScope(async () => {
     while (hasMore) {
       const mappings: Array<{
         id: string;

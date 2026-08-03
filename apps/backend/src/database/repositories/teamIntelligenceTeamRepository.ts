@@ -1,5 +1,5 @@
 import { db } from '@/database/client';
-import { elevateToServiceActor } from '@/database/tenant/context';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { teamIntelligenceContentStorageService } from '@/team-intelligence/services/team-intelligence-content-storage.service';
 
 export interface TeamBulletsDateRangeFilters {
@@ -402,7 +402,7 @@ class TeamIntelligenceTeamRepository {
 
     const channelIds = grouped.map((item) => item.entityId);
     // Resolves names for ids already in the result set, so it runs above the caller's own scope.
-    const channels = await elevateToServiceActor(() =>
+    const channels = await withWorkspaceScope(() =>
       db.channel.findMany({
         where: {
           id: {
@@ -502,7 +502,7 @@ class TeamIntelligenceTeamRepository {
           userId: true,
         },
       }),
-      elevateToServiceActor(() => db.channel.findMany({
+      withWorkspaceScope(() => db.channel.findMany({
         where: {
           id: {
             in: channelIds,

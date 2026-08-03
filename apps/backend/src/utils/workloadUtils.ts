@@ -1,6 +1,6 @@
 import { DatabaseClient } from '@/database/client';
 import { TicketStatusV2 } from '@xyne/shared';
-import { elevateToServiceActor } from '@/database/tenant/context';
+import { elevateToServiceActor, withWorkspaceScope } from '@/database/tenant/context';
 import { repositories } from '@/database/repositories';
 import { logger } from './logger';
 
@@ -112,7 +112,7 @@ export async function syncUserWorkload(
   ]);
 
   // Writes the row of the assignee rather than the caller, so it runs above the caller's own scope.
-  await elevateToServiceActor(() =>
+  await withWorkspaceScope(() =>
     repositories.userWorkloadMapping.upsert({
       where: {
         userId_userGroupId_boardId: {

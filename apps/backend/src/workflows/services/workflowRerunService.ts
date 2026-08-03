@@ -1,5 +1,5 @@
 import { DatabaseClient } from '@/database/client';
-import { elevateToServiceActor } from '@/database/tenant/context';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { WorkflowRepository } from '@/database/repositories/workflowRepository';
 import { WorkflowExecutionStatus } from '@/workflows/types/workflow-enums';
 import { createExecutionState, getExecutionState } from '@/database/repositories/workflowExecutionStateUtils';
@@ -188,7 +188,7 @@ export class WorkflowRerunService {
 
       const conversationId = ticket.conversationId;
 
-      await elevateToServiceActor(async () => {
+      await withWorkspaceScope(async () => {
         // Find existing SYSTEM message for this workflow
         const existingMessage = await this.db.message.findFirst({
           where: {

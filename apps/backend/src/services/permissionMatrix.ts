@@ -3,7 +3,7 @@ import { AccessType, WorkspaceRole } from '@xyne/shared';
 import { logger } from '../utils/logger';
 import { repositories } from '../database/repositories/index';
 import { db } from '../database/client';
-import { elevateToServiceActor } from '../database/tenant/context';
+import { withWorkspaceScope } from '../database/tenant/context';
 import { aclAuditService } from './aclAuditService';
 
 /**
@@ -305,7 +305,7 @@ export async function syncOrgResourceAdminAccess(
   try {
     // Org-wide by design: this fans out across every workspace in the org, so it runs
     // above the caller's own workspace scope.
-    await elevateToServiceActor(async () => {
+    await withWorkspaceScope(async () => {
       const links = await db.workspaceOrganization.findMany({
         where: { orgId, leftAt: null },
         select: { workspaceId: true },

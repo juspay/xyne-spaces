@@ -1,5 +1,5 @@
 import { db } from '@/database/client';
-import { elevateToServiceActor } from '@/database/tenant/context';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
 import { logger } from '@/utils/logger';
@@ -32,7 +32,7 @@ async function refreshForShares(
   label: string,
 ): Promise<void> {
   // Runs after the membership row is gone, so it must not be scoped to the actor.
-  const shares = await elevateToServiceActor(() =>
+  const shares = await withWorkspaceScope(() =>
     db.canvasParticipant.findMany({ where, select: { canvasId: true } }),
   );
   const canvasIds = Array.from(new Set(shares.map(s => s.canvasId)));

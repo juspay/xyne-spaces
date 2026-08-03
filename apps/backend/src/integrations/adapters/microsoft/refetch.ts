@@ -19,7 +19,7 @@ import { AttachmentConversionService } from '@/services/externalAttachmentServic
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { EmailRepository } from '@/database/repositories/emailRepository';
 import { db } from '@/database/client';
-import { elevateToServiceActor } from '@/database/tenant/context';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { emailMatchesDl } from '@/services/dlResolver';
 import { normalizeRfcMessageId, normalizeRfcMessageIds } from '@/utils/emailRfcMessageId';
 
@@ -145,7 +145,7 @@ export class MicrosoftRefetch extends BaseRefetch {
 
       if (allInternetMsgIds.length > 0) {
         // Dedupe has to see every already-ingested message, so it runs above the caller's own scope.
-        const existingInChannel = await elevateToServiceActor(() =>
+        const existingInChannel = await withWorkspaceScope(() =>
           db.email.findMany({
             where: {
               channelId: ingestChannelId,

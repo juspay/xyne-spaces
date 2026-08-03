@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { db } from '@/database/client';
-import { elevateToServiceActor } from '@/database/tenant/context';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import { ApiResponse } from '@/types/express';
 
@@ -279,7 +279,7 @@ export class WorkspaceIdBackfillController {
         activities: { processed: 0, updated: 0, skipped: 0, errors: 0 },
       };
 
-      await elevateToServiceActor(async () => {
+      await withWorkspaceScope(async () => {
         if (options.tables.includes('conversations')) {
           summary.conversations = await WorkspaceIdBackfillController.backfillConversations(options);
         }

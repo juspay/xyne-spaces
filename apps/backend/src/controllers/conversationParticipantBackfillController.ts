@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { db } from '@/database/client';
-import { elevateToServiceActor } from '@/database/tenant/context';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import { ApiResponse } from '@/types/express';
 
@@ -408,7 +408,7 @@ export class ConversationParticipantBackfillController {
 
       logger.info('[ConvParticipantBackfill] Starting backfill', options);
 
-      await elevateToServiceActor(async () => {
+      await withWorkspaceScope(async () => {
         if (options.types.includes('lastReplyAt')) {
           results.lastReplyAt = await ConversationParticipantBackfillController.backfillLastReplyAt(options);
         }

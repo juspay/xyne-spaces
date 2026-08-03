@@ -4,7 +4,7 @@ import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { buildCronPattern } from '@/utils/cronUtils';
 import { scheduledMessageService } from '@/services/scheduledMessageService';
-import { elevateToServiceActor } from '@/database/tenant/context';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 async function checkMutatePermission(
   channelId: string,
@@ -48,7 +48,7 @@ export async function listScheduledMessages(req: Request, res: Response) {
     });
     const channelIds = adminChannels.map((p) => p.channelId);
     // A channel admin sees every scheduled message in the channels they administer.
-    const messages = await elevateToServiceActor(() =>
+    const messages = await withWorkspaceScope(() =>
       db.scheduledMessage.findMany({
         where: { channelId: { in: channelIds } },
         orderBy: { createdAt: 'desc' },
@@ -144,7 +144,7 @@ export async function updateScheduledMessage(req: Request, res: Response) {
 
   try {
     // Check the message exists — checkMutatePermission below decides who may change it.
-    const existing = await elevateToServiceActor(() =>
+    const existing = await withWorkspaceScope(() =>
       db.scheduledMessage.findUnique({ where: { id } }),
     );
     if (!existing) {
@@ -163,7 +163,7 @@ export async function updateScheduledMessage(req: Request, res: Response) {
     if (isActive !== undefined) data.isActive = isActive;
 
     // checkMutatePermission above authorised a channel admin to edit another user's message.
-    const updated = await elevateToServiceActor(() =>
+    const updated = await withWorkspaceScope(() =>
       db.scheduledMessage.update({
         where: { id },
         data,
@@ -199,7 +199,7 @@ export async function deleteScheduledMessage(req: Request, res: Response) {
 
   try {
     // checkMutatePermission below decides who may delete it.
-    const existing = await elevateToServiceActor(() =>
+    const existing = await withWorkspaceScope(() =>
       db.scheduledMessage.findUnique({ where: { id } }),
     );
     if (!existing) {
@@ -210,7 +210,7 @@ export async function deleteScheduledMessage(req: Request, res: Response) {
     if (denied) return res.status(denied.status).json({ error: denied.error });
 
     // checkMutatePermission above authorised a channel admin to delete another user's message.
-    await elevateToServiceActor(() => db.scheduledMessage.delete({ where: { id } }));
+    await withWorkspaceScope(() => db.scheduledMessage.delete({ where: { id } }));
 
     // Remove Bull job
     await scheduledMessageService.removeJob(id);

@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { applicationBackfillService } from '@/services/release/applicationBackfillService';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
-import { elevateToServiceActor } from '@/database/tenant/context';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 export class ApplicationBackfillController {
   /**
@@ -73,7 +73,7 @@ export class ApplicationBackfillController {
 
       // Tenant isolation: ensure the target channel belongs to the caller's
       // workspace before we create boards/forms/applications inside it.
-      const channel = await elevateToServiceActor(() =>
+      const channel = await withWorkspaceScope(() =>
         db.channel.findUnique({
           where: { id: channelId },
           select: { workspaceId: true },
