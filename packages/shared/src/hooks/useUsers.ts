@@ -37,6 +37,11 @@ export const useUsers = (): User[] => {
   return useMemo(() => users, [users]);
 };
 
+export const useUsersMap = (): Map<string, User> => {
+  const users = useUsers();
+  return getUsersMap(users);
+};
+
 export const useUser = (userId: string): User | undefined => {
   // O(1) Map lookup inside selector. Re-renders only when this specific user
   // object changes (=== check on the returned User object, not the entire array).

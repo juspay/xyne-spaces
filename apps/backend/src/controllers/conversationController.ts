@@ -10,6 +10,7 @@ import {
   MessageAttachmentRepository,
   CreateMessageAttachmentInput,
 } from '../database/repositories/messageAttachmentRepository';
+import { DraftMessageRepository } from '@/database/repositories/draftMessageRepository';
 import { ReactionRepository } from '../database/repositories/reactionRepository';
 import { UserRepository } from '../database/repositories/users';
 import { websocketService } from '../services/websocketService';
@@ -80,6 +81,7 @@ export class ConversationController {
   private channelParticipantRepository: ChannelParticipantRepository;
   private messageRepository: MessageRepository;
   private messageAttachmentRepository: MessageAttachmentRepository;
+  private draftMessageRepository: DraftMessageRepository;
   private reactionRepository: ReactionRepository;
   private userRepository: UserRepository;
   private channelUserStatusRespository: ChannelUserStatusRepository;
@@ -92,6 +94,7 @@ export class ConversationController {
     this.channelParticipantRepository = new ChannelParticipantRepository();
     this.messageRepository = new MessageRepository();
     this.messageAttachmentRepository = new MessageAttachmentRepository();
+    this.draftMessageRepository = new DraftMessageRepository();
     this.reactionRepository = new ReactionRepository();
     this.userRepository = new UserRepository();
     this.channelUserStatusRespository = new ChannelUserStatusRepository();
@@ -462,13 +465,27 @@ export class ConversationController {
         return;
       }
 
+      // A compose-DM draft's attachments live in the DB as DRAFT rows keyed by
+      // the compose draftId. On send we re-parent them onto this new CHAT message instead of
+      // re-uploading local copies. Pre-count so the message row flags hasAttachment correctly.
+      const composeDraftId =
+        typeof req.body.composeDraftId === 'string' && req.body.composeDraftId
+          ? (req.body.composeDraftId as string)
+          : undefined;
+      let draftAttachmentCount = 0;
+      if (composeDraftId) {
+        draftAttachmentCount = (
+          await this.messageAttachmentRepository.findDraftAttachments(composeDraftId, userId)
+        ).length;
+      }
+
       // First create the message
       const messageData: CreateMessageInput = {
         conversationId: 'temp', // Will be updated after conversation creation
         senderId: userId,
         content: content?.trim() || '',
         msgType: msgType || MessageType.USER,
-        hasAttachment: files.length > 0,
+        hasAttachment: files.length > 0 || draftAttachmentCount > 0,
         visibleTo: visibleTo ?? null,
       };
 
@@ -517,9 +534,24 @@ export class ConversationController {
         await this.messageAttachmentRepository.createMany(attachmentData);
       }
 
+      // Re-parent the compose-DM draft's persisted attachments onto this message.
+      if (composeDraftId && draftAttachmentCount > 0) {
+        await this.messageAttachmentRepository.reparentDraftAttachmentsToChat(
+          composeDraftId,
+          userId,
+          message.messageId,
+          conversation.conversationId,
+        );
+      }
+
+      // Delete the compose-DM draft row now that the message has been sent.
+      if (composeDraftId) {
+        await this.draftMessageRepository.deleteComposeDraft(composeDraftId, userId);
+      }
+
       // Fetch created attachments from database
       const attachments =
-        uploadedFiles.length > 0
+        uploadedFiles.length > 0 || draftAttachmentCount > 0
           ? await this.messageAttachmentRepository.findByMessageId(message.messageId)
           : [];
 

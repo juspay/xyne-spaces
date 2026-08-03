@@ -212,6 +212,49 @@ export class MessageAttachmentRepository {
     });
   }
 
+  /**
+   * Attachments are persisted as DRAFT rows keyed by the draftId (entityId).
+   * Fetch the sender's own draft attachments so send can flag
+   * the message's hasAttachment before re-parenting them.
+   */
+  async findDraftAttachments(draftId: string, userId: string): Promise<MessageAttachment[]> {
+    return await this.db.messageAttachment.findMany({
+      where: {
+        entityId: draftId,
+        entityType: AttachmentEntityType.DRAFT,
+        uploadedByUserId: userId,
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  /**
+   * Re-parent a compose-DM draft's attachments (DRAFT/entityId=draftId) onto the CHAT message
+   * created when the draft is sent. Owner-scoped so only the sender's own rows
+   * move. Returns the number of rows re-parented.
+   */
+  async reparentDraftAttachmentsToChat(
+    draftId: string,
+    userId: string,
+    messageId: string,
+    conversationId: string,
+  ): Promise<number> {
+    const result = await this.db.messageAttachment.updateMany({
+      where: {
+        entityId: draftId,
+        entityType: AttachmentEntityType.DRAFT,
+        uploadedByUserId: userId,
+        isDeleted: false,
+      },
+      data: {
+        entityType: AttachmentEntityType.CHAT,
+        entityId: messageId,
+        conversationId,
+      },
+    });
+    return result.count;
+  }
+
   async findByCallId(callId: string): Promise<MessageAttachment[]> {
     return await this.db.messageAttachment.findMany({
       where: {

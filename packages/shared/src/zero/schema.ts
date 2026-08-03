@@ -1812,6 +1812,7 @@ export const draftMessageTable = table('draft_messages')
     userId: string(),
     content: string(),
     hasAttachment: boolean(),
+    recipientIds: string().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
