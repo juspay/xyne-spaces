@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { db } from '@/database/client';
+import { elevateToServiceActor } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import { ApiResponse } from '@/types/express';
 import {
@@ -394,21 +395,23 @@ export class MessageMetadataBackfillController {
 
       logger.info('[MessageMetadataBackfill] Starting backfill', options);
 
-      if (options.types.includes('reactions')) {
-        results.reactions = await MessageMetadataBackfillController.backfillReactionsMd(options);
-      }
+      await elevateToServiceActor(async () => {
+        if (options.types.includes('reactions')) {
+          results.reactions = await MessageMetadataBackfillController.backfillReactionsMd(options);
+        }
 
-      if (options.types.includes('replies')) {
-        results.replies = await MessageMetadataBackfillController.backfillRepliesMd(options);
-      }
+        if (options.types.includes('replies')) {
+          results.replies = await MessageMetadataBackfillController.backfillRepliesMd(options);
+        }
 
-      if (options.types.includes('initialMessage')) {
-        results.initialMessage = await MessageMetadataBackfillController.backfillInitialMessageMd(options);
-      }
+        if (options.types.includes('initialMessage')) {
+          results.initialMessage = await MessageMetadataBackfillController.backfillInitialMessageMd(options);
+        }
 
-      if (options.types.includes('parentMessage')) {
-        results.parentMessage = await MessageMetadataBackfillController.backfillParentMessageMd(options);
-      }
+        if (options.types.includes('parentMessage')) {
+          results.parentMessage = await MessageMetadataBackfillController.backfillParentMessageMd(options);
+        }
+      });
 
 
       const response: ApiResponse = {

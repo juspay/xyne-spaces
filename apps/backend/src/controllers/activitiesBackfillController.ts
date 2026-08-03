@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { ApiResponse } from '@/types/express';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
+import { elevateToServiceActor } from '@/database/tenant/context';
 import { extractGroupMentionsFromContent, extractSpecialMentions } from '@/utils/mentionUtils';
 
 interface GroupMention {
@@ -167,7 +168,9 @@ export class ActivitiesBackfillController {
 
       logger.info(`[ActivitiesBackfill] Starting backfill...`);
 
-      const result = await ActivitiesBackfillController.backfillGroupMentionActorAction();
+      const result = await elevateToServiceActor(() =>
+        ActivitiesBackfillController.backfillGroupMentionActorAction(),
+      );
 
       const response: ApiResponse = {
         success: true,

@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { db } from '@/database/client';
+import { elevateToServiceActor } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import { ApiResponse } from '@/types/express';
 
@@ -99,51 +100,53 @@ export class TicketEmailCountBackfillController {
   }
 
   private static async runBackfill(options: BackfillOptions): Promise<void> {
-    const summary: BackfillSummary = { batches: 0, processed: 0, updated: 0, skipped: 0, errors: 0 };
-    const startTime = Date.now();
-    logger.info('[TicketEmailCountBackfill] Starting', options);
+    await elevateToServiceActor(async () => {
+      const summary: BackfillSummary = { batches: 0, processed: 0, updated: 0, skipped: 0, errors: 0 };
+      const startTime = Date.now();
+      logger.info('[TicketEmailCountBackfill] Starting', options);
 
-    let channelsSeen = 0;
-    let channelCursor: string | null = null;
-    while (true) {
-      const channels: Array<{ id: string }> = await db.channel.findMany({
-        where: { type: 'EMAIL' },
-        select: { id: true },
-        orderBy: { id: 'asc' },
-        take: options.batchSize,
-        ...(channelCursor ? { cursor: { id: channelCursor }, skip: 1 } : {}),
-      });
-      if (channels.length === 0) break;
+      let channelsSeen = 0;
+      let channelCursor: string | null = null;
+      while (true) {
+        const channels: Array<{ id: string }> = await db.channel.findMany({
+          where: { type: 'EMAIL' },
+          select: { id: true },
+          orderBy: { id: 'asc' },
+          take: options.batchSize,
+          ...(channelCursor ? { cursor: { id: channelCursor }, skip: 1 } : {}),
+        });
+        if (channels.length === 0) break;
 
-      for (const channel of channels) {
-        channelsSeen += 1;
-        try {
-          await TicketEmailCountBackfillController.backfillChannel(
-            channel.id,
-            options.batchSize,
-            summary,
-          );
-        } catch (error) {
-          summary.errors += 1;
-          logger.warn('[TicketEmailCountBackfill] Channel failed', {
+        for (const channel of channels) {
+          channelsSeen += 1;
+          try {
+            await TicketEmailCountBackfillController.backfillChannel(
+              channel.id,
+              options.batchSize,
+              summary,
+            );
+          } catch (error) {
+            summary.errors += 1;
+            logger.warn('[TicketEmailCountBackfill] Channel failed', {
+              channelId: channel.id,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+          logger.info('[TicketEmailCountBackfill] Channel done', {
             channelId: channel.id,
-            error: error instanceof Error ? error.message : String(error),
+            channelsSeen,
+            ...summary,
           });
         }
-        logger.info('[TicketEmailCountBackfill] Channel done', {
-          channelId: channel.id,
-          channelsSeen,
-          ...summary,
-        });
+
+        channelCursor = channels[channels.length - 1]?.id ?? null;
       }
 
-      channelCursor = channels[channels.length - 1]?.id ?? null;
-    }
-
-    logger.info('[TicketEmailCountBackfill] Done', {
-      ...summary,
-      channelsSeen,
-      durationMs: Date.now() - startTime,
+      logger.info('[TicketEmailCountBackfill] Done', {
+        ...summary,
+        channelsSeen,
+        durationMs: Date.now() - startTime,
+      });
     });
   }
 
