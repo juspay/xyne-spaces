@@ -49,6 +49,10 @@ export interface DraftMessages {
   [lookupId: string]: DraftMessage | undefined;
 }
 
+export interface DraftMessagesByLookupId {
+  [lookupId: string]: DraftMessageDB | undefined;
+}
+
 const DRAFT_STORAGE_KEY = 'channel-draft-message';
 
 export type User = QueryResultType<typeof queries.getUsersV2>[number];
@@ -65,6 +69,15 @@ export type UserChannelStatus = QueryResultType<typeof queries.getAllChannelsUse
 export type Conversation = QueryResultType<typeof queries.channelConversationsPaginatedV3>[number];
 
 export type DraftMessageDB = QueryResultType<typeof queries.userDrafts>[number];
+
+export const getDraftMessageLookupId = (channelId: string, conversationId: string | null): string =>
+  `${channelId}::${conversationId === null ? 'channel' : `conversation:${conversationId}`}`;
+
+const indexDraftMessages = (draftMessages: DraftMessageDB[]): DraftMessagesByLookupId =>
+  draftMessages.reduce<DraftMessagesByLookupId>((acc, draftMessage) => {
+    acc[getDraftMessageLookupId(draftMessage.channelId, draftMessage.conversationId)] = draftMessage;
+    return acc;
+  }, {});
 export type DelayedMessageDB = QueryResultType<typeof queries.userDelayedMessages>[number];
 export type UnreadActivity = QueryResultType<typeof queries.userUnreadActivities>[number];
 export type UserPreference = QueryResultType<typeof queries.getCurrentUserPreference>;
@@ -197,6 +210,7 @@ interface StateMachineContext {
   savedRoutes: Record<string, string>;
   drafts: DraftMessages; // Draft messages per channel/conversation
   draftMessages: DraftMessageDB[];
+  draftMessagesByLookupId: DraftMessagesByLookupId;
   delayedMessages: DelayedMessageDB[];
   userPreference: UserPreference;
   allUserGroups: UserGroup[];
@@ -481,17 +495,24 @@ export const stateMachine = setup({
         return context.currentUserRoleIds;
       },
     }),
-    addUserDrafts: assign({
-      draftMessages: ({ context, event }) => {
-        if (event.type === 'ADD_USER_DRAFTS') {
-          return event.draftMessages.filter(d => {
-            const hasContent = d.content.trim() !== '';
-            const hasAttachments = (d.attachments?.length ?? 0) > 0;
-            return hasContent || hasAttachments;
-          });
-        }
-        return context.draftMessages;
-      },
+    addUserDrafts: assign(({ context, event }) => {
+      if (event.type !== 'ADD_USER_DRAFTS') {
+        return {
+          draftMessages: context.draftMessages,
+          draftMessagesByLookupId: context.draftMessagesByLookupId,
+        };
+      }
+
+      const draftMessages = event.draftMessages.filter(d => {
+        const hasContent = d.content.trim() !== '';
+        const hasAttachments = (d.attachments?.length ?? 0) > 0;
+        return hasContent || hasAttachments;
+      });
+
+      return {
+        draftMessages,
+        draftMessagesByLookupId: indexDraftMessages(draftMessages),
+      };
     }),
     addUserDelayedMessages: assign({
       delayedMessages: ({ context, event }) => {
@@ -689,6 +710,7 @@ export const stateMachine = setup({
       allUserGroups: [],
       userGroupMappings: [],
       draftMessages: [],
+      draftMessagesByLookupId: {},
       delayedMessages: [],
       unreadActivities: [],
       filteredTicketIds: [],
@@ -741,6 +763,7 @@ export const stateMachine = setup({
     })(),
     drafts: JSON.parse(draftStorage().getItem(DRAFT_STORAGE_KEY) || '{}') as DraftMessages,
     draftMessages: [],
+    draftMessagesByLookupId: {},
     delayedMessages: [],
     userPreference: undefined,
     allUserGroups: [],

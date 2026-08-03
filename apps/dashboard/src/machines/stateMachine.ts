@@ -9,6 +9,7 @@ export {
   useHasOverlay,
   useOverlayEffect,
   getThreadTrackingSnapshot,
+  getDraftMessageLookupId,
   setThreadLastRead,
   setThreadScroll,
 } from '@xyne/shared/machines';
@@ -25,6 +26,7 @@ export type {
   UserChannelStatus,
   Conversation,
   DraftMessageDB,
+  DraftMessagesByLookupId,
   DelayedMessageDB,
   UserPreference,
   PeriodMetrics,
