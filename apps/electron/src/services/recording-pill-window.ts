@@ -8,6 +8,7 @@ const POSITION_KEY = 'pillPosition';
 
 let pillWindow: BrowserWindow | null = null;
 let hideTimer: ReturnType<typeof setTimeout> | null = null;
+let pillRequested = false;
 let ignoreMouseHandler: ((event: Electron.IpcMainEvent, ignore: boolean) => void) | null = null;
 let dragStartHandler: ((event: Electron.IpcMainEvent) => void) | null = null;
 let dragEndHandler: ((event: Electron.IpcMainEvent) => void) | null = null;
@@ -171,9 +172,13 @@ export function showRecordingPill(recordingStartTime?: number): void {
   }
 
   currentStartTime = recordingStartTime ?? Date.now();
+  pillRequested = true;
 
   if (pillWindow && !pillWindow.isDestroyed()) {
+    applyIgnoreMouseEvents(true);
+    pillWindow.webContents.send('recording-pill:theme-changed', currentTheme);
     pillWindow.webContents.send('recording-pill:show', currentStartTime);
+    if (!pillWindow.isVisible()) pillWindow.showInactive();
     return;
   }
 
@@ -251,7 +256,7 @@ export function showRecordingPill(recordingStartTime?: number): void {
       )
       .catch((error) => log.warn('[RecordingPill] Failed to inject layout CSS', error));
     applyIgnoreMouseEvents(true);
-    if (hideTimer) return;
+    if (!pillRequested) return;
     pillWindow.webContents.send('recording-pill:theme-changed', currentTheme);
     pillWindow.webContents.send('recording-pill:show', currentStartTime ?? Date.now());
     pillWindow.showInactive();
@@ -267,7 +272,6 @@ export function showRecordingPill(recordingStartTime?: number): void {
     stopDrag();
     if (!pillWindow || pillWindow.isDestroyed()) return;
     applyIgnoreMouseEvents(true);
-    if (hideTimer) return;
     pillWindow.reload();
   });
 
@@ -302,19 +306,16 @@ export function showRecordingPill(recordingStartTime?: number): void {
 }
 
 export function hideRecordingPill(): void {
+  pillRequested = false;
   if (!pillWindow || pillWindow.isDestroyed()) return;
-  if (hideTimer) return;
+  if (hideTimer || !pillWindow.isVisible()) return;
 
   stopDrag();
 
-  pillWindow.blur();
   pillWindow.webContents.send('recording-pill:hide');
   hideTimer = setTimeout(() => {
     hideTimer = null;
-    if (pillWindow && !pillWindow.isDestroyed()) {
-      pillWindow.close();
-      pillWindow = null;
-    }
+    if (pillWindow && !pillWindow.isDestroyed()) pillWindow.hide();
   }, 300);
 
   log.info('[RecordingPill] Hiding recording pill');
