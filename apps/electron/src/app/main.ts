@@ -13,7 +13,7 @@ import {
 import { setupMTLS } from '../services/mtls';
 import { agentAuthService } from '../services/agent-auth';
 import { BrowserWindow } from 'electron';
-import { Logger } from '../services/logger/Logger';
+import { installElectronLogStackHook, Logger } from '../services/logger/Logger';
 import { EnrollmentEvent } from '../services/logger/enrollment-events';
 import { startVersionChecker, stopVersionChecker } from '../services/version-checker';
 import ElectronEvent from '../services/logger/electron-events';
@@ -26,7 +26,6 @@ import { registerProtocolScheme, setupCustomProtocol } from '../services/custom-
 import { initializeUIUpdater } from '../services/ui-updater';
 import { initializeTelemetry } from '../services/telemetry';
 import { setupGlobalErrorHandlers } from '../services/error-handler';
-import { installElectronLogTraceHook } from '../services/logger/errorTrace';
 import { setupWebviewShortcuts } from '../services/webview-shortcuts';
 import Store from 'electron-store';
 
@@ -55,7 +54,7 @@ app.setAppUserModelId(config.APP_ID);
 // Initialize electron-log for main process
 process.setSourceMapsEnabled(true);
 log.initialize();
-installElectronLogTraceHook();
+installElectronLogStackHook();
 log.transports.file.level = 'info';
 log.transports['console'].level = 'info';
 log.info('[Main] Electron app starting...');

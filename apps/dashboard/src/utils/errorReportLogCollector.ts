@@ -1,7 +1,6 @@
 import { detectPlatform, type Platform } from '../hooks/usePlatform';
 import type { ErrorReportNativeLog } from '../types/electron';
-import { logger, Event as LogEvent } from './logger';
-import { createErrorTrace, type ErrorTrace } from './errorTrace';
+import { logger, Event as LogEvent, limitLibraryStackFrames } from './logger';
 
 type LogLevel = 'error' | 'window.error' | 'unhandledrejection';
 
@@ -19,7 +18,7 @@ export interface ErrorReportLogEntry {
   timestamp: string;
   level: LogLevel;
   message: string;
-  errorTrace?: ErrorTrace;
+  stack?: string;
 }
 
 export interface ErrorReportContext {
@@ -43,8 +42,7 @@ interface InstallErrorReportLogCollectorOptions {
 
 const serializeValue = (value: unknown): string => {
   if (typeof value === 'string') return value;
-  if (value instanceof Error)
-    return `${value.name}: ${value.message}${value.stack ? `\n${value.stack}` : ''}`;
+  if (value instanceof Error) return `${value.name}: ${value.message}`;
   try {
     return JSON.stringify(value) ?? String(value);
   } catch {
@@ -58,8 +56,8 @@ const appendLogEntry = (level: LogLevel, message: string, error?: unknown): void
     level,
     message,
   };
-  if (error !== undefined) {
-    entry.errorTrace = createErrorTrace(error);
+  if (error instanceof Error && error.stack) {
+    entry.stack = limitLibraryStackFrames(error.stack);
   }
   logEntries.push(entry);
 
@@ -171,7 +169,10 @@ export const createErrorReportLogFile = async (): Promise<{
 
   const sessionLogLines =
     errorEntries.length > 0
-      ? errorEntries.map(entry => `[${entry.timestamp}] [${entry.level}] ${entry.message}`)
+      ? errorEntries.map(
+          entry =>
+            `[${entry.timestamp}] [${entry.level}] ${entry.message}${entry.stack ? `\n${entry.stack}` : ''}`,
+        )
       : ['No session logs captured.'];
 
   const nativeLogSections = nativeLogs.flatMap(nativeLog => [

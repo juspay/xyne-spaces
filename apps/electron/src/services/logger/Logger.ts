@@ -15,7 +15,64 @@ import si from 'systeminformation';
 import { config } from '../../app/config';
 import type { ElectronEventType } from './electron-events';
 import Store from 'electron-store';
-import { createErrorTrace, serializeError } from './errorTrace';
+
+const MAX_LIBRARY_STACK_FRAMES = 3;
+
+const redact = (value: string): string =>
+  value
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [REDACTED]')
+    .replace(
+      /\b(authorization|token|password|secret|api[_-]?key)\s*[:=]\s*[^\s,;]+/gi,
+      '$1=[REDACTED]'
+    );
+
+const isLibraryStackFrame = (line: string): boolean =>
+  /(?:[/\\]node_modules[/\\]|\bnode:[^)\s]+|\bat (?:async )?internal[/\\])/.test(line);
+
+export const limitLibraryStackFrames = (stack: string): string => {
+  let libraryFrames = 0;
+
+  return stack
+    .split('\n')
+    .filter((line, index) => {
+      if (index === 0 || !isLibraryStackFrame(line)) return true;
+      libraryFrames += 1;
+      return libraryFrames <= MAX_LIBRARY_STACK_FRAMES;
+    })
+    .join('\n');
+};
+
+const serializeError = (value: unknown): Record<string, unknown> => {
+  if (!(value instanceof Error)) {
+    return {
+      name: 'NonError',
+      message: redact(typeof value === 'string' ? value : String(value)),
+    };
+  }
+
+  return {
+    name: value.name,
+    message: redact(value.message),
+    stack: value.stack ? redact(limitLibraryStackFrames(value.stack)) : undefined,
+  };
+};
+
+const errorFrom = (value: unknown): Error | undefined => {
+  if (value instanceof Error) return value;
+  if (!value || typeof value !== 'object') return undefined;
+  return Object.values(value as Record<string, unknown>).find(
+    item => item instanceof Error
+  ) as Error | undefined;
+};
+
+export const installElectronLogStackHook = (): void => {
+  log.hooks.push(message => {
+    if (message.level !== 'error') return message;
+    const error = message.data.map(errorFrom).find(Boolean);
+    if (error) message.data.push({ error: serializeError(error) });
+    return message;
+  });
+};
 
 // Create logger instance for errors and warnings only
 export const errorLogger = log.create({ logId: 'error' });
@@ -166,9 +223,6 @@ class LoggerService {
     const errorDetails = {
       ...(extraFields || {}),
       error: serializeError(error),
-      errorTrace: createErrorTrace(error),
-      error_message: error instanceof Error ? error.message : String(error),
-      error_stack: error instanceof Error ? error.stack : undefined,
     };
     this.error(event, errorDetails, logType);
   }
@@ -202,7 +256,7 @@ class LoggerService {
           : Object.values(extraFields).find(value => value instanceof Error);
     }
     const normalizedFields = error
-      ? { ...(extraFields instanceof Error ? {} : extraFields), error: serializeError(error), errorTrace: createErrorTrace(error) }
+      ? { ...(extraFields instanceof Error ? {} : extraFields), error: serializeError(error) }
       : extraFields;
     const logEntry: LogEntry = {
       clientSessionId: this.clientSessionId,

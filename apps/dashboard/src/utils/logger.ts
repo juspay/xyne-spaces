@@ -10,7 +10,6 @@ import {
 import type { WorkerMessage } from './logger.worker';
 import { v4 as uuidv4 } from 'uuid';
 import { detectReactNativeWebView, reactNativeBridge } from './reactNativeBridge';
-import { createErrorTrace, findError, serializeError } from './errorTrace';
 
 import { Event as LoggerEvent, LogLevel } from '@xyne/shared/logger';
 
@@ -19,6 +18,65 @@ import { Event as LoggerEvent, LogLevel } from '@xyne/shared/logger';
 export type LogEvent = EventType | string;
 
 const ERROR_DEDUP_WINDOW_IN_MS = 5_000;
+const MAX_LIBRARY_STACK_FRAMES = 3;
+const SENSITIVE_KEYS = new Set(['config', 'request', 'response', 'headers', 'options']);
+
+const redact = (value: string): string =>
+  value
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [REDACTED]')
+    .replace(
+      /\b(authorization|token|password|secret|api[_-]?key)\s*[:=]\s*[^\s,;]+/gi,
+      '$1=[REDACTED]',
+    );
+
+const isLibraryStackFrame = (line: string): boolean =>
+  /(?:[/\\]node_modules[/\\]|\bnode:[^)\s]+|\bat (?:async )?internal[/\\])/.test(line);
+
+export const limitLibraryStackFrames = (stack: string): string => {
+  let libraryFrames = 0;
+
+  return stack
+    .split('\n')
+    .filter((line, index) => {
+      if (index === 0 || !isLibraryStackFrame(line)) return true;
+      libraryFrames += 1;
+      return libraryFrames <= MAX_LIBRARY_STACK_FRAMES;
+    })
+    .join('\n');
+};
+
+const stackFor = (error: Error): string | undefined =>
+  error.stack ? redact(limitLibraryStackFrames(error.stack)) : undefined;
+
+const serializeError = (value: unknown): Record<string, unknown> => {
+  if (!(value instanceof Error)) {
+    return {
+      name: 'NonError',
+      message: redact(typeof value === 'string' ? value : String(value)),
+    };
+  }
+
+  return {
+    name: value.name,
+    message: redact(value.message),
+    stack: stackFor(value),
+  };
+};
+
+const findError = (value: unknown, depth = 0): Error | undefined => {
+  if (value instanceof Error) return value;
+  if (!value || typeof value !== 'object') return undefined;
+
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    if (SENSITIVE_KEYS.has(key)) continue;
+    if (item instanceof Error) return item;
+    if (depth === 0) {
+      const nestedError = findError(item, depth + 1);
+      if (nestedError) return nestedError;
+    }
+  }
+  return undefined;
+};
 
 export const NotificationSocketState = {
   CONNECTED: 'connected',
@@ -200,12 +258,12 @@ const normalizeDedupValue = (value: unknown, seen: WeakSet<object> = new WeakSet
 
 const createErrorDedupKey = (
   event: LogEvent,
-  fingerprint: string,
+  stack: string,
   extraFields?: Record<string, unknown>,
 ): string =>
   JSON.stringify({
     event,
-    fingerprint,
+    stack,
     extraFields: normalizeDedupValue(extraFields ?? {}),
   });
 
@@ -245,7 +303,7 @@ export class Logger implements LoggerConfig {
   private zeroSocketState: ZeroSocketState = ZeroSocketState.DISCONNECTED;
   private pageViewId: string | null = null;
   private pageUrl: string | null = null;
-  private recentErrorFingerprints = new Map<string, number>();
+  private recentErrors = new Map<string, number>();
 
   constructor(config: { clientSessionId: string; platform_name: Platform }) {
     this.clientSessionId = config.clientSessionId;
@@ -408,14 +466,15 @@ export class Logger implements LoggerConfig {
     const message = extraFields?.['message'];
     const error =
       findError(extraFields ?? {}) ?? new Error(typeof message === 'string' ? message : event);
-    const errorTrace = createErrorTrace(error);
+    const serializedError = serializeError(error);
+    const stack = typeof serializedError['stack'] === 'string' ? serializedError['stack'] : '';
     const now = Date.now();
-    const dedupKey = createErrorDedupKey(event, errorTrace.fingerprint, extraFields);
-    const previous = this.recentErrorFingerprints.get(dedupKey);
-    this.recentErrorFingerprints.set(dedupKey, now);
-    for (const [fingerprint, timestamp] of this.recentErrorFingerprints) {
+    const dedupKey = createErrorDedupKey(event, stack, extraFields);
+    const previous = this.recentErrors.get(dedupKey);
+    this.recentErrors.set(dedupKey, now);
+    for (const [key, timestamp] of this.recentErrors) {
       if (now - timestamp > ERROR_DEDUP_WINDOW_IN_MS) {
-        this.recentErrorFingerprints.delete(fingerprint);
+        this.recentErrors.delete(key);
       }
     }
     if (previous && now - previous < ERROR_DEDUP_WINDOW_IN_MS) return;
@@ -424,8 +483,7 @@ export class Logger implements LoggerConfig {
       event,
       {
         ...extraFields,
-        error: serializeError(error),
-        errorTrace,
+        error: serializedError,
         release: __APP_VERSION__,
       },
       consoleLog,

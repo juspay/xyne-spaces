@@ -3,13 +3,6 @@ import { AsyncLocalStorage } from 'async_hooks';
 import fluentLogger from 'fluent-logger';
 import type { Socket } from 'net';
 import { config } from '@/config/env';
-import {
-  ErrorTrace,
-  createCallSiteError,
-  createErrorTrace,
-  findError,
-  serializeError as serializeTraceError,
-} from './errorTrace';
 
 export interface LogContext {
   requestId?: string;
@@ -33,58 +26,85 @@ const injectContext = winston.format((info) => {
 
 const ERROR_PAYLOAD_KEYS = new Set(['config', 'request', 'response', 'headers', 'options']);
 const REDACTED = '[REDACTED]';
-const CALL_SITE_TRACE_KEY = '__callSiteTrace';
+const MAX_LIBRARY_STACK_FRAMES = 3;
+const SAFE_ERROR_FIELDS = ['code', 'status', 'statusCode', 'errno', 'syscall'] as const;
+
+const redact = (value: string): string =>
+  value
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [REDACTED]')
+    .replace(
+      /\b(authorization|token|password|secret|api[_-]?key)\s*[:=]\s*[^\s,;]+/gi,
+      '$1=[REDACTED]'
+    );
+
+const isLibraryStackFrame = (line: string): boolean =>
+  /(?:[/\\]node_modules[/\\]|\bnode:[^)\s]+|\bat (?:async )?internal[/\\])/.test(line);
+
+export const limitLibraryStackFrames = (stack: string): string => {
+  let libraryFrames = 0;
+
+  return stack
+    .split('\n')
+    .filter((line, index) => {
+      if (index === 0 || !isLibraryStackFrame(line)) return true;
+      libraryFrames += 1;
+      return libraryFrames <= MAX_LIBRARY_STACK_FRAMES;
+    })
+    .join('\n');
+};
+
+const stackFor = (error: Error): string | undefined =>
+  error.stack ? redact(limitLibraryStackFrames(error.stack)) : undefined;
+
+const findError = (value: unknown, depth = 0): Error | undefined => {
+  if (value instanceof Error) return value;
+  if (!value || typeof value !== 'object') return undefined;
+
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    if (ERROR_PAYLOAD_KEYS.has(key)) continue;
+    if (item instanceof Error) return item;
+    if (depth === 0) {
+      const nestedError = findError(item, depth + 1);
+      if (nestedError) return nestedError;
+    }
+  }
+  return undefined;
+};
 
 export function serializeError(value: unknown): Record<string, unknown> {
-  return serializeTraceError(value);
+  if (!(value instanceof Error)) {
+    return {
+      name: 'NonError',
+      message: redact(typeof value === 'string' ? value : String(value)),
+    };
+  }
+
+  const serialized: Record<string, unknown> = {
+    name: value.name,
+    message: redact(value.message),
+    stack: stackFor(value),
+  };
+  for (const field of SAFE_ERROR_FIELDS) {
+    const fieldValue = (value as unknown as Record<string, unknown>)[field];
+    if (typeof fieldValue === 'string' || typeof fieldValue === 'number') {
+      serialized[field] = fieldValue;
+    }
+  }
+  return serialized;
 }
 
 const normalizeErrors = winston.format((info) => {
-  if (info.level === 'error') {
-    const splat = (info as Record<PropertyKey, unknown>)[Symbol.for('splat')];
-    const infoRecord = info as Record<string, unknown>;
-    const error =
-      findError(info) ??
-      (Array.isArray(splat) ? splat.map(findError).find(Boolean) : findError(splat));
-    const metadataError = infoRecord.error;
-    const splatError = Array.isArray(splat)
-      ? splat.find(
-          (item) =>
-            item instanceof Error || (item !== null && typeof item === 'object' && 'error' in item)
-        )
-      : splat;
-    const splatValue =
-      splatError !== null && typeof splatError === 'object' && 'error' in splatError
-        ? (splatError as Record<string, unknown>).error
-        : splatError;
-    const callSiteTrace = [
-      infoRecord[CALL_SITE_TRACE_KEY],
-      ...(Array.isArray(splat)
-        ? splat.map((item) =>
-            item !== null && typeof item === 'object'
-              ? (item as Record<string, unknown>)[CALL_SITE_TRACE_KEY]
-              : undefined
-          )
-        : []),
-    ].find(
-      (value): value is ErrorTrace =>
-        value !== null && typeof value === 'object' && 'fingerprint' in value
-    );
-    delete infoRecord[CALL_SITE_TRACE_KEY];
-    const traceValue = error ?? metadataError ?? splatValue;
-    if (traceValue !== undefined) {
-      infoRecord.errorTrace = createErrorTrace(traceValue);
-      infoRecord.error = serializeError(traceValue);
-    } else if (callSiteTrace) {
-      infoRecord.errorTrace = callSiteTrace;
-    }
+  const infoRecord = info as Record<string, unknown>;
+  if (typeof infoRecord.stack === 'string') {
+    infoRecord.stack = redact(limitLibraryStackFrames(infoRecord.stack));
   }
+
   for (const key of Object.keys(info)) {
-    const value = (info as Record<string, unknown>)[key];
+    const value = infoRecord[key];
     if (value instanceof Error) {
-      (info as Record<string, unknown>)[key] = serializeError(value);
+      infoRecord[key] = serializeError(value);
     } else if (ERROR_PAYLOAD_KEYS.has(key)) {
-      (info as Record<string, unknown>)[key] = REDACTED;
+      infoRecord[key] = REDACTED;
     }
   }
   return info;
@@ -231,10 +251,12 @@ const originalError = logger.error.bind(logger) as (...args: unknown[]) => winst
 
 const captureErrorLog = (...args: unknown[]): winston.Logger => {
   if (!args.some((arg) => findError(arg))) {
-    const callSiteError = createCallSiteError(args[0], captureErrorLog);
+    const message = typeof args[0] === 'string' ? args[0] : String(args[0]);
+    const callSiteError = new Error(message);
+    Error.captureStackTrace?.(callSiteError, captureErrorLog);
     const lastArgument = args[args.length - 1];
     const callback = typeof lastArgument === 'function' ? args.pop() : undefined;
-    const callSiteMetadata = { [CALL_SITE_TRACE_KEY]: createErrorTrace(callSiteError) };
+    const callSiteMetadata = { stack: stackFor(callSiteError) };
     return callback
       ? originalError(...args, callSiteMetadata, callback)
       : originalError(...args, callSiteMetadata);
