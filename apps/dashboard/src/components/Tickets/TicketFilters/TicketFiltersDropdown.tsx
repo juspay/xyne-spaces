@@ -564,7 +564,6 @@ export const TicketFiltersDropdown = ({
             label='Assignee'
             includeUnassigned
             allowInvert
-            channelId={channelId}
             priorityUserIds={availableUsers}
             demoteDeactivated
           />
@@ -797,7 +796,6 @@ export const TicketFiltersDropdown = ({
                   label='Assignee'
                   includeUnassigned
                   allowInvert
-                  channelId={channelId}
                   priorityUserIds={availableUsers}
                   demoteDeactivated
                 />

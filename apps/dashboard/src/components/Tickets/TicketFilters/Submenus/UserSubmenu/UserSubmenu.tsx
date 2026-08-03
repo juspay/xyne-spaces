@@ -4,7 +4,6 @@ import { Search, Check, User as UserIcon } from 'lucide-react';
 import Avatar from '../../../../ui/Avatar/Avatar';
 import Input from '../../../../ui/Input/Input';
 import { useUsers, useSelf } from '../../../../../hooks/useUsers';
-import { useChannelMemberIds } from '../../../../../hooks/useChannelMemberIds';
 import type { User } from '../../../../../machines/stateMachine';
 import {
   getUserDisplayName,
@@ -25,19 +24,14 @@ interface UserSubmenuProps {
   includeUnassigned?: boolean;
   /** Offer an "Exclude selected" toggle that inverts the selection. */
   allowInvert?: boolean;
-  /** When set, members of this channel are ranked above non-members. */
-  channelId?: string | undefined;
   /**
-   * Users to rank first when there is no channel context — e.g. a project
-   * board ranks people already on the project's tickets. Ignored when
-   * `channelId` is set (channel membership takes precedence). Any `user:`/
-   * `group:` selector prefix is stripped defensively before matching.
+   * Users to rank first — e.g. a project board ranks people already on the
+   * project's tickets. Any `user:`/`group:` selector prefix is stripped
+   * defensively before matching.
    */
   priorityUserIds?: string[] | undefined;
   /** Sink deactivated users to the bottom of the list (used by the assignee filter). */
   demoteDeactivated?: boolean;
-  /** Requires `channelId`. Restrict the list to members of that channel (plus already-selected users). */
-  membersOnly?: boolean;
 }
 
 // A row is either a user or the pinned "Unassigned" option.
@@ -56,10 +50,8 @@ export const UserSubmenu = ({
   className = '',
   includeUnassigned = false,
   allowInvert = false,
-  channelId,
   priorityUserIds,
   demoteDeactivated = false,
-  membersOnly = false,
 }: UserSubmenuProps): ReactElement => {
   // The invert marker rides inside the selection array; strip it for all
   // selection/ordering logic so it never behaves like a user id.
@@ -80,18 +72,15 @@ export const UserSubmenu = ({
 
   const users = useUsers();
   const selfId = useSelf()?.id;
-  const { memberIds } = useChannelMemberIds(channelId);
 
-  // Users to float to the top: channel members when scoped to a channel,
-  // otherwise the caller-provided priority set (e.g. project-board people).
+  // Users to float to the top (e.g. project-board people).
   const priorityUserIdSet = useMemo(() => {
-    if (channelId) return memberIds;
     const ids = new Set<string>();
     for (const id of priorityUserIds ?? []) {
       ids.add(id.replace(/^(user:|group:|userGroup:)/, ''));
     }
     return ids;
-  }, [channelId, memberIds, priorityUserIds]);
+  }, [priorityUserIds]);
 
   const usersMap = useMemo(() => {
     return new Map<string, User>(users.map((u: User) => [u.id, u]));
@@ -149,13 +138,6 @@ export const UserSubmenu = ({
       baseUsers = users;
     }
 
-    if (channelId && membersOnly) {
-      const selectedForFilter = new Set(selectedUsers);
-      baseUsers = baseUsers.filter(
-        user => memberIds.has(user.id) || selectedForFilter.has(user.id),
-      );
-    }
-
     // Order (each group alphabetical):
     //   1. selected filter chips (stay on top so they can be deselected)
     //   2. the current user ("You")
@@ -202,9 +184,6 @@ export const UserSubmenu = ({
     priorityUserIdSet,
     demoteDeactivated,
     selfId,
-    channelId,
-    membersOnly,
-    memberIds,
   ]);
 
   // Re-attach the invert marker on every write; inverting an empty selection
