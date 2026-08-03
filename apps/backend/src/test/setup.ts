@@ -9,6 +9,7 @@ process.env.COMMON_DATABASE_URL = process.env.COMMON_DATABASE_URL || 'postgresql
 process.env.PORT = '3001';
 process.env.HOST = 'localhost';
 process.env.CORS_ORIGIN = 'http://localhost:3000';
+process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-jwt-secret-not-for-production';
 
 beforeAll(async () => {
   try {

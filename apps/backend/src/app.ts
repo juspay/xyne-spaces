@@ -15,6 +15,7 @@ import { tenantScopeMiddleware } from '@/database/tenant/context';
 import { redactSensitiveUrl } from '@/utils/redact';
 import { aclMiddleware } from '@/middleware/acl';
 import { authMiddleware } from '@/middleware/auth';
+import { backfillMountGuard } from '@/middleware/backfillAdminAuth';
 import { authenticateUserOrApp } from '@/middleware/authenticateUserOrApp';
 import { verifyTranscriptionAgent } from '@/middleware/transcriptionAgentAuth';
 import { DatabaseClient } from '@/database/client';
@@ -386,6 +387,14 @@ export class App {
     this.app.use('/api/csat', csatRoutes);
 
     this.app.use('/api/transcriptionAgent', verifyTranscriptionAgent, transcriptionAgentRoutes);
+
+    // Mount-layer default guard: any `*-backfill` admin path is gated with
+    // backfillAdminAuth (TICKET-MIGRATION ADMIN) BY DEFAULT, so a new backfill
+    // router is protected even if its author forgets the in-file guard. Routes
+    // that authorize against a different resource are listed in
+    // SELF_GUARDED_BACKFILLS and self-authorize in their own router.
+    this.app.use('/api/admin', backfillMountGuard);
+    this.app.use('/migrate/api/admin', backfillMountGuard);
 
     // Admin backfill routes (must be before generic /api routes to avoid auth conflicts)
     // Only enable when ENABLE_VESPA_BACKFILL_ROUTES environment variable is true
