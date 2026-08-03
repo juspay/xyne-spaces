@@ -11,7 +11,7 @@ import { unifiedBotUserService } from '@/bots/unified';
 import { v4 as uuidv4 } from 'uuid';
 import type { BlockNoteBlock, BlockNoteInlineContent } from '@/types/blockNoteTypes';
 import { db } from '@/database/client';
-import { elevateToServiceActor } from '@/database/tenant/context';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 interface PRData {
   prId: number;
@@ -257,7 +257,7 @@ Release notes have been generated for **${ticket.title}**
 
       // Email is globally unique in orgMember, single lookup is sufficient
       // Resolves the release bot's membership, not the caller's.
-      const orgMember = await elevateToServiceActor(() =>
+      const orgMember = await withWorkspaceScope(() =>
         db.orgMember.findUnique({
           where: { email: botUser.email },
         }),

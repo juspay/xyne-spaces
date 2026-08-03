@@ -1,7 +1,7 @@
 import { BaseSideEffectHandler } from '../base-handler';
 import type { FormEntityValuePreviousValue, SideEffectJobConfig } from '../types';
 import { db } from '@/database/client';
-import { elevateToServiceActor } from '@/database/tenant/context';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import { emitEventToWorkspaceApps } from '@/apps/core/eventSubscriptionUtils';
 import { AppEventType, AdditionalFormFieldUpdatedPayload, BaseAppEvent } from '@/apps/types';
@@ -114,7 +114,7 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
       if (!ticket?.conversationId) return;
 
       // Re-feeds the whole thread regardless of who can see it, so it runs above the caller's own scope.
-      const emails = await elevateToServiceActor(() =>
+      const emails = await withWorkspaceScope(() =>
         db.email.findMany({
           where: { conversationId: ticket.conversationId },
           select: { id: true },
@@ -394,7 +394,7 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
         ? 'added'
         : 'removed';
 
-    await elevateToServiceActor(() =>
+    await withWorkspaceScope(() =>
       db.ticketActivity.create({
         data: {
           ticketId,

@@ -6,7 +6,7 @@
 import { PrismaClient, WorkspaceRole, Invitation, AuthProvider, ChannelRole, CanvasRole, User, ChannelScopeType } from '@prisma/client';
 import { GuestEntity } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
-import { elevateToServiceActor } from '@/database/tenant/context';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import { emailService } from './email/factory';
 import { grantPermissionsForRole } from './permissionMatrix';
@@ -88,7 +88,7 @@ export class InvitationService {
       // Ensure the invitee exists in the org_members table (any org)
       if (role !== 'GUEST') {
         // Looks the invitee up across any org, not just the caller's, so it runs above the caller's own scope.
-        const inviteeInOrg = await elevateToServiceActor(() =>
+        const inviteeInOrg = await withWorkspaceScope(() =>
           this.prisma.orgMember.findFirst({
             where: { email, leftAt: null },
           }),
@@ -103,7 +103,7 @@ export class InvitationService {
     }
 
     if (role === 'GUEST') {
-      const inviteeOrgMember = await elevateToServiceActor(() =>
+      const inviteeOrgMember = await withWorkspaceScope(() =>
         this.prisma.orgMember.findUnique({
           where: { email },
         }),
@@ -287,7 +287,7 @@ export class InvitationService {
    * hash it, store it, and return the plaintext for the invitation email.
    */
   async generateOrgMemberPassword(email: string): Promise<string> {
-    return elevateToServiceActor(async () => {
+    return withWorkspaceScope(async () => {
       const orgMember = await this.prisma.orgMember.findUnique({
         where: { email: email.toLowerCase() },
         select: { memberId: true, passwordHash: true },

@@ -51,7 +51,7 @@ import { ticketSchema, mailSchema } from '@/vespa/src/types';
 import { logger } from '@/utils/logger';
 import { messageMetadataService } from '@/services/messageMetadataService';
 import { db } from '@/database/client';
-import { currentWorkspaceId, elevateToServiceActor } from '@/database/tenant/context';
+import { currentWorkspaceId, withWorkspaceScope } from '@/database/tenant/context';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import { processMeetLinksFromEmail } from './meetLinkService';
 import { repositories } from '@/database/repositories';
@@ -695,7 +695,7 @@ export class EmailService {
   private async setAutoDraftGenerating(conversationId: string, channelId: string): Promise<void> {
     try {
       // The seed row has no owner, so it runs above the caller's own scope.
-      await elevateToServiceActor(async () => {
+      await withWorkspaceScope(async () => {
         const existingSeed = await this.prisma.emailDraft.findFirst({
           where: { conversationId, userId: null },
           select: { id: true },
@@ -731,7 +731,7 @@ export class EmailService {
   async clearAutoDraftGenerating(conversationId: string): Promise<void> {
     try {
       // The seed row is ownerless, so it is resolved above the caller's own scope.
-      await elevateToServiceActor(async () => {
+      await withWorkspaceScope(async () => {
         const seed = await this.prisma.emailDraft.findFirst({
           where: { conversationId, userId: null, autoDraftStatus: 'GENERATING' },
           select: { id: true, draftContent: true },
@@ -1382,7 +1382,7 @@ export class EmailService {
             select: { userId: true },
           });
           if (caughtUpUsers.length > 0) {
-                  await elevateToServiceActor(() => this.prisma.channelUserStatus.updateMany({
+                  await withWorkspaceScope(() => this.prisma.channelUserStatus.updateMany({
               where: {
                 channelId: conversation.channelId,
                 userId: { in: caughtUpUsers.map(r => r.userId) },

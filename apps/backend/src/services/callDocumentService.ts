@@ -6,7 +6,7 @@
 
 import { v4 as uuidv4 } from 'uuid';
 import { DatabaseClient } from '@/database/client';
-import { elevateToServiceActor } from '@/database/tenant/context';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { repositories } from '@/database/repositories';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { DEFAULT_SUMMARY_FIELDS, MessageType } from '@xyne/shared';
@@ -1532,7 +1532,7 @@ A comprehensive detailed summary has been generated from this call.
       if (existingMessage) {
         // Update existing message instead of creating a new one.
         // The row belongs to the bot, not the caller, so it runs above the caller's own scope.
-        await elevateToServiceActor(() =>
+        await withWorkspaceScope(() =>
           prisma.message.update({
             where: { messageId: existingMessage.messageId },
             data: {

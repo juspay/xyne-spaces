@@ -1,7 +1,7 @@
 import { DatabaseClient } from '@/database/client';
 import { NotificationLevel, NotificationType } from '@prisma/client';
 import { logger } from '@/utils/logger';
-import { elevateToServiceActor } from '@/database/tenant/context';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { parseNotificationKeywords } from '@xyne/shared';
 
 const prisma = DatabaseClient.getInstance();
@@ -76,7 +76,7 @@ export async function prefetchFilterData(
   channelId: string,
 ): Promise<PrefetchedFilterData> {
   // Reads notification state for every recipient, not just the caller.
-  return elevateToServiceActor(() => prefetchFilterDataInner(userIds, channelId));
+  return withWorkspaceScope(() => prefetchFilterDataInner(userIds, channelId));
 }
 
 async function prefetchFilterDataInner(
@@ -326,7 +326,7 @@ export async function filterUsers(
   isGroupDM: boolean = false,
 ): Promise<{ desktopUsers: string[]; mobileUsers: string[] }> {
   // Reads notification state for every candidate recipient, not just the caller.
-  return elevateToServiceActor(() => filterUsersInner(userIds, channelId, isDMChannel, context, options, prefetchedData, isGroupDM));
+  return withWorkspaceScope(() => filterUsersInner(userIds, channelId, isDMChannel, context, options, prefetchedData, isGroupDM));
 }
 
 async function filterUsersInner(
@@ -559,7 +559,7 @@ export async function filterGlobalUsers(
   context: NotificationContext = 'channel_message',
 ): Promise<{ desktopUsers: string[]; mobileUsers: string[] }> {
   // Reads notification state for every candidate recipient, not just the caller.
-  return elevateToServiceActor(() => filterGlobalUsersInner(userIds, notificationType, context));
+  return withWorkspaceScope(() => filterGlobalUsersInner(userIds, notificationType, context));
 }
 
 async function filterGlobalUsersInner(

@@ -1,5 +1,5 @@
 import { db } from '@/database/client';
-import { elevateToServiceActor } from '@/database/tenant/context';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 
 export interface PresenceBackfillConfig {
@@ -36,7 +36,7 @@ export class UserPresenceBackfillService {
   async backfillPresenceToUsers(
     config: Partial<PresenceBackfillConfig> = {},
   ): Promise<PresenceBackfillResult> {
-    return await elevateToServiceActor(async () => {
+    return await withWorkspaceScope(async () => {
       const { batchSize, sleepMs } = { ...DEFAULT_CONFIG, ...config };
       const startTime = new Date();
 

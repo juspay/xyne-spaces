@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { db } from '@/database/client';
-import { elevateToServiceActor } from '@/database/tenant/context';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import { ApiResponse } from '@/types/express';
 import { extractAllSlackIds, resolveApiGroup } from '@/integrations/adapters/slack-webhook-tickets/utils/slackUserResolver';
@@ -217,7 +217,7 @@ export class UnknownGroupBackfillController {
     batchSize: number,
     delayMs: number,
   ): Promise<void> {
-    await elevateToServiceActor(async () => {
+    await withWorkspaceScope(async () => {
       logger.info(`${TAG} Starting backfill`, { slackChannelId, xynespacesChannelId, dryRun, batchSize, delayMs });
 
       // ── 1. Resolve workspace + bot config ────────────────────────────────────

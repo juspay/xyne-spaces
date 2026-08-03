@@ -4,7 +4,7 @@ import { getStorageService } from '../services/storage';
 import { AccessType, CalendarVisibility, WorkspaceRole } from '@prisma/client';
 import { GuestEntity } from '@xyne/shared';
 import { logger } from '../utils/logger';
-import { elevateToServiceActor } from '@/database/tenant/context';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { setSafeInlineImageHeaders } from '../utils/safeAttachmentDownload';
 
 const storageService = getStorageService();
@@ -381,7 +381,7 @@ export class UserManagementController {
       }
 
       // Admin console action on the target user's row, not the caller's.
-      const updatedUser = await elevateToServiceActor(() =>
+      const updatedUser = await withWorkspaceScope(() =>
         userManagementService.updateUser(id, { status }),
       );
 
@@ -670,7 +670,7 @@ export class UserManagementController {
       if (description !== undefined) updateData.description = description?.trim() || null;
 
       // Admin console action on a group the caller need not have created.
-      const group = await elevateToServiceActor(() =>
+      const group = await withWorkspaceScope(() =>
         userManagementService.updateUserGroup(id, updateData),
       );
 
@@ -713,7 +713,7 @@ export class UserManagementController {
       }
 
       // Admin console action on a group the caller need not have created.
-      await elevateToServiceActor(() => userManagementService.deleteUserGroup(id));
+      await withWorkspaceScope(() => userManagementService.deleteUserGroup(id));
 
       res.status(200).json({ message: 'Group deleted successfully' });
     } catch (error) {
@@ -740,7 +740,7 @@ export class UserManagementController {
       const { id } = req.params;
 
       // Admin console action on a group the caller need not have created.
-      await elevateToServiceActor(() => userManagementService.deactivateUserGroup(id));
+      await withWorkspaceScope(() => userManagementService.deactivateUserGroup(id));
 
       res.status(200).json({ message: 'Group deactivated successfully' });
     } catch (error) {
@@ -765,7 +765,7 @@ export class UserManagementController {
       const { id } = req.params;
 
       // Admin console action on a group the caller need not have created.
-      await elevateToServiceActor(() => userManagementService.reactivateUserGroup(id));
+      await withWorkspaceScope(() => userManagementService.reactivateUserGroup(id));
 
       res.status(200).json({ message: 'Group reactivated successfully' });
     } catch (error) {
@@ -804,7 +804,7 @@ export class UserManagementController {
       }
 
       // Admin console action on the target user's group membership, not the caller's.
-      const result = await elevateToServiceActor(() =>
+      const result = await withWorkspaceScope(() =>
         userManagementService.assignUserToGroup(userId, groupId),
       );
 
@@ -846,7 +846,7 @@ export class UserManagementController {
       }
 
       // Admin console action on the target user's group membership, not the caller's.
-      const result = await elevateToServiceActor(() =>
+      const result = await withWorkspaceScope(() =>
         userManagementService.removeUserFromGroup(userId, groupId),
       );
 

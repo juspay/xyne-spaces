@@ -1,6 +1,6 @@
 import { RotationInterval } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
-import { elevateToServiceActor } from '@/database/tenant/context';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -104,7 +104,7 @@ export async function applyRotationForSet(
     // Update only if changed
     if (assignmentState.onCall !== shouldBeOnCall) {
       // Flips the flag for every member of the group, so it runs above the caller's own scope.
-      await elevateToServiceActor(() =>
+      await withWorkspaceScope(() =>
         prisma.userAssignmentState.update({
           where: { id: assignmentState.id },
           data: { onCall: shouldBeOnCall },

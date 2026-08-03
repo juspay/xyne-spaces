@@ -12,7 +12,7 @@ import { emailClassificationQueue } from '../queues/emailClassificationQueue.js'
 import { autoDraftQueue } from '../queues/autoDraftQueue.js';
 import { redisService } from '../services/redisService.js';
 import { logger } from '../utils/logger.js';
-import { elevateToServiceActor } from '../database/tenant/context.js';
+import { withWorkspaceScope } from '../database/tenant/context.js';
 
 const COOLDOWN_SECONDS = 10 * 60;
 const LOCK_TTL_SECONDS = 120;
@@ -211,7 +211,7 @@ export class AiRetriggerController {
         // Existing team drafts (userId: null) in one query.
         const existingDraftConvIds = conversationIds.length > 0
           ? new Set(
-              (await elevateToServiceActor(() =>
+              (await withWorkspaceScope(() =>
                 this.prisma.emailDraft.findMany({
                   where: { conversationId: { in: conversationIds }, userId: null },
                   select: { conversationId: true },

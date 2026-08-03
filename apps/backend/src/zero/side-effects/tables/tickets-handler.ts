@@ -2,7 +2,7 @@ import { ActivityClassification } from '@prisma/client';
 import { BaseSideEffectHandler } from '../base-handler';
 import type { SideEffectJobConfig, TicketPreviousValue } from '../types';
 import { db } from '@/database/client';
-import { elevateToServiceActor } from '@/database/tenant/context';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { buildKanbanCountsSnapshot } from '@/services/tickets/kanbanCountsSnapshotService';
 import { activityService } from '@/services/activity/activityService';
 import { notificationService } from '@/services/notificationService';
@@ -217,7 +217,7 @@ export class TicketsSideEffectHandler extends BaseSideEffectHandler {
     if (ticket.conversationId) {
       try {
         // Fans out to every subscriber, so it runs above the caller's own scope.
-        const participants = await elevateToServiceActor(() =>
+        const participants = await withWorkspaceScope(() =>
           db.conversationParticipant.findMany({
             where: {
               conversationId: ticket.conversationId,

@@ -3,7 +3,7 @@ import { ActivityClassification, ActivityClassificationJobType, AttachmentEntity
 import { BaseSideEffectHandler } from '../base-handler';
 import type { SideEffectJobConfig, MessagePreviousValue } from '../types';
 import { db } from '@/database/client';
-import { elevateToServiceActor } from '@/database/tenant/context';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { config } from '@/config/env';
 import { activityService } from '@/services/activity/activityService';
 import { notificationService } from '@/services/notificationService';
@@ -301,7 +301,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         select: { userId: true }
       }),
       // Keyed on the sender rather than the ambient user, so it runs above the caller's own scope.
-      elevateToServiceActor(() => db.userPreference.findUnique({
+      withWorkspaceScope(() => db.userPreference.findUnique({
         where: { userId: senderId },
         select: { allowThreadBroadcastMentions: true },
       })),
@@ -1026,7 +1026,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
 
     // The message may have been posted by a bot rather than the ambient user,
     // so the write runs above the caller's own scope.
-    await elevateToServiceActor(() => db.message.update({
+    await withWorkspaceScope(() => db.message.update({
       where: { messageId },
       data: { link_preview_md: md },
     }));
@@ -1096,7 +1096,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     });
     if (!md) return;
 
-    await elevateToServiceActor(() => db.message.update({
+    await withWorkspaceScope(() => db.message.update({
       where: { messageId },
       data: { link_preview_md: md },
     }));
@@ -1257,7 +1257,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     const md = serializeMessagePreviewMd(previewData);
     if (!md) return false;
 
-    await elevateToServiceActor(() => db.message.update({
+    await withWorkspaceScope(() => db.message.update({
       where: { messageId },
       data: { link_preview_md: md },
     }));
@@ -2067,7 +2067,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       // Every recipient who was notified about this message, not just the editor, so this
       // read is elevated — notifications are otherwise scoped to their own owner and mobile
       // edit/delete sync would stop silently.
-      const recipients = await elevateToServiceActor(() =>
+      const recipients = await withWorkspaceScope(() =>
         db.notification.findMany({
           where: {
             relatedEntityType: 'message',

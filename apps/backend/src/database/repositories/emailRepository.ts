@@ -1,5 +1,5 @@
 import { DatabaseClient } from '../client';
-import { elevateToServiceActor } from '../tenant/context';
+import { withWorkspaceScope } from '../tenant/context';
 import { Email, EmailType } from '@prisma/client';
 import { syncTicketEmailCount } from '../syncTicketEmailCount';
 import { normalizeRfcMessageId, normalizeRfcMessageIds } from '@/utils/emailRfcMessageId';
@@ -96,7 +96,7 @@ export class EmailRepository {
   ): Promise<string[]> {
     if (externalMessageIds.length === 0) return [];
     // Ingestion dedupe: keyed on the target channel, not on the triggering user.
-    const emails = await elevateToServiceActor(() =>
+    const emails = await withWorkspaceScope(() =>
       this.db.email.findMany({
         where: {
           externalMessageId: { in: externalMessageIds },

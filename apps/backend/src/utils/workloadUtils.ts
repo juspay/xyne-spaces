@@ -1,5 +1,5 @@
 import { DatabaseClient } from '@/database/client';
-import { elevateToServiceActor } from '@/database/tenant/context';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { repositories } from '@/database/repositories';
 import { TicketStatusV2 } from '@prisma/client';
 import { logger } from './logger';
@@ -112,7 +112,7 @@ export async function syncUserWorkload(
   ]);
 
   // Writes the row of the assignee rather than the caller, so it runs above the caller's own scope.
-  await elevateToServiceActor(() =>
+  await withWorkspaceScope(() =>
     repositories.userWorkloadMapping.upsert({
       where: {
         userId_userGroupId_boardId: {

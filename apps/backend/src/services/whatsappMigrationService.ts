@@ -2,7 +2,7 @@ import { readFile, rm } from 'fs/promises';
 import { basename } from 'path';
 import { fileTypeFromBuffer } from 'file-type';
 import { DatabaseClient } from '@/database/client';
-import { elevateToServiceActor } from '@/database/tenant/context';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { ChannelParticipantRepository } from '@/database/repositories/channelParticipantRepository';
 import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
 import { ExternalMessageRepository } from '@/database/repositories/externalMessageRepository';
@@ -814,7 +814,7 @@ export class WhatsAppMigrationService {
       .filter((value): value is string => typeof value === 'string' && value.length > 0);
 
     const messageRows = messageIds.length
-      ? await elevateToServiceActor(() => db.message.findMany({
+      ? await withWorkspaceScope(() => db.message.findMany({
           where: {
             messageId: { in: messageIds },
           },
@@ -923,7 +923,7 @@ export class WhatsAppMigrationService {
 
     const conversationIds = purgeData.conversationIds;
     const conversations = conversationIds.length
-      ? await elevateToServiceActor(() => db.conversation.findMany({
+      ? await withWorkspaceScope(() => db.conversation.findMany({
           where: { conversationId: { in: conversationIds } },
           select: {
             conversationId: true,
@@ -934,7 +934,7 @@ export class WhatsAppMigrationService {
       : [];
 
     const allConversationMessages = conversationIds.length
-      ? await elevateToServiceActor(() => db.message.findMany({
+      ? await withWorkspaceScope(() => db.message.findMany({
           where: { conversationId: { in: conversationIds } },
           select: {
             messageId: true,

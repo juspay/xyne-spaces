@@ -1,5 +1,5 @@
 import { DatabaseClient } from '@/database/client';
-import { elevateToServiceActor } from '@/database/tenant/context';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { config } from '@/config/env';
 import { TicketRepository } from '@/database/repositories/ticketRepository';
 import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
@@ -1607,7 +1607,7 @@ export class JiraMigrationImportService {
   }
 
   private async syncConversationDerivedMd(conversationId: string, ticketId: string): Promise<void> {
-    return elevateToServiceActor(async () => {
+    return withWorkspaceScope(async () => {
       const [ticket, conversation] = await Promise.all([
         db.ticket.findUnique({ where: { id: ticketId } }),
         db.conversation.findUnique({ where: { conversationId }, select: { initialMessageId: true } }),
@@ -1703,7 +1703,7 @@ export class JiraMigrationImportService {
 
 	        // Jira comments can be edited. If the comment exists, refresh content when it differs.
 	        try {
-	    	          await elevateToServiceActor(async () => {
+	    	          await withWorkspaceScope(async () => {
 	            const existingMessage = await db.message.findUnique({
 	              where: { messageId: existingMessageId },
 	              select: { messageId: true, content: true, senderId: true, edited: true },
@@ -3633,7 +3633,7 @@ export class JiraMigrationImportService {
                 );
               }
 
-                      await elevateToServiceActor(async () => {
+                      await withWorkspaceScope(async () => {
 	                if (conversation?.initialMessageId) {
 	                  const currentInitialMessage = await db.message.findUnique({
 	                    where: { messageId: conversation.initialMessageId },

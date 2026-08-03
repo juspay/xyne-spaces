@@ -10,7 +10,7 @@ import { isValidUrl } from '@/utils/urlUtils';
 import { UserManagementService } from '@/services/userManagementService';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { appSchema } from '@/vespa/src/types';
-import { elevateToServiceActor } from '@/database/tenant/context';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 const CreateAppBodySchema = z.object({
   name: z.string().min(1, 'App name cannot be empty').trim(),
@@ -236,7 +236,7 @@ export class AppController {
       }
 
       // Promotion is authorised by org ownership above, not by who created the app.
-      const updated = await elevateToServiceActor(() =>
+      const updated = await withWorkspaceScope(() =>
         repositories.apps.update(appId, { scope: 'GLOBAL' }),
       );
       res.status(200).json(updated);
@@ -636,7 +636,7 @@ export class AppController {
         return;
       }
       // Resolves names for the requested orgs, which may include the app's origin org.
-      const orgs = await elevateToServiceActor(() =>
+      const orgs = await withWorkspaceScope(() =>
         db.organization.findMany({
           where: { orgId: { in: ids } },
           select: { orgId: true, name: true },

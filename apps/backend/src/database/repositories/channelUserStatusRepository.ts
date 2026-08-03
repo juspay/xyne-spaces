@@ -1,7 +1,7 @@
 import { ChannelUserStatus, PrismaClient } from '@prisma/client';
 import { BaseRepository } from './base';
 import { QueryOptions } from '@/types/database';
-import { elevateToServiceActor } from '@/database/tenant/context';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 type TransactionClient = Parameters<Parameters<PrismaClient['$transaction']>[0]>[0];
 
@@ -259,7 +259,7 @@ export class ChannelUserStatusRepository extends BaseRepository<ChannelUserStatu
    */
   async reopenForAllParticipants(channelId: string): Promise<void> {
     // Keyed on the channel: every participant's row is reopened, not just the sender's.
-    await elevateToServiceActor(() =>
+    await withWorkspaceScope(() =>
       this.db.channelUserStatus.updateMany({
         where: {
           channelId,

@@ -9,7 +9,7 @@ import { ProjectType, Status } from '@prisma/client';
 import { invitationService } from '@/services/invitationService';
 import { redisService } from '@/services/redisService';
 import { DatabaseClient } from '@/database/client';
-import { elevateToServiceActor } from '@/database/tenant/context';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
@@ -466,7 +466,7 @@ export class InvitationController {
 
       // Reject if the owner email is already an active member of any org
       // Checks membership of ANY org, not just the caller's.
-      const existingMembership = await elevateToServiceActor(() =>
+      const existingMembership = await withWorkspaceScope(() =>
         prisma.orgMember.findFirst({
           where: { email: normalizedOwnerEmail, leftAt: null },
           select: { orgId: true },
@@ -572,7 +572,7 @@ export class InvitationController {
         });
 
         // 2. Delete org member
-        await elevateToServiceActor(() =>
+        await withWorkspaceScope(() =>
           prisma.orgMember.delete({ where: { email: normalizedOwnerEmail } }),
         );
         

@@ -8,7 +8,7 @@ import {
 } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { DatabaseClient } from '@/database/client';
-import { elevateToServiceActor } from '@/database/tenant/context';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { calculateETADeadline } from '@/utils/etaCalculation';
 import { logger } from '@/utils/logger';
@@ -260,7 +260,7 @@ export class StageReconstructionService {
         },
         orderBy: [{ timestamp: 'asc' }, { id: 'asc' }],
       }),
-      elevateToServiceActor(() => this.db.message.findMany({
+      withWorkspaceScope(() => this.db.message.findMany({
         where: {
           conversationId: { in: conversationIds },
           msgType: MessageType.SYSTEM,
