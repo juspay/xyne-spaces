@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { db } from '@/database/client';
+import { elevateToServiceActor } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import { ApiResponse } from '@/types/express';
 import { extractAllSlackIds, resolveApiGroup } from '@/integrations/adapters/slack-webhook-tickets/utils/slackUserResolver';
@@ -216,230 +217,232 @@ export class UnknownGroupBackfillController {
     batchSize: number,
     delayMs: number,
   ): Promise<void> {
-    logger.info(`${TAG} Starting backfill`, { slackChannelId, xynespacesChannelId, dryRun, batchSize, delayMs });
+    await elevateToServiceActor(async () => {
+      logger.info(`${TAG} Starting backfill`, { slackChannelId, xynespacesChannelId, dryRun, batchSize, delayMs });
 
-    // ── 1. Resolve workspace + bot config ────────────────────────────────────
-    const channel = await db.channel.findUnique({
-      where: { id: xynespacesChannelId },
-      select: { workspaceId: true },
-    });
-    if (!channel) {
-      logger.error(`${TAG} Channel not found: ${xynespacesChannelId}`);
-      return;
-    }
-
-    const botConfig = getBotConfigByWorkspaceId(channel.workspaceId);
-    if (!botConfig?.slackBotToken) {
-      logger.error(`${TAG} No bot token for workspace ${channel.workspaceId}`);
-      return;
-    }
-
-    const slackClient = new WebClient(botConfig.slackBotToken);
-
-    // ── 2. Fetch only conversation IDs — the ONLY data held across the full run ─
-    const allConvIds: string[] = (
-      await db.conversation.findMany({
-        where: {
-          channelId: xynespacesChannelId,
-          OR: [
-            { initial_message_md: { contains: '<span>@unknown group</span>' } },
-            { messages: { some: { content: { contains: '@unknown group' } } } },
-          ],
-        },
-        select: { conversationId: true },
-      })
-    ).map(c => c.conversationId);
-
-    logger.info(`${TAG} Found ${allConvIds.length} conversations with @unknown group`);
-    if (allConvIds.length === 0) return;
-
-    const totalBatches = Math.ceil(allConvIds.length / batchSize);
-    let totalProcessed = 0, totalUpdated = 0, totalSkipped = 0, totalErrors = 0;
-
-    // ── 3. Process strictly in batches — all data is batch-scoped → GC'd after each batch ──
-    for (let batchStart = 0; batchStart < allConvIds.length; batchStart += batchSize) {
-      const batchIds = allConvIds.slice(batchStart, batchStart + batchSize);
-      const batchNum = Math.floor(batchStart / batchSize) + 1;
-
-      logger.info(`${TAG} Batch ${batchNum}/${totalBatches} — loading data for ${batchIds.length} conversations`);
-
-      // Fetch full conversation rows for this batch only
-      const conversations = await db.conversation.findMany({
-        where: { conversationId: { in: batchIds } },
-        select: { conversationId: true, initialMessageId: true, initial_message_md: true },
+      // ── 1. Resolve workspace + bot config ────────────────────────────────────
+      const channel = await db.channel.findUnique({
+        where: { id: xynespacesChannelId },
+        select: { workspaceId: true },
       });
+      if (!channel) {
+        logger.error(`${TAG} Channel not found: ${xynespacesChannelId}`);
+        return;
+      }
 
-      // Fetch messages with @unknown for this batch only
-      const messagesWithUnknown = await db.message.findMany({
-        where: {
-          conversationId: { in: batchIds },
-          content: { contains: '@unknown group' },
-        },
-        select: { messageId: true, content: true, conversationId: true },
-      });
+      const botConfig = getBotConfigByWorkspaceId(channel.workspaceId);
+      if (!botConfig?.slackBotToken) {
+        logger.error(`${TAG} No bot token for workspace ${channel.workspaceId}`);
+        return;
+      }
 
-      const msgMap = new Map(messagesWithUnknown.map(m => [m.messageId, { ...m }]));
+      const slackClient = new WebClient(botConfig.slackBotToken);
 
-      // Fetch initial messages whose content may not have @unknown (preview-only edge case)
-      const initialIdsNotInMap = conversations
-        .filter(c => c.initial_message_md?.includes('@unknown group') && c.initialMessageId && !msgMap.has(c.initialMessageId!))
-        .map(c => c.initialMessageId!);
+      // ── 2. Fetch only conversation IDs — the ONLY data held across the full run ─
+      const allConvIds: string[] = (
+        await db.conversation.findMany({
+          where: {
+            channelId: xynespacesChannelId,
+            OR: [
+              { initial_message_md: { contains: '<span>@unknown group</span>' } },
+              { messages: { some: { content: { contains: '@unknown group' } } } },
+            ],
+          },
+          select: { conversationId: true },
+        })
+      ).map(c => c.conversationId);
 
-      if (initialIdsNotInMap.length > 0) {
-        const extra = await db.message.findMany({
-          where: { messageId: { in: initialIdsNotInMap } },
+      logger.info(`${TAG} Found ${allConvIds.length} conversations with @unknown group`);
+      if (allConvIds.length === 0) return;
+
+      const totalBatches = Math.ceil(allConvIds.length / batchSize);
+      let totalProcessed = 0, totalUpdated = 0, totalSkipped = 0, totalErrors = 0;
+
+      // ── 3. Process strictly in batches — all data is batch-scoped → GC'd after each batch ──
+      for (let batchStart = 0; batchStart < allConvIds.length; batchStart += batchSize) {
+        const batchIds = allConvIds.slice(batchStart, batchStart + batchSize);
+        const batchNum = Math.floor(batchStart / batchSize) + 1;
+
+        logger.info(`${TAG} Batch ${batchNum}/${totalBatches} — loading data for ${batchIds.length} conversations`);
+
+        // Fetch full conversation rows for this batch only
+        const conversations = await db.conversation.findMany({
+          where: { conversationId: { in: batchIds } },
+          select: { conversationId: true, initialMessageId: true, initial_message_md: true },
+        });
+
+        // Fetch messages with @unknown for this batch only
+        const messagesWithUnknown = await db.message.findMany({
+          where: {
+            conversationId: { in: batchIds },
+            content: { contains: '@unknown group' },
+          },
           select: { messageId: true, content: true, conversationId: true },
         });
-        for (const m of extra) msgMap.set(m.messageId, { ...m });
-      }
 
-      // Fetch ExternalMessage records for this batch only
-      const externalMsgs = await db.externalMessage.findMany({
-        where: { messageId: { in: [...msgMap.keys()] } },
-        select: { messageId: true, externalId: true, externalThreadId: true },
-      });
-      const extByMessageId = new Map(externalMsgs.map(e => [e.messageId, e]));
+        const msgMap = new Map(messagesWithUnknown.map(m => [m.messageId, { ...m }]));
 
-      // Collect unique thread timestamps needed for this batch.
-      // Fall back to externalId when externalThreadId is null — reply messages whose
-      // thread_ts was not stored still need their individual ts fetched from Slack.
-      const uniqueThreadTs = new Set<string>();
-      for (const ext of externalMsgs) {
-        uniqueThreadTs.add(ext.externalThreadId ?? ext.externalId);
-      }
+        // Fetch initial messages whose content may not have @unknown (preview-only edge case)
+        const initialIdsNotInMap = conversations
+          .filter(c => c.initial_message_md?.includes('@unknown group') && c.initialMessageId && !msgMap.has(c.initialMessageId!))
+          .map(c => c.initialMessageId!);
 
-      logger.info(`${TAG} Batch ${batchNum}/${totalBatches} — fetching ${uniqueThreadTs.size} Slack threads`);
-
-      // Batch-scoped Slack text cache: ts → original text (freed when batch ends)
-      const slackTextByTs = new Map<string, string>();
-
-      for (const threadTs of uniqueThreadTs) {
-        try {
-          await fetchThreadIntoCache(slackClient, slackChannelId, threadTs, slackTextByTs);
-        } catch (err) {
-          logger.warn(`${TAG} Failed to fetch Slack thread ts=${threadTs}`, {
-            error: err instanceof Error ? err.message : String(err),
+        if (initialIdsNotInMap.length > 0) {
+          const extra = await db.message.findMany({
+            where: { messageId: { in: initialIdsNotInMap } },
+            select: { messageId: true, content: true, conversationId: true },
           });
+          for (const m of extra) msgMap.set(m.messageId, { ...m });
         }
-        // Small gap between Slack API calls to stay within Tier-3 rate limits
-        await sleep(200);
-      }
 
-      logger.info(`${TAG} Batch ${batchNum}/${totalBatches} — cached ${slackTextByTs.size} Slack messages, processing`);
+        // Fetch ExternalMessage records for this batch only
+        const externalMsgs = await db.externalMessage.findMany({
+          where: { messageId: { in: [...msgMap.keys()] } },
+          select: { messageId: true, externalId: true, externalThreadId: true },
+        });
+        const extByMessageId = new Map(externalMsgs.map(e => [e.messageId, e]));
 
-      // ── Process conversations in this batch ─────────────────────────────────
-      for (const conv of conversations) {
-        try {
-          totalProcessed++;
+        // Collect unique thread timestamps needed for this batch.
+        // Fall back to externalId when externalThreadId is null — reply messages whose
+        // thread_ts was not stored still need their individual ts fetched from Slack.
+        const uniqueThreadTs = new Set<string>();
+        for (const ext of externalMsgs) {
+          uniqueThreadTs.add(ext.externalThreadId ?? ext.externalId);
+        }
 
-          const hasInitialUnknown = conv.initial_message_md?.includes('@unknown group') ?? false;
+        logger.info(`${TAG} Batch ${batchNum}/${totalBatches} — fetching ${uniqueThreadTs.size} Slack threads`);
 
-          const messageIdsToFix = new Set<string>(
-            messagesWithUnknown
-              .filter(m => m.conversationId === conv.conversationId)
-              .map(m => m.messageId),
-          );
-          if (hasInitialUnknown && conv.initialMessageId) {
-            messageIdsToFix.add(conv.initialMessageId);
+        // Batch-scoped Slack text cache: ts → original text (freed when batch ends)
+        const slackTextByTs = new Map<string, string>();
+
+        for (const threadTs of uniqueThreadTs) {
+          try {
+            await fetchThreadIntoCache(slackClient, slackChannelId, threadTs, slackTextByTs);
+          } catch (err) {
+            logger.warn(`${TAG} Failed to fetch Slack thread ts=${threadTs}`, {
+              error: err instanceof Error ? err.message : String(err),
+            });
           }
+          // Small gap between Slack API calls to stay within Tier-3 rate limits
+          await sleep(200);
+        }
 
-          if (messageIdsToFix.size === 0) { totalSkipped++; continue; }
+        logger.info(`${TAG} Batch ${batchNum}/${totalBatches} — cached ${slackTextByTs.size} Slack messages, processing`);
 
-          let conversationUpdated = false;
+        // ── Process conversations in this batch ─────────────────────────────────
+        for (const conv of conversations) {
+          try {
+            totalProcessed++;
 
-          for (const messageId of messageIdsToFix) {
-            const msgData = msgMap.get(messageId);
-            if (!msgData?.content?.includes('@unknown group')) continue;
+            const hasInitialUnknown = conv.initial_message_md?.includes('@unknown group') ?? false;
 
-            const ext = extByMessageId.get(messageId);
-            if (!ext) {
-              logger.warn(`${TAG} No ExternalMessage for messageId=${messageId}`);
-              continue;
-            }
-
-            const originalText = slackTextByTs.get(ext.externalId) ?? '';
-            if (!originalText) {
-              logger.warn(`${TAG} No cached Slack text for messageId=${messageId} (ts=${ext.externalId})`);
-              continue;
-            }
-
-            if (dryRun) {
-              logger.info(`${TAG} DRY RUN: messageId=${messageId} groupIds=${extractAllSlackIds(originalText, false).join(', ')}`);
-              conversationUpdated = true;
-              continue;
-            }
-
-            const updatedContent = await resolveUnknownGroupsInContent(
-              msgData.content,
-              originalText,
-              botConfig.slackBotToken,
-              channel.workspaceId,
+            const messageIdsToFix = new Set<string>(
+              messagesWithUnknown
+                .filter(m => m.conversationId === conv.conversationId)
+                .map(m => m.messageId),
             );
+            if (hasInitialUnknown && conv.initialMessageId) {
+              messageIdsToFix.add(conv.initialMessageId);
+            }
 
-            if (updatedContent === msgData.content) continue;
+            if (messageIdsToFix.size === 0) { totalSkipped++; continue; }
 
-            await db.message.update({ where: { messageId }, data: { content: updatedContent } });
-            msgData.content = updatedContent;
-            logger.info(`${TAG} Updated message ${messageId}`);
-            conversationUpdated = true;
+            let conversationUpdated = false;
 
-            // Sync initial_message_md when this message is the initial message
-            if (messageId === conv.initialMessageId && conv.initial_message_md?.includes('@unknown group')) {
-              const updatedInitialMd = await resolveUnknownGroupsInContent(
-                conv.initial_message_md,
+            for (const messageId of messageIdsToFix) {
+              const msgData = msgMap.get(messageId);
+              if (!msgData?.content?.includes('@unknown group')) continue;
+
+              const ext = extByMessageId.get(messageId);
+              if (!ext) {
+                logger.warn(`${TAG} No ExternalMessage for messageId=${messageId}`);
+                continue;
+              }
+
+              const originalText = slackTextByTs.get(ext.externalId) ?? '';
+              if (!originalText) {
+                logger.warn(`${TAG} No cached Slack text for messageId=${messageId} (ts=${ext.externalId})`);
+                continue;
+              }
+
+              if (dryRun) {
+                logger.info(`${TAG} DRY RUN: messageId=${messageId} groupIds=${extractAllSlackIds(originalText, false).join(', ')}`);
+                conversationUpdated = true;
+                continue;
+              }
+
+              const updatedContent = await resolveUnknownGroupsInContent(
+                msgData.content,
                 originalText,
                 botConfig.slackBotToken,
                 channel.workspaceId,
               );
-              await db.conversation.update({
-                where: { conversationId: conv.conversationId },
-                data: { initial_message_md: updatedInitialMd },
-              });
-              conv.initial_message_md = updatedInitialMd;
-              logger.info(`${TAG} Updated initial_message_md for conversation ${conv.conversationId}`);
-            }
-          }
 
-          // Edge case: @unknown only in initial_message_md (message content already fixed)
-          if (!dryRun && conv.initial_message_md?.includes('@unknown group') && conv.initialMessageId) {
-            const ext = extByMessageId.get(conv.initialMessageId);
-            if (ext) {
-              const originalText = slackTextByTs.get(ext.externalId) ?? '';
-              if (originalText) {
+              if (updatedContent === msgData.content) continue;
+
+              await db.message.update({ where: { messageId }, data: { content: updatedContent } });
+              msgData.content = updatedContent;
+              logger.info(`${TAG} Updated message ${messageId}`);
+              conversationUpdated = true;
+
+              // Sync initial_message_md when this message is the initial message
+              if (messageId === conv.initialMessageId && conv.initial_message_md?.includes('@unknown group')) {
                 const updatedInitialMd = await resolveUnknownGroupsInContent(
                   conv.initial_message_md,
                   originalText,
                   botConfig.slackBotToken,
                   channel.workspaceId,
                 );
-                if (updatedInitialMd !== conv.initial_message_md) {
-                  await db.conversation.update({
-                    where: { conversationId: conv.conversationId },
-                    data: { initial_message_md: updatedInitialMd },
-                  });
-                  conv.initial_message_md = updatedInitialMd;
-                  conversationUpdated = true;
-                  logger.info(`${TAG} Updated initial_message_md (standalone) for conversation ${conv.conversationId}`);
+                await db.conversation.update({
+                  where: { conversationId: conv.conversationId },
+                  data: { initial_message_md: updatedInitialMd },
+                });
+                conv.initial_message_md = updatedInitialMd;
+                logger.info(`${TAG} Updated initial_message_md for conversation ${conv.conversationId}`);
+              }
+            }
+
+            // Edge case: @unknown only in initial_message_md (message content already fixed)
+            if (!dryRun && conv.initial_message_md?.includes('@unknown group') && conv.initialMessageId) {
+              const ext = extByMessageId.get(conv.initialMessageId);
+              if (ext) {
+                const originalText = slackTextByTs.get(ext.externalId) ?? '';
+                if (originalText) {
+                  const updatedInitialMd = await resolveUnknownGroupsInContent(
+                    conv.initial_message_md,
+                    originalText,
+                    botConfig.slackBotToken,
+                    channel.workspaceId,
+                  );
+                  if (updatedInitialMd !== conv.initial_message_md) {
+                    await db.conversation.update({
+                      where: { conversationId: conv.conversationId },
+                      data: { initial_message_md: updatedInitialMd },
+                    });
+                    conv.initial_message_md = updatedInitialMd;
+                    conversationUpdated = true;
+                    logger.info(`${TAG} Updated initial_message_md (standalone) for conversation ${conv.conversationId}`);
+                  }
                 }
               }
             }
-          }
 
-          if (conversationUpdated) totalUpdated++;
-          else totalSkipped++;
-        } catch (error) {
-          totalErrors++;
-          logger.error(`${TAG} Error processing conversation ${conv.conversationId}:`, error);
+            if (conversationUpdated) totalUpdated++;
+            else totalSkipped++;
+          } catch (error) {
+            totalErrors++;
+            logger.error(`${TAG} Error processing conversation ${conv.conversationId}:`, error);
+          }
         }
+
+        // conversations, messagesWithUnknown, msgMap, externalMsgs, slackTextByTs
+        // all go out of scope here → GC'd before next batch
+        logger.info(`${TAG} Batch ${batchNum}/${totalBatches} done — processed=${totalProcessed} updated=${totalUpdated} skipped=${totalSkipped} errors=${totalErrors}`);
+
+        if (batchStart + batchSize < allConvIds.length) await sleep(delayMs);
       }
 
-      // conversations, messagesWithUnknown, msgMap, externalMsgs, slackTextByTs
-      // all go out of scope here → GC'd before next batch
-      logger.info(`${TAG} Batch ${batchNum}/${totalBatches} done — processed=${totalProcessed} updated=${totalUpdated} skipped=${totalSkipped} errors=${totalErrors}`);
-
-      if (batchStart + batchSize < allConvIds.length) await sleep(delayMs);
-    }
-
-    logger.info(`${TAG} BACKFILL COMPLETE`, { totalProcessed, totalUpdated, totalSkipped, totalErrors, dryRun });
+      logger.info(`${TAG} BACKFILL COMPLETE`, { totalProcessed, totalUpdated, totalSkipped, totalErrors, dryRun });
+    });
   }
 }

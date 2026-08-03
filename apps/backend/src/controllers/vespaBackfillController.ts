@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { ApiResponse } from '@/types/express';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
+import { elevateToServiceActor } from '@/database/tenant/context';
 import { repositories } from '@/database/repositories';
 import { vespaBackfillQueue } from '@/queues/vespaQueue';
 import { entityExtractionQueue } from '@/queues/entityExtractionQueue';
@@ -1098,7 +1099,9 @@ export class AdminBackfillController {
         timestamp: new Date().toISOString(),
       } as ApiResponse);
 
-      AdminBackfillController.backfillEntities(channelId, cutoffTime, fromTime).catch((error) => {
+      elevateToServiceActor(() =>
+        AdminBackfillController.backfillEntities(channelId, cutoffTime, fromTime),
+      ).catch((error) => {
         logger.error(
           `❌ Entity backfill failed for channel ${channelId} (job ${backfillJobId}):`,
           error,
@@ -1273,13 +1276,15 @@ export class AdminBackfillController {
 
       // Execute backfill asynchronously in the background (fire and forget)
       // No await here - let it run independently
-      AdminBackfillController.executeBackfillInBackground(
-        schemasToBackfill,
-        backfillJobId,
-        queueName,
-        cutoffTime,
-        fromTime,
-        filters,
+      elevateToServiceActor(() =>
+        AdminBackfillController.executeBackfillInBackground(
+          schemasToBackfill,
+          backfillJobId,
+          queueName,
+          cutoffTime,
+          fromTime,
+          filters,
+        ),
       )
         .catch((error) => {
           logger.error(`❌ Background backfill failed for job ${backfillJobId}:`, error);
