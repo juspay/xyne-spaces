@@ -409,6 +409,7 @@ export class EmailController {
             ? {
                 ticketId: ticketForActivity.id,
                 updatedBy: userId,
+                workspaceId: ticketForActivity.workspaceId,
                 activityType: ActivityType.METADATA,
                 value: {
                   field: 'emailReply',

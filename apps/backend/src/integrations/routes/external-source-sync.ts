@@ -18,7 +18,8 @@ import { ExternalSourceRepository } from '@/database/repositories/externalSource
 import { emailFetchQueue } from '@/queues/emailFetchQueue';
 import { config as appConfig } from '@/config/env';
 import { db } from '@/database/client';
-import { runWithContext } from '@/database/tenant/context';
+import { runWithContext, runAsServiceActor } from '@/database/tenant/context';
+import { DeskType } from '@xyne/shared';
 
 const router = Router();
 
@@ -100,8 +101,7 @@ router.post(
         });
         throw new Error(`External source ingest: no resolvable workspaceId for source ${source?.id ?? sourceName}`);
       }
-      const results = await runWithContext(
-        { userId: 'external-source-ingest', workspaceId: ingestWorkspaceId },
+      const results = await runAsServiceActor('external-source-ingest', ingestWorkspaceId,
         () => externalSourceCore.ingest(adapter, sourceName, req.body, source),
       );
 

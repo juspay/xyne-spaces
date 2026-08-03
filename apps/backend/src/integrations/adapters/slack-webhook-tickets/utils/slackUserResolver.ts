@@ -316,35 +316,6 @@ async function resolveApiUser(
   return { dbUserId: user?.id, displayName };
 }
 
-/**
- * Runs `fn` over `items` with at most `limit` promises in flight at once.
- *
- * Used to import Slack usergroup members concurrently without firing an unbounded
- * number of `users.info` calls (Slack rate limits) or DB writes (connection pool)
- * at the same time. Results preserve input order; `fn` errors reject the whole run,
- * so callers that want per-item resilience must catch inside `fn`.
- */
-async function mapWithConcurrency<T, R>(
-  items: T[],
-  limit: number,
-  fn: (item: T, index: number) => Promise<R>,
-): Promise<R[]> {
-  const results: R[] = new Array(items.length);
-  let cursor = 0;
-  const workers = Array.from(
-    { length: Math.min(Math.max(limit, 1), items.length) },
-    async () => {
-      while (true) {
-        const i = cursor++;
-        if (i >= items.length) break;
-        results[i] = await fn(items[i], i);
-      }
-    },
-  );
-  await Promise.all(workers);
-  return results;
-}
-
 export async function resolveApiGroup(slackGroupId: string, botOauthToken: string, workspaceId?: string): Promise<string | undefined> {
   if (!slackGroupId || !botOauthToken) {
     return undefined;
@@ -370,64 +341,66 @@ export async function resolveApiGroup(slackGroupId: string, botOauthToken: strin
     workspace: { connect: { id: resolvedWorkspaceId } },
   });
 
-  // Resolve each group member — create if not in DB. Members are imported with
-  // bounded concurrency (rather than one-by-one) so a large group doesn't serialize
-  // N `users.info` round-trips; the concurrency cap keeps us under Slack rate limits
-  // and the DB connection pool. Each member is fully self-contained and returns its
-  // resolved DB user id (or undefined if it should be skipped).
-  const importMember = async (slackUserId: string): Promise<string | undefined> => {
+  // Resolve each group member — create if not in DB (same pattern as channel resolution)
+  const dbUserIds: string[] = [];
+  for (const slackUserId of slackGroup.users) {
     // First try: find by slackId metadata in the target workspace
     const existingBySlackId = await userRepo.findByMetadataField('slackId', slackUserId, resolvedWorkspaceId);
     if (existingBySlackId) {
-      return existingBySlackId.id;
+      dbUserIds.push(existingBySlackId.id);
+      continue;
     }
 
     // Second try: find by fetching Slack user info (they may not have slackId metadata yet)
     const slackUserInfo = await fetchSlackUserInfo(slackUserId, botOauthToken);
     if (!slackUserInfo || slackUserInfo.is_bot) {
       logger.debug('[resolveApiGroup] Skipping bot or unfetchable user', { slackUserId });
-      return undefined;
+      continue;
     }
 
-    const userName = slackUserInfo.profile?.real_name || slackUserInfo.profile?.display_name || slackUserId;
-    const hasRealEmail = !!slackUserInfo.profile?.email;
-    const email = hasRealEmail
-      ? slackUserInfo.profile!.email!.toLowerCase()
-      : `${slackUserId}@cross-platform.in`;
-
-    // For a real email, an existing user may already be present — link slackId to it.
-    if (hasRealEmail) {
-      const existingByEmail = await userRepo.findByEmailCaseInsensitive(email, resolvedWorkspaceId);
+    // Try to find user by email
+    if (slackUserInfo.profile?.email) {
+      const existingByEmail = await userRepo.findByEmailCaseInsensitive(
+        slackUserInfo.profile.email.toLowerCase(),
+        resolvedWorkspaceId,
+      );
       if (existingByEmail) {
         await userRepo.upsertMetaDataField(existingByEmail.id, 'slackId', slackUserId);
-        return existingByEmail.id;
+        dbUserIds.push(existingByEmail.id);
+        continue;
       }
-    }
 
-    // Create OrgMember + User. Guard against a concurrent import (the same member can
-    // appear in two groups resolved in parallel) creating the row first — on a failure
-    // re-fetch by email and link to the now-existing user instead of throwing.
-    try {
+      // User not in this workspace — create them with synthetic or real email
+      const userName = slackUserInfo.profile.real_name || slackUserInfo.profile.display_name || slackUserId;
+      const email = slackUserInfo.profile.email.toLowerCase();
       let orgMember = await dbClient.orgMember.findUnique({
         where: { email },
-        select: { memberId: true },
+        select: { memberId: true, orgId: true },
       });
+      const workspace = await dbClient.workspace.findUnique({
+        where: { id: resolvedWorkspaceId },
+        select: { orgId: true },
+      });
+      if (!workspace) {
+        logger.warn('[resolveApiGroup] Workspace not found', { workspaceId: resolvedWorkspaceId });
+        continue;
+      }
+      // Never pull a Slack member who already belongs to a DIFFERENT org into this
+      // workspace: buildTokenFallbackList tries every configured bot token, so a fallback
+      // token can resolve an identity that belongs elsewhere. New members of THIS org are
+      // still auto-created; existing members of THIS org are still linked by email.
+      if (orgMember && orgMember.orgId !== workspace.orgId) {
+        logger.warn('[resolveApiGroup] Skipping cross-org Slack member (email belongs to another org)', { email });
+        continue;
+      }
       if (!orgMember) {
-        const workspace = await dbClient.workspace.findUnique({
-          where: { id: resolvedWorkspaceId },
-          select: { orgId: true },
-        });
-        if (!workspace) {
-          logger.warn('[resolveApiGroup] Workspace not found', { workspaceId: resolvedWorkspaceId });
-          return undefined;
-        }
         orgMember = await dbClient.orgMember.create({
           data: {
             orgId: workspace.orgId,
             email,
             role: 'MEMBER',
           },
-          select: { memberId: true },
+          select: { memberId: true, orgId: true },
         });
         logger.info('[resolveApiGroup] OrgMember created for group member', { email });
       }
@@ -440,22 +413,53 @@ export async function resolveApiGroup(slackGroupId: string, botOauthToken: strin
         workspace: { connect: { id: resolvedWorkspaceId } },
         orgMember: { connect: { memberId: orgMember.memberId } },
       });
-      logger.info('[resolveApiGroup] User created for group member', { userId: user.id, email, hasRealEmail });
+      logger.info('[resolveApiGroup] User created for group member', { userId: user.id, email });
       await userRepo.upsertMetaDataField(user.id, 'slackId', slackUserId);
-      return user.id;
-    } catch (error) {
-      const existing = await userRepo.findByEmailCaseInsensitive(email, resolvedWorkspaceId);
-      if (existing) {
-        await userRepo.upsertMetaDataField(existing.id, 'slackId', slackUserId);
-        return existing.id;
+      dbUserIds.push(user.id);
+    } else {
+      // No email — use synthetic email
+      const syntheticEmail = `${slackUserId}@cross-platform.in`;
+      const userName = slackUserInfo.profile.real_name || slackUserInfo.profile.display_name || slackUserId;
+      let orgMember = await dbClient.orgMember.findUnique({
+        where: { email: syntheticEmail },
+        select: { memberId: true },
+      });
+      if (!orgMember) {
+        const workspace = await dbClient.workspace.findUnique({
+          where: { id: resolvedWorkspaceId },
+          select: { orgId: true },
+        });
+        if (!workspace) {
+          logger.warn('[resolveApiGroup] Workspace not found', { workspaceId: resolvedWorkspaceId });
+          continue;
+        }
+        orgMember = await dbClient.orgMember.create({
+          data: {
+            orgId: workspace.orgId,
+            email: syntheticEmail,
+            role: 'MEMBER',
+          },
+          select: { memberId: true },
+        });
       }
-      logger.error('[resolveApiGroup] Failed to import group member', { slackUserId, email, error });
-      return undefined;
+      const user = await userRepo.create({
+        email: syntheticEmail,
+        name: userName,
+        providerUserId: `slack-migrated-${syntheticEmail}`,
+        authProvider: AuthProvider.GOOGLE,
+        status: slackUserInfo.deleted ? 'INACTIVE' : 'ACTIVE',
+        workspace: { connect: { id: resolvedWorkspaceId } },
+        orgMember: { connect: { memberId: orgMember.memberId } },
+      });
+      logger.info('[resolveApiGroup] User created with synthetic email for group member', {
+        userId: user.id,
+        syntheticEmail,
+        userName,
+      });
+      await userRepo.upsertMetaDataField(user.id, 'slackId', slackUserId);
+      dbUserIds.push(user.id);
     }
-  };
-
-  const memberResults = await mapWithConcurrency(slackGroup.users, 6, importMember);
-  const dbUserIds: string[] = memberResults.filter((id): id is string => !!id);
+  }
 
   // Add all resolved users to the group
   if (dbUserIds.length > 0) {
@@ -603,37 +607,6 @@ function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-/**
- * Resolves each `<#C…>` channel mention to its replacement HTML, concurrently.
- * The DB read (and Slack `conversations.info` fallback) for each channel is
- * independent, so they run in parallel; the caller applies the replacements after.
- */
-async function resolveChannelReplacements(
-  channelIds: { id: string; name?: string }[],
-  channelRepo: ChannelRepository,
-  botOauthToken: string,
-  quote: string,
-): Promise<{ channelId: string; html: string }[]> {
-  return Promise.all(
-    channelIds.map(async ({ id: channelId, name: slackChannelName }) => {
-      const channel = await channelRepo.findById(channelId);
-      if (channel) {
-        return { channelId, html: buildChannelMentionSpan(channel, quote) };
-      }
-      if (slackChannelName) {
-        return { channelId, html: `<span>#${escapeHtml(slackChannelName)}</span>` };
-      }
-      if (botOauthToken) {
-        const slackChannel = await fetchSlackChannelInfo(channelId, botOauthToken);
-        if (slackChannel) {
-          return { channelId, html: `<span>#${escapeHtml(slackChannel.name)}</span>` };
-        }
-      }
-      return { channelId, html: `<span>#${escapeHtml(channelId)}</span>` };
-    }),
-  );
-}
-
 export async function resolveSlackMentions(
   text: string,
   botOauthToken: string = '',
@@ -649,40 +622,24 @@ export async function resolveSlackMentions(
 
   // Use provided workspaceId or fall back to default
   const resolvedWorkspaceId = workspaceId ?? config.defaultWorkspaceId;
+
+  const userMapper = await resolveSlackIds(userIds, botOauthToken, 'user', resolvedWorkspaceId);
+  const groupMapper = await resolveSlackIds(groupIds, botOauthToken, 'group', resolvedWorkspaceId);
   const quote = isStringified ? "'" : '"'
   const userRepo = new UserRepository();
   const groupRepo = new UserGroupRepository();
   const channelRepo = new ChannelRepository();
 
-  // Users, groups and channels are independent — resolve them concurrently instead
-  // of one phase after another. (resolveSlackIds only writes for groups; user
-  // resolution is read-only, so there is no cross-write race between these.)
-  const [userMapper, groupMapper, channelReplacements] = await Promise.all([
-    resolveSlackIds(userIds, botOauthToken, 'user', resolvedWorkspaceId),
-    resolveSlackIds(groupIds, botOauthToken, 'group', resolvedWorkspaceId),
-    resolveChannelReplacements(channelIds, channelRepo, botOauthToken, quote),
-  ]);
-
-  // Batch-load every resolved user/group row in a single query each, instead of a
-  // per-entity findById in the render loops below.
-  const userDbIds = userMapper
-    ? [...userMapper.values()].map((v) => v.dbId).filter((id): id is string => !!id)
-    : [];
-  const groupDbIds = groupMapper
-    ? [...groupMapper.values()].map((v) => v.dbId).filter((id): id is string => !!id)
-    : [];
-  const [userRows, groupRows] = await Promise.all([
-    userDbIds.length ? userRepo.findMany({ where: { id: { in: userDbIds } } }) : Promise.resolve([]),
-    groupDbIds.length ? groupRepo.findMany({ where: { id: { in: groupDbIds } } }) : Promise.resolve([]),
-  ]);
-  const userById = new Map(userRows.map((u) => [u.id, u]));
-  const groupById = new Map(groupRows.map((g) => [g.id, g]));
-
   if (userMapper) {
     for (const [slackId, { dbId, displayName }] of userMapper.entries()) {
-      const user = dbId ? userById.get(dbId) : undefined;
-      if (user) {
-        text = replaceSlackUserMention(text, slackId, `<span ${buildMentionAttrs(user.id, user.name, false, quote, undefined, undefined, user.email, user.picture || undefined).join(' ')}>@${escapeHtml(user.name)}</span>`);
+      if (dbId) {
+        const user = await userRepo.findById(dbId);
+        if (user) {
+          text = replaceSlackUserMention(text, slackId, `<span ${buildMentionAttrs(user.id, user.name, false, quote, undefined, undefined, user.email, user.picture || undefined).join(' ')}>@${escapeHtml(user.name)}</span>`);
+      } else {
+        const name = displayName ?? 'unknown user';
+        text = replaceSlackUserMention(text, slackId, `<span>@${escapeHtml(name)}</span>`);
+      }
       } else {
         const name = displayName ?? 'unknown user';
         text = replaceSlackUserMention(text, slackId, `<span>@${escapeHtml(name)}</span>`);
@@ -691,17 +648,36 @@ export async function resolveSlackMentions(
   }
   if (groupMapper) {
     for (const [slackId, { dbId, displayName }] of groupMapper.entries()) {
-      const group = dbId ? groupById.get(dbId) : undefined;
-      if (group) {
-        text = replaceSlackGroupMention(text, slackId, `<span ${buildMentionAttrs(group.id, group.name, true, quote, group.alias || undefined, group.description || undefined).join(' ')}>@${escapeHtml(group.alias || group.name)}</span>`);
+      if (dbId) {
+        const group = await groupRepo.findById(dbId);
+        if (group) {
+          text = replaceSlackGroupMention(text, slackId, `<span ${buildMentionAttrs(group.id, group.name, true, quote, group.alias || undefined, group.description || undefined).join(' ')}>@${escapeHtml(group.alias || group.name)}</span>`);
+        } else {
+          const name = displayName ?? 'unknown group';
+          text = replaceSlackGroupMention(text, slackId, `<span>@${escapeHtml(name)}</span>`);
+        }
       } else {
         const name = displayName ?? 'unknown group';
         text = replaceSlackGroupMention(text, slackId, `<span>@${escapeHtml(name)}</span>`);
       }
     }
   }
-  for (const { channelId, html } of channelReplacements) {
-    text = replaceSlackChannelMention(text, channelId, html);
+  for (const { id: channelId, name: slackChannelName } of channelIds) {
+    const channel = await channelRepo.findById(channelId);
+    if (channel) {
+      text = replaceSlackChannelMention(text, channelId, buildChannelMentionSpan(channel, quote));
+    } else if (slackChannelName) {
+      text = replaceSlackChannelMention(text, channelId, `<span>#${escapeHtml(slackChannelName)}</span>`);
+    } else if (botOauthToken) {
+      const slackChannel = await fetchSlackChannelInfo(channelId, botOauthToken);
+      if (slackChannel) {
+        text = replaceSlackChannelMention(text, channelId, `<span>#${escapeHtml(slackChannel.name)}</span>`);
+      } else {
+        text = replaceSlackChannelMention(text, channelId, `<span>#${escapeHtml(channelId)}</span>`);
+      }
+    } else {
+      text = replaceSlackChannelMention(text, channelId, `<span>#${escapeHtml(channelId)}</span>`);
+    }
   }
   return resolveSpecialMentions(text, isStringified);
 }
