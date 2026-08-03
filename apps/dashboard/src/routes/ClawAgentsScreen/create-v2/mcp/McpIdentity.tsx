@@ -25,7 +25,11 @@ export const StatusBadge = ({
 }: {
   tone: 'positive' | 'neutral';
   children: ReactNode;
-}): ReactElement => <Pill tone={tone === 'positive' ? 'success' : 'neutral'}>{children}</Pill>;
+}): ReactElement => (
+  <Pill tone={tone === 'positive' ? 'success' : 'neutral'} size='sm'>
+    {children}
+  </Pill>
+);
 
 interface McpIdentityProps {
   label: string;

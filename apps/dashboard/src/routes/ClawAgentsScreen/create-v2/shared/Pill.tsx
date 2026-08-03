@@ -40,7 +40,7 @@ const SIZE: Record<PillSize, string> = {
 
 export function Pill({
   tone,
-  size = 'md',
+  size = 'sm',
   children,
 }: {
   tone: PillTone;

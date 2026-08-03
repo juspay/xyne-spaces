@@ -28,16 +28,16 @@ export function ToolRow({ tool, checked, onToggle }: ToolRowProps): ReactElement
       onClick={onToggle}
       data-track-category='Claw Agents'
       data-track-name='Create agent v2: toggle tool'
-      className='flex w-full flex-col items-start gap-1 rounded-lg py-0.5 text-left'
+      className='flex w-full flex-col items-start gap-1 text-left'
     >
-      <span className='flex items-center gap-2'>
+      <span className='flex w-full items-center gap-2'>
         <ToolCheckbox checked={checked} />
-        <span className='text-sm font-normal leading-5 text-foreground'>
+        <span className='min-w-0 truncate text-sm font-normal leading-[1.2] text-foreground'>
           {humanizeToolName(tool.name)}
         </span>
       </span>
       {tool.description && (
-        <span className='line-clamp-2 w-full pl-7 text-xs font-normal leading-4 text-muted-foreground'>
+        <span className='w-full truncate pl-7 text-xs font-normal leading-4 tracking-[-0.24px] text-muted-foreground'>
           {tool.description}
         </span>
       )}
