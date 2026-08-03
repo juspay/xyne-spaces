@@ -49,7 +49,7 @@ import { StageFormModal } from '../../components/Tickets/StageFormModal/StageFor
 import { useMachine } from '@xstate/react';
 import { ticketFiltersMachine } from '../../machines/ticketFiltersMachine';
 import { setBoardNavParams } from '../../components/Tickets/boardNavStore';
-import type { KanbanTicketsPageBaseArgs } from './useKanbanTicketsPage';
+import { useKanbanTicketsPage, type KanbanTicketsPageBaseArgs } from './useKanbanTicketsPage';
 import type { TicketFilters } from '../../components/Tickets/TicketFilters/types';
 import { KanbanColumns } from '../../components/Tickets/KanbanColumns/KanbanColumns';
 import { ViewBoardPicker } from '../../components/Project/ViewBoardPicker/ViewBoardPicker';
@@ -126,6 +126,8 @@ type SavedConfigValue = {
   fieldName: string;
   fieldValue: string;
 };
+
+const TABLE_TICKETS_PAGE_SIZE = 25;
 
 // Serialize filters (incl. boards) + groupBy into saved-config value rows.
 const WORKSPACE_VIEW_ARRAY_KEYS = [
@@ -244,6 +246,104 @@ function uniqueProjectIds(boards: readonly { projectId?: string | null }[]): str
   });
   return Array.from(ids);
 }
+
+type TableTicketGroupProps = {
+  groupKey: string;
+  totalCount: number;
+  fallbackTickets: Ticket[];
+  paginationArgs: KanbanTicketsPageBaseArgs | null;
+  enabled: boolean;
+  ticketTags: React.ComponentProps<typeof TicketTable>['ticketTags'];
+  availableTags: string[];
+  visibleColumns: Set<string>;
+  isComfortView: boolean;
+};
+
+const TableTicketGroup: React.FC<TableTicketGroupProps> = ({
+  groupKey,
+  totalCount,
+  fallbackTickets,
+  paginationArgs,
+  enabled,
+  ticketTags,
+  availableTags,
+  visibleColumns,
+  isComfortView,
+}) => {
+  const effectivePaginationArgs = useMemo<KanbanTicketsPageBaseArgs>(
+    () =>
+      paginationArgs
+        ? {
+            ...paginationArgs,
+            ...(groupKey !== 'All Tickets' ? { groupKey } : {}),
+          }
+        : {
+            viewMode: 'project',
+          },
+    [paginationArgs, groupKey],
+  );
+  const page = useKanbanTicketsPage({
+    ...effectivePaginationArgs,
+    stageName: '',
+    pageSize: TABLE_TICKETS_PAGE_SIZE,
+    enabled: enabled && paginationArgs !== null,
+  });
+
+  const tickets = paginationArgs && enabled ? page.tickets : fallbackTickets;
+  const mergedTicketTags = useMemo(() => {
+    const next = new Map(ticketTags ?? []);
+    tickets.forEach(ticket => {
+      const tagMappings = (ticket as KanbanLocalTicket).tagMappings;
+      if (!tagMappings?.length || next.has(ticket.id)) return;
+      next.set(
+        ticket.id,
+        tagMappings.map(tag => ({
+          workspaceId: ticket.workspaceId,
+          id: tag.id,
+          name: tag.tagName,
+          ticketId: tag.ticketId,
+        })),
+      );
+    });
+    return next;
+  }, [ticketTags, tickets]);
+
+  const handlePaginationBoundaryReached = useCallback(() => {
+    if (!page.hasMore || page.isLoadingMore) return;
+    page.loadMore();
+  }, [page.hasMore, page.isLoadingMore, page.loadMore]);
+
+  const handleFirstPageRequested = useCallback(() => {
+    page.reset();
+  }, [page.reset]);
+
+  const handleLastPageRequested = useCallback(() => {
+    const lastPageSize = totalCount % TABLE_TICKETS_PAGE_SIZE || TABLE_TICKETS_PAGE_SIZE;
+    page.loadLast(lastPageSize);
+  }, [page.loadLast, totalCount]);
+
+  const paginationBoundaryProps = paginationArgs
+    ? {
+        onPaginationBoundaryReached: handlePaginationBoundaryReached,
+        onFirstPageRequested: handleFirstPageRequested,
+        onLastPageRequested: handleLastPageRequested,
+        totalRowCount: totalCount,
+        hasMoreRows: page.hasMore,
+        isLoadingMoreRows: page.isLoadingMore,
+      }
+    : {};
+
+  return (
+    <TicketTable
+      tickets={tickets}
+      ticketTags={mergedTicketTags}
+      availableTags={availableTags}
+      visibleColumns={visibleColumns}
+      isComfortView={isComfortView}
+      {...paginationBoundaryProps}
+    />
+  );
+};
 
 const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   viewMode: viewModeProp,
@@ -477,11 +577,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const [state, send] = useMachine(ticketFiltersMachine);
   const layoutView = searchParams.get('layout') ?? 'kanban';
   const isKanbanLayout = layoutView === 'kanban';
+  const isTableLayout = layoutView === 'table';
   const groupBy: GroupByType = useMemo(
     () => parseGroupBy(state.context.groupBy),
     [state.context.groupBy],
   );
-  const shouldUseLegacyTicketsQuery = !isKanbanLayout;
   const [selectedViewId, setSelectedViewId] = useState<string | null>(null);
   const activeViewKey = `active-view-${state.context.storageKey}`;
   const hasRestoredActiveView = useRef<string | null>(null);
@@ -614,6 +714,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
   // Don't query a workspace view until a board is picked (else it fans out across the workspace).
   const workspaceViewReady = !isWorkspaceView || (filters.boards?.length ?? 0) > 0;
+  const shouldUsePagedTicketData = (isKanbanLayout || isTableLayout) && workspaceViewReady;
+  const shouldUseLegacyTicketsQuery = !shouldUsePagedTicketData;
   const showSubStatus = state.context.showSubStatus;
 
   const setShowOverdueOnly = useCallback(
@@ -1269,7 +1371,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     queries.ticketsQueryV2(ticketsQueryParams),
     {
       enabled:
-        !isKanbanLayout &&
+        shouldUseLegacyTicketsQuery &&
         ((viewMode === 'board' && !!boardId) ||
           (viewMode === 'project' && !!effectiveProjectId) ||
           viewMode === 'my-tickets' ||
@@ -1282,12 +1384,12 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   }
 
   const kanbanSourceTickets = useMemo(() => {
-    if (!isKanbanLayout) {
+    if (!shouldUsePagedTicketData) {
       return allProjectTickets ?? undefined;
     }
 
     return localTickets ?? [];
-  }, [allProjectTickets, isKanbanLayout, localTickets]);
+  }, [allProjectTickets, shouldUsePagedTicketData, localTickets]);
 
   // Collect the unique board IDs visible on screen.
   //
@@ -1735,6 +1837,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   }, [filteredTickets, isKanbanLayout, kanbanTicketsByColumn, localTickets]);
 
   useEffect(() => {
+    if (!isTableLayout || !shouldUsePagedTicketData || localTickets === null) return;
+    setLocalTickets(null);
+  }, [isTableLayout, shouldUsePagedTicketData, localTickets]);
+
+  useEffect(() => {
     if (!isKanbanLayout) {
       setKanbanTicketsByColumn({});
     }
@@ -1998,13 +2105,15 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
   const hasSearchTerm = searchTerm.trim().length > 0;
   const canUseKanbanColumnPagination = isKanbanLayout && workspaceViewReady;
-  const shouldFetchKanbanCounts = canUseKanbanColumnPagination && !hasSearchTerm;
+  const canUseTicketCounts = shouldUsePagedTicketData;
+  const shouldFetchKanbanCounts = canUseTicketCounts && !hasSearchTerm;
   const kanbanCounts = useKanbanCounts({
     ...ticketsQueryParams,
     columnType: shouldUseStatusColumns ? 'status' : 'stage',
     filters: deferredFilters,
     groupBy,
     showOverdueOnly,
+    includeColumnCounts: isKanbanLayout,
     ...(user?.id ? { currentUserId: user.id } : {}),
     enabled: shouldFetchKanbanCounts,
   });
@@ -2017,7 +2126,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   } | null>(null);
 
   useEffect(() => {
-    if (!isKanbanLayout) return;
+    if (!canUseTicketCounts) return;
     if (hasSearchTerm) return;
     if (lastKnownKanbanGroupsQueryKeyRef.current !== kanbanColumnQueryKey) {
       lastKnownKanbanGroupsRef.current = null;
@@ -2030,22 +2139,22 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     lastKnownKanbanGroupsRef.current = {
       groups: kanbanCounts.groups,
     };
-  }, [hasSearchTerm, isKanbanLayout, kanbanCounts.groups, kanbanColumnQueryKey]);
+  }, [hasSearchTerm, canUseTicketCounts, kanbanCounts.groups, kanbanColumnQueryKey]);
 
   useEffect(() => {
-    if (!isKanbanLayout) return;
+    if (!canUseTicketCounts) return;
     if (!localTickets || localTickets.length === 0) return;
 
     lastKnownKanbanTicketsRef.current = {
       tickets: localTickets,
     };
-  }, [isKanbanLayout, localTickets]);
+  }, [canUseTicketCounts, localTickets]);
 
   const hasMatchingLastKnownKanbanGroups =
     lastKnownKanbanGroupsQueryKeyRef.current === kanbanColumnQueryKey &&
     (lastKnownKanbanGroupsRef.current?.groups.length ?? 0) > 0;
 
-  const isTicketsSyncing = isKanbanLayout
+  const isTicketsSyncing = shouldUsePagedTicketData
     ? !hasSearchTerm && kanbanCounts.isLoading
     : ticketsDetails.type !== 'complete';
 
@@ -2065,7 +2174,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const processedGroups = useMemo(() => {
     const groupedRows = groupTickets(kanbanTicketsForGrouping, groupBy);
     const localEntries = Object.entries(groupedRows);
-    const serverGroups = isKanbanLayout
+    const serverGroups = shouldUsePagedTicketData
       ? hasSearchTerm
         ? groupBy === 'status'
           ? getStatusColumns().map(column => ({
@@ -2095,7 +2204,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         : localEntries;
 
     const mapped = entries.map(([groupName, groupTickets]) => {
-      const serverCountGroup = isKanbanLayout ? kanbanCounts.groupsByKey.get(groupName) : undefined;
+      const serverCountGroup = shouldUsePagedTicketData
+        ? kanbanCounts.groupsByKey.get(groupName)
+        : undefined;
       const serverColumnCounts = shouldUseStatusColumns
         ? (serverCountGroup?.statuses ?? {})
         : (serverCountGroup?.stages ?? {});
@@ -2174,7 +2285,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     groupNamesById,
     canReorder,
     shouldUseStatusColumns,
-    isKanbanLayout,
+    shouldUsePagedTicketData,
     hasSearchTerm,
     searchTerm,
     kanbanCounts.groups,
@@ -2869,8 +2980,26 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
                 {(isExpanded || !showGroupHeader) && (
                   <div>
-                    <TicketTable
-                      tickets={group.allTickets}
+                    <TableTicketGroup
+                      groupKey={group.key}
+                      totalCount={group.count}
+                      fallbackTickets={group.allTickets}
+                      paginationArgs={
+                        shouldUsePagedTicketData
+                          ? {
+                              ...ticketsQueryParams,
+                              searchTerm,
+                              filters: deferredFilters,
+                              formEntityValueFieldIds: fevFieldIds,
+                              dynamicFieldVespaTokens,
+                              dynamicFieldDateRanges,
+                              zeroOnlyDynamicFieldIds,
+                              showOverdueOnly,
+                              groupBy,
+                            }
+                          : null
+                      }
+                      enabled={isExpanded || !showGroupHeader}
                       ticketTags={tagsByTicketId}
                       availableTags={availableTags || []}
                       visibleColumns={tableVisibleColumns}

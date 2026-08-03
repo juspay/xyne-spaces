@@ -210,6 +210,7 @@ const addTicketToGroup = (
   displayName: string,
   columnType: KanbanCountColumnType,
   columnValue: string,
+  includeColumnCounts: boolean,
 ): void => {
   const group = groupsByKey.get(groupKey) ?? {
     groupKey,
@@ -220,10 +221,12 @@ const addTicketToGroup = (
   };
 
   group.totalCount += 1;
-  if (columnType === 'status') {
-    group.statuses[columnValue] = (group.statuses[columnValue] ?? 0) + 1;
-  } else {
-    group.stages[columnValue] = (group.stages[columnValue] ?? 0) + 1;
+  if (includeColumnCounts) {
+    if (columnType === 'status') {
+      group.statuses[columnValue] = (group.statuses[columnValue] ?? 0) + 1;
+    } else {
+      group.stages[columnValue] = (group.stages[columnValue] ?? 0) + 1;
+    }
   }
   groupsByKey.set(groupKey, group);
 };
@@ -235,6 +238,7 @@ const addAggregateRowToGroup = (
   columnType: KanbanCountColumnType,
   columnValue: string,
   count: number,
+  includeColumnCounts: boolean,
 ): void => {
   const group = groupsByKey.get(groupKey) ?? {
     groupKey,
@@ -245,10 +249,12 @@ const addAggregateRowToGroup = (
   };
 
   group.totalCount += count;
-  if (columnType === 'status') {
-    group.statuses[columnValue] = (group.statuses[columnValue] ?? 0) + count;
-  } else {
-    group.stages[columnValue] = (group.stages[columnValue] ?? 0) + count;
+  if (includeColumnCounts) {
+    if (columnType === 'status') {
+      group.statuses[columnValue] = (group.statuses[columnValue] ?? 0) + count;
+    } else {
+      group.stages[columnValue] = (group.stages[columnValue] ?? 0) + count;
+    }
   }
   groupsByKey.set(groupKey, group);
 };
@@ -277,6 +283,7 @@ export const getKanbanCounts = async (
   const where = buildKanbanTicketWhere(context);
   const dynamicFieldIds = Object.keys(context.filters?.dynamicFields ?? {});
   const groupBy = context.groupBy ?? 'none';
+  const includeColumnCounts = context.includeColumnCounts ?? true;
   const countColumnType = getCountColumnType(context);
   const countField = getCountField(countColumnType);
   const groupsByKey = new Map<string, KanbanCountGroup>();
@@ -289,13 +296,31 @@ export const getKanbanCounts = async (
     groupId: context.groupId ?? null,
     groupBy,
     countColumnType,
+    includeColumnCounts,
     hasDynamicFields: dynamicFieldIds.length > 0,
     where,
   });
 
+  if (!includeColumnCounts && groupBy === 'none' && dynamicFieldIds.length === 0) {
+    const totalCount = await db.ticket.count({ where });
+    return {
+      groups: [
+        {
+          groupKey: ALL_TICKETS_GROUP,
+          displayName: ALL_TICKETS_GROUP,
+          totalCount,
+          stages: {},
+          statuses: {},
+        },
+      ],
+    };
+  }
+
   if (!isFormFieldGroup(groupBy) && dynamicFieldIds.length === 0) {
     const groupFields = getBuiltInGroupByFields(groupBy);
-    const aggregateGroupFields = [...new Set([...groupFields, countField])] as Array<
+    const aggregateGroupFields = [
+      ...new Set(includeColumnCounts ? [...groupFields, countField] : groupFields),
+    ] as Array<
       'assignedTo' | 'stageName' | 'statusV2' | 'priority'
     >;
 
@@ -329,6 +354,7 @@ export const getKanbanCounts = async (
         countColumnType,
         row[countField] ?? '',
         row._count._all,
+        includeColumnCounts,
       );
     }
 
@@ -340,7 +366,9 @@ export const getKanbanCounts = async (
   const fallbackGroupFields = isFormFieldGroup(groupBy)
     ? []
     : getBuiltInGroupByFields(groupBy);
-  const fallbackFields = [...new Set(['id', countField, ...fallbackGroupFields])] as Array<
+  const fallbackFields = [
+    ...new Set(includeColumnCounts ? ['id', countField, ...fallbackGroupFields] : ['id', ...fallbackGroupFields]),
+  ] as Array<
     'id' | 'assignedTo' | 'stageName' | 'statusV2' | 'priority'
   >;
 
@@ -399,6 +427,7 @@ export const getKanbanCounts = async (
         group.displayName,
         countColumnType,
         ticket[countField] ?? '',
+        includeColumnCounts,
       );
     }
   }

@@ -72,6 +72,7 @@ export interface KanbanCountsRequest {
   filters?: KanbanCountsFilters;
   groupBy?: KanbanCountsGroupBy;
   showOverdueOnly?: boolean;
+  includeColumnCounts?: boolean;
 }
 
 export interface KanbanCountGroup {

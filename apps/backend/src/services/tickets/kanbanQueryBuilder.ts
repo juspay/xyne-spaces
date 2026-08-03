@@ -58,6 +58,7 @@ export type KanbanTicketQueryContext = {
   filters?: KanbanTicketFilters;
   groupBy?: KanbanGroupBy;
   showOverdueOnly?: boolean;
+  includeColumnCounts?: boolean;
 };
 
 const hasItems = <T>(value: readonly T[] | undefined): value is readonly T[] =>

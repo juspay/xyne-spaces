@@ -18,7 +18,7 @@ import { useZero } from '../../../hooks/useZero';
 import { queries } from '../../../zero/queries';
 import { useUser, useUsers } from '../../../hooks/useUsers';
 import { useUserGroupById, useUserGroups } from '../../../hooks/useUserGroup';
-import { Calendar, Check, User } from 'lucide-react';
+import { Calendar, Check, ChevronLeft, ChevronRight, User } from 'lucide-react';
 import Tooltip, { TruncatedTooltip } from '../../ui/Tooltip';
 import { formatStatusLabel, getPriorityIcon, isEtaUrgent } from '../TicketCard/TicketCard.utils';
 import { mutators } from '../../../zero/mutators';
@@ -52,7 +52,33 @@ interface TicketTableProps {
   extraColumns?: ColDef<Ticket>[];
   selectedIds?: ReadonlySet<string>;
   onSelectionChange?: (tickets: Ticket[]) => void;
+  onPaginationBoundaryReached?: () => void;
+  onFirstPageRequested?: () => void;
+  onLastPageRequested?: () => void;
+  totalRowCount?: number;
+  hasMoreRows?: boolean;
+  isLoadingMoreRows?: boolean;
 }
+
+const TABLE_PAGE_SIZE = 25;
+const numberFormatter = new Intl.NumberFormat('en-US');
+
+type PaginationSummary = {
+  currentPage: number;
+  loadedPageCount: number;
+  loadedRowCount: number;
+  pageSize: number;
+};
+
+type TicketTableGridContext = {
+  rowNumberOffset?: number;
+};
+
+const getRowNumberOffset = (context: unknown): number => {
+  if (!context || typeof context !== 'object' || !('rowNumberOffset' in context)) return 0;
+  const offset = (context as TicketTableGridContext).rowNumberOffset;
+  return typeof offset === 'number' ? offset : 0;
+};
 
 // Index header renderer component
 const IndexHeaderRenderer = (params: IHeaderParams) => {
@@ -100,7 +126,7 @@ const IndexHeaderRenderer = (params: IHeaderParams) => {
 const IndexCellRenderer = (params: ICellRendererParams<Ticket>) => {
   const [isHovered, setIsHovered] = useState(false);
   const [isSelected, setIsSelected] = useState(params.node.isSelected());
-  const rowIndex = (params.node.rowIndex ?? 0) + 1;
+  const rowIndex = getRowNumberOffset(params.context) + (params.node.rowIndex ?? 0) + 1;
   useEffect(() => {
     const onSelectionChanged = () => {
       setIsSelected(params.node.isSelected());
@@ -160,6 +186,12 @@ export const TicketTable: React.FC<TicketTableProps> = ({
   extraColumns,
   selectedIds,
   onSelectionChange,
+  onPaginationBoundaryReached,
+  onFirstPageRequested,
+  onLastPageRequested,
+  totalRowCount,
+  hasMoreRows = false,
+  isLoadingMoreRows = false,
 }) => {
   const zero = useZero();
   const users = useUsers();
@@ -213,6 +245,34 @@ export const TicketTable: React.FC<TicketTableProps> = ({
 
   const [gridApi, setGridApi] = useState<GridApi | null>(null);
   const [selectedCount, setSelectedCount] = useState(0);
+  const [paginationSummary, setPaginationSummary] = useState<PaginationSummary>({
+    currentPage: 0,
+    loadedPageCount: 0,
+    loadedRowCount: tickets.length,
+    pageSize: TABLE_PAGE_SIZE,
+  });
+  const [pendingPageAfterLoad, setPendingPageAfterLoad] = useState<number | null>(null);
+  const [serverPageIndex, setServerPageIndex] = useState(0);
+
+  const refreshPaginationSummary = useCallback((api: GridApi): void => {
+    const nextSummary = {
+      currentPage: api.paginationGetCurrentPage(),
+      loadedPageCount: api.paginationGetTotalPages(),
+      loadedRowCount: api.paginationGetRowCount(),
+      pageSize: api.paginationGetPageSize() || TABLE_PAGE_SIZE,
+    };
+    setPaginationSummary(prev => {
+      if (
+        prev.currentPage === nextSummary.currentPage &&
+        prev.loadedPageCount === nextSummary.loadedPageCount &&
+        prev.loadedRowCount === nextSummary.loadedRowCount &&
+        prev.pageSize === nextSummary.pageSize
+      ) {
+        return prev;
+      }
+      return nextSummary;
+    });
+  }, []);
 
   useEffect(() => {
     if (!gridApi || selectedIds === undefined) return;
@@ -222,6 +282,23 @@ export const TicketTable: React.FC<TicketTableProps> = ({
       if (node.isSelected() !== shouldBeSelected) node.setSelected(shouldBeSelected);
     });
   }, [gridApi, selectedIds, tickets]);
+
+  useEffect(() => {
+    if (!gridApi) return;
+    refreshPaginationSummary(gridApi);
+  }, [gridApi, refreshPaginationSummary, tickets.length]);
+
+  useEffect(() => {
+    if (!gridApi || pendingPageAfterLoad === null) return;
+    if (pendingPageAfterLoad >= gridApi.paginationGetTotalPages()) return;
+    gridApi.paginationGoToPage(pendingPageAfterLoad);
+    refreshPaginationSummary(gridApi);
+    setPendingPageAfterLoad(null);
+  }, [gridApi, pendingPageAfterLoad, refreshPaginationSummary, tickets.length]);
+
+  useEffect(() => {
+    setServerPageIndex(0);
+  }, [totalRowCount]);
 
   const userGroups = useUserGroups();
 
@@ -703,6 +780,87 @@ export const TicketTable: React.FC<TicketTableProps> = ({
     [gridApi, zero, ticketTags],
   );
 
+  const usesServerTotal = totalRowCount !== undefined;
+  const effectiveTotalRows = totalRowCount ?? paginationSummary.loadedRowCount;
+  const totalPageCount =
+    effectiveTotalRows > 0 ? Math.ceil(effectiveTotalRows / paginationSummary.pageSize) : 0;
+  const currentPage =
+    totalPageCount === 0
+      ? 0
+      : usesServerTotal
+        ? Math.min(serverPageIndex, totalPageCount - 1)
+        : Math.min(paginationSummary.currentPage, totalPageCount - 1);
+  const firstRowOnPage =
+    effectiveTotalRows === 0 ? 0 : currentPage * paginationSummary.pageSize + 1;
+  const lastRowOnPage =
+    effectiveTotalRows === 0
+      ? 0
+      : Math.min((currentPage + 1) * paginationSummary.pageSize, effectiveTotalRows);
+  const canGoFirst = !!gridApi && currentPage > 0;
+  const hasLoadedPreviousPage =
+    !usesServerTotal ||
+    serverPageIndex === paginationSummary.currentPage ||
+    currentPage <= paginationSummary.loadedPageCount - 1;
+  const rowNumberOffset =
+    usesServerTotal && currentPage >= paginationSummary.loadedPageCount
+      ? currentPage * paginationSummary.pageSize
+      : 0;
+  const gridContext = useMemo<TicketTableGridContext>(
+    () => ({ rowNumberOffset }),
+    [rowNumberOffset],
+  );
+  const canGoPrevious = !!gridApi && currentPage > 0 && hasLoadedPreviousPage;
+  const hasLoadedNextPage = currentPage + 1 < paginationSummary.loadedPageCount;
+  const canGoNext =
+    !!gridApi && currentPage + 1 < totalPageCount && (hasLoadedNextPage || hasMoreRows);
+
+  const goToPreviousPage = useCallback(() => {
+    if (!gridApi || currentPage === 0) return;
+    gridApi.paginationGoToPreviousPage();
+    refreshPaginationSummary(gridApi);
+    setServerPageIndex(prev => Math.max(0, prev - 1));
+  }, [currentPage, gridApi, refreshPaginationSummary]);
+
+  const goToFirstPage = useCallback(() => {
+    if (!gridApi || !canGoFirst) return;
+    onFirstPageRequested?.();
+    gridApi.paginationGoToFirstPage();
+    refreshPaginationSummary(gridApi);
+    setServerPageIndex(0);
+  }, [canGoFirst, gridApi, onFirstPageRequested, refreshPaginationSummary]);
+
+  const goToNextPage = useCallback(() => {
+    if (!gridApi || !canGoNext) return;
+    const nextPage = currentPage + 1;
+    if (nextPage < gridApi.paginationGetTotalPages()) {
+      gridApi.paginationGoToNextPage();
+      refreshPaginationSummary(gridApi);
+      setServerPageIndex(nextPage);
+      return;
+    }
+    if (!onPaginationBoundaryReached || isLoadingMoreRows) return;
+    setPendingPageAfterLoad(nextPage);
+    setServerPageIndex(nextPage);
+    onPaginationBoundaryReached();
+  }, [
+    canGoNext,
+    currentPage,
+    gridApi,
+    isLoadingMoreRows,
+    onPaginationBoundaryReached,
+    refreshPaginationSummary,
+  ]);
+  const canGoLastPage =
+    !!gridApi && !!onLastPageRequested && currentPage + 1 < totalPageCount && !isLoadingMoreRows;
+
+  const goToLastPage = useCallback(() => {
+    if (!gridApi || !canGoLastPage) return;
+    setPendingPageAfterLoad(0);
+    setServerPageIndex(Math.max(0, totalPageCount - 1));
+    onLastPageRequested?.();
+    refreshPaginationSummary(gridApi);
+  }, [canGoLastPage, gridApi, onLastPageRequested, refreshPaginationSummary, totalPageCount]);
+
   return (
     <>
       <div className='flex flex-col'>
@@ -730,6 +888,7 @@ export const TicketTable: React.FC<TicketTableProps> = ({
               onSelectionChange?.(selectedRows);
             }}
             rowData={tickets}
+            context={gridContext}
             columnDefs={columnDefs}
             rowHeight={44}
             headerHeight={44}
@@ -740,17 +899,93 @@ export const TicketTable: React.FC<TicketTableProps> = ({
             }}
             onGridReady={(params: GridReadyEvent) => {
               setGridApi(params.api);
+              refreshPaginationSummary(params.api);
               setTimeout(() => {
                 params.api.setFocusedCell(0, 'title');
               }, 100);
+            }}
+            onPaginationChanged={params => {
+              refreshPaginationSummary(params.api);
+              if (!onPaginationBoundaryReached) return;
+              if (usesServerTotal) return;
+              const currentPage = params.api.paginationGetCurrentPage();
+              const totalPages = params.api.paginationGetTotalPages();
+              if (totalPages > 0 && currentPage >= totalPages - 1) {
+                onPaginationBoundaryReached();
+              }
             }}
             suppressCellFocus={false}
             suppressNoRowsOverlay={true}
             alwaysShowHorizontalScroll
             pagination={true}
-            paginationPageSize={25}
+            paginationPageSize={TABLE_PAGE_SIZE}
             paginationPageSizeSelector={false}
+            suppressPaginationPanel={usesServerTotal}
           />
+          {usesServerTotal && (
+            <div className='flex h-12 items-center justify-end gap-8 border-t border-border px-4 text-sm text-foreground'>
+              <span className='whitespace-nowrap'>
+                {numberFormatter.format(firstRowOnPage)} to {numberFormatter.format(lastRowOnPage)}{' '}
+                of {numberFormatter.format(effectiveTotalRows)}
+              </span>
+              <span className='flex items-center gap-3 whitespace-nowrap'>
+                <button
+                  type='button'
+                  className='inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-35'
+                  disabled={!canGoFirst}
+                  onClick={goToFirstPage}
+                  aria-label='First page'
+                  data-track-category='Tickets'
+                  data-track-name='TablePaginationFirst'
+                >
+                  <span className='relative inline-flex h-5 w-5 items-center justify-center'>
+                    <span className='absolute left-1 h-4 w-0.5 rounded-full bg-current' />
+                    <ChevronLeft className='h-5 w-5 translate-x-0.5' />
+                  </span>
+                </button>
+                <button
+                  type='button'
+                  className='inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-35'
+                  disabled={!canGoPrevious}
+                  onClick={goToPreviousPage}
+                  aria-label='Previous page'
+                  data-track-category='Tickets'
+                  data-track-name='TablePaginationPrevious'
+                >
+                  <ChevronLeft className='h-5 w-5' />
+                </button>
+                <span className='px-2 text-foreground'>
+                  Page {numberFormatter.format(totalPageCount === 0 ? 0 : currentPage + 1)} of{' '}
+                  {numberFormatter.format(totalPageCount)}
+                </span>
+                <button
+                  type='button'
+                  className='inline-flex h-8 w-8 items-center justify-center rounded-md text-foreground hover:bg-muted disabled:pointer-events-none disabled:opacity-35'
+                  disabled={!canGoNext || isLoadingMoreRows}
+                  onClick={goToNextPage}
+                  aria-label='Next page'
+                  data-track-category='Tickets'
+                  data-track-name='TablePaginationNext'
+                >
+                  <ChevronRight className='h-5 w-5' />
+                </button>
+                <button
+                  type='button'
+                  className='inline-flex h-8 w-8 items-center justify-center rounded-md text-foreground hover:bg-muted disabled:pointer-events-none disabled:opacity-35'
+                  disabled={!canGoLastPage}
+                  onClick={goToLastPage}
+                  aria-label='Last page'
+                  data-track-category='Tickets'
+                  data-track-name='TablePaginationLast'
+                >
+                  <span className='relative inline-flex h-5 w-5 items-center justify-center'>
+                    <ChevronRight className='h-5 w-5 -translate-x-0.5' />
+                    <span className='absolute right-1 h-4 w-0.5 rounded-full bg-current' />
+                  </span>
+                </button>
+              </span>
+            </div>
+          )}
         </div>
 
         <div>
