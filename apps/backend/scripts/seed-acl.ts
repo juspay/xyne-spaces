@@ -12,16 +12,8 @@
 
 import { PrismaClient } from '@prisma/client';
 import { repositories } from '../src/database/repositories/index';
-import {
-  WorkspaceJoinPolicy,
-  WorkspaceType,
-  AccessType,
-  AuthProvider,
-  UserStatus,
-  SessionStatus,
-  WorkspaceRole,
-  ProjectType,
-} from '@xyne/shared';
+import { WorkspaceJoinPolicy, WorkspaceType, AccessType, AuthProvider, UserStatus, SessionStatus, WorkspaceRole, ProjectType } from '@xyne/shared';
+import { runAsSystem } from '../src/database/tenant/context';
 import { hashPassword } from '../src/utils/passwordUtils';
 
 const prisma = new PrismaClient();
@@ -312,7 +304,8 @@ async function main() {
             await repositories.resourceAccess.create({
               groupId: group.id,
               resourceId: resourceId,
-              accessType: permission.accessType
+              accessType: permission.accessType,
+              workspaceId: defaultWorkspaceId
             });
             console.log(`    ✅ Granted ${permission.accessType} access to ${permission.resourceName}`);
           } catch (error) {
@@ -434,7 +427,8 @@ async function main() {
         await prisma.userGroupMapping.create({
           data: {
             userId: adminUser.id,
-            userGroupId: adminGroupId
+            userGroupId: adminGroupId,
+            workspaceId: defaultWorkspaceId
           }
         });
         console.log('  ✅ Linked admin user to ADMIN group');
@@ -461,6 +455,7 @@ async function main() {
               userId: adminUser.id,
               resourceId: resourceId,
               accessType: AccessType.ADMIN,
+              workspaceId: defaultWorkspaceId,
             },
           });
           grantedCount++;
@@ -549,7 +544,8 @@ async function main() {
             await prisma.userGroupMapping.create({
               data: {
                 userId: defaultAdminUser.id,
-                userGroupId: adminGroupId
+                userGroupId: adminGroupId,
+                workspaceId: defaultWorkspaceId
               }
             });
             console.log('  ✅ Linked default admin email user to ADMIN group');
@@ -574,6 +570,7 @@ async function main() {
                 userId: defaultAdminUser.id,
                 resourceId: resourceId,
                 accessType: AccessType.ADMIN,
+                workspaceId: defaultWorkspaceId,
               },
             });
             grantedCount++;
@@ -733,8 +730,10 @@ async function main() {
   }
 }
 
-// Execute the seeding script when run directly
-main()
+// Execute the seeding script when run directly. Run under a system tenant context so
+// audit logging works: ACLAuditLog.workspaceId is NOT NULL, and the seed creates global
+// resources before any workspace exists, so logEvent has no request-scoped tenant to read.
+runAsSystem(() => main())
   .then(() => {
     process.exit(0);
   })

@@ -351,18 +351,20 @@ export class TicketDuplicateBackfillController {
                 logger.error(`Failed to update due date for ticket ${ticket.id}:`, error);
               }
 
+              // Sweep write: the reference is attributed to the ticket's own creator, so it
+              // runs above the operator's own row scope.
               const result = await prisma.ticketReferenceMapping.createMany({
-                data: [
-                  {
-                    sourceTicketId: ticket.id,
-                    targetTicketId: duplicateCandidate.id,
-                    relationType: TicketReferenceRelation.DUPLICATE_POSSIBLE,
-                    createdBy: ticket.createdBy,
-                    workspaceId: ticket.workspaceId,
-                  },
-                ],
-                skipDuplicates: true,
-              });
+                  data: [
+                    {
+                      sourceTicketId: ticket.id,
+                      targetTicketId: duplicateCandidate.id,
+                      relationType: TicketReferenceRelation.DUPLICATE_POSSIBLE,
+                      createdBy: ticket.createdBy,
+                      workspaceId: ticket.workspaceId,
+                    },
+                  ],
+                  skipDuplicates: true,
+                });
               stats.referencesCreated += result.count;
             }
           } catch (error) {

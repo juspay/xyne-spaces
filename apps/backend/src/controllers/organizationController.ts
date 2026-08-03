@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { OrganizationRepository, CreateOrganizationInput } from '../database/repositories/organizationRepository';
 import { UserRepository } from '../database/repositories/users';
 import { DatabaseClient } from '../database/client';
+import { withWorkspaceScope } from '../database/tenant/context';
 import { logger } from '@/utils/logger';
 import { invitationService } from '@/services/invitationService';
 import { WorkspaceJoinPolicy, WorkspaceType, OrgRole, ProjectType, WorkspaceRole } from '@xyne/shared';
@@ -205,14 +206,17 @@ export class OrganizationController {
       });
 
       // 5. Add ownerEmail as org OWNER (email-only, no user account yet)
-      await db.orgMember.create({
-        data: {
-          orgId: organization.orgId,
-          email: ownerEmail.trim().toLowerCase(),
-          role: OrgRole.OWNER,
-          invitedBy: userId,
-        },
-      });
+      // Provisioning writes the owner row for the newly created org, not the caller's own.
+      await withWorkspaceScope(() =>
+        db.orgMember.create({
+          data: {
+            orgId: organization.orgId,
+            email: ownerEmail.trim().toLowerCase(),
+            role: OrgRole.OWNER,
+            invitedBy: userId,
+          },
+        }),
+      );
 
       await organizationDomainService.createDomainMappingForOrg({
         orgId: organization.orgId,
@@ -410,6 +414,12 @@ export class OrganizationController {
         return;
       }
 
+      // Only an existing OWNER may add a member with the OWNER role.
+      if (role === 'OWNER' && currentUserMembership.role !== 'OWNER') {
+        res.status(403).json({ error: 'Only an owner can assign the OWNER role' });
+        return;
+      }
+
       // Check if target user is already a member
       const existingMembership = await this.orgMemberRepository.findMember(orgId, targetUserId);
       if (existingMembership) {
@@ -465,6 +475,18 @@ export class OrganizationController {
       const currentUserMembership = await this.orgMemberRepository.findMember(orgId, userId);
       if (!currentUserMembership || !['OWNER', 'ADMIN'].includes(currentUserMembership.role)) {
         res.status(403).json({ error: 'Access denied - insufficient permissions' });
+        return;
+      }
+
+      // Only an existing OWNER may grant the OWNER role; an ADMIN cannot promote anyone
+      // (including themselves) to OWNER.
+      if (role === 'OWNER' && currentUserMembership.role !== 'OWNER') {
+        res.status(403).json({ error: 'Only an owner can assign the OWNER role' });
+        return;
+      }
+      // A member may not change their own role.
+      if (targetUserId === userId && role !== currentUserMembership.role) {
+        res.status(403).json({ error: 'You cannot change your own role' });
         return;
       }
 

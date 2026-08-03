@@ -410,24 +410,32 @@ export async function resolveApiGroup(slackGroupId: string, botOauthToken: strin
     try {
       let orgMember = await dbClient.orgMember.findUnique({
         where: { email },
-        select: { memberId: true },
+        select: { memberId: true, orgId: true },
       });
+      const workspace = await dbClient.workspace.findUnique({
+        where: { id: resolvedWorkspaceId },
+        select: { orgId: true },
+      });
+      if (!workspace) {
+        logger.warn('[resolveApiGroup] Workspace not found', { workspaceId: resolvedWorkspaceId });
+        return undefined;
+      }
+      // Never pull a Slack member who already belongs to a DIFFERENT org into this
+      // workspace: buildTokenFallbackList tries every configured bot token, so a fallback
+      // token can resolve an identity that belongs elsewhere. New members of THIS org are
+      // still auto-created; existing members of THIS org are still linked by email.
+      if (orgMember && orgMember.orgId !== workspace.orgId) {
+        logger.warn('[resolveApiGroup] Skipping cross-org Slack member (email belongs to another org)', { email });
+        return undefined;
+      }
       if (!orgMember) {
-        const workspace = await dbClient.workspace.findUnique({
-          where: { id: resolvedWorkspaceId },
-          select: { orgId: true },
-        });
-        if (!workspace) {
-          logger.warn('[resolveApiGroup] Workspace not found', { workspaceId: resolvedWorkspaceId });
-          return undefined;
-        }
         orgMember = await dbClient.orgMember.create({
           data: {
             orgId: workspace.orgId,
             email,
             role: 'MEMBER',
           },
-          select: { memberId: true },
+          select: { memberId: true, orgId: true },
         });
         logger.info('[resolveApiGroup] OrgMember created for group member', { email });
       }
