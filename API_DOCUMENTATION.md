@@ -10,7 +10,7 @@ http://localhost:3001/api
 # Health APIs
 
 ## GET /api/health
-Get application health status and system information.
+Get application health status and system information. 
 
 **Request:**
 ```http
