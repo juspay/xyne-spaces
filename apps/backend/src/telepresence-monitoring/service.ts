@@ -54,6 +54,7 @@ function toDeviceRecord(row: TelepresenceHealthView): TelepresenceDeviceHealthRe
     connected: row.connected,
     detected: row.detected,
     lastReportedAt: row.lastReportedAt,
+    layoutConfig: row.layoutConfig ?? undefined,
   };
 }
 
@@ -100,6 +101,7 @@ export class TelepresenceMonitoringService {
             description: device.description,
             reportedAt,
             createdAt,
+            layoutConfig: device.layoutConfig,
           },
         });
 
@@ -107,7 +109,15 @@ export class TelepresenceMonitoringService {
 
         await tx.telepresenceHealthView.upsert({
           where: { userId_deviceType_name: { userId, deviceType: device.deviceType, name } },
-          update: { status, connected, detected, cpuTemperature, lastReportedAt: reportedAt, updatedAt: createdAt },
+          update: {
+            status,
+            connected,
+            detected,
+            cpuTemperature,
+            lastReportedAt: reportedAt,
+            updatedAt: createdAt,
+            layoutConfig: device.layoutConfig,
+          },
           create: {
             userId,
             deviceType: device.deviceType,
@@ -117,6 +127,7 @@ export class TelepresenceMonitoringService {
             detected,
             cpuTemperature,
             lastReportedAt: reportedAt,
+            layoutConfig: device.layoutConfig,
           },
         });
       }
@@ -193,6 +204,7 @@ export class TelepresenceMonitoringService {
       cpuTemperature: row.cpuTemperature,
       description: row.description,
       reportedAt: row.reportedAt,
+      layoutConfig: row.layoutConfig ?? undefined,
     }));
   }
 }

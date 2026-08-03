@@ -87,3 +87,14 @@ export const ENABLE_SUMMARY_ACTION_BUTTON: boolean =
 // Set VITE_DEFAULT_WORKSPACE_ID in .env.local to the default workspace ID.
 export const DEFAULT_WORKSPACE_ID: string =
   (import.meta.env['VITE_DEFAULT_WORKSPACE_ID'] as string) ?? '';
+
+// Telepresence System Analytics access allow-list (comma-separated emails).
+// Hiding the nav item with this list is NOT access control on its own — the
+// telepresence-monitoring data routes must enforce the same list server-side
+// (403) for direct URL / API access by non-allow-listed users.
+export const TELEPRESENCE_ANALYTICS_ALLOWED_EMAILS: string[] = (
+  (import.meta.env['VITE_TELEPRESENCE_ANALYTICS_ALLOWED_EMAILS'] as string | undefined) ?? ''
+)
+  .split(',')
+  .map(email => email.trim().toLowerCase())
+  .filter(Boolean);

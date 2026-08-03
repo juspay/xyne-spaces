@@ -8,6 +8,7 @@ import {
   type NavigationItem,
 } from '../components/AppSidebar/navigationConfig';
 import { useClawDashboardVisibility } from './useClawDashboardVisibility';
+import { useTelepresenceAnalyticsAccess } from './useTelepresenceAnalyticsAccess';
 
 // Navigation items the current user is allowed to see, in canonical order.
 export const useVisibleNavigationItems = (): NavigationItem[] => {
@@ -18,14 +19,20 @@ export const useVisibleNavigationItems = (): NavigationItem[] => {
     group => group.createdBy === user?.id && group.workspaceId === user?.workspaceId,
   );
   const { showClawDashboard } = useClawDashboardVisibility();
+  const canViewTelepresenceAnalytics = useTelepresenceAnalyticsAccess();
 
   return useMemo(() => {
-    const permittedItems = filterNavItemsByPermission(
+    let permittedItems = filterNavItemsByPermission(
       NAVIGATION_ITEMS,
       permissions,
       canManageOwnUserGroups,
     );
-    if (showClawDashboard) return permittedItems;
-    return permittedItems.filter(item => item.path !== '/claw-agents');
-  }, [permissions, canManageOwnUserGroups, showClawDashboard]);
+    if (!showClawDashboard) {
+      permittedItems = permittedItems.filter(item => item.path !== '/claw-agents');
+    }
+    if (!canViewTelepresenceAnalytics) {
+      permittedItems = permittedItems.filter(item => item.path !== '/analytics/telepresence');
+    }
+    return permittedItems;
+  }, [permissions, canManageOwnUserGroups, showClawDashboard, canViewTelepresenceAnalytics]);
 };

@@ -1,5 +1,6 @@
 import type { ComponentType } from 'react';
 import {
+  Activity,
   GraphTrendLine,
   Settings01,
   Notebook,
@@ -66,6 +67,7 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
   { path: '/workspace-management', label: 'Workspace Management', icon: Settings01 },
   { path: '/organisations', label: 'Organisations', icon: BuildingApartmentTwo },
   { path: '/analytics', label: 'Analytics', icon: GraphTrendLine },
+  { path: '/analytics/telepresence', label: 'Telepresence Analytics', icon: Activity },
   { path: '/forms', label: 'Forms', icon: ClipboardDefault },
   { path: '/browser', label: 'Browser', icon: Globe },
   { path: '/apps', label: 'Apps', icon: Grid02 },

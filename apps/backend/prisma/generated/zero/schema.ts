@@ -867,6 +867,20 @@ export enum TagMethod {
   AUTOMATED = "AUTOMATED",
 }
 
+export enum TelepresenceDeviceType {
+  TV = "TV",
+  CAMERA = "CAMERA",
+  MICROPHONE = "MICROPHONE",
+  SPEAKER = "SPEAKER",
+}
+
+export enum TelepresenceHealthStatus {
+  HEALTHY = "HEALTHY",
+  DEGRADED = "DEGRADED",
+  UNAVAILABLE = "UNAVAILABLE",
+  UNKNOWN = "UNKNOWN",
+}
+
 // Define tables
 
 export const agentTable = table("agents")
@@ -3554,6 +3568,66 @@ export const doclingAsyncPartTable = table("docling_async_parts")
   })
   .primaryKey("fileId", "partIndex");
 
+export const entityTable = table("entities")
+  .columns({
+    workspaceId: string().optional(),
+    id: string(),
+    type: string(),
+    canonicalName: string(),
+    normalizedName: string(),
+    mentionCount: number(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
+export const entityAliasTable = table("entity_aliases")
+  .columns({
+    workspaceId: string().optional(),
+    id: string(),
+    entityId: string(),
+    type: string(),
+    surfaceForm: string(),
+    normalizedForm: string(),
+    count: number(),
+    createdAt: number(),
+  })
+  .primaryKey("id");
+
+export const telepresenceHealthViewTable = table("telepresence_health_view")
+  .columns({
+    id: string(),
+    userId: string(),
+    deviceType: enumeration<TelepresenceDeviceType>(),
+    name: string(),
+    status: enumeration<TelepresenceHealthStatus>(),
+    connected: number(),
+    detected: number(),
+    cpuTemperature: number(),
+    lastReportedAt: number(),
+    layoutConfig: json().optional(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
+export const telepresenceHealthLogTable = table("telepresence_health_log")
+  .columns({
+    id: string(),
+    userId: string(),
+    deviceType: enumeration<TelepresenceDeviceType>(),
+    name: string().optional(),
+    status: enumeration<TelepresenceHealthStatus>(),
+    connected: number(),
+    detected: number(),
+    cpuTemperature: number(),
+    description: string().optional(),
+    reportedAt: number(),
+    layoutConfig: json().optional(),
+    createdAt: number(),
+  })
+  .primaryKey("id");
+
 
 // Define relationships
 
@@ -5317,6 +5391,22 @@ export const doclingAsyncPartTableRelationships = relationships(doclingAsyncPart
   })
 }));
 
+export const entityTableRelationships = relationships(entityTable, ({ many }) => ({
+  aliases: many({
+    sourceField: ["id"],
+    destField: ["entityId"],
+    destSchema: entityAliasTable,
+  })
+}));
+
+export const entityAliasTableRelationships = relationships(entityAliasTable, ({ one }) => ({
+  entity: one({
+    sourceField: ["entityId"],
+    destField: ["id"],
+    destSchema: entityTable,
+  })
+}));
+
 // Define schema
 
 export const schema = createSchema(
@@ -5488,6 +5578,10 @@ export const schema = createSchema(
       tagsConfigTable,
       doclingAsyncFileTable,
       doclingAsyncPartTable,
+      entityTable,
+      entityAliasTable,
+      telepresenceHealthViewTable,
+      telepresenceHealthLogTable,
     ],
     relationships: [
       agentTableRelationships,
@@ -5590,6 +5684,8 @@ export const schema = createSchema(
       installedAppPermissionTableRelationships,
       doclingAsyncFileTableRelationships,
       doclingAsyncPartTableRelationships,
+      entityTableRelationships,
+      entityAliasTableRelationships,
     ],
   }
 );
@@ -5762,3 +5858,7 @@ export type Tag = Row<typeof schema.tables.tags>;
 export type TagsConfig = Row<typeof schema.tables.tags_config>;
 export type DoclingAsyncFile = Row<typeof schema.tables.docling_async_files>;
 export type DoclingAsyncPart = Row<typeof schema.tables.docling_async_parts>;
+export type Entity = Row<typeof schema.tables.entities>;
+export type EntityAlias = Row<typeof schema.tables.entity_aliases>;
+export type TelepresenceHealthView = Row<typeof schema.tables.telepresence_health_view>;
+export type TelepresenceHealthLog = Row<typeof schema.tables.telepresence_health_log>;
