@@ -24,6 +24,13 @@ import { KeyboardProvider } from './contexts/KeyboardContext';
 import { SwitchLoadingOverlay } from './components/SwitchLoadingOverlay/SwitchLoadingOverlay';
 import { TRUSTED_ORIGINS } from '@xyne/shared';
 import { DEFAULT_WORKSPACE_ID } from './config';
+import {
+  CheckTickCircle,
+  AlertCircle,
+  AlertTriangle,
+  InformationCircle,
+  MultipleCrossCancelDefault,
+} from '@xyne/icons';
 
 const App = (): ReactElement => {
   // Initialize theme on app load
@@ -123,6 +130,13 @@ const App = (): ReactElement => {
                       richColors
                       closeButton
                       className='visual-regression-hide'
+                      icons={{
+                        success: <CheckTickCircle size={20} />,
+                        error: <AlertCircle size={20} />,
+                        warning: <AlertTriangle size={20} />,
+                        info: <InformationCircle size={20} />,
+                        close: <MultipleCrossCancelDefault size={16} />,
+                      }}
                       toastOptions={{
                         style: {
                           alignItems: 'flex-start',
@@ -143,7 +157,7 @@ const App = (): ReactElement => {
                             '!bg-secondary !text-secondary-foreground hover:!bg-secondary/80 !mt-8',
 
                           closeButton:
-                            '!absolute !right-3 !top-5 !left-auto !bg-transparent !opacity-100 !text-card-foreground hover:!opacity-50 rounded-md z-10',
+                            '!absolute !right-3 !top-5 !left-auto !bg-transparent !border-0 !ring-0 focus:!ring-0 focus:!outline-none !opacity-100 !text-card-foreground hover:!opacity-50 rounded-md z-10',
 
                           success: '!text-status-success',
                           error: '!text-status-failure',
