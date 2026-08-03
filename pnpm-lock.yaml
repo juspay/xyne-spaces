@@ -146,15 +146,6 @@ importers:
 
   apps/backend:
     dependencies:
-      '@aws-sdk/client-s3':
-        specifier: ^3.1017.0
-        version: 3.1097.0
-      '@aws-sdk/lib-storage':
-        specifier: 3.1017.0
-        version: 3.1017.0(@aws-sdk/client-s3@3.1097.0)
-      '@aws-sdk/s3-request-presigner':
-        specifier: ^3.1017.0
-        version: 3.1097.0
       '@blocknote/core':
         specifier: 0.51.4
         version: 0.51.4(@lezer/common@1.5.2)(@lezer/highlight@1.2.3)(@types/hast@3.0.5)(highlight.js@11.11.1)(lowlight@3.3.0)(refractor@5.0.0)
@@ -170,9 +161,6 @@ importers:
       '@google-cloud/pubsub':
         specifier: ^4.11.0
         version: 4.11.0
-      '@google-cloud/storage':
-        specifier: ^7.7.0
-        version: 7.21.0
       '@juspay-jaf/jaf':
         specifier: 0.1.43
         version: 0.1.43(@cfworker/json-schema@4.1.1)(ws@8.21.1)
@@ -1587,9 +1575,6 @@ importers:
       '@earendil-works/pi-coding-agent':
         specifier: 0.75.5
         version: 0.75.5(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6)
-      '@google-cloud/storage':
-        specifier: ^7.21.0
-        version: 7.21.0
       '@modelcontextprotocol/sdk':
         specifier: 1.29.0
         version: 1.29.0(@cfworker/json-schema@4.1.1)(zod@4.3.6)
@@ -1666,9 +1651,6 @@ importers:
 
   apps/xyne-claw-auth/backend:
     dependencies:
-      '@google-cloud/storage':
-        specifier: ^7.19.0
-        version: 7.21.0
       '@mariozechner/pi-agent-core':
         specifier: 0.73.0
         version: 0.73.0(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(@opentelemetry/api@1.9.1)(ws@8.21.1)(zod@4.3.6)

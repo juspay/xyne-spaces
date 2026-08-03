@@ -60,6 +60,10 @@ const DEBUG_RUN_PREFIX = "claw-debug-runs";
 // Source of truth for "did this finish?", independent of the lossy callback.
 const RESULT_MARKER_PREFIX = "claw-results";
 
+// Per-request write timeout. SIGTERM drain gives the pod ~30s; a hung upload
+// must fail fast enough for the claw-auth fallback to still run within it.
+const STORAGE_TIMEOUT_MS = 15_000;
+
 export interface SessionFile {
   path: string;
   contentBase64: string;
@@ -171,6 +175,7 @@ export async function gcsUploadSessionFromDisk(
             path: objectName(conversationId, f.path),
             contentType: "application/octet-stream",
             resumable: f.sizeBytes > RESUMABLE_THRESHOLD_BYTES,
+            timeoutMs: STORAGE_TIMEOUT_MS,
             ...(options.createOnly ? { ifNotExists: true } : {}),
           });
         } catch (err) {
@@ -200,6 +205,7 @@ export async function gcsUploadDebugRun(storeKey: string, fileName: string, data
     await client.uploadFileV2(data, {
       path: `${DEBUG_RUN_PREFIX}/${storeKey}/${fileName}`,
       contentType: "application/json",
+      timeoutMs: STORAGE_TIMEOUT_MS,
     });
     return true;
   } catch (err) {
@@ -248,6 +254,7 @@ export async function gcsUploadResultMarker(idempotencyKey: string, data: Buffer
     await client.uploadFileV2(data, {
       path: `${RESULT_MARKER_PREFIX}/${idempotencyKey}.json`,
       contentType: "application/json",
+      timeoutMs: STORAGE_TIMEOUT_MS,
     });
     return true;
   } catch (err) {

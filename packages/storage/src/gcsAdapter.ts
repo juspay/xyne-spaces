@@ -14,7 +14,7 @@ export class GCSAdapter implements StorageService {
     return { filename: r.filename, path: r.gcsPath, size: r.size };
   }
 
-  async uploadFileV2(buffer: Buffer, options: { path: string; contentType: string; cacheControl?: string; metadata?: Record<string, string>; ifNotExists?: boolean }): Promise<UploadResult> {
+  async uploadFileV2(buffer: Buffer, options: { path: string; contentType: string; cacheControl?: string; metadata?: Record<string, string>; ifNotExists?: boolean; timeoutMs?: number }): Promise<UploadResult> {
     const gcsOptions = {
       path: options.path,
       contentType: options.contentType,
@@ -23,6 +23,7 @@ export class GCSAdapter implements StorageService {
         ...(options.cacheControl ? { cacheControl: options.cacheControl } : {}),
       },
       ...(options.ifNotExists ? { ifNotExists: true } : {}),
+      ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {}),
     };
     const r = await this.gcs.uploadFileV2(buffer, gcsOptions);
     return { filename: r.filename, path: r.gcsPath, size: r.size };

@@ -102,7 +102,7 @@ export class S3StorageService implements StorageService {
   }
 
 
-  async uploadFileV2(buffer: Buffer, options: { path: string; contentType: string; cacheControl?: string; metadata?: Record<string, string>; ifNotExists?: boolean }): Promise<UploadResult> {
+  async uploadFileV2(buffer: Buffer, options: { path: string; contentType: string; cacheControl?: string; metadata?: Record<string, string>; ifNotExists?: boolean; timeoutMs?: number }): Promise<UploadResult> {
     if (!buffer || buffer.length === 0) throw new Error('File buffer is empty or invalid');
     if (!options.path) throw new Error('Path is required');
     if (!options.contentType) throw new Error('Content type is required');
@@ -127,7 +127,7 @@ export class S3StorageService implements StorageService {
 
   async uploadStreamToPath(
     stream: NodeJS.ReadableStream,
-    options: { path: string; contentType: string; metadata?: Record<string, string>; ifNotExists?: boolean; resumable?: boolean }
+    options: { path: string; contentType: string; metadata?: Record<string, string>; ifNotExists?: boolean; resumable?: boolean; timeoutMs?: number }
   ): Promise<UploadResult> {
     if (!stream) throw new Error('File stream is empty or invalid');
     if (!options.path) throw new Error('Path is required');

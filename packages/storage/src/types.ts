@@ -61,12 +61,14 @@ export interface UploadToPathOptions {
   metadata?: Record<string, string>;
   ifNotExists?: boolean;
   resumable?: boolean;
+  /** GCS only: per-request timeout in ms (SDK default when omitted). */
+  timeoutMs?: number;
 }
 
 export interface StorageService {
   uploadFile(buffer: Buffer, options: UploadOptions): Promise<UploadResult>;
   uploadStream(stream: NodeJS.ReadableStream, options: UploadOptions): Promise<UploadResult>;
-  uploadFileV2(buffer: Buffer, options: { path: string; contentType: string; cacheControl?: string; metadata?: Record<string, string>; ifNotExists?: boolean }): Promise<UploadResult>;
+  uploadFileV2(buffer: Buffer, options: { path: string; contentType: string; cacheControl?: string; metadata?: Record<string, string>; ifNotExists?: boolean; timeoutMs?: number }): Promise<UploadResult>;
   uploadStreamToPath(stream: NodeJS.ReadableStream, options: UploadToPathOptions): Promise<UploadResult>;
   deleteFile(filename: string): Promise<DeleteResult>;
   generateSignedUrl(filename: string, expirationHours?: number): Promise<string>;

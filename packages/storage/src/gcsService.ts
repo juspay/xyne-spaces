@@ -192,6 +192,7 @@ export class GCSService {
       metadata?: Record<string, string>;
       ifNotExists?: boolean;
       resumable?: boolean;
+      timeoutMs?: number;
     }
   ): Promise<GCSUploadResult> {
     try {
@@ -228,6 +229,7 @@ export class GCSService {
         // ifGenerationMatch: 0 = only create when the object does not exist
         // (412 Precondition Failed otherwise).
         ...(options.ifNotExists ? { preconditionOpts: { ifGenerationMatch: 0 } } : {}),
+        ...(options.timeoutMs ? { timeout: options.timeoutMs } : {}),
       });
 
       await new Promise<void>((resolve, reject) => {
@@ -262,6 +264,7 @@ export class GCSService {
       contentType: string;
       metadata?: Record<string, string>;
       ifNotExists?: boolean;
+      timeoutMs?: number;
     }
   ): Promise<GCSUploadResult> {
     try {
