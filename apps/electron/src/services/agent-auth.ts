@@ -117,10 +117,28 @@ class AgentAuthService {
       return;
     }
 
+    // Every legitimate caller connects to the loopback server directly, so Host must be
+    // 127.0.0.1:<port> / localhost:<port>. A request arriving with any other Host is
+    // rejected here before routing.
+    const hostHeader = req.headers.host;
+    const allowedHosts = new Set([`127.0.0.1:${this.port}`, `localhost:${this.port}`]);
+    if (!hostHeader || !allowedHosts.has(hostHeader)) {
+      log.warn(`[AgentAuth] Rejected request with unexpected Host header: ${hostHeader ?? '(none)'}`);
+      this.sendJson(res, 403, { error: 'Forbidden', message: 'Invalid Host' });
+      return;
+    }
+
     const url = new URL(req.url || '/', `http://${req.headers.host}`);
 
     try {
       if (req.method === 'POST' && url.pathname === '/auth/request') {
+        // Real local agents are non-browser clients and send no Origin / Sec-Fetch-Site
+        // header; reject cross-site browser requests to the consent dialog.
+        if (this.isCrossSiteBrowserRequest(req)) {
+          log.warn('[AgentAuth] Rejected cross-site /auth/request (browser consent-dialog spam)');
+          this.sendJson(res, 403, { error: 'Forbidden', message: 'Cross-site request rejected' });
+          return;
+        }
         await this.handleAuthRequest(req, res);
       } else if (req.method === 'POST' && url.pathname === '/auth/release') {
         await this.handleAuthRelease(req, res);

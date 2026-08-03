@@ -209,6 +209,18 @@ export class MicrosoftAuthController {
 
         await pkceServiceV2.storeVerifier(state, codeVerifier);
 
+        // The callback echoes this state back via the HttpOnly cookie. sameSite=lax lets the
+        // cookie ride Microsoft's top-level callback redirect. Mirrors the Google flow; only
+        // the web callback verifies it.
+        const isProduction = process.env.NODE_ENV === 'production';
+        res.cookie('oauth_state', state, {
+          httpOnly: true,
+          secure: isProduction,
+          sameSite: 'lax' as const,
+          maxAge: 10 * 60 * 1000,
+          path: '/',
+        });
+
         const redirectUri = this.getMicrosoftRedirectUri(req);
 
         logger.info('[OAuth] Redirect URI:', redirectUri);
@@ -321,6 +333,26 @@ export class MicrosoftAuthController {
           logger.info(`[${requestId}] ELECTRON_REDIRECT: invitationId_appended=${!!peekedState?.invitationId}, invitationId=${peekedState?.invitationId || 'NULL'}, launchUrl=${launchUrl}`);
           res.redirect(launchUrl);
           return;
+        }
+
+        // The state must match the oauth_state cookie. Only the browser-driven path is
+        // checked: electron returned above, and the mobile app posts code+state directly
+        // rather than being redirected here. `resolvedPlatform` comes from the stored state
+        // record.
+        if (resolvedPlatform !== 'mobile') {
+          const boundState = req.cookies?.oauth_state as string | undefined;
+          res.clearCookie('oauth_state', { path: '/' });
+          if (!boundState || boundState !== state) {
+            logger.error(`[${requestId}] OAuth state cookie missing or mismatched — rejecting`);
+            await oauthStateServiceV2.deleteState(state as string);
+            res.redirect(
+              this.getRedirectUrl(req, resolvedPlatform, {
+                error: 'invalid_state',
+                message: 'Login session expired or invalid. Please try signing in again.',
+              })
+            );
+            return;
+          }
         }
 
         // Now consume the state (delete it)
