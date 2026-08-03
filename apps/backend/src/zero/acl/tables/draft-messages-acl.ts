@@ -1,4 +1,4 @@
-import type { DeleteID, InsertValue, Transaction, UpdateValue } from '@rocicorp/zero';
+import type { DeleteID, InsertValue, Transaction, UpdateValue, UpsertValue } from '@rocicorp/zero';
 import { ChannelVisibility, Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, TableSchema } from '../core/types';
@@ -81,6 +81,15 @@ export class DraftMessagesACL extends BaseACL<'draft_messages'> {
     }
     if (args.channelId !== undefined && args.channelId !== row.channelId) {
       await this.ensureChannelAccess(args.channelId, tx);
+    }
+  }
+
+  async canUpsert(args: UpsertValue<TableSchema<'draft_messages'>>, tx: Transaction<Schema>): Promise<void> {
+    const row = await tx.run(zql.draft_messages.where('id', args.id).one());
+    if (row) {
+      await this.canUpdate(args, tx);
+    } else {
+      await this.canInsert(args, tx);
     }
   }
 
