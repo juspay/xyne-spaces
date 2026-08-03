@@ -133,7 +133,7 @@ interface ChatBubbleProps {
   isThreadTicketSubTicket?: boolean;
 }
 
-export const ChatBubble: React.FC<ChatBubbleProps> = ({
+const ChatBubbleComponent: React.FC<ChatBubbleProps> = ({
   message,
   channelId,
   projectId,
@@ -1650,3 +1650,14 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     </div>
   );
 };
+
+ChatBubbleComponent.displayName = 'ChatBubble';
+
+/**
+ * Memoized to stop a single new message in a long thread from re-rendering every
+ * ChatBubble in the list (XYNE-55052). Default shallow prop comparison is safe:
+ * Zero returns stable row identities for unchanged messages, and the only array
+ * prop (`allThreadAttachments`) is identity-stabilized by ThreadList, so unchanged
+ * bubbles compare equal and skip re-render while edited/reacted rows still update.
+ */
+export const ChatBubble = React.memo(ChatBubbleComponent);

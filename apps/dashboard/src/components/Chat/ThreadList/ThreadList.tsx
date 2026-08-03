@@ -82,9 +82,14 @@ const ThreadList = ({
     [conversationId],
   );
 
-  // Pre-compute all thread attachments for gallery navigation
+  // Pre-compute all thread attachments for gallery navigation.
+  // Identity is stabilized (XYNE-55052): a new array is only returned when the
+  // attachment set actually changes. Text-only message arrivals — the common case
+  // that previously re-rendered every ChatBubble in the thread — keep the same
+  // reference, so the memoized ChatBubble can skip re-rendering.
+  const prevAttachmentsRef = useRef<AttachmentRef[]>([]);
   const allThreadAttachments: AttachmentRef[] = useMemo(() => {
-    if (!threadMessages) return [];
+    if (!threadMessages) return prevAttachmentsRef.current;
 
     const result = threadMessages.flatMap(msg => {
       if (!msg.hasAttachment || !msg.attachments?.length) return [];
@@ -102,6 +107,21 @@ const ThreadList = ({
       }));
     });
 
+    const prev = prevAttachmentsRef.current;
+    const unchanged =
+      prev.length === result.length &&
+      prev.every((p, i) => {
+        const n = result[i]!;
+        return (
+          p.attachmentId === n.attachmentId &&
+          p.conversationId === n.conversationId &&
+          p.channelId === n.channelId &&
+          p.replyCount === n.replyCount
+        );
+      });
+    if (unchanged) return prev;
+
+    prevAttachmentsRef.current = result;
     return result;
   }, [threadMessages, channelId, conversation?.replyCount]);
 
@@ -476,7 +496,13 @@ const ThreadList = ({
 
               return (
                 <div key={threadMessage.messageId}>
-                  <div id={`thread-message-${conversationId}-${threadMessage.messageId}`}>
+                  <div
+                    id={`thread-message-${conversationId}-${threadMessage.messageId}`}
+                    // content-visibility skips layout/paint for off-screen bubbles (XYNE-55052).
+                    // contain-intrinsic-size:auto lets the browser remember each row's last
+                    // measured height, so scroll position and deep-link jumps stay stable.
+                    style={{ contentVisibility: 'auto', containIntrinsicSize: 'auto 80px' }}
+                  >
                     <ChatBubble
                       message={threadMessage}
                       channelId={channelId}
@@ -574,7 +600,13 @@ const ThreadList = ({
                     </div>
                   </div>
                 )}
-                <div id={`thread-message-${conversationId}-${threadMessage.messageId}`}>
+                <div
+                  id={`thread-message-${conversationId}-${threadMessage.messageId}`}
+                  // content-visibility skips layout/paint for off-screen bubbles (XYNE-55052).
+                  // contain-intrinsic-size:auto lets the browser remember each row's last
+                  // measured height, so scroll position and deep-link jumps stay stable.
+                  style={{ contentVisibility: 'auto', containIntrinsicSize: 'auto 80px' }}
+                >
                   <ChatBubble
                     message={threadMessage}
                     channelId={channelId}
