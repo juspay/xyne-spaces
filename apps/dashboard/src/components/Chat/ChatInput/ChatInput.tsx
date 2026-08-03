@@ -30,6 +30,7 @@ import { useAuth, useAuthContextValues } from '../../../hooks/useAuth';
 import { websocketService } from '../../../services/clients/socketClient';
 import { processMessageForSending, containsSpecialBroadcastMention } from './ChatInput.utils';
 import { saveDraft, useDraft } from '../../../hooks/useDraft';
+import { useSentMessageHistory } from '../../../hooks/useSentMessageHistory';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import type { InputBoxHandle } from '../../../hooks/useDragAndDropAreaRef';
 import { CreateTicketModal } from '../../Tickets/CreateTicketModal/CreateTicketModal';
@@ -218,6 +219,9 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
     );
 
     const currentSessionId = conversationId ?? channelId;
+    // Per-composer sent-message recall (ArrowUp/Down). Scoped to currentSessionId
+    // so the channel composer and each thread composer keep separate history.
+    const messageHistory = useSentMessageHistory(currentSessionId);
     // The first message in a channel creates a conversation client-side, but the
     // `conversationId` prop only updates once the view switches into that thread.
     // Agent-progress events are scoped to the new conversationId, so without this
@@ -529,6 +533,12 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
         console.info(
           `[AgentProgress] 📤 Message sent | conversationId: ${conversationId ?? currentSessionId} | hasFiles: ${!!(files && files.length > 0)}`,
         );
+
+        // Record into ArrowUp/Down recall history. Store the editor HTML (mention
+        // spans intact) for non-edit sends only; edits must not enter recall.
+        if (!messageId) {
+          messageHistory.push(html);
+        }
 
         const processedHtml = processMessageForSending(html, allUsersForMentionResolution);
         const hasFiles = files && files.length > 0;
@@ -969,6 +979,11 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               }
               commandItems={channelCommands}
               onCommandSelect={handleCommandSelect}
+              {...(!messageId && {
+                onRecallPrev: messageHistory.recallPrev,
+                onRecallNext: messageHistory.recallNext,
+                onRecallReset: messageHistory.resetCursor,
+              })}
               {...(editorValue !== undefined && { value: editorValue })}
               {...(messageId && onCancel && { onCancel: handleCancelEdit })}
               {...(conversationId && { conversationId })}
