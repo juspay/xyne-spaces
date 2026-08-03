@@ -3,7 +3,7 @@ import {
   MutationACLError,
   type TableSchema,
 } from '../core/types';
-import { Schema } from '@xyne/shared';
+import { ChannelVisibility, Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { zql } from '../../queries';
 import { hasGuestTicketAccess } from '../core/guest-access';
@@ -21,6 +21,27 @@ export class TicketStageEtaACL extends BaseACL<'ticket_stage_eta'> {
       if (!hasAccess) {
         throw new MutationACLError('Ticket stage ETA not accessible for guest users', 'ticket_stage_eta');
       }
+      return;
+    }
+
+    // Gate on the ticket's own channel (PUBLIC or participant), matching TicketsACL's read
+    // predicate and TicketAssignmentsACL — a workspace check alone would let any member of
+    // the tenant write ETAs on tickets in private channels they cannot see.
+    const accessible = await tx.run(
+      zql.tickets
+        .where('id', ticketId)
+        .whereExists('channel', (channel) =>
+          channel.where(({ or, cmp, exists }) =>
+            or(
+              cmp('visibility', ChannelVisibility.PUBLIC),
+              exists('participants', (participants) => participants.where('userId', this.ctx.userID)),
+            ),
+          ),
+        )
+        .one(),
+    );
+    if (!accessible) {
+      throw new MutationACLError('Ticket stage ETA failed: you do not have access to the ticket\'s channel', 'ticket_stage_eta');
     }
   }
 

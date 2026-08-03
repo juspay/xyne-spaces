@@ -43,6 +43,45 @@ export class SubTicketsACL extends BaseACL<'sub_tickets'> {
       throw new MutationACLError('Sub-ticket not found in this workspace', 'sub_tickets');
     }
 
+    // When mappedTicketId is being changed, verify the caller can access the new
+    // target's channel and that it is in the same workspace.
+    if (args.mappedTicketId) {
+      const accessibleNewMapped = await tx.run(zql.tickets
+        .where('id', args.mappedTicketId as string)
+        .where('workspaceId', this.ctx.workspaceId)
+        .whereExists('conversation', (conversation) => {
+          return conversation.whereExists('channel', (channel) => {
+            return channel.where(({ cmp, or, exists, and }) => {
+              return or(
+                and(
+                  cmp('visibility', ChannelVisibility.PRIVATE),
+                  exists('participants', (participants) => {
+                    return participants.where('userId', this.ctx.userID);
+                  })
+                ),
+                and(
+                  cmp('visibility', ChannelVisibility.PUBLIC),
+                  exists('project', (project) => {
+                    return project.whereExists('channels', (channelQuery) => {
+                      return channelQuery
+                        .where('visibility', ChannelVisibility.PUBLIC)
+                        .whereExists('participants', (participants) => {
+                          return participants.where('userId', this.ctx.userID);
+                        });
+                    });
+                  })
+                )
+              );
+            });
+          });
+        })
+        .one());
+
+      if (!accessibleNewMapped) {
+        throw new MutationACLError('Sub-ticket update failed: you do not have access to the target mapped ticket\'s channel', 'sub_tickets');
+      }
+    }
+
     if (!subTicket.mappedTicketId) {
       return;
     }
