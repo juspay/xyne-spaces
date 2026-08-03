@@ -74,10 +74,6 @@ const SlackComposer = ({
       CodeBlockLowlight.configure({
         lowlight,
         defaultLanguage: 'plaintext',
-        HTMLAttributes: {
-          class: 'bg-slate-50 border border-slate-200 rounded-lg overflow-x-auto relative',
-          style: 'padding: 0.75rem;',
-        },
       }),
       LinkExtension.extend({ inclusive: false }).configure({
         openOnClick: false,
