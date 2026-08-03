@@ -35,6 +35,7 @@ import { verifySpacesSignature } from "../middleware/verify-spaces-signature.js"
 import { coerceAutomationForwardResult } from "../lib/automation-result.js";
 import { parseSlashCommand } from "../lib/parseSlashCommand.js";
 import { buildExperimentProofBundle } from "../lib/experiment-bundle.js";
+import { resolveAuthForUser } from "../services/userMemoryFetcher.js";
 import { parseExperimentCommand, formatDuration, dispatchExperimentEpoch, dispatchExperimentChecker, EXPERIMENT_PROVIDERS, buildFindingsMarkdown, cancelRunSession } from "../lib/experiment.js";
 import { resolveFastMode, setFastModeOverride } from "../lib/fast-mode.js";
 import { acquireTwinSlot, renameTwinSlot, releaseTwinSlot } from "../lib/twin-limiter.js";
@@ -1494,12 +1495,22 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       // when the thread has no attachments or Spaces is unreachable.
       let bundle: Awaited<ReturnType<typeof buildExperimentProofBundle>> = null;
       try {
-        bundle = await buildExperimentProofBundle({
-          run,
-          findings,
-          findingsMarkdown: markdown,
-          conversationId: payload.conversationId,
-        });
+        // Reads the thread's attachments as the REQUESTER, so the bundle can
+        // never contain a file they couldn't already open in the thread.
+        const bundleAuth = await resolveAuthForUser(payload.userId);
+        if (!bundleAuth) {
+          log.warn("[experiment] no Spaces credentials for requester; findings will be markdown-only", {
+            userId: payload.userId,
+          });
+        } else {
+          bundle = await buildExperimentProofBundle({
+            run,
+            findings,
+            findingsMarkdown: markdown,
+            conversationId: payload.conversationId,
+            auth: bundleAuth,
+          });
+        }
       } catch (err) {
         log.warn("[experiment] proof bundle failed; falling back to markdown only", {
           error: err instanceof Error ? err.message : String(err),
@@ -4117,8 +4128,17 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     // failed with no chain and no promote-prompt, so the user saw nothing and
     // asked "why no reply"). Cancellations are intentional and stay silent.
     let failureSurfaced = false;
+    const rawErr = String(payload.error ?? "");
+    // SHUTDOWN_DRAIN-prefixed failures are pod-restart kills (claw's drain
+    // deadline aborted the run — see cancelActiveRunsForDrain). The recovery
+    // worker refires these, so NOTHING below should treat them as agent
+    // failures: no chain escalation, no failure-investigation dispatch, no
+    // "internal error" notice. If the refire also dies it fails with a normal
+    // (unprefixed) error and the full failure path runs then — the thread is
+    // never permanently silent.
+    const isShutdownDrain = /^SHUTDOWN_DRAIN:/.test(rawErr);
     // ── Handle failure chain if configured ──
-    if (payload.status === "failed" && ctx?.agentSlug && ctx.agentOrgId) {
+    if (payload.status === "failed" && !isShutdownDrain && ctx?.agentSlug && ctx.agentOrgId) {
       try {
         const agentRow = await agentRepository.findBySlug(ctx.agentSlug, ctx.agentOrgId);
 
@@ -4286,7 +4306,6 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     // user — otherwise the thread goes silent and looks like the agent ignored
     // the mention. Only for conversation-mode failures with a thread to post
     // to; cancellations and approval-mode runs stay silent by design.
-    const rawErr = String(payload.error ?? "");
     // A dropped SSE stream ("…ended without a done frame") is a TRANSIENT
     // transport flake — claw-auth retries the dispatch automatically and the
     // retry almost always completes and posts the real reply. Surfacing a
@@ -4300,6 +4319,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       payload.status === "failed" &&
       !failureSurfaced &&
       !isTransientSseDrop &&
+      !isShutdownDrain &&
       ctx?.conversationId &&
       ctx?.channelId &&
       ctx.responseMode === "conversation"

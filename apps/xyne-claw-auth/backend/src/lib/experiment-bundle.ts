@@ -19,7 +19,7 @@
  */
 import JSZip from "jszip";
 import type { ExperimentFinding, ExperimentRun } from "@prisma/client";
-import { interact, spacesFetchBuffer } from "../mcp/servers/xyne-spaces-client.js";
+import { interact, spacesFetchBuffer, type SpacesAuthContext } from "../mcp/servers/xyne-spaces-client.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("experiment-bundle");
@@ -65,30 +65,49 @@ function epochDir(epoch: number): string {
   return `epoch-${String(epoch).padStart(2, "0")}`;
 }
 
-/** Every non-deleted attachment in the thread, newest first. Mirrors the
- *  two-step the spaces-thread-attachments tool uses: messages carrying
- *  attachments, then the attachment rows keyed by messageId. */
-async function listThreadAttachments(conversationId: string): Promise<ThreadAttachment[]> {
+/** Every non-deleted attachment in the thread, newest first.
+ *
+ *  Queried BOTH ways, exactly as the spaces-thread-attachments tool does:
+ *  denormalised `conversationId` on the attachment row, and `entityId` against
+ *  the thread's messages. Neither alone is complete — older rows predate the
+ *  denormalised column, and the message hop misses attachments whose message
+ *  was pruned. */
+async function listThreadAttachments(
+  conversationId: string,
+  auth: SpacesAuthContext,
+): Promise<ThreadAttachment[]> {
+  const direct = (await interact({
+    model: "messageAttachment",
+    operation: "findMany",
+    where: { conversationId: { equals: conversationId }, isDeleted: { equals: false } },
+    orderBy: [{ createdAt: "desc" }],
+    take: MAX_ATTACHMENTS_SCANNED,
+  }, auth).catch(() => null)) as ThreadAttachment[] | null;
+
   const messages = (await interact({
     model: "message",
     operation: "findMany",
     where: { conversationId: { equals: conversationId }, hasAttachment: { equals: true } },
     orderBy: [{ createdAt: "desc" }],
     take: MAX_ATTACHMENTS_SCANNED,
-  })) as Array<{ messageId?: string }> | null;
+  }, auth).catch(() => null)) as Array<{ messageId?: string }> | null;
 
   const messageIds = (messages ?? []).map((m) => m.messageId).filter((id): id is string => Boolean(id));
-  if (messageIds.length === 0) return [];
+  const byMessage = messageIds.length > 0
+    ? ((await interact({
+        model: "messageAttachment",
+        operation: "findMany",
+        where: { entityId: { in: messageIds }, isDeleted: { equals: false } },
+        orderBy: [{ createdAt: "desc" }],
+        take: MAX_ATTACHMENTS_SCANNED,
+      }, auth).catch(() => null)) as ThreadAttachment[] | null)
+    : null;
 
-  const rows = (await interact({
-    model: "messageAttachment",
-    operation: "findMany",
-    where: { entityId: { in: messageIds }, isDeleted: { equals: false } },
-    orderBy: [{ createdAt: "desc" }],
-    take: MAX_ATTACHMENTS_SCANNED,
-  })) as ThreadAttachment[] | null;
-
-  return rows ?? [];
+  const merged = new Map<string, ThreadAttachment>();
+  for (const row of [...(direct ?? []), ...(byMessage ?? [])]) {
+    if (row?.id && !merged.has(row.id)) merged.set(row.id, row);
+  }
+  return [...merged.values()];
 }
 
 export async function buildExperimentProofBundle(args: {
@@ -96,12 +115,17 @@ export async function buildExperimentProofBundle(args: {
   findings: ExperimentFinding[];
   findingsMarkdown: string;
   conversationId: string;
+  /** The requester's Spaces credentials. REQUIRED: this runs in the claw-auth
+   *  API process, which — unlike a spawned MCP server — has no
+   *  XYNE_SPACES_TOKEN in its environment, so an unauthenticated call would
+   *  throw "Spaces auth token missing" and silently degrade to markdown. */
+  auth: SpacesAuthContext;
 }): Promise<ProofBundle | null> {
-  const { run, findings, findingsMarkdown, conversationId } = args;
+  const { run, findings, findingsMarkdown, conversationId, auth } = args;
 
   let attachments: ThreadAttachment[];
   try {
-    attachments = await listThreadAttachments(conversationId);
+    attachments = await listThreadAttachments(conversationId, auth);
   } catch (err) {
     log.warn(`[experiment] bundle: attachment listing failed id=${run.id}: ${err instanceof Error ? err.message : String(err)}`);
     return null;
@@ -145,7 +169,7 @@ export async function buildExperimentProofBundle(args: {
     let buf = downloaded.get(attachment.id);
     if (!buf) {
       try {
-        const dl = await spacesFetchBuffer(`/api/attachments/${encodeURIComponent(attachment.id)}/download`);
+        const dl = await spacesFetchBuffer(`/api/attachments/${encodeURIComponent(attachment.id)}/download`, auth);
         buf = dl.buffer;
         downloaded.set(attachment.id, buf);
         totalBytes += buf.length;
@@ -182,7 +206,7 @@ export async function buildExperimentProofBundle(args: {
     if (claimed.has(a.id)) continue;
     if (a.size > MAX_SINGLE_BYTES || totalBytes + a.size > MAX_TOTAL_BYTES) continue;
     try {
-      const dl = await spacesFetchBuffer(`/api/attachments/${encodeURIComponent(a.id)}/download`);
+      const dl = await spacesFetchBuffer(`/api/attachments/${encodeURIComponent(a.id)}/download`, auth);
       totalBytes += dl.buffer.length;
       let path = `unmatched/${a.originalFilename}`;
       let i = 2;

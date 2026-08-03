@@ -10,6 +10,8 @@ vi.mock("../mcp/servers/xyne-spaces-client.js", () => ({
 
 const { buildExperimentProofBundle } = await import("./experiment-bundle.js");
 
+const AUTH = { token: "t", workspaceId: "w", baseUrl: "https://spaces.test" };
+
 const run = {
   id: "exp1",
   agentSlug: "xyne-spaces-architect",
@@ -24,18 +26,24 @@ function finding(over: Partial<{ id: string; epoch: number; title: string; proof
   } as Parameters<typeof buildExperimentProofBundle>[0]["findings"][number];
 }
 
-/** interact() is called twice: messages, then attachment rows. */
+/** interact() is called three times, in order:
+ *   1. messageAttachment by conversationId  (denormalised path)
+ *   2. message by conversationId            (to collect messageIds)
+ *   3. messageAttachment by entityId in [..] (message-hop path)
+ *  Both attachment queries return the same rows here; the impl dedupes by id. */
 function mockThread(attachments: Array<{ id: string; originalFilename: string; size?: number }>) {
+  const rows = attachments.map((a) => ({
+    id: a.id,
+    originalFilename: a.originalFilename,
+    mimetype: "text/plain",
+    size: a.size ?? 100,
+    entityId: "m0",
+  }));
   interact.mockReset();
   interact
+    .mockResolvedValueOnce(rows)
     .mockResolvedValueOnce(attachments.map((_, i) => ({ messageId: `m${i}` })))
-    .mockResolvedValueOnce(attachments.map((a) => ({
-      id: a.id,
-      originalFilename: a.originalFilename,
-      mimetype: "text/plain",
-      size: a.size ?? 100,
-      entityId: "m0",
-    })));
+    .mockResolvedValueOnce(rows);
   spacesFetchBuffer.mockReset();
   spacesFetchBuffer.mockImplementation((path: string) =>
     Promise.resolve({ buffer: Buffer.from(`bytes-for-${path}`), contentType: "text/plain" }),
@@ -57,6 +65,7 @@ describe("buildExperimentProofBundle", () => {
       findings: [finding({ epoch: 3, proofArtifactPath: "/workspace/proof_a.cjs" })],
       findingsMarkdown: "# findings",
       conversationId: "c1",
+      auth: AUTH,
     });
     expect(bundle).not.toBeNull();
     expect(await pathsOf(bundle!.buffer)).toContain("epoch-03/proof_a.cjs");
@@ -70,6 +79,7 @@ describe("buildExperimentProofBundle", () => {
       findings: [finding({ proofArtifactPath: "/workspace/proof_dm_race.cjs" })],
       findingsMarkdown: "# findings",
       conversationId: "c1",
+      auth: AUTH,
     });
     expect(bundle!.includedCount).toBe(0);
     expect(bundle!.entries[0]!.status).toBe("not-delivered");
@@ -85,6 +95,7 @@ describe("buildExperimentProofBundle", () => {
       findings: [finding({ proofArtifactPath: null })],
       findingsMarkdown: "# findings",
       conversationId: "c1",
+      auth: AUTH,
     });
     expect(await pathsOf(bundle!.buffer)).toContain("unmatched/orphan_report.html");
     expect(bundle!.entries[0]!.status).toBe("no-proof-path");
@@ -100,6 +111,7 @@ describe("buildExperimentProofBundle", () => {
       ],
       findingsMarkdown: "# findings",
       conversationId: "c1",
+      auth: AUTH,
     });
     const paths = await pathsOf(bundle!.buffer);
     expect(paths).toContain("epoch-01/proof.cjs");
@@ -113,6 +125,7 @@ describe("buildExperimentProofBundle", () => {
       findings: [finding({ proofArtifactPath: "huge.bin" })],
       findingsMarkdown: "# findings",
       conversationId: "c1",
+      auth: AUTH,
     });
     expect(bundle!.entries[0]!.status).toBe("too-large");
     expect(spacesFetchBuffer).not.toHaveBeenCalled();
@@ -120,12 +133,13 @@ describe("buildExperimentProofBundle", () => {
 
   it("returns null when the thread has no attachments at all", async () => {
     interact.mockReset();
-    interact.mockResolvedValueOnce([]);
+    interact.mockResolvedValue([]);
     const bundle = await buildExperimentProofBundle({
       run,
       findings: [finding({})],
       findingsMarkdown: "# findings",
       conversationId: "c1",
+      auth: AUTH,
     });
     expect(bundle).toBeNull();
   });
@@ -137,6 +151,7 @@ describe("buildExperimentProofBundle", () => {
       findings: [finding({})],
       findingsMarkdown: "# the ledger",
       conversationId: "c1",
+      auth: AUTH,
     });
     const zip = await JSZip.loadAsync(bundle!.buffer);
     expect(await zip.file("findings.md")!.async("string")).toBe("# the ledger");

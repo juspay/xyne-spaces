@@ -359,10 +359,18 @@ async function notifyExhausted(state: RunRecoveryState): Promise<void> {
   const tail = isSessionLockedFailure(state.lastError)
     ? "Another task was already running in this thread, so this request could not start. Please re-send your message after the current task finishes."
     : "Some application issue is happening while running this query. Admins will get back to you.";
+  // "I retried **0/2** times … but it still failed" reads absurd and alarms
+  // users — at zero retries the run was interrupted and could not even be
+  // redispatched (handoff/dispatch failure), which is a different story than
+  // burning through real retries.
+  const headline =
+    state.retriesUsed > 0
+      ? `I retried this request **${state.retriesUsed}/${state.maxRetries}** times after interruptions, but it still failed.`
+      : "This request was interrupted and could not be resumed automatically.";
   const message = [
     "⚠️ **Run recovery exhausted**",
     "",
-    `I retried this request **${state.retriesUsed}/${state.maxRetries}** times after interruptions, but it still failed.`,
+    headline,
     `Session ID: \`${state.activeSessionId}\``,
     `Root Session ID: \`${state.rootSessionId}\``,
     "",
