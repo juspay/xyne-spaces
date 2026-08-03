@@ -34,6 +34,7 @@ import { mintSessionToken } from "../lib/session-tokens.js";
 import { verifySpacesSignature } from "../middleware/verify-spaces-signature.js";
 import { coerceAutomationForwardResult } from "../lib/automation-result.js";
 import { parseSlashCommand } from "../lib/parseSlashCommand.js";
+import { buildExperimentProofBundle } from "../lib/experiment-bundle.js";
 import { parseExperimentCommand, formatDuration, dispatchExperimentEpoch, dispatchExperimentChecker, EXPERIMENT_PROVIDERS, buildFindingsMarkdown, cancelRunSession } from "../lib/experiment.js";
 import { resolveFastMode, setFastModeOverride } from "../lib/fast-mode.js";
 import { acquireTwinSlot, renameTwinSlot, releaseTwinSlot } from "../lib/twin-limiter.js";
@@ -481,11 +482,17 @@ async function postGeneratedMarkdownFile(args: {
   userId: string;
   appToken: string;
   filename: string;
-  markdown: string;
+  /** Text body, or raw bytes when `mimeType` says the payload is binary. */
+  markdown: string | Uint8Array;
+  mimeType?: string;
   summary: string;
 }): Promise<void> {
   const form = new FormData();
-  form.append("files", new Blob([args.markdown], { type: "text/markdown" }), args.filename);
+  const mimeType = args.mimeType ?? "text/markdown";
+  const body = typeof args.markdown === "string"
+    ? [args.markdown]
+    : [new Uint8Array(args.markdown)];
+  form.append("files", new Blob(body, { type: mimeType }), args.filename);
   form.append("channelId", args.channelId);
   form.append("conversationId", args.conversationId);
   form.append("userId", args.userId);
@@ -1478,24 +1485,50 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
           `${candidate.id} (${candidate.status}, ${candidate._count.findings} findings, ${candidate.createdAt.toISOString().slice(0, 10)})`
         ).join(" · ")}`);
       }
-      const summary = summaryLines.join("\n");
       const markdown = capExperimentFindingsMarkdown(buildFindingsMarkdown(run, findings, reviews));
       const filename = experimentFindingsFilename(run.agentSlug);
+
+      // Prefer ONE zip laid out by epoch over a bare .md: the proof artifacts
+      // are otherwise scattered across hours of thread messages, and a proof
+      // you can't locate is a proof you don't have. Falls back to the markdown
+      // when the thread has no attachments or Spaces is unreachable.
+      let bundle: Awaited<ReturnType<typeof buildExperimentProofBundle>> = null;
+      try {
+        bundle = await buildExperimentProofBundle({
+          run,
+          findings,
+          findingsMarkdown: markdown,
+          conversationId: payload.conversationId,
+        });
+      } catch (err) {
+        log.warn("[experiment] proof bundle failed; falling back to markdown only", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+      if (bundle) {
+        summaryLines.push(
+          `Proof bundle: ${bundle.includedCount} of ${bundle.entries.length} findings have their artifact attached` +
+          (bundle.missingCount > 0 ? ` · ${bundle.missingCount} missing (see MANIFEST.md)` : "") +
+          ` — organised by epoch inside the zip.`,
+        );
+      }
+      const summary = summaryLines.join("\n");
       try {
         await postGeneratedMarkdownFile({
           channelId: payload.channelId,
           conversationId: payload.conversationId,
           userId: agent.spacesAppUserId,
           appToken: agent.appToken,
-          filename,
-          markdown,
+          filename: bundle ? bundle.filename : filename,
+          markdown: bundle ? bundle.buffer : markdown,
+          ...(bundle ? { mimeType: "application/zip" } : {}),
           summary,
         });
       } catch (err) {
         log.warn("[experiment] findings file upload failed; posting inline fallback", {
           error: err instanceof Error ? err.message : String(err),
         });
-        await postExperimentReply(`${summary}\n\n⚠️ _Couldn't attach ${filename} (upload failed); posting the markdown inline._\n\n${markdown}`);
+        await postExperimentReply(`${summary}\n\n⚠️ _Couldn't attach ${bundle ? bundle.filename : filename} (upload failed); posting the markdown inline._\n\n${markdown}`);
       }
       return;
     }
