@@ -9,7 +9,7 @@
  */
 import { PrismaClient, Prisma } from '@prisma/client';
 import { AsyncLocalStorage } from 'async_hooks';
-import { getContextOrNull, currentWorkspaceId } from './context';
+import { getContextOrNull, currentWorkspaceId, isRequestContext } from './context';
 import { ACLFactory } from '@/database/acl';
 import { logger } from '@/utils/logger';
 
@@ -168,8 +168,9 @@ export function withAclExtension<T extends PrismaClient>(prisma: T): T {
           }
 
           const camel = toCamel(model);
-          // Service actors (synthetic userId) get workspace scope only — skip the per-table ACL.
-          const acl = ctx!.actor === 'service'
+          // The table's per-user ACL applies only to a principal asking on their own behalf.
+          // Every other caller acts for the workspace and gets workspace scope alone.
+          const acl = !isRequestContext()
             ? null
             : ACLFactory.getACL(
                 camel as Uncapitalize<Prisma.ModelName>,
