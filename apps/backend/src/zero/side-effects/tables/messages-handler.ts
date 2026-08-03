@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { BaseSideEffectHandler } from '../base-handler';
 import type { SideEffectJobConfig, MessagePreviousValue } from '../types';
 import { db } from '@/database/client';
+import { elevateToServiceActor } from '@/database/tenant/context';
 import { config } from '@/config/env';
 import { activityService } from '@/services/activity/activityService';
 import { notificationService } from '@/services/notificationService';
@@ -2073,17 +2074,22 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     content?: string,
   ): Promise<void> {
     try {
-      const recipients = await db.notification.findMany({
-        where: {
-          relatedEntityType: 'message',
-          relatedEntityId: messageId,
-          deliveryMethods: {
-            hasSome: [NotificationDeliveryMethod.IOS, NotificationDeliveryMethod.ANDROID],
+      // Every recipient who was notified about this message, not just the editor, so this
+      // read is elevated — notifications are otherwise scoped to their own owner and mobile
+      // edit/delete sync would stop silently.
+      const recipients = await elevateToServiceActor(() =>
+        db.notification.findMany({
+          where: {
+            relatedEntityType: 'message',
+            relatedEntityId: messageId,
+            deliveryMethods: {
+              hasSome: [NotificationDeliveryMethod.IOS, NotificationDeliveryMethod.ANDROID],
+            },
           },
-        },
-        select: { userId: true },
-        distinct: ['userId'],
-      });
+          select: { userId: true },
+          distinct: ['userId'],
+        }),
+      );
 
       await Promise.allSettled(
         recipients.map(({ userId }) =>
