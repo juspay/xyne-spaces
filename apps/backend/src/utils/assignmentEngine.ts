@@ -1,5 +1,6 @@
 import { repositories } from '@/database/repositories';
 import { UserResponsibility } from '@xyne/shared';
+import { elevateToServiceActor } from '@/database/tenant/context';
 import { logger } from './logger';
 import type {
   UserGroupMapping,
@@ -238,12 +239,14 @@ export async function evaluateAssignmentRule(
 
   // Get workload mappings and board scores for boards in this user group
   let [allWorkloadMappings, allBoardScores] = await Promise.all([
-    repositories.userWorkloadMapping.findMany({
-      where: {
-        userGroupId,
-        userId: { in: finalEligibleUserIds },
-      },
-    }),
+    elevateToServiceActor(() =>
+      repositories.userWorkloadMapping.findMany({
+        where: {
+          userGroupId,
+          userId: { in: finalEligibleUserIds },
+        },
+      }),
+    ),
     repositories.boardComplexityScore.findMany({
       where: { userGroupId },
     }),
@@ -624,7 +627,9 @@ export async function evaluateAllRoles(
   let [userStates, expertiseMappings, allWorkloadMappings, allBoardScores] = await Promise.all([
     repositories.userAssignmentState.findMany({ where: { userGroupId, userId: { in: allUserIds } } }),
     repositories.userExpertiseMapping.findMany({ where: { userGroupId, boardId, userId: { in: allUserIds } } }),
-    repositories.userWorkloadMapping.findMany({ where: { userGroupId, userId: { in: allUserIds } } }),
+    elevateToServiceActor(() =>
+      repositories.userWorkloadMapping.findMany({ where: { userGroupId, userId: { in: allUserIds } } }),
+    ),
     repositories.boardComplexityScore.findMany({ where: { userGroupId } }),
   ]);
 
@@ -763,7 +768,9 @@ export async function evaluateRoleSlots(
   let [userStates, expertiseMappings, allWorkloadMappings, allBoardScores] = await Promise.all([
     repositories.userAssignmentState.findMany({ where: { userGroupId, userId: { in: allUserIds } } }),
     repositories.userExpertiseMapping.findMany({ where: { userGroupId, boardId, userId: { in: allUserIds } } }),
-    repositories.userWorkloadMapping.findMany({ where: { userGroupId, userId: { in: allUserIds } } }),
+    elevateToServiceActor(() =>
+      repositories.userWorkloadMapping.findMany({ where: { userGroupId, userId: { in: allUserIds } } }),
+    ),
     repositories.boardComplexityScore.findMany({ where: { userGroupId } }),
   ]);
 

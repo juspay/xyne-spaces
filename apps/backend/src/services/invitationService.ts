@@ -351,6 +351,7 @@ export class InvitationService {
       create: {
         channelId,
         userId,
+        workspaceId,
         role: ChannelRole.MEMBER,
         workspaceId,
       },
@@ -558,6 +559,7 @@ export class InvitationService {
         create: {
           canvasId: entityId,
           userId,
+          workspaceId,
           role: CanvasRole.VIEWER,
           workspaceId,
         },

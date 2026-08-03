@@ -2,7 +2,7 @@ import { PrismaClient } from '@prisma/client';
 import { ActivityClassification, ActivityClassificationJobType } from '@xyne/shared';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
-import { getContextOrNull } from '@/database/tenant/context';
+import { currentWorkspaceId, elevateToServiceActor, runAsSystem } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 
 export interface CreateActivityParams {
@@ -48,7 +48,7 @@ export class ActivityService {
     if (params.channelId) {
       return repositories.channels.getWorkspaceId(params.channelId);
     }
-    const ctxWorkspaceId = getContextOrNull()?.workspaceId;
+    const ctxWorkspaceId = currentWorkspaceId();
     if (ctxWorkspaceId) return ctxWorkspaceId;
     throw new Error(
       '[ActivityService] workspaceId required: no explicit workspaceId, channelId, or tenant context',
@@ -368,22 +368,26 @@ export class ActivityService {
   }
 
   async deleteActivitiesBySource(actionSource: string, actionSourceId: string): Promise<void> {
-    await this.prisma.activity.deleteMany({
-      where: {
-        actionSource,
-        actionSourceId,
-      },
+    return elevateToServiceActor(async () => {
+      await this.prisma.activity.deleteMany({
+        where: {
+          actionSource,
+          actionSourceId,
+        },
+      });
     });
   }
 
   async deleteActivitiesBySourceIds(actionSource: string, actionSourceIds: string[]): Promise<void> {
-    if (actionSourceIds.length === 0) return;
+    return elevateToServiceActor(async () => {
+      if (actionSourceIds.length === 0) return;
 
-    await this.prisma.activity.deleteMany({
-      where: {
-        actionSource,
-        actionSourceId: { in: actionSourceIds },
-      },
+      await this.prisma.activity.deleteMany({
+        where: {
+          actionSource,
+          actionSourceId: { in: actionSourceIds },
+        },
+      });
     });
   }
 
@@ -400,18 +404,54 @@ export class ActivityService {
     messageAuthorId: string;
     isThreadActivity?: boolean;
   }): Promise<'created' | 'updated'> {
-    const { messageId, channelId, workspaceId, actorId, messageAuthorId, isThreadActivity } = params;
+    return elevateToServiceActor(async () => {
+      const { messageId, channelId, workspaceId, actorId, messageAuthorId, isThreadActivity } = params;
 
-    const existingActivity = await this.prisma.activity.findFirst({
-      where: {
-        userId: messageAuthorId,
-        messageId: messageId,
-        actorAction: 'added_v2',
-        actionSource: 'message',
-      },
-    });
+      const existingActivity = await this.prisma.activity.findFirst({
+        where: {
+          userId: messageAuthorId,
+          messageId: messageId,
+          actorAction: 'added_v2',
+          actionSource: 'message',
+        },
+      });
 
-    if (existingActivity) {
+      if (existingActivity) {
+        const activity = await this.enrichActivityWithConversationCutoff({
+          userId: messageAuthorId,
+          workspaceId,
+          actorAction: 'added_v2',
+          actionSource: 'message',
+          actionSourceId: messageId,
+          messageId,
+          channelId,
+          actorId,
+          isThreadActivity,
+        });
+
+        const conversationSeenCutoffAt = existingActivity.conversationSeenCutoffAt
+          ? null
+          : activity.conversationSeenCutoffAt;
+
+        await this.prisma.activity.update({
+          where: { id: existingActivity.id },
+          data: {
+            actorId: actorId,
+            isRead: false,
+            ...(isThreadActivity !== undefined ? { isThreadActivity } : {}),
+            ...(conversationSeenCutoffAt ? { conversationSeenCutoffAt } : {}),
+          },
+        });
+
+        logger.info('[ActivityService] Updated existing reaction activity (v2)', {
+          activityId: existingActivity.id,
+          messageId,
+          newActorId: actorId,
+        });
+
+        return 'updated';
+      }
+
       const activity = await this.enrichActivityWithConversationCutoff({
         userId: messageAuthorId,
         workspaceId,
@@ -421,89 +461,57 @@ export class ActivityService {
         messageId,
         channelId,
         actorId,
+        classification: ActivityClassification.FYI,
         isThreadActivity,
       });
 
-      const conversationSeenCutoffAt = existingActivity.conversationSeenCutoffAt
-        ? null
-        : activity.conversationSeenCutoffAt;
-
-      await this.prisma.activity.update({
-        where: { id: existingActivity.id },
+      const resolvedWorkspaceId = await this.resolveWorkspaceId({
+        workspaceId: activity.workspaceId,
+        channelId: activity.channelId ?? channelId,
+      });
+      await this.prisma.activity.create({
         data: {
-          actorId: actorId,
+          userId: activity.userId,
+          workspaceId: resolvedWorkspaceId,
+          actorAction: activity.actorAction,
+          actionSource: activity.actionSource,
+          actionSourceId: activity.actionSourceId,
+          messageId: activity.messageId,
+          ...(activity.conversationId ? { conversationId: activity.conversationId } : {}),
+          channelId: activity.channelId,
+          actorId: activity.actorId,
           isRead: false,
+          classification: activity.classification,
           ...(isThreadActivity !== undefined ? { isThreadActivity } : {}),
-          ...(conversationSeenCutoffAt ? { conversationSeenCutoffAt } : {}),
+          ...(activity.conversationSeenCutoffAt
+            ? { conversationSeenCutoffAt: activity.conversationSeenCutoffAt }
+            : {}),
         },
       });
 
-      logger.info('[ActivityService] Updated existing reaction activity (v2)', {
-        activityId: existingActivity.id,
+      logger.info('[ActivityService] Created new reaction activity (v2)', {
         messageId,
-        newActorId: actorId,
+        actorId,
       });
 
-      return 'updated';
-    }
-
-    const activity = await this.enrichActivityWithConversationCutoff({
-      userId: messageAuthorId,
-      workspaceId,
-      actorAction: 'added_v2',
-      actionSource: 'message',
-      actionSourceId: messageId,
-      messageId,
-      channelId,
-      actorId,
-      classification: ActivityClassification.FYI,
-      isThreadActivity,
+      return 'created';
     });
-
-    const resolvedWorkspaceId = await this.resolveWorkspaceId({
-      workspaceId: activity.workspaceId,
-      channelId: activity.channelId ?? channelId,
-    });
-    await this.prisma.activity.create({
-      data: {
-        userId: activity.userId,
-        workspaceId: resolvedWorkspaceId,
-        actorAction: activity.actorAction,
-        actionSource: activity.actionSource,
-        actionSourceId: activity.actionSourceId,
-        messageId: activity.messageId,
-        ...(activity.conversationId ? { conversationId: activity.conversationId } : {}),
-        channelId: activity.channelId,
-        actorId: activity.actorId,
-        isRead: false,
-        classification: activity.classification,
-        ...(isThreadActivity !== undefined ? { isThreadActivity } : {}),
-        ...(activity.conversationSeenCutoffAt
-          ? { conversationSeenCutoffAt: activity.conversationSeenCutoffAt }
-          : {}),
-      },
-    });
-
-    logger.info('[ActivityService] Created new reaction activity (v2)', {
-      messageId,
-      actorId,
-    });
-
-    return 'created';
   }
 
 
   async deleteReactionActivityV2(messageId: string, messageAuthorId: string): Promise<void> {
-    await this.prisma.activity.deleteMany({
-      where: {
-        userId: messageAuthorId,
-        messageId: messageId,
-        actorAction: 'added_v2',
-        actionSource: 'message',
-      },
-    });
+    return elevateToServiceActor(async () => {
+      await this.prisma.activity.deleteMany({
+        where: {
+          userId: messageAuthorId,
+          messageId: messageId,
+          actorAction: 'added_v2',
+          actionSource: 'message',
+        },
+      });
 
-    logger.info('[ActivityService] Deleted reaction activity (v2)', { messageId });
+      logger.info('[ActivityService] Deleted reaction activity (v2)', { messageId });
+    });
   }
 
 
@@ -538,79 +546,81 @@ export class ActivityService {
     recipientUserId: string;
     latestReplyMessageId: string;
   }): Promise<'created' | 'updated'> {
-    const {
-      conversationId,
-      channelId,
-      workspaceId,
-      actorId,
-      recipientUserId,
-      latestReplyMessageId,
-    } = params;
-
-    const existingActivity = await this.prisma.activity.findFirst({
-      where: {
-        userId: recipientUserId,
+    return elevateToServiceActor(async () => {
+      const {
         conversationId,
-        actorAction: 'replied_v2',
-        actionSource: 'message',
-      },
-    });
+        channelId,
+        workspaceId,
+        actorId,
+        recipientUserId,
+        latestReplyMessageId,
+      } = params;
 
-    if (existingActivity) {
-      const conversationSeenCutoffAt =
-        existingActivity.conversationSeenCutoffAt ??
-        (await this.getConversationSeenCutoffAtForConversation(conversationId, channelId));
+      const existingActivity = await this.prisma.activity.findFirst({
+        where: {
+          userId: recipientUserId,
+          conversationId,
+          actorAction: 'replied_v2',
+          actionSource: 'message',
+        },
+      });
 
-      await this.prisma.activity.update({
-        where: { id: existingActivity.id },
+      if (existingActivity) {
+        const conversationSeenCutoffAt =
+          existingActivity.conversationSeenCutoffAt ??
+          (await this.getConversationSeenCutoffAtForConversation(conversationId, channelId));
+
+        await this.prisma.activity.update({
+          where: { id: existingActivity.id },
+          data: {
+            actorId: actorId,
+            isRead: false,
+            messageId: latestReplyMessageId,
+            actionSourceId: latestReplyMessageId,
+            ...(conversationSeenCutoffAt ? { conversationSeenCutoffAt } : {}),
+          },
+        });
+
+        logger.info('[ActivityService] Updated existing reply activity (v2)', {
+          activityId: existingActivity.id,
+          conversationId,
+          newActorId: actorId,
+        });
+
+        return 'updated';
+      }
+
+      const conversationSeenCutoffAt = await this.getConversationSeenCutoffAtForConversation(
+        conversationId,
+        channelId,
+      );
+
+      const resolvedWorkspaceId = await this.resolveWorkspaceId({ workspaceId, channelId });
+      await this.prisma.activity.create({
         data: {
+          userId: recipientUserId,
+          workspaceId: resolvedWorkspaceId,
+          actorAction: 'replied_v2',
+          actionSource: 'message',
+          actionSourceId: latestReplyMessageId,
+          messageId: latestReplyMessageId,
+          conversationId,
+          channelId: channelId,
           actorId: actorId,
           isRead: false,
-          messageId: latestReplyMessageId,
-          actionSourceId: latestReplyMessageId,
+          isThreadActivity: true,
+          classification: ActivityClassification.FYI,
           ...(conversationSeenCutoffAt ? { conversationSeenCutoffAt } : {}),
         },
       });
 
-      logger.info('[ActivityService] Updated existing reply activity (v2)', {
-        activityId: existingActivity.id,
+      logger.info('[ActivityService] Created new reply activity (v2)', {
         conversationId,
-        newActorId: actorId,
+        actorId,
       });
 
-      return 'updated';
-    }
-
-    const conversationSeenCutoffAt = await this.getConversationSeenCutoffAtForConversation(
-      conversationId,
-      channelId,
-    );
-
-    const resolvedWorkspaceId = await this.resolveWorkspaceId({ workspaceId, channelId });
-    await this.prisma.activity.create({
-      data: {
-        userId: recipientUserId,
-        workspaceId: resolvedWorkspaceId,
-        actorAction: 'replied_v2',
-        actionSource: 'message',
-        actionSourceId: latestReplyMessageId,
-        messageId: latestReplyMessageId,
-        conversationId,
-        channelId: channelId,
-        actorId: actorId,
-        isRead: false,
-        isThreadActivity: true,
-        classification: ActivityClassification.FYI,
-        ...(conversationSeenCutoffAt ? { conversationSeenCutoffAt } : {}),
-      },
+      return 'created';
     });
-
-    logger.info('[ActivityService] Created new reply activity (v2)', {
-      conversationId,
-      actorId,
-    });
-
-    return 'created';
   }
 
 
@@ -661,45 +671,48 @@ export class ActivityService {
       count: number;
     }>
   > {
-    const users = await this.prisma.user.findMany({
-      where: {
-        orgMemberId: memberId,
-        leftAt: null,
-        status: 'ACTIVE',
-      },
-      select: {
-        id: true,
-        workspaceId: true,
-      },
+    // Spans the caller's own identities across workspaces.
+    return runAsSystem(async () => {
+      const users = await this.prisma.user.findMany({
+        where: {
+          orgMemberId: memberId,
+          leftAt: null,
+          status: 'ACTIVE',
+        },
+        select: {
+          id: true,
+          workspaceId: true,
+        },
+      });
+
+      if (users.length === 0) {
+        return [];
+      }
+
+      const userIds = users.map(u => u.id);
+
+      const activityCounts = await this.prisma.activity.groupBy({
+        by: ['userId'],
+        where: {
+          userId: { in: userIds },
+          isRead: false,
+        },
+        _count: {
+          id: true,
+        },
+      });
+
+      const countMap = new Map<string, number>();
+      for (const ac of activityCounts) {
+        countMap.set(ac.userId, ac._count.id);
+      }
+
+      return users.map(u => ({
+        workspaceId: u.workspaceId,
+        userId: u.id,
+        count: countMap.get(u.id) ?? 0,
+      }));
     });
-
-    if (users.length === 0) {
-      return [];
-    }
-
-    const userIds = users.map(u => u.id);
-
-    const activityCounts = await this.prisma.activity.groupBy({
-      by: ['userId'],
-      where: {
-        userId: { in: userIds },
-        isRead: false,
-      },
-      _count: {
-        id: true,
-      },
-    });
-
-    const countMap = new Map<string, number>();
-    for (const ac of activityCounts) {
-      countMap.set(ac.userId, ac._count.id);
-    }
-
-    return users.map(u => ({
-      workspaceId: u.workspaceId,
-      userId: u.id,
-      count: countMap.get(u.id) ?? 0,
-    }));
   }
 }
 

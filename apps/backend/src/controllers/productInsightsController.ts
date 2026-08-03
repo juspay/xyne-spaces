@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { productInsightsService } from '../services/productInsightsService';
 import { logger } from '../utils/logger';
 import { z } from 'zod';
+import { DatabaseClient } from '@/database/client';
 
 // Validation schema
 const ProductInsightsQuerySchema = z.object({
@@ -28,6 +29,24 @@ export class ProductInsightsController {
       }
 
       const { project_id } = result.data;
+
+      const workspaceId = req.user?.workspaceId;
+      if (!workspaceId) {
+        res.status(401).json({ success: false, error: 'Unauthorized' });
+        return;
+      }
+      const prisma = DatabaseClient.getInstance();
+      const project = await prisma.project.findUnique({
+        where: { id: project_id },
+        select: { workspaceId: true },
+      });
+      if (!project || project.workspaceId !== workspaceId) {
+        res.status(404).json({
+          success: false,
+          error: 'Insights file not found for the specified parameters',
+        });
+        return;
+      }
 
       logger.info(`Fetching product insights: project_id=${project_id}`);
 

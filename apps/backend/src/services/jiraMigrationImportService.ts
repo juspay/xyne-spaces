@@ -1,4 +1,5 @@
 import { DatabaseClient } from '@/database/client';
+import { elevateToServiceActor } from '@/database/tenant/context';
 import { config } from '@/config/env';
 import { TicketRepository } from '@/database/repositories/ticketRepository';
 import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
@@ -1604,47 +1605,49 @@ export class JiraMigrationImportService {
   }
 
   private async syncConversationDerivedMd(conversationId: string, ticketId: string): Promise<void> {
-    const [ticket, conversation] = await Promise.all([
-      db.ticket.findUnique({ where: { id: ticketId } }),
-      db.conversation.findUnique({ where: { conversationId }, select: { initialMessageId: true } }),
-    ]);
+    return elevateToServiceActor(async () => {
+      const [ticket, conversation] = await Promise.all([
+        db.ticket.findUnique({ where: { id: ticketId } }),
+        db.conversation.findUnique({ where: { conversationId }, select: { initialMessageId: true } }),
+      ]);
 
-    if (!ticket || !conversation?.initialMessageId) return;
+      if (!ticket || !conversation?.initialMessageId) return;
 
-    const initialMessage = await db.message.findUnique({
-      where: { messageId: conversation.initialMessageId },
-    });
+      const initialMessage = await db.message.findUnique({
+        where: { messageId: conversation.initialMessageId },
+      });
 
-    await syncConversationTicketMdFromPrismaTicket(db as any, ticket);
-    if (initialMessage) {
-      const summaryData: InitialMessageSummary = {
-        messageId: initialMessage.messageId,
-        conversationId: initialMessage.conversationId,
-        senderId: initialMessage.senderId,
-        content: initialMessage.content,
-        msgType: initialMessage.msgType as InitialMessageSummary['msgType'],
-        hasAttachment: initialMessage.hasAttachment,
-        edited: initialMessage.edited,
-        isDeleted: initialMessage.isDeleted,
-        showInChannel: initialMessage.showInChannel,
-        visibleTo: initialMessage.visibleTo,
-        createdAt: initialMessage.createdAt.getTime(),
-        metadata: initialMessage.metadata ? JSON.stringify(initialMessage.metadata) : null,
-        nudgeCount: initialMessage.nudgeCount,
-        isSent: initialMessage.isSent,
-        reactions_md: initialMessage.reactions_md,
-        link_preview_md: initialMessage.link_preview_md,
-        childConversationId: initialMessage.childConversationId,
-      };
+      await syncConversationTicketMdFromPrismaTicket(db as any, ticket);
+      if (initialMessage) {
+        const summaryData: InitialMessageSummary = {
+          messageId: initialMessage.messageId,
+          conversationId: initialMessage.conversationId,
+          senderId: initialMessage.senderId,
+          content: initialMessage.content,
+          msgType: initialMessage.msgType as InitialMessageSummary['msgType'],
+          hasAttachment: initialMessage.hasAttachment,
+          edited: initialMessage.edited,
+          isDeleted: initialMessage.isDeleted,
+          showInChannel: initialMessage.showInChannel,
+          visibleTo: initialMessage.visibleTo,
+          createdAt: initialMessage.createdAt.getTime(),
+          metadata: initialMessage.metadata ? JSON.stringify(initialMessage.metadata) : null,
+          nudgeCount: initialMessage.nudgeCount,
+          isSent: initialMessage.isSent,
+          reactions_md: initialMessage.reactions_md,
+          link_preview_md: initialMessage.link_preview_md,
+          childConversationId: initialMessage.childConversationId,
+        };
 
-      const md = serializeInitialMessageMd(summaryData);
-      if (md) {
-        await db.conversation.update({
-          where: { conversationId },
-          data: { initial_message_md: md },
-        });
+        const md = serializeInitialMessageMd(summaryData);
+        if (md) {
+          await db.conversation.update({
+            where: { conversationId },
+            data: { initial_message_md: md },
+          });
+        }
       }
-    }
+    });
   }
 
   private async importComments(
@@ -1698,40 +1701,42 @@ export class JiraMigrationImportService {
 
 	        // Jira comments can be edited. If the comment exists, refresh content when it differs.
 	        try {
-	          const existingMessage = await db.message.findUnique({
-	            where: { messageId: existingMessageId },
-	            select: { messageId: true, content: true, senderId: true, edited: true },
-	          });
+	    	          await elevateToServiceActor(async () => {
+	            const existingMessage = await db.message.findUnique({
+	              where: { messageId: existingMessageId },
+	              select: { messageId: true, content: true, senderId: true, edited: true },
+	            });
 
-	          if (existingMessage) {
-	            const nextSenderId = await this.userResolver.resolveUser(
-	              comment.author,
-	              fallbackUserId,
-	              unresolvedUsers,
-	              issue.key,
-	            );
-	            const nextContent = await this.renderJiraMessageContent(
-	              comment.body,
-	              unresolvedUsers,
-	              '<p>[Imported Jira comment]</p>',
-	              issue.key,
-	            );
+	            if (existingMessage) {
+	              const nextSenderId = await this.userResolver.resolveUser(
+	                comment.author,
+	                fallbackUserId,
+	                unresolvedUsers,
+	                issue.key,
+	              );
+	              const nextContent = await this.renderJiraMessageContent(
+	                comment.body,
+	                unresolvedUsers,
+	                '<p>[Imported Jira comment]</p>',
+	                issue.key,
+	              );
 
-	            if (existingMessage.content !== nextContent || existingMessage.senderId !== nextSenderId) {
-	              await db.message.update({
-	                where: { messageId: existingMessageId },
-	                data: {
-	                  content: nextContent,
-	                  senderId: nextSenderId,
-	                  edited: true,
-	                },
-	              });
+	              if (existingMessage.content !== nextContent || existingMessage.senderId !== nextSenderId) {
+	                await db.message.update({
+	                  where: { messageId: existingMessageId },
+	                  data: {
+	                    content: nextContent,
+	                    senderId: nextSenderId,
+	                    edited: true,
+	                  },
+	                });
 
-	              this.queueMessageVespaJobs([
-	                { messageId: existingMessageId, userId: nextSenderId },
-	              ]);
+	                this.queueMessageVespaJobs([
+	                  { messageId: existingMessageId, userId: nextSenderId },
+	                ]);
+	              }
 	            }
-	          }
+	          });
 	        } catch (error) {
 	          logger.warn('[JiraMigration] Failed to sync edited Jira comment', {
 	            issueKey: issue.key,
@@ -3626,33 +3631,35 @@ export class JiraMigrationImportService {
                 );
               }
 
-	              if (conversation?.initialMessageId) {
-	                const currentInitialMessage = await db.message.findUnique({
-	                  where: { messageId: conversation.initialMessageId },
-	                  select: { messageId: true, senderId: true, content: true },
-	                });
+                      await elevateToServiceActor(async () => {
+	                if (conversation?.initialMessageId) {
+	                  const currentInitialMessage = await db.message.findUnique({
+	                    where: { messageId: conversation.initialMessageId },
+	                    select: { messageId: true, senderId: true, content: true },
+	                  });
 	
-	                if (
-	                  currentInitialMessage &&
-	                  (currentInitialMessage.senderId !== initialTicketMessageSenderId ||
-	                    currentInitialMessage.content !== rootMessageContent)
-	                ) {
-	                  updates.push(
-	                    db.message.update({
-	                      where: { messageId: conversation.initialMessageId },
-	                      data: {
-	                        senderId: initialTicketMessageSenderId,
-	                        content: rootMessageContent,
-	                      },
-	                    }),
-	                  );
-	                  initialMessageTouched = true;
+	                  if (
+	                    currentInitialMessage &&
+	                    (currentInitialMessage.senderId !== initialTicketMessageSenderId ||
+	                      currentInitialMessage.content !== rootMessageContent)
+	                  ) {
+	                    updates.push(
+	                      db.message.update({
+	                        where: { messageId: conversation.initialMessageId },
+	                        data: {
+	                          senderId: initialTicketMessageSenderId,
+	                          content: rootMessageContent,
+	                        },
+	                      }),
+	                    );
+	                    initialMessageTouched = true;
+	                  }
 	                }
-	              }
 
-              if (updates.length > 0) {
-                await Promise.all(updates);
-              }
+                if (updates.length > 0) {
+                  await Promise.all(updates);
+                }
+              });
 
               if ((ticketTouched || initialMessageTouched) && existingConversationId && ticketId) {
                 await this.syncConversationDerivedMd(existingConversationId, ticketId);

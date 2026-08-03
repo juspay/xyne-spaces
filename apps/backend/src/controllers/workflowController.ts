@@ -920,6 +920,20 @@ export class WorkflowController {
       const mode = await this.workflowRepository.getExecutionMode(executionId);
       const hasOutput = await this.workflowRepository.agentStepHasOutput(stepId);
 
+      // Bind the authorized object to the mutated one before any Redis publish.
+      // getWorkflowExecutionByIdSimple is workspace-scoped, so a null execution means
+      // the id is outside the caller's workspace — reject instead of falling through to the
+      // normal-continuation branch that publishes into `workflow:<executionId>:...`.
+      // Additionally require the step to belong to THIS execution.
+      if (!execution) {
+        res.status(404).json({ error: 'Execution not found' });
+        return;
+      }
+      if (step.workflowExecutionId !== executionId) {
+        res.status(403).json({ error: 'Step does not belong to this execution' });
+        return;
+      }
+
       // If step already has output, create a rerun execution instead of continuing
       if (hasOutput) {
         if (!execution) {
