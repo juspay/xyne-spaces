@@ -6,11 +6,10 @@ export {
   getShortcutsByCategory,
   findConflicts,
   scopesOverlap,
-  findActionsForCombo,
 } from './catalog';
 export { invokeShortcut } from './shortcutsRegistry';
 export type { ShortcutConfig, ShortcutRegistration, ShortcutScope } from './shortcutsRegistry';
-export type { ShortcutDefinition, ShortcutId, ComboMatch } from './catalog';
+export type { ShortcutDefinition, ShortcutId } from './catalog';
 export {
   getShortcutOverrides,
   setShortcutOverrides,

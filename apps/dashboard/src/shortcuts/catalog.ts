@@ -491,41 +491,7 @@ export const findConflicts = (): Array<{ key: string; scope: string; ids: Shortc
 /**
  * Two scopes "overlap" (can be active at the same time) when they are the same
  * scope, or when either is `global` — global shortcuts are live in every scope.
- * Single source of truth for collision checks, shared by the settings
- * configurator and the shortcut playground so the two never drift.
+ * Single source of truth for the settings configurator's collision check.
  */
 export const scopesOverlap = (a: ShortcutScope, b: ShortcutScope): boolean =>
   a === b || a === 'global' || b === 'global';
-
-export interface ComboMatch {
-  id: ShortcutId;
-  description: string;
-  scope: ShortcutScope;
-  hasWhen: boolean;
-}
-
-/**
- * Reverse lookup for the shortcut playground: every catalog action whose
- * *effective* binding (override-aware, via the supplied resolver) includes
- * `combo`. `hasWhen` reports whether the action is guarded by a runtime
- * predicate, which lets the playground tell a genuine ambiguity apart from a
- * context-disambiguated binding.
- */
-export const findActionsForCombo = (
-  combo: string,
-  resolveKeys: (id: ShortcutId) => string[],
-): ComboMatch[] => {
-  const matches: ComboMatch[] = [];
-  (Object.keys(shortcuts) as ShortcutId[]).forEach(id => {
-    if (resolveKeys(id).includes(combo)) {
-      const def = shortcuts[id] as ShortcutDefinition;
-      matches.push({
-        id,
-        description: def.description ?? id,
-        scope: def.scope ?? 'global',
-        hasWhen: typeof def.when === 'function',
-      });
-    }
-  });
-  return matches;
-};
