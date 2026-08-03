@@ -881,7 +881,14 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       form.setFieldValue('ticketType', generatedTicketType);
       markAutoApplied({ ticketType: generatedTicketType });
     }
-  }, [form, generatedTitle, generatedTicketType, isFlowRootTicket, selectedBoard?.boardType, markAutoApplied]);
+  }, [
+    form,
+    generatedTitle,
+    generatedTicketType,
+    isFlowRootTicket,
+    selectedBoard?.boardType,
+    markAutoApplied,
+  ]);
 
   // File handling functions
   const handleModalDragOver = (e: DragEvent<HTMLDivElement>): void => {

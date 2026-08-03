@@ -565,8 +565,7 @@ const toRequest = (options: UseKanbanCountsOptions): KanbanCountsRequest => {
   if (options.boardId !== undefined) request.boardId = options.boardId;
   if (options.userId !== undefined) request.userId = options.userId;
   if (options.groupId !== undefined) request.groupId = options.groupId;
-  if (options.excludeFlowSteps !== undefined)
-    request.excludeFlowSteps = options.excludeFlowSteps;
+  if (options.excludeFlowSteps !== undefined) request.excludeFlowSteps = options.excludeFlowSteps;
 
   const normalizedFilters = normalizeFilters(options.filters);
   if (normalizedFilters) request.filters = normalizedFilters;

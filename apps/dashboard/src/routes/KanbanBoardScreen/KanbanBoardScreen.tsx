@@ -1849,9 +1849,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           const value = activity.value as { field?: string } | null;
           return value?.field === 'stageName';
         })
-        .sort(
-          (left, right) => right.timestamp - left.timestamp || right.id.localeCompare(left.id),
-        ),
+        .sort((left, right) => right.timestamp - left.timestamp || right.id.localeCompare(left.id)),
     [flowRunActivities],
   );
   const flowRunTicketById = useMemo(
