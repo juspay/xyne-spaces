@@ -1,0 +1,15 @@
+F37 — React.memo bail-out for ONE older MessageItem across 100 streaming tokens
+
+  reference identity of onFeedback across renders:
+    BEFORE  Object.is(frameA, frameB) = false   (new arrow each render)
+    AFTER   Object.is(frameA, frameB) = true    (stable useCallback)
+
+  wasted re-renders (React.memo could NOT skip):
+    BEFORE  100 / 100 tokens   -> re-renders EVERY token
+    AFTER   0 / 100 tokens   -> bails out EVERY token
+
+  scaled to a 50-message list:
+    BEFORE  5000 wasted MessageItem renders over 100 tokens
+    AFTER   0 wasted MessageItem renders
+
+PASS: BEFORE defeats React.memo on every token; AFTER lets it bail out completely.

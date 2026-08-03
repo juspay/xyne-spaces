@@ -1,0 +1,12 @@
+correctness: BEFORE and AFTER produce identical botTurnIndex for n in {1,2,3,10,51,200}  ✓
+
+F38 — per-render cost of botTurnIndex over the whole list
+
+   n     BEFORE (O(n^2))     AFTER (O(n))      speedup
+  ---    ---------------     ------------      -------
+    50        0.0043 ms        0.0017 ms     2.6x
+   100        0.0139 ms        0.0035 ms     4.0x
+   500        0.3047 ms        0.0168 ms     18.2x
+  1000        1.3338 ms        0.0385 ms     34.7x
+
+PASS: AFTER is asymptotically flat (O(n)); BEFORE grows quadratically.
