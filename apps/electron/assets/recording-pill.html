@@ -323,6 +323,9 @@
 
     function hide() {
       card.classList.add('hiding');
+      card.classList.remove('expanded');
+      if (collapseTimer) { clearTimeout(collapseTimer); collapseTimer = null; }
+      lastIgnoreMouse = null;
       stopTimer();
     }
 
