@@ -1456,7 +1456,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             zql.draft_messages
               .where('channelId', channelId)
               .where('userId', authData.sub)
-              .where('origin', DraftOrigin.user),
+              .where(({ or, cmp }) => or(cmp('origin', '=', DraftOrigin.user), cmp('origin', 'IS', null))),
           );
 
           // Find the channel-level draft (conversationId === null)
@@ -2388,7 +2388,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             const channelDrafts = await tx.run(zql.draft_messages
               .where('channelId', channelId)
               .where('userId', authData.sub)
-            .where('origin', DraftOrigin.user));
+            .where(({ or, cmp }) => or(cmp('origin', '=', DraftOrigin.user), cmp('origin', 'IS', null))));
 
             const draft = channelDrafts.find(d => d.conversationId === null);
 
@@ -3030,7 +3030,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             tx.run(zql.draft_messages
               .where('channelId', conversation.channelId)
               .where('userId', authData.sub)
-              .where('origin', DraftOrigin.user)),
+              .where(({ or, cmp }) => or(cmp('origin', '=', DraftOrigin.user), cmp('origin', 'IS', null)))),
           ]);
           if (!channel) {
             throw new Error("Channel doesn't exists");
@@ -4974,7 +4974,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               .where('channelId', channelId)
               .where('conversationId', conversationId)
               .where('userId', authData.sub)
-              .where('origin', DraftOrigin.user)
+              .where(({ or, cmp }) => or(cmp('origin', '=', DraftOrigin.user), cmp('origin', 'IS', null)))
               .one(),
           );
 
@@ -5050,7 +5050,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               .where('channelId', channelId)
               .where('conversationId', conversationId)
               .where('userId', authData.sub)
-              .where('origin', DraftOrigin.user)
+              .where(({ or, cmp }) => or(cmp('origin', '=', DraftOrigin.user), cmp('origin', 'IS', null)))
               .one(),
           );
 
@@ -11463,7 +11463,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 .where('channelId', channelId)
                 .where('userId', authData.sub)
                 .where('conversationId', conversationId)
-                .where('origin', DraftOrigin.user)
+                .where(({ or, cmp }) => or(cmp('origin', '=', DraftOrigin.user), cmp('origin', 'IS', null)))
                 .one(),
             );
           } else {
@@ -11471,7 +11471,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               zql.draft_messages
                 .where('channelId', channelId)
                 .where('userId', authData.sub)
-                .where('origin', DraftOrigin.user),
+                .where(({ or, cmp }) => or(cmp('origin', '=', DraftOrigin.user), cmp('origin', 'IS', null))),
             );
             existingDraft = channelDrafts.find(draft => draft.conversationId === null);
           }
@@ -11603,7 +11603,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           const channelDrafts = await tx.run(
             zql.draft_messages
               .where('channelId', channelId)
-              .where('userId', authData.sub),
+              .where('userId', authData.sub)
+              .where(({ or, cmp }) => or(cmp('origin', '=', DraftOrigin.user), cmp('origin', 'IS', null))),
           );
           const draft = conversationId
             ? channelDrafts.find(d => d.conversationId === conversationId)
@@ -14849,7 +14850,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             zql.draft_messages
               .where("channelId", channelId)
               .where("userId", ctx.userID)
-              .where("origin", DraftOrigin.user),
+              .where(({ or, cmp }) => or(cmp('origin', '=', DraftOrigin.user), cmp('origin', 'IS', null))),
           );
           const existingDraft = channelDrafts.find(
             (d) =>
@@ -15014,7 +15015,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             zql.draft_messages
               .where('channelId', scheduled.channelId)
               .where('userId', ctx.userID)
-              .where('origin', DraftOrigin.user)
+              .where(({ or, cmp }) => or(cmp('origin', '=', DraftOrigin.user), cmp('origin', 'IS', null)))
           );
           const existingDraft = channelDrafts.find(
             (d) => d.conversationId === (scheduled.conversationId ?? null) && d.messageId === null
@@ -15089,7 +15090,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
       /** Delete a draft message by ID (only the owner can delete their own draft) */
       delete: defineMutator(z.object({ id: z.string() }), async ({ tx, ctx, args: { id } }) => {
         const draft = await tx.run(
-          zql.draft_messages.where('id', id).where('userId', ctx.userID).where('origin', DraftOrigin.user).one()
+          zql.draft_messages.where('id', id).where('userId', ctx.userID).where(({ or, cmp }) => or(cmp('origin', '=', DraftOrigin.user), cmp('origin', 'IS', null))).one()
         );
         if (!draft) {
           throw new Error('Draft not found');
@@ -15107,7 +15108,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         }),
         async ({ tx, ctx, args: { id, content, timestamp } }) => {
           const draft = await tx.run(
-            zql.draft_messages.where('id', id).where('userId', ctx.userID).where('origin', DraftOrigin.user).one()
+            zql.draft_messages.where('id', id).where('userId', ctx.userID).where(({ or, cmp }) => or(cmp('origin', '=', DraftOrigin.user), cmp('origin', 'IS', null))).one()
           );
           if (!draft) {
             throw new Error('Draft not found');
@@ -15128,7 +15129,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         }),
         async ({ tx, ctx, args: { id, timestamp } }) => {
           const draft = await tx.run(
-            zql.draft_messages.where('id', id).where('userId', ctx.userID).where('origin', DraftOrigin.user).one()
+            zql.draft_messages.where('id', id).where('userId', ctx.userID).where(({ or, cmp }) => or(cmp('origin', '=', DraftOrigin.user), cmp('origin', 'IS', null))).one()
           );
           if (!draft) {
             throw new Error('Draft not found');
