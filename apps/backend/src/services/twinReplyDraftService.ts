@@ -2,34 +2,10 @@ import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
 import type { TwinReplyDraft } from './twinReplyDraft';
 
-/**
- * Digital Twin in-thread reply draft — DB IO layer.
- *
- * A twin proposal is stored as an ordinary `draft_messages` row with
- * `origin = 'twin'` (owner = the mentioned user, `userId`). Zero's per-user
- * replication delivers it live to the owner's client (the `twinDrafts` query),
- * so there is no bespoke fetch or socket — the row appearing IS the notification,
- * and deleting it clears the dock/badge everywhere.
- *
- * Owner-only by construction: the read/act paths always scope to
- * `userId = req.user.id AND origin = 'twin'`, and Zero's drafts ACL already
- * restricts every draft_messages row to its own `userId`.
- *
- * The rich twin payload (action/emoji/reasoning/citations/destination/sessionId/…)
- * rides in the row's `metadata` JSON; `content` mirrors the reply text. Unlike a
- * user draft there is NO unique constraint, so a thread can hold several twin
- * proposals (one per @mention). Rows live until the owner approves or declines
- * (both delete the row); an ignored proposal simply stays.
- *
- * Pure types + validation/projection live in `./twinReplyDraft` and are
- * re-exported here so existing importers are unaffected.
- */
 export * from './twinReplyDraft';
 
 const db = (): ReturnType<typeof DatabaseClient.getInstance> => DatabaseClient.getInstance();
 
-/** Parse the stringified-JSON twin payload from a row's `metadata` (TEXT column).
- *  Returns null for empty/absent/malformed metadata (treated as "no draft"). */
 function parseTwinMetadata(metadata: string | null | undefined): TwinReplyDraft | null {
   if (!metadata) return null;
   try {
@@ -40,17 +16,8 @@ function parseTwinMetadata(metadata: string | null | undefined): TwinReplyDraft 
   }
 }
 
-/**
- * Persist a twin proposal as a draft_messages row. Called only by the S2S create
- * route. A re-run of the twin for the SAME trigger (same owner + thread +
- * sourceMessageId) replaces its prior proposal; distinct triggers accumulate as
- * separate drafts in the thread.
- */
 export async function createTwinReplyDraft(draft: TwinReplyDraft): Promise<void> {
   const prisma = db();
-  // Best-effort dedup: drop a stale proposal for the same @mention before insert.
-  // metadata is stringified JSON (TEXT), so we can't filter by JSON path in SQL —
-  // fetch this thread's twin proposals and match sourceMessageId in JS.
   if (draft.sourceMessageId) {
     try {
       const existing = await prisma.draftMessage.findMany({
@@ -87,9 +54,6 @@ export async function createTwinReplyDraft(draft: TwinReplyDraft): Promise<void>
   });
 }
 
-/** Read one twin proposal by its row id, scoped to the owner. Returns the full
- *  stored TwinReplyDraft (from `metadata`) — the delivery context approve/decline
- *  forward to claw-auth — or null if it's gone / not the caller's / not a twin. */
 export async function getTwinReplyDraftById(
   id: string,
   ownerUserId: string,
@@ -106,7 +70,6 @@ export async function getTwinReplyDraftById(
   }
 }
 
-/** Remove a twin proposal once approved/declined (consumed). Owner-scoped. */
 export async function deleteTwinReplyDraftById(id: string, ownerUserId: string): Promise<void> {
   try {
     await db().draftMessage.deleteMany({ where: { id, userId: ownerUserId, origin: 'twin' } });

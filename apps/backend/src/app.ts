@@ -565,14 +565,9 @@ export class App {
       (req as Request & { isPostAsUser?: boolean }).isPostAsUser = true;
       void new ChatController().postMessage(req, res);
     });
-    // React AS a user (S2S) — the reaction counterpart to postAsUser. Used by the
-    // Digital Twin approval flow so an approved emoji reaction shows as the user.
     this.app.post('/api/internal/reactAsUser', validateS2SKey, (req: Request, res: Response) => {
       void new ReactionController().reactAsUser(req, res);
     });
-    // Get-or-create a 1:1 DM channel between two users (S2S). Used by the Digital
-    // Twin approval flow to resolve a `dm`/`dm_sender` reply destination into a
-    // channelId before posting AS the user (via postAsUser). Returns { channelId }.
     this.app.post('/api/internal/getOrCreateDm', validateS2SKey, async (req: Request, res: Response) => {
       try {
         const { userId, targetUserId, workspaceId } = (req.body ?? {}) as {
@@ -589,10 +584,6 @@ export class App {
         res.status(500).json({ error: 'Internal error' });
       }
     });
-    // Create a Digital Twin in-thread reply draft (S2S). Written by claw-auth
-    // after a twin run (instead of the old approval DM) as a draft_messages row
-    // (origin='twin'); Zero replication surfaces it live to the owner. The owner
-    // approves/declines it through the /reply-draft/:draftId endpoints.
     this.app.post('/api/internal/twin-reply-draft', validateS2SKey, async (req: Request, res: Response) => {
       try {
         const parsed = coerceTwinReplyDraft(req.body);
@@ -600,10 +591,6 @@ export class App {
           res.status(400).json({ error: parsed.error });
           return;
         }
-        // Resolve the destination's human NAME for the "posts to …" label. The
-        // Twin forwards only ids for channel/thread/dm; Spaces owns the channel
-        // and user tables, so we look the name up here. Best-effort and
-        // fail-open — a missing name only degrades the label, never the draft.
         const lookup = destinationNameLookup(parsed.draft);
         if (lookup) {
           try {
@@ -620,9 +607,6 @@ export class App {
             logger.warn('[twin-reply-draft] destination name resolution failed', err);
           }
         }
-        // Persist as a draft_messages row; Zero replicates it to the owner's
-        // open clients live (a Twin run is async — seconds — so the owner is
-        // usually already in the thread), so no bespoke socket is needed.
         await createTwinReplyDraft(parsed.draft);
         res.json({ ok: true });
       } catch (err) {

@@ -9,8 +9,6 @@ import { formatDistanceToNow } from 'date-fns';
 import { MessageCard, RecipientAvatar, useRecipientName } from '../MessageCard';
 import { rowToTwinReplyDraftView } from '../TwinReplyDraft/twinReplyDraftApi';
 
-/** The subset of a twin draft row this panel needs (structural, so it doesn't
- *  depend on the opaque Zero-derived `TwinDraftDB` alias). */
 interface TwinDraftItem {
   id: string;
   channelId: string;
@@ -19,16 +17,10 @@ interface TwinDraftItem {
   metadata?: unknown;
 }
 
-/**
- * A row for one pending Digital Twin proposal in the Drafts & Sent page. Unlike a
- * user draft it isn't sent/edited/deleted from here — clicking opens the thread,
- * where the in-composer dock lets the owner review + approve/decline it.
- */
 const TwinDraftRow = ({ draft }: { draft: TwinDraftItem }): ReactElement => {
   const navigate = useNavigate();
   const view = rowToTwinReplyDraftView(draft);
 
-  // avatarHelpers only access conversation?.channelId, so a partial object is safe
   const channelRef = { channelId: draft.channelId } as Conversation;
   const recipientName = useRecipientName(null, channelRef);
   const displayName = draft.conversationId ? `${recipientName} · thread` : recipientName;
@@ -60,13 +52,11 @@ const TwinDraftRow = ({ draft }: { draft: TwinDraftItem }): ReactElement => {
       timestamp={timestamp}
       className='rounded-xl'
       onClick={handleClick}
-      // Twin drafts are reviewed inside the thread (click opens it) — no inline row actions.
       actions={null}
     />
   );
 };
 
-// ─── Panel ────────────────────────────────────────────────────────────────────
 
 const TwinDraftsPanel = (): ReactElement => {
   const twinDrafts = useSelector(stateMachineActor, state => state.context.twinDrafts);

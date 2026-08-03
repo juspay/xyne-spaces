@@ -136,10 +136,6 @@ const ThreadList = ({
   const [isNearTop, setIsNearTop] = useState(true);
   const [hasOverflow, setHasOverflow] = useState(false);
   const [isScrolling, setIsScrolling] = useState(false);
-  // Mirror of isNearBottom readable synchronously inside the ResizeObserver (React
-  // state would be stale there). Lets the observer re-pin to the bottom when the
-  // viewport shrinks (e.g. the Twin tray expands) — but ONLY if the user was
-  // already at the bottom, so a scrolled-up reader is never yanked down.
   const isNearBottomRef = useRef(isNearBottom);
   useEffect(() => {
     isNearBottomRef.current = isNearBottom;
@@ -346,9 +342,6 @@ const ThreadList = ({
     };
 
     const observer = new ResizeObserver(() => {
-      // If the reader was pinned to the bottom before this resize (e.g. the Twin
-      // tray expanded and shrank the viewport), keep them pinned so the latest
-      // messages stay visible instead of sliding behind the taller composer.
       const wasNearBottom = isNearBottomRef.current;
       recomputeOverflow();
       if (wasNearBottom) {

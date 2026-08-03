@@ -19,21 +19,11 @@ type ReasoningTab = 'reasoning' | 'debug';
 
 interface TwinReasoningDrawerProps {
   open: boolean;
-  /** The current draft (from the dock) — carries reasoning + the run identity. */
   draft: TwinReplyDraftView | undefined;
-  /** Origin conversation — the debugger fetches the twin run's trace by this. */
   conversationId: string;
   onClose: () => void;
 }
 
-/**
- * Right-side drawer explaining a Twin draft: a **Reasoning** tab (the twin's
- * private rationale with clickable clf- citation chips) and a **Debug** tab
- * (the reused AskAIDebugPanel — the full run trace: tool calls, thinking,
- * timeline). Rendered as an overlay over the thread panel's right edge so it
- * never displaces the thread; dismissible. The debugger is scoped to THIS twin
- * run via (conversationId, agentSlug, sessionId) and owner-ACL'd server-side.
- */
 export function TwinReasoningDrawer({
   open,
   draft,
@@ -42,7 +32,6 @@ export function TwinReasoningDrawer({
 }: TwinReasoningDrawerProps): ReactElement | null {
   const [tab, setTab] = useState<ReasoningTab>('reasoning');
 
-  // Default to the Reasoning tab every time the drawer opens.
   useEffect(() => {
     if (open) setTab('reasoning');
   }, [open]);
@@ -90,8 +79,6 @@ export function TwinReasoningDrawer({
           )}
         </div>
       ) : (
-        // Reused run debugger — lazily mounted so it only fetches artifacts when
-        // the Debug tab is actually opened. Scoped to this twin run.
         <div className='flex min-h-0 flex-1 flex-col'>
           <AskAIDebugPanel
             open
@@ -136,12 +123,6 @@ function TabButton({
   );
 }
 
-/**
- * The twin's rationale, rendered with the SAME clf- citation-chip pipeline as
- * thread messages: register the baked icon bytes, number the cited tools,
- * linkify `[clf-…#n]` tokens, then let createMarkdownComponents' `a`-override
- * swap them for clickable chips.
- */
 function ReasoningBody({
   reasoning,
   draft,

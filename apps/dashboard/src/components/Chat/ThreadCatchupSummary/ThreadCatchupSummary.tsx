@@ -7,25 +7,6 @@ import { cn } from '../../../utils/classNames';
 import { MarkdownMessageRenderer } from '../../ui/MessageBubble/MarkdownMessageRenderer';
 import { createMarkdownComponents } from '../../../utils/markdownComponents';
 
-// Slides straight down from the header and fades in — no `scale`. Scaling a
-// full-width, edge-to-edge panel from slightly-shrunk to 100% reads as a
-// "pop"/zoom (its left and right edges visibly snap outward), not a
-// dropdown. A pure vertical slide is what actually looks like something
-// unfurling downward from the header bar above it.
-//
-// A tween with an explicit duration (not a spring) — a fast/stiff spring
-// settles too quickly to read as "dropping," and a spring's effective
-// duration is hard to reason about directly. -28px of travel over 0.35s
-// with a decelerating ease gives it enough distance and time to actually
-// look like it's coming down and settling, not just fading in place.
-//
-// Deliberately does NOT animate `height`. Framer Motion resolves 'auto' to a
-// measured px value under the hood (render once to measure, snap back,
-// then interpolate) — on a panel whose natural size can itself change right
-// after mount (loading -> content), that measurement step keeps producing a
-// visible second jump no matter how the height transition is tuned. Since
-// opacity/y are plain scalars with no layout measurement involved, animating
-// only those is glitch-proof regardless of content or timing.
 const dropdownVariants = {
   initial: { opacity: 0, y: -28 },
   animate: {
@@ -46,7 +27,6 @@ interface ThreadCatchupSummaryButtonProps {
   onClick: () => void;
 }
 
-/** Header button — present once the feature is enabled; glows if a summary was already ready when the viewer opened the thread. */
 export function ThreadCatchupSummaryButton({
   isRecommended,
   loading,
@@ -86,14 +66,6 @@ interface ThreadCatchupSummaryPanelProps {
   onClose: () => void;
 }
 
-/**
- * The summary display — auto-shown (no Yes/No ask) for someone who was just
- * added to the thread, or opened manually via the header button. Deliberately
- * minimal: an icon + light-weight "Thread Summary" label directly above
- * muted/italic body text, plus a dismiss X — no card chrome, no separate
- * header row, no avatar. Same component/style for both the automatic and
- * manual cases, so there's one consistent look regardless of how it opened.
- */
 export function ThreadCatchupSummaryPanel({
   content,
   loading,
@@ -105,18 +77,8 @@ export function ThreadCatchupSummaryPanel({
     <motion.div variants={dropdownVariants} initial='initial' animate='animate' exit='exit'>
       <div className='flex items-start justify-between gap-2 px-4 py-3'>
         <ScrollText size={16} className='text-muted-foreground shrink-0 mt-0.5' />
-        {/* "Thread Summary" label sits above the content (light weight,
-            upright) — the summary itself reads as muted/italic body copy
-            below it. Capped + internally scrollable so a long summary
-            can't push the actual thread messages out of view. */}
         <div className='flex-1 min-w-0 max-h-64 overflow-y-auto'>
           <div className='text-sm font-medium text-muted-foreground'>Thread Summary</div>
-          {/* opacity-* (not text-muted-foreground/N) — the markdown
-              renderer's own elements (e.g. <strong> for bold names) set
-              their own explicit color, which wins over inherited text
-              color from this wrapper. `opacity` is a compositing property
-              applied to the whole rendered subtree regardless of each
-              child's own color, so it actually lightens everything. */}
           <div className='text-sm italic text-muted-foreground opacity-70'>
             {content ? (
               <MarkdownMessageRenderer content={content} markdownComponents={markdownComponents} />

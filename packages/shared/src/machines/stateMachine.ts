@@ -65,11 +65,6 @@ export type UserChannelStatus = QueryResultType<typeof queries.getAllChannelsUse
 export type Conversation = QueryResultType<typeof queries.channelConversationsPaginatedV3>[number];
 
 export type DraftMessageDB = QueryResultType<typeof queries.userDrafts>[number];
-/**
- * A pending Digital Twin reply proposal (origin='twin' row in draft_messages).
- * Same row shape as a composer draft — `userDrafts` fetches both origins in one
- * subscription and the stateMachine partitions them by `origin`.
- */
 export type TwinDraftDB = DraftMessageDB;
 export type DelayedMessageDB = QueryResultType<typeof queries.userDelayedMessages>[number];
 export type UnreadActivity = QueryResultType<typeof queries.userUnreadActivities>[number];
@@ -203,7 +198,7 @@ interface StateMachineContext {
   savedRoutes: Record<string, string>;
   drafts: DraftMessages; // Draft messages per channel/conversation
   draftMessages: DraftMessageDB[];
-  twinDrafts: TwinDraftDB[]; // pending Digital Twin reply proposals (origin='twin')
+  twinDrafts: TwinDraftDB[];
   delayedMessages: DelayedMessageDB[];
   userPreference: UserPreference;
   allUserGroups: UserGroup[];
@@ -488,10 +483,6 @@ export const stateMachine = setup({
         return context.currentUserRoleIds;
       },
     }),
-    // Single `userDrafts` subscription carries both origins; split it here so the
-    // composer/Drafts UI (draftMessages) never sees twin proposals (twinDrafts).
-    // "twin is explicit, everything else is a user draft" — a null origin is a
-    // legacy (pre-migration) user draft and belongs in draftMessages.
     addUserDrafts: assign({
       draftMessages: ({ context, event }) => {
         if (event.type === 'ADD_USER_DRAFTS') {

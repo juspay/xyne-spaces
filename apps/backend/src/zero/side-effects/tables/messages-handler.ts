@@ -812,12 +812,6 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     // Queue Vespa indexing for message attachments
     await this.queueVespaIndexingForAttachments(messageId);
 
-    // Keep an already-requested thread catch-up summary warm as new messages
-    // land, so whoever's still waiting on it gets it fully up-to-date the moment
-    // they open the thread. Fire-and-forget, gated on there still being a pending
-    // recommendation for this conversation (NOT merely a cache blob existing,
-    // which can outlive the pending audience) so it doesn't regenerate forever
-    // for nobody in particular.
     if (message.msgType === 'USER') {
       this.keepThreadSummaryWarm(conversationId, channelId).catch(error => {
         logger.error('[MessagesSideEffect] Failed to keep thread summary warm:', {

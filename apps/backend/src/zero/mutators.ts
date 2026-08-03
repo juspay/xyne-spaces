@@ -1450,8 +1450,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             updatedAt: timestamp,
           });
 
-          // Query for the user's OWN drafts in this channel (origin='user' so a
-          // twin proposal is never mistaken for the composer draft).
           const channelDrafts = await tx.run(
             zql.draft_messages
               .where('channelId', channelId)
@@ -11454,8 +11452,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             timestamp,
           },
         }) => {
-          // 1. Check if a USER draft exists for this channel/conversation/user
-          // (origin='user' so we never attach the composer's files onto a twin draft)
           let existingDraft = null;
           if (conversationId) {
             existingDraft = await tx.run(

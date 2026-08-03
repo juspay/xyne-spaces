@@ -47,9 +47,6 @@ export default defineConfig({
     manifest: true
   },
   optimizeDeps: {
-    // @terrastruct/d2's browser build is a ~7.8MB self-contained bundle (base64
-    // WASM + a Blob-spawned worker). It's loaded lazily via dynamic import(), so
-    // keep esbuild's dev prebundler from trying to transform the whole blob.
     exclude: ['@terrastruct/d2'],
   },
   server: {

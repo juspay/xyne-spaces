@@ -3,12 +3,6 @@ import type { ReactElement } from 'react';
 import { cn } from '../../../utils/classNames';
 import { useTwinDraftBadge } from './TwinDraftBadgeContext';
 
-/**
- * A small, neutral "Twin draft" pill shown on a thread row when the caller has a
- * pending Digital Twin draft for it. Reads the badge from context (no props to
- * drill through the message list). Renders nothing when there's no draft. Theme
- * tokens only — no accent colour.
- */
 export function TwinDraftIndicator({
   conversationId,
   className,

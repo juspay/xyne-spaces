@@ -219,9 +219,6 @@ export const ThreadMessages = ({
     return source;
   }, [propConversationParticipant, conversation?.participants]);
 
-  // `threadConversation` filters `participants` to the current user, so a
-  // truthy row means the viewer is a thread participant, including when they
-  // were tagged/added before posting. This gates the catch-up recap.
   const isThreadParticipant = useMemo(() => {
     const source =
       propConversationParticipant !== undefined
@@ -275,8 +272,6 @@ export const ThreadMessages = ({
     derivedConversationId,
     currentUser?.id,
     messages,
-    // The recap is gated on how many UNREAD messages (from others) I have here,
-    // captured at open — not total thread length. Pass my last-read position.
     conversationParticipant.lastReadAt ?? 0,
     isMessagesLoaded,
     isThreadParticipant,
@@ -355,8 +350,6 @@ export const ThreadMessages = ({
   const navigate = useNavigate();
   const location = useLocation();
 
-  // After the Twin's draft is sent, take the user to where it posted (unless
-  // that's the thread they're already in). React-only deliveries return null.
   const handleTwinPosted = useCallback(
     (target: PostedTarget | null) => {
       if (!target?.channelId) return;
@@ -372,15 +365,8 @@ export const ThreadMessages = ({
     [navigate, baseRoute, derivedChannelId, derivedConversationId],
   );
 
-  // The "Why?" reasoning + run-debugger side drawer (overlays the thread's right
-  // edge; dismissible). Opened from a proposal's Why? button — holds THAT
-  // proposal (a thread can have several), or undefined when closed.
   const [reasoningDraft, setReasoningDraft] = useState<TwinReplyDraftView | undefined>(undefined);
 
-  // A Twin draft being edited IN the composer (the dock hands editing off so the
-  // real message box takes over, with a highlight + back button). We track the id
-  // and look the draft up live, so the session ends by itself when the row syncs
-  // away (e.g. after approve/decline).
   const [twinEditDraftId, setTwinEditDraftId] = useState<string | null>(null);
   const editingTwinDraft = useMemo(
     () => assist.reply.drafts.find(d => d.id === twinEditDraftId) ?? null,
@@ -390,9 +376,6 @@ export const ThreadMessages = ({
     if (twinEditDraftId && !editingTwinDraft) setTwinEditDraftId(null);
   }, [twinEditDraftId, editingTwinDraft]);
 
-  // Leave edit mode. The tray's `collapsed` state was never touched (edit only
-  // closes the body via its own `editing` flag), so clearing the draft id lets the
-  // body spring back open — landing the user on the expanded tray.
   const exitTwinEdit = (): void => {
     setTwinEditDraftId(null);
   };
@@ -402,11 +385,6 @@ export const ThreadMessages = ({
         draftId: editingTwinDraft.id,
         message: editingTwinDraft.message ?? '',
         ...(editingTwinDraft.senderName ? { senderName: editingTwinDraft.senderName } : {}),
-        // Send from the composer = approve with the edited text. The approve
-        // endpoint posts to the draft's server-resolved destination and records
-        // the twin's learning feedback — a plain thread post would do neither.
-        // On success we end the session (restoring the expanded tray); on failure
-        // we keep it open, toast, and let the user retry with their edit.
         onApprove: (editedText: string) => {
           void (async () => {
             try {
@@ -426,9 +404,6 @@ export const ThreadMessages = ({
       }
     : undefined;
 
-  // Index this thread's messages by id so the twin dock can resolve the message
-  // each draft is replying to — for the tab label (first ~10 chars), the
-  // one-line preview, and the jump-to-message affordance.
   const messagesById = useMemo(() => {
     const map = new Map<string, { content?: unknown }>();
     for (const m of messages) map.set(m.messageId, m);
@@ -459,7 +434,6 @@ export const ThreadMessages = ({
               );
               if (!el) return;
               el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-              // Brief tint so the jump target is obvious (mirrors link-nav highlight).
               el.animate(
                 [{ backgroundColor: 'rgba(99,102,241,0.14)' }, { backgroundColor: 'transparent' }],
                 { duration: 1400, easing: 'ease-out' },
@@ -475,9 +449,6 @@ export const ThreadMessages = ({
     [messagesById, derivedConversationId],
   );
 
-  // The Twin assist dock. `twinDock` fuses onto the composer below it; the
-  // `attached={false}` variant is used on the threads-page preview where there
-  // is no composer, so it closes into a self-contained card.
   const renderTwinDock = (attached: boolean) =>
     assist.available ? (
       <ThreadAssistDock
@@ -494,10 +465,6 @@ export const ThreadMessages = ({
         onOpenReasoning={setReasoningDraft}
         resolveSource={resolveTwinSource}
         attached={attached}
-        // Only the composer-fused dock delegates editing to the composer; the
-        // standalone preview card (no composer) keeps its inline textarea. When a
-        // draft is being edited, onEditBack puts the dock into edit mode (edit
-        // header + collapsed body + glow) — it no longer swaps to a separate bar.
         {...(attached && { onBeginEdit: (d: TwinReplyDraftView) => setTwinEditDraftId(d.id) })}
         {...(attached && editingTwinDraft && { onEditBack: exitTwinEdit })}
       />
@@ -1081,8 +1048,6 @@ export const ThreadMessages = ({
                 />
               </div>
             ) : previewCardMode && assist.hasReply ? (
-              // Threads-page preview: surface the Twin draft even when the viewer
-              // isn't a channel member (no composer here — just review/act on it).
               <div className='px-4 pb-4 bg-background'>{twinDockCard}</div>
             ) : (
               <JoinChannel
@@ -1400,8 +1365,6 @@ export const ThreadMessages = ({
                       />
                     </div>
                   ) : previewCardMode && assist.hasReply ? (
-                    // Threads-page preview: surface the Twin draft even when the
-                    // viewer isn't a channel member (no composer here).
                     <div className='px-4 pb-4 bg-background'>{twinDockCard}</div>
                   ) : (
                     <JoinChannel
@@ -1662,8 +1625,6 @@ export const ThreadMessages = ({
                     />
                   </div>
                 ) : previewCardMode && assist.hasReply ? (
-                  // Threads-page preview: surface the Twin draft even when the
-                  // viewer isn't a channel member (no composer here).
                   <div className='px-4 pb-4 bg-background'>{twinDockCard}</div>
                 ) : (
                   <JoinChannel

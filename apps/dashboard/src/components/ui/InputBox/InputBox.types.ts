@@ -71,9 +71,5 @@ export interface InputBoxProps {
   /** Extra buttons rendered in the left side of the desktop bottom action bar, after the # button */
   bottomLeftSlot?: React.ReactNode;
   disableDraftUpload?: boolean;
-  /** A detached card rendered directly ABOVE the editor, inside the composer's
-   *  positioning root — e.g. the Twin drafts dock. Placing it here (rather than as
-   *  an outside sibling) lets the composer's single activity indicator float above
-   *  the whole unit instead of colliding with it. */
   dockSlot?: React.ReactNode;
 }

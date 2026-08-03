@@ -129,13 +129,6 @@ class UnifiedDMService {
     return definition?.id ?? null;
   }
 
-  /**
-   * Get or create a 1:1 DM channel between two HUMAN users. Same mechanics as a
-   * bot DM (a 2-member DM channel keyed on the sorted user ids), just named for
-   * the user↔user case. Used by the Digital Twin approval flow so an approved
-   * reply can be delivered as a DM to a specific person (the mention sender, or
-   * anyone else the Twin chose). Returns the DM channel id.
-   */
   async getOrCreateDirectMessage(userAId: string, userBId: string, workspaceId: string): Promise<string> {
     const channel = await this.getOrCreateBotDM(userAId, userBId, workspaceId);
     return channel.id;

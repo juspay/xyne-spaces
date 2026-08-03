@@ -9,12 +9,6 @@ import {
   downloadDiagramAsPng,
 } from './D2Block.utils';
 
-/**
- * Tracks whether the app is in its dark theme by observing the `data-theme`
- * attribute on <html> (Spaces sets data-theme="midnight" for dark). A plain
- * useTheme() hook keeps per-component local state and would not react to a
- * toggle made elsewhere, so we watch the attribute directly.
- */
 function useIsDarkTheme(): boolean {
   const [isDark, setIsDark] = useState<boolean>(
     () =>
@@ -32,13 +26,6 @@ function useIsDarkTheme(): boolean {
   return isDark;
 }
 
-/**
- * Renders real D2-language diagrams (d2lang.com) via the @terrastruct/d2 WASM
- * compiler, lazy-loaded on first use. Mirrors MermaidBlock's UX (diagram/code
- * toggle, PNG download, fullscreen) but always surfaces errors instead of
- * spinning forever. Debounced so streaming deltas don't recompile mid-stream.
- * The diagram theme follows the app theme (light/dark) and re-renders on toggle.
- */
 const D2BlockComponent = ({ source }: D2BlockProps): ReactElement => {
   const elementRef = useRef<HTMLDivElement>(null);
   const isDark = useIsDarkTheme();
@@ -56,14 +43,11 @@ const D2BlockComponent = ({ source }: D2BlockProps): ReactElement => {
       clearTimeout(renderTimeoutRef.current);
     }
 
-    // Wait for the block to finish streaming (balanced braces) before we pay for
-    // a WASM compile — and skip if this exact source+theme already rendered.
     const renderKey = `${isDark ? 'd' : 'l'}:${source}`;
     if (!isLikelyCompleteD2(source) || lastRenderedRef.current === renderKey) {
       return;
     }
 
-    // Debounce to coalesce the final streaming deltas into one render.
     renderTimeoutRef.current = setTimeout(() => {
       void renderD2Diagram({
         source,
@@ -99,7 +83,6 @@ const D2BlockComponent = ({ source }: D2BlockProps): ReactElement => {
     downloadDiagramAsPng(svgElement);
   };
 
-  // Error — show the message plus the raw source (fail loud, never hang).
   if (error) {
     return (
       <div className='my-4 rounded-2xl border border-red-200 bg-red-50 p-4'>
@@ -124,7 +107,6 @@ const D2BlockComponent = ({ source }: D2BlockProps): ReactElement => {
       }`;
     return (
       <div className='group/d2 relative my-4 overflow-hidden rounded-xl border border-border/60 bg-muted/30'>
-        {/* Minimal control cluster — icon-only, reveals on hover */}
         <div className='absolute right-2 top-2 z-10 flex items-center gap-0.5 rounded-lg border border-border/60 bg-background/70 p-0.5 opacity-0 shadow-sm backdrop-blur-sm transition-opacity focus-within:opacity-100 group-hover/d2:opacity-100'>
           <button
             onClick={() => setViewMode('diagram')}
@@ -227,8 +209,6 @@ const D2BlockComponent = ({ source }: D2BlockProps): ReactElement => {
           <div className='h-full w-full flex items-center justify-center p-4 overflow-auto rounded-lg'>
             <div
               className='d2-diagram flex items-center justify-center w-[90vw] h-[85vh] bg-background rounded-lg m-10'
-              // Override the inline caps so the fullscreen preview scales the
-              // diagram up to fill the modal instead of the compact inline size.
               style={
                 {
                   maxWidth: '90vw',
@@ -246,9 +226,6 @@ const D2BlockComponent = ({ source }: D2BlockProps): ReactElement => {
     );
   }
 
-  // No SVG yet: show a spinner while the block is finishing streaming or the
-  // WASM compile is in flight. Once complete, this resolves into a diagram or an
-  // error — it cannot get stuck, because renderD2Diagram always settles both.
   if (isRendering || isLikelyCompleteD2(source)) {
     return (
       <div className='my-4 rounded-xl border border-border/60 bg-muted/30 p-8'>
@@ -260,7 +237,6 @@ const D2BlockComponent = ({ source }: D2BlockProps): ReactElement => {
     );
   }
 
-  // Still streaming (incomplete) — render nothing rather than a flash of error.
   return <div className='my-2' />;
 };
 

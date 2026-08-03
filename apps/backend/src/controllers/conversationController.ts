@@ -2082,16 +2082,6 @@ export class ConversationController {
     }
   };
 
-  /**
-   * GET /:conversationId/summary
-   *
-   * On-demand AI summary of the thread, shared across all members. Cached by
-   * "as of" message — only makes a fresh LLM call if new messages have
-   * landed since the last summary was generated; otherwise returns the
-   * existing one instantly. Manual summary generation is available whenever
-   * the feature is enabled for the channel; only automatic recommendations
-   * are gated by THREAD_SUMMARY_MIN_MESSAGES.
-   */
   getSummary = async (req: Request, res: Response): Promise<void> => {
     try {
       const { conversationId } = req.params;
@@ -2140,35 +2130,6 @@ export class ConversationController {
     }
   };
 
-  /**
-   * GET /:conversationId/recommendation
-   *
-   * Whether the requesting user should see the "you were just added" catch-up
-   * summary for this thread — and if so, the summary content itself, in the
-   * same round trip. Backed by a one-time flag set by the real-time
-   * ConversationParticipant insert side effect (not inferred from
-   * lastReadAt/joinedAt timestamps — see threadSummaryService for why
-   * that broke down). Consumes the flag on read, so it's only ever surfaced
-   * once per genuine add.
-   *
-   * Deliberately bundled with a cache READ here (not generation — rather than
-   * making the client separately call GET /summary right after) — this is
-   * the only path that can ever empty out the pending set, so this is also
-   * the only place that needs to check afterward whether to tear the cache
-   * down. Doing the read and that check in the same request means there's no
-   * race to guess a delay around: by the time the pending-check below runs,
-   * `result` is already computed and on its way to the client regardless of
-   * what happens to the cache next. A plain GET /summary (the manual header
-   * button) never touches the pending set at all, so it needs none of this.
-   *
-   * Uses getCachedSummary, NOT getOrGenerateThreadSummary — this
-   * endpoint never triggers an LLM call itself. Generation is exclusively
-   * the job of the two side-effect handlers (pre-warm on add, keep-warm on
-   * message); by the time a genuinely-recommended user opens the thread, the
-   * pre-warm has almost always already populated the cache. If it somehow
-   * hasn't (pre-warm still in flight or failed), this just serves nothing
-   * rather than making the request itself pay for a fresh generation.
-   */
   getRecommendation = async (req: Request, res: Response): Promise<void> => {
     try {
       const { conversationId } = req.params;
@@ -2223,21 +2184,8 @@ export class ConversationController {
     }
   };
 
-  // ── Digital Twin in-thread reply draft (owner-only) ────────────────────────
 
-  /**
-   * The caller reads their own pending twin proposals directly from Zero (the
-   * `twinDrafts` query → draft_messages where origin='twin'), so there is no
-   * GET endpoint here — only approve/decline (below), keyed by the draft row id.
-   */
 
-  /**
-   * Forward an approve/decline to claw-auth, which owns the Twin's tested
-   * delivery + feedback pipeline (post-as-user / react-as-user / destination
-   * resolution / TwinResponseFeedback). The delivery-execution context is read
-   * from the SERVER-SIDE Redis draft (never the client body), so the client
-   * can't tamper with where the reply lands. S2S-authed with the shared claw key.
-   */
   private forwardTwinDraftAction = async (
     draft: TwinReplyDraft,
     action: 'approve' | 'decline',
@@ -2251,8 +2199,6 @@ export class ConversationController {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          // Spaces↔claw-auth shared key (Spaces does not hold XYNE_CLAW_S2S_KEY);
-          // claw-auth validates it via requireInternalS2S.
           ...(config.internalS2sKey ? { 'x-s2s-key': config.internalS2sKey } : {}),
         },
         body: JSON.stringify({
@@ -2277,7 +2223,6 @@ export class ConversationController {
           };
         }
       } catch {
-        // no posted target (react-only) — fine
       }
       return { ok: true, status: 200, ...(posted ? { posted } : {}) };
     } catch (err) {
@@ -2286,15 +2231,6 @@ export class ConversationController {
     }
   };
 
-  /**
-   * POST /reply-drafts/:draftId/approve  { editedMessage? }
-   *
-   * Deliver the (possibly edited) draft. Reads the twin proposal server-side by
-   * its row id (owner-scoped), forwards to claw-auth to post/react as the user +
-   * record accepted feedback, and only removes the row when delivery SUCCEEDED
-   * (a transient failure leaves it intact for retry). Deleting the row clears the
-   * dock/badge on every open client via Zero replication — no socket needed.
-   */
   approveReplyDraft = async (req: Request, res: Response): Promise<void> => {
     try {
       const { draftId } = req.params;
@@ -2313,7 +2249,6 @@ export class ConversationController {
 
       const result = await this.forwardTwinDraftAction(draft, 'approve', userId, editedMessage);
       if (!result.ok) {
-        // Keep the draft — the user can retry the approval.
         res.status(502).json({ error: 'Failed to deliver reply', detail: result.error });
         return;
       }
@@ -2325,13 +2260,6 @@ export class ConversationController {
     }
   };
 
-  /**
-   * POST /reply-drafts/:draftId/decline
-   *
-   * The user rejects the draft. Records declined feedback (best-effort) and drops
-   * the row regardless — declining is the user's choice, so it always clears even
-   * if the feedback callback fails.
-   */
   declineReplyDraft = async (req: Request, res: Response): Promise<void> => {
     try {
       const { draftId } = req.params;

@@ -6,9 +6,6 @@ import type { ConversationParticipantPreviousValue, SideEffectJobConfig } from '
 import { logger } from '@/utils/logger';
 import { NotificationType } from '@prisma/client';
 
-// How long the onInsert side effect keeps retrying/awaiting the participant row
-// to settle before giving up (the thread-recommendation flag write races the
-// participant insert). Matches the original twin-recap handler.
 const ON_INSERT_TIMEOUT_MS = 45_000;
 
 /**
@@ -19,11 +16,6 @@ const ON_INSERT_TIMEOUT_MS = 45_000;
 export class ConversationParticipantsSideEffectHandler extends BaseSideEffectHandler {
   async onInsert(job: SideEffectJobConfig): Promise<void> {
     logger.info(`[ConversationParticipantsHandler] onInsert entity=${job.entityId} actor=${this.ctx.userID}`);
-    // The timeout side of Promise.race is never implicitly cancelled when
-    // processInsert wins (the common case) — without clearing it explicitly,
-    // its setTimeout keeps firing (harmlessly, since the race already
-    // settled) up to ON_INSERT_TIMEOUT_MS after every single participant
-    // insert, accumulating dangling timers under load.
     let timeoutHandle: NodeJS.Timeout;
     try {
       await Promise.race([
@@ -54,7 +46,6 @@ export class ConversationParticipantsSideEffectHandler extends BaseSideEffectHan
     const { conversationId, userId, channelId } = participant;
 
     if (this.ctx.userID === userId) {
-      // Self-joined (e.g. by replying) — no need to catch them up.
       logger.info(`[ConversationParticipantsHandler] Skipping self-join: user ${userId} in conversation ${conversationId}`);
       return;
     }
@@ -63,17 +54,8 @@ export class ConversationParticipantsSideEffectHandler extends BaseSideEffectHan
       return;
     }
 
-    // This is the one moment we know with certainty — not inferred later
-    // from lastReadAt/joinedAt timestamps (which broke down in practice,
-    // see threadSummaryService) — that `userId` was genuinely just
-    // added by someone else. Flag it once for the frontend to consume.
     await flagThreadRecommendation(conversationId, userId);
 
-    // Pre-warm the in-memory thread-summary cache (see threadSummaryService)
-    // so it's ready immediately instead of the newly-added participant
-    // having to click-and-wait. The cache is shared across users to dedupe
-    // LLM calls; anyone can also trigger/refresh it on demand via the
-    // thread panel button.
     await getOrGenerateThreadSummary(conversationId);
   }
 

@@ -31,12 +31,7 @@ const ReplyLayoutV2: React.FC<{
   messageId,
 }) => {
   const { channelId } = useParams<{ channelId: string }>();
-  // A pending Twin draft for THIS thread (from the bulk badge context). Shown as
-  // the "Twin draft" pill even when the thread has no replies yet — the freshest,
-  // highest-value case, which the reply-count guards below would otherwise hide.
   const twinBadge = useTwinDraftBadge(replies?.conversation?.conversationId);
-  // Surface a pending Twin draft using the SAME "1 draft" / "and 1 draft"
-  // treatment as a user's own draft — no separate pill in the channel list.
   const showTwinDraft = !isThreadOpen && !!twinBadge;
 
   // For showInChannel messages, show "View newer replies" only if there are newer replies in the parent thread
@@ -61,9 +56,6 @@ const ReplyLayoutV2: React.FC<{
   if ((!replies || replies.replyCount === 0) && (!hasDraft || isThreadOpen) && !showTwinDraft)
     return null;
 
-  // A thread can carry BOTH the user's own composer draft AND a pending Twin
-  // draft — count each so the indicator reads "1 draft" or "2 drafts". Same
-  // neutral draft UI for both (no separate Twin styling in the channel list).
   const zeroReplyDraftCount = (hasDraft ? 1 : 0) + (showTwinDraft ? 1 : 0);
   const inlineDraftCount = (draft && !isThreadOpen ? 1 : 0) + (showTwinDraft ? 1 : 0);
   const draftWord = (n: number): string => `${n} draft${n > 1 ? 's' : ''}`;

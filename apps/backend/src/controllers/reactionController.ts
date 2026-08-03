@@ -191,14 +191,6 @@ export class ReactionController {
     }
   }
 
-  /**
-   * S2S: add a reaction to a message AS a specific user (userId from the body,
-   * not req.user). Mirrors /api/internal/postAsUser but for reactions — used by
-   * the Digital Twin approval flow: when the user approves a "react" delivery,
-   * claw-auth posts the emoji AS the user through this endpoint, so the reaction
-   * shows as coming from the person (consistent with the Twin acting as them).
-   * Idempotent: a duplicate reaction (already reacted) is treated as success.
-   */
   async reactAsUser(req: Request, res: Response): Promise<void> {
     try {
       const { messageId, emojiName, userId } = (req.body ?? {}) as {
@@ -220,28 +212,12 @@ export class ReactionController {
       try {
         await reactionRepository.addReaction({ messageId, userId, emojiName: emoji });
       } catch (error: any) {
-        // Unique-constraint = the user already reacted with this emoji → success.
         if (error?.code !== 'P2002') throw error;
       }
 
-      // CRITICAL for real-time render: the chat UI derives the reaction pill
-      // EXCLUSIVELY from the message's denormalized `reactions_md` column (Zero
-      // replicates it to every client) — NOT from the raw reaction rows written
-      // above, and NOT from the Redis broadcast below (no chat client subscribes
-      // to `reaction_updated`). The normal UI reaction path updates reactions_md
-      // via a Zero mutator; this S2S path bypasses Zero, so we must update
-      // reactions_md ourselves or the emoji never appears (the row lands in the
-      // DB but is invisible — exactly the Digital Twin react bug). Run it even on
-      // the P2002 "already reacted" path: addReactionToData is a set-union
-      // (idempotent per emoji+user), so this self-heals a column left stale by an
-      // earlier bypassed write. Do it BEFORE responding so the caller only sees
-      // success once the client-visible state is actually updated.
       const conversationId = await messageRepository.getConversationIdByMessageId(messageId);
       try {
         await messageMetadataService.addReaction(messageId, emoji, userId);
-        // If this message is a conversation's initial (root) message, its
-        // reaction also lives in conversations.initial_message_md — keep it in
-        // sync (no-op when messageId isn't the initial message).
         if (conversationId) await messageMetadataService.syncInitialMessageMd(conversationId);
       } catch (mdError) {
         logger.error('[reactAsUser] failed to update reactions_md — emoji may not render:', mdError);
@@ -250,9 +226,6 @@ export class ReactionController {
       const reactions = await reactionRepository.getMessageReactions(messageId, userId);
       res.status(200).json({ success: true, reactions });
 
-      // Best-effort legacy Redis broadcast. Kept harmless, but it is NOT what
-      // renders the reaction — the real-time render comes from Zero replicating
-      // the reactions_md update above. No chat client subscribes to this event.
       try {
         if (conversationId) {
           await redisService.broadcastMessageToSession(conversationId, {

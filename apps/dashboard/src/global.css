@@ -2708,12 +2708,6 @@ img.inline-emoji,
   padding-left: 6px !important;
 }
 
-/* When markdown is posted as a real chat message (e.g. a Digital Twin reply),
-   it renders in a MessageBubble alongside plain HTML messages. Strip the
-   standalone-answer spacing — the container's top/bottom margin, the last
-   paragraph's trailing margin, and the left indent — so it sits as tight as a
-   normal message. Inter-paragraph spacing (8px) is kept for multi-paragraph
-   replies; the AI-sidebar answer styling (outside any MessageBubble) is untouched. */
 [data-component="MessageBubble"] .bot-markdown-content {
   margin: 0 !important;
 }
