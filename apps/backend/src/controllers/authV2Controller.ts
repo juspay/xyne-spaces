@@ -27,9 +27,6 @@ import { migrateLegacyIdentity } from '@/services/legacyIdentityMigrationHelper'
 import { redisService } from '@/services/redisService';
 import { randomUUID } from 'crypto';
 
-const PENDING_OAUTH_TOKEN_PREFIX = 'pendingauth:oauth:';
-const PENDING_OAUTH_TOKEN_TTL_SECONDS = 10 * 60;
-
 /**
  * Result type for single workspace auto-login
  */
@@ -64,13 +61,13 @@ export class AuthV2Controller {
   ): Promise<string> {
     const tokenKey = randomUUID();
     await redisService.set(
-      `${PENDING_OAUTH_TOKEN_PREFIX}${tokenKey}`,
+      `${config.pendingOAuthTokens.redisKeyPrefix}${tokenKey}`,
       JSON.stringify({
         refreshToken: refreshToken ?? null,
         accessToken: accessToken ?? null,
         accessTokenExpiry: accessTokenExpiry?.toISOString() ?? null,
       }),
-      PENDING_OAUTH_TOKEN_TTL_SECONDS,
+      config.pendingOAuthTokens.ttlSeconds,
     );
     return tokenKey;
   }
@@ -1529,7 +1526,9 @@ export class AuthV2Controller {
 
       // Clear pending auth cookie and return success
       if (pendingTokenKey) {
-        await redisService.del(`${PENDING_OAUTH_TOKEN_PREFIX}${pendingTokenKey}`);
+        await redisService.del(
+          `${config.pendingOAuthTokens.redisKeyPrefix}${pendingTokenKey}`,
+        );
       }
       res.clearCookie('google_access_token', { path: '/' });
       res.status(200).json({
@@ -1707,7 +1706,9 @@ export class AuthV2Controller {
 
       // Clear pending auth cookie
       if (pendingTokenKey) {
-        await redisService.del(`${PENDING_OAUTH_TOKEN_PREFIX}${pendingTokenKey}`);
+        await redisService.del(
+          `${config.pendingOAuthTokens.redisKeyPrefix}${pendingTokenKey}`,
+        );
       }
       res.clearCookie('google_access_token', { path: '/' });
 
@@ -2050,7 +2051,9 @@ export class AuthV2Controller {
         });
 
         if (pendingTokenKey) {
-          await redisService.del(`${PENDING_OAUTH_TOKEN_PREFIX}${pendingTokenKey}`);
+          await redisService.del(
+            `${config.pendingOAuthTokens.redisKeyPrefix}${pendingTokenKey}`,
+          );
         }
         res.clearCookie('google_access_token', { path: '/' });
 
@@ -2249,7 +2252,7 @@ export class AuthV2Controller {
       } | null = null;
       if (decoded.tokenKey) {
         const storedTokens = await redisService.get(
-          `${PENDING_OAUTH_TOKEN_PREFIX}${decoded.tokenKey}`,
+          `${config.pendingOAuthTokens.redisKeyPrefix}${decoded.tokenKey}`,
         );
         if (!storedTokens) return null;
         redisTokens = JSON.parse(storedTokens);

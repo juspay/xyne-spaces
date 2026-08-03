@@ -17,8 +17,6 @@ import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { redisService } from '@/services/redisService';
 
-const PENDING_OAUTH_TOKEN_PREFIX = 'pendingauth:oauth:';
-
 type PendingAuth = {
   userData: {
     providerUserId: string;
@@ -145,7 +143,9 @@ export class CommunityWorkspaceController {
         });
       }
       if (pendingAuth.tokenKey) {
-        await redisService.del(`${PENDING_OAUTH_TOKEN_PREFIX}${pendingAuth.tokenKey}`);
+        await redisService.del(
+          `${config.pendingOAuthTokens.redisKeyPrefix}${pendingAuth.tokenKey}`,
+        );
       }
       res.clearCookie('google_access_token', { path: '/' });
 
@@ -327,7 +327,7 @@ export class CommunityWorkspaceController {
 
       if (decoded.tokenKey) {
         const storedTokens = await redisService.get(
-          `${PENDING_OAUTH_TOKEN_PREFIX}${decoded.tokenKey}`,
+          `${config.pendingOAuthTokens.redisKeyPrefix}${decoded.tokenKey}`,
         );
         if (!storedTokens) return null;
         redisTokens = JSON.parse(storedTokens);

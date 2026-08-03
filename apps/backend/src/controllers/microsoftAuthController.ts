@@ -24,9 +24,6 @@ import { signMicrosoftInvitationPendingAuthToken } from '@/utils/microsoftPendin
 import { redisService } from '@/services/redisService';
 import { randomUUID } from 'crypto';
 
-const PENDING_OAUTH_TOKEN_PREFIX = 'pendingauth:oauth:';
-const PENDING_OAUTH_TOKEN_TTL_SECONDS = 10 * 60;
-
 export class MicrosoftAuthController {
   private oauthClient: AuthorizationCode | undefined;
   private userService: UserService | undefined;
@@ -42,13 +39,13 @@ export class MicrosoftAuthController {
   ): Promise<string> {
     const tokenKey = randomUUID();
     await redisService.set(
-      `${PENDING_OAUTH_TOKEN_PREFIX}${tokenKey}`,
+      `${config.pendingOAuthTokens.redisKeyPrefix}${tokenKey}`,
       JSON.stringify({
         refreshToken: refreshToken ?? null,
         accessToken: accessToken ?? null,
         accessTokenExpiry: accessTokenExpiry?.toISOString() ?? null,
       }),
-      PENDING_OAUTH_TOKEN_TTL_SECONDS,
+      config.pendingOAuthTokens.ttlSeconds,
     );
     return tokenKey;
   }
