@@ -1982,6 +1982,17 @@ export const queries = defineQueries({
       )
       .orderBy('id', 'asc');
   }),
+  subTicketMappingsForTickets: defineQuery(
+    z.object({ ticketIds: z.array(z.string()) }),
+    ({ args: { ticketIds } }) => {
+      return zql.ticket_sub_ticket_mappings
+        .where(helpers => helpers.cmp('ticketId', 'IN', ticketIds))
+        .related('subTicket', (subTicketQuery) =>
+          subTicketQuery.related('conversation').related('mappedTicket')
+        )
+        .orderBy('id', 'asc');
+    }
+  ),
 
   subTicketsByMappedTicketId: defineQuery(
     z.object({ mappedTicketId: z.string() }),
@@ -3000,6 +3011,13 @@ export const queries = defineQueries({
   ticketActivities: defineQuery(z.object({ ticketId: z.string() }), ({ args: { ticketId } }) =>
     zql.ticket_activities.where('ticketId', ticketId).orderBy('timestamp', 'desc')
   ),
+  ticketActivitiesForTickets: defineQuery(
+    z.object({ ticketIds: z.array(z.string()) }),
+    ({ args: { ticketIds } }) =>
+      zql.ticket_activities
+        .where(helpers => helpers.cmp('ticketId', 'IN', ticketIds))
+        .orderBy('timestamp', 'asc'),
+  ),
 
   channelAndThreadMessages: defineQuery(
     z.object({ channelId: z.string() }),
@@ -3778,6 +3796,9 @@ dmChannelsLatestMessagesPaginated: defineQuery(
   getAllFormsList: defineQuery(() => {
     return zql.forms.orderBy('createdAt', 'desc');
   }),
+  getFormById: defineQuery(z.object({ formId: z.string() }), ({ args: { formId } }) => {
+    return zql.forms.where('id', formId).one();
+  }),
   // Query for form fields by form ID
   // Order by sequenceNumber first; fall back to createdAt for rows where all sequenceNumbers are 0 (e.g. legacy data before backfill)
   getFormFieldsByFormId: defineQuery(z.object({ formId: z.string() }), ({ args: { formId } }) => {
@@ -4108,6 +4129,13 @@ dmChannelsLatestMessagesPaginated: defineQuery(
     z.object({ subTicketIds: z.array(z.string()) }),
     ({ args: { subTicketIds } }) => {
       return zql.sub_tickets.where(helpers => helpers.cmp('id', 'IN', subTicketIds));
+    },
+  ),
+
+  subTicketsByMappedTicketIds: defineQuery(
+    z.object({ mappedTicketIds: z.array(z.string()) }),
+    ({ args: { mappedTicketIds } }) => {
+      return zql.sub_tickets.where(helpers => helpers.cmp('mappedTicketId', 'IN', mappedTicketIds));
     },
   ),
 

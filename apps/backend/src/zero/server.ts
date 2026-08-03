@@ -178,6 +178,7 @@ export async function handleMutate(request: Request): Promise<unknown> {
   const startTime = Date.now();
   // Accumulators for post-processing
   const asyncTasks: (() => Promise<void>)[] = [];
+  const awaitedPostCommitTasks: (() => Promise<void>)[] = [];
   let vespaJobs: VespaJobsAccumulator = [];
   let sideEffectJobs: SideEffectJobsAccumulator = [];
   let capturedMutatorName: string | null = null;
@@ -228,12 +229,17 @@ export async function handleMutate(request: Request): Promise<unknown> {
       request,
       handler: transact => {
         const mutationAsyncTasks: (() => Promise<void>)[] = [];
+        const mutationAwaitedPostCommitTasks: (() => Promise<void>)[] = [];
         const mutationVespaJobs = createVespaJobsAccumulator();
         const mutationSideEffectJobs = createSideEffectJobsAccumulator();
 
         return transact(async (tx, mutatorName, args) => {
           capturedMutatorName = mutatorName;
-          const mutators = createMutators(authData, mutationAsyncTasks);
+          const mutators = createMutators(
+            authData,
+            mutationAsyncTasks,
+            mutationAwaitedPostCommitTasks,
+          );
           const wrappedTx = wrapTransactionWithACL(tx, context, mutationVespaJobs, mutationSideEffectJobs);
           const mutator = mustGetMutator(mutators, mutatorName);
           return mutator.fn({ tx: wrappedTx, args, ctx: context });
@@ -242,6 +248,7 @@ export async function handleMutate(request: Request): Promise<unknown> {
           // back the transaction. Do not dispatch work staged by that rollback.
           if (!('error' in mutatorResult.result)) {
             asyncTasks.push(...mutationAsyncTasks);
+            awaitedPostCommitTasks.push(...mutationAwaitedPostCommitTasks);
             vespaJobs.push(...mutationVespaJobs);
             sideEffectJobs.push(...mutationSideEffectJobs);
           }
@@ -274,6 +281,7 @@ export async function handleMutate(request: Request): Promise<unknown> {
       });
     }
 
+    await Promise.allSettled(awaitedPostCommitTasks.map(task => task()));
     Promise.allSettled(asyncTasks.map((task) => task()));
 
     Promise.allSettled(
@@ -574,6 +582,7 @@ export async function handleMutateFallback(request: Request): Promise<unknown> {
   }
 
   const asyncTasks: (() => Promise<void>)[] = [];
+  const awaitedPostCommitTasks: (() => Promise<void>)[] = [];
   const vespaJobs: VespaJobsAccumulator = createVespaJobsAccumulator();
   const sideEffectJobs: SideEffectJobsAccumulator = createSideEffectJobsAccumulator();
 
@@ -586,7 +595,7 @@ export async function handleMutateFallback(request: Request): Promise<unknown> {
     console.log(`Fallback executing mutation: ${mutation.name}`);
 
     await dbProvider.transaction(async (tx) => {
-      const mutators = createMutators(authData, asyncTasks);
+      const mutators = createMutators(authData, asyncTasks, awaitedPostCommitTasks);
       const wrappedTx = wrapTransactionWithACL(
         tx,
         { userID: authData.sub, workspaceId: authData.workspaceId, role: authData.role, orgRole: authData.orgRole, memberId: authData.memberId },
@@ -600,6 +609,7 @@ export async function handleMutateFallback(request: Request): Promise<unknown> {
         ctx: { userID: authData.sub, workspaceId: authData.workspaceId, role: authData.role, orgRole: authData.orgRole, memberId: authData.memberId }
       });
     });
+    await Promise.allSettled(awaitedPostCommitTasks.map(task => task()));
     Promise.allSettled(asyncTasks.map(task => task()));
     Promise.allSettled(
       vespaJobs.map(async (job) => {

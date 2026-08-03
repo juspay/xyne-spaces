@@ -1654,6 +1654,17 @@ export const queries = defineQueries({
       )
       .orderBy('id', 'asc');
   }),
+  subTicketMappingsForTickets: defineQuery(
+    z.object({ ticketIds: z.array(z.string()) }),
+    ({ args: { ticketIds } }) => {
+      return zql.ticket_sub_ticket_mappings
+        .where(helpers => helpers.cmp('ticketId', 'IN', ticketIds))
+        .related('subTicket', subTicketQuery =>
+          subTicketQuery.related('conversation').related('mappedTicket'),
+        )
+        .orderBy('id', 'asc');
+    },
+  ),
   subTicketsByMappedTicketId: defineQuery(
     z.object({ mappedTicketId: z.string() }),
     ({ args: { mappedTicketId } }) => {
@@ -2546,6 +2557,13 @@ export const queries = defineQueries({
   ticketActivities: defineQuery(z.object({ ticketId: z.string() }), ({ args: { ticketId } }) => {
     return zql.ticket_activities.where('ticketId', ticketId).orderBy('timestamp', 'desc');
   }),
+  ticketActivitiesForTickets: defineQuery(
+    z.object({ ticketIds: z.array(z.string()) }),
+    ({ args: { ticketIds } }) =>
+      zql.ticket_activities
+        .where(helpers => helpers.cmp('ticketId', 'IN', ticketIds))
+        .orderBy('timestamp', 'asc'),
+  ),
   getCanvas: defineQuery(z.object({ canvasId: z.string() }), ({ ctx, args: { canvasId } }) => {
     // Backward-compat lookup: match by canonical id, userRepo (Quarto), and
     // the legacy viewAccessId/editAccessId columns so historical chat URLs
@@ -3332,6 +3350,9 @@ export const queries = defineQueries({
   // Lightweight forms query - only scalar fields (id, formName, etc.), no related data
   getAllFormsList: defineQuery(() => {
     return zql.forms.orderBy('createdAt', 'desc');
+  }),
+  getFormById: defineQuery(z.object({ formId: z.string() }), ({ args: { formId } }) => {
+    return zql.forms.where('id', formId).one();
   }),
   // Query for form fields by form ID
   // Order by sequenceNumber first; fall back to createdAt for rows where all sequenceNumbers are 0 (e.g. legacy data before backfill)

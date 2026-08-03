@@ -15,6 +15,7 @@ import { emitTicketUpdated } from '@/automations/triggers/ticket-updated.trigger
 import { FormFieldType, ActivityType } from '@xyne/shared';
 import { stringFromFormValue } from '@xyne/shared/zero';
 import { resolveFieldDefinitionById } from '@/utils/fieldDefinition';
+import { resolveFormActivityContext } from './form-entity-value-activity-context';
 
 const getPreviousFormEntityValue = (
   previousValue: FormEntityValuePreviousValue | undefined,
@@ -320,10 +321,14 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
 
       const ticket = await db.ticket.findUnique({
         where: { id: formEntityValue.entityId },
-        select: { boardId: true },
+        select: { boardId: true, metadata: true },
       });
 
-      if (!ticket || formEntityValue.contextId !== ticket.boardId) {
+      if (!ticket) {
+        return;
+      }
+      const activityContext = resolveFormActivityContext(ticket, formEntityValue.contextId);
+      if (!activityContext.allowed) {
         return;
       }
 
@@ -336,7 +341,6 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
       const previousRawValue = operation === 'update'
         ? getPreviousFormEntityValue(previousValue)
         : null;
-
       if (fieldDefinition.fieldType === FormFieldType.DOC) {
         await this.createFileFieldActivity(
           formEntityValue.entityId,
@@ -344,6 +348,7 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
           fieldDefinition.fieldName,
           stringFromFormValue(previousRawValue),
           stringFromFormValue(formEntityValue.actualFieldValue),
+          activityContext.name,
         );
         return;
       }
@@ -354,6 +359,7 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
         oldValue: previousRawValue,
         newValue: formEntityValue.actualFieldValue ?? formEntityValue.fieldValue,
         updatedBy: this.ctx.userID,
+        contextName: activityContext.name,
       });
     } catch (error) {
       logger.error('[FormEntityValuesSideEffectHandler] Failed to create form field activity:', {
@@ -370,6 +376,7 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
     fieldName: string,
     previousAttachmentId: string | null,
     nextAttachmentId: string | null,
+    contextName?: string,
   ): Promise<void> {
     if ((previousAttachmentId ?? null) === (nextAttachmentId ?? null)) return;
 
@@ -388,6 +395,7 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
       : nextAttachmentId
         ? 'added'
         : 'removed';
+    const formContextName = stage?.name ?? contextName;
 
     await db.ticketActivity.create({
       data: {
@@ -399,7 +407,7 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
           field: 'stageFormFile',
           fieldName,
           action,
-          ...(stage?.name ? { stageName: stage.name } : {}),
+          ...(formContextName ? { stageName: formContextName } : {}),
           ...(previousAttachmentId ? { oldValue: previousAttachmentId } : {}),
           ...(nextAttachmentId ? { newValue: nextAttachmentId } : {}),
           ...(previousAttachment?.originalFilename

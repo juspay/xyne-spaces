@@ -51,6 +51,7 @@ const buildTicketFromSummary = (summary: TicketCardSummary, workspaceId: string)
     eta: summary.eta ?? null,
     priority: summary.priority ?? TicketPriority.LOW,
     metadata: null,
+    rootId: null,
     closedAt: null,
     closedBy: null,
     xyneId: summary.xyneId ?? summary.id,

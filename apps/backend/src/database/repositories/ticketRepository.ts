@@ -29,6 +29,8 @@ import {
 import { versionReleaseMappingService } from '@/services/release/versionReleaseMappingService';
 import { dualWriteTicketTag, dualWriteTicketTags } from '@/services/ticketTagDualWriteService';
 import type { TicketLike } from '@/automations/triggers/ticket-context';
+import { dispatchCommittedTicketStatusChange } from '@/services/flowStatusChangeDispatcher';
+import { updateWhileFlowRunActive } from '@/services/flowActiveRunGuard';
 //import { queueTicketIngestion } from '@/queues/vespaQueue';
 
 const prisma = DatabaseClient.getInstance();
@@ -173,6 +175,7 @@ export class TicketRepository {
     // Create ticket with the conversationId, auto-assigned stageName, and calculated ETA
     const ticket = await db.ticket.create({
       data: {
+        ...(data.id && { id: data.id }),
         title: data.title,
         description: data.description,
         createdBy: data.createdBy,
@@ -190,6 +193,7 @@ export class TicketRepository {
         priority: data.priority || TicketPriority.LOW,
         ...(resolvedEta && { eta: resolvedEta }),
         metadata: data.metadata as Prisma.InputJsonValue,
+        ...(data.rootId && { rootId: data.rootId }),
         closedAt: data.closedAt,
         closedBy: data.closedBy,
         merchantId: data.merchantId,
@@ -281,6 +285,11 @@ export class TicketRepository {
       prAuthor?: string;
       remainingOpenPRs?: number;
     },
+    options: {
+      cascadeFlow?: boolean;
+      allowedCurrentStatuses?: readonly TicketStatusV2[];
+      requiredActiveFlowRootId?: string;
+    } = {},
   ) {
 
     // Get current ticket to capture old stage name, boardId, and statusV2
@@ -326,6 +335,50 @@ export class TicketRepository {
 
     if (!targetStage) {
       throw new Error(`Target stage "${newStageName}" not found in board ${currentTicket.boardId}`);
+    }
+
+    const newStatusV2 = targetStage.defaultTicketStatusV2;
+    const statusChanged = newStatusV2 !== oldStatusV2;
+    let guardedUpdatedTicket = null;
+    if (options.allowedCurrentStatuses) {
+      if (!options.allowedCurrentStatuses.includes(oldStatusV2)) return null;
+      try {
+        const update = (client: Prisma.TransactionClient | PrismaClient) =>
+          client.ticket.update({
+            where: {
+              id: ticketId,
+              statusV2: oldStatusV2,
+              stageName: oldStageName,
+            },
+            data: {
+              stageName: newStageName,
+              statusV2: newStatusV2,
+              updatedBy: updatedBy,
+              updatedAt: new Date(),
+            },
+          });
+        guardedUpdatedTicket = options.requiredActiveFlowRootId
+          ? await updateWhileFlowRunActive({
+              runTransaction: operation => prisma.$transaction(operation),
+              lockAndReadRootStatus: async tx => {
+                const [root] = await tx.$queryRaw<{ statusV2: TicketStatusV2 }[]>`
+                  SELECT "statusV2"
+                  FROM "tickets"
+                  WHERE "id" = ${options.requiredActiveFlowRootId}
+                  FOR UPDATE
+                `;
+                return root?.statusV2 ?? null;
+              },
+              update,
+            })
+          : await update(prisma);
+        if (!guardedUpdatedTicket) return null;
+      } catch (error) {
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
+          return null;
+        }
+        throw error;
+      }
     }
 
     const isForwardMovement = !currentStage || targetStage.sequenceNumber > currentStage.sequenceNumber;
@@ -450,19 +503,26 @@ export class TicketRepository {
       }
     }
 
-    const newStatusV2 = targetStage?.defaultTicketStatusV2;
-    const statusChanged = newStatusV2 && newStatusV2 !== oldStatusV2;
-
     // Update the ticket stage and status (synced with stage's default status)
-    const updatedTicket = await prisma.ticket.update({
-      where: { id: ticketId },
-      data: {
-        stageName: newStageName,
-        ...(newStatusV2 && { statusV2: newStatusV2 }),
-        updatedBy: updatedBy,
-        updatedAt: new Date()
-      }
-    });
+    const updatedTicket =
+      guardedUpdatedTicket ??
+      (await prisma.ticket.update({
+        where: { id: ticketId },
+        data: {
+          stageName: newStageName,
+          statusV2: newStatusV2,
+          updatedBy: updatedBy,
+          updatedAt: new Date()
+        }
+      }));
+
+    if (statusChanged && options.cascadeFlow !== false) {
+      await dispatchCommittedTicketStatusChange({
+        ticketId,
+        newStatus: newStatusV2,
+        actorUserId: updatedBy,
+      });
+    }
 
     await syncConversationTicketMdFromPrismaTicket(prisma, updatedTicket);
 
@@ -626,6 +686,38 @@ export class TicketRepository {
           `[TicketRepository] Created status change message for ticket ${ticketId} in conversation ${currentTicket.conversationId}`
         );
       }
+    }
+
+    const flowSnapshot = (
+      updatedTicket.metadata as {
+        flow?: {
+          nodeSnapshot?: {
+            planNodeId?: string;
+            title?: string;
+            gate?: { type?: string; prompt?: string };
+          };
+        };
+      } | null
+    )?.flow?.nodeSnapshot;
+    if (
+      newStatusV2 === TicketStatusV2.COMPLETED &&
+      oldStatusV2 !== TicketStatusV2.COMPLETED &&
+      flowSnapshot?.gate?.type === 'confirmation'
+    ) {
+      await prisma.ticketActivity.create({
+        data: {
+          ticketId,
+          updatedBy,
+          activityType: ActivityType.METADATA,
+          value: {
+            field: 'flowConfirmation',
+            planNodeId: flowSnapshot.planNodeId ?? null,
+            prompt: flowSnapshot.gate.prompt?.trim() || null,
+            confirmationText:
+              flowSnapshot.gate.prompt?.trim() || flowSnapshot.title?.trim() || null,
+          } as Prisma.InputJsonValue,
+        },
+      });
     }
 
     return updatedTicket;
@@ -881,6 +973,7 @@ export class TicketRepository {
       aiPriority?: string;
     },
     updatedBy: string,
+    options: { cascadeFlow?: boolean } = {},
   ): Promise<void> {
     const data: Record<string, unknown> = { updatedBy, updatedAt: new Date() };
     if (fields.title !== undefined) data.title = fields.title;
@@ -944,6 +1037,19 @@ export class TicketRepository {
     const previousStatus: TicketStatusV2 | null = prevSnapshot?.statusV2 ?? null;
 
     const updatedTicket = await prisma.ticket.update({ where: { id: ticketId }, data });
+
+    if (
+      fields.statusV2 !== undefined
+      && fields.statusV2 !== previousStatus
+      && options.cascadeFlow !== false
+    ) {
+      await dispatchCommittedTicketStatusChange({
+        ticketId,
+        newStatus: fields.statusV2,
+        actorUserId: updatedBy,
+      });
+    }
+
     await syncConversationTicketMdFromPrismaTicket(prisma, updatedTicket);
 
     if (

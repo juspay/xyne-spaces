@@ -1,14 +1,22 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
 import { Board, Stage } from '@prisma/client';
-import { PRStatusEvent, BoardType } from '@xyne/shared';
+import {
+  BoardType,
+  FLOW_STAGE_TRANSITIONS,
+  PRStatusEvent,
+  serializeFlowPlan,
+  TicketStatusV2,
+  type FlowPlan,
+} from '@xyne/shared';
 import { EntitySequenceService } from '@/services/entitySequenceService';
 
 
 export interface CreateStageInput {
   name: string;
-  eta: number;
+  eta?: number;
   sequenceNumber: number;
+  defaultTicketStatusV2?: TicketStatusV2;
   prStatuses?: PRStatusEvent[];
 }
 
@@ -20,6 +28,7 @@ export interface CreateBoardInput {
   workspaceId: string;
   boardType?: BoardType;
   metadata?: Record<string, unknown>;
+  flowPlan?: FlowPlan;
 }
 
 export interface CreateBoardWithStagesInput extends CreateBoardInput {
@@ -83,6 +92,7 @@ export class BoardRepository {
           createdBy: data.createdBy,
           boardType: data.boardType || BoardType.DEFAULT,
           ...(data.metadata !== undefined && { metadata: data.metadata  as Prisma.InputJsonValue}),
+          ...(data.flowPlan !== undefined && { flowPlan: serializeFlowPlan(data.flowPlan) }),
         },
       });
 
@@ -98,11 +108,14 @@ export class BoardRepository {
           currentMaxSequence = Math.max(currentMaxSequence, sequenceNumber);
           stagesToCreate.push({
             name: stage.name,
-            eta: stage.eta,
+            eta: stage.eta ?? 0,
             sequenceNumber,
             boardId: board.id,
             workspaceId: data.workspaceId,
             createdBy: data.createdBy,
+            ...(stage.defaultTicketStatusV2 && {
+              defaultTicketStatusV2: stage.defaultTicketStatusV2,
+            }),
           });
         }
 
@@ -134,6 +147,21 @@ export class BoardRepository {
           ...stage,
           prStatuses: prStatusMap.get(stage.id) || [],
         }));
+
+        if (board.boardType === BoardType.FLOW) {
+          const stageByName = new Map(rawStages.map(stage => [stage.name, stage]));
+          await tx.stageTransition.createMany({
+            data: FLOW_STAGE_TRANSITIONS.map(([fromName, toName]) => ({
+              boardId: board.id,
+              fromStageId: stageByName.get(fromName)!.id,
+              toStageId: stageByName.get(toName)!.id,
+              requiresApproval: false,
+              bypassApprovalForAutomation: true,
+              createdAt: new Date(),
+            })),
+            skipDuplicates: true,
+          });
+        }
 
         // Sync PR status mappings for each stage (in case input had them)
         for (let i = 0; i < stages.length; i++) {
@@ -244,10 +272,10 @@ export class BoardRepository {
     return !!(existing && existing.id !== excludeId);
   }
 
-  async findBoardById(id: string): Promise<{ name: string } | null> {
+  async findBoardById(id: string): Promise<{ name: string; boardType: BoardType } | null> {
     return await this.db.board.findUnique({
       where: { id },
-      select: { name: true },
+      select: { name: true, boardType: true },
     });
   }
 

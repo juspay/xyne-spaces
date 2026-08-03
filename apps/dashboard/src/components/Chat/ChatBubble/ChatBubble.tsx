@@ -292,6 +292,14 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     return ((initMsg?.metadata as Record<string, unknown>)?.['ticketId'] as string) || '';
   }, [context, isTicketThread, conversation]);
 
+  const [threadTicket] = useCachedQuery(queries.ticketByIdV2({ ticketId: threadTicketId }), {
+    enabled: !!threadTicketId,
+  });
+  const isFlowStep = !!(
+    threadTicket?.metadata as { flow?: { planNodeId?: string } } | null | undefined
+  )?.flow?.planNodeId;
+  const canNestSubTicket = !isThreadTicketSubTicket || isFlowStep;
+
   // Mark activities as read when message becomes visible
   // const observerRef = useIntersectionObserver(() => {
   //   void zero.mutate(mutators.activities.markActivitiesSeenByMessageId({
@@ -979,7 +987,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       ...(context === 'thread' &&
         !isMessageDeleted &&
         isTicketThread &&
-        !isThreadTicketSubTicket &&
+        canNestSubTicket &&
         !isFirstInThread && {
           onCreateSubTicket: handleCreateSubTicket,
         }),
@@ -1429,7 +1437,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       {conversation &&
         context === 'thread' &&
         isTicketThread &&
-        !isThreadTicketSubTicket &&
+        canNestSubTicket &&
         isSubTicketModalOpen && (
           <SubTicketModal
             isOpen

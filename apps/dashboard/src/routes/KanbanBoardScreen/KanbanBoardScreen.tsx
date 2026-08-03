@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef, useDeferredValue } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import type { QueryResultType } from '@rocicorp/zero';
 import { toast } from 'sonner';
 import { useQuery } from '@tanstack/react-query';
 import { logger, Event } from '../../utils/logger';
@@ -26,8 +27,28 @@ import {
   BarChart3,
   Bookmark,
   Share2,
+  GitBranch,
+  Pencil,
+  CheckCircle2,
+  XCircle,
+  Download,
+  FileSpreadsheet,
+  FileText,
+  Archive,
+  CircleMinus,
 } from 'lucide-react';
 import { CalendarView } from '../../components/Tickets/CalendarView';
+import ReactFlow, {
+  Background,
+  BackgroundVariant,
+  MarkerType,
+  MiniMap,
+  Panel,
+  type Edge,
+  type Node,
+  type ReactFlowInstance,
+} from 'reactflow';
+import 'reactflow/dist/style.css';
 import {
   DndContext,
   DragOverlay,
@@ -69,6 +90,7 @@ import type {
 } from '@xyne/shared';
 import {
   TicketStatusV2,
+  ActivityType,
   FormContextType,
   FormEntityType,
   FormFieldType,
@@ -78,7 +100,57 @@ import {
   isDeskChannelType,
   parseFieldOptions,
   type FieldEnumOption,
+  FLOW_STAGE_NAMES,
+  FlowPlanModel,
+  deserializeFlowPlan,
+  type FlowDecisionOutcome,
+  type FlowPlanNode,
 } from '@xyne/shared';
+import {
+  FlowNodeSidePanel,
+  type FlowNodeSelection,
+} from '../../components/Board/FlowRun/FlowNodeSidePanel';
+import {
+  mapPlanToRunTickets,
+  getFlowMeta,
+  flowRuntimeStatusOf,
+  isFlowStepBacklogged,
+  nextFlowWaitingNode,
+  type FlowRunTicket,
+} from '../../components/Board/FlowRun/flowRun.utils';
+import {
+  buildFlowRunModel,
+  runPlanNode,
+  sameFlowPlanNode,
+  sameFlowRunTicket,
+  summarizeFlowRuns,
+  type FlowRunSummary,
+} from '../../components/Board/FlowRun/flowRunModel';
+import {
+  buildFlowRunExportRows,
+  downloadFlowRunsExcel,
+  downloadFlowRunsPdf,
+} from '../../components/Board/FlowRun/flowRunExport';
+import {
+  FLOW_NODE_TYPES,
+  type FlowTicketNodeData,
+} from '../../components/Board/FlowRun/FlowTicketNodeCard';
+import {
+  collapsedGroupCoverHeight,
+  flowGroupColor,
+  type FlowGroupNodeData,
+} from '../../components/Board/FlowRun/FlowGroupNode';
+import {
+  getStatusOption,
+  STATUS_OPTIONS,
+} from '../../components/Board/BoardStageConfigScreen/BoardStageConfigScreen.types';
+import {
+  computeFlowLayout,
+  computeGroupInternalLayout,
+  VIRTUAL_ROOT_ID as FLOW_VIRTUAL_ROOT_ID,
+  CARD_WIDTH as FLOW_CARD_WIDTH,
+  type FlowLayoutItem,
+} from '../../components/Board/FlowPlanEditor/FlowPlanEditor.utils';
 import type { Stage } from './KanbanBoardScreen.types';
 import {
   getStageColor,
@@ -92,6 +164,10 @@ import {
   ticketsHaveSameBoardSnapshot,
 } from './KanbanBoardScreen.utils';
 import { TicketTable } from '../../components/Tickets/TicketTable/TicketTable';
+import {
+  getActivityDescription,
+  getActivityIcon,
+} from '../../components/Tickets/TicketActivity/TicketActivity';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import Tooltip from '../../components/ui/Tooltip';
 import Avatar from '../../components/ui/Avatar/Avatar';
@@ -121,6 +197,8 @@ import { useZero } from '../../hooks/useZero';
 import { useBoardsSlaPolicies } from '../../hooks/useChannelSlaPolicy';
 import { useKanbanCounts } from './useKanbanCounts';
 import { valuesToFilters } from '../../utils/savedViewSerialization';
+import { useConfirmDialog } from '../../hooks/useConfirmDialog';
+import { getApiErrorMessage } from '../../utils/apiError';
 
 type SavedConfigValue = {
   id: string;
@@ -229,6 +307,25 @@ type KanbanLocalTicket = Ticket & {
   >;
 };
 
+// 'flow' is the dedicated mode for FLOW boards (plan-driven run graph); it is
+// never offered in the layout toggle and only reachable on flow boards.
+type LayoutView = 'kanban' | 'table' | 'calendar' | 'flow';
+type TicketGraphMapping = QueryResultType<typeof queries.subTicketMappingsForTickets>[number];
+type TicketGraphSubTicket = NonNullable<TicketGraphMapping['subTicket']>;
+
+interface TicketGraphNode {
+  key: string;
+  ticket?: Ticket;
+  subTicket?: TicketGraphSubTicket;
+  displayId: string;
+  title: string;
+  statusLabel?: string;
+  priority?: TicketPriority | null;
+  assignedTo?: string | null;
+  depth: number;
+  children: TicketGraphNode[];
+}
+
 function parseGroupBy(raw: string): GroupByType {
   try {
     const parsed: unknown = JSON.parse(raw);
@@ -268,6 +365,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const { baseRoute, buildChannelRoute } = useRouteContext();
   const canCreateTicket = useCanCreateTicket(); // Check ticket permissions
   const zero = useZero();
+  const { confirm, ConfirmDialog } = useConfirmDialog();
   const isDraggingRef = useRef(false);
 
   // ── Latency instrumentation ──────────────────────────────────────────
@@ -312,6 +410,13 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const [kanbanTicketsByColumn, setKanbanTicketsByColumn] = useState<Record<string, Ticket[]>>({});
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [isCustomizeOpen, setIsCustomizeOpen] = useState(false);
+  const [flowSelection, setFlowSelection] = useState<FlowNodeSelection | null>(null);
+  const [collapsedFlowGroups, setCollapsedFlowGroups] = useState<Set<string>>(new Set());
+  const [flowLegendOpen, setFlowLegendOpen] = useState(false);
+  const [flowActivityOpen, setFlowActivityOpen] = useState(false);
+  const [flowRunExporting, setFlowRunExporting] = useState<'excel' | 'pdf' | null>(null);
+  const [flowGroupBacklogPendingId, setFlowGroupBacklogPendingId] = useState<string | null>(null);
+  const collapseInitRunRef = useRef<string | null>(null);
   const channel = useChannel(channelId || '');
   const isEmailChannel = channel?.type === ChannelType.EMAIL;
 
@@ -477,8 +582,34 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     setIsCreateModalOpen(true);
   }, [searchParams]);
   const [state, send] = useMachine(ticketFiltersMachine);
-  const layoutView = searchParams.get('layout') ?? 'kanban';
+  const requestedLayoutView = searchParams.get('layout');
+  const layoutView: LayoutView =
+    requestedLayoutView === 'table' ||
+    requestedLayoutView === 'calendar' ||
+    requestedLayoutView === 'flow'
+      ? requestedLayoutView
+      : 'kanban';
   const isKanbanLayout = layoutView === 'kanban';
+  // Flow view: the open run lives in the URL so browser back returns to the
+  // main-tickets grid and run links are shareable.
+  const selectedGraphRootTicketId = layoutView === 'flow' ? searchParams.get('run') : null;
+  const setSelectedGraphRootTicketId = useCallback(
+    (ticketId: string | null, opts?: { replace?: boolean }) => {
+      setSearchParams(
+        prev => {
+          const next = new URLSearchParams(prev);
+          if (ticketId) {
+            next.set('run', ticketId);
+          } else {
+            next.delete('run');
+          }
+          return next;
+        },
+        opts?.replace ? { replace: true } : undefined,
+      );
+    },
+    [setSearchParams],
+  );
   const groupBy: GroupByType = useMemo(
     () => parseGroupBy(state.context.groupBy),
     [state.context.groupBy],
@@ -903,6 +1034,82 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
   // Detect non-linear board type
   const isNonLinearBoard = selectedBoardDetail?.boardType === BoardType.NON_LINEAR;
+
+  // Flow actions need a project id even where the URL has none (e.g. the
+  // my-tickets view with a flow board selected in the filter) — fall back to
+  // the board's own project.
+  const isFlowBoard = selectedBoardDetail?.boardType === BoardType.FLOW;
+  const flowProjectId = effectiveProjectId || selectedBoardDetail?.projectId || null;
+  const flowModel = useMemo((): FlowPlanModel | null => {
+    if (!isFlowBoard) return null;
+    const flowPlan = selectedBoardDetail?.flowPlan;
+    return flowPlan ? new FlowPlanModel(deserializeFlowPlan(flowPlan)) : null;
+  }, [isFlowBoard, selectedBoardDetail]);
+
+  useEffect(() => {
+    if (isFlowBoard && layoutView !== 'flow') {
+      setSearchParams(
+        prev => {
+          const next = new URLSearchParams(prev);
+          next.set('layout', 'flow');
+          return next;
+        },
+        { replace: true },
+      );
+    } else if (
+      !isFlowBoard &&
+      layoutView === 'flow' &&
+      // no single board selected (e.g. All Boards) — flow view is meaningless;
+      // with a single board, wait for its detail to load before deciding
+      (!filteredSingleBoardId || selectedBoardDetail)
+    ) {
+      setSearchParams(
+        prev => {
+          const next = new URLSearchParams(prev);
+          next.set('layout', 'kanban');
+          next.delete('run');
+          return next;
+        },
+        { replace: true },
+      );
+    }
+  }, [isFlowBoard, selectedBoardDetail, filteredSingleBoardId, layoutView, setSearchParams]);
+
+  const handleFlowStatusChange = useCallback(
+    async (ticketId: string, statusV2: TicketStatusV2): Promise<void> => {
+      const result = zero.mutate(
+        mutators.ticket.update({
+          id: ticketId,
+          statusV2,
+          stageName: FLOW_STAGE_NAMES[statusV2],
+          updatedAt: Date.now(),
+        }),
+      );
+      const response = await result.server;
+      if (response?.type === 'error') {
+        throw new Error(response.error.message || 'Failed to update status');
+      }
+    },
+    [zero],
+  );
+
+  const handleFlowStepBacklog = useCallback(
+    async (ticketId: string): Promise<void> => {
+      const result = zero.mutate(
+        mutators.ticket.update({
+          id: ticketId,
+          statusV2: TicketStatusV2.PAUSED,
+          stageName: FLOW_STAGE_NAMES.BACKLOG,
+          updatedAt: Date.now(),
+        }),
+      );
+      const response = await result.server;
+      if (response?.type === 'error') {
+        throw new Error(response.error.message || 'Failed to move step to backlog');
+      }
+    },
+    [zero],
+  );
 
   // Transitions (with approvers) are fetched via the dedicated query, not embedded in boardDetailById.
   const [boardStageTransitions] = useCachedQuery(
@@ -1617,6 +1824,1224 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     logEntityTiming('filteredTickets');
   }
 
+  const graphTickets = useMemo(() => filteredTickets ?? [], [filteredTickets]);
+  const graphTicketIds = useMemo(
+    () => (layoutView === 'flow' ? graphTickets.map(ticket => ticket.id) : []),
+    [graphTickets, layoutView],
+  );
+  const flowRunActivityTicketIds = useMemo(() => {
+    if (!flowActivityOpen || !isFlowBoard || !selectedGraphRootTicketId) return [];
+    return graphTickets
+      .filter(
+        ticket =>
+          ticket.id === selectedGraphRootTicketId || ticket.rootId === selectedGraphRootTicketId,
+      )
+      .map(ticket => ticket.id);
+  }, [flowActivityOpen, graphTickets, isFlowBoard, selectedGraphRootTicketId]);
+  const [flowRunActivities] = useCachedQuery(
+    queries.ticketActivitiesForTickets({ ticketIds: flowRunActivityTicketIds }),
+    {
+      enabled:
+        flowActivityOpen &&
+        isFlowBoard &&
+        !!selectedGraphRootTicketId &&
+        flowRunActivityTicketIds.length > 0,
+    },
+  );
+  const flowRunTimelineActivities = useMemo(
+    () =>
+      (flowRunActivities ?? []).filter(activity => {
+        if (activity.activityType !== ActivityType.STATUS) return true;
+        const value = activity.value as { field?: string } | null;
+        return value?.field === 'stageName';
+      }),
+    [flowRunActivities],
+  );
+  const flowRunTicketById = useMemo(
+    () => new Map(graphTickets.map(ticket => [ticket.id, ticket])),
+    [graphTickets],
+  );
+  const [graphSubTicketMappings] = useCachedQuery(
+    queries.subTicketMappingsForTickets({ ticketIds: graphTicketIds }),
+    {
+      enabled: layoutView === 'flow' && graphTicketIds.length > 0,
+    },
+  );
+  const ticketGraphNodes = useMemo(() => {
+    const ticketsById = new Map<string, Ticket>();
+    graphTickets.forEach(ticket => ticketsById.set(ticket.id, ticket));
+    const mappingsByParent = new Map<string, TicketGraphMapping[]>();
+    const childTicketIds = new Set<string>();
+    graphSubTicketMappings?.forEach(mapping => {
+      const mappings = mappingsByParent.get(mapping.ticketId);
+      if (mappings) {
+        mappings.push(mapping);
+      } else {
+        mappingsByParent.set(mapping.ticketId, [mapping]);
+      }
+      const subTicket = mapping.subTicket;
+      if (subTicket?.mappedTicketId) {
+        childTicketIds.add(subTicket.mappedTicketId);
+      }
+      if (subTicket?.mappedTicket && !ticketsById.has(subTicket.mappedTicket.id)) {
+        ticketsById.set(subTicket.mappedTicket.id, subTicket.mappedTicket as Ticket);
+      }
+    });
+    const toTicketNode = (
+      ticket: Ticket,
+      depth: number,
+      visitedTicketIds: Set<string>,
+      subTicket?: TicketGraphSubTicket,
+    ): TicketGraphNode => {
+      const childMappings = mappingsByParent.get(ticket.id) ?? [];
+      const children = childMappings
+        .map(mapping => {
+          const childSubTicket = mapping.subTicket;
+          if (!childSubTicket) return null;
+          const mappedTicket = childSubTicket.mappedTicketId
+            ? ticketsById.get(childSubTicket.mappedTicketId)
+            : undefined;
+          if (mappedTicket && !visitedTicketIds.has(mappedTicket.id)) {
+            return toTicketNode(
+              mappedTicket,
+              depth + 1,
+              new Set([...visitedTicketIds, mappedTicket.id]),
+              childSubTicket,
+            );
+          }
+          return {
+            key: `sub-ticket:${childSubTicket.id}`,
+            subTicket: childSubTicket,
+            displayId: childSubTicket.id.substring(0, 8).toUpperCase(),
+            title: childSubTicket.title || 'Untitled sub-ticket',
+            depth: depth + 1,
+            children: [],
+          } satisfies TicketGraphNode;
+        })
+        .filter((node): node is TicketGraphNode => node !== null);
+      return {
+        key: ticket.id,
+        ticket,
+        ...(subTicket ? { subTicket } : {}),
+        displayId: ticket.xyneId || ticket.id.substring(0, 8).toUpperCase(),
+        title: ticket.title || 'Untitled Ticket',
+        statusLabel: ticket.stageName || ticket.statusV2,
+        priority: ticket.priority ?? null,
+        assignedTo: ticket.assignedTo ?? null,
+        depth,
+        children,
+      };
+    };
+    const rootTickets = graphTickets.filter(ticket => !childTicketIds.has(ticket.id));
+    const roots = rootTickets.length > 0 ? rootTickets : graphTickets;
+    return roots.map(ticket => toTicketNode(ticket, 0, new Set([ticket.id])));
+  }, [graphSubTicketMappings, graphTickets]);
+  useEffect(() => {
+    if (!selectedGraphRootTicketId || ticketsDetails.type !== 'complete') return;
+    if (!ticketGraphNodes.some(root => root.key === selectedGraphRootTicketId)) {
+      setSelectedGraphRootTicketId(null, { replace: true });
+    }
+  }, [
+    selectedGraphRootTicketId,
+    setSelectedGraphRootTicketId,
+    ticketGraphNodes,
+    ticketsDetails.type,
+  ]);
+  useEffect(() => {
+    if (!selectedGraphRootTicketId) setFlowSelection(null);
+  }, [selectedGraphRootTicketId]);
+  const selectedFlowRunModel = useMemo(() => {
+    if (!flowModel || !selectedGraphRootTicketId) return null;
+    const flowTickets = graphTickets as unknown as FlowRunTicket[];
+    const rootTicket = flowTickets.find(ticket => ticket.id === selectedGraphRootTicketId);
+    if (!rootTicket) return null;
+    return buildFlowRunModel(
+      flowModel,
+      rootTicket,
+      mapPlanToRunTickets(flowTickets, selectedGraphRootTicketId),
+    );
+  }, [flowModel, graphTickets, selectedGraphRootTicketId]);
+  const handleFlowGroupBacklog = useCallback(
+    async (groupId: string): Promise<void> => {
+      if (!selectedFlowRunModel || !selectedGraphRootTicketId || flowGroupBacklogPendingId) return;
+      const group = selectedFlowRunModel.getGroup(groupId);
+      if (!group) return;
+      const memberCount = selectedFlowRunModel.descendantMembersOf(groupId).length;
+      const accepted = await confirm({
+        title: `Move "${group.name || 'Group'}" to backlog?`,
+        description: `This will create any missing tickets and move all ${memberCount} non-terminal steps${selectedFlowRunModel.childGroupsOf(groupId).length > 0 ? ', including nested groups,' : ''} to backlog. Completed, cancelled, and skipped steps stay unchanged.`,
+        confirmLabel: 'Move to backlog',
+      });
+      if (!accepted) return;
+      setFlowGroupBacklogPendingId(groupId);
+      try {
+        const response = await apiInstance.post<{
+          createdCount: number;
+          backloggedCount: number;
+          unchangedCount: number;
+        }>(
+          `/tickets/${encodeURIComponent(selectedGraphRootTicketId)}/flow-groups/${encodeURIComponent(groupId)}/backlog`,
+        );
+        const { backloggedCount, createdCount } = response.data;
+        toast.success(
+          `${backloggedCount} ${backloggedCount === 1 ? 'step' : 'steps'} moved to backlog`,
+          createdCount > 0
+            ? {
+                description: `${createdCount} missing ${createdCount === 1 ? 'ticket was' : 'tickets were'} created.`,
+              }
+            : undefined,
+        );
+      } catch (error) {
+        toast.error('Failed to move group to backlog', {
+          description: getApiErrorMessage(error, 'Please retry.'),
+        });
+      } finally {
+        setFlowGroupBacklogPendingId(null);
+      }
+    },
+    [confirm, flowGroupBacklogPendingId, selectedFlowRunModel, selectedGraphRootTicketId],
+  );
+  const selectedFlowRunBacklogs = useMemo((): FlowNodeSelection[] => {
+    if (!selectedFlowRunModel || !selectedGraphRootTicketId) return [];
+    const runTickets = mapPlanToRunTickets(
+      graphTickets as unknown as FlowRunTicket[],
+      selectedGraphRootTicketId,
+    );
+    const hasWaitingStep = [...runTickets.values()].some(
+      ticket =>
+        !isFlowStepBacklogged(ticket) &&
+        (ticket.statusV2 === TicketStatusV2.PAUSED || ticket.statusV2 === TicketStatusV2.STARTED),
+    );
+    if (hasWaitingStep) return [];
+    return selectedFlowRunModel.nodes
+      .map(planNode => ({ planNode, ticket: runTickets.get(planNode.id) ?? null, skipped: false }))
+      .filter((step): step is { planNode: FlowPlanNode; ticket: FlowRunTicket; skipped: boolean } =>
+        isFlowStepBacklogged(step.ticket),
+      )
+      .sort((left, right) => left.planNode.order - right.planNode.order);
+  }, [graphTickets, selectedFlowRunModel, selectedGraphRootTicketId]);
+  const flowRunGraph = useMemo((): {
+    nodes: Node<FlowTicketNodeData | FlowGroupNodeData>[];
+    edges: Edge[];
+    locked: Set<string>;
+  } => {
+    const empty = { nodes: [], edges: [], locked: new Set<string>() };
+    if (!isFlowBoard || !selectedFlowRunModel || !selectedGraphRootTicketId) return empty;
+    const rootTicket =
+      (graphTickets.find(
+        ticket => ticket.id === selectedGraphRootTicketId,
+      ) as unknown as FlowRunTicket) ?? null;
+    if (!rootTicket) return empty;
+    const ticketsByPlanNodeId = mapPlanToRunTickets(
+      graphTickets as unknown as FlowRunTicket[],
+      selectedGraphRootTicketId,
+    );
+    const runModel = selectedFlowRunModel;
+    const statusByPlanNodeId = new Map(
+      [...ticketsByPlanNodeId].map(([planNodeId, ticket]) => [
+        planNodeId,
+        flowRuntimeStatusOf(ticket),
+      ]),
+    );
+    const decisionOutcomeById = new Map<string, FlowDecisionOutcome>();
+    for (const decision of runModel.decisions) {
+      const outcome = getFlowMeta(ticketsByPlanNodeId.get(decision.parentNodeId) ?? {})
+        ?.decisionOutcomes?.[decision.id];
+      if (outcome) decisionOutcomeById.set(decision.id, outcome);
+    }
+    const skipped = runModel.skippedPlanNodeIds(
+      statusByPlanNodeId,
+      rootTicket.statusV2 === TicketStatusV2.CANCELLED,
+      decisionOutcomeById,
+    );
+    const skippedWithoutDecisions = runModel.skippedPlanNodeIds(
+      statusByPlanNodeId,
+      rootTicket.statusV2 === TicketStatusV2.CANCELLED,
+    );
+    const decisionSkipped = new Set(
+      [...skipped].filter(planNodeId => !skippedWithoutDecisions.has(planNodeId)),
+    );
+    const rootPaused = rootTicket.statusV2 === TicketStatusV2.PAUSED;
+    const locked = rootPaused
+      ? new Set(runModel.nodes.map(planNode => planNode.id))
+      : new Set<string>();
+    // Groups carry outer edges; member tickets remain inside the cover.
+    const activeGroups = runModel.activeGroups;
+    const activeGroupIds = runModel.activeGroupIds;
+    const skippedGroupIds = new Set(
+      activeGroups
+        .filter(
+          group => runModel.deriveGroupStatus(group.id, statusByPlanNodeId, skipped) === 'SKIPPED',
+        )
+        .map(group => group.id),
+    );
+    const coverId = (groupId: string): string => `flow-group:${groupId}`;
+    const displayId = (planId: string): string =>
+      activeGroupIds.has(planId) ? coverId(planId) : planId;
+    const runtimeParentIds = (parentIds: string[]): string[] =>
+      parentIds.map(parentId => runModel.getDecision(parentId)?.parentNodeId ?? parentId);
+    const collapsedIds = new Set(
+      [...collapsedFlowGroups].filter(groupId => activeGroupIds.has(groupId)),
+    );
+    const hiddenPlanNodeIds = new Set(
+      runModel.nodes
+        .filter(planNode => {
+          if (!planNode.groupId) return false;
+          const group = runModel.getGroup(planNode.groupId);
+          return (
+            collapsedIds.has(planNode.groupId) ||
+            (!!group?.groupId && collapsedIds.has(group.groupId))
+          );
+        })
+        .map(planNode => planNode.id),
+    );
+    const STEP_CARD_HEIGHT = 118;
+    const nestedGroups = activeGroups.filter(group => !!group.groupId);
+    const topGroups = activeGroups.filter(group => !group.groupId);
+    const internalByGroup = new Map(
+      nestedGroups.map(group => [
+        group.id,
+        computeGroupInternalLayout(
+          runModel.membersOf(group.id).map(member => ({
+            ...member,
+            order: runModel.layoutOrder(member.id),
+            parentIds: runtimeParentIds(member.parentIds),
+          })),
+          STEP_CARD_HEIGHT,
+        ),
+      ]),
+    );
+    const coverSizeOf = (groupId: string): { width: number; height: number } => {
+      if (collapsedIds.has(groupId)) {
+        return {
+          width: FLOW_CARD_WIDTH,
+          height: collapsedGroupCoverHeight(
+            runModel.membersOf(groupId).length + runModel.childGroupsOf(groupId).length,
+          ),
+        };
+      }
+      const content = internalByGroup.get(groupId);
+      return content
+        ? { width: content.width, height: content.height }
+        : { width: FLOW_CARD_WIDTH, height: STEP_CARD_HEIGHT };
+    };
+    for (const group of topGroups) {
+      const children = runModel
+        .childGroupsOf(group.id)
+        .filter(child => activeGroupIds.has(child.id));
+      const childIds = new Set(children.map(child => child.id));
+      internalByGroup.set(
+        group.id,
+        computeGroupInternalLayout(
+          runModel.membersOf(group.id).map(member => ({
+            ...member,
+            order: runModel.layoutOrder(member.id),
+            parentIds: runtimeParentIds(member.parentIds).map(parentId =>
+              childIds.has(parentId) ? coverId(parentId) : parentId,
+            ),
+          })),
+          STEP_CARD_HEIGHT,
+          [],
+          100,
+          children.map(child => ({
+            id: coverId(child.id),
+            parentIds: runtimeParentIds(child.parentIds).map(parentId =>
+              childIds.has(parentId) ? coverId(parentId) : parentId,
+            ),
+            order: runModel.layoutOrder(child.id),
+            ...coverSizeOf(child.id),
+          })),
+        ),
+      );
+    }
+    const layoutItems: FlowLayoutItem[] = [
+      ...runModel.nodes
+        .filter(planNode => !planNode.groupId || !activeGroupIds.has(planNode.groupId))
+        .map(planNode => ({
+          id: planNode.id,
+          parentIds: runtimeParentIds(planNode.parentIds).map(displayId),
+          order: runModel.layoutOrder(planNode.id),
+          width: FLOW_CARD_WIDTH,
+          height: STEP_CARD_HEIGHT,
+        })),
+      ...topGroups.map(group => ({
+        id: coverId(group.id),
+        parentIds: runtimeParentIds(group.parentIds).map(displayId),
+        order: runModel.layoutOrder(group.id),
+        ...coverSizeOf(group.id),
+      })),
+    ];
+    const layout = computeFlowLayout(layoutItems, STEP_CARD_HEIGHT);
+    for (const group of topGroups) {
+      const coverPosition = layout.get(coverId(group.id));
+      const internal = internalByGroup.get(group.id);
+      if (!coverPosition || !internal) continue;
+      for (const [memberId, relative] of internal.memberPositions) {
+        layout.set(memberId, {
+          x: coverPosition.x + relative.x,
+          y: coverPosition.y + relative.y,
+        });
+      }
+      for (const child of runModel.childGroupsOf(group.id)) {
+        const childCoverPosition = layout.get(coverId(child.id));
+        const childInternal = internalByGroup.get(child.id);
+        if (!childCoverPosition || !childInternal) continue;
+        for (const [memberId, relative] of childInternal.memberPositions) {
+          layout.set(memberId, {
+            x: childCoverPosition.x + relative.x,
+            y: childCoverPosition.y + relative.y,
+          });
+        }
+      }
+    }
+    const toggleGroup = (groupId: string): void => {
+      setCollapsedFlowGroups(prev => {
+        const next = new Set(prev);
+        if (next.has(groupId)) {
+          next.delete(groupId);
+        } else {
+          next.add(groupId);
+        }
+        return next;
+      });
+      // Collapsing hides the member the panel may be showing
+      setFlowSelection(prev => {
+        const selectedGroup = prev?.planNode?.groupId
+          ? runModel.getGroup(prev.planNode.groupId)
+          : undefined;
+        return prev?.planNode?.groupId === groupId || selectedGroup?.groupId === groupId
+          ? null
+          : prev;
+      });
+    };
+    const memberStatusChip = (member: FlowPlanNode): React.ReactNode => {
+      const ticket = ticketsByPlanNodeId.get(member.id) ?? null;
+      if (isFlowStepBacklogged(ticket)) {
+        return (
+          <span className='flex shrink-0 items-center text-amber-600' title='Backlog'>
+            <Archive size={12} />
+          </span>
+        );
+      }
+      const statusOption = ticket ? getStatusOption(flowRuntimeStatusOf(ticket)) : null;
+      if (statusOption) {
+        return (
+          <span className='flex shrink-0 items-center' title={statusOption.label}>
+            {statusOption.icon}
+          </span>
+        );
+      }
+      if (skipped.has(member.id)) {
+        return (
+          <span className='shrink-0 text-[10px] text-muted-foreground' title='Skipped'>
+            —
+          </span>
+        );
+      }
+      return (
+        <span className='flex shrink-0 items-center opacity-60' title='To Do'>
+          {getStatusOption(TicketStatusV2.TODO)?.icon}
+        </span>
+      );
+    };
+    const groupNodes: Node<FlowGroupNodeData>[] = [...topGroups, ...nestedGroups]
+      .filter(group => !group.groupId || !collapsedIds.has(group.groupId))
+      .map(group => {
+        const members = runModel.descendantMembersOf(group.id);
+        const allBacklogged =
+          members.length > 0 &&
+          members.every(member => isFlowStepBacklogged(ticketsByPlanNodeId.get(member.id)));
+        const groupStatus = runModel.deriveGroupStatus(group.id, statusByPlanNodeId, skipped);
+        const allSettled = members.every(
+          member =>
+            skipped.has(member.id) ||
+            ticketsByPlanNodeId.get(member.id)?.statusV2 === TicketStatusV2.CANCELLED,
+        );
+        const statusOption =
+          groupStatus && groupStatus !== 'SKIPPED'
+            ? getStatusOption(groupStatus as TicketStatusV2)
+            : null;
+        const isCollapsed = collapsedIds.has(group.id);
+        const targetEntityIds = new Set([
+          ...runModel.groupAndAncestorIds(group.id),
+          ...runModel.childGroupsOf(group.id).map(child => child.id),
+          ...members.map(member => member.id),
+        ]);
+        const unresolvedDecision = runModel.decisions.find(decision => {
+          if (decisionOutcomeById.has(decision.id) || skipped.has(decision.parentNodeId)) {
+            return false;
+          }
+          return (
+            members.some(member => member.id === decision.parentNodeId) ||
+            decision.routes.some(route => targetEntityIds.has(route.targetId))
+          );
+        });
+        const backlogDisabledReason = rootPaused
+          ? 'Resume the Flow run first.'
+          : rootTicket.statusV2 !== TicketStatusV2.STARTED
+            ? 'Only an active Flow run can move a group to backlog.'
+            : flowGroupBacklogPendingId && flowGroupBacklogPendingId !== group.id
+              ? 'Another group is being moved to backlog.'
+              : unresolvedDecision
+                ? `Resolve conditional step "${runModel.getNode(unresolvedDecision.parentNodeId)?.title ?? 'Condition'}" first.`
+                : members.every(member => {
+                      const ticket = ticketsByPlanNodeId.get(member.id);
+                      return (
+                        skipped.has(member.id) ||
+                        isFlowStepBacklogged(ticket) ||
+                        ticket?.statusV2 === TicketStatusV2.COMPLETED ||
+                        ticket?.statusV2 === TicketStatusV2.CANCELLED
+                      );
+                    })
+                  ? 'All group steps are already settled.'
+                  : undefined;
+        const statusChip = allBacklogged ? (
+          <span
+            className='flex shrink-0 items-center gap-1 text-[10px] font-medium text-amber-600'
+            title='Backlog'
+          >
+            <Archive size={isCollapsed ? 14 : 12} />
+            {!isCollapsed && 'Backlog'}
+          </span>
+        ) : groupStatus === 'SKIPPED' ? (
+          <span
+            className='flex shrink-0 items-center gap-1 text-[10px] font-medium text-muted-foreground'
+            title='Skipped'
+          >
+            {isCollapsed ? <CircleMinus size={14} /> : <span aria-hidden='true'>—</span>}
+            {!isCollapsed && 'Skipped'}
+          </span>
+        ) : statusOption ? (
+          <span
+            className='flex shrink-0 items-center gap-1 text-[10px] font-medium text-muted-foreground'
+            title={statusOption.label}
+          >
+            {statusOption.icon}
+            {!isCollapsed && statusOption.label}
+          </span>
+        ) : isCollapsed ? (
+          <span
+            className='flex shrink-0 items-center text-muted-foreground'
+            title={allSettled ? 'Skipped' : 'To Do'}
+          >
+            {allSettled ? <CircleMinus size={14} /> : getStatusOption(TicketStatusV2.TODO)?.icon}
+          </span>
+        ) : (
+          <span className='shrink-0 text-[9px] font-medium uppercase tracking-[0.5px] text-muted-foreground'>
+            {allSettled ? 'Skipped' : 'To Do'}
+          </span>
+        );
+        const size = coverSizeOf(group.id);
+        return {
+          id: coverId(group.id),
+          type: 'flowGroupNode',
+          position: layout.get(coverId(group.id)) ?? { x: 60, y: 40 },
+          style: { width: size.width, height: size.height },
+          draggable: false,
+          selectable: false,
+          data: {
+            name: group.name,
+            memberCount: members.length,
+            color: flowGroupColor(group.id),
+            collapsed: isCollapsed,
+            status: statusChip,
+            skipped: groupStatus === 'SKIPPED',
+            notStarted: groupStatus === null && !allSettled,
+            ...(isCollapsed && {
+              members: runModel.directEntityIdsInLevelOrder(group.id).map(id => {
+                const member = runModel.getNode(id);
+                if (member) {
+                  return {
+                    id: member.id,
+                    title: ticketsByPlanNodeId.get(member.id)?.title ?? member.title,
+                    status: memberStatusChip(member),
+                  };
+                }
+                const child = runModel.getGroup(id)!;
+                const childMembers = runModel.descendantMembersOf(child.id);
+                const childAllBacklogged =
+                  childMembers.length > 0 &&
+                  childMembers.every(member =>
+                    isFlowStepBacklogged(ticketsByPlanNodeId.get(member.id)),
+                  );
+                const childStatus = runModel.deriveGroupStatus(
+                  child.id,
+                  statusByPlanNodeId,
+                  skipped,
+                );
+                return {
+                  id: child.id,
+                  title: child.name,
+                  memberCount: runModel.descendantMembersOf(child.id).length,
+                  status: childAllBacklogged ? (
+                    <span className='flex shrink-0 items-center text-amber-600' title='Backlog'>
+                      <Archive size={12} />
+                    </span>
+                  ) : childStatus === 'SKIPPED' ? (
+                    <span
+                      className='flex size-4 shrink-0 items-center justify-center rounded-full text-muted-foreground'
+                      title='Skipped'
+                      aria-label='Skipped'
+                    >
+                      <CircleMinus size={13} />
+                    </span>
+                  ) : childStatus ? (
+                    <span className='flex shrink-0 items-center' title={childStatus}>
+                      {getStatusOption(childStatus as TicketStatusV2)?.icon}
+                    </span>
+                  ) : undefined,
+                };
+              }),
+            }),
+            onToggleCollapse: () => toggleGroup(group.id),
+            onMoveToBacklog: () => void handleFlowGroupBacklog(group.id),
+            ...(backlogDisabledReason && { backlogDisabledReason }),
+            backlogPending: flowGroupBacklogPendingId === group.id,
+          },
+        };
+      });
+    const nodes: Node<FlowTicketNodeData | FlowGroupNodeData>[] = [
+      ...groupNodes,
+      {
+        id: FLOW_VIRTUAL_ROOT_ID,
+        type: 'flowTicketNode',
+        position: layout.get(FLOW_VIRTUAL_ROOT_ID) ?? { x: 60, y: 40 },
+        selected: !!flowSelection && flowSelection.planNode === null,
+        data: {
+          planNode: null,
+          ticket: rootTicket,
+          skipped: false,
+          onSelect: () => setFlowSelection({ planNode: null, ticket: rootTicket, skipped: false }),
+        },
+      },
+      ...runModel.nodes
+        .filter(planNode => !hiddenPlanNodeIds.has(planNode.id))
+        .map(planNode => {
+          const ticket = ticketsByPlanNodeId.get(planNode.id) ?? null;
+          const isSkipped = skipped.has(planNode.id);
+          const decision = runModel.decisionAfter(planNode.id);
+          const outcome = decision ? decisionOutcomeById.get(decision.id) : undefined;
+          const selectedRoute =
+            decision && outcome
+              ? runModel.routeForOutcome(decision.id, outcome.outcomeKey)
+              : undefined;
+          const skipReason: FlowTicketNodeData['skipReason'] = isSkipped
+            ? decisionSkipped.has(planNode.id)
+              ? 'decision'
+              : 'blocked'
+            : undefined;
+          return {
+            id: planNode.id,
+            type: 'flowTicketNode',
+            position: layout.get(planNode.id) ?? { x: 60, y: 40 },
+            selected: flowSelection?.planNode?.id === planNode.id,
+            data: {
+              planNode,
+              ticket,
+              skipped: isSkipped,
+              ...(skipReason && { skipReason }),
+              ...(decision && {
+                decision: {
+                  fieldName: decision.fieldName,
+                  ...(selectedRoute && { selectedLabel: selectedRoute.label }),
+                },
+              }),
+              onSelect: () =>
+                setFlowSelection({
+                  planNode,
+                  ticket,
+                  skipped: isSkipped,
+                  ...(skipReason && { skipReason }),
+                }),
+            },
+          };
+        }),
+    ];
+    // Edges: parents -> steps/covers. Internal member edges only while the
+    // group is expanded; entry members hang off the cover's top border and
+    // terminal members run into its bottom border (entry/exit handles).
+    interface EdgeProps {
+      waiting: boolean;
+      dimmed: boolean;
+      color: string;
+      label?: string;
+      dashed?: boolean;
+    }
+    const stepEdgeProps = (planNode: FlowPlanNode): EdgeProps => {
+      const targetTicket = ticketsByPlanNodeId.get(planNode.id);
+      const targetStatus = targetTicket ? flowRuntimeStatusOf(targetTicket) : null;
+      // Dotted (animated) edge = the flow is waiting on this step right now.
+      const waiting =
+        !!targetTicket &&
+        !isFlowStepBacklogged(targetTicket) &&
+        !locked.has(planNode.id) &&
+        (targetTicket.statusV2 === TicketStatusV2.PAUSED ||
+          targetTicket.statusV2 === TicketStatusV2.STARTED);
+      // Edge color mirrors the target step: blue = yet to start, dashed blue
+      // = waiting, green = completed, red = cancelled, gray = skipped path
+      // after a cancel (the edge INTO the cancelled step itself stays red).
+      const dimmed = skipped.has(planNode.id);
+      const color = dimmed
+        ? '#d4d4d8'
+        : isFlowStepBacklogged(targetTicket)
+          ? '#d97706'
+          : targetStatus === TicketStatusV2.COMPLETED
+            ? '#22c55e'
+            : targetTicket?.statusV2 === TicketStatusV2.CANCELLED
+              ? '#ef4444'
+              : '#6276be';
+      return { waiting, dimmed, color };
+    };
+    const edgePropsFromSource = (sourceId: string, targetProps: EdgeProps): EdgeProps =>
+      skipped.has(sourceId) || skippedGroupIds.has(sourceId)
+        ? {
+            ...targetProps,
+            waiting: false,
+            dimmed: true,
+            color: '#d4d4d8',
+            dashed: true,
+          }
+        : targetProps;
+    const edges: Edge[] = [];
+    const pushEdge = (
+      source: string,
+      target: string,
+      props: EdgeProps,
+      handles?: { sourceHandle?: string; targetHandle?: string },
+      edgeKey?: string,
+    ): void => {
+      edges.push({
+        id: `flow-edge:${edgeKey ?? `${source}:${handles?.sourceHandle ?? 'default'}:${target}`}`,
+        source,
+        target,
+        ...(handles?.sourceHandle ? { sourceHandle: handles.sourceHandle } : {}),
+        ...(handles?.targetHandle ? { targetHandle: handles.targetHandle } : {}),
+        type: 'default',
+        animated: props.waiting,
+        markerEnd: { type: MarkerType.ArrowClosed, color: props.color, width: 18, height: 18 },
+        style: {
+          stroke: props.color,
+          strokeWidth: props.dimmed ? 1.25 : props.waiting ? 2 : 1.5,
+          ...(props.dimmed && { opacity: 0.6 }),
+          ...(props.dashed && { strokeDasharray: '5 5' }),
+        },
+        ...(props.label && {
+          label: props.label,
+          labelStyle: {
+            fill: props.dimmed ? '#71717a' : props.color,
+            fontSize: 10,
+            fontWeight: 600,
+          },
+          labelShowBg: true,
+          labelBgStyle: {
+            fill: props.dimmed ? '#fafafa' : '#ffffff',
+            stroke: props.color,
+            strokeWidth: 1,
+            opacity: 0.96,
+          },
+          labelBgPadding: [6, 4],
+          labelBgBorderRadius: 6,
+        }),
+      });
+    };
+    for (const planNode of runModel.nodes) {
+      if (planNode.groupId && activeGroupIds.has(planNode.groupId)) {
+        if (collapsedIds.has(planNode.groupId)) continue; // members hidden
+        const props = stepEdgeProps(planNode);
+        for (const parentId of planNode.parentIds) {
+          if (!runModel.isDecision(parentId)) {
+            pushEdge(displayId(parentId), planNode.id, edgePropsFromSource(parentId, props));
+          }
+        }
+        // Entry members flow in from the cover top; terminal members flow
+        // out into the cover bottom — the path through the group is visible.
+        if (planNode.parentIds.length === 0) {
+          pushEdge(coverId(planNode.groupId), planNode.id, props, { sourceHandle: 'entry' });
+        }
+        if (runModel.isTerminalMember(planNode)) {
+          pushEdge(planNode.id, coverId(planNode.groupId), props, { targetHandle: 'exit' });
+        }
+        continue;
+      }
+      const props = stepEdgeProps(planNode);
+      const sourcePlanIds =
+        planNode.parentIds.length > 0 ? planNode.parentIds : [FLOW_VIRTUAL_ROOT_ID];
+      for (const sourcePlanId of sourcePlanIds) {
+        if (runModel.isDecision(sourcePlanId)) continue;
+        pushEdge(displayId(sourcePlanId), planNode.id, edgePropsFromSource(sourcePlanId, props));
+      }
+    }
+    const groupEdgePropsById = new Map<string, EdgeProps>();
+    const groupEdgeProps = (groupId: string): EdgeProps => {
+      const cached = groupEdgePropsById.get(groupId);
+      if (cached) return cached;
+      const members = runModel.descendantMembersOf(groupId);
+      const groupStatus = runModel.deriveGroupStatus(groupId, statusByPlanNodeId, skipped);
+      const waiting =
+        !rootPaused &&
+        members.some(member => {
+          const memberTicket = ticketsByPlanNodeId.get(member.id);
+          return (
+            !!memberTicket &&
+            !isFlowStepBacklogged(memberTicket) &&
+            (memberTicket.statusV2 === TicketStatusV2.PAUSED ||
+              memberTicket.statusV2 === TicketStatusV2.STARTED)
+          );
+        });
+      const dimmed =
+        groupStatus === 'SKIPPED' ||
+        (groupStatus === null &&
+          members.every(
+            member =>
+              skipped.has(member.id) ||
+              ticketsByPlanNodeId.get(member.id)?.statusV2 === TicketStatusV2.CANCELLED,
+          ));
+      // Same palette as step edges — the cover itself carries the group color
+      const color = dimmed
+        ? '#d4d4d8'
+        : groupStatus === 'COMPLETED'
+          ? '#22c55e'
+          : groupStatus === 'CANCELLED'
+            ? '#ef4444'
+            : '#6276be';
+      const props = { waiting, dimmed, color, ...(dimmed && { dashed: true }) };
+      groupEdgePropsById.set(groupId, props);
+      return props;
+    };
+    for (const group of activeGroups) {
+      if (group.groupId && collapsedIds.has(group.groupId)) continue;
+      const props = groupEdgeProps(group.id);
+      const sourcePlanIds =
+        group.parentIds.length > 0
+          ? group.parentIds
+          : group.groupId
+            ? [group.groupId]
+            : [FLOW_VIRTUAL_ROOT_ID];
+      for (const sourcePlanId of sourcePlanIds) {
+        if (!runModel.isDecision(sourcePlanId)) {
+          pushEdge(
+            displayId(sourcePlanId),
+            coverId(group.id),
+            edgePropsFromSource(sourcePlanId, props),
+            group.groupId && group.parentIds.length === 0 ? { sourceHandle: 'entry' } : undefined,
+          );
+        }
+      }
+      if (!collapsedIds.has(group.id)) {
+        const terminalEntities = new Set(runModel.terminalEntityIdsOf(group.id));
+        for (const child of runModel.childGroupsOf(group.id)) {
+          if (terminalEntities.has(child.id)) {
+            pushEdge(coverId(child.id), coverId(group.id), groupEdgeProps(child.id), {
+              targetHandle: 'exit',
+            });
+          }
+        }
+      }
+    }
+    for (const decision of runModel.decisions) {
+      const sourceGroupId = runModel.getNode(decision.parentNodeId)?.groupId;
+      const sourceGroup = sourceGroupId ? runModel.getGroup(sourceGroupId) : undefined;
+      if (
+        sourceGroupId &&
+        (collapsedIds.has(sourceGroupId) ||
+          (!!sourceGroup?.groupId && collapsedIds.has(sourceGroup.groupId)))
+      )
+        continue;
+      const outcome = decisionOutcomeById.get(decision.id);
+      const outcomeKey = outcome?.outcomeKey;
+      const resolvedTargetId = outcome
+        ? runModel.resolvedDecisionTargetId(decision.id, outcome)
+        : undefined;
+      const routesByTarget = new Map<string, typeof decision.routes>();
+      for (const route of decision.routes) {
+        const targetRoutes = routesByTarget.get(route.targetId) ?? [];
+        targetRoutes.push(route);
+        routesByTarget.set(route.targetId, targetRoutes);
+      }
+      for (const [targetId, targetRoutes] of routesByTarget) {
+        const selectedRoute =
+          targetId === resolvedTargetId
+            ? targetRoutes.find(route => route.key === outcomeKey)
+            : undefined;
+        const selected = !!selectedRoute;
+        const routeLabels = targetRoutes.map(route => route.label).join(' / ');
+        const label = !outcomeKey
+          ? routeLabels
+          : selectedRoute
+            ? `${selectedRoute.label} · Chosen`
+            : `${routeLabels} · Skipped`;
+        pushEdge(
+          decision.parentNodeId,
+          displayId(targetId),
+          {
+            waiting: false,
+            dimmed: !!outcomeKey && !selected,
+            color: outcomeKey ? (selected ? '#22c55e' : '#d4d4d8') : '#d97706',
+            label,
+            dashed: !!outcomeKey && !selected,
+          },
+          undefined,
+          `decision:${decision.id}:${targetId}`,
+        );
+      }
+    }
+    return { nodes, edges, locked };
+  }, [
+    isFlowBoard,
+    selectedFlowRunModel,
+    selectedGraphRootTicketId,
+    graphTickets,
+    collapsedFlowGroups,
+    flowSelection,
+    flowGroupBacklogPendingId,
+    handleFlowGroupBacklog,
+  ]);
+  // On entering a run, auto-open the panel for the first step waiting at its
+  // gate (or the main ticket when nothing is waiting yet) — once per run.
+  const flowTicketNodes = useMemo(
+    () =>
+      flowRunGraph.nodes.filter(
+        (graphNode): graphNode is Node<FlowTicketNodeData> => graphNode.type === 'flowTicketNode',
+      ),
+    [flowRunGraph],
+  );
+  // Entering a run collapses every group by default
+  useEffect(() => {
+    if (!isFlowBoard || !selectedGraphRootTicketId || !selectedFlowRunModel) return;
+    if (collapseInitRunRef.current === selectedGraphRootTicketId) return;
+    collapseInitRunRef.current = selectedGraphRootTicketId;
+    setCollapsedFlowGroups(new Set(selectedFlowRunModel.groups.map(group => group.id)));
+  }, [isFlowBoard, selectedGraphRootTicketId, selectedFlowRunModel]);
+  const flowRunSummaries = useMemo<Map<string, FlowRunSummary>>(
+    () =>
+      isFlowBoard && flowModel
+        ? summarizeFlowRuns(flowModel, graphTickets as unknown as FlowRunTicket[])
+        : new Map<string, FlowRunSummary>(),
+    [isFlowBoard, flowModel, graphTickets],
+  );
+  const userNamesById = useMemo(() => {
+    const map = new Map<string, string>();
+    if (allUsers) {
+      allUsers.forEach(user => {
+        map.set(user.id, getUserDisplayName(user));
+      });
+    }
+    return map;
+  }, [allUsers]);
+  const flowRunExportRows = useMemo(() => {
+    if (!isFlowBoard || !flowModel) return [];
+    return buildFlowRunExportRows({
+      currentModel: flowModel,
+      visibleTickets: graphTickets as unknown as FlowRunTicket[],
+      allTickets: (allProjectTickets ?? graphTickets) as unknown as FlowRunTicket[],
+      userNamesById,
+    });
+  }, [allProjectTickets, flowModel, graphTickets, isFlowBoard, userNamesById]);
+  const flowRunExportTitle = `${selectedBoardDetail?.name ?? 'Flow board'} — Ticket Tracker`;
+  const handleFlowRunExport = useCallback(
+    async (format: 'excel' | 'pdf'): Promise<void> => {
+      if (flowRunExportRows.length === 0 || flowRunExporting) return;
+      setFlowRunExporting(format);
+      try {
+        if (format === 'excel') {
+          await downloadFlowRunsExcel(flowRunExportTitle, flowRunExportRows);
+        } else {
+          await downloadFlowRunsPdf(flowRunExportTitle, flowRunExportRows);
+        }
+        toast.success(`${format === 'excel' ? 'Excel' : 'PDF'} downloaded`);
+      } catch {
+        toast.error(`Failed to download ${format === 'excel' ? 'Excel' : 'PDF'}`);
+      } finally {
+        setFlowRunExporting(null);
+      }
+    },
+    [flowRunExportRows, flowRunExportTitle, flowRunExporting],
+  );
+  // Auto-advance: jump to the next waiting step ONLY on a transition we
+  // witnessed while the selection stayed put — a viewed step settling
+  // (completes/cancels), or the main ticket going to STARTED (start/resume).
+  // Manual clicks never move the selection: clicking the main ticket to pause
+  // it, or an already-finished step, leaves it exactly where the user put it.
+  const flowRunInstanceRef = useRef<ReactFlowInstance | null>(null);
+  const pendingFlowFocusRef = useRef<string | null>(null);
+  // Animate the viewport only after React Flow has measured the destination.
+  // A pending request stays armed when its containing group is still collapsed;
+  // the graph-nodes effect below retries after expansion renders the member.
+  const focusFlowNode = useCallback((nodeId: string): void => {
+    pendingFlowFocusRef.current = nodeId;
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        const instance = flowRunInstanceRef.current;
+        if (!instance || pendingFlowFocusRef.current !== nodeId || !instance.getNode(nodeId))
+          return;
+        pendingFlowFocusRef.current = null;
+        void instance.fitView({
+          nodes: [{ id: nodeId }],
+          maxZoom: 1,
+          padding: 0.4,
+          duration: 500,
+        });
+      });
+    });
+  }, []);
+  useEffect(() => {
+    const pendingNodeId = pendingFlowFocusRef.current;
+    if (pendingNodeId) focusFlowNode(pendingNodeId);
+  }, [flowRunGraph.nodes, focusFlowNode]);
+  const handleSelectFlowBacklog = useCallback(
+    (step: FlowNodeSelection): void => {
+      if (!step.planNode) return;
+      if (step.planNode.groupId) {
+        setCollapsedFlowGroups(previous => {
+          const next = new Set(previous);
+          for (const groupId of selectedFlowRunModel?.groupAndAncestorIds(
+            step.planNode!.groupId!,
+          ) ?? []) {
+            next.delete(groupId);
+          }
+          return next;
+        });
+      }
+      setFlowSelection(step);
+      focusFlowNode(step.planNode.id);
+    },
+    [focusFlowNode, selectedFlowRunModel],
+  );
+  const witnessedActiveNodeRef = useRef<string | null>(null);
+  const witnessedRootStatusRef = useRef<TicketStatusV2 | null>(null);
+  const pendingRootAdvanceRef = useRef(false);
+  const lastFlowSelectionKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!isFlowBoard || !selectedGraphRootTicketId || !selectedFlowRunModel || !flowSelection)
+      return;
+    const selectedPlanNode = flowSelection.planNode;
+    // Moving the selection to a different node (manual click) invalidates any
+    // watch armed on the previous node — no surprise jumps later.
+    const selectionKey = selectedPlanNode?.id ?? FLOW_VIRTUAL_ROOT_ID;
+    if (lastFlowSelectionKeyRef.current !== selectionKey) {
+      lastFlowSelectionKeyRef.current = selectionKey;
+      if (witnessedActiveNodeRef.current !== selectedPlanNode?.id) {
+        witnessedActiveNodeRef.current = null;
+      }
+    }
+    const ticketsByPlanNodeId = mapPlanToRunTickets(
+      graphTickets as unknown as FlowRunTicket[],
+      selectedGraphRootTicketId,
+    );
+    const runRootTicket = (graphTickets as unknown as FlowRunTicket[]).find(
+      ticket => ticket.id === selectedGraphRootTicketId,
+    );
+    const statusByPlanNodeId = new Map(
+      [...ticketsByPlanNodeId].map(([planNodeId, ticket]) => [
+        planNodeId,
+        flowRuntimeStatusOf(ticket),
+      ]),
+    );
+    const decisionOutcomeById = new Map<string, FlowDecisionOutcome>();
+    for (const decision of selectedFlowRunModel.decisions) {
+      const outcome = getFlowMeta(ticketsByPlanNodeId.get(decision.parentNodeId) ?? {})
+        ?.decisionOutcomes?.[decision.id];
+      if (outcome) decisionOutcomeById.set(decision.id, outcome);
+    }
+    const skippedPlanNodeIds = selectedFlowRunModel.skippedPlanNodeIds(
+      statusByPlanNodeId,
+      runRootTicket?.statusV2 === TicketStatusV2.CANCELLED,
+      decisionOutcomeById,
+    );
+    const findWaiting = (): FlowPlanNode | undefined => {
+      const candidates: FlowPlanNode[] = [];
+      for (const [planNodeId, ticket] of ticketsByPlanNodeId) {
+        if (
+          isFlowStepBacklogged(ticket) ||
+          (ticket.statusV2 !== TicketStatusV2.PAUSED && ticket.statusV2 !== TicketStatusV2.STARTED)
+        ) {
+          continue;
+        }
+        const node = runPlanNode(selectedFlowRunModel, planNodeId, ticket);
+        if (node) candidates.push(node);
+      }
+      return nextFlowWaitingNode(
+        selectedFlowRunModel,
+        candidates,
+        selectedPlanNode,
+        statusByPlanNodeId,
+        skippedPlanNodeIds,
+      );
+    };
+    const advanceTo = (next: FlowPlanNode): void => {
+      const prevGroupId = selectedPlanNode?.groupId ?? null;
+      const nextGroupId = next.groupId ?? null;
+      setCollapsedFlowGroups(prev => {
+        const updated = new Set(prev);
+        if (prevGroupId && prevGroupId !== nextGroupId) {
+          updated.add(prevGroupId); // collapse only the direct group we left
+        }
+        if (nextGroupId) {
+          for (const groupId of selectedFlowRunModel.groupAndAncestorIds(nextGroupId)) {
+            updated.delete(groupId); // reveal the destination and every containing group
+          }
+        }
+        return updated;
+      });
+      setFlowSelection({
+        planNode: next,
+        ticket: ticketsByPlanNodeId.get(next.id) ?? null,
+        skipped: false,
+      });
+      // Same entry treatment: glide the viewport onto the newly waiting step.
+      focusFlowNode(next.id);
+    };
+    if (!selectedPlanNode) {
+      // Main ticket selected. Watch its status: a transition INTO STARTED
+      // (start/resume clicked here) advances to the first waiting step —
+      // possibly a tick later, once the cascade instantiates it. Pausing or
+      // merely parking on the main ticket never moves the selection.
+      const rootStatus =
+        (graphTickets as unknown as FlowRunTicket[]).find(
+          ticket => ticket.id === selectedGraphRootTicketId,
+        )?.statusV2 ?? null;
+      const previousStatus = witnessedRootStatusRef.current;
+      witnessedRootStatusRef.current = rootStatus;
+      if (
+        previousStatus !== null &&
+        previousStatus !== TicketStatusV2.STARTED &&
+        rootStatus === TicketStatusV2.STARTED
+      ) {
+        pendingRootAdvanceRef.current = true;
+      }
+      if (!pendingRootAdvanceRef.current) return;
+      const next = findWaiting();
+      if (!next) return; // step not instantiated yet — retry on the next tickets update
+      pendingRootAdvanceRef.current = false;
+      advanceTo(next);
+      return;
+    }
+    // A step is selected — the user moved off the main ticket, so drop any
+    // pending root-advance and re-seed root watching on the next main select.
+    witnessedRootStatusRef.current = null;
+    pendingRootAdvanceRef.current = false;
+    const selectedTicket = ticketsByPlanNodeId.get(selectedPlanNode.id);
+    const settled =
+      !!selectedTicket &&
+      (isFlowStepBacklogged(selectedTicket) ||
+        selectedTicket.statusV2 === TicketStatusV2.COMPLETED ||
+        selectedTicket.statusV2 === TicketStatusV2.CANCELLED);
+    if (!settled) {
+      // Remember we saw this node active so we can detect it settling later.
+      if (selectedTicket) witnessedActiveNodeRef.current = selectedPlanNode.id;
+      return;
+    }
+    // Advance only on a transition we actually watched — not a click onto a
+    // step that was already finished.
+    if (witnessedActiveNodeRef.current !== selectedPlanNode.id) return;
+    const next = findWaiting();
+    // The cascade may not have instantiated the next step yet — keep the
+    // witness armed and retry on the next tickets update.
+    if (!next || next.id === selectedPlanNode.id) return;
+    witnessedActiveNodeRef.current = null;
+    advanceTo(next);
+  }, [
+    isFlowBoard,
+    selectedGraphRootTicketId,
+    selectedFlowRunModel,
+    graphTickets,
+    flowSelection,
+    focusFlowNode,
+  ]);
+  const autoSelectedRunRef = useRef<string | null>(null);
+  // Re-arm on run close so reopening a run re-focuses its waiting step (the
+  // ref otherwise remembers we already auto-selected and skips it).
+  useEffect(() => {
+    if (!selectedGraphRootTicketId) autoSelectedRunRef.current = null;
+    // Run changed/closed — stale watching must not leak into the next run.
+    witnessedRootStatusRef.current = null;
+    pendingRootAdvanceRef.current = false;
+    witnessedActiveNodeRef.current = null;
+    lastFlowSelectionKeyRef.current = null;
+  }, [selectedGraphRootTicketId]);
+  useEffect(() => {
+    if (!isFlowBoard || !selectedGraphRootTicketId || !selectedFlowRunModel) return;
+    if (autoSelectedRunRef.current === selectedGraphRootTicketId) return;
+    const rootTicket =
+      (graphTickets as unknown as FlowRunTicket[]).find(
+        ticket => ticket.id === selectedGraphRootTicketId,
+      ) ?? null;
+    // Tickets not loaded yet — don't consume the once-per-run slot.
+    if (!rootTicket) return;
+    autoSelectedRunRef.current = selectedGraphRootTicketId;
+    const ticketsByPlanNodeId = mapPlanToRunTickets(
+      graphTickets as unknown as FlowRunTicket[],
+      selectedGraphRootTicketId,
+    );
+    // Search the PLAN (not the rendered nodes) — the waiting step may sit
+    // inside a group that entry collapsed; expand it so the node is visible.
+    const waitingCandidates: FlowPlanNode[] = [];
+    for (const [planNodeId, stepTicket] of ticketsByPlanNodeId) {
+      if (
+        !isFlowStepBacklogged(stepTicket) &&
+        (stepTicket.statusV2 === TicketStatusV2.PAUSED ||
+          stepTicket.statusV2 === TicketStatusV2.STARTED)
+      ) {
+        const candidate = runPlanNode(selectedFlowRunModel, planNodeId, stepTicket);
+        if (candidate) waitingCandidates.push(candidate);
+      }
+    }
+    const waiting = nextFlowWaitingNode(
+      selectedFlowRunModel,
+      waitingCandidates,
+      null,
+      new Map(),
+      new Set(),
+    );
+    if (waiting) {
+      const groupId = waiting.groupId;
+      if (groupId) {
+        setCollapsedFlowGroups(prev => {
+          const updated = new Set(prev);
+          for (const visibleGroupId of selectedFlowRunModel.groupAndAncestorIds(groupId)) {
+            updated.delete(visibleGroupId);
+          }
+          return updated;
+        });
+      }
+      setFlowSelection({
+        planNode: waiting,
+        ticket: ticketsByPlanNodeId.get(waiting.id) ?? null,
+        skipped: false,
+      });
+      focusFlowNode(waiting.id);
+    } else {
+      setFlowSelection({ planNode: null, ticket: rootTicket, skipped: false });
+      focusFlowNode(FLOW_VIRTUAL_ROOT_ID);
+    }
+  }, [isFlowBoard, selectedGraphRootTicketId, selectedFlowRunModel, graphTickets, focusFlowNode]);
+  // Keep the open side panel in sync with live ticket updates (Zero sync /
+  // cascade-created steps) — the selection is otherwise a snapshot. Functional
+  // update: reading the selection from a closure here could revert an
+  // auto-advance queued in the same commit (stale-selection race).
+  useEffect(() => {
+    setFlowSelection(previous => {
+      if (!previous) return previous;
+      const key = previous.planNode?.id ?? FLOW_VIRTUAL_ROOT_ID;
+      const fresh = flowTicketNodes.find(node => node.id === key)?.data;
+      if (
+        !fresh ||
+        (sameFlowRunTicket(fresh.ticket, previous.ticket) &&
+          fresh.skipped === previous.skipped &&
+          fresh.skipReason === previous.skipReason &&
+          sameFlowPlanNode(fresh.planNode, previous.planNode))
+      ) {
+        return previous;
+      }
+      return {
+        planNode: fresh.planNode,
+        ticket: fresh.ticket,
+        skipped: fresh.skipped,
+        ...(fresh.skipReason && { skipReason: fresh.skipReason }),
+      };
+    });
+  }, [flowTicketNodes]);
+
   const shouldUseStatusColumns =
     isWorkspaceView ||
     (!filteredSingleBoardId && ['project', 'my-tickets'].includes(viewMode)) ||
@@ -1773,17 +3198,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       stateMachineActor.send({ type: 'SET_FILTERED_TICKET_IDS', ids });
     }
   }, [filteredTickets, isKanbanLayout, localTickets]);
-
-  // Create a map of user ID to user name for display
-  const userNamesById = useMemo(() => {
-    const map = new Map<string, string>();
-    if (allUsers) {
-      allUsers.forEach(user => {
-        map.set(user.id, getUserDisplayName(user));
-      });
-    }
-    return map;
-  }, [allUsers]);
 
   // Create a map of user group ID to group name for display
   const groupNamesById = useMemo(() => {
@@ -2190,7 +3604,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   ]);
 
   const filteredAvailableColumns = useMemo(() => {
-    if (layoutView === 'table') {
+    if (layoutView === 'table' || layoutView === 'flow') {
       // In table mode, hide TicketCard metadata columns
       return availableColumns.filter(
         col => !['stage', 'board', 'createdAt', 'createdBy'].includes(col.key),
@@ -2348,83 +3762,87 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
               <span className='sm:hidden'>Create</span>
             </button>
           )}
-          {/* Layout View Toggle */}
+          {/* Layout View Toggle (flow boards only have the flow view) */}
           <div className='flex items-center gap-2'>
-            <div className='flex items-center rounded-xl bg-muted border'>
-              <Tooltip content='Kanban'>
-                <button
-                  onClick={() => {
-                    setSearchParams(prev => {
-                      const p = new URLSearchParams(prev);
-                      p.set('layout', 'kanban');
-                      return p;
-                    });
-                  }}
-                  className={`px-3 py-2 rounded-l-xl transition-colors border-r ${
-                    layoutView === 'kanban'
-                      ? 'bg-background text-foreground'
-                      : 'text-muted-foreground hover:text-foreground'
-                  }`}
-                  title='Kanban View'
-                  data-track-category='Tickets'
-                  data-track-name='SetKanbanView'
-                  data-testid='kanban-view-btn'
-                >
-                  <SquareKanban className='w-3.5 h-3.5' />
-                </button>
-              </Tooltip>
-              <Tooltip content='Table'>
-                <button
-                  onClick={() => {
-                    setSearchParams(prev => {
-                      const p = new URLSearchParams(prev);
-                      p.set('layout', 'table');
-                      return p;
-                    });
-                  }}
-                  className={`px-3 py-2 transition-colors border-r ${
-                    layoutView === 'table'
-                      ? 'bg-background text-foreground'
-                      : 'text-muted-foreground hover:text-foreground'
-                  }`}
-                  title='Table View'
-                  data-track-category='Tickets'
-                  data-track-name='SetTableView'
-                  data-testid='table-view-btn'
-                >
-                  <List className='w-3.5 h-3.5' />
-                </button>
-              </Tooltip>
-              {!isMobile && (
-                <Tooltip content='Calendar View'>
+            {!isFlowBoard && (
+              <div className='flex items-center rounded-xl bg-muted border'>
+                <Tooltip content='Kanban'>
                   <button
                     onClick={() => {
                       setSearchParams(prev => {
                         const p = new URLSearchParams(prev);
-                        p.set('layout', 'calendar');
+                        p.set('layout', 'kanban');
                         return p;
                       });
                     }}
-                    className={`px-3 py-2 rounded-r-xl transition-colors ${
-                      layoutView === 'calendar'
+                    className={`px-3 py-2 rounded-l-xl transition-colors border-r ${
+                      layoutView === 'kanban'
                         ? 'bg-background text-foreground'
                         : 'text-muted-foreground hover:text-foreground'
                     }`}
-                    title='Calendar View'
-                    data-track-category='KANBAN'
-                    data-track-name='SetCalendarView'
-                    data-track-metadata={JSON.stringify({
-                      layout: 'calendar',
-                      viewMode,
-                      channelId,
-                    })}
-                    data-testid='calendar-view-btn'
+                    title='Kanban View'
+                    data-track-category='Tickets'
+                    data-track-name='SetKanbanView'
+                    data-testid='kanban-view-btn'
                   >
-                    <Calendar className='w-3.5 h-3.5' />
+                    <SquareKanban className='w-3.5 h-3.5' />
                   </button>
                 </Tooltip>
-              )}
-            </div>
+                <Tooltip content='Table'>
+                  <button
+                    onClick={() => {
+                      setSearchParams(prev => {
+                        const p = new URLSearchParams(prev);
+                        p.set('layout', 'table');
+                        return p;
+                      });
+                    }}
+                    className={`px-3 py-2 transition-colors ${
+                      isMobile ? 'rounded-r-xl' : 'border-r'
+                    } ${
+                      layoutView === 'table'
+                        ? 'bg-background text-foreground'
+                        : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                    title='Table View'
+                    data-track-category='Tickets'
+                    data-track-name='SetTableView'
+                    data-testid='table-view-btn'
+                  >
+                    <List className='w-3.5 h-3.5' />
+                  </button>
+                </Tooltip>
+                {!isMobile && (
+                  <Tooltip content='Calendar View'>
+                    <button
+                      onClick={() => {
+                        setSearchParams(prev => {
+                          const p = new URLSearchParams(prev);
+                          p.set('layout', 'calendar');
+                          return p;
+                        });
+                      }}
+                      className={`px-3 py-2 rounded-r-xl transition-colors ${
+                        layoutView === 'calendar'
+                          ? 'bg-background text-foreground'
+                          : 'text-muted-foreground hover:text-foreground'
+                      }`}
+                      title='Calendar View'
+                      data-track-category='KANBAN'
+                      data-track-name='SetCalendarView'
+                      data-track-metadata={JSON.stringify({
+                        layout: 'calendar',
+                        viewMode,
+                        channelId,
+                      })}
+                      data-testid='calendar-view-btn'
+                    >
+                      <Calendar className='w-3.5 h-3.5' />
+                    </button>
+                  </Tooltip>
+                )}
+              </div>
+            )}
 
             {/* My Tickets Filter Toggles - only show in my-tickets view */}
             {viewMode === 'my-tickets' && (
@@ -2820,6 +4238,595 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
             tickets={filteredTickets ?? []}
             onTicketClick={(ticket: Ticket) => handleTicketClick({} as React.MouseEvent, ticket)}
           />
+        </div>
+      ) : layoutView === 'flow' ? (
+        <div className='flex-1 overflow-hidden bg-background p-4'>
+          <div className='relative flex h-full flex-col overflow-hidden rounded-lg border border-border bg-muted'>
+            <div className='flex items-center justify-between border-b border-border bg-background px-4 py-3'>
+              <div className='flex items-center gap-2'>
+                <GitBranch className='h-4 w-4 text-muted-foreground' />
+                <h2 className='text-sm font-semibold text-foreground'>
+                  {selectedGraphRootTicketId ? 'Flow Run' : 'Main Tickets'}
+                </h2>
+                <span className='rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground'>
+                  {selectedGraphRootTicketId
+                    ? `${flowRunGraph.nodes.length} nodes`
+                    : `${ticketGraphNodes.length} tickets`}
+                </span>
+                {selectedGraphRootTicketId && (
+                  <span className='rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground'>
+                    {flowRunGraph.edges.length} edges
+                  </span>
+                )}
+              </div>
+              <div className='flex items-center gap-2'>
+                {!selectedGraphRootTicketId && flowRunExportRows.length > 0 && (
+                  <DropdownMenu.Root>
+                    <DropdownMenu.Trigger asChild>
+                      <button
+                        type='button'
+                        disabled={flowRunExporting !== null}
+                        data-track-category='flow_board'
+                        data-track-name='download_flow_runs'
+                        className='flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60'
+                      >
+                        <Download className='h-3.5 w-3.5' />
+                        {flowRunExporting ? 'Downloading…' : 'Download'}
+                        <ChevronDownIcon className='h-3 w-3' />
+                      </button>
+                    </DropdownMenu.Trigger>
+                    <DropdownMenu.Portal>
+                      <DropdownMenu.Content
+                        align='end'
+                        sideOffset={6}
+                        className='z-50 min-w-40 rounded-lg border border-border bg-background p-1 shadow-xl'
+                      >
+                        <DropdownMenu.Item
+                          onSelect={() => void handleFlowRunExport('excel')}
+                          className='flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-xs text-foreground outline-none data-[highlighted]:bg-muted'
+                        >
+                          <FileSpreadsheet className='h-4 w-4 text-emerald-600' />
+                          Excel (.xlsx)
+                        </DropdownMenu.Item>
+                        <DropdownMenu.Item
+                          onSelect={() => void handleFlowRunExport('pdf')}
+                          className='flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-xs text-foreground outline-none data-[highlighted]:bg-muted'
+                        >
+                          <FileText className='h-4 w-4 text-red-500' />
+                          PDF (.pdf)
+                        </DropdownMenu.Item>
+                      </DropdownMenu.Content>
+                    </DropdownMenu.Portal>
+                  </DropdownMenu.Root>
+                )}
+                {isFlowBoard && filteredSingleBoardId && flowProjectId && (
+                  <button
+                    type='button'
+                    onClick={() =>
+                      void navigate(
+                        `/listProjects/${flowProjectId}?editBoard=${filteredSingleBoardId}`,
+                      )
+                    }
+                    data-track-category='flow_board'
+                    data-track-name='edit_board'
+                    className='flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground'
+                  >
+                    <Pencil className='h-3 w-3' />
+                    Edit board
+                  </button>
+                )}
+                {selectedGraphRootTicketId && (
+                  <button
+                    type='button'
+                    data-track-category='flow_board'
+                    data-track-name='back_to_main_tickets'
+                    onClick={() => {
+                      setSelectedGraphRootTicketId(null);
+                      setFlowSelection(null);
+                    }}
+                    className='rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground'
+                  >
+                    Back to main tickets
+                  </button>
+                )}
+              </div>
+            </div>
+            {ticketsDetails.type !== 'complete' ? (
+              <div className='rounded-lg border border-border bg-muted p-4 text-sm text-muted-foreground'>
+                Loading tickets...
+              </div>
+            ) : !selectedGraphRootTicketId ? (
+              <div className='min-h-0 flex-1 overflow-y-auto p-4'>
+                {ticketGraphNodes.length > 0 ? (
+                  <div className='grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4'>
+                    {ticketGraphNodes.map(root => {
+                      const statusLabel = root.statusLabel;
+                      const assigneeId =
+                        root.assignedTo?.replace(/^(user:|group:|userGroup:)/, '') || '';
+                      const priorityIcon = root.priority ? getPriorityIcon(root.priority) : null;
+                      const childCount = root.children.length;
+                      const summary = flowRunSummaries.get(root.key);
+                      const progressPct = summary?.totalCount
+                        ? Math.round((summary.completedCount / summary.totalCount) * 100)
+                        : 0;
+                      const progressColor =
+                        summary?.state === 'completed'
+                          ? '#22c55e'
+                          : summary?.state === 'cancelled'
+                            ? '#ef4444'
+                            : '#6276be';
+
+                      return (
+                        <button
+                          key={root.key}
+                          type='button'
+                          data-track-category='flow_board'
+                          data-track-name='open_flow_run'
+                          onClick={() => setSelectedGraphRootTicketId(root.key)}
+                          className='flex h-full flex-col gap-2 rounded-xl border border-border bg-background p-4 text-left shadow-sm transition-all hover:-translate-y-px hover:border-[#6276be]/50 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50'
+                        >
+                          <div className='flex items-center justify-between gap-2'>
+                            <span className='font-mono text-[11px] font-medium text-muted-foreground'>
+                              {root.displayId}
+                            </span>
+                            {summary ? (
+                              <span
+                                className={cn(
+                                  'rounded-full px-2 py-0.5 text-[11px] font-medium',
+                                  summary.state === 'completed' &&
+                                    'bg-emerald-500/10 text-emerald-600',
+                                  summary.state === 'cancelled' && 'bg-red-500/10 text-red-500',
+                                  summary.state === 'pending' && 'bg-[#6276be]/10 text-[#6276be]',
+                                  summary.state === 'backlog' && 'bg-amber-500/10 text-amber-700',
+                                  summary.state === 'not-started' &&
+                                    'bg-muted text-muted-foreground',
+                                )}
+                              >
+                                {summary.state === 'completed'
+                                  ? 'Completed'
+                                  : summary.state === 'cancelled'
+                                    ? 'Cancelled'
+                                    : summary.state === 'pending'
+                                      ? 'In progress'
+                                      : summary.state === 'backlog'
+                                        ? 'Backlog'
+                                        : 'To Do'}
+                              </span>
+                            ) : (
+                              statusLabel && (
+                                <span className='rounded-md bg-muted px-2 py-0.5 text-[11px] text-muted-foreground'>
+                                  {statusLabel}
+                                </span>
+                              )
+                            )}
+                          </div>
+                          <div className='truncate text-sm font-semibold text-foreground'>
+                            {root.title}
+                          </div>
+                          {summary && (
+                            <div className='h-1 w-full overflow-hidden rounded-full bg-muted'>
+                              <div
+                                className='h-full rounded-full transition-all'
+                                style={{
+                                  width: `${progressPct}%`,
+                                  backgroundColor: progressColor,
+                                }}
+                              />
+                            </div>
+                          )}
+                          {summary &&
+                            summary.state !== 'pending' &&
+                            summary.state !== 'backlog' &&
+                            summary.cancelled.length === 0 && (
+                              <div className='flex flex-1 items-center justify-center py-1'>
+                                <span
+                                  className={cn(
+                                    'flex items-center gap-1.5 text-[11px]',
+                                    summary.state === 'completed' && 'text-emerald-600/80',
+                                    summary.state === 'cancelled' && 'text-red-500/80',
+                                    summary.state === 'not-started' && 'text-muted-foreground/70',
+                                  )}
+                                >
+                                  {summary.state === 'completed' ? (
+                                    <>
+                                      <CheckCircle2 size={13} />
+                                      All steps completed
+                                    </>
+                                  ) : summary.state === 'cancelled' ? (
+                                    <>
+                                      <XCircle size={13} />
+                                      Run cancelled
+                                    </>
+                                  ) : (
+                                    'All steps To Do'
+                                  )}
+                                </span>
+                              </div>
+                            )}
+                          {summary?.state === 'pending' && (
+                            <div className='flex flex-1 flex-col gap-1.5 pt-1.5'>
+                              <span className='text-[9px] font-semibold uppercase tracking-[0.6px] text-muted-foreground/70'>
+                                Waiting on
+                              </span>
+                              {summary.pending.slice(0, 2).map(step => (
+                                <div
+                                  key={step.id}
+                                  className='flex w-full items-center gap-2 rounded-md bg-[#6276be]/[0.06] px-2.5 py-1.5 text-[11px]'
+                                >
+                                  <span className='inline-block h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-[#6276be]' />
+                                  <span className='min-w-0 flex-1 truncate text-foreground/80'>
+                                    {step.title}
+                                  </span>
+                                  {step.groupId && step.groupName && (
+                                    <span
+                                      className='max-w-[45%] shrink-0 truncate rounded px-1.5 py-px text-[10px] font-medium'
+                                      style={{
+                                        backgroundColor: `${flowGroupColor(step.groupId)}1a`,
+                                        color: flowGroupColor(step.groupId),
+                                      }}
+                                    >
+                                      {step.groupName}
+                                    </span>
+                                  )}
+                                </div>
+                              ))}
+                              {summary.pending.length > 2 && (
+                                <div className='flex w-full items-center justify-center rounded-md bg-muted/60 px-2.5 py-1.5 text-[11px] font-medium text-muted-foreground'>
+                                  +{summary.pending.length - 2} more
+                                </div>
+                              )}
+                            </div>
+                          )}
+                          {summary?.state === 'backlog' && (
+                            <div className='flex flex-1 flex-col gap-1.5 pt-1.5'>
+                              <span className='text-[9px] font-semibold uppercase tracking-[0.6px] text-amber-600/80'>
+                                Backlog steps
+                              </span>
+                              {summary.backlogged.slice(0, 2).map(step => (
+                                <div
+                                  key={step.id}
+                                  className='flex w-full items-center gap-2 rounded-md bg-amber-500/[0.06] px-2.5 py-1.5 text-[11px]'
+                                >
+                                  <Archive size={12} className='shrink-0 text-amber-600' />
+                                  <span className='min-w-0 flex-1 truncate text-foreground/80'>
+                                    {step.title}
+                                  </span>
+                                  {step.groupId && step.groupName && (
+                                    <span
+                                      className='max-w-[45%] shrink-0 truncate rounded px-1.5 py-px text-[10px] font-medium'
+                                      style={{
+                                        backgroundColor: `${flowGroupColor(step.groupId)}1a`,
+                                        color: flowGroupColor(step.groupId),
+                                      }}
+                                    >
+                                      {step.groupName}
+                                    </span>
+                                  )}
+                                </div>
+                              ))}
+                              {summary.backlogged.length > 2 && (
+                                <div className='flex w-full items-center justify-center rounded-md bg-amber-500/[0.04] px-2.5 py-1.5 text-[11px] font-medium text-amber-700/80'>
+                                  +{summary.backlogged.length - 2} more
+                                </div>
+                              )}
+                            </div>
+                          )}
+                          {summary && summary.cancelled.length > 0 && (
+                            <div className='flex flex-1 flex-col gap-1.5 pt-1.5'>
+                              <span className='text-[9px] font-semibold uppercase tracking-[0.6px] text-red-500/80'>
+                                Cancelled steps
+                              </span>
+                              {summary.cancelled.slice(0, 2).map(step => (
+                                <div
+                                  key={step.id}
+                                  className='flex w-full items-center gap-2 rounded-md bg-red-500/[0.06] px-2.5 py-1.5 text-[11px]'
+                                >
+                                  <XCircle size={12} className='shrink-0 text-red-500' />
+                                  <span className='min-w-0 flex-1 truncate text-foreground/80'>
+                                    {step.title}
+                                  </span>
+                                  {step.groupId && step.groupName && (
+                                    <span
+                                      className='max-w-[45%] shrink-0 truncate rounded px-1.5 py-px text-[10px] font-medium'
+                                      style={{
+                                        backgroundColor: `${flowGroupColor(step.groupId)}1a`,
+                                        color: flowGroupColor(step.groupId),
+                                      }}
+                                    >
+                                      {step.groupName}
+                                    </span>
+                                  )}
+                                </div>
+                              ))}
+                              {summary.cancelled.length > 2 && (
+                                <div className='flex w-full items-center justify-center rounded-md bg-red-500/[0.04] px-2.5 py-1.5 text-[11px] font-medium text-red-500/80'>
+                                  +{summary.cancelled.length - 2} more cancelled
+                                </div>
+                              )}
+                            </div>
+                          )}
+                          <div className='mt-auto flex items-center justify-between gap-2 pt-1'>
+                            <span className='flex items-center gap-1.5'>
+                              {priorityIcon}
+                              {assigneeId && (
+                                <Avatar userId={assigneeId} size='sm' className='rounded-md' />
+                              )}
+                            </span>
+                            <span className='text-[11px] text-muted-foreground'>
+                              {summary
+                                ? `${summary.completedCount}/${summary.totalCount} steps done`
+                                : `${childCount} nodes`}
+                            </span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className='rounded-lg border border-border bg-muted p-4 text-sm text-muted-foreground'>
+                    No tickets match the current filters.
+                  </div>
+                )}
+              </div>
+            ) : isFlowBoard && flowModel ? (
+              <div className='relative min-h-0 flex-1'>
+                <ReactFlow
+                  nodes={flowRunGraph.nodes}
+                  edges={flowRunGraph.edges}
+                  nodeTypes={FLOW_NODE_TYPES}
+                  fitView
+                  fitViewOptions={{ padding: 0.25, maxZoom: 1 }}
+                  minZoom={0.3}
+                  maxZoom={2}
+                  nodesDraggable
+                  nodesConnectable={false}
+                  elementsSelectable
+                  onPaneClick={() => setFlowSelection(null)}
+                  onInit={instance => {
+                    flowRunInstanceRef.current = instance;
+                    // Entry focus may have been requested before the canvas
+                    // mounted — replay it now that fitView can resolve nodes.
+                    const pending = pendingFlowFocusRef.current;
+                    if (pending) focusFlowNode(pending);
+                  }}
+                  proOptions={{ hideAttribution: true }}
+                  className='flow-run-view'
+                >
+                  <Background
+                    variant={BackgroundVariant.Dots}
+                    gap={22}
+                    size={1}
+                    color='hsl(var(--border))'
+                  />
+                  <MiniMap
+                    pannable
+                    zoomable
+                    position='bottom-left'
+                    nodeColor='hsl(var(--muted-foreground))'
+                    maskColor='hsl(var(--background) / 0.72)'
+                    style={{
+                      backgroundColor: 'hsl(var(--card))',
+                      border: '1px solid hsl(var(--border))',
+                    }}
+                  />
+                  <Panel position='top-left'>
+                    <div
+                      className={cn(
+                        'flex max-h-[calc(100vh-15rem)] flex-col overflow-hidden rounded-xl border border-border/80 bg-background/95 text-xs text-muted-foreground shadow-lg shadow-black/5 backdrop-blur-md',
+                        flowActivityOpen
+                          ? 'w-[340px] max-w-[calc(100vw-3rem)]'
+                          : 'w-fit min-w-[112px]',
+                      )}
+                    >
+                      <button
+                        type='button'
+                        onClick={() => {
+                          const nextOpen = !flowLegendOpen;
+                          setFlowLegendOpen(nextOpen);
+                          if (nextOpen) setFlowActivityOpen(false);
+                        }}
+                        data-track-category='flow_board'
+                        data-track-name='toggle_flow_legend'
+                        className='flex w-full shrink-0 items-center justify-between gap-3 px-3.5 py-2.5 transition-colors hover:bg-muted/50'
+                      >
+                        <span className='flex min-w-0 items-center gap-1.5'>
+                          <GitBranch size={14} />
+                          <span className='font-semibold text-foreground/80'>Legend</span>
+                        </span>
+                        {flowLegendOpen ? (
+                          <ChevronDownIcon className='h-3 w-3' />
+                        ) : (
+                          <ChevronRight size={12} />
+                        )}
+                      </button>
+                      {flowLegendOpen && (
+                        <div className='flex shrink-0 flex-col gap-1.5 border-t border-border/70 px-3.5 py-2.5'>
+                          <span className='flex items-center gap-2'>
+                            <span className='inline-block w-6 border-t-2 border-dashed border-[#6276be]' />
+                            Waiting — flow is at this step
+                          </span>
+                          <span className='flex items-center gap-2'>
+                            <span className='inline-block w-6 border-t-2 border-[#6276be]' />
+                            To Do — created when its parents complete
+                          </span>
+                          <span className='flex items-center gap-2'>
+                            <span className='inline-block w-6 border-t-2 border-[#22c55e]' />
+                            Completed step
+                          </span>
+                          <span className='flex items-center gap-2'>
+                            <span className='inline-block w-6 border-t-2 border-[#d97706]' />
+                            Backlog — skipped manually; flow continues
+                          </span>
+                          <span className='flex items-center gap-2'>
+                            <span className='inline-block w-6 border-t-2 border-[#ef4444]' />
+                            Cancelled step
+                          </span>
+                          <span className='flex items-center gap-2'>
+                            <span className='inline-block w-6 border-t-2 border-[#d4d4d8] opacity-60' />
+                            Skipped — a parent step was cancelled
+                          </span>
+                          {/* Status symbols (as shown in collapsed group rows) */}
+                          <div className='mt-1 flex flex-col gap-1.5 border-t border-border pt-1.5'>
+                            {STATUS_OPTIONS.map(option => (
+                              <span key={option.status} className='flex items-center gap-2'>
+                                <span className='flex w-6 justify-center'>{option.icon}</span>
+                                {option.label}
+                              </span>
+                            ))}
+                            <span className='flex items-center gap-2'>
+                              <span className='flex w-6 justify-center text-amber-600'>
+                                <Archive size={12} />
+                              </span>
+                              Backlog
+                            </span>
+                            <span className='flex items-center gap-2'>
+                              <span className='flex w-6 justify-center text-[10px]'>—</span>
+                              Skipped
+                            </span>
+                          </div>
+                        </div>
+                      )}
+                      <button
+                        type='button'
+                        onClick={() => {
+                          const nextOpen = !flowActivityOpen;
+                          setFlowActivityOpen(nextOpen);
+                          if (nextOpen) setFlowLegendOpen(false);
+                        }}
+                        data-track-category='flow_board'
+                        data-track-name='toggle_flow_activity'
+                        className='flex w-full shrink-0 items-center justify-between gap-3 border-t border-border/70 bg-background/90 px-3.5 py-2.5 text-left transition-colors hover:bg-muted/50'
+                      >
+                        <span className='flex min-w-0 items-center gap-1.5'>
+                          <Clock size={14} />
+                          <span className='font-semibold text-foreground/80'>Run activity</span>
+                        </span>
+                        <span className='flex shrink-0 items-center gap-2'>
+                          {flowRunTimelineActivities.length > 0 && (
+                            <span className='rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium tabular-nums text-muted-foreground'>
+                              {flowRunTimelineActivities.length}
+                            </span>
+                          )}
+                          {flowActivityOpen ? (
+                            <ChevronDownIcon className='h-3 w-3' />
+                          ) : (
+                            <ChevronRight size={12} />
+                          )}
+                        </span>
+                      </button>
+                      {flowActivityOpen && (
+                        <div className='min-h-0 flex-1 overflow-y-auto overscroll-contain border-t border-border/70 bg-muted/20 px-3.5 py-2'>
+                          {flowRunTimelineActivities.length > 0 ? (
+                            flowRunTimelineActivities.map((activity, activityIndex) => {
+                              const activityTicket = flowRunTicketById.get(activity.ticketId);
+                              const actorName = userNamesById.get(activity.updatedBy) || 'Someone';
+                              const { description, details, hideActorName } =
+                                getActivityDescription(
+                                  activity,
+                                  allUsers,
+                                  undefined,
+                                  allUserGroups,
+                                );
+                              const timestamp = new Date(activity.timestamp);
+                              const previousActivity = flowRunTimelineActivities[activityIndex - 1];
+                              const previousDate = previousActivity
+                                ? new Date(previousActivity.timestamp).toDateString()
+                                : null;
+                              const showDate = timestamp.toDateString() !== previousDate;
+                              return (
+                                <React.Fragment key={activity.id}>
+                                  {showDate && (
+                                    <div className='sticky top-0 z-10 -mx-1 bg-muted/95 py-1.5 pl-10 pr-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground backdrop-blur-sm'>
+                                      {timestamp.toLocaleDateString(undefined, {
+                                        month: 'short',
+                                        day: 'numeric',
+                                        year:
+                                          timestamp.getFullYear() !== new Date().getFullYear()
+                                            ? 'numeric'
+                                            : undefined,
+                                      })}
+                                    </div>
+                                  )}
+                                  <div className='group relative flex gap-3 py-2.5 after:absolute after:bottom-0 after:left-[13px] after:top-8 after:w-px after:bg-border/70 last:after:hidden'>
+                                    <span className='relative z-[1] flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-border/80 bg-background shadow-sm'>
+                                      {getActivityIcon(activity)}
+                                    </span>
+                                    <div className='min-w-0 flex-1 pb-1'>
+                                      <div className='mb-1 flex items-center justify-between gap-2'>
+                                        <span
+                                          className='max-w-[160px] truncate rounded-md bg-background px-1.5 py-0.5 font-mono text-[10px] font-semibold text-foreground/70 ring-1 ring-inset ring-border/70'
+                                          title={activityTicket?.title ?? undefined}
+                                        >
+                                          {activityTicket?.xyneId ??
+                                            activity.ticketId.slice(0, 8).toUpperCase()}
+                                        </span>
+                                        <time
+                                          dateTime={timestamp.toISOString()}
+                                          title={timestamp.toLocaleString()}
+                                          className='shrink-0 text-[10px] tabular-nums text-muted-foreground/70'
+                                        >
+                                          {timestamp.toLocaleTimeString(undefined, {
+                                            hour: 'numeric',
+                                            minute: '2-digit',
+                                          })}
+                                        </time>
+                                      </div>
+                                      <p className='break-words text-[12px] leading-[1.45] text-muted-foreground'>
+                                        {!hideActorName && (
+                                          <span className='font-semibold text-foreground/90'>
+                                            {actorName}{' '}
+                                          </span>
+                                        )}
+                                        {description}
+                                        {details && <span> {details}</span>}
+                                      </p>
+                                    </div>
+                                  </div>
+                                </React.Fragment>
+                              );
+                            })
+                          ) : (
+                            <p className='py-4 text-center text-muted-foreground'>
+                              No run activity yet.
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </Panel>
+                </ReactFlow>
+                {flowSelection && filteredSingleBoardId && flowProjectId && (
+                  <div className='absolute bottom-4 right-4 top-4 z-10 flex items-start'>
+                    <FlowNodeSidePanel
+                      node={flowSelection}
+                      backlogSteps={selectedFlowRunBacklogs}
+                      projectId={flowProjectId}
+                      boardId={filteredSingleBoardId}
+                      locked={
+                        flowSelection.planNode
+                          ? flowRunGraph.locked.has(flowSelection.planNode.id)
+                          : false
+                      }
+                      backlogBlockedReason={
+                        flowSelection.planNode &&
+                        selectedFlowRunModel?.decisionAfter(flowSelection.planNode.id)
+                          ? 'Conditional form steps must be submitted before the flow can continue.'
+                          : undefined
+                      }
+                      onClose={() => setFlowSelection(null)}
+                      onChangeStatus={handleFlowStatusChange}
+                      onBacklog={handleFlowStepBacklog}
+                      onSelectBacklog={handleSelectFlowBacklog}
+                    />
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className='rounded-lg border border-border bg-muted p-4 text-sm text-muted-foreground'>
+                No tickets match the current filters.
+              </div>
+            )}
+          </div>
         </div>
       ) : layoutView === 'table' ? (
         <div className='flex-1 overflow-y-auto p-4 space-y-4 bg-background pb-14'>
@@ -3225,6 +5232,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           </div>
         </Dialog>
       )}
+      <ConfirmDialog />
     </div>
   );
 };
