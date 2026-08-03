@@ -118,8 +118,6 @@ export function ClawConversationProvider({
     streamSessionKey: streamThreadKey,
     setMessages,
     setConversationId,
-
-    isV2: true,
     agentSlug: selectedAgentSlug,
   });
 

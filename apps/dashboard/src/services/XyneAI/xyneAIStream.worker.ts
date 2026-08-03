@@ -53,7 +53,6 @@ export interface WorkerStartStreamMessage {
       editedUserMessageId?: string;
       parentAssistantMessageId?: string;
       draftMode?: boolean;
-      version?: 'v1' | 'v2';
       disableTools?: boolean;
       agentSlug?: string;
       /** Per-run model pin from the composer's model picker. */
@@ -179,7 +178,6 @@ async function executeStream(
           parent_assistant_message_id: requestBody.parentAssistantMessageId,
         }),
         ...(requestBody.draftMode && { draft_mode: true }),
-        ...(requestBody.version && { version: requestBody.version }),
         ...(requestBody.disableTools && { disable_tools: true }),
         ...(requestBody.agentSlug && { agentSlug: requestBody.agentSlug }),
         ...(requestBody.model && { model: requestBody.model }),

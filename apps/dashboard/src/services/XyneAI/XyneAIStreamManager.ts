@@ -66,7 +66,6 @@ export interface StreamState {
   debugArtifactsReadyVersion: number;
   followUpsPending?: boolean;
   startedAt: number;
-  version?: 'v1' | 'v2';
   agentSlug?: string;
   showInSidebar: boolean;
 }
@@ -103,7 +102,6 @@ export interface StreamRequest {
   localUserMessageId?: string | undefined;
   suppressCompletionToast?: boolean | undefined;
   draftMode?: boolean | undefined;
-  version?: 'v1' | 'v2' | undefined;
   disableTools?: boolean | undefined;
   agentSlug?: string | undefined;
   /** Per-run model pin from the composer's model picker. Undefined = the
@@ -304,7 +302,6 @@ class XyneAIStreamManager {
             webSearchEnabled: record.webSearchEnabled,
             deepResearchEnabled: record.deepResearchEnabled ?? false,
             researchContext: null,
-            ...(record.version && { version: record.version }),
             ...(record.attachments.length > 0 && {
               attachments: record.attachments
                 .filter(
@@ -883,7 +880,6 @@ class XyneAIStreamManager {
   ): Promise<string> {
     const streamId = `stream-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-    request.version = 'v2';
 
     // Handle any existing stream for this thread
     const existingStream = this.activeStreams.get(threadId);
@@ -928,7 +924,6 @@ class XyneAIStreamManager {
       debugArtifactsReadyVersion: 0,
       startedAt: Date.now(),
       showInSidebar: request.showInSidebar ?? true,
-      ...(request.version && { version: request.version }),
       ...(request.agentSlug && { agentSlug: request.agentSlug }),
       ...(request.suppressCompletionToast && { suppressCompletionToast: true }),
     };
@@ -947,7 +942,6 @@ class XyneAIStreamManager {
       request.deepResearchEnabled ?? false,
       request.attachments,
       initialMessages,
-      request.version,
     );
 
     // Start the actual streaming request
@@ -1030,8 +1024,7 @@ class XyneAIStreamManager {
             parentAssistantMessageId: request.parentAssistantMessageId,
           }),
           ...(request.draftMode && { draftMode: true }),
-          ...(request.version && { version: request.version }),
-          ...(request.disableTools && { disableTools: true }),
+              ...(request.disableTools && { disableTools: true }),
           ...(request.agentSlug && { agentSlug: request.agentSlug }),
           ...(request.model && { model: request.model }),
         },
@@ -1842,7 +1835,6 @@ class XyneAIStreamManager {
         debugArtifactsReadyVersion: 0,
         startedAt: Date.now(),
         showInSidebar: true,
-        version: 'v2',
         agentSlug,
       };
       this.activeStreams.set(threadId, streamState);
