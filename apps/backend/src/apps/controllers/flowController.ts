@@ -62,10 +62,29 @@ export class FlowController {
         return;
       }
 
-      // 4. Look up the installed app to get its webhook/action URL
-      // Note: Webhook is configured per-app, not per-user
+      // 4. Look up the installed app to get its webhook/action URL.
+      // Webhook is configured per-app, but there can be multiple InstalledApps
+      // rows for the same appId (e.g. one per workspace) and only some carry a
+      // webhookUrl. The lookup MUST be scoped to the acting user's workspace and
+      // require a configured webhook so we never non-deterministically pick
+      // another tenant's install row (tenant-isolation, relevant for OSS /
+      // multi-tenant deployments) or a row whose webhookUrl is null/empty (which
+      // surfaced as a spurious "No webhook URL configured" 502 even though the
+      // app's webhook was set). Mirrors configureWebhook / updateInstalledApp.
+      const workspaceId = req.user?.workspaceId;
+      if (!workspaceId) {
+        // No workspace on the authenticated user — refuse rather than fall back
+        // to an unscoped, cross-tenant lookup.
+        res.status(400).json({ error: 'Workspace not found for user' });
+        return;
+      }
       const installedApp = await repositories.installedApps.findFirst({
-        where: { appId },
+        where: {
+          appId,
+          webhookUrl: { not: null },
+          AND: [{ webhookUrl: { not: '' } }],
+          user: { workspaceId },
+        },
       });
       if (!installedApp?.webhookUrl) {
         res.status(502).json({ error: `No webhook URL configured for app: ${appId}` });
