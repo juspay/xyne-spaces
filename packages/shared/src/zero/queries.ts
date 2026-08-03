@@ -2366,6 +2366,25 @@ export const queries = defineQueries({
     return zql.canvas_participants.where('canvasId', canvasId).related('canvas');
   }),
 
+  canvasCommentThreads: defineQuery(
+    z.object({ canvasId: z.string() }),
+    ({ args: { canvasId } }) => {
+      return zql.canvas_comment_threads
+        .where('canvasId', canvasId)
+        .orderBy('createdAt', 'asc')
+        .related('initialComment');
+    },
+  ),
+
+  canvasThreadComments: defineQuery(
+    z.object({ threadId: z.string() }),
+    ({ args: { threadId } }) => {
+      return zql.canvas_comments
+        .where('threadId', threadId)
+        .orderBy('createdAt', 'asc');
+    },
+  ),
+
   channelAndThreadMessages: defineQuery(
     z.object({ channelId: z.string() }),
     ({ ctx, args: { channelId } }) => {

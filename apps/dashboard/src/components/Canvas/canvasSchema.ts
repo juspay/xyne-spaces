@@ -3,6 +3,7 @@ import { whiteboardBlockSpecs } from 'blocknote-layout-extensions';
 import { mentionInlineContentSpec } from './CanvasMentionSpec';
 import { citationInlineContentSpec } from './CanvasCitationSpec';
 import { knownBlockTypesOf } from '../../utils/canvasUtils';
+import { canvasCommentThreadStyleSpec } from './CanvasCommentStyleSpec/CanvasCommentStyleSpec';
 
 // Default blocks + whiteboard, then extended with mention and citation inline content.
 // Shared by the canvas editors and the read-only previews: a preview built on a
@@ -17,6 +18,9 @@ function createCanvasSchema() {
       ...defaultInlineContentSpecs,
       mention: mentionInlineContentSpec,
       citation: citationInlineContentSpec,
+    },
+    styleSpecs: {
+      canvasCommentThread: canvasCommentThreadStyleSpec,
     },
   });
 }

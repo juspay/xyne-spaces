@@ -7,12 +7,41 @@
 import { DocConnection, DocumentManager } from '@y-sweet/sdk';
 import * as Y from 'yjs';
 import { ServerBlockNoteEditor } from '@blocknote/server-util';
-import { BlockNoteSchema, defaultBlockSpecs, defaultInlineContentSpecs } from '@blocknote/core';
+import {
+  BlockNoteSchema,
+  createStyleSpec,
+  defaultBlockSpecs,
+  defaultInlineContentSpecs,
+  defaultStyleSpecs,
+} from '@blocknote/core';
 import { mentionServerSpec } from 'blocknote-layout-server-utils';
 import { config } from '@/config/env.js';
 import { logger } from '@/utils/logger.js';
 import { citationServerSpec } from '@/utils/canvasCitationSpec.js';
 import type { BlockNoteBlock } from '@/types/blockNoteTypes.js';
+
+const canvasCommentThreadStyleSpec = createStyleSpec(
+  {
+    type: 'canvasCommentThread',
+    propSchema: 'string',
+  },
+  {
+    render: () => {
+      const doc = (globalThis as unknown as {
+        document?: { createElement: (tagName: string) => unknown };
+      }).document;
+      const span = doc?.createElement('span') ?? {};
+      return {
+        dom: span,
+        contentDOM: span,
+      } as never;
+    },
+    parse: element =>
+      (element as unknown as { getAttribute?: (name: string) => string | null }).getAttribute?.(
+        'data-canvas-comment-thread-id',
+      ) ?? undefined,
+  },
+);
 
 function createServerSchema() {
   return BlockNoteSchema.create({
@@ -23,6 +52,10 @@ function createServerSchema() {
       // Register "citation" so blocksToYDoc/blocksToYXmlFragment preserve the
       // call-summary citation chips into Y-Sweet instead of silently dropping them.
       citation: citationServerSpec,
+    },
+    styleSpecs: {
+      ...defaultStyleSpecs,
+      canvasCommentThread: canvasCommentThreadStyleSpec,
     },
   });
 }

@@ -1291,6 +1291,9 @@ model User {
   channelParticipations     ChannelParticipant[]   @relation("ChannelParticipantUser")
   channelUserStatuses       ChannelUserStatus[]    @relation("ChannelUserStatusUser")
   canvasUserStatuses        CanvasUserStatus[]     @relation("CanvasUserStatusUser")
+  createdCanvasCommentThreads CanvasCommentThread[] @relation("CanvasCommentThreadCreatedBy")
+  statusUpdatedCanvasCommentThreads CanvasCommentThread[] @relation("CanvasCommentThreadStatusUpdatedBy")
+  createdCanvasComments     CanvasComment[]        @relation("CanvasCommentCreatedBy")
   sentMessages              Message[]              @relation("MessageSender")
   createdConversations      Conversation[]         @relation("ConversationCreatedBy")
   createdChannels           Channel[]              @relation("ChannelCreatedBy")
@@ -3537,6 +3540,7 @@ model Canvas {
   participants CanvasParticipant[]
   userStatuses CanvasUserStatus[]
   versions     CanvasVersion[]
+  commentThreads CanvasCommentThread[]
   folder       CanvasFolder? @relation("FolderCanvases", fields: [folderId], references: [id])
   project      Project?      @relation(fields: [projectId], references: [id])
   // Quarto Doc fields - when docType is Quarto
@@ -3583,6 +3587,50 @@ model CanvasVersion {
   @@index([createdBy])
 
   @@map("canvas_versions")
+  @@schema("public")
+}
+
+model CanvasCommentThread {
+  id              String                    @id @default(cuid())
+  canvasId        String
+  blockId         String
+  anchorText      String?
+  initialCommentId String?
+  status          String                    @default("OPEN")
+  statusUpdatedBy String?
+  statusUpdatedAt DateTime?
+  createdBy       String
+  createdAt       DateTime                  @default(now())
+
+  canvas              Canvas          @relation(fields: [canvasId], references: [id], onDelete: Cascade)
+  comments            CanvasComment[] @relation("CanvasCommentThreadComments")
+  initialComment      CanvasComment?  @relation("CanvasCommentThreadInitialComment", fields: [initialCommentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  createdByUser       User            @relation("CanvasCommentThreadCreatedBy", fields: [createdBy], references: [id])
+  statusUpdatedByUser User?           @relation("CanvasCommentThreadStatusUpdatedBy", fields: [statusUpdatedBy], references: [id])
+
+  @@index([canvasId, createdAt])
+  @@map("canvas_comment_threads")
+  @@schema("public")
+}
+
+model CanvasComment {
+  id               String   @id @default(cuid())
+  threadId         String
+  canvasId         String
+  body             String
+  mentionedUserIds String   @default("[]")
+  isInitial        Boolean  @default(false)
+  createdBy        String
+  editedAt         DateTime?
+  deletedAt        DateTime?
+  createdAt        DateTime @default(now())
+
+  thread       CanvasCommentThread  @relation("CanvasCommentThreadComments", fields: [threadId], references: [id], onDelete: Cascade)
+  initialForThreads CanvasCommentThread[] @relation("CanvasCommentThreadInitialComment")
+  createdByUser User               @relation("CanvasCommentCreatedBy", fields: [createdBy], references: [id])
+
+  @@index([threadId, isInitial, createdAt])
+  @@map("canvas_comments")
   @@schema("public")
 }
 
@@ -5327,7 +5375,6 @@ model EntityAlias {
   @@map("entity_aliases")
   @@schema("non_zero")
 }
-
 // Telepresence Health Monitoring Models
 enum TelepresenceDeviceType {
   TV

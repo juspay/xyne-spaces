@@ -18,6 +18,8 @@ import {
   CanvasParticipantsACL,
   CanvasUserStatusACL,
   CanvasesACL,
+  CanvasCommentThreadsACL,
+  CanvasCommentsACL,
   ChannelDailyRecapsACL,
   ChannelRecapsACL,
   RecapsACL,
@@ -121,6 +123,10 @@ export class QueryACLFactory {
         return new CanvasUserStatusACL(ctx) as BaseQueryACL<TTable>;
       case 'canvases':
         return new CanvasesACL(ctx) as BaseQueryACL<TTable>;
+      case 'canvas_comment_threads':
+        return new CanvasCommentThreadsACL(ctx) as BaseQueryACL<TTable>;
+      case 'canvas_comments':
+        return new CanvasCommentsACL(ctx) as BaseQueryACL<TTable>;
       case 'channel_participants':
         return new ChannelParticipantsACL(ctx) as BaseQueryACL<TTable>;
       case 'channel_user_status':

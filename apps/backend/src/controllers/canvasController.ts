@@ -221,7 +221,9 @@ export class CanvasController {
       mentionType: z.enum(['user', 'group']),
       mentionId: z.string().min(1),
       blockId: z.string().min(1),
+      commentThreadId: z.string().optional(),
       canvasTitle: z.string().optional(),
+      mentionContext: z.enum(['canvas', 'comment']).optional(),
       slackUrl: z.string().url().optional().or(z.literal('')),
     });
 
@@ -238,7 +240,8 @@ export class CanvasController {
         return;
       }
 
-      const { mentionType, mentionId, blockId, canvasTitle, slackUrl } = validatedBody.data;
+      const { mentionType, mentionId, blockId, commentThreadId, canvasTitle, mentionContext, slackUrl } =
+        validatedBody.data;
       const userId = req.user?.id;
 
       if (!userId) {
@@ -337,8 +340,8 @@ export class CanvasController {
         userId: u.userId,
         actorId: userId,
         actorAction: u.mentionSource === 'direct' ? 'mentioned_user' : 'group_mention',
-        actionSource: 'canvas',
-        actionSourceId: canvasId,
+        actionSource: mentionContext === 'comment' ? 'canvas_comment' : 'canvas',
+        actionSourceId: mentionContext === 'comment' && commentThreadId ? commentThreadId : canvasId,
         channelId: canvasChannelId ?? undefined,
         canvasId: canvasId,
         blockId: blockId ?? undefined,
@@ -371,7 +374,9 @@ export class CanvasController {
           req.user?.workspaceId ?? '',
           channelName,
           blockId,
+          commentThreadId,
           canvasChannelId ?? undefined,
+          mentionContext,
         );
 
         slackRecipientEmails = getSlackRecipientEmails(mentionedEmails, deliveredUserIds, userEmailMap);
