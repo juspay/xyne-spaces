@@ -466,6 +466,13 @@ export default function RecordingDetailV2Screen(): ReactElement {
     { enabled: !!recording?.messageId },
   );
 
+  // While live the notes canvas is created by NoteTakerOverlayHost, so its id only
+  // reaches this screen through the store until the detail is refetched.
+  const notesCanvasId =
+    (isLive && recording?.externalId === activeRecordingId ? liveNotesCanvasId : null) ??
+    recording?.notesCanvasId ??
+    null;
+
   /**
    * A note-taker recording has no channel, message or conversation — it is created
    * from a LiveKit webhook rather than posted anywhere — so none of those can gate
@@ -474,23 +481,58 @@ export default function RecordingDetailV2Screen(): ReactElement {
    * as the recordings list does.
    */
   const handleAskAI = useCallback((): void => {
+    if (!recording) return;
     const attachmentIds = (message?.attachments ?? []).map((att: { id: string }) => att.id);
-    const hasThreadContext = !!recording?.conversationId || attachmentIds.length > 0;
+    const hasThreadContext = !!recording.conversationId || attachmentIds.length > 0;
+    const canvasSelections = [
+      ...(recording.detailedSummaryCanvasId
+        ? [
+            {
+              id: recording.detailedSummaryCanvasId,
+              canvasId: recording.detailedSummaryCanvasId,
+              title: `${recording.title || 'Recording'} summary`,
+            },
+          ]
+        : []),
+      ...(notesCanvasId && notesCanvasId !== recording.detailedSummaryCanvasId
+        ? [
+            {
+              id: notesCanvasId,
+              canvasId: notesCanvasId,
+              title: `${recording.title || 'Recording'} notes`,
+            },
+          ]
+        : []),
+    ];
 
     xyneAIActor.send({
       type: 'OPEN',
       startFreshChat: true,
       contextType: 'general',
-      ...(recording?.channelId ? { channelId: recording.channelId } : {}),
+      initialContextSelections: {
+        recordings: [
+          {
+            // `id` is the canonical Call id. `externalId` is only the public
+            // recording-route id, so using it here would make Claw fail to
+            // resolve the attached call.
+            id: recording.id,
+            title: recording.title || 'Recording',
+            ...(recording.channelId ? { channelId: recording.channelId } : {}),
+            ...(recording.conversationId ? { conversationId: recording.conversationId } : {}),
+            externalId: recording.externalId,
+          },
+        ],
+        canvases: canvasSelections,
+      },
       threadInfo: hasThreadContext
         ? {
-            conversationId: recording?.conversationId ?? '',
-            previewText: recording?.title || 'Recording Transcript',
+            conversationId: recording.conversationId ?? '',
+            previewText: recording.title || 'Recording Transcript',
             ...(attachmentIds.length > 0 ? { attachmentIds } : {}),
           }
         : null,
     });
-  }, [recording, message]);
+  }, [recording, message, notesCanvasId]);
 
   const transcriptText =
     speakerIdentificationEnabled && recording?.hasIdentifiedTranscript
@@ -546,11 +588,6 @@ export default function RecordingDetailV2Screen(): ReactElement {
     );
   }
 
-  // While live the notes canvas is created by NoteTakerOverlayHost, so its id only
-  // reaches this screen through the store until the detail is refetched.
-  const notesCanvasId =
-    (isLive && recording.externalId === activeRecordingId ? liveNotesCanvasId : null) ??
-    recording.notesCanvasId;
   // The player replaces the read-only timeline once there is audio to scrub.
   const showAudioPlayer = !isLive && !!recording.hasRecording;
   const hasDetailedSummary = !!recording.detailedSummaryCanvasId;

@@ -373,6 +373,11 @@ const AppRoot = (): ReactElement => {
   const xyneAICanvasInfo = useSelector(xyneAIActor, state => state.context.canvasInfo);
   const xyneAIThreadInfo = useSelector(xyneAIActor, state => state.context.threadInfo);
   const xyneAIStartFreshChat = useSelector(xyneAIActor, state => state.context.startFreshChat);
+  const xyneAIInitialContextSelections = useSelector(
+    xyneAIActor,
+    state => state.context.initialContextSelections,
+  );
+  const xyneAIContextOpenNonce = useSelector(xyneAIActor, state => state.context.contextOpenNonce);
   const xyneAIKbCollectionId = useSelector(xyneAIActor, state => state.context.kbCollectionId);
   const xyneAIKbChannelId = useSelector(xyneAIActor, state => state.context.kbChannelId);
   const xyneAIKbDocId = useSelector(xyneAIActor, state => state.context.kbDocId);
@@ -598,6 +603,8 @@ const AppRoot = (): ReactElement => {
                             threadInfo={xyneAIThreadInfo}
                             startFreshChat={xyneAIStartFreshChat}
                             canvasInfo={xyneAICanvasInfo}
+                            initialContextSelections={xyneAIInitialContextSelections}
+                            contextOpenNonce={xyneAIContextOpenNonce}
                             kbCollectionId={xyneAIKbCollectionId ?? ''}
                             kbChannelId={xyneAIKbChannelId ?? ''}
                             kbDocId={xyneAIKbDocId ?? ''}
@@ -743,6 +750,8 @@ const AppRoot = (): ReactElement => {
                       threadInfo={xyneAIThreadInfo}
                       startFreshChat={xyneAIStartFreshChat}
                       canvasInfo={xyneAICanvasInfo}
+                      initialContextSelections={xyneAIInitialContextSelections}
+                      contextOpenNonce={xyneAIContextOpenNonce}
                       kbCollectionId={xyneAIKbCollectionId ?? ''}
                       kbChannelId={xyneAIKbChannelId ?? ''}
                       kbDocId={xyneAIKbDocId ?? ''}
@@ -770,6 +779,8 @@ const AppRoot = (): ReactElement => {
                       threadInfo={xyneAIThreadInfo}
                       startFreshChat={xyneAIStartFreshChat}
                       canvasInfo={xyneAICanvasInfo}
+                      initialContextSelections={xyneAIInitialContextSelections}
+                      contextOpenNonce={xyneAIContextOpenNonce}
                       kbCollectionId={xyneAIKbCollectionId ?? ''}
                       kbChannelId={xyneAIKbChannelId ?? ''}
                       kbDocId={xyneAIKbDocId ?? ''}

@@ -1591,8 +1591,8 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
           selectedCanvases.length +
           selectedTranscripts.length +
           selectedRecordings.length;
-        if (nonChannelCount >= 5) {
-          toast.error('Maximum 5 context items can be selected', { duration: 2000 });
+        if (nonChannelCount >= 20) {
+          toast.error('Maximum 20 context items can be selected', { duration: 2000 });
           return null;
         }
         return [...list, make()];
