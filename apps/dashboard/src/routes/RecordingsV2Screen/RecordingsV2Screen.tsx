@@ -42,7 +42,7 @@ const RecordingsV2Screen = (): ReactElement => {
   const [scrollContainer, setScrollContainer] = useState<HTMLDivElement | null>(null);
   const [activeListTab, setActiveListTab] = useState<RecordingOwnershipTab>('created');
   const [selectedCreatorId, setSelectedCreatorId] = useState<string | null>(null);
-  const [selectedDatePreset, setSelectedDatePreset] = useState<RecordingDatePreset>('this-week');
+  const [selectedDatePreset, setSelectedDatePreset] = useState<RecordingDatePreset>('all-time');
   const [selectedLabels, setSelectedLabels] = useState<string[]>([]);
   const [selectedSharerIds, setSelectedSharerIds] = useState<string[]>([]);
   const {

@@ -1,1 +1,0 @@
-ALTER TYPE "NotificationType" ADD VALUE 'RECORDING_SHARED';

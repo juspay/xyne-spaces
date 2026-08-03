@@ -619,7 +619,6 @@ export default function RecordingDetailV2Screen(): ReactElement {
               {...(ownsLiveSession ? { onMinimize: handleMinimize } : {})}
             />
             <motion.div layoutRoot className='flex flex-col pt-2'>
-              
               <LiveRecordingControlBar
                 recording={recording}
                 isLive={isLive}

@@ -6,7 +6,6 @@ import { scheduleCallController } from '@/controllers/scheduleCallController';
 import { callChatController, requireInternalCallParticipant } from '@/controllers/callChatController';
 import { uploadSingle } from '@/middleware/upload';
 import { summaryTemplateController } from '@/controllers/summaryTemplateController';
-import { recordingEmailController } from '@/controllers/recordingEmailController';
 import { recordingSharingController } from '@/controllers/recordingSharingController';
 
 const router = Router();
