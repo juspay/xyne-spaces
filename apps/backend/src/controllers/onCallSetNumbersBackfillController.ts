@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { db } from '@/database/client';
+import { elevateToServiceActor } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import { ApiResponse } from '@/types/express';
 
@@ -34,6 +35,9 @@ export class OnCallSetNumbersBackfillController {
 
     let hasMore = true;
 
+    // Maintenance sweep: reads and rewrites every mapping in the workspace, above the
+    // operator's own row scope.
+    await elevateToServiceActor(async () => {
     while (hasMore) {
       const mappings: Array<{
         id: string;
@@ -105,6 +109,7 @@ export class OnCallSetNumbersBackfillController {
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
     }
+    });
 
     return summary;
   }

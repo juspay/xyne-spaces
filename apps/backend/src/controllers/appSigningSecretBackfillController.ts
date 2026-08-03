@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { Prisma } from '@prisma/client';
 import { db } from '@/database/client';
+import { elevateToServiceActor } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import { ApiResponse } from '@/types/express';
 import { encrypt } from '@/services/encryptionService';
@@ -93,6 +94,9 @@ export class AppSigningSecretBackfillController {
       for (const app of apps) {
         summary.appsProcessed += 1;
         try {
+          // Maintenance sweep: resolves and fills every app in the workspace, above the
+          // operator's own row scope.
+          await elevateToServiceActor(async () => {
           const data: Prisma.AppsUpdateInput = {};
 
           if (app.signingSecret === '') {
@@ -148,6 +152,7 @@ export class AppSigningSecretBackfillController {
           if (!options.dryRun && Object.keys(data).length > 0) {
             await db.apps.update({ where: { id: app.id }, data });
           }
+          });
         } catch (error) {
           summary.errors += 1;
           logger.warn(`${TAG} Failed to backfill app`, {
