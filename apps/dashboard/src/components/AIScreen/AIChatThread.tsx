@@ -13,8 +13,6 @@ import {
 import {
   Menu,
   Copy,
-  ThumbsUp,
-  ThumbsDown,
   ChevronLeft,
   ChevronRight,
   Link2,
@@ -30,7 +28,6 @@ import remarkBreaks from 'remark-breaks';
 import { Link } from 'react-router-dom';
 import { useXyneAIStream } from '../../hooks/useXyneAIStream';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
-import { useAskAIVersion } from '../../hooks/useAskAIVersion';
 import type {
   Message,
   MessageAttachment,
@@ -663,8 +660,6 @@ const preserveUrlTransform = (url: string): string => url;
 function ChatMessageBubble({
   message,
   onCopy,
-  onFeedback,
-  feedbackValue,
   onDebug,
   onOpenToolDebug,
   onEditSubmit,
@@ -672,15 +667,10 @@ function ChatMessageBubble({
   onFollowUpSuggestionClick,
   branchInfo,
   onBranchNavigate,
-  isV2,
   onRatingChange,
 }: {
   message: Message;
   onCopy?: () => void;
-  onFeedback?: (messageId: string, feedbackType: 'LIKE' | 'DISLIKE') => void;
-  feedbackValue?: FeedbackValue;
-  /** v2 (claw-backed) surface: route 👍/👎 to agent_runs.rating instead of Langfuse. */
-  isV2?: boolean;
   /** v2 rating change — lets the parent reflect the new feedback in message state. */
   onRatingChange?: (messageId: string, feedback: 0 | 1 | 2, comment?: string | null) => void;
   onDebug?: (() => void) | undefined;
@@ -1214,56 +1204,12 @@ function ChatMessageBubble({
               >
                 <Copy className='h-3.5 w-3.5' aria-hidden strokeWidth={1.75} />
               </button>
-              {isV2 ? (
-                // v2 (claw): persist to agent_runs.rating (metrics + reload) with
-                // an optional comment on 👎.
-                <AskAiRatingButtons
-                  messageId={message.id}
-                  feedback={message.feedback}
-                  comment={message.ratingComment}
-                  onChange={(fb, c): void => onRatingChange?.(message.id, fb, c)}
-                />
-              ) : (
-                <>
-                  <button
-                    type='button'
-                    onClick={(): void => onFeedback?.(message.id, 'LIKE')}
-                    title='Helpful'
-                    className={cn(
-                      'inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-secondary hover:text-foreground',
-                      feedbackValue === 'LIKE' ? 'text-foreground' : 'text-muted-foreground',
-                    )}
-                    data-track-category='XyneAI'
-                    data-track-name='LIKE_MESSAGE'
-                  >
-                    <ThumbsUp
-                      className='h-3.5 w-3.5'
-                      aria-hidden
-                      strokeWidth={1.75}
-                      fill={feedbackValue === 'LIKE' ? 'currentColor' : 'none'}
-                      fillOpacity={feedbackValue === 'LIKE' ? 0.3 : 1}
-                    />
-                  </button>
-                  <button
-                    type='button'
-                    onClick={(): void => onFeedback?.(message.id, 'DISLIKE')}
-                    title='Not helpful'
-                    className={cn(
-                      'inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-secondary hover:text-foreground',
-                      feedbackValue === 'DISLIKE' ? 'text-foreground' : 'text-muted-foreground',
-                    )}
-                    data-track-category='XyneAI'
-                    data-track-name='DISLIKE_MESSAGE'
-                  >
-                    <ThumbsDown
-                      className='h-3.5 w-3.5'
-                      aria-hidden
-                      strokeWidth={1.75}
-                      fill={feedbackValue === 'DISLIKE' ? 'currentColor' : 'none'}
-                      fillOpacity={feedbackValue === 'DISLIKE' ? 0.3 : 1}
-                    />
-                  </button>
-                </>
+              <AskAiRatingButtons
+                messageId={message.id}
+                feedback={message.feedback}
+                comment={message.ratingComment}
+                onChange={(fb, c): void => onRatingChange?.(message.id, fb, c)}
+              />
               )}
               {/* Regenerate — re-runs the last user query as a new bot sibling.
                   Only wired on the latest bot message. */}
@@ -1466,9 +1412,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
   void threadId; // Used by stream manager via useXyneAIStream internally
 
   const { selectedAgentSlug } = useSelectedAgent();
-  const { askAIVersion } = useAskAIVersion();
-  const isV2 = askAIVersion === 'v2';
-  const effectiveAgentSlug = isV2 ? selectedAgentSlug : null;
+  const effectiveAgentSlug = selectedAgentSlug;
 
   const { submitQuery, abortCurrentRequest } = useXyneAIStream({
     channelIds: [],
@@ -1478,7 +1422,6 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     setConversationId,
     setDebugEvents,
     setDebugArtifactsReadyVersion,
-    isV2,
     agentSlug: effectiveAgentSlug,
   });
 
@@ -1696,7 +1639,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
         setDebugArtifactsReadyVersion(0);
         setDebugSessionId(null);
 
-        if (isV2) {
+        {
           const messages = await fetchV2ConversationMessages(sessionId, effectiveAgentSlug);
           const loadedMessages = messages.map(msg => ({
             ...msg,
@@ -1758,7 +1701,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     return () => {
       cancelled = true;
     };
-  }, [sessionId, threadId, onConversationChange, effectiveAgentSlug, isV2]);
+  }, [sessionId, threadId, onConversationChange, effectiveAgentSlug]);
 
   // Auto-submit initialQuery once on mount, applying the landing composer's
   // chosen context/toggles to this first turn.
@@ -2086,8 +2029,6 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
           <div ref={contentRef} className='mx-auto flex max-w-3xl flex-col'>
             <ConversationToolInvocationsContext.Provider value={conversationToolInvocations}>
               {displayMessages.map((message, idx) => {
-                const feedbackValue: FeedbackValue =
-                  message.feedback === 1 ? 'LIKE' : message.feedback === 2 ? 'DISLIKE' : null;
                 const botTurnIndex =
                   message.type === 'bot'
                     ? displayMessages.slice(0, idx + 1).filter(m => m.type === 'bot').length - 1
@@ -2113,14 +2054,9 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
                         message.content || message.streamingContent || '',
                       );
                     }}
-                    onFeedback={(id, type) => {
-                      void handleFeedback(id, type);
-                    }}
-                    feedbackValue={feedbackValue}
-                    isV2={isV2}
                     onRatingChange={handleRatingChange}
                     onDebug={
-                      isV2 && message.type === 'bot'
+                      message.type === 'bot'
                         ? () => {
                             setDebugTurnIndex(botTurnIndex);
                             // Pin to this message's run when known (branching-safe);
@@ -2132,7 +2068,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
                         : undefined
                     }
                     onOpenToolDebug={
-                      isV2 && message.type === 'bot'
+                      message.type === 'bot'
                         ? (toolCallId: string) => {
                             setDebugTurnIndex(botTurnIndex);
                             setDebugSessionId(message.debugSessionId ?? null);
@@ -2152,7 +2088,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
                         : undefined
                     }
                     onFollowUpSuggestionClick={
-                      isV2 && isLatestBotMessage && !message.isStreaming
+                      isLatestBotMessage && !message.isStreaming
                         ? handleFollowUpSuggestion
                         : undefined
                     }
@@ -2196,7 +2132,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
                 void handleSubmit(text, attachments, context);
               }}
               onAgentChange={onAgentChange}
-              showAgentSelector={isV2}
+              showAgentSelector
               initialExtras={initialExtras}
               onContextChange={onContextChange}
               pending={isAnyMessageStreaming}
@@ -2207,7 +2143,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
         </div>
       </div>
 
-      {showDebugger && isV2 && (
+      {showDebugger && (
         <AskAIDebugPanel
           inline
           open={showDebugger}
