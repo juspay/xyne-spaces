@@ -24,10 +24,9 @@ export function LibraryIconTile({
   return (
     <span
       className={cn(
-        'flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-lg border text-sm font-semibold',
-        // Uncolored tiles match the Browse MCP dialog's McpLogo frame: a white
-        // card surface with a grey border, not a filled grey swatch.
-        color ? 'border-black/5 text-white' : 'border-border bg-card text-muted-foreground',
+        'flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-lg text-sm font-normal shadow-sm',
+
+        color ? 'text-white' : 'border border-border bg-card text-muted-foreground',
       )}
       style={color ? { backgroundColor: color } : undefined}
       aria-hidden='true'
@@ -112,7 +111,7 @@ export function LibraryCard({
 export function LibraryCardSkeleton(): ReactElement {
   return (
     <div className='flex items-start gap-3 rounded-[20px] border border-border bg-background p-4'>
-      <Skeleton className='size-10 shrink-0 rounded-lg' />
+      <Skeleton className='size-8 shrink-0 rounded-lg' />
 
       <div className='flex min-w-0 flex-1 flex-col gap-0.5'>
         <div className='flex min-h-[22px] items-center'>

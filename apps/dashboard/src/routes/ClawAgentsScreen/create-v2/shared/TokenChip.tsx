@@ -3,7 +3,7 @@ import { type ReactElement, type ReactNode } from 'react';
 export function ChipIconTile({ children }: { children: ReactNode }): ReactElement {
   return (
     <span
-      className='flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-card text-muted-foreground'
+      className='flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-card text-muted-foreground shadow-sm'
       aria-hidden
     >
       {children}

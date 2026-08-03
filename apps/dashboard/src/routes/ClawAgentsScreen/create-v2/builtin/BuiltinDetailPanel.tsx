@@ -37,7 +37,7 @@ export function BuiltinDetailPanel({
     <div className='flex min-h-0 flex-1 flex-col gap-8 overflow-y-auto px-[22px] pb-9 pt-2'>
       <div className='flex w-full items-start gap-12'>
         <div className='flex min-w-0 flex-1 items-center gap-2.5'>
-          <span className='flex size-11 shrink-0 items-center justify-center rounded-xl border border-border bg-card text-muted-foreground'>
+          <span className='flex size-11 shrink-0 items-center justify-center rounded-xl border border-border bg-card text-muted-foreground shadow-sm'>
             <Grid01 className='size-5' aria-hidden />
           </span>
           <div className='flex min-w-0 flex-col gap-2.5 py-px'>
@@ -94,7 +94,7 @@ export function BuiltinDetailPanel({
             </button>
           }
         />
-        <div className='grid grid-cols-1 gap-x-12 gap-y-4 sm:grid-cols-2'>
+        <div className='grid w-full grid-cols-1 gap-x-12 gap-y-4 sm:grid-cols-2'>
           {entry.tools.map(tool => {
             const checked = isToolSelected(selection, tool);
             return (

@@ -32,7 +32,7 @@ export function McpLogo({
     return (
       <div
         className={cn(
-          'flex shrink-0 items-center justify-center border border-border font-semibold text-muted-foreground',
+          'flex shrink-0 items-center justify-center border border-border font-semibold text-muted-foreground shadow-sm',
           SIZE[size],
           background,
         )}
@@ -49,7 +49,11 @@ export function McpLogo({
       alt=''
       aria-hidden='true'
       onError={() => setErrored(true)}
-      className={cn('shrink-0 border border-border object-contain', SIZE[size], background)}
+      className={cn(
+        'shrink-0 border border-border object-contain shadow-sm',
+        SIZE[size],
+        background,
+      )}
     />
   );
 }

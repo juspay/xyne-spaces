@@ -308,7 +308,7 @@ export function McpDetailPanel({
           />
 
           {entry.selectable ? (
-            <div className='grid grid-cols-1 gap-x-12 gap-y-4 sm:grid-cols-2'>
+            <div className='grid w-full grid-cols-1 gap-x-12 gap-y-4 sm:grid-cols-2'>
               {entry.tools.map(tool => {
                 const checked = isToolSelected(selection, entry, tool);
                 return (
