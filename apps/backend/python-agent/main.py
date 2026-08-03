@@ -302,6 +302,10 @@ async def entrypoint(ctx: JobContext):
     event_bus.subscribe("TRANSCRIPTION", transcription_handler.handle)
     logger.info(f"event_bus_subscribed | event=TRANSCRIPTION, handler=transcription_handler")
 
+    # Forward live STT failures so the dashboard can begin local repair capture.
+    event_bus.subscribe("STT_STATUS", publisher.publish)
+    logger.info("event_bus_subscribed | event=STT_STATUS, handler=publisher")
+
     if identified_storage is not None:
         storage_for_identified_transcripts = identified_storage
         # Subscribe to identified transcription events → second storage (real names)

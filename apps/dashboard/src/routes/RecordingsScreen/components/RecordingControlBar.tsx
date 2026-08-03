@@ -82,6 +82,12 @@ export function RecordingControlBar({
       style={{ paddingBottom: isMobileWeb ? `${MOBILE_NAV_H + 16}px` : '1rem' }}
     >
       <div className='max-w-4xl mx-auto flex items-center justify-center gap-4'>
+        {isOffline && isRecording && (
+          <span className='text-xs font-medium text-amber-600 dark:text-amber-400'>
+            Recording locally — transcript unavailable
+          </span>
+        )}
+
         {/* Waveform bars (left side, visible when actively recording) */}
         {isRecording && !isPaused && <Waveform variant='bar' durationSec={0.5} staggerSec={0.1} />}
 

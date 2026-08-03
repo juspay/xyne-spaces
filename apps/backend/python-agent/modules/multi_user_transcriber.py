@@ -952,6 +952,15 @@ class MultiUserTranscriber:
         
         # Grab pre-warmed session from pool (instant, no initialization delay)
         session = await self._get_session_from_pool()
+
+        @session.on("error")
+        def on_session_error(event):
+            if isinstance(event.error, stt.STTError):
+                asyncio.create_task(self.bus.emit("STT_STATUS", {
+                    "type": "stt_error",
+                    "timestamp": event.created_at,
+                    "recoverable": event.error.recoverable,
+                }))
         
         # Create agent for this participant with shared turn detector
         agent = ParticipantTranscriber(

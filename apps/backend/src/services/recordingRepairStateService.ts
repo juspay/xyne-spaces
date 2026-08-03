@@ -1,7 +1,7 @@
 import { redisService } from '@/services/redisService';
 
 export type RecordingRepairStatus = 'OPEN' | 'FINALIZED' | 'PROCESSING' | 'MERGED' | 'FAILED';
-export type RecordingRepairOutageReason = 'browser_offline' | 'livekit_disconnected' | 'reconnect_timeout' | 'agent_left';
+export type RecordingRepairOutageReason = 'browser_offline' | 'livekit_disconnected' | 'reconnect_timeout' | 'agent_left' | 'stt_failed';
 
 export interface RecordingRepairOutage {
   startedAt: number;
@@ -42,7 +42,7 @@ class RecordingRepairStateService {
     const result = await redisService.getClient().eval(`
       local current = redis.call('HGET', KEYS[1], 'status')
       if not current then
-        redis.call('HSET', KEYS[1], 'status', 'FINALIZED', 'outages', ARGV[1], 'finalizedAt', ARGV[2], 'processingError', '', 'mergedAt', '')
+        redis.call('HSET', KEYS[1], 'status', 'FINALIZED', 'outages', ARGV[1], 'finalizedAt', ARGV[2], 'processingError', '', 'mergedAt', '', 'retryable', 'true')
         return 'FINALIZED'
       end
       return current
@@ -56,7 +56,8 @@ class RecordingRepairStateService {
     const key = this.key(callId, captureId);
     const claimed = await redisService.getClient().eval(`
       local status = redis.call('HGET', KEYS[1], 'status')
-      if status == 'FINALIZED' or status == 'FAILED' then
+      local retryable = redis.call('HGET', KEYS[1], 'retryable')
+      if status == 'FINALIZED' or (status == 'FAILED' and retryable ~= 'false') then
         redis.call('HSET', KEYS[1], 'status', 'PROCESSING', 'processingError', '')
         return 1
       end
@@ -74,8 +75,13 @@ class RecordingRepairStateService {
       .exec();
   }
 
-  async markFailed(callId: string, captureId: string, error: string): Promise<void> {
-    await redisService.getClient().hset(this.key(callId, captureId), 'status', 'FAILED', 'processingError', error.slice(0, 1000));
+  async markFailed(callId: string, captureId: string, error: string, retryable = true): Promise<void> {
+    await redisService.getClient().hset(
+      this.key(callId, captureId),
+      'status', 'FAILED',
+      'processingError', error.slice(0, 1000),
+      'retryable', String(retryable),
+    );
   }
 
   async findPending(): Promise<Array<{ callId: string; captureId: string }>> {
@@ -86,8 +92,8 @@ class RecordingRepairStateService {
       const [nextCursor, keys] = await client.scan(cursor, 'MATCH', 'recording-repair:*', 'COUNT', 100);
       cursor = nextCursor;
       for (const key of keys) {
-        const status = await client.hget(key, 'status');
-        if (status !== 'FINALIZED' && status !== 'FAILED') continue;
+        const [status, retryable] = await client.hmget(key, 'status', 'retryable');
+        if (status !== 'FINALIZED' && (status !== 'FAILED' || retryable === 'false')) continue;
         const [, callId, ...captureParts] = key.split(':');
         const captureId = captureParts.join(':');
         if (callId && captureId) pending.push({ callId, captureId });

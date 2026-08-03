@@ -44,7 +44,11 @@ export type RecordingStoreEvent =
   | { type: 'setActiveLayout'; layout: RecordingLayout }
   | { type: 'setTranscriptMinimized'; isMinimized: boolean }
   | { type: 'agentLeftUnexpectedly' }
-  | { type: 'enterOfflineFallback'; reason: 'browser_offline' | 'livekit_disconnected' | 'reconnect_timeout' }
+  | {
+      type: 'enterOfflineFallback';
+      reason: 'browser_offline' | 'livekit_disconnected' | 'reconnect_timeout' | 'stt_failed';
+    }
+  | { type: 'sttRecovered' }
   | { type: 'resumeLiveRecording' };
 
 interface TypedRecordingStore {

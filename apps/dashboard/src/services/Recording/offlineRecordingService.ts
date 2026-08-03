@@ -1,10 +1,19 @@
-import { recordingService, type RecordingRepairOutage } from './recordingService';
+import {
+  RECORDING_REPAIR_MERGED_EVENT,
+  recordingService,
+  type RecordingRepairMergedEventDetail,
+  type RecordingRepairOutage,
+  type RecordingRepairStatus,
+} from './recordingService';
 import { toast } from 'sonner';
+import { logger, Logger } from '../../utils/logger';
 
 const DATABASE_NAME = 'xyne-recording-repairs';
 const CHUNK_STORE = 'chunks';
 const CAPTURE_STORE = 'captures';
-const CHUNK_DURATION_MS = 5_000;
+const CHUNK_DURATION_MS = 10_000;
+const REPAIR_STATUS_POLL_INTERVAL_MS = 2_000;
+const REPAIR_STATUS_POLL_TIMEOUT_MS = 5 * 60_000;
 
 interface StoredChunk {
   id: string;
@@ -25,8 +34,14 @@ interface PersistedCapture {
 }
 
 interface Capture extends PersistedCapture {
-  recorder: MediaRecorder;
+  stream: MediaStream;
+  mimeType: string;
+  recorder: MediaRecorder | null;
+  segmentTimer: ReturnType<typeof setTimeout> | null;
+  segmentStopped: Promise<void> | null;
   chunkStartedAt: number;
+  paused: boolean;
+  stopping: boolean;
 }
 
 function openDatabase(): Promise<IDBDatabase> {
@@ -54,6 +69,7 @@ async function checksum(blob: Blob): Promise<string> {
 export class OfflineRecordingService {
   private capture: Capture | null = null;
   private pendingWrites = new Set<Promise<void>>();
+  private pendingUpload: Promise<void> = Promise.resolve();
   private hasPersistenceError = false;
 
   async initialize(): Promise<void> {
@@ -62,44 +78,35 @@ export class OfflineRecordingService {
   }
 
   async start(callId: string, track: MediaStreamTrack): Promise<void> {
-    if (this.capture || typeof MediaRecorder === 'undefined') return;
+    if (this.capture) throw new Error('A local recording capture is already active');
+    if (typeof MediaRecorder === 'undefined') {
+      throw new Error('This browser does not support local recording capture');
+    }
 
     this.hasPersistenceError = false;
     const stream = new MediaStream([track]);
     const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
       ? 'audio/webm;codecs=opus'
       : 'audio/webm';
-    const recorder = new MediaRecorder(stream, { mimeType });
     const capture: Capture = {
       callId,
       captureId: crypto.randomUUID(),
-      recorder,
+      stream,
+      mimeType,
+      recorder: null,
+      segmentTimer: null,
+      segmentStopped: null,
       sequence: 0,
       chunkStartedAt: Date.now(),
+      paused: false,
+      stopping: false,
       outages: [],
       activeOutage: null,
     };
 
-    recorder.ondataavailable = (event: BlobEvent): void => {
-      if (!event.data.size) return;
-      const startedAt = capture.chunkStartedAt;
-      const endedAt = Date.now();
-      capture.chunkStartedAt = endedAt;
-      const chunk: StoredChunk = {
-        id: `${capture.captureId}:${capture.sequence}`,
-        callId: capture.callId,
-        captureId: capture.captureId,
-        sequence: capture.sequence++,
-        startedAt,
-        endedAt,
-        blob: event.data,
-      };
-      this.trackWrite(Promise.all([this.saveChunk(chunk), this.saveCapture(capture)]).then(() => undefined));
-    };
-
     await this.saveCapture(capture);
-    recorder.start(CHUNK_DURATION_MS);
     this.capture = capture;
+    this.startSegment(capture);
   }
 
   enterOutage(reason: RecordingRepairOutage['reason']): void {
@@ -109,41 +116,147 @@ export class OfflineRecordingService {
     this.trackWrite(this.saveCapture(capture));
   }
 
-  leaveOutage(): void {
+  leaveOutage(expectedReason?: RecordingRepairOutage['reason']): boolean {
     const capture = this.capture;
-    if (!capture?.activeOutage) return;
+    if (
+      !capture?.activeOutage ||
+      (expectedReason && capture.activeOutage.reason !== expectedReason)
+    )
+      return false;
     capture.activeOutage.endedAt = new Date().toISOString();
     capture.outages.push(capture.activeOutage);
     capture.activeOutage = null;
     this.trackWrite(this.saveCapture(capture));
-    void this.uploadPending(capture).catch(() => undefined);
+    void this.queueUpload(capture).catch(() => undefined);
+    return true;
   }
 
   pause(): void {
-    if (this.capture?.recorder.state === 'recording') this.capture.recorder.pause();
+    const capture = this.capture;
+    if (!capture || capture.paused) return;
+    capture.paused = true;
+    this.clearSegmentTimer(capture);
+    if (capture.recorder?.state === 'recording') capture.recorder.stop();
   }
 
   resume(): void {
-    if (this.capture?.recorder.state === 'paused') this.capture.recorder.resume();
+    const capture = this.capture;
+    if (!capture || !capture.paused || capture.stopping) return;
+    capture.paused = false;
+    // If stop() is still dispatching its stop event, that handler starts the next
+    // segment. Otherwise there is no recorder left and we can start immediately.
+    if (!capture.recorder) this.startSegment(capture);
   }
 
   async stopAndUpload(): Promise<void> {
     const capture = this.capture;
     if (!capture) return;
     this.leaveOutage();
-    if (capture.recorder.state !== 'inactive') {
-      await new Promise<void>(resolve => {
-        capture.recorder.addEventListener('stop', () => resolve(), { once: true });
-        capture.recorder.stop();
-      });
+    logger.info(
+      Logger.Event.RECORDING_STATE_CHANGED,
+      {
+        source: 'offline_recording_service',
+        event: 'recording_repair_outages_at_stop',
+        callId: capture.callId,
+        captureId: capture.captureId,
+        outageCount: capture.outages.length,
+        outages: capture.outages.map((outage, index) => {
+          const startedAtMs = new Date(outage.startedAt).getTime();
+          const endedAtMs = new Date(outage.endedAt ?? outage.startedAt).getTime();
+          return {
+            index,
+            reason: outage.reason,
+            startedAt: outage.startedAt,
+            endedAt: outage.endedAt,
+            startedAtMs,
+            endedAtMs,
+            durationMs: Math.max(0, endedAtMs - startedAtMs),
+          };
+        }),
+      },
+      true,
+    );
+    capture.stopping = true;
+    this.clearSegmentTimer(capture);
+    const segmentStopped = capture.segmentStopped;
+    if (capture.recorder?.state === 'recording' || capture.recorder?.state === 'paused') {
+      capture.recorder.stop();
     }
+    // Detach synchronously so repair upload/status polling for this recording
+    // cannot block a new recording from starting with its own active capture.
+    this.capture = null;
+    if (segmentStopped) await segmentStopped;
     await this.flushWrites();
     if (capture.outages.length) {
-      await this.uploadPending(capture);
-      await recordingService.finalizeRecordingRepair(capture.callId, capture.captureId, capture.outages);
+      await this.queueUpload(capture);
+      await recordingService.finalizeRecordingRepair(
+        capture.callId,
+        capture.captureId,
+        capture.outages,
+      );
       await this.cleanupIfMerged(capture);
+    } else {
+      await this.deleteCapture(capture.captureId);
+      await this.deleteChunks(capture.captureId);
     }
-    this.capture = null;
+  }
+
+  /**
+   * A MediaRecorder timeslice is only a fragment of one WebM stream. In
+   * particular, blobs after the first usually have no EBML/track header and
+   * cannot be sent to a transcription API independently. Use one recorder
+   * lifecycle per segment so every persisted blob is a complete WebM file.
+   */
+  private startSegment(capture: Capture): void {
+    if (capture.stopping || capture.paused || this.capture !== capture) return;
+
+    const recorder = new MediaRecorder(capture.stream, { mimeType: capture.mimeType });
+    capture.recorder = recorder;
+    capture.chunkStartedAt = Date.now();
+
+    let resolveStopped: (() => void) | undefined;
+    capture.segmentStopped = new Promise<void>(resolve => {
+      resolveStopped = resolve;
+    });
+
+    recorder.ondataavailable = (event: BlobEvent): void => {
+      if (!event.data.size) return;
+      const chunk: StoredChunk = {
+        id: `${capture.captureId}:${capture.sequence}`,
+        callId: capture.callId,
+        captureId: capture.captureId,
+        sequence: capture.sequence++,
+        startedAt: capture.chunkStartedAt,
+        endedAt: Date.now(),
+        blob: event.data,
+      };
+      this.trackWrite(
+        Promise.all([this.saveChunk(chunk), this.saveCapture(capture)]).then(() => undefined),
+      );
+    };
+
+    recorder.onstop = (): void => {
+      this.clearSegmentTimer(capture);
+      // Ignore a stale stop event if another segment was already installed.
+      if (capture.recorder === recorder) {
+        capture.recorder = null;
+        capture.segmentStopped = null;
+        if (!capture.stopping && !capture.paused) this.startSegment(capture);
+      }
+      resolveStopped?.();
+    };
+
+    recorder.start();
+    capture.segmentTimer = setTimeout(() => {
+      capture.segmentTimer = null;
+      if (recorder.state === 'recording') recorder.stop();
+    }, CHUNK_DURATION_MS);
+  }
+
+  private clearSegmentTimer(capture: Capture): void {
+    if (capture.segmentTimer === null) return;
+    clearTimeout(capture.segmentTimer);
+    capture.segmentTimer = null;
   }
 
   private trackWrite(write: Promise<void>): void {
@@ -172,29 +285,61 @@ export class OfflineRecordingService {
   }
 
   private async saveCapture(capture: PersistedCapture): Promise<void> {
-    const { recorder: _recorder, chunkStartedAt: _chunkStartedAt, ...persisted } = capture as Capture;
+    const persisted: PersistedCapture = {
+      captureId: capture.captureId,
+      callId: capture.callId,
+      sequence: capture.sequence,
+      outages: capture.outages,
+      activeOutage: capture.activeOutage,
+    };
     await this.transaction(CAPTURE_STORE, 'readwrite', store => store.put(persisted));
   }
 
   private async uploadPending(capture: PersistedCapture): Promise<void> {
     if (!navigator.onLine) return;
-    const chunks = await this.getAll<StoredChunk>(CHUNK_STORE);
+    const chunks = (await this.getAll<StoredChunk>(CHUNK_STORE))
+      .filter(chunk => chunk.captureId === capture.captureId)
+      .sort((left, right) => left.sequence - right.sequence);
+    const selectedSequences = new Set<number>();
     for (const chunk of chunks) {
-      if (chunk.captureId !== capture.captureId || !this.overlapsOutage(chunk, capture.outages)) continue;
-      await recordingService.uploadRecordingRepairChunk(capture.callId, capture.captureId, chunk.sequence, {
-        audio: chunk.blob,
-        startedAt: new Date(chunk.startedAt).toISOString(),
-        endedAt: new Date(chunk.endedAt).toISOString(),
-        checksum: await checksum(chunk.blob),
-        mimeType: chunk.blob.type || 'audio/webm',
-      });
+      if (!this.overlapsOutage(chunk, capture.outages)) continue;
+      selectedSequences.add(chunk.sequence);
+      if (chunk.sequence > 0) selectedSequences.add(chunk.sequence - 1);
     }
+
+    for (const chunk of chunks) {
+      if (!selectedSequences.has(chunk.sequence)) continue;
+      await recordingService.uploadRecordingRepairChunk(
+        capture.callId,
+        capture.captureId,
+        chunk.sequence,
+        {
+          audio: chunk.blob,
+          startedAt: new Date(chunk.startedAt).toISOString(),
+          endedAt: new Date(chunk.endedAt).toISOString(),
+          checksum: await checksum(chunk.blob),
+          mimeType: chunk.blob.type || 'audio/webm',
+        },
+      );
+    }
+  }
+
+  /** Serialize uploads so leaveOutage, stop, and browser-online recovery cannot race finalization. */
+  private queueUpload(capture: PersistedCapture): Promise<void> {
+    const upload = this.pendingUpload
+      .catch(() => undefined)
+      .then(() => this.uploadPending(capture));
+    this.pendingUpload = upload.catch(() => undefined);
+    return upload;
   }
 
   // Recovery closes an interrupted outage, then retries upload and finalization.
   private async recoverPending(): Promise<void> {
     const captures = await this.getAll<PersistedCapture>(CAPTURE_STORE);
     for (const capture of captures) {
+      // Initialization also runs on browser-online and when the recording page
+      // remounts. Never recover/finalize the capture that is still recording.
+      if (capture.captureId === this.capture?.captureId) continue;
       const outages = capture.activeOutage
         ? [...capture.outages, { ...capture.activeOutage, endedAt: new Date().toISOString() }]
         : capture.outages;
@@ -206,7 +351,7 @@ export class OfflineRecordingService {
       try {
         const recovered = { ...capture, outages, activeOutage: null };
         if (capture.activeOutage) await this.saveCapture(recovered);
-        await this.uploadPending(recovered);
+        await this.queueUpload(recovered);
         await recordingService.finalizeRecordingRepair(capture.callId, capture.captureId, outages);
         await this.cleanupIfMerged(recovered);
       } catch {
@@ -220,10 +365,34 @@ export class OfflineRecordingService {
   }
 
   private async cleanupIfMerged(capture: PersistedCapture): Promise<void> {
-    const status = await recordingService.getRecordingRepairStatus(capture.callId, capture.captureId);
-    if (status.status !== 'MERGED') return;
-    await this.deleteCapture(capture.captureId);
-    await this.deleteChunks(capture.captureId);
+    const deadline = Date.now() + REPAIR_STATUS_POLL_TIMEOUT_MS;
+
+    while (navigator.onLine) {
+      let status: RecordingRepairStatus;
+      try {
+        status = await recordingService.getRecordingRepairStatus(capture.callId, capture.captureId);
+      } catch {
+        // A transient status request must not discard the locally persisted
+        // capture. Keep polling while online and let later initialization retry
+        // if this window expires.
+        if (Date.now() >= deadline) return;
+        await new Promise(resolve => setTimeout(resolve, REPAIR_STATUS_POLL_INTERVAL_MS));
+        continue;
+      }
+      if (status.status === 'MERGED') {
+        const detail: RecordingRepairMergedEventDetail = {
+          callId: capture.callId,
+          captureId: capture.captureId,
+        };
+        window.dispatchEvent(new CustomEvent(RECORDING_REPAIR_MERGED_EVENT, { detail }));
+        await this.deleteCapture(capture.captureId);
+        await this.deleteChunks(capture.captureId);
+        return;
+      }
+
+      if (Date.now() >= deadline) return;
+      await new Promise(resolve => setTimeout(resolve, REPAIR_STATUS_POLL_INTERVAL_MS));
+    }
   }
 
   private async deleteChunks(captureId: string): Promise<void> {

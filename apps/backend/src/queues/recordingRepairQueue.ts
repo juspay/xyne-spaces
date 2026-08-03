@@ -1,6 +1,6 @@
 import Bull from 'bull';
 import { logger } from '@/utils/logger';
-import { recordingRepairService } from '@/services/recordingRepairService';
+import { InvalidRecordingRepairAudioError, recordingRepairService } from '@/services/recordingRepairService';
 import { recordingRepairStateService } from '@/services/recordingRepairStateService';
 import { redisService } from '@/services/redisService';
 
@@ -14,8 +14,9 @@ class RecordingRepairQueue {
 
   private ensureQueue(): Bull.Queue<RecordingRepairJobData> {
     if (this.queue) return this.queue;
+    const redisConfig = { ...redisService.getRedisConfig(), lazyConnect: false };
     this.queue = new Bull<RecordingRepairJobData>('recording-repair', {
-      redis: redisService.getRedisConfig(),
+      redis: redisConfig,
       defaultJobOptions: {
         attempts: 3,
         backoff: { type: 'exponential', delay: 10000 },
@@ -46,7 +47,15 @@ class RecordingRepairQueue {
 
   startConsumer(): void {
     const queue = this.ensureQueue();
-    queue.process('repair', (job) => recordingRepairService.process(job.data.callId, job.data.captureId));
+    queue.process('repair', async job => {
+      try {
+        await recordingRepairService.process(job.data.callId, job.data.captureId);
+      } catch (error) {
+        // A headerless MediaRecorder fragment cannot become valid on retry.
+        if (error instanceof InvalidRecordingRepairAudioError) job.discard();
+        throw error;
+      }
+    });
     queue.on('failed', (job, error) => logger.error(`[RECORDING-REPAIR] Job for ${job.data?.callId}/${job.data?.captureId} failed:`, error));
     logger.info('[RECORDING-REPAIR] Consumer started');
   }

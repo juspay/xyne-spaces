@@ -138,12 +138,24 @@ export interface RecordingDetail extends Recording {
 export interface RecordingRepairOutage {
   startedAt: string;
   endedAt: string | null;
-  reason: 'browser_offline' | 'livekit_disconnected' | 'reconnect_timeout' | 'agent_left';
+  reason:
+    | 'browser_offline'
+    | 'livekit_disconnected'
+    | 'reconnect_timeout'
+    | 'agent_left'
+    | 'stt_failed';
 }
 
 export interface RecordingRepairStatus {
   status: 'OPEN' | 'FINALIZED' | 'PROCESSING' | 'MERGED' | 'FAILED';
   processingError: string | null;
+}
+
+export const RECORDING_REPAIR_MERGED_EVENT = 'xyne-recording-repair-merged';
+
+export interface RecordingRepairMergedEventDetail {
+  callId: string;
+  captureId: string;
 }
 
 /** A single in-call recording session (call_recordings row). */
@@ -407,7 +419,10 @@ class RecordingService {
     form.append('endedAt', chunk.endedAt);
     form.append('checksum', chunk.checksum);
     form.append('mimeType', chunk.mimeType);
-    await apiInstance.put(`/calls/${callId}/recording-repairs/${captureId}/chunks/${sequence}`, form);
+    await apiInstance.put(
+      `/calls/${callId}/recording-repairs/${captureId}/chunks/${sequence}`,
+      form,
+    );
   }
 
   async finalizeRecordingRepair(
@@ -418,7 +433,10 @@ class RecordingService {
     await apiInstance.post(`/calls/${callId}/recording-repairs/${captureId}/finalize`, { outages });
   }
 
-  async getRecordingRepairStatus(callId: string, captureId: string): Promise<RecordingRepairStatus> {
+  async getRecordingRepairStatus(
+    callId: string,
+    captureId: string,
+  ): Promise<RecordingRepairStatus> {
     const response: AxiosResponse<{ capture: RecordingRepairStatus }> = await apiInstance.get(
       `/calls/${callId}/recording-repairs/${captureId}`,
     );
