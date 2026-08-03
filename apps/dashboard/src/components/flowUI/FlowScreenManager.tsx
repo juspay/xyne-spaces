@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { X, ChevronLeft } from 'lucide-react';
 import { FlowRenderer } from './FlowRenderer';
@@ -47,7 +47,7 @@ export const FlowScreenManager: React.FC<FlowScreenManagerProps> = ({
   // avoid an update loop. Only the inline base [0] is replaced; any open popup
   // stack (screenStack[1+]) is preserved. FlowRenderer reseeds its own
   // validated flow from the new prop (same screenId ⇒ user form values kept).
-  const flowKey = JSON.stringify(flow);
+  const flowKey = useMemo(() => JSON.stringify(flow), [flow]);
   const flowRef = useRef(flow);
   flowRef.current = flow;
   useEffect(() => {

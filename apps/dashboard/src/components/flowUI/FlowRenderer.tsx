@@ -31,9 +31,28 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
   onStateChange,
   compact = false,
 }) => {
-  const [validationError, setValidationError] = useState<string | null>(null);
-  const [validatedFlow, setValidatedFlow] = useState<FlowDefinition | null>(null);
   const [state, setState] = useState<FlowState>(flow.state);
+
+  const flowKey = useMemo(() => JSON.stringify(flow), [flow]);
+  const validation = useMemo(() => {
+    const result = validateFlowDefinition(flow);
+    if (!result.success) {
+      return {
+        error: formatValidationErrors(result).join('; '),
+        flow: null,
+      };
+    }
+    return {
+      error: null,
+      flow: result.data as FlowDefinition,
+    };
+    // validateFlowDefinition is intentionally keyed by serialized flow content so
+    // re-parsed objects with identical payloads do not re-run zod validation.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flowKey]);
+
+  const validationError = validation.error;
+  const validatedFlow = validation.flow;
 
   // Always-current ref so executeAction closures never read stale values.
   // Synced synchronously inside updateFieldValue (not via useEffect) so debounced
@@ -45,24 +64,18 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
   // we must NOT reset form values in that case, only update the flow definition.
   const initializedScreenIdRef = useRef<string | null>(null);
 
-  // Validate flow whenever the prop changes
   useEffect(() => {
-    const result = validateFlowDefinition(flow);
-    if (!result.success) {
-      const errors = formatValidationErrors(result);
-      setValidationError(errors.join('; '));
-      setValidatedFlow(null);
-    } else {
-      setValidationError(null);
-      setValidatedFlow(result.data as FlowDefinition);
-      // Only reset form state when this is genuinely a new screen
-      if (initializedScreenIdRef.current !== result.data.screenId) {
-        initializedScreenIdRef.current = result.data.screenId;
-        // Always start with submitting=false so a remounted screen isn't frozen
-        setState({ ...result.data.state, submitting: false });
-      }
+    if (!validatedFlow) return;
+
+    // Only reset form state when this is genuinely a new screen.
+    if (initializedScreenIdRef.current !== validatedFlow.screenId) {
+      initializedScreenIdRef.current = validatedFlow.screenId;
+      // Always start with submitting=false so a remounted screen isn't frozen.
+      const next = { ...validatedFlow.state, submitting: false };
+      stateRef.current = next;
+      setState(next);
     }
-  }, [flow]);
+  }, [validatedFlow]);
 
   useEffect(() => {
     onStateChange?.(state);
@@ -299,11 +312,7 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
     );
   }
 
-  // The node registry is populated synchronously at module load (see NodeRegistry.ts),
-  // so the only thing we wait for here is the one-tick flow validation below.
-  if (!validatedFlow) {
-    return <div className='animate-pulse bg-muted h-32 rounded-lg' />;
-  }
+  if (!validatedFlow) return null;
 
   return (
     <FlowContext.Provider value={contextValue}>
