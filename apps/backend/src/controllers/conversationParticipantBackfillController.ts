@@ -1,6 +1,5 @@
 import { Request, Response } from 'express';
 import { db } from '@/database/client';
-import { withWorkspaceScope } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import { ApiResponse } from '@/types/express';
 
@@ -408,25 +407,23 @@ export class ConversationParticipantBackfillController {
 
       logger.info('[ConvParticipantBackfill] Starting backfill', options);
 
-      await withWorkspaceScope(async () => {
-        if (options.types.includes('lastReplyAt')) {
-          results.lastReplyAt = await ConversationParticipantBackfillController.backfillLastReplyAt(options);
-        }
+      if (options.types.includes('lastReplyAt')) {
+        results.lastReplyAt = await ConversationParticipantBackfillController.backfillLastReplyAt(options);
+      }
 
-        if (options.types.includes('staleLastReplyAt')) {
-          results.staleLastReplyAt =
-            await ConversationParticipantBackfillController.clearStaleLastReplyAt(options);
-        }
+      if (options.types.includes('staleLastReplyAt')) {
+        results.staleLastReplyAt =
+          await ConversationParticipantBackfillController.clearStaleLastReplyAt(options);
+      }
 
-        if (options.types.includes('channelId')) {
-          results.channelId = await ConversationParticipantBackfillController.backfillChannelId(options);
-        }
+      if (options.types.includes('channelId')) {
+        results.channelId = await ConversationParticipantBackfillController.backfillChannelId(options);
+      }
 
-        if (options.types.includes('orphanedParticipants')) {
-          results.orphanedParticipants =
-            await ConversationParticipantBackfillController.cleanupOrphanedParticipants(options);
-        }
-      });
+      if (options.types.includes('orphanedParticipants')) {
+        results.orphanedParticipants =
+          await ConversationParticipantBackfillController.cleanupOrphanedParticipants(options);
+      }
 
       logger.info('[ConvParticipantBackfill] Backfill completed', { results });
 

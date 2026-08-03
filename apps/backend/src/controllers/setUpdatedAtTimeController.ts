@@ -1,6 +1,5 @@
 import { Request, Response } from 'express';
 import { db } from '@/database/client';
-import { withWorkspaceScope } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import { ApiResponse } from '@/types/express';
 
@@ -37,62 +36,61 @@ export class SetUpdatedAtTimeController {
   }
 
   private static async backfillUpdatedAt(options: BackfillOptions): Promise<BackfillSummary> {
-    return await withWorkspaceScope(async () => {
-      const summary: BackfillSummary = { processed: 0, updated: 0, skipped: 0, errors: 0 };
-      let cursor: string | null = null;
+    const summary: BackfillSummary = { processed: 0, updated: 0, skipped: 0, errors: 0 };
+    let cursor: string | null = null;
 
-      do {
-        const activities: Array<{ id: string; createdAt: Date; updatedAt: Date }> =
-          await db.activity.findMany({
-            select: { id: true, createdAt: true, updatedAt: true },
-            orderBy: { id: 'asc' },
-            take: options.batchSize,
-            ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-          });
+    do {
+      const activities: Array<{ id: string; createdAt: Date; updatedAt: Date }> =
+        await db.activity.findMany({
+          select: { id: true, createdAt: true, updatedAt: true },
+          orderBy: { id: 'asc' },
+          take: options.batchSize,
+          ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+        });
 
-        if (activities.length === 0) break;
+      if (activities.length === 0) break;
 
-        const idsToUpdate: string[] = [];
+      const idsToUpdate: string[] = [];
 
-        for (const activity of activities) {
-          summary.processed += 1;
-          if (activity.updatedAt.getTime() === activity.createdAt.getTime()) {
-            summary.skipped += 1;
-            continue;
+      for (const activity of activities) {
+        summary.processed += 1;
+        if (activity.updatedAt.getTime() === activity.createdAt.getTime()) {
+          summary.skipped += 1;
+          continue;
+        }
+        idsToUpdate.push(activity.id);
+      }
+
+      if (idsToUpdate.length > 0) {
+        if (!options.dryRun) {
+          try {
+            const updatedCount = await db.$executeRaw`
+              UPDATE "activities"
+              SET "updatedAt" = "createdAt"
+              WHERE "id" = ANY(${idsToUpdate})
+                AND "updatedAt" <> "createdAt"
+            `;
+            summary.updated += Number(updatedCount);
+          } catch (error) {
+            summary.errors += idsToUpdate.length;
+            logger.warn('[SetUpdatedAtTime] Failed updatedAt backfill batch', {
+              batchSize: idsToUpdate.length,
+              error: error instanceof Error ? error.message : String(error),
+            });
           }
-          idsToUpdate.push(activity.id);
+        } else {
+          summary.updated += idsToUpdate.length;
         }
+      }
 
-        if (idsToUpdate.length > 0) {
-          if (!options.dryRun) {
-            try {
-              const updatedCount = await db.$executeRaw`
-                UPDATE "activities"
-                SET "updatedAt" = "createdAt"
-                WHERE "id" = ANY(${idsToUpdate})
-                  AND "updatedAt" <> "createdAt"
-              `;
-              summary.updated += Number(updatedCount);
-            } catch (error) {
-              summary.errors += idsToUpdate.length;
-              logger.warn('[SetUpdatedAtTime] Failed updatedAt backfill batch', {
-                batchSize: idsToUpdate.length,
-                error: error instanceof Error ? error.message : String(error),
-              });
-            }
-          } else {
-            summary.updated += idsToUpdate.length;
-          }
-        }
+      cursor = activities[activities.length - 1]?.id ?? null;
+      if (options.delayMs > 0) {
+        await this.sleep(options.delayMs);
+      }
+    } while (cursor);
 
-        cursor = activities[activities.length - 1]?.id ?? null;
-        if (options.delayMs > 0) {
-          await this.sleep(options.delayMs);
-        }
-      } while (cursor);
+    return summary;
 
-      return summary;
-    });
   }
 
   static async triggerBackfill(req: Request, res: Response<ApiResponse>) {
