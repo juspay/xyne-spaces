@@ -27,26 +27,10 @@ export async function requireTelepresenceMonitoringCacAccess(
   const cacConfig = await CacConfigService.fetch(TELEPRESENCE_CAC_KEY, { email }) as TelepresenceCacConfig | null;
 
   const normalizedEmail = email.toLowerCase();
-  let isAllowed =
+  const isAllowed =
     !!cacConfig &&
     cacConfig.enabled &&
     cacConfig.allowedEmails.some((allowedEmail) => allowedEmail.toLowerCase() === normalizedEmail);
-
-  // Local dev fallback: `cacConfig` resolves to null whenever Superposition
-  // has no `xyne_telepresence_config` entry provisioned (e.g. a bare local
-  // workspace, not a denial), which would otherwise 403 every local dev
-  // regardless of the real allow-list. Mirrors the existing ENABLE_DEV_AUTH
-  // pattern in middleware/auth.ts — strictly development-only, never affects
-  // staging/production, and only engages when Superposition genuinely has no
-  // config to answer with (a real "disabled" or empty-allowlist config from
-  // Superposition still denies access as normal).
-  if (!isAllowed && cacConfig === null && process.env.NODE_ENV === 'development') {
-    const localAllowedEmails = (process.env.TELEPRESENCE_MONITORING_LOCAL_DEV_ALLOWED_EMAILS ?? '')
-      .split(',')
-      .map((allowedEmail) => allowedEmail.trim().toLowerCase())
-      .filter(Boolean);
-    isAllowed = localAllowedEmails.includes(normalizedEmail);
-  }
 
   if (!isAllowed) {
     logger.warn('[TelepresenceMonitoringAuth] User not allowed by telepresence CAC config', {
