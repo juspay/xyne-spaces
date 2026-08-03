@@ -521,6 +521,7 @@ export class MicrosoftAuthController {
             picture: microsoftUserData.picture,
             provider: AuthProvider.MICROSOFT,
             tokenKey,
+            jwtId: domainConflictPendingAuthJwtId,
           }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
             httpOnly: true,
             secure: isProduction,
