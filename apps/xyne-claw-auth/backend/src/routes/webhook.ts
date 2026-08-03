@@ -35,6 +35,7 @@ import { verifySpacesSignature } from "../middleware/verify-spaces-signature.js"
 import { coerceAutomationForwardResult } from "../lib/automation-result.js";
 import { parseSlashCommand } from "../lib/parseSlashCommand.js";
 import { buildExperimentProofBundle } from "../lib/experiment-bundle.js";
+import { resolveAuthForUser } from "../services/userMemoryFetcher.js";
 import { parseExperimentCommand, formatDuration, dispatchExperimentEpoch, dispatchExperimentChecker, EXPERIMENT_PROVIDERS, buildFindingsMarkdown, cancelRunSession } from "../lib/experiment.js";
 import { resolveFastMode, setFastModeOverride } from "../lib/fast-mode.js";
 import { acquireTwinSlot, renameTwinSlot, releaseTwinSlot } from "../lib/twin-limiter.js";
@@ -1494,12 +1495,22 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       // when the thread has no attachments or Spaces is unreachable.
       let bundle: Awaited<ReturnType<typeof buildExperimentProofBundle>> = null;
       try {
-        bundle = await buildExperimentProofBundle({
-          run,
-          findings,
-          findingsMarkdown: markdown,
-          conversationId: payload.conversationId,
-        });
+        // Reads the thread's attachments as the REQUESTER, so the bundle can
+        // never contain a file they couldn't already open in the thread.
+        const bundleAuth = await resolveAuthForUser(payload.userId);
+        if (!bundleAuth) {
+          log.warn("[experiment] no Spaces credentials for requester; findings will be markdown-only", {
+            userId: payload.userId,
+          });
+        } else {
+          bundle = await buildExperimentProofBundle({
+            run,
+            findings,
+            findingsMarkdown: markdown,
+            conversationId: payload.conversationId,
+            auth: bundleAuth,
+          });
+        }
       } catch (err) {
         log.warn("[experiment] proof bundle failed; falling back to markdown only", {
           error: err instanceof Error ? err.message : String(err),
