@@ -24,6 +24,8 @@ import {
   organizationDomainService,
 } from '@/services/organizationDomainService';
 import { migrateLegacyIdentity } from '@/services/legacyIdentityMigrationHelper';
+import { redisService } from '@/services/redisService';
+import { randomUUID } from 'crypto';
 
 /**
  * Result type for single workspace auto-login
@@ -51,6 +53,24 @@ export class AuthV2Controller {
   private userSessionService: UserSessionService;
   private microsoftAuthController: MicrosoftAuthController;
   private prisma = DatabaseClient.getInstance();
+
+  private async storePendingOAuthTokens(
+    refreshToken?: string | null,
+    accessToken?: string | null,
+    accessTokenExpiry?: Date,
+  ): Promise<string> {
+    const tokenKey = randomUUID();
+    await redisService.set(
+      `${config.pendingOAuthTokens.redisKeyPrefix}${tokenKey}`,
+      JSON.stringify({
+        refreshToken: refreshToken ?? null,
+        accessToken: accessToken ?? null,
+        accessTokenExpiry: accessTokenExpiry?.toISOString() ?? null,
+      }),
+      config.pendingOAuthTokens.ttlSeconds,
+    );
+    return tokenKey;
+  }
 
   constructor() {
     const clientId = process.env.GOOGLE_CLIENT_ID;
@@ -505,15 +525,18 @@ export class AuthV2Controller {
       }
 
       const isProduction = process.env.NODE_ENV === 'production';
+      const tokenKey = await this.storePendingOAuthTokens(
+        refresh_token,
+        access_token,
+        accessTokenExpiry,
+      );
       res.cookie('google_access_token', jwt.sign({
         googleId: googleUserData.googleId,
         email: googleUserData.email,
         name: googleUserData.name,
         picture: googleUserData.picture,
         provider: AuthProvider.GOOGLE,
-        refreshToken: refresh_token,
-        accessToken: access_token,
-        accessTokenExpiry: accessTokenExpiry?.toISOString(),
+        tokenKey,
       }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
         httpOnly: true,
         secure: isProduction,
@@ -867,14 +890,18 @@ export class AuthV2Controller {
       const effectiveInvitationId = stateData.invitationId || invitationId;
       if (effectiveInvitationId) {
         logger.info(`[${requestId}] Invitation detected (${effectiveInvitationId}) — returning hasInvitation signal to Electron`);
+        const tokenKey = await this.storePendingOAuthTokens(
+          refresh_token,
+          access_token,
+          accessTokenExpiry,
+        );
         res.cookie('google_access_token', jwt.sign({
           googleId: googleUserData.googleId,
           email: googleUserData.email,
           name: googleUserData.name,
           picture: googleUserData.picture,
           provider: AuthProvider.GOOGLE,
-          refreshToken: refresh_token,
-          accessToken: access_token,
+          tokenKey,
         }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
           httpOnly: true,
           secure: isProduction,
@@ -949,15 +976,18 @@ export class AuthV2Controller {
       }
 
       // Store pending auth data for later loginWorkspace/createOrg call (multi-workspace case)
+      const tokenKey = await this.storePendingOAuthTokens(
+        refresh_token,
+        access_token,
+        accessTokenExpiry,
+      );
       res.cookie('google_access_token', jwt.sign({
         googleId: googleUserData.googleId,
         email: googleUserData.email,
         name: googleUserData.name,
         picture: googleUserData.picture,
         provider: AuthProvider.GOOGLE,
-        refreshToken: refresh_token,
-        accessToken: access_token,
-        accessTokenExpiry: accessTokenExpiry?.toISOString(),
+        tokenKey,
       }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
         httpOnly: true,
         secure: isProduction,
@@ -1046,6 +1076,7 @@ export class AuthV2Controller {
       });
 
       const { id_token, refresh_token, access_token } = tokens;
+      const accessTokenExpiry = tokens.expiry_date ? new Date(tokens.expiry_date) : undefined;
 
       if (!id_token) {
         logger.error(`[${requestId}] No ID token received`);
@@ -1112,15 +1143,19 @@ export class AuthV2Controller {
         maxAge: 10 * 60 * 1000, // 10 minutes
       };
 
-      // Store all Google auth data in one cookie (until workspace selection)
+      // Keep provider tokens in Redis; the cookie contains only the lookup key.
+      const tokenKey = await this.storePendingOAuthTokens(
+        refresh_token,
+        access_token,
+        accessTokenExpiry,
+      );
       res.cookie('google_access_token', jwt.sign({
         googleId: googleUserData.googleId,
         email: googleUserData.email,
         name: googleUserData.name,
         picture: googleUserData.picture,
         provider: AuthProvider.GOOGLE,
-        refreshToken: refresh_token || null,
-        accessToken: access_token || null,
+        tokenKey,
       }, process.env.JWT_SECRET!, { expiresIn: '10m' }), cookieOptions);
       logger.info(`[${requestId}] Stored pending auth data for workspace selection`);
 
@@ -1306,9 +1341,10 @@ export class AuthV2Controller {
       let pendingRefreshToken: string | undefined;
       let pendingAccessToken: string | undefined;
       let pendingAccessTokenExpiry: Date | undefined;
+      let pendingTokenKey: string | undefined;
 
       if (pendingAuthCookie) {
-        const parsed = this.parsePendingAuthCookie(pendingAuthCookie);
+        const parsed = await this.parsePendingAuthCookie(pendingAuthCookie);
         if (!parsed) {
           res.status(401).json({
             error: 'Invalid auth data',
@@ -1324,6 +1360,7 @@ export class AuthV2Controller {
           pendingRefreshToken = parsed.pendingRefreshToken;
           pendingAccessToken = parsed.pendingAccessToken;
           pendingAccessTokenExpiry = parsed.pendingAccessTokenExpiry;
+          pendingTokenKey = parsed.pendingTokenKey;
         } else {
           res.status(401).json({
             error: 'Invalid auth data',
@@ -1488,6 +1525,11 @@ export class AuthV2Controller {
         : '';
 
       // Clear pending auth cookie and return success
+      if (pendingTokenKey) {
+        await redisService.del(
+          `${config.pendingOAuthTokens.redisKeyPrefix}${pendingTokenKey}`,
+        );
+      }
       res.clearCookie('google_access_token', { path: '/' });
       res.status(200).json({
         success: true,
@@ -1534,7 +1576,7 @@ export class AuthV2Controller {
         return;
       }
 
-      const parsedAuth = this.parsePendingAuthCookie(pendingAuthCookie);
+      const parsedAuth = await this.parsePendingAuthCookie(pendingAuthCookie);
       if (!parsedAuth) {
         res.status(401).json({
           error: 'Invalid auth data',
@@ -1542,7 +1584,7 @@ export class AuthV2Controller {
         });
         return;
       }
-      const { oauthUserData, provider, pendingRefreshToken } = parsedAuth;
+      const { oauthUserData, provider, pendingRefreshToken, pendingTokenKey } = parsedAuth;
 
       if (!oauthUserData?.email) {
         res.status(401).json({
@@ -1663,6 +1705,11 @@ export class AuthV2Controller {
       });
 
       // Clear pending auth cookie
+      if (pendingTokenKey) {
+        await redisService.del(
+          `${config.pendingOAuthTokens.redisKeyPrefix}${pendingTokenKey}`,
+        );
+      }
       res.clearCookie('google_access_token', { path: '/' });
 
       logger.info(`[CREATE-ORG] Created org ${organization.orgId} with workspace ${workspace.id}`);
@@ -1847,7 +1894,7 @@ export class AuthV2Controller {
         return;
       }
 
-      const parsedAuth = this.parsePendingAuthCookie(pendingAuthCookie);
+      const parsedAuth = await this.parsePendingAuthCookie(pendingAuthCookie);
       if (!parsedAuth) {
         res.status(401).json({
           error: 'Invalid auth data',
@@ -1855,7 +1902,7 @@ export class AuthV2Controller {
         });
         return;
       }
-      const { oauthUserData, provider, pendingRefreshToken } = parsedAuth;
+      const { oauthUserData, provider, pendingRefreshToken, pendingTokenKey } = parsedAuth;
         if (!oauthUserData?.email) {
           res.status(401).json({
             error: 'Invalid auth data',
@@ -2003,6 +2050,11 @@ export class AuthV2Controller {
           maxAge: 24 * 60 * 60 * 1000,
         });
 
+        if (pendingTokenKey) {
+          await redisService.del(
+            `${config.pendingOAuthTokens.redisKeyPrefix}${pendingTokenKey}`,
+          );
+        }
         res.clearCookie('google_access_token', { path: '/' });
 
         logger.info(`[CREATE-WORKSPACE-PENDING] Created workspace "${workspaceName}" for ${oauthUserData.email} in org ${organization.orgId}`);
@@ -2170,13 +2222,14 @@ export class AuthV2Controller {
    * Parses and verifies the google_access_token pending-auth cookie (signed JWT).
    * Returns null if the token is invalid, expired, or cannot be verified.
    */
-  private parsePendingAuthCookie(cookie: string): {
+  private async parsePendingAuthCookie(cookie: string): Promise<{
     oauthUserData: { email: string; name: string; googleId?: string; providerUserId?: string; picture?: string };
     provider: string;
     pendingRefreshToken: string | undefined;
     pendingAccessToken: string | undefined;
     pendingAccessTokenExpiry: Date | undefined;
-  } | null {
+    pendingTokenKey: string | undefined;
+  } | null> {
     try {
       const decoded = jwt.verify(cookie, process.env.JWT_SECRET!) as {
         googleId?: string;
@@ -2188,10 +2241,28 @@ export class AuthV2Controller {
         refreshToken?: string | null;
         accessToken?: string | null;
         accessTokenExpiry?: string | null;
+        tokenKey?: string;
       };
       if (!decoded?.email) throw new Error('Invalid JWT payload');
-      const pendingAccessTokenExpiry = decoded.accessTokenExpiry
-        ? new Date(decoded.accessTokenExpiry)
+
+      let redisTokens: {
+        refreshToken?: string | null;
+        accessToken?: string | null;
+        accessTokenExpiry?: string | null;
+      } | null = null;
+      if (decoded.tokenKey) {
+        const storedTokens = await redisService.get(
+          `${config.pendingOAuthTokens.redisKeyPrefix}${decoded.tokenKey}`,
+        );
+        if (!storedTokens) return null;
+        redisTokens = JSON.parse(storedTokens);
+      }
+
+      const refreshToken = redisTokens?.refreshToken ?? decoded.refreshToken;
+      const accessToken = redisTokens?.accessToken ?? decoded.accessToken;
+      const accessTokenExpiry = redisTokens?.accessTokenExpiry ?? decoded.accessTokenExpiry;
+      const pendingAccessTokenExpiry = accessTokenExpiry
+        ? new Date(accessTokenExpiry)
         : undefined;
       return {
         oauthUserData: {
@@ -2202,12 +2273,13 @@ export class AuthV2Controller {
           picture: decoded.picture,
         },
         provider: decoded.provider || AuthProvider.GOOGLE,
-        pendingRefreshToken: decoded.refreshToken || undefined,
-        pendingAccessToken: decoded.accessToken || undefined,
+        pendingRefreshToken: refreshToken || undefined,
+        pendingAccessToken: accessToken || undefined,
         pendingAccessTokenExpiry:
           pendingAccessTokenExpiry && !Number.isNaN(pendingAccessTokenExpiry.getTime())
             ? pendingAccessTokenExpiry
             : undefined,
+        pendingTokenKey: decoded.tokenKey,
       };
     } catch {
       return null;
