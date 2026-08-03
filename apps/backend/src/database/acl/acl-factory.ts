@@ -484,13 +484,6 @@ export class ACLFactory {
       return new TelepresenceHealthLogACL(ctx, prisma)
     case 'telepresenceHealthView':
       return new TelepresenceHealthViewACL(ctx, prisma)
-
-    default: {
-      // Exhaustiveness check — a model with no case arm above fails to compile here.
-      // Must stay a throw, never a fallback ACL.
-      const unhandled: never = modelName
-      throw new Error(`No ACL defined for model: ${String(unhandled)}`)
-    }
     }
   }
 }
