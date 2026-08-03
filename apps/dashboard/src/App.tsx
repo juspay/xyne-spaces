@@ -126,27 +126,29 @@ const App = (): ReactElement => {
                       toastOptions={{
                         style: {
                           alignItems: 'flex-start',
-                          background: '#000000',
-                          color: '#ffffff',
-                          border: '1px solid #27272a',
+                          background: 'hsl(var(--card))',
+                          color: 'hsl(var(--card-foreground))',
+                          border: '1px solid hsl(var(--border))',
                           pointerEvents: 'auto',
                         },
                         classNames: {
                           toast: 'relative items-start group !pt-3 !pr-3 !pb-3 !pl-4',
                           icon: 'mt-1',
-                          title: '!text-white !font-semibold !max-w-[calc(100%-2rem)] !mr-8',
-                          description: '!text-white !opacity-80',
+                          title: '!text-card-foreground !font-semibold !max-w-[calc(100%-2rem)] !mr-8',
+                          description: '!text-card-foreground/80',
 
-                          actionButton: '!bg-white !text-black hover:!bg-zinc-200 !mt-8',
-                          cancelButton: '!bg-zinc-800 !text-white hover:!bg-zinc-700 !mt-8',
+                          actionButton:
+                            '!bg-primary !text-primary-foreground hover:!bg-primary/90 !mt-8',
+                          cancelButton:
+                            '!bg-secondary !text-secondary-foreground hover:!bg-secondary/80 !mt-8',
 
                           closeButton:
-                            '!absolute !right-3 !top-5 !left-auto !bg-transparent !opacity-100 !text-white hover:!opacity-50 rounded-md z-10',
+                            '!absolute !right-3 !top-5 !left-auto !bg-transparent !opacity-100 !text-card-foreground hover:!opacity-50 rounded-md z-10',
 
-                          success: '!text-green-500 !border-green-100',
-                          error: '!text-red-500 !border-red-100',
-                          warning: '!text-yellow-500 !border-yellow-100',
-                          info: '!text-blue-500 !border-blue-100',
+                          success: '!text-status-success',
+                          error: '!text-status-failure',
+                          warning: '!text-status-pending',
+                          info: '!text-status-scheduled',
                         },
                       }}
                     />
