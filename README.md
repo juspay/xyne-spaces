@@ -2,15 +2,15 @@
 
 # Xyne Spaces
 
-**A collaborative workspace that is your organization's context layer — real-time by
-default, permission-aware by default, and built for agents.**
+**The org OS — a collaborative workspace that is your organization's context layer.
+Real-time by default, permission-aware by default, and built for agents.**
 
 Chat, threads, tickets, boards, calls and shared canvases — where your team actually does
 the work. And because the work happens here, every conversation, ticket, call, document and
 calendar is already in one place, indexed and served back to your people *and* your
 agents — with each read and write filtered through the same permission model.
 
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENCE)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![CI](https://github.com/juspay/xyne-spaces/actions/workflows/ci.yml/badge.svg)](https://github.com/juspay/xyne-spaces/actions/workflows/ci.yml)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178c6.svg)](https://www.typescriptlang.org/)
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
@@ -342,4 +342,4 @@ before it is written. Participation is governed by our
 
 ## License
 
-Licensed under the [Apache License 2.0](LICENCE).
+Licensed under the [Apache License 2.0](LICENSE).

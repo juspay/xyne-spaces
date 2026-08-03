@@ -1,0 +1,113 @@
+name: Feature request
+description: Propose a new capability or an improvement to an existing one
+title: "[FEATURE] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting this. Two things that make a proposal much easier to act on:
+
+        1. **Describe the problem before the solution.** What are you trying to do, and what
+           gets in the way? That usually surfaces options the original idea missed.
+        2. **Search open and closed issues** first: https://github.com/juspay/xyne-spaces/issues?q=is%3Aissue+sort%3Aupdated-desc
+
+        For anything larger than a small change, opening this issue before writing code lets
+        the approach be agreed first — see the [Contributing Guidelines](https://github.com/juspay/xyne-spaces/blob/main/CONTRIBUTING.md).
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which part of Xyne Spaces would this touch? Pick everything that applies.
+      multiple: true
+      options:
+        - Dashboard / web UI
+        - Backend API
+        - Real-time sync (Zero)
+        - Access control / permissions
+        - Agents (Xyne Claw)
+        - Agent tools / MCP (Claw Auth)
+        - Connectors and ingestion (Slack, Gmail, Microsoft, Jira, Confluence)
+        - Search and retrieval (Vespa)
+        - Calls, recordings and transcription
+        - Desktop app (Electron)
+        - Local setup / developer environment
+        - Documentation
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do today, and where does it break down? Include a concrete example if you have one.
+      placeholder: When a ticket moves between spaces, I have to ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What should happen instead? Rough shape is fine — you do not need an implementation plan.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+      description: Other approaches you thought about, and why you did not pick them. Also worth noting if a workaround exists today.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: who-benefits
+    attributes:
+      label: Who does this help?
+      options:
+        - Everyone using Xyne Spaces
+        - Workspace admins
+        - Agent and automation authors
+        - People self-hosting or developing on it
+        - My team's specific workflow
+    validations:
+      required: false
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Mockups, links to related issues, prior art in other tools, anything else.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: no-duplicate-issues
+    attributes:
+      label: Have you checked whether this has been requested already?
+      options:
+        - label: I searched open and closed issues and did not find a match
+          required: true
+
+  - type: checkboxes
+    id: read-contributing-guidelines
+    attributes:
+      label: Have you read the Contributing Guidelines?
+      options:
+        - label: I have read the [Contributing Guidelines](https://github.com/juspay/xyne-spaces/blob/main/CONTRIBUTING.md)
+          required: true
+
+  - type: dropdown
+    id: willing-to-submit-pr
+    attributes:
+      label: Are you willing to submit a PR?
+      description: Not required at all, but we are happy to guide you through it.
+      options:
+        - Yes, I am willing to submit a PR
+        - No, but I am happy to collaborate on a PR with someone else
+        - No, I don't have time to work on this right now
+    validations:
+      required: false
