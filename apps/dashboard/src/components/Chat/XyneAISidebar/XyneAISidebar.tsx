@@ -216,7 +216,6 @@ const XyneAISidebar = ({
   const [showHistorySidebar, setShowHistorySidebar] = useState(false);
   const [showUserActivityPanel, setShowUserActivityPanel] = useState(false);
   const [conversations, setConversations] = useState<ConversationHistoryType[]>([]);
-  const [feedbackMap, setFeedbackMap] = useState<Record<string, 'LIKE' | 'DISLIKE' | null>>({});
   const [isLoadingConversation, setIsLoadingConversation] = useState(
     !startFreshChat && !isFullscreen,
   );
@@ -605,8 +604,6 @@ const XyneAISidebar = ({
     staleTime: 60_000,
   });
 
-  // Ask AI v1 has been removed; everything runs on v2 (xyne-claw) now.
-  const isV2 = true;
   const effectiveAgentSlug = selectedAgentSlug;
 
   // Per-run model pin. The model list is scoped to the AGENT's LiteLLM key, so
@@ -618,21 +615,19 @@ const XyneAISidebar = ({
     queryKey: ['claw-agent-models', modelAgentSlug],
     queryFn: () => fetchClawAgentModels(modelAgentSlug),
     staleTime: 60_000,
-    enabled: isV2,
+    enabled: true,
   });
   useEffect(() => {
     setSelectedModel(null);
   }, [modelAgentSlug]);
 
   useEffect(() => {
-    onDebuggerOpenChange?.(showDebugger && isV2);
-  }, [showDebugger, isV2, onDebuggerOpenChange]);
+    onDebuggerOpenChange?.(showDebugger);
+  }, [showDebugger, onDebuggerOpenChange]);
   // When selectedAgentSlug is null (Ask AI default), look for 'ask-ai' agent in v2 mode
   const selectedAgent = effectiveAgentSlug
     ? (accessibleAgents.find(a => a.slug === effectiveAgentSlug) ?? null)
-    : isV2
-      ? (accessibleAgents.find(a => a.slug === 'ask-ai') ?? null)
-      : null;
+    : (accessibleAgents.find(a => a.slug === 'ask-ai') ?? null);
   const selectedAgentName = selectedAgent?.name ?? null;
 
   // Ask AI v2 context-picker scope: when a claw agent is active, narrow the
@@ -686,7 +681,6 @@ const XyneAISidebar = ({
     webSearchEnabled: webSearchAccessible ? webSearchEnabled : false,
     deepResearchEnabled: deepResearchAccessible ? deepResearchEnabled : false,
     createCanvasEnabled,
-    isV2,
     suppressCompletionToast: isAgentForced,
     channelId: channelId || undefined, // Pass channelId for thread ID construction
     ticketIds: selectedTickets.map(t => t.id),
@@ -775,7 +769,6 @@ const XyneAISidebar = ({
   // v2 sessions hooks (xyne-claw backed)
   const { data: v2SessionsData, refetch: refetchV2Sessions } = useV2SessionsList(
     effectiveAgentSlug,
-    isV2,
   );
   const { invalidateSessions: invalidateV2Sessions } = useV2SessionInvalidator();
 
@@ -816,7 +809,7 @@ const XyneAISidebar = ({
         const threadConversationId = threadInfo?.conversationId;
 
         const latestLiveStream = xyneAIStreamManager.findLatestSidebarStream();
-        if (isV2 && latestLiveStream) {
+        if (latestLiveStream) {
           setStreamThreadKey(latestLiveStream.streamSlotKey);
           usesDraftStreamKeyRef.current =
             latestLiveStream.streamSlotKey !== latestLiveStream.sessionId;
@@ -840,8 +833,7 @@ const XyneAISidebar = ({
         }
 
         // Global / channel-only / channel+thread: load session list first, then match active stream by session id
-        if (isV2) {
-          // Open a FRESH session by default instead of auto-loading the most
+        {          // Open a FRESH session by default instead of auto-loading the most
           // recent past conversation. Any in-flight stream was already resumed
           // above (findLatestSidebarStream), and past conversations remain
           // reachable via the history panel. A desk-ticket context
@@ -930,7 +922,6 @@ const XyneAISidebar = ({
     threadInfo?.conversationId,
     scrollToBottom,
     startFreshChat,
-    isV2,
     v2SessionsData,
     refetchV2Sessions,
     selectedAgentSlug,
@@ -990,15 +981,13 @@ const XyneAISidebar = ({
         setBranchSelections({});
         setEditingMessageId(null);
         setShowHistorySidebar(false);
-        setFeedbackMap({});
         setTimeout(() => {
           scrollToBottom();
         }, 100);
         return;
       }
 
-      if (isV2) {
-        setDebugEvents([]);
+      {        setDebugEvents([]);
         setDebugArtifactsReadyVersion(0);
         const clawMessages = await fetchV2ConversationMessages(
           conversation.sessionId,
@@ -1031,7 +1020,6 @@ const XyneAISidebar = ({
         setBranchSelections({});
         setEditingMessageId(null);
         setShowHistorySidebar(false);
-        setFeedbackMap({});
 
         // Reload mid-run: no in-memory stream was adopted above, so attach a
         // read-only live viewer that streams an in-flight answer in. No-op if
@@ -1114,19 +1102,17 @@ const XyneAISidebar = ({
   // reset to a fresh conversation scoped to that agent.
   const handleSelectAgent = useCallback(
     (slug: string | null): void => {
-      if (!isV2) return;
       if (slug === selectedAgentSlug) return;
       setSelectedAgentSlug(slug);
       handleNewChat();
     },
-    [isV2, selectedAgentSlug, setSelectedAgentSlug, handleNewChat],
+    [selectedAgentSlug, setSelectedAgentSlug, handleNewChat],
   );
 
   // When user selects an agent from the history page, stay on history
   // and refresh the conversation list for that agent.
   const handleSelectAgentFromHistory = useCallback(
     (slug: string | null): void => {
-      if (!isV2) return;
       if (slug === selectedAgentSlug) return;
       setSelectedAgentSlug(slug);
       // Clear active conversation but stay on history page
@@ -1138,7 +1124,7 @@ const XyneAISidebar = ({
       // Refresh sessions list for the new agent
       void refetchV2Sessions();
     },
-    [isV2, selectedAgentSlug, setSelectedAgentSlug, refetchV2Sessions],
+    [selectedAgentSlug, setSelectedAgentSlug, refetchV2Sessions],
   );
 
   const handleLoadConversationRef = useRef(handleLoadConversation);
@@ -1281,78 +1267,6 @@ const XyneAISidebar = ({
 
     setShowUserActivityPanel(false);
   }, []);
-
-  const handleFeedback = useCallback(
-    async (messageId: string, feedbackType: 'LIKE' | 'DISLIKE'): Promise<void> => {
-      // Toggle feedback - if already selected, deselect it
-      const currentFeedback = feedbackMap[messageId];
-      const newFeedback = currentFeedback === feedbackType ? null : feedbackType;
-
-      // Update UI immediately
-      setFeedbackMap(prev => ({
-        ...prev,
-        [messageId]: newFeedback,
-      }));
-
-      // Update the message with feedback value (1 for LIKE, 2 for DISLIKE)
-      setMessages(prevMessages =>
-        prevMessages.map(msg => {
-          if (msg.id === messageId) {
-            const { feedback: _removedFeedback, ...msgWithoutFeedback } = msg;
-            if (newFeedback === 'LIKE') {
-              return { ...msgWithoutFeedback, feedback: 1 };
-            } else if (newFeedback === 'DISLIKE') {
-              return { ...msgWithoutFeedback, feedback: 2 };
-            }
-            return msgWithoutFeedback;
-          }
-          return msg;
-        }),
-      );
-
-      // Only make API call if setting feedback (not when removing)
-      if (newFeedback && currentTraceId) {
-        try {
-          // eslint-disable-next-line local-rules/no-fetch-use-axios
-          await fetch(`${BASE_URL}/xyne-ai/feedback`, {
-            method: 'POST',
-            headers: {
-              // eslint-disable-next-line @typescript-eslint/naming-convention
-              'Content-Type': 'application/json',
-            },
-            credentials: 'include',
-            body: JSON.stringify({
-              traceId: currentTraceId,
-              value: newFeedback,
-            }),
-          });
-        } catch (error) {
-          console.error('[XyneAISidebar] Failed to submit feedback:', error);
-          // Revert UI state on error
-          setFeedbackMap(prev => ({
-            ...prev,
-            [messageId]: currentFeedback ?? null,
-          }));
-          // Revert message feedback
-          setMessages(prevMessages =>
-            prevMessages.map(msg => {
-              if (msg.id === messageId) {
-                const { feedback: _removedFeedback, ...msgWithoutFeedback } = msg;
-                if (currentFeedback === 'LIKE') {
-                  return { ...msgWithoutFeedback, feedback: 1 };
-                } else if (currentFeedback === 'DISLIKE') {
-                  return { ...msgWithoutFeedback, feedback: 2 };
-                }
-                return msgWithoutFeedback;
-              }
-              return msg;
-            }),
-          );
-        }
-      }
-    },
-    [feedbackMap, currentTraceId],
-  );
 
   // v2 (claw) rating change — AskAiRatingButtons already persisted to
   // agent_runs; reflect the new feedback in local message state AND in the
@@ -1724,7 +1638,7 @@ const XyneAISidebar = ({
   const sharedInputSectionProps = {
     // Model picker. Empty list (agent has no litellm credential) ⇒ the picker
     // hides itself, so no extra gating is needed here beyond the v2 check.
-    models: isV2 ? (agentModelsData?.models ?? []) : [],
+    models: agentModelsData?.models ?? [],
     defaultModel: agentModelsData?.defaultModel ?? null,
     selectedModel,
     onSelectModel: setSelectedModel,
@@ -1782,7 +1696,7 @@ const XyneAISidebar = ({
     onUserTagsChange: setCurrentUserTags,
   };
 
-  const showInlineDebugger = showDebugger && isV2;
+  const showInlineDebugger = showDebugger;
   const isCompactSidebar = sidebarContentWidth > 0 && sidebarContentWidth < 760;
   const isTightSidebar = sidebarContentWidth > 0 && sidebarContentWidth < 640;
 
@@ -1863,8 +1777,8 @@ const XyneAISidebar = ({
             }}
             onDeleteConversation={handleDeleteConversation}
             selectedAgentSlug={effectiveAgentSlug}
-            agents={isV2 ? accessibleAgents : []}
-            {...(isV2 && !isAgentForced ? { onSelectAgent: handleSelectAgentFromHistory } : {})}
+            agents={accessibleAgents}
+            {...(!isAgentForced ? { onSelectAgent: handleSelectAgentFromHistory } : {})}
           />
         ) : showUserActivityPanel ? (
           <UserActivityPanel
@@ -1887,7 +1801,7 @@ const XyneAISidebar = ({
                 title={isFullscreen ? 'Xyne AI' : selectedAgentName || 'Ask AI'}
                 selectedAgent={selectedAgent}
                 onShowDebugger={
-                  isV2 && !isAgentForced
+                  !isAgentForced
                     ? () => {
                         setDebugTurnIndex(null);
                         setDebugSessionId(null);
@@ -1928,7 +1842,7 @@ const XyneAISidebar = ({
                     // selector reflects it and the loaded session is scoped to
                     // the right agent (not the one currently selected).
                     const respondingAgent = s?.agentSlug ?? null;
-                    if (isV2 && respondingAgent !== selectedAgentSlug) {
+                    if (respondingAgent !== selectedAgentSlug) {
                       setSelectedAgentSlug(respondingAgent);
                     }
                     xyneAIActor.send({ type: 'SET_FOCUS_SESSION', sessionId: sid });
@@ -1987,8 +1901,8 @@ const XyneAISidebar = ({
                             isStreaming={false}
                             contextPanelPosition='top'
                             selectedAgentSlug={effectiveAgentSlug}
-                            agents={isV2 ? accessibleAgents : []}
-                            {...(isV2 && !isAgentForced
+                            agents={accessibleAgents}
+                            {...(!isAgentForced
                               ? { onSelectAgent: handleSelectAgent }
                               : {})}
                             {...sharedInputSectionProps}
@@ -2069,7 +1983,6 @@ const XyneAISidebar = ({
                                       .filter(item => item.type === 'bot').length - 1
                                   : -1;
                               const showFollowUps =
-                                isV2 &&
                                 isLatestBotMessage &&
                                 !message.isStreaming &&
                                 !!message.followUpSuggestions?.length;
@@ -2080,11 +1993,8 @@ const XyneAISidebar = ({
                                   // would kill the activity block's transition).
                                   key={message.stableKey ?? message.id}
                                   message={message}
-                                  onFeedback={(id, type) => void handleFeedback(id, type)}
                                   onCitationClick={handleCitationClick}
                                   onSummarizerCitationClick={handleSummarizerCitationClick}
-                                  feedbackValue={feedbackMap[message.id] || null}
-                                  isV2={isV2}
                                   onRatingChange={handleRatingChange}
                                   onRegenerate={
                                     !isLegacyConversation && isLatestBotMessage
@@ -2115,7 +2025,7 @@ const XyneAISidebar = ({
                                       : undefined
                                   }
                                   onDebug={
-                                    isV2 && message.type === 'bot'
+                                    message.type === 'bot'
                                       ? () => {
                                           setDebugTurnIndex(botTurnIndex);
                                           // Prefer sessionId pinning when the
@@ -2130,7 +2040,7 @@ const XyneAISidebar = ({
                                       : undefined
                                   }
                                   onOpenToolDebug={
-                                    isV2 && message.type === 'bot'
+                                    message.type === 'bot'
                                       ? (toolCallId: string) => {
                                           setDebugTurnIndex(botTurnIndex);
                                           setDebugSessionId(message.debugSessionId ?? null);
@@ -2204,8 +2114,8 @@ const XyneAISidebar = ({
                     isStreaming={isActiveSessionStreaming}
                     contextPanelPosition='bottom'
                     selectedAgentSlug={effectiveAgentSlug}
-                    agents={isV2 ? accessibleAgents : []}
-                    {...(isV2 && !isAgentForced ? { onSelectAgent: handleSelectAgent } : {})}
+                    agents={accessibleAgents}
+                    {...(!isAgentForced ? { onSelectAgent: handleSelectAgent } : {})}
                     compactToolbar={isCompactSidebar}
                     {...sharedInputSectionProps}
                     kbCollectionId={kbCollectionIdProp}
@@ -2232,7 +2142,7 @@ const XyneAISidebar = ({
             <span className='absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-border/80 group-hover:bg-primary/60' />
           </button>
           <AskAIDebugPanel
-            open={showDebugger && isV2}
+            open={showDebugger}
             inline
             width={debuggerWidth}
             conversationId={conversationId || streamThreadKey}

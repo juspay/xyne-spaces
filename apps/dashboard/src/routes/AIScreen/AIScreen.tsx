@@ -43,7 +43,6 @@ const AIScreen = (): ReactElement => {
   const lastContextRef = useRef<ComposerContext | undefined>(undefined);
   const navigate = useNavigate();
   const { selectedAgentSlug } = useSelectedAgent();
-  const isV2 = true;
   const effectiveAgentSlug = selectedAgentSlug;
   const { invalidateSessions: invalidateV2Sessions } = useV2SessionInvalidator();
 
@@ -258,7 +257,7 @@ const AIScreen = (): ReactElement => {
                   autoFocus
                   onSubmit={handleComposerSubmit}
                   onAgentChange={handleAgentChange}
-                  showAgentSelector={isV2}
+                  showAgentSelector
                   onContextChange={handleContextChange}
                   hideDisclaimer
                 />
