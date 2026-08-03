@@ -1061,7 +1061,7 @@ export const toolTable = table('tools')
 
 export const agentToolsMappingTable = table('agent_tools_mappings')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     agentId: string(),
     toolId: string(),
@@ -1132,7 +1132,7 @@ export const subTicketTable = table('sub_tickets')
 
 export const ticketSubTicketMappingTable = table('ticket_sub_ticket_mappings')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     ticketId: string(),
     subTicketId: string(),
@@ -1141,7 +1141,7 @@ export const ticketSubTicketMappingTable = table('ticket_sub_ticket_mappings')
 
 export const ticketAssignmentTable = table('ticket_assignments')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     ticketId: string(),
     userId: string(),
@@ -1154,7 +1154,7 @@ export const ticketAssignmentTable = table('ticket_assignments')
 
 export const ticketActivityTable = table('ticket_activities')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     ticketId: string(),
     updatedBy: string(),
@@ -1167,7 +1167,7 @@ export const ticketActivityTable = table('ticket_activities')
 
 export const ticketEntityMappingTable = table('ticket_entity_mappings')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     ticketId: string(),
     entityType: enumeration<EntityType>(),
@@ -1177,7 +1177,7 @@ export const ticketEntityMappingTable = table('ticket_entity_mappings')
 
 export const ticketTagTable = table('ticket_tags')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     name: string(),
     ticketId: string(),
@@ -1186,7 +1186,7 @@ export const ticketTagTable = table('ticket_tags')
 
 export const projectTagTable = table('project_tags')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     name: string(),
     projectId: string(),
@@ -1196,7 +1196,7 @@ export const projectTagTable = table('project_tags')
 
 export const ticketTagMappingTable = table('ticket_tag_mappings')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     ticketId: string(),
     tagId: string(),
@@ -1207,7 +1207,7 @@ export const ticketTagMappingTable = table('ticket_tag_mappings')
 
 export const ticketReferenceMappingTable = table('ticket_reference_mappings')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     sourceTicketId: string(),
     targetTicketId: string(),
@@ -1220,7 +1220,7 @@ export const ticketReferenceMappingTable = table('ticket_reference_mappings')
 
 export const ticketStageEtaTable = table('ticket_stage_eta')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     ticketId: string(),
     stageId: string(),
@@ -1270,7 +1270,7 @@ export const boardTable = table('boards')
 
 export const stageTable = table('stages')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     name: string(),
     eta: number().optional(),
@@ -1288,7 +1288,7 @@ export const stageTable = table('stages')
 
 export const stagePRStatusMappingTable = table('stage_pr_status_mappings')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     stageId: string(),
     prStatus: enumeration<PRStatusEvent>(),
@@ -1298,7 +1298,7 @@ export const stagePRStatusMappingTable = table('stage_pr_status_mappings')
 
 export const userGroupMappingTable = table('user_group_mappings')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     userId: string(),
     userGroupId: string(),
@@ -1313,7 +1313,7 @@ export const userGroupMappingTable = table('user_group_mappings')
 
 export const userAssignmentStateTable = table('user_assignment_states')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     userId: string(),
     userGroupId: string(),
@@ -1327,7 +1327,7 @@ export const userAssignmentStateTable = table('user_assignment_states')
 
 export const boardComplexityScoreTable = table('board_complexity_scores')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     userGroupId: string(),
     boardId: string(),
@@ -1341,7 +1341,7 @@ export const boardComplexityScoreTable = table('board_complexity_scores')
 
 export const userWorkloadMappingTable = table('user_workload_mappings')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     userId: string(),
     userGroupId: string(),
@@ -1356,7 +1356,7 @@ export const userWorkloadMappingTable = table('user_workload_mappings')
 
 export const userExpertiseMappingTable = table('user_expertise_mappings')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     userId: string(),
     userGroupId: string(),
@@ -1398,7 +1398,7 @@ export const workflowTable = table('workflows')
 
 export const workflowExecutionTable = table('workflow_executions')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     workflowId: string(),
     workflowType: string().optional(),
@@ -1465,7 +1465,7 @@ export const userTable = table('users')
 
 export const userPresenceTable = table('user_presence')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     userId: string(),
     status: enumeration<UserPresenceStatus>(),
@@ -1490,7 +1490,7 @@ export const userPresenceTable = table('user_presence')
 
 export const userProfileTable = table('user_profiles')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     userId: string(),
     dob: number().optional(), // Date of birth (optional) - stored as timestamp
@@ -1509,7 +1509,7 @@ export const userProfileTable = table('user_profiles')
 
 export const userPreferenceTable = table('user_preferences')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     userId: string(),
     askai_custom_instruction: string().optional(), // Custom instructions for Ask AI
@@ -1539,7 +1539,7 @@ export const resourceTable = table('resources')
 
 export const resourceAccessTable = table('resource_access')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     groupId: string().optional(),
     userId: string().optional(),
@@ -1552,7 +1552,7 @@ export const resourceAccessTable = table('resource_access')
 
 export const pullRequestsTable = table('pull_requests')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     prId: number(),
     ticketId: string().optional(),
@@ -1628,7 +1628,7 @@ export const invitationTable = table('invitations')
   .columns({
     id: string(),
     orgId: string().optional(),
-    workspaceId: string().optional(),
+    workspaceId: string(),
     email: string(),
     role: enumeration<WorkspaceRole>(),
     invitedBy: string(),
@@ -1682,7 +1682,7 @@ export const channelTable = table('channels')
 
 export const channelStatsTable = table('channel_stats')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     channelId: string(),
     lastActivityAt: number(),
     participantCount: number(),
@@ -1693,7 +1693,7 @@ export const channelStatsTable = table('channel_stats')
 
 export const channelParticipantTable = table('channel_participants')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     channelId: string(),
     userId: string(),
@@ -1710,7 +1710,7 @@ export const channelParticipantTable = table('channel_participants')
 
 export const channelUserStatusTable = table('channel_user_status')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     channelId: string(),
     userId: string(),
@@ -1758,7 +1758,7 @@ export const conversationTable = table("conversations")
     channelId: string(),
     createdBy: string(),
     initialMessageId: string(),
-    workspaceId: string().optional(),
+    workspaceId: string(),
     parentMessageId: string().optional(),
     lastActivityAt: number(),
     replyCount: number(),
@@ -1777,7 +1777,7 @@ export const conversationTable = table("conversations")
 
 export const conversationParticipantTable = table('conversation_participants')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     conversationId: string(),
     userId: string(),
@@ -1796,7 +1796,7 @@ export const messageTable = table('messages')
     conversationId: string(),
     childConversationId: string().optional(),
     senderId: string(),
-    workspaceId: string().optional(),
+    workspaceId: string(),
     content: string(),
     msgType: enumeration<MessageType>(),
     hasAttachment: boolean(),
@@ -1839,7 +1839,7 @@ export const messageAttachmentTable = table('message_attachments')
 
 export const draftMessageTable = table('draft_messages')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     channelId: string(),
     conversationId: string().optional(),
@@ -1854,7 +1854,7 @@ export const draftMessageTable = table('draft_messages')
 
 export const delayedMessageTable = table('delayed_messages' /* DelayedMessage */)
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     channelId: string(),
     conversationId: string().optional(),
@@ -1872,7 +1872,7 @@ export const delayedMessageTable = table('delayed_messages' /* DelayedMessage */
 
 export const reactionTable = table('reactions')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     reactionId: string(),
     messageId: string(),
     userId: string(),
@@ -1883,7 +1883,7 @@ export const reactionTable = table('reactions')
 
 export const reactionCountTable = table('reaction_counts')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     countId: string(),
     messageId: string(),
     emojiName: string(),
@@ -1894,7 +1894,7 @@ export const reactionCountTable = table('reaction_counts')
 
 export const customEmojiTable = table('custom_emojis')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     name: string(),
     url: string(),
@@ -1907,7 +1907,7 @@ export const activityTable = table('activities')
   .columns({
     id: string(),
     userId: string(),
-    workspaceId: string().optional(),
+    workspaceId: string(),
     actorAction: string(),
     actionSource: string(), // @deprecated Use messageId, reactionId, or callId
     actionSourceId: string(), // @deprecated Use messageId, reactionId, or callId
@@ -1933,7 +1933,7 @@ export const activityTable = table('activities')
 
 export const notificationPreferenceTable = table('notification_preferences')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     userId: string(),
     notificationType: enumeration<NotificationType>(),
@@ -1947,7 +1947,7 @@ export const notificationPreferenceTable = table('notification_preferences')
 
 export const proactiveNudgeTable = table('proactive_nudges')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     messageId: string(),
     type: string(),
@@ -1963,7 +1963,7 @@ export const proactiveNudgeTable = table('proactive_nudges')
 
 export const surfaceNudgeTable = table('surface_nudges')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     nudgeKind: enumeration<NudgeKind>(),
     sourceId: string(),
@@ -1982,7 +1982,7 @@ export const surfaceNudgeTable = table('surface_nudges')
 
 export const surfaceNudgeCountTable = table('surface_nudge_counts')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     nudgeCount: number(),
     userId: string().optional(),
@@ -2001,7 +2001,7 @@ export const surfaceNudgeCountTable = table('surface_nudge_counts')
 
 export const callTable = table('calls')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     externalId: string(),
     title: string().optional(),
@@ -2072,7 +2072,7 @@ export const summaryTemplateTable = table('summary_templates' /* SummaryTemplate
 
 export const callParticipantTable = table('call_participants')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     callId: string(),
     userId: string(),
@@ -2092,7 +2092,7 @@ export const callParticipantTable = table('call_participants')
 
 export const recurringCallSeriesTable = table('recurring_call_series')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     title: string(),
     description: string().optional(),
@@ -2113,7 +2113,7 @@ export const recurringCallSeriesTable = table('recurring_call_series')
 
 export const recurringCallParticipantTable = table('recurring_call_participants')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     recurringSeriesId: string(),
     userId: string(),
@@ -2131,7 +2131,7 @@ export const recurringCallParticipantTable = table('recurring_call_participants'
 
 export const canvasFolderTable = table('canvas_folders' /* CanvasFolder */)
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     projectId: string().optional(),
     channelId: string().optional(),
@@ -2144,7 +2144,7 @@ export const canvasFolderTable = table('canvas_folders' /* CanvasFolder */)
 
 export const canvasTable = table('canvases')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     title: string(),
     content: json(),
@@ -2174,7 +2174,7 @@ export const canvasTable = table('canvases')
 
 export const canvasVersionTable = table('canvas_versions')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     canvasId: string(),
     name: string(),
@@ -2218,7 +2218,7 @@ export const canvasCommentTable = table('canvas_comments' /* CanvasComment */)
 
 export const canvasParticipantTable = table('canvas_participants')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     canvasId: string(),
     userId: string().optional(),
@@ -2232,7 +2232,7 @@ export const canvasParticipantTable = table('canvas_participants')
 
 export const canvasUserStatusTable = table('canvas_user_status' /* CanvasUserStatus */)
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     canvasId: string(),
     userId: string(),
@@ -2244,7 +2244,7 @@ export const canvasUserStatusTable = table('canvas_user_status' /* CanvasUserSta
 
 export const bookmarkTable = table('bookmarks')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     userId: string(),
     entityId: string(),
@@ -2259,7 +2259,7 @@ export const bookmarkTable = table('bookmarks')
 
 export const linkTable = table('links')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     url: string(),
     title: string(),
@@ -2275,7 +2275,7 @@ export const linkTable = table('links')
 
 export const linkAccessTable = table('link_access')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     linkId: string(),
     userId: string(),
@@ -2285,7 +2285,7 @@ export const linkAccessTable = table('link_access')
 
 export const repoTable = table('repos')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     name: string(),                     // e.g., "xyne-spaces"
     url: string(),                      // SSH or HTTPS URL
@@ -2297,7 +2297,7 @@ export const repoTable = table('repos')
 
 export const emailTable = table('emails')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     type: enumeration<EmailType>(),
     subject: string(),
@@ -2320,7 +2320,7 @@ export const emailTable = table('emails')
 
 export const emailDraftTable = table('email_drafts')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     conversationId: string().optional(),
     userId: string().optional(),
@@ -2383,7 +2383,7 @@ export const ticketUserMailboxTable = table('ticket_user_mailbox')
 
 export const emailSignatureTable = table('email_signatures')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     userId: string(),
     name: string(),
@@ -2397,7 +2397,7 @@ export const emailSignatureTable = table('email_signatures')
 export const emailReadTable = table('email_reads') // Prisma model: EmailRead
   .columns({
     id: string(),
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     ticketId: string(),
     userId: string(),
     lastReadEmailId: string(),
@@ -2427,7 +2427,7 @@ export const emailChannelPreferenceTable = table('email_channel_preferences')
     autoDraftMode: enumeration<AutoDraftMode>().optional(),
     deskType: enumeration<DeskType>(),
     dlEmail: string().optional(),
-    workspaceId: string().optional(),
+    workspaceId: string(),
     autoDraftAgentSlug: string().optional(),
     metricsEnabled: boolean().optional(),
     frtStageNames: string().optional(),
@@ -2437,7 +2437,7 @@ export const emailChannelPreferenceTable = table('email_channel_preferences')
 export const classificationMappingTable = table('classification_mappings') // ClassificationMapping
   .columns({
     id: string(),
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     channelId: string(),
     category: string(),
     subCategory: string().optional(),
@@ -2449,7 +2449,7 @@ export const classificationMappingTable = table('classification_mappings') // Cl
 export const boardSlaPolicyTable = table('board_sla_policies')
   .columns({
     id: string(),
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     boardId: string(),
     priority: enumeration<TicketPriority>(),
     responseHours: number(),
@@ -2480,7 +2480,7 @@ export const formTable = table('forms')
 
 export const formContextMappingTable = table('forms_context_mapping')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     formId: string(),
     contextId: string(),
@@ -2493,7 +2493,7 @@ export const formContextMappingTable = table('forms_context_mapping')
 export const globalFieldsTable = table('global_fields') // Prisma model: GlobalField
   .columns({
     id: string(),
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     projectId: string(),
     fieldName: string(),
     fieldType: enumeration<FormFieldType>(),
@@ -2509,7 +2509,7 @@ export const globalFieldsTable = table('global_fields') // Prisma model: GlobalF
 export const formFieldsTable = table('form_fields') // Prisma model: FormFields
   .columns({
     id: string(),
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     formId: string(),
     globalFieldId: string().optional(), // definition in global_fields (null for legacy rows)
     fieldName: string().optional(), // DEPRECATED: legacy definition only
@@ -2529,7 +2529,7 @@ export type FormFieldValue = string | string[] | null;
 export const formEntityValuesTable = table('form_entity_values')
   .columns({
     id: string(),
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     entityId: string(),
     entityType: string(),
     formId: string(),
@@ -2545,7 +2545,7 @@ export const formEntityValuesTable = table('form_entity_values')
 
 export const stageApproversTable = table('stage_approvers')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     userId: string().optional(), // set when approverType = USER
     roleId: string().optional(), // set when approverType = ROLE
@@ -2572,7 +2572,7 @@ export const rolesTable = table('roles')
 
 export const userRoleMappingsTable = table('user_role_mappings')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     userId: string(),
     roleId: string(),
@@ -2584,7 +2584,7 @@ export const userRoleMappingsTable = table('user_role_mappings')
 export const stageTransitionTable = table('stage_transitions') // Prisma: StageTransition
   .columns({
     id: string(),
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     boardId: string(),
     fromStageId: string().optional(),
     toStageId: string(),
@@ -2632,7 +2632,7 @@ export const stageApproversTableRelationships = relationships(stageApproversTabl
 export const ticketStageRequestTable = table('ticket_stage_requests')
   .columns({
     id: string(),
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     ticketId: string(),
     stageId: string(),
     formId: string().optional(),
@@ -2649,7 +2649,7 @@ export const ticketStageRequestTable = table('ticket_stage_requests')
 // publishedDocTable has been deprecated - published docs were folded into canvasTable
 export const dashboardTable = table('dashboards')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     name: string(),
     description: string().optional(),
@@ -2661,7 +2661,7 @@ export const dashboardTable = table('dashboards')
 
 export const queryTable = table('queries')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     title: string(),
     queryJson: json(),
@@ -2689,7 +2689,7 @@ export const lookupValueTable = table('lookup_values')
 
 export const applicationTable = table('applications')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     name: string(),
     projectId: string(),
@@ -2711,7 +2711,7 @@ export const applicationTable = table('applications')
 
 export const applicationReleaseTicketTable = table('application_release_tickets')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     applicationReleaseId: string(),
     releaseId: string(),
@@ -2727,7 +2727,7 @@ export const applicationReleaseTicketTable = table('application_release_tickets'
 
 export const releaseEventTable = table('release_events')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     releaseId: string(),
     applicationReleaseId: string().optional(),
@@ -2746,7 +2746,7 @@ export const releaseEventTable = table('release_events')
 
 export const releaseChangeTable = table('release_changes')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     releaseId: string(),
     applicationReleaseId: string().optional(),
@@ -2759,7 +2759,7 @@ export const releaseChangeTable = table('release_changes')
 
 export const releaseChangeTypeTable = table('release_change_types')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     applicationId: string(),
     changeType: string(),
@@ -2775,7 +2775,7 @@ export const releaseChangeTypeTable = table('release_change_types')
 
 export const rcaTable = table('rcas')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     title: string(),
     ticketId: string(),
@@ -2795,7 +2795,7 @@ export const rcaTable = table('rcas')
 
 export const impactTable = table('impacts')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     ticketId: string(),
     rcaId: string().optional(),
@@ -2807,7 +2807,7 @@ export const impactTable = table('impacts')
 
 export const coeTable = table('coes')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     rcaId: string(),
     ownerId: string(),
@@ -2822,7 +2822,7 @@ export const coeTable = table('coes')
 
 export const releaseAttributionTable = table('release_attributions')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     ticketId: string(),
     releaseId: string(),
@@ -2835,7 +2835,7 @@ export const releaseAttributionTable = table('release_attributions')
 
 export const dashboardQueryMappingTable = table('dashboard_queries_mapping')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     dashboardId: string(),
     queryId: string(),
@@ -2847,7 +2847,7 @@ export const dashboardQueryMappingTable = table('dashboard_queries_mapping')
 
 export const surfaceLinkTable = table('surface_links')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     sourceType: enumeration<SurfaceAreaType>(),
     sourceId: string(),
@@ -2863,7 +2863,7 @@ export const surfaceLinkTable = table('surface_links')
 /** @deprecated Use channelRecapTable instead */
 export const channelDailyRecapTable = table('channel_daily_recaps')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     channelId: string(),
     recapDate: number(),
@@ -2874,7 +2874,7 @@ export const channelDailyRecapTable = table('channel_daily_recaps')
 
 export const channelRecapTable = table('channel_recaps')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     channelId: string(),
     recapDate: number(),
@@ -2885,7 +2885,7 @@ export const channelRecapTable = table('channel_recaps')
 
 export const recapsTable = table('recaps')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     recapDate: number(),
     entityType: enumeration<RecapEntityType>(),
@@ -2897,7 +2897,7 @@ export const recapsTable = table('recaps')
 
 export const appsTable = table('apps')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     name: string(),
     description: string().optional(),
@@ -2914,7 +2914,7 @@ export const appsTable = table('apps')
 
 export const installedAppsTable = table('installed_apps')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     appId: string(),
     userId: string(),
@@ -2930,7 +2930,7 @@ export const installedAppsTable = table('installed_apps')
 // Saved Views Tables
 export const savedUserConfigurationTable = table('saved_user_configurations')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     userId: string(),
     name: string(),
@@ -2945,7 +2945,7 @@ export const savedUserConfigurationTable = table('saved_user_configurations')
 
 export const savedUserConfigurationValueTable = table('saved_user_configuration_values')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     configId: string(),
     entityName: enumeration<SavedConfigEntityName>(),
@@ -2961,7 +2961,7 @@ export const savedUserConfigurationValueTable = table('saved_user_configuration_
 
 export const collectionTable = table('collections')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     parentId: string().optional(),
     ownerId: string(),
@@ -2979,7 +2979,7 @@ export const collectionTable = table('collections')
 
 export const collectionItemTable = table('collection_items')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     rootCollectionId: string(),
     collectionId: string(),
@@ -2998,7 +2998,7 @@ export const collectionItemTable = table('collection_items')
 
 export const collectionPermissionTable = table('collection_permissions')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     collectionId: string(),
     userId: string().optional(),
