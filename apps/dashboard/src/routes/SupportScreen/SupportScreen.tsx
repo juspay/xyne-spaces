@@ -218,7 +218,8 @@ import {
 import AddChannelForm from '../../components/Chat/AddChannelForm/AddChannelForm';
 import Info, { ChannelTab } from '../../components/Chat/Info/Info';
 import { useVisibleChannel } from '../../hooks/useChannels';
-import { API_BASE_URL, SHAREABLE_ORIGIN } from '../../config';
+import { API_BASE_URL } from '../../config';
+import { useShareableOrigin } from '../../hooks/useShareableOrigin';
 import { initDeskChannelOAuth } from '../../services/clients/integrationOAuthApi';
 import Dialog from '../../components/ui/Dialog';
 import { MergeTicketsDialog } from '../../components/Tickets/MergeTicketsDialog/MergeTicketsDialog';
@@ -3447,6 +3448,7 @@ export const SupportTicketDetail = ({
     ticketId?: string;
   }>();
   const supportBase = routeWorkspaceId ? `/${routeWorkspaceId}/support` : '/support';
+  const shareableOrigin = useShareableOrigin();
   const { workspaceId, userID } = useAuthContextValues();
   const [isRightPanelOpen, setIsRightPanelOpen] = useState<boolean>(true);
   const isAIPanelOpen = useSelector(
@@ -4360,7 +4362,7 @@ export const SupportTicketDetail = ({
                           toast.error('Cannot copy link');
                           return;
                         }
-                        const url = `${SHAREABLE_ORIGIN}/support/${channelId}/${ticketIdParam}`;
+                        const url = `${shareableOrigin}/support/${channelId}/${ticketIdParam}`;
                         void navigator.clipboard
                           .writeText(url)
                           .then(() => toast.success('Link copied'))
