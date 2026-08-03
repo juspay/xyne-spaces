@@ -50,7 +50,7 @@ router.use((_req, res, next) => {
 
 const OPERATOR_METADATA: Record<
   ConditionOperator,
-  { label: string; valueType: 'string' | 'number' | 'boolean' | 'none' }
+  { label: string; valueType: 'string' | 'number' | 'boolean' | 'none' | 'tag' }
 > = {
   [ConditionOperator.EQ]: { label: 'equals', valueType: 'string' },
   [ConditionOperator.NEQ]: { label: 'does not equal', valueType: 'string' },
@@ -60,6 +60,7 @@ const OPERATOR_METADATA: Record<
   [ConditionOperator.LT]: { label: 'is less than', valueType: 'number' },
   [ConditionOperator.LTE]: { label: 'is less than or equal to', valueType: 'number' },
   [ConditionOperator.EXISTS]: { label: 'exists', valueType: 'none' },
+  [ConditionOperator.HAS_TAG]: { label: 'has tag', valueType: 'tag' },
 };
 
 const AutomationPayloadSchema = z.object({
