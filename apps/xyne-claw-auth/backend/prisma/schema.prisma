@@ -1771,6 +1771,83 @@ model ActiveGoal {
   @@map("active_goals")
 }
 
+model ExperimentRun {
+  id                String              @id @default(cuid())
+  conversationId    String
+  channelId         String
+  agentSlug         String
+  userId            String
+  orgId             String?
+  focus             String?
+  /// Per-experiment LLM pin, forwarded as providerOverride on every epoch
+  /// dispatch. NULL = the agent's normal provider resolution.
+  provider          String?
+  modelId           String?
+  status            String              @default("running") /// running | finishing | done | aborted
+  epoch             Int                 @default(1)
+  deadlineAt        DateTime
+  currentHypothesis String?             @db.Text
+  currentSessionId  String?
+  lastEpochEndedAt  DateTime?
+  sandboxNote       String?
+  /// Basenames of files the agent actually delivered to the thread via
+  /// sandbox-deliver-files. A finding may only be marked `proved` if its
+  /// proofArtifactPath resolves to one of these — proof left behind in a
+  /// sandbox dies with the sandbox and is worthless to a human reader.
+  deliveredArtifacts String[]           @default([])
+  finalReport       String?             @db.Text
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  findings          ExperimentFinding[]
+  reviews           ExperimentReview[]
+
+  @@index([conversationId, status])
+  @@map("experiment_runs")
+}
+
+model ExperimentFinding {
+  id                String        @id @default(cuid())
+  experimentId      String
+  experiment        ExperimentRun @relation(fields: [experimentId], references: [id], onDelete: Cascade)
+  epoch             Int
+  status            String /// conjecture | proved | refuted
+  title             String
+  hypothesis        String        @db.Text
+  note              String?       @db.Text
+  proofArtifactPath String?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  reviews           ExperimentReview[]
+
+  @@index([experimentId])
+  @@map("experiment_findings")
+}
+
+/// A second agent's verdict on a finding, produced at the end of each epoch.
+/// Deliberately ADVISORY: a review never mutates ExperimentFinding.status.
+/// An agent that can silently un-prove another agent's work is a failure mode
+/// with no audit trail — so the verdict sits beside the finding and a human
+/// (or the next epoch's prompt) decides what to do with it.
+model ExperimentReview {
+  id           String            @id @default(cuid())
+  experimentId String
+  experiment   ExperimentRun     @relation(fields: [experimentId], references: [id], onDelete: Cascade)
+  findingId    String
+  finding      ExperimentFinding @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  /// Epoch the review ran for (the epoch whose findings it checked).
+  epoch        Int
+  /// confirms | contradicts | stale | duplicate | unverifiable
+  verdict      String
+  reason       String            @db.Text
+  /// Set when verdict = duplicate — the ExperimentFinding.id it duplicates.
+  duplicateOf  String?
+  createdAt    DateTime          @default(now())
+
+  @@unique([findingId, epoch])
+  @@index([experimentId])
+  @@map("experiment_reviews")
+}
+
 /// Output of the FailureCurator — a structured "why this agent is
 /// failing and what to change" finding, evidenced by 2+ AgentRun
 /// sessionIds. Generated hourly by the curator worker; reviewed and

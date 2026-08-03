@@ -1,17 +1,32 @@
 import { ReactElement, ReactNode } from 'react';
-import { Eye } from 'lucide-react';
+import { Eye, Plus, Trash2 } from 'lucide-react';
 import { cn } from '@/utils/classNames';
 import { Input } from '@/components/ui/Input';
 import { Textarea } from '@/components/ui/Textarea';
 import { Switch } from '@/components/ui/Switch';
 import { SegmentedToggle } from '@/components/ui/SegmentedToggle';
+import { Button } from '@/components/ui/Button';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/Select/Select';
 import type { AgentPermissions } from '@/services/claw/agentPermissions';
-import type { BehaviourDraft } from '@/services/claw/behaviourConfig';
+import type {
+  BehaviourDraft,
+  SkillTriggerDraft,
+  SkillTriggerMatchMode,
+  SkillTriggerWhen,
+} from '@/services/claw/behaviourConfig';
+import type { Skill } from '@/services/claw/clawSkillsTypes';
 
 interface BehaviourTabProps {
   permissions: AgentPermissions;
   value: BehaviourDraft;
   onChange: (patch: Partial<BehaviourDraft>) => void;
+  skills: readonly Skill[];
 }
 
 const ToggleCard = ({
@@ -64,15 +79,50 @@ const Labeled = ({
   </div>
 );
 
+const WHEN_OPTIONS: { value: SkillTriggerWhen; label: string }[] = [
+  { value: 'before', label: 'Before' },
+  { value: 'after', label: 'After' },
+];
+
+const MATCH_OPTIONS: { value: SkillTriggerMatchMode; label: string }[] = [
+  { value: 'exact', label: 'Exact' },
+  { value: 'prefix', label: 'Prefix' },
+  { value: 'suffix', label: 'Suffix' },
+  { value: 'contains', label: 'Contains' },
+];
+
+const newTrigger = (): SkillTriggerDraft => ({
+  id: `st-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+  toolName: '',
+  skillSlug: '',
+  when: 'before',
+  matchMode: 'exact',
+  prompt: '',
+});
+
 /**
  * Behaviour tab — extra rules and autonomy applied on every turn, stored in the
  * agent's `config` bag. Edits flow up into the screen's behaviour draft and are
  * persisted (merged into config) by the header's Save button. Controls are
  * disabled / read-only when `!permissions.canEdit`.
  */
-const BehaviourTab = ({ permissions, value, onChange }: BehaviourTabProps): ReactElement => {
+const BehaviourTab = ({ permissions, value, onChange, skills }: BehaviourTabProps): ReactElement => {
   const canEdit = permissions.canEdit;
   const readOnlyCls = cn(!canEdit && 'cursor-default bg-muted/40 text-muted-foreground');
+
+  const updateTrigger = (id: string, patch: Partial<SkillTriggerDraft>): void => {
+    onChange({
+      skillTriggers: value.skillTriggers.map(t => (t.id === id ? { ...t, ...patch } : t)),
+    });
+  };
+
+  const addTrigger = (): void => {
+    onChange({ skillTriggers: [...value.skillTriggers, newTrigger()] });
+  };
+
+  const removeTrigger = (id: string): void => {
+    onChange({ skillTriggers: value.skillTriggers.filter(t => t.id !== id) });
+  };
 
   return (
     <div className='flex max-w-2xl flex-col gap-4'>
@@ -170,6 +220,142 @@ const BehaviourTab = ({ permissions, value, onChange }: BehaviourTabProps): Reac
         onCheckedChange={next => onChange({ autoToolCitations: next })}
         disabled={!canEdit}
       />
+
+      {/* Skill triggers — deterministic tool → skill loading. */}
+      <div className='rounded-lg border border-border p-4'>
+        <div className='mb-4 flex flex-col gap-0.5'>
+          <span className='text-sm font-medium text-foreground'>Skill triggers</span>
+          <p className='text-xs text-muted-foreground'>
+            When a specific tool is called, automatically load a skill. The runtime matches
+            tool names against the rule below.
+          </p>
+        </div>
+
+        <div className='flex flex-col gap-3'>
+          {value.skillTriggers.length === 0 && (
+            <p className='text-xs text-muted-foreground'>No triggers configured yet.</p>
+          )}
+
+          {value.skillTriggers.map(trigger => (
+            <div
+              key={trigger.id}
+              className='flex flex-col gap-3 rounded-md border border-border bg-muted/20 p-3'
+            >
+              <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
+                <Labeled label='Tool name' hint='Exact name or substring of the tool to match.'>
+                  <Input
+                    value={trigger.toolName}
+                    onChange={e => updateTrigger(trigger.id, { toolName: e.target.value })}
+                    readOnly={!canEdit}
+                    placeholder='e.g. Create HTML Report'
+                    className={readOnlyCls}
+                  />
+                </Labeled>
+
+                <Labeled label='Skill'>
+                  <Select
+                    value={trigger.skillSlug}
+                    onValueChange={skillSlug => updateTrigger(trigger.id, { skillSlug })}
+                    disabled={!canEdit}
+                  >
+                    <SelectTrigger className='w-full'>
+                      <SelectValue placeholder='Choose a skill…' />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {skills.map(skill => (
+                        <SelectItem key={skill.slug} value={skill.name}>
+                          {skill.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Labeled>
+
+                <Labeled label='When'>
+                  <Select
+                    value={trigger.when}
+                    onValueChange={w => updateTrigger(trigger.id, { when: w as SkillTriggerWhen })}
+                    disabled={!canEdit}
+                  >
+                    <SelectTrigger className='w-full'>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {WHEN_OPTIONS.map(opt => (
+                        <SelectItem key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Labeled>
+
+                <Labeled label='Match' hint='How closely the tool name must match.'>
+                  <Select
+                    value={trigger.matchMode}
+                    onValueChange={m =>
+                      updateTrigger(trigger.id, { matchMode: m as SkillTriggerMatchMode })
+                    }
+                    disabled={!canEdit}
+                  >
+                    <SelectTrigger className='w-full'>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {MATCH_OPTIONS.map(opt => (
+                        <SelectItem key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Labeled>
+              </div>
+
+              <Labeled
+                label='Extra prompt (optional)'
+                hint='Additional instructions to prepend alongside the loaded skill.'
+              >
+                <Textarea
+                  value={trigger.prompt}
+                  onChange={e => updateTrigger(trigger.id, { prompt: e.target.value })}
+                  readOnly={!canEdit}
+                  placeholder='e.g. Follow the design system for dashboards.'
+                  className={cn('min-h-[64px]', readOnlyCls)}
+                />
+              </Labeled>
+
+              {canEdit && (
+                <div className='flex justify-end'>
+                  <Button
+                    type='button'
+                    variant='outline'
+                    size='sm'
+                    onClick={() => removeTrigger(trigger.id)}
+                    className='gap-1.5 text-destructive hover:text-destructive'
+                  >
+                    <Trash2 className='size-4' />
+                    Remove
+                  </Button>
+                </div>
+              )}
+            </div>
+          ))}
+
+          {canEdit && (
+            <Button
+              type='button'
+              variant='outline'
+              size='sm'
+              onClick={addTrigger}
+              className='w-fit gap-1.5'
+            >
+              <Plus className='size-4' />
+              Add trigger
+            </Button>
+          )}
+        </div>
+      </div>
 
       <ToggleCard
         title='Structured output'

@@ -52,6 +52,34 @@ export interface BehaviourDraft {
   outputTemplate: string;
   /** Comma/newline list of tool-name substrings required before submit. */
   outputRequireTools: string;
+  /** Deterministic tool → skill triggers (config.skillTriggers). */
+  skillTriggers: SkillTriggerDraft[];
+}
+
+/** Lifecycle hook at which a skill is loaded for a matched tool. */
+export type SkillTriggerWhen = 'before' | 'after';
+
+/** How a tool name is matched against the configured trigger. */
+export type SkillTriggerMatchMode = 'exact' | 'prefix' | 'suffix' | 'contains';
+
+/** One skill-trigger row as edited in the Behaviour tab. */
+export interface SkillTriggerDraft {
+  /** Stable React key only — not persisted. */
+  id: string;
+  toolName: string;
+  skillSlug: string;
+  when: SkillTriggerWhen;
+  matchMode: SkillTriggerMatchMode;
+  prompt: string;
+}
+
+/** Raw trigger shape persisted in agent.config.skillTriggers. */
+export interface RawSkillTrigger {
+  toolName: string;
+  skillSlug: string;
+  when: SkillTriggerWhen;
+  matchMode?: SkillTriggerMatchMode;
+  prompt?: string;
 }
 
 type ConfigBag = Record<string, unknown> | undefined | null;
@@ -76,6 +104,42 @@ interface BehaviourConfigShape {
   citationReflection?: unknown;
   autoToolCitations?: unknown;
   outputFormat?: OutputFormat;
+  skillTriggers?: unknown;
+}
+
+let triggerIdCounter = 0;
+const newSkillTriggerId = (): string => `st-${Date.now()}-${++triggerIdCounter}`;
+
+function normalizeMatchMode(value: unknown): SkillTriggerMatchMode {
+  if (value === 'exact' || value === 'prefix' || value === 'suffix' || value === 'contains') {
+    return value;
+  }
+  return 'exact';
+}
+
+function normalizeWhen(value: unknown): SkillTriggerWhen {
+  return value === 'after' ? 'after' : 'before';
+}
+
+function readSkillTriggers(raw: unknown): SkillTriggerDraft[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((entry: unknown) => {
+      if (!entry || typeof entry !== 'object') return null;
+      const t = entry as Record<string, unknown>;
+      const toolName = typeof t['toolName'] === 'string' ? t['toolName'].trim() : '';
+      const skillSlug = typeof t['skillSlug'] === 'string' ? t['skillSlug'].trim() : '';
+      if (!toolName || !skillSlug) return null;
+      return {
+        id: newSkillTriggerId(),
+        toolName,
+        skillSlug,
+        when: normalizeWhen(t['when']),
+        matchMode: normalizeMatchMode(t['matchMode']),
+        prompt: typeof t['prompt'] === 'string' ? t['prompt'] : '',
+      };
+    })
+    .filter((t): t is SkillTriggerDraft => t !== null);
 }
 
 /** Reads the behaviour draft out of an agent's config bag. */
@@ -106,15 +170,23 @@ export function readBehaviourDraft(config: ConfigBag): BehaviourDraft {
     outputRequireTools: Array.isArray(of?.requireToolsBeforeSubmit)
       ? of.requireToolsBeforeSubmit.join(', ')
       : '',
+    skillTriggers: readSkillTriggers(c.skillTriggers),
   };
 }
 
 /** The empty/default draft (all off), for initial state. */
 export const EMPTY_BEHAVIOUR_DRAFT: BehaviourDraft = readBehaviourDraft(undefined);
 
+function withoutTriggerIds(draft: BehaviourDraft): unknown {
+  return {
+    ...draft,
+    skillTriggers: draft.skillTriggers.map(({ id: _id, ...rest }) => rest),
+  };
+}
+
 /** True when the draft differs from what's stored in the agent's config. */
 export function behaviourDirty(config: ConfigBag, draft: BehaviourDraft): boolean {
-  return JSON.stringify(readBehaviourDraft(config)) !== JSON.stringify(draft);
+  return JSON.stringify(withoutTriggerIds(readBehaviourDraft(config))) !== JSON.stringify(withoutTriggerIds(draft));
 }
 
 /**
@@ -139,6 +211,11 @@ export function validateBehaviour(draft: BehaviourDraft): string | null {
       typeof (parsed as Record<string, unknown>)['type'] !== 'string'
     ) {
       return 'Output schema must be a JSON Schema object with a top-level "type"';
+    }
+  }
+  for (const t of draft.skillTriggers) {
+    if (!t.toolName.trim() || !t.skillSlug.trim()) {
+      return 'Every skill trigger needs a tool name and a skill';
     }
   }
   return null;
@@ -201,6 +278,21 @@ export function applyBehaviour(config: ConfigBag, draft: BehaviourDraft): Record
     }
   } else {
     delete next['outputFormat'];
+  }
+
+  const rawTriggers: RawSkillTrigger[] = draft.skillTriggers
+    .filter(t => t.toolName.trim() && t.skillSlug.trim())
+    .map(t => ({
+      toolName: t.toolName.trim(),
+      skillSlug: t.skillSlug.trim(),
+      when: t.when,
+      matchMode: t.matchMode,
+      ...(t.prompt.trim() ? { prompt: t.prompt.trim() } : {}),
+    }));
+  if (rawTriggers.length) {
+    next['skillTriggers'] = rawTriggers;
+  } else {
+    delete next['skillTriggers'];
   }
 
   return next;

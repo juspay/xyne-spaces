@@ -7,6 +7,7 @@ import { cn } from '@/utils/classNames';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useAuth } from '@/hooks/useAuth';
 import { useIsClawAdmin } from '@/hooks/useIsClawAdmin';
+import { useClawSkills } from '@/hooks/useClawSkills';
 import {
   useClawAgentDetail,
   useClawAgentShares,
@@ -116,6 +117,7 @@ const ClawAgentDetailScreen = (): ReactElement => {
   const { data: agent, isLoading, isError } = useClawAgentDetail(agentSlug);
   const { data: shares } = useClawAgentShares(agentSlug);
   const { data: isAdmin = false, isLoading: isAdminLoading } = useIsClawAdmin();
+  const { data: skills = [] } = useClawSkills();
 
   const permissions = useMemo(() => {
     if (!agent) return null;
@@ -443,6 +445,7 @@ const ClawAgentDetailScreen = (): ReactElement => {
                 permissions={permissions}
                 value={behaviour}
                 onChange={updateBehaviour}
+                skills={skills}
               />
             ) : activeTab === 'people' ? (
               <PeopleTab agent={agent} permissions={permissions} />

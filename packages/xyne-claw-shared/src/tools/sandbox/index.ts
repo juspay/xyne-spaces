@@ -4,6 +4,7 @@ export {
   sandboxRunDetached,
   sandboxPollJob,
   sandboxWriteFile,
+  sandboxCopyIn,
   sandboxReadFile,
   sandboxDeliverFiles,
   sandboxDestroy,

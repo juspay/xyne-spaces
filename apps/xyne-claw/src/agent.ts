@@ -17,6 +17,7 @@ import { createScopedToolMap } from "./scoped-tools.js";
 import { metric } from "./metrics.js";
 import { compactionExtension } from "./compaction-extension.js";
 import { takeCitations, takeDebug } from "./citations.js";
+import { matchTrigger, formatSkillInjection, formatCombinedInjection, type SkillTrigger } from "./skill-trigger-dispatcher.js";
 import { applyAutoCitations } from "./auto-citations.js";
 import { extractSessionClfTokens } from "./citation-sanitizer.js";
 import { getSandboxSession } from "xyne-claw-shared";
@@ -739,7 +740,9 @@ export function resolveModel(
   // Per-agent overrides (agentConfig.modelSettings). `model` only applies to
   // the default LiteLLM branch — provider branches already receive an
   // overridden providerConfig.model from runTask. `maxTokens` applies to all.
-  overrides?: { model?: string | undefined; maxTokens?: number | undefined },
+  // `litellmApiKey` swaps the platform key on the default LiteLLM branch only
+  // (automation/scheduled runs use the low-priority automation key).
+  overrides?: { model?: string | undefined; maxTokens?: number | undefined; litellmApiKey?: string | undefined },
 ) {
   const maxTokens = overrides?.maxTokens ?? 16384;
   if (provider === "copilot" && providerConfig?.apiKey) {
@@ -926,7 +929,7 @@ export function resolveModel(
   const litellmModel = overrides?.model ?? LITELLM.model;
   modelRegistry.registerProvider("litellm", {
     baseUrl: LITELLM.url,
-    apiKey: LITELLM.apiKey,
+    apiKey: overrides?.litellmApiKey || LITELLM.apiKey,
     api: "openai-completions",
     authHeader: true,
     models: [
@@ -1271,6 +1274,9 @@ export interface PromptInjection {
 export interface RunTaskOptions {
   userId: string;
   task: string;
+  /** Automation/scheduled run — the default LiteLLM branch uses the
+   *  low-priority automation key so batch load never queues human mentions. */
+  automationRun?: boolean | undefined;
   // Optional fields use `| undefined` (not bare `?`) so call sites can pass
   // through possibly-undefined values under exactOptionalPropertyTypes.
   context?: string | undefined;
@@ -1291,7 +1297,7 @@ export interface RunTaskOptions {
   images?: ImageContent[] | undefined;
   fileAttachments?: FileAttachmentContent[] | undefined;
   skills?: { slug?: string; name: string; description?: string; content: string; files?: { relativePath: string; content: string; contentType?: string | null }[] }[] | undefined;
-  skillTriggers?: import("./subagent-tools.js").SkillTrigger[] | undefined;
+  skillTriggers?: SkillTrigger[] | undefined;
   promptInjections?: PromptInjection[] | undefined;
   /** Task-command contract (routes/run.ts parseTaskCommand): the run may not
    *  finish until this tool has run — enforced by a post-loop nudge pass. */
@@ -1500,8 +1506,13 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   const model = resolveModel(modelRegistry, provider, effectiveProviderConfig, {
     // Spaces default-model override — only the LiteLLM branch reads it;
     // provider-credential runs keep the model configured on the credential.
-    model: effectiveProviderConfig ? undefined : modelSettings?.model,
+    // Precedence on the platform branch: per-agent modelSettings.model, then
+    // the automation default model (batch runs), then LITELLM.model.
+    model: effectiveProviderConfig
+      ? undefined
+      : modelSettings?.model ?? (opts.automationRun ? LITELLM.automationModel : undefined),
     maxTokens: modelSettings?.maxTokens,
+    litellmApiKey: opts.automationRun ? LITELLM.automationApiKey : undefined,
   });
 
   // Use persistent session if conversationId provided, otherwise in-memory
@@ -1552,6 +1563,9 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   }
 
   // Build skill trigger + prompt injection extensions if configured
+  // Collect before-triggers at tool_execution_start and flush them on the next context event.
+  const pendingBeforeSkills = new Map<string, SkillTrigger>();
+
   const extensions: import("@earendil-works/pi-coding-agent").ExtensionFactory[] = [compactionExtension];
 
   if (promptInjections && promptInjections.length > 0) {
@@ -1575,21 +1589,35 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   if (skillTriggers && skillTriggers.length > 0) {
     const triggers = skillTriggers;
     extensions.push((pi) => {
+      // BEFORE trigger: inject skill content into the next context so the LLM
+      // sees it before reasoning about the tool's result.
+      pi.on("context", (event) => {
+        if (pendingBeforeSkills.size === 0) return undefined;
+        const pending = Array.from(pendingBeforeSkills.values());
+        pendingBeforeSkills.clear();
+        const body = formatCombinedInjection(pending);
+        log.info(`[agent] Skill trigger: ${pending.length} before-trigger(s) applied for next turn`);
+        return {
+          messages: [
+            ...event.messages,
+            {
+              role: "user" as const,
+              content: [{ type: "text" as const, text: `[Skill Trigger Injection]\n\n${body}` }],
+              timestamp: Date.now(),
+            },
+          ],
+        };
+      });
+
+      // AFTER trigger: append skill content to the tool result text.
       pi.on("tool_result", (event) => {
-        const afterTriggers = triggers.filter((t) => t.when === "after" && event.toolName.endsWith(t.toolName));
+        const afterTriggers = triggers.filter((t) => t.when === "after" && matchTrigger(event.toolName, t));
         for (const trigger of afterTriggers) {
           log.info(`[agent] Skill trigger: ${trigger.skillSlug} fired after ${event.toolName}`);
-          const injectedContent = [
-            `\n\n---`,
-            `**[Skill Injected: ${trigger.skillSlug}]** _(configured by user in agent settings)_`,
-            trigger.prompt ? `\nInstruction: ${trigger.prompt}` : "",
-            `\n${trigger.skillContent}`,
-            `---`,
-          ].join("\n");
           return {
             content: [
               ...event.content,
-              { type: "text" as const, text: injectedContent },
+              { type: "text" as const, text: formatSkillInjection(trigger) },
             ],
           };
         }
@@ -1795,6 +1823,23 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     : allCustomTools;
 
   const { session } = await createAgentSession(options);
+
+  // Record before-triggers when a tool starts executing so they can be flushed
+  // into the next context event before the LLM reasons about the result.
+  if (skillTriggers && skillTriggers.length > 0) {
+    const triggers = skillTriggers;
+    session.subscribe((event) => {
+      if (event.type === "tool_execution_start") {
+        for (const trigger of triggers) {
+          if (trigger.when === "before" && matchTrigger(event.toolName, trigger)) {
+            const key = `${event.toolCallId}:${trigger.skillSlug}`;
+            pendingBeforeSkills.set(key, trigger);
+            log.info(`[agent] Skill trigger: ${trigger.skillSlug} queued before ${event.toolName}`);
+          }
+        }
+      }
+    });
+  }
 
   if (fastMode && fastToolController && fastCatalogNameSet.size > 0) {
     const activeSet = new Set(restoredFastActiveToolSet);

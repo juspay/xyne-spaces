@@ -9,7 +9,8 @@
 import { Type } from "@sinclair/typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { getAllCustomTools, parseToolsConfig, PLATFORM_ONLY_CONFIG_KEYS, type ToolExecutionContext, type PendingQuestion, type PendingResponse } from "xyne-claw-shared";
-import { SERVER } from "./config.js";
+import { SERVER, PATHS } from "./config.js";
+import { join } from "node:path";
 
 import { createLogger } from "./logger.js";
 const log = createLogger("custom-tools");
@@ -207,8 +208,16 @@ export function loadCustomTools(
   const pinnedSandboxRepo = typeof agentConfig?.["sandboxRepo"] === "string"
     ? (agentConfig["sandboxRepo"] as string).trim()
     : "";
-  const toolMeta: Record<string, string> | undefined = (meta || pinnedSandboxRepo)
-    ? { ...(meta ?? {}), ...(pinnedSandboxRepo ? { sandboxRepo: pinnedSandboxRepo } : {}) }
+  // Absolute root of THIS run's materialized skills (`<dataDir>/session-skills/<sessionId>`).
+  // Injected so `sandbox-copy-in` can stream a skill's companion file into the
+  // sandbox server-side, confined to this root (mirrors the agent's skill read root).
+  const skillsRoot = sessionId ? join(PATHS.dataDir, "session-skills", sessionId) : "";
+  const toolMeta: Record<string, string> | undefined = (meta || pinnedSandboxRepo || skillsRoot)
+    ? {
+        ...(meta ?? {}),
+        ...(pinnedSandboxRepo ? { sandboxRepo: pinnedSandboxRepo } : {}),
+        ...(skillsRoot ? { skillsRoot } : {}),
+      }
     : undefined;
 
   const tools = customTools.map((ct) => {

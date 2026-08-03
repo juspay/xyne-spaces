@@ -10,36 +10,36 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 FROM base AS builder
-WORKDIR /app/xyne-claw-auth/backend
+WORKDIR /app/apps/xyne-claw-auth/backend
 
 # Copy and install shared package dependencies
 COPY packages/kata-sdk/package*.json /app/packages/kata-sdk/
-RUN cd /app/packages/kata-sdk && npm ci
+RUN cd /app/packages/kata-sdk && npm ci --ignore-scripts
 COPY packages/kata-sdk/ /app/packages/kata-sdk/
 
-COPY xyne-claw-shared/package*.json /app/xyne-claw-shared/
-RUN cd /app/xyne-claw-shared && npm ci
-COPY xyne-claw-shared/ /app/xyne-claw-shared/
+COPY packages/xyne-claw-shared/package*.json /app/packages/xyne-claw-shared/
+RUN cd /app/packages/xyne-claw-shared && npm ci --ignore-scripts
+COPY packages/xyne-claw-shared/ /app/packages/xyne-claw-shared/
 
 # Copy service files and install
-COPY xyne-claw-auth/backend/package*.json ./
-RUN npm ci
-COPY xyne-claw-auth/backend/prisma ./prisma
+COPY apps/xyne-claw-auth/backend/package*.json ./
+RUN npm ci --ignore-scripts
+COPY apps/xyne-claw-auth/backend/prisma ./prisma
 RUN npx prisma generate
-COPY xyne-claw-auth/backend/tsconfig.json ./
-COPY xyne-claw-auth/backend/src ./src
-COPY xyne-claw-auth/backend/scripts ./scripts
+COPY apps/xyne-claw-auth/backend/tsconfig.json ./
+COPY apps/xyne-claw-auth/backend/src ./src
+COPY apps/xyne-claw-auth/backend/scripts ./scripts
 RUN npx tsc --noEmit
 
 # Production image
 FROM base AS runner
-WORKDIR /app/xyne-claw-auth/backend
+WORKDIR /app/apps/xyne-claw-auth/backend
 
 RUN groupadd --system --gid 1001 nodejs && \
     useradd --system --uid 1001 --gid nodejs --create-home clawauth
 
-COPY --from=builder --chown=clawauth:nodejs /app/xyne-claw-auth/backend ./
-COPY --from=builder --chown=clawauth:nodejs /app/xyne-claw-shared /app/xyne-claw-shared
+COPY --from=builder --chown=clawauth:nodejs /app/apps/xyne-claw-auth/backend ./
+COPY --from=builder --chown=clawauth:nodejs /app/packages/xyne-claw-shared /app/packages/xyne-claw-shared
 COPY --from=builder --chown=clawauth:nodejs /app/packages/kata-sdk /app/packages/kata-sdk
 
 USER clawauth

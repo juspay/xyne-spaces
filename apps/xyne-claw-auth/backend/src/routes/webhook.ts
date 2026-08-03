@@ -20,6 +20,7 @@ import {
   chatMessageRepository,
   agentChainWorkflowRepository,
   activeGoalRepository,
+  experimentRepository,
 } from "../repositories/index.js";
 import { getValidClaudeBearer } from "../lib/claude-oauth-refresh.js";
 import { getValidCodexBearer } from "../lib/codex-oauth-refresh.js";
@@ -33,6 +34,9 @@ import { mintSessionToken } from "../lib/session-tokens.js";
 import { verifySpacesSignature } from "../middleware/verify-spaces-signature.js";
 import { coerceAutomationForwardResult } from "../lib/automation-result.js";
 import { parseSlashCommand } from "../lib/parseSlashCommand.js";
+import { buildExperimentProofBundle } from "../lib/experiment-bundle.js";
+import { resolveAuthForUser } from "../services/userMemoryFetcher.js";
+import { parseExperimentCommand, formatDuration, dispatchExperimentEpoch, dispatchExperimentChecker, EXPERIMENT_PROVIDERS, buildFindingsMarkdown, cancelRunSession } from "../lib/experiment.js";
 import { resolveFastMode, setFastModeOverride } from "../lib/fast-mode.js";
 import { acquireTwinSlot, renameTwinSlot, releaseTwinSlot } from "../lib/twin-limiter.js";
 import { handleSlashCommandBeforeRun, persistGoalStart, recordTurnAndDecide } from "../services/goalRelooper.js";
@@ -72,6 +76,7 @@ import { getSpacesAuthForUser, spacesDbAvailable, getSpacesUserWorkspaceId, getW
 import { ensureUserExists, orgIdForSpacesUser } from "../lib/users-jit.js";
 import { finalizeOrphanedRun } from "../services/orphan-run-finalizer.js";
 import { requireStrictS2S, s2sKeyMatches, requireResultToken } from "../middleware/require-auth.js";
+import { isClawAdmin } from "../middleware/agent-acl.js";
 import { renderAttachmentsToPdf } from "../lib/result-pdf.js";
 import { renderMarkdownToHtml } from "../lib/result-html.js";
 import { sendStoredExternalResultCallback, type ExternalResultCallbackConfig } from "../surfaces/external-api/delivery.js";
@@ -436,6 +441,152 @@ import {
   zipAttachmentsToBuffer,
   prepareAgentResultForPosting,
 } from "../surfaces/spaces/attachments.js";
+
+function experimentCounts(findings: Array<{ status: string }>): { conjecture: number; proved: number; refuted: number } {
+  return {
+    conjecture: findings.filter((f) => f.status === "conjecture").length,
+    proved: findings.filter((f) => f.status === "proved").length,
+    refuted: findings.filter((f) => f.status === "refuted").length,
+  };
+}
+
+const EXPERIMENT_FINDINGS_MAX_BYTES = 200 * 1024;
+
+function capExperimentFindingsMarkdown(markdown: string): string {
+  if (Buffer.byteLength(markdown, "utf8") <= EXPERIMENT_FINDINGS_MAX_BYTES) return markdown;
+  const suffix = "\n\n---\n\n_Report truncated at 200KB for Spaces file delivery._\n";
+  let capped = markdown;
+  while (Buffer.byteLength(capped + suffix, "utf8") > EXPERIMENT_FINDINGS_MAX_BYTES && capped.length > 0) {
+    capped = capped.slice(0, Math.max(0, capped.length - 4096));
+  }
+  return `${capped.trimEnd()}${suffix}`;
+}
+
+function experimentFindingsFilename(agentSlug: string, date = new Date()): string {
+  const safeSlug = agentSlug.replace(/[^\w.\-]+/g, "_").slice(0, 80) || "agent";
+  const stamp = date.toISOString().replace(/\.\d{3}Z$/, "").replace(/:/g, "-");
+  return `experiment-findings-${safeSlug}-${stamp}.md`;
+}
+
+/**
+ * Upload a generated markdown document as a thread attachment.
+ *
+ * FILE ONLY — deliberately no `flow` parameter. `/files/filesUpload`
+ * (filesController.uploadFiles) does not read a flow field, so a card passed
+ * here is silently dropped and no Approve/Decline buttons ever render. Post
+ * approval cards separately via `/chat/postMessage` with `flow: <FlowDefinition>`.
+ */
+async function postGeneratedMarkdownFile(args: {
+  channelId: string;
+  conversationId: string;
+  workspaceId?: string | null;
+  userId: string;
+  appToken: string;
+  filename: string;
+  /** Text body, or raw bytes when `mimeType` says the payload is binary. */
+  markdown: string | Uint8Array;
+  mimeType?: string;
+  summary: string;
+}): Promise<void> {
+  const form = new FormData();
+  const mimeType = args.mimeType ?? "text/markdown";
+  const body = typeof args.markdown === "string"
+    ? [args.markdown]
+    : [new Uint8Array(args.markdown)];
+  form.append("files", new Blob(body, { type: mimeType }), args.filename);
+  form.append("channelId", args.channelId);
+  form.append("conversationId", args.conversationId);
+  form.append("userId", args.userId);
+  if (args.workspaceId) form.append("workspaceId", args.workspaceId);
+  form.append("markdownText", args.summary);
+  form.append("metadata", JSON.stringify({ contentFormat: "markdown" }));
+  await spacesAppFetchMultipart("/files/filesUpload", form, args.appToken);
+}
+
+function formatExperimentStatus(
+  run: Awaited<ReturnType<typeof experimentRepository.findActiveByConversation>>,
+  findings: Array<{ status: string; title: string; epoch: number; createdAt: Date }>,
+): string {
+  if (!run) return "No active /experiment in this thread.";
+  const elapsedMs = Date.now() - run.createdAt.getTime();
+  const remainingMs = Math.max(0, run.deadlineAt.getTime() - Date.now());
+  const counts = experimentCounts(findings);
+  const recent = [...findings]
+    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+    .slice(0, 5);
+  const icon = (status: string) => status === "proved" ? "✓" : status === "refuted" ? "✗" : "◉";
+  return [
+    `**/experiment status** — epoch ${run.epoch}`,
+    `Elapsed: ${formatDuration(elapsedMs)} · Remaining: ${formatDuration(remainingMs)}`,
+    ...(run.provider ? [`Model: ${formatExperimentModel(run.provider, run.modelId)}`] : []),
+    `Now: ${run.currentHypothesis?.trim() || "(no current hypothesis recorded)"}`,
+    `Findings: ${counts.conjecture} open · ${counts.proved} proved · ${counts.refuted} refuted`,
+    recent.length
+      ? ["", ...recent.map((f) => `${icon(f.status)} [epoch ${f.epoch}] ${f.title}`)].join("\n")
+      : "\nNo findings recorded yet.",
+  ].join("\n");
+}
+
+function formatExperimentModel(provider: string, modelId?: string | null): string {
+  return modelId?.trim() ? `${provider}/${modelId.trim()}` : `${provider} (default)`;
+}
+
+async function continueExperimentAfterResult(ctx: SessionContext, sessionId: string): Promise<boolean> {
+  const active = await experimentRepository.findActiveByConversation(ctx.conversationId);
+  if (!active) return false;
+  if (active.currentSessionId && active.currentSessionId !== sessionId) return false;
+
+  const now = Date.now();
+  if (active.status === "finishing") {
+    await experimentRepository.update(active.id, { status: "done", lastEpochEndedAt: new Date() });
+    return false;
+  }
+
+  // Rapid-fail brake: an epoch that died within seconds of STARTING (model
+  // outage, misconfig) must NOT chain instantly — that's an unbounded tight
+  // dispatch loop. Measured against the session's own startedAt (not the
+  // experiment row's updatedAt, which ledger writes also bump). Deferring
+  // leaves the run inactive; the supervisor's stale sweep re-dispatches after
+  // its window, turning a hot loop into ~1 retry/10min.
+  const MIN_EPOCH_MS = 30_000;
+  const epochRun = await agentRunRepository.findBySessionId(sessionId).catch(() => null);
+  const epochRanMs = epochRun?.startedAt ? now - epochRun.startedAt.getTime() : Number.POSITIVE_INFINITY;
+  if (epochRanMs < MIN_EPOCH_MS) {
+    clog.warn(`[experiment] epoch for ${active.id} lived only ${Math.round(epochRanMs / 1000)}s — deferring next epoch to supervisor (rapid-fail brake)`);
+    await experimentRepository.update(active.id, { lastEpochEndedAt: new Date() }).catch(() => undefined);
+    return true; // treated as handled: keep this thread's queue-drain semantics unchanged
+  }
+
+  // Check the epoch that just ended, in parallel with the next one starting.
+  // Deliberately not awaited: the checker is advisory, and a slow or failing
+  // verification pass must never delay or block the experiment's own progress.
+  // Its verdicts land in the ledger and reach whichever epoch starts after.
+  void dispatchExperimentChecker(active, active.epoch).catch((err) => {
+    clog.warn("[experiment] checker dispatch threw", {
+      experimentId: active.id,
+      epoch: active.epoch,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  });
+
+  if (now < active.deadlineAt.getTime()) {
+    const next = await experimentRepository.update(active.id, {
+      epoch: { increment: 1 },
+      lastEpochEndedAt: new Date(),
+    });
+    await dispatchExperimentEpoch(next);
+    return true;
+  }
+
+  const finishing = await experimentRepository.update(active.id, {
+    status: "finishing",
+    epoch: { increment: 1 },
+    lastEpochEndedAt: new Date(),
+  });
+  await dispatchExperimentEpoch(finishing);
+  return true;
+}
+
 function recordParam(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
@@ -803,6 +954,11 @@ export async function fetchConversationHistory(
 
 // ── Action formatting ───────────────────────────────────────────────
 
+/** Tickets rendered in full inside the bulk approval card. The rest are
+ *  summarised by count — every ticket in `params` is still created on approve,
+ *  since the executed payload comes from the HMAC-signed action, not the card. */
+const BULK_TICKETS_CARD_LIMIT = 25;
+
 function formatActionDescription(tool: string, params: Record<string, unknown>, options?: { channelName?: string }): string {
   if (tool === "user-send-message") {
     const content = (params["content"] as string ?? "").slice(0, 300);
@@ -823,6 +979,36 @@ function formatActionDescription(tool: string, params: Record<string, unknown>, 
     const desc = (params["description"] as string ?? "").slice(0, 300);
     const lines = [`**Create Ticket**`, ``, `**Title:** ${title}`];
     if (desc) lines.push(`**Description:** ${desc}${(params["description"] as string ?? "").length > 300 ? "..." : ""}`);
+    return lines.join("\n");
+  }
+
+  if (tool === "spaces-create-bulk-tickets") {
+    const tickets = Array.isArray(params["tickets"]) ? params["tickets"] as Array<Record<string, unknown>> : [];
+    const lines = [
+      `**Create ${tickets.length} Tickets**`,
+      ``,
+      `**Project/Board/Channel:** ${String(params["projectId"] ?? "")} / ${String(params["boardId"] ?? "")} / ${options?.channelName ? `#${options.channelName}` : String(params["channelId"] ?? "")}`,
+      ``,
+    ];
+    // Everything the approver needs lives in THIS card — no companion file
+    // upload. Same shape as spaces-create-ticket above (title + trimmed
+    // description), repeated per ticket. The card body scrolls past 280px
+    // (buildWriteApprovalFlow), so a long batch stays readable in-thread.
+    tickets.slice(0, BULK_TICKETS_CARD_LIMIT).forEach((ticket, index) => {
+      const title = String(ticket["title"] ?? "(untitled)");
+      const priority = String(ticket["priority"] ?? params["defaultPriority"] ?? "");
+      const assignee = String(ticket["assignedTo"] ?? params["defaultAssignedTo"] ?? "");
+      const tags = Array.isArray(ticket["tags"]) ? (ticket["tags"] as unknown[]).join(", ") : "";
+      const rawDesc = String(ticket["description"] ?? "");
+      const desc = rawDesc.slice(0, 200);
+      const meta = [priority, assignee && `→ ${assignee}`, tags && `[${tags}]`].filter(Boolean).join(" · ");
+      lines.push(`**${index + 1}. ${title}**${meta ? ` — ${meta}` : ""}`);
+      if (desc) lines.push(`${desc}${rawDesc.length > 200 ? "…" : ""}`);
+      lines.push(``);
+    });
+    if (tickets.length > BULK_TICKETS_CARD_LIMIT) {
+      lines.push(`_…and ${tickets.length - BULK_TICKETS_CARD_LIMIT} more — all ${tickets.length} are created on approve._`);
+    }
     return lines.join("\n");
   }
 
@@ -867,6 +1053,66 @@ function formatActionDescription(tool: string, params: Record<string, unknown>, 
     lines.push(`**${key}:** ${val}`);
   }
   return lines.join("\n");
+}
+
+async function postWriteApprovalAction(args: {
+  action: Record<string, unknown>;
+  ctx: SessionContext;
+  token: string;
+  targetValidation: { channelName?: string };
+}): Promise<void> {
+  const { action, ctx, token, targetValidation } = args;
+  const params = action["params"] as Record<string, unknown>;
+  const actionDesc = formatActionDescription(action["tool"] as string, params, targetValidation);
+
+  const writeFlow = withSpacesAppId(buildWriteApprovalFlow(actionDesc, {
+    serverType: action["serverType"] as string,
+    tool: action["tool"] as string,
+    params,
+    userId: action["userId"] as string,
+    signature: action["signature"] as string,
+    agentSlug: ctx.agentSlug ?? "",
+    channelId: ctx.channelId,
+    conversationId: ctx.conversationId,
+  }), ctx.spacesAppId);
+
+  // Any attachment is a SEPARATE post from the card. `/files/filesUpload`
+  // (filesController.uploadFiles) has no flow handling at all — a `flow` field
+  // sent with an upload is silently dropped, so the Approve/Decline card never
+  // appears. Only `/chat/postMessage` renders a card, and its schema calls the
+  // field `flow` (UpdateMessage uses `flowJSON` — different route, different
+  // name).
+  //
+  // spaces-create-bulk-tickets deliberately posts NO file: the batch renders
+  // inline in the approval card itself (formatActionDescription), same as
+  // spaces-create-ticket. One message, one Approve button, nothing to open.
+  if (action["tool"] === "spaces-memory-create" && params?.["content"]) {
+    const memContent = params["content"] as string;
+    const memDocType = (params["docType"] as string) ?? "fact";
+    try {
+      await postGeneratedMarkdownFile({
+        channelId: ctx.channelId,
+        conversationId: ctx.conversationId,
+        ...(ctx.workspaceId ? { workspaceId: ctx.workspaceId } : {}),
+        userId: ctx.spacesAppUserId,
+        appToken: token,
+        filename: `memory-${memDocType}-${Date.now()}.md`,
+        markdown: memContent,
+        summary: "",
+      });
+    } catch (err) {
+      clog.warn("[webhook/result] memory attachment upload failed; posting approval card without attachment", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  await spacesAppFetch("/chat/postMessage", {
+    channelId: ctx.channelId,
+    conversationId: ctx.conversationId,
+    flow: writeFlow,
+    userId: ctx.spacesAppUserId,
+  }, token);
 }
 
 
@@ -1120,6 +1366,228 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
   const slash =
     rawSlash ??
     (autoGoalEnabled ? parseSlashCommand(`/goal ${userText}`) : null);
+  const experimentCommand = parseExperimentCommand(userText);
+
+  if (experimentCommand) {
+    const postExperimentReply = (markdownText: string) => spacesAppFetch("/chat/postMessage", {
+      channelId: payload.channelId,
+      conversationId: payload.conversationId,
+      markdownText,
+      userId: agent.spacesAppUserId,
+      metadata: { contentFormat: "markdown" },
+    }, agent.appToken).catch((err) => {
+      log.warn("Failed to post /experiment reply", { error: err instanceof Error ? err.message : String(err) });
+    });
+
+    if (experimentCommand.sub === "unknown") {
+      await postExperimentReply([
+        "/experiment <duration> [provider=…] [model=…] [focus…]",
+        "/experiment status",
+        "/experiment list",
+        "/experiment findings [id]",
+        "/experiment stop",
+      ].join("\n"));
+      return;
+    }
+
+    if (experimentCommand.sub === "status") {
+      const run = await experimentRepository.findActiveByConversation(payload.conversationId);
+      const findings = run ? await experimentRepository.listFindings(run.id) : [];
+      await postExperimentReply(formatExperimentStatus(run, findings));
+      return;
+    }
+
+    if (experimentCommand.sub === "stop") {
+      const run = await experimentRepository.findActiveByConversation(payload.conversationId);
+      if (!run) {
+        await postExperimentReply("No active /experiment to stop.");
+        return;
+      }
+      const allowed = run.userId === payload.userId || await isClawAdmin(payload.userId);
+      if (!allowed) {
+        await postExperimentReply("Only the requester or a claw admin can stop this /experiment.");
+        return;
+      }
+      await experimentRepository.update(run.id, { status: "aborted", lastEpochEndedAt: new Date() });
+      let cancelledEpoch = false;
+      if (run.currentSessionId) {
+        try {
+          await cancelRunSession(run.currentSessionId, run.userId);
+          cancelledEpoch = true;
+        } catch (err) {
+          log.warn("[experiment] failed to cancel running epoch", {
+            experimentId: run.id,
+            sessionId: run.currentSessionId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+      await postExperimentReply(cancelledEpoch
+        ? "Stopped /experiment (cancelled the running epoch)."
+        : "Stopped /experiment.");
+      return;
+    }
+
+    if (experimentCommand.sub === "list") {
+      // Thread-scoped, no ownership gate — same visibility as /experiment
+      // status. The run ids printed here are what `/experiment findings <id>`
+      // takes, and THAT path does gate on owner/admin.
+      const runs = await experimentRepository.listRecentByConversationWithFindingCounts(payload.conversationId, 15);
+      if (runs.length === 0) {
+        await postExperimentReply("No /experiment has run in this thread.");
+        return;
+      }
+      const rows = runs.map((run) => {
+        const started = run.createdAt.toISOString().slice(0, 16).replace("T", " ");
+        const model = run.provider ? ` · ${formatExperimentModel(run.provider, run.modelId)}` : "";
+        const live = run.status === "running" || run.status === "finishing" ? " ← active" : "";
+        return `\`${run.id}\` — ${run.status}, ${run._count.findings} findings, epoch ${run.epoch}${model} · ${started}${live}`;
+      });
+      await postExperimentReply([
+        `**/experiment list** — ${runs.length} run${runs.length === 1 ? "" : "s"} in this thread`,
+        "",
+        ...rows,
+        "",
+        "Pull any one with `/experiment findings <id>`.",
+      ].join("\n"));
+      return;
+    }
+
+    if (experimentCommand.sub === "findings") {
+      const run = experimentCommand.id
+        ? await experimentRepository.findById(experimentCommand.id)
+        : await experimentRepository.findBestForFindings(payload.conversationId);
+      if (!run) {
+        await postExperimentReply(experimentCommand.id
+          ? "Experiment not found."
+          : "No /experiment has run in this thread.");
+        return;
+      }
+      if (experimentCommand.id && run.userId !== payload.userId && !(await isClawAdmin(payload.userId))) {
+        await postExperimentReply("Not your experiment.");
+        return;
+      }
+      const [findings, reviews] = await Promise.all([
+        experimentRepository.listFindings(run.id),
+        experimentRepository.listReviews(run.id),
+      ]);
+      const recentRuns = await experimentRepository.listRecentByConversationWithFindingCounts(payload.conversationId);
+      const counts = experimentCounts(findings);
+      const summaryLines = [
+        `**/experiment findings** — ${run.agentSlug}`,
+        `Status: ${run.status} · Epoch: ${run.epoch} · Findings: ${counts.proved} proved, ${counts.conjecture} open, ${counts.refuted} refuted`,
+      ];
+      if (!experimentCommand.id && recentRuns[0] && recentRuns[0].id !== run.id) {
+        summaryLines.push(`(showing experiment ${run.id} — the most recent run in this thread had no findings)`);
+      }
+      const otherRuns = recentRuns.filter((candidate) => candidate.id !== run.id).slice(0, 5);
+      if (recentRuns.length > 1 && otherRuns.length > 0) {
+        summaryLines.push(`Other runs in this thread: ${otherRuns.map((candidate) =>
+          `${candidate.id} (${candidate.status}, ${candidate._count.findings} findings, ${candidate.createdAt.toISOString().slice(0, 10)})`
+        ).join(" · ")}`);
+      }
+      const markdown = capExperimentFindingsMarkdown(buildFindingsMarkdown(run, findings, reviews));
+      const filename = experimentFindingsFilename(run.agentSlug);
+
+      // Prefer ONE zip laid out by epoch over a bare .md: the proof artifacts
+      // are otherwise scattered across hours of thread messages, and a proof
+      // you can't locate is a proof you don't have. Falls back to the markdown
+      // when the thread has no attachments or Spaces is unreachable.
+      let bundle: Awaited<ReturnType<typeof buildExperimentProofBundle>> = null;
+      try {
+        // Reads the thread's attachments as the REQUESTER, so the bundle can
+        // never contain a file they couldn't already open in the thread.
+        const bundleAuth = await resolveAuthForUser(payload.userId);
+        if (!bundleAuth) {
+          log.warn("[experiment] no Spaces credentials for requester; findings will be markdown-only", {
+            userId: payload.userId,
+          });
+        } else {
+          bundle = await buildExperimentProofBundle({
+            run,
+            findings,
+            findingsMarkdown: markdown,
+            conversationId: payload.conversationId,
+            auth: bundleAuth,
+          });
+        }
+      } catch (err) {
+        log.warn("[experiment] proof bundle failed; falling back to markdown only", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+      if (bundle) {
+        summaryLines.push(
+          `Proof bundle: ${bundle.includedCount} of ${bundle.entries.length} findings have their artifact attached` +
+          (bundle.missingCount > 0 ? ` · ${bundle.missingCount} missing (see MANIFEST.md)` : "") +
+          ` — organised by epoch inside the zip.`,
+        );
+      }
+      const summary = summaryLines.join("\n");
+      try {
+        await postGeneratedMarkdownFile({
+          channelId: payload.channelId,
+          conversationId: payload.conversationId,
+          userId: agent.spacesAppUserId,
+          appToken: agent.appToken,
+          filename: bundle ? bundle.filename : filename,
+          markdown: bundle ? bundle.buffer : markdown,
+          ...(bundle ? { mimeType: "application/zip" } : {}),
+          summary,
+        });
+      } catch (err) {
+        log.warn("[experiment] findings file upload failed; posting inline fallback", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+        await postExperimentReply(`${summary}\n\n⚠️ _Couldn't attach ${bundle ? bundle.filename : filename} (upload failed); posting the markdown inline._\n\n${markdown}`);
+      }
+      return;
+    }
+
+    if (experimentCommand.invalidProvider !== undefined) {
+      await postExperimentReply([
+        `Invalid /experiment provider: ${experimentCommand.invalidProvider || "(empty)"}`,
+        `Valid providers: ${Array.from(EXPERIMENT_PROVIDERS).join(", ")}`,
+      ].join("\n"));
+      return;
+    }
+
+    const existing = await experimentRepository.findActiveByConversation(payload.conversationId);
+    if (existing) {
+      await postExperimentReply("An active /experiment is already running in this thread. Use `/experiment status` or `/experiment stop`.");
+      return;
+    }
+    const run = await experimentRepository.createRun({
+      conversationId: payload.conversationId,
+      channelId: payload.channelId,
+      agentSlug: agent.slug,
+      userId: payload.userId,
+      orgId: agent.orgId,
+      focus: experimentCommand.focus ?? null,
+      provider: experimentCommand.provider ?? null,
+      modelId: experimentCommand.model ?? null,
+      deadlineAt: new Date(Date.now() + experimentCommand.durationMs),
+    });
+    await postExperimentReply([
+      "**/experiment started**",
+      `Mode: time-boxed autonomous exploration`,
+      `Duration: ${formatDuration(experimentCommand.durationMs)}`,
+      ...(experimentCommand.provider ? [`Model: ${formatExperimentModel(experimentCommand.provider, experimentCommand.model)}`] : []),
+      `Focus: ${experimentCommand.focus?.trim() || "(none)"}`,
+      `Use \`/experiment status\` to inspect progress.`,
+    ].join("\n"));
+    try {
+      await dispatchExperimentEpoch(run);
+    } catch (err) {
+      // A silent failure here strands a zombie "active" run that blocks every
+      // future /experiment in this thread. Abort it and tell the user why.
+      const msg = err instanceof Error ? err.message : String(err);
+      log.warn("[experiment] initial dispatch failed", { error: msg });
+      await experimentRepository.update(run.id, { status: "aborted", lastEpochEndedAt: new Date() }).catch(() => undefined);
+      await postExperimentReply(`⚠️ /experiment could not start: ${msg.slice(0, 300)}\nThe experiment was aborted — fix the issue and start again.`);
+    }
+    return;
+  }
 
   // ── /queue ── show messages waiting behind the active run, then stop.
   if (slash?.kind === "queueShow") {
@@ -1157,6 +1625,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         "**Slash commands**",
         "- `/goal <condition>` — work autonomously until the condition is met",
         "- `/goal status` — show the active goal",
+        "- `/experiment <duration> [focus...]` — explore until the deadline · `/experiment status` · `/experiment stop`",
         "- `/stop` (or `/goal clear`) — stop the current run, drop queued messages, and clear any active goal",
         "- `/clear` — wipe this thread's context and start fresh",
         "- `/compact [focus]` — summarize & shrink the context, then continue",
@@ -3281,6 +3750,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
   // releases the slot — UNLESS a /goal turn is continuing (goalContinues),
   // which keeps the slot so the loop owns the conversation across turns.
   let goalContinues = false;
+  let experimentContinues = false;
   let skipQueueDrain = false;
   let resultConversationId = payload.conversationId ?? "";
   let resultAgentSlug = payload.agentSlug ?? "";
@@ -3516,6 +3986,12 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     await handleRunCompletion(sessionId, "completed").catch((err) => {
       clog.warn(`[webhook/result] Failed to mark ${sessionId} completed in run recovery:`, err instanceof Error ? err.message : err);
     });
+    if (ctx?.conversationId && ctx.agentSlug) {
+      experimentContinues = await continueExperimentAfterResult(ctx, sessionId).catch((err) => {
+        clog.warn(`[experiment] continuation hook failed session=${sessionId}:`, err instanceof Error ? err.message : String(err));
+        return false;
+      });
+    }
   }
 
   const isSessionLockedFailure = payload.status === "failed" && payload.error === "session_locked";
@@ -4557,39 +5033,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
             continue;
           }
 
-          const actionDesc = formatActionDescription(action["tool"] as string, action["params"] as Record<string, unknown>, targetValidation);
-
-          const writeFlow = withSpacesAppId(buildWriteApprovalFlow(actionDesc, {
-            serverType: action["serverType"] as string,
-            tool: action["tool"] as string,
-            params: action["params"] as Record<string, unknown>,
-            userId: action["userId"] as string,
-            signature: action["signature"] as string,
-            agentSlug: ctx.agentSlug ?? "",
-            channelId: ctx.channelId,
-            conversationId: ctx.conversationId,
-          }), ctx.spacesAppId);
-
-          if (action["tool"] === "spaces-memory-create" && (action["params"] as Record<string, unknown>)?.["content"]) {
-            const memParams = action["params"] as Record<string, unknown>;
-            const memContent = memParams["content"] as string;
-            const memDocType = (memParams["docType"] as string) ?? "fact";
-            const form = new FormData();
-            const blob = new Blob([memContent], { type: "text/markdown" });
-            form.append("files", blob, `memory-${memDocType}-${Date.now()}.md`);
-            form.append("channelId", ctx.channelId);
-            form.append("conversationId", ctx.conversationId);
-            form.append("userId", ctx.spacesAppUserId);
-            form.append("flow", JSON.stringify(writeFlow));
-            await spacesAppFetchMultipart("/files/filesUpload", form, token);
-          } else {
-            await spacesAppFetch("/chat/postMessage", {
-              channelId: ctx.channelId,
-              conversationId: ctx.conversationId,
-              flow: writeFlow,
-              userId: ctx.spacesAppUserId,
-            }, token);
-          }
+          await postWriteApprovalAction({ action, ctx, token, targetValidation });
           copilotApprovalCardsSent += 1;
         }
         log.info(`Copilot: posted ${copilotApprovalCardsSent}/${copilotPendingActions.length} write action approval(s)`);
@@ -4970,40 +5414,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           continue;
         }
 
-        const actionDesc = formatActionDescription(action["tool"] as string, action["params"] as Record<string, unknown>, targetValidation);
-
-        const writeFlow = withSpacesAppId(buildWriteApprovalFlow(actionDesc, {
-          serverType: action["serverType"] as string,
-          tool: action["tool"] as string,
-          params: action["params"] as Record<string, unknown>,
-          userId: action["userId"] as string,
-          signature: action["signature"] as string,
-          agentSlug: ctx.agentSlug ?? "",
-          channelId: ctx.channelId,
-          conversationId: ctx.conversationId,
-        }), ctx.spacesAppId);
-
-        // Post in the same thread where the conversation happened
-        if (action["tool"] === "spaces-memory-create" && (action["params"] as Record<string, unknown>)?.["content"]) {
-          const memParams = action["params"] as Record<string, unknown>;
-          const memContent = memParams["content"] as string;
-          const memDocType = (memParams["docType"] as string) ?? "fact";
-          const form = new FormData();
-          const blob = new Blob([memContent], { type: "text/markdown" });
-          form.append("files", blob, `memory-${memDocType}-${Date.now()}.md`);
-          form.append("channelId", ctx.channelId);
-          form.append("conversationId", ctx.conversationId);
-          form.append("userId", ctx.spacesAppUserId);
-          form.append("flow", JSON.stringify(writeFlow));
-          await spacesAppFetchMultipart("/files/filesUpload", form, token);
-        } else {
-          await spacesAppFetch("/chat/postMessage", {
-            channelId: ctx.channelId,
-            conversationId: ctx.conversationId,
-            flow: writeFlow,
-            userId: ctx.spacesAppUserId,
-          }, token);
-        }
+        await postWriteApprovalAction({ action, ctx, token, targetValidation });
         approvalCardsSent += 1;
       }
 
@@ -5195,7 +5606,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         // Best-effort cleanup; the ingress key also has a TTL.
       }
     }
-    if (QUEUE_ENABLED && resultConversationId && resultAgentSlug && !goalContinues && !skipQueueDrain) {
+    if (QUEUE_ENABLED && resultConversationId && resultAgentSlug && !goalContinues && !experimentContinues && !skipQueueDrain) {
       await drainNextQueued(resultConversationId, resultAgentSlug, undefined, resultUserScope || undefined).catch(() => {});
     }
   }
@@ -5222,6 +5633,21 @@ async function doRenderPlanCard(
   // being dropped by a momentary getSession miss.
   const ctx = await resolveSessionContext(sessionId, conversationId ?? null, agentSlug ?? null);
   if (!ctx || ctx.responseMode !== "conversation" || !ctx.channelId || !ctx.appToken) return;
+
+  // Per-agent opt-out (agent.config.postTodos === false): suppress the live
+  // plan/todo card in the Spaces thread for agents whose owner turned this off.
+  // Absent/true preserves the default (post), so existing agents are unchanged.
+  // This is the ONE choke point every kind:"plan" emitter funnels through
+  // (the runtime todo-write tool, run.ts onPlan, consume-claw-stream), so a
+  // single guard here covers every emitter and every dispatch surface. Read
+  // fresh from the agent row (a PK lookup) — mirrors how memoryEnabled is
+  // consumed at the point of use, and lets a mid-run config change take effect.
+  if (ctx.agentId) {
+    const cfgRow = await prisma.agent
+      .findUnique({ where: { id: ctx.agentId }, select: { config: true } })
+      .catch(() => null);
+    if ((cfgRow?.config as { postTodos?: boolean } | null)?.postTodos === false) return;
+  }
 
   // Deterministic per-conversation plan facts, written BEFORE Turn 2 dispatched
   // (so they're present even for the first todo-write): whether the plan was

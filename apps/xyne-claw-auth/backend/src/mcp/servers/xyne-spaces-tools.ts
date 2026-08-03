@@ -9,8 +9,10 @@ import { interact, search, memorySearch, spacesFetch, spacesFetchBuffer, spacesF
 import { esc, queryDirect, type DirectSearchResponse } from "./vespa-direct.js";
 import { buildYqlFromParams, AREA_NAMES, AREA_ALIASES, describeAreasForPrompt } from "./vespa-search-areas.js";
 import { validateCorpusScan, buildCorpusScanYql, parseBucketKey, termToQuery, MAX_SCAN_TERMS, type CorpusScanScope } from "./vespa-corpus-scan.js";
+import { validateEvidencePack, bucketRange, buildPackFetchYql, formatIstDate, toSnippet, MAX_PACK_PER_BUCKET, DEFAULT_PACK_PER_BUCKET, MAX_BUCKET_FETCHES } from "./vespa-evidence-pack.js";
 import { getWorkspaceIdForUser } from "../../lib/spaces-db.js";
 import type { Citation } from "xyne-claw-shared";
+import { extractCleanTextFromFlowJson, isFlowJsonContent } from "xyne-claw-shared";
 import { CONFIG } from "../../config.js";
 import { createLogger } from "../../logger.js";
 
@@ -934,6 +936,13 @@ function decodeHtmlEntities(s: string): string {
  */
 function cleanSnippet(text: string): string {
   if (!text || typeof text !== "string") return text ?? "";
+  // Flow JSON (app/bot block messages) hide their real content in a
+  // `data-flow-json` attribute; the tag-strip below would drop it, so flatten
+  // the block tree first. Falls through to normal handling when empty.
+  if (isFlowJsonContent(text)) {
+    const flowText = extractCleanTextFromFlowJson(text);
+    if (flowText) return flowText;
+  }
   // Fast path: nothing tag-shaped → just decode entities + trim.
   if (!/<[a-z!/][^>]*>/i.test(text)) return decodeHtmlEntities(text).trim();
   const s = text
@@ -3462,6 +3471,169 @@ const spacesCreateTicket: ToolDef = {
   },
 };
 
+// ── spaces-create-bulk-tickets ──────────────────────────────────────
+
+type TicketPriority = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+
+interface BulkTicketInput {
+  title?: unknown;
+  description?: unknown;
+  projectId?: unknown;
+  boardId?: unknown;
+  channelId?: unknown;
+  priority?: unknown;
+  assignedTo?: unknown;
+  eta?: unknown;
+  tags?: unknown;
+}
+
+interface BulkTicketCreateResult {
+  id: string;
+  xyneId: string;
+  conversationId: string;
+  title: string;
+  priority: string;
+  status: string;
+}
+
+function optionalString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function normalizeTags(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const tags = value
+    .map((v) => typeof v === "string" ? v.trim() : "")
+    .filter(Boolean);
+  return tags.length ? tags : undefined;
+}
+
+const spacesCreateBulkTickets: ToolDef = {
+  name: "spaces-create-bulk-tickets",
+  description:
+    "Create MANY tickets in Spaces behind ONE approval. Prefer this tool over calling spaces-create-ticket repeatedly " +
+    "when turning multiple findings into multiple tickets. Set shared projectId, boardId, channelId, defaultPriority, " +
+    "defaultTags, and defaultAssignedTo once at the top level; each ticket may override projectId, boardId, channelId, " +
+    "priority, assignedTo, eta, and tags. Tickets are created sequentially and partial failures are reported.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      projectId: { type: "string", description: "Default project ID for tickets unless a ticket overrides it." },
+      boardId: { type: "string", description: "Default board ID for tickets unless a ticket overrides it." },
+      channelId: { type: "string", description: "Default channel ID where tickets will live unless a ticket overrides it." },
+      defaultPriority: { type: "string", enum: ["LOW", "MEDIUM", "HIGH", "CRITICAL"], description: "Priority applied to tickets that do not specify priority." },
+      defaultTags: { type: "array", items: { type: "string" }, description: "Tags applied to tickets that do not specify tags." },
+      defaultAssignedTo: { type: "string", description: "Assignee applied to tickets that do not specify assignedTo." },
+      tickets: {
+        type: "array",
+        minItems: 1,
+        items: {
+          type: "object",
+          properties: {
+            title: { type: "string", description: "Ticket title" },
+            description: { type: "string", description: "Ticket description" },
+            projectId: { type: "string", description: "Override project ID for this ticket." },
+            boardId: { type: "string", description: "Override board ID for this ticket." },
+            channelId: { type: "string", description: "Override channel ID for this ticket." },
+            priority: { type: "string", enum: ["LOW", "MEDIUM", "HIGH", "CRITICAL"], description: "Ticket priority" },
+            assignedTo: { type: "string", description: "User ID to assign" },
+            eta: { type: "string", description: "Due date as ISO 8601 string" },
+            tags: { type: "array", items: { type: "string" }, description: "Tags to apply" },
+          },
+          required: ["title", "description"],
+        },
+      },
+    },
+    required: ["projectId", "boardId", "channelId", "tickets"],
+  },
+  async handler(args, ctx) {
+    const tickets = Array.isArray(args["tickets"]) ? args["tickets"] as BulkTicketInput[] : [];
+    if (tickets.length === 0) return err("tickets must contain at least one ticket.");
+
+    const MAX_TICKETS = 100;
+    if (tickets.length > MAX_TICKETS) {
+      return err(`Too many tickets (${tickets.length} > ${MAX_TICKETS}). Create bulk tickets in batches of ${MAX_TICKETS} or fewer.`);
+    }
+
+    const defaultProjectId = optionalString(args["projectId"]);
+    const defaultBoardId = optionalString(args["boardId"]);
+    const defaultChannelId = optionalString(args["channelId"]);
+    if (!defaultProjectId || !defaultBoardId || !defaultChannelId) {
+      return err("projectId, boardId, and channelId are required.");
+    }
+
+    const defaultPriority = optionalString(args["defaultPriority"]) as TicketPriority | undefined;
+    const defaultAssignedTo = optionalString(args["defaultAssignedTo"]);
+    const defaultTags = normalizeTags(args["defaultTags"]);
+    const created: Array<{ index: number; title: string; id: string; xyneId: string; url?: string }> = [];
+    const failures: Array<{ index: number; title: string; reason: string }> = [];
+
+    for (let i = 0; i < tickets.length; i += 1) {
+      const ticket = tickets[i]!;
+      const title = optionalString(ticket.title);
+      const description = optionalString(ticket.description);
+      const projectId = optionalString(ticket.projectId) ?? defaultProjectId;
+      const boardId = optionalString(ticket.boardId) ?? defaultBoardId;
+      const channelId = optionalString(ticket.channelId) ?? defaultChannelId;
+      const priority = optionalString(ticket.priority) ?? defaultPriority;
+      const assignedTo = optionalString(ticket.assignedTo) ?? defaultAssignedTo;
+      const eta = optionalString(ticket.eta);
+      const tags = normalizeTags(ticket.tags) ?? defaultTags;
+      const label = title ?? `ticket ${i + 1}`;
+
+      if (!title || !description) {
+        failures.push({ index: i + 1, title: label, reason: "title and description are required." });
+        continue;
+      }
+
+      try {
+        const body: Record<string, unknown> = { title, description, projectId, boardId, channelId };
+        if (priority) body["priority"] = priority;
+        if (assignedTo) body["assignedTo"] = assignedTo;
+        if (eta) body["eta"] = eta;
+        if (tags) body["tags"] = tags;
+        if (ctx.userId) body["createdBy"] = ctx.userId;
+
+        const data = (await spacesFetch("/api/tickets/claw", {
+          method: "POST",
+          body: JSON.stringify(body),
+        })) as BulkTicketCreateResult;
+
+        created.push({
+          index: i + 1,
+          title,
+          id: data.id,
+          xyneId: data.xyneId,
+          ...(buildTicketUrl(channelId, data.conversationId) ? { url: buildTicketUrl(channelId, data.conversationId)! } : {}),
+        });
+      } catch (e) {
+        failures.push({
+          index: i + 1,
+          title: label,
+          reason: e instanceof Error ? e.message : String(e),
+        });
+      }
+    }
+
+    const lines = [
+      `Bulk ticket creation complete: requested ${tickets.length}, created ${created.length}, failed ${failures.length}.`,
+    ];
+    if (created.length) {
+      lines.push("", "Created:");
+      for (const c of created) {
+        lines.push(`  ${c.index}. ${c.xyneId} (${c.id})${c.url ? ` ${c.url}` : ""}`);
+      }
+    }
+    if (failures.length) {
+      lines.push("", `Failures${failures.length > 10 ? " (first 10)" : ""}:`);
+      for (const f of failures.slice(0, 10)) {
+        lines.push(`  ${f.index}. ${f.title}: ${f.reason}`);
+      }
+    }
+    return ok(lines.join("\n"));
+  },
+};
+
 // ── spaces-update-ticket ────────────────────────────────────────────
 
 const spacesUpdateTicket: ToolDef = {
@@ -5689,8 +5861,10 @@ const spacesCorpusScan: ToolDef = {
     "- Counts OVER TIME, trends, or anything needing a fair denominator → THIS tool.\n" +
     "- NEVER answer a how-many question by counting a page of search hits — that is a ranked sample, not a total.\n\n" +
     "## Reading the result\n" +
-    "`counts[term][bucket]` are real Vespa totals (lexical match, ACL-respected). `corpusTotals[bucket]` is the " +
-    "same scope with no term — the denominator. `shares[term][bucket]` = count ÷ that bucket's total, precomputed " +
+    "`counts[term][bucket]` are real Vespa totals (lexical match, ACL-respected). `termTotals[term]` is that term's " +
+    "total over the WHOLE scanned window — use it for any \"how many total\" number; NEVER sum bucket rows yourself. " +
+    "`corpusTotals[bucket]` is the same scope with no term — the denominator (`windowTotal` = its whole-window sum). " +
+    "`shares[term][bucket]` = count ÷ that bucket's total, precomputed " +
     "so you never do the division yourself. Compare SHARES across buckets, not raw counts: the corpus grows over " +
     "time, so raw counts read as fake growth.\n\n" +
     "## Notes\n" +
@@ -5794,8 +5968,14 @@ const spacesCorpusScan: ToolDef = {
 
       const counts: Record<string, Record<number, number>> = {};
       const shares: Record<string, Record<number, string>> = {};
+      // Whole-window totals computed HERE so the model never sums buckets by
+      // hand — a live run hand-summed 7 month buckets and shipped 1,713 where
+      // the true total was 2,152. Any "how many total" number must come from
+      // termTotals / windowTotal, not model arithmetic over the bucket rows.
+      const termTotals: Record<string, number> = {};
       scan.terms.forEach((term, i) => {
         counts[term] = termBuckets[i] ?? {};
+        termTotals[term] = Object.values(counts[term]).reduce((a, b) => a + b, 0);
         const s: Record<number, string> = {};
         for (const [bucketKey, n] of Object.entries(counts[term])) {
           const total = corpusTotals?.[Number(bucketKey)];
@@ -5803,6 +5983,7 @@ const spacesCorpusScan: ToolDef = {
         }
         shares[term] = s;
       });
+      const windowTotal = Object.values(corpusTotals ?? {}).reduce((a, b) => a + b, 0);
 
       const scopeNote = autoBounded
         ? `\nNote: month scans are auto-bounded to the last 24 months (after=${scan.scope.after}); pass scope.after to override.`
@@ -5814,7 +5995,7 @@ const spacesCorpusScan: ToolDef = {
         `Queries executed (${scan.terms.length} term + 1 denominator, identical scope):\n` +
         `  term YQL:   ${termYql}\n` +
         `  totals YQL: ${totalsYql}\n\n` +
-        JSON.stringify({ counts, corpusTotals, shares, ...(hasScope ? { scope: scan.scope } : {}) }, null, 1),
+        JSON.stringify({ counts, termTotals, corpusTotals, windowTotal, shares, ...(hasScope ? { scope: scan.scope } : {}) }, null, 1),
       );
       // Same channel spaces-vespa-search uses — the dashboard debug panel
       // reads _meta.debug; it never reaches the model's context.
@@ -5825,9 +6006,188 @@ const spacesCorpusScan: ToolDef = {
   },
 };
 
+// ── spaces-evidence-pack ─────────────────────────────────────────────────────
+// The EXTRACT tool (corpus playbook Step 3): run a fixed spec once and emit a
+// bounded, dated pack — the writer's only input and the verifier's closed set.
+// Dumb by design: caps per time-bucket (which forces spread across time),
+// deterministic oldest-first order within a bucket, dates on every row.
+// Query construction/validation live in vespa-evidence-pack.ts (pure,
+// unit-testable); this handler fans out through queryDirect (ACL + workspace
+// guards injected there).
+const spacesEvidencePack: ToolDef = {
+  name: "spaces-evidence-pack",
+  description:
+    "EXTRACT a deterministic, capped, dated evidence pack for one topic — the input for a written analysis. " +
+    "Runs a fixed spec (terms + scope) over ONE area, discovers which time buckets have matches, and returns up to " +
+    "perBucket snippets per bucket, each row carrying {docId, date, channel, term, snippet}. Rows within a bucket " +
+    "are the EARLIEST members (timestamp asc) — deterministic and spread across time, not relevance-ranked.\n\n" +
+    "## When to use\n" +
+    "- A multi-topic or shareable analysis where writing happens under contract: the pack is the writer's ONLY " +
+    "evidence source and the closed set that verification checks citations against.\n" +
+    "- NOT for everyday lookups — plain questions use spaces-vespa-search; counting uses spaces-corpus-scan.\n\n" +
+    "## The contract\n" +
+    "1. Write this tool's JSON output VERBATIM to a sandbox data file (the pack artifact) before any writing starts.\n" +
+    "2. The writer cites only pack rows; claims not supported by a pack row don't go in the analysis.\n" +
+    "3. Numbers about the topic come from the returned counts/termTotals or from sandbox code over them — never " +
+    "from tallying pack rows (the pack is capped; counts are not).\n\n" +
+    "## Notes\n" +
+    `- perBucket 1..${MAX_PACK_PER_BUCKET} (default ${DEFAULT_PACK_PER_BUCKET}). At most ${MAX_BUCKET_FETCHES} term×bucket fetches per call — ` +
+    "when history is longer, the NEWEST buckets win and the skip is reported in coverage.\n" +
+    "- Terms follow corpus-scan semantics: lexical, exact phrase for multi-word terms, up to " +
+    `${MAX_SCAN_TERMS} per call.\n` +
+    "- One call = one topic = one pack. Fan out calls per topic for a multi-topic spec.\n" +
+    "- Only available when DIRECT_VESPA_SEARCH is enabled.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      searchArea: {
+        type: "string",
+        enum: [...AREA_NAMES, ...Object.keys(AREA_ALIASES)],
+        description: "The area to extract from — same areas as spaces-vespa-search.",
+      },
+      topic: { type: "string", description: "The topic this pack is for (names the artifact; one pack per topic)." },
+      terms: {
+        type: "array",
+        items: { type: "string" },
+        minItems: 1,
+        maxItems: MAX_SCAN_TERMS,
+        description: "Terms/phrases defining the topic's evidence set, matched lexically (multi-word = exact phrase).",
+      },
+      scope: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          channels: { type: "array", items: { type: "string" }, description: "Channel ids to confine the spec to (OR'd)." },
+          after: { type: "string", description: "Inclusive lower bound, dd/mm/yy (IST)." },
+          before: { type: "string", description: "Exclusive upper bound, dd/mm/yy (IST)." },
+        },
+        description: "Spec-level filters, applied identically to counting and extraction.",
+      },
+      bucket: { type: "string", enum: ["year", "month"], description: "Time bucket that caps + spreads the pack." },
+      perBucket: { type: "number", description: `Max rows per term per bucket (1..${MAX_PACK_PER_BUCKET}, default ${DEFAULT_PACK_PER_BUCKET}).` },
+    },
+    required: ["searchArea", "topic", "terms", "bucket"],
+  },
+  async handler(args, ctx) {
+    if (!CONFIG.directVespaSearch) {
+      return err("spaces-evidence-pack requires DIRECT_VESPA_SEARCH=true.");
+    }
+    try {
+      const validated = validateEvidencePack({
+        searchArea: String(args["searchArea"] ?? ""),
+        topic: String(args["topic"] ?? ""),
+        terms: Array.isArray(args["terms"]) ? (args["terms"] as unknown[]).map(String) : [],
+        ...(args["scope"] !== undefined ? { scope: args["scope"] as CorpusScanScope } : {}),
+        bucket: args["bucket"] as "year" | "month",
+        ...(args["perBucket"] !== undefined ? { perBucket: Number(args["perBucket"]) } : {}),
+      });
+      const { scan, topic, perBucket } = validated;
+
+      const workspaceId = await getWorkspaceIdForUser(ctx.userId);
+      if (!workspaceId) return err("Could not resolve your workspaceId — cannot run a workspace-scoped extraction.");
+
+      const debugPayloads: Array<{ stage: string; yql: string; vespaParams: Record<string, unknown> }> = [];
+
+      // Phase 1 — discover which buckets have matches, per term (the same
+      // grouping census corpus-scan runs). This is what makes the fetch list
+      // finite and the coverage note honest.
+      const censusYql = buildCorpusScanYql(scan, { withTerm: true });
+      const termBucketCounts = await Promise.all(scan.terms.map(async term => {
+        const res = await queryDirect(censusYql, termToQuery(term), ctx.userId, 0, 0, CONFIG.vespaQueryEndpoint, "unranked", undefined, workspaceId);
+        const executed = res.data.debug?.payloads?.[0];
+        debugPayloads.push({ stage: `evidence-pack census: "${term}"`, yql: executed?.yql ?? censusYql, vespaParams: executed?.vespaParams ?? {} });
+        const buckets: Record<number, number> = {};
+        for (const g of res.data.groups ?? []) {
+          const key = parseBucketKey(g.groupValue);
+          if (key !== null && g.count > 0) buckets[key] = g.count;
+        }
+        return buckets;
+      }));
+
+      const counts: Record<string, Record<number, number>> = {};
+      const termTotals: Record<string, number> = {};
+      scan.terms.forEach((term, i) => {
+        counts[term] = termBucketCounts[i] ?? {};
+        termTotals[term] = Object.values(counts[term]).reduce((a, b) => a + b, 0);
+      });
+
+      // Phase 2 — build the fetch list (term × non-empty bucket), newest
+      // buckets first, hard-capped so one call can't become a query storm.
+      const fetchList: Array<{ term: string; bucketKey: number }> = [];
+      scan.terms.forEach(term => {
+        for (const key of Object.keys(counts[term] ?? {})) fetchList.push({ term, bucketKey: Number(key) });
+      });
+      fetchList.sort((a, b) => b.bucketKey - a.bucketKey);
+      const skipped = fetchList.splice(MAX_BUCKET_FETCHES);
+
+      const rowsNested = await Promise.all(fetchList.map(async ({ term, bucketKey }) => {
+        const yql = buildPackFetchYql(scan, bucketRange(bucketKey, scan.bucket));
+        const res = await queryDirect(yql, termToQuery(term), ctx.userId, perBucket, 0, CONFIG.vespaQueryEndpoint, "unranked", undefined, workspaceId, true);
+        const executed = res.data.debug?.payloads?.[0];
+        debugPayloads.push({ stage: `evidence-pack fetch: "${term}" @ ${bucketKey}`, yql: executed?.yql ?? yql, vespaParams: executed?.vespaParams ?? {} });
+        const results = (!res.data.grouped ? res.data.results : []) ?? [];
+        return results.map(r => {
+          const raw = (r.rawFields ?? {}) as Record<string, unknown>;
+          const ts = Number(raw[scan.area.timestampField] ?? NaN);
+          return {
+            docId: r.id,
+            date: formatIstDate(ts),
+            _ts: Number.isFinite(ts) ? ts : 0,
+            area: scan.areaName,
+            channel: typeof raw["channelId"] === "string" && raw["channelId"] ? String(raw["channelId"]) : (r.title || undefined),
+            term,
+            bucket: bucketKey,
+            snippet: toSnippet(r.context),
+          };
+        });
+      }));
+
+      // Dedupe by docId (a doc matching two terms appears once, first term
+      // wins), then order the pack oldest-first — the shape trend/timeline
+      // writing wants to read.
+      const seen = new Set<string>();
+      const pack = rowsNested.flat()
+        .filter(row => {
+          if (!row.docId || seen.has(row.docId)) return false;
+          seen.add(row.docId);
+          return true;
+        })
+        .sort((a, b) => a._ts - b._ts)
+        .map(({ _ts, ...row }) => row);
+
+      const coverage = {
+        bucketsFetched: fetchList.length,
+        bucketsSkipped: skipped.length,
+        note: skipped.length > 0
+          ? `Fetch cap hit: the ${skipped.length} OLDEST term×bucket cells were not extracted (oldest skipped bucket: ${Math.min(...skipped.map(s => s.bucketKey))}). Narrow the scope or split the spec to cover them.`
+          : "All non-empty buckets extracted.",
+        capNote: `Pack rows are capped at ${perBucket}/term/bucket (earliest-first) — the pack is a bounded SAMPLE of each bucket; counts/termTotals are the real totals.`,
+      };
+
+      const hasScope = Object.keys(scan.scope).length > 0;
+      const result = ok(
+        `Evidence pack "${topic}" over area "${scan.areaName}" (bucket: ${scan.bucket}; cap ${perBucket}/term/bucket; deterministic oldest-first; lexical; ACL-scoped to you).\n` +
+        `CONTRACT: write this JSON verbatim to a sandbox data file as the pack artifact. Writers cite only pack rows; ` +
+        `numbers come from counts/termTotals (or sandbox code over them), never from tallying the capped pack.\n\n` +
+        JSON.stringify({
+          topic,
+          spec: { area: scan.areaName, terms: scan.terms, bucket: scan.bucket, perBucket, ...(hasScope ? { scope: scan.scope } : {}) },
+          counts,
+          termTotals,
+          coverage,
+          pack,
+        }, null, 1),
+      );
+      return { ...result, _meta: { debug: { payloads: debugPayloads } } };
+    } catch (e) {
+      return directError("evidence-pack error", e);
+    }
+  },
+};
+
 export const tools: ToolDef[] = [
   spacesWhoami,
-  ...(CONFIG.directVespaSearch ? [spacesVespaSchema, spacesVespaQuery, spacesVespaSearch, spacesCorpusScan] : []),
+  ...(CONFIG.directVespaSearch ? [spacesVespaSchema, spacesVespaQuery, spacesVespaSearch, spacesCorpusScan, spacesEvidencePack] : []),
   spacesSearch,
   spacesSearchV2,
   spacesMyItems,
@@ -5852,6 +6212,7 @@ export const tools: ToolDef[] = [
   spacesFetchAttachment,
   spacesUploadToKb,
   spacesCreateTicket,
+  spacesCreateBulkTickets,
   spacesUpdateTicket,
   spacesScheduleCall,
   spacesReadCanvas,

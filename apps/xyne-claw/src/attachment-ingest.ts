@@ -56,6 +56,9 @@ export interface IngestedAttachments {
   textAttachments: TextAttachmentFile[];
   xlsxAttachments: AttachmentInput[];
   pdfAttachments: AttachmentInput[];
+  docxAttachments: AttachmentInput[];
+  pptxAttachments: AttachmentInput[];
+  htmlAttachments: AttachmentInput[];
 }
 
 /** Decode an attachment's base64 payload to bytes (handles data-URI prefixes). */
@@ -82,6 +85,26 @@ const MD_CONVERTERS: ReadonlyArray<{
   { match: isPptxAttachment, convert: pptxBufferToMarkdown, suffix: ".md" },
   { match: isHtmlAttachment, convert: htmlBufferToMarkdown, suffix: "" },
 ];
+
+/**
+ * Convert a single document buffer to markdown iff its type is convertible —
+ * the one reusable "is this convertible + convert it" decision, shared by the
+ * /run attachment pipeline above and skill-file materialization
+ * (session-skills.ts). Returns null for unsupported types. Throws whatever
+ * the underlying converter throws (corrupt file etc.) — callers decide
+ * whether that is fatal (attachments) or skippable (skill files).
+ */
+export async function documentBufferToMarkdown(
+  buf: Buffer,
+  fileName: string,
+  mimeType: string,
+): Promise<string | null> {
+  if (isPdfAttachment(fileName, mimeType)) return pdfBufferToMarkdown(buf, fileName);
+  for (const c of MD_CONVERTERS) {
+    if (c.match(fileName, mimeType)) return c.convert(buf, fileName);
+  }
+  return null;
+}
 
 async function convertAll(
   attachments: AttachmentInput[],
@@ -118,9 +141,10 @@ export async function ingestAttachments(
       mimeType: a.mimeType,
     }));
 
-  // Simple markdown converters (xlsx/docx/pptx/html). xlsx is pulled out as a
-  // named list because the prompt-builder references it; the others are only
-  // consumed as derived files.
+  // Simple markdown converters (xlsx/docx/pptx/html). Every list is returned by
+  // name: the prompt-builder needs them to advertise the derived `.context/`
+  // paths, and a type missing from that block is invisible to the agent even
+  // though its markdown sibling is on disk.
   const xlsxAttachments = all.filter((a) => isXlsxAttachment(a.fileName, a.mimeType));
   const docxAttachments = all.filter((a) => isDocxAttachment(a.fileName, a.mimeType));
   const pptxAttachments = all.filter((a) => isPptxAttachment(a.fileName, a.mimeType));
@@ -190,5 +214,8 @@ export async function ingestAttachments(
     textAttachments,
     xlsxAttachments,
     pdfAttachments,
+    docxAttachments,
+    pptxAttachments,
+    htmlAttachments,
   };
 }
