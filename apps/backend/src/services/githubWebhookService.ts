@@ -1,5 +1,18 @@
+import { PrismaClient, FormFieldType } from '@prisma/client';
 import { logger } from '@/utils/logger';
 import { xyneCommentService } from '@/services/xyneCommentService';
+import { config } from '@/config/env';
+import { createTicketWithConversation } from '@/apps/core/ticketutils';
+import { DatabaseClient } from '@/database/client';
+import { githubAppClient } from '@/services/githubAppClient';
+import { ticketService } from '@/services/ticketService';
+
+// Board custom fields that store the GitHub issue metadata. Resolved (and
+// auto-created if missing) by name at runtime — ids differ per environment.
+const FIELD_ISSUE_NUMBER = 'githubIssueNumber'; // 134
+const FIELD_REPORTER = 'githubReporter'; // login, e.g. sirajshaik-code
+const FIELD_REPORTER_ID = 'githubReporterId'; // numeric id — dedup + link key
+const FIELD_REPOSITORY = 'githubRepository'; // owner/repo
 
 interface GitHubUser {
   login: string;
@@ -34,10 +47,32 @@ interface GitHubPRReviewCommentPayload {
   repository: GitHubRepository;
 }
 
+interface GitHubIssueEventPayload {
+  action: string;
+  issue: {
+    number: number;
+    title: string;
+    body?: string;
+    html_url: string;
+    state_reason?: string | null;
+  };
+  repository: GitHubRepository;
+  sender: {
+    login: string;
+    id: number;
+  };
+}
+
 const XYNE_MENTION_EMAIL = 'john.doe@gmail.com';
 const XYNE_MENTION_USERNAME = 'xynespaces';
 
 export class GitHubWebhookService {
+  private prisma: PrismaClient;
+
+  constructor() {
+    this.prisma = DatabaseClient.getInstance();
+  }
+
   async handleWebhookEvent(
     eventType: string,
     payload: unknown
@@ -49,7 +84,11 @@ export class GitHubWebhookService {
         return await this.handlePRReviewCommentEvent(payload as GitHubPRReviewCommentPayload);
       }
 
-      logger.info(`[GitHub-Webhook] Non-comment event received: ${eventType}, skipping`);
+      if (eventType === 'issues') {
+        return await this.handleIssueEvent(payload as GitHubIssueEventPayload);
+      }
+
+      logger.info(`[GitHub-Webhook] Non-handled event received: ${eventType}, skipping`);
       return { success: true, message: `Event ${eventType} acknowledged but not processed` };
     } catch (error) {
       logger.error(`[GitHub-Webhook] Error processing event ${eventType}:`, error);
@@ -68,7 +107,7 @@ export class GitHubWebhookService {
     // For PR comments, the PR data is in payload.issue (PRs are also issues in GitHub's API)
     const issueData = payload.issue;
     const prSpecificData = issueData?.pull_request;
-    
+
     if (!prSpecificData) {
       logger.info('[GitHub-Webhook] Comment on regular issue (not PR), skipping');
       return { success: true, message: 'Issue comment acknowledged but not processed' };
@@ -77,22 +116,19 @@ export class GitHubWebhookService {
     const prNumber = issueData.number;
     const prUrl = prSpecificData.html_url;
     const commentText = payload.comment.body || '';
-    
+
     logger.info(`[GitHub-Webhook] Processing comment on PR #${prNumber}`);
     logger.info(`[GitHub-Webhook] Comment body: ${commentText}`);
 
     const mentions = this.extractMentions(commentText);
     logger.info(`[GitHub-Webhook] Extracted mentions: ${mentions.join(', ')}`);
 
-    const isXyneMentioned = mentions.some((m) =>
-      m.toLowerCase() === XYNE_MENTION_EMAIL ||
-      m.toLowerCase() === XYNE_MENTION_USERNAME
+    const isXyneMentioned = mentions.some(
+      (m) => m.toLowerCase() === XYNE_MENTION_EMAIL || m.toLowerCase() === XYNE_MENTION_USERNAME
     );
 
     if (isXyneMentioned) {
-      logger.info(
-        `[GitHub-Webhook] Detected XyneSpaces mention in PR #${prNumber}`
-      );
+      logger.info(`[GitHub-Webhook] Detected XyneSpaces mention in PR #${prNumber}`);
 
       await xyneCommentService.handleXyneMention({
         prId: prNumber,
@@ -103,6 +139,412 @@ export class GitHubWebhookService {
     }
 
     return { success: true, message: 'Comment event processed successfully' };
+  }
+
+  private async handleIssueEvent(
+    payload: GitHubIssueEventPayload
+  ): Promise<{ success: boolean; message: string }> {
+    const { action, issue, sender, repository } = payload;
+    const repoFullName = `${repository?.owner?.login}/${repository?.name}`;
+    logger.info(
+      `[GitHub-Webhook] issues.${action} #${issue?.number} "${issue?.title}" ` +
+        `by @${sender?.login} (id ${sender?.id}) in ${repoFullName}`
+    );
+
+    // Act on: opened (create), reopened (create-or-reopen), closed (close the
+    // tracked ticket). Everything else (edited, labeled, assigned, …) is a no-op.
+    if (action !== 'opened' && action !== 'reopened' && action !== 'closed') {
+      return { success: true, message: `issues.${action} acknowledged (no-op)` };
+    }
+
+    const c = config.community;
+    if (!c?.intakeBoardId || !c?.intakeChannelId || !c?.systemUserId) {
+      logger.warn(
+        '[GitHub-Webhook] Community intake is not fully configured ' +
+          '(COMMUNITY_INTAKE_BOARD_ID / _CHANNEL_ID / _SYSTEM_USER_ID); skipping ticket creation'
+      );
+      return { success: true, message: 'Community intake not configured' };
+    }
+
+    const [intakeBoard, intakeChannel] = await Promise.all([
+      this.prisma.board.findUnique({
+        where: { id: c.intakeBoardId },
+        select: { projectId: true, workspaceId: true },
+      }),
+      this.prisma.channel.findUnique({
+        where: { id: c.intakeChannelId },
+        select: { projectId: true, workspaceId: true },
+      }),
+    ]);
+    if (
+      !intakeBoard ||
+      !intakeChannel ||
+      intakeBoard.projectId !== intakeChannel.projectId ||
+      intakeBoard.workspaceId !== intakeChannel.workspaceId
+    ) {
+      logger.warn(
+        `[GitHub-Webhook] Invalid community board/channel configuration ` +
+          `(board=${c.intakeBoardId}, channel=${c.intakeChannelId}); skipping ticket creation`
+      );
+      return { success: true, message: 'Community intake board/channel mismatch' };
+    }
+
+    const { projectId, workspaceId } = intakeBoard;
+
+    // Ensure the board's GitHub custom fields exist (auto-create if missing).
+    const fields = await this.ensureIssueCustomFields(c.intakeBoardId, projectId, workspaceId);
+
+    // Dedup on (repository, issue number): don't create a second ticket for the
+    // same repo + issue.
+    if (fields) {
+      const existingTicketId = await this.findTicketIdByRepoIssue(
+        fields.contextId,
+        fields.issueNumberFieldId,
+        issue.number,
+        fields.repositoryFieldId,
+        repoFullName
+      );
+      if (existingTicketId) {
+        // Issue reopened/closed on an already-tracked ticket → sync its status.
+        if (action === 'reopened' || action === 'closed') {
+          return await this.syncTicketStatus(
+            existingTicketId,
+            action,
+            issue,
+            sender.id,
+            repoFullName,
+            workspaceId,
+            c.systemUserId
+          );
+        }
+        logger.info(
+          `[GitHub-Webhook] ${repoFullName}#${issue.number} already tracked as ticket ` +
+            `${existingTicketId}; skipping create`
+        );
+        return { success: true, message: `Issue #${issue.number} already tracked` };
+      }
+    }
+
+    // A close event for an issue we never tracked: nothing to create or sync.
+    if (action === 'closed') {
+      logger.info(
+        `[GitHub-Webhook] ${repoFullName}#${issue.number} closed but not tracked; nothing to sync`
+      );
+      return { success: true, message: `Issue #${issue.number} closed; not tracked` };
+    }
+
+    // Attribute to the real community member if they've linked their GitHub id
+    // (via the OAuth flow); otherwise the community bot. No backfill of past
+    // tickets — by design; the link only affects tickets created after linking.
+    const createdByUserId = await this.resolveActorUserId(sender.id, workspaceId, c.systemUserId);
+    if (createdByUserId !== c.systemUserId) {
+      logger.info(
+        `[GitHub-Webhook] githubId=${sender.id} is linked to community user ` +
+          `${createdByUserId}; attributing ticket to them`
+      );
+    }
+
+    const description =
+      (issue?.body?.trim() || '_No description provided._') +
+      `\n\n---\n` +
+      `Reported by **@${sender?.login}** (GitHub user id \`${sender?.id}\`) via ` +
+      `[${repoFullName}#${issue?.number}](${issue?.html_url}).`;
+
+    // Fill the board custom fields (issue number, reporter, reporter id, repository).
+    const fieldValues: Array<{ fieldId: string; fieldValue: string; actualFieldValue: string }> =
+      [];
+    if (fields) {
+      fieldValues.push(
+        {
+          fieldId: fields.issueNumberFieldId,
+          fieldValue: String(issue.number),
+          actualFieldValue: String(issue.number),
+        },
+        {
+          fieldId: fields.reporterFieldId,
+          fieldValue: sender.login,
+          actualFieldValue: sender.login,
+        },
+        {
+          fieldId: fields.reporterIdFieldId,
+          fieldValue: String(sender.id),
+          actualFieldValue: String(sender.id),
+        },
+        {
+          fieldId: fields.repositoryFieldId,
+          fieldValue: repoFullName,
+          actualFieldValue: repoFullName,
+        }
+      );
+    }
+
+    const result = await createTicketWithConversation({
+      title: issue.title,
+      description,
+      projectId,
+      boardId: c.intakeBoardId,
+      channelId: c.intakeChannelId,
+      userId: createdByUserId,
+    });
+
+    // Write the board custom-field values ourselves with version=1. The ticket
+    // read path resolves currentVersion = (max(version) ?? 1) and filters
+    // `version === currentVersion`, so values must be version 1 to render.
+    if (fields && fieldValues.length > 0) {
+      await this.prisma.formEntityValues.createMany({
+        data: fieldValues.map((fv) => ({
+          formId: fields.formId,
+          entityId: result.ticketId,
+          entityType: 'TICKET',
+          fieldId: fv.fieldId,
+          contextId: fields.contextId,
+          version: 1,
+          fieldValue: fv.fieldValue,
+          actualFieldValue: fv.actualFieldValue,
+          workspaceId,
+        })),
+      });
+    }
+
+    logger.info(
+      `[GitHub-Webhook] Created community ticket for ${repoFullName}#${issue?.number} ` +
+        `(githubIssueNumber=${issue.number}, githubReporterId=${sender?.id})`
+    );
+
+    // If the reporter hasn't linked their GitHub yet, invite them to (so future
+    // issues are filed under their name). Skip if already linked — i.e. the
+    // ticket was attributed to someone other than the community bot.
+    if (createdByUserId === c.systemUserId) {
+      const startUrl = (config.github?.oauthCallbackUrl || '').replace(
+        '/oauth/callback',
+        '/oauth/start'
+      );
+      const communityUrl = config.community?.url || '';
+      if (startUrl) {
+        const futureNote =
+          `\n\n_This issue stays under the bot; linking applies to issues you open afterwards._`;
+        const steps = communityUrl
+          ? `Two quick steps:\n` +
+            `1. Join / sign in to the community: ${communityUrl}\n` +
+            `2. Then link your GitHub — once you start, finish authorizing within 15 min: ${startUrl}` +
+            futureNote
+          : `Link your GitHub — once you start, finish authorizing within 15 min: ${startUrl}` +
+            futureNote;
+        const posted = await githubAppClient.postIssueComment(
+          repository.owner.login,
+          repository.name,
+          issue.number,
+          `👋 Thanks @${sender.login}! This issue is now tracked in the Xyne community.\n\n${steps}`
+        );
+        if (posted) {
+          logger.info(
+            `[GitHub-Webhook] Posted link-invite comment on ${repoFullName}#${issue.number}`
+          );
+        }
+      }
+    }
+
+    return { success: true, message: `Ticket created for issue #${issue?.number}` };
+  }
+
+  /**
+   * Resolve the community user for a GitHub sender: the linked user if they've
+   * connected their GitHub id via OAuth, otherwise the provided fallback (bot).
+   */
+  private async resolveActorUserId(
+    senderId: number,
+    workspaceId: string,
+    fallbackUserId: string
+  ): Promise<string> {
+    const link = await this.prisma.userExternalToken.findFirst({
+      where: { provider: 'github', providerUserId: String(senderId), workspaceId },
+    });
+    return link?.userId ?? fallbackUserId;
+  }
+
+  /**
+   * Sync a tracked ticket's status from a GitHub issue state change.
+   *
+   * Mapping (reopened ignores state_reason; close uses GitHub's three reasons):
+   *   - reopened              → TODO
+   *   - closed 'completed'    → COMPLETED
+   *   - closed 'duplicate'    → COMPLETED  (resolved elsewhere; treated as done)
+   *   - closed 'not_planned'  → CANCELLED  (won't be worked)
+   *
+   * Routed through ticketService.updateTicket so the change writes a STATUS
+   * TicketActivity row and broadcasts the kanban-count delta (same side effects
+   * as an in-app status change).
+   */
+  private async syncTicketStatus(
+    ticketId: string,
+    action: 'reopened' | 'closed',
+    issue: GitHubIssueEventPayload['issue'],
+    senderId: number,
+    repoFullName: string,
+    workspaceId: string,
+    fallbackUserId: string
+  ): Promise<{ success: boolean; message: string }> {
+    // Only 'not_planned' cancels; 'completed', 'duplicate', and any unset reason
+    // resolve as COMPLETED.
+    const newStatus =
+      action === 'reopened'
+        ? 'TODO'
+        : issue.state_reason === 'not_planned'
+          ? 'CANCELLED'
+          : 'COMPLETED';
+
+    // Attribute to the linked community member if known, else the community bot.
+    const updatedBy = await this.resolveActorUserId(senderId, workspaceId, fallbackUserId);
+
+    await ticketService.updateTicket(ticketId, updatedBy, { status: newStatus });
+    logger.info(
+      `[GitHub-Webhook] ${repoFullName}#${issue.number} ${action} → ticket ${ticketId} status ${newStatus}`
+    );
+    return { success: true, message: `Issue #${issue.number} ${action} → ${newStatus}` };
+  }
+
+  /**
+   * Ensure the board's GitHub custom fields exist (creating any that are missing)
+   * and return the global definition ids used by form_entity_values. Fields are
+   * keyed by name so ids can differ per environment.
+   */
+  private async ensureIssueCustomFields(
+    boardId: string,
+    projectId: string,
+    workspaceId: string
+  ): Promise<{
+    formId: string;
+    contextId: string;
+    issueNumberFieldId: string;
+    reporterFieldId: string;
+    reporterIdFieldId: string;
+    repositoryFieldId: string;
+  } | null> {
+    const mapping = await this.prisma.formContextMapping.findFirst({
+      where: { contextId: boardId, contextType: 'BOARD' },
+    });
+    if (!mapping) {
+      logger.warn(
+        `[GitHub-Webhook] No form mapped to board ${boardId}; cannot create custom fields`
+      );
+      return null;
+    }
+    // Create sequentially (avoids sequenceNumber races within a single call).
+    const issueNumberFieldId = await this.ensureBoardField(
+      mapping.formId,
+      workspaceId,
+      projectId,
+      FIELD_ISSUE_NUMBER
+    );
+    const reporterFieldId = await this.ensureBoardField(
+      mapping.formId,
+      workspaceId,
+      projectId,
+      FIELD_REPORTER
+    );
+    const reporterIdFieldId = await this.ensureBoardField(
+      mapping.formId,
+      workspaceId,
+      projectId,
+      FIELD_REPORTER_ID
+    );
+    const repositoryFieldId = await this.ensureBoardField(
+      mapping.formId,
+      workspaceId,
+      projectId,
+      FIELD_REPOSITORY
+    );
+
+    return {
+      formId: mapping.formId,
+      contextId: mapping.contextId,
+      issueNumberFieldId,
+      reporterFieldId,
+      reporterIdFieldId,
+      repositoryFieldId,
+    };
+  }
+
+  /**
+   * Ensure a STRING custom field exists on a board's form (global definition +
+   * per-form membership), returning the global field definition id used by
+   * form_entity_values. Idempotent via upsert.
+   */
+  private async ensureBoardField(
+    formId: string,
+    workspaceId: string,
+    projectId: string,
+    fieldName: string
+  ): Promise<string> {
+    const global = await this.prisma.globalField.upsert({
+      where: {
+        projectId_fieldName_fieldType: { projectId, fieldName, fieldType: FormFieldType.STRING },
+      },
+      create: { projectId, workspaceId, fieldName, fieldType: FormFieldType.STRING },
+      update: {},
+    });
+
+    const existing = await this.prisma.formFields.findFirst({
+      where: { formId, globalFieldId: global.id },
+      select: { id: true },
+    });
+    if (existing) {
+      return global.id;
+    }
+
+    const maxSeq = await this.prisma.formFields.aggregate({
+      where: { formId },
+      _max: { sequenceNumber: true },
+    });
+    await this.prisma.formFields.create({
+      data: {
+        formId,
+        globalFieldId: global.id,
+        workspaceId,
+        isOptional: true,
+        sequenceNumber: (maxSeq._max.sequenceNumber ?? 0) + 1,
+      },
+    });
+    return global.id;
+  }
+
+  /**
+   * Find an existing ticket for a GitHub issue, keyed on repository and issue number.
+   */
+  private async findTicketIdByRepoIssue(
+    contextId: string,
+    issueIdFieldId: string,
+    issueNumber: number,
+    repositoryFieldId: string | undefined,
+    repoFullName: string
+  ): Promise<string | null> {
+    const prisma = this.prisma;
+    // Tickets carrying this issue_id.
+    const issueMatches = await prisma.formEntityValues.findMany({
+      where: { fieldId: issueIdFieldId, contextId, fieldValue: String(issueNumber) },
+      select: { entityId: true },
+    });
+    if (issueMatches.length === 0) {
+      return null;
+    }
+    const candidateIds = issueMatches.map((m) => m.entityId);
+
+    // If a repository field exists, require it to match too (repo-scoped dedup).
+    if (repositoryFieldId) {
+      const repoMatch = await prisma.formEntityValues.findFirst({
+        where: {
+          fieldId: repositoryFieldId,
+          contextId,
+          fieldValue: repoFullName,
+          entityId: { in: candidateIds },
+        },
+        select: { entityId: true },
+      });
+      return repoMatch?.entityId ?? null;
+    }
+
+    // No repository field yet → issue_id-only dedup.
+    return candidateIds[0] ?? null;
   }
 
   private extractMentions(text: string): string[] {

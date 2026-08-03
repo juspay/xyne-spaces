@@ -4,6 +4,7 @@ import { bitbucketWebhookMiddleware } from "@/middleware/bitbucketWebhookValidat
 import { jenkinsWebhookMiddleware } from "@/middleware/jenkinsWebhookValidator";
 import { githubWebhookService } from "@/services/githubWebhookService";
 import { githubWebhookMiddleware } from "@/middleware/githubWebhookValidator";
+import { githubOAuthService } from "@/services/githubOAuthService";
 import { logger } from "@/utils/logger";
 import { handleJenkinsWebhook } from '@/bots/implementations/qa-alert-bot/qa-alert-bot';
 
@@ -227,7 +228,36 @@ async function handleGitHubWebhook(req: Request, res: Response): Promise<void> {
   }
 }
 
+// --- GitHub OAuth "link" flow (reporter links their GitHub -> community user) ---
+// GET /api/webhooks/github/oauth/start -> redirect to GitHub authorize
+router.get('/github/oauth/start', (_req: Request, res: Response) => {
+  const state = githubOAuthService.generateState();
+  res.redirect(githubOAuthService.buildAuthorizeUrl(state));
+});
+// GET /api/webhooks/github/oauth/callback -> exchange code, link, show result
+router.get('/github/oauth/callback', async (req: Request, res: Response) => {
+  const code = req.query['code'] as string | undefined;
+  const state = req.query['state'] as string | undefined;
+  if (!code || !state || !githubOAuthService.verifyState(state)) {
+    res.status(400).send('<h3>Invalid or expired link. Please try again.</h3>');
+    return;
+  }
+  try {
+    const result = await githubOAuthService.handleCallback(code);
+    res
+      .status(result.linked ? 200 : 400)
+      .send(`<h3>${result.linked ? '✅ Linked!' : '⚠️ Not linked'}</h3><p>${result.message}</p><p>You can close this tab.</p>`);
+  } catch (error) {
+    logger.error('[GitHub-OAuth] callback error:', error);
+    res.status(500).send('<h3>Something went wrong linking your account.</h3>');
+  }
+});
+
 router.post('/github', githubWebhookMiddleware.verify, handleGitHubWebhook);
+// Tolerant alias: the App webhook URL may include a trailing segment (e.g.
+// /github/local-test). The handler ignores it — the community workspace comes
+// from config — so both forms work.
+router.post('/github/:workspaceId', githubWebhookMiddleware.verify, handleGitHubWebhook);
 
 // Use raw body parser for Jenkins webhook to preserve exact bytes for HMAC verification
 router.post('/qa-alerts', 
