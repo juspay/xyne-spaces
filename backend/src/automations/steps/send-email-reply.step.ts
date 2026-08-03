@@ -12,6 +12,14 @@ import { logger } from '@/utils/logger';
 const SendEmailReplyConfigSchema = z.object({
   conversationId: variableRef(z.string().min(1)),
   body: variableRef(z.string().min(1)),
+  cc: z
+    .array(variableRef(z.string().email()))
+    .optional()
+    .describe('Optional email addresses to copy on the reply.'),
+  bcc: z
+    .array(variableRef(z.string().email()))
+    .optional()
+    .describe('Optional email addresses to blind-copy on the reply.'),
   replyAll: z.boolean().optional(),
 });
 
@@ -36,7 +44,7 @@ export class SendEmailReplyStep extends BaseActionStep<
   readonly outputSchema = SendEmailReplyOutputSchema;
   readonly name = 'Send an email reply';
   readonly description =
-    'Replies to the latest email on the conversation. Body supports {{...}} placeholders. Recipients are derived from the original message.';
+    'Replies to the latest email on the conversation. Body supports {{...}} placeholders. Recipients are derived from the original message, with optional CC and BCC recipients.';
   readonly category = StepCategory.MESSAGING;
   readonly icon = 'Mail';
 
@@ -53,6 +61,8 @@ export class SendEmailReplyStep extends BaseActionStep<
       conversationId,
       body,
       type,
+      cc: config.cc as string[] | undefined,
+      bcc: config.bcc as string[] | undefined,
     });
 
     logger.info(
