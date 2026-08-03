@@ -404,54 +404,18 @@ export class ActivityService {
     messageAuthorId: string;
     isThreadActivity?: boolean;
   }): Promise<'created' | 'updated'> {
-    return withWorkspaceScope(async () => {
-      const { messageId, channelId, workspaceId, actorId, messageAuthorId, isThreadActivity } = params;
+    const { messageId, channelId, workspaceId, actorId, messageAuthorId, isThreadActivity } = params;
 
-      const existingActivity = await this.prisma.activity.findFirst({
-        where: {
-          userId: messageAuthorId,
-          messageId: messageId,
-          actorAction: 'added_v2',
-          actionSource: 'message',
-        },
-      });
+    const existingActivity = await this.prisma.activity.findFirst({
+      where: {
+        userId: messageAuthorId,
+        messageId: messageId,
+        actorAction: 'added_v2',
+        actionSource: 'message',
+      },
+    });
 
-      if (existingActivity) {
-        const activity = await this.enrichActivityWithConversationCutoff({
-          userId: messageAuthorId,
-          workspaceId,
-          actorAction: 'added_v2',
-          actionSource: 'message',
-          actionSourceId: messageId,
-          messageId,
-          channelId,
-          actorId,
-          isThreadActivity,
-        });
-
-        const conversationSeenCutoffAt = existingActivity.conversationSeenCutoffAt
-          ? null
-          : activity.conversationSeenCutoffAt;
-
-        await this.prisma.activity.update({
-          where: { id: existingActivity.id },
-          data: {
-            actorId: actorId,
-            isRead: false,
-            ...(isThreadActivity !== undefined ? { isThreadActivity } : {}),
-            ...(conversationSeenCutoffAt ? { conversationSeenCutoffAt } : {}),
-          },
-        });
-
-        logger.info('[ActivityService] Updated existing reaction activity (v2)', {
-          activityId: existingActivity.id,
-          messageId,
-          newActorId: actorId,
-        });
-
-        return 'updated';
-      }
-
+    if (existingActivity) {
       const activity = await this.enrichActivityWithConversationCutoff({
         userId: messageAuthorId,
         workspaceId,
@@ -461,57 +425,89 @@ export class ActivityService {
         messageId,
         channelId,
         actorId,
-        classification: ActivityClassification.FYI,
         isThreadActivity,
       });
 
-      const resolvedWorkspaceId = await this.resolveWorkspaceId({
-        workspaceId: activity.workspaceId,
-        channelId: activity.channelId ?? channelId,
-      });
-      await this.prisma.activity.create({
+      const conversationSeenCutoffAt = existingActivity.conversationSeenCutoffAt
+        ? null
+        : activity.conversationSeenCutoffAt;
+
+      await this.prisma.activity.update({
+        where: { id: existingActivity.id },
         data: {
-          userId: activity.userId,
-          workspaceId: resolvedWorkspaceId,
-          actorAction: activity.actorAction,
-          actionSource: activity.actionSource,
-          actionSourceId: activity.actionSourceId,
-          messageId: activity.messageId,
-          ...(activity.conversationId ? { conversationId: activity.conversationId } : {}),
-          channelId: activity.channelId,
-          actorId: activity.actorId,
+          actorId: actorId,
           isRead: false,
-          classification: activity.classification,
           ...(isThreadActivity !== undefined ? { isThreadActivity } : {}),
-          ...(activity.conversationSeenCutoffAt
-            ? { conversationSeenCutoffAt: activity.conversationSeenCutoffAt }
-            : {}),
+          ...(conversationSeenCutoffAt ? { conversationSeenCutoffAt } : {}),
         },
       });
 
-      logger.info('[ActivityService] Created new reaction activity (v2)', {
+      logger.info('[ActivityService] Updated existing reaction activity (v2)', {
+        activityId: existingActivity.id,
         messageId,
-        actorId,
+        newActorId: actorId,
       });
 
-      return 'created';
+      return 'updated';
+    }
+
+    const activity = await this.enrichActivityWithConversationCutoff({
+      userId: messageAuthorId,
+      workspaceId,
+      actorAction: 'added_v2',
+      actionSource: 'message',
+      actionSourceId: messageId,
+      messageId,
+      channelId,
+      actorId,
+      classification: ActivityClassification.FYI,
+      isThreadActivity,
     });
+
+    const resolvedWorkspaceId = await this.resolveWorkspaceId({
+      workspaceId: activity.workspaceId,
+      channelId: activity.channelId ?? channelId,
+    });
+    await this.prisma.activity.create({
+      data: {
+        userId: activity.userId,
+        workspaceId: resolvedWorkspaceId,
+        actorAction: activity.actorAction,
+        actionSource: activity.actionSource,
+        actionSourceId: activity.actionSourceId,
+        messageId: activity.messageId,
+        ...(activity.conversationId ? { conversationId: activity.conversationId } : {}),
+        channelId: activity.channelId,
+        actorId: activity.actorId,
+        isRead: false,
+        classification: activity.classification,
+        ...(isThreadActivity !== undefined ? { isThreadActivity } : {}),
+        ...(activity.conversationSeenCutoffAt
+          ? { conversationSeenCutoffAt: activity.conversationSeenCutoffAt }
+          : {}),
+      },
+    });
+
+    logger.info('[ActivityService] Created new reaction activity (v2)', {
+      messageId,
+      actorId,
+    });
+
+    return 'created';
   }
 
 
   async deleteReactionActivityV2(messageId: string, messageAuthorId: string): Promise<void> {
-    return withWorkspaceScope(async () => {
-      await this.prisma.activity.deleteMany({
-        where: {
-          userId: messageAuthorId,
-          messageId: messageId,
-          actorAction: 'added_v2',
-          actionSource: 'message',
-        },
-      });
-
-      logger.info('[ActivityService] Deleted reaction activity (v2)', { messageId });
+    await this.prisma.activity.deleteMany({
+      where: {
+        userId: messageAuthorId,
+        messageId: messageId,
+        actorAction: 'added_v2',
+        actionSource: 'message',
+      },
     });
+
+    logger.info('[ActivityService] Deleted reaction activity (v2)', { messageId });
   }
 
 

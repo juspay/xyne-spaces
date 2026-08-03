@@ -2003,12 +2003,10 @@ export class JiraMigrationController {
     const participantId = randomUUID();
     // The report canvas is written into the migration's channel, resolved by workspace
     // rather than by the operator's own membership.
-    const canvasChannel = await withWorkspaceScope(() =>
-      db.channel.findUniqueOrThrow({
-        where: { id: channelId },
-        select: { workspaceId: true },
-      }),
-    );
+    const canvasChannel = await db.channel.findUniqueOrThrow({
+      where: { id: channelId },
+      select: { workspaceId: true },
+    });
     try {
       await db.$transaction(async tx => {
         await tx.canvas.create({
@@ -2123,12 +2121,10 @@ export class JiraMigrationController {
 
     // The report message is posted into the migration's channel, resolved by workspace
     // rather than by the operator's own membership.
-    const migrationReportChannel = await withWorkspaceScope(() =>
-      db.channel.findUniqueOrThrow({
-        where: { id: channelId },
-        select: { workspaceId: true },
-      }),
-    );
+    const migrationReportChannel = await db.channel.findUniqueOrThrow({
+      where: { id: channelId },
+      select: { workspaceId: true },
+    });
 
     await db.$transaction(async tx => {
       await tx.conversation.create({
