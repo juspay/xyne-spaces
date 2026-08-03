@@ -30,14 +30,14 @@ const LIBRARY_TABS = [
     label: 'Subagents',
     content: SubagentsV2,
     searchPlaceholder: 'Search subagents',
-    create: { label: 'Create Subagent', path: '/claw-agents/subagents/create' },
+    create: { label: 'Create Subagent', path: '/ai/library/subagent/create' },
   },
   {
     id: 'skills',
     label: 'Skills',
     content: SkillsV2,
     searchPlaceholder: 'Search skills',
-    create: { label: 'Create Skill', path: '/claw-agents/skills/create' },
+    create: { label: 'Create Skill', path: '/ai/library/skill/create' },
   },
   {
     id: 'mcp',

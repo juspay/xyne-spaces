@@ -209,6 +209,8 @@ import ConfluenceMigrationScreen from './ConfluenceMigrationScreen/ConfluenceMig
 import AIScreen from './AIScreen/AIScreen';
 import AILibraryScreen from './AIScreen/AILibraryScreen';
 import AIAgentCreateScreen from './AIScreen/AIAgentCreateScreen';
+import AISubagentCreateScreen from './AIScreen/AISubagentCreateScreen';
+import AISkillCreateScreen from './AIScreen/AISkillCreateScreen';
 import AIKnowledgeScreen from './AIScreen/AIKnowledgeScreen';
 import AISectionLayout from './AIScreen/AISectionLayout';
 import UserGuideScreen from './UserGuideScreen';
@@ -827,6 +829,8 @@ export const router = createBrowserRouter([
                   { path: 'chat/new', element: <AIScreen /> },
                   { path: 'library', element: <AILibraryScreen /> },
                   { path: 'library/agent/create', element: <AIAgentCreateScreen /> },
+                  { path: 'library/subagent/create', element: <AISubagentCreateScreen /> },
+                  { path: 'library/skill/create', element: <AISkillCreateScreen /> },
                   { path: 'knowledge', element: <AIKnowledgeScreen /> },
                   {
                     element: <AISectionLayout />,
