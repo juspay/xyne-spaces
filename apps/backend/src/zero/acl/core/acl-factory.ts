@@ -1,6 +1,7 @@
 import type { QueryContext, TableName } from './types';
 import { BaseACL } from './base-acl';
 import { ActivitiesACL } from '../tables/activities-acl';
+import { GuestAccessACL } from '../tables/guest-access-acl';
 import { CallParticipantsACL } from '../tables/call-participants-acl';
 import { CallsACL } from '../tables/calls-acl';
 import { CanvasFoldersACL } from '../tables/canvas-folders-acl';
@@ -73,6 +74,52 @@ import { GlobalFieldsACL } from '../tables/global-fields-acl';
 import { FormEntityValuesACL } from '../tables/form-entity-values-acl';
 import { DelayedMessagesACL } from '../tables/delayed-messages-acl';
 import { DraftMessagesACL } from '../tables/draft-messages-acl';
+import { AgentToolsMappingsACL } from '../tables/agent-tools-mappings-acl';
+import { AgentsACL } from '../tables/agents-acl';
+import { ApplicationReleaseTicketsACL } from '../tables/application-release-tickets-acl';
+import { ApplicationsACL } from '../tables/applications-acl';
+import { BoardSlaPoliciesACL } from '../tables/board-sla-policies-acl';
+import { CanvasVersionsACL } from '../tables/canvas-versions-acl';
+import { ChannelDailyRecapsACL } from '../tables/channel-daily-recaps-acl';
+import { ChannelRecapsACL } from '../tables/channel-recaps-acl';
+import { ClassificationMappingsACL } from '../tables/classification-mappings-acl';
+import { CoesACL } from '../tables/coes-acl';
+import { CollectionItemsACL } from '../tables/collection-items-acl';
+import { CollectionPermissionsACL } from '../tables/collection-permissions-acl';
+import { CollectionsACL } from '../tables/collections-acl';
+import { ConversationLabelMappingsACL } from '../tables/conversation-label-mappings-acl';
+import { ConversationLabelsACL } from '../tables/conversation-labels-acl';
+import { CustomEmojisACL } from '../tables/custom-emojis-acl';
+import { DashboardQueriesMappingACL } from '../tables/dashboard-queries-mapping-acl';
+import { DashboardsACL } from '../tables/dashboards-acl';
+import { EmailDraftsACL } from '../tables/email-drafts-acl';
+import { EmailsACL } from '../tables/emails-acl';
+import { ImpactsACL } from '../tables/impacts-acl';
+import { InstalledAppsACL } from '../tables/installed-apps-acl';
+import { InvitationsACL } from '../tables/invitations-acl';
+import { LinkAccessACL } from '../tables/link-access-acl';
+import { LinksACL } from '../tables/links-acl';
+import { LookupValuesACL } from '../tables/lookup-values-acl';
+import { MerchantsACL } from '../tables/merchants-acl';
+import { ModelsACL } from '../tables/models-acl';
+import { QueriesACL } from '../tables/queries-acl';
+import { RcasACL } from '../tables/rcas-acl';
+import { RecapsACL } from '../tables/recaps-acl';
+import { RecurringCallParticipantsACL } from '../tables/recurring-call-participants-acl';
+import { RecurringCallSeriesACL } from '../tables/recurring-call-series-acl';
+import { ReleaseAttributionsACL } from '../tables/release-attributions-acl';
+import { ReleaseChangeTypesACL } from '../tables/release-change-types-acl';
+import { ReleaseChangesACL } from '../tables/release-changes-acl';
+import { ReleaseEventsACL } from '../tables/release-events-acl';
+import { ReposACL } from '../tables/repos-acl';
+import { StageApproversACL } from '../tables/stage-approvers-acl';
+import { StageTransitionsACL } from '../tables/stage-transitions-acl';
+import { SurfaceNudgeCountsACL } from '../tables/surface-nudge-counts-acl';
+import { TicketStageRequestsACL } from '../tables/ticket-stage-requests-acl';
+import { TicketUserMailboxACL } from '../tables/ticket-user-mailbox-acl';
+import { ToolsACL } from '../tables/tools-acl';
+import { WorkspaceOrganizationsACL } from '../tables/workspace-organizations-acl';
+import { WorkspacesACL } from '../tables/workspaces-acl';
 
 // Tables where GUEST users may perform mutations.
 // All other tables default to DenyGuestsACL for guest users.
@@ -137,9 +184,9 @@ export class ACLFactory {
       case 'apps':
         return new AppsACL(ctx);
       case 'agent_tools_mappings':
-        return new DenyGuestsACL<'agent_tools_mappings'>(ctx, 'agent_tools_mappings');
+        return new AgentToolsMappingsACL(ctx);
       case 'agents':
-        return new DenyGuestsACL<'agents'>(ctx, 'agents');
+        return new AgentsACL(ctx);
       case 'board_complexity_scores':
         return new BoardComplexityScoresACL(ctx);
       case 'boards':
@@ -183,7 +230,7 @@ export class ACLFactory {
       case 'messages':
         return new MessagesACL(ctx);
       case 'models':
-        return new DenyGuestsACL<'models'>(ctx, 'models');
+        return new ModelsACL(ctx);
       case 'notification_preferences':
         return new NotificationPreferencesACL(ctx);
       case 'org_members':
@@ -233,7 +280,7 @@ export class ACLFactory {
       case 'tickets':
         return new TicketACl(ctx);
       case 'tools':
-        return new DenyGuestsACL<'tools'>(ctx, 'tools');
+        return new ToolsACL(ctx);
       case 'user_assignment_states':
         return new UserAssignmentStatesACL(ctx);
       case 'user_expertise_mappings':
@@ -275,11 +322,11 @@ export class ACLFactory {
       case 'form_entity_values':
         return new FormEntityValuesACL(ctx);
       case 'rcas':
-        return new DenyGuestsACL<'rcas'>(ctx, 'rcas');
+        return new RcasACL(ctx);
       case 'impacts':
-        return new DenyGuestsACL<'impacts'>(ctx, 'impacts');
+        return new ImpactsACL(ctx);
       case 'coes':
-        return new DenyGuestsACL<'coes'>(ctx, 'coes');
+        return new CoesACL(ctx);
       case 'saved_user_configurations':
         return new SavedUserConfigurationsACL(ctx);
       case 'saved_user_configuration_values':
@@ -290,8 +337,91 @@ export class ACLFactory {
         return new DelayedMessagesACL(ctx);
       case 'draft_messages':
         return new DraftMessagesACL(ctx);
-      default:
-        return new DenyGuestsACL<any>(ctx, table);
+      case 'application_release_tickets':
+        return new ApplicationReleaseTicketsACL(ctx);
+      case 'applications':
+        return new ApplicationsACL(ctx);
+      case 'board_sla_policies':
+        return new BoardSlaPoliciesACL(ctx);
+      case 'canvas_versions':
+        return new CanvasVersionsACL(ctx);
+      case 'channel_daily_recaps':
+        return new ChannelDailyRecapsACL(ctx);
+      case 'channel_recaps':
+        return new ChannelRecapsACL(ctx);
+      case 'classification_mappings':
+        return new ClassificationMappingsACL(ctx);
+      case 'collection_items':
+        return new CollectionItemsACL(ctx);
+      case 'collection_permissions':
+        return new CollectionPermissionsACL(ctx);
+      case 'collections':
+        return new CollectionsACL(ctx);
+      case 'conversation_label_mappings':
+        return new ConversationLabelMappingsACL(ctx);
+      case 'conversation_labels':
+        return new ConversationLabelsACL(ctx);
+      case 'custom_emojis':
+        return new CustomEmojisACL(ctx);
+      case 'dashboard_queries_mapping':
+        return new DashboardQueriesMappingACL(ctx);
+      case 'dashboards':
+        return new DashboardsACL(ctx);
+      case 'email_drafts':
+        return new EmailDraftsACL(ctx);
+      case 'emails':
+        return new EmailsACL(ctx);
+      case 'installed_apps':
+        return new InstalledAppsACL(ctx);
+      case 'invitations':
+        return new InvitationsACL(ctx);
+      case 'link_access':
+        return new LinkAccessACL(ctx);
+      case 'links':
+        return new LinksACL(ctx);
+      case 'lookup_values':
+        return new LookupValuesACL(ctx);
+      case 'merchants':
+        return new MerchantsACL(ctx);
+      case 'queries':
+        return new QueriesACL(ctx);
+      case 'recaps':
+        return new RecapsACL(ctx);
+      case 'recurring_call_participants':
+        return new RecurringCallParticipantsACL(ctx);
+      case 'recurring_call_series':
+        return new RecurringCallSeriesACL(ctx);
+      case 'release_attributions':
+        return new ReleaseAttributionsACL(ctx);
+      case 'release_change_types':
+        return new ReleaseChangeTypesACL(ctx);
+      case 'release_changes':
+        return new ReleaseChangesACL(ctx);
+      case 'release_events':
+        return new ReleaseEventsACL(ctx);
+      case 'repos':
+        return new ReposACL(ctx);
+      case 'stage_approvers':
+        return new StageApproversACL(ctx);
+      case 'stage_transitions':
+        return new StageTransitionsACL(ctx);
+      case 'surface_nudge_counts':
+        return new SurfaceNudgeCountsACL(ctx);
+      case 'ticket_stage_requests':
+        return new TicketStageRequestsACL(ctx);
+      case 'ticket_user_mailbox':
+        return new TicketUserMailboxACL(ctx);
+      case 'workspace_organizations':
+        return new WorkspaceOrganizationsACL(ctx);
+      case 'workspaces':
+        return new WorkspacesACL(ctx);
+      case 'guest_access':
+        return new GuestAccessACL(ctx, table);
+      default: {
+        // Exhaustiveness check — a table with no case above fails to compile here.
+        const unhandled: never = table;
+        throw new Error(`No ACL defined for table: ${String(unhandled)}`);
+      }
     }
   }
 }
