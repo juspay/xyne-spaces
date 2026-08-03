@@ -318,6 +318,16 @@ export class AuthV2Controller {
         code_challenge_method: CodeChallengeMethod.S256,
       });
 
+      // sameSite=lax so the cookie survives Google's top-level callback redirect.
+      const isProduction = process.env.NODE_ENV === 'production';
+      res.cookie('oauth_state', state, {
+        httpOnly: true,
+        secure: isProduction,
+        sameSite: 'lax' as const,
+        maxAge: 10 * 60 * 1000,
+        path: '/',
+      });
+
       logger.info(`[${requestId}] Redirecting to Google OAuth`);
       res.redirect(authUrl);
     } catch (error) {
@@ -392,6 +402,20 @@ export class AuthV2Controller {
         const launchUrl = `${frontendUrl}/launch?${launchParams.toString()}`;
         logger.info(`[${requestId}] Redirecting to Frontend launch page: ${launchUrl}`);
         res.redirect(launchUrl);
+        return;
+      }
+
+      // The state must match the oauth_state cookie; reject when absent or different. The
+      // cookie is single-use and cleared here regardless of outcome. Checked only on the
+      // browser-driven path: desktop returns above, and the cookie is host-only.
+      const boundState = req.cookies?.oauth_state as string | undefined;
+      res.clearCookie('oauth_state', { path: '/' });
+      if (!boundState || boundState !== state) {
+        logger.error(`[${requestId}] OAuth state cookie missing or mismatched — rejecting`);
+        const frontendUrl = getFrontendUrl(req);
+        res.redirect(
+          `${frontendUrl}?error=invalid_state&message=${encodeURIComponent('Invalid or expired state')}`
+        );
         return;
       }
 
@@ -1019,8 +1043,21 @@ export class AuthV2Controller {
     const requestId = `EXCHANGE_CODE_${Date.now()}`;
     const frontendUrl = getFrontendUrl(req);
 
-    const isMobileNative =
-      req.headers['x-platform'] === 'mobile' || req.query.platform === 'mobile';
+    // Select the native branch via the `x-platform` header. `?platform=mobile` is kept for
+    // older mobile builds, but only when the request carries no browser cross-site markers;
+    // otherwise it is treated as a web request and must pass state + PKCE.
+    const secFetchSite = req.headers['sec-fetch-site'];
+    const looksBrowserInitiated =
+      !!req.headers.origin ||
+      (typeof secFetchSite === 'string' && secFetchSite !== 'none');
+    const nativeByHeader = req.headers['x-platform'] === 'mobile';
+    const nativeByQuery = req.query.platform === 'mobile' && !looksBrowserInitiated;
+    if (req.query.platform === 'mobile' && !nativeByHeader) {
+      logger.warn(
+        `[${requestId}] mobile-exchange selected via query parameter without the x-platform header (browserInitiated=${looksBrowserInitiated})`,
+      );
+    }
+    const isMobileNative = nativeByHeader || nativeByQuery;
 
     // Helper to send error response (JSON for mobile, redirect for web)
     const sendError = (errorCode: string, message: string, statusCode = 400) => {
@@ -1061,6 +1098,30 @@ export class AuthV2Controller {
         return;
       }
 
+      // Native does PKCE inside the Google SDK, so only the web branch verifies it server-side.
+      let codeVerifier: string | undefined;
+      if (!isMobileNative) {
+        const state = (req.query.state || req.body?.state) as string | undefined;
+        if (!state) {
+          logger.error(`[${requestId}] Missing state on web mobile-exchange`);
+          sendError('missing_params', 'Missing state');
+          return;
+        }
+        const stateData = await oauthStateServiceV2.validateState(state, false);
+        if (!stateData) {
+          logger.error(`[${requestId}] Invalid or expired state`);
+          sendError('invalid_state', 'Invalid or expired state');
+          return;
+        }
+        await oauthStateServiceV2.deleteState(state);
+        codeVerifier = (await pkceServiceV2.getAndDeleteVerifier(state)) ?? undefined;
+        if (!codeVerifier) {
+          logger.error(`[${requestId}] PKCE verifier not found`);
+          sendError('pkce_failed', 'PKCE verification failed');
+          return;
+        }
+      }
+
       await oauthStateServiceV2.markCodeAsUsed(code as string);
 
       // For mobile native apps using serverAuthCode, use empty string as redirect_uri
@@ -1073,6 +1134,7 @@ export class AuthV2Controller {
       const { tokens } = await this.mobileGoogleClient.getToken({
         code: code as string,
         redirect_uri: redirectUri,
+        ...(codeVerifier ? { codeVerifier } : {}),
       });
 
       const { id_token, refresh_token, access_token } = tokens;
