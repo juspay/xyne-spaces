@@ -3652,6 +3652,46 @@ img.inline-emoji,
 .detailed-summary-canvas-editor .bn-editor {
   max-width: 100% !important;
   padding: 1rem 1.25rem 5rem !important;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* Headless detailed summaries use muted body copy while section headings retain
+   foreground contrast. List markers inherit this color from their content block. */
+.detailed-summary-canvas-editor
+  .bn-editor
+  .bn-block-content:is(
+    [data-content-type="paragraph"],
+    [data-content-type="bulletListItem"],
+    [data-content-type="numberedListItem"],
+    [data-content-type="checkListItem"],
+    [data-content-type="toggleListItem"],
+    [data-content-type="quote"]
+  ) {
+  color: hsl(var(--muted-foreground)) !important;
+}
+
+.detailed-summary-canvas-editor
+  .bn-editor
+  .bn-block-content[data-content-type="heading"] {
+  color: hsl(var(--foreground)) !important;
+}
+
+.detailed-summary-canvas-editor
+  .bn-editor
+  .bn-block
+  .bn-block-content[data-content-type="heading"][data-level="3"] {
+  font-size: 1rem;
+  line-height: 1.4;
+  padding-top: 12px;
+}
+
+.detailed-summary-canvas-editor
+  .bn-editor
+  .bn-block
+  .bn-block-content[data-content-type="heading"][data-level="4"] {
+  font-size: 0.9375rem;
+  line-height: 1.4;
 }
 
 /* Code blocks (fenced ``` ... ```) */
