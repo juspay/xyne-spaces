@@ -91,6 +91,7 @@ import ActivitySupportTicket from '../components/Activity/ActivitySupportTicket/
 import Search from '../components/Chat/Search/Search';
 import SearchResults from '../components/Chat/SearchResults/SearchResults';
 import ProjectsListView from './ProjectsScreen/ProjectsListView';
+import ReleaseManagerView from './ProjectsScreen/ReleaseManagerView';
 import BookmarksPanel from '../components/Chat/BookmarksPanel/BookmarksPanel';
 import DraftsAndSentPage from '../pages/DraftsAndSentPage';
 import UserThreads from '../components/Chat/UserThreads/UserThreads';
@@ -1205,6 +1206,10 @@ export const router = createBrowserRouter([
                     <ProjectsListView />
                   </ResourceProtectedRoute>
                 ),
+              },
+              {
+                path: 'releaseManager',
+                element: <ReleaseManagerView />,
               },
               {
                 path: 'listProjects/:projectId',

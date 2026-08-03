@@ -1,4 +1,4 @@
-import { parseBitbucketRepoUrl } from './repoUrlParser';
+import { parseBitbucketRepoUrl, parseGitHubRepoUrl } from './repoUrlParser';
 
 describe('parseBitbucketRepoUrl', () => {
   describe('SSH clone URLs (what the webhook stores on pull_requests.repositoryUrl)', () => {
@@ -79,5 +79,73 @@ describe('parseBitbucketRepoUrl', () => {
       expect(parseBitbucketRepoUrl(null as unknown as string)).toBeNull();
       expect(parseBitbucketRepoUrl(undefined as unknown as string)).toBeNull();
     });
+  });
+});
+
+describe('parseGitHubRepoUrl', () => {
+  it('parses an https github.com URL', () => {
+    expect(parseGitHubRepoUrl('https://github.com/juspay/xyne-spaces')).toEqual({
+      owner: 'juspay',
+      repo: 'xyne-spaces',
+    });
+  });
+
+  it('strips a trailing .git', () => {
+    expect(parseGitHubRepoUrl('https://github.com/juspay/xyne-spaces.git')).toEqual({
+      owner: 'juspay',
+      repo: 'xyne-spaces',
+    });
+  });
+
+  it('parses a scheme-less URL', () => {
+    expect(parseGitHubRepoUrl('github.com/juspay/xyne-spaces')).toEqual({
+      owner: 'juspay',
+      repo: 'xyne-spaces',
+    });
+  });
+
+  it('parses a www.github.com URL', () => {
+    expect(parseGitHubRepoUrl('https://www.github.com/juspay/xyne-spaces')).toEqual({
+      owner: 'juspay',
+      repo: 'xyne-spaces',
+    });
+  });
+
+  it('parses a GHE-style host', () => {
+    expect(parseGitHubRepoUrl('https://github.acme.com/owner/repo')).toEqual({
+      owner: 'owner',
+      repo: 'repo',
+    });
+  });
+
+  it('parses scp-like SSH clone syntax', () => {
+    expect(parseGitHubRepoUrl('git@github.com:juspay/xyne-spaces.git')).toEqual({
+      owner: 'juspay',
+      repo: 'xyne-spaces',
+    });
+  });
+
+  it('ignores extra path segments, query and fragment', () => {
+    expect(parseGitHubRepoUrl('https://github.com/juspay/xyne-spaces/tree/main?tab=readme#top')).toEqual({
+      owner: 'juspay',
+      repo: 'xyne-spaces',
+    });
+  });
+
+  it('rejects lookalike hosts (host anchoring)', () => {
+    expect(parseGitHubRepoUrl('https://notgithub.com/owner/repo')).toBeNull();
+    expect(parseGitHubRepoUrl('https://github.com.evil.io/owner/repo')).toBeNull();
+    expect(parseGitHubRepoUrl('https://evil.com/github.com/owner/repo')).toBeNull();
+  });
+
+  it('rejects URLs without owner/repo', () => {
+    expect(parseGitHubRepoUrl('https://github.com/')).toBeNull();
+    expect(parseGitHubRepoUrl('https://github.com/onlyowner')).toBeNull();
+  });
+
+  it('returns null for empty/garbage input', () => {
+    expect(parseGitHubRepoUrl('')).toBeNull();
+    expect(parseGitHubRepoUrl('garbage')).toBeNull();
+    expect(parseGitHubRepoUrl(null as unknown as string)).toBeNull();
   });
 });

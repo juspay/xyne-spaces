@@ -12,6 +12,8 @@ import { config } from '@/config/env';
 import { PRStatusEvent } from '@prisma/client';
 import { xyneCommentService } from '@/services/xyneCommentService';
 import { prCheckApprovalService } from '@/services/prCheckApprovalService';
+import { syncReleaseOnPRMerge } from '@/services/release/releaseWebhookSync';
+import { VCSProviderType } from '@xyne/shared';
 import { runWithContext } from '@/database/tenant/context';
 /**
  * Bitbucket Server webhook event types for pull requests
@@ -85,6 +87,29 @@ export class BitbucketWebhookService {
 
         // Extract PR context
         const context = this.extractPRContext(payload, workspaceId);
+
+        // Release sync is BRANCH-scoped, not gated on PR-title validation: fire on
+        // merge BEFORE the validation gate so a hotfix whose dev ticket doesn't
+        // exist yet still syncs. Fire-and-forget — analysis can outlast the webhook
+        // timeout and syncReleaseOnPRMerge handles its own errors.
+        if (eventKey === BitbucketPREventType.PR_MERGED) {
+          // No latestCommit fallback: if mergeCommit.id is absent, leave it
+          // undefined so syncReleaseOnPRMerge does a plain re-run rather than
+          // inventing a hotfix delta from the destination-branch tip.
+          if (!context.pr.properties?.mergeCommit?.id) {
+            logger.warn(`[Bitbucket-Webhook] PR #${context.prId} merged with no mergeCommit.id — hotfix delta will fall back to a plain re-run`);
+          }
+          syncReleaseOnPRMerge({
+            workspaceId: context.workspace,
+            provider: VCSProviderType.BITBUCKET_SERVER,
+            projectKey: context.projectName,
+            repoSlug: context.pr.toRef.repository.slug,
+            baseBranch: context.destinationBranch,
+            mergeCommitSha: context.pr.properties?.mergeCommit?.id,
+            source: 'Bitbucket-Webhook',
+          }).catch(err => logger.error('[Bitbucket-Webhook] release sync failed:', err));
+        }
+
         let validationResult: { isValid: boolean; ticketId?: string };
 
           // PR doesn't exist or wasn't created by workflow - run full validation
@@ -453,6 +478,9 @@ export class BitbucketWebhookService {
         `[Bitbucket-Webhook] ℹ️ Ignored manual PR webhook: ${context.prUrl} (not created by Xyne)`
       );
     }
+    // NOTE: release sync fires in handleWebhookEvent (before the PR-title
+    // validation gate), so it also runs for hotfix PRs whose dev ticket
+    // doesn't exist yet.
   }
 
   /**

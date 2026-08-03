@@ -55,6 +55,7 @@ import {
   SurfaceAreaType,
   SurfaceLinkKind,
   RotationInterval,
+  ReleaseEventType,
   parseReactionsMd,
   removeReactionFromData,
   serializeReactionsMd,
@@ -6618,11 +6619,11 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           args: {
             projectId,
             mainBoardId,
-            mainBoardName,
+            mainBoardName: rawMainBoardName,
             vcsProvider,
             releaseTrackingMode,
             channelId,
-            applications,
+            applications: rawApplications,
           },
         }) => {
           // Validate project exists
@@ -6640,8 +6641,49 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             throw new Error('Channel does not belong to this project');
           }
 
-          if (applications.length === 0) {
+          if (rawApplications.length === 0) {
             throw new Error('At least one application is required');
+          }
+
+          // ── Normalize all user-typed strings up-front ─────────────────────
+          // Why: a single trailing space in `regex` previously caused commit
+          // analysis to silently match zero files (bug discovered 2026-06-25).
+          // Now: trim everything, drop empty path entries, and validate the
+          // regex compiles BEFORE any DB write. Downstream code already does
+          // some of these trims inline; those become no-ops on already-trimmed
+          // strings.
+          const mainBoardName = rawMainBoardName.trim();
+          const applications = rawApplications.map(app => {
+            const trimmedRegex = app.regex.trim();
+            const trimmedName = app.name.trim();
+            if (trimmedRegex !== '') {
+              try {
+                new RegExp(trimmedRegex);
+              } catch (e) {
+                const why = e instanceof Error ? e.message : 'unknown error';
+                throw new Error(
+                  `Invalid regex for application "${trimmedName || '(unnamed)'}": ${why}`,
+                );
+              }
+            }
+            return {
+              ...app,
+              name: trimmedName,
+              boardName: app.boardName.trim(),
+              repoUrl: app.repoUrl.trim().replace(/\/+$/, ''),
+              regex: trimmedRegex,
+              ownerTeam: app.ownerTeam.trim(),
+              envPaths: app.envPaths.map(p => p.trim()).filter(Boolean),
+              migrationPaths: app.migrationPaths.map(p => p.trim()).filter(Boolean),
+            };
+          });
+
+          for (const app of applications) {
+            if (app.regex === '') {
+              throw new Error(
+                `Application "${app.name || '(unnamed)'}" is missing its file-path regex`,
+              );
+            }
           }
 
           const normalizedApplicationNames = applications.map(app => app.name.trim());
@@ -12676,6 +12718,34 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               ...(stageName !== undefined && { stageName }),
               updatedAt: timestamp,
             });
+          }
+
+          // Emit a TESTING event to the release timeline so the user can see
+          // QA stage changes in the audit feed. Requires looking up the release
+          // ticket for channelId/conversationId (ART doesn't store them).
+          if (stageName) {
+            const releaseTicket = await tx.run(
+              zql.tickets.where('id', row.releaseId).one(),
+            );
+            if (releaseTicket) {
+              const devTitle = devTicket?.title ?? 'dev ticket';
+              const message = failureReason
+                ? `${devTitle} → ${stageName} (reason: ${failureReason})`
+                : `${devTitle} → ${stageName}`;
+              await tx.mutate.release_events.insert({
+                id: uuidv4(),
+                releaseId: row.releaseId,
+                applicationReleaseId: row.applicationReleaseId ?? undefined,
+                eventType: ReleaseEventType.TESTING,
+                eventName: 'STAGE_CHANGED',
+                message,
+                userId: authData.sub,
+                userName: authData.name,
+                channelId: releaseTicket.channelId ?? '',
+                conversationId: releaseTicket.conversationId,
+                createdAt: timestamp,
+              });
+            }
           }
         },
       ),

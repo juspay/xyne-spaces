@@ -4229,6 +4229,9 @@ model ApplicationReleaseTicket {
   testedBy              String?                         // User ID (no FK constraint)
   testedAt              DateTime?
   failureReason         String?
+  // Nullable, no DB default: Zero client inserts don't run Postgres defaults, so
+  // it's written app-side; NULL = not a hotfix. Release-scoped.
+  isHotfix              Boolean?
   createdAt             DateTime                        @default(now())
   // No @default(now()): see Application.updatedAt — every write sets it explicitly.
   updatedAt             DateTime?                        @updatedAt
@@ -4263,6 +4266,9 @@ model ReleaseEvent {
   @@index([channelId, conversationId])
   @@index([eventType])
   @@index([createdAt])
+  // Serves releaseEventsByReleaseId (filter releaseId, order createdAt desc, id desc);
+  // avoids a zero-cache TEMP B-TREE sort. Built CONCURRENTLY in a raw migration.
+  @@index([releaseId, createdAt(sort: Desc), id(sort: Desc)], map: "release_events_releaseId_createdAt_id_idx")
   @@map("release_events")
   @@schema("public")
 }
@@ -4312,6 +4318,8 @@ model ReleaseChangeType {
   @@index([releaseId])
   @@index([applicationReleaseId])
   @@index([devTicketXyneId])
+  // Partial unique dedupe indexes (release_change_types_release_dedupe_key +
+  // _nocommit_key) live in a raw migration — Prisma can't express filtered indexes.
   @@map("release_change_types")
   @@schema("public")
 }

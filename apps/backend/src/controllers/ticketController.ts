@@ -1288,9 +1288,11 @@ export class TicketController {
       if (releaseTicket && releaseTrackingMode === ReleaseTrackingMode.VERSION) {
         logger.info(`[ReleaseTrigger] skipped for ticket ${ticket.xyneId}: releaseTrackingMode=VERSION`);
       } else {
-        const deployedCommitId = dynamicFields?.['deployedCommitId'] as string;
-        const newCommitId = dynamicFields?.['newCommitId'] as string;
-        const branch = dynamicFields?.['branch'] as string;
+        // Trim — protects commit analysis from accidental whitespace in the form
+        // (e.g. user pastes "main " with a trailing space, GitHub returns 404).
+        const deployedCommitId = String(dynamicFields?.['deployedCommitId'] ?? '').trim();
+        const newCommitId = String(dynamicFields?.['newCommitId'] ?? '').trim();
+        const branch = String(dynamicFields?.['branch'] ?? '').trim();
 
         // Make silent-skip visible — log which condition(s) failed so this can be
         // debugged without staring at code. WARN level so it shows up by default.
