@@ -34,6 +34,12 @@ import {
   type KbHandlerResult,
 } from "../mcp/kb-handlers.js";
 import { createLogger } from "../logger.js";
+import {
+  signWriteAction,
+  verifyWriteActionSignature,
+  type WriteActionSignaturePayload,
+  WRITE_ACTION_MAX_AGE_MS,
+} from "../lib/write-action-signature.js";
 import { executeTool as executeGatewayTool } from "../mcpgateway/services/execution.js";
 import {
   GATEWAY_KEY_PREFIX,
@@ -639,6 +645,9 @@ export function verifyActionSignature(action: Record<string, unknown>, signature
   }
 }
 
+export { signWriteAction, verifyWriteActionSignature, WRITE_ACTION_MAX_AGE_MS };
+export type { WriteActionSignaturePayload };
+
 const router = Router();
 
 // Scope the Bearer gate to the subpaths this router actually serves
@@ -1174,9 +1183,8 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
       );
 
       if (effectivePermission === "ask") {
-        const action = { serverType, tool, params: params ?? {}, userId };
-        const signature = signAction(action);
-        res.json({ success: true, data: { content: `Action queued for approval: ${tool}`, pendingAction: { ...action, signature } } });
+        const pendingAction = await signWriteAction({ serverType, tool, params: params ?? {}, userId, agentSlug, spacesAppId });
+        res.json({ success: true, data: { content: `Action queued for approval: ${tool}`, pendingAction } });
         return;
       }
 
@@ -1274,9 +1282,8 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
         res.json({ success: true, data: { content: `Cannot ${tool}: ${validationError}` } });
         return;
       }
-      const action = { serverType, tool, params: effectiveParams, userId };
-      const signature = signAction(action);
-      res.json({ success: true, data: { content: `Action queued for approval: ${tool}`, pendingAction: { ...action, signature } } });
+      const pendingAction = await signWriteAction({ serverType, tool, params: effectiveParams, userId, agentSlug, spacesAppId });
+      res.json({ success: true, data: { content: `Action queued for approval: ${tool}`, pendingAction } });
       return;
     }
 
@@ -1545,6 +1552,10 @@ router.post("/:sessionId/actions/sign", async (req: Request<{ sessionId: string 
         params?: Record<string, unknown>;
         userId?: string;
         signature?: string;
+        issuedAt?: number;
+        nonce?: string;
+        agentSlug?: string;
+        spacesAppId?: string;
       };
       // Initial-signing shape (2026-07-15): claw's custom-tool write wrapper
       // (custom-tools.ts signWriteAction) sends the bare action — it CANNOT
@@ -1566,7 +1577,7 @@ router.post("/:sessionId/actions/sign", async (req: Request<{ sessionId: string 
 
     if (body.pendingAction && typeof body.pendingAction === "object") {
       // Re-sign shape: verify the existing signature before re-issuing.
-      const { serverType: st, tool: t, params, userId: pendingUserId, signature } = body.pendingAction;
+      const { serverType: st, tool: t, params, userId: pendingUserId, signature, issuedAt, nonce, agentSlug: pendingAgentSlug, spacesAppId: pendingSpacesAppId } = body.pendingAction;
       if (!st || !t || !pendingUserId || !signature) {
         res.status(400).json({ success: false, error: "pendingAction must include serverType, tool, userId, signature" });
         return;
@@ -1576,8 +1587,12 @@ router.post("/:sessionId/actions/sign", async (req: Request<{ sessionId: string 
         return;
       }
       actionParams = params ?? {};
-      const action = { serverType: st, tool: t, params: actionParams, userId: pendingUserId };
-      if (!verifyActionSignature(action, signature)) {
+      // Support legacy four-field signatures (backward compat during rollout).
+      const hasNewFields = typeof issuedAt === "number" && typeof nonce === "string";
+      const verified = hasNewFields
+        ? await verifyWriteActionSignature({ serverType: st, tool: t, params: actionParams, userId: pendingUserId, agentSlug: pendingAgentSlug, spacesAppId: pendingSpacesAppId, issuedAt, nonce }, signature)
+        : verifyActionSignature({ serverType: st, tool: t, params: actionParams, userId: pendingUserId }, signature);
+      if (!verified) {
         res.status(400).json({ success: false, error: "Invalid pendingAction signature" });
         return;
       }
@@ -1687,12 +1702,11 @@ router.post("/:sessionId/actions/sign", async (req: Request<{ sessionId: string 
       }
     }
 
-    const signedAction = { serverType, tool, params: actionParams, userId };
-    const signedSignature = signAction(signedAction);
+    const signedAction = await signWriteAction({ serverType, tool, params: actionParams, userId, agentSlug, spacesAppId });
 
     log.info(`[actions/sign] Signed write action: user=${userId} server=${serverType} tool=${tool}`);
 
-    res.json({ success: true, data: { ...signedAction, signature: signedSignature } });
+    res.json({ success: true, data: signedAction });
   } catch (err) {
     log.error("[actions/sign] error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });

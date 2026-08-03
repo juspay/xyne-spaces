@@ -4565,9 +4565,11 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
             params: action["params"] as Record<string, unknown>,
             userId: action["userId"] as string,
             signature: action["signature"] as string,
-            agentSlug: ctx.agentSlug ?? "",
+            agentSlug: (action["agentSlug"] as string | undefined) ?? ctx.agentSlug ?? "",
             channelId: ctx.channelId,
             conversationId: ctx.conversationId,
+            issuedAt: Number(action["issuedAt"]),
+            nonce: String(action["nonce"] ?? ""),
           }), ctx.spacesAppId);
 
           if (action["tool"] === "spaces-memory-create" && (action["params"] as Record<string, unknown>)?.["content"]) {
@@ -4978,9 +4980,11 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           params: action["params"] as Record<string, unknown>,
           userId: action["userId"] as string,
           signature: action["signature"] as string,
-          agentSlug: ctx.agentSlug ?? "",
+          agentSlug: (action["agentSlug"] as string | undefined) ?? ctx.agentSlug ?? "",
           channelId: ctx.channelId,
           conversationId: ctx.conversationId,
+          issuedAt: Number(action["issuedAt"]),
+          nonce: String(action["nonce"] ?? ""),
         }), ctx.spacesAppId);
 
         // Post in the same thread where the conversation happened

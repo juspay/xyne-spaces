@@ -442,6 +442,8 @@ async function finishWriteSuccess(opts: {
   signature: string;
   agentSlug: string | undefined;
   spacesAppId: string | undefined;
+  issuedAt: number;
+  nonce: string;
   messageId: string;
   conversationId?: string | undefined;
   channelId?: string | undefined;
@@ -472,6 +474,8 @@ async function finishWriteFailure(opts: {
   signature: string;
   agentSlug: string | undefined;
   spacesAppId: string | undefined;
+  issuedAt: number;
+  nonce: string;
   messageId: string;
   conversationId?: string | undefined;
   channelId?: string | undefined;
@@ -489,6 +493,8 @@ async function finishWriteFailure(opts: {
       userId: opts.writeUserId,
       signature: opts.signature,
       agentSlug: opts.agentSlug ?? "",
+      issuedAt: opts.issuedAt,
+      nonce: opts.nonce,
       ...(opts.channelId !== undefined ? { channelId: opts.channelId } : {}),
       ...(opts.conversationId !== undefined ? { conversationId: opts.conversationId } : {}),
       ...(opts.spacesAppId !== undefined ? { spacesAppId: opts.spacesAppId } : {}),
@@ -518,6 +524,8 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       const signature = data["signature"] as string;
       const agentSlug = data["agentSlug"] as string | undefined;
       const spacesAppId = data["spacesAppId"] as string | undefined;
+      const issuedAt = Number(data["issuedAt"]);
+      const nonce = String(data["nonce"] ?? "");
 
       const continueChannelId = data["channelId"] as string | undefined;
 
@@ -544,10 +552,19 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       // actionId === "approve-write"
       const params = JSON.parse(paramsStr) as Record<string, unknown>;
 
-      // Verify HMAC signature
-      const { verifyActionSignature } = await import("./mcp.js");
-      const actionPayload = { serverType, tool, params, userId: writeUserId };
-      if (!verifyActionSignature(actionPayload, signature)) {
+      // Verify HMAC signature + replay/identity binding
+      const { verifyWriteActionSignature } = await import("./mcp.js");
+      const actionPayload = {
+        serverType,
+        tool,
+        params,
+        userId: writeUserId,
+        agentSlug,
+        spacesAppId,
+        issuedAt,
+        nonce,
+      };
+      if (!(await verifyWriteActionSignature(actionPayload, signature))) {
         log.error("[flow-action] HMAC verification failed");
         res.json({ type: "error", message: "HMAC verification failed — action may have been tampered with" } satisfies AppActionResponse);
         return;
@@ -658,7 +675,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
             message: userMessage,
           } satisfies AppActionResponse);
           await finishWriteFailure({
-            tool, serverType, params, writeUserId, signature, agentSlug, spacesAppId,
+            tool, serverType, params, writeUserId, signature, agentSlug, spacesAppId, issuedAt, nonce,
             messageId, conversationId, channelId: continueChannelId, errorText: userMessage,
           });
           return;
@@ -670,7 +687,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         resp = { type: "close_screen", finalMessage: `✅ ${tool} executed successfully.` };
         res.json(resp);
         await finishWriteSuccess({
-          actionId, tool, serverType, params, writeUserId, signature, agentSlug, spacesAppId,
+          actionId, tool, serverType, params, writeUserId, signature, agentSlug, spacesAppId, issuedAt, nonce,
           messageId, conversationId, channelId: continueChannelId, resultText: safeResultString(execution.result),
         });
         return;
@@ -723,7 +740,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         resp = { type: "close_screen", finalMessage: `✅ ${tool} executed successfully.` };
         res.json(resp);
         await finishWriteSuccess({
-          actionId, tool, serverType, params, writeUserId, signature, agentSlug, spacesAppId,
+          actionId, tool, serverType, params, writeUserId, signature, agentSlug, spacesAppId, issuedAt, nonce,
           messageId, conversationId, channelId: continueChannelId, resultText: safeResultString(result),
         });
         return;
@@ -777,7 +794,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         resp = { type: "close_screen", finalMessage: `✅ ${tool} executed successfully.` };
         res.json(resp);
         await finishWriteSuccess({
-          actionId, tool, serverType, params, writeUserId, signature, agentSlug, spacesAppId,
+          actionId, tool, serverType, params, writeUserId, signature, agentSlug, spacesAppId, issuedAt, nonce,
           messageId, conversationId, channelId: continueChannelId, resultText: safeResultString(result),
         });
         return;
@@ -866,7 +883,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
           message: userMessage,
         } satisfies AppActionResponse);
         await finishWriteFailure({
-          tool, serverType, params, writeUserId, signature, agentSlug, spacesAppId,
+          tool, serverType, params, writeUserId, signature, agentSlug, spacesAppId, issuedAt, nonce,
           messageId, conversationId, channelId: continueChannelId, errorText: userMessage,
         });
         return;
@@ -875,7 +892,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       resp = { type: "close_screen", finalMessage: `✅ ${tool} executed successfully.` };
       res.json(resp);
       await finishWriteSuccess({
-        actionId, tool, serverType, params, writeUserId, signature, agentSlug, spacesAppId,
+        actionId, tool, serverType, params, writeUserId, signature, agentSlug, spacesAppId, issuedAt, nonce,
         messageId, conversationId, channelId: continueChannelId, resultText: toolResult.content,
       });
       return;

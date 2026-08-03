@@ -56,6 +56,34 @@ class RedisService {
     }
   }
 
+
+  /**
+   * Mark a nonce as consumed with a TTL. Returns true if the nonce was newly
+   * consumed, false if it was already present or on Redis error.
+   */
+  async markNonceConsumed(nonce: string, ttlSeconds: number): Promise<boolean> {
+    const redis = this.getConnection();
+    try {
+      const result = await redis.set(`nonce:${nonce}`, "1", "EX", ttlSeconds, "NX");
+      return result === "OK";
+    } catch (err) {
+      log.error("[redis] markNonceConsumed failed:", err);
+      return false;
+    }
+  }
+
+  /** Check whether a nonce has already been consumed. */
+  async isNonceConsumed(nonce: string): Promise<boolean> {
+    const redis = this.getConnection();
+    try {
+      const result = await redis.exists(`nonce:${nonce}`);
+      return result === 1;
+    } catch (err) {
+      log.error("[redis] isNonceConsumed failed:", err);
+      return false;
+    }
+  }
+
   /** Get the shared connection (creates lazily if needed). */
   getConnection(): Redis {
     if (!this.redis) {

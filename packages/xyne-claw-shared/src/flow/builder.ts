@@ -328,6 +328,8 @@ export function buildWriteApprovalFlow(
     agentSlug: string;
     channelId?: string;
     conversationId?: string;
+    issuedAt: number;
+    nonce: string;
   },
 ): FlowDefinition {
   return new FlowBuilder(`write-approval-${crypto.randomUUID()}`)
@@ -381,6 +383,8 @@ export function buildWriteResultFlow(opts: {
     channelId?: string;
     conversationId?: string;
     spacesAppId?: string;
+    issuedAt: number;
+    nonce: string;
   };
 }): FlowDefinition {
   const b = new FlowBuilder(`write-result-${crypto.randomUUID()}`)

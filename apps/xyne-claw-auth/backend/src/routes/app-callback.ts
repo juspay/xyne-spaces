@@ -511,10 +511,19 @@ router.post("/callback", async (req: Request, res: Response) => {
 
     const params = JSON.parse(paramsStr) as Record<string, unknown>;
 
-    // Verify HMAC signature
-    const { verifyActionSignature } = await import("./mcp.js");
-    const action = { serverType, tool, params, userId: writeUserId };
-    if (!verifyActionSignature(action, signature)) {
+    // Verify HMAC signature + replay/identity binding
+    const { verifyWriteActionSignature } = await import("./mcp.js");
+    const action = {
+      serverType,
+      tool,
+      params,
+      userId: writeUserId,
+      agentSlug,
+      spacesAppId,
+      issuedAt: Number(context["issuedAt"]),
+      nonce: String(context["nonce"] ?? ""),
+    };
+    if (!(await verifyWriteActionSignature(action, signature))) {
       log.error("[app-callback] HMAC verification failed — action may have been tampered with");
       return;
     }

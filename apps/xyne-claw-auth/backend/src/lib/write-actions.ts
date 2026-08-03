@@ -32,6 +32,10 @@ export interface SignedWriteAction {
   params: Record<string, unknown>;
   userId: string;
   signature: string;
+  agentSlug?: string | undefined;
+  spacesAppId?: string | undefined;
+  issuedAt: number;
+  nonce: string;
 }
 
 export interface WriteActionResult {
@@ -61,13 +65,13 @@ function parseGatewayActionTarget(serverType: string): { serviceName: string; ba
  * approver.
  */
 export async function executeWriteAction(action: SignedWriteAction): Promise<WriteActionResult> {
-  const { serverType, tool, params, userId, signature } = action;
+  const { serverType, tool, params, userId, signature, agentSlug, spacesAppId, issuedAt, nonce } = action;
 
   // 1. Signature verification — prevents tampered params sneaking through.
-  const { verifyActionSignature } = await import("../routes/mcp.js");
-  const actionCore = { serverType, tool, params, userId };
-  if (!verifyActionSignature(actionCore, signature)) {
-    return { ok: false, content: "", error: "Signature verification failed — action may have been tampered with." };
+  const { verifyWriteActionSignature } = await import("../routes/mcp.js");
+  const actionCore = { serverType, tool, params, userId, agentSlug, spacesAppId, issuedAt, nonce };
+  if (!(await verifyWriteActionSignature(actionCore, signature))) {
+    return { ok: false, content: "", error: "Signature verification failed — action may have been tampered with or replayed." };
   }
 
   try {
