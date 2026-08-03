@@ -1,4 +1,5 @@
 import { DatabaseClient } from '../client';
+import { elevateToServiceActor } from '../tenant/context';
 import { Email } from '@prisma/client';
 import { EmailType } from '@xyne/shared';
 import { syncTicketEmailCount } from '../syncTicketEmailCount';
@@ -95,13 +96,16 @@ export class EmailRepository {
     channelId: string,
   ): Promise<string[]> {
     if (externalMessageIds.length === 0) return [];
-    const emails = await this.db.email.findMany({
-      where: {
-        externalMessageId: { in: externalMessageIds },
-        channelId,
-      },
-      select: { externalMessageId: true },
-    });
+    // Ingestion dedupe: keyed on the target channel, not on the triggering user.
+    const emails = await elevateToServiceActor(() =>
+      this.db.email.findMany({
+        where: {
+          externalMessageId: { in: externalMessageIds },
+          channelId,
+        },
+        select: { externalMessageId: true },
+      }),
+    );
     return emails.map(e => e.externalMessageId);
   }
 
