@@ -88,7 +88,11 @@ export async function setupMTLS() {
 
         log.info(`[mTLS] Candidates found: ${list.length}`);
 
-        // Both app.spaces and auth.spaces require mTLS.
+        // INVARIANT: only first-party hosts reach this point — the allowedMtlsHosts()
+        // gate at the top of this handler has already declined (preventDefault +
+        // callback(undefined)) every non-allowlisted host, and selectClientCertificate()
+        // below re-checks the allowlist. Do not add a selection path here that bypasses
+        // either check.
         event.preventDefault();
 
         if (list.length > 0) {

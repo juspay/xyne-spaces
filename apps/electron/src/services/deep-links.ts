@@ -12,13 +12,11 @@ import { isHexToken } from '../utils/validation';
 let mainWindow: BrowserWindow | null = null;
 
 /**
- * XYNE Issues 398/405 (CWE-601): a xyne-spaces:// deep link is externally
- * triggerable (any web page can set location.href = 'xyne-spaces://...'), and
- * its path is forwarded to the renderer's router via 'navigate-to'. Only allow
- * plain in-app route paths — reject anything with an embedded scheme, a
- * protocol-relative '//', backslashes, or path traversal (raw or percent-
- * encoded), so an attacker cannot force an external-looking redirect or reach
- * unexpected routes via traversal tricks.
+ * A xyne-spaces:// deep link is externally triggerable (any web page can set
+ * location.href = 'xyne-spaces://...') and its path is forwarded to the renderer's
+ * router via 'navigate-to'. Only plain in-app route paths are allowed — anything with
+ * an embedded scheme, a protocol-relative '//', backslashes, or path traversal (raw or
+ * percent-encoded) is rejected.
  */
 function isSafeDeepLinkPath(pathStr: string): boolean {
   if (typeof pathStr !== 'string' || !pathStr.startsWith('/') || pathStr.startsWith('//')) {

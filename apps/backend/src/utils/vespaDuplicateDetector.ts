@@ -7,6 +7,7 @@ import { vespaClient } from '@/services/vespaSearch';
 import { convert } from 'html-to-text';
 import { type VespaTicketDocument, type VespaSearchResponse } from '@/vespa/src/types';
 import { logger } from '@/utils/logger';
+import { escapeYqlString } from '@/utils/yqlEscape';
 import { repositories } from '@/database/repositories';
 
 export interface DuplicateMatch {
@@ -147,9 +148,9 @@ export async function findDuplicateEmailConversation(
   const extractedEmailFrom = extractEmailFromAddress(emailFrom);
   const incomingEmailDomain = getEmailDomain(extractedEmailFrom);
 
-  // Build and execute Vespa query with channelId filter for better performance
-  const excludeCondition = excludeTicketId ? ` and docId != "${excludeTicketId}"` : '';
-  const yql = `select * from sources ticket where docType contains "ticket" and title contains "${normalizedSubject}" and channelId contains "${channelId}"${excludeCondition}`;
+  // Build and execute Vespa query with channelId filter for better performance.
+  const excludeCondition = excludeTicketId ? ` and docId != "${escapeYqlString(excludeTicketId)}"` : '';
+  const yql = `select * from sources ticket where docType contains "ticket" and title contains "${escapeYqlString(normalizedSubject)}" and channelId contains "${escapeYqlString(channelId)}"${excludeCondition}`;
 
   logger.info('[VESPA_DUPLICATE_SEARCH]', { channelId, emailFrom, normalizedSubject, excludeTicketId });
 
