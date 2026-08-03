@@ -394,7 +394,7 @@ export class EmailController {
 
         const ticketForActivity = await db.ticket.findFirst({
           where: { conversationId },
-          select: { id: true },
+          select: { id: true, workspaceId: true },
         });
 
         await recordTicketTimelineEvent({
@@ -402,6 +402,7 @@ export class EmailController {
             ? {
                 ticketId: ticketForActivity.id,
                 updatedBy: userId,
+                workspaceId: ticketForActivity.workspaceId,
                 activityType: ActivityType.METADATA,
                 value: {
                   field: 'emailReply',

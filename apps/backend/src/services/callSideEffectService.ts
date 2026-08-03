@@ -448,7 +448,7 @@ class CallSideEffectService {
 
             const handler = new MessagesSideEffectHandler({
                 userID: bot.id,
-                workspaceId: bot.workspaceId ?? '',
+                workspaceId: bot.workspaceId,
                 role: bot.role ?? 'MEMBER',
                 orgRole: orgMember?.role ?? '',
                 memberId: orgMember?.memberId ?? '',

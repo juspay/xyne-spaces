@@ -296,7 +296,8 @@ export class UserManagementController {
             const result = await userManagementService.grantUserResourceAccess(
               id,
               resourceName,
-              accessType
+              accessType,
+              req.user!.workspaceId!
             );
             if (result.success) {
               results.successful.push(resourceName);
@@ -945,7 +946,8 @@ export class UserManagementController {
             const result = await userManagementService.grantGroupResourceAccess(
               id,
               resourceName,
-              accessType
+              accessType,
+              req.user!.workspaceId!
             );
             if (result.success) {
               results.successful.push(resourceName);

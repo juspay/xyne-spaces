@@ -446,6 +446,9 @@ export class ConversationService {
     if (processedFiles.length > 0) {
       // Fetch channel to get workspaceId for attachments
       const channel = await this.channelRepository.findById(channelId);
+      if (!channel?.workspaceId) {
+        throw new Error(`workspaceId required: channel ${channelId} not found for attachments`);
+      }
       const attachmentData: CreateMessageAttachmentInput[] = processedFiles.map((file) => ({
         entityId: message.messageId,
         entityType: AttachmentEntityType.CHAT,
@@ -460,7 +463,7 @@ export class ConversationService {
         createdBy: userId,
         storageProvider: config.fileStorage.provider,
         conversationId: conversation.conversationId,
-        workspaceId: channel?.workspaceId ?? '',
+        workspaceId: channel.workspaceId,
         metadata: file.metadata || {},
         ...(createdAt && { createdAt }),
       }));
@@ -677,6 +680,9 @@ export class ConversationService {
 
     // Create attachment records if files were uploaded
     if (processedFiles.length > 0) {
+      if (!channel?.workspaceId) {
+        throw new Error(`workspaceId required: channel ${conversation.channelId} not found for attachments`);
+      }
       const attachmentData: CreateMessageAttachmentInput[] = processedFiles.map((file) => ({
         entityId: message.messageId,
         entityType: AttachmentEntityType.CHAT,
@@ -691,7 +697,7 @@ export class ConversationService {
         createdBy: userId,
         storageProvider: config.fileStorage.provider,
         conversationId: conversationId,
-        workspaceId: channel?.workspaceId ?? '',
+        workspaceId: channel.workspaceId,
         metadata: file.metadata || {},
         ...(createdAt && { createdAt }),
       }));
@@ -903,6 +909,9 @@ export class ConversationService {
       await this.messageAttachmentRepository.deleteByMessageId(message.messageId);
 
       // Create new attachment records
+      if (!channel?.workspaceId) {
+        throw new Error(`workspaceId required: channel ${conversation.channelId} not found for attachments`);
+      }
       const attachmentData: CreateMessageAttachmentInput[] = processedFiles.map((file) => ({
         entityId: message.messageId,
         entityType: AttachmentEntityType.CHAT,
@@ -917,7 +926,7 @@ export class ConversationService {
         createdBy: message.senderId,
         storageProvider: config.fileStorage.provider,
         conversationId: message.conversationId,
-        workspaceId: channel?.workspaceId ?? '',
+        workspaceId: channel.workspaceId,
         metadata: file.metadata || {},
       }));
       await this.messageAttachmentRepository.createMany(attachmentData);

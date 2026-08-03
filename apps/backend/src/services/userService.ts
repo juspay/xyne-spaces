@@ -194,7 +194,7 @@ export class UserService {
       );
 
       // grantPermissionsForRole swallows errors internally — user creation must not rollback on grant failure
-      await grantPermissionsForRole(user.id, user.email, WorkspaceRole.MEMBER, workspaceId);
+      await grantPermissionsForRole(user.id, user.email, WorkspaceRole.MEMBER, user.workspaceId);
 
       // Add user to general channel
       await this.ensureUserInGeneralChannel(user);

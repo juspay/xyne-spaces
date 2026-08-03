@@ -1,6 +1,7 @@
 import { DatabaseClient } from '@/database/client';
 import { NotificationLevel, NotificationType } from '@prisma/client';
 import { logger } from '@/utils/logger';
+import { elevateToServiceActor } from '@/database/tenant/context';
 import { parseNotificationKeywords } from '@xyne/shared';
 
 const prisma = DatabaseClient.getInstance();
@@ -71,6 +72,14 @@ export type PrefetchedFilterData = {
  * multiple notification calls for the same channel share a single DB fetch.
  */
 export async function prefetchFilterData(
+  userIds: string[],
+  channelId: string,
+): Promise<PrefetchedFilterData> {
+  // Reads notification state for every recipient, not just the caller.
+  return elevateToServiceActor(() => prefetchFilterDataInner(userIds, channelId));
+}
+
+async function prefetchFilterDataInner(
   userIds: string[],
   channelId: string,
 ): Promise<PrefetchedFilterData> {
@@ -316,6 +325,19 @@ export async function filterUsers(
   prefetchedData?: PrefetchedFilterData,
   isGroupDM: boolean = false,
 ): Promise<{ desktopUsers: string[]; mobileUsers: string[] }> {
+  // Reads notification state for every candidate recipient, not just the caller.
+  return elevateToServiceActor(() => filterUsersInner(userIds, channelId, isDMChannel, context, options, prefetchedData, isGroupDM));
+}
+
+async function filterUsersInner(
+  userIds: string[],
+  channelId: string,
+  isDMChannel: boolean = false,
+  context: NotificationContext = 'mention',
+  options: FilterUsersOptions = {},
+  prefetchedData?: PrefetchedFilterData,
+  isGroupDM: boolean = false,
+): Promise<{ desktopUsers: string[]; mobileUsers: string[] }> {
   const desktopUsers: string[] = [];
   const mobileUsers: string[] = [];
 
@@ -532,6 +554,15 @@ export async function filterUsers(
  *                           Pass 'mention' to let MENTIONS_ONLY users through.
  */
 export async function filterGlobalUsers(
+  userIds: string[],
+  notificationType: NotificationType,
+  context: NotificationContext = 'channel_message',
+): Promise<{ desktopUsers: string[]; mobileUsers: string[] }> {
+  // Reads notification state for every candidate recipient, not just the caller.
+  return elevateToServiceActor(() => filterGlobalUsersInner(userIds, notificationType, context));
+}
+
+async function filterGlobalUsersInner(
   userIds: string[],
   notificationType: NotificationType,
   context: NotificationContext = 'channel_message',

@@ -16,7 +16,7 @@ import { TicketIdService } from '@/services/ticketIdService';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { ticketSchema } from '@/vespa/src/types';
 import { NAMESPACE } from '@/vespa/src/config';
-import { getContextOrNull } from '@/database/tenant/context';
+import { currentWorkspaceId } from '@/database/tenant/context';
 
 // Initialize Block Kit parser instance
 const blockKitParser = new SlackBlockKitParser();
@@ -66,7 +66,7 @@ async function pushVespaJobForTicket(
       const db = DatabaseClient.getInstance();
       const vespaLogs = db.vespaInsertionLogs;
       if (vespaLogs) {
-        const logWorkspaceId = workspaceId ?? getContextOrNull()?.workspaceId;
+        const logWorkspaceId = workspaceId ?? currentWorkspaceId();
         if (!logWorkspaceId) throw new Error('workspaceId required: no tenant context');
         await vespaLogs.create({
           data: {

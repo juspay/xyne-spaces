@@ -9,7 +9,7 @@
  * Inserts the pending_split row; the splitter takes over.
  */
 import { db } from '@/database/client';
-import { runWithContext } from '@/database/tenant/context';
+import { runAsServiceActor } from '@/database/tenant/context';
 import { IngestionStatus } from '@prisma/client';
 import { SubApp } from '@/vespa/src/types';
 import { config } from '@/config/env';
@@ -47,8 +47,7 @@ const routeCollection = async (fileId: string): Promise<boolean> => {
   const sourceKey = toGcsKey(attachment.url);
   const { basePriority } = inferDoclingSourcePriority({ collectionId: item.rootCollectionId });
 
-  const inserted = await runWithContext(
-    { userId: 'docling-intake', workspaceId: attachment.workspaceId },
+  const inserted = await runAsServiceActor('docling-intake', attachment.workspaceId,
     () => upsertDoclingAsyncFileForSplit({
       fileId: item.fileId,
       collectionId: item.rootCollectionId,
@@ -82,8 +81,7 @@ const routeAttachment = async (attachmentId: string, app: SubApp): Promise<boole
   const sourceKey = toGcsKey(att.url);
   const { basePriority } = inferDoclingSourcePriority({ collectionId: '' });
 
-  const inserted = await runWithContext(
-    { userId: 'docling-intake', workspaceId: att.workspaceId },
+  const inserted = await runAsServiceActor('docling-intake', att.workspaceId,
     () => upsertDoclingAsyncFileForSplit({
       fileId: att.id,
       collectionId: '',  // empty sentinel = attachment, not collection

@@ -8,6 +8,7 @@ import {
 } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { DatabaseClient } from '@/database/client';
+import { elevateToServiceActor } from '@/database/tenant/context';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { calculateETADeadline } from '@/utils/etaCalculation';
 import { logger } from '@/utils/logger';
@@ -259,7 +260,7 @@ export class StageReconstructionService {
         },
         orderBy: [{ timestamp: 'asc' }, { id: 'asc' }],
       }),
-      this.db.message.findMany({
+      elevateToServiceActor(() => this.db.message.findMany({
         where: {
           conversationId: { in: conversationIds },
           msgType: MessageType.SYSTEM,
@@ -273,7 +274,7 @@ export class StageReconstructionService {
           metadata: true,
         },
         orderBy: [{ createdAt: 'asc' }, { messageId: 'asc' }],
-      }),
+      })),
       this.db.stage.findMany({
         where: { boardId: { in: boardIds } },
         select: {

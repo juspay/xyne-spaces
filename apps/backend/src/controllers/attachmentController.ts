@@ -105,10 +105,9 @@ export class AttachmentController {
     userId: string,
     workspaceId?: string,
   ): Promise<{ ok: true } | { ok: false; status: number; body: Record<string, string> }> {
-    // 1) Tenant isolation — never serve another workspace's file.
-    //    Fail closed: an absent workspace context must never bypass this check,
-    //    otherwise a misconfigured auth path could read attachments across
-    //    workspaces by raw id.
+    // 1) Workspace isolation — never serve another workspace's file.
+    //    Require a workspace context; an absent one is rejected rather than
+    //    allowed through.
     if (!workspaceId || attachment.workspaceId !== workspaceId) {
       logger.warn(
         `Cross-workspace attachment access blocked: user ${userId} (ws ${workspaceId ?? 'none'}) -> attachment ${attachment.id} (ws ${attachment.workspaceId})`,
@@ -505,6 +504,23 @@ export class AttachmentController {
         return;
       }
 
+      // entityId is client-supplied. Confirm it references an entity in the caller's
+      // workspace BEFORE writing attachments onto it and before the response returns any
+      // pre-existing attachment ids/mimetypes for that entity.
+      const callerWorkspaceId = req.user?.workspaceId;
+      if (!callerWorkspaceId) {
+        res.status(400).json({ error: 'Missing workspaceId' });
+        return;
+      }
+      const entityWorkspaceId =
+        entityType === AttachmentEntityType.IMPACT
+          ? (await db.impact.findUnique({ where: { id: entityId }, select: { workspaceId: true } }))?.workspaceId
+          : (await db.formEntityValues.findUnique({ where: { id: entityId }, select: { workspaceId: true } }))?.workspaceId;
+      if (!entityWorkspaceId || entityWorkspaceId !== callerWorkspaceId) {
+        res.status(404).json({ error: 'Entity not found' });
+        return;
+      }
+
       const reqFiles = req.files as { [fieldname: string]: Express.Multer.File[] };
       const files = reqFiles?.['files'];
       if (!files || files.length === 0) {
@@ -531,6 +547,10 @@ export class AttachmentController {
 
       const uploadedFiles = await uploadFiles(files, undefined, fileMetadataArray);
 
+      const workspaceId = req.user?.workspaceId;
+      if (!workspaceId) {
+        throw new Error('workspaceId required: no authenticated workspace');
+      }
       const attachmentData: CreateMessageAttachmentInput[] = uploadedFiles.map(file => ({
         entityId,
         entityType,
@@ -545,7 +565,7 @@ export class AttachmentController {
         createdBy: userId,
         storageProvider: config.fileStorage.provider,
         conversationId: null,
-        workspaceId: req.user?.workspaceId ?? '',
+        workspaceId,
         metadata: file.metadata || {},
       }));
 

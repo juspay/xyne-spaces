@@ -51,7 +51,7 @@ import { ticketSchema, mailSchema } from '@/vespa/src/types';
 import { logger } from '@/utils/logger';
 import { messageMetadataService } from '@/services/messageMetadataService';
 import { db } from '@/database/client';
-import { getContextOrNull } from '@/database/tenant/context';
+import { currentWorkspaceId, elevateToServiceActor } from '@/database/tenant/context';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import { processMeetLinksFromEmail } from './meetLinkService';
 import { repositories } from '@/database/repositories';
@@ -339,7 +339,7 @@ export class EmailService {
       try {
         const vespaLogs = db.vespaInsertionLogs;
         if (vespaLogs) {
-          const ws = workspaceId ?? getContextOrNull()?.workspaceId;
+          const ws = workspaceId ?? currentWorkspaceId();
           if (!ws) throw new Error('workspaceId required: no tenant context');
           await vespaLogs.create({
             data: {
@@ -377,7 +377,7 @@ export class EmailService {
       try {
         const vespaLogs = db.vespaInsertionLogs;
         if (vespaLogs) {
-          const ws = workspaceId ?? getContextOrNull()?.workspaceId;
+          const ws = workspaceId ?? currentWorkspaceId();
           if (!ws) throw new Error('workspaceId required: no tenant context');
           await vespaLogs.create({
             data: {
@@ -1376,14 +1376,14 @@ export class EmailService {
             select: { userId: true },
           });
           if (caughtUpUsers.length > 0) {
-            await this.prisma.channelUserStatus.updateMany({
+                  await elevateToServiceActor(() => this.prisma.channelUserStatus.updateMany({
               where: {
                 channelId: conversation.channelId,
                 userId: { in: caughtUpUsers.map(r => r.userId) },
                 isDeleted: false,
               },
               data: { unreadCount: { increment: 1 }, updatedAt: new Date() },
-            });
+            }));
           }
 
           void this.notifyAssigneeOfReply({
@@ -1424,7 +1424,10 @@ export class EmailService {
       }
 
       // Create MessageAttachment entries for email attachments
-      await this.createEmailAttachments(email.id, conversation.conversationId, conversation.createdBy, channel?.workspaceId ?? '', uploadedFiles);
+      if (!channel?.workspaceId) {
+        throw new Error(`workspaceId required: channel not found for email ${email.id} attachments`);
+      }
+      await this.createEmailAttachments(email.id, conversation.conversationId, conversation.createdBy, channel.workspaceId, uploadedFiles);
 
       if (ticketRow) {
         void this.triggerAutoDraft({

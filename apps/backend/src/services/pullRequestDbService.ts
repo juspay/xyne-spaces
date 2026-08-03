@@ -1,7 +1,7 @@
 import { PrismaClient, PRStatus } from '@prisma/client';
 import { PullRequestDataWithRepo } from '../types/bitbucket.js';
 import { DatabaseClient } from '@/database/client';
-import { getContextOrNull } from '@/database/tenant/context';
+import { currentWorkspaceId } from '@/database/tenant/context';
 import {logger} from '@/utils/logger';
 
 export class PullRequestDbService {
@@ -43,7 +43,7 @@ export class PullRequestDbService {
       errors: [] as Array<{ prId: number; error: string }>
     };
 
-    const workspaceId = getContextOrNull()?.workspaceId;
+    const workspaceId = currentWorkspaceId();
     if (!workspaceId) {
       throw new Error('workspaceId required: no tenant context for savePullRequests');
     }

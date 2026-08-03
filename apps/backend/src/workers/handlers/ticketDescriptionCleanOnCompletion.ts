@@ -1,5 +1,5 @@
 import { db } from '@/database/client';
-import { getContextOrNull } from '@/database/tenant/context';
+import { currentWorkspaceId } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import vespaClient from '@/vespa/client';
 import { ticketSchema } from '@/vespa/src/types';
@@ -109,7 +109,7 @@ async function upsertTicketCleanupFailure(
       where: { id: ticketId },
       select: { workspaceId: true },
     });
-    const workspaceId = ticket?.workspaceId ?? getContextOrNull()?.workspaceId;
+    const workspaceId = ticket?.workspaceId ?? currentWorkspaceId();
     if (!workspaceId) {
       throw new Error(
         `workspaceId required: ticket ${ticketId} not found and no tenant context`,

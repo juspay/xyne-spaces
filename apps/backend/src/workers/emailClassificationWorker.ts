@@ -12,7 +12,7 @@ import { activityService } from '@/services/activity/activityService';
 import { ActivityClassification, ActivityType, EmailType } from '@prisma/client';
 import type { BoardMetadata } from '@xyne/shared';
 import { emitTicketUpdated } from '@/automations/triggers/ticket-updated.trigger';
-import { runWithContext } from '@/database/tenant/context';
+import { runAsServiceActor } from '@/database/tenant/context';
 import { getAutomationsBotUserId } from '@/automations/steps/automations-bot';
 
 const emailClassificationService = new EmailClassificationService();
@@ -73,8 +73,7 @@ class EmailClassificationWorker {
       });
       throw new Error(`EmailClassificationWorker: channel ${job.data.channelId} not found or has no workspaceId`);
     }
-    return runWithContext(
-      { userId: 'email-classification-worker', workspaceId: channel.workspaceId },
+    return runAsServiceActor('email-classification-worker', channel.workspaceId,
       () => this.classifyAndAssign(job, channel.workspaceId),
     );
   }

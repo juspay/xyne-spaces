@@ -170,7 +170,7 @@ export async function maybeCreateEntryApprovalRequest(
  */
 async function claimEntryApprovalRequest(
   tx: Prisma.TransactionClient,
-  ticket: { id: string; conversationId: string; workspaceId: string | null },
+  ticket: { id: string; conversationId: string; workspaceId: string },
   stageId: string,
   landedStageName: string,
   targetStageName: string | null,
@@ -228,7 +228,7 @@ async function claimEntryApprovalRequest(
       messageId: randomUUID(),
       conversationId: ticket.conversationId,
       senderId: actorId,
-      ...(ticket.workspaceId ? { workspaceId: ticket.workspaceId } : {}),
+      workspaceId: ticket.workspaceId,
       content: `${actorName} requested approval for ${targetStageName ?? ''}`.trim(),
       msgType: MessageType.SYSTEM,
       showInChannel: false,
@@ -401,9 +401,16 @@ async function notifyEntryApprovers(
  */
 async function resolveRoleMemberUserIds(roleIds: string[]): Promise<string[]> {
   if (roleIds.length === 0) return [];
+  // Only live roles confer approval rights; a deactivated role must not.
+  const activeRoles = await db.role.findMany({
+    where: { id: { in: roleIds }, isActive: true },
+    select: { id: true },
+  });
+  const activeRoleIds = activeRoles.map(r => r.id);
+  if (activeRoleIds.length === 0) return [];
   const [directMembers, groupMembers] = await Promise.all([
-    db.userRoleMapping.findMany({ where: { roleId: { in: roleIds } }, select: { userId: true } }),
-    db.userGroupMapping.findMany({ where: { roleId: { in: roleIds } }, select: { userId: true } }),
+    db.userRoleMapping.findMany({ where: { roleId: { in: activeRoleIds } }, select: { userId: true } }),
+    db.userGroupMapping.findMany({ where: { roleId: { in: activeRoleIds } }, select: { userId: true } }),
   ]);
   return Array.from(
     new Set([...directMembers.map(m => m.userId), ...groupMembers.map(m => m.userId)]),

@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { Ticket, TicketStatusV2, TicketPriority, AttachmentEntityType, MessageAttachment, ChannelType, ActivityType, TicketReferenceRelation } from '@prisma/client';
-import { getContextOrNull } from '@/database/tenant/context';
+import { currentWorkspaceId } from '@/database/tenant/context';
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
 import { TicketRepository } from '../database/repositories/ticketRepository';
 import { ConversationRepository } from '../database/repositories/conversationRepository';
@@ -125,7 +125,7 @@ export class TicketController {
         logger.error(`[TicketController] Error queuing Vespa job for attachment ${attachment.id}:`, error);
         // Log failed insertion to Postgres
         try {
-          const logWorkspaceId = workspaceId ?? getContextOrNull()?.workspaceId;
+          const logWorkspaceId = workspaceId ?? currentWorkspaceId();
           if (!logWorkspaceId) throw new Error('workspaceId required: no tenant context');
           if (db.vespaInsertionLogs) {
             await db.vespaInsertionLogs.create({
@@ -164,7 +164,7 @@ export class TicketController {
     }).catch(async (error) => {
       logger.error(`[TicketController] Error queuing Vespa job for ticket ${ticketId}:`, error);
       try {
-        const logWorkspaceId = workspaceId ?? getContextOrNull()?.workspaceId;
+        const logWorkspaceId = workspaceId ?? currentWorkspaceId();
         if (!logWorkspaceId) throw new Error('workspaceId required: no tenant context');
         const vespaLogs = db.vespaInsertionLogs;
         if (vespaLogs) {
@@ -1796,11 +1796,34 @@ export class TicketController {
         return;
       }
 
-      // Validate conversation exists
-      const conversation = await this.conversationRepository.findById(sourceConversationId);
+      // Validate the source conversation exists AND belongs to the caller's workspace.
+      const conversation = await this.conversationRepository.findByIdAndWorkspace(
+        sourceConversationId,
+        req.user!.workspaceId,
+      );
       if (!conversation) {
         res.status(400).json({ error: 'Source conversation not found' });
         return;
+      }
+
+      // Enforce access to the source conversation's channel (PRIVATE = participant only).
+      const sourceChannel = await this.channelRepository.findById(conversation.channelId);
+      if (!sourceChannel || sourceChannel.workspaceId !== req.user!.workspaceId) {
+        res.status(400).json({ error: 'Source conversation not found' });
+        return;
+      }
+      if (sourceChannel.visibility === 'PRIVATE') {
+        const isParticipant = await this.channelParticipantRepository.isParticipant(
+          conversation.channelId,
+          userId,
+        );
+        if (!isParticipant) {
+          res.status(403).json({
+            error: 'Access denied - you do not have permission to access this conversation',
+            code: 'NOT_CONVERSATION_PARTICIPANT',
+          });
+          return;
+        }
       }
 
       // Determine which message to pull attachments from:
@@ -1810,6 +1833,14 @@ export class TicketController {
       if (!messageId) {
         res.json({ count: 0 });
         return;
+      }
+
+      if (sourceMessageId) {
+        const sourceMessage = await this.messageRepository.findById(sourceMessageId);
+        if (!sourceMessage || sourceMessage.conversationId !== sourceConversationId) {
+          res.status(403).json({ error: 'Access denied - message does not belong to the source conversation' });
+          return;
+        }
       }
 
       const attachments = await this.messageAttachmentRepository.findByMessageId(messageId);

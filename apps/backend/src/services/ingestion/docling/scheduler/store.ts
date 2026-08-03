@@ -15,7 +15,7 @@ import { randomUUID } from 'node:crypto';
 import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import { db } from '@/database/client';
 import { config } from '@/config/env';
-import { getContextOrNull } from '@/database/tenant/context';
+import { currentWorkspaceId } from '@/database/tenant/context';
 import { IngestionStatus, Prisma } from '@prisma/client';
 import {
   DOCLING_FILE_STATUS,
@@ -119,7 +119,7 @@ export const upsertDoclingAsyncFileForSplit = async (
   input: QueueFileForSplitInput,
 ): Promise<DoclingFile | null> => {
   const basePriority = input.basePriority ?? 0;
-  const ws = getContextOrNull()?.workspaceId;
+  const ws = currentWorkspaceId();
   if (!ws) {
     throw new Error('workspaceId required: no tenant context');
   }
