@@ -687,22 +687,30 @@ export class CallDocumentService {
     content: any;
     mentionedUserIds: string[];
   }> {
-    // Build canvas title with call title suffix, or fall back to IST timestamp
+    // A generated/existing call title is authoritative. In particular, the
+    // first partial Markdown heading must not replace a title that completed
+    // before the first streamed content delta arrived.
     let title: string;
-    if (callStartedAt) {
-      const suffix = callTitle || formatToISTLocaleString(callStartedAt);
-      title = `Detailed Summary - ${suffix}`;
+    const normalizedCallTitle = callTitle?.trim();
+    if (normalizedCallTitle) {
+      title = `Detailed Summary - ${normalizedCallTitle}`;
+    } else if (callStartedAt) {
+      title = `Detailed Summary - ${formatToISTLocaleString(callStartedAt)}`;
     } else {
       title = `Detailed Summary (Updated)`;
     }
 
-    const firstHeadingMatch = markdownSummary.match(/^#\s+(.+)$/m);
-    if (firstHeadingMatch) {
-      title = firstHeadingMatch[1].trim();
-    } else {
-      const primaryFocusMatch = markdownSummary.match(/\*\*Primary Focus:\*\*\s*(.+?)(?:\n|$)/i);
-      if (primaryFocusMatch) {
-        title = `Call Summary: ${primaryFocusMatch[1].trim()}`;
+    // Content-derived titles remain a fallback for flows that do not have a
+    // call title. They are intentionally lower priority than normalizedCallTitle.
+    if (!normalizedCallTitle) {
+      const firstHeadingMatch = markdownSummary.match(/^#\s+(.+)$/m);
+      if (firstHeadingMatch) {
+        title = firstHeadingMatch[1].trim();
+      } else {
+        const primaryFocusMatch = markdownSummary.match(/\*\*Primary Focus:\*\*\s*(.+?)(?:\n|$)/i);
+        if (primaryFocusMatch) {
+          title = `Call Summary: ${primaryFocusMatch[1].trim()}`;
+        }
       }
     }
 
@@ -1256,8 +1264,9 @@ export class CallDocumentService {
 
       logger.info(`[CallDocumentService] Created collaborative detailed summary canvas ${canvasId} for call ${callId} with Xyne Automatic and call creator as owners`);
 
-      // A streaming canvas is initially empty. Defer creation activity, mention
-      // notifications, and indexing until final metadata/content are available.
+      // A streaming canvas is created from its first content delta. Defer
+      // creation activity, mention notifications, and indexing until the final
+      // metadata/content are available.
       if (!options.deferInsertSideEffects) {
         const { canvasHandler, workspaceId: sideEffectWorkspaceId } =
           await this.createCanvasSideEffectHandler(createdByUserId);
@@ -1352,9 +1361,10 @@ export class CallDocumentService {
 
   /**
    * Write the final, complete detailed-summary content into a canvas that was
-   * created empty for live streaming. Keeps the version the provisional message
-   * already announced (no extra increment) and returns false if the Y-Sweet
-   * write fails, so the caller can surface it rather than reporting success.
+   * created from the first delta for live streaming. Keeps the version the
+   * provisional message already announced (no extra increment) and returns
+   * false if the Y-Sweet write fails, so the caller can surface it rather than
+   * reporting success.
    */
   private async finalizeDetailedSummaryCanvas(
     canvasId: string,
@@ -1711,19 +1721,32 @@ A comprehensive detailed summary has been generated from this call.
       });
 
       if (callMessage) {
-        // Set the canvas URL, or drop the key entirely when clearing (null).
-        const currentMetadata = (callMessage.metadata as Record<string, any>) || {};
-        const nextMetadata = { ...currentMetadata };
-        if (canvasUrl === null) {
-          delete nextMetadata[metadataKey];
-        } else {
-          nextMetadata[metadataKey] = canvasUrl;
-        }
-        await prisma.message.update({
-          where: { messageId: callMessage.messageId },
-          data: {
-            metadata: nextMetadata,
-          },
+        await prisma.$transaction(async (tx) => {
+          // Title generation and first-chunk Canvas publication can now update
+          // this message concurrently. Lock the row and merge from the latest
+          // metadata so neither write erases the other's key.
+          const [lockedMessage] = await tx.$queryRaw<Array<{ metadata: unknown }>>`
+            SELECT "metadata"
+            FROM "messages"
+            WHERE "messageId" = ${callMessage.messageId}
+            FOR UPDATE
+          `;
+          if (!lockedMessage) {
+            return;
+          }
+
+          // Set the canvas URL, or drop the key entirely when clearing (null).
+          const currentMetadata = (lockedMessage.metadata as Record<string, any>) || {};
+          const nextMetadata = { ...currentMetadata };
+          if (canvasUrl === null) {
+            delete nextMetadata[metadataKey];
+          } else {
+            nextMetadata[metadataKey] = canvasUrl;
+          }
+          await tx.message.update({
+            where: { messageId: callMessage.messageId },
+            data: { metadata: nextMetadata },
+          });
         });
         logger.info(`[CallDocumentService] Updated call message ${callMessage.messageId} with ${metadataKey}`);
       } else {
@@ -1887,10 +1910,11 @@ A comprehensive detailed summary has been generated from this call.
     callId: string,
     transcript: string,
     conversationId: string,
-    customPrompt?: string
+    customPrompt?: string,
+    options: { callTitlePromise?: Promise<string | null> } = {},
   ): Promise<{ success: boolean; canvasUrl?: string; error?: string }> {
-    // Tracks a brand-new canvas published up-front (streaming path) so the catch
-    // below can tear it down if generation throws after it was created.
+    // Tracks a brand-new, lazily-created streaming canvas so any failure after
+    // its first chunk can tear down the canvas and published message.
     let newCanvasId: string | null = null;
     try {
       const call = await repositories.calls.findByExternalId(callId);
@@ -1934,8 +1958,26 @@ A comprehensive detailed summary has been generated from this call.
         throw new Error('Xyne Automatic bot not found');
       }
 
-      const suffix = call.title || formatToISTLocaleString(new Date(call.startedAt));
-      const canvasTitle = `Detailed Summary - ${suffix}`;
+      let resolvedCallTitle = call.title;
+      const callTitlePromise = (options.callTitlePromise ?? Promise.resolve(null))
+        .then((generatedTitle) => {
+          // Scheduled/headless calls may already have a deliberate title. Only
+          // fill the gap with the concurrently-generated title.
+          if (!resolvedCallTitle && generatedTitle) {
+            resolvedCallTitle = generatedTitle;
+          }
+          return resolvedCallTitle;
+        })
+        .catch((titleError) => {
+          logger.warn(`[${callId}] detailed_summary_call_title_unavailable`, {
+            error: titleError instanceof Error ? titleError.message : String(titleError),
+          });
+          return resolvedCallTitle;
+        });
+      const buildCanvasTitle = (callTitle?: string | null): string => {
+        const suffix = callTitle || formatToISTLocaleString(new Date(call.startedAt));
+        return `Detailed Summary - ${suffix}`;
+      };
 
       // Only a brand-new canvas streams live. A rerun keeps its existing (valid)
       // content untouched and is written exactly once at the end, so a
@@ -1953,6 +1995,8 @@ A comprehensive detailed summary has been generated from this call.
           return { success: false, error: 'Failed to generate detailed summary' };
         }
 
+        await callTitlePromise;
+
         // Single update reserves one version for this generation; the message
         // announces that same version.
         const { canvasId, version } = await this.createOrUpdateDetailedSummaryCanvas(
@@ -1963,7 +2007,7 @@ A comprehensive detailed summary has been generated from this call.
           conversation.channelId,
           call.startedAt,
           call.createdByUserId,
-          call.title,
+          resolvedCallTitle,
           citationCtx,
         );
         if (!canvasId) {
@@ -1975,64 +2019,46 @@ A comprehensive detailed summary has been generated from this call.
           conversationId,
           callId,
           canvasUrl,
-          canvasTitle,
+          buildCanvasTitle(resolvedCallTitle),
           channel.workspaceId,
           version
         );
         return { success: true, canvasUrl };
       }
 
-      // New canvas: create it empty (reserving id + version 1), post the link,
-      // then stream the summary into it live.
-      const canvasId = await this.createDetailedSummaryCanvas(
-        callId,
-        '',
-        xyneAutomaticBot.id,
-        conversationId,
-        conversation.channelId,
-        call.startedAt,
-        call.createdByUserId,
-        call.title,
-        citationCtx,
-        undefined,
-        { deferInsertSideEffects: true },
-      );
-      if (!canvasId) {
-        return { success: false, error: 'Failed to create detailed summary canvas' };
-      }
-      newCanvasId = canvasId;
-
-      const canvasUrl = getCanvasUrl(canvasId);
-      // Post the message now so the user can open the canvas and watch it fill in.
-      await this.postDetailedSummaryToConversation(
-        conversationId,
-        callId,
-        canvasUrl,
-        canvasTitle,
-        channel.workspaceId,
-        1
-      );
-
-      // Coalescing background writer: onDelta only records the newest accumulated
-      // text (instant, never blocking the LLM stream); a separate loop renders +
-      // syncs at most once per interval, always writing the latest snapshot and
-      // collapsing everything in between.
-      const participantMap = await buildParticipantMap(conversation.channelId);
+      // New canvas: start the LLM first. The first content delta creates the
+      // canvas with that content already in Y-Sweet, then publishes its URL.
+      // This avoids both an empty dangling canvas and waiting for call-title
+      // generation before detailed-summary streaming can begin.
+      const participantMapPromise = buildParticipantMap(conversation.channelId);
       const SYNC_INTERVAL_MS = 300;
       const sleepMs = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
       let latestMarkdown = '';
       let renderedMarkdown = '';
-      let writerActive = true;
+      let canvasUrl: string | null = null;
+      let postedCanvasTitle: string | null = null;
+      let canvasInitialization: Promise<void> | null = null;
+      let canvasInitializationError: Error | null = null;
+      let writerActive = false;
+      let writerLoop: Promise<void> | null = null;
+
       const flushLatest = async (): Promise<void> => {
-        if (latestMarkdown === renderedMarkdown) {
+        if (!newCanvasId || latestMarkdown === renderedMarkdown) {
           return;
         }
         const snapshot = latestMarkdown;
-        renderedMarkdown = snapshot;
         try {
+          const participantMap = await participantMapPromise;
           const { blocks } = await convertMarkdownToBlockNote(snapshot, participantMap, citationCtx);
           if (blocks.length > 0) {
-            await syncToYSweet(canvasId, sanitizeBlockNoteContent(blocks) as unknown as BlockNoteBlock[]);
+            const synced = await syncToYSweet(
+              newCanvasId,
+              sanitizeBlockNoteContent(blocks) as unknown as BlockNoteBlock[],
+            );
+            if (!synced) {
+              throw new Error('Y-Sweet sync returned false');
+            }
+            renderedMarkdown = snapshot;
           }
         } catch (writeError) {
           logger.warn(`[${callId}] detailed_summary_stream_write_failed`, {
@@ -2040,12 +2066,76 @@ A comprehensive detailed summary has been generated from this call.
           });
         }
       };
-      const writerLoop = (async (): Promise<void> => {
-        while (writerActive) {
-          await flushLatest();
-          await sleepMs(SYNC_INTERVAL_MS);
+
+      const startWriter = (): void => {
+        writerActive = true;
+        writerLoop = (async (): Promise<void> => {
+          while (writerActive) {
+            await flushLatest();
+            await sleepMs(SYNC_INTERVAL_MS);
+          }
+        })();
+      };
+
+      const ensureStreamingCanvas = async (
+        firstMarkdown: string,
+        startLiveWriter: boolean = true,
+      ): Promise<void> => {
+        if (canvasInitialization || canvasInitializationError) {
+          if (canvasInitialization) {
+            await canvasInitialization;
+          }
+          return;
         }
-      })();
+
+        canvasInitialization = (async (): Promise<void> => {
+          const canvasId = await this.createDetailedSummaryCanvas(
+            callId,
+            firstMarkdown,
+            xyneAutomaticBot.id,
+            conversationId,
+            conversation.channelId,
+            call.startedAt,
+            call.createdByUserId,
+            resolvedCallTitle,
+            citationCtx,
+            undefined,
+            { deferInsertSideEffects: true },
+          );
+          if (!canvasId) {
+            throw new Error('Failed to create detailed summary canvas');
+          }
+
+          newCanvasId = canvasId;
+          renderedMarkdown = firstMarkdown;
+          canvasUrl = getCanvasUrl(canvasId);
+          postedCanvasTitle = buildCanvasTitle(resolvedCallTitle);
+
+          // The initial Y-Sweet document already contains the first accumulated
+          // chunk. Publish the link only after that write has completed.
+          await this.postDetailedSummaryToConversation(
+            conversationId,
+            callId,
+            canvasUrl,
+            postedCanvasTitle,
+            channel.workspaceId,
+            1,
+          );
+
+          if (startLiveWriter) {
+            startWriter();
+          }
+        })().catch((initializationError) => {
+          canvasInitializationError = initializationError instanceof Error
+            ? initializationError
+            : new Error(String(initializationError));
+          logger.error(`[${callId}] detailed_summary_canvas_initialization_failed`, {
+            error: canvasInitializationError.message,
+          });
+        });
+
+        await canvasInitialization;
+      };
 
       let detailedSummaryMarkdown: string | null;
       try {
@@ -2057,42 +2147,94 @@ A comprehensive detailed summary has been generated from this call.
           undefined,
           DETAILED_SUMMARY_PROMPT,
           DEFAULT_SUMMARY_FIELDS,
-          (accumulated: string) => { latestMarkdown = accumulated; },
+          async (accumulated: string) => {
+            latestMarkdown = accumulated;
+            await ensureStreamingCanvas(accumulated);
+          },
         );
       } finally {
-        // Stop the live writer on success, a handled LLM failure, or an exception
-        // before generation can return. This prevents a leaked 300 ms timer from
-        // continuing after the outer catch tears down the provisional canvas.
+        // Stop the writer on success, handled failure, or throw. It is only
+        // started after the first chunk has successfully published the canvas.
         writerActive = false;
-        await writerLoop;
+        if (writerLoop) {
+          await writerLoop;
+        }
+        // The loop may have gone to sleep just before the last delta arrived.
+        // Flush once after stopping so final streamed content is visible even
+        // while the independently-generated call title is still pending.
+        await flushLatest();
       }
 
       if (!detailedSummaryMarkdown) {
-        // Generation failed on a brand-new canvas: tear down the empty canvas and
-        // the link/message we published up-front so nothing dangling remains.
-        await this.cleanupFailedDetailedSummaryCanvas(canvasId, conversationId, callId);
+        if (newCanvasId) {
+          await this.cleanupFailedDetailedSummaryCanvas(newCanvasId, conversationId, callId);
+        }
         return { success: false, error: 'Failed to generate detailed summary' };
       }
+
+      // Defensive fallback for providers that return final content without any
+      // content delta. The response is already complete, so initialize the
+      // canvas without starting a writer that nothing would later stop.
+      if (!newCanvasId && !canvasInitializationError) {
+        await ensureStreamingCanvas(detailedSummaryMarkdown, false);
+      }
+      // Initialization runs inside the delta callback, so TypeScript cannot see
+      // the closure assignment when narrowing this value here.
+      const initializationFailure = canvasInitializationError as Error | null;
+      if (initializationFailure || !newCanvasId || !canvasUrl) {
+        if (newCanvasId) {
+          await this.cleanupFailedDetailedSummaryCanvas(newCanvasId, conversationId, callId);
+        }
+        return {
+          success: false,
+          error: initializationFailure?.message || 'Failed to create detailed summary canvas',
+        };
+      }
+
+      await callTitlePromise;
+      const finalizedCanvasId = newCanvasId;
+      const finalizedCanvasUrl = canvasUrl;
 
       // Finalize at the SAME version (1): authoritative content + title/mentions
       // + re-index. Returns false if the Y-Sweet write fails so we don't report
       // success on a lost final write.
       const finalized = await this.finalizeDetailedSummaryCanvas(
-        canvasId,
+        finalizedCanvasId,
         detailedSummaryMarkdown,
         xyneAutomaticBot.id,
         conversation.channelId,
         callId,
         call.startedAt,
-        call.title,
+        resolvedCallTitle,
         citationCtx,
       );
       if (!finalized) {
-        await this.cleanupFailedDetailedSummaryCanvas(canvasId, conversationId, callId);
+        await this.cleanupFailedDetailedSummaryCanvas(finalizedCanvasId, conversationId, callId);
         return { success: false, error: 'Failed to write final detailed summary content' };
       }
 
-      return { success: true, canvasUrl };
+      // If the title LLM completed after the first content delta, update the
+      // already-posted link to match the finalized canvas title. This remains
+      // version 1 and therefore does not display an "updated" indicator.
+      const finalizedCanvasTitle = buildCanvasTitle(resolvedCallTitle);
+      if (postedCanvasTitle !== finalizedCanvasTitle) {
+        try {
+          await this.postDetailedSummaryToConversation(
+            conversationId,
+            callId,
+            finalizedCanvasUrl,
+            finalizedCanvasTitle,
+            channel.workspaceId,
+            1,
+          );
+        } catch (messageTitleError) {
+          logger.warn(`[${callId}] detailed_summary_message_title_refresh_failed`, {
+            error: messageTitleError instanceof Error ? messageTitleError.message : String(messageTitleError),
+          });
+        }
+      }
+
+      return { success: true, canvasUrl: finalizedCanvasUrl };
     } catch (error) {
       logger.error('[CallDocumentService] Error in generateAndPostDetailedSummary:', error);
       // If a brand-new canvas + link was already published before the throw,
