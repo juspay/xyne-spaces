@@ -1,5 +1,9 @@
 import { createBuilder, defineQueries } from '@rocicorp/zero';
 import { BaseTicketType } from './types.js';
+import {
+  FLOW_STEP_ROOT_ID_FIELD,
+  flowStepVisibilitySchemaShape,
+} from '../tickets/flow.js';
 import { defineQuery } from './acl/define-query.js';
 import {
   BoardType,
@@ -67,6 +71,7 @@ const kanbanTicketsPageArgsSchema = z.object({
   boardId: z.string().optional(),
   userId: z.string().optional(),
   groupId: z.string().optional(),
+  ...flowStepVisibilitySchemaShape,
   columnType: z.enum(['stage', 'status']).optional(),
   stageName: z.string(),
   limit: z.number(),
@@ -255,6 +260,10 @@ const applyKanbanTicketPageConditions = (
   // Scope by selected boards server-side so multi-board pagination stays correct.
   if (!boardId && filters?.boards?.length) {
     query = query.where('boardId', 'IN', filters.boards);
+  }
+
+  if (args.excludeFlowSteps) {
+    query = query.where(FLOW_STEP_ROOT_ID_FIELD, 'IS', null);
   }
 
   switch (viewMode) {
@@ -865,9 +874,21 @@ export const queries = defineQueries({
       boardId: z.string().optional(),
       userId: z.string().optional(),
       groupId: z.string().optional(),
+      ...flowStepVisibilitySchemaShape,
       formEntityValueFieldIds: z.array(z.string()).optional(),
     }),
-    ({ ctx, args: { viewMode, projectId, boardId, userId, groupId, formEntityValueFieldIds } }) => {
+    ({
+      ctx,
+      args: {
+        viewMode,
+        projectId,
+        boardId,
+        userId,
+        groupId,
+        excludeFlowSteps,
+        formEntityValueFieldIds,
+      },
+    }) => {
       let query = zql.tickets;
 
       // Apply explicit board filter if provided (works across all view modes)
@@ -881,6 +902,10 @@ export const queries = defineQueries({
       // This allows combining project scoping with user/group filtering
       if (!boardId && viewMode !== 'my-tickets' && projectId) {
         query = query.where('projectId', projectId);
+      }
+
+      if (excludeFlowSteps) {
+        query = query.where(FLOW_STEP_ROOT_ID_FIELD, 'IS', null);
       }
 
       // Apply context filter based on viewMode

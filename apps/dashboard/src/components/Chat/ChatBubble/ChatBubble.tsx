@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect, useId, useMemo } from 'react';
 import { useZero } from '../../../hooks/useZero';
+import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useSummaryCache } from '../../../hooks/useSummaryQuery';
+import { queries } from '../../../zero/queries';
 import { MessageBubble } from '../../ui/MessageBubble/MessageBubble';
 import { BotBubble } from '../BotBubble';
 import { LinkPreview } from '../LinkPreview/LinkPreview';
