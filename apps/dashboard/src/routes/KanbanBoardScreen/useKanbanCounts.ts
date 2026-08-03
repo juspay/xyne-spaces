@@ -24,6 +24,7 @@ interface UseKanbanCountsOptions {
   filters?: TicketFilters;
   groupBy?: KanbanCountsGroupBy;
   showOverdueOnly?: boolean;
+  includeColumnCounts?: boolean;
   enabled?: boolean;
   currentUserId?: string;
 }
@@ -359,6 +360,7 @@ const applyGroupDelta = (
   statusKeys: string[],
   delta: number,
   columnType: 'stage' | 'status',
+  includeColumnCounts: boolean,
 ): KanbanCountGroup[] => {
   const nextGroups = groups.map(cloneGroup);
   for (const groupKey of groupKeys) {
@@ -380,10 +382,12 @@ const applyGroupDelta = (
     }
 
     group.totalCount += delta;
-    if (columnType === 'status') {
-      applyCountDelta(group, statusKeys, delta, 'statuses');
-    } else {
-      applyCountDelta(group, stageKeys, delta, 'stages');
+    if (includeColumnCounts) {
+      if (columnType === 'status') {
+        applyCountDelta(group, statusKeys, delta, 'statuses');
+      } else {
+        applyCountDelta(group, stageKeys, delta, 'stages');
+      }
     }
 
     if (group.totalCount <= 0) {
@@ -422,6 +426,7 @@ const applyTicketCountsUpdate = (
 
   let nextGroups = current.groups;
   const columnType = request.columnType ?? 'stage';
+  const includeColumnCounts = request.includeColumnCounts ?? true;
 
   if (previousMatches && event.previousTicket) {
     const previousGroupKeys = getGroupKeys(event.previousTicket, request.groupBy);
@@ -435,6 +440,7 @@ const applyTicketCountsUpdate = (
         previousStatusKeys,
         -1,
         columnType,
+        includeColumnCounts,
       );
     }
   }
@@ -451,6 +457,7 @@ const applyTicketCountsUpdate = (
         currentStatusKeys,
         1,
         columnType,
+        includeColumnCounts,
       );
     }
   }
@@ -564,6 +571,8 @@ const toRequest = (options: UseKanbanCountsOptions): KanbanCountsRequest => {
 
   if (options.groupBy !== undefined) request.groupBy = options.groupBy;
   if (options.showOverdueOnly !== undefined) request.showOverdueOnly = options.showOverdueOnly;
+  if (options.includeColumnCounts !== undefined)
+    request.includeColumnCounts = options.includeColumnCounts;
 
   return request;
 };

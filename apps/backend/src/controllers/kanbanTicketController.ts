@@ -56,6 +56,7 @@ const kanbanCountsBodySchema = z.object({
     ])
     .optional(),
   showOverdueOnly: z.boolean().optional(),
+  includeColumnCounts: z.boolean().optional(),
 });
 
 export class KanbanTicketController {

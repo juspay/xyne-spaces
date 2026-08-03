@@ -83,6 +83,7 @@ type UseKanbanTicketsPageResult = {
   hasMore: boolean;
   isLoadingMore: boolean;
   loadMore: () => void;
+  loadLast: (limit?: number) => void;
   reset: () => void;
 };
 
@@ -100,7 +101,10 @@ type TicketsState = {
 
 type FetchCursorState = {
   queryKey: string;
-  cursor: KanbanCursor;
+  cursor: KanbanCursor | null;
+  dir?: 'forward' | 'backward';
+  replace?: boolean;
+  limit?: number;
 };
 
 const hasZeroOnlyFilters = (
@@ -443,8 +447,17 @@ export const useKanbanTicketsPage = (
   const { start: _start, ...queryKeyArgs } = basePageArgs;
   const queryKey = JSON.stringify(queryKeyArgs);
   const fetchCursor = fetchCursorState?.queryKey === queryKey ? fetchCursorState.cursor : null;
+  const fetchDir = fetchCursorState?.queryKey === queryKey ? fetchCursorState.dir : undefined;
+  const shouldReplacePage =
+    shouldUseDirectVespaRows || fetchCursor === null || fetchCursorState?.replace === true;
   const tickets = ticketsState.queryKey === queryKey ? ticketsState.tickets : [];
-  const pageArgs = buildKanbanTicketsPageArgs(pageOptions, fetchCursor);
+  const pageArgs = {
+    ...buildKanbanTicketsPageArgs(pageOptions, fetchCursor),
+    ...(fetchCursorState?.queryKey === queryKey && fetchCursorState.limit
+      ? { limit: fetchCursorState.limit }
+      : {}),
+    ...(fetchDir ? { dir: fetchDir } : {}),
+  };
   const [page, pageDetails] = useCachedQuery(
     queries.kanbanTicketsPageV2(pageArgs as Parameters<typeof queries.kanbanTicketsPageV2>[0]),
     {
@@ -502,7 +515,7 @@ export const useKanbanTicketsPage = (
     }
 
     setTicketsState(prev => {
-      if (shouldUseDirectVespaRows || fetchCursor === null) {
+      if (shouldReplacePage) {
         return { queryKey, tickets: pageRows };
       }
 
@@ -518,7 +531,9 @@ export const useKanbanTicketsPage = (
       return;
     }
 
-    setHasMore(pageRows.length >= (options.pageSize ?? DEFAULT_PAGE_SIZE));
+    setHasMore(
+      fetchDir === 'backward' ? false : pageRows.length >= (options.pageSize ?? DEFAULT_PAGE_SIZE),
+    );
 
     const lastItemOfPage = rawPageRows.at(-1);
     if (lastItemOfPage) {
@@ -531,18 +546,36 @@ export const useKanbanTicketsPage = (
     }
   }, [
     fetchCursor,
+    fetchCursorState?.replace,
+    fetchDir,
     queryKey,
     options.pageSize,
     effectivePage,
     effectivePageDetailsType,
     shouldUseDirectVespaRows,
+    shouldReplacePage,
   ]);
 
   const loadMore = useCallback(() => {
     if (isLoadingMoreRef.current || !hasMore || !nextCursor) return;
     isLoadingMoreRef.current = true;
-    setFetchCursorState({ queryKey, cursor: nextCursor });
+    setFetchCursorState({ queryKey, cursor: nextCursor, dir: 'forward' });
   }, [hasMore, nextCursor, queryKey]);
+
+  const loadLast = useCallback(
+    (limit?: number) => {
+      if (isLoadingMoreRef.current || shouldUseDirectVespaRows) return;
+      isLoadingMoreRef.current = true;
+      setFetchCursorState({
+        queryKey,
+        cursor: null,
+        dir: 'backward',
+        replace: true,
+        ...(limit ? { limit } : {}),
+      });
+    },
+    [queryKey, shouldUseDirectVespaRows],
+  );
 
   const reset = useCallback(() => {
     setTicketsState({ queryKey, tickets: [] });
@@ -554,13 +587,19 @@ export const useKanbanTicketsPage = (
 
   const isLoadingMore =
     !shouldUseDirectVespaRows && fetchCursor !== null && pageDetails.type !== 'complete';
+  const isLoadingLast =
+    !shouldUseDirectVespaRows &&
+    fetchCursorState?.queryKey === queryKey &&
+    fetchCursorState.dir === 'backward' &&
+    pageDetails.type !== 'complete';
 
   return {
     tickets,
     detailsType: effectivePageDetailsType,
     hasMore,
-    isLoadingMore,
+    isLoadingMore: isLoadingMore || isLoadingLast,
     loadMore,
+    loadLast,
     reset,
   };
 };
