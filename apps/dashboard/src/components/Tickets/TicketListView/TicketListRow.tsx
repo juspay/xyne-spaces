@@ -98,6 +98,7 @@ export const TicketListRow = ({
   const { width } = useMeasure({ ref: containerRef, observeResize: true });
   const isHumanInterventionTicket = ticket.stageName?.toLowerCase().includes('human') ?? false;
   const shouldHideDetails = width < 500;
+  const shouldHideTicketId = width < 1120;
 
   const metadata = ticket.metadata as { fromEmailAddress?: string | null } | null | undefined;
   const fromEmailAddress = metadata?.fromEmailAddress;
@@ -111,6 +112,7 @@ export const TicketListRow = ({
   const dueDate = useMemo(() => {
     return ticket.lastEmailAt ? new Date(ticket.lastEmailAt) : new Date();
   }, [ticket.lastEmailAt]);
+  const createdDate = useMemo(() => new Date(ticket.createdAt), [ticket.createdAt]);
 
   const displayEmail = senderEmail || (showExtraFields ? fromEmailAddress?.trim() || null : null);
   // Show the sender's display name when the email carries one (like Gmail),
@@ -204,14 +206,16 @@ export const TicketListRow = ({
         ) : (
           <PriorityPicker ticketId={ticket.id} priority={ticket.priority} compact />
         )}
-        <span
-          className={cn(
-            'text-xs font-mono flex-shrink-0',
-            hasUnread ? 'text-foreground font-semibold' : 'text-muted-foreground font-medium',
-          )}
-        >
-          {ticketIdValue}
-        </span>
+        {!shouldHideTicketId && (
+          <span
+            className={cn(
+              'text-xs font-mono flex-shrink-0',
+              hasUnread ? 'text-foreground font-semibold' : 'text-muted-foreground font-medium',
+            )}
+          >
+            {ticketIdValue}
+          </span>
+        )}
         <TruncatedTooltip content={ticket.title}>
           <span
             className={cn(
@@ -325,7 +329,21 @@ export const TicketListRow = ({
           assignedTo={ticket.assignedTo}
           channelId={ticket.channelId ?? undefined}
         />
-        <Tooltip delayDuration={500} content={formatDateTime(dueDate)} side='top'>
+        <Tooltip delayDuration={500} content={`Created: ${formatDateTime(createdDate)}`} side='top'>
+          <div className='flex w-[118px] flex-col items-end leading-tight'>
+            <span className='text-[10px] font-medium uppercase tracking-wide text-muted-foreground'>
+              Created
+            </span>
+            <span className='text-xs whitespace-nowrap tabular-nums text-muted-foreground'>
+              {formatDate(createdDate)} · {formatTime(createdDate)}
+            </span>
+          </div>
+        </Tooltip>
+        <Tooltip
+          delayDuration={500}
+          content={`Latest email: ${formatDateTime(dueDate)}`}
+          side='top'
+        >
           <span
             className={cn(
               'text-xs whitespace-nowrap w-[44px] text-right tabular-nums',

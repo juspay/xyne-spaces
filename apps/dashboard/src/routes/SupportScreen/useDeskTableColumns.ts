@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 export const DESK_TABLE_BUILTIN_COLUMNS = [
+  { key: 'createdAt', label: 'Created at' },
   { key: 'assignee', label: 'Assignee' },
   { key: 'dueDate', label: 'Due date' },
   { key: 'status', label: 'Status Category' },
@@ -13,14 +14,45 @@ const DEFAULT_COLUMN_KEYS = DESK_TABLE_BUILTIN_COLUMNS.map(column => column.key 
 
 const storageKey = (channelId: string): string => `desk-table-columns-${channelId}`;
 
+interface StoredDeskTableColumns {
+  version: 2;
+  columns: string[];
+}
+
+const writeColumns = (channelId: string, columns: Set<string>): void => {
+  const value: StoredDeskTableColumns = { version: 2, columns: [...columns] };
+  localStorage.setItem(storageKey(channelId), JSON.stringify(value));
+};
+
 const readColumns = (channelId: string | null): Set<string> => {
   if (!channelId) return new Set(DEFAULT_COLUMN_KEYS);
   try {
     const raw = localStorage.getItem(storageKey(channelId));
     if (!raw) return new Set(DEFAULT_COLUMN_KEYS);
     const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return new Set(DEFAULT_COLUMN_KEYS);
-    return new Set(parsed.filter((key): key is string => typeof key === 'string'));
+    if (Array.isArray(parsed)) {
+      // Migrate the old array-only format once. Existing desks should gain the
+      // new Created-at column without losing the user's other column choices.
+      const migrated = new Set([
+        ...parsed.filter((key): key is string => typeof key === 'string'),
+        'createdAt',
+      ]);
+      writeColumns(channelId, migrated);
+      return migrated;
+    }
+    if (
+      typeof parsed === 'object' &&
+      parsed !== null &&
+      (parsed as Partial<StoredDeskTableColumns>).version === 2 &&
+      Array.isArray((parsed as Partial<StoredDeskTableColumns>).columns)
+    ) {
+      return new Set(
+        (parsed as StoredDeskTableColumns).columns.filter(
+          (key): key is string => typeof key === 'string',
+        ),
+      );
+    }
+    return new Set(DEFAULT_COLUMN_KEYS);
   } catch {
     return new Set(DEFAULT_COLUMN_KEYS);
   }
@@ -46,7 +78,7 @@ export function useDeskTableColumns(channelId: string | null): {
         else next.delete(key);
         if (channelId) {
           try {
-            localStorage.setItem(storageKey(channelId), JSON.stringify([...next]));
+            writeColumns(channelId, next);
           } catch {
             // Storage full or unavailable (private mode) — selection still applies in-memory.
           }
