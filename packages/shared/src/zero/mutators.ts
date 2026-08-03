@@ -71,6 +71,7 @@ import {
   serializeInitialMessageMd,
   serializeParentMessageMd,
 } from '../utils/activityMetadataParser.js';
+import { MESSAGE_ACT_NAMES } from '../tags/vocabularies.js';
 import { assertCanvasDestinationAccess } from '../utils/canvasDestinationAccess.js';
 import {
   getCanvasFolderNameConflictMessage,
@@ -8792,6 +8793,45 @@ export const mutators = defineMutators({
           await tx.mutate.conversation_label_mappings.delete({ id: mapping.id });
         }
         await tx.mutate.conversation_labels.delete({ id: labelId });
+      },
+    ),
+  },
+  // Message acts — what a message creates going forward (DECISION, COMMITMENT, QUESTION,
+  // ...). Stored as a stringified JSON array on the message row itself, so it inherits
+  // MessagesACL and needs no separate table, ACL or side-effect handler.
+  //
+  // The caller sends the FULL desired set rather than a single add/remove. Two reasons:
+  // the column is one value so a partial update would be a read-modify-write race, and
+  // the picker already knows the complete selection it wants.
+  //
+  // KEEP IN SYNC with apps/backend/src/zero/mutators.ts messageTag.
+  messageTag: {
+    setActs: defineMutator(
+      z.object({
+        messageId: z.string(),
+        // Validated against the closed vocabulary — an unknown value is rejected rather
+        // than silently widening what the column can hold.
+        acts: z.array(z.enum(MESSAGE_ACT_NAMES)),
+      }),
+      async ({ tx, args: { messageId, acts } }) => {
+        // resolveMessage, not a raw zql.messages lookup: the channel list never syncs
+        // messages rows, so a direct lookup would throw there. This falls back to the
+        // conversation's initial_message_md.
+        const message = await resolveMessage(tx, messageId);
+        if (!message) throw new Error('Message not found');
+
+        // Dedupe and order by the vocabulary's own precedence (strongest act first), so
+        // chips render in a stable order regardless of what order they were picked in.
+        const unique = [...new Set(acts)].sort(
+          (a, b) => MESSAGE_ACT_NAMES.indexOf(a) - MESSAGE_ACT_NAMES.indexOf(b),
+        );
+
+        await tx.mutate.messages.update({
+          messageId,
+          // null rather than '[]' when empty — one representation of "no tags", so
+          // readers never have to handle both.
+          messageActs: unique.length > 0 ? JSON.stringify(unique) : null,
+        });
       },
     ),
   },

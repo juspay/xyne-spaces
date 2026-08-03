@@ -44,6 +44,7 @@ import {
 import { ConversationWithTicket } from '../../ui/MessageBubble/MessageBubble.types';
 import { MESSAGE_REMINDER_MENU_OPTIONS, type ReminderMenuOption } from '../utils/bookmarkUtils';
 import type { AppShortcutWithApp } from '../../../services/Apps/appsService';
+import { MessageTags } from '../../tags/MessageTags';
 
 const REMINDER_TRACK_NAME_BY_OPTION: Record<ReminderMenuOption, string> = {
   '20mins': 'REMINDER_20_MINS',
@@ -95,6 +96,18 @@ export interface HoverActionsToolbarProps {
    * only the thread parent passes 'below'.
    */
   placement?: 'above' | 'below';
+  /**
+   * The message's current acts (stringified JSON array, or null). Presence of this prop is
+   * what renders the tag button — set only when the message is taggable, mirroring how the
+   * other optional actions gate themselves.
+   */
+  taggableMessageActs?: string | null;
+  /**
+   * Reports the tag popover's open state so the shared overlay can pin itself open.
+   * Without it, moving the pointer up into the popover leaves the message row, the
+   * toolbar hides, and the popover unmounts before anything can be clicked.
+   */
+  onTagPickerOpenChange?: (isOpen: boolean) => void;
 }
 
 export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
@@ -130,6 +143,8 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
   onRunShortcut,
   onShowAllShortcuts,
   placement = 'above',
+  taggableMessageActs,
+  onTagPickerOpenChange,
 }) => {
   const { toggleReaction } = useReactions();
   const { user } = useAuth();
@@ -316,6 +331,17 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
             <XyneAIStar size={16} />
           </Button>
         </Tooltip>
+      )}
+
+      {/* Message acts — what this message does (DECISION, QUESTION, ...). Only rendered
+          in the expanded thread view; the channel list shows the thread's type instead. */}
+      {taggableMessageActs !== undefined && (
+        <MessageTags
+          messageId={messageId}
+          messageActs={taggableMessageActs}
+          slot='picker'
+          {...(onTagPickerOpenChange && { onOpenChange: onTagPickerOpenChange })}
+        />
       )}
 
       {/* More Actions Dropdown */}

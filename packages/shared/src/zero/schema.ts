@@ -1772,6 +1772,7 @@ export const conversationTable = table("conversations")
     parent_message_md: string().optional(), // Markdown format parent message data
     doNotPostToChannel: boolean().optional(),
     createdAt: number(),
+    threadType: string().optional(),
   })
   .primaryKey("conversationId");
 
@@ -1810,6 +1811,7 @@ export const messageTable = table('messages')
     isSent: boolean(),
     reactions_md: string().optional(), // Markdown format reactions data
     link_preview_md: string().optional(), // Markdown format internal link preview data
+    messageActs: string().optional(),
   })
   .primaryKey('messageId');
 

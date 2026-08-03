@@ -15,6 +15,8 @@ import {
   unregisterMessageHoverActions,
   type MessageHoverToolbarActions,
 } from '../HoverActionsToolbar/messageHoverActionsRegistry';
+import { MessageTags } from '../../tags/MessageTags';
+import { useIsChannelAdmin } from '../../tags/useIsChannelAdmin';
 import { useAuthContext } from '../../../providers/AuthProvider';
 import { ChatInput } from '../ChatInput';
 import { usePin } from '../../../hooks/usePin';
@@ -903,6 +905,39 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   // bubble only keeps its current per-message capabilities/handlers registered
   // (keyed by a per-instance id stamped on the root node as data-hover-key) so
   // the overlay can derive them at show time. Hover never sets state here.
+  // Tag chips ride along with the message text rather than sitting on their own row, so
+  // they land beside the "(edited)" marker instead of adding a line under every message.
+  // afterTextContent renders inside the same inline-block as the message HTML, which is
+  // exactly where RenderMessageWithHTML appends "(edited)".
+  const composedAfterTextContent = useMemo(() => {
+    if (isMessageDeleted || isSystemMessage) return afterTextContent;
+    return (
+      <>
+        {afterTextContent}
+        {context === 'thread' && (
+          <span className='inline-flex align-middle ml-1.5'>
+            <MessageTags
+              messageId={message.messageId}
+              messageActs={message.messageActs}
+              slot='chips'
+            />
+          </span>
+        )}
+      </>
+    );
+  }, [
+    afterTextContent,
+    isMessageDeleted,
+    isSystemMessage,
+    message.messageId,
+    message.messageActs,
+    context,
+  ]);
+
+  // Only channel admins may edit acts (MessagesACL.canUpdate enforces it server-side);
+  // hiding the picker keeps everyone else from clicking into an error.
+  const isChannelAdmin = useIsChannelAdmin(channelId);
+
   const hoverToolbarKey = useId();
   const canShowHoverToolbar =
     !isMobile &&
@@ -934,6 +969,16 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         initialMessageId: conversation.initialMessageId,
       }),
       reactionsMd: message.reactions_md,
+      // Message acts are a thread-level concern: inside a thread each message gets its own
+      // act, while a channel-list row stands for the whole thread and shows its type
+      // instead. The channel list also builds its message from initial_message_md, which
+      // carries no acts — so a picker there could write a tag it could never display.
+      // Deleted and system messages aren't taggable either: a tag on a tombstone or an
+      // "X added a label" line has nothing to categorise.
+      ...(context === 'thread' &&
+        isChannelAdmin &&
+        !isMessageDeleted &&
+        !isSystemMessage && { taggableMessageActs: message.messageActs ?? null }),
       onCopyLink,
       ...(!isMessageDeleted && shouldShowCopyButton && { onCopyMessage: handleCopyMessage }),
       ...(!isMessageDeleted && { onEmojiPickerOpenChange: setIsEmojiPickerOpen }),
@@ -1199,7 +1244,9 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             {...(onUserClick && { onUserClick })}
             {...(allThreadAttachments && { allThreadAttachments })}
             workflowNumber={workflowNumber}
-            {...(afterTextContent !== undefined && { afterTextContent })}
+            {...(composedAfterTextContent !== undefined && {
+              afterTextContent: composedAfterTextContent,
+            })}
             {...(conversation && { conversation: conversation })}
             {...(shouldEnableMobileThreadOpen && {
               onClick: handleMobileBubbleThreadOpen,

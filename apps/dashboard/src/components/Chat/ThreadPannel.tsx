@@ -49,6 +49,7 @@ import * as Tabs from '@radix-ui/react-tabs';
 import { cn } from '../../utils/classNames';
 import JoinChannel from './JoinChannel/JoinChannel';
 import { BotBubble } from './BotBubble';
+import { ThreadTypeChip } from '../tags/ThreadTypeChip';
 import { toast } from 'sonner';
 import { TicketDetails } from '../Tickets/TicketDetails/TicketDetails';
 import { FileBubble } from '../ui/FileBubble/FileBubble';
@@ -946,6 +947,9 @@ export const ThreadMessages = ({
               <h3 className='text-[17px] font-semibold whitespace-nowrap overflow-hidden text-ellipsis min-w-0'>
                 {isTicketThread && ticket ? ticket.title : 'Thread message'}
               </h3>
+              {/* Sits in the panel header, not beside a message: this classifies the whole
+                  thread, while the chips on each message below classify that message. */}
+              <ThreadTypeChip threadType={conversation?.threadType} />
             </div>
 
             {derivedConversationId && (

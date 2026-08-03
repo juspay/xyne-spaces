@@ -222,6 +222,10 @@ export interface VespaChatMessageDocument extends Omit<VespaDocument, 'orgId' | 
   createdAtTimestamp: number;
   threadId: string;
   isRootMessage?: boolean;
+  /** What this message does — DECISION, COMMITMENT, ... Mirrors messages.messageActs. */
+  messageActs?: string[];
+  /** What kind of thread this is. Set only on the thread's root message. */
+  threadType?: string;
   channelWeightedSet: any,
   userWeightedSet: any,
   channelRef: string;

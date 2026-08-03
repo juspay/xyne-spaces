@@ -426,6 +426,21 @@ export const mapMessage = async (
 
   const threadInfo = await mapAndUpdatePreviousMessagesMentions(args.messageId, args.conversationId);
 
+  // Message acts, denormalized onto the doc so search can filter on them. Stored as a
+  // stringified JSON array; parsed defensively because it is plain TEXT with no DB-level
+  // guarantee of shape.
+  let messageActs: string[] = [];
+  if (args.messageActs) {
+    try {
+      const parsed: unknown = JSON.parse(args.messageActs);
+      if (Array.isArray(parsed)) {
+        messageActs = parsed.filter((v): v is string => typeof v === 'string');
+      }
+    } catch {
+      logger.warn('[VESPA] Ignoring malformed messageActs', { messageId: args.messageId });
+    }
+  }
+
   // Update parent ticket thread fields if this is a ticket conversation
   await updateTicketThreadFields(args.conversationId);
 
@@ -458,6 +473,12 @@ export const mapMessage = async (
     channelRef: getRef(channelSchema, conversation.channelId),
     threadId: args.conversationId,
     isRootMessage: args.messageId === conversation.initialMessageId,
+    messageActs,
+    // Only the root message carries the thread's type — one doc to refeed when it changes
+    // rather than the whole thread.
+    ...(args.messageId === conversation.initialMessageId && conversation.threadType
+      ? { threadType: conversation.threadType }
+      : {}),
     channelWeightedSet: {
       [`channel:${conversation.channelId}`]: 1
     },

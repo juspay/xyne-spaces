@@ -10,6 +10,7 @@ import { eventPollingService } from './workflows/services/event-polling-service'
 import { registerAllWorkflows } from '@/workflows'
 import { vespaWorker } from './workers/vespaWorker'
 import { vespaFileWorker } from './workers/vespaFileWorker'
+import { messageClassificationQueue } from '@/queues/messageClassificationQueue'
 import { proactiveNudgeWorker } from './workers/proactiveNudgeWorker'
 import { activityClassificationWorkerService } from '@/services/activity/activityClassificationWorkerService'
 import { ticketCleanupWorkerService } from '@/services/tickets/descriptionCleaner/ticketCleanupWorkerService'
@@ -76,6 +77,7 @@ class WorkerService {
       const workerSchedulerEnabled = appConfig.workerSchedulerEnabled
       const proactiveNudgeWorkerEnabled = process.env.ENABLE_PROACTIVE_NUDGE_WORKER === 'true'
       const callValidationEnabled = process.env.ENABLE_CALL_VALIDATION_WORKER === 'true'
+      const messageClassificationEnabled = process.env.ENABLE_MESSAGE_CLASSIFICATION === 'true'
           // Only schedule recovery if not disabled (recovery should run in separate pod)
     const enableRecovery = appConfig.workflowRecoveryEnabled
     const workflowType = process.env.WORKFLOW_TYPE
@@ -154,6 +156,14 @@ class WorkerService {
       if (callValidationEnabled) {
         logger.info('Starting call validation worker service...');
         await callValidationWorker.start();
+      }
+
+      // LLM auto-tagging of messages (message act + thread type). Producer-side enqueue
+      // happens in the API process; only this worker consumes, so leaving the flag off
+      // means jobs queue up harmlessly instead of spending model calls.
+      if (messageClassificationEnabled) {
+        logger.info('Starting message classification worker service...')
+        messageClassificationQueue.startProcessing()
       }
 
       if (appConfig.enableWorkflowStepGcsSync) {
@@ -333,6 +343,7 @@ class WorkerService {
       const workerSchedulerEnabled = appConfig.workerSchedulerEnabled
       const proactiveNudgeWorkerEnabled = process.env.ENABLE_PROACTIVE_NUDGE_WORKER === 'true'
       const callValidationEnabled = process.env.ENABLE_CALL_VALIDATION_WORKER === 'true'
+      const messageClassificationEnabled = process.env.ENABLE_MESSAGE_CLASSIFICATION === 'true'
       const enableRecovery = process.env.ENABLE_WORKFLOW_RECOVERY !== 'false'
       const workflowType = process.env.WORKFLOW_TYPE
       if (enableRecovery) {
@@ -378,6 +389,10 @@ class WorkerService {
 
       if (callValidationEnabled) {
         await callValidationWorker.stop();
+      }
+
+      if (messageClassificationEnabled) {
+        await messageClassificationQueue.shutdown()
       }
 
       if (appConfig.enableWorkflowStepGcsSync) {
