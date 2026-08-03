@@ -96,4 +96,9 @@ export interface BoardMetadata {
    * schema migration and defaults gracefully to `'stages'` when absent.
    */
   slaPolicyType?: 'stages' | 'priority';
+  /**
+   * Per-custom-field visibility in the create ticket modal, keyed by field id.
+   * Absent = treat as visible (backward compat for boards saved before this existed).
+   */
+  customFieldVisibility?: Record<string, boolean>;
 }
