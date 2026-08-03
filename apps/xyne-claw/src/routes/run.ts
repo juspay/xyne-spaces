@@ -153,6 +153,12 @@ interface ActiveRunControl {
   handoffCapFired?: boolean;
   handoffLastTurn?: number;
   handoffCapTimer?: ReturnType<typeof setTimeout>;
+  /** True when the abort came from the SIGTERM drain deadline (pod shutdown),
+   *  not from anything the run did. The failure callback prefixes its error
+   *  with SHUTDOWN_DRAIN so claw-auth suppresses the user-facing "internal
+   *  error" notice — recovery/handoff refires these, and announcing an infra
+   *  restart as an agent failure was a recurring deploy-day false alarm. */
+  drainCancelled?: boolean;
 }
 
 const activeRuns = new Map<string, ActiveRunControl>();
@@ -247,6 +253,7 @@ export function cancelActiveRunsForDrain(reason = "server draining"): number {
     const ageS = active.startedAtMs ? Math.round((Date.now() - active.startedAtMs) / 1000) : -1;
     clog.warn(`[run] drain deadline reached — cancelling active run sessionId=${sessionId} agent=${active.agentSlug ?? "unknown"} user=${active.userId} ageS=${ageS} reason=${reason}`);
     clog.warn(`[metric] name=inflight_killed kind=count value=1 cause=drain_deadline agent=${active.agentSlug ?? "unknown"} session=${sessionId}`);
+    active.drainCancelled = true;
     active.abortController.abort();
     cancelled++;
   }
@@ -4186,6 +4193,11 @@ async function processTask(
         `Session failed: ${err instanceof Error ? err.message : String(err)}`,
       );
 
+      // Drain kills are infra events, not agent failures — mark them so
+      // claw-auth's result handler skips the user-facing error notice (the
+      // recovery worker refires the run; see ActiveRunControl.drainCancelled).
+      const drainKilled = activeRuns.get(sessionId)?.drainCancelled === true;
+      const rawError = err instanceof Error ? err.message : "Internal error";
       await sendCallback(callbackUrl, sessionToken, {
         sessionId,
         userId,
@@ -4193,7 +4205,7 @@ async function processTask(
         agentSlug: agentSlug ?? null,
         fastMode: fastModeForCallback,
         status: "failed",
-        error: err instanceof Error ? err.message : "Internal error",
+        error: drainKilled ? `SHUTDOWN_DRAIN: ${rawError}` : rawError,
         provider: callbackProvider,
         model: callbackModel,
       });
