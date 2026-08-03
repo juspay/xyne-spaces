@@ -2,6 +2,7 @@ import { BaseSideEffectHandler } from '../base-handler';
 import { ActivityClassification } from '@xyne/shared';
 import type { SideEffectJobConfig, TicketPreviousValue } from '../types';
 import { db } from '@/database/client';
+import { elevateToServiceActor } from '@/database/tenant/context';
 import { buildKanbanCountsSnapshot } from '@/services/tickets/kanbanCountsSnapshotService';
 import { activityService } from '@/services/activity/activityService';
 import { notificationService } from '@/services/notificationService';
@@ -216,13 +217,16 @@ export class TicketsSideEffectHandler extends BaseSideEffectHandler {
     let subscribedParticipants: string[] = [];
     if (ticket.conversationId) {
       try {
-        const participants = await db.conversationParticipant.findMany({
-          where: {
-            conversationId: ticket.conversationId,
-            isSubscribed: true,
-          },
-          select: { userId: true },
-        });
+        // Fans out to every subscriber, so it runs above the caller's own scope.
+        const participants = await elevateToServiceActor(() =>
+          db.conversationParticipant.findMany({
+            where: {
+              conversationId: ticket.conversationId,
+              isSubscribed: true,
+            },
+            select: { userId: true },
+          }),
+        );
         subscribedParticipants = participants.map(p => p.userId);
       } catch (error) {
         logger.warn(`[TicketsSideEffectHandler] Failed to fetch conversation participants for ticket ${ticketId}:`, error);

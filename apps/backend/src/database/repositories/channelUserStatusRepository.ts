@@ -1,6 +1,7 @@
 import { ChannelUserStatus, PrismaClient } from '@prisma/client';
 import { BaseRepository } from './base';
 import { QueryOptions } from '@/types/database';
+import { elevateToServiceActor } from '@/database/tenant/context';
 
 type TransactionClient = Parameters<Parameters<PrismaClient['$transaction']>[0]>[0];
 
@@ -257,16 +258,19 @@ export class ChannelUserStatusRepository extends BaseRepository<ChannelUserStatu
    * Used when new messages are sent to DMs
    */
   async reopenForAllParticipants(channelId: string): Promise<void> {
-    await this.db.channelUserStatus.updateMany({
-      where: {
-        channelId,
-        isClosed: true,
-      },
-      data: {
-        isClosed: false,
-        updatedAt: new Date(),
-      },
-    });
+    // Keyed on the channel: every participant's row is reopened, not just the sender's.
+    await elevateToServiceActor(() =>
+      this.db.channelUserStatus.updateMany({
+        where: {
+          channelId,
+          isClosed: true,
+        },
+        data: {
+          isClosed: false,
+          updatedAt: new Date(),
+        },
+      }),
+    );
   }
 
   /**

@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { TicketReferenceRelation } from '@xyne/shared';
 import { ApiResponse } from '@/types/express';
 import { DatabaseClient } from '@/database/client';
+import { elevateToServiceActor } from '@/database/tenant/context';
 import { logger as baseLogger } from '@/utils/logger';
 import { vespaService } from '@/services/vespaSearch';
 import { transformVespaResults } from '@/services/vespaSearch/resultTransform';
@@ -351,18 +352,22 @@ export class TicketDuplicateBackfillController {
                 logger.error(`Failed to update due date for ticket ${ticket.id}:`, error);
               }
 
-              const result = await prisma.ticketReferenceMapping.createMany({
-                data: [
-                  {
-                    sourceTicketId: ticket.id,
-                    targetTicketId: duplicateCandidate.id,
-                    relationType: TicketReferenceRelation.DUPLICATE_POSSIBLE,
-                    createdBy: ticket.createdBy,
-                    workspaceId: ticket.workspaceId,
-                  },
-                ],
-                skipDuplicates: true,
-              });
+              // Sweep write: the reference is attributed to the ticket's own creator, so it
+              // runs above the operator's own row scope.
+              const result = await elevateToServiceActor(() =>
+                prisma.ticketReferenceMapping.createMany({
+                  data: [
+                    {
+                      sourceTicketId: ticket.id,
+                      targetTicketId: duplicateCandidate.id,
+                      relationType: TicketReferenceRelation.DUPLICATE_POSSIBLE,
+                      createdBy: ticket.createdBy,
+                      workspaceId: ticket.workspaceId,
+                    },
+                  ],
+                  skipDuplicates: true,
+                }),
+              );
               stats.referencesCreated += result.count;
             }
           } catch (error) {

@@ -698,28 +698,31 @@ export class EmailService {
 
   private async setAutoDraftGenerating(conversationId: string, channelId: string): Promise<void> {
     try {
-      const existingSeed = await this.prisma.emailDraft.findFirst({
-        where: { conversationId, userId: null },
-        select: { id: true },
+      // The seed row has no owner, so it runs above the caller's own scope.
+      await elevateToServiceActor(async () => {
+        const existingSeed = await this.prisma.emailDraft.findFirst({
+          where: { conversationId, userId: null },
+          select: { id: true },
+        });
+        if (existingSeed) {
+          await this.prisma.emailDraft.update({
+            where: { id: existingSeed.id },
+            data: { autoDraftStatus: 'GENERATING', updatedAt: new Date() },
+          });
+        } else {
+          const workspaceId = await this.channelRepository.getWorkspaceId(channelId);
+          await this.prisma.emailDraft.create({
+            data: {
+              conversationId,
+              channelId,
+              workspaceId,
+              userId: null,
+              draftContent: '',
+              autoDraftStatus: 'GENERATING',
+            },
+          });
+        }
       });
-      if (existingSeed) {
-        await this.prisma.emailDraft.update({
-          where: { id: existingSeed.id },
-          data: { autoDraftStatus: 'GENERATING', updatedAt: new Date() },
-        });
-      } else {
-        const workspaceId = await this.channelRepository.getWorkspaceId(channelId);
-        await this.prisma.emailDraft.create({
-          data: {
-            conversationId,
-            channelId,
-            workspaceId,
-            userId: null,
-            draftContent: '',
-            autoDraftStatus: 'GENERATING',
-          },
-        });
-      }
     } catch (error) {
       logger.warn('[AutoDraft] failed to mark GENERATING', {
         mode: 'autodraft',
@@ -731,19 +734,22 @@ export class EmailService {
 
   async clearAutoDraftGenerating(conversationId: string): Promise<void> {
     try {
-      const seed = await this.prisma.emailDraft.findFirst({
-        where: { conversationId, userId: null, autoDraftStatus: 'GENERATING' },
-        select: { id: true, draftContent: true },
-      });
-      if (!seed) return;
-      if (!seed.draftContent || !seed.draftContent.trim()) {
-        await this.prisma.emailDraft.delete({ where: { id: seed.id } });
-      } else {
-        await this.prisma.emailDraft.update({
-          where: { id: seed.id },
-          data: { autoDraftStatus: 'READY' },
+      // The seed row is ownerless, so it is resolved above the caller's own scope.
+      await elevateToServiceActor(async () => {
+        const seed = await this.prisma.emailDraft.findFirst({
+          where: { conversationId, userId: null, autoDraftStatus: 'GENERATING' },
+          select: { id: true, draftContent: true },
         });
-      }
+        if (!seed) return;
+        if (!seed.draftContent || !seed.draftContent.trim()) {
+          await this.prisma.emailDraft.delete({ where: { id: seed.id } });
+        } else {
+          await this.prisma.emailDraft.update({
+            where: { id: seed.id },
+            data: { autoDraftStatus: 'READY' },
+          });
+        }
+      });
     } catch (error) {
       logger.warn('[AutoDraft] failed to clear GENERATING', {
         mode: 'autodraft',

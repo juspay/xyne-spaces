@@ -19,6 +19,7 @@ import { AttachmentConversionService } from '@/services/externalAttachmentServic
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { EmailRepository } from '@/database/repositories/emailRepository';
 import { db } from '@/database/client';
+import { elevateToServiceActor } from '@/database/tenant/context';
 import { emailMatchesDl } from '@/services/dlResolver';
 import { normalizeRfcMessageId, normalizeRfcMessageIds } from '@/utils/emailRfcMessageId';
 
@@ -143,16 +144,19 @@ export class MicrosoftRefetch extends BaseRefetch {
       const normalizedInternetMsgIds = normalizeRfcMessageIds(allInternetMsgIds);
 
       if (allInternetMsgIds.length > 0) {
-        const existingInChannel = await db.email.findMany({
-          where: {
-            channelId: ingestChannelId,
-            OR: [
-              ...(normalizedInternetMsgIds.length > 0 ? [{ rfcMessageId: { in: normalizedInternetMsgIds } }] : []),
-              { externalMessageId: { in: allInternetMsgIds } },
-            ],
-          },
-          select: { externalMessageId: true, rfcMessageId: true, externalThreadId: true },
-        });
+        // Dedupe has to see every already-ingested message, so it runs above the caller's own scope.
+        const existingInChannel = await elevateToServiceActor(() =>
+          db.email.findMany({
+            where: {
+              channelId: ingestChannelId,
+              OR: [
+                ...(normalizedInternetMsgIds.length > 0 ? [{ rfcMessageId: { in: normalizedInternetMsgIds } }] : []),
+                { externalMessageId: { in: allInternetMsgIds } },
+              ],
+            },
+            select: { externalMessageId: true, rfcMessageId: true, externalThreadId: true },
+          }),
+        );
         if (existingInChannel.length > 0) {
           // Map: internetMessageId → channel's externalThreadId
           const msgIdToChannelThreadId = new Map<string, string>();
