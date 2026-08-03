@@ -9,6 +9,7 @@ import { ProjectType, Status } from '@prisma/client';
 import { invitationService } from '@/services/invitationService';
 import { redisService } from '@/services/redisService';
 import { DatabaseClient } from '@/database/client';
+import { elevateToServiceActor } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
@@ -464,10 +465,13 @@ export class InvitationController {
       await organizationDomainService.assertCanCreateOrgForEmail(normalizedOwnerEmail);
 
       // Reject if the owner email is already an active member of any org
-      const existingMembership = await prisma.orgMember.findFirst({
-        where: { email: normalizedOwnerEmail, leftAt: null },
-        select: { orgId: true },
-      });
+      // Checks membership of ANY org, not just the caller's.
+      const existingMembership = await elevateToServiceActor(() =>
+        prisma.orgMember.findFirst({
+          where: { email: normalizedOwnerEmail, leftAt: null },
+          select: { orgId: true },
+        }),
+      );
       if (existingMembership) {
         res.status(409).json({
           error: `${ownerEmail.trim()} is already a member of an organisation`,
@@ -568,9 +572,9 @@ export class InvitationController {
         });
 
         // 2. Delete org member
-        await prisma.orgMember.delete({ 
-          where: { email: normalizedOwnerEmail } 
-        });
+        await elevateToServiceActor(() =>
+          prisma.orgMember.delete({ where: { email: normalizedOwnerEmail } }),
+        );
         
         // 3. Delete workspace-organization link
         await prisma.workspaceOrganization.delete({ 

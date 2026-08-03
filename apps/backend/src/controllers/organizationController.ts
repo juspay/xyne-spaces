@@ -3,6 +3,7 @@ import { OrganizationRepository, CreateOrganizationInput } from '../database/rep
 import { UserRepository } from '../database/repositories/users';
 import { OrgRole, ProjectType } from '@prisma/client';
 import { DatabaseClient } from '../database/client';
+import { elevateToServiceActor } from '../database/tenant/context';
 import { logger } from '@/utils/logger';
 import { invitationService } from '@/services/invitationService';
 import { WorkspaceJoinPolicy, WorkspaceType } from '@xyne/shared';
@@ -206,14 +207,17 @@ export class OrganizationController {
       });
 
       // 5. Add ownerEmail as org OWNER (email-only, no user account yet)
-      await db.orgMember.create({
-        data: {
-          orgId: organization.orgId,
-          email: ownerEmail.trim().toLowerCase(),
-          role: OrgRole.OWNER,
-          invitedBy: userId,
-        },
-      });
+      // Provisioning writes the owner row for the newly created org, not the caller's own.
+      await elevateToServiceActor(() =>
+        db.orgMember.create({
+          data: {
+            orgId: organization.orgId,
+            email: ownerEmail.trim().toLowerCase(),
+            role: OrgRole.OWNER,
+            invitedBy: userId,
+          },
+        }),
+      );
 
       await organizationDomainService.createDomainMappingForOrg({
         orgId: organization.orgId,
