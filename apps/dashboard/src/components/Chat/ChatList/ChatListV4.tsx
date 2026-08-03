@@ -32,6 +32,8 @@ import { mutators } from '../../../zero/mutators';
 import { queryCacheActor, flushQueryCachePersistence } from '../../../machines/queryCacheMachine';
 import { browserPanelActor } from '../../../machines/browserPanelMachine';
 import LoadingAnimation from '../Loader/Loader';
+import { toast } from 'sonner';
+import { Event, logger } from '../../../utils/logger';
 import { getDraft } from '../../../hooks/useDraft';
 import { v4 as uuidv4 } from 'uuid';
 import { withProfiler } from '../../../utils/withProfiler';
@@ -312,6 +314,14 @@ const ChatListV4: React.FC<ChatListProps> = ({
   }, [conversations]);
 
   const [isInitialLoadComplete, setIsInitialLoadComplete] = useState(false);
+  const [initialLoadError, setInitialLoadError] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const handleRetryInitialLoad = useCallback(() => {
+    setInitialLoadError(false);
+    setIsInitialLoadComplete(false);
+    lifecycleRef.current.initialLoadComplete = false;
+    setLoadAttempt(attempt => attempt + 1);
+  }, []);
   const isFetchingRef = useRef(false);
   const isFetchingOlderRef = useRef(false);
   // Set true when Zero returns older.length=0 (no items exist before the anchor).
@@ -488,11 +498,33 @@ const ChatListV4: React.FC<ChatListProps> = ({
 
         // No firstItemIndex — anchorTo: 'end' handles prepend scroll stability natively.
         setConversationsState(merged);
+        setInitialLoadError(false);
         setIsInitialLoadComplete(true);
         lifecycleRef.current.initialLoadComplete = true;
       })
-      .catch(() => {});
-  }, []);
+      .catch((error: unknown) => {
+        // A rejected run({ type: 'complete' }) (e.g. the server-side Zero
+        // "Bound should be set" pipeline crash) must NOT leave the list stuck on
+        // the loading gate forever. Log it, release the gate, and surface an
+        // error/retry state when there is nothing cached to show. Retry re-runs
+        // this imperative load via the loadAttempt dependency.
+        logger.error(Event.ZERO_RUN_ERROR, {
+          error,
+          source: 'ChatListV4: getChannelConversations',
+          channelId,
+          message: 'Initial channel conversations load failed',
+        });
+        if (conversationsRef.current.length === 0) {
+          setInitialLoadError(true);
+          toast.error('Couldn\u2019t load conversations', {
+            description: 'Something went wrong while loading this channel. Please retry.',
+          });
+        }
+        setIsInitialLoadComplete(true);
+        lifecycleRef.current.initialLoadComplete = true;
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadAttempt]);
 
   // ── Initial load (cutoff path) ────────────────────────────────────────────────
   useEffect(() => {
@@ -1283,6 +1315,25 @@ const ChatListV4: React.FC<ChatListProps> = ({
   }, [handleLatestMessagesScroll, virtualizer]);
 
   // ── Empty / loading states ─────────────────────────────────────────────────────
+  if (initialLoadError && conversations.length === 0)
+    return (
+      <div
+        className='text-center text-muted-foreground flex-1 flex flex-col items-center justify-center gap-3'
+        data-testid='chat-list-error'
+      >
+        <p className='text-muted-foreground'>Couldn&rsquo;t load conversations</p>
+        <button
+          type='button'
+          onClick={handleRetryInitialLoad}
+          data-track-category='CHAT_LIST'
+          data-track-name='Retry_Initial_Conversations_Load'
+          className='rounded-md border border-border px-3 py-1.5 text-sm text-foreground hover:bg-muted transition-colors'
+        >
+          Retry
+        </button>
+      </div>
+    );
+
   if (conversations.length === 0 && isInitialLoadComplete)
     return (
       <div className='text-center text-muted-foreground flex-1 flex items-center justify-center'>
