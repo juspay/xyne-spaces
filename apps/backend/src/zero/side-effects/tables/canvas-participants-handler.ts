@@ -2,7 +2,6 @@ import { BaseSideEffectHandler } from '../base-handler';
 import type { SideEffectJobConfig } from '../types';
 import type { CanvasParticipantPreviousValue } from '../types';
 import { db } from '@/database/client';
-import { withWorkspaceScope } from '@/database/tenant/context';
 import { notificationService } from '@/services/notificationService';
 import { activityService } from '@/services/activity/activityService';
 import { ActivityClassification } from '@prisma/client';
@@ -19,13 +18,10 @@ export class CanvasParticipantsSideEffectHandler extends BaseSideEffectHandler {
 
     if (participant.userGroupId) {
       const userGroupId = participant.userGroupId;
-      // Expands the group into its members, so it runs above the caller's own scope.
-      const mappings = await withWorkspaceScope(() =>
-        db.userGroupMapping.findMany({
-          where: { userGroupId },
-          select: { userId: true },
-        }),
-      );
+      const mappings = await db.userGroupMapping.findMany({
+        where: { userGroupId },
+        select: { userId: true },
+      });
       return Array.from(new Set(mappings.map(m => m.userId).filter(Boolean)));
     }
 
