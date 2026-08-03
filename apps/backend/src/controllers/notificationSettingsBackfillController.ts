@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { db } from '@/database/client';
+import { elevateToServiceActor } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import { ApiResponse } from '@/types/express';
 
@@ -47,73 +48,75 @@ export class NotificationSettingsBackfillController {
   }
 
   private static async runBackfill(options: BackfillOptions): Promise<BackfillSummary> {
-    const summary: BackfillSummary = { processed: 0, updated: 0, skipped: 0, errors: 0 };
-    let cursor: string | null = null;
+    return await elevateToServiceActor(async () => {
+      const summary: BackfillSummary = { processed: 0, updated: 0, skipped: 0, errors: 0 };
+      let cursor: string | null = null;
 
-    while (true) {
-      const rows: ChannelUserStatusRow[] = await db.channelUserStatus.findMany({
-        where: {
-          isDeleted: false,
-          OR: [
-            { desktopNotificationLevel: { in: ['ALL', 'THREADS_ONLY'] } },
-            { mobileNotificationLevel: { in: ['ALL', 'THREADS_ONLY'] } },
-          ],
-        },
-        select: {
-          id: true,
-          desktopNotificationLevel: true,
-          mobileNotificationLevel: true,
-        },
-        orderBy: { id: 'asc' },
-        take: options.batchSize,
-        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-      });
+      while (true) {
+        const rows: ChannelUserStatusRow[] = await db.channelUserStatus.findMany({
+          where: {
+            isDeleted: false,
+            OR: [
+              { desktopNotificationLevel: { in: ['ALL', 'THREADS_ONLY'] } },
+              { mobileNotificationLevel: { in: ['ALL', 'THREADS_ONLY'] } },
+            ],
+          },
+          select: {
+            id: true,
+            desktopNotificationLevel: true,
+            mobileNotificationLevel: true,
+          },
+          orderBy: { id: 'asc' },
+          take: options.batchSize,
+          ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+        });
 
-      if (rows.length === 0) break;
+        if (rows.length === 0) break;
 
-      for (const row of rows) {
-        summary.processed += 1;
+        for (const row of rows) {
+          summary.processed += 1;
 
-        const hasTargetDesktop = row.desktopNotificationLevel === 'ALL' || row.desktopNotificationLevel === 'THREADS_ONLY';
-        const hasTargetMobile = row.mobileNotificationLevel === 'ALL' || row.mobileNotificationLevel === 'THREADS_ONLY';
+          const hasTargetDesktop = row.desktopNotificationLevel === 'ALL' || row.desktopNotificationLevel === 'THREADS_ONLY';
+          const hasTargetMobile = row.mobileNotificationLevel === 'ALL' || row.mobileNotificationLevel === 'THREADS_ONLY';
 
-        if (!hasTargetDesktop && !hasTargetMobile) {
-          summary.skipped += 1;
-          continue;
-        }
-
-        try {
-          if (!options.dryRun) {
-            await db.channelUserStatus.update({
-              where: { id: row.id },
-              data: {
-                ...(hasTargetDesktop && { desktopNotificationLevel: null }),
-                ...(hasTargetMobile && { mobileNotificationLevel: null }),
-              },
-            });
+          if (!hasTargetDesktop && !hasTargetMobile) {
+            summary.skipped += 1;
+            continue;
           }
 
-          summary.updated += 1;
-        } catch (error) {
-          summary.errors += 1;
-          logger.warn('[NotificationSettingsBackfill] Failed to update row', {
-            rowId: row.id,
-            error: error instanceof Error ? error.message : String(error),
-          });
+          try {
+            if (!options.dryRun) {
+              await db.channelUserStatus.update({
+                where: { id: row.id },
+                data: {
+                  ...(hasTargetDesktop && { desktopNotificationLevel: null }),
+                  ...(hasTargetMobile && { mobileNotificationLevel: null }),
+                },
+              });
+            }
+
+            summary.updated += 1;
+          } catch (error) {
+            summary.errors += 1;
+            logger.warn('[NotificationSettingsBackfill] Failed to update row', {
+              rowId: row.id,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
+
+        cursor = rows[rows.length - 1]?.id ?? null;
+        logger.info(
+          `[NotificationSettingsBackfill] Batch complete — processed: ${summary.processed}, updated: ${summary.updated}, errors: ${summary.errors}`
+        );
+
+        if (options.delayMs > 0) {
+          await this.sleep(options.delayMs);
         }
       }
 
-      cursor = rows[rows.length - 1]?.id ?? null;
-      logger.info(
-        `[NotificationSettingsBackfill] Batch complete — processed: ${summary.processed}, updated: ${summary.updated}, errors: ${summary.errors}`
-      );
-
-      if (options.delayMs > 0) {
-        await this.sleep(options.delayMs);
-      }
-    }
-
-    return summary;
+      return summary;
+    });
   }
 
   static async triggerBackfill(req: Request, res: Response<ApiResponse>) {

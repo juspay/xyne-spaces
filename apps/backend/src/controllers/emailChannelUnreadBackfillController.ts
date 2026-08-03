@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { db } from '@/database/client';
+import { elevateToServiceActor } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import { ApiResponse } from '@/types/express';
 
@@ -86,142 +87,144 @@ export class EmailChannelUnreadBackfillController {
   }
 
   private static async runBackfill(options: BackfillOptions): Promise<void> {
-    const summary: BackfillSummary = { processed: 0, updated: 0, skipped: 0, errors: 0 };
-    const startTime = Date.now();
+    await elevateToServiceActor(async () => {
+      const summary: BackfillSummary = { processed: 0, updated: 0, skipped: 0, errors: 0 };
+      const startTime = Date.now();
 
-    logger.info('[EmailChannelUnreadBackfill] Starting', options);
+      logger.info('[EmailChannelUnreadBackfill] Starting', options);
 
-    let channelsSeen = 0;
-    let channelCursor: string | null = null;
-    while (true) {
-      const channels: Array<{ id: string }> = await db.channel.findMany({
-        where: { type: 'EMAIL' },
-        select: { id: true },
-        orderBy: { id: 'asc' },
-        take: options.batchSize,
-        ...(channelCursor ? { cursor: { id: channelCursor }, skip: 1 } : {}),
-      });
-      if (channels.length === 0) break;
+      let channelsSeen = 0;
+      let channelCursor: string | null = null;
+      while (true) {
+        const channels: Array<{ id: string }> = await db.channel.findMany({
+          where: { type: 'EMAIL' },
+          select: { id: true },
+          orderBy: { id: 'asc' },
+          take: options.batchSize,
+          ...(channelCursor ? { cursor: { id: channelCursor }, skip: 1 } : {}),
+        });
+        if (channels.length === 0) break;
 
-      logger.info('[EmailChannelUnreadBackfill] Channel page fetched', {
-        count: channels.length,
-        firstId: channels[0]?.id,
-        lastId: channels[channels.length - 1]?.id,
-      });
-
-      for (const channel of channels) {
-        channelsSeen += 1;
-        let channelTickets: ChannelTickets;
-        try {
-          channelTickets = await EmailChannelUnreadBackfillController.loadChannelTickets(
-            channel.id,
-          );
-        } catch (error) {
-          logger.warn('[EmailChannelUnreadBackfill] Failed to load channel tickets', {
-            channelId: channel.id,
-            error: error instanceof Error ? error.message : String(error),
-          });
-          continue;
-        }
-        logger.info('[EmailChannelUnreadBackfill] Channel loaded', {
-          channelsSeen,
-          channelId: channel.id,
-          totalTickets: channelTickets.totalTickets,
+        logger.info('[EmailChannelUnreadBackfill] Channel page fetched', {
+          count: channels.length,
+          firstId: channels[0]?.id,
+          lastId: channels[channels.length - 1]?.id,
         });
 
-        let participantCursor: string | null = null;
-        let participantBatchNum = 0;
-        while (true) {
-          const participants: Array<{ id: string; userId: string; unreadCount: number }> =
-            await db.channelUserStatus.findMany({
-              where: { channelId: channel.id, isDeleted: false },
-              select: { id: true, userId: true, unreadCount: true },
-              orderBy: { id: 'asc' },
-              take: options.batchSize,
-              ...(participantCursor ? { cursor: { id: participantCursor }, skip: 1 } : {}),
+        for (const channel of channels) {
+          channelsSeen += 1;
+          let channelTickets: ChannelTickets;
+          try {
+            channelTickets = await EmailChannelUnreadBackfillController.loadChannelTickets(
+              channel.id,
+            );
+          } catch (error) {
+            logger.warn('[EmailChannelUnreadBackfill] Failed to load channel tickets', {
+              channelId: channel.id,
+              error: error instanceof Error ? error.message : String(error),
             });
-          if (participants.length === 0) break;
-          participantBatchNum += 1;
-          logger.info('[EmailChannelUnreadBackfill] Participant batch', {
+            continue;
+          }
+          logger.info('[EmailChannelUnreadBackfill] Channel loaded', {
+            channelsSeen,
             channelId: channel.id,
-            batchNum: participantBatchNum,
-            batchSize: participants.length,
+            totalTickets: channelTickets.totalTickets,
           });
 
-          const reads =
-            channelTickets.ticketIds.length === 0
-              ? []
-              : await db.emailRead.findMany({
-                  where: {
-                    userId: { in: participants.map(p => p.userId) },
-                    ticketId: { in: channelTickets.ticketIds },
-                  },
-                  select: { userId: true, ticketId: true, lastReadEmailId: true },
-                });
-
-          const readsByUser = new Map<
-            string,
-            Array<{ ticketId: string; lastReadEmailId: string }>
-          >();
-          for (const r of reads) {
-            const bucket = readsByUser.get(r.userId);
-            if (bucket) bucket.push({ ticketId: r.ticketId, lastReadEmailId: r.lastReadEmailId });
-            else
-              readsByUser.set(r.userId, [
-                { ticketId: r.ticketId, lastReadEmailId: r.lastReadEmailId },
-              ]);
-          }
-
-          for (const p of participants) {
-            summary.processed += 1;
-            try {
-              const trueCount = EmailChannelUnreadBackfillController.computeUnreadForUser(
-                channelTickets,
-                readsByUser.get(p.userId) ?? [],
-              );
-              if (trueCount === p.unreadCount) {
-                summary.skipped += 1;
-                continue;
-              }
-              await db.channelUserStatus.update({
-                where: { id: p.id },
-                data: { unreadCount: trueCount, updatedAt: new Date() },
+          let participantCursor: string | null = null;
+          let participantBatchNum = 0;
+          while (true) {
+            const participants: Array<{ id: string; userId: string; unreadCount: number }> =
+              await db.channelUserStatus.findMany({
+                where: { channelId: channel.id, isDeleted: false },
+                select: { id: true, userId: true, unreadCount: true },
+                orderBy: { id: 'asc' },
+                take: options.batchSize,
+                ...(participantCursor ? { cursor: { id: participantCursor }, skip: 1 } : {}),
               });
-              summary.updated += 1;
-            } catch (error) {
-              summary.errors += 1;
-              logger.warn('[EmailChannelUnreadBackfill] Row update failed', {
-                id: p.id,
-                channelId: channel.id,
-                userId: p.userId,
-                error: error instanceof Error ? error.message : String(error),
-              });
+            if (participants.length === 0) break;
+            participantBatchNum += 1;
+            logger.info('[EmailChannelUnreadBackfill] Participant batch', {
+              channelId: channel.id,
+              batchNum: participantBatchNum,
+              batchSize: participants.length,
+            });
+
+            const reads =
+              channelTickets.ticketIds.length === 0
+                ? []
+                : await db.emailRead.findMany({
+                    where: {
+                      userId: { in: participants.map(p => p.userId) },
+                      ticketId: { in: channelTickets.ticketIds },
+                    },
+                    select: { userId: true, ticketId: true, lastReadEmailId: true },
+                  });
+
+            const readsByUser = new Map<
+              string,
+              Array<{ ticketId: string; lastReadEmailId: string }>
+            >();
+            for (const r of reads) {
+              const bucket = readsByUser.get(r.userId);
+              if (bucket) bucket.push({ ticketId: r.ticketId, lastReadEmailId: r.lastReadEmailId });
+              else
+                readsByUser.set(r.userId, [
+                  { ticketId: r.ticketId, lastReadEmailId: r.lastReadEmailId },
+                ]);
             }
-          }
 
-          logger.info('[EmailChannelUnreadBackfill] Participant batch done', {
-            channelId: channel.id,
-            batchNum: participantBatchNum,
-            totalProcessed: summary.processed,
-            totalUpdated: summary.updated,
-            totalSkipped: summary.skipped,
-            totalErrors: summary.errors,
-          });
-          participantCursor = participants[participants.length - 1]?.id ?? null;
-          logger.info('[EmailChannelUnreadBackfill] Sleeping before next participant batch', {
-            sleepMs: SLEEP_BETWEEN_BATCHES_MS,
-          });
-          await EmailChannelUnreadBackfillController.sleep(SLEEP_BETWEEN_BATCHES_MS);
+            for (const p of participants) {
+              summary.processed += 1;
+              try {
+                const trueCount = EmailChannelUnreadBackfillController.computeUnreadForUser(
+                  channelTickets,
+                  readsByUser.get(p.userId) ?? [],
+                );
+                if (trueCount === p.unreadCount) {
+                  summary.skipped += 1;
+                  continue;
+                }
+                await db.channelUserStatus.update({
+                  where: { id: p.id },
+                  data: { unreadCount: trueCount, updatedAt: new Date() },
+                });
+                summary.updated += 1;
+              } catch (error) {
+                summary.errors += 1;
+                logger.warn('[EmailChannelUnreadBackfill] Row update failed', {
+                  id: p.id,
+                  channelId: channel.id,
+                  userId: p.userId,
+                  error: error instanceof Error ? error.message : String(error),
+                });
+              }
+            }
+
+            logger.info('[EmailChannelUnreadBackfill] Participant batch done', {
+              channelId: channel.id,
+              batchNum: participantBatchNum,
+              totalProcessed: summary.processed,
+              totalUpdated: summary.updated,
+              totalSkipped: summary.skipped,
+              totalErrors: summary.errors,
+            });
+            participantCursor = participants[participants.length - 1]?.id ?? null;
+            logger.info('[EmailChannelUnreadBackfill] Sleeping before next participant batch', {
+              sleepMs: SLEEP_BETWEEN_BATCHES_MS,
+            });
+            await EmailChannelUnreadBackfillController.sleep(SLEEP_BETWEEN_BATCHES_MS);
+          }
         }
+
+        channelCursor = channels[channels.length - 1]?.id ?? null;
       }
 
-      channelCursor = channels[channels.length - 1]?.id ?? null;
-    }
-
-    logger.info('[EmailChannelUnreadBackfill] Done', {
-      ...summary,
-      channelsSeen,
-      durationMs: Date.now() - startTime,
+      logger.info('[EmailChannelUnreadBackfill] Done', {
+        ...summary,
+        channelsSeen,
+        durationMs: Date.now() - startTime,
+      });
     });
   }
 
