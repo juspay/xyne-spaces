@@ -7,13 +7,15 @@ import { logger } from '@/utils/logger';
  * @param channelId - Channel ID (optional)
  * @param conversationId - Conversation ID (optional)
  * @param channelName - Channel name (optional)
+ * @param workspaceId - Workspace ID (required when resolving by channelName)
  * @returns Resolved channel ID
  * @throws Error if no identifier is provided, or if the resource is not found
  */
 export async function resolveChannelId(
   channelId: string | undefined,
   conversationId: string | undefined,
-  channelName?: string | undefined
+  channelName?: string | undefined,
+  workspaceId?: string | undefined
 ): Promise<string> {
   if (channelId) {
     return channelId;
@@ -21,7 +23,10 @@ export async function resolveChannelId(
 
   if (channelName) {
     logger.info(`[CHANNEL-UTILS] Resolving channelId from channelName: ${channelName}`);
-    const channel = await repositories.channels.findByName(channelName);
+    if (!workspaceId) {
+      throw new Error('workspaceId is required to resolve a channel by name');
+    }
+    const channel = await repositories.channels.findByName(channelName, workspaceId);
     if (!channel) {
       logger.warn(`[CHANNEL-UTILS] Channel not found by name: ${channelName}`);
       throw new Error('Channel not found');

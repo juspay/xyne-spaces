@@ -31,13 +31,18 @@ async function resolveAndValidateChannel(
   channelName: string | undefined,
   conversationId: string | undefined,
   userId: string,
+  workspaceId: string | undefined,
   res: Response
 ): Promise<string | null> {
   let resolvedChannelId = channelId;
 
   // Resolve channelId from channelName if not provided
   if (!resolvedChannelId && channelName) {
-    const channel = await repositories.channels.findByName(channelName);
+    if (!workspaceId) {
+      sendError(res, 401, 'Unauthorized', 'Workspace not found');
+      return null;
+    }
+    const channel = await repositories.channels.findByName(channelName, workspaceId);
     if (!channel) {
       logger.warn(`[CHANNEL-VALIDATION] Channel with name "${channelName}" not found`);
       sendError(res, 404, 'Not Found', 'Channel not found');
@@ -159,6 +164,7 @@ export async function validateChannelAccessForGet(
     const channelName = req.query.channelName as string | undefined;
     const conversationId = req.query.conversationId as string | undefined;
     const userId = req.user?.id;
+    const workspaceId = req.user?.workspaceId;
 
     const validationResult = ChannelValidationSchema.safeParse({
       channelId,
@@ -178,6 +184,7 @@ export async function validateChannelAccessForGet(
       validated.channelName,
       validated.conversationId,
       validated.userId,
+      workspaceId,
       res
     );
 
@@ -207,6 +214,7 @@ export async function validateChannelAccessForPost(
     const channelName = req.body.channelName;
     const conversationId = req.body.conversationId;
     const userId = req.user?.id;
+    const workspaceId = req.user?.workspaceId;
 
     const validationResult = ChannelValidationSchema.safeParse({
       channelId,
@@ -226,6 +234,7 @@ export async function validateChannelAccessForPost(
       validated.channelName,
       validated.conversationId,
       validated.userId,
+      workspaceId,
       res
     );
 

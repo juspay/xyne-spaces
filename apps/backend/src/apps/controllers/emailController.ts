@@ -32,7 +32,7 @@ export class EmailController {
 
       const { channelId, channelName, conversationId, limit, cursor } = queryResult.data;
 
-      const resolvedChannelId = await resolveChannelId(channelId, conversationId, channelName);
+      const resolvedChannelId = await resolveChannelId(channelId, conversationId, channelName, req.user?.workspaceId);
 
       const response = await getEmailReplies(resolvedChannelId, conversationId, limit, cursor);
 
