@@ -25,9 +25,15 @@ export interface TicketExportFilters {
   columnsByBoard?: Record<string, string[]>;
 }
 
-type TicketExportDownloadRequest =
-  | { exportId: string }
-  | { workspaceId: string; filters: TicketExportFilters };
+export interface TicketExportRecord {
+  id: string;
+  workspaceId: string;
+  requestedBy: string;
+  status: TicketExportStatus;
+  filters: TicketExportFilters;
+  createdAt: string;
+  updatedAt: string;
+}
 
 function getErrorMessage(payload: unknown): string | null {
   if (!payload || typeof payload !== 'object') return null;
@@ -50,17 +56,56 @@ function getErrorMessage(payload: unknown): string | null {
 }
 
 export const ticketReportsApi = {
+  /**
+   * POST /ticket-reports/exports
+   * Request a new export — creates a PENDING record and enqueues a worker job.
+   * Returns the export record with status PENDING.
+   */
+  requestExport: async (
+    workspaceId: string,
+    filters: TicketExportFilters,
+  ): Promise<TicketExportRecord> => {
+    try {
+      const res = await apiInstance.post('/ticket-reports/exports', { workspaceId, filters });
+      return res.data.data as TicketExportRecord;
+    } catch (error) {
+      const data = (error as { response?: { data?: unknown } })?.response?.data;
+      const message = getErrorMessage(data);
+      if (message) throw new Error(message);
+      throw error;
+    }
+  },
+
+  /**
+   * GET /ticket-reports/exports/:id
+   * Get the current status of an export (for polling).
+   */
+  getExport: async (exportId: string): Promise<TicketExportRecord> => {
+    try {
+      const res = await apiInstance.get(`/ticket-reports/exports/${exportId}`);
+      return res.data.data as TicketExportRecord;
+    } catch (error) {
+      const data = (error as { response?: { data?: unknown } })?.response?.data;
+      const message = getErrorMessage(data);
+      if (message) throw new Error(message);
+      throw error;
+    }
+  },
+
+  /**
+   * GET /ticket-reports/exports/:id/download
+   * Download the XLSX file for a READY export. Returns a blob.
+   */
   downloadExport: async (
-    request: TicketExportDownloadRequest,
+    exportId: string,
   ): Promise<{ blob: Blob; fileName: string }> => {
     try {
-      const res = await apiInstance.post('/ticket-reports/exports/download', request, {
+      const res = await apiInstance.get(`/ticket-reports/exports/${exportId}/download`, {
         responseType: 'blob',
       });
       const disposition = String(res.headers['content-disposition'] || '');
       const match = disposition.match(/filename="?([^"]+)"?/);
-      const fileName =
-        match?.[1] ?? `ticket-export-${'exportId' in request ? request.exportId : Date.now()}.xlsx`;
+      const fileName = match?.[1] ?? `ticket-export-${exportId}.xlsx`;
       return { blob: res.data as Blob, fileName };
     } catch (error) {
       const data = (error as { response?: { data?: unknown } })?.response?.data;

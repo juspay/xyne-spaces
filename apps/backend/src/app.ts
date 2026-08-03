@@ -158,6 +158,7 @@ import { assignmentReactivationQueue } from '@/queues/assignmentReactivationQueu
 import { ticketReassignmentQueue } from '@/queues/ticketReassignmentQueue';
 import { onCallRotationQueue } from '@/queues/onCallRotationQueue';
 import { scheduledMessageQueue } from '@/queues/scheduledMessageQueue';
+import { ticketReportQueue } from '@/queues/ticketReportQueue';
 import { conversationIngestQueue } from '@/queues/conversationIngestQueue';
 import { documentIngestQueue } from '@/queues/documentIngestQueue';
 import { teamIntelligenceQueue } from '@/team-intelligence/queue';
@@ -765,6 +766,10 @@ export class App {
           await scheduledMessageQueue.initialize();
         })(),
         (async () => {
+          logger.info('Initializing ticket report queue...');
+          await ticketReportQueue.initialize();
+        })(),
+        (async () => {
           logger.info('Initializing team intelligence queue...');
           await teamIntelligenceQueue.initialize();
         })(),
@@ -808,6 +813,9 @@ export class App {
       logger.info('Initializing scheduled message queue...');
       await scheduledMessageQueue.initialize();
 
+      logger.info('Initializing ticket report queue...');
+      await ticketReportQueue.initialize();
+
       logger.info('Initializing team intelligence queue...');
       await teamIntelligenceQueue.initialize();
 
@@ -821,6 +829,14 @@ export class App {
 
       logger.info('Initializing auto draft queue...');
       await autoDraftQueue.initialize();
+
+      // In dev mode, start the ticket report worker in-process so local
+      // development works without a separate worker process.
+      if (process.env.NODE_ENV === 'development' && process.env.ENABLE_TICKET_REPORT_WORKER !== 'false') {
+        logger.info('Starting ticket report worker (dev mode)...');
+        const { ticketReportWorker } = await import('@/workers/ticketReportWorker');
+        await ticketReportWorker.start();
+      }
     }
 
     logger.info('Initializing automations module (registries + queue producers)...');
@@ -1000,11 +1016,20 @@ export class App {
       // Close scheduled message queue
       await scheduledMessageQueue.close();
 
+      // Close ticket report queue
+      await ticketReportQueue.close();
+
       // Close email classification queue
       await emailClassificationQueue.close();
 
       // Close auto draft queue
       await autoDraftQueue.close();
+
+      // Shut down dev-mode ticket report worker if running
+      if (process.env.NODE_ENV === 'development' && process.env.ENABLE_TICKET_REPORT_WORKER !== 'false') {
+        const { ticketReportWorker } = await import('@/workers/ticketReportWorker');
+        await ticketReportWorker.shutdown();
+      }
 
       // Close tag generation pipeline queue
       await tagGenerationPipeline.close();

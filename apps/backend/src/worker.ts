@@ -31,6 +31,7 @@ import { documentIngestionWorker } from '@/workers/documentIngestionWorker';
 import { dataSourceIngestionWorker } from '@/workers/dataSourceIngestionWorker';
 import { delayedMessageWorker } from '@/workers/delayedMessageWorker';
 import { scheduledMessageWorker } from '@/workers/scheduledMessageWorker';
+import { ticketReportQueue } from '@/queues/ticketReportQueue';
 import { stageEtaDeadlineWorker } from '@/workers/stageEtaDeadlineWorker';
 import { etaDeadlineWorker } from '@/workers/etaDeadlineWorker';
 import { emailFetchWorker } from '@/workers/emailFetchWorker';
@@ -188,6 +189,9 @@ class WorkerService {
       const { scheduledMessageQueue } = await import('@/queues/scheduledMessageQueue');
       await scheduledMessageQueue.initialize();
 
+      logger.info('Initializing ticket report queue...');
+      await ticketReportQueue.initialize();
+
       // Initialize recording cleanup queue (daily cron to delete expired recordings)
       logger.info('Initializing recording cleanup queue...');
       const { recordingCleanupQueue } = await import('@/queues/recordingCleanupQueue');
@@ -207,6 +211,15 @@ class WorkerService {
         await notificationService.initialize();
         logger.info('Starting scheduled message worker...');
         await scheduledMessageWorker.start();
+      }
+
+      // Ticket report export worker — always started in the worker process
+      // (unless explicitly disabled). The queue is initialized above (producer),
+      // but the worker needs its own process consumer.
+      if (process.env.ENABLE_TICKET_REPORT_WORKER !== 'false') {
+        logger.info('Starting ticket report worker...');
+        const { ticketReportWorker } = await import('@/workers/ticketReportWorker');
+        await ticketReportWorker.start();
       }
 
       if (appConfig.enableStageEtaDeadlineWorker) {
@@ -415,6 +428,14 @@ class WorkerService {
       if (appConfig.enableScheduledMessageWorker) {
         await scheduledMessageWorker.shutdown();
       }
+
+      if (process.env.ENABLE_TICKET_REPORT_WORKER !== 'false') {
+        const { ticketReportWorker } = await import('@/workers/ticketReportWorker');
+        await ticketReportWorker.shutdown();
+      }
+
+      // Close ticket report queue
+      await ticketReportQueue.close();
 
       if (appConfig.enableStageEtaDeadlineWorker) {
         await stageEtaDeadlineWorker.shutdown();

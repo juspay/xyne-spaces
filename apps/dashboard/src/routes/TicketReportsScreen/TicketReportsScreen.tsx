@@ -314,18 +314,7 @@ const TicketReportsScreen = ({
     setRequestPending(true);
     setFormError(null);
     try {
-      const { blob, fileName } = await ticketReportsApi.downloadExport({
-        workspaceId,
-        filters: payload.filters,
-      });
-      const url = window.URL.createObjectURL(blob);
-      const anchor = document.createElement('a');
-      anchor.href = url;
-      anchor.download = fileName;
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-      window.URL.revokeObjectURL(url);
+      await ticketReportsApi.requestExport(workspaceId, payload.filters);
     } catch (error) {
       setFormError(errorMessage(error, 'Failed to request export'));
     } finally {
@@ -336,9 +325,7 @@ const TicketReportsScreen = ({
   const handleDownload = async (record: { id: string }): Promise<void> => {
     setDownloadingId(record.id);
     try {
-      const { blob, fileName } = await ticketReportsApi.downloadExport({
-        exportId: record.id,
-      });
+      const { blob, fileName } = await ticketReportsApi.downloadExport(record.id);
       const url = window.URL.createObjectURL(blob);
       const anchor = document.createElement('a');
       anchor.href = url;
@@ -725,13 +712,13 @@ const TicketReportsScreen = ({
                 disabled={requestPending || (requiresProject && !projectId)}
                 loading={requestPending}
                 data-track-category='TicketReports'
-                data-track-name='GenerateExport'
+                data-track-name='RequestExport'
               >
                 <FileSpreadsheet className='size-4' />
-                Download report
+                Request report
               </Button>
               <span className='text-xs text-muted-foreground'>
-                The report is generated directly and its configuration is saved in history.
+                The report is generated in the background. Check the list below for status.
               </span>
             </div>
           </div>
@@ -742,7 +729,7 @@ const TicketReportsScreen = ({
             <div>
               <h2 className='text-sm font-semibold text-foreground'>Generated reports</h2>
               <p className='text-xs text-muted-foreground'>
-                Files are generated when you click download and are not stored.
+                Reports are generated asynchronously. Status updates in real time.
               </p>
             </div>
             <span className='text-xs text-muted-foreground'>Live updates</span>
@@ -785,8 +772,7 @@ const TicketReportsScreen = ({
                     <td className='px-4 py-3'>You</td>
                     <td className='px-4 py-3'>{formatDate(record.createdAt)}</td>
                     <td className='px-4 py-3 text-right'>
-                      {(record.status === 'READY' ||
-                        isRetryableExport(record.status, record.updatedAt)) && (
+                      {record.status === 'READY' && (
                         <button
                           type='button'
                           onClick={() => {
@@ -799,13 +785,48 @@ const TicketReportsScreen = ({
                         >
                           {downloadingId === record.id ? (
                             <Loader2 className='h-3.5 w-3.5 animate-spin' />
-                          ) : record.status !== 'READY' ? (
-                            <RotateCcw className='h-3.5 w-3.5' />
                           ) : (
                             <Download className='h-3.5 w-3.5' />
                           )}
-                          {record.status !== 'READY' ? 'Retry' : 'Download'}
+                          Download
                         </button>
+                      )}
+                      {record.status === 'FAILED' && (
+                        <button
+                          type='button'
+                          onClick={() => {
+                            void handleRequest();
+                          }}
+                          disabled={requestPending}
+                          className='inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-xs font-medium text-foreground hover:bg-accent'
+                          data-track-category='TicketReports'
+                          data-track-name='RetryExport'
+                        >
+                          <RotateCcw className='h-3.5 w-3.5' />
+                          Retry
+                        </button>
+                      )}
+                      {isRetryableExport(record.status, record.updatedAt) && record.status !== 'READY' && record.status !== 'FAILED' && (
+                        <button
+                          type='button'
+                          onClick={() => {
+                            void handleRequest();
+                          }}
+                          disabled={requestPending}
+                          className='inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-xs font-medium text-foreground hover:bg-accent'
+                          data-track-category='TicketReports'
+                          data-track-name='RetryStaleExport'
+                        >
+                          <RotateCcw className='h-3.5 w-3.5' />
+                          Retry
+                        </button>
+                      )}
+                      {(record.status === 'PENDING' || record.status === 'IN_PROGRESS') &&
+                        !isRetryableExport(record.status, record.updatedAt) && (
+                        <span className='inline-flex items-center gap-1 text-xs text-muted-foreground'>
+                          <Loader2 className='h-3.5 w-3.5 animate-spin' />
+                          {record.status === 'PENDING' ? 'Queued' : 'Generating'}
+                        </span>
                       )}
                     </td>
                   </tr>

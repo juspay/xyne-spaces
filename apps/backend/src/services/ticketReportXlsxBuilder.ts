@@ -1,4 +1,4 @@
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 import type { Ticket, Board, Project, Channel, User } from '@prisma/client';
 
 export interface TicketExportTicket extends Ticket {
@@ -109,59 +109,68 @@ function buildRow(values: unknown[]): (string | number | Date | null)[] {
 }
 
 export class TicketReportXlsxBuilder {
-  buildWorkbook(input: ExportWorkbookInput): XLSX.WorkBook {
-    const wb = XLSX.utils.book_new();
+  /**
+   * Build the workbook using ExcelJS streaming writer, writing rows to disk
+   * instead of holding the entire workbook in memory.
+   *
+   * @param input - Export configuration and data
+   * @param filePath - Absolute path to write the .xlsx file
+   * @returns The same filePath that was passed in
+   */
+  async buildWorkbook(input: ExportWorkbookInput, filePath: string): Promise<string> {
+    const workbook = new ExcelJS.stream.xlsx.WorkbookWriter({
+      filename: filePath,
+      useSharedStrings: true,
+    });
     const usedSheetNames = new Set<string>();
 
-    const summaryWs = this.buildSummarySheet(input);
-    this.appendSheet(wb, summaryWs, 'Summary', usedSheetNames);
+    await this.buildSummarySheet(workbook, input, usedSheetNames);
 
     for (const [, { board, tickets }] of input.ticketsByBoard) {
-      const ws = this.buildBoardSheet(
+      await this.buildBoardSheet(
+        workbook,
         input.workspaceName,
         board,
         tickets,
-        input.columnsByBoard?.[board.id],
-      );
-      this.appendSheet(
-        wb,
-        ws,
-        board.name || 'Untitled Board',
         usedSheetNames,
+        input.columnsByBoard?.[board.id],
       );
     }
 
     if (input.includeLinks) {
-      const linksWs = this.buildLinksSheet(input.links);
-      this.appendSheet(wb, linksWs, 'Ticket Links', usedSheetNames);
+      await this.buildLinksSheet(workbook, input.links, usedSheetNames);
     }
 
     if (input.linkedTicketsByBoard) {
       for (const [, { board, tickets }] of input.linkedTicketsByBoard) {
-        const ws = this.buildBoardSheet(
+        await this.buildBoardSheet(
+          workbook,
           input.workspaceName,
           board,
           tickets,
-          input.columnsByBoard?.[board.id],
-        );
-        this.appendSheet(
-          wb,
-          ws,
-          `Linked - ${board.name || 'Untitled Board'}`,
           usedSheetNames,
+          input.columnsByBoard?.[board.id],
+          `Linked - ${board.name || 'Untitled Board'}`,
         );
       }
     }
 
     if (input.includeActivity) {
-      const activityWs = this.buildActivitySheet(input.activities);
-      this.appendSheet(wb, activityWs, 'Activity', usedSheetNames);
+      await this.buildActivitySheet(workbook, input.activities, usedSheetNames);
     }
 
-    return wb;
+    await workbook.commit();
+    return filePath;
   }
 
-  private buildSummarySheet(input: ExportWorkbookInput): XLSX.WorkSheet {
+  private async buildSummarySheet(
+    workbook: ExcelJS.stream.xlsx.WorkbookWriter,
+    input: ExportWorkbookInput,
+    usedNames: Set<string>,
+  ): Promise<void> {
+    const sheetName = this.uniqueSheetName('Summary', usedNames);
+    const ws = workbook.addWorksheet(sheetName);
+
     const rows: (string | number | Date | null)[][] = [
       ['Workspace', input.workspaceName],
       ['Project', input.projectScope],
@@ -177,15 +186,28 @@ export class TicketReportXlsxBuilder {
       ],
       ['Total tickets', Array.from(input.ticketsByBoard.values()).reduce((sum, b) => sum + b.tickets.length, 0)],
     ];
-    return XLSX.utils.aoa_to_sheet(rows.map(buildRow));
+
+    for (const row of rows) {
+      ws.addRow(buildRow(row)).commit();
+    }
+    await ws.commit();
   }
 
-  private buildBoardSheet(
+  private async buildBoardSheet(
+    workbook: ExcelJS.stream.xlsx.WorkbookWriter,
     workspaceName: string,
     board: TicketExportTicket['board'],
     tickets: TicketExportTicket[],
+    usedNames: Set<string>,
     selectedColumnKeys?: string[],
-  ): XLSX.WorkSheet {
+    requestedSheetName?: string,
+  ): Promise<void> {
+    const sheetName = this.uniqueSheetName(
+      requestedSheetName ?? board.name ?? 'Untitled Board',
+      usedNames,
+    );
+    const ws = workbook.addWorksheet(sheetName);
+
     const customFieldKeys = new Set<string>();
     for (const t of tickets) {
       Object.keys(t.customFields).forEach(k => customFieldKeys.add(k));
@@ -193,6 +215,7 @@ export class TicketReportXlsxBuilder {
     selectedColumnKeys
       ?.filter(key => key.startsWith('custom:'))
       .forEach(key => customFieldKeys.add(key.substring('custom:'.length)));
+
     const standardColumns = [
       { key: 'ticketKey', label: 'Ticket Key', value: (t: TicketExportTicket): unknown => t.xyneId },
       { key: 'title', label: 'Title', value: (t: TicketExportTicket): unknown => t.title },
@@ -228,14 +251,21 @@ export class TicketReportXlsxBuilder {
     }
     const headers = columns.map(column => column.label);
 
-    const rows = tickets.map(t =>
-      buildRow(columns.map(column => column.value(t))),
-    );
-
-    return XLSX.utils.aoa_to_sheet([buildRow(headers), ...rows]);
+    ws.addRow(buildRow(headers)).commit();
+    for (const t of tickets) {
+      ws.addRow(buildRow(columns.map(column => column.value(t)))).commit();
+    }
+    await ws.commit();
   }
 
-  private buildLinksSheet(links: TicketExportLink[]): XLSX.WorkSheet {
+  private async buildLinksSheet(
+    workbook: ExcelJS.stream.xlsx.WorkbookWriter,
+    links: TicketExportLink[],
+    usedNames: Set<string>,
+  ): Promise<void> {
+    const sheetName = this.uniqueSheetName('Ticket Links', usedNames);
+    const ws = workbook.addWorksheet(sheetName);
+
     const headers = [
       'Source Ticket Key',
       'Source Ticket Title',
@@ -248,8 +278,9 @@ export class TicketReportXlsxBuilder {
       'Target Status',
       'Target Assignee',
     ];
-    const rows = links.map(l =>
-      buildRow([
+    ws.addRow(buildRow(headers)).commit();
+    for (const l of links) {
+      ws.addRow(buildRow([
         l.sourceTicketKey,
         l.sourceTitle,
         l.sourceBoardName,
@@ -260,12 +291,19 @@ export class TicketReportXlsxBuilder {
         l.targetProjectName,
         l.targetStatus,
         l.targetAssigneeName,
-      ]),
-    );
-    return XLSX.utils.aoa_to_sheet([buildRow(headers), ...rows]);
+      ])).commit();
+    }
+    await ws.commit();
   }
 
-  private buildActivitySheet(activities: TicketExportActivity[]): XLSX.WorkSheet {
+  private async buildActivitySheet(
+    workbook: ExcelJS.stream.xlsx.WorkbookWriter,
+    activities: TicketExportActivity[],
+    usedNames: Set<string>,
+  ): Promise<void> {
+    const sheetName = this.uniqueSheetName('Activity', usedNames);
+    const ws = workbook.addWorksheet(sheetName);
+
     const headers = [
       'Ticket Key',
       'Ticket Title',
@@ -279,8 +317,9 @@ export class TicketReportXlsxBuilder {
       'New Value',
       'Visibility Result',
     ];
-    const rows = activities.map(a =>
-      buildRow([
+    ws.addRow(buildRow(headers)).commit();
+    for (const a of activities) {
+      ws.addRow(buildRow([
         a.ticketKey,
         a.ticketTitle,
         a.projectName,
@@ -292,17 +331,12 @@ export class TicketReportXlsxBuilder {
         a.oldValue,
         a.newValue,
         a.visibilityResult,
-      ]),
-    );
-    return XLSX.utils.aoa_to_sheet([buildRow(headers), ...rows]);
+      ])).commit();
+    }
+    await ws.commit();
   }
 
-  private appendSheet(
-    workbook: XLSX.WorkBook,
-    worksheet: XLSX.WorkSheet,
-    requestedName: string,
-    usedNames: Set<string>,
-  ): void {
+  private uniqueSheetName(requestedName: string, usedNames: Set<string>): string {
     const base = this.safeSheetName(requestedName);
     let name = base;
     let suffix = 2;
@@ -312,11 +346,11 @@ export class TicketReportXlsxBuilder {
       suffix += 1;
     }
     usedNames.add(name.toLowerCase());
-    XLSX.utils.book_append_sheet(workbook, worksheet, name);
+    return name;
   }
 
   private safeSheetName(name: string): string {
-    const sanitized = name.replace(/[*\\/[\]:?]/g, '-').substring(0, 31);
+    const sanitized = name.replace(/[*\\/?[\]:?]/g, '-').substring(0, 31);
     return sanitized || 'Sheet';
   }
 }

@@ -1,5 +1,7 @@
 import { z } from 'zod';
-import * as XLSX from 'xlsx';
+import * as os from 'os';
+import * as fs from 'fs';
+import * as path from 'path';
 import {
   AccessType,
   Prisma,
@@ -41,12 +43,73 @@ function formatFileStamp(d: Date): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
 }
 
-const MAX_EXPORT_ROWS = 50_000;
-const MAX_ACTIVITY_ROWS = 100_000;
+const MAX_EXPORT_ROWS = 5_000;
+const MAX_ACTIVITY_ROWS = 10_000;
 const TICKET_REPORT_RESOURCE_NAME = 'TICKET-REPORTS';
 const ESTIMATED_CORE_COLUMNS = 19;
 const ESTIMATED_BYTES_PER_CELL = 32;
 const STALE_EXPORT_TIMEOUT_MS = 15 * 60 * 1000;
+
+const TICKET_EXPORT_TEMP_DIR = path.join(os.tmpdir(), 'ticket-exports');
+
+class TicketReportTempFileService {
+  getTempFilePath(exportId: string): string {
+    return path.join(TICKET_EXPORT_TEMP_DIR, `${exportId}.xlsx`);
+  }
+
+  ensureTempDir(): void {
+    if (!fs.existsSync(TICKET_EXPORT_TEMP_DIR)) {
+      fs.mkdirSync(TICKET_EXPORT_TEMP_DIR, { recursive: true });
+    }
+  }
+
+  deleteTempFile(exportId: string): void {
+    const filePath = this.getTempFilePath(exportId);
+    fs.promises.unlink(filePath).catch(() => {
+      // File may not exist — ignore
+    });
+  }
+
+  deleteTempFileSync(exportId: string): void {
+    const filePath = this.getTempFilePath(exportId);
+    try {
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+    } catch {
+      // Ignore errors
+    }
+  }
+
+  tempFileExists(exportId: string): boolean {
+    return fs.existsSync(this.getTempFilePath(exportId));
+  }
+
+  /**
+   * Delete any temp files older than 1 hour to clean up orphaned files
+   * from worker crashes. Called on worker startup.
+   */
+  cleanupOldTempFiles(): void {
+    if (!fs.existsSync(TICKET_EXPORT_TEMP_DIR)) return;
+    const oneHourAgo = Date.now() - 60 * 60 * 1000;
+    try {
+      const files = fs.readdirSync(TICKET_EXPORT_TEMP_DIR);
+      for (const file of files) {
+        if (!file.endsWith('.xlsx')) continue;
+        const filePath = path.join(TICKET_EXPORT_TEMP_DIR, file);
+        const stat = fs.statSync(filePath);
+        if (stat.mtimeMs < oneHourAgo) {
+          fs.unlinkSync(filePath);
+          logger.info(`[TicketReportTempFileService] Cleaned up stale temp file: ${file}`);
+        }
+      }
+    } catch (error) {
+      logger.error('[TicketReportTempFileService] Cleanup failed:', error);
+    }
+  }
+}
+
+export const ticketReportTempFileService = new TicketReportTempFileService();
 
 const badRequest = (message: string): AppError => new AppError(message, 400);
 const forbidden = (message: string): AppError => new AppError(message, 403);
@@ -86,13 +149,7 @@ export const createTicketExportRequestSchema = z.object({
   filters: ticketExportFiltersSchema.default({}),
 });
 
-export const downloadTicketExportRequestSchema = z.union([
-  z.object({ exportId: z.string().min(1) }),
-  createTicketExportRequestSchema,
-]);
-
 export type CreateTicketExportRequestInput = z.infer<typeof createTicketExportRequestSchema>;
-export type DownloadTicketExportRequestInput = z.infer<typeof downloadTicketExportRequestSchema>;
 export type TicketExportFilters = z.infer<typeof ticketExportFiltersSchema>;
 export type TicketExportPermissionLevel = 'ADMIN' | 'WRITE' | 'READ';
 
@@ -258,10 +315,10 @@ export class TicketReportService {
     };
   }
 
-  private async generateExport(
+  async generateExport(
     exportId: string,
     workspaceId: string,
-  ): Promise<{ buffer: Buffer; fileName: string }> {
+  ): Promise<{ filePath: string; fileName: string }> {
     const exportRecord = await prisma.ticketExport.findFirst({
       where: { id: exportId, workspaceId },
     });
@@ -352,7 +409,10 @@ export class TicketReportService {
       }
 
       const generatedAt = new Date();
-      const workbook = ticketReportXlsxBuilder.buildWorkbook({
+      ticketReportTempFileService.ensureTempDir();
+      const filePath = ticketReportTempFileService.getTempFilePath(exportId);
+
+      await ticketReportXlsxBuilder.buildWorkbook({
         exportId,
         workspaceName: workspace.name,
         projectScope: filters.projectId
@@ -368,11 +428,10 @@ export class TicketReportService {
         linkedTicketsByBoard,
         activities,
         columnsByBoard: filters.columnsByBoard,
-      });
+      }, filePath);
 
-      const buffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'buffer' });
-      if (buffer.length === 0) {
-        throw new Error('Generated workbook is empty');
+      if (!fs.existsSync(filePath)) {
+        throw new Error('Generated workbook file is empty or missing');
       }
 
       const fileName = `ticket-report-${workspace.name}-${formatFileStamp(new Date())}.xlsx`.replace(/[^a-zA-Z0-9._-]/g, '_');
@@ -380,8 +439,8 @@ export class TicketReportService {
         where: { id: exportId, workspaceId },
         data: { status: 'READY', updatedAt: new Date() },
       });
-      logger.info(`[TicketReportService] Export ${exportId} generated for direct download: ${buffer.length} bytes`);
-      return { buffer, fileName };
+      logger.info(`[TicketReportService] Export ${exportId} generated at ${filePath}`);
+      return { filePath, fileName };
     } catch (error) {
       await prisma.ticketExport.updateMany({
         where: { id: exportId, workspaceId },
@@ -414,25 +473,46 @@ export class TicketReportService {
     };
   }
 
-  async downloadExport(input: DownloadTicketExportRequestInput, user: AuthenticatedUser) {
-    const record =
-      'exportId' in input
-        ? await prisma.ticketExport.findFirst({
-            where: {
-              id: input.exportId,
-              workspaceId: user.workspaceId,
-              requestedBy: user.id,
-            },
-          })
-        : await this.requestExport(input, user);
+  async getExport(exportId: string, user: AuthenticatedUser) {
+    const record = await prisma.ticketExport.findFirst({
+      where: {
+        id: exportId,
+        workspaceId: user.workspaceId,
+        requestedBy: user.id,
+      },
+    });
 
     if (!record) {
       throw notFound('Export not found');
     }
 
-    const filters = this.normalizeFilters(record.filters);
-    await this.assertCanAccessExport(user, record.workspaceId, filters.projectId ?? null);
-    return this.generateExport(record.id, record.workspaceId);
+    return this.sanitizeExportRecord(record);
+  }
+
+  async downloadFile(exportId: string, user: AuthenticatedUser): Promise<{ filePath: string; fileName: string }> {
+    const record = await prisma.ticketExport.findFirst({
+      where: {
+        id: exportId,
+        workspaceId: user.workspaceId,
+        requestedBy: user.id,
+      },
+    });
+
+    if (!record) {
+      throw notFound('Export not found');
+    }
+
+    if (record.status !== 'READY') {
+      throw conflict('Export is not ready for download');
+    }
+
+    const filePath = ticketReportTempFileService.getTempFilePath(exportId);
+    if (!ticketReportTempFileService.tempFileExists(exportId)) {
+      throw notFound('Export file not found on disk');
+    }
+
+    const fileName = `ticket-report-${formatFileStamp(new Date())}.xlsx`.replace(/[^a-zA-Z0-9._-]/g, '_');
+    return { filePath, fileName };
   }
 
   private async assertCanCreateExport(
