@@ -22,7 +22,6 @@ import { apiInstance } from '../../../services/clients/apiClient';
 import { useChannel, useAllVisibleChannels } from '../../../hooks/useChannels';
 import { useXyneAIStream } from '../../../hooks/useXyneAIStream';
 import { ChannelScopeType } from '@xyne/shared';
-import { BASE_URL } from '../../../services/clients/apiClient';
 import type { ConversationHistory as ConversationHistoryType } from './utils/XyneAITypes';
 import { resolveActivePath, getSiblings, BRANCH_ROOT_KEY } from './utils/XyneAIUtils';
 import { useV2SessionsList, useV2SessionInvalidator } from '../../../hooks/useAskAISessionsV2';
@@ -166,7 +165,6 @@ const XyneAISidebar = ({
   useEffect(() => () => liveViewerDetachRef.current?.(), []);
   const [loadingHistorySessionId, setLoadingHistorySessionId] = useState<string | null>(null);
   const [streamingSessionIds, setStreamingSessionIds] = useState<string[]>([]);
-  const [currentTraceId, setCurrentTraceId] = useState<string | undefined>();
   const [debugEvents, setDebugEvents] = useState<DebugEventRecord[]>([]);
   const [debugArtifactsReadyVersion, setDebugArtifactsReadyVersion] = useState(0);
   const [showDebugger, setShowDebugger] = useState(false);
@@ -428,7 +426,6 @@ const XyneAISidebar = ({
       setMessages([]);
       setConversationId('');
       setBranchSelections({});
-      setFeedbackMap({});
       setStreamThreadKey(newStreamSlotKey());
       usesDraftStreamKeyRef.current = true;
     }
@@ -675,7 +672,6 @@ const XyneAISidebar = ({
     canvasId: canvasInfo?.canvasId ?? null,
     setMessages,
     setConversationId,
-    setCurrentTraceId,
     setDebugEvents,
     setDebugArtifactsReadyVersion,
     webSearchEnabled: webSearchAccessible ? webSearchEnabled : false,
@@ -710,7 +706,6 @@ const XyneAISidebar = ({
       setMessages([]);
       setBranchSelections({});
       setConversationId('');
-      setCurrentTraceId(undefined);
       setDebugEvents([]);
       setDebugArtifactsReadyVersion(0);
       setShowDebugger(false);
@@ -1083,7 +1078,6 @@ const XyneAISidebar = ({
     setBranchSelections({});
     setConversationId('');
     setConversationChannelId(null);
-    setCurrentTraceId(undefined);
     setDebugEvents([]);
     setDebugArtifactsReadyVersion(0);
     setShowDebugger(false);

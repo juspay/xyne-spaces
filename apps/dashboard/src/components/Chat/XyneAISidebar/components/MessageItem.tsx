@@ -1530,7 +1530,7 @@ export const MessageItem = React.memo(
         prev.message.errorInfo === next.message.errorInfo &&
         prev.message.followUpSuggestions === next.message.followUpSuggestions &&
         prev.isLatestBotMessage === next.isLatestBotMessage &&
-        prev.onFollowUpSuggestionClick === next.onFollowUpSuggestionClick &&
+        prev.onFollowUpSuggestionClick === next.onFollowUpSuggestionClick
         );
     }
     return (
@@ -1546,7 +1546,7 @@ export const MessageItem = React.memo(
       prev.message.errorInfo === next.message.errorInfo &&
       prev.message.followUpSuggestions === next.message.followUpSuggestions &&
       prev.isLatestBotMessage === next.isLatestBotMessage &&
-      prev.onFollowUpSuggestionClick === next.onFollowUpSuggestionClick &&
+      prev.onFollowUpSuggestionClick === next.onFollowUpSuggestionClick
     );
   },
 );

@@ -42,7 +42,6 @@ import { AIComposer, type AIComposerAttachment, type AIComposerHandle } from './
 import { type ComposerContext, toStreamOverrides } from './composerContext';
 import { fetchV2ConversationMessages } from '../../services/XyneAI/XyneAISessionsV2Service';
 import { xyneAIStreamManager } from '../../services/XyneAI/XyneAIStreamManager';
-import { BASE_URL } from '../../services/clients/apiClient';
 import { BrailleLoader, AnimatedLabel, useStableLabel } from './ReasoningLoader';
 import { createMarkdownComponents } from '../../utils/markdownComponents';
 import { StreamingMarkdownBlocks, rehypeStreamWordFade } from '../utils/StreamingMarkdownBlocks';
@@ -87,7 +86,6 @@ import {
   BRANCH_ROOT_KEY,
 } from '../Chat/XyneAISidebar/utils/XyneAIUtils';
 
-type FeedbackValue = 'LIKE' | 'DISLIKE' | null;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Types
@@ -1210,7 +1208,6 @@ function ChatMessageBubble({
                 comment={message.ratingComment}
                 onChange={(fb, c): void => onRatingChange?.(message.id, fb, c)}
               />
-              )}
               {/* Regenerate — re-runs the last user query as a new bot sibling.
                   Only wired on the latest bot message. */}
               {onRegenerate && (
@@ -1890,54 +1887,6 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     composerRef.current?.setPrompt(suggestion);
   }, []);
 
-  const handleFeedback = useCallback(
-    async (messageId: string, feedbackType: 'LIKE' | 'DISLIKE'): Promise<void> => {
-      let previousFeedback: 0 | 1 | 2 | undefined;
-      let traceId: string | undefined;
-      let nextFeedback: 0 | 1 | 2 = 0;
-
-      setMessages(prevMessages =>
-        prevMessages.map(msg => {
-          if (msg.id !== messageId) return msg;
-          previousFeedback = msg.feedback;
-          traceId = msg.traceId;
-          const desired: 0 | 1 | 2 = feedbackType === 'LIKE' ? 1 : 2;
-          nextFeedback = msg.feedback === desired ? 0 : desired;
-          return { ...msg, feedback: nextFeedback };
-        }),
-      );
-
-      // Only call the backend when setting feedback (not when toggling off) and
-      // when we actually have a trace to attach it to.
-      if (nextFeedback === 0 || !traceId) return;
-
-      try {
-        // eslint-disable-next-line local-rules/no-fetch-use-axios
-        const res = await fetch(`${BASE_URL}/xyne-ai/feedback`, {
-          method: 'POST',
-          headers: {
-            // eslint-disable-next-line @typescript-eslint/naming-convention
-            'Content-Type': 'application/json',
-          },
-          credentials: 'include',
-          body: JSON.stringify({
-            traceId,
-            value: feedbackType,
-          }),
-        });
-        if (!res.ok) throw new Error(`Feedback request failed: ${res.status}`);
-      } catch (error) {
-        console.error('[AIChatThread] Failed to submit feedback:', error);
-        // Revert to the previous feedback on failure
-        setMessages(prevMessages =>
-          prevMessages.map(msg =>
-            msg.id === messageId ? { ...msg, feedback: previousFeedback ?? 0 } : msg,
-          ),
-        );
-      }
-    },
-    [],
-  );
 
   // v2 (claw) rating change — the AskAiRatingButtons already persisted to
   // agent_runs; here we reflect the new feedback in local message state AND in
