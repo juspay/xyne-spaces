@@ -20,6 +20,7 @@ export class CanvasParticipantsACL extends BaseQueryACL<
       )
 
       return {
+        workspaceId: ctx.workspaceId,
         OR: [
           { userId: this.ctx.userId },
           { canvasId: { in: canvasIds } },
@@ -46,7 +47,11 @@ export class CanvasParticipantsACL extends BaseQueryACL<
       ? ({ channelId: { in: channelIds } } satisfies Prisma.CanvasParticipantWhereInput)
       : null;
 
+    // The PUBLIC arm below matches on canvas visibility alone, so without a
+    // workspace term this clause would reach rows in other workspaces. The sync
+    // layer applies the same scope structurally after every canSelect.
     return {
+      workspaceId: this.ctx.workspaceId,
       OR: [
         { userId: this.ctx.userId },
         ...(groupParticipantWhere ? [groupParticipantWhere] : []),
