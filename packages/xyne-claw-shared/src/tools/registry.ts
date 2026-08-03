@@ -16,6 +16,7 @@ import * as sandboxPw from "./sandbox-pw/index.js";
 import * as createPpt from "./create-ppt/index.js";
 import * as createReport from "./create-report/index.js";
 import * as genius from "./genius/index.js";
+import * as visualize from "./visualize/index.js";
 import * as webSearch from "./web-search/index.js";
 import * as deepResearch from "./deep-research/index.js";
 import * as generateImage from "./generate-image/index.js";
@@ -139,6 +140,10 @@ register(createReport.createHtmlReportTool);
 // Register genius tools
 register(genius.geniusAnalyticsTool);
 register(genius.geniusInvestigationTool);
+
+// Register visualize tool — renders a chart from data the agent already has,
+// reusing the Analytics module's chart contracts + renderer registry.
+register(visualize.visualizeTool);
 
 // Register web-search and deep-research tools
 register(webSearch.webSearchTool);

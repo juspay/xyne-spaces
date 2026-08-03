@@ -229,6 +229,7 @@ import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 import { useAskAiTicketContext } from '../../hooks/useAskAiTicketContext';
 import { clearDeskContactsCache } from '../../hooks/useDeskContacts';
 import { XyneAIStar } from '../../components/icons/xyne-ai';
+import { trackAskAIOpened } from '../../services/otel/xyneAIMetrics';
 import {
   channelService,
   CreateChannelFormData,
@@ -2419,6 +2420,30 @@ const SupportScreen = (): ReactElement => {
                             </button>
                           </Tooltip>
                         ))}
+                      {/* Ask AI, scoped to the desk channel — mirrors the normal-channel
+                          entry point in ConversationHeader. Passing channelId is what
+                          puts the sidebar in 'chat' context (xyneAIMachine.ts); without
+                          it the panel opens unscoped. Hidden on the ALL_CHANNELS view,
+                          which has no single channel to scope to. */}
+                      {isSelectedChannelJoined && selectedChannelId !== ALL_CHANNELS_ID && (
+                        <Tooltip content='Ask AI' side='bottom'>
+                          <button
+                            onClick={() => {
+                              if (!selectedChannelId) return;
+                              trackAskAIOpened(
+                                emailChannels?.find(c => c.id === selectedChannelId)?.scopeType,
+                              );
+                              xyneAIActor.send({ type: 'OPEN', channelId: selectedChannelId });
+                            }}
+                            className='p-1.5 rounded transition-colors text-muted-foreground hover:text-foreground hover:bg-accent'
+                            data-track-category='Support'
+                            data-track-name='OPEN_XYNE_AI'
+                            data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
+                          >
+                            <XyneAIStar />
+                          </button>
+                        </Tooltip>
+                      )}
                       {isSelectedChannelJoined &&
                         selectedChannelId !== ALL_CHANNELS_ID &&
                         selectedChannelPref?.metricsEnabled && (
