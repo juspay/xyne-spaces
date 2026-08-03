@@ -449,30 +449,29 @@ export class JiraMigrationController {
       const sourceExternalSourceName = `jira-${normalizedProjectKey}-${sourceChannelId}`.toLowerCase();
       const targetExternalSourceName = `jira-${normalizedProjectKey}-${targetChannelId}`.toLowerCase();
 
-      const [sourceExternalSource, targetExternalSource, sourceChannel, targetChannel] = await Promise.all([
-        db.externalSource.findUnique({
-          where: { name: sourceExternalSourceName },
-          select: { id: true, sourceType: true, channelId: true, boardId: true, name: true },
-        }),
-        db.externalSource.findUnique({
-          where: { name: targetExternalSourceName },
-          select: { id: true, sourceType: true, channelId: true, boardId: true, name: true },
-        }),
-        // Both ends of the move are resolved by workspace, not by the operator's own
-        // membership — the workspace comparison below is the check that decides access.
-        withWorkspaceScope(() =>
-          db.channel.findUnique({
-            where: { id: sourceChannelId },
-            select: { id: true, name: true, projectId: true, workspaceId: true },
-          }),
-        ),
-        withWorkspaceScope(() =>
-          db.channel.findUnique({
-            where: { id: targetChannelId },
-            select: { id: true, name: true, projectId: true, workspaceId: true },
-          }),
-        ),
-      ]);
+      // Both ends of the move are resolved by workspace, not by the operator's own
+      // membership — the workspace comparison below is the check that decides access.
+      const [sourceExternalSource, targetExternalSource, sourceChannel, targetChannel] =
+        await withWorkspaceScope(() =>
+          Promise.all([
+            db.externalSource.findUnique({
+              where: { name: sourceExternalSourceName },
+              select: { id: true, sourceType: true, channelId: true, boardId: true, name: true },
+            }),
+            db.externalSource.findUnique({
+              where: { name: targetExternalSourceName },
+              select: { id: true, sourceType: true, channelId: true, boardId: true, name: true },
+            }),
+            db.channel.findUnique({
+              where: { id: sourceChannelId },
+              select: { id: true, name: true, projectId: true, workspaceId: true },
+            }),
+            db.channel.findUnique({
+              where: { id: targetChannelId },
+              select: { id: true, name: true, projectId: true, workspaceId: true },
+            }),
+          ]),
+        );
 
       if (!sourceExternalSource || sourceExternalSource.sourceType !== 'jira') {
         res.status(404).json({ error: 'Jira external source not found for provided jiraProjectKey + sourceChannelId' });
@@ -549,22 +548,20 @@ export class JiraMigrationController {
 
       // Counted across the whole source channel so the preview matches what the real move
       // will touch, rather than only the operator's own rows.
-      const [conversationCount, participantCount] = await Promise.all([
-        conversationIds.length > 0
-          ? withWorkspaceScope(() =>
-              db.conversation.count({
+      const [conversationCount, participantCount] = await withWorkspaceScope(() =>
+        Promise.all([
+          conversationIds.length > 0
+            ? db.conversation.count({
                 where: { conversationId: { in: conversationIds }, channelId: sourceChannelId },
-              }),
-            )
-          : Promise.resolve(0),
-        conversationIds.length > 0
-          ? withWorkspaceScope(() =>
-              db.conversationParticipant.count({
+              })
+            : Promise.resolve(0),
+          conversationIds.length > 0
+            ? db.conversationParticipant.count({
                 where: { conversationId: { in: conversationIds }, channelId: sourceChannelId },
-              }),
-            )
-          : Promise.resolve(0),
-      ]);
+              })
+            : Promise.resolve(0),
+        ]),
+      );
 
       const remainingOnSourceBeforeMove = mappedTicketIds.length - ticketsToMove.length;
       const wouldFullyDrainSource = remainingOnSourceBeforeMove === 0;
