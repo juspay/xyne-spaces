@@ -9,13 +9,13 @@ import { disableSkill, isSkillSelected, toggleSkill, type SkillCatalogEntry } fr
 
 const FILTER_OPTIONS: readonly FilterOption[] = [
   { id: null, label: 'All' },
-  { id: 'global', label: 'Global skills' },
   { id: 'personal', label: 'My skills' },
+  { id: 'global', label: 'Global skills' },
 ];
 
 const SECTIONS = [
-  { key: 'global', label: 'Global skills' },
   { key: 'personal', label: 'My skills' },
+  { key: 'global', label: 'Global skills' },
 ] as const;
 
 function matchesSearch(entry: SkillCatalogEntry, query: string): boolean {
