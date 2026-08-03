@@ -159,12 +159,12 @@ export function BrowseDialog({
             aria-label={`Back to ${title}`}
             data-track-category='Claw Agents'
             data-track-name='Create agent v2: browse back'
-            className='flex h-7 shrink-0 items-center gap-1 rounded-[10px] pl-1 pr-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
+            className='flex h-7 shrink-0 items-center rounded-[10px] pr-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
           >
-            <ChevronBigLeft className='size-4 shrink-0' aria-hidden />
-            <span className='text-base font-semibold leading-6 tracking-[-0.32px] text-foreground'>
-              Back
+            <span className='flex h-7 w-[22px] shrink-0 items-center justify-center'>
+              <ChevronBigLeft className='size-4' aria-hidden />
             </span>
+            <span className='text-sm font-normal leading-5 tracking-[-0.28px]'>Back</span>
           </button>
         ) : (
           <span className='text-base font-semibold leading-6 tracking-[-0.16px] text-foreground'>
