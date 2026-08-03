@@ -1,6 +1,10 @@
 import { Prisma, PrismaClient } from '@prisma/client'
 import { BaseQueryACL, ACLContext } from '../base-acl'
-import { getAccessibleChannelIds, isGuestContext } from './channel-access-helper'
+import {
+  getAccessibleChannelIds,
+  hasGuestChannelAccess,
+  isGuestContext,
+} from './channel-access-helper'
 
 export class MessagesACL extends BaseQueryACL<
   Prisma.MessageWhereInput,
@@ -79,6 +83,7 @@ export class MessagesACL extends BaseQueryACL<
       where: { channelId: conversation.channel.id, userId: this.ctx.userId },
       select: { id: true },
     })
-    return participant !== null
+    if (participant !== null) return true
+    return hasGuestChannelAccess(this.prisma, this.ctx, conversation.channel.id)
   }
 }
