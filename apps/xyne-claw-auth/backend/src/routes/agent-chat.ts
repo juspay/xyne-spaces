@@ -9,7 +9,7 @@ import { getValidClaudeBearer } from "../lib/claude-oauth-refresh.js";
 import { prisma } from "../db.js";
 import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
-import { KNOWN_PROVIDERS, buildProviderConfig, agentCredRefreshTarget, userCredRefreshTarget } from "../lib/agent-provider-config.js";
+import { KNOWN_PROVIDERS, buildProviderConfig, buildProviderConfigsTiered, agentCredRefreshTarget, userCredRefreshTarget } from "../lib/agent-provider-config.js";
 import { resolveFastMode } from "../lib/fast-mode.js";
 import { extractFollowUpSuggestionsFromInvocations } from "../lib/follow-up-suggestions.js";
 import { getRequesterId, getOrgId, getAgentEditAccess, isClawAdmin } from "../middleware/agent-acl.js";
@@ -1167,7 +1167,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       : [];
     const userProvider = personalProvider ?? agentLevelProvider;
 
-    const allCreds = await userProviderCredentialsRepository.listByUser(userId).catch(() => []);
+    const allCreds = await userProviderCredentialsRepository.listByUser(userId, { includeSystem: true }).catch(() => []);
     const agentCreds = await agentProviderCredentialsRepository.listByAgent(agent.id).catch(() => []);
     const subagentConfigs = await userSubagentConfigRepository.listByUser(userId).catch(() => []);
     const subagentProviders: Record<string, string> = {};
@@ -1177,19 +1177,10 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
     // (lib/agent-provider-config.ts) — one source of truth for the per-provider
     // default models + OAuth-bundle extraction, so adding a provider is a
     // one-place change (this used to be an inline `buildCfg` copy).
-    const providerConfigs: Record<string, { apiKey: string; model: string; baseUrl?: string; authType?: string; reasoningEffort?: string }> = {};
-    const providerScope: Record<string, "user" | "agent"> = {};
-    // User-level wins.
-    for (const row of allCreds) {
-      const cfg = buildProviderConfig(row.provider, row);
-      if (cfg) { providerConfigs[row.provider] = cfg; providerScope[row.provider] = "user"; }
-    }
-    // Agent-level fills in only what the user hasn't configured personally.
-    for (const row of agentCreds) {
-      if (providerConfigs[row.provider]) continue;
-      const cfg = buildProviderConfig(row.provider, row);
-      if (cfg) { providerConfigs[row.provider] = cfg; providerScope[row.provider] = "agent"; }
-    }
+    // Build providerConfigs with the shared 3-tier precedence (personal USER >
+    // shared agent > system-managed) so the rule can't drift between the chat
+    // paths. agent-chat has no "defer to agent" opt-out, so all tiers apply.
+    const { providerConfigs, providerScope } = buildProviderConfigsTiered(allCreds, agentCreds);
 
     // Refresh Claude OAuth before use (short-lived token; see webhook.ts for the
     // rationale). Mutates the resolved config's apiKey and persists the rotated
@@ -1224,6 +1215,9 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
     }
     if (!resolvedParentProvider && agentLevelProvider) {
       resolvedParentProvider = agentLevelProvider;
+    }
+    if (!resolvedParentProvider && providerConfigs["litellm"]) {
+      resolvedParentProvider = "litellm";
     }
     let runtimeProviderOrder: string[] = agentProviderOrder.length > 0
       ? agentProviderOrder

@@ -123,10 +123,15 @@ async function convertAll(
  * Run every per-type pipeline over the request's attachments. Pure aside from
  * `log` calls (video/zip ingest summaries) — no disk writes happen here; the
  * caller persists `derivedContextFiles` / `pdfBuffers` to the workspace.
+ *
+ * `opts.litellmApiKey`, when present, is forwarded to the video pipeline so its
+ * vision-model calls charge the user's per-key budget instead of the shared
+ * server key.
  */
 export async function ingestAttachments(
   attachments: AttachmentInput[] | undefined,
   log: (message: string) => void,
+  opts?: { litellmApiKey?: string },
 ): Promise<IngestedAttachments> {
   const all = attachments ?? [];
 
@@ -172,7 +177,7 @@ export async function ingestAttachments(
   const videoKeyframes: VideoKeyframe[] = [];
   const videoDerived = await Promise.all(
     videoAttachments.map(async (a) => {
-      const { narrative, keyframes } = await videoBufferToContext(decode(a), a.fileName);
+      const { narrative, keyframes } = await videoBufferToContext(decode(a), a.fileName, opts);
       videoKeyframes.push(...keyframes);
       return { path: `${a.fileName}.video.md`, content: narrative };
     }),

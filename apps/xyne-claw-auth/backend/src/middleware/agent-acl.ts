@@ -95,6 +95,11 @@ export async function getAgentEditAccess(
   const agent = await agentRepository.findBySlug(slug, orgId);
   if (!agent) return null;
 
+  // Platform agents are read-only for everyone — no edit access.
+  if (agent.scope === "platform") {
+    return { agent, isOwner: false, isContributor: false, canEdit: false };
+  }
+
   const isOwner = agent.ownerUserId === userId;
   let isContributor = false;
   if (!isOwner) {
@@ -188,6 +193,19 @@ export async function requireAgentOwnerOrAdmin(
   const admin = await isClawAdmin(requesterId);
   const isOwner = agent.ownerUserId === requesterId;
 
+  // Platform agents: allow read access for everyone. Mutation routes have
+  // their own scope === "platform" guard that returns 403 before any write.
+  if (agent.scope === "platform") {
+    (req as Request & { agentContext: AgentContext }).agentContext = {
+      agent,
+      isAdmin: admin,
+      isOwner: false,
+      isContributor: false,
+    };
+    next();
+    return;
+  }
+
   if (!admin && !isOwner) {
     res.status(403).json({
       success: false,
@@ -237,6 +255,19 @@ export async function requireAgentOwnerContributorOrAdmin(
   const admin = await isClawAdmin(requesterId);
   const isOwner = access.isOwner;
   const isContributor = !admin && access.isContributor;
+
+  // Platform agents: allow read access for everyone. Mutation routes have
+  // their own scope === "platform" guard that returns 403 before any write.
+  if (access.agent.scope === "platform") {
+    (req as Request & { agentContext: AgentContext }).agentContext = {
+      agent: access.agent,
+      isAdmin: admin,
+      isOwner: false,
+      isContributor: false,
+    };
+    next();
+    return;
+  }
 
   if (!admin && !access.canEdit) {
     res.status(403).json({

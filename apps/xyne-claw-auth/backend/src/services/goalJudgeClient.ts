@@ -34,6 +34,9 @@ export interface GoalJudgeRequest {
   /** Metadata for files the worker attached this turn. Forwarded to claw's
    *  judge so artefact goals (HTML reports, CSVs) aren't false-negatived. */
   attachmentsThisTurn?: GoalJudgeAttachmentMeta[];
+  /** Per-user LiteLLM key (provisioned or personal), shipped over S2S so the boss
+   *  judge charges the user's budget. Absent → claw fails-open to judge_unavailable. */
+  litellmApiKey?: string;
 }
 
 export interface GoalJudgeDecision {

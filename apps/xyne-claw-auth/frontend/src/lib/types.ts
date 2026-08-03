@@ -1,3 +1,6 @@
+export const AGENT_SCOPES = ["personal", "global", "platform"] as const;
+export type AgentScope = (typeof AGENT_SCOPES)[number];
+
 export interface User {
   readonly id: string;
   readonly email: string;

@@ -882,11 +882,17 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
     let effectiveProvider = provider;
     if (!providerConfigs) {
       try {
+        // Pass the running user's id so the resolver folds in their provisioned key
+        // as a gap-fill and defaults `parent` to "litellm" when no premium cred wins
+        // — so the run uses the user's budgeted identity, not the pod's server key.
         const resolvedProviders = await resolveAgentProviderConfigs(
           { id: agent.id, config: agent.config },
-          // Only bulk machine traffic gets the automationProvider downgrade;
-          // "spaces"/"chat"/"api" dispatches keep the agent's premium order.
-          { headlessBulk: defaultTriggerSource === "automation" || defaultTriggerSource === "scheduled" },
+          {
+            userId: resolved.userId,
+            // Only bulk machine traffic gets the automationProvider downgrade;
+            // "spaces"/"chat"/"api" dispatches keep the agent's premium order.
+            headlessBulk: defaultTriggerSource === "automation" || defaultTriggerSource === "scheduled",
+          },
         );
         effectiveProviderConfigs = resolvedProviders.providerConfigs;
         if (!providerOrder?.length) effectiveProviderOrder = resolvedProviders.providerOrder;

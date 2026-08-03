@@ -1090,8 +1090,12 @@ export function AdminPageV3({ userId }: Props) {
     () => agents.filter((a) => a.scope === "global"),
     [agents],
   );
+  const platformAgents = useMemo(
+    () => agents.filter((a) => a.scope === "platform"),
+    [agents],
+  );
   const personalAgents = useMemo(
-    () => agents.filter((a) => a.scope !== "global"),
+    () => agents.filter((a) => a.scope !== "global" && a.scope !== "platform"),
     [agents],
   );
 
@@ -1237,6 +1241,7 @@ export function AdminPageV3({ userId }: Props) {
                 {tab === "agents" && (
                   <AgentsTab
                     globalAgents={globalAgents}
+                    platformAgents={platformAgents}
                     personalAgents={personalAgents}
                     spacesFlow={spacesFlow}
                     slackCreatingSlug={slackCreatingSlug}
@@ -2156,6 +2161,7 @@ function ConnectorsTab({
 
 function AgentsTab({
   globalAgents,
+  platformAgents,
   personalAgents,
   spacesFlow,
   slackCreatingSlug,
@@ -2174,6 +2180,7 @@ function AgentsTab({
   showOrgLabels,
 }: {
   globalAgents: AgentLight[];
+  platformAgents: AgentLight[];
   personalAgents: AgentLight[];
   spacesFlow: SpacesFlow | null;
   slackCreatingSlug: string | null;
@@ -2348,6 +2355,53 @@ function AgentsTab({
           })}
         </div>
       </section>
+
+      {platformAgents.length > 0 && (
+        <section>
+          <h3 className="mb-2 text-[12px] font-medium text-xyne-fg-secondary">
+            Platform Agents ({platformAgents.length})
+          </h3>
+          <div className="space-y-2">
+            {platformAgents.map((a) => {
+              const registered = Boolean(a.spacesAppId && a.spacesAppTokenConfigured);
+              const hasApp = Boolean(a.spacesAppId);
+              const slackStatus = slackAgentStatuses[a.id];
+              return (
+                <div
+                  key={a.id}
+                  className="flex items-center justify-between gap-3 rounded-xl border border-xyne-border bg-xyne-surface px-4 py-3"
+                >
+                  <div className="flex min-w-0 items-center gap-3">
+                    <span
+                      className="inline-block h-3 w-3 shrink-0 rounded-full"
+                      style={{ backgroundColor: a.color }}
+                    />
+                    <div className="min-w-0">
+                      <span className="text-[13px] font-medium text-xyne-fg-primary">{a.name}</span>
+                      <span className="ml-2 text-[11px] text-xyne-fg-tertiary">{a.slug}</span>
+                      {showOrgLabels && <span className="ml-2"><OrgBadge orgName={a.orgName} orgId={a.orgId} /></span>}
+                      <span className="ml-2 inline-block align-middle">
+                        <Badge
+                          as="span"
+                          size="sm"
+                          variant="info"
+                          label="platform"
+                        />
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Badge as="span" size="sm" variant={a.enabled ? "success" : "warning"} label={a.enabled ? "Active" : "Paused"} />
+                    {hasApp && (
+                      <Badge as="span" size="sm" variant={registered ? "success" : "neutral"} label={registered ? "Spaces" : "Spaces (pending)"} />
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       <section>
         <h3 className="mb-2 text-[12px] font-medium text-xyne-fg-secondary">

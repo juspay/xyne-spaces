@@ -590,10 +590,13 @@ async function main() {
     update: {},
   });
 
-  // Create "spaces" Surface if it doesn't exist
+  // Create "spaces" Surface if it doesn't exist. id is set to "spaces"
+  // (matching the slice0_surface_foundation migration) instead of letting
+  // Prisma generate a cuid — db push skips migration SQL, so the seed is
+  // the only thing that creates this row in dev.
   const spacesSurface = await prisma.surface.upsert({
     where: { key: "spaces" },
-    create: { key: "spaces", identityMode: "USER_ID", supportsUserResolution: true },
+    create: { id: "spaces", key: "spaces", identityMode: "USER_ID", supportsUserResolution: true },
     update: {},
   });
 
@@ -1223,6 +1226,32 @@ You:
       console.log(`[seed] Attached skill '${def.name}' to ask-ai agent`);
     }
   }
+
+  // ── Platform-level agent (cross-org, read-only) ─────────────────
+  // Platform agents are visible across ALL orgs and cannot be edited, deleted,
+  // promoted, or demoted. Users must clone (duplicate) them to customize.
+  // Only the seed script can create platform-scope agents — the API rejects
+  // scope: "platform" on create.
+  await prisma.agent.upsert({
+    where: { orgId_slug: { orgId: defaultOrg.id, slug: "platform-assistant" } },
+    create: {
+      slug: "platform-assistant",
+      orgId: defaultOrg.id,
+      name: "Platform Assistant",
+      description: "A platform-level agent accessible across all orgs. Read-only — duplicate it to your own agent to customize.",
+      systemPrompt: [
+        "You are the **Platform Assistant** — a general-purpose helper available to all organizations.",
+        "",
+        "You can help with research, drafting, summarization, and answering questions across a wide range of topics.",
+        "Be concise, accurate, and helpful.",
+      ].join("\n"),
+      scope: "platform",
+      color: "#8b5cf6",
+      config: {},
+    },
+    update: {},
+  });
+  console.log("[seed] Upserted platform-assistant agent (scope: platform)");
 
   // Seed doctor-agent (Xyne Doctor — autonomous bug fixer)
   const DOCTOR_AGENT_PROMPT = [

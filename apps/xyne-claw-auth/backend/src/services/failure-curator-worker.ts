@@ -20,6 +20,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
 import { selectNegativeSessions, type NegativeSession } from "./failure-curator-detection.js";
+import { resolveOrgLitellmApiKey } from "../lib/agent-provider-config.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("failure-curator-worker");
@@ -169,6 +170,9 @@ export async function processAgentRange(
 
   // 4. Resolve current systemPrompt so the curator doesn't propose duplicate rules
   // 5. Call claw curator
+  // Resolve the ORG's key so the distill call bills the org (org-identity, no user
+  // context). Miss → undefined → claw skips (no server-key fallback).
+  const orgLitellmApiKey = await resolveOrgLitellmApiKey(agentRow.orgId).catch(() => undefined);
   const payload = {
     agentSlug,
     systemPrompt: agentRow?.systemPrompt ?? undefined,
@@ -193,7 +197,7 @@ export async function processAgentRange(
     const res = await fetch(`${CLAW_URL}/internal/failure-curator/distill`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-s2s-key": S2S_KEY },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ ...payload, ...(orgLitellmApiKey ? { litellmApiKey: orgLitellmApiKey } : {}) }),
     });
     if (!res.ok) {
       log.warn(`[failure-curator-worker] claw responded ${res.status} for orgId=${orgId} agent=${agentSlug}`);

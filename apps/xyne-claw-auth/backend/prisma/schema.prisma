@@ -219,6 +219,7 @@ enum OrgRole {
   OWNER
   ADMIN
   MEMBER
+  COMMUNITY_MEMBER
 }
 
 enum OrgStatus {
@@ -257,6 +258,8 @@ model Organization {
   skills              Skill[]
   subagentDefinitions SubagentDefinition[]
   surfaceTenantLinks  SurfaceTenantLink[]
+  providerIntegrations OrgProviderIntegration[]
+  orgProviderCredentials OrgProviderCredential[]
 
   @@map("organizations")
 }
@@ -284,6 +287,7 @@ model ConnectedSurface {
   surfaceId       String
   surface         Surface       @relation(fields: [surfaceId], references: [id], onDelete: Restrict)
   surfaceTenantId String        @default("")
+  surfaceOrgId    String?
   accessToken     String?       @db.Text
   refreshToken    String?       @db.Text
   tokenExpiresAt  DateTime?
@@ -294,6 +298,8 @@ model ConnectedSurface {
 
   @@unique([orgId, surfaceId, surfaceTenantId])
   @@index([orgId])
+  @@index([surfaceId, surfaceTenantId])
+  @@index([surfaceId, surfaceOrgId])
   @@map("connected_surfaces")
 }
 
@@ -403,6 +409,7 @@ model SurfaceAccessToken {
   @@map("surface_access_tokens")
 }
 
+/// DEPRECATED legacy fallback for ConnectedSurface.
 /// Maps an external surface's tenant (today: a Spaces workspace, i.e.
 /// public.users.workspaceId) to a claw Organization. One org can have several
 /// tenant links (a Spaces org has several workspaces), so this is a table, not
@@ -443,6 +450,48 @@ model OrgMember {
   @@unique([userId, orgId])
   @@index([orgId])
   @@map("org_members")
+}
+
+model OrgProviderIntegration {
+  id            String       @id @default(cuid())
+  orgId         String
+  organization  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  provider      String
+  externalId    String
+  externalAlias String?
+  status        String       @default("ACTIVE")
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@unique([orgId, provider])
+  @@index([provider, externalId])
+  @@map("org_provider_integrations")
+}
+
+/// Org-level provider credentials (e.g. the org-level LiteLLM key provisioned
+/// during team creation). Mirrors user_provider_credentials but keyed on orgId
+/// instead of userId, and without the per-key model/baseUrl/authType columns —
+/// those are LiteLLM constants resolved at read time, not per-key data.
+///
+/// Used ONLY at call sites that run under the ORG's identity (no meaningful user
+/// context). It is NOT an automatic fallback when a user key is missing.
+model OrgProviderCredential {
+  id            String       @id @default(cuid())
+  orgId         String
+  organization  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  provider      String
+  encryptedKey  String       @db.Text
+  iv            String
+  authTag       String
+  /// Provenance + LiteLLM-side ids: { source, spacesOrgId, litellmTeamId,
+  /// litellmKeyId, litellmTokenId, keyName, keyAlias, expires, provisionedAt,
+  /// changedBy }. Mirrors user_provider_credentials.metadata.
+  metadata      Json
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@unique([orgId, provider])
+  @@map("org_provider_credentials")
 }
 
 /// Per-user candidate memories awaiting the user's own review. Grouped into
@@ -745,16 +794,17 @@ model ChannelAgentChainBinding {
 }
 
 model UserProviderCredentials {
-  userId             String
-  user               User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  provider           String /// "spaces" | "copilot" | "claude"
-  encryptedKey       String?                   @db.Text
-  iv                 String?
-  authTag            String?
-  model              String?
-  baseUrl            String?
-  authType           String? /// "api_key" (default) | "oauth_token" — how to send the credential at runtime
-  reasoningEffort    String? /// "low" | "medium" | "high" — only meaningful for reasoning-capable models (codex gpt-5.x, etc.). Null = service default ("medium").
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider        String /// "spaces" | "copilot" | "claude"
+  managedBy       String   @default("USER") /// "USER" for visible user-managed creds, "SYSTEM" for hidden provisioned creds
+  encryptedKey    String?  @db.Text
+  iv              String?
+  authTag         String?
+  model           String?
+  baseUrl         String?
+  authType        String? /// "api_key" (default) | "oauth_token" — how to send the credential at runtime
+  reasoningEffort String? /// "low" | "medium" | "high" — only meaningful for reasoning-capable models (codex gpt-5.x, etc.). Null = service default ("medium").
   /// When set, this row is a BINDING to a SharedProviderCredential (same
   /// semantics as AgentProviderCredentials.sharedCredentialId): key material
   /// comes from the shared row; model/reasoningEffort here are overrides.
@@ -763,10 +813,11 @@ model UserProviderCredentials {
   /// refreshes would invalidate each other's OAuth session.
   sharedCredentialId String?
   sharedCredential   SharedProviderCredential? @relation(fields: [sharedCredentialId], references: [id], onDelete: SetNull)
-  createdAt          DateTime                  @default(now())
-  updatedAt          DateTime                  @updatedAt
+  metadata        Json?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
-  @@id([userId, provider])
+  @@id([userId, provider, managedBy])
   @@index([sharedCredentialId])
   @@map("user_provider_credentials")
 }

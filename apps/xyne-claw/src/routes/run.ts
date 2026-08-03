@@ -1611,7 +1611,9 @@ async function processTask(
       docxAttachments,
       pptxAttachments,
       htmlAttachments,
-    } = await ingestAttachments(attachments, log);
+    } = await ingestAttachments(attachments, log, {
+      ...(providerConfigs?.["litellm"]?.apiKey ? { litellmApiKey: providerConfigs["litellm"].apiKey } : {}),
+    });
 
     const mergedContextFiles = [
       ...(contextFiles ?? []),
@@ -2682,6 +2684,7 @@ async function processTask(
           evidenceRef,
           agentSlug,
           ...(verifyResponseCriteria ? { criteria: verifyResponseCriteria } : {}),
+          ...(providerConfigs?.["litellm"]?.apiKey ? { litellmApiKey: providerConfigs["litellm"].apiKey } : {}),
         }),
       );
       log(
@@ -4345,6 +4348,7 @@ router.post("/chain-judge", validateS2SKey, async (req, res: Response) => {
     taskTemplate,
     userQuery,
     judgeContext,
+    litellmApiKey,
   } = req.body as {
     agentResult?: string;
     sourceAgent?: string;
@@ -4352,6 +4356,7 @@ router.post("/chain-judge", validateS2SKey, async (req, res: Response) => {
     taskTemplate?: string;
     userQuery?: string;
     judgeContext?: string;
+    litellmApiKey?: string;
   };
 
   if (!agentResult || !sourceAgent || !targetAgent) {
@@ -4371,6 +4376,8 @@ router.post("/chain-judge", validateS2SKey, async (req, res: Response) => {
     taskTemplate,
     userQuery,
     judgeContext,
+    // per-user key from claw-auth; absent → 401
+    typeof litellmApiKey === "string" && litellmApiKey ? litellmApiKey : undefined,
   );
   res.json({ success: true, data: decision });
 });
@@ -4378,14 +4385,21 @@ router.post("/chain-judge", validateS2SKey, async (req, res: Response) => {
 // ── Generate agent prompt (called by xyne-claw-auth) ──────────────────────
 
 router.post("/generate-prompt", validateS2SKey, async (req, res: Response) => {
-  const { intent, agentName, existingPrompt } = req.body as {
+  const { intent, agentName, existingPrompt, litellmApiKey } = req.body as {
     intent?: string;
     agentName?: string;
     existingPrompt?: string;
+    litellmApiKey?: string;
   };
 
   if (!intent || typeof intent !== "string") {
     res.status(400).json({ success: false, error: "intent is required" });
+    return;
+  }
+
+  const genApiKey = (typeof litellmApiKey === "string" && litellmApiKey) ? litellmApiKey : LITELLM.apiKey; // fall back to env server key
+  if (!genApiKey) {
+    res.status(500).json({ success: false, error: "No LiteLLM key resolved — no org key and LITELLM_API_KEY not set" });
     return;
   }
 
@@ -4403,7 +4417,7 @@ router.post("/generate-prompt", validateS2SKey, async (req, res: Response) => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${LITELLM.apiKey}`,
+        Authorization: `Bearer ${genApiKey}`,
       },
       body: JSON.stringify({
         model: LITELLM.model,
@@ -4541,13 +4555,14 @@ router.post(
   "/generate-output-format",
   validateS2SKey,
   async (req, res: Response) => {
-    const { description, format, existingSchema, existingTemplate, agentName } =
+    const { description, format, existingSchema, existingTemplate, agentName, litellmApiKey } =
       req.body as {
         description?: string;
         format?: "json" | "markdown";
         existingSchema?: string;
         existingTemplate?: string;
         agentName?: string;
+        litellmApiKey?: string;
       };
 
     if (
@@ -4558,6 +4573,11 @@ router.post(
       res
         .status(400)
         .json({ success: false, error: "description is required" });
+      return;
+    }
+    const genApiKey = (typeof litellmApiKey === "string" && litellmApiKey) ? litellmApiKey : LITELLM.apiKey; // fall back to env server key
+    if (!genApiKey) {
+      res.status(500).json({ success: false, error: "No LiteLLM key resolved — no org key and LITELLM_API_KEY not set" });
       return;
     }
     const wantMarkdownOnly = format === "markdown";
@@ -4594,7 +4614,7 @@ router.post(
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${LITELLM.apiKey}`,
+            Authorization: `Bearer ${genApiKey}`,
           },
           body: JSON.stringify({
             model: LITELLM.model,
@@ -4711,7 +4731,7 @@ router.post(
 // proposal and the UI renders it as a diff for the user to accept.
 
 router.post("/suggest-tools", validateS2SKey, async (req, res: Response) => {
-  const { intent, catalog } = req.body as {
+  const { intent, catalog, litellmApiKey } = req.body as {
     intent?: string;
     catalog?: {
       subagents: Array<{ name: string; description: string }>;
@@ -4730,6 +4750,7 @@ router.post("/suggest-tools", validateS2SKey, async (req, res: Response) => {
         }>;
       }>;
     };
+    litellmApiKey?: string;
   };
 
   if (!intent || typeof intent !== "string" || intent.trim().length === 0) {
@@ -4738,6 +4759,12 @@ router.post("/suggest-tools", validateS2SKey, async (req, res: Response) => {
   }
   if (!catalog || typeof catalog !== "object") {
     res.status(400).json({ success: false, error: "catalog is required" });
+    return;
+  }
+
+  const genApiKey = (typeof litellmApiKey === "string" && litellmApiKey) ? litellmApiKey : LITELLM.apiKey; // fall back to env server key
+  if (!genApiKey) {
+    res.status(500).json({ success: false, error: "No LiteLLM key resolved — no org key and LITELLM_API_KEY not set" });
     return;
   }
 
@@ -4812,7 +4839,7 @@ router.post("/suggest-tools", validateS2SKey, async (req, res: Response) => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${LITELLM.apiKey}`,
+        Authorization: `Bearer ${genApiKey}`,
       },
       body: JSON.stringify({
         model: LITELLM.model,
