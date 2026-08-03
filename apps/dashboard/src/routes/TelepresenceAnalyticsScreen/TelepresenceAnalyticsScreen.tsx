@@ -16,15 +16,15 @@ import {
 } from '../../components/ui/Select';
 import { Skeleton } from '../../components/ui/Skeleton';
 import { cn } from '../../utils/classNames';
-import DigitalTwinCanvas from './DigitalTwinCanvas';
-import DigitalTwinDeviceModal from './DigitalTwinDeviceModal';
+import TelepresenceCanvas from './TelepresenceCanvas';
+import TelepresenceDeviceModal from './TelepresenceDeviceModal';
 import {
-  DIGITAL_TWIN_KIND_META,
-  digitalTwinDeviceKey,
-  fetchDigitalTwinRooms,
-  fetchDigitalTwinTimeseries,
-  type DigitalTwinDevice,
-} from './digitalTwinData';
+  TELEPRESENCE_CANVAS_KIND_META,
+  telepresenceCanvasDeviceKey,
+  fetchTelepresenceCanvasRooms,
+  fetchTelepresenceCanvasTimeseries,
+  type TelepresenceCanvasDevice,
+} from './telepresenceCanvasData';
 import TimeseriesChart from './TimeseriesChart';
 import { formatRelativeTime } from './TelepresenceAnalyticsScreen.utils';
 
@@ -81,11 +81,11 @@ const TelepresenceAnalyticsScreen = (): ReactElement => {
     endDate: new Date(),
   }));
   // null = show every device's line on the graph; otherwise a
-  // digitalTwinDeviceKey() string narrows the chart to that one device.
+  // telepresenceCanvasDeviceKey() string narrows the chart to that one device.
   const [selectedDeviceKey, setSelectedDeviceKey] = useState<string | null>(null);
   // null = not chosen yet, falls back to the first room once data loads.
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
-  const [selectedTwinDevice, setSelectedTwinDevice] = useState<DigitalTwinDevice | null>(null);
+  const [selectedDevice, setSelectedDevice] = useState<TelepresenceCanvasDevice | null>(null);
 
   // Effective range: cleared filter falls back to the default last 24h.
   const range = useMemo<DateRangeValue>(
@@ -100,14 +100,14 @@ const TelepresenceAnalyticsScreen = (): ReactElement => {
   const toIso = range.endDate.toISOString();
 
   // Sample-data-only spatial layouts driving both the room canvas above and
-  // the device picker below (see digitalTwinData.ts) — every device you can
+  // the device picker below (see telepresenceCanvasData.ts) — every device you can
   // click in the canvas has a matching line in the graph, since both read
   // from the same dataset. Real AV-shaped data (telepresenceService.ts) still
   // exists for whenever the documented backend is implemented, it's just not
   // wired into this screen anymore.
-  const digitalTwinQuery = useQuery({
-    queryKey: ['telepresence', 'digital-twin'],
-    queryFn: fetchDigitalTwinRooms,
+  const telepresenceCanvasQuery = useQuery({
+    queryKey: ['telepresence', 'rooms'],
+    queryFn: fetchTelepresenceCanvasRooms,
     enabled: Boolean(user) && allowed,
     refetchInterval: POLL_INTERVAL_MS,
     refetchOnWindowFocus: true,
@@ -116,8 +116,8 @@ const TelepresenceAnalyticsScreen = (): ReactElement => {
   });
 
   const timeseriesQuery = useQuery({
-    queryKey: ['telepresence', 'digital-twin-timeseries', fromIso, toIso],
-    queryFn: () => fetchDigitalTwinTimeseries(fromIso, toIso),
+    queryKey: ['telepresence', 'rooms-timeseries', fromIso, toIso],
+    queryFn: () => fetchTelepresenceCanvasTimeseries(fromIso, toIso),
     enabled: Boolean(user) && allowed,
     placeholderData: keepPreviousData,
     staleTime: 60 * 1000,
@@ -131,12 +131,12 @@ const TelepresenceAnalyticsScreen = (): ReactElement => {
   const handleRefresh = useCallback((): void => {
     if (isManualRefreshing) return;
     setIsManualRefreshing(true);
-    void Promise.allSettled([digitalTwinQuery.refetch(), timeseriesQuery.refetch()]).finally(() =>
-      setIsManualRefreshing(false),
+    void Promise.allSettled([telepresenceCanvasQuery.refetch(), timeseriesQuery.refetch()]).finally(
+      () => setIsManualRefreshing(false),
     );
-  }, [isManualRefreshing, digitalTwinQuery, timeseriesQuery]);
+  }, [isManualRefreshing, telepresenceCanvasQuery, timeseriesQuery]);
 
-  // Opened from a digital-twin device: narrow the graph to this device's own
+  // Opened from a telepresence device: narrow the graph to this device's own
   // line, close the modal, and jump to the graph section below.
   //
   // Closing the modal unmounts Radix's Dialog, which holds a scroll lock via
@@ -144,10 +144,10 @@ const TelepresenceAnalyticsScreen = (): ReactElement => {
   // have flushed by the time a single requestAnimationFrame fires, so a
   // scrollIntoView call there can silently land while the page is still
   // locked. A second nested rAF waits a full extra frame, past that cleanup.
-  const handleViewTwinHistory = useCallback(
-    (roomUserId: string, device: DigitalTwinDevice): void => {
-      setSelectedDeviceKey(digitalTwinDeviceKey(roomUserId, device));
-      setSelectedTwinDevice(null);
+  const handleViewDeviceHistory = useCallback(
+    (roomUserId: string, device: TelepresenceCanvasDevice): void => {
+      setSelectedDeviceKey(telepresenceCanvasDeviceKey(roomUserId, device));
+      setSelectedDevice(null);
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
           graphSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -163,22 +163,21 @@ const TelepresenceAnalyticsScreen = (): ReactElement => {
   }
 
   const now = Date.now();
-  const digitalTwinRooms = digitalTwinQuery.data ?? [];
+  const telepresenceCanvasRooms = telepresenceCanvasQuery.data ?? [];
   const points = timeseriesQuery.data ?? [];
   const chartTo = new Date(Math.min(range.endDate.getTime(), now));
-  const healthIsStale = digitalTwinQuery.isError && Boolean(digitalTwinQuery.data);
+  const healthIsStale = telepresenceCanvasQuery.isError && Boolean(telepresenceCanvasQuery.data);
 
-  const effectiveRoomId = selectedRoomId ?? digitalTwinRooms[0]?.userId ?? null;
-  const selectedTwinRoom = digitalTwinRooms.find(room => room.userId === effectiveRoomId) ?? null;
+  const effectiveRoomId = selectedRoomId ?? telepresenceCanvasRooms[0]?.userId ?? null;
+  const selectedRoom =
+    telepresenceCanvasRooms.find(room => room.userId === effectiveRoomId) ?? null;
 
   // The graph is scoped to whichever room is showing in the canvas above —
   // "All devices" means all devices in THIS room (typically ~10-15), not
   // every device across every room (55+), which was both unreadably
   // cluttered and ambiguous (the same device names repeat in every room).
-  const roomDevices = selectedTwinRoom?.devices ?? [];
-  const roomPoints = selectedTwinRoom
-    ? points.filter(p => p.userId === selectedTwinRoom.userId)
-    : [];
+  const roomDevices = selectedRoom?.devices ?? [];
+  const roomPoints = selectedRoom ? points.filter(p => p.userId === selectedRoom.userId) : [];
   const filteredPoints = selectedDeviceKey
     ? points.filter(p => `${p.userId}|${p.deviceType}|${p.name}` === selectedDeviceKey)
     : roomPoints;
@@ -189,10 +188,10 @@ const TelepresenceAnalyticsScreen = (): ReactElement => {
         <header className='flex flex-wrap items-center justify-between gap-3'>
           <h1 className='text-xl font-semibold text-foreground'>Telepresence Observance</h1>
           <div className='flex items-center gap-2'>
-            {digitalTwinQuery.data && (
+            {telepresenceCanvasQuery.data && (
               <LiveIndicator
                 isStale={healthIsStale}
-                updatedAt={digitalTwinQuery.dataUpdatedAt}
+                updatedAt={telepresenceCanvasQuery.dataUpdatedAt}
                 now={now}
               />
             )}
@@ -218,7 +217,7 @@ const TelepresenceAnalyticsScreen = (): ReactElement => {
         <section className='flex flex-col gap-3'>
           <div className='flex flex-wrap items-center justify-between gap-3'>
             <h2 className='text-sm font-medium text-muted-foreground'>Room</h2>
-            {digitalTwinRooms.length > 0 && (
+            {telepresenceCanvasRooms.length > 0 && (
               <Select
                 {...(effectiveRoomId ? { value: effectiveRoomId } : {})}
                 onValueChange={value => {
@@ -236,7 +235,7 @@ const TelepresenceAnalyticsScreen = (): ReactElement => {
                   />
                 </SelectTrigger>
                 <SelectContent className='max-w-80'>
-                  {digitalTwinRooms.map(room => (
+                  {telepresenceCanvasRooms.map(room => (
                     <SelectItem key={room.userId} value={room.userId}>
                       <span className='block min-w-0 truncate'>{room.label}</span>
                     </SelectItem>
@@ -246,28 +245,24 @@ const TelepresenceAnalyticsScreen = (): ReactElement => {
             )}
           </div>
 
-          {digitalTwinQuery.isError && !digitalTwinRooms.length ? (
+          {telepresenceCanvasQuery.isError && !telepresenceCanvasRooms.length ? (
             <div className='flex flex-col items-center gap-3 rounded-xl border border-border px-6 py-10 text-center'>
               <p className='text-sm text-muted-foreground'>Could not load room layouts.</p>
               <button
                 type='button'
-                onClick={() => void digitalTwinQuery.refetch()}
+                onClick={() => void telepresenceCanvasQuery.refetch()}
                 data-track-category='Telepresence_Analytics'
-                data-track-name='Retry_Digital_Twin_Fetch'
+                data-track-name='Retry_Telepresence_Fetch'
                 className='flex items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-sm text-foreground transition-colors hover:bg-accent'
               >
                 <RefreshCw size={14} aria-hidden='true' />
                 Retry
               </button>
             </div>
-          ) : digitalTwinQuery.isPending ? (
+          ) : telepresenceCanvasQuery.isPending ? (
             <Skeleton className='aspect-[16/10] w-full rounded-xl' />
-          ) : selectedTwinRoom ? (
-            <DigitalTwinCanvas
-              room={selectedTwinRoom}
-              now={now}
-              onSelectDevice={setSelectedTwinDevice}
-            />
+          ) : selectedRoom ? (
+            <TelepresenceCanvas room={selectedRoom} now={now} onSelectDevice={setSelectedDevice} />
           ) : (
             <div className='rounded-xl border border-dashed border-border px-6 py-10 text-center text-sm text-muted-foreground'>
               No room layouts available yet.
@@ -282,8 +277,8 @@ const TelepresenceAnalyticsScreen = (): ReactElement => {
           <div className='flex flex-col gap-3'>
             <div>
               <h2 className='text-sm font-medium text-foreground'>Device health over time</h2>
-              {selectedTwinRoom && (
-                <p className='text-xs text-muted-foreground'>{selectedTwinRoom.label}</p>
+              {selectedRoom && (
+                <p className='text-xs text-muted-foreground'>{selectedRoom.label}</p>
               )}
             </div>
             <div className='flex flex-wrap items-center justify-between gap-4'>
@@ -305,14 +300,14 @@ const TelepresenceAnalyticsScreen = (): ReactElement => {
                 </SelectTrigger>
                 <SelectContent className='max-w-80'>
                   <SelectItem value={ALL_DEVICES_VALUE}>All devices</SelectItem>
-                  {selectedTwinRoom &&
+                  {selectedRoom &&
                     roomDevices.map(device => (
                       <SelectItem
                         key={device.id}
-                        value={digitalTwinDeviceKey(selectedTwinRoom.userId, device)}
+                        value={telepresenceCanvasDeviceKey(selectedRoom.userId, device)}
                       >
                         <span className='block min-w-0 truncate'>
-                          {device.name} ({DIGITAL_TWIN_KIND_META[device.kind].label})
+                          {device.name} ({TELEPRESENCE_CANVAS_KIND_META[device.kind].label})
                         </span>
                       </SelectItem>
                     ))}
@@ -322,14 +317,14 @@ const TelepresenceAnalyticsScreen = (): ReactElement => {
             </div>
           </div>
 
-          {digitalTwinQuery.isError && !digitalTwinQuery.data ? (
+          {telepresenceCanvasQuery.isError && !telepresenceCanvasQuery.data ? (
             <div className='flex flex-col items-center gap-3 px-6 py-10 text-center'>
               <p className='text-sm text-muted-foreground'>
                 Could not load telepresence health data.
               </p>
               <button
                 type='button'
-                onClick={() => void digitalTwinQuery.refetch()}
+                onClick={() => void telepresenceCanvasQuery.refetch()}
                 data-track-category='Telepresence_Analytics'
                 data-track-name='Retry_Health_Fetch'
                 className='flex items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-sm text-foreground transition-colors hover:bg-accent'
@@ -338,7 +333,7 @@ const TelepresenceAnalyticsScreen = (): ReactElement => {
                 Retry
               </button>
             </div>
-          ) : timeseriesQuery.isPending || digitalTwinQuery.isPending ? (
+          ) : timeseriesQuery.isPending || telepresenceCanvasQuery.isPending ? (
             <Skeleton className='h-64 rounded-lg' />
           ) : timeseriesQuery.isError ? (
             <div className='flex flex-col items-center gap-3 px-6 py-10 text-center'>
@@ -360,13 +355,13 @@ const TelepresenceAnalyticsScreen = (): ReactElement => {
         </section>
       </div>
 
-      <DigitalTwinDeviceModal
-        device={selectedTwinDevice}
-        roomLabel={selectedTwinRoom?.label ?? ''}
+      <TelepresenceDeviceModal
+        device={selectedDevice}
+        roomLabel={selectedRoom?.label ?? ''}
         now={now}
-        onClose={() => setSelectedTwinDevice(null)}
+        onClose={() => setSelectedDevice(null)}
         onViewHistory={device => {
-          if (selectedTwinRoom) handleViewTwinHistory(selectedTwinRoom.userId, device);
+          if (selectedRoom) handleViewDeviceHistory(selectedRoom.userId, device);
         }}
       />
     </div>

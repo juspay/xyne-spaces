@@ -1,10 +1,10 @@
 import { ReactElement } from 'react';
 import {
-  DIGITAL_TWIN_KIND_IMAGE,
-  DIGITAL_TWIN_KIND_META,
-  type DigitalTwinDevice,
-  type DigitalTwinRoom,
-} from './digitalTwinData';
+  TELEPRESENCE_CANVAS_KIND_IMAGE,
+  TELEPRESENCE_CANVAS_KIND_META,
+  type TelepresenceCanvasDevice,
+  type TelepresenceCanvasRoom,
+} from './telepresenceCanvasData';
 import { STATUS_META, effectiveDeviceStatus } from './TelepresenceAnalyticsScreen.utils';
 
 // A schematic front-elevation "floor plan" of one room's physical AV/compute/
@@ -20,21 +20,21 @@ const DisplayCell = ({
   now,
   onClick,
 }: {
-  device: DigitalTwinDevice;
+  device: TelepresenceCanvasDevice;
   now: number;
   onClick: () => void;
 }): ReactElement => {
   const status = effectiveDeviceStatus(device, now);
   const meta = STATUS_META[status];
-  const image = DIGITAL_TWIN_KIND_IMAGE.DISPLAY;
-  const Icon = DIGITAL_TWIN_KIND_META.DISPLAY.icon;
+  const image = TELEPRESENCE_CANVAS_KIND_IMAGE.DISPLAY;
+  const Icon = TELEPRESENCE_CANVAS_KIND_META.DISPLAY.icon;
   return (
     <button
       type='button'
       onClick={onClick}
       aria-label={`${device.name}: ${meta.label}`}
       data-track-category='Telepresence_Analytics'
-      data-track-name='Open_Digital_Twin_Device'
+      data-track-name='Open_Telepresence_Device'
       data-track-metadata={JSON.stringify({ kind: device.kind })}
       className='relative flex aspect-video items-center justify-center overflow-hidden rounded-md border-2 bg-card transition-transform hover:z-10 hover:scale-[1.06]'
       style={{ borderColor: meta.color }}
@@ -57,10 +57,11 @@ const DisplayCell = ({
 
 const MARKER_SIZES = {
   // Camera/sensors — a small icon tile.
-  sm: { box: 'size-9', icon: 16 },
-  // Compute — a bigger, LED-display-style tile so the real device photo
-  // reads clearly, same treatment as the wall-screen cells.
-  lg: { box: 'size-16', icon: 26 },
+  sm: { box: 'size-9', icon: 16, imageFit: 'object-cover' },
+  // Compute — a bigger, taller tile matching the real device photo's
+  // portrait aspect ratio, shown uncropped (object-contain) so the full
+  // chassis reads clearly instead of being cut off by a square object-cover.
+  lg: { box: 'h-24 w-16', icon: 26, imageFit: 'object-contain' },
 } as const;
 
 // A normal (non-absolutely-positioned) flex item — its place on the canvas
@@ -72,24 +73,24 @@ const PointMarker = ({
   onClick,
   size = 'sm',
 }: {
-  device: DigitalTwinDevice;
+  device: TelepresenceCanvasDevice;
   now: number;
   onClick: () => void;
   size?: keyof typeof MARKER_SIZES;
 }): ReactElement => {
   const status = effectiveDeviceStatus(device, now);
   const meta = STATUS_META[status];
-  const kindMeta = DIGITAL_TWIN_KIND_META[device.kind];
-  const image = DIGITAL_TWIN_KIND_IMAGE[device.kind];
+  const kindMeta = TELEPRESENCE_CANVAS_KIND_META[device.kind];
+  const image = TELEPRESENCE_CANVAS_KIND_IMAGE[device.kind];
   const Icon = kindMeta.icon;
-  const { box, icon } = MARKER_SIZES[size];
+  const { box, icon, imageFit } = MARKER_SIZES[size];
   return (
     <button
       type='button'
       onClick={onClick}
       aria-label={`${device.name}: ${meta.label}`}
       data-track-category='Telepresence_Analytics'
-      data-track-name='Open_Digital_Twin_Device'
+      data-track-name='Open_Telepresence_Device'
       data-track-metadata={JSON.stringify({ kind: device.kind })}
       className='flex flex-col items-center gap-1 transition-transform hover:z-10 hover:scale-110'
     >
@@ -98,7 +99,7 @@ const PointMarker = ({
         style={{ backgroundColor: `${kindMeta.accent}1a`, borderColor: meta.color }}
       >
         {image ? (
-          <img src={image} alt='' className='h-full w-full object-cover' />
+          <img src={image} alt='' className={`h-full w-full ${imageFit}`} />
         ) : (
           <Icon size={icon} style={{ color: kindMeta.accent }} aria-hidden='true' />
         )}
@@ -114,20 +115,24 @@ const PointMarker = ({
   );
 };
 
-type GridSpatial = Extract<DigitalTwinDevice['spatial'], { layout: 'grid' }>;
-type FrontWallPoint = DigitalTwinDevice & { spatial: { layout: 'point'; zone: 'front_wall' } };
+type GridSpatial = Extract<TelepresenceCanvasDevice['spatial'], { layout: 'grid' }>;
+type FrontWallPoint = TelepresenceCanvasDevice & {
+  spatial: { layout: 'point'; zone: 'front_wall' };
+};
 
-const DigitalTwinCanvas = ({
+const TelepresenceCanvas = ({
   room,
   now,
   onSelectDevice,
 }: {
-  room: DigitalTwinRoom;
+  room: TelepresenceCanvasRoom;
   now: number;
-  onSelectDevice: (device: DigitalTwinDevice) => void;
+  onSelectDevice: (device: TelepresenceCanvasDevice) => void;
 }): ReactElement => {
   const displays = room.devices
-    .filter((d): d is DigitalTwinDevice & { spatial: GridSpatial } => d.spatial.layout === 'grid')
+    .filter(
+      (d): d is TelepresenceCanvasDevice & { spatial: GridSpatial } => d.spatial.layout === 'grid',
+    )
     .sort((a, b) => a.spatial.row - b.spatial.row || a.spatial.col - b.spatial.col);
   const gridSpec = displays[0]?.spatial;
 
@@ -150,7 +155,7 @@ const DigitalTwinCanvas = ({
     .sort((a, b) => bySide(a) - bySide(b));
 
   const sideRackPoints = room.devices.filter(
-    (d): d is DigitalTwinDevice & { spatial: { layout: 'point'; zone: 'side_rack' } } =>
+    (d): d is TelepresenceCanvasDevice & { spatial: { layout: 'point'; zone: 'side_rack' } } =>
       d.spatial.layout === 'point' && d.spatial.zone === 'side_rack',
   );
 
@@ -243,4 +248,4 @@ const DigitalTwinCanvas = ({
   );
 };
 
-export default DigitalTwinCanvas;
+export default TelepresenceCanvas;

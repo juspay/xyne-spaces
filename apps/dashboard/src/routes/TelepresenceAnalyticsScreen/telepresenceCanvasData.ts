@@ -2,7 +2,7 @@ import { Cpu, Mic, Monitor, Video, Volume2, type LucideIcon } from 'lucide-react
 import type { TelepresenceDeviceType, TelepresenceHealthStatus } from '../../types/telepresence';
 import { telepresenceService } from '../../services/Telepresence/telepresenceService';
 
-// Digital-twin room layouts: a spatial floor-plan replica of each room's
+// Telepresence room layouts: a spatial floor-plan replica of each room's
 // physical AV layout, built from the real telepresence-monitoring API
 // (GET /health, GET /health/timeseries) — the sole room view AND the sole
 // source for the "Device health over time" graph on the Observance screen, so
@@ -21,10 +21,15 @@ import { telepresenceService } from '../../services/Telepresence/telepresenceSer
 // devices; otherwise devices fall back to a deterministic auto-layout so the
 // canvas never breaks on a report that omits it.
 
-export type DigitalTwinDeviceKind = 'DISPLAY' | 'CAMERA' | 'MICROPHONE' | 'SPEAKER' | 'COMPUTE';
+export type TelepresenceCanvasDeviceKind =
+  | 'DISPLAY'
+  | 'CAMERA'
+  | 'MICROPHONE'
+  | 'SPEAKER'
+  | 'COMPUTE';
 
 // Fixed display order for charts/legends grouping by kind.
-export const DIGITAL_TWIN_KIND_ORDER: DigitalTwinDeviceKind[] = [
+export const TELEPRESENCE_CANVAS_KIND_ORDER: TelepresenceCanvasDeviceKind[] = [
   'DISPLAY',
   'CAMERA',
   'MICROPHONE',
@@ -32,35 +37,35 @@ export const DIGITAL_TWIN_KIND_ORDER: DigitalTwinDeviceKind[] = [
   'COMPUTE',
 ];
 
-export type DigitalTwinSpatial =
+export type TelepresenceCanvasSpatial =
   // Displays tile a grid on the front wall — position given as (row, col)
   // out of (rows, cols), 1-indexed, filled in row-major order.
   | { layout: 'grid'; zone: 'front_wall'; row: number; col: number; rows: number; cols: number }
   // Everything else is a single point, normalized 0..1 within its zone.
   | { layout: 'point'; zone: 'front_wall' | 'side_rack'; x: number; y: number };
 
-export interface DigitalTwinDevice {
+export interface TelepresenceCanvasDevice {
   id: string;
-  kind: DigitalTwinDeviceKind;
+  kind: TelepresenceCanvasDeviceKind;
   name: string;
   physicalRole: string;
   status: TelepresenceHealthStatus;
   connected: number;
   detected: number;
   lastReportedAt: string;
-  spatial: DigitalTwinSpatial;
+  spatial: TelepresenceCanvasSpatial;
   /** Celsius — present on the room's synthesized COMPUTE tile, absent otherwise. */
   cpuTemperature?: number;
 }
 
-export interface DigitalTwinRoom {
+export interface TelepresenceCanvasRoom {
   userId: string;
   label: string;
-  devices: DigitalTwinDevice[];
+  devices: TelepresenceCanvasDevice[];
 }
 
-export const DIGITAL_TWIN_KIND_META: Record<
-  DigitalTwinDeviceKind,
+export const TELEPRESENCE_CANVAS_KIND_META: Record<
+  TelepresenceCanvasDeviceKind,
   { label: string; icon: LucideIcon; accent: string }
 > = {
   DISPLAY: { label: 'Display', icon: Monitor, accent: '#2a78d6' },
@@ -71,14 +76,15 @@ export const DIGITAL_TWIN_KIND_META: Record<
 };
 
 // Real device photo per kind, served from public/images/telepresence/ — a
-// kind without an entry here falls back to its icon (DIGITAL_TWIN_KIND_META
+// kind without an entry here falls back to its icon (TELEPRESENCE_CANVAS_KIND_META
 // above). Fill in CAMERA/MICROPHONE/SPEAKER as those photos are added.
-export const DIGITAL_TWIN_KIND_IMAGE: Partial<Record<DigitalTwinDeviceKind, string>> = {
-  DISPLAY: '/images/telepresence/LED43Inch.png',
-  COMPUTE: '/images/telepresence/CPU.png',
-};
+export const TELEPRESENCE_CANVAS_KIND_IMAGE: Partial<Record<TelepresenceCanvasDeviceKind, string>> =
+  {
+    DISPLAY: '/images/telepresence/LED43Inch.svg',
+    COMPUTE: '/images/telepresence/CPU.svg',
+  };
 
-const DEVICE_TYPE_TO_KIND: Record<TelepresenceDeviceType, DigitalTwinDeviceKind> = {
+const DEVICE_TYPE_TO_KIND: Record<TelepresenceDeviceType, TelepresenceCanvasDeviceKind> = {
   TV: 'DISPLAY',
   CAMERA: 'CAMERA',
   MICROPHONE: 'MICROPHONE',
@@ -124,7 +130,7 @@ interface RoomDeviceInput {
   layoutConfig?: unknown;
 }
 
-const buildDisplayDevices = (devices: RoomDeviceInput[]): DigitalTwinDevice[] => {
+const buildDisplayDevices = (devices: RoomDeviceInput[]): TelepresenceCanvasDevice[] => {
   if (devices.length === 0) return [];
   const placed = devices.map((device, index) => {
     const entry = parseLayoutConfig(device.layoutConfig)[0];
@@ -153,14 +159,14 @@ const buildDisplayDevices = (devices: RoomDeviceInput[]): DigitalTwinDevice[] =>
 // Point-layout devices (camera/microphone/speaker): cameras render centered
 // in their own row; everything else splits across the top/bottom of the
 // front wall (or the side rack, for anything explicitly reporting that
-// zone) — see DigitalTwinCanvas, which groups purely by kind and zone/y, not
+// zone) — see TelepresenceCanvas, which groups purely by kind and zone/y, not
 // by exact coordinates. `layoutConfig`'s gridPosition (when present) only
 // influences left-right ordering and top/bottom placement, since the real
 // API never promises true spatial coordinates.
 const buildPointDevices = (
   devices: RoomDeviceInput[],
-  kind: Extract<DigitalTwinDeviceKind, 'CAMERA' | 'MICROPHONE' | 'SPEAKER'>,
-): DigitalTwinDevice[] => {
+  kind: Extract<TelepresenceCanvasDeviceKind, 'CAMERA' | 'MICROPHONE' | 'SPEAKER'>,
+): TelepresenceCanvasDevice[] => {
   const withLayout = devices.map((device, index) => {
     const entry = parseLayoutConfig(device.layoutConfig)[0];
     return {
@@ -211,16 +217,16 @@ const buildPointDevices = (
   return [...frontWallDevices, ...sideRackDevices];
 };
 
-const mapRoomToDigitalTwin = (room: {
+const mapRoomToTelepresenceCanvas = (room: {
   userId: string;
   cpuTemperature: number | null;
   lastReportedAt: string;
   devices: RoomDeviceInput[];
-}): DigitalTwinRoom => {
+}): TelepresenceCanvasRoom => {
   const byType = (type: TelepresenceDeviceType): RoomDeviceInput[] =>
     room.devices.filter(d => d.deviceType === type);
 
-  const devices: DigitalTwinDevice[] = [
+  const devices: TelepresenceCanvasDevice[] = [
     ...buildDisplayDevices(byType('TV')),
     ...buildPointDevices(byType('CAMERA'), 'CAMERA'),
     ...buildPointDevices(byType('MICROPHONE'), 'MICROPHONE'),
@@ -245,21 +251,23 @@ const mapRoomToDigitalTwin = (room: {
   return { userId: room.userId, label: humanizeUserId(room.userId), devices };
 };
 
-export const fetchDigitalTwinRooms = async (): Promise<DigitalTwinRoom[]> => {
+export const fetchTelepresenceCanvasRooms = async (): Promise<TelepresenceCanvasRoom[]> => {
   const response = await telepresenceService.getHealth();
-  return response.data.rooms.map(mapRoomToDigitalTwin);
+  return response.data.rooms.map(mapRoomToTelepresenceCanvas);
 };
 
-// Identity key for a single digital-twin device — mirrors the shape
+// Identity key for a single telepresence device — mirrors the shape
 // groupPointsByDevice keys lanes by (userId|deviceType|name), so picking a
 // device here filters the graph down to exactly its own line.
-export const digitalTwinDeviceKey = (roomUserId: string, device: DigitalTwinDevice): string =>
-  `${roomUserId}|${device.kind}|${device.name}`;
+export const telepresenceCanvasDeviceKey = (
+  roomUserId: string,
+  device: TelepresenceCanvasDevice,
+): string => `${roomUserId}|${device.kind}|${device.name}`;
 
-export interface DigitalTwinTimeseriesPoint {
+export interface TelepresenceCanvasTimeseriesPoint {
   id: string;
   userId: string;
-  deviceType: DigitalTwinDeviceKind;
+  deviceType: TelepresenceCanvasDeviceKind;
   name: string;
   status: TelepresenceHealthStatus;
   connected: number;
@@ -268,10 +276,10 @@ export interface DigitalTwinTimeseriesPoint {
   reportedAt: string;
 }
 
-export const fetchDigitalTwinTimeseries = async (
+export const fetchTelepresenceCanvasTimeseries = async (
   from: string,
   to: string,
-): Promise<DigitalTwinTimeseriesPoint[]> => {
+): Promise<TelepresenceCanvasTimeseriesPoint[]> => {
   const response = await telepresenceService.getTimeseries({ from, to });
   // The room-level "Room Controller" COMPUTE tile has no corresponding
   // per-device log rows (cpuTemperature is a room-level reading, not a

@@ -8,7 +8,10 @@ import {
   CartesianGrid,
   Tooltip,
 } from 'recharts';
-import { DIGITAL_TWIN_KIND_META, type DigitalTwinDeviceKind } from './digitalTwinData';
+import {
+  TELEPRESENCE_CANVAS_KIND_META,
+  type TelepresenceCanvasDeviceKind,
+} from './telepresenceCanvasData';
 import {
   STATUS_META,
   groupPointsByDevice,
@@ -74,7 +77,7 @@ const formatTime = (t: number, rangeMs: number): string => {
 };
 
 const laneDisplayName = (lane: DeviceLane): string =>
-  `${lane.name} · ${DIGITAL_TWIN_KIND_META[lane.deviceType as DigitalTwinDeviceKind]?.label ?? lane.deviceType}`;
+  `${lane.name} · ${TELEPRESENCE_CANVAS_KIND_META[lane.deviceType as TelepresenceCanvasDeviceKind]?.label ?? lane.deviceType}`;
 
 interface TooltipEntry {
   dataKey?: string | number;

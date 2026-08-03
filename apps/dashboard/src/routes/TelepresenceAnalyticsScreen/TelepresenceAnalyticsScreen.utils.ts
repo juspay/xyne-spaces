@@ -1,6 +1,6 @@
 import { CheckCircle2, AlertTriangle, XCircle, HelpCircle, type LucideIcon } from 'lucide-react';
 import type { TelepresenceDevice, TelepresenceHealthStatus } from '../../types/telepresence';
-import { DIGITAL_TWIN_KIND_ORDER } from './digitalTwinData';
+import { TELEPRESENCE_CANVAS_KIND_ORDER } from './telepresenceCanvasData';
 
 // A device that hasn't reported within this window is treated as Unavailable
 // even if its last self-reported status was better.
@@ -55,7 +55,7 @@ export const STATUS_META: Record<TelepresenceHealthStatus, StatusMeta> = {
 
 // Reported status downgraded to UNAVAILABLE when the device has gone silent.
 // Takes just the two fields it needs (structural, not TelepresenceDevice
-// specifically) so it also works for the digital-twin device shape, which
+// specifically) so it also works for the telepresence device shape, which
 // carries the same status/lastReportedAt pair but no deviceType.
 export const effectiveDeviceStatus = (
   device: Pick<TelepresenceDevice, 'status' | 'lastReportedAt'>,
@@ -78,7 +78,7 @@ export const formatRelativeTime = (iso: string, now: number): string => {
   return `${Math.floor(hours / 24)}d ago`;
 };
 
-// A shape any timeseries point flavor (real AV or digital-twin) satisfies for
+// A shape any timeseries point flavor (real AV or telepresence-canvas) satisfies for
 // charting purposes — deviceType widened to a plain string since the chart
 // itself doesn't care which enum a point's device type came from.
 export interface ChartTimeseriesPoint {
@@ -125,8 +125,12 @@ export const groupPointsByDevice = (points: ChartTimeseriesPoint[]): DeviceLane[
   }
   grouped.sort((a, b) => {
     const byType =
-      DIGITAL_TWIN_KIND_ORDER.indexOf(a.deviceType as (typeof DIGITAL_TWIN_KIND_ORDER)[number]) -
-      DIGITAL_TWIN_KIND_ORDER.indexOf(b.deviceType as (typeof DIGITAL_TWIN_KIND_ORDER)[number]);
+      TELEPRESENCE_CANVAS_KIND_ORDER.indexOf(
+        a.deviceType as (typeof TELEPRESENCE_CANVAS_KIND_ORDER)[number],
+      ) -
+      TELEPRESENCE_CANVAS_KIND_ORDER.indexOf(
+        b.deviceType as (typeof TELEPRESENCE_CANVAS_KIND_ORDER)[number],
+      );
     if (byType !== 0) return byType;
     const byRoom = a.userId.localeCompare(b.userId);
     return byRoom !== 0 ? byRoom : a.name.localeCompare(b.name);

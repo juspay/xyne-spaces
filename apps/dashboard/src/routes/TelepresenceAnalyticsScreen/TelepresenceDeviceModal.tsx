@@ -3,10 +3,10 @@ import { TrendingUp, X } from 'lucide-react';
 import { Dialog } from '../../components/ui/Dialog';
 import StatusBadge from './StatusBadge';
 import {
-  DIGITAL_TWIN_KIND_IMAGE,
-  DIGITAL_TWIN_KIND_META,
-  type DigitalTwinDevice,
-} from './digitalTwinData';
+  TELEPRESENCE_CANVAS_KIND_IMAGE,
+  TELEPRESENCE_CANVAS_KIND_META,
+  type TelepresenceCanvasDevice,
+} from './telepresenceCanvasData';
 import { effectiveDeviceStatus, formatRelativeTime } from './TelepresenceAnalyticsScreen.utils';
 
 const Row = ({ label, children }: { label: string; children: ReactElement }): ReactElement => (
@@ -16,23 +16,23 @@ const Row = ({ label, children }: { label: string; children: ReactElement }): Re
   </div>
 );
 
-const DigitalTwinDeviceModal = ({
+const TelepresenceDeviceModal = ({
   device,
   roomLabel,
   now,
   onClose,
   onViewHistory,
 }: {
-  device: DigitalTwinDevice | null;
+  device: TelepresenceCanvasDevice | null;
   roomLabel: string;
   now: number;
   onClose: () => void;
-  onViewHistory: (device: DigitalTwinDevice) => void;
+  onViewHistory: (device: TelepresenceCanvasDevice) => void;
 }): ReactElement | null => {
   if (!device) return null;
   const status = effectiveDeviceStatus(device, now);
-  const kindMeta = DIGITAL_TWIN_KIND_META[device.kind];
-  const image = DIGITAL_TWIN_KIND_IMAGE[device.kind];
+  const kindMeta = TELEPRESENCE_CANVAS_KIND_META[device.kind];
+  const image = TELEPRESENCE_CANVAS_KIND_IMAGE[device.kind];
   const Icon = kindMeta.icon;
 
   return (
@@ -43,7 +43,7 @@ const DigitalTwinDeviceModal = ({
       }}
       title={`${device.name} — ${kindMeta.label} in ${roomLabel}`}
       className='max-w-lg'
-      testId='digital-twin-device-modal'
+      testId='telepresence-device-modal'
     >
       <div className='p-6'>
         <button
@@ -51,7 +51,7 @@ const DigitalTwinDeviceModal = ({
           onClick={onClose}
           aria-label='Close'
           data-track-category='Telepresence_Analytics'
-          data-track-name='Close_Digital_Twin_Device_Detail'
+          data-track-name='Close_Telepresence_Device_Detail'
           className='absolute right-4 top-4 rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
         >
           <X size={16} />
@@ -59,11 +59,15 @@ const DigitalTwinDeviceModal = ({
 
         <div className='flex items-start gap-5'>
           <div
-            className='flex size-28 shrink-0 items-center justify-center overflow-hidden rounded-2xl border'
+            className={`flex shrink-0 items-center justify-center overflow-hidden rounded-2xl border ${device.kind === 'COMPUTE' ? 'h-40 w-28' : 'size-28'}`}
             style={{ backgroundColor: `${kindMeta.accent}1a`, borderColor: `${kindMeta.accent}33` }}
           >
             {image ? (
-              <img src={image} alt='' className='h-full w-full object-cover' />
+              <img
+                src={image}
+                alt=''
+                className={`h-full w-full ${device.kind === 'COMPUTE' ? 'object-contain' : 'object-cover'}`}
+              />
             ) : (
               <Icon size={48} style={{ color: kindMeta.accent }} strokeWidth={1.75} />
             )}
@@ -106,7 +110,7 @@ const DigitalTwinDeviceModal = ({
           type='button'
           onClick={() => onViewHistory(device)}
           data-track-category='Telepresence_Analytics'
-          data-track-name='View_Digital_Twin_Device_History'
+          data-track-name='View_Telepresence_Device_History'
           data-track-metadata={JSON.stringify({ kind: device.kind })}
           className='mt-6 flex w-full items-center justify-center gap-2 rounded-lg border border-border px-4 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-accent'
         >
@@ -118,4 +122,4 @@ const DigitalTwinDeviceModal = ({
   );
 };
 
-export default DigitalTwinDeviceModal;
+export default TelepresenceDeviceModal;
