@@ -1,6 +1,10 @@
 import { Prisma, PrismaClient } from '@prisma/client'
 import { BaseQueryACL, ACLContext } from '../base-acl'
-import { getAccessibleChannelIds, isGuestContext } from './channel-access-helper'
+import {
+  getAccessibleChannelIds,
+  hasGuestChannelAccess,
+  isGuestContext,
+} from './channel-access-helper'
 
 export class ChannelParticipantsACL extends BaseQueryACL<
   Prisma.ChannelParticipantWhereInput,
@@ -76,6 +80,10 @@ export class ChannelParticipantsACL extends BaseQueryACL<
       where: { channelId: data.channelId, userId: this.ctx.userId },
       select: { id: true },
     })
-    return existing !== null
+    if (existing !== null) return true
+    // A guest reaching the channel by grant has no row here yet, so joining
+    // would otherwise be impossible. They may add only themselves.
+    if (data.userId !== this.ctx.userId) return false
+    return hasGuestChannelAccess(this.prisma, this.ctx, data.channelId)
   }
 }

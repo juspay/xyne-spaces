@@ -1,6 +1,10 @@
 import { Prisma, PrismaClient } from '@prisma/client'
 import { BaseQueryACL, ACLContext } from '../base-acl'
-import { getAccessibleChannelIds, isGuestContext } from './channel-access-helper'
+import {
+  getAccessibleChannelIds,
+  hasGuestChannelAccess,
+  isGuestContext,
+} from './channel-access-helper'
 
 export class ReactionsACL extends BaseQueryACL<
   Prisma.ReactionWhereInput,
@@ -63,6 +67,7 @@ export class ReactionsACL extends BaseQueryACL<
           select: {
             channel: {
               select: {
+                id: true,
                 workspaceId: true,
                 visibility: true,
                 participants: {
@@ -79,6 +84,7 @@ export class ReactionsACL extends BaseQueryACL<
     if (!channel) return false
     if (channel.workspaceId !== this.ctx.workspaceId) return false
     if (channel.visibility === 'PUBLIC') return true
-    return channel.participants.length > 0
+    if (channel.participants.length > 0) return true
+    return hasGuestChannelAccess(this.prisma, this.ctx, channel.id)
   }
 }

@@ -108,10 +108,53 @@ export async function getGuestAccessibleChannelIds(
 ): Promise<string[]> {
   const scope = await getGuestScopeData(prisma, { workspaceId, userId })
 
+  // A grant on a project reaches every channel inside it, not just channels
+  // granted by name.
+  const projectChannels = scope.directProjectIds.length
+    ? await prisma.channel.findMany({
+        where: { workspaceId, projectId: { in: scope.directProjectIds } },
+        select: { id: true },
+      })
+    : []
+
   return unique([
     ...scope.directChannelIds,
     ...scope.participantChannelIds,
+    ...projectChannels.map((entry) => entry.id),
   ])
+}
+
+/**
+ * Whether a guest reaches `channelId` through any of their grants.
+ *
+ * Guest reach is not expressible as a participant lookup, so write clauses that
+ * gate on participation need this as an additional arm to stay in step with the
+ * sync layer. Returns false for non-guests, who are gated by their own rules.
+ */
+export async function hasGuestChannelAccess(
+  prisma: PrismaClient,
+  ctx: ACLContext,
+  channelId: string
+): Promise<boolean> {
+  if (!isGuestContext(ctx)) {
+    return false
+  }
+
+  const channel = await prisma.channel.findFirst({
+    where: { id: channelId, workspaceId: ctx.workspaceId },
+    select: { id: true },
+  })
+  if (!channel) {
+    return false
+  }
+
+  const accessibleChannelIds = await getGuestAccessibleChannelIds(
+    prisma,
+    ctx.workspaceId,
+    ctx.userId
+  )
+
+  return accessibleChannelIds.includes(channelId)
 }
 
 export async function getAccessibleChannelIds(
