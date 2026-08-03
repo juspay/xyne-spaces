@@ -1,9 +1,16 @@
 export { ShortcutsProvider } from '../providers/ShortcutsProvider';
 export { useShortcut, useScope, useShortcutById, useResolvedShortcutCombo } from './hooks';
-export { shortcuts, getShortcut, getShortcutsByCategory, findConflicts } from './catalog';
+export {
+  shortcuts,
+  getShortcut,
+  getShortcutsByCategory,
+  findConflicts,
+  scopesOverlap,
+  findActionsForCombo,
+} from './catalog';
 export { invokeShortcut } from './shortcutsRegistry';
 export type { ShortcutConfig, ShortcutRegistration, ShortcutScope } from './shortcutsRegistry';
-export type { ShortcutDefinition, ShortcutId } from './catalog';
+export type { ShortcutDefinition, ShortcutId, ComboMatch } from './catalog';
 export {
   getShortcutOverrides,
   setShortcutOverrides,

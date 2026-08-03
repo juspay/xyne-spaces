@@ -55,7 +55,12 @@ import { Badge } from '../../ui/Badge/Badge';
 
 import { usePreferencesState, type PreferencesState } from '../../../hooks/usePreferencesState';
 import { useShortcutConfig } from '../../../hooks/useShortcutConfig';
-import { getShortcutsByCategory, shortcuts } from '../../../shortcuts';
+import {
+  getShortcutsByCategory,
+  shortcuts,
+  scopesOverlap,
+  findActionsForCombo,
+} from '../../../shortcuts';
 import type { ShortcutId, ShortcutDefinition } from '../../../shortcuts';
 import {
   CALL_MEDIA_QUALITY_OPTIONS,
@@ -1057,6 +1062,20 @@ const formatCombo = (combo: string, isMac: boolean): string =>
 // Categories intentionally hidden from the user-facing configurator.
 const HIDDEN_SHORTCUT_CATEGORIES = new Set(['Viewer']);
 
+// Combos the browser or OS usually claim before the page ever sees them. In the
+// browser the playground can only warn about these; it cannot actually test
+// them (the keydown never reaches Xyne). Stored in the platform-neutral
+// `mod+...` form produced by serializeKeyEvent.
+const BROWSER_RESERVED_COMBOS = new Set<string>([
+  'mod+w',
+  'mod+t',
+  'mod+n',
+  'mod+shift+n',
+  'mod+shift+t',
+  'mod+shift+w',
+  'mod+q',
+]);
+
 // Turn a raw keydown into a platform-neutral combo string, ordered
 // mod → shift → alt → key to match the catalog convention. Returns null while
 // only modifier keys are held (so the capture waits for a real key).
@@ -1162,10 +1181,13 @@ const ShortcutRow: FC<{
 };
 
 const ShortcutsSection: FC<{ state: PreferencesState }> = () => {
-  const { isMac } = usePlatform();
+  const { isMac, isElectron } = usePlatform();
   const { overrides, setOverride, resetOverride, resetAll, isCustomized } = useShortcutConfig();
   const [capturingId, setCapturingId] = useState<ShortcutId | null>(null);
   const [conflictLabel, setConflictLabel] = useState<string | null>(null);
+  // Playground: press any combo to see what it maps to, without assigning it.
+  const [isTesting, setIsTesting] = useState(false);
+  const [testCombo, setTestCombo] = useState<string | null>(null);
 
   const grouped = useMemo(() => getShortcutsByCategory(), []);
 
@@ -1184,7 +1206,7 @@ const ShortcutsSection: FC<{ state: PreferencesState }> = () => {
       if (rawId === targetId) continue;
       const definition = shortcuts[rawId] as ShortcutDefinition;
       const scope = definition.scope ?? 'global';
-      const overlaps = scope === targetScope || scope === 'global' || targetScope === 'global';
+      const overlaps = scopesOverlap(scope, targetScope);
       if (!overlaps) continue;
       if (resolveKeys(rawId).includes(combo)) return definition.description ?? rawId;
     }
@@ -1223,6 +1245,60 @@ const ShortcutsSection: FC<{ state: PreferencesState }> = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [capturingId, overrides]);
 
+  // Playground capture: listen for a single combo, then show what it maps to.
+  // Kept separate from the row-capture listener above so testing never writes
+  // an override.
+  useEffect(() => {
+    if (!isTesting) return;
+
+    const onKeyDown = (event: KeyboardEvent): void => {
+      event.preventDefault();
+      event.stopPropagation();
+
+      if (event.key === 'Escape') {
+        setIsTesting(false);
+        return;
+      }
+
+      const combo = serializeKeyEvent(event);
+      if (!combo) return; // still holding only modifiers
+
+      setTestCombo(combo);
+      setIsTesting(false);
+    };
+
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isTesting]);
+
+  // Override-aware reverse lookup for the combo under test.
+  const testMatches = useMemo(
+    () => (testCombo ? findActionsForCombo(testCombo, resolveKeys) : []),
+    // resolveKeys reads `overrides`, so re-run when either changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [testCombo, overrides],
+  );
+
+  // A hard collision is two actions bound to this combo in the *same* scope
+  // where at least one is unconditional (no `when` guard) — only then can both
+  // fire in the same context. Cross-scope matches are disambiguated by scope
+  // precedence and are reported as context-dependent, not as errors.
+  const testHardCollision = useMemo(() => {
+    for (let i = 0; i < testMatches.length; i += 1) {
+      for (let j = i + 1; j < testMatches.length; j += 1) {
+        const a = testMatches[i];
+        const b = testMatches[j];
+        if (!a || !b) continue;
+        if (a.scope === b.scope && !(a.hasWhen && b.hasWhen)) return true;
+      }
+    }
+    return false;
+  }, [testMatches]);
+
+  const testCrossScope = testMatches.length > 1 && !testHardCollision;
+  const testReserved = testCombo ? BROWSER_RESERVED_COMBOS.has(testCombo) : false;
+
   const hasAnyCustom = Object.keys(overrides).length > 0;
 
   return (
@@ -1246,6 +1322,81 @@ const ShortcutsSection: FC<{ state: PreferencesState }> = () => {
           >
             Reset all
           </Button>
+        )}
+      </div>
+
+      <div className='rounded-lg border border-border bg-muted/20 p-3 space-y-2'>
+        <div className='flex items-center justify-between gap-4'>
+          <div className='min-w-0'>
+            <p className='text-sm font-medium text-foreground'>Test a shortcut</p>
+            <p className='text-xs text-muted-foreground'>
+              Press any combination to see what it does in Xyne — nothing is saved.
+            </p>
+          </div>
+          <button
+            type='button'
+            onClick={() => {
+              setTestCombo(null);
+              setIsTesting(true);
+            }}
+            className='inline-flex items-center gap-1 rounded-md border border-border bg-background px-2 py-1 hover:bg-muted transition-colors shrink-0'
+            aria-label='Test a shortcut'
+            data-track-category='PREFERENCES'
+            data-track-name='TestShortcut'
+          >
+            {isTesting ? (
+              <span className='text-xs text-primary animate-pulse'>
+                Press keys… (Esc to cancel)
+              </span>
+            ) : testCombo ? (
+              <KeyCap>{formatCombo(testCombo, isMac)}</KeyCap>
+            ) : (
+              <span className='text-xs text-muted-foreground'>Press a shortcut</span>
+            )}
+          </button>
+        </div>
+
+        {testCombo && !isTesting && (
+          <div className='space-y-1 text-xs'>
+            {testMatches.length === 0 ? (
+              <p className='text-muted-foreground'>
+                No Xyne action uses this combination — it’s free to assign.
+              </p>
+            ) : (
+              <ul className='space-y-0.5'>
+                {testMatches.map(match => (
+                  <li key={match.id} className='text-foreground'>
+                    Triggers <span className='font-medium'>{match.description}</span>
+                    <span className='text-muted-foreground'> · {match.scope}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {testHardCollision && (
+              <p className='text-destructive'>
+                Conflict: more than one action is bound to this combination in the same scope.
+              </p>
+            )}
+
+            {testCrossScope && (
+              <p className='text-muted-foreground'>
+                Context-dependent — Xyne runs the action for whichever surface is active.
+              </p>
+            )}
+
+            {testReserved && (
+              <p className='text-amber-600 dark:text-amber-500'>
+                Your browser or OS may intercept this combination before Xyne receives it.
+              </p>
+            )}
+
+            {isElectron && (
+              <p className='text-muted-foreground'>
+                Desktop system-level shortcut detection is not enabled yet.
+              </p>
+            )}
+          </div>
         )}
       </div>
 
