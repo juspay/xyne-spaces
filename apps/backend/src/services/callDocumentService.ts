@@ -1995,7 +1995,12 @@ A comprehensive detailed summary has been generated from this call.
           return { success: false, error: 'Failed to generate detailed summary' };
         }
 
-        await callTitlePromise;
+        // A rerun keeps its existing title; only wait on concurrent title
+        // generation when the call has no title yet, so a present title does
+        // not add needless latency here.
+        if (!resolvedCallTitle) {
+          await callTitlePromise;
+        }
 
         // Single update reserves one version for this generation; the message
         // announces that same version.
