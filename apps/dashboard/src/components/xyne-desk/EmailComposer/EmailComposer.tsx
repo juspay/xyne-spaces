@@ -101,6 +101,7 @@ import {
   MAX_EMAIL_ATTACHMENT_FILES,
   MAX_EMAIL_ATTACHMENT_FILE_SIZE_BYTES,
   parseFromField,
+  sanitizeSignatureHtml,
   stripHtml,
 } from './helpers';
 
@@ -2030,7 +2031,7 @@ export const EmailComposer = ({
                     <p className='text-xs text-muted-foreground mb-1'>--</p>
                     <div
                       className='text-sm text-foreground/80 prose prose-sm dark:prose-invert max-w-none'
-                      dangerouslySetInnerHTML={{ __html: activeSig.content ?? '' }}
+                      dangerouslySetInnerHTML={{ __html: sanitizeSignatureHtml(activeSig.content) }}
                     />
                   </div>
                 </div>
@@ -2149,7 +2150,7 @@ export const EmailComposer = ({
                       <div
                         className='prose prose-sm dark:prose-invert mt-4 break-words border-t border-border pt-4 text-sm text-muted-foreground [overflow-wrap:anywhere]'
                         dangerouslySetInnerHTML={{
-                          __html: DOMPurify.sanitize(activeSig.content),
+                          __html: sanitizeSignatureHtml(activeSig.content),
                         }}
                       />
                     );
