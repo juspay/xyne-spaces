@@ -59,6 +59,16 @@ function warnUnscoped(model: string | undefined, operation: string, reason: stri
   logger.warn('[acl] query ran with no tenant scope', { model, operation, reason });
 }
 
+/** Counts query shapes worth reviewing, deduped by tag:model:operation and capped like the above. */
+const patternSeen = new Set<string>();
+
+function notePattern(tag: string, model: string | undefined, operation: string, detail: Record<string, unknown> = {}): void {
+  const key = `${tag}:${model ?? '?'}:${operation}`;
+  if (patternSeen.has(key) || patternSeen.size >= 500) return;
+  patternSeen.add(key);
+  logger.warn(tag, { model, operation, ...detail });
+}
+
 /**
  * Build the error thrown when a row is out of the caller's scope, logging it first.
  * Every denial in this file goes through here or `denyCreate` so refusals are never silent.
@@ -144,7 +154,11 @@ export function withAclExtension<T extends PrismaClient>(prisma: T): T {
     query: {
       $allModels: {
         async $allOperations({ model, operation, args, query }) {
-          if (txStorage.getStore() === true) return query(args);
+          if (txStorage.getStore() === true) {
+            // Interactive transactions run on the base client; record what goes through.
+            notePattern('[acl] ran inside a transaction', model, operation);
+            return query(args);
+          }
           const ctx = getContextOrNull();
           const ws = currentWorkspaceId();
           // Raw queries carry no model and are handled by their call sites.
@@ -197,7 +211,13 @@ export function withAclExtension<T extends PrismaClient>(prisma: T): T {
             }
             // A table that declared itself unscoped (UnscopedACL) — pass straight through so
             // findUnique keeps its native, transaction-safe behaviour.
-            if (isUnrestricted(aclWhere)) return query(args);
+            if (isUnrestricted(aclWhere)) {
+              // Only worth noting when the model has the column; global tables are expected.
+              if (isWorkspaceScopedModel(String(model))) {
+                notePattern('[acl] table opted out of scoping', model, operation, { side: 'read' });
+              }
+              return query(args);
+            }
             const scalarDefault = isWorkspaceOnly(aclWhere, ws);
 
             if (WHERE_OPS.has(operation)) {
@@ -275,7 +295,12 @@ export function withAclExtension<T extends PrismaClient>(prisma: T): T {
             }
             mutateWhere = { workspaceId: ws };
           }
-          if (isUnrestricted(mutateWhere)) return query(args);
+          if (isUnrestricted(mutateWhere)) {
+            if (isWorkspaceScopedModel(String(model))) {
+              notePattern('[acl] table opted out of scoping', model, operation, { side: 'write' });
+            }
+            return query(args);
+          }
 
           // Bulk ops accept a non-unique/relational where — AND the mutate filter directly.
           if (isBulkMutate) {
