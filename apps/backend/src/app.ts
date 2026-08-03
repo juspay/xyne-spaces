@@ -388,11 +388,6 @@ export class App {
 
     this.app.use('/api/transcriptionAgent', verifyTranscriptionAgent, transcriptionAgentRoutes);
 
-    // Mount-layer default guard: any `*-backfill` admin path is gated with
-    // backfillAdminAuth (TICKET-MIGRATION ADMIN) BY DEFAULT, so a new backfill
-    // router is protected even if its author forgets the in-file guard. Routes
-    // that authorize against a different resource are listed in
-    // SELF_GUARDED_BACKFILLS and self-authorize in their own router.
     this.app.use('/api/admin', backfillMountGuard);
     this.app.use('/migrate/api/admin', backfillMountGuard);
 

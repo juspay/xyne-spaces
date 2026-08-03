@@ -1,23 +1,18 @@
 import { Router } from 'express';
-import { AccessType } from '@prisma/client';
 import { FormFieldSequenceBackfillController } from '@/controllers/formFieldSequenceBackfillController';
-import { authMiddleware } from '@/middleware/auth';
-import { authorize } from '@/middleware/authorize';
+import { backfillAdminAuth } from '@/middleware/backfillAdminAuth';
 
 const router = Router();
-
-const formFieldSequenceBackfillAdminAuth = authorize('FORMS', AccessType.ADMIN);
 
 /**
  * @route POST /migrate/api/admin/form-field-sequence-backfill
  * @desc Backfill deterministic sequenceNumber values for legacy form_fields rows
- * @access FORMS Admin only
+ * @access Admin (TICKET-MIGRATION ADMIN)
  * @body { batchSize?: number, delayMs?: number, dryRun?: boolean }
  */
 router.post(
   '/',
-  authMiddleware.authenticate,
-  formFieldSequenceBackfillAdminAuth,
+  ...backfillAdminAuth,
   FormFieldSequenceBackfillController.triggerBackfill
 );
 

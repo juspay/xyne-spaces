@@ -1,27 +1,16 @@
-import { Router, Request, Response, NextFunction } from 'express';
+import { Router } from 'express';
 import { AdminBackfillController } from '@/controllers/vespaBackfillController';
-import { authMiddleware } from '@/middleware/auth';
-import { authorize } from '@/middleware/authorize';
-import { AccessType } from '@prisma/client';
+import { backfillAdminAuth } from '@/middleware/backfillAdminAuth';
 
 const router = Router();
 
-const requireAuth = (req: Request, res: Response, next: NextFunction) => {
-  // Always require authentication - no bypass for development/sandbox
-  authMiddleware.authenticate(req, res, next);
-};
-
-// Resource-ACL gate: caller must hold WRITE (or ADMIN, which satisfies WRITE) on the VESPA resource.
-const requireVespaAccess = authorize('VESPA', AccessType.WRITE);
-
 /**
  * @desc Trigger Vespa backfill for all or specific schemas
- * @access Requires VESPA resource WRITE or ADMIN
+ * @access Admin (TICKET-MIGRATION ADMIN)
 */
 router.post(
   '/',
-  requireAuth,
-  requireVespaAccess,
+  ...backfillAdminAuth,
   AdminBackfillController.triggerBackfill
 );
 
@@ -32,33 +21,30 @@ router.post(
  */
 router.post(
   '/entities',
-  requireAuth,
-  requireVespaAccess,
+  ...backfillAdminAuth,
   AdminBackfillController.triggerEntityBackfill
 );
 
 /**
  * @desc Get Vespa queue statistics
- * @access Requires VESPA resource WRITE or ADMIN
+ * @access Admin (TICKET-MIGRATION ADMIN)
  */
 router.get(
   '/stats',
-  requireAuth,
-  requireVespaAccess,
+  ...backfillAdminAuth,
   AdminBackfillController.getQueueStats
 );
 
 /**
  * @desc Get queue jobs with pagination and state filter
- * @access Requires VESPA resource WRITE or ADMIN
+ * @access Admin (TICKET-MIGRATION ADMIN)
  * @query page - Page number (default: 1)
  * @query limit - Jobs per page (default: 100)
  * @query state - Job state: waiting, active, delayed, completed, failed, or all (default: failed)
  */
 router.get(
   '/jobs',
-  requireAuth,
-  requireVespaAccess,
+  ...backfillAdminAuth,
   AdminBackfillController.getJobsWithState
 );
 
@@ -66,12 +52,11 @@ router.get(
 /**
  * @route POST /api/admin/vespa-backfill/retry-failed
  * @desc Retry all failed jobs
- * @access Requires VESPA resource WRITE or ADMIN
+ * @access Admin (TICKET-MIGRATION ADMIN)
  */
 router.post(
   '/retryFailedJobs',
-  requireAuth,
-  requireVespaAccess,
+  ...backfillAdminAuth,
   AdminBackfillController.retryFailedJobs
 );
 
@@ -79,14 +64,13 @@ router.post(
 /**
  * @route DELETE /api/admin/vespa-backfill/jobs
  * @desc Clear jobs by state (waiting, active, delayed, completed, failed, or all)
- * @access Requires VESPA resource WRITE or ADMIN
+ * @access Admin (TICKET-MIGRATION ADMIN)
  * @query state - Job state to clear: waiting, active, delayed, completed, failed, or all (required)
  * @warning Destructive operation - use with caution!
  */
 router.delete(
   '/clearJobsByState',
-  requireAuth,
-  requireVespaAccess,
+  ...backfillAdminAuth,
   AdminBackfillController.clearJobsByState
 );
 
