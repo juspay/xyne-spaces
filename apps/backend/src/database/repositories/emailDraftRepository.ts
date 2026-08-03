@@ -1,5 +1,5 @@
 import { DatabaseClient } from '../client';
-import { getContextOrNull } from '@/database/tenant/context';
+import { currentWorkspaceId } from '@/database/tenant/context';
 import { EmailDraft } from '@prisma/client';
 
 export class EmailDraftRepository {
@@ -12,7 +12,7 @@ export class EmailDraftRepository {
       where: { id: channelId },
       select: { workspaceId: true },
     });
-    const workspaceId = channel?.workspaceId ?? getContextOrNull()?.workspaceId;
+    const workspaceId = channel?.workspaceId ?? currentWorkspaceId();
     if (!workspaceId) {
       throw new Error(
         `workspaceId required: channel ${channelId} not found and no tenant context`,

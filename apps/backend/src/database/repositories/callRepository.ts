@@ -430,7 +430,6 @@ export class CallRepository {
         title: params.title,
         workspaceId,
         createdByUserId: params.createdByUserId,
-        ...(params.workspaceId && { workspaceId: params.workspaceId }),
         channelId: params.channelId,
         callType: params.callType,
         callOrigin: params.callOrigin,
@@ -961,7 +960,7 @@ export class CallRepository {
       conversationId: string;
       messageId: string;
       channelId: string;
-      workspaceId: string | null;
+      workspaceId: string;
       callId: string;        // room externalId / roomName
       callType?: CallType;   // undefined ⇒ regular call
       initiatorName: string;
