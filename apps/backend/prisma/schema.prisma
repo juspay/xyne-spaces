@@ -198,6 +198,7 @@ enum ActivityType {
   EMAIL_SENT
   TICKET_CREATED
   CSAT_RECEIVED
+  MOBIUS_RELEASE_UPDATE
   @@schema("public")
 }
 
@@ -539,6 +540,7 @@ model Ticket {
   aiSubCategory        String?           // Sub-category from AI classification
   aiPriority           String?           // Priority detected by AI (LOW, MEDIUM, HIGH, CRITICAL)
   emailReplyEnabled    Boolean           @default(true) // Whether email replies are enabled for this ticket
+  mobiusReleaseId      String?           // External Mobius release id manually linked to this ticket; lets the Mobius webhook route release events here
 
   // Relations
   createdByUser      User                   @relation("TicketCreatedBy", fields: [createdBy], references: [id])
@@ -586,6 +588,9 @@ model Ticket {
   @@index([workspaceId, createdAt(sort: Desc), id])
   @@index([xyneId])
   @@unique([workspaceId, xyneId])
+  // One Mobius release maps to at most one ticket per workspace. NULLs are
+  // distinct in Postgres, so unlinked tickets are unconstrained.
+  @@unique([workspaceId, mobiusReleaseId])
   @@map("tickets")
   @@schema("public")
 }

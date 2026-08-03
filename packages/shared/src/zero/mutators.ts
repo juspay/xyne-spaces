@@ -4007,6 +4007,7 @@ export const mutators = defineMutators({
         metadata: z.any().optional(),
         isArchived: z.boolean().optional(),
         kanbanPosition: z.string().nullable().optional(),
+        mobiusReleaseId: z.string().nullable().optional(),
         updatedAt: z.number(),
       }),
       async ({
@@ -4027,6 +4028,7 @@ export const mutators = defineMutators({
           metadata,
           isArchived,
           kanbanPosition,
+          mobiusReleaseId,
           updatedAt,
         },
       }) => {
@@ -4046,6 +4048,7 @@ export const mutators = defineMutators({
           metadata?: ReadonlyJSONValue;
           isArchived?: boolean;
           kanbanPosition?: string | null;
+          mobiusReleaseId?: string | null;
         }
 
         const updateData: TicketUpdateData = {
@@ -4073,6 +4076,11 @@ export const mutators = defineMutators({
         if (metadata !== undefined) updateData.metadata = metadata;
         if (isArchived !== undefined) updateData.isArchived = isArchived;
         if (kanbanPosition !== undefined) updateData.kanbanPosition = kanbanPosition;
+        // Normalize empty string to null so clearing the field removes the link
+        // (and doesn't collide on the unique index with other cleared tickets).
+        if (mobiusReleaseId !== undefined) {
+          updateData.mobiusReleaseId = mobiusReleaseId ? mobiusReleaseId.trim() : null;
+        }
 
         await tx.mutate.tickets.update({
           id,
