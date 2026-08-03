@@ -57,7 +57,6 @@ const TwinDraftRow = ({ draft }: { draft: TwinDraftItem }): ReactElement => {
   );
 };
 
-
 const TwinDraftsPanel = (): ReactElement => {
   const twinDrafts = useSelector(stateMachineActor, state => state.context.twinDrafts);
 

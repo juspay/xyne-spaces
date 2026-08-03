@@ -1,6 +1,5 @@
 import type { D2, RenderOptions } from '@terrastruct/d2';
 
-
 let d2Promise: Promise<D2> | null = null;
 
 async function getD2(): Promise<D2> {
@@ -9,7 +8,6 @@ async function getD2(): Promise<D2> {
   }
   return d2Promise;
 }
-
 
 let d2Queue: Promise<unknown> = Promise.resolve();
 
