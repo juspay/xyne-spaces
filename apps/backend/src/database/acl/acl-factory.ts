@@ -17,6 +17,8 @@ import {
   CanvasesACL,
   CanvasParticipantsACL,
   CanvasVersionsACL,
+  CanvasCommentsACL,
+  CanvasCommentThreadsACL,
   ChannelParticipantsACL,
   ChannelsACL,
   ChannelStatsACL,
@@ -164,6 +166,15 @@ export class ACLFactory {
       return new CanvasParticipantsACL(ctx, prisma)
     case 'canvasVersion':
       return new CanvasVersionsACL(ctx, prisma)
+    case 'canvasComment':
+      return new CanvasCommentsACL(ctx, prisma)
+    case 'canvasCommentThread':
+      return new CanvasCommentThreadsACL(ctx, prisma)
+    // Both carry workspaceId, so the base clause ({ workspaceId }) is the whole rule.
+    case 'entityAccess':
+      return new BaseQueryACL(ctx, prisma)
+    case 'summaryTemplate':
+      return new BaseQueryACL(ctx, prisma)
     case 'channel':
       return new ChannelsACL(ctx, prisma)
     case 'channelParticipant':
