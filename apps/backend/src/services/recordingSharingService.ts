@@ -239,7 +239,7 @@ export class RecordingSharingService {
         where: {
           conversationId: ticket.conversationId,
           channelId: ticket.channelId,
-          OR: [{ workspaceId: actor.workspaceId }, { workspaceId: null }],
+          workspaceId: actor.workspaceId,
         },
       });
       if (!conversation) {
@@ -408,7 +408,7 @@ export class RecordingSharingService {
       where: {
         conversationId: ticket.conversationId,
         channelId: ticket.channelId,
-        OR: [{ workspaceId: actor.workspaceId }, { workspaceId: null }],
+        workspaceId: actor.workspaceId,
       },
     });
     if (!conversation) throw new RecordingSharingError('Linked ticket conversation not found', 409);
