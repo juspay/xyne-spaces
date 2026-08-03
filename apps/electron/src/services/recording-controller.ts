@@ -12,11 +12,11 @@ export interface RecordingSnapshot {
 
 const RENDERER_READY_TIMEOUT_MS = 10_000;
 const EXTERNAL_START_TIMEOUT_MS = 5 * 60_000;
-/** Long enough to outlast a Space-switch animation's focus churn, short enough
- * that the pill still feels like it responds to leaving the app. */
 const PILL_SYNC_DEBOUNCE_MS = 150;
+const FOCUS_REQUEST_GRACE_MS = 2_000;
 
 let pillSyncTimer: ReturnType<typeof setTimeout> | null = null;
+let focusRequestTimer: ReturnType<typeof setTimeout> | null = null;
 
 let active = false;
 let startTime: number | null = null;
@@ -91,9 +91,24 @@ function waitForRenderer(): Promise<void> {
   });
 }
 
+function markFocusRequested(): void {
+  clearFocusRequested();
+  focusRequestTimer = setTimeout(() => {
+    focusRequestTimer = null;
+    syncPillVisibility();
+  }, FOCUS_REQUEST_GRACE_MS);
+}
+
+function clearFocusRequested(): void {
+  if (!focusRequestTimer) return;
+  clearTimeout(focusRequestTimer);
+  focusRequestTimer = null;
+}
+
 export function focusMainWindow(pathname?: string): BrowserWindow | null {
   const mainWindow = getMainWindow();
   if (!mainWindow || mainWindow.isDestroyed()) return null;
+  markFocusRequested();
   mainWindow.show();
   mainWindow.focus();
   if (pathname) mainWindow.webContents.send('navigate-to', pathname);
@@ -101,6 +116,7 @@ export function focusMainWindow(pathname?: string): BrowserWindow | null {
 }
 
 function isMainWindowFocused(): boolean {
+  if (focusRequestTimer) return true;
   const mainWindow = getMainWindow();
   return !!mainWindow && !mainWindow.isDestroyed() && mainWindow.isFocused();
 }
@@ -142,6 +158,7 @@ export function setOverlayMinimized(next: boolean): void {
 export function initRecordingPillVisibility(): void {
   const handleWindowFocus = (_event: Electron.Event, window: BrowserWindow): void => {
     if (isPillWindow(window)) return;
+    if (window === getMainWindow()) clearFocusRequested();
     scheduleSyncPillVisibility();
   };
   const handleWindowBlur = (_event: Electron.Event, window: BrowserWindow): void => {
@@ -154,6 +171,7 @@ export function initRecordingPillVisibility(): void {
 
   app.once('will-quit', () => {
     cancelPendingPillSync();
+    clearFocusRequested();
     app.removeListener('browser-window-focus', handleWindowFocus);
     app.removeListener('browser-window-blur', handleWindowBlur);
   });
