@@ -2,7 +2,14 @@ import { useCallback, useEffect, useRef, useState, type ReactElement } from 'rea
 import { useNavigate, useParams } from 'react-router-dom';
 import { useMutation } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Ai01, ArrowUp, AtMark, MaximizeTwoArrow, MinimizeTwoArrow } from '@xyne/icons';
+import {
+  Ai01,
+  ArrowUp,
+  AtMark,
+  MaximizeTwoArrow,
+  MinimizeTwoArrow,
+  PencilEditLine,
+} from '@xyne/icons';
 import { Loader2 } from 'lucide-react';
 import { cn } from '@/utils/classNames';
 import { Button } from '@/components/ui/Button';
@@ -17,7 +24,8 @@ import {
   slugify,
   type WizardState,
 } from '../create/wizardState';
-import { AgentColorPicker } from './AgentColorPicker';
+import { AgentColorRow } from './AgentColorRow';
+import { AutoWidthInput } from './shared/AutoWidthInput';
 import { BuiltinCapabilityRow } from './builtin/BuiltinCapabilityRow';
 import { KnowledgeCapabilityRow } from './knowledge/KnowledgeCapabilityRow';
 import { McpCapabilityRow } from './mcp/McpCapabilityRow';
@@ -25,7 +33,7 @@ import { SkillsCapabilityRow } from './skill/SkillsCapabilityRow';
 import { SubagentCapabilityRow } from './subagent/SubagentCapabilityRow';
 
 function inlineWidth(value: string, placeholder: string): string {
-  return `${Math.max(value.length, placeholder.length) + 1}ch`;
+  return `${Math.max(value.length, placeholder.length) - 2}ch`;
 }
 
 const ClawAgentCreateV2 = (): ReactElement => {
@@ -98,7 +106,6 @@ const ClawAgentCreateV2 = (): ReactElement => {
   };
 
   const fieldError = nameCheck.nameError ?? nameCheck.slugError;
-  const initial = state.name.trim().charAt(0).toUpperCase();
 
   return (
     <div className='h-full overflow-y-auto no-scrollbar' data-component='ClawAgentCreateV2'>
@@ -109,49 +116,39 @@ const ClawAgentCreateV2 = (): ReactElement => {
 
         <div className='flex w-full flex-col gap-4'>
           <div className='flex w-full items-start gap-4 py-4'>
-            <div className='relative shrink-0'>
-              <div
-                className='flex size-20 items-center justify-center overflow-hidden rounded-full border-[1.5px] border-border text-2xl font-medium text-white'
-                style={{ backgroundColor: state.color }}
-                aria-hidden
-              >
-                {initial}
-              </div>
-              <AgentColorPicker color={state.color} onChange={color => update({ color })} />
-            </div>
-
             <div className='flex min-w-0 flex-1 flex-col gap-1.5'>
-              <input
-                value={state.name}
-                onChange={e =>
-                  update({
-                    name: e.target.value,
-                    ...(state.slugManual ? {} : { slug: slugify(e.target.value) }),
-                  })
-                }
-                placeholder='Name your agent'
-                aria-label='Agent name'
-                autoFocus
-                data-track-category='Claw Agents'
-                data-track-name='Create agent v2: name'
-                className='w-full bg-transparent text-base font-medium leading-6 tracking-[-0.1px] text-foreground placeholder:font-medium placeholder:text-muted-foreground focus:outline-none'
-              />
+              <div className='flex w-full items-center gap-2'>
+                <AutoWidthInput
+                  value={state.name}
+                  onChange={next =>
+                    update({
+                      name: next,
+                      ...(state.slugManual ? {} : { slug: slugify(next) }),
+                    })
+                  }
+                  placeholder='Name your agent'
+                  aria-label='Agent name'
+                  autoFocus
+                  data-track-category='Claw Agents'
+                  data-track-name='Create agent v2: name'
+                  className='text-base font-medium leading-6 tracking-[-0.1px] text-foreground placeholder:font-medium placeholder:text-muted-foreground'
+                />
+                <PencilEditLine className='size-3 shrink-0 text-muted-foreground' aria-hidden />
+              </div>
 
               <div className='flex items-center gap-1.5'>
                 <div className='flex items-center gap-0.5 rounded-[10px] bg-muted py-0.5 pl-0.5 pr-1'>
                   <AtMark className='size-4 shrink-0 text-muted-foreground' aria-hidden />
-                  <input
+                  <AutoWidthInput
                     value={slug}
-                    onChange={e => {
-                      const next = slugify(e.target.value);
+                    onChange={raw => {
+                      const next = slugify(raw);
                       update({ slugManual: next.length > 0, slug: next });
                     }}
                     placeholder='Agent handle'
                     aria-label='Agent handle'
                     style={{ width: inlineWidth(slug, 'Agent handle') }}
-                    data-track-category='Claw Agents'
-                    data-track-name='Create agent v2: handle'
-                    className='bg-transparent text-sm font-medium leading-5 tracking-[-0.14px] text-foreground placeholder:font-medium placeholder:text-muted-foreground focus:outline-none'
+                    className='text-sm font-medium leading-5 tracking-[-0.14px] text-foreground placeholder:font-medium placeholder:text-muted-foreground'
                   />
                 </div>
                 {nameCheck.checking && state.name.trim().length > 0 && (
@@ -169,6 +166,13 @@ const ClawAgentCreateV2 = (): ReactElement => {
           </div>
 
           <div className='flex w-full flex-col gap-8'>
+            <div className='flex w-full flex-col gap-3'>
+              <span className='text-sm font-medium leading-[1.2] tracking-[-0.1px] text-foreground'>
+                Color
+              </span>
+              <AgentColorRow color={state.color} onChange={color => update({ color })} />
+            </div>
+
             <div className='flex w-full flex-col gap-3'>
               <label
                 htmlFor='agent-v2-description'

@@ -97,7 +97,7 @@ export function SubagentDetailPanel({
       <div className='flex w-full items-start gap-12'>
         <div className='flex min-w-0 flex-1 items-center gap-2.5'>
           <span
-            className='flex size-11 shrink-0 items-center justify-center rounded-xl border border-border bg-card text-muted-foreground'
+            className='flex size-11 shrink-0 items-center justify-center rounded-xl border border-border bg-card text-muted-foreground shadow-sm'
             aria-hidden
           >
             <UserBot className='size-6' />
