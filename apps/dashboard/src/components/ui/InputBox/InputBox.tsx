@@ -67,7 +67,7 @@ import { usePlatform } from '../../../hooks/usePlatform';
 import { MobileEditor } from './MobileEditor';
 import { useTypingState } from '../../../contexts/TypingStateContext';
 import { validateFile } from '../utils/files';
-import { useScope, useShortcutById } from '../../../shortcuts';
+import { useScope, useShortcutById, useResolvedShortcutCombo } from '../../../shortcuts';
 import { useEnterSendsMessage } from '../../../hooks/useEnterSendsMessage';
 import { Preferences } from '../../Settings/Preferences';
 import { Dialog } from '../Dialog';
@@ -336,6 +336,10 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
 
     useShortcutById('composer.voiceInput', () => voiceInputRef.current?.toggle());
 
+    // Override-aware push-to-talk combo (default mod+shift+space). Reading it from
+    // the registry means a user remap in Settings rebinds this hold gesture live.
+    const voiceHoldCombo = useResolvedShortcutCombo('composer.voiceInputHold');
+
     useEffect(() => {
       if (!isVoiceRecording) return;
       const onKeyDown = (e: KeyboardEvent): void => {
@@ -351,11 +355,46 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     useEffect(() => {
       if (disabled) return;
 
+      // Parse the (possibly user-remapped) combo, e.g. 'mod+shift+space'. `mod`
+      // maps to Meta OR Control so the same binding works on macOS and Windows.
+      const parts = voiceHoldCombo
+        .toLowerCase()
+        .split('+')
+        .map(part => part.trim())
+        .filter(Boolean);
+      const MODIFIER_TOKENS = [
+        'mod',
+        'meta',
+        'cmd',
+        'command',
+        'ctrl',
+        'control',
+        'shift',
+        'alt',
+        'option',
+      ];
+      const needMod = parts.some(p =>
+        ['mod', 'meta', 'cmd', 'command', 'ctrl', 'control'].includes(p),
+      );
+      const needShift = parts.includes('shift');
+      const needAlt = parts.some(p => ['alt', 'option'].includes(p));
+      const mainKey = parts.find(p => !MODIFIER_TOKENS.includes(p)) ?? '';
+      if (!mainKey) return; // no non-modifier key → nothing to hold
+
+      const isMainKey = (e: KeyboardEvent): boolean =>
+        mainKey === 'space'
+          ? e.code === 'Space'
+          : e.key.toLowerCase() === mainKey || e.code === `Key${mainKey.toUpperCase()}`;
+
       const HOLD_TO_TALK_MS = 700;
       let armTimer: number | null = null;
       let gestureActive = false; // this gesture is the one that started recording
-      const pressed = { mod: false, shift: false, space: false };
-      const comboHeld = (): boolean => pressed.mod && pressed.shift && pressed.space;
+      const pressed = { mod: false, shift: false, alt: false, main: false };
+      const comboHeld = (): boolean =>
+        (!needMod || pressed.mod) &&
+        (!needShift || pressed.shift) &&
+        (!needAlt || pressed.alt) &&
+        pressed.main;
 
       const clearArm = (): void => {
         if (armTimer !== null) {
@@ -375,10 +414,13 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       const onKeyDown = (e: KeyboardEvent): void => {
         if (e.key === 'Meta' || e.key === 'Control') pressed.mod = true;
         if (e.key === 'Shift') pressed.shift = true;
-        if (e.code === 'Space') pressed.space = true;
+        if (e.key === 'Alt') pressed.alt = true;
+        if (isMainKey(e)) pressed.main = true;
 
-        if (e.code !== 'Space') return;
-        if (!(e.metaKey || e.ctrlKey) || !e.shiftKey) return;
+        if (!isMainKey(e)) return;
+        if (needMod && !(e.metaKey || e.ctrlKey)) return;
+        if (needShift && !e.shiftKey) return;
+        if (needAlt && !e.altKey) return;
         if (e.isComposing) return; // don't fight IME composition
         e.preventDefault();
         if (e.repeat) return; // ignore auto-repeat — arm once per physical press
@@ -395,14 +437,16 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       const onKeyUp = (e: KeyboardEvent): void => {
         if (e.key === 'Meta' || e.key === 'Control') pressed.mod = false;
         if (e.key === 'Shift') pressed.shift = false;
-        if (e.code === 'Space') pressed.space = false;
+        if (e.key === 'Alt') pressed.alt = false;
+        if (isMainKey(e)) pressed.main = false;
         if (!comboHeld()) endGesture();
       };
 
       const onInterrupt = (): void => {
         pressed.mod = false;
         pressed.shift = false;
-        pressed.space = false;
+        pressed.alt = false;
+        pressed.main = false;
         endGesture();
       };
 
@@ -418,7 +462,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         window.removeEventListener('blur', onInterrupt);
         document.removeEventListener('visibilitychange', onInterrupt);
       };
-    }, [disabled]);
+    }, [disabled, voiceHoldCombo]);
 
     const handleTyping = onTyping;
 

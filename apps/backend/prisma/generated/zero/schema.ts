@@ -1375,6 +1375,7 @@ export const userPreferenceTable = table("user_preferences")
     threadReplyNotificationsEnabled: boolean(),
     channelWideMentionsEnabled: boolean(),
     notificationKeywords: string().optional(),
+    keyboardShortcuts: string().optional(), // Per-user shortcut overrides (stringified JSON map)
     createdAt: number(),
     updatedAt: number(),
   })

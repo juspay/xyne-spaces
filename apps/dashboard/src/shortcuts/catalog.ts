@@ -139,6 +139,19 @@ export const shortcuts = {
     category: 'Composer',
     preventDefault: true,
   },
+  // Push-to-talk: HOLD this combo to dictate, release to stop. Handled by a raw
+  // key listener in the composer (a hold gesture, not a keydown dispatch), so it
+  // is NOT registered via useShortcutById — but it lives in the catalog so it is
+  // listed in the shortcut configurator and remappable like any other binding.
+  'composer.voiceInputHold': {
+    keys: 'mod+shift+space',
+    scope: 'composer',
+    allowInInputs: true,
+    priority: 100,
+    description: 'Hold to talk (push-to-talk voice input)',
+    category: 'Composer',
+    preventDefault: true,
+  },
   'global.toggleBrowser': {
     keys: 'mod+shift+b',
     scope: 'global',
@@ -472,3 +485,13 @@ export const findConflicts = (): Array<{ key: string; scope: string; ids: Shortc
 
   return conflicts;
 };
+
+// ─── Playground / collision helpers ─────────────────────────────────────────
+
+/**
+ * Two scopes "overlap" (can be active at the same time) when they are the same
+ * scope, or when either is `global` — global shortcuts are live in every scope.
+ * Single source of truth for the settings configurator's collision check.
+ */
+export const scopesOverlap = (a: ShortcutScope, b: ShortcutScope): boolean =>
+  a === b || a === 'global' || b === 'global';

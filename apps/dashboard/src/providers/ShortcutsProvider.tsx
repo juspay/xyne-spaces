@@ -1,9 +1,11 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect } from 'react';
 import { HotkeysProvider, useHotkeys } from 'react-hotkeys-hook';
 import { useSelector } from '@xstate/react';
 import { shortcutsActor } from '../machines/shortcutsMachine';
 import { getUseKeyForShortcut, resolveShortcut } from '../shortcuts/shortcutsRegistry';
 import { usePlatform } from '../hooks/usePlatform';
+import { stateMachineActor } from '../machines/stateMachine';
+import { parseShortcutOverrides, setShortcutOverrides } from '../shortcuts/overridesStore';
 
 const APP_SCOPE = 'app';
 
@@ -92,6 +94,18 @@ export const ShortcutsProvider = ({
     (a, b) => a === b || (a.length === b.length && a.every((k, i) => k === b[i])),
   );
   const { isMobile, isMac } = usePlatform();
+
+  // Mirror the user's persisted keyboard-shortcut overrides into the live
+  // registry store. Runs once here (the provider wraps the whole app), so a
+  // remap made on any client — or synced from another device via Zero — takes
+  // effect immediately without a reload.
+  const persistedShortcutOverrides = useSelector(
+    stateMachineActor,
+    state => state.context.userPreference?.keyboardShortcuts,
+  );
+  useEffect(() => {
+    setShortcutOverrides(parseShortcutOverrides(persistedShortcutOverrides ?? null));
+  }, [persistedShortcutOverrides]);
 
   if (isMobile) {
     return <>{children}</>;

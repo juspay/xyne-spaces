@@ -12,7 +12,8 @@ export type PreferenceSection =
   | 'toolbar'
   | 'calendar'
   | 'password'
-  | 'developer';
+  | 'developer'
+  | 'shortcuts';
 
 export interface PreferencesProps {
   open: boolean;

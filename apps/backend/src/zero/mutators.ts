@@ -13871,6 +13871,42 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           }
         },
       ),
+      setKeyboardShortcuts: defineMutator(
+        z.object({
+          id: z.string(),
+          keyboardShortcuts: z.string(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { id, keyboardShortcuts, timestamp } }) => {
+          const existing = await tx.run(
+            zql.user_preferences.where('userId', authData.sub).one(),
+          );
+          if (existing) {
+            await tx.mutate.user_preferences.update({
+              id: existing.id,
+              keyboardShortcuts,
+              updatedAt: timestamp,
+            });
+          } else {
+            await tx.mutate.user_preferences.insert({
+              workspaceId: authData.workspaceId,
+              id,
+              userId: authData.sub,
+              channelSortOrder: ChannelSortOrder.RECENCY,
+              enterSendsMessage: true,
+              allowThreadBroadcastMentions: false,
+              globalDesktopNotificationLevel: NotificationLevel.MENTIONS_ONLY,
+              globalMobileNotificationLevel: NotificationLevel.MENTIONS_ONLY,
+              threadReplyNotificationsEnabled: true,
+              channelWideMentionsEnabled: true,
+              notificationKeywords: '[]',
+              keyboardShortcuts,
+              createdAt: timestamp,
+              updatedAt: timestamp,
+            });
+          }
+        },
+      ),
       setEnterSendsMessage: defineMutator(
         z.object({
           id: z.string(),

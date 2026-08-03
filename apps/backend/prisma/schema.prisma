@@ -1334,6 +1334,7 @@ model UserPreference {
   threadReplyNotificationsEnabled Boolean           @default(true) // Receive thread reply notifications globally
   channelWideMentionsEnabled      Boolean           @default(true) // Receive @channel and @here mention notifications
   notificationKeywords            String?             // Global keyword-notification list (max 50, each <= 80 chars)
+  keyboardShortcuts               String?             // Per-user keyboard shortcut overrides: stringified JSON map { [shortcutId]: string[] }. Sparse — only remapped shortcuts.
   createdAt               DateTime @default(now())
   updatedAt               DateTime @updatedAt
 
