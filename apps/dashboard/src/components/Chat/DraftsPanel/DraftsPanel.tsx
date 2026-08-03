@@ -1,6 +1,6 @@
 import { type ReactElement, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FileEdit, Trash2, Send, Clock, Pencil, X } from 'lucide-react';
+import { FileEdit, Trash2, Send, Clock, Pencil, X, Loader2 } from 'lucide-react';
 import { Virtuoso } from 'react-virtuoso';
 import { toast } from 'sonner';
 import { mutators } from '../../../zero/mutators';
@@ -13,9 +13,31 @@ import { formatDistanceToNow } from 'date-fns';
 import { Dialog } from '../../ui/Dialog/Dialog';
 import { MessageCard, RecipientAvatar, useRecipientName } from '../MessageCard';
 import { ScheduleMessageDialog } from '../../ui/ScheduleMessageDialog/ScheduleMessageDialog';
+import { useUsersMap, useUser } from '../../../hooks/useUsers';
+import type { User } from '@xyne/shared';
+import UserAvatar, { AvatarSize } from '../../UserAvatar/UserAvatar';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { channelService } from '../../../services/Chat/channelService';
+import { apiInstance } from '../../../services/clients/apiClient';
+import { sendConversationWithAttachments } from '../AddDmForm/useExistingDmChannel';
+import { flushPendingAttachmentUploads } from '../../../hooks/useComposeDmDraftAutosave';
+import type { RestoreComposeDraft } from '../AddDmForm/ComposeDmPanel';
+import type { UploadedFile } from '../../ui/files/Files.types';
 
 type DraftWithAttachments = DraftMessageDB & {
   attachments?: readonly MessageAttachment[] | undefined;
+};
+
+/** Compose-DM placeholder drafts carry this channelId prefix. */
+const COMPOSE_CHANNEL_PREFIX = 'composedm-';
+
+/**
+ * `composeDmRecipientIds` is stored as a comma-separated string in the DB. Split it into
+ * a clean `string[]` for compose-DM drafts. Returns empty array for non-compose
+ * drafts (NULL column).
+ */
+const getComposeDmRecipientIds = (draft: DraftWithAttachments): string[] => {
+  return draft.recipientIds ? draft.recipientIds.split(',').filter(id => id.length > 0) : [];
 };
 
 const DraftRow = ({ draft }: { draft: DraftWithAttachments }): ReactElement => {
@@ -24,6 +46,8 @@ const DraftRow = ({ draft }: { draft: DraftWithAttachments }): ReactElement => {
   const { clearDroppedFiles } = useDraftAttachments();
   const [isScheduleDialogOpen, setIsScheduleDialogOpen] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState<'delete' | 'send' | null>(null);
+  const [isSending, setIsSending] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const panelAttachments = useMemo(() => {
     const raw = draft.attachments;
@@ -37,25 +61,106 @@ const DraftRow = ({ draft }: { draft: DraftWithAttachments }): ReactElement => {
     }));
   }, [draft.attachments]);
 
+  // Map persisted draft attachments to the InputBox UploadedFile shape so restoring a draft
+  // re-seeds atachments in InputBox.
+  const restoreAttachments = useMemo<UploadedFile[]>(() => {
+    const raw = draft.attachments;
+    if (!raw?.length) return [];
+    return raw.map(a => ({
+      id: a.id,
+      originalName: a.originalFilename,
+      fileName: a.originalFilename,
+      fileSize: a.size,
+      mimeType: a.mimetype,
+      fileUrl: a.url,
+      ...(a.thumbnailUrl && { thumbnailUrl: a.thumbnailUrl }),
+      ...(a.metadata && { metadata: a.metadata as Record<string, unknown> }),
+    }));
+  }, [draft.attachments]);
+
+  const isComposeDm = draft.channelId?.startsWith(COMPOSE_CHANNEL_PREFIX) ?? false;
+  const composeDmRecipientIds = useMemo(() => getComposeDmRecipientIds(draft), [draft]);
+  const usersById = useUsersMap();
+  const composeRecipients = useMemo(
+    () =>
+      isComposeDm
+        ? composeDmRecipientIds.map(id => usersById.get(id)).filter((u): u is User => !!u)
+        : [],
+    [isComposeDm, composeDmRecipientIds, usersById],
+  );
+  const composeDisplayName =
+    composeRecipients.length > 0
+      ? composeRecipients.map(u => getUserDisplayName(u)).join(', ')
+      : 'No Destination';
+  const firstRecipient = useUser(composeDmRecipientIds[0] ?? '');
+
   // avatarHelpers only access conversation?.channelId, so a partial object is safe
   const channelRef = { channelId: draft.channelId } as Conversation;
-  const recipientName = useRecipientName(null, channelRef);
-  const displayName = draft.conversationId ? `${recipientName} · thread` : recipientName;
+  const resolvedRecipientName = useRecipientName(null, channelRef);
+  const displayName = isComposeDm
+    ? composeDisplayName
+    : draft.conversationId
+      ? `${resolvedRecipientName} · thread`
+      : resolvedRecipientName;
 
-  const performDelete = (): void => {
+  const performDelete = async (): Promise<void> => {
+    setIsDeleting(true);
     try {
       const lookupId = draft.conversationId ?? draft.channelId;
       removeDraft(lookupId);
       void clearDroppedFiles(draft.channelId, draft.conversationId);
-      void zero.mutate(mutators.draftMessages.delete({ id: draft.id }));
+      if (isComposeDm) {
+        await flushPendingAttachmentUploads(draft.id);
+        await apiInstance.delete(`/drafts/compose/${draft.id}?force=true`);
+      } else {
+        void zero.mutate(mutators.draftMessages.delete({ id: draft.id }));
+      }
       setConfirmDialog(null);
       toast.success('Draft deleted');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to delete draft');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  // Compose-DM send: there is no real channel yet, so resolve-or-create the DM channel
+  // for the recipient set, send the content via the conversations API, then delete the
+  // placeholder draft. Mirrors ComposeDmPanel.handleSendMessage.
+  const performComposeDmSend = async (): Promise<void> => {
+    if (composeDmRecipientIds.length === 0) {
+      toast.error('Add at least one recipient before sending');
+      setConfirmDialog(null);
+      return;
+    }
+    setIsSending(true);
+    try {
+      const response = await channelService.createDm({ participantIds: composeDmRecipientIds });
+      const channelId = response.id;
+      // A previously-closed DM may be returned; reopen it so it surfaces in the sidebar.
+      if (response.isExisting) {
+        void zero.mutate(mutators.channel.reopenDm({ channelId, updatedAt: Date.now() }));
+      }
+      // Wait for any in-flight attachment uploads so the
+      // backend's DRAFT→CHAT re-parent step finds all rows.
+      await flushPendingAttachmentUploads(draft.id);
+
+      await sendConversationWithAttachments(channelId, draft.content, [], draft.id);
+      setConfirmDialog(null);
+      toast.success('Message sent');
+      void navigate(`/chat/dir/${channelId}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to send message');
+    } finally {
+      setIsSending(false);
     }
   };
 
   const performSend = (): void => {
+    if (isComposeDm) {
+      void performComposeDmSend();
+      return;
+    }
     try {
       const lookupId = draft.conversationId ?? draft.channelId;
       removeDraft(lookupId);
@@ -110,6 +215,19 @@ const DraftRow = ({ draft }: { draft: DraftWithAttachments }): ReactElement => {
   };
 
   const handleClick = (): void => {
+    if (isComposeDm) {
+      const restoreDraft: RestoreComposeDraft = {
+        draftId: draft.id,
+        channelId: draft.channelId,
+        content: draft.content,
+        recipientIds: composeDmRecipientIds,
+        attachments: restoreAttachments,
+      };
+      void navigate('/chat/search?mode=dm', {
+        state: { composePanelKey: draft.id, restoreDraft },
+      });
+      return;
+    }
     void navigate(
       `/chat/dir/${draft.channelId}${draft.conversationId ? `/${draft.conversationId}` : ''}`,
     );
@@ -144,16 +262,18 @@ const DraftRow = ({ draft }: { draft: DraftWithAttachments }): ReactElement => {
       >
         <Send size={14} />
       </button>
-      <button
-        type='button'
-        onClick={handleSchedule}
-        className='p-1.5 rounded hover:bg-accent hover:text-foreground transition-all'
-        aria-label='Schedule draft'
-        data-track-category='DRAFTS_PANEL'
-        data-track-name='SCHEDULE_DRAFT'
-      >
-        <Clock size={14} />
-      </button>
+      {!isComposeDm && (
+        <button
+          type='button'
+          onClick={handleSchedule}
+          className='p-1.5 rounded hover:bg-accent hover:text-foreground transition-all'
+          aria-label='Schedule draft'
+          data-track-category='DRAFTS_PANEL'
+          data-track-name='SCHEDULE_DRAFT'
+        >
+          <Clock size={14} />
+        </button>
+      )}
       <button
         type='button'
         onClick={handleDelete}
@@ -170,7 +290,13 @@ const DraftRow = ({ draft }: { draft: DraftWithAttachments }): ReactElement => {
   return (
     <div className='relative'>
       <MessageCard
-        recipientAvatar={<RecipientAvatar conversation={channelRef} />}
+        recipientAvatar={
+          isComposeDm ? (
+            <UserAvatar userId={firstRecipient?.id ?? null} size={AvatarSize.MD} />
+          ) : (
+            <RecipientAvatar conversation={channelRef} />
+          )
+        }
         recipientName={displayName}
         contentPreview={
           <>
@@ -195,7 +321,7 @@ const DraftRow = ({ draft }: { draft: DraftWithAttachments }): ReactElement => {
         <Dialog
           open
           onOpenChange={open => {
-            if (!open) setConfirmDialog(null);
+            if (!open && !isDeleting) setConfirmDialog(null);
           }}
           title='Delete draft?'
           description={`Are you sure you want to delete this draft to ${displayName}?`}
@@ -209,7 +335,8 @@ const DraftRow = ({ draft }: { draft: DraftWithAttachments }): ReactElement => {
               <button
                 type='button'
                 onClick={() => setConfirmDialog(null)}
-                className='rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors shrink-0'
+                disabled={isDeleting}
+                className='rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors shrink-0 disabled:opacity-60'
                 aria-label='Close'
                 data-track-category='DRAFTS_PANEL'
                 data-track-name='close-delete-draft-dialog'
@@ -225,7 +352,8 @@ const DraftRow = ({ draft }: { draft: DraftWithAttachments }): ReactElement => {
               <button
                 type='button'
                 onClick={() => setConfirmDialog(null)}
-                className='text-sm font-medium px-4 py-2 rounded-md border border-border bg-background text-foreground hover:bg-muted/60 transition-colors'
+                disabled={isDeleting}
+                className='text-sm font-medium px-4 py-2 rounded-md border border-border bg-background text-foreground hover:bg-muted/60 transition-colors disabled:opacity-60'
                 data-track-category='DRAFTS_PANEL'
                 data-track-name='cancel-delete-draft'
               >
@@ -234,11 +362,13 @@ const DraftRow = ({ draft }: { draft: DraftWithAttachments }): ReactElement => {
               <button
                 type='button'
                 onClick={() => void performDelete()}
-                className='text-sm font-bold px-4 py-2 rounded-md bg-destructive text-destructive-foreground hover:bg-destructive/90 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 transition-colors'
+                disabled={isDeleting}
+                className='text-sm font-bold px-4 py-2 rounded-md bg-destructive text-destructive-foreground hover:bg-destructive/90 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 transition-colors disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-2'
                 data-track-category='DRAFTS_PANEL'
                 data-track-name='confirm-delete-draft'
               >
-                Delete Draft
+                {isDeleting && <Loader2 className='size-4 animate-spin' />}
+                {isDeleting ? 'Deleting…' : 'Delete Draft'}
               </button>
             </div>
           </div>
@@ -249,7 +379,7 @@ const DraftRow = ({ draft }: { draft: DraftWithAttachments }): ReactElement => {
         <Dialog
           open
           onOpenChange={open => {
-            if (!open) setConfirmDialog(null);
+            if (!open && !isSending) setConfirmDialog(null);
           }}
           title='Send now?'
           description={`Are you sure you want to send this message to ${displayName} now?`}
@@ -263,7 +393,8 @@ const DraftRow = ({ draft }: { draft: DraftWithAttachments }): ReactElement => {
               <button
                 type='button'
                 onClick={() => setConfirmDialog(null)}
-                className='rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors shrink-0'
+                disabled={isSending}
+                className='rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors shrink-0 disabled:opacity-60'
                 aria-label='Close'
                 data-track-category='DRAFTS_PANEL'
                 data-track-name='close-send-draft-dialog'
@@ -279,7 +410,8 @@ const DraftRow = ({ draft }: { draft: DraftWithAttachments }): ReactElement => {
               <button
                 type='button'
                 onClick={() => setConfirmDialog(null)}
-                className='text-sm font-medium px-4 py-2 rounded-md border border-border bg-background text-foreground hover:bg-muted/60 transition-colors'
+                disabled={isSending}
+                className='text-sm font-medium px-4 py-2 rounded-md border border-border bg-background text-foreground hover:bg-muted/60 transition-colors disabled:opacity-60'
                 data-track-category='DRAFTS_PANEL'
                 data-track-name='cancel-send-draft'
               >
@@ -288,11 +420,13 @@ const DraftRow = ({ draft }: { draft: DraftWithAttachments }): ReactElement => {
               <button
                 type='button'
                 onClick={() => void performSend()}
-                className='text-sm font-medium px-4 py-2 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 transition-colors'
+                disabled={isSending}
+                className='text-sm font-medium px-4 py-2 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 transition-colors disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-2'
                 data-track-category='DRAFTS_PANEL'
                 data-track-name='confirm-send-draft'
               >
-                Send now
+                {isSending && <Loader2 className='size-4 animate-spin' />}
+                {isSending ? 'Sending…' : 'Send now'}
               </button>
             </div>
           </div>

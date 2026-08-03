@@ -70,11 +70,16 @@ export const sendConversationWithAttachments = async (
   channelId: string,
   content: string,
   files: File[],
+  composeDraftId?: string,
 ): Promise<void> => {
   const formData = new FormData();
 
   // Add content
   formData.append('content', content);
+
+  if (composeDraftId) {
+    formData.append('composeDraftId', composeDraftId);
+  }
 
   if (files.length > 0) {
     const thumbnails = await generateThumbnails(files);

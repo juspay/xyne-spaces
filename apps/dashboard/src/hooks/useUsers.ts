@@ -1,6 +1,7 @@
 export {
   searchUsers,
   useUsers,
+  useUsersMap,
   useUser,
   useSelf,
   useUserSearch,
