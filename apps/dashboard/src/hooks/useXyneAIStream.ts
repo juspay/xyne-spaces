@@ -81,7 +81,6 @@ function activitiesToAttachedContext(activities: UserActivity[]): AttachedContex
   }));
 }
 
-
 export const useXyneAIStream = ({
   channelIds,
   conversationId,

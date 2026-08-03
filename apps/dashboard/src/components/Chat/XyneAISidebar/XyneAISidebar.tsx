@@ -762,9 +762,8 @@ const XyneAISidebar = ({
   }, [aiOnboarding.isActive, messages]);
 
   // v2 sessions hooks (xyne-claw backed)
-  const { data: v2SessionsData, refetch: refetchV2Sessions } = useV2SessionsList(
-    effectiveAgentSlug,
-  );
+  const { data: v2SessionsData, refetch: refetchV2Sessions } =
+    useV2SessionsList(effectiveAgentSlug);
   const { invalidateSessions: invalidateV2Sessions } = useV2SessionInvalidator();
 
   // Sync sessions list to local state for the ConversationHistory component
@@ -828,7 +827,8 @@ const XyneAISidebar = ({
         }
 
         // Global / channel-only / channel+thread: load session list first, then match active stream by session id
-        {          // Open a FRESH session by default instead of auto-loading the most
+        {
+          // Open a FRESH session by default instead of auto-loading the most
           // recent past conversation. Any in-flight stream was already resumed
           // above (findLatestSidebarStream), and past conversations remain
           // reachable via the history panel. A desk-ticket context
@@ -982,7 +982,8 @@ const XyneAISidebar = ({
         return;
       }
 
-      {        setDebugEvents([]);
+      {
+        setDebugEvents([]);
         setDebugArtifactsReadyVersion(0);
         const clawMessages = await fetchV2ConversationMessages(
           conversation.sessionId,
@@ -1896,9 +1897,7 @@ const XyneAISidebar = ({
                             contextPanelPosition='top'
                             selectedAgentSlug={effectiveAgentSlug}
                             agents={accessibleAgents}
-                            {...(!isAgentForced
-                              ? { onSelectAgent: handleSelectAgent }
-                              : {})}
+                            {...(!isAgentForced ? { onSelectAgent: handleSelectAgent } : {})}
                             {...sharedInputSectionProps}
                           />
                         }

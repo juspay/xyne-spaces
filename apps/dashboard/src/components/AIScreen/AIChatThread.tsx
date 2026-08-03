@@ -86,7 +86,6 @@ import {
   BRANCH_ROOT_KEY,
 } from '../Chat/XyneAISidebar/utils/XyneAIUtils';
 
-
 // ═══════════════════════════════════════════════════════════════════════════════
 // Types
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1886,7 +1885,6 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
   const handleFollowUpSuggestion = useCallback((suggestion: string): void => {
     composerRef.current?.setPrompt(suggestion);
   }, []);
-
 
   // v2 (claw) rating change — the AskAiRatingButtons already persisted to
   // agent_runs; here we reflect the new feedback in local message state AND in

@@ -880,7 +880,6 @@ class XyneAIStreamManager {
   ): Promise<string> {
     const streamId = `stream-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-
     // Handle any existing stream for this thread
     const existingStream = this.activeStreams.get(threadId);
     if (existingStream) {
@@ -1024,7 +1023,7 @@ class XyneAIStreamManager {
             parentAssistantMessageId: request.parentAssistantMessageId,
           }),
           ...(request.draftMode && { draftMode: true }),
-              ...(request.disableTools && { disableTools: true }),
+          ...(request.disableTools && { disableTools: true }),
           ...(request.agentSlug && { agentSlug: request.agentSlug }),
           ...(request.model && { model: request.model }),
         },
