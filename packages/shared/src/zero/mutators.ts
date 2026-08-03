@@ -48,6 +48,13 @@ import {
   NudgeState,
   SurfaceAreaType,
   SurfaceLinkKind,
+  RoomStatus,
+  RoomCurationCadence,
+  RoomSourceType,
+  RoomRole,
+  RoomMemberStatus,
+  RoomRecapStatus,
+  RoomRecapType,
   NotificationLevel,
   SavedConfigContextType,
   SavedConfigVisibility,
@@ -359,6 +366,9 @@ async function deleteConversationWithParticipants(
 
 const FORM_VALUE_CHANGED_MESSAGE =
   'Form value changed. Review the latest form changes before saving.';
+
+const RECAP_BODY_MAX = 50_000;
+const CHECKLIST_TEMPLATE_MAX = 5_000;
 
 export const mutators = defineMutators({
   notificationSettings: {
@@ -11537,6 +11547,324 @@ export const mutators = defineMutators({
         await Promise.all(
           mappingIds.map(mappingId => tx.mutate.user_role_mappings.delete({ id: mappingId })),
         );
+      },
+    ),
+  },
+  room: {
+    create: defineMutator(
+      z.object({
+        roomId: z.string(),
+        projectId: z.string(),
+        ownerMemberId: z.string(),
+        name: z.string().min(1),
+        description: z.string().min(1),
+        curationCadence: z.nativeEnum(RoomCurationCadence).optional(),
+        clawAgentId: z.string().nullable().optional(),
+        checklistTemplate: z.string().max(CHECKLIST_TEMPLATE_MAX).optional(),
+        sources: z.array(
+          z.object({
+            id: z.string(),
+            sourceType: z.nativeEnum(RoomSourceType),
+            sourceId: z.string(),
+            label: z.string().min(1),
+          }),
+        ).max(50),
+        members: z.array(
+          z.object({
+            id: z.string(),
+            userId: z.string(),
+          }),
+        ).max(200),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args }) => {
+        const name = args.name.trim();
+        const description = args.description.trim();
+        if (!name) throw new Error('Room name cannot be empty');
+        if (!description) throw new Error('Room description cannot be empty');
+
+        const existingRoom = await tx.run(zql.rooms.where('id', args.roomId).one());
+        if (existingRoom) throw new Error('Room already exists');
+
+        await tx.mutate.rooms.insert({
+          id: args.roomId,
+          projectId: args.projectId,
+          workspaceId: ctx.workspaceId,
+          name,
+          description,
+          status: RoomStatus.ACTIVE,
+          curationCadence: args.curationCadence ?? RoomCurationCadence.MANUAL,
+          ...(args.clawAgentId != null && { clawAgentId: args.clawAgentId }),
+          ...(args.checklistTemplate !== undefined && {
+            checklistTemplate: args.checklistTemplate,
+          }),
+          createdAt: args.timestamp,
+          updatedAt: args.timestamp,
+        });
+
+        await tx.mutate.room_members.insert({
+          id: args.ownerMemberId,
+          roomId: args.roomId,
+          workspaceId: ctx.workspaceId,
+          userId: ctx.userID,
+          role: RoomRole.OWNER,
+          status: RoomMemberStatus.APPROVED,
+          joinedAt: args.timestamp,
+          updatedAt: args.timestamp,
+        });
+
+        for (const source of args.sources) {
+          await tx.mutate.room_sources.insert({
+            id: source.id,
+            roomId: args.roomId,
+            workspaceId: ctx.workspaceId,
+            sourceType: source.sourceType,
+            sourceId: source.sourceId,
+            label: source.label,
+            addedBy: ctx.userID,
+            createdAt: args.timestamp,
+          });
+        }
+
+        for (const member of args.members) {
+          if (member.userId === ctx.userID) continue;
+          await tx.mutate.room_members.insert({
+            id: member.id,
+            roomId: args.roomId,
+            workspaceId: ctx.workspaceId,
+            userId: member.userId,
+            role: RoomRole.MEMBER,
+            status: RoomMemberStatus.APPROVED,
+            joinedAt: args.timestamp,
+            updatedAt: args.timestamp,
+          });
+        }
+      },
+    ),
+    update: defineMutator(
+      z.object({
+        roomId: z.string(),
+        name: z.string().min(1).optional(),
+        description: z.string().min(1).optional(),
+        curationCadence: z.nativeEnum(RoomCurationCadence).optional(),
+        clawAgentId: z.string().nullable().optional(),
+        checklistTemplate: z.string().max(CHECKLIST_TEMPLATE_MAX).optional(),
+        timestamp: z.number(),
+      }),
+      async ({
+        tx,
+        args: {
+          roomId,
+          name,
+          description,
+          curationCadence,
+          clawAgentId,
+          checklistTemplate,
+          timestamp,
+        },
+      }) => {
+        const room = await tx.run(zql.rooms.where('id', roomId).one());
+        if (!room) throw new Error('Room not found');
+        await tx.mutate.rooms.update({
+          id: roomId,
+          ...(name !== undefined && { name: name.trim() }),
+          ...(description !== undefined && { description: description.trim() }),
+          ...(curationCadence !== undefined && { curationCadence }),
+          ...(clawAgentId !== undefined && { clawAgentId }),
+          ...(checklistTemplate !== undefined && { checklistTemplate }),
+          updatedAt: timestamp,
+        });
+      },
+    ),
+    archive: defineMutator(
+      z.object({
+        roomId: z.string(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, args: { roomId, timestamp } }) => {
+        const room = await tx.run(zql.rooms.where('id', roomId).one());
+        if (!room) throw new Error('Room not found');
+        await tx.mutate.rooms.update({
+          id: roomId,
+          status: RoomStatus.ARCHIVED,
+          updatedAt: timestamp,
+        });
+      },
+    ),
+    requestAccess: defineMutator(
+      z.object({
+        roomId: z.string(),
+        memberId: z.string(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { roomId, memberId, timestamp } }) => {
+        const existing = await tx.run(
+          zql.room_members.where('roomId', roomId).where('userId', ctx.userID).one(),
+        );
+        if (existing) throw new Error('Already a member or request pending');
+        await tx.mutate.room_members.insert({
+          id: memberId,
+          roomId,
+          userId: ctx.userID,
+          workspaceId: ctx.workspaceId,
+          role: RoomRole.MEMBER,
+          status: RoomMemberStatus.PENDING,
+          joinedAt: timestamp,
+          updatedAt: timestamp,
+        });
+      },
+    ),
+    addMember: defineMutator(
+      z.object({
+        roomId: z.string(),
+        memberId: z.string(),
+        userId: z.string(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { roomId, memberId, userId, timestamp } }) => {
+        const existing = await tx.run(
+          zql.room_members.where('roomId', roomId).where('userId', userId).one(),
+        );
+        if (existing) throw new Error('User is already a member or has a pending request');
+        await tx.mutate.room_members.insert({
+          id: memberId,
+          roomId,
+          userId,
+          workspaceId: ctx.workspaceId,
+          role: RoomRole.MEMBER,
+          status: RoomMemberStatus.APPROVED,
+          joinedAt: timestamp,
+          updatedAt: timestamp,
+        });
+      },
+    ),
+    approveMember: defineMutator(
+      z.object({
+        memberId: z.string(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, args: { memberId, timestamp } }) => {
+        const member = await tx.run(zql.room_members.where('id', memberId).one());
+        if (!member) throw new Error('Member record not found');
+        if (member.status === RoomMemberStatus.APPROVED) return;
+        await tx.mutate.room_members.update({
+          id: memberId,
+          status: RoomMemberStatus.APPROVED,
+          updatedAt: timestamp,
+        });
+      },
+    ),
+    removeMember: defineMutator(
+      z.object({
+        memberId: z.string(),
+      }),
+      async ({ tx, args: { memberId } }) => {
+        const member = await tx.run(zql.room_members.where('id', memberId).one());
+        if (!member) throw new Error('Member record not found');
+        await tx.mutate.room_members.delete({ id: memberId });
+      },
+    ),
+    addSource: defineMutator(
+      z.object({
+        id: z.string(),
+        roomId: z.string(),
+        sourceType: z.nativeEnum(RoomSourceType),
+        sourceId: z.string(),
+        label: z.string().min(1),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { id, roomId, sourceType, sourceId, label, timestamp } }) => {
+        const existing = await tx.run(
+          zql.room_sources
+            .where('roomId', roomId)
+            .where('sourceType', sourceType)
+            .where('sourceId', sourceId)
+            .one(),
+        );
+        if (existing) throw new Error('Source is already attached to this room');
+        await tx.mutate.room_sources.insert({
+          id,
+          roomId,
+          workspaceId: ctx.workspaceId,
+          sourceType,
+          sourceId,
+          label,
+          addedBy: ctx.userID,
+          createdAt: timestamp,
+        });
+      },
+    ),
+    removeSource: defineMutator(
+      z.object({
+        id: z.string(),
+      }),
+      async ({ tx, args: { id } }) => {
+        const source = await tx.run(zql.room_sources.where('id', id).one());
+        if (!source) throw new Error('Room source not found');
+        await tx.mutate.room_sources.delete({ id });
+      },
+    ),
+    approveRecap: defineMutator(
+      z.object({
+        recapId: z.string(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { recapId, timestamp } }) => {
+        const recap = await tx.run(zql.room_recaps.where('id', recapId).one());
+        if (!recap) throw new Error('Recap not found');
+        if (recap.status === RoomRecapStatus.APPROVED) return;
+        await tx.mutate.room_recaps.update({
+          id: recapId,
+          status: RoomRecapStatus.APPROVED,
+          approvedBy: ctx.userID,
+          approvedAt: timestamp,
+          updatedAt: timestamp,
+        });
+      },
+    ),
+    editRecapBody: defineMutator(
+      z.object({
+        recapId: z.string(),
+        body: z.string().min(1).max(RECAP_BODY_MAX),
+        timestamp: z.number(),
+      }),
+      async ({ tx, args: { recapId, body, timestamp } }) => {
+        const recap = await tx.run(zql.room_recaps.where('id', recapId).one());
+        if (!recap) throw new Error('Recap not found');
+        await tx.mutate.room_recaps.update({ id: recapId, body, updatedAt: timestamp });
+      },
+    ),
+    deleteRecap: defineMutator(
+      z.object({
+        recapId: z.string(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, args: { recapId, timestamp } }) => {
+        const recap = await tx.run(zql.room_recaps.where('id', recapId).one());
+        if (!recap) throw new Error('Recap not found');
+        if (recap.deletedAt) return;
+        await tx.mutate.room_recaps.update({
+          id: recapId,
+          deletedAt: timestamp,
+          updatedAt: timestamp,
+        });
+        if (recap.type !== RoomRecapType.SUMMARY) {
+          await tx.mutate.rooms.update({ id: recap.roomId, updatedAt: timestamp });
+          return;
+        }
+        const latest = await tx.run(
+          zql.room_recaps
+            .where('roomId', recap.roomId)
+            .where('type', RoomRecapType.SUMMARY)
+            .where('deletedAt', 'IS', null)
+            .orderBy('createdAt', 'desc')
+            .one(),
+        );
+        await tx.mutate.rooms.update({
+          id: recap.roomId,
+          lastCuratedAt: latest?.createdAt ?? null,
+          updatedAt: timestamp,
+        });
       },
     ),
   },

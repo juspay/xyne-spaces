@@ -45,6 +45,7 @@ export {
   useAllChannels,
   useAllVisibleChannels,
   useVisibleProjects,
+  useVisibleProjectsWithoutDms,
   useChannel,
   useVisibleChannel,
   useChannelByName,

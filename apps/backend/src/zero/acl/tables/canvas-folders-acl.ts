@@ -3,6 +3,7 @@ import { ChannelRole, Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, TableSchema } from '../core/types';
 import { zql } from '../../queries';
+import { isProjectParticipant } from '../core/admin-access';
 
 export class CanvasFoldersACL extends BaseACL<'canvas_folders'> {
   private async verifyChannelWorkspace(
@@ -99,14 +100,7 @@ export class CanvasFoldersACL extends BaseACL<'canvas_folders'> {
       return;
     }
 
-    const projectChannelMembership = await tx.run(
-      zql.channels
-        .where('projectId', projectId)
-        .whereExists('participants', p => p.where('userId', this.ctx.userID))
-        .one(),
-    );
-
-    if (!projectChannelMembership) {
+    if (!(await isProjectParticipant(this.ctx, tx, projectId))) {
       throw new MutationACLError('Canvas folder insert failed: you must be a member of a project channel', 'canvas_folders');
     }
   }

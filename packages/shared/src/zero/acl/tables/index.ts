@@ -79,3 +79,7 @@ export { FormFieldsACL } from './form-fields-acl';
 export { GlobalFieldsACL } from './global-fields-acl';
 export { FormEntityValuesACL } from './form-entity-values-acl';
 export { DelayedMessagesACL } from './delayed-messages-acl';
+export { RoomsACL } from './rooms-acl';
+export { RoomSourcesACL } from './room-sources-acl';
+export { RoomMembersACL } from './room-members-acl';
+export { RoomRecapsACL } from './room-recaps-acl';

@@ -86,6 +86,7 @@ import linkPreviewRoutes from '@/routes/linkPreview';
 import bundleRoutes from '@/routes/bundles';
 import projectRoutes from '@/routes/projects';
 import boardRoutes from '@/routes/boards';
+import roomRoutes from '@/routes/rooms';
 import searchMetricsRoutes from '@/routes/searchMetrics';
 import knowledgeRoutes from '@/routes/knowledge';
 import vespaSearchRoutes from '@/routes/vespaSearch';
@@ -189,6 +190,7 @@ import { documentIngestQueue } from '@/queues/documentIngestQueue';
 import { teamIntelligenceQueue } from '@/team-intelligence/queue';
 import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
 import { autoDraftQueue } from '@/queues/autoDraftQueue';
+import { roomCurationQueue } from '@/queues/roomCurationQueue';
 import { entityExtractionQueue } from '@/queues/entityExtractionQueue';
 import { initStorage } from '@/services/storage';
 
@@ -583,6 +585,7 @@ export class App {
     this.app.use('/api', authMiddleware.authenticate, attachmentRoutes); // Attachment routes (file streaming)
     this.app.use('/api', authMiddleware.authenticate, draftAttachmentRoutes); // Draft attachment upload routes
     this.app.use('/api/link-preview', authMiddleware.authenticate, linkPreviewRoutes); // Link preview routes
+    this.app.use('/api/rooms', authMiddleware.authenticate, roomRoutes);
     this.app.use('/api/search-metrics', authMiddleware.authenticate, searchMetricsRoutes); // Search metrics routes (POST /api/search-metrics/...)
 
     // API Key management routes (admin only, no ACL needed as it has requireAdmin middleware)
@@ -807,6 +810,10 @@ export class App {
           logger.info('Initializing email classification queue...');
           await emailClassificationQueue.initialize();
         })(),
+        (async () => {
+          logger.info('Initializing room curation queue...');
+          await roomCurationQueue.initialize();
+        })(),
       ]);
 
       logger.info('[TEST MODE] All queues initialized');
@@ -853,6 +860,9 @@ export class App {
 
       logger.info('Initializing auto draft queue...');
       await autoDraftQueue.initialize();
+
+      logger.info('Initializing room curation queue...');
+      await roomCurationQueue.initialize();
     }
 
     logger.info('Initializing automations module (registries + queue producers)...');
@@ -1026,6 +1036,9 @@ export class App {
 
       // Close tag generation pipeline queue
       await tagGenerationPipeline.close();
+
+      // Close room curation queue (initialised here as a producer for /rooms/:roomId/curate)
+      await roomCurationQueue.close();
 
       // Shutdown notification service
       await notificationService.shutdown();

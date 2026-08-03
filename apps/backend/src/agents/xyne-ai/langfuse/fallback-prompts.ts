@@ -1844,6 +1844,68 @@ OUTPUT: Respond with ONLY valid JSON. No markdown fences. No extra text:
   ]
 }`;
 
+// Langfuse prompt names: "room-curation-brief", "room-curation-checklist-section"
+// Template variables use {{double_braces}} syntax.
+
+/**
+ * Room curation — ONE agent run produces the summary and the checklist in a single
+ * markdown document, split apart by the caller on the "## Checklist" heading.
+ * Variables: room_name, tracking_query, window_line, channel_list, checklist_section
+ * (checklist_section is the compiled "room-curation-checklist-section" prompt, or
+ * empty when the room owner did not write a checklist).
+ */
+const ROOM_CURATION_BRIEF_FALLBACK = `You are the curation agent for a private "room" that tracks a topic across a workspace.
+You are given the room's tracking query and a list of channels to read.
+
+{{window_line}}
+
+Room name: {{room_name}}
+Tracking query: {{tracking_query}}
+
+Channels:
+{{channel_list}}
+
+You do not receive the channel messages inline — read the listed channels yourself with your workspace tools over the given time range, then write ONE briefing in GitHub-flavored MARKDOWN with these sections, in order:
+
+## Summary
+- Open with a one-line bold headline of what changed.
+- 2-4 short paragraphs or bullet lists, most important developments first.
+
+## Stakeholders
+- The people who appear across the channel messages and their role. Omit this section entirely if there are none.
+{{checklist_section}}
+
+Rules:
+- Ground every claim in the channel messages. When you reference something, name where it came from in prose (e.g. "in #payments") — do NOT invent facts not present in the channels.
+- If there is too little activity to say anything useful, say so plainly in one line.
+- Output ONLY the markdown briefing. No preamble, no JSON, no code fences around the whole thing.`;
+
+/**
+ * Room curation — the "## Checklist" section of the brief above. Compiled separately
+ * and injected as {{checklist_section}} only when the room owner wrote a checklist.
+ * Variables: checklist_template
+ */
+const ROOM_CURATION_CHECKLIST_SECTION_FALLBACK = `
+## Checklist
+The room owner wrote the checklist below — one item per line formatted "- **<point>** — <condition>", where the point is what to track and the condition says when it counts as done:
+
+<checklist>
+{{checklist_template}}
+</checklist>
+
+Reproduce each of the owner's points on its own line, IN THE ORDER the owner wrote them, prefixed with a status marker chosen ONLY by checking that point's condition against what you read in the channels:
+- ✅ done — the channels clearly show the point's condition is met.
+- 🚧 in progress — the channels show active work toward it, but it is not met yet.
+- ⛔ blocked — the channels show something is blocking it.
+- ⬜ not started — the channels show no relevant activity, OR there is not enough evidence to judge.
+
+Checklist rules:
+- Keep the owner's points verbatim. Do NOT add, remove, merge, split, or reword points — only prefix each with a marker and append a one-line reason.
+- Do NOT use "[ ]"/"[x]" checkboxes — they do not render here. Use only the four markers above.
+- Format each line as: "- <marker> **<the owner's point>** — <one-line reason grounded in the channel messages, naming where the evidence came from>."
+- Never invent facts not present in the channels. If a point's condition refers to something the channels never mention, mark it ⬜ not started and say there is no activity on it yet.
+- "## Checklist" must appear exactly once and must be the last section of the briefing.`;
+
 /**
  * Fallback description for generate_image tool
  */
@@ -1938,6 +2000,8 @@ export const FALLBACK_PROMPTS: Record<string, string> = {
   'summarize_email_thread': SUMMARIZE_EMAIL_THREAD_FALLBACK,
   'project-recap-channel-summary': PROJECT_RECAP_CHANNEL_SUMMARY_FALLBACK,
   'project-recap-aggregator': PROJECT_RECAP_AGGREGATOR_FALLBACK,
+  'room-curation-brief': ROOM_CURATION_BRIEF_FALLBACK,
+  'room-curation-checklist-section': ROOM_CURATION_CHECKLIST_SECTION_FALLBACK,
 };
 
 /**

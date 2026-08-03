@@ -59,6 +59,10 @@ import { SurfaceNudgesACL } from '../tables/surface-nudges-acl';
 import { SurfaceLinksACL } from '../tables/surface-links-acl';
 import { SavedUserConfigurationsACL } from '../tables/saved-user-configurations-acl';
 import { SavedUserConfigurationValuesACL } from '../tables/saved-user-configuration-values-acl';
+import { RoomsACL } from '../tables/rooms-acl';
+import { RoomSourcesACL } from '../tables/room-sources-acl';
+import { RoomMembersACL } from '../tables/room-members-acl';
+import { RoomRecapsACL } from '../tables/room-recaps-acl';
 import { AppsACL } from '../tables/apps-acl';
 import { TicketAssignmentsACL } from '../tables/ticket-assignments-acl';
 import { TicketStageEtaACL } from '../tables/ticket-stage-eta-acl';
@@ -284,6 +288,14 @@ export class ACLFactory {
         return new DelayedMessagesACL(ctx);
       case 'draft_messages':
         return new DraftMessagesACL(ctx);
+      case 'rooms':
+        return new RoomsACL(ctx);
+      case 'room_sources':
+        return new RoomSourcesACL(ctx);
+      case 'room_members':
+        return new RoomMembersACL(ctx);
+      case 'room_recaps':
+        return new RoomRecapsACL(ctx);
       default:
         return new DenyGuestsACL<any>(ctx, table);
     }

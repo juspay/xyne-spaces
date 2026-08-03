@@ -171,4 +171,6 @@ export const PROMPT_NAMES = {
   SUMMARIZE_EMAIL_THREAD: 'summarize_email_thread',
   PROJECT_RECAP_CHANNEL_SUMMARY: 'project-recap-channel-summary',
   PROJECT_RECAP_AGGREGATOR: 'project-recap-aggregator',
+  ROOM_CURATION_BRIEF: 'room-curation-brief',
+  ROOM_CURATION_CHECKLIST_SECTION: 'room-curation-checklist-section',
 } as const;

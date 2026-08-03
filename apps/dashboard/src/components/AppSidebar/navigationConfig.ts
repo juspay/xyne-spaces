@@ -28,6 +28,7 @@ import {
   LightningThunderElectricOn,
   Atom,
   ChatChatting,
+  Grid01,
   Bot,
   type PikaIconProps,
 } from '@xyne/icons';
@@ -58,6 +59,7 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
   { path: '/projects', label: 'Tickets', icon: TicketToken },
   { path: '/support', label: 'Support', icon: Troubleshoot },
   { path: '/chat/canvas', label: 'My Canvas', icon: FileText },
+  { path: '/rooms', label: 'Rooms', icon: Grid01 },
   { path: '/automations', label: 'Automations', icon: LightningThunderElectricOn },
   { path: '/scheduled-messages', label: 'Scheduled Messages', icon: CalendarTimer },
   { path: '/user-groups', label: 'User Groups', icon: UserThree },

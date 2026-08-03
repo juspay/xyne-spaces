@@ -762,6 +762,48 @@ export enum SurfaceLinkKind {
 }
 
 // @ts-ignore TS1294
+export enum RoomStatus {
+  ACTIVE = 'ACTIVE',
+  ARCHIVED = 'ARCHIVED',
+}
+
+// @ts-ignore TS1294
+export enum RoomCurationCadence {
+  MANUAL = 'MANUAL',
+  DAILY = 'DAILY',
+  HOURLY = 'HOURLY',
+}
+
+// @ts-ignore TS1294
+export enum RoomSourceType {
+  CHANNEL = 'CHANNEL',
+}
+
+// @ts-ignore TS1294
+export enum RoomRole {
+  OWNER = 'OWNER',
+  MEMBER = 'MEMBER',
+}
+
+// @ts-ignore TS1294
+export enum RoomMemberStatus {
+  APPROVED = 'APPROVED',
+  PENDING = 'PENDING',
+}
+
+// @ts-ignore TS1294
+export enum RoomRecapStatus {
+  PENDING = 'PENDING',
+  APPROVED = 'APPROVED',
+}
+
+// @ts-ignore TS1294
+export enum RoomRecapType {
+  SUMMARY = 'SUMMARY',
+  CHECKLIST = 'CHECKLIST',
+}
+
+// @ts-ignore TS1294
 export enum NudgeKind {
   CREATE_TICKET_FROM_MESSAGE = 'CREATE_TICKET_FROM_MESSAGE',
   FIND_RELATED_TICKET_FROM_MESSAGE = 'FIND_RELATED_TICKET_FROM_MESSAGE',
@@ -2502,6 +2544,66 @@ export const stageTransitionTable = table('stage_transitions') // Prisma: StageT
   })
   .primaryKey('id');
 
+export const roomTable = table('rooms') // Prisma model: Room
+  .columns({
+    id: string(),
+    projectId: string(),
+    workspaceId: string().optional(),
+    name: string(),
+    description: string(),
+    clawAgentId: string().optional(),
+    status: enumeration<RoomStatus>(),
+    curationCadence: enumeration<RoomCurationCadence>(),
+    lastCuratedAt: number().optional(),
+    checklistTemplate: string().optional(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
+
+export const roomSourceTable = table('room_sources') // Prisma model: RoomSource
+  .columns({
+    id: string(),
+    roomId: string(),
+    workspaceId: string().optional(),
+    sourceType: enumeration<RoomSourceType>(),
+    sourceId: string(),
+    label: string(),
+    addedBy: string(),
+    createdAt: number(),
+  })
+  .primaryKey('id');
+
+export const roomMemberTable = table('room_members') // Prisma model: RoomMember
+  .columns({
+    id: string(),
+    roomId: string(),
+    workspaceId: string().optional(),
+    userId: string(),
+    role: enumeration<RoomRole>(),
+    status: enumeration<RoomMemberStatus>(),
+    joinedAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
+
+export const roomRecapTable = table('room_recaps') // Prisma model: RoomRecap
+  .columns({
+    id: string(),
+    roomId: string(),
+    workspaceId: string().optional(),
+    type: enumeration<RoomRecapType>(),
+    body: string(),
+    citations: json().optional(),
+    status: enumeration<RoomRecapStatus>(),
+    approvedBy: string().optional(),
+    approvedAt: number().optional(),
+    deletedAt: number().optional(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
+
 export const stageTransitionTableRelationships = relationships(stageTransitionTable, ({ one, many }) => ({
   // Transition approvers now live in stage_approvers (keyed by transitionId), merged from the
   // former stage_transition_approvers table.
@@ -3354,6 +3456,11 @@ export const projectTableRelationships = relationships(projectTable, ({ one, man
     sourceField: ['id'],
     destField: ['accessibleEntityId'],
     destSchema: guestAccessTable,
+  }),
+  rooms: many({
+    sourceField: ['id'],
+    destField: ['projectId'],
+    destSchema: roomTable,
   }),
 }));
 
@@ -5098,6 +5205,54 @@ export const savedUserConfigurationValueTableRelationships = relationships(
   }),
 );
 
+
+export const roomTableRelationships = relationships(roomTable, ({ one, many }) => ({
+  project: one({
+    sourceField: ['projectId'],
+    destField: ['id'],
+    destSchema: projectTable,
+  }),
+  sources: many({
+    sourceField: ['id'],
+    destField: ['roomId'],
+    destSchema: roomSourceTable,
+  }),
+  members: many({
+    sourceField: ['id'],
+    destField: ['roomId'],
+    destSchema: roomMemberTable,
+  }),
+  recaps: many({
+    sourceField: ['id'],
+    destField: ['roomId'],
+    destSchema: roomRecapTable,
+  }),
+}));
+
+export const roomSourceTableRelationships = relationships(roomSourceTable, ({ one }) => ({
+  room: one({
+    sourceField: ['roomId'],
+    destField: ['id'],
+    destSchema: roomTable,
+  }),
+}));
+
+export const roomMemberTableRelationships = relationships(roomMemberTable, ({ one }) => ({
+  room: one({
+    sourceField: ['roomId'],
+    destField: ['id'],
+    destSchema: roomTable,
+  }),
+}));
+
+export const roomRecapTableRelationships = relationships(roomRecapTable, ({ one }) => ({
+  room: one({
+    sourceField: ['roomId'],
+    destField: ['id'],
+    destSchema: roomTable,
+  }),
+}));
+
 // Define schema
 
 export const schema = createSchema({
@@ -5229,6 +5384,10 @@ export const schema = createSchema({
     collectionTable,
     collectionItemTable,
     collectionPermissionTable,
+    roomTable,
+    roomSourceTable,
+    roomMemberTable,
+    roomRecapTable,
   ],
   relationships: [
     agentTableRelationships,
@@ -5351,6 +5510,10 @@ export const schema = createSchema({
     collectionTableRelationships,
     collectionItemTableRelationships,
     collectionPermissionTableRelationships,
+    roomTableRelationships,
+    roomSourceTableRelationships,
+    roomMemberTableRelationships,
+    roomRecapTableRelationships,
   ],
 });
 
@@ -5487,6 +5650,10 @@ export type SavedUserConfigurationValue = Row<typeof schema.tables.saved_user_co
 export type Collection = Row<typeof schema.tables.collections>;
 export type CollectionItem = Row<typeof schema.tables.collection_items>;
 export type CollectionPermission = Row<typeof schema.tables.collection_permissions>;
+export type Room = Row<typeof schema.tables.rooms>;
+export type RoomSource = Row<typeof schema.tables.room_sources>;
+export type RoomMember = Row<typeof schema.tables.room_members>;
+export type RoomRecap = Row<typeof schema.tables.room_recaps>;
 
 export type Context = {
   userID: string;

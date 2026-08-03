@@ -2103,6 +2103,7 @@ model Project {
   globalFields GlobalField[]
   canvasFolders CanvasFolder[]
   canvases      Canvas[]
+  rooms         Room[]
 
   @@unique([name, workspaceId])
   @@unique([code, workspaceId])
@@ -5331,4 +5332,85 @@ model TelepresenceHealthLog {
   @@index([userId, deviceType, reportedAt])
   @@map("telepresence_health_log")
   @@schema("non_zero")
+}
+
+model Room {
+  id              String    @id @default(cuid())
+  projectId       String
+  workspaceId     String? // denormalized tenant key (nullable; stamped on insert)
+  name            String
+  description     String
+  clawAgentId     String?
+  status          String
+  curationCadence String
+  lastCuratedAt   DateTime?
+  checklistTemplate String?
+  createdAt       DateTime
+  updatedAt       DateTime  @updatedAt
+
+  project  Project       @relation(fields: [projectId], references: [id])
+  sources  RoomSource[]
+  members  RoomMember[]
+  recaps   RoomRecap[]
+
+  @@index([projectId])
+  @@index([status, curationCadence, lastCuratedAt])
+  @@map("rooms")
+  @@schema("public")
+}
+
+model RoomSource {
+  id         String   @id @default(cuid())
+  roomId     String
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
+  sourceType String
+  sourceId   String
+  label      String
+  addedBy    String
+  createdAt  DateTime
+
+  room Room @relation(fields: [roomId], references: [id])
+
+  @@unique([roomId, sourceType, sourceId])
+  @@map("room_sources")
+  @@schema("public")
+}
+
+model RoomMember {
+  id        String   @id @default(cuid())
+  roomId    String
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
+  userId    String
+  role      String
+  status    String
+  joinedAt  DateTime
+  updatedAt DateTime @updatedAt
+
+  room Room @relation(fields: [roomId], references: [id])
+
+  @@unique([roomId, userId])
+  @@index([userId, status])
+  @@map("room_members")
+  @@schema("public")
+}
+
+model RoomRecap {
+  id         String    @id @default(cuid())
+  roomId     String
+  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
+  type       String
+  body       String
+  citations  Json? // [{ toolCallId, citations: [...] }] - the client turns these into links
+  status     String
+  approvedBy String?
+  approvedAt DateTime?
+  deletedAt  DateTime?
+  createdAt  DateTime
+  updatedAt  DateTime  @updatedAt
+
+  room Room @relation(fields: [roomId], references: [id])
+
+  @@index([roomId, type, status, createdAt(sort: Desc)])
+  @@map("room_recaps")
+  @@schema("public")
 }

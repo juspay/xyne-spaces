@@ -31,6 +31,7 @@ import { dataSourceIngestionWorker } from '@/workers/dataSourceIngestionWorker';
 import { delayedMessageWorker } from '@/workers/delayedMessageWorker';
 import { scheduledMessageWorker } from '@/workers/scheduledMessageWorker';
 import { stageEtaDeadlineWorker } from '@/workers/stageEtaDeadlineWorker';
+import { roomCurationWorker } from '@/workers/roomCurationWorker';
 import { etaDeadlineWorker } from '@/workers/etaDeadlineWorker';
 import { emailFetchWorker } from '@/workers/emailFetchWorker';
 import { teamIntelligenceWorker } from '@/workers/teamIntelligenceWorker';
@@ -205,6 +206,13 @@ class WorkerService {
       if (appConfig.enableEtaDeadlineWorker) {
         logger.info('Starting ETA deadline worker...');
         await etaDeadlineWorker.start();
+      }
+
+      if (appConfig.roomCuration.enabled) {
+        logger.info('Starting room curation worker...');
+        await roomCurationWorker.start();
+      } else {
+        logger.info('Room curation worker is disabled (ENABLE_ROOM_CURATION_WORKER=false)')
       }
 
       if (appConfig.enableAutomationWorker) {
@@ -399,6 +407,10 @@ class WorkerService {
 
       if (appConfig.enableEtaDeadlineWorker) {
         await etaDeadlineWorker.shutdown();
+      }
+
+      if (appConfig.roomCuration.enabled) {
+        await roomCurationWorker.shutdown();
       }
 
       if (appConfig.enableEmailFetchWorker) {
