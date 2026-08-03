@@ -23,6 +23,7 @@ overrides:
   '@opentelemetry/sdk-node': 0.217.0
   '@tanstack/form-core': 1.27.7
   '@tanstack/react-store': 0.8.0
+  '@terrastruct/d2': 0.1.33
   '@xmldom/xmldom': 0.8.13
   adm-zip: 0.6.0
   ajv@6: 6.14.0
@@ -761,7 +762,7 @@ importers:
         specifier: ^3.14.2
         version: 3.14.9(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       '@terrastruct/d2':
-        specifier: ^0.1.33
+        specifier: 0.1.33
         version: 0.1.33
       '@tiptap/core':
         specifier: 3.29.2
