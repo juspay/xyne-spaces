@@ -330,14 +330,9 @@ export const TicketListRow = ({
           channelId={ticket.channelId ?? undefined}
         />
         <Tooltip delayDuration={500} content={`Created: ${formatDateTime(createdDate)}`} side='top'>
-          <div className='flex w-[118px] flex-col items-end leading-tight'>
-            <span className='text-[10px] font-medium uppercase tracking-wide text-muted-foreground'>
-              Created
-            </span>
-            <span className='text-xs whitespace-nowrap tabular-nums text-muted-foreground'>
-              {formatDate(createdDate)} · {formatTime(createdDate)}
-            </span>
-          </div>
+          <span className='w-[118px] text-right text-xs whitespace-nowrap tabular-nums text-muted-foreground'>
+            {formatDate(createdDate)} · {formatTime(createdDate)}
+          </span>
         </Tooltip>
         <Tooltip
           delayDuration={500}
