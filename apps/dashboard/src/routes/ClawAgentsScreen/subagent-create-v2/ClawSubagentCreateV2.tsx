@@ -188,14 +188,14 @@ const ClawSubagentCreateV2 = (): ReactElement => {
                 loading={toolsLoading}
               />
             ))}
-            <ProgressLabelsField
-              labels={state.progressLabels}
-              onChange={progressLabels => update({ progressLabels })}
-            />
-
             <SkillsCapabilityRow
               selectedIds={state.skillIds}
               onChange={skillIds => update({ skillIds })}
+            />
+
+            <ProgressLabelsField
+              labels={state.progressLabels}
+              onChange={progressLabels => update({ progressLabels })}
             />
           </div>
         </div>
