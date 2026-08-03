@@ -70,6 +70,7 @@ import {
   Status,
   OrgRole,
   DelayedMessageStatus,
+  DraftOrigin,
   assertCanvasDestinationAccess,
   getCanvasFolderNameConflictMessage,
   rethrowCanvasFolderNameConflict,
@@ -1455,7 +1456,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             zql.draft_messages
               .where('channelId', channelId)
               .where('userId', authData.sub)
-              .where('origin', 'user'),
+              .where('origin', DraftOrigin.user),
           );
 
           // Find the channel-level draft (conversationId === null)
@@ -1472,7 +1473,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               userId: authData.sub,
               content: draftMessage,
               hasAttachment: draft?.hasAttachment || false,
-              origin: 'user',
+              origin: DraftOrigin.user,
               updatedAt: timestamp,
               createdAt: draft?.createdAt || timestamp,
             });
@@ -2387,7 +2388,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             const channelDrafts = await tx.run(zql.draft_messages
               .where('channelId', channelId)
               .where('userId', authData.sub)
-            .where('origin', 'user'));
+            .where('origin', DraftOrigin.user));
 
             const draft = channelDrafts.find(d => d.conversationId === null);
 
@@ -3029,7 +3030,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             tx.run(zql.draft_messages
               .where('channelId', conversation.channelId)
               .where('userId', authData.sub)
-              .where('origin', 'user')),
+              .where('origin', DraftOrigin.user)),
           ]);
           if (!channel) {
             throw new Error("Channel doesn't exists");
@@ -4973,7 +4974,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               .where('channelId', channelId)
               .where('conversationId', conversationId)
               .where('userId', authData.sub)
-              .where('origin', 'user')
+              .where('origin', DraftOrigin.user)
               .one(),
           );
 
@@ -4988,7 +4989,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               userId: authData.sub,
               content: draftMessage,
               hasAttachment: draft?.hasAttachment || false,
-              origin: 'user',
+              origin: DraftOrigin.user,
               updatedAt: timestamp,
               createdAt: draft?.createdAt || timestamp,
             });
@@ -5049,7 +5050,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               .where('channelId', channelId)
               .where('conversationId', conversationId)
               .where('userId', authData.sub)
-              .where('origin', 'user')
+              .where('origin', DraftOrigin.user)
               .one(),
           );
 
@@ -5064,7 +5065,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               userId: authData.sub,
               content: draftMessage,
               hasAttachment: draft?.hasAttachment || false,
-              origin: 'user',
+              origin: DraftOrigin.user,
               updatedAt: timestamp,
               createdAt: draft?.createdAt || timestamp,
             });
@@ -11462,7 +11463,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 .where('channelId', channelId)
                 .where('userId', authData.sub)
                 .where('conversationId', conversationId)
-                .where('origin', 'user')
+                .where('origin', DraftOrigin.user)
                 .one(),
             );
           } else {
@@ -11470,7 +11471,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               zql.draft_messages
                 .where('channelId', channelId)
                 .where('userId', authData.sub)
-                .where('origin', 'user'),
+                .where('origin', DraftOrigin.user),
             );
             existingDraft = channelDrafts.find(draft => draft.conversationId === null);
           }
@@ -11487,7 +11488,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               userId: authData.sub,
               content: content || '',
               hasAttachment: true,
-              origin: 'user',
+              origin: DraftOrigin.user,
               createdAt: timestamp,
               updatedAt: timestamp,
             });
@@ -14848,7 +14849,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             zql.draft_messages
               .where("channelId", channelId)
               .where("userId", ctx.userID)
-              .where("origin", "user"),
+              .where("origin", DraftOrigin.user),
           );
           const existingDraft = channelDrafts.find(
             (d) =>
@@ -15013,7 +15014,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             zql.draft_messages
               .where('channelId', scheduled.channelId)
               .where('userId', ctx.userID)
-              .where('origin', 'user')
+              .where('origin', DraftOrigin.user)
           );
           const existingDraft = channelDrafts.find(
             (d) => d.conversationId === (scheduled.conversationId ?? null) && d.messageId === null
@@ -15043,7 +15044,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             userId: ctx.userID,
             content: scheduled.content,
             hasAttachment,
-            origin: 'user',
+            origin: DraftOrigin.user,
             createdAt: timestamp,
             updatedAt: timestamp,
           });
@@ -15088,7 +15089,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
       /** Delete a draft message by ID (only the owner can delete their own draft) */
       delete: defineMutator(z.object({ id: z.string() }), async ({ tx, ctx, args: { id } }) => {
         const draft = await tx.run(
-          zql.draft_messages.where('id', id).where('userId', ctx.userID).where('origin', 'user').one()
+          zql.draft_messages.where('id', id).where('userId', ctx.userID).where('origin', DraftOrigin.user).one()
         );
         if (!draft) {
           throw new Error('Draft not found');
@@ -15106,7 +15107,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         }),
         async ({ tx, ctx, args: { id, content, timestamp } }) => {
           const draft = await tx.run(
-            zql.draft_messages.where('id', id).where('userId', ctx.userID).where('origin', 'user').one()
+            zql.draft_messages.where('id', id).where('userId', ctx.userID).where('origin', DraftOrigin.user).one()
           );
           if (!draft) {
             throw new Error('Draft not found');
@@ -15127,7 +15128,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         }),
         async ({ tx, ctx, args: { id, timestamp } }) => {
           const draft = await tx.run(
-            zql.draft_messages.where('id', id).where('userId', ctx.userID).where('origin', 'user').one()
+            zql.draft_messages.where('id', id).where('userId', ctx.userID).where('origin', DraftOrigin.user).one()
           );
           if (!draft) {
             throw new Error('Draft not found');
