@@ -80,6 +80,10 @@ import {
   EmailChannelPreferencesACL,
   BoardSlaPoliciesACL,
   DelayedMessagesACL,
+  RoomsACL,
+  RoomSourcesACL,
+  RoomMembersACL,
+  RoomRecapsACL,
 } from '../tables';
 export class QueryACLFactory {
   static getACL<TTable extends TableName>(
@@ -229,6 +233,14 @@ export class QueryACLFactory {
         return new CollectionItemsACL(ctx) as BaseQueryACL<TTable>;
       case 'collection_permissions':
         return new CollectionPermissionsACL(ctx) as BaseQueryACL<TTable>;
+      case 'rooms':
+        return new RoomsACL(ctx) as BaseQueryACL<TTable>;
+      case 'room_sources':
+        return new RoomSourcesACL(ctx) as BaseQueryACL<TTable>;
+      case 'room_members':
+        return new RoomMembersACL(ctx) as BaseQueryACL<TTable>;
+      case 'room_recaps':
+        return new RoomRecapsACL(ctx) as BaseQueryACL<TTable>;
       default:
         return new BaseQueryACL(ctx, table) as BaseQueryACL<TTable>;
       case 'emails':

@@ -43,6 +43,9 @@ import { MemoryScreen } from './MemoryScreen';
 import { FileViewerLayout } from '../components/knowledgeBase/layout/FileViewerLayout';
 import AnalyticsScreen from './AnalyticsScreen/AnalyticsScreen';
 import ProjectsScreen from './ProjectsScreen/ProjectsScreen';
+import RoomsDirectoryScreen from './RoomsScreen/RoomsDirectoryScreen';
+import RoomDetailScreen from './RoomsScreen/RoomDetailScreen';
+import { RoomCreateWizard } from '../components/Rooms/CreateWizard/RoomCreateWizard';
 import UserGroupsScreen from './UserGroupsScreen/UserGroupsScreen';
 import ProjectDetailScreen from './ProjectDetailScreen/ProjectDetailScreen';
 import ReleaseDetailScreen from './ReleaseDetailScreen/ReleaseDetailScreen';
@@ -1209,6 +1212,18 @@ export const router = createBrowserRouter([
               {
                 path: 'listProjects/:projectId',
                 element: <ProjectDetailScreen />,
+              },
+              {
+                path: 'rooms',
+                element: <RoomsDirectoryScreen />,
+              },
+              {
+                path: 'rooms/new',
+                element: <RoomCreateWizard />,
+              },
+              {
+                path: 'rooms/:roomId',
+                element: <RoomDetailScreen />,
               },
               {
                 path: 'listProjects/:projectId/releases/:releaseTicketId',

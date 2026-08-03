@@ -14,6 +14,7 @@ import {
   hasGuestChannelAccess,
   hasGuestProjectAccess,
 } from '../core/guest-access';
+import { isProjectParticipant } from '../core/admin-access';
 
 export class CanvasesACL extends BaseACL<'canvases'> {
   private mapInsertHierarchyError(code: CanvasHierarchyErrorCode): string {
@@ -127,14 +128,7 @@ export class CanvasesACL extends BaseACL<'canvases'> {
         );
       }
     } else if (resolvedProjectId) {
-      const projectChannelMembership = await tx.run(
-        zql.channels
-          .where('projectId', resolvedProjectId)
-          .whereExists('participants', p => p.where('userId', this.ctx.userID))
-          .one(),
-      );
-
-      if (!projectChannelMembership) {
+      if (!(await isProjectParticipant(this.ctx, tx, resolvedProjectId))) {
         throw new MutationACLError(
           'Canvas insert failed: you must be a member of a project channel',
           'canvases',

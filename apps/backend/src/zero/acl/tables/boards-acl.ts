@@ -6,7 +6,7 @@ import {
 import { Schema } from '@xyne/shared'
 import { BaseACL } from '../core/base-acl';
 import { zql } from '../../queries';
-import { hasProjectAdminAccess } from '../core/admin-access';
+import { hasProjectAdminAccess, isProjectParticipant } from '../core/admin-access';
 import { assertGuestWriteBlocked } from '../core/guest-access';
 
 export class BoardAcl extends BaseACL<'boards'> {
@@ -33,14 +33,7 @@ export class BoardAcl extends BaseACL<'boards'> {
             return;
         }
 
-        const channel = await tx
-            .run(
-            zql.channels
-            .where('projectId', args.projectId)
-            .whereExists('participants', (participants) => {
-                return participants.where('userId', this.ctx.userID)
-            }));
-        if (channel.length === 0) {
+        if (!(await isProjectParticipant(this.ctx, tx, args.projectId))) {
             throw new MutationACLError('Board insert failed: you must be a project participant to create boards', 'boards');
         }
     }

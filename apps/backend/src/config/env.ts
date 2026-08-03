@@ -200,6 +200,8 @@ const envSchema = Joi.object({
   RECAP_GENERATION_CRON: Joi.string().default('15 0 * * *'), //5:45 IST daily
   RECAP_CLEANUP_CRON: Joi.string().default('30 23 * * *'), //5:00 IST daily
   RECAP_RETENTION_DAYS: Joi.number().default(30),
+  ENABLE_ROOM_CURATION_WORKER: Joi.boolean().default(false),
+  ROOM_CURATION_CRON: Joi.string().default('*/15 * * * *'), //every 15 minutes
   ACTIVITY_CLASSIFICATION_MAX_RETRIES: Joi.number().default(2),
   TICKET_DESC_CLEAN_MODEL: Joi.string().default(''),
   TICKET_DESC_CLEAN_MAX_RETRIES: Joi.number().default(3),
@@ -773,6 +775,10 @@ export const config = {
     generationCron: envVars.RECAP_GENERATION_CRON,
     cleanupCron: envVars.RECAP_CLEANUP_CRON,
     retentionDays: envVars.RECAP_RETENTION_DAYS,
+  },
+  roomCuration: {
+    enabled: envVars.ENABLE_ROOM_CURATION_WORKER,
+    cron: envVars.ROOM_CURATION_CRON,
   },
   otel: {
     metricsEnabled: envVars.ENABLE_OTEL_METRICS,

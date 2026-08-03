@@ -41,6 +41,29 @@ export async function hasProjectAdminAccess(ctx: { userID: string }, tx: Transac
 }
 
 /**
+ * Checks whether the current user participates in a project.
+ *
+ * There is no direct project-membership table in this codebase: membership is
+ * only ever recorded per channel (`channel_participants`). Project
+ * participation is therefore always DERIVED - a user participates in a project
+ * if they participate in at least one channel of that project. This is the same
+ * check as channel participation, just rolled up to the project level.
+ */
+export async function isProjectParticipant(
+  ctx: { userID: string },
+  tx: Transaction<Schema>,
+  projectId: string
+): Promise<boolean> {
+  const participatingChannel = await tx.run(
+    zql.channels
+      .where('projectId', projectId)
+      .whereExists('participants', (participants) => participants.where('userId', ctx.userID))
+      .one()
+  );
+  return !!participatingChannel;
+}
+
+/**
  * Checks if the current user has ADMIN access to the USER-GROUPS resource (direct or via group).
  */
 export async function hasUserGroupsAdminAccess(ctx: { userID: string; role?: string }, tx: Transaction<Schema>): Promise<boolean> {

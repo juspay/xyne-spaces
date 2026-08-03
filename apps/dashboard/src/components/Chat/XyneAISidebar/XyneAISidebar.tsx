@@ -5,6 +5,7 @@ import {
   useEffect,
   useCallback,
   useMemo,
+  useSyncExternalStore,
   type MouseEvent as ReactMouseEvent,
 } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -60,6 +61,11 @@ import {
   type ContextSelections,
   toAttachedContext,
 } from './components/ContextPickerPanel';
+import {
+  consumePendingContextSeed,
+  getPendingContextSeedVersion,
+  subscribePendingContextSeed,
+} from './utils/pendingContextSeed';
 import { MessageItem, ConversationToolInvocationsContext } from './components/MessageItem';
 import { ConversationHistory } from './components/ConversationHistory';
 import { XyneAIHeader } from './components/XyneAIHeader';
@@ -1245,6 +1251,15 @@ const XyneAISidebar = ({
     setSelectedTranscripts(selections.transcripts);
     setSelectedRecordings(selections.recordings);
   }, []);
+
+  const pendingSeedVersion = useSyncExternalStore(
+    subscribePendingContextSeed,
+    getPendingContextSeedVersion,
+  );
+  useEffect(() => {
+    const seed = consumePendingContextSeed();
+    if (seed) handleConfirmContext(seed);
+  }, [pendingSeedVersion, handleConfirmContext]);
   const handleRemoveChannel = useCallback((id: string) => {
     setSelectedChannels(prev => prev.filter(ch => ch.id !== id));
   }, []);

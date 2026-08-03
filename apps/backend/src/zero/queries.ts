@@ -8,6 +8,9 @@ import {
   FormContextType,
   FormEntityType,
   LookupType,
+  RoomStatus,
+  RoomRecapType,
+  RoomMemberStatus,
 } from '@xyne/shared';
 import { z } from 'zod';
 import {
@@ -4500,4 +4503,83 @@ dmChannelsLatestMessagesPaginated: defineQuery(
       .related('userMappings')
       .one();
   }),
+  roomsPaginated: defineQuery(
+    z.object({
+      status: z.nativeEnum(RoomStatus),
+      limit: z.number(),
+      start: z.object({ createdAt: z.number(), id: z.string() }).nullable(),
+    }),
+    ({ ctx, args: { status, limit, start } }) => {
+      let query = zql.rooms
+        .where('status', status)
+        .orderBy('createdAt', 'desc')
+        .orderBy('id', 'desc')
+        // Only the root table's ACL is applied to a query, so related rows do not get
+        // room_members' own ACL - the membership gate has to be repeated here.
+        .related('members', m =>
+          m.where(({ or, cmp, exists }) =>
+            or(
+              cmp('userId', ctx.userID),
+              exists('room', r =>
+                r.whereExists('members', mm =>
+                  mm.where('userId', ctx.userID).where('status', RoomMemberStatus.APPROVED),
+                ),
+              ),
+            ),
+          ),
+        );
+
+      if (start) {
+        query = query.start({ createdAt: start.createdAt, id: start.id }, { inclusive: false });
+      }
+
+      return query.limit(limit);
+    },
+  ),
+  roomDetail: defineQuery(z.object({ roomId: z.string() }), ({ ctx, args: { roomId } }) =>
+    zql.rooms
+      .where('id', roomId)
+      // Related rows bypass their own table ACL - see roomsPaginated.
+      .related('members', m =>
+        m.where(({ or, cmp, exists }) =>
+          or(
+            cmp('userId', ctx.userID),
+            exists('room', r =>
+              r.whereExists('members', mm =>
+                mm.where('userId', ctx.userID).where('status', RoomMemberStatus.APPROVED),
+              ),
+            ),
+          ),
+        ),
+      )
+      .related('sources', s =>
+        s.whereExists('room', r =>
+          r.whereExists('members', m =>
+            m.where('userId', ctx.userID).where('status', RoomMemberStatus.APPROVED),
+          ),
+        ),
+      )
+      .one(),
+  ),
+  roomRecapsPaginated: defineQuery(
+    z.object({
+      roomId: z.string(),
+      type: z.nativeEnum(RoomRecapType),
+      limit: z.number(),
+      start: z.object({ createdAt: z.number(), id: z.string() }).nullable(),
+    }),
+    ({ args: { roomId, type, limit, start } }) => {
+      let query = zql.room_recaps
+        .where('roomId', roomId)
+        .where('type', type)
+        .orderBy('createdAt', 'desc')
+        .orderBy('id', 'desc');
+
+      if (start) {
+        query = query.start({ createdAt: start.createdAt, id: start.id }, { inclusive: false });
+      }
+
+      return query.limit(limit);
+    },
+  ),
 });

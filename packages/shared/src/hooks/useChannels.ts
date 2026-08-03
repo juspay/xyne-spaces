@@ -5,7 +5,7 @@ import type { Conversation, VisibleChannel } from '../machines/stateMachine.js';
 import { queryCacheActor } from '../machines/queryCacheMachine.js';
 import { searchChannels as _searchChannels, searchChannelsWithScores as _searchChannelsWithScores } from '../utils/search.js';
 import type { Channel, ChannelUserStatus } from '../zero/schema.js';
-import { ChannelScopeType, ChannelVisibility } from '../zero/schema.js';
+import { ChannelScopeType, ChannelVisibility, ProjectType } from '../zero/schema.js';
 import { isDeskChannelType } from '../utils/channel.js';
 import { queries } from '../zero/queries.js';
 import { useQuery } from './useQuery.js';
@@ -73,6 +73,14 @@ export const useVisibleProjects = (): VisibleProject[] => {
 
   return useMemo(
     () => [...(projects ?? [])].sort((a, b) => a.name.localeCompare(b.name)),
+    [projects],
+  );
+};
+
+export const useVisibleProjectsWithoutDms = (): VisibleProject[] => {
+  const projects = useVisibleProjects();
+  return useMemo(
+    () => projects.filter(project => project.type === ProjectType.DEFAULT),
     [projects],
   );
 };
