@@ -3671,9 +3671,7 @@ img.inline-emoji,
   color: hsl(var(--muted-foreground)) !important;
 }
 
-.detailed-summary-canvas-editor
-  .bn-editor
-  .bn-block-content[data-content-type="heading"] {
+.detailed-summary-canvas-editor .bn-editor .bn-block-content[data-content-type="heading"] {
   color: hsl(var(--foreground)) !important;
 }
 
