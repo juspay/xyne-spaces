@@ -677,7 +677,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           map[groupByKey] = [...next];
           sessionStorage.setItem(expandedGroupsStorageKey, JSON.stringify(map));
         } catch (err) {
-          console.error('Failed to persist expanded groups to sessionStorage', err);
+          logger.error(Event.FRONTEND_ERROR, {
+            type: 'migrated_console_error',
+            message: String('Failed to persist expanded groups to sessionStorage'),
+            error: err,
+          });
         }
         return next;
       });
@@ -692,7 +696,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       const map = (raw ? JSON.parse(raw) : {}) as Record<string, string[]>;
       setExpandedGroups(new Set(map[groupByKey] ?? []));
     } catch (err) {
-      console.error('Failed to read expanded groups from sessionStorage', err);
+      logger.error(Event.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('Failed to read expanded groups from sessionStorage'),
+        error: err,
+      });
       setExpandedGroups(new Set());
     }
   }, [expandedGroupsStorageKey, groupByKey, groupBy]);
@@ -848,7 +856,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         try {
           sessionStorage.removeItem(activeViewKey);
         } catch (err) {
-          console.error('Failed to remove active view from sessionStorage', err);
+          logger.error(Event.FRONTEND_ERROR, {
+            type: 'migrated_console_error',
+            message: String('Failed to remove active view from sessionStorage'),
+            error: err,
+          });
         }
       }
 
@@ -907,7 +919,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         try {
           sessionStorage.removeItem(activeViewKey);
         } catch (err) {
-          console.error('Failed to remove active view from sessionStorage', err);
+          logger.error(Event.FRONTEND_ERROR, {
+            type: 'migrated_console_error',
+            message: String('Failed to remove active view from sessionStorage'),
+            error: err,
+          });
         }
       }
       setGroupBy(value);
@@ -1288,7 +1304,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         setSelectedViewId(storedId);
       }
     } catch (err) {
-      console.error('Failed to read active view from sessionStorage', err);
+      logger.error(Event.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('Failed to read active view from sessionStorage'),
+        error: err,
+      });
     }
   }, [state.value, savedConfigs, activeViewKey]);
 
@@ -3574,10 +3594,13 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                                 try {
                                   sessionStorage.setItem(activeViewKey, config.id);
                                 } catch (err) {
-                                  console.error(
-                                    'Failed to persist active view to sessionStorage',
-                                    err,
-                                  );
+                                  logger.error(Event.FRONTEND_ERROR, {
+                                    type: 'migrated_console_error',
+                                    message: String(
+                                      'Failed to persist active view to sessionStorage',
+                                    ),
+                                    error: err,
+                                  });
                                 }
                                 if (groupByEntry) {
                                   try {
@@ -3787,7 +3810,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                     try {
                       sessionStorage.removeItem(activeViewKey);
                     } catch (err) {
-                      console.error('Failed to remove active view from sessionStorage', err);
+                      logger.error(Event.FRONTEND_ERROR, {
+                        type: 'migrated_console_error',
+                        message: String('Failed to remove active view from sessionStorage'),
+                        error: err,
+                      });
                     }
                     setFilters({ ...(filters.boards ? { boards: filters.boards } : {}) });
                     setGroupBy('none');
@@ -4795,7 +4822,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                     try {
                       sessionStorage.removeItem(activeViewKey);
                     } catch (err) {
-                      console.error('Failed to remove active view from sessionStorage', err);
+                      logger.error(Event.FRONTEND_ERROR, {
+                        type: 'migrated_console_error',
+                        message: String('Failed to remove active view from sessionStorage'),
+                        error: err,
+                      });
                     }
                   }
                   const configId = deleteViewConfirm.configId;

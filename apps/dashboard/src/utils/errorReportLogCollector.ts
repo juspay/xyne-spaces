@@ -1,6 +1,6 @@
 import { detectPlatform, type Platform } from '../hooks/usePlatform';
 import type { ErrorReportNativeLog } from '../types/electron';
-import { logger } from './logger';
+import { logger, Event as LogEvent } from './logger';
 import { createErrorTrace, type ErrorTrace } from './errorTrace';
 
 type LogLevel = 'error' | 'window.error' | 'unhandledrejection';
@@ -8,8 +8,8 @@ type LogLevel = 'error' | 'window.error' | 'unhandledrejection';
 const MAX_LOG_ENTRIES = 500;
 const MAX_ERROR_REPORT_LOG_BYTES = 512 * 1024;
 
-// eslint-disable-next-line no-console
-const originalConsoleError = console.error.bind(console);
+const browserConsole = globalThis.console;
+const originalConsoleError = browserConsole.error.bind(browserConsole);
 
 const logEntries: ErrorReportLogEntry[] = [];
 
@@ -76,8 +76,11 @@ const getNativeLogs = async (): Promise<ErrorReportNativeLog[]> => {
   try {
     return await window.electronAPI.getErrorReportNativeLogs();
   } catch (error) {
-    // eslint-disable-next-line no-console
-    console.warn('Failed to collect native Electron logs for error report', error);
+    logger.warn(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_warn',
+      message: String('Failed to collect native Electron logs for error report'),
+      context: [error],
+    });
     return [];
   }
 };
@@ -107,8 +110,7 @@ export const installErrorReportLogCollector = (
 
   isInstalled = true;
 
-  // eslint-disable-next-line no-console
-  console.error = (...args: unknown[]): void => {
+  browserConsole.error = (...args: unknown[]): void => {
     originalConsoleError(...args);
     appendLogEntry(
       'error',

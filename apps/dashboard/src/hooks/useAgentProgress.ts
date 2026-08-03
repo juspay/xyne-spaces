@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../utils/logger';
 import { useEffect, useRef, useState } from 'react';
 import { websocketService } from '../services/clients/socketClient';
 import {
@@ -124,8 +125,12 @@ export function useAgentProgress(sessionId: string | undefined): UseAgentProgres
       });
 
     const handler = (evt: SessionActivityEvent): void => {
-      console.info('Received session_activity event', evt);
-      if (evt?.message?.msgType !== MessageType.SYSTEM) return;
+      logger.info(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_info',
+        message: String('Received session_activity event'),
+        context: [evt],
+      });
+      if (evt?.message?.msgType !== 'SYSTEM') return;
       let parsed: AgentProgressData | undefined;
       try {
         parsed = JSON.parse(evt.message.content) as AgentProgressData;

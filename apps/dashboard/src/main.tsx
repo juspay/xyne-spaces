@@ -9,9 +9,8 @@ import { logger, Event } from './utils/logger';
 // Expose app version to window for Electron access
 window.__APP_VERSION__ = __APP_VERSION__;
 
-// Store original console.error
-// eslint-disable-next-line no-console
-const originalConsoleError = console.error;
+const browserConsole = globalThis.console;
+const originalConsoleError = browserConsole.error.bind(browserConsole);
 // Helper function to get common error properties
 const getCommonErrorProperties = (): {
   userAgent: string;
@@ -27,14 +26,14 @@ const handleConsoleError = (args: unknown[]): void => {
     const error = args.find(arg => arg instanceof Error);
 
     const properties = {
-      type: 'console.error',
+      type: 'browser_console_error',
       message: errorMessage,
       ...getCommonErrorProperties(),
     };
     mixpanelService.track('Frontend Error', properties);
     logger.error(Event.FRONTEND_ERROR, { ...properties, error });
   } catch (trackingError) {
-    originalConsoleError('Failed to track console.error to Mixpanel:', trackingError);
+    originalConsoleError('Failed to track browser console error to Mixpanel:', trackingError);
   }
 };
 
@@ -100,10 +99,18 @@ if ('serviceWorker' in navigator && !isCustomProtocol) {
     navigator.serviceWorker
       .register('/sw.js')
       .then(registration => {
-        console.log('Service Worker registered with scope:', registration.scope);
+        logger.info(Event.FRONTEND_ERROR, {
+          type: 'migrated_console_log',
+          message: String('Service Worker registered with scope:'),
+          context: [registration.scope],
+        });
       })
       .catch(error => {
-        console.error('Service Worker registration failed:', error);
+        logger.error(Event.FRONTEND_ERROR, {
+          type: 'service_worker_registration',
+          message: 'Service Worker registration failed',
+          error,
+        });
       });
   });
 }

@@ -13,7 +13,7 @@ import * as os from 'os';
 import { net, app } from 'electron';
 import si from 'systeminformation';
 import { config } from '../../app/config';
-import { ElectronEventType } from './electron-events';
+import type { ElectronEventType } from './electron-events';
 import Store from 'electron-store';
 import { createErrorTrace, serializeError } from './errorTrace';
 
@@ -21,9 +21,9 @@ import { createErrorTrace, serializeError } from './errorTrace';
 export const errorLogger = log.create({ logId: 'error' });
 errorLogger.transports.file.fileName = 'errors.log';
 errorLogger.transports.file.level = 'error'; // Only error
-errorLogger.transports.console.level = false; 
+errorLogger.transports['console'].level = false;
 
-type EventType = EnrollmentEventType | ElectronEventType;
+export type LogEvent = EnrollmentEventType | ElectronEventType | string;
 
 export const LogLevel = {
   DEBUG: 'DEBUG',
@@ -42,7 +42,7 @@ interface LogEntry {
   timestamp: string;
   level: LogLevel;
   hostname: string;
-  event: EventType;
+  event: LogEvent;
   serialNumber: string;
   preProdEnabled: boolean;
   [key: string]: unknown;
@@ -134,35 +134,35 @@ class LoggerService {
   /**
    * Log a debug event
    */
-  debug(event: EventType, extraFields?: Record<string, unknown>, logType?: string): void {
+  debug(event: LogEvent, extraFields?: Record<string, unknown>, logType?: string): void {
     this.addLog(LogLevel.DEBUG, event, extraFields, logType);
   }
 
   /**
    * Log an info event
    */
-  info(event: EventType, extraFields?: Record<string, unknown>, logType?: string): void {
+  info(event: LogEvent, extraFields?: Record<string, unknown>, logType?: string): void {
     this.addLog(LogLevel.INFO, event, extraFields, logType);
   }
 
   /**
    * Log a warning event
    */
-  warn(event: EventType, extraFields?: Record<string, unknown>, logType?: string): void {
+  warn(event: LogEvent, extraFields?: Record<string, unknown>, logType?: string): void {
     this.addLog(LogLevel.WARN, event, extraFields, logType);
   }
 
   /**
    * Log an error event
    */
-  error(event: EventType, extraFields?: Record<string, unknown>, logType?: string): void {
+  error(event: LogEvent, extraFields?: Record<string, unknown>, logType?: string): void {
     this.addLog(LogLevel.ERROR, event, extraFields, logType);
   }
 
   /**
    * Log an error with exception details
    */
-  logError(event: EventType, error: unknown, extraFields?: Record<string, unknown>, logType?: string): void {
+  logError(event: LogEvent, error: unknown, extraFields?: Record<string, unknown>, logType?: string): void {
     const errorDetails = {
       ...(extraFields || {}),
       error: serializeError(error),
@@ -189,16 +189,18 @@ class LoggerService {
   /**
    * Add a log entry
    */
-  private addLog(level: LogLevel, event: EventType, extraFields?: Record<string, unknown>, logType?: string): void {
+  private addLog(level: LogLevel, event: LogEvent, extraFields?: Record<string, unknown>, logType?: string): void {
     if (!this.isEnabled) {
       return;
     }
 
-    const error = level === LogLevel.ERROR && extraFields instanceof Error
-      ? extraFields
-      : level === LogLevel.ERROR
-        ? Object.values(extraFields ?? {}).find(value => value instanceof Error)
-        : undefined;
+    let error: Error | undefined;
+    if (level === LogLevel.ERROR && extraFields) {
+      error =
+        extraFields instanceof Error
+          ? extraFields
+          : Object.values(extraFields).find(value => value instanceof Error);
+    }
     const normalizedFields = error
       ? { ...(extraFields instanceof Error ? {} : extraFields), error: serializeError(error), errorTrace: createErrorTrace(error) }
       : extraFields;

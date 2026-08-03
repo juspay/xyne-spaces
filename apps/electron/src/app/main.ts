@@ -57,7 +57,7 @@ process.setSourceMapsEnabled(true);
 log.initialize();
 installElectronLogTraceHook();
 log.transports.file.level = 'info';
-log.transports.console.level = 'info';
+log.transports['console'].level = 'info';
 log.info('[Main] Electron app starting...');
 
 // Setup global error handlers FIRST to catch any initialization errors

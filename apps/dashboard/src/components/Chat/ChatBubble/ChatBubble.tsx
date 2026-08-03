@@ -196,7 +196,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     appsService
       .getChannelShortcuts(channelId, { type: 'MESSAGE' })
       .then(setMessageShortcuts)
-      .catch(() => {});
+      .catch(() => undefined);
   }, [channelId]);
 
   const messageConversationId = message.conversationId;
@@ -685,7 +685,11 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         ? markdownToHtml(contentToCopy)
             .then(html => copyHtmlToClipboard(html))
             .catch(error => {
-              console.warn('Markdown processing failed, falling back to raw content:', error);
+              logger.warn(Event.FRONTEND_ERROR, {
+                type: 'migrated_console_warn',
+                message: String('Markdown processing failed, falling back to raw content:'),
+                context: [error],
+              });
               return copyHtmlToClipboard(contentToCopy);
             })
         : copyHtmlToClipboard(contentToCopy);
@@ -770,7 +774,11 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       }
       toast.success('Marked as unread');
     } catch (error) {
-      console.error('Failed to mark as unread:', error);
+      logger.error(Event.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('Failed to mark as unread:'),
+        error: error,
+      });
       toast.error('Failed to mark as unread. Please try again.');
       setSkipMarkAsRead(false);
     }
@@ -1050,7 +1058,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                 plainText,
                 message.messageId,
               )
-              .catch(() => {});
+              .catch(() => undefined);
           },
           onShowAllShortcuts: () => setShortcutModalOpen(true),
         }),

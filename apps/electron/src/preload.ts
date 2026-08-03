@@ -435,9 +435,5 @@ const electronAPI = {
 if (isTrustedOrigin()) {
   contextBridge.exposeInMainWorld('electronAPI', electronAPI);
 } else {
-  // eslint-disable-next-line no-console
-  console.warn(
-    '[preload] Untrusted origin — electronAPI bridge withheld:',
-    window.location.origin,
-  );
+  // The privileged bridge is intentionally withheld for untrusted origins.
 }

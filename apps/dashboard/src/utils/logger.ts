@@ -14,6 +14,10 @@ import { createErrorTrace, findError, serializeError } from './errorTrace';
 
 import { Event as LoggerEvent, LogLevel } from '@xyne/shared/logger';
 
+// EventType remains explicit here to document the typed telemetry subset.
+// eslint-disable-next-line @typescript-eslint/no-redundant-type-constituents
+export type LogEvent = EventType | string;
+
 const ERROR_DEDUP_WINDOW_IN_MS = 5_000;
 
 export const NotificationSocketState = {
@@ -195,7 +199,7 @@ const normalizeDedupValue = (value: unknown, seen: WeakSet<object> = new WeakSet
 };
 
 const createErrorDedupKey = (
-  event: EventType,
+  event: LogEvent,
   fingerprint: string,
   extraFields?: Record<string, unknown>,
 ): string =>
@@ -211,7 +215,7 @@ export interface LogEntry {
   emailId: string | null;
   timestamp: number;
   level: LogLevel;
-  event: EventType;
+  event: LogEvent;
   latency?: number | null;
   version: string;
   pageViewId?: string | null;
@@ -274,11 +278,8 @@ export class Logger implements LoggerConfig {
         payload,
       };
       this.worker.postMessage(initMessage);
-      this.worker.onerror = error => {
-        console.error('Logger worker error:', error);
-      };
-    } catch (error) {
-      console.error('Failed to initialize logger worker:', error);
+    } catch {
+      /* Intentionally ignored. */
     }
   }
 
@@ -365,7 +366,7 @@ export class Logger implements LoggerConfig {
 
   private postLogMessage(
     level: LogLevel,
-    event: EventType,
+    event: LogEvent,
     extraFields?: Record<string, unknown>,
     consoleLog?: boolean,
   ): void {
@@ -391,21 +392,22 @@ export class Logger implements LoggerConfig {
     }
   }
 
-  debug(event: EventType, extraFields?: Record<string, unknown>, consoleLog?: boolean): void {
+  debug(event: LogEvent, extraFields?: Record<string, unknown>, consoleLog?: boolean): void {
     this.postLogMessage(LogLevel.DEBUG, event, extraFields, consoleLog);
   }
 
-  info(event: EventType, extraFields?: Record<string, unknown>, consoleLog?: boolean): void {
+  info(event: LogEvent, extraFields?: Record<string, unknown>, consoleLog?: boolean): void {
     this.postLogMessage(LogLevel.INFO, event, extraFields, consoleLog);
   }
 
-  warn(event: EventType, extraFields?: Record<string, unknown>, consoleLog?: boolean): void {
+  warn(event: LogEvent, extraFields?: Record<string, unknown>, consoleLog?: boolean): void {
     this.postLogMessage(LogLevel.WARN, event, extraFields, consoleLog);
   }
 
-  error(event: EventType, extraFields?: Record<string, unknown>, consoleLog?: boolean): void {
+  error(event: LogEvent, extraFields?: Record<string, unknown>, consoleLog?: boolean): void {
+    const message = extraFields?.['message'];
     const error =
-      findError(extraFields ?? {}) ?? new Error(String(extraFields?.['message'] ?? event));
+      findError(extraFields ?? {}) ?? new Error(typeof message === 'string' ? message : event);
     const errorTrace = createErrorTrace(error);
     const now = Date.now();
     const dedupKey = createErrorDedupKey(event, errorTrace.fingerprint, extraFields);
@@ -457,8 +459,8 @@ const getClientSessionId = async (): Promise<string | null> => {
     } else if (detectReactNativeWebView() && reactNativeBridge.isAvailable()) {
       return await reactNativeBridge.getClientSessionId();
     }
-  } catch (error) {
-    console.error('Error getting client session ID for logger:', error);
+  } catch {
+    /* Intentionally ignored. */
   }
   return null;
 };
@@ -466,9 +468,6 @@ const getClientSessionId = async (): Promise<string | null> => {
 export const getLogger = async (): Promise<Logger> => {
   if (!loggerInstance) {
     const clientSessionId = await getClientSessionId();
-    if (!clientSessionId) {
-      console.warn('Failed to get client session ID from native, generating a new one');
-    }
     loggerInstance = new Logger({
       clientSessionId: clientSessionId ?? uuidv4(),
       platform_name: detectPlatform(),

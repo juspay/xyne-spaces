@@ -620,7 +620,7 @@ export const ThreadMessages = ({
 
   const conversationTabContextValue = useMemo(
     () => ({
-      setActiveTab: (): void => {},
+      setActiveTab: (): void => undefined,
       setSkipMarkAsRead: setSkipMarkAsReadThread,
       skipMarkAsReadRef: skipMarkAsReadThreadRef,
     }),
@@ -922,7 +922,10 @@ export const ThreadMessages = ({
       '_blank',
     );
     if (!newWindow) {
-      console.warn('Failed to open new window - popup may be blocked');
+      logger.warn(Event.FRONTEND_ERROR, {
+        type: 'migrated_console_warn',
+        message: String('Failed to open new window - popup may be blocked'),
+      });
     } else {
       newWindow.focus();
     }

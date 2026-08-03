@@ -284,7 +284,13 @@ const AttachmentCitationPreviewInner: React.FC = () => {
 
   const handleDownload = () => {
     if (!ref) return;
-    downloadFile(ref.attachmentId, ref.fileName).catch(console.error);
+    downloadFile(ref.attachmentId, ref.fileName).catch(error => {
+      logger.error(Event.FRONTEND_ERROR, {
+        type: 'attachment_download',
+        message: 'Failed to download attachment',
+        error,
+      });
+    });
   };
 
   const close = () => attachmentCitationPreviewStore.close();
@@ -386,3 +392,4 @@ export const AttachmentCitationPreview: React.FC = () => (
 );
 
 export default AttachmentCitationPreview;
+import { Event, logger } from '../../utils/logger';

@@ -74,9 +74,7 @@ function writeAll(all: Record<string, PendingMessage>): void {
   for (const cb of listeners) {
     try {
       cb();
-    } catch (err) {
-      console.error('pending: listener threw', err);
-    }
+    } catch {}
   }
 }
 
