@@ -307,7 +307,6 @@ const envSchema = Joi.object({
   PULSE_ENABLED_CHANNELS: Joi.string().allow('').default(''),
   PULSE_API_URL: Joi.string().uri().default(''),
   PULSE_AUTHORIZATION: Joi.string().allow('').default(''),
-  // Desk beta-channel rollout
   DESK_BETA_CHANNELS: Joi.string().allow('').default(''),
   // Jira Configuration
   JUSPAY_JIRA_BASEURL: Joi.string().uri().default(''),
@@ -802,7 +801,6 @@ export const config = {
     authorization: envVars.PULSE_AUTHORIZATION as string,
   },
   desk: {
-    // Comma-separated channel IDs that get the beta ingestion path (empty = every channel uses the stable path)
     betaChannels: (envVars.DESK_BETA_CHANNELS as string)
       .split(',')
       .map((s: string) => s.trim())
