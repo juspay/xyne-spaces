@@ -34,80 +34,77 @@ export class OnCallSetNumbersBackfillController {
 
     let hasMore = true;
 
-    // Maintenance sweep: reads and rewrites every mapping in the workspace, above the
-    // operator's own row scope.
-  while (hasMore) {
-    const mappings: Array<{
-      id: string;
-      userId: string;
-      userGroupId: string;
-      onCallSetNumber: number | null;
-      onCallSetNumbers: number[] | null;
-    }> = await db.userGroupMapping.findMany({
-      where: {
-        OR: [
-          { onCallSetNumbers: { isEmpty: true } },
-          { onCallSetNumbers: { equals: [] } },
-        ],
-      },
-      select: {
-        id: true,
-        userId: true,
-        userGroupId: true,
-        onCallSetNumber: true,
-        onCallSetNumbers: true,
-      },
-      orderBy: { id: 'asc' },
-      take: options.batchSize,
-      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-    });
+    while (hasMore) {
+      const mappings: Array<{
+        id: string;
+        userId: string;
+        userGroupId: string;
+        onCallSetNumber: number | null;
+        onCallSetNumbers: number[] | null;
+      }> = await db.userGroupMapping.findMany({
+        where: {
+          OR: [
+            { onCallSetNumbers: { isEmpty: true } },
+            { onCallSetNumbers: { equals: [] } },
+          ],
+        },
+        select: {
+          id: true,
+          userId: true,
+          userGroupId: true,
+          onCallSetNumber: true,
+          onCallSetNumbers: true,
+        },
+        orderBy: { id: 'asc' },
+        take: options.batchSize,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      });
 
-    hasMore = mappings.length > 0;
+      hasMore = mappings.length > 0;
 
-    for (const mapping of mappings) {
-      summary.processed += 1;
-      try {
-        let newSetNumbers: number[];
+      for (const mapping of mappings) {
+        summary.processed += 1;
+        try {
+          let newSetNumbers: number[];
 
-        if (mapping.onCallSetNumber !== null) {
-          newSetNumbers = [mapping.onCallSetNumber];
-        } else {
-          newSetNumbers = [];
-        }
+          if (mapping.onCallSetNumber !== null) {
+            newSetNumbers = [mapping.onCallSetNumber];
+          } else {
+            newSetNumbers = [];
+          }
 
-        if (mapping.onCallSetNumbers !== null && mapping.onCallSetNumbers.length > 0) {
-          summary.skipped += 1;
-          continue;
-        }
+          if (mapping.onCallSetNumbers !== null && mapping.onCallSetNumbers.length > 0) {
+            summary.skipped += 1;
+            continue;
+          }
 
-        if (!options.dryRun) {
-          await db.userGroupMapping.update({
-            where: { id: mapping.id },
-            data: { onCallSetNumbers: newSetNumbers },
+          if (!options.dryRun) {
+            await db.userGroupMapping.update({
+              where: { id: mapping.id },
+              data: { onCallSetNumbers: newSetNumbers },
+            });
+          }
+          summary.updated += 1;
+
+          logger.info(`[OnCallSetNumbersBackfill] Updated mapping ${mapping.id}: user=${mapping.userId}, group=${mapping.userGroupId}, old=${mapping.onCallSetNumber}, new=[${newSetNumbers.join(',')}]`);
+        } catch (error) {
+          summary.errors += 1;
+          logger.warn('[OnCallSetNumbersBackfill] Failed to update mapping', {
+            mappingId: mapping.id,
+            userId: mapping.userId,
+            userGroupId: mapping.userGroupId,
+            error: error instanceof Error ? error.message : String(error),
           });
         }
-        summary.updated += 1;
+      }
 
-        logger.info(`[OnCallSetNumbersBackfill] Updated mapping ${mapping.id}: user=${mapping.userId}, group=${mapping.userGroupId}, old=${mapping.onCallSetNumber}, new=[${newSetNumbers.join(',')}]`);
-      } catch (error) {
-        summary.errors += 1;
-        logger.warn('[OnCallSetNumbersBackfill] Failed to update mapping', {
-          mappingId: mapping.id,
-          userId: mapping.userId,
-          userGroupId: mapping.userGroupId,
-          error: error instanceof Error ? error.message : String(error),
-        });
+      cursor = mappings[mappings.length - 1]?.id ?? null;
+      logger.info(`[OnCallSetNumbersBackfill] Processed batch: ${summary.processed} total, ${summary.updated} updated, ${summary.skipped} skipped, ${summary.errors} errors`);
+
+      if (hasMore) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
       }
     }
-
-    cursor = mappings[mappings.length - 1]?.id ?? null;
-    logger.info(`[OnCallSetNumbersBackfill] Processed batch: ${summary.processed} total, ${summary.updated} updated, ${summary.skipped} skipped, ${summary.errors} errors`);
-
-    if (hasMore) {
-      await new Promise(resolve => setTimeout(resolve, 1000));
-    }
-  }
-
 
     return summary;
   }

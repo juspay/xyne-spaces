@@ -146,19 +146,14 @@ router.post('/callback', validateS2SKey, async (req: Request, res: Response) => 
     }
 
     // Object-level authorization: when an acting user is supplied (the ordinary-user
-    // dispatch path), they must have access to the ticket's channel. Without this an
-    // authenticated user could drive this S2S callback against a ticket in a channel
-    // they have no access to. (Absent callerUserId = the app's own S2S call, which
-    // falls back to the Varys bot identity below.)
+    // dispatch path), they must have access to the ticket's channel. (Absent
+    // callerUserId = the app's own S2S call, which falls back to the Varys bot below.)
     //
-    // Mirror the app's channel ACL, but always enforce the workspace/tenant boundary:
+    // Mirror the app's channel ACL, and always enforce the workspace boundary:
     //   - PRIVATE channel → the caller must be an explicit participant of THIS channel.
-    //   - PUBLIC channel  → accessible to all members of the channel's workspace (the
-    //     "Run PR Check" button renders to every viewer via showToAll, so ordinary
-    //     viewers legitimately have NO participant row on this specific channel) — but the
-    //     caller must still belong to the channel's workspace.
-    // Workspace membership is proxied by "participates in >=1 channel of that workspace"
-    // (there is no standalone workspace-member table — org membership is email-keyed).
+    //   - PUBLIC channel  → open to members of the channel's workspace (the "Run PR Check"
+    //     button renders to every viewer via showToAll, so ordinary viewers legitimately
+    //     have no participant row here) — but the caller must still belong to that workspace.
     if (typeof callerUserId === 'string' && callerUserId.trim() && ticket.channelId) {
       const chan = await db.channel.findUnique({
         where: { id: ticket.channelId },
