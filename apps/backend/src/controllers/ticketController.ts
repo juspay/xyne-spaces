@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { Ticket, MessageAttachment } from '@prisma/client';
-import { getContextOrNull, currentWorkspaceId, elevateToServiceActor } from '@/database/tenant/context';
+import { getContextOrNull, currentWorkspaceId, elevateToServiceActor, withWorkspaceScope } from '@/database/tenant/context';
 import { TicketStatusV2, TicketPriority, AttachmentEntityType, ChannelType, ActivityType, TicketReferenceRelation } from '@xyne/shared';
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
 import { TicketRepository } from '../database/repositories/ticketRepository';
@@ -1687,7 +1687,7 @@ export class TicketController {
 
     for (const inputStep of inputSteps) {
       // Any approver's response counts as answered, so it runs above the caller's own scope.
-      const externalStepResponse = await elevateToServiceActor(() =>
+      const externalStepResponse = await withWorkspaceScope(() =>
         prisma.externalStepResponse.findUnique({
           where: {
             workflowStepId: inputStep.id

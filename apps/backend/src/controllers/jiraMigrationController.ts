@@ -21,7 +21,7 @@ import {
   queueJiraPurgeMessageVespaDeleteJob,
   queueJiraPurgeTicketVespaDeleteJob,
 } from '@/services/jira/vespa';
-import { runWithContext, elevateToServiceActor } from '@/database/tenant/context';
+import { runWithContext, withWorkspaceScope } from '@/database/tenant/context';
 
 const db = DatabaseClient.getInstance();
 
@@ -117,7 +117,7 @@ export class JiraMigrationController {
         db.board.findUnique({ where: { id: sourceBoardId }, select: { id: true, projectId: true, name: true } }),
         db.board.findUnique({ where: { id: targetBoardId }, select: { id: true, projectId: true, name: true, workspaceId: true } }),
         // The migration target is resolved by workspace, not by the operator's own membership.
-        elevateToServiceActor(() =>
+        withWorkspaceScope(() =>
           db.channel.findUnique({ where: { id: channelId }, select: { id: true, projectId: true, name: true } }),
         ),
       ]);
@@ -460,13 +460,13 @@ export class JiraMigrationController {
         }),
         // Both ends of the move are resolved by workspace, not by the operator's own
         // membership — the workspace comparison below is the check that decides access.
-        elevateToServiceActor(() =>
+        withWorkspaceScope(() =>
           db.channel.findUnique({
             where: { id: sourceChannelId },
             select: { id: true, name: true, projectId: true, workspaceId: true },
           }),
         ),
-        elevateToServiceActor(() =>
+        withWorkspaceScope(() =>
           db.channel.findUnique({
             where: { id: targetChannelId },
             select: { id: true, name: true, projectId: true, workspaceId: true },
@@ -551,14 +551,14 @@ export class JiraMigrationController {
       // will touch, rather than only the operator's own rows.
       const [conversationCount, participantCount] = await Promise.all([
         conversationIds.length > 0
-          ? elevateToServiceActor(() =>
+          ? withWorkspaceScope(() =>
               db.conversation.count({
                 where: { conversationId: { in: conversationIds }, channelId: sourceChannelId },
               }),
             )
           : Promise.resolve(0),
         conversationIds.length > 0
-          ? elevateToServiceActor(() =>
+          ? withWorkspaceScope(() =>
               db.conversationParticipant.count({
                 where: { conversationId: { in: conversationIds }, channelId: sourceChannelId },
               }),
@@ -732,7 +732,7 @@ export class JiraMigrationController {
 
       // Re-reads the channel the updateMany above just moved, by workspace rather than by
       // the operator's own membership.
-      const updatedChannel = await elevateToServiceActor(() =>
+      const updatedChannel = await withWorkspaceScope(() =>
         db.channel.findUnique({
           where: { id: channelId },
           select: { id: true, projectId: true, isMigrated: true, updatedAt: true, name: true, project: { select: { name: true } } },
@@ -895,7 +895,7 @@ export class JiraMigrationController {
 
       // A project-wide purge spans every channel of the project, including ones the
       // operator does not belong to. An empty result here would widen the purge.
-      const channels = await elevateToServiceActor(() =>
+      const channels = await withWorkspaceScope(() =>
         db.channel.findMany({
           where: { projectId },
           select: { id: true },
@@ -1024,7 +1024,7 @@ export class JiraMigrationController {
     },
   ): Promise<void> {
     // The purge deletes rows created by the mapped Jira authors, not by the operator.
-    await elevateToServiceActor(async () => {
+    await withWorkspaceScope(async () => {
       const { actorUserId, externalSourceIds, externalMessageCount, messageIds, conversationIds, attachmentIds, ticketIds, stats } = data;
 
       try {
@@ -1798,7 +1798,7 @@ export class JiraMigrationController {
     // Fire-and-forget background job detached from the HTTP request (no req.user), so open an
     // explicit tenant scope from the import's TARGET workspace (single-target import) so the
     // workspaceId stamper fills the rows this job writes downstream.
-    const targetChannel = await elevateToServiceActor(() =>
+    const targetChannel = await withWorkspaceScope(() =>
       db.channel.findUnique({
         where: { id: input.targetChannelId },
         select: { workspaceId: true },
@@ -2006,7 +2006,7 @@ export class JiraMigrationController {
     const participantId = randomUUID();
     // The report canvas is written into the migration's channel, resolved by workspace
     // rather than by the operator's own membership.
-    const canvasChannel = await elevateToServiceActor(() =>
+    const canvasChannel = await withWorkspaceScope(() =>
       db.channel.findUniqueOrThrow({
         where: { id: channelId },
         select: { workspaceId: true },
@@ -2126,7 +2126,7 @@ export class JiraMigrationController {
 
     // The report message is posted into the migration's channel, resolved by workspace
     // rather than by the operator's own membership.
-    const migrationReportChannel = await elevateToServiceActor(() =>
+    const migrationReportChannel = await withWorkspaceScope(() =>
       db.channel.findUniqueOrThrow({
         where: { id: channelId },
         select: { workspaceId: true },

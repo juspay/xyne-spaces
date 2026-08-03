@@ -1,5 +1,5 @@
 import { db } from '@/database/client';
-import { elevateToServiceActor } from '@/database/tenant/context';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { teamIntelligenceContentStorageService } from '@/team-intelligence/services/team-intelligence-content-storage.service';
 import { logger } from '@/utils/logger';
 
@@ -528,7 +528,7 @@ class TeamIntelligenceOrgRepository {
         },
       }),
       // Resolves names for ids already in the result set, so it runs above the caller's own scope.
-      elevateToServiceActor(() => db.channel.findMany({
+      withWorkspaceScope(() => db.channel.findMany({
         select: { id: true, name: true },
       })),
       db.ticket.findMany({

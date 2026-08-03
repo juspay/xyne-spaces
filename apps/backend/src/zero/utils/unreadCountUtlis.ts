@@ -1,5 +1,5 @@
 import { db } from "@/database/client";
-import { elevateToServiceActor } from "@/database/tenant/context";
+import { withWorkspaceScope } from "@/database/tenant/context";
 
 /** Recomputes every recipient's unread count, so it reads and writes other users' rows. */
 export async function handleUnreadCount(
@@ -8,7 +8,7 @@ export async function handleUnreadCount(
     channelParticipants: Array<{ userId: string }>,
     senderId?: string
   ): Promise<void> {
-    return elevateToServiceActor(() =>
+    return withWorkspaceScope(() =>
       handleUnreadCountInner(channelId, isDMChannel, channelParticipants, senderId),
     );
   }

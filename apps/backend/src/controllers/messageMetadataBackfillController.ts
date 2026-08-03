@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { db } from '@/database/client';
-import { elevateToServiceActor } from '@/database/tenant/context';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import { ApiResponse } from '@/types/express';
 import {
@@ -395,7 +395,7 @@ export class MessageMetadataBackfillController {
 
       logger.info('[MessageMetadataBackfill] Starting backfill', options);
 
-      await elevateToServiceActor(async () => {
+      await withWorkspaceScope(async () => {
         if (options.types.includes('reactions')) {
           results.reactions = await MessageMetadataBackfillController.backfillReactionsMd(options);
         }

@@ -317,7 +317,7 @@ export async function handleMutate(request: Request): Promise<unknown> {
     // conversation, ticketActivity, …). Fire-and-forget is fine — AsyncLocalStorage propagates to the
     // async chain scheduled inside the callback.
     // Runs as the requesting user so handler ACLs stay in force; the workspace-wide fan-outs
-    // inside elevate themselves via elevateToServiceActor.
+    // inside elevate themselves via withWorkspaceScope.
     void runWithContext(
       {
         userId: authData.sub,

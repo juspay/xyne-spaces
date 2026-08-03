@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { ExternalEntityType, TicketStatusV2 } from '@xyne/shared';
 import { z } from 'zod';
 import { db } from '@/database/client';
-import { elevateToServiceActor } from '@/database/tenant/context';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { ApiResponse } from '@/types/express';
 import { calculateETADeadline } from '@/utils/etaCalculation';
 import { logger } from '@/utils/logger';
@@ -254,7 +254,7 @@ export class TicketStageBackfillController {
     try {
       // Resolves the desk channel by workspace, not by the caller's own membership — the
       // workspaceId in the filter is the check that decides access.
-      const channel = await elevateToServiceActor(() =>
+      const channel = await withWorkspaceScope(() =>
         db.channel.findFirst({
           where: { id: options.channelId, workspaceId },
           select: { id: true, type: true, projectId: true },

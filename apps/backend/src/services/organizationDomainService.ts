@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import { PrismaClient } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
-import { elevateToServiceActor } from '@/database/tenant/context';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { config } from '@/config/env';
 import { OrganizationDomainVerificationStatus, Status } from '@xyne/shared';
 
@@ -238,7 +238,7 @@ export class OrganizationDomainService {
 
   async assertOrgMemberLimit(orgId: string, email?: string): Promise<void> {
     // Counts every seat in the org, not just the caller's own, so it runs above the caller's own scope.
-    return elevateToServiceActor(async () => {
+    return withWorkspaceScope(async () => {
       if (this.orgMemberLimit === null) {
         return;
       }

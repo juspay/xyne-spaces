@@ -19,10 +19,17 @@ import type { Request, Response, NextFunction } from 'express';
 /**
  * Who is asking. Exactly one per context, ordered by privilege.
  *
- * `user`    — real principal: workspace scope + per-table user ACLs.
- * `service` — worker/webhook bound to one workspace: workspace scope only. Its userId is
- *             synthetic, so per-table user ACLs would match nothing and are skipped.
- * `system`  — no workspace bound: used for cross-workspace maintenance work.
+ * `user`    — a principal serving their own request: workspace scope PLUS the table's
+ *             per-user ACL. Opened by `tenantScopeMiddleware` on every HTTP request.
+ * `service` — work done on behalf of the workspace rather than one member — jobs, workers,
+ *             webhooks, maintenance sweeps: workspace scope only, per-table ACLs skipped.
+ *             Opened by `runAsServiceActor`, or entered from a user context via
+ *             `withWorkspaceScope`.
+ * `system`  — cross-workspace maintenance: no scope applied at all. Opened by `runAsSystem`.
+ *
+ * Decide the actor ONCE, where the context is opened. A controller answering a request is
+ * `user`; a job or sweep declares `service` at its entry point. Prefer one declaration per
+ * routine over one per query — the actor is a property of the work, not of a single read.
  */
 export type ActorKind = 'user' | 'service' | 'system';
 
@@ -84,14 +91,15 @@ export function currentWorkspaceId(): string | null {
 export type PrincipalCtx = Omit<TenantCtx, 'actor'>;
 
 /**
- * WIDEN the context already open — `runAsServiceActor` OPENS one, this does not. Swaps the
- * table's user predicate for plain workspace scope, so "my rows" becomes "this workspace's
- * rows". The tenant boundary is unchanged.
+ * Run `fn` with workspace scope only — the table's per-user predicate is replaced by plain
+ * workspace scope, so "my rows" becomes "this workspace's rows". The tenant boundary is
+ * unchanged, and a `system` context is left alone.
  *
- * Only for one operation that genuinely spans the workspace's users (a recipient fan-out).
- * Keep the scope that small: ids resolved inside it lose the ACL that would have rejected them.
+ * For work that legitimately spans the workspace's members: a recipient fan-out, a
+ * maintenance sweep, a job acting for the workspace. `runAsServiceActor` OPENS such a
+ * context; this enters one from a request. Wrap the routine, not each query.
  */
-export function elevateToServiceActor<T>(fn: () => T): T {
+export function withWorkspaceScope<T>(fn: () => T): T {
   const ctx = getContextOrNull();
   if (!ctx) return fn();
   // Don't narrow a `system` bypass into a workspace filter.

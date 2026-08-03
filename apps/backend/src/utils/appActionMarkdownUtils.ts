@@ -5,7 +5,7 @@ import remarkFrontmatter from 'remark-frontmatter';
 import { load as yamlLoad, dump as yamlDump } from 'js-yaml';
 import { db } from '@/database/client';
 import { messageMetadataService } from '@/services/messageMetadataService';
-import { elevateToServiceActor } from '@/database/tenant/context';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 function parseFrontmatter(markdown: string): { data: Record<string, unknown>; end: number } | null {
   const tree = unified()
@@ -80,7 +80,7 @@ export async function updateAppActionStatus(
   const updatedContent = newFrontmatter + contentAfter;
 
   // Rewrites the bot's own message, which the acting user did not author.
-  await elevateToServiceActor(() =>
+  await withWorkspaceScope(() =>
     db.message.update({
       where: { messageId },
       data: { content: updatedContent, edited: true },

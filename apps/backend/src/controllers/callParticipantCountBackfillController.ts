@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { db } from '@/database/client';
-import { elevateToServiceActor } from '@/database/tenant/context';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import { ApiResponse } from '@/types/express';
 import { Prisma } from '@prisma/client';
@@ -115,7 +115,7 @@ export class CallParticipantCountBackfillController {
   }
 
   private static async runBackfill(options: BackfillOptions): Promise<BackfillSummary> {
-    return await elevateToServiceActor(async () => {
+    return await withWorkspaceScope(async () => {
       const summary: BackfillSummary = { processed: 0, updated: 0, skipped: 0, errors: 0 };
       let cursor: string | null = null;
       let batchNumber = 0;

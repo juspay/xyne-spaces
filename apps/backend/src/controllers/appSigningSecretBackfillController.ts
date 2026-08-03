@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { Prisma } from '@prisma/client';
 import { db } from '@/database/client';
-import { elevateToServiceActor } from '@/database/tenant/context';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import { ApiResponse } from '@/types/express';
 import { encrypt } from '@/services/encryptionService';
@@ -96,7 +96,7 @@ export class AppSigningSecretBackfillController {
         try {
           // Maintenance sweep: resolves and fills every app in the workspace, above the
           // operator's own row scope.
-          await elevateToServiceActor(async () => {
+          await withWorkspaceScope(async () => {
           const data: Prisma.AppsUpdateInput = {};
 
           if (app.signingSecret === '') {
