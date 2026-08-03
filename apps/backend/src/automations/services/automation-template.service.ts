@@ -6,7 +6,7 @@ import { db } from '@/database/client';
 import { config } from '@/config/env';
 import type { UploadedFileResult } from '@/services/fileUploadService';
 import { storageService } from '@/services/storage';
-import { normalizeStoragePath } from '@/services/storage/pathUtils';
+import { normalizeStoragePath } from '@xyne/storage';
 import { logger } from '@/utils/logger';
 import type { AutomationContext } from '../types/context';
 import { AUTOMATION_WORKFLOW_TYPE } from '../types/workflow-adapter';

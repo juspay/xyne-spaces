@@ -257,6 +257,9 @@ importers:
       '@xyne/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@xyne/storage':
+        specifier: workspace:*
+        version: link:../../packages/storage
       '@xyne/vespa-ts':
         specifier: 1.6.0
         version: 1.6.0(typescript@5.9.3)
@@ -1599,6 +1602,9 @@ importers:
       '@xyne/litellm-client':
         specifier: workspace:*
         version: link:../../packages/litellm-client
+      '@xyne/storage':
+        specifier: workspace:*
+        version: link:../../packages/storage
       deepwiki-mcp:
         specifier: ^0.0.6
         version: 0.0.6(@cfworker/json-schema@4.1.1)
@@ -1690,6 +1696,9 @@ importers:
       '@types/pdfkit':
         specifier: ^0.17.6
         version: 0.17.6
+      '@xyne/storage':
+        specifier: workspace:*
+        version: link:../../../packages/storage
       bullmq:
         specifier: ^5.72.0
         version: 5.81.2(redis@5.12.1(@opentelemetry/api@1.9.1))
@@ -2067,6 +2076,34 @@ importers:
         version: 6.1.0(@types/react@19.2.17)(react@19.2.3)(xstate@5.32.5)
       typescript:
         specifier: ^5.3.3
+        version: 5.9.3
+
+  packages/storage:
+    dependencies:
+      '@aws-sdk/client-s3':
+        specifier: ^3.1017.0
+        version: 3.1097.0
+      '@aws-sdk/lib-storage':
+        specifier: 3.1017.0
+        version: 3.1017.0(@aws-sdk/client-s3@3.1097.0)
+      '@aws-sdk/s3-request-presigner':
+        specifier: ^3.1017.0
+        version: 3.1097.0
+      '@google-cloud/storage':
+        specifier: ^7.7.0
+        version: 7.21.0
+      uuid:
+        specifier: ^9.0.0
+        version: 9.0.1
+    devDependencies:
+      '@types/node':
+        specifier: ^20.0.0
+        version: 20.19.43
+      '@types/uuid':
+        specifier: ^9.0.0
+        version: 9.0.8
+      typescript:
+        specifier: ^5.3.0
         version: 5.9.3
 
   packages/xyne-claw-mcp:
@@ -16974,7 +17011,6 @@ packages:
     engines: {node: '>=0.6.0', teleport: '>=0.2.0'}
     deprecated: |-
       You or someone you depend on is using Q, the JavaScript Promise library that gave JavaScript developers strong feelings about promises. They can almost certainly migrate to the native JavaScript promise now. Thank you literally everyone for joining me in this bet against the odds. Be excellent to each other.
-
       (For a CapTP with native promises, see @endo/eventual-send and @endo/captp)
 
   qs@6.15.2:

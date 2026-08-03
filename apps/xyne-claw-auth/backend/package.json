@@ -28,6 +28,7 @@
     "@sinclair/typebox": "^0.34.49",
     "@slack/web-api": "8.0.0",
     "@types/pdfkit": "^0.17.6",
+    "@xyne/storage": "workspace:*",
     "bullmq": "^5.72.0",
     "cron-parser": "^4.9.0",
     "exceljs": "^4.4.0",
