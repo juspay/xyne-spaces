@@ -442,6 +442,11 @@ class ReactNativeBridge {
   // the message shape/type before dispatch. Revisit if this bridge is ever reachable from arbitrary
   // web frames (e.g. remote iframes).
   private readonly messageHandler = (event: MessageEvent): void => {
+    // React-Native-injected messages arrive with an empty origin or the app's own origin;
+    // reject cross-origin postMessages.
+    if (event.origin && event.origin !== window.location.origin) {
+      return;
+    }
     const message = this.parseInboundMessage(event.data);
     if (!message) {
       return;
