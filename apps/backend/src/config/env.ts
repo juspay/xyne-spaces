@@ -347,7 +347,6 @@ const envSchema = Joi.object({
     .uri()
     .default('http://localhost:3003/claw/api/v1/webhook'),
   XYNE_CLAW_CALLBACK_URL: Joi.string().allow('').default('http://localhost:3001'),
-  ASK_AI_VERSION: Joi.string().valid('v1', 'v2').default('v2'),
   // Internal S2S key for service-to-service communication
   INTERNAL_S2S_KEY: Joi.string().allow('').default(''),
   // Email fetch
@@ -849,9 +848,6 @@ export const config = {
     callbackUrl: (envVars.XYNE_CLAW_CALLBACK_URL || envVars.BACKEND_URL) as string,
   },
   internalS2sKey: envVars.INTERNAL_S2S_KEY as string,
-  askAI: {
-    version: envVars.ASK_AI_VERSION as 'v1' | 'v2',
-  },
   emailFetch: {
     batchSize: envVars.EMAIL_FETCH_BATCH_SIZE as number,
     batchDelayMs: envVars.EMAIL_FETCH_BATCH_DELAY_MS as number,
