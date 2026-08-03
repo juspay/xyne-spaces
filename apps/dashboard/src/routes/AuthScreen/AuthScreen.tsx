@@ -620,6 +620,7 @@ const AuthScreen = (): ReactElement => {
                       <input
                         type='text'
                         value={newEnterpriseWorkspaceName}
+                        aria-label='New workspace name'
                         onChange={e => setNewEnterpriseWorkspaceName(e.target.value)}
                         placeholder='Workspace name'
                         className='flex-1 px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground text-sm'
@@ -868,6 +869,7 @@ const AuthScreen = (): ReactElement => {
                               <input
                                 type='email'
                                 value={fpEmail}
+                                aria-label='Email address'
                                 onChange={e => setFpEmail(e.target.value)}
                                 placeholder='Email address'
                                 required
@@ -903,6 +905,7 @@ const AuthScreen = (): ReactElement => {
                               <input
                                 type='text'
                                 value={fpCode}
+                                aria-label='6-digit reset code'
                                 onChange={e =>
                                   setFpCode(e.target.value.replace(/\D/g, '').slice(0, 6))
                                 }
@@ -918,6 +921,7 @@ const AuthScreen = (): ReactElement => {
                               <input
                                 type='password'
                                 value={fpNewPassword}
+                                aria-label='New password'
                                 onChange={e => setFpNewPassword(e.target.value)}
                                 placeholder='New password (min 8 chars)'
                                 required
@@ -928,6 +932,7 @@ const AuthScreen = (): ReactElement => {
                               <input
                                 type='password'
                                 value={fpConfirmPassword}
+                                aria-label='Confirm new password'
                                 onChange={e => setFpConfirmPassword(e.target.value)}
                                 placeholder='Confirm new password'
                                 required
@@ -988,6 +993,7 @@ const AuthScreen = (): ReactElement => {
                           <input
                             type='email'
                             value={email}
+                            aria-label='Email address'
                             onChange={e => setEmail(e.target.value)}
                             placeholder='Email address'
                             required
@@ -998,6 +1004,7 @@ const AuthScreen = (): ReactElement => {
                           <input
                             type='password'
                             value={password}
+                            aria-label='Password'
                             onChange={e => setPassword(e.target.value)}
                             placeholder='Password'
                             required
