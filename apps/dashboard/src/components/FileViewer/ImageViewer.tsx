@@ -9,6 +9,7 @@ import { BaseViewerProps } from './utils';
 import { usePlatform } from '../../hooks/usePlatform';
 import { useMobileZoom } from '../../hooks/useMobileZoom';
 import { useScope, useShortcutById } from '../../shortcuts';
+import { openSafeWindow } from '../../utils/safeWindowOpen';
 
 const ImageViewer: React.FC<BaseViewerProps> = ({
   source,
@@ -84,7 +85,7 @@ const ImageViewer: React.FC<BaseViewerProps> = ({
 
   const handleOpenInNewWindow = useCallback(() => {
     if (imageUrl) {
-      window.open(imageUrl, '_blank');
+      openSafeWindow(imageUrl);
     }
   }, [imageUrl]);
 

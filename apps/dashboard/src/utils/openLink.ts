@@ -2,6 +2,7 @@ import { toast } from 'sonner';
 import { isElectronApp } from './electronApp';
 import { detectReactNativeWebView, reactNativeBridge } from './reactNativeBridge';
 import { browserPanelActor } from '../machines/browserPanelMachine';
+import { openSafeWindow } from './safeWindowOpen';
 
 const LINK_OPEN_EXTERNAL_KEY = 'xyne:link-open-external-default';
 const LINK_OPEN_HINT_DISMISSED_KEY = 'xyne:link-open-hint-dismissed';
@@ -73,7 +74,7 @@ const openExternal = (url: string): void => {
   if (detectReactNativeWebView() && reactNativeBridge.isAvailable()) {
     if (reactNativeBridge.openExternalUrl(url)) return;
   }
-  window.open(url, '_blank', 'noopener,noreferrer');
+  openSafeWindow(url);
 };
 
 const openInApp = (url: string): void => {
@@ -86,7 +87,7 @@ const openInApp = (url: string): void => {
     }
     return;
   }
-  window.open(url, '_blank', 'noopener,noreferrer');
+  openSafeWindow(url);
 };
 
 const maybeShowHint = (): void => {

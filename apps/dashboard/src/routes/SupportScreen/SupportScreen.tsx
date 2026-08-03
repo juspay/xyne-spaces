@@ -240,6 +240,7 @@ import { ScheduleCallModal } from '../../components/Call/ScheduleCallModal/Sched
 import { ThreadCallButton } from '../../components/Call/ThreadCallButton/ThreadCallButton';
 import { WorkspaceDeskEmailCard } from '../../components/xyne-desk/WorkspaceDeskEmailCard/WorkspaceDeskEmailCard';
 import { WorkspaceOzonetelCard } from '../../components/xyne-desk/WorkspaceOzonetelCard/WorkspaceOzonetelCard';
+import { openSafeWindow } from '../../utils/safeWindowOpen';
 
 // Unified type for tickets from the supportTicketsFiltered query
 type SupportTicket = QueryResultType<typeof queries.supportTicketsFilteredV3>[number];
@@ -1797,7 +1798,7 @@ const SupportScreen = (): ReactElement => {
 
       // Only open in new tab on desktop when Cmd/Ctrl+Click is pressed
       if (!isMobile && isCmdClick) {
-        window.open(ticketUrl, '_blank');
+        openSafeWindow(ticketUrl);
         return;
       }
 

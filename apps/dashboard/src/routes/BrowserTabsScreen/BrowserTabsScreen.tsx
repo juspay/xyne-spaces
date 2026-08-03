@@ -25,6 +25,7 @@ import { logger, Event } from '../../utils/logger';
 import { xyneAIActor } from '../../machines/xyneAIMachine';
 import { BrowserSettingsMenu } from '../../components/BrowserPanel/BrowserSettingsMenu';
 import { usePlatform } from '../../hooks/usePlatform';
+import { openSafeWindow } from '../../utils/safeWindowOpen';
 
 // Define WebviewTag interface locally since Electron types may not be available in renderer
 interface WebviewTag extends HTMLElement {
@@ -491,7 +492,7 @@ export function BrowserTabsScreen({
   const handleOpenExternal = () => {
     if (activeTab?.url) {
       void (
-        window.electronAPI?.openExternal?.(activeTab.url) ?? window.open(activeTab.url, '_blank')
+        window.electronAPI?.openExternal?.(activeTab.url) ?? openSafeWindow(activeTab.url)
       );
     }
   };

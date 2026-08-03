@@ -14,6 +14,7 @@ import { useRouteContext } from '../../../hooks/useRouteContext';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { isElectronApp } from '../../../utils/electronApp';
 import { openLink, getLinkOpenExternalDefault } from '../../../utils/openLink';
+import { openSafeWindow } from '../../../utils/safeWindowOpen';
 
 interface LinksTabProps {
   channelId: string;
@@ -46,7 +47,7 @@ const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
         xyneAIActor.send({ type: 'CLOSE' });
         browserPanelActor.send({ type: 'OPEN', urls });
       } else {
-        urls.forEach(url => window.open(url, '_blank'));
+        urls.forEach(url => openSafeWindow(url));
       }
 
       void navigate(`${baseRoute}/${channelId}?tab=links`, { replace: true });

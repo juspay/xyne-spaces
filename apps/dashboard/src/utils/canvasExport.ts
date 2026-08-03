@@ -1,6 +1,7 @@
 import type { PartialBlock } from '@blocknote/core';
 import DOMPurify from 'dompurify';
 import { blobToBase64, createPreviewUrl } from '../services/clients/fileFetchService';
+import { openSafeWindow } from './safeWindowOpen';
 
 /**
  * Minimal shape of a BlockNote editor instance required to export a canvas.
@@ -315,7 +316,7 @@ export async function exportCanvasAsPDF(
     return window.electronAPI.exportCanvasPdf(filename, html);
   }
 
-  const printWindow = window.open('', '_blank', 'width=900,height=1200');
+  const printWindow = openSafeWindow('', '_blank', 'width=900,height=1200');
   if (!printWindow) {
     throw new Error('Unable to open the print window — please allow pop-ups for this site.');
   }

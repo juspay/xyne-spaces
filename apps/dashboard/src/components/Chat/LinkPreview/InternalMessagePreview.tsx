@@ -17,6 +17,7 @@ import { MessageAttachment } from '../MessageAttachment/MessageAttachment';
 import { TicketCard } from '../../Tickets/TicketCard/TicketCard';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { openSafeWindow } from '../../../utils/safeWindowOpen';
 interface InternalMessagePreviewProps {
   metadata: InternalMessageLinkMetadata;
   onClose?: () => void;
@@ -370,7 +371,7 @@ const InternalMessagePreviewComponent: React.FC<InternalMessagePreviewProps> = (
       !!event && 'metaKey' in event && !isMobile && (event.metaKey || event.ctrlKey);
 
     if (isModifiedClick) {
-      window.open(url, '_blank');
+      openSafeWindow(url);
       return;
     }
 

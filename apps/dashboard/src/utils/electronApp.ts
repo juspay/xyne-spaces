@@ -1,6 +1,7 @@
 import type { CSSProperties } from 'react';
 import type { ElectronAPI } from '../types/electron';
 import type { NavigateFunction } from 'react-router-dom';
+import { openSafeWindow } from './safeWindowOpen';
 
 interface ElectronWindow extends Window {
   electronAPI?: ElectronAPI;
@@ -121,7 +122,7 @@ export const standaloneNavigate = (
 
   if (isElectronApp() && isCmdOrCtrlClick && isStandaloneSupportedPath(normalizedPath)) {
     const newWindowPath = toStandalonePath(normalizedPath);
-    const newWindow = window.open(newWindowPath, '_blank');
+    const newWindow = openSafeWindow(newWindowPath);
     if (newWindow) {
       newWindow.focus();
     } else {
@@ -188,10 +189,10 @@ export const openCreateTicketWindow = (draft: CreateTicketPopoutDraft): boolean 
   if (draft.tab) search.set('tab', draft.tab);
 
   const path = toStandalonePath(`/create-ticket?${search.toString()}`);
-  const newWindow = window.open(
+  const newWindow = openSafeWindow(
     path,
     '_blank',
-    isElectronApp() ? '' : 'popup=yes,width=960,height=900',
+    isElectronApp() ? undefined : 'popup=yes,width=960,height=900',
   );
   if (newWindow) {
     newWindow.focus();

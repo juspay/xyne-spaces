@@ -12,6 +12,7 @@ import { standaloneNavigate } from '../../../utils/electronApp';
 import { useLocation } from 'react-router-dom';
 import { SearchResultsContext } from '../SearchResults/SearchResultsContext';
 import { useNavigate } from '../../../hooks/useWorkspaceNavigate';
+import { openSafeWindow } from '../../../utils/safeWindowOpen';
 
 interface BotBubbleProps {
   messageId?: string;
@@ -79,7 +80,7 @@ const TicketDisplayModeV2: React.FC<{
     if (!isMobile && isCmdClick) {
       const ws = window.location.pathname.split('/').find(s => s.length > 0) ?? '';
       const ticketUrl = `${ws ? `/${ws}` : ''}/chat/dir/${resolvedChannelId}?tab=tickets&ticketId=${ticket.id}&conversationId=${resolvedConversationId}`;
-      window.open(ticketUrl, '_blank');
+      openSafeWindow(ticketUrl);
       return;
     }
 

@@ -94,6 +94,7 @@ const getFileExtension = (name: string): string => {
   return dotIndex > 0 ? name.slice(dotIndex).toLowerCase() : '';
 };
 import { preloadEmojiData } from '../../../utils/emojiLookup';
+import { openSafeWindow } from '../../../utils/safeWindowOpen';
 
 const lowlight = createLowlight(all);
 
@@ -1217,7 +1218,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
 
         // Open canvas editor in new tab for editing
         const canvasUrl = `${shareableOrigin}/chat/canvas/${newCanvasId}`;
-        window.open(canvasUrl, '_blank');
+        openSafeWindow(canvasUrl);
       } catch (error) {
         logger.error(Event.CANVAS_CREATE_FAILED, {
           canvasId: newCanvasId,

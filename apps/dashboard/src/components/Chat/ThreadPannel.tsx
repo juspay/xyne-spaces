@@ -82,6 +82,7 @@ import { CallParticipantsSelectionModal } from '../Call/CallParticipantsSelectio
 import { ScheduleCallModal } from '../Call/ScheduleCallModal/ScheduleCallModal';
 import { ThreadCallButton } from '../Call/ThreadCallButton/ThreadCallButton';
 import { ConversationTabContext } from './ConversationTabContext';
+import { openSafeWindow } from '../../utils/safeWindowOpen';
 
 type TabType = 'thread' | 'details' | 'files' | 'workflows' | 'rca';
 type UnderTicketTabType = 'replies' | 'workflows' | 'rca';
@@ -733,9 +734,8 @@ export const ThreadMessages = ({
     );
   };
   const openInNewWindow = (): void => {
-    const newWindow = window.open(
+    const newWindow = openSafeWindow(
       `/newWindow/chat/dir/${derivedChannelId}/${derivedConversationId}`,
-      '_blank',
     );
     if (!newWindow) {
       console.warn('Failed to open new window - popup may be blocked');
