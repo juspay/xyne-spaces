@@ -1,18 +1,110 @@
-import type { Conversation } from '../machines/queryCacheMachine.js';
+import type {
+  Conversation,
+  ThreadConversation,
+} from '../machines/queryCacheMachine.js';
 
-export const compareConversations = (left: Conversation, right: Conversation): number =>
-  left.createdAt - right.createdAt || left.conversationId.localeCompare(right.conversationId);
+export const compareConversations = (
+  left: Conversation,
+  right: Conversation,
+): number =>
+  left.createdAt - right.createdAt ||
+  left.conversationId.localeCompare(right.conversationId);
 
 export const dedupeAndSortConversations = (
-  current: Conversation[],
-  incoming: Conversation[],
+  current: readonly Conversation[],
+  incoming: readonly Conversation[],
 ): Conversation[] => {
   const byId = new Map<string, Conversation>();
-  for (const conversation of current) byId.set(conversation.conversationId, conversation);
+  for (const conversation of current) {
+    byId.set(conversation.conversationId, conversation);
+  }
   for (const conversation of incoming) {
     byId.set(conversation.conversationId, conversation);
   }
   return Array.from(byId.values()).sort(compareConversations);
+};
+
+type ThreadMessage = ThreadConversation['messages'][number];
+
+const compareThreadMessages = (
+  rootMessageId: string | undefined,
+  left: ThreadMessage,
+  right: ThreadMessage,
+): number => {
+  if (rootMessageId === left.messageId) return -1;
+  if (rootMessageId === right.messageId) return 1;
+  return (
+    left.createdAt - right.createdAt ||
+    left.messageId.localeCompare(right.messageId)
+  );
+};
+
+/**
+ * Deduplicates thread rows by message identity and keeps the thread root first.
+ * The second argument wins on a collision, which lets callers pass pending rows
+ * first and authoritative/live rows second.
+ */
+const dedupeAndSortThreadMessages = (
+  current: readonly ThreadMessage[],
+  incoming: readonly ThreadMessage[],
+): ThreadMessage[] => {
+  const byMessageId = new Map<string, ThreadMessage>();
+  for (const message of current) {
+    byMessageId.set(message.messageId, message);
+  }
+  for (const message of incoming) {
+    byMessageId.set(message.messageId, message);
+  }
+
+  const rootMessageId = incoming[0]?.messageId ?? current[0]?.messageId;
+  return Array.from(byMessageId.values()).sort((left, right) =>
+    compareThreadMessages(rootMessageId, left, right),
+  );
+};
+
+/**
+ * Merges server/live channel rows with pending render rows. Server rows win by
+ * both render identity and initial-message identity; pending state itself is
+ * not removed here, because an optimistic local row can still roll back.
+ */
+export const mergeServerAndPendingConversations = (
+  serverRows: readonly Conversation[],
+  pendingRows: readonly Conversation[],
+): Conversation[] => {
+  const serverConversationIds = new Set(
+    serverRows.map(conversation => conversation.conversationId),
+  );
+  const serverMessageIds = new Set(
+    serverRows
+      .map(conversation => conversation.initialMessageId)
+      .filter((messageId): messageId is string => Boolean(messageId)),
+  );
+  const renderablePendingRows = pendingRows.filter(
+    row =>
+      !serverConversationIds.has(row.conversationId) &&
+      !serverMessageIds.has(row.initialMessageId),
+  );
+
+  return dedupeAndSortConversations(renderablePendingRows, serverRows);
+};
+
+/**
+ * Merges server/live thread messages with pending render rows. Message identity
+ * is the only valid thread render key; the shared conversation id identifies the
+ * thread container and must not remove an unrelated pending reply.
+ */
+export const mergeServerAndPendingThreadMessages = (
+  serverRows: readonly ThreadMessage[],
+  pendingRows: readonly ThreadMessage[],
+): ThreadMessage[] => {
+  const serverMessageIds = new Set(
+    serverRows.map(message => message.messageId),
+  );
+  const renderablePendingRows = pendingRows.filter(
+    message => !serverMessageIds.has(message.messageId),
+  );
+
+  return dedupeAndSortThreadMessages(renderablePendingRows, serverRows);
 };
 
 /** Replaces one live viewport window without disturbing rows outside that window. */

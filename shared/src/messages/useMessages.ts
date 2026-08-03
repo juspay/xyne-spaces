@@ -30,6 +30,8 @@ import {
   dedupeAndSortConversations,
   mergeCachedConversations,
   mergeConversationsWithLatest,
+  mergeServerAndPendingConversations,
+  mergeServerAndPendingThreadMessages,
   reconcileConversationWindow,
 } from './channelMessageMerge.js';
 import {
@@ -579,16 +581,10 @@ function useChannelMessagesImpl(
   const pendingForChannel = usePendingForChannel(channelId);
   const messagesWithPending = useMemo(() => {
     if (pendingForChannel.length === 0) return conversations;
-    const pendingByMessageId = new Map(
-      pendingForChannel.map(p => [p.messageId, p]),
-    );
-    const filtered = conversations.filter(
-      c => !pendingByMessageId.has(c.initialMessageId ?? ''),
-    );
     const pendingRows = [...pendingForChannel]
       .sort((a, b) => a.timestamp - b.timestamp)
       .map(buildPendingChannelConversation);
-    return [...filtered, ...pendingRows];
+    return mergeServerAndPendingConversations(conversations, pendingRows);
   }, [conversations, pendingForChannel]);
 
   return {
@@ -640,18 +636,12 @@ function useThreadMessagesImpl(
   return useMemo(() => {
     if (!base) return null;
     if (pendingForThread.length === 0) return base;
-    const pendingByMessageId = new Map(
-      pendingForThread.map(p => [p.messageId, p]),
-    );
-    const filtered = base.messages.filter(
-      m => !pendingByMessageId.has(m.messageId),
-    );
     const pendingRows = [...pendingForThread]
       .sort((a, b) => a.timestamp - b.timestamp)
       .map(buildPendingThreadMessage);
     return {
       ...base,
-      messages: [...filtered, ...pendingRows],
+      messages: mergeServerAndPendingThreadMessages(base.messages, pendingRows),
     } as ThreadConversation;
   }, [base, pendingForThread]);
 }
