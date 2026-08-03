@@ -1,7 +1,7 @@
 import { repositories } from '@/database/repositories';
 import { getCanvasUrl } from '@/services/canvasService';
 import { logger } from '@/utils/logger';
-import { AttachmentEntityType, CallOrigin, Prisma } from '@prisma/client';
+import { AttachmentEntityType, CallOrigin, CallType, Prisma } from '@prisma/client';
 import { config } from '@/config/env';
 import { Agent, createUserMessage } from '@framework';
 import { extractAgentContent } from '@/utils/agentUtils';
