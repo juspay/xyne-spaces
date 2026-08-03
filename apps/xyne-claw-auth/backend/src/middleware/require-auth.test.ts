@@ -112,3 +112,59 @@ describe("requireAuth CLI bearer branch", () => {
     expect(res.status).toHaveBeenCalledWith(401);
   });
 });
+
+describe("requireNoAccessToken barrier", () => {
+  beforeEach(() => {
+    state.rawToken = "";
+    state.verifyCalls = 0;
+    state.config.cliTokensEnabled = true;
+  });
+
+  it("rejects requests authenticated via a CLI/service access token", async () => {
+    const { requireAuth, requireNoAccessToken } = await import("./require-auth.js");
+    const req = {
+      headers: {
+        authorization: "Bearer xyne_cli_real",
+      },
+    } as unknown as Request;
+    const res = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn(),
+    } as unknown as Response;
+    const authNext: NextFunction = vi.fn();
+
+    await requireAuth(req, res, authNext);
+    expect(authNext).toHaveBeenCalledOnce();
+    expect(state.rawToken).toBe("xyne_cli_real");
+
+    const barrierNext: NextFunction = vi.fn();
+    requireNoAccessToken(req, res, barrierNext);
+
+    expect(barrierNext).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(res.json).toHaveBeenCalledWith({
+      success: false,
+      error: "Access tokens are not authorized for this endpoint",
+    });
+  });
+
+  it("allows requests that are not access-token authenticated", async () => {
+    const { requireNoAccessToken } = await import("./require-auth.js");
+    const req = {
+      headers: {
+        "x-s2s-key": "s2s-secret",
+        "x-user-id": "service-account",
+      },
+    } as unknown as Request;
+    const res = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn(),
+    } as unknown as Response;
+    const next: NextFunction = vi.fn();
+
+    requireNoAccessToken(req, res, next);
+
+    expect(next).toHaveBeenCalledOnce();
+    expect(res.status).not.toHaveBeenCalled();
+  });
+});

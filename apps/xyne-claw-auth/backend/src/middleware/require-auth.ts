@@ -4,10 +4,16 @@ import { CONFIG } from "../config.js";
 import { ensureUserExists } from "../lib/users-jit.js";
 import { checkResultCallbackToken } from "../lib/session-tokens.js";
 import { verify as verifyCliToken } from "../lib/cli-tokens.js";
+import type { VerifiedCliToken } from "../lib/cli-tokens.js";
 import { prisma } from "../db.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("require-auth");
+
+// Track which Response objects were authenticated via a CLI/service access token.
+// Used by requireNoAccessToken to reject access-token callers from routes that
+// do not enforce scopes. Intentionally NOT exposed outside this module.
+const accessTokenRegistry = new WeakMap<Response, VerifiedCliToken>();
 
 /**
  * Attach phase-1 org context to the request as headers, right after `x-user-id`
@@ -174,6 +180,7 @@ export async function requireAuth(
       // (locals always exists under Express; test doubles may omit it.)
       res.locals = res.locals ?? {};
       res.locals["accessToken"] = token;
+      accessTokenRegistry.set(res, token);
       next();
       return;
     }
@@ -332,5 +339,23 @@ export async function requireUserAuth(
   });
   req.headers["x-user-id"] = userId;
   await attachOrgContext(req, userId);
+  next();
+}
+
+/**
+ * Barrier middleware: reject requests whose identity came from a CLI/service
+ * access token. Mount this AFTER requireAuth on routes that should only be
+ * reachable by a browser session or a validated S2S key.
+ *
+ * This closes the bearer-token scope-enforcement gap: requireAuth accepts
+ * xyne_cli_* / xyne_svc_* tokens, but most routes do not enforce scopes.
+ * Only endpoints that explicitly understand scopes (currently /run) should
+ * omit this barrier.
+ */
+export function requireNoAccessToken(_req: Request, res: Response, next: NextFunction): void {
+  if (accessTokenRegistry.has(res)) {
+    res.status(403).json({ success: false, error: "Access tokens are not authorized for this endpoint" });
+    return;
+  }
   next();
 }
