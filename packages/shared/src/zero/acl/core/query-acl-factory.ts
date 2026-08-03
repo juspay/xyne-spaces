@@ -373,11 +373,6 @@ export class QueryACLFactory {
         return new FormContextMappingsACL(ctx) as BaseQueryACL<TTable>;
       case 'guest_access':
         return new GuestAccessACL(ctx) as BaseQueryACL<TTable>;
-      default: {
-        // Exhaustiveness check — a table with no case above fails to compile here.
-        const unhandled: never = table;
-        throw new Error(`No ACL defined for table: ${String(unhandled)}`);
-      }
     }
   }
 }

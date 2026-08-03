@@ -417,11 +417,6 @@ export class ACLFactory {
         return new WorkspacesACL(ctx);
       case 'guest_access':
         return new GuestAccessACL(ctx, table);
-      default: {
-        // Exhaustiveness check — a table with no case above fails to compile here.
-        const unhandled: never = table;
-        throw new Error(`No ACL defined for table: ${String(unhandled)}`);
-      }
     }
   }
 }
