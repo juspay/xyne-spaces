@@ -2,7 +2,6 @@ import { randomUUID } from 'crypto';
 import { readFile, rm } from 'fs/promises';
 import type { Request, Response } from 'express';
 import { DatabaseClient } from '@/database/client';
-import { withWorkspaceScope } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import {
   whatsAppMigrationService,
@@ -250,12 +249,10 @@ export class WhatsAppMigrationController {
 
       // Resolves the target channel by workspace, not by the caller's own membership — the
       // workspace comparison below is the check that decides access.
-      const channel = await withWorkspaceScope(() =>
-        db.channel.findUnique({
+      const channel = await db.channel.findUnique({
           where: { id: targetChannelId },
           select: { id: true, projectId: true, workspaceId: true, scopeType: true },
-        }),
-      );
+        });
       if (!channel) {
         await cleanupUploadedFiles([archive, mappingFile]);
         res.status(404).json({ error: 'Target channel not found' });

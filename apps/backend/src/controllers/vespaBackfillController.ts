@@ -2,7 +2,6 @@ import { Request, Response } from 'express';
 import { ApiResponse } from '@/types/express';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
-import { withWorkspaceScope } from '@/database/tenant/context';
 import { repositories } from '@/database/repositories';
 import { vespaBackfillQueue } from '@/queues/vespaQueue';
 import { entityExtractionQueue } from '@/queues/entityExtractionQueue';
@@ -1099,9 +1098,7 @@ export class AdminBackfillController {
         timestamp: new Date().toISOString(),
       } as ApiResponse);
 
-      withWorkspaceScope(() =>
-        AdminBackfillController.backfillEntities(channelId, cutoffTime, fromTime),
-      ).catch((error) => {
+      AdminBackfillController.backfillEntities(channelId, cutoffTime, fromTime).catch((error) => {
         logger.error(
           `❌ Entity backfill failed for channel ${channelId} (job ${backfillJobId}):`,
           error,
@@ -1276,16 +1273,14 @@ export class AdminBackfillController {
 
       // Execute backfill asynchronously in the background (fire and forget)
       // No await here - let it run independently
-      withWorkspaceScope(() =>
-        AdminBackfillController.executeBackfillInBackground(
+      AdminBackfillController.executeBackfillInBackground(
           schemasToBackfill,
           backfillJobId,
           queueName,
           cutoffTime,
           fromTime,
           filters,
-        ),
-      )
+        )
         .catch((error) => {
           logger.error(`❌ Background backfill failed for job ${backfillJobId}:`, error);
         });
@@ -1411,7 +1406,7 @@ export class AdminBackfillController {
     }
   }
 
-  
+
   /**
    * Get queue jobs with pagination and state filter
    * Query params: page, limit, state (waiting|active|delayed|completed|failed|all)
@@ -1537,7 +1532,7 @@ export class AdminBackfillController {
           queue.clean(0, 'wait'), 
           queue.clean(0, 'active') ,  
           queue.clean(0, 'delayed'),
-         
+
         ]);
       } else {
         // queue.clean supports 'completed' and 'failed'
@@ -1566,5 +1561,5 @@ export class AdminBackfillController {
       } as ApiResponse);
     }
   }
-  
+
 }

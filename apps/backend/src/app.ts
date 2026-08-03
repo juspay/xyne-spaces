@@ -399,7 +399,7 @@ export class App {
     }
 
     // Ticket migration route (admin-only)
-    this.app.use('/api/admin/migrate-tickets-xyneid', ticketMigrationRoutes);
+    this.app.use('/api/admin/migrate-tickets-xyneid', workspaceScopedRoute, ticketMigrationRoutes);
     // Activities backfill route (for backfilling group mention actorAction)
     if (process.env.ENABLE_ACTIVITIES_BACKFILL_ROUTES === 'true') {
       this.app.use('/api/admin/activities-backfill', workspaceScopedRoute, activitiesBackfillRoutes);
@@ -445,7 +445,7 @@ export class App {
     this.app.use('/api/admin/email-read-at-backfill', workspaceScopedRoute, emailReadAtBackfillRoutes);
     this.app.use('/migrate/api/admin/automation-series-id-backfill', workspaceScopedRoute, automationSeriesIdBackfillRoutes);
     this.app.use('/api/admin/automation-series-id-backfill', workspaceScopedRoute, automationSeriesIdBackfillRoutes);
-    this.app.use('/api/admin/set-updated-at-time', setUpdatedAtTimeRoutes);
+    this.app.use('/api/admin/set-updated-at-time', workspaceScopedRoute, setUpdatedAtTimeRoutes);
     this.app.use('/api/admin/ticket-metadata-backfill', workspaceScopedRoute, ticketMetadataBackfillRoutes);
     this.app.use('/api/admin/ticket-stage-backfill', workspaceScopedRoute, ticketStageBackfillRoutes);
     this.app.use('/migrate/api/admin/ticket-stage-backfill', workspaceScopedRoute, ticketStageBackfillRoutes);
@@ -464,8 +464,8 @@ export class App {
     this.app.use('/api/admin/dual-write-sequence-number-backfill', workspaceScopedRoute, dualWriteSequenceNumberBackfillRoutes);
     this.app.use('/migrate/api/admin/dual-write-sequence-number-backfill', workspaceScopedRoute, dualWriteSequenceNumberBackfillRoutes);
     // Product insights recluster route (admin-only)
-    this.app.use('/api/admin/product-insights-recluster', productInsightsReclusterRoutes);
-    this.app.use('/api/admin/gmail-watch-renewal', gmailWatchRenewalRoutes);
+    this.app.use('/api/admin/product-insights-recluster', workspaceScopedRoute, productInsightsReclusterRoutes);
+    this.app.use('/api/admin/gmail-watch-renewal', workspaceScopedRoute, gmailWatchRenewalRoutes);
     this.app.use('/migrate/api/admin/on-call-set-numbers-backfill', workspaceScopedRoute, onCallSetNumbersBackfillRoutes);
     this.app.use('/migrate/api/admin/dm-channel-project-backfill', workspaceScopedRoute, dmChannelProjectBackfillRoutes);
     this.app.use('/api/admin/dm-channel-project-backfill', workspaceScopedRoute, dmChannelProjectBackfillRoutes);
@@ -586,7 +586,7 @@ export class App {
     this.app.use('/api/vespaSearch/claw', authenticateUserOrApp, vespaSearchRoutes);
     this.app.use('/api/dashboard/claw', authenticateUserOrApp, dashboardClawRouter);
 
-    
+
     this.app.use('/api', authMiddleware.authenticate, attachmentRoutes); // Attachment routes (file streaming)
     this.app.use('/api', authMiddleware.authenticate, draftAttachmentRoutes); // Draft attachment upload routes
     this.app.use('/api/link-preview', authMiddleware.authenticate, linkPreviewRoutes); // Link preview routes

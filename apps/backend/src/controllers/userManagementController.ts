@@ -293,7 +293,6 @@ export class UserManagementController {
 
         try {
           if (action === 'grant') {
-            // Admin console action on the target user's grants, not the caller's.
             const result = await userManagementService.grantUserResourceAccess(
                 id,
                 resourceName,
@@ -306,7 +305,6 @@ export class UserManagementController {
               results.failed.push({ resourceName, error: result.message });
             }
           } else {
-            // Admin console action on the target user's grants, not the caller's.
             const result = await userManagementService.revokeUserResourceAccess(
                 id,
                 resourceName
@@ -379,10 +377,7 @@ export class UserManagementController {
         return;
       }
 
-      // Admin console action on the target user's row, not the caller's.
-      const updatedUser = await withWorkspaceScope(() =>
-        userManagementService.updateUser(id, { status }),
-      );
+      const updatedUser = await userManagementService.updateUser(id, { status });
 
       res.status(200).json({
         id: updatedUser.id,
@@ -668,10 +663,7 @@ export class UserManagementController {
       if (alias !== undefined) updateData.alias = alias?.trim() || null;
       if (description !== undefined) updateData.description = description?.trim() || null;
 
-      // Admin console action on a group the caller need not have created.
-      const group = await withWorkspaceScope(() =>
-        userManagementService.updateUserGroup(id, updateData),
-      );
+      const group = await userManagementService.updateUserGroup(id, updateData);
 
       res.status(200).json({
         id: group.id,
@@ -711,8 +703,7 @@ export class UserManagementController {
         return;
       }
 
-      // Admin console action on a group the caller need not have created.
-      await withWorkspaceScope(() => userManagementService.deleteUserGroup(id));
+      await userManagementService.deleteUserGroup(id);
 
       res.status(200).json({ message: 'Group deleted successfully' });
     } catch (error) {
@@ -738,8 +729,7 @@ export class UserManagementController {
     try {
       const { id } = req.params;
 
-      // Admin console action on a group the caller need not have created.
-      await withWorkspaceScope(() => userManagementService.deactivateUserGroup(id));
+      await userManagementService.deactivateUserGroup(id);
 
       res.status(200).json({ message: 'Group deactivated successfully' });
     } catch (error) {
@@ -763,8 +753,7 @@ export class UserManagementController {
     try {
       const { id } = req.params;
 
-      // Admin console action on a group the caller need not have created.
-      await withWorkspaceScope(() => userManagementService.reactivateUserGroup(id));
+      await userManagementService.reactivateUserGroup(id);
 
       res.status(200).json({ message: 'Group reactivated successfully' });
     } catch (error) {
@@ -802,10 +791,7 @@ export class UserManagementController {
         return;
       }
 
-      // Admin console action on the target user's group membership, not the caller's.
-      const result = await withWorkspaceScope(() =>
-        userManagementService.assignUserToGroup(userId, groupId),
-      );
+      const result = await userManagementService.assignUserToGroup(userId, groupId);
 
       if (!result.success) {
         if (result.message.includes('not found')) {
@@ -844,10 +830,7 @@ export class UserManagementController {
         return;
       }
 
-      // Admin console action on the target user's group membership, not the caller's.
-      const result = await withWorkspaceScope(() =>
-        userManagementService.removeUserFromGroup(userId, groupId),
-      );
+      const result = await userManagementService.removeUserFromGroup(userId, groupId);
 
       if (!result.success) {
         if (result.message.includes('not found')) {
@@ -960,7 +943,6 @@ export class UserManagementController {
 
         try {
           if (action === 'grant') {
-            // Admin console action on the target group's grants, not the caller's.
             const result = await userManagementService.grantGroupResourceAccess(
                 id,
                 resourceName,
@@ -973,7 +955,6 @@ export class UserManagementController {
               results.failed.push({ resourceName, error: result.message });
             }
           } else {
-            // Admin console action on the target group's grants, not the caller's.
             const result = await userManagementService.revokeGroupResourceAccess(
                 id,
                 resourceName

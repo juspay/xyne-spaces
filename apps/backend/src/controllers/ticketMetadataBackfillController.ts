@@ -1,6 +1,5 @@
 import { Request, Response } from 'express';
 import { db } from '@/database/client';
-import { withWorkspaceScope } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import { ApiResponse } from '@/types/express';
 import { serializeTicketMd } from '@xyne/shared';
@@ -39,105 +38,104 @@ export class TicketMetadataBackfillController {
   }
 
   private static async backfillTicketMd(options: BackfillOptions): Promise<BackfillSummary> {
-    return await withWorkspaceScope(async () => {
-      const summary: BackfillSummary = { processed: 0, updated: 0, skipped: 0, errors: 0 };
-      let cursor: string | null = null;
+    const summary: BackfillSummary = { processed: 0, updated: 0, skipped: 0, errors: 0 };
+    let cursor: string | null = null;
 
-      while (true) {
-        const conversations: Array<{
-          conversationId: string;
-          ticketId: string | null;
-          ticket_md: string | null;
-        }> = await db.conversation.findMany({
-          where: { ticketId: { not: null } },
-          select: { conversationId: true, ticketId: true, ticket_md: true },
-          orderBy: { conversationId: 'asc' },
-          take: options.batchSize,
-          ...(cursor ? { cursor: { conversationId: cursor }, skip: 1 } : {}),
-        });
+    while (true) {
+      const conversations: Array<{
+        conversationId: string;
+        ticketId: string | null;
+        ticket_md: string | null;
+      }> = await db.conversation.findMany({
+        where: { ticketId: { not: null } },
+        select: { conversationId: true, ticketId: true, ticket_md: true },
+        orderBy: { conversationId: 'asc' },
+        take: options.batchSize,
+        ...(cursor ? { cursor: { conversationId: cursor }, skip: 1 } : {}),
+      });
 
-        if (conversations.length === 0) break;
+      if (conversations.length === 0) break;
 
-        for (const conversation of conversations) {
-          summary.processed += 1;
-          try {
-            if (!conversation.ticketId) {
-              summary.skipped += 1;
-              continue;
-            }
+      for (const conversation of conversations) {
+        summary.processed += 1;
+        try {
+          if (!conversation.ticketId) {
+            summary.skipped += 1;
+            continue;
+          }
 
-            const ticket = await db.ticket.findUnique({
-              where: { id: conversation.ticketId },
-              select: {
-                id: true,
-                title: true,
-                description: true,
-                statusV2: true,
-                priority: true,
-                assignedTo: true,
-                createdBy: true,
-                createdAt: true,
-                eta: true,
-                xyneId: true,
-                stageName: true,
-                ticketType: true,
-                channelId: true,
-                conversationId: true,
-              },
-            });
+          const ticket = await db.ticket.findUnique({
+            where: { id: conversation.ticketId },
+            select: {
+              id: true,
+              title: true,
+              description: true,
+              statusV2: true,
+              priority: true,
+              assignedTo: true,
+              createdBy: true,
+              createdAt: true,
+              eta: true,
+              xyneId: true,
+              stageName: true,
+              ticketType: true,
+              channelId: true,
+              conversationId: true,
+            },
+          });
 
-            if (!ticket) {
-              summary.skipped += 1;
-              continue;
-            }
+          if (!ticket) {
+            summary.skipped += 1;
+            continue;
+          }
 
-            const summaryData: TicketCardSummary = {
-              id: ticket.id,
-              title: ticket.title,
-              description: ticket.description,
-              statusV2: ticket.statusV2 as TicketCardSummary['statusV2'],
-              priority: ticket.priority as TicketCardSummary['priority'],
-              assignedTo: ticket.assignedTo ?? null,
-              createdBy: ticket.createdBy,
-              createdAt: ticket.createdAt.getTime(),
-              eta: ticket.eta ? ticket.eta.getTime() : null,
-              xyneId: ticket.xyneId,
-              stageName: ticket.stageName,
-              ticketType: ticket.ticketType ?? null,
-              channelId: ticket.channelId,
-              conversationId: ticket.conversationId,
-            };
+          const summaryData: TicketCardSummary = {
+            id: ticket.id,
+            title: ticket.title,
+            description: ticket.description,
+            statusV2: ticket.statusV2 as TicketCardSummary['statusV2'],
+            priority: ticket.priority as TicketCardSummary['priority'],
+            assignedTo: ticket.assignedTo ?? null,
+            createdBy: ticket.createdBy,
+            createdAt: ticket.createdAt.getTime(),
+            eta: ticket.eta ? ticket.eta.getTime() : null,
+            xyneId: ticket.xyneId,
+            stageName: ticket.stageName,
+            ticketType: ticket.ticketType ?? null,
+            channelId: ticket.channelId,
+            conversationId: ticket.conversationId,
+          };
 
-            const newMd = serializeTicketMd(summaryData);
-            if (newMd === conversation.ticket_md) {
-              summary.skipped += 1;
-              continue;
-            }
+          const newMd = serializeTicketMd(summaryData);
+          if (newMd === conversation.ticket_md) {
+            summary.skipped += 1;
+            continue;
+          }
 
-            if (!options.dryRun) {
-              await db.conversation.update({
-                where: { conversationId: conversation.conversationId },
-                data: { ticket_md: newMd },
-              });
-            }
-            summary.updated += 1;
-          } catch (error) {
-            summary.errors += 1;
-            logger.warn('[TicketMetadataBackfill] Failed ticket_md update', {
-              conversationId: conversation.conversationId,
-              error: error instanceof Error ? error.message : String(error),
+          if (!options.dryRun) {
+            await db.conversation.update({
+              where: { conversationId: conversation.conversationId },
+              data: { ticket_md: newMd },
             });
           }
-        }
-
-        cursor = conversations[conversations.length - 1]?.conversationId ?? null;
-        if (options.delayMs > 0) {
-          await this.sleep(options.delayMs);
+          summary.updated += 1;
+        } catch (error) {
+          summary.errors += 1;
+          logger.warn('[TicketMetadataBackfill] Failed ticket_md update', {
+            conversationId: conversation.conversationId,
+            error: error instanceof Error ? error.message : String(error),
+          });
         }
       }
 
-      return summary;
-    });
+      cursor = conversations[conversations.length - 1]?.conversationId ?? null;
+      if (options.delayMs > 0) {
+        await this.sleep(options.delayMs);
+      }
+    }
+
+    return summary;
+
   }
 
   static async triggerBackfill(req: Request, res: Response<ApiResponse>) {

@@ -1,6 +1,5 @@
 import { Request, Response } from 'express';
 import { db } from '@/database/client';
-import { withWorkspaceScope } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import { ApiResponse } from '@/types/express';
 
@@ -279,17 +278,16 @@ export class WorkspaceIdBackfillController {
         activities: { processed: 0, updated: 0, skipped: 0, errors: 0 },
       };
 
-      await withWorkspaceScope(async () => {
-        if (options.tables.includes('conversations')) {
-          summary.conversations = await WorkspaceIdBackfillController.backfillConversations(options);
-        }
-        if (options.tables.includes('messages')) {
-          summary.messages = await WorkspaceIdBackfillController.backfillMessages(options);
-        }
-        if (options.tables.includes('activities')) {
-          summary.activities = await WorkspaceIdBackfillController.backfillActivities(options);
-        }
-      });
+      if (options.tables.includes('conversations')) {
+        summary.conversations = await WorkspaceIdBackfillController.backfillConversations(options);
+      }
+      if (options.tables.includes('messages')) {
+        summary.messages = await WorkspaceIdBackfillController.backfillMessages(options);
+      }
+      if (options.tables.includes('activities')) {
+        summary.activities = await WorkspaceIdBackfillController.backfillActivities(options);
+      }
+
 
       res.status(200).json({
         success: true,
