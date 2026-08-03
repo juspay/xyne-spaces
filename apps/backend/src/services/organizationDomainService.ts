@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 import { PrismaClient, Status } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
+import { elevateToServiceActor } from '@/database/tenant/context';
 import { config } from '@/config/env';
 import { OrganizationDomainVerificationStatus } from '@xyne/shared';
 
@@ -231,36 +232,39 @@ export class OrganizationDomainService {
   }
 
   async assertOrgMemberLimit(orgId: string, email?: string): Promise<void> {
-    if (this.orgMemberLimit === null) {
-      return;
-    }
-
-    const normalizedEmail = email?.trim().toLowerCase();
-    if (normalizedEmail) {
-      const existingMember = await this.prisma.orgMember.findFirst({
-        where: {
-          orgId,
-          email: normalizedEmail,
-          leftAt: null,
-        },
-        select: { memberId: true },
-      });
-
-      if (existingMember) {
+    // Counts every seat in the org, not just the caller's own, so it runs above the caller's own scope.
+    return elevateToServiceActor(async () => {
+      if (this.orgMemberLimit === null) {
         return;
       }
-    }
 
-    const activeMemberCount = await this.prisma.orgMember.count({
-      where: {
-        orgId,
-        leftAt: null,
-      },
+      const normalizedEmail = email?.trim().toLowerCase();
+      if (normalizedEmail) {
+        const existingMember = await this.prisma.orgMember.findFirst({
+          where: {
+            orgId,
+            email: normalizedEmail,
+            leftAt: null,
+          },
+          select: { memberId: true },
+        });
+
+        if (existingMember) {
+          return;
+        }
+      }
+
+      const activeMemberCount = await this.prisma.orgMember.count({
+        where: {
+          orgId,
+          leftAt: null,
+        },
+      });
+
+      if (activeMemberCount >= this.orgMemberLimit) {
+        throw new OrgMemberLimitError(orgId, this.orgMemberLimit);
+      }
     });
-
-    if (activeMemberCount >= this.orgMemberLimit) {
-      throw new OrgMemberLimitError(orgId, this.orgMemberLimit);
-    }
   }
 }
 

@@ -4,6 +4,7 @@ import { ChannelRole } from '@prisma/client';
 import { logger } from '@/utils/logger';
 import { buildCronPattern } from '@/utils/cronUtils';
 import { scheduledMessageService } from '@/services/scheduledMessageService';
+import { elevateToServiceActor } from '@/database/tenant/context';
 
 async function checkMutatePermission(
   channelId: string,
@@ -46,10 +47,13 @@ export async function listScheduledMessages(req: Request, res: Response) {
       select: { channelId: true },
     });
     const channelIds = adminChannels.map((p) => p.channelId);
-    const messages = await db.scheduledMessage.findMany({
-      where: { channelId: { in: channelIds } },
-      orderBy: { createdAt: 'desc' },
-    });
+    // A channel admin sees every scheduled message in the channels they administer.
+    const messages = await elevateToServiceActor(() =>
+      db.scheduledMessage.findMany({
+        where: { channelId: { in: channelIds } },
+        orderBy: { createdAt: 'desc' },
+      }),
+    );
 
     const creatorAdminRows = messages.length
       ? await db.channelParticipant.findMany({
@@ -139,8 +143,10 @@ export async function updateScheduledMessage(req: Request, res: Response) {
   const { title, messageContent, daysOfWeek, scheduledTime, isActive } = req.body;
 
   try {
-    // Check the message exists
-    const existing = await db.scheduledMessage.findUnique({ where: { id } });
+    // Check the message exists — checkMutatePermission below decides who may change it.
+    const existing = await elevateToServiceActor(() =>
+      db.scheduledMessage.findUnique({ where: { id } }),
+    );
     if (!existing) {
       return res.status(404).json({ error: 'Scheduled message not found' });
     }
@@ -156,10 +162,13 @@ export async function updateScheduledMessage(req: Request, res: Response) {
     if (scheduledTime !== undefined) data.scheduledTime = scheduledTime;
     if (isActive !== undefined) data.isActive = isActive;
 
-    const updated = await db.scheduledMessage.update({
-      where: { id },
-      data,
-    });
+    // checkMutatePermission above authorised a channel admin to edit another user's message.
+    const updated = await elevateToServiceActor(() =>
+      db.scheduledMessage.update({
+        where: { id },
+        data,
+      }),
+    );
 
     // Re-sync Bull job
     const effectiveTime = scheduledTime ?? existing.scheduledTime;
@@ -189,7 +198,10 @@ export async function deleteScheduledMessage(req: Request, res: Response) {
   const { id } = req.params;
 
   try {
-    const existing = await db.scheduledMessage.findUnique({ where: { id } });
+    // checkMutatePermission below decides who may delete it.
+    const existing = await elevateToServiceActor(() =>
+      db.scheduledMessage.findUnique({ where: { id } }),
+    );
     if (!existing) {
       return res.status(404).json({ error: 'Scheduled message not found' });
     }
@@ -197,7 +209,8 @@ export async function deleteScheduledMessage(req: Request, res: Response) {
     const denied = await checkMutatePermission(existing.channelId, existing.createdBy, userId);
     if (denied) return res.status(denied.status).json({ error: denied.error });
 
-    await db.scheduledMessage.delete({ where: { id } });
+    // checkMutatePermission above authorised a channel admin to delete another user's message.
+    await elevateToServiceActor(() => db.scheduledMessage.delete({ where: { id } }));
 
     // Remove Bull job
     await scheduledMessageService.removeJob(id);

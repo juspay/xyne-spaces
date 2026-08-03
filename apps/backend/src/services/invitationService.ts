@@ -6,6 +6,7 @@
 import { PrismaClient, WorkspaceRole, Invitation, AuthProvider, ChannelRole, CanvasRole, User, ChannelScopeType } from '@prisma/client';
 import { GuestEntity } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
+import { elevateToServiceActor } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import { emailService } from './email/factory';
 import { grantPermissionsForRole } from './permissionMatrix';
@@ -86,9 +87,12 @@ export class InvitationService {
 
       // Ensure the invitee exists in the org_members table (any org)
       if (role !== 'GUEST') {
-        const inviteeInOrg = await this.prisma.orgMember.findFirst({
-          where: { email, leftAt: null },
-        });
+        // Looks the invitee up across any org, not just the caller's, so it runs above the caller's own scope.
+        const inviteeInOrg = await elevateToServiceActor(() =>
+          this.prisma.orgMember.findFirst({
+            where: { email, leftAt: null },
+          }),
+        );
 
         if (!inviteeInOrg) {
           throw new Error(
@@ -99,9 +103,11 @@ export class InvitationService {
     }
 
     if (role === 'GUEST') {
-      const inviteeOrgMember = await this.prisma.orgMember.findUnique({
-        where: { email },
-      });
+      const inviteeOrgMember = await elevateToServiceActor(() =>
+        this.prisma.orgMember.findUnique({
+          where: { email },
+        }),
+      );
       if (inviteeOrgMember && inviteeOrgMember.leftAt) {
         throw new Error(
           `${email} is no longer part of an organization and cannot be invited as a guest`
@@ -281,24 +287,26 @@ export class InvitationService {
    * hash it, store it, and return the plaintext for the invitation email.
    */
   async generateOrgMemberPassword(email: string): Promise<string> {
-    const orgMember = await this.prisma.orgMember.findUnique({
-      where: { email: email.toLowerCase() },
-      select: { memberId: true, passwordHash: true },
+    return elevateToServiceActor(async () => {
+      const orgMember = await this.prisma.orgMember.findUnique({
+        where: { email: email.toLowerCase() },
+        select: { memberId: true, passwordHash: true },
+      });
+
+      if (!orgMember) {
+        throw new Error(`orgMember not found for ${email}`);
+      }
+
+      const tempPassword = crypto.randomBytes(12).toString('base64url'); // ~16 chars
+      const hashed = await hashPassword(tempPassword);
+
+      await this.prisma.orgMember.update({
+        where: { memberId: orgMember.memberId },
+        data: { passwordHash: hashed },
+      });
+
+      return tempPassword;
     });
-
-    if (!orgMember) {
-      throw new Error(`orgMember not found for ${email}`);
-    }
-
-    const tempPassword = crypto.randomBytes(12).toString('base64url'); // ~16 chars
-    const hashed = await hashPassword(tempPassword);
-
-    await this.prisma.orgMember.update({
-      where: { memberId: orgMember.memberId },
-      data: { passwordHash: hashed },
-    });
-
-    return tempPassword;
   }
 
   /**

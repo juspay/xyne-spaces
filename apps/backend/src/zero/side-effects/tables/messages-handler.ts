@@ -300,10 +300,11 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         where: { channelId },
         select: { userId: true }
       }),
-      db.userPreference.findUnique({
+      // Keyed on the sender rather than the ambient user, so it runs above the caller's own scope.
+      elevateToServiceActor(() => db.userPreference.findUnique({
         where: { userId: senderId },
         select: { allowThreadBroadcastMentions: true },
-      }),
+      })),
     ]);
 
     const channelProject = channel?.projectId
@@ -1023,10 +1024,12 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     const md = serializeLinkPreviewMd(metadata);
     if (!md) return false;
 
-    await db.message.update({
+    // The message may have been posted by a bot rather than the ambient user,
+    // so the write runs above the caller's own scope.
+    await elevateToServiceActor(() => db.message.update({
       where: { messageId },
       data: { link_preview_md: md },
-    });
+    }));
 
     await this.syncConversationMessageMetadata(conversationId);
 
@@ -1093,10 +1096,10 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     });
     if (!md) return;
 
-    await db.message.update({
+    await elevateToServiceActor(() => db.message.update({
       where: { messageId },
       data: { link_preview_md: md },
-    });
+    }));
 
     await this.syncConversationMessageMetadata(conversationId);
 
@@ -1254,10 +1257,10 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     const md = serializeMessagePreviewMd(previewData);
     if (!md) return false;
 
-    await db.message.update({
+    await elevateToServiceActor(() => db.message.update({
       where: { messageId },
       data: { link_preview_md: md },
-    });
+    }));
 
     await this.syncConversationMessageMetadata(sourceConversationId);
 

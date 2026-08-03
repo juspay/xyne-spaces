@@ -19,6 +19,7 @@ import { grantPermissionsForRole } from '@/services/permissionMatrix';
 import { aiProvisioningService } from '@/services/aiProvisioningService';
 import { organizationDomainService } from '@/services/organizationDomainService';
 import { repositories } from '@/database/repositories';
+import { elevateToServiceActor } from '@/database/tenant/context';
 
 const COMMUNITY_MEMBER_WORKSPACE_ROLE = 'COMMUNITY_MEMBER' as WorkspaceRole;
 const TEMPLATE_TOKEN_PATTERN = /{{\s*(workspaceName|workspaceId|joinLink|email)\s*}}/g;
@@ -685,24 +686,29 @@ export class CommunityWorkspaceService {
       return;
     }
 
-    const existingOrgMember = await this.prisma.orgMember.findUnique({
-      where: { email: request.email },
-      select: { memberId: true, role: true },
-    });
+    // Provisions the approved requester's membership, not the reviewer's.
+    const existingOrgMember = await elevateToServiceActor(async () => {
+      const current = await this.prisma.orgMember.findUnique({
+        where: { email: request.email },
+        select: { memberId: true, role: true },
+      });
 
-    await this.prisma.orgMember.upsert({
-      where: { email: request.email },
-      create: {
-        orgId: workspace.orgId,
-        email: request.email,
-        role: OrgRole.MEMBER,
-        leftAt: null,
-      },
-      update: {
-        orgId: workspace.orgId,
-        role: OrgRole.MEMBER,
-        leftAt: null,
-      },
+      await this.prisma.orgMember.upsert({
+        where: { email: request.email },
+        create: {
+          orgId: workspace.orgId,
+          email: request.email,
+          role: OrgRole.MEMBER,
+          leftAt: null,
+        },
+        update: {
+          orgId: workspace.orgId,
+          role: OrgRole.MEMBER,
+          leftAt: null,
+        },
+      });
+
+      return current;
     });
 
     if (existingOrgMember?.role === OrgRole.COMMUNITY_MEMBER) {

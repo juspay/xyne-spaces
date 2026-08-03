@@ -116,7 +116,10 @@ export class JiraMigrationController {
       const [sourceBoard, targetBoard, channel] = await Promise.all([
         db.board.findUnique({ where: { id: sourceBoardId }, select: { id: true, projectId: true, name: true } }),
         db.board.findUnique({ where: { id: targetBoardId }, select: { id: true, projectId: true, name: true, workspaceId: true } }),
-        db.channel.findUnique({ where: { id: channelId }, select: { id: true, projectId: true, name: true } }),
+        // The migration target is resolved by workspace, not by the operator's own membership.
+        elevateToServiceActor(() =>
+          db.channel.findUnique({ where: { id: channelId }, select: { id: true, projectId: true, name: true } }),
+        ),
       ]);
 
       if (!sourceBoard || !targetBoard || !channel) {
@@ -455,14 +458,20 @@ export class JiraMigrationController {
           where: { name: targetExternalSourceName },
           select: { id: true, sourceType: true, channelId: true, boardId: true, name: true },
         }),
-        db.channel.findUnique({
-          where: { id: sourceChannelId },
-          select: { id: true, name: true, projectId: true, workspaceId: true },
-        }),
-        db.channel.findUnique({
-          where: { id: targetChannelId },
-          select: { id: true, name: true, projectId: true, workspaceId: true },
-        }),
+        // Both ends of the move are resolved by workspace, not by the operator's own
+        // membership — the workspace comparison below is the check that decides access.
+        elevateToServiceActor(() =>
+          db.channel.findUnique({
+            where: { id: sourceChannelId },
+            select: { id: true, name: true, projectId: true, workspaceId: true },
+          }),
+        ),
+        elevateToServiceActor(() =>
+          db.channel.findUnique({
+            where: { id: targetChannelId },
+            select: { id: true, name: true, projectId: true, workspaceId: true },
+          }),
+        ),
       ]);
 
       if (!sourceExternalSource || sourceExternalSource.sourceType !== 'jira') {
@@ -538,16 +547,22 @@ export class JiraMigrationController {
         ),
       );
 
+      // Counted across the whole source channel so the preview matches what the real move
+      // will touch, rather than only the operator's own rows.
       const [conversationCount, participantCount] = await Promise.all([
         conversationIds.length > 0
-          ? db.conversation.count({
-              where: { conversationId: { in: conversationIds }, channelId: sourceChannelId },
-            })
+          ? elevateToServiceActor(() =>
+              db.conversation.count({
+                where: { conversationId: { in: conversationIds }, channelId: sourceChannelId },
+              }),
+            )
           : Promise.resolve(0),
         conversationIds.length > 0
-          ? db.conversationParticipant.count({
-              where: { conversationId: { in: conversationIds }, channelId: sourceChannelId },
-            })
+          ? elevateToServiceActor(() =>
+              db.conversationParticipant.count({
+                where: { conversationId: { in: conversationIds }, channelId: sourceChannelId },
+              }),
+            )
           : Promise.resolve(0),
       ]);
 
@@ -715,10 +730,14 @@ export class JiraMigrationController {
         return;
       }
 
-      const updatedChannel = await db.channel.findUnique({
-        where: { id: channelId },
-        select: { id: true, projectId: true, isMigrated: true, updatedAt: true, name: true, project: { select: { name: true } } },
-      });
+      // Re-reads the channel the updateMany above just moved, by workspace rather than by
+      // the operator's own membership.
+      const updatedChannel = await elevateToServiceActor(() =>
+        db.channel.findUnique({
+          where: { id: channelId },
+          select: { id: true, projectId: true, isMigrated: true, updatedAt: true, name: true, project: { select: { name: true } } },
+        }),
+      );
 
       logger.info('analytics_event', {
         event: 'channel_migrated',
@@ -1985,10 +2004,14 @@ export class JiraMigrationController {
     const now = new Date();
     const canvasId = randomUUID();
     const participantId = randomUUID();
-    const canvasChannel = await db.channel.findUniqueOrThrow({
-      where: { id: channelId },
-      select: { workspaceId: true },
-    });
+    // The report canvas is written into the migration's channel, resolved by workspace
+    // rather than by the operator's own membership.
+    const canvasChannel = await elevateToServiceActor(() =>
+      db.channel.findUniqueOrThrow({
+        where: { id: channelId },
+        select: { workspaceId: true },
+      }),
+    );
     try {
       await db.$transaction(async tx => {
         await tx.canvas.create({
@@ -2101,10 +2124,14 @@ export class JiraMigrationController {
       ...(canvasUrl ? ['', `View full report: ${canvasUrl}`] : []),
     ].join('\n');
 
-    const migrationReportChannel = await db.channel.findUniqueOrThrow({
-      where: { id: channelId },
-      select: { workspaceId: true },
-    });
+    // The report message is posted into the migration's channel, resolved by workspace
+    // rather than by the operator's own membership.
+    const migrationReportChannel = await elevateToServiceActor(() =>
+      db.channel.findUniqueOrThrow({
+        where: { id: channelId },
+        select: { workspaceId: true },
+      }),
+    );
 
     await db.$transaction(async tx => {
       await tx.conversation.create({

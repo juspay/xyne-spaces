@@ -4,6 +4,7 @@ import { getStorageService } from '../services/storage';
 import { AccessType, CalendarVisibility, WorkspaceRole } from '@prisma/client';
 import { GuestEntity } from '@xyne/shared';
 import { logger } from '../utils/logger';
+import { elevateToServiceActor } from '@/database/tenant/context';
 import { setSafeInlineImageHeaders } from '../utils/safeAttachmentDownload';
 
 const storageService = getStorageService();
@@ -293,22 +294,24 @@ export class UserManagementController {
 
         try {
           if (action === 'grant') {
+            // Admin console action on the target user's grants, not the caller's.
             const result = await userManagementService.grantUserResourceAccess(
-              id,
-              resourceName,
-              accessType,
-              req.user!.workspaceId!
-            );
+                id,
+                resourceName,
+                accessType,
+                req.user!.workspaceId!
+              );
             if (result.success) {
               results.successful.push(resourceName);
             } else {
               results.failed.push({ resourceName, error: result.message });
             }
           } else {
+            // Admin console action on the target user's grants, not the caller's.
             const result = await userManagementService.revokeUserResourceAccess(
-              id,
-              resourceName
-            );
+                id,
+                resourceName
+              );
             if (result.success) {
               results.successful.push(resourceName);
             } else {
@@ -377,7 +380,10 @@ export class UserManagementController {
         return;
       }
 
-      const updatedUser = await userManagementService.updateUser(id, { status });
+      // Admin console action on the target user's row, not the caller's.
+      const updatedUser = await elevateToServiceActor(() =>
+        userManagementService.updateUser(id, { status }),
+      );
 
       res.status(200).json({
         id: updatedUser.id,
@@ -663,7 +669,10 @@ export class UserManagementController {
       if (alias !== undefined) updateData.alias = alias?.trim() || null;
       if (description !== undefined) updateData.description = description?.trim() || null;
 
-      const group = await userManagementService.updateUserGroup(id, updateData);
+      // Admin console action on a group the caller need not have created.
+      const group = await elevateToServiceActor(() =>
+        userManagementService.updateUserGroup(id, updateData),
+      );
 
       res.status(200).json({
         id: group.id,
@@ -703,7 +712,8 @@ export class UserManagementController {
         return;
       }
 
-      await userManagementService.deleteUserGroup(id);
+      // Admin console action on a group the caller need not have created.
+      await elevateToServiceActor(() => userManagementService.deleteUserGroup(id));
 
       res.status(200).json({ message: 'Group deleted successfully' });
     } catch (error) {
@@ -729,7 +739,8 @@ export class UserManagementController {
     try {
       const { id } = req.params;
 
-      await userManagementService.deactivateUserGroup(id);
+      // Admin console action on a group the caller need not have created.
+      await elevateToServiceActor(() => userManagementService.deactivateUserGroup(id));
 
       res.status(200).json({ message: 'Group deactivated successfully' });
     } catch (error) {
@@ -753,7 +764,8 @@ export class UserManagementController {
     try {
       const { id } = req.params;
 
-      await userManagementService.reactivateUserGroup(id);
+      // Admin console action on a group the caller need not have created.
+      await elevateToServiceActor(() => userManagementService.reactivateUserGroup(id));
 
       res.status(200).json({ message: 'Group reactivated successfully' });
     } catch (error) {
@@ -791,7 +803,10 @@ export class UserManagementController {
         return;
       }
 
-      const result = await userManagementService.assignUserToGroup(userId, groupId);
+      // Admin console action on the target user's group membership, not the caller's.
+      const result = await elevateToServiceActor(() =>
+        userManagementService.assignUserToGroup(userId, groupId),
+      );
 
       if (!result.success) {
         if (result.message.includes('not found')) {
@@ -830,7 +845,10 @@ export class UserManagementController {
         return;
       }
 
-      const result = await userManagementService.removeUserFromGroup(userId, groupId);
+      // Admin console action on the target user's group membership, not the caller's.
+      const result = await elevateToServiceActor(() =>
+        userManagementService.removeUserFromGroup(userId, groupId),
+      );
 
       if (!result.success) {
         if (result.message.includes('not found')) {
@@ -943,22 +961,24 @@ export class UserManagementController {
 
         try {
           if (action === 'grant') {
+            // Admin console action on the target group's grants, not the caller's.
             const result = await userManagementService.grantGroupResourceAccess(
-              id,
-              resourceName,
-              accessType,
-              req.user!.workspaceId!
-            );
+                id,
+                resourceName,
+                accessType,
+                req.user!.workspaceId!
+              );
             if (result.success) {
               results.successful.push(resourceName);
             } else {
               results.failed.push({ resourceName, error: result.message });
             }
           } else {
+            // Admin console action on the target group's grants, not the caller's.
             const result = await userManagementService.revokeGroupResourceAccess(
-              id,
-              resourceName
-            );
+                id,
+                resourceName
+              );
             if (result.success) {
               results.successful.push(resourceName);
             } else {

@@ -2,6 +2,7 @@ import { BaseSideEffectHandler } from '../base-handler';
 import type { SideEffectJobConfig } from '../types';
 import type { CanvasParticipantPreviousValue } from '../types';
 import { db } from '@/database/client';
+import { elevateToServiceActor } from '@/database/tenant/context';
 import { notificationService } from '@/services/notificationService';
 import { activityService } from '@/services/activity/activityService';
 import { ActivityClassification } from '@prisma/client';
@@ -17,10 +18,14 @@ export class CanvasParticipantsSideEffectHandler extends BaseSideEffectHandler {
     if (participant.userId) return [participant.userId];
 
     if (participant.userGroupId) {
-      const mappings = await db.userGroupMapping.findMany({
-        where: { userGroupId: participant.userGroupId },
-        select: { userId: true },
-      });
+      const userGroupId = participant.userGroupId;
+      // Expands the group into its members, so it runs above the caller's own scope.
+      const mappings = await elevateToServiceActor(() =>
+        db.userGroupMapping.findMany({
+          where: { userGroupId },
+          select: { userId: true },
+        }),
+      );
       return Array.from(new Set(mappings.map(m => m.userId).filter(Boolean)));
     }
 

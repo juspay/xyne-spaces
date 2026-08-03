@@ -2,6 +2,7 @@ import { ExternalEntityType, TicketStatusV2 } from '@prisma/client';
 import { Request, Response } from 'express';
 import { z } from 'zod';
 import { db } from '@/database/client';
+import { elevateToServiceActor } from '@/database/tenant/context';
 import { ApiResponse } from '@/types/express';
 import { calculateETADeadline } from '@/utils/etaCalculation';
 import { logger } from '@/utils/logger';
@@ -251,10 +252,14 @@ export class TicketStageBackfillController {
     }
 
     try {
-      const channel = await db.channel.findFirst({
-        where: { id: options.channelId, workspaceId },
-        select: { id: true, type: true, projectId: true },
-      });
+      // Resolves the desk channel by workspace, not by the caller's own membership — the
+      // workspaceId in the filter is the check that decides access.
+      const channel = await elevateToServiceActor(() =>
+        db.channel.findFirst({
+          where: { id: options.channelId, workspaceId },
+          select: { id: true, type: true, projectId: true },
+        }),
+      );
 
       if (!channel) {
         res.status(404).json({
