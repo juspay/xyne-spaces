@@ -33,6 +33,7 @@ router.post(
 router.post(
   '/entities',
   requireAuth,
+  requireVespaAccess,
   AdminBackfillController.triggerEntityBackfill
 );
 
