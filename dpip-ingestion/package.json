@@ -9,6 +9,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json && npm run bundle",
     "bundle": "esbuild src/index.ts --bundle --platform=node --format=esm --packages=external --outfile=console-source/index.js",
+    "postbundle": "node scripts/copy-report.mjs",
     "gcp-build": "npm run build",
     "prestart": "npm run build",
     "start": "functions-framework --target=ingestDpip",

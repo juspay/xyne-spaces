@@ -2,6 +2,12 @@ import { Pool, type PoolClient, type QueryResult } from 'pg';
 
 import { DPIP_TABLE_SPECS } from './schema';
 import {
+  contextLogFields,
+  type DpipLogContext,
+  errorLogFields,
+  logError,
+} from './logging';
+import {
   DPIP_TABLE_NAMES,
   type DpipRow,
   type DpipTableName,
@@ -44,13 +50,8 @@ export function getPool(): Pool {
     application_name: 'dpip-daily-ingestion',
   });
 
-  pool.on('error', () => {
-    console.error(
-      JSON.stringify({
-        severity: 'ERROR',
-        event: 'dpip_database_pool_error',
-      }),
-    );
+  pool.on('error', (error) => {
+    logError('dpip_database_pool_error', errorLogFields(error));
   });
 
   return pool;
@@ -203,6 +204,7 @@ async function writeHistoryTable(
 
 export async function writeDpipTables(
   tables: Readonly<Record<DpipTableName, DpipRow[]>>,
+  logContext?: DpipLogContext,
 ): Promise<Record<DpipTableName, DpipWriteStats>> {
   const client = await getPool().connect();
   const stats = {} as Record<DpipTableName, DpipWriteStats>;
@@ -211,16 +213,26 @@ export async function writeDpipTables(
     await client.query('BEGIN');
 
     for (const table of DPIP_TABLE_NAMES) {
-      if (table === 'reports') {
-        stats[table] = await writeReports(client, tables[table]);
-      } else if (table === 'screenings') {
-        stats[table] = await writeScreenings(client, tables[table]);
-      } else {
-        stats[table] = await writeHistoryTable(
-          client,
+      try {
+        if (table === 'reports') {
+          stats[table] = await writeReports(client, tables[table]);
+        } else if (table === 'screenings') {
+          stats[table] = await writeScreenings(client, tables[table]);
+        } else {
+          stats[table] = await writeHistoryTable(
+            client,
+            table,
+            tables[table],
+          );
+        }
+      } catch (error) {
+        logError('dpip_database_table_write_failed', {
+          ...contextLogFields(logContext),
           table,
-          tables[table],
-        );
+          rows: tables[table].length,
+          ...errorLogFields(error),
+        });
+        throw error;
       }
     }
 
@@ -229,13 +241,64 @@ export async function writeDpipTables(
   } catch (error) {
     try {
       await client.query('ROLLBACK');
-    } catch {
-      console.error(
-        JSON.stringify({
-          severity: 'ERROR',
-          event: 'dpip_database_rollback_failed',
-        }),
+    } catch (rollbackError) {
+      logError('dpip_database_rollback_failed', {
+        ...contextLogFields(logContext),
+        ...errorLogFields(rollbackError),
+      });
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function readAllDpipTables(
+  logContext?: DpipLogContext,
+): Promise<Record<DpipTableName, DpipRow[]>> {
+  const client = await getPool().connect();
+  const tables = {} as Record<DpipTableName, DpipRow[]>;
+
+  try {
+    await client.query(
+      'BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY',
+    );
+
+    for (const table of DPIP_TABLE_NAMES) {
+      const spec = DPIP_TABLE_SPECS[table];
+      const fields = Object.keys(spec.fields);
+      const textFields = fields.map(
+        (field) => `${field}::text AS ${field}`,
       );
+      try {
+        const result = await client.query<DpipRow>(
+          `
+            SELECT ${textFields.join(', ')}
+            FROM dpip.${table}
+            ORDER BY ${spec.key.join(', ')}
+          `,
+        );
+        tables[table] = result.rows;
+      } catch (error) {
+        logError('dpip_database_table_read_failed', {
+          ...contextLogFields(logContext),
+          table,
+          ...errorLogFields(error),
+        });
+        throw error;
+      }
+    }
+
+    await client.query('COMMIT');
+    return tables;
+  } catch (error) {
+    try {
+      await client.query('ROLLBACK');
+    } catch (rollbackError) {
+      logError('dpip_database_report_snapshot_rollback_failed', {
+        ...contextLogFields(logContext),
+        ...errorLogFields(rollbackError),
+      });
     }
     throw error;
   } finally {
