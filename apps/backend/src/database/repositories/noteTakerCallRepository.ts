@@ -1,5 +1,4 @@
-import { CallStatus, CallType, InvitationResponse, type Call } from '@prisma/client';
-import { v4 as uuidv4 } from 'uuid';
+import { CallStatus, CallType, type Call } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
 
 export interface CreateNoteTakerCallParams {
@@ -17,8 +16,8 @@ export interface CreateNoteTakerCallParams {
  *
  * Deliberately separate from callRepository.createCallWithParticipantsAndMessage:
  * note-taker calls never live inside a channel and never create a message/
- * conversation. This repository only ever writes a Call row + a single
- * CallParticipant row for the creator.
+ * conversation. A headless room only contains its creator, so no
+ * CallParticipant rows are needed.
  */
 export class NoteTakerCallRepository {
   private get db() {
@@ -28,79 +27,30 @@ export class NoteTakerCallRepository {
   async createCall(params: CreateNoteTakerCallParams): Promise<Call> {
     const { callId, roomName, workspaceId, createdBy, notesCanvasId, roomLink, now } = params;
 
-    return this.db.$transaction(async (tx) => {
-      const call = await tx.call.create({
-        data: {
-          id: callId,
-          externalId: roomName,
-          workspaceId,
-          createdByUserId: createdBy,
-          callType: CallType.HEADLESS,
-          status: CallStatus.ACTIVE,
-          roomLink,
-          metadata: { notesCanvasId },
-          startedAt: now,
-          lastActivityAt: now,
-        },
-      });
-
-      await tx.callParticipant.create({
-        data: {
-          id: uuidv4(),
-          callId: call.id,
-          userId: createdBy,
-          invitedBy: createdBy,
-          invitedAt: now,
-          response: InvitationResponse.ACCEPTED,
-          joinedAt: now,
-        },
-      });
-
-      return call;
+    return this.db.call.create({
+      data: {
+        id: callId,
+        externalId: roomName,
+        workspaceId,
+        createdByUserId: createdBy,
+        callType: CallType.HEADLESS,
+        status: CallStatus.ACTIVE,
+        roomLink,
+        metadata: { notesCanvasId },
+        startedAt: now,
+        lastActivityAt: now,
+      },
     });
   }
 
-  /**
-   * A participant (re)joined a room whose Call row already exists — e.g. the
-   * creator's client reconnected after a network drop. Note-taker calls have
-   * no scheduling/invitation concept, so this is just an upsert to ACCEPTED +
-   * joinedAt, no side effects.
-   */
-  async recordParticipantJoin(callId: string, userId: string, now: Date): Promise<void> {
-    await this.db.$transaction(async (tx) => {
-      const participant = await tx.callParticipant.findFirst({
-        where: { callId, userId },
-        select: { id: true },
-      });
-
-      if (participant) {
-        await tx.callParticipant.update({
-          where: { id: participant.id },
-          data: { response: InvitationResponse.ACCEPTED, joinedAt: now, leftAt: null },
-        });
-      } else {
-        await tx.callParticipant.create({
-          data: {
-            id: uuidv4(),
-            callId,
-            userId,
-            invitedBy: userId,
-            invitedAt: now,
-            response: InvitationResponse.ACCEPTED,
-            joinedAt: now,
-          },
-        });
-      }
-
-      await tx.call.update({ where: { id: callId }, data: { lastActivityAt: now } });
-    });
+  /** Update activity when the creator reconnects to an existing headless room. */
+  async touchCallActivity(callId: string, now: Date): Promise<void> {
+    await this.db.call.update({ where: { id: callId }, data: { lastActivityAt: now } });
   }
 
   /**
-   * Mark a participant as left. Ends the call once no participant remains
-   * active — note-taker calls are never SCHEDULED, so (unlike callRepository's
-   * equivalent) there's no revert-to-SCHEDULED branch, and there's no system
-   * message to update.
+   * End the headless call when its creator leaves. Headless rooms are
+   * single-user, so there is no participant presence table to update or count.
    */
   async handleParticipantLeave(params: {
     callExternalId: string;
@@ -113,31 +63,16 @@ export class NoteTakerCallRepository {
       const call = await tx.call.findUnique({ where: { externalId: callExternalId } });
       if (!call) return { shouldEndCall: false, call: null };
 
-      const participant = await tx.callParticipant.findFirst({
-        where: { callId: call.id, userId },
-        select: { id: true },
-      });
-      if (!participant) return { shouldEndCall: false, call };
-
-      await tx.callParticipant.update({
-        where: { id: participant.id },
-        data: { leftAt, response: InvitationResponse.LEFT },
-      });
-
-      const activeCount = await tx.callParticipant.count({
-        where: { callId: call.id, leftAt: null },
-      });
-
-      let shouldEndCall = false;
-      if (activeCount === 0 && call.status !== CallStatus.ENDED) {
-        await tx.call.update({
-          where: { id: call.id },
-          data: { status: CallStatus.ENDED, endedAt: leftAt },
-        });
-        shouldEndCall = true;
+      if (call.createdByUserId !== userId || call.status === CallStatus.ENDED) {
+        return { shouldEndCall: false, call };
       }
 
-      return { shouldEndCall, call };
+      await tx.call.update({
+        where: { id: call.id },
+        data: { status: CallStatus.ENDED, endedAt: leftAt },
+      });
+
+      return { shouldEndCall: true, call };
     });
   }
 

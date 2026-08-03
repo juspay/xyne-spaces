@@ -2395,17 +2395,7 @@ export const queries = defineQueries({
         .where('callType', CallType.HEADLESS)
         .where('createdByUserId', ctx.userID)
         .orderBy('startedAt', 'desc')
-        .orderBy('id', 'desc')
-        .related('createdByUser')
-        .related('shares', shares =>
-          shares
-            .where('shareableEntityType', ShareableEntityType.NOTE_TAKER)
-            .where('entityUserAccess', '!=', EntityUserAccess.REVOKED)
-            .related('user')
-            .related('userGroup')
-            .related('channel'),
-        )
-        .related('summaryTemplate');
+        .orderBy('id', 'desc');
 
       if (start) {
         query = query.start({ id: start.id, startedAt: start.startedAt }, { inclusive: false });
@@ -2437,17 +2427,7 @@ export const queries = defineQueries({
             ),
         )
         .orderBy('startedAt', 'desc')
-        .orderBy('id', 'desc')
-        .related('createdByUser')
-        .related('shares', shares =>
-          shares
-            .where('shareableEntityType', ShareableEntityType.NOTE_TAKER)
-            .where('entityUserAccess', '!=', EntityUserAccess.REVOKED)
-            .related('user')
-            .related('userGroup')
-            .related('channel'),
-        )
-        .related('summaryTemplate');
+        .orderBy('id', 'desc');
 
       if (start) {
         query = query.start({ id: start.id, startedAt: start.startedAt }, { inclusive: false });
@@ -2456,7 +2436,7 @@ export const queries = defineQueries({
     },
   ),
 
-  // Fetches the HEADLESS recording (+ shares/summaryTemplate) by its public
+  // Fetches the HEADLESS recording (+ shares) by its public
   // externalId (what's in the URL / RecordingDetail.externalId) — used by
   // the Share modal and the detail screen alike.
   oatsRecordingByExternalId: defineQuery(
@@ -2466,7 +2446,6 @@ export const queries = defineQueries({
         .where('workspaceId', ctx.workspaceId)
         .where('callType', CallType.HEADLESS)
         .where('externalId', callId)
-        .related('createdByUser')
         .related('shares', shares =>
           shares
             .where('shareableEntityType', ShareableEntityType.NOTE_TAKER)
@@ -2475,7 +2454,6 @@ export const queries = defineQueries({
             .related('userGroup')
             .related('channel'),
         )
-        .related('summaryTemplate')
         .one(),
   ),
 

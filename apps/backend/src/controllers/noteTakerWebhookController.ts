@@ -69,10 +69,10 @@ class NoteTakerWebhookController {
     const existing = await repositories.calls.findByExternalId(roomName);
 
     if (existing) {
-      // Re-join (e.g. reconnect after a network drop) — no scheduling/invitation
-      // concept for note-taker calls, just track the participant + activity.
-      await noteTakerCallRepository.recordParticipantJoin(existing.id, participant.identity, new Date());
-      logger.info(`[NoteTaker Webhook] Participant ${participant.identity} (re)joined call ${roomName}`);
+      // A headless room only contains its creator, so a subsequent join is a
+      // reconnect. Keep activity fresh without creating participant state.
+      await noteTakerCallRepository.touchCallActivity(existing.id, new Date());
+      logger.info(`[NoteTaker Webhook] Creator ${participant.identity} rejoined call ${roomName}`);
       return;
     }
 
@@ -88,8 +88,10 @@ class NoteTakerWebhookController {
       return;
     }
 
-    const workspaceId = typeof roomMetadata.workspaceId === 'string' ? roomMetadata.workspaceId : undefined;
-    const createdBy = typeof roomMetadata.createdBy === 'string' ? roomMetadata.createdBy : participant.identity;
+    const workspaceId =
+      typeof roomMetadata.workspaceId === 'string' ? roomMetadata.workspaceId : undefined;
+    const createdBy =
+      typeof roomMetadata.createdBy === 'string' ? roomMetadata.createdBy : participant.identity;
     const notesCanvasId =
       typeof roomMetadata.notesCanvasId === 'string' ? roomMetadata.notesCanvasId : undefined;
 
@@ -115,12 +117,13 @@ class NoteTakerWebhookController {
       now: new Date(),
     });
 
-    logger.info(`[NoteTaker Webhook] Created note taker call record for ${roomName}`, { callId: call.id });
+    logger.info(`[NoteTaker Webhook] Created note taker call record for ${roomName}`, {
+      callId: call.id,
+    });
 
     // Auto-start an audio recording for the whole call — note-taker calls have
     // no manual "start recording" UI action, so this replaces that trigger.
-    // Stopped automatically in handleParticipantLeft when the last participant
-    // leaves (shouldEndCall). Non-fatal: a failure here shouldn't block call
+    // Stopped automatically when the creator leaves. Non-fatal: a failure here shouldn't block call
     // creation or the transcription pipeline.
     try {
       await callRecordingService.startRecording({
@@ -129,7 +132,10 @@ class NoteTakerWebhookController {
         startedBy: createdBy,
       });
     } catch (recordingError) {
-      logger.error(`[NoteTaker Webhook] Failed to auto-start recording for call ${roomName}:`, recordingError);
+      logger.error(
+        `[NoteTaker Webhook] Failed to auto-start recording for call ${roomName}:`,
+        recordingError
+      );
     }
 
     emitCallStarted({
@@ -153,21 +159,23 @@ class NoteTakerWebhookController {
     if (participant.kind === ParticipantInfo_Kind.EGRESS) return;
 
     const now = new Date();
-    const result = await noteTakerCallRepository.handleParticipantLeave({
-      callExternalId: roomName,
-      userId: participant.identity,
-      leftAt: now,
-    }).catch((error) => {
-      logger.error('[NoteTaker Webhook] participant_leave_failed', { room: roomName, error });
-      return null;
-    });
+    const result = await noteTakerCallRepository
+      .handleParticipantLeave({
+        callExternalId: roomName,
+        userId: participant.identity,
+        leftAt: now,
+      })
+      .catch((error) => {
+        logger.error('[NoteTaker Webhook] participant_leave_failed', { room: roomName, error });
+        return null;
+      });
 
     if (!result?.call) return;
 
-    logger.info(`[NoteTaker Webhook] Participant ${participant.identity} left call ${roomName}`);
+    logger.info(`[NoteTaker Webhook] Creator ${participant.identity} left call ${roomName}`);
 
     if (result.shouldEndCall) {
-      logger.info(`[NoteTaker Webhook] No active participants remaining — call ${roomName} ended`);
+      logger.info(`[NoteTaker Webhook] Creator left — call ${roomName} ended`);
 
       try {
         await callRecordingService.stopActiveRecordingsForCall(roomName);
@@ -184,13 +192,15 @@ class NoteTakerWebhookController {
     if (!roomName) return;
 
     const now = new Date();
-    const result = await noteTakerCallRepository.handleRoomFinished({
-      callExternalId: roomName,
-      endedAt: now,
-    }).catch((error) => {
-      logger.error('[NoteTaker Webhook] room_finished_failed', { room: roomName, error });
-      return null;
-    });
+    const result = await noteTakerCallRepository
+      .handleRoomFinished({
+        callExternalId: roomName,
+        endedAt: now,
+      })
+      .catch((error) => {
+        logger.error('[NoteTaker Webhook] room_finished_failed', { room: roomName, error });
+        return null;
+      });
 
     if (!result?.call) {
       logger.error(`[NoteTaker Webhook] Call not found for room_finished: ${roomName}`);
@@ -203,7 +213,10 @@ class NoteTakerWebhookController {
     try {
       await callRecordingService.stopActiveRecordingsForCall(roomName);
     } catch (stopErr) {
-      logger.error(`[NoteTaker Webhook] Failed to stop recording for call ${roomName} on room_finished:`, stopErr);
+      logger.error(
+        `[NoteTaker Webhook] Failed to stop recording for call ${roomName} on room_finished:`,
+        stopErr
+      );
     }
 
     if (result.shouldEndCall) {
@@ -222,7 +235,7 @@ class NoteTakerWebhookController {
 
   private async emitCallEndedAutomation(
     call: Awaited<ReturnType<typeof noteTakerCallRepository.handleRoomFinished>>['call'],
-    endedAt: Date,
+    endedAt: Date
   ): Promise<void> {
     if (!call) return;
     try {
