@@ -4,7 +4,7 @@ import { CanvasCommentThreadStatus } from '@xyne/shared';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { queries } from '../../zero/queries';
 
-type CanvasCommentThreadWithAnchor = {
+type CanvasCommentHighlightThread = {
   id: string;
   blockId: string;
   status: CanvasCommentThreadStatus;
@@ -15,7 +15,7 @@ interface UseCanvasCommentHighlightsOptions {
   containerRef: RefObject<HTMLElement | null>;
   enabled?: boolean;
   refreshKey?: unknown;
-  onAnchorClick?: ((thread: CanvasCommentThreadWithAnchor) => void) | undefined;
+  onAnchorClick?: ((thread: CanvasCommentHighlightThread) => void) | undefined;
 }
 
 const COMMENT_THREAD_SELECTOR = '[data-canvas-comment-thread-id]';
@@ -50,14 +50,16 @@ export const useCanvasCommentHighlights = ({
     {
       enabled: enabled && Boolean(canvasId),
     },
-  ) as unknown as [CanvasCommentThreadWithAnchor[]];
+  );
 
   useEffect(() => {
     if (!enabled || !canvasId || typeof window === 'undefined') return;
 
     ensureHighlightStyles();
     const openThreadIds = new Set(
-      threads.filter(thread => thread.status === CanvasCommentThreadStatus.OPEN).map(thread => thread.id),
+      threads
+        .filter(thread => thread.status === CanvasCommentThreadStatus.OPEN)
+        .map(thread => thread.id),
     );
 
     const syncAnchors = (): void => {
@@ -119,7 +121,9 @@ export const useCanvasCommentHighlights = ({
     if (!container) return;
 
     const threadsById = new Map(
-      threads.filter(thread => thread.status === CanvasCommentThreadStatus.OPEN).map(thread => [thread.id, thread]),
+      threads
+        .filter(thread => thread.status === CanvasCommentThreadStatus.OPEN)
+        .map(thread => [thread.id, thread]),
     );
 
     const handleClick = (event: MouseEvent): void => {

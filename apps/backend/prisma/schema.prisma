@@ -3542,6 +3542,7 @@ model CanvasCommentThread {
   canvasId        String
   blockId         String
   anchorText      String?
+  initialCommentId String?
   status          String                    @default("OPEN")
   statusUpdatedBy String?
   statusUpdatedAt DateTime?
@@ -3549,7 +3550,8 @@ model CanvasCommentThread {
   createdAt       DateTime                  @default(now())
 
   canvas              Canvas          @relation(fields: [canvasId], references: [id], onDelete: Cascade)
-  comments            CanvasComment[]
+  comments            CanvasComment[] @relation("CanvasCommentThreadComments")
+  initialComment      CanvasComment?  @relation("CanvasCommentThreadInitialComment", fields: [initialCommentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   createdByUser       User            @relation("CanvasCommentThreadCreatedBy", fields: [createdBy], references: [id])
   statusUpdatedByUser User?           @relation("CanvasCommentThreadStatusUpdatedBy", fields: [statusUpdatedBy], references: [id])
 
@@ -3564,15 +3566,17 @@ model CanvasComment {
   canvasId         String
   body             String
   mentionedUserIds String   @default("[]")
+  isInitial        Boolean  @default(false)
   createdBy        String
   editedAt         DateTime?
   deletedAt        DateTime?
   createdAt        DateTime @default(now())
 
-  thread       CanvasCommentThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  thread       CanvasCommentThread  @relation("CanvasCommentThreadComments", fields: [threadId], references: [id], onDelete: Cascade)
+  initialForThreads CanvasCommentThread[] @relation("CanvasCommentThreadInitialComment")
   createdByUser User               @relation("CanvasCommentCreatedBy", fields: [createdBy], references: [id])
 
-  @@index([threadId, createdAt])
+  @@index([threadId, isInitial, createdAt])
   @@map("canvas_comments")
   @@schema("public")
 }

@@ -2285,9 +2285,16 @@ export const queries = defineQueries({
       return zql.canvas_comment_threads
         .where('canvasId', canvasId)
         .orderBy('createdAt', 'asc')
-        .related('comments', comments =>
-          comments.orderBy('createdAt', 'asc'),
-        );
+        .related('initialComment');
+    },
+  ),
+
+  canvasThreadComments: defineQuery(
+    z.object({ threadId: z.string() }),
+    ({ args: { threadId } }) => {
+      return zql.canvas_comments
+        .where('threadId', threadId)
+        .orderBy('createdAt', 'asc');
     },
   ),
 

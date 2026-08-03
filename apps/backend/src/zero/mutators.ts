@@ -9039,6 +9039,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             canvasId,
             blockId,
             anchorText: anchorText || null,
+            initialCommentId: commentId,
             status: CanvasCommentThreadStatus.OPEN,
             statusUpdatedBy: null,
             statusUpdatedAt: null,
@@ -9052,6 +9053,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             canvasId,
             body,
             mentionedUserIds: serializeCanvasCommentMentionedUserIds(mentionedUserIds),
+            isInitial: true,
             createdBy: authData.sub,
             editedAt: null,
             deletedAt: null,
@@ -9082,6 +9084,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             canvasId,
             body,
             mentionedUserIds: serializeCanvasCommentMentionedUserIds(mentionedUserIds),
+            isInitial: false,
             createdBy: authData.sub,
             editedAt: null,
             deletedAt: null,
@@ -9150,12 +9153,13 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           });
         },
       ),
-      resolveThread: defineMutator(
+      setThreadStatus: defineMutator(
         z.object({
           threadId: z.string(),
+          status: z.nativeEnum(CanvasCommentThreadStatus),
           timestamp: z.number(),
         }),
-        async ({ tx, args: { threadId, timestamp } }) => {
+        async ({ tx, args: { threadId, status, timestamp } }) => {
           const thread = await tx.run(zql.canvas_comment_threads.where('id', threadId).one());
           if (!thread) {
             throw new Error('Comment thread not found');
@@ -9165,28 +9169,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           await tx.mutate.canvas_comment_threads.update({
             id: threadId,
-            status: CanvasCommentThreadStatus.RESOLVED,
-            statusUpdatedBy: authData.sub,
-            statusUpdatedAt: timestamp,
-          });
-        },
-      ),
-      reopenThread: defineMutator(
-        z.object({
-          threadId: z.string(),
-          timestamp: z.number(),
-        }),
-        async ({ tx, args: { threadId, timestamp } }) => {
-          const thread = await tx.run(zql.canvas_comment_threads.where('id', threadId).one());
-          if (!thread) {
-            throw new Error('Comment thread not found');
-          }
-
-          await assertCanvasThreadManageAccess(tx, thread, authData.sub);
-
-          await tx.mutate.canvas_comment_threads.update({
-            id: threadId,
-            status: CanvasCommentThreadStatus.OPEN,
+            status,
             statusUpdatedBy: authData.sub,
             statusUpdatedAt: timestamp,
           });

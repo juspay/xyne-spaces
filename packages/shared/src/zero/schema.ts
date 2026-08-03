@@ -2130,6 +2130,7 @@ export const canvasCommentThreadTable = table('canvas_comment_threads' /* Canvas
     canvasId: string(),
     blockId: string(),
     anchorText: string().optional(),
+    initialCommentId: string().optional(),
     status: enumeration<CanvasCommentThreadStatus>(),
     statusUpdatedBy: string().optional(),
     statusUpdatedAt: number().optional(),
@@ -2145,6 +2146,7 @@ export const canvasCommentTable = table('canvas_comments' /* CanvasComment */)
     canvasId: string(),
     body: string(),
     mentionedUserIds: string(),
+    isInitial: boolean(),
     createdBy: string(),
     editedAt: number().optional(),
     deletedAt: number().optional(),
@@ -4475,6 +4477,11 @@ export const canvasCommentThreadTableRelationships = relationships(
     comments: many({
       sourceField: ['id'],
       destField: ['threadId'],
+      destSchema: canvasCommentTable,
+    }),
+    initialComment: one({
+      sourceField: ['initialCommentId'],
+      destField: ['id'],
       destSchema: canvasCommentTable,
     }),
     createdByUser: one({

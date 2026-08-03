@@ -41,6 +41,7 @@ type CanvasComment = {
   canvasId: string;
   body: string;
   mentionedUserIds?: string | null;
+  isInitial?: boolean;
   createdBy: string;
   editedAt?: number | null;
   deletedAt?: number | null;
@@ -53,12 +54,13 @@ type CanvasCommentThread = {
   canvasId: string;
   blockId: string;
   anchorText?: string | null;
+  initialCommentId?: string | null;
   status: CanvasCommentThreadStatus;
   statusUpdatedBy?: string | null;
   statusUpdatedAt?: number | null;
   createdBy: string;
   createdAt: number;
-  comments?: CanvasComment[];
+  initialComment?: CanvasComment | null;
 };
 
 export interface CanvasCommentAnchor {
@@ -93,6 +95,31 @@ interface CanvasCommentComposerProps {
   minHeightClassName: string;
   actions?: React.ReactNode;
   onSubmit: (payload: { body: string; mentionedUserIds: string[] }) => void;
+}
+
+interface CanvasCommentThreadSectionProps {
+  thread: CanvasCommentThread;
+  isSelectedBlock: boolean;
+  isExpanded: boolean;
+  editable: boolean;
+  channelId?: string | undefined;
+  currentUserId?: string | undefined;
+  allUsers: UserLite[];
+  editingCommentId: string | null;
+  onSelectBlock: (blockId: string) => void;
+  onToggleExpanded: (threadId: string) => void;
+  onSetThreadStatus: (threadId: string, status: CanvasCommentThreadStatus) => void;
+  onSetEditingCommentId: (commentId: string | null) => void;
+  onDeleteComment: (commentId: string) => void;
+  onUpdateComment: (
+    thread: CanvasCommentThread,
+    comment: CanvasComment,
+    payload: { body: string; mentionedUserIds: string[] },
+  ) => void;
+  onReplyToThread: (
+    thread: CanvasCommentThread,
+    payload: { body: string; mentionedUserIds: string[] },
+  ) => void;
 }
 
 const getDisplayName = (user?: UserLite | null): string =>
@@ -285,6 +312,223 @@ function CanvasCommentComposer({
   );
 }
 
+function CanvasCommentThreadSection({
+  thread,
+  isSelectedBlock,
+  isExpanded,
+  editable,
+  channelId,
+  currentUserId,
+  allUsers,
+  editingCommentId,
+  onSelectBlock,
+  onToggleExpanded,
+  onSetThreadStatus,
+  onSetEditingCommentId,
+  onDeleteComment,
+  onUpdateComment,
+  onReplyToThread,
+}: CanvasCommentThreadSectionProps): React.JSX.Element {
+  const [loadedComments = []] = useCachedQuery(
+    queries.canvasThreadComments({ threadId: thread.id }),
+    {
+      enabled: isExpanded,
+    },
+  ) as unknown as [CanvasComment[]];
+  const topComments = thread.initialComment ? [thread.initialComment] : [];
+  const comments = isExpanded ? loadedComments : topComments;
+  const visibleComments = comments.filter(comment => !comment.deletedAt);
+  const previewComment = visibleComments[0] ?? comments[0];
+  const replyCount = isExpanded ? Math.max(comments.length - 1, 0) : null;
+
+  return (
+    <section
+      className={cn(
+        'rounded-md border bg-background transition-colors',
+        isSelectedBlock ? 'border-primary/60 shadow-sm' : 'border-border',
+        thread.status === CanvasCommentThreadStatus.RESOLVED && 'bg-muted/20 opacity-80',
+      )}
+    >
+      <div className='flex items-start justify-between gap-2 border-b border-border px-3 py-2'>
+        <button
+          type='button'
+          className='min-w-0 flex-1 space-y-1 text-left'
+          data-track-category='canvas'
+          data-track-name='TOGGLE_CANVAS_COMMENT_THREAD'
+          onClick={() => {
+            onSelectBlock(thread.blockId);
+            onToggleExpanded(thread.id);
+          }}
+          aria-expanded={isExpanded}
+        >
+          {thread.anchorText && (
+            <span className='line-clamp-2 block rounded-sm border-l-2 border-primary bg-muted/30 px-2 py-1 text-xs italic text-muted-foreground'>
+              {thread.anchorText}
+            </span>
+          )}
+          {previewComment && (
+            <span className='line-clamp-2 block text-sm leading-5 text-foreground'>
+              {previewComment.deletedAt
+                ? 'Comment deleted'
+                : renderCommentBody(
+                    previewComment.body,
+                    parseMentionedUserIds(previewComment.mentionedUserIds),
+                    allUsers,
+                  )}
+            </span>
+          )}
+          <span className='block text-[11px] text-muted-foreground'>
+            {isExpanded
+              ? `${replyCount} ${replyCount === 1 ? 'reply' : 'replies'}`
+              : 'View replies'}
+          </span>
+        </button>
+        <span className='flex shrink-0 items-center gap-1'>
+          <Badge
+            variant={thread.status === CanvasCommentThreadStatus.OPEN ? 'outline' : 'secondary'}
+            className={cn(
+              'rounded-md',
+              thread.status === CanvasCommentThreadStatus.OPEN &&
+                'border-primary/20 bg-primary/10 text-primary',
+            )}
+          >
+            {thread.status === CanvasCommentThreadStatus.OPEN ? 'Open' : 'Resolved'}
+          </Badge>
+          {editable && thread.status === CanvasCommentThreadStatus.OPEN && (
+            <Tooltip content='Resolve comment'>
+              <Button
+                variant='ghost'
+                size='iconSm'
+                onClick={() => onSetThreadStatus(thread.id, CanvasCommentThreadStatus.RESOLVED)}
+                aria-label='Resolve comment'
+              >
+                <Check className='size-4' />
+              </Button>
+            </Tooltip>
+          )}
+          <Button
+            variant='ghost'
+            size='iconSm'
+            onClick={() => {
+              onSelectBlock(thread.blockId);
+              onToggleExpanded(thread.id);
+            }}
+            aria-label={isExpanded ? 'Collapse comment' : 'Expand comment'}
+          >
+            <ChevronDown
+              className={cn(
+                'size-4 text-muted-foreground transition-transform',
+                isExpanded && 'rotate-180',
+              )}
+            />
+          </Button>
+        </span>
+      </div>
+
+      {isExpanded && (
+        <div className='space-y-3 p-3'>
+          {comments.map(comment => {
+            const isOwnComment = comment.createdBy === currentUserId;
+            const isDeleted = Boolean(comment.deletedAt);
+            const isEditing = editingCommentId === comment.id;
+            const commentAuthor =
+              allUsers.find(candidate => candidate.id === comment.createdBy) ??
+              comment.createdByUser;
+
+            return (
+              <div key={comment.id} className='group'>
+                <div className='mb-1 flex items-center justify-between gap-2'>
+                  <div className='min-w-0'>
+                    <p className='truncate text-xs font-semibold text-foreground'>
+                      {getDisplayName(commentAuthor)}
+                    </p>
+                    <p className='text-[11px] text-muted-foreground'>
+                      {formatCommentTime(comment.createdAt)}
+                      {comment.editedAt && !isDeleted ? ' · edited' : ''}
+                    </p>
+                  </div>
+                  {editable && isOwnComment && !isDeleted && !isEditing && (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          variant='ghost'
+                          size='iconSm'
+                          className='opacity-0 group-hover:opacity-100'
+                          aria-label='Comment actions'
+                        >
+                          <MoreVertical className='size-4' />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align='end'>
+                        <DropdownMenuItem onClick={() => onSetEditingCommentId(comment.id)}>
+                          <Pencil className='size-4' />
+                          Edit
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          className='text-destructive focus:text-destructive'
+                          onClick={() => onDeleteComment(comment.id)}
+                        >
+                          <Trash2 className='size-4' />
+                          Delete
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  )}
+                </div>
+                {isEditing ? (
+                  <CanvasCommentComposer
+                    id={`canvas-comment-edit-${comment.id}`}
+                    channelId={channelId}
+                    currentUserId={currentUserId}
+                    placeholder='Edit comment'
+                    value={comment.body}
+                    fallbackMentionedUserIds={parseMentionedUserIds(comment.mentionedUserIds)}
+                    minHeightClassName='min-h-[64px]'
+                    onSubmit={payload => onUpdateComment(thread, comment, payload)}
+                    actions={
+                      <Button variant='ghost' size='sm' onClick={() => onSetEditingCommentId(null)}>
+                        Cancel
+                      </Button>
+                    }
+                  />
+                ) : (
+                  <p
+                    className={cn(
+                      'whitespace-pre-wrap break-words text-sm leading-5 text-foreground',
+                      isDeleted && 'italic text-muted-foreground',
+                    )}
+                  >
+                    {isDeleted
+                      ? 'Comment deleted'
+                      : renderCommentBody(
+                          comment.body,
+                          parseMentionedUserIds(comment.mentionedUserIds),
+                          allUsers,
+                        )}
+                  </p>
+                )}
+              </div>
+            );
+          })}
+
+          {editable && (
+            <div className='border-t border-border pt-3'>
+              <CanvasCommentComposer
+                id={`canvas-comment-reply-${thread.id}`}
+                channelId={channelId}
+                currentUserId={currentUserId}
+                placeholder='Reply'
+                minHeightClassName='min-h-[64px]'
+                onSubmit={payload => onReplyToThread(thread, payload)}
+              />
+            </div>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function CanvasCommentsPanel({
   canvasId,
   canvasTitle,
@@ -327,8 +571,12 @@ export function CanvasCommentsPanel({
     return visibleThreads.filter(thread => thread.blockId === activeBlockId);
   }, [activeBlockId, visibleThreads]);
 
-  const openCount = orderedThreads.filter(thread => thread.status === CanvasCommentThreadStatus.OPEN).length;
-  const resolvedCount = orderedThreads.filter(thread => thread.status === CanvasCommentThreadStatus.RESOLVED).length;
+  const openCount = orderedThreads.filter(
+    thread => thread.status === CanvasCommentThreadStatus.OPEN,
+  ).length;
+  const resolvedCount = orderedThreads.filter(
+    thread => thread.status === CanvasCommentThreadStatus.RESOLVED,
+  ).length;
 
   const sendMentionNotifications = useCallback(
     (blockId: string, mentionedUserIds: string[], commentThreadId?: string): void => {
@@ -465,10 +713,11 @@ export function CanvasCommentsPanel({
     setExpandedThreadIds(prev => new Set(prev).add(thread.id));
   };
 
-  const resolveThread = (threadId: string): void => {
+  const setThreadStatus = (threadId: string, status: CanvasCommentThreadStatus): void => {
     zero.mutate(
-      mutators.canvasComment.resolveThread({
+      mutators.canvasComment.setThreadStatus({
         threadId,
+        status,
         timestamp: Date.now(),
       }),
     );
@@ -531,7 +780,9 @@ export function CanvasCommentsPanel({
             {openCount} open
           </Button>
           <Button
-            variant={threadStatusFilter === CanvasCommentThreadStatus.RESOLVED ? 'secondary' : 'ghost'}
+            variant={
+              threadStatusFilter === CanvasCommentThreadStatus.RESOLVED ? 'secondary' : 'ghost'
+            }
             size='sm'
             onClick={() => setThreadStatusFilter(CanvasCommentThreadStatus.RESOLVED)}
             aria-pressed={threadStatusFilter === CanvasCommentThreadStatus.RESOLVED}
@@ -582,7 +833,9 @@ export function CanvasCommentsPanel({
           <div className='flex h-40 flex-col items-center justify-center rounded-md border border-dashed border-border text-center'>
             <MessageSquare className='mb-2 size-5 text-muted-foreground' />
             <p className='text-sm font-medium text-foreground'>
-              {threadStatusFilter === CanvasCommentThreadStatus.RESOLVED ? 'No resolved comments' : 'No open comments'}
+              {threadStatusFilter === CanvasCommentThreadStatus.RESOLVED
+                ? 'No resolved comments'
+                : 'No open comments'}
             </p>
             <p className='mt-1 text-xs text-muted-foreground'>
               {threadStatusFilter === CanvasCommentThreadStatus.RESOLVED
@@ -592,206 +845,26 @@ export function CanvasCommentsPanel({
           </div>
         ) : (
           <div className='space-y-3'>
-            {visibleThreads.map(thread => {
-              const comments = thread.comments || [];
-              const visibleComments = comments.filter(comment => !comment.deletedAt);
-              const previewComment = visibleComments[visibleComments.length - 1] ?? comments[0];
-              const isSelectedBlock = activeBlockId === thread.blockId;
-              const isExpanded = expandedThreadIds.has(thread.id);
-              const replyCount = Math.max(comments.length - 1, 0);
-
-              return (
-                <section
-                  key={thread.id}
-                  className={cn(
-                    'rounded-md border bg-background transition-colors',
-                    isSelectedBlock ? 'border-primary/60 shadow-sm' : 'border-border',
-                    thread.status === CanvasCommentThreadStatus.RESOLVED && 'bg-muted/20 opacity-80',
-                  )}
-                >
-                  <div className='flex items-start justify-between gap-2 border-b border-border px-3 py-2'>
-                    <button
-                      type='button'
-                      className='min-w-0 flex-1 space-y-1 text-left'
-                      data-track-category='canvas'
-                      data-track-name='TOGGLE_CANVAS_COMMENT_THREAD'
-                      onClick={() => {
-                        onSelectBlock(thread.blockId);
-                        toggleThreadExpanded(thread.id);
-                      }}
-                      aria-expanded={isExpanded}
-                    >
-                      {thread.anchorText && (
-                        <span className='line-clamp-2 block rounded-sm border-l-2 border-primary bg-muted/30 px-2 py-1 text-xs italic text-muted-foreground'>
-                          {thread.anchorText}
-                        </span>
-                      )}
-                      {previewComment && (
-                        <span className='line-clamp-2 block text-sm leading-5 text-foreground'>
-                          {previewComment.deletedAt
-                            ? 'Comment deleted'
-                            : renderCommentBody(
-                                previewComment.body,
-                                parseMentionedUserIds(previewComment.mentionedUserIds),
-                                allUsers,
-                              )}
-                        </span>
-                      )}
-                      <span className='block text-[11px] text-muted-foreground'>
-                        {replyCount} {replyCount === 1 ? 'reply' : 'replies'}
-                      </span>
-                    </button>
-                    <span className='flex shrink-0 items-center gap-1'>
-                      <Badge
-                        variant={thread.status === CanvasCommentThreadStatus.OPEN ? 'outline' : 'secondary'}
-                        className={cn(
-                          'rounded-md',
-                          thread.status === CanvasCommentThreadStatus.OPEN &&
-                            'border-primary/20 bg-primary/10 text-primary',
-                        )}
-                      >
-                        {thread.status === CanvasCommentThreadStatus.OPEN ? 'Open' : 'Resolved'}
-                      </Badge>
-                      {editable && thread.status === CanvasCommentThreadStatus.OPEN && (
-                        <Tooltip content='Resolve comment'>
-                          <Button
-                            variant='ghost'
-                            size='iconSm'
-                            onClick={() => resolveThread(thread.id)}
-                            aria-label='Resolve comment'
-                          >
-                            <Check className='size-4' />
-                          </Button>
-                        </Tooltip>
-                      )}
-                      <Button
-                        variant='ghost'
-                        size='iconSm'
-                        onClick={() => {
-                          onSelectBlock(thread.blockId);
-                          toggleThreadExpanded(thread.id);
-                        }}
-                        aria-label={isExpanded ? 'Collapse comment' : 'Expand comment'}
-                      >
-                        <ChevronDown
-                          className={cn(
-                            'size-4 text-muted-foreground transition-transform',
-                            isExpanded && 'rotate-180',
-                          )}
-                        />
-                      </Button>
-                    </span>
-                  </div>
-
-                  {isExpanded && (
-                    <div className='space-y-3 p-3'>
-                      {comments.map(comment => {
-                        const isOwnComment = comment.createdBy === user?.id;
-                        const isDeleted = Boolean(comment.deletedAt);
-                        const isEditing = editingCommentId === comment.id;
-                        const commentAuthor =
-                          allUsers.find(candidate => candidate.id === comment.createdBy) ??
-                          comment.createdByUser;
-
-                        return (
-                          <div key={comment.id} className='group'>
-                            <div className='mb-1 flex items-center justify-between gap-2'>
-                              <div className='min-w-0'>
-                                <p className='truncate text-xs font-semibold text-foreground'>
-                                  {getDisplayName(commentAuthor)}
-                                </p>
-                                <p className='text-[11px] text-muted-foreground'>
-                                  {formatCommentTime(comment.createdAt)}
-                                  {comment.editedAt && !isDeleted ? ' · edited' : ''}
-                                </p>
-                              </div>
-                              {editable && isOwnComment && !isDeleted && !isEditing && (
-                                <DropdownMenu>
-                                  <DropdownMenuTrigger asChild>
-                                    <Button
-                                      variant='ghost'
-                                      size='iconSm'
-                                      className='opacity-0 group-hover:opacity-100'
-                                      aria-label='Comment actions'
-                                    >
-                                      <MoreVertical className='size-4' />
-                                    </Button>
-                                  </DropdownMenuTrigger>
-                                  <DropdownMenuContent align='end'>
-                                    <DropdownMenuItem
-                                      onClick={() => setEditingCommentId(comment.id)}
-                                    >
-                                      <Pencil className='size-4' />
-                                      Edit
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem
-                                      className='text-destructive focus:text-destructive'
-                                      onClick={() => deleteComment(comment.id)}
-                                    >
-                                      <Trash2 className='size-4' />
-                                      Delete
-                                    </DropdownMenuItem>
-                                  </DropdownMenuContent>
-                                </DropdownMenu>
-                              )}
-                            </div>
-                            {isEditing ? (
-                              <CanvasCommentComposer
-                                id={`canvas-comment-edit-${comment.id}`}
-                                channelId={channelId}
-                                currentUserId={user?.id}
-                                placeholder='Edit comment'
-                                value={comment.body}
-                                fallbackMentionedUserIds={parseMentionedUserIds(comment.mentionedUserIds)}
-                                minHeightClassName='min-h-[64px]'
-                                onSubmit={payload => updateComment(thread, comment, payload)}
-                                actions={
-                                  <Button
-                                    variant='ghost'
-                                    size='sm'
-                                    onClick={() => setEditingCommentId(null)}
-                                  >
-                                    Cancel
-                                  </Button>
-                                }
-                              />
-                            ) : (
-                              <p
-                                className={cn(
-                                  'whitespace-pre-wrap break-words text-sm leading-5 text-foreground',
-                                  isDeleted && 'italic text-muted-foreground',
-                                )}
-                              >
-                                {isDeleted
-                                  ? 'Comment deleted'
-                                  : renderCommentBody(
-                                      comment.body,
-                                      parseMentionedUserIds(comment.mentionedUserIds),
-                                      allUsers,
-                                    )}
-                              </p>
-                            )}
-                          </div>
-                        );
-                      })}
-
-                      {editable && (
-                        <div className='border-t border-border pt-3'>
-                          <CanvasCommentComposer
-                            id={`canvas-comment-reply-${thread.id}`}
-                            channelId={channelId}
-                            currentUserId={user?.id}
-                            placeholder='Reply'
-                            minHeightClassName='min-h-[64px]'
-                            onSubmit={payload => replyToThread(thread, payload)}
-                          />
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </section>
-              );
-            })}
+            {visibleThreads.map(thread => (
+              <CanvasCommentThreadSection
+                key={thread.id}
+                thread={thread}
+                isSelectedBlock={activeBlockId === thread.blockId}
+                isExpanded={expandedThreadIds.has(thread.id)}
+                editable={editable}
+                channelId={channelId}
+                currentUserId={user?.id}
+                allUsers={allUsers}
+                editingCommentId={editingCommentId}
+                onSelectBlock={onSelectBlock}
+                onToggleExpanded={toggleThreadExpanded}
+                onSetThreadStatus={setThreadStatus}
+                onSetEditingCommentId={setEditingCommentId}
+                onDeleteComment={deleteComment}
+                onUpdateComment={updateComment}
+                onReplyToThread={replyToThread}
+              />
+            ))}
           </div>
         )}
       </div>
