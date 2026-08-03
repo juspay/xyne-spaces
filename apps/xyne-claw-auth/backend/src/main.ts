@@ -17,6 +17,7 @@ import { gatewaysRouter } from "./routes/gateways.js";
 import { webhookRouter } from "./routes/webhook.js";
 import { flowActionRouter } from "./routes/flow-action.js";
 import { twinDraftInternalRouter } from "./routes/twin-draft.js";
+import { attachmentsInternalRouter } from "./routes/attachments.js";
 import { appCallbackRouter } from "./routes/app-callback.js";
 import { agentsRouter } from "./routes/agents.js";
 import { chainWorkflowsRouter } from "./routes/chain-workflows.js";
@@ -187,6 +188,7 @@ app.use(`${BASE}/agent-chat`, requireAuth, agentChatRouter);
 app.use(`${BASE}/daily-brief`, requireAuth, dailyBriefRouter);
 app.use(`${BASE}/internal/agent-chat`, requireStrictS2S, agentChatInternalRouter); // progress/callback from xyne-claw
 app.use(`${BASE}/internal/twin-draft`, requireInternalS2S, twinDraftInternalRouter);  // Spaces → approve/decline an in-thread Twin reply draft (INTERNAL_S2S_KEY)
+app.use(`${BASE}/internal/attachments`, requireInternalS2S, attachmentsInternalRouter); // Spaces → extract document text via claw's converters (INTERNAL_S2S_KEY)
 app.use(`${BASE}/internal/sessions`, requireStrictS2S, sessionsArchiveRouter);     // archive/restore session JSONLs to GCS — S2S only (transcripts)
 app.use(`${BASE}/internal/experiments`, requireStrictS2S, experimentsInternalRouter);
 app.use(`${BASE}/error-pipeline`, errorPipelineIngestRouter); // Grafana webhook ingest (JWT-authed inside)

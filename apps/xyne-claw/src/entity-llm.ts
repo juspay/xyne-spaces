@@ -12,7 +12,7 @@
  * prompt, nothing else.
  */
 
-import { fetchLiteLLMWithRetry } from "./litellm-retry.js";
+import { fetchLiteLLMWithRetry } from "@xyne/litellm-client";
 import { withLlmSlot, pauseLlmGate, retryAfterMs } from "./llm-gate.js";
 import { LITELLM } from "./config.js";
 

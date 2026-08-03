@@ -11,7 +11,7 @@
  * never invents — and respects a hard char cap so the file can't blow context.
  */
 
-import { fetchLiteLLMWithRetry } from "./litellm-retry.js";
+import { fetchLiteLLMWithRetry } from "@xyne/litellm-client";
 import { createLogger } from "./logger.js";
 
 const log = createLogger("twin-soul-synthesizer");
