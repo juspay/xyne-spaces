@@ -1,5 +1,5 @@
 import { Prisma } from "@prisma/client";
-import { prisma } from "../db.js";
+import { prisma, type AppTransactionClient } from "../db.js";
 import { formatDayIST } from "../lib/ist-time.js";
 import { createLogger } from "../logger.js";
 
@@ -61,7 +61,7 @@ const LOCK_NAMESPACE = "agent_run";
 
 async function withSessionWriteLock<T>(
   sessionId: string,
-  fn: (tx: Prisma.TransactionClient) => Promise<T>,
+  fn: (tx: AppTransactionClient) => Promise<T>,
 ): Promise<T> {
   return prisma.$transaction(
     async (tx) => {
