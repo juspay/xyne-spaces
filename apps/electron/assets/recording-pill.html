@@ -4,199 +4,344 @@
   <meta charset="UTF-8">
   <title>Recording</title>
   <style>
-    html { font-size: 16px; }
+    :root {
+      --green: #1f9d4d;
+      --red: #e04330;
+      --red-hover: #c93a28;
+      --red-active: #b23222;
+      --ink: #1d1d1f;
+      --card-bg: #fff;
+      --card-border: rgba(0, 0, 0, 0.08);
+      --row-hover: rgba(0, 0, 0, 0.05);
+      --row-active: rgba(0, 0, 0, 0.09);
+      --card-collapsed-w: 48px;
+      --card-expanded-w: 96px;
+      --gutter: 32px;
+      --ease-out: cubic-bezier(0.32, 0.72, 0, 1);
+    }
+
+    :root[data-theme="dark"] {
+      --green: #30bf63;
+      --ink: #f2f2f3;
+      --card-bg: #2c2c2e;
+      --card-border: rgba(255, 255, 255, 0.12);
+      --row-hover: rgba(255, 255, 255, 0.08);
+      --row-active: rgba(255, 255, 255, 0.13);
+    }
+
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    html, body {
       background: transparent;
       overflow: hidden;
-      padding: 0.5rem;
+      height: 100%;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      -webkit-font-smoothing: antialiased;
+      user-select: none;
     }
 
-    /* Drag handle covers the whole pill; buttons override with no-drag */
-    .pill {
-      display: inline-flex;
-      flex-direction: column;
+    body {
+      display: flex;
       align-items: center;
-      gap: 0.5rem;
-      background: #111;
-      border-radius: 1.25rem;
-      box-shadow: 0 2px 16px rgba(0,0,0,0.4);
-      padding: 0.875rem 0.625rem;
-      opacity: 0;
-      transform: translateX(0.5rem);
-      transition: opacity 0.2s ease, transform 0.2s ease;
+      justify-content: flex-end;
+      padding-right: var(--gutter);
+    }
+
+    .card {
       cursor: grab;
-      -webkit-app-region: drag;
-    }
-
-    .pill.visible {
-      opacity: 1;
-      transform: translateX(0);
-    }
-
-    .pill.hiding {
+      width: var(--card-collapsed-w);
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 6px;
+      padding: 8px;
+      background: var(--card-bg);
+      border: 0.5px solid var(--card-border);
+      border-radius: 24px;
+      box-shadow: 0 3px 8px rgba(0, 0, 0, 0.10), 0 10px 24px rgba(0, 0, 0, 0.16);
       opacity: 0;
-      transform: translateX(0.5rem);
+      transform: translateX(8px);
+      transition:
+        width 0.24s var(--ease-out),
+        border-radius 0.24s var(--ease-out),
+        opacity 0.2s ease,
+        transform 0.2s ease;
     }
 
-    /* Xyne icon */
-    .icon {
-      width: 2rem;
-      height: 2rem;
-      border-radius: 50%;
-      overflow: hidden;
-      flex-shrink: 0;
-      -webkit-app-region: no-drag;
-    }
-    .icon img { width: 100%; height: 100%; object-fit: cover; }
+    .card.dragging { cursor: grabbing; }
 
-    /* Animated recording dot */
-    .rec-dot {
-      width: 0.5rem;
-      height: 0.5rem;
-      border-radius: 50%;
-      background: #f44;
-      flex-shrink: 0;
-      animation: pulse 1.2s ease-in-out infinite;
-      -webkit-app-region: no-drag;
-    }
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50%       { opacity: 0.3; }
+    .card.visible { opacity: 1; transform: translateX(0); }
+    .card.hiding  { opacity: 0; transform: translateX(8px); }
+
+    .card.expanded {
+      width: var(--card-expanded-w);
+      border-radius: 15px;
     }
 
-    /* Timer */
-    .timer {
-      font-size: 0.6875rem;
-      font-weight: 600;
-      color: #fff;
-      letter-spacing: 0.02em;
-      font-variant-numeric: tabular-nums;
-      -webkit-app-region: no-drag;
-    }
-
-    /* Divider */
-    .divider {
-      width: 1.5rem;
-      height: 1px;
-      background: rgba(255,255,255,0.12);
-      -webkit-app-region: no-drag;
-    }
-
-    /* Icon buttons */
-    .btn {
-      width: 2rem;
-      height: 2rem;
+    .row {
+      display: flex;
+      align-items: center;
+      height: 26px;
       border: none;
-      border-radius: 50%;
+      background: none;
+      font: inherit;
+      color: var(--ink);
+      border-radius: 9px;
+    }
+
+    button.row { cursor: pointer; }
+    button.row:hover { background: var(--row-hover); }
+    button.row:active { background: var(--row-active); }
+
+    .icon-slot {
+      width: 32px;
       display: flex;
       align-items: center;
       justify-content: center;
-      cursor: pointer;
       flex-shrink: 0;
-      -webkit-app-region: no-drag;
-      transition: background 0.15s;
     }
 
-    /* Stop — filled square icon */
-    .btn-stop {
-      background: rgba(255,255,255,0.12);
+    .label {
+      max-width: 0;
+      opacity: 0;
+      overflow: hidden;
+      white-space: nowrap;
+      font-size: 13px;
+      transition: max-width 0.24s var(--ease-out), opacity 0.16s ease;
     }
-    .btn-stop:hover { background: rgba(255,70,70,0.8); }
-    .btn-stop svg { display: block; }
 
-    /* Cancel — ✕ icon */
-    .btn-cancel {
-      background: rgba(255,255,255,0.07);
+    .card.expanded .label { max-width: 44px; opacity: 1; }
+
+    .timer {
+      color: var(--green);
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: 0.01em;
     }
-    .btn-cancel:hover { background: rgba(255,255,255,0.18); }
-    .btn-cancel svg { display: block; }
+
+    .open-label { font-weight: 500; }
+
+    .waveform {
+      display: flex;
+      align-items: center;
+      gap: 2.5px;
+      height: 14px;
+    }
+    .waveform span {
+      width: 2.5px;
+      height: 14px;
+      border-radius: 2px;
+      background: var(--green);
+      transform-origin: center;
+      animation: wave var(--dur) ease-in-out var(--delay) infinite;
+    }
+    .waveform span:nth-child(1) { --dur: 1.15s; --delay: -0.9s;  }
+    .waveform span:nth-child(2) { --dur: 0.85s; --delay: -0.35s; }
+    .waveform span:nth-child(3) { --dur: 1.35s; --delay: -0.6s;  }
+    .waveform span:nth-child(4) { --dur: 0.95s; --delay: -1.1s;  }
+    .waveform span:nth-child(5) { --dur: 1.25s; --delay: -0.2s;  }
+    @keyframes wave {
+      0%, 100% { transform: scaleY(0.30); }
+      30%      { transform: scaleY(1);    }
+      55%      { transform: scaleY(0.45); }
+      80%      { transform: scaleY(0.75); }
+    }
+
+    .stop {
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      height: 30px;
+      border: none;
+      background: transparent;
+      border-radius: 11px;
+      transition: background 0.15s ease;
+    }
+
+    .stop .icon-slot { height: 100%; }
+
+    .stop-chip {
+      width: 25px;
+      height: 25px;
+      border-radius: 9px;
+      background: var(--red);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.15s ease;
+    }
+    .stop:hover .stop-chip  { background: var(--red-hover); }
+    .stop:active .stop-chip { background: var(--red-active); }
+
+    .stop-square {
+      width: 13px;
+      height: 13px;
+      border-radius: 5px;
+      background: #fff;
+    }
+
+    .card.expanded .stop { background: var(--red); }
+    .card.expanded .stop:hover  { background: var(--red-hover); }
+    .card.expanded .stop:active { background: var(--red-active); }
+    .card.expanded .stop .stop-chip { background: transparent; }
+
+    .stop .label {
+      color: #fff;
+      font-weight: 600;
+    }
   </style>
 </head>
 <body>
-  <div class="pill" id="pill">
-    <div class="icon"><img src="./images/xyne.png" alt="Xyne" /></div>
-    <div class="rec-dot"></div>
-    <div class="timer" id="timer">0:00</div>
-    <div class="divider"></div>
+  <div class="card" id="card">
+    <div class="row">
+      <span class="icon-slot">
+        <span class="waveform"><span></span><span></span><span></span><span></span><span></span></span>
+      </span>
+      <span class="label timer" id="timer">0s</span>
+    </div>
 
-    <!-- Stop recording (saves the recording) -->
-    <button class="btn btn-stop" id="btnStop" title="Stop recording">
-      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <rect x="1" y="1" width="10" height="10" rx="2" fill="white"/>
-      </svg>
+    <button class="row" id="btnOpen" title="Open Xyne">
+      <span class="icon-slot">
+        <svg width="18" height="18" viewBox="0 0 1000 1000" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <g transform="translate(0 86.5)"><path d="M411 0.5C425 0.5 439.1 0.8 453.1 1.9C462.7 2.7 472.4 4.4 481.9 6.3C488.9 7.7 495.8 9.5 502.6 11.6C508.7 13.5 514.7 15.7 520.6 18.3C527.1 21.1 533.6 24.4 539.8 28C544.9 30.9 549.8 34.2 554.4 37.9C558.8 41.6 563.1 45.6 566.8 50.1C572.8 57.2 578.8 64.5 583.3 72.6C588.9 82.9 593.3 94.1 597 105.2C601 117.7 604 130.7 606.3 143.6C610.2 165.5 615.8 209.8 615.8 209.8C615.8 209.8 643.1 159.2 657.6 134.4C664.8 122.1 672.9 110.2 681 98.4C685.8 91.3 690.9 84.3 696.4 77.7C703.7 69.2 711.4 60.9 719.3 53C723.7 48.6 728.5 44.7 733.3 41C739.7 36.2 746.2 31.4 753.1 27.4C759.3 23.8 765.9 20.7 772.6 18C780.7 14.8 789 11.8 797.5 9.7C810.1 6.4 823 3.7 835.8 1.8C844.7 0.5 853.8 -0.3 862.7 0C874.8 0.4 887.1 1.8 899.1 4.1C908.2 5.8 917.2 8.6 925.7 12.1C934.3 15.6 942.6 20 950.3 25.1C957.4 29.8 964.3 35.2 970.1 41.4C975.8 47.4 980.6 54.4 984.7 61.6C988.8 68.9 992 76.9 994.5 85C997 93.1 998.8 101.7 999.7 110.2C1000.7 120.5 1000.7 131 1000 141.4C999.5 149.7 998 158.2 996.1 166.3C994.5 173 992.4 179.6 989.5 185.8C985.6 194.1 981.2 202.3 975.8 209.6C969.9 217.5 962.8 224.7 955.7 231.5C951.2 235.7 946 239.4 940.8 242.6C934.3 246.5 927.4 249.8 920.5 252.7C915.6 254.8 910.4 256.6 905.2 257.6C892.2 260 878.8 262.9 865.7 262.9C853.1 262.8 840.1 260.6 827.8 257.4C816 254.4 804.4 249.7 793.4 244.1C782.9 238.8 772.6 232.4 763.6 224.8C755 217.7 747.3 209 740.8 199.9C733.9 190.2 728 179.4 723.1 168.4C716.6 153.7 712.6 137.7 706.8 122.7C706.2 121.4 703.9 119.3 703.9 119.3C703.9 119.3 699.9 122.5 698.4 124.6C692.5 132.6 686.9 141.1 681.5 149.6C674.8 160.4 668.3 171.3 662.4 182.5C654.2 198.2 646.6 214.1 639.3 230.2C633.3 243.3 627.4 256.5 622.7 269.9C621.8 272.5 621.9 275.4 622.2 278.1C636.5 408.4 650.9 538.8 666.4 669C667.4 677.5 669.5 685.8 671.7 694C673.4 700.2 675.1 706.6 678 712.3C681.4 719.1 685.6 725.9 690.5 731.6C693 734.4 696.6 736.3 700 738C703.1 739.5 706.5 740.5 709.9 741.1C713.4 741.8 717 742.1 720.5 741.8C724.4 741.5 728.4 740.6 732 739.3C735 738.3 737.8 736.6 740.5 734.8C744.7 731.9 749 728.8 752.6 725.2C757.3 720.3 761.6 714.7 765.4 709.1C769.9 702.3 774 695.3 777.5 687.9C783.8 674.7 789.4 661 794.6 647.2C804.4 621.1 812.8 594.3 822.5 568.2C823.1 566.6 824.2 564.9 825.5 564C827.1 562.9 829.2 562.5 831.2 562.3C836.6 562 842.2 562.2 847.7 562.6C848.5 562.6 850.1 563.6 850.1 563.6C850.1 563.6 851 565.6 850.7 566.6C835.8 611.2 821 656.3 804.3 700.3C799.9 712 793.9 723.3 787.3 733.9C781 744.1 773.5 753.8 765.6 762.8C760.2 768.9 753.6 774 747.3 779.2C742.2 783.3 737 787.4 731.4 790.7C722 796.4 712.2 801.7 702.3 806.4C696.8 809 691.1 810.9 685.3 812.6C677.3 814.9 669.2 817.1 661 818.6C646.8 821.2 632.6 823.5 618.3 825.1C607.8 826.2 597.3 826.6 586.8 826.6C577.3 826.6 567.8 825.8 558.3 824.8C547.8 823.7 537.2 822.3 526.9 820.1C515.1 817.5 503.4 814 491.9 810.2C485 807.9 478.2 804.8 471.6 801.6C466.8 799.4 462 796.9 457.6 793.9C451 789.1 444.3 784.1 438.6 778.2C432.9 772.4 427.7 765.7 423.3 758.8C418.7 751.6 414.8 743.8 411.6 735.9C408 727 405.2 717.7 402.8 708.5C400.7 700.1 399.3 691.4 398.1 682.8C395 659.6 393.1 636.2 389.9 613.1C389.6 611.3 387.6 608.3 387.6 608.3C387.6 608.3 366.1 653.2 353.8 674.8C344 692.1 333.1 708.8 321.5 724.9C312.5 737.4 302.5 749.3 292.1 760.6C286.2 767.1 279.3 772.8 272.5 778.5C267.5 782.7 262.3 786.8 256.8 790.3C249 795.2 240.8 799.6 232.5 803.6C225.5 807 218.3 809.8 211 812.4C203 815.3 194.8 817.8 186.5 819.8C178.2 821.9 169.7 823.6 161.2 824.8C153.2 825.9 145.1 826.6 137.1 826.6C128.6 826.6 120 825.8 111.6 824.8C105 824 98.3 823 91.9 821.4C84.1 819.4 76.1 817.4 68.8 814.1C59.5 809.9 50.7 804.4 42.2 798.8C37.9 796 34.1 792.4 30.5 788.8C26.7 784.9 23.2 780.6 20.1 776.1C16.8 771.5 13.9 766.7 11.4 761.7C9.1 757 6.9 752.2 5.6 747.2C3.1 738.1 0.7 728.9 0 719.5C-0.9 707.9 -0.3 696.1 0.6 684.4C1 678.2 2.4 672.1 3.8 666C5.4 659.7 7.3 653.4 9.7 647.3C11.8 641.9 14.4 636.7 17.2 631.7C20 626.9 22.8 622 26.5 617.8C33.9 609.4 41.8 601.2 50.4 594C56.5 588.9 63.4 584.7 70.3 580.7C75 578 80.1 575.8 85.1 573.8C90.1 571.9 95.2 570.2 100.4 568.8C106 567.4 111.7 566.3 117.4 565.6C124.4 564.6 131.5 563.7 138.5 563.7C146 563.7 153.6 564.7 161 565.7C166.3 566.5 171.5 567.5 176.6 568.9C183.1 570.8 189.6 573 195.8 575.7C200.7 577.8 205.5 580.4 210 583.3C216.6 587.6 223.4 591.9 229.1 597.4C238.4 606.4 247 616.3 254.8 626.6C260.9 634.7 266.1 643.5 271.1 652.3C275.3 659.8 279.1 667.6 282.5 675.6C286.5 685.2 289.4 695.4 293.4 705C293.8 706 295.9 707.4 295.9 707.4C295.9 707.4 304 698.4 307.4 693.4C316.6 679.9 325.3 665.9 333.6 651.7C340.2 640.3 346.2 628.5 352 616.6C357.1 606.2 361.8 595.4 366.3 584.7C371 573.3 376 562 379.7 550.3C380.9 546.4 381.5 542.1 381 538C367 410.2 351.9 282.4 336.3 154.8C335.3 147.2 333.7 139.6 331.4 132.3C329.4 126.1 326.6 119.9 323.4 114.2C321.9 111.6 319.6 109.3 317.3 107.3C314.7 105.1 311.6 103.2 308.6 101.6C305.7 100 302.6 98.6 299.5 97.7C296 96.6 292.3 95.5 288.7 95.5C281.8 95.4 274.6 96 267.9 97.4C264.3 98.1 260.9 99.9 257.6 101.6C254.6 103.2 251.3 104.9 248.9 107.3C243.7 112.7 238.9 118.7 234.8 125C229.6 133 225.1 141.6 221 150.3C215.7 161.6 211.2 173.4 206.7 185.1C197.3 210.1 189.4 236 179.5 260.6C178.9 262.2 177 263.2 175.4 263.7C173 264.4 170.1 264.3 167.5 264.4C163.4 264.5 158.9 264.9 155.1 264C153.8 263.7 152 260.9 152 260.9C152 260.9 182.3 169.2 199.3 124.2C203.6 112.9 210 102.3 216 91.8C219.1 86.4 222.9 81.4 226.7 76.5C231.2 70.8 235.7 65.2 240.8 60.2C247.2 54 254.2 48.5 261.3 43.1C265.7 39.7 270.3 36.6 275.1 33.7C280.8 30.2 286.7 26.8 292.8 24C299.1 20.9 305.6 18 312.3 16C326.1 12 340.3 8.7 354.4 6.1C365.8 3.9 377.4 2.8 389 1.6C396.3 0.9 403.6 0.4 411 0.5Z" fill="currentColor"/></g>
+        </svg>
+      </span>
+      <span class="label open-label">Open</span>
     </button>
 
-    <!-- Dismiss pill (recording continues) -->
-    <button class="btn btn-cancel" id="btnCancel" title="Dismiss">
-      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <line x1="2" y1="2" x2="10" y2="10" stroke="rgba(255,255,255,0.7)" stroke-width="1.75" stroke-linecap="round"/>
-        <line x1="10" y1="2" x2="2" y2="10" stroke="rgba(255,255,255,0.7)" stroke-width="1.75" stroke-linecap="round"/>
-      </svg>
+    <button class="stop" id="btnStop" title="Stop recording">
+      <span class="icon-slot"><span class="stop-chip"><span class="stop-square"></span></span></span>
+      <span class="label">Stop</span>
     </button>
   </div>
 
   <script>
-    const pill = document.getElementById('pill');
+    const card = document.getElementById('card');
     const timerEl = document.getElementById('timer');
     let startTime = null;
     let timerInterval = null;
+    let collapseTimer = null;
 
-    function formatTime(seconds) {
-      const m = Math.floor(seconds / 60);
-      const s = seconds % 60;
+    function formatTime(totalSeconds) {
+      if (totalSeconds < 60) return totalSeconds + 's';
+      const m = Math.floor(totalSeconds / 60);
+      const s = totalSeconds % 60;
       return m + ':' + String(s).padStart(2, '0');
+    }
+
+    function renderTimer() {
+      timerEl.textContent = formatTime(Math.max(0, Math.floor((Date.now() - startTime) / 1000)));
     }
 
     function startTimer(recordingStartTime) {
       startTime = recordingStartTime || Date.now();
-      // Show elapsed time immediately, then update every second
-      timerEl.textContent = formatTime(Math.floor((Date.now() - startTime) / 1000));
-      timerInterval = setInterval(() => {
-        timerEl.textContent = formatTime(Math.floor((Date.now() - startTime) / 1000));
-      }, 1000);
+      renderTimer();
+      if (timerInterval) clearInterval(timerInterval);
+      timerInterval = setInterval(renderTimer, 1000);
     }
 
     function stopTimer() {
       if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
       startTime = null;
-      timerEl.textContent = '0:00';
     }
 
-    function reportSize() {
-      requestAnimationFrame(() => {
-        const rect = pill.getBoundingClientRect();
-        const w = Math.ceil(rect.width) + 16;
-        const h = Math.ceil(rect.height) + 16;
-        window.electronAPI?.ipcSend?.('recording-pill:content-size', w, h);
-      });
+    const DRAG_THRESHOLD = 4;
+    let pressed = null;
+    let dragging = false;
+    let didDrag = false;
+
+    card.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      pressed = { x: e.screenX, y: e.screenY };
+      didDrag = false;
+    });
+
+    window.addEventListener('mousemove', (e) => {
+      if (!pressed || dragging) return;
+      const moved =
+        Math.abs(e.screenX - pressed.x) + Math.abs(e.screenY - pressed.y);
+      if (moved > DRAG_THRESHOLD) {
+        dragging = true;
+        didDrag = true;
+        card.classList.add('dragging');
+        window.electronAPI?.recordingPill?.dragStart();
+      }
+    });
+
+    window.addEventListener('mouseup', () => {
+      pressed = null;
+      if (!dragging) return;
+      dragging = false;
+      card.classList.remove('dragging');
+      window.electronAPI?.recordingPill?.dragEnd();
+    });
+
+    card.addEventListener(
+      'click',
+      (e) => {
+        if (didDrag) {
+          e.stopPropagation();
+          e.preventDefault();
+          didDrag = false;
+        }
+      },
+      true,
+    );
+
+    let lastIgnoreMouse = null;
+    function setIgnoreMouse(ignore) {
+      if (lastIgnoreMouse === ignore) return;
+      lastIgnoreMouse = ignore;
+      window.electronAPI?.recordingPill?.setIgnoreMouse(ignore);
     }
+
+    function expand() {
+      if (collapseTimer) { clearTimeout(collapseTimer); collapseTimer = null; }
+      card.classList.add('expanded');
+      setIgnoreMouse(false);
+    }
+
+    function scheduleCollapse() {
+      if (dragging) return;
+      if (collapseTimer) clearTimeout(collapseTimer);
+      collapseTimer = setTimeout(() => {
+        collapseTimer = null;
+        card.classList.remove('expanded');
+        setIgnoreMouse(true);
+      }, 200);
+    }
+
+    card.addEventListener('mouseenter', expand);
+    card.addEventListener('mouseover', expand);
+    card.addEventListener('mouseleave', scheduleCollapse);
 
     function show(recordingStartTime) {
-      pill.classList.remove('hiding');
-      pill.classList.add('visible');
+      card.classList.remove('hiding');
+      card.classList.add('visible');
       startTimer(recordingStartTime);
-      reportSize();
     }
 
     function hide() {
-      pill.classList.add('hiding');
+      card.classList.add('hiding');
       stopTimer();
     }
+
+    function applyTheme(theme) {
+      document.documentElement.dataset.theme = theme === 'dark' ? 'dark' : 'light';
+    }
+
+    document.getElementById('btnOpen').addEventListener('click', () => {
+      window.electronAPI?.recordingPill?.openApp();
+    });
 
     document.getElementById('btnStop').addEventListener('click', () => {
       window.electronAPI?.recordingPill?.stopRecording();
     });
 
-    document.getElementById('btnCancel').addEventListener('click', () => {
-      window.electronAPI?.recordingPill?.cancelRecording();
-    });
-
     if (window.electronAPI?.recordingPill) {
       window.electronAPI.recordingPill.onShow((startTime) => show(startTime));
       window.electronAPI.recordingPill.onHide(hide);
+      window.electronAPI.recordingPill.onThemeChanged(applyTheme);
     }
   </script>
 </body>

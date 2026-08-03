@@ -3133,6 +3133,7 @@ enum NotificationType {
   EMAIL_FETCH_COMPLETED
   EMAIL_FETCH_FAILED
   CANVAS_SHARED
+  RECORDING_SHARED
   EMAIL_REPLY_RECEIVED
   MESSAGE_DELETED
   MESSAGE_EDITED
@@ -3266,6 +3267,9 @@ model Call {
   callUpdatesChannel String?   // Non-null = post call updates to this channel (Case 3); null = no broadcast
   participantCount Int?        // Denormalized total CallParticipant rows; nullable until backfilled
   participantPreviewUserIds String? // Stringified JSON: list of { userId: string , hasJoined: boolean }
+  summaryTemplateId String?
+  labels            String[]    @default([]) // Tag ids (see Tag model); no FK constraint
+  markedItems       Json[]      @default([]) // Marked moments/decisions/actions surfaced during the call
 
   // Relations
   channel      Channel?          @relation(fields: [channelId], references: [id])
@@ -3283,10 +3287,59 @@ model Call {
   @@index([isRecurring]) // Fast lookup of recurring calls
   @@index([instanceDate]) // Fast lookup by instance date
   @@index([orgName]) // Fast org call lookup
+  @@index([summaryTemplateId])
 
   @@index([status, startedAt(sort: Desc), externalId])
   @@index([status, startsAt, externalId])
   @@map("calls")
+  @@schema("public")
+}
+
+/// Polymorphic sharing record. `entityId` is resolved according to
+/// `shareableEntityType`; application services enforce target existence and access.
+/// Sharing target is exactly one of userId, userGroupId, or channelId.
+/// `shareableEntityType` and `entityUserAccess` are plain Strings (DB enums are
+/// frozen — see scripts/validate-no-new-enums.sh). Allowed values are enforced
+/// app-side via the ShareableEntityType / EntityUserAccess consts exported from
+/// packages/shared/src/zero/schema.ts (import from '@xyne/shared').
+model EntityAccess {
+  id                  String   @id @default(cuid())
+  workspaceId         String
+  shareableEntityType String   // NOTE_TAKER (see ShareableEntityType in @xyne/shared; app-validated, no DB enum)
+  entityId            String   // Polymorphic id, resolved by shareableEntityType (no FK constraint)
+
+  userId              String?  // Shared with a specific user (no FK constraint)
+  userGroupId         String?  // Shared with a user group (no FK constraint)
+  channelId           String?  // Shared with a channel (no FK constraint)
+
+  entityUserAccess    String   @default("VIEW") // VIEW/EDIT/ADMIN/REVOKED (see EntityUserAccess in @xyne/shared; app-validated, no DB enum)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@unique([workspaceId, shareableEntityType, entityId, userId])
+  @@index([workspaceId, shareableEntityType, entityId])
+  @@index([workspaceId, userId])
+  @@index([workspaceId, userGroupId])
+  @@index([workspaceId, channelId])
+  @@map("entity_access")
+  @@schema("public")
+}
+
+model SummaryTemplate {
+  id                String   @id @default(cuid())
+  workspaceId       String
+  name              String
+  autoTriggerPrompt String?
+  sections          Json
+  version           Int      @default(1)
+  systemPrompt      String
+  defaultOutlet     String   @default("EMAIL") // EMAIL/MESSAGE (see DefaultOutlet in @xyne/shared; app-validated, no DB enum)
+  createdBy         String
+  createdAt         DateTime @default(now())
+
+  @@index([workspaceId, name])
+  @@unique([workspaceId, name, version])
+  @@map("summary_templates")
   @@schema("public")
 }
 

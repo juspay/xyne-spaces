@@ -3576,6 +3576,122 @@ img.inline-emoji,
   border-top-color: #374151 !important;
 }
 
+/* Recording detail keeps summaries unframed and easy to scan. */
+.recording-summary-content.bot-markdown-content-call-summary {
+  border-left: 0;
+  margin: 0;
+  max-width: 100%;
+  padding-left: 0;
+}
+
+.recording-summary-content.bot-markdown-content-call-summary::before,
+.recording-summary-content.bot-markdown-content-call-summary h2::before {
+  display: none;
+}
+
+.recording-summary-content.bot-markdown-content-call-summary h1,
+.recording-summary-content.bot-markdown-content-call-summary h2 {
+  margin: 26px 0 10px !important;
+  padding-left: 0 !important;
+  color: hsl(var(--foreground)) !important;
+  font-size: 16px !important;
+  font-weight: 650 !important;
+  line-height: 1.35 !important;
+}
+
+.recording-summary-content.bot-markdown-content-call-summary h1:first-child,
+.recording-summary-content.bot-markdown-content-call-summary h2:first-child {
+  margin-top: 0 !important;
+}
+
+.recording-summary-content.bot-markdown-content-call-summary h3 {
+  margin: 20px 0 8px !important;
+  padding-left: 0 !important;
+  color: hsl(var(--foreground)) !important;
+  font-size: 14px !important;
+  font-weight: 650 !important;
+}
+
+.recording-summary-content.bot-markdown-content-call-summary p {
+  margin: 0 0 12px !important;
+  padding-left: 0 !important;
+  color: hsl(var(--muted-foreground)) !important;
+  font-size: 15px !important;
+  line-height: 1.62 !important;
+}
+
+.recording-summary-content.bot-markdown-content-call-summary ul,
+.recording-summary-content.bot-markdown-content-call-summary ol {
+  margin: 8px 0 14px !important;
+  padding-left: 20px !important;
+}
+
+.recording-summary-content.bot-markdown-content-call-summary li {
+  margin: 5px 0 !important;
+  color: hsl(var(--muted-foreground)) !important;
+  line-height: 1.55 !important;
+}
+
+.recording-summary-content.bot-markdown-content-call-summary strong {
+  color: hsl(var(--foreground)) !important;
+}
+
+.recording-notes-canvas-editor .thin-scrollbar {
+  padding-top: 0 !important;
+}
+
+.recording-notes-canvas-editor .bn-editor {
+  max-width: 100% !important;
+  padding: 0 0 5rem !important;
+}
+
+.detailed-summary-canvas-editor .thin-scrollbar {
+  padding-top: 0 !important;
+}
+
+.detailed-summary-canvas-editor .bn-editor {
+  max-width: 100% !important;
+  padding: 1rem 1.25rem 5rem !important;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* Headless detailed summaries use muted body copy while section headings retain
+   foreground contrast. List markers inherit this color from their content block. */
+.detailed-summary-canvas-editor
+  .bn-editor
+  .bn-block-content:is(
+    [data-content-type="paragraph"],
+    [data-content-type="bulletListItem"],
+    [data-content-type="numberedListItem"],
+    [data-content-type="checkListItem"],
+    [data-content-type="toggleListItem"],
+    [data-content-type="quote"]
+  ) {
+  color: hsl(var(--muted-foreground)) !important;
+}
+
+.detailed-summary-canvas-editor .bn-editor .bn-block-content[data-content-type="heading"] {
+  color: hsl(var(--foreground)) !important;
+}
+
+.detailed-summary-canvas-editor
+  .bn-editor
+  .bn-block
+  .bn-block-content[data-content-type="heading"][data-level="3"] {
+  font-size: 1rem;
+  line-height: 1.4;
+  padding-top: 12px;
+}
+
+.detailed-summary-canvas-editor
+  .bn-editor
+  .bn-block
+  .bn-block-content[data-content-type="heading"][data-level="4"] {
+  font-size: 0.9375rem;
+  line-height: 1.4;
+}
+
 /* Code blocks (fenced ``` ... ```) */
 .bot-markdown-content pre {
   background-color: #f6f8fa !important;
@@ -4195,6 +4311,9 @@ img.inline-emoji,
 .rec-overlay-waveform-bar {
   height: var(--rec-wave-height, 6%);
   opacity: var(--rec-wave-opacity, 0.4);
+  transition:
+    height 110ms linear,
+    opacity 110ms linear;
 }
 
 /* Live reasoning streaming: fade in each newly-arrived chunk at the writing edge
