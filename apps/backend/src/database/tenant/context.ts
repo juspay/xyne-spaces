@@ -72,6 +72,18 @@ function resolve(source: CtxSource | undefined): TenantCtx | null {
   };
 }
 
+/**
+ * True only while an HTTP request's own context is open — i.e. a principal is asking on
+ * their own behalf, so the table's per-user ACL applies on top of workspace scope.
+ *
+ * Everything else (jobs, workers, webhooks, sync side effects, maintenance sweeps) opens an
+ * explicit context and gets workspace scope alone: those callers act FOR the workspace, not
+ * as one of its members, so a per-user predicate would match nothing.
+ */
+export function isRequestContext(): boolean {
+  return storage.getStore()?.kind === 'request';
+}
+
 /** Read the current tenant context, or null when none is open / resolvable. */
 export function getContextOrNull(): TenantCtx | null {
   return resolve(storage.getStore());
