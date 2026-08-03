@@ -28,34 +28,45 @@ export class SubTicketsACL extends BaseQueryACL<
   }
 
   async getMutateWhere(): Promise<Prisma.SubTicketWhereInput> {
-    return {
-      workspaceId: this.ctx.workspaceId,
-      OR: [
-        { mappedTicketId: null },
-        {
-          mappedTicket: {
-            channel: {
-              OR: [
-                {
-                  visibility: 'PRIVATE',
-                  participants: { some: { userId: this.ctx.userId } },
-                },
-                {
-                  visibility: 'PUBLIC',
-                  project: {
-                    channels: {
-                      some: {
-                        visibility: 'PUBLIC',
-                        participants: { some: { userId: this.ctx.userId } },
-                      },
+    const arms: Prisma.SubTicketWhereInput[] = [
+      { mappedTicketId: null },
+      {
+        mappedTicket: {
+          channel: {
+            OR: [
+              {
+                visibility: 'PRIVATE',
+                participants: { some: { userId: this.ctx.userId } },
+              },
+              {
+                visibility: 'PUBLIC',
+                project: {
+                  channels: {
+                    some: {
+                      visibility: 'PUBLIC',
+                      participants: { some: { userId: this.ctx.userId } },
                     },
                   },
                 },
-              ],
-            },
+              },
+            ],
           },
         },
-      ],
+      },
+    ]
+
+    if (isGuestContext(this.ctx)) {
+      const ticketIds = await getAccessibleTicketIds(this.prisma, this.ctx.userId, this.ctx)
+
+      arms.push(
+        { mappedTicketId: { in: ticketIds } },
+        { ticketMappings: { some: { ticketId: { in: ticketIds } } } }
+      )
+    }
+
+    return {
+      workspaceId: this.ctx.workspaceId,
+      OR: arms,
     }
   }
 
