@@ -953,7 +953,7 @@ export class ChannelController {
 
       // For DM channels, check if channel already exists
       if (scopeType === 'DM' && scopeId) {
-        const existingDM = await this.channelRepository.getDMChannel(userId, scopeId);
+        const existingDM = await this.channelRepository.getDMChannel(userId, scopeId, req.user!.workspaceId!);
         if (existingDM) {
           res.status(200).json({
             message: 'DM channel already exists',
@@ -2020,7 +2020,7 @@ export class ChannelController {
       // Handle self-DM case
       if (isSelfDm) {
         // Check if self-DM already exists
-        const existingSelfDm = await this.channelRepository.getDMChannel(currentUserId, currentUserId);
+        const existingSelfDm = await this.channelRepository.getDMChannel(currentUserId, currentUserId, workspaceId);
         if (existingSelfDm) {
           const conversations = await this.conversationRepository.getChannelConversations(existingSelfDm.id);
           const participants = await this.channelParticipantRepository.getChannelParticipants(existingSelfDm.id);
@@ -2137,7 +2137,7 @@ export class ChannelController {
         const targetUser = participantUsers[0];
 
         // Check if DM already exists
-        const existingDM = await this.channelRepository.getDMChannel(currentUserId, targetUserId);
+        const existingDM = await this.channelRepository.getDMChannel(currentUserId, targetUserId, workspaceId);
         if (existingDM) {
           const conversations = await this.conversationRepository.getChannelConversations(existingDM.id);
           const participants = await this.channelParticipantRepository.getChannelParticipants(existingDM.id);
@@ -2252,7 +2252,7 @@ export class ChannelController {
         const allMemberIds = [currentUserId, ...otherParticipantIds].sort();
 
         // Check for existing group DM with same members
-        const existingGroupDM = await this.channelRepository.getGroupChannelByMembers(allMemberIds);
+        const existingGroupDM = await this.channelRepository.getGroupChannelByMembers(allMemberIds, workspaceId);
         if (existingGroupDM) {
           const conversations = await this.conversationRepository.getChannelConversations(existingGroupDM.id);
           const participants = await this.channelParticipantRepository.getChannelParticipants(existingGroupDM.id);
@@ -2497,7 +2497,7 @@ export class ChannelController {
       }
 
       // 6. Check for existing GROUP_DM with same participants
-      const existingGroupDM = await this.channelRepository.getGroupChannelByMembers(allParticipantIds);
+      const existingGroupDM = await this.channelRepository.getGroupChannelByMembers(allParticipantIds, workspaceId);
 
       // 7. Handle different scenarios
       if (existingGroupDM) {

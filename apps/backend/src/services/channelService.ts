@@ -19,7 +19,7 @@ export class ChannelService {
   async ensureSelfDmExists(userId: string, workspaceId: string): Promise<string> {
     try {
 
-      const existingSelfDm = await this.channelRepository.getDMChannel(userId, userId);
+      const existingSelfDm = await this.channelRepository.getDMChannel(userId, userId, workspaceId);
 
       if (existingSelfDm) {
         logger.debug(`[ChannelService] Self-DM already exists for user ${userId}: ${existingSelfDm.id}`);
@@ -55,9 +55,9 @@ export class ChannelService {
     }
   }
 
-  async getSelfDmId(userId: string): Promise<string | null> {
+  async getSelfDmId(userId: string, workspaceId: string): Promise<string | null> {
     try {
-      const selfDm = await this.channelRepository.getDMChannel(userId, userId);
+      const selfDm = await this.channelRepository.getDMChannel(userId, userId, workspaceId);
       return selfDm?.id ?? null;
     } catch (error) {
       logger.error(`[ChannelService] Error getting self-DM for user ${userId}:`, error);

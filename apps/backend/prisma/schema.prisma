@@ -2267,6 +2267,7 @@ model Channel {
 
   @@index([workspaceId, id])
   @@index([workspaceId, name, id])
+  @@unique([workspaceId, name, scopeType])
   @@map("channels")
   @@schema("public")
 }

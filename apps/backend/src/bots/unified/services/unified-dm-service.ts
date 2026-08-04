@@ -32,7 +32,7 @@ class UnifiedDMService {
    */
   async getOrCreateBotDM(userId: string, botUserId: string, workspaceId: string): Promise<Channel> {
     // Check for existing DM
-    const existingDM = await channelRepository.getDMChannel(userId, botUserId);
+    const existingDM = await channelRepository.getDMChannel(userId, botUserId, workspaceId);
     if (existingDM) {
       // Ensure participants exist (fix for channels created without participants)
       const participants = await channelParticipantRepository.getChannelParticipants(existingDM.id);

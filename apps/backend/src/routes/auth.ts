@@ -48,7 +48,7 @@ router.get('/validate', authV2Middleware.authenticate, async (req, res) => {
   if (pendingInvitation) {
     logger.warn(`[DEBUG] [/validate] ⚠️ User already has a session but pending_invitation_id cookie exists (${pendingInvitation}). OAuth callback will be skipped — invitation will NOT be auto-accepted via callback flow.`);
   }
-  const selfDmChannelId = await channelService.getSelfDmId(req.user!.id);
+  const selfDmChannelId = await channelService.getSelfDmId(req.user!.id, req.user!.workspaceId!);
   const workspace = await prisma.workspace.findUnique({
     where: { id: req.user!.workspaceId },
     select: { landingChannelId: true },
