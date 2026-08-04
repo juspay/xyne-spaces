@@ -71,4 +71,20 @@ export interface InputBoxProps {
   /** Extra buttons rendered in the left side of the desktop bottom action bar, after the # button */
   bottomLeftSlot?: React.ReactNode;
   disableDraftUpload?: boolean;
+  /**
+   * Terminal/Slack-style message recall. When the caret is on the first visual
+   * line and no suggestion menu is open, ArrowUp calls this with the current
+   * editor HTML and, if it returns a string, that HTML is loaded into the editor
+   * (return `null` to leave the editor untouched). Desktop only.
+   */
+  onRecallPrev?: (currentHtml: string) => string | null;
+  /**
+   * Counterpart to {@link onRecallPrev}: ArrowDown on the last visual line moves
+   * forward through recalled messages and finally restores the live draft. An
+   * empty string is a valid result (restore an empty draft); `null` means do
+   * nothing.
+   */
+  onRecallNext?: (currentHtml: string) => string | null;
+  /** Called when the user edits the text, so recall navigation can reset. */
+  onRecallReset?: () => void;
 }

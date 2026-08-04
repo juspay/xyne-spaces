@@ -191,6 +191,9 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       sendDisabled = false,
       bottomLeftSlot,
       disableDraftUpload = false,
+      onRecallPrev,
+      onRecallNext,
+      onRecallReset,
     },
 
     ref,
@@ -633,6 +636,9 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         setIsInCodeBlock(editor.isActive('codeBlock'));
         handleTyping?.();
         notifyTyping();
+        // A real keystroke abandons recall navigation so the edited text becomes
+        // the new live draft.
+        onRecallReset?.();
 
         // Quick emoji size reset: if text clearly has non-emoji chars, switch to
         // small immediately so the user doesn't see large text while typing.
@@ -802,6 +808,76 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             event.preventDefault();
             void handleSend();
             return true;
+          }
+
+          // Message-history recall (desktop only). ArrowUp on the first visual
+          // line loads the previous sent message; ArrowDown on the last visual
+          // line steps forward and finally restores the live draft. Gated so it
+          // never hijacks caret movement inside a multi-line draft, an active
+          // selection, or an open suggestion menu.
+          if (
+            (event.key === 'ArrowUp' || event.key === 'ArrowDown') &&
+            (onRecallPrev || onRecallNext) &&
+            window.innerWidth >= 500 &&
+            !event.shiftKey &&
+            !event.metaKey &&
+            !event.ctrlKey &&
+            !event.altKey
+          ) {
+            const mentionState = mentionPluginKey.getState(view.state);
+            const channelMentionState = channelMentionPluginKey.getState(view.state);
+            const commandState = commandPluginKey.getState(view.state);
+            const emojiSelectorState = emojiSelectorPluginKey.getState(view.state);
+            const anyMenuOpen =
+              (mentionState?.isOpen && mentionState.items.length > 0) ||
+              (channelMentionState?.isOpen && channelMentionState.items.length > 0) ||
+              (commandState?.isOpen && commandState.items.length > 0) ||
+              (emojiSelectorState?.isOpen && emojiSelectorState.items.length > 0);
+
+            const { selection, doc } = view.state;
+            if (!anyMenuOpen && selection.empty && editor) {
+              // Determine whether the caret sits on the first / last visual line
+              // so recall only triggers when ArrowUp/Down would otherwise have
+              // nowhere to move vertically. coordsAtPos can throw on a detached
+              // view, so guard it.
+              let atFirstLine = true;
+              let atLastLine = true;
+              try {
+                const cursor = view.coordsAtPos(selection.from);
+                const start = view.coordsAtPos(1);
+                const end = view.coordsAtPos(Math.max(1, doc.content.size - 1));
+                atFirstLine = Math.abs(cursor.top - start.top) < 5;
+                atLastLine = Math.abs(cursor.bottom - end.bottom) < 5;
+              } catch {
+                atFirstLine = true;
+                atLastLine = true;
+              }
+
+              const currentHtml = sanitizeHtmlContent(editor.getHTML());
+              if (event.key === 'ArrowUp' && atFirstLine && onRecallPrev) {
+                const recalled = onRecallPrev(currentHtml);
+                if (recalled !== null && recalled !== undefined) {
+                  event.preventDefault();
+                  editor.commands.setContent(recalled, { emitUpdate: false });
+                  editor.commands.focus('end');
+                  lastAppliedValueRef.current = sanitizeHtmlContent(editor.getHTML());
+                  setContent(editor.getText().trim().length > 0 ? 'has-content' : '');
+                  updateEmojiSizeClass(editor);
+                  return true;
+                }
+              } else if (event.key === 'ArrowDown' && atLastLine && onRecallNext) {
+                const recalled = onRecallNext(currentHtml);
+                if (recalled !== null && recalled !== undefined) {
+                  event.preventDefault();
+                  editor.commands.setContent(recalled, { emitUpdate: false });
+                  editor.commands.focus('end');
+                  lastAppliedValueRef.current = sanitizeHtmlContent(editor.getHTML());
+                  setContent(editor.getText().trim().length > 0 ? 'has-content' : '');
+                  updateEmojiSizeClass(editor);
+                  return true;
+                }
+              }
+            }
           }
 
           return false;
