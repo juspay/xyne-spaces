@@ -446,7 +446,12 @@ export const EmailComposer = ({
 
   const hasEmailBody = useMemo(() => stripHtml(emailContent).trim().length > 0, [emailContent]);
   const isDirty = emailContent !== lastLoadedContentRef.current;
-  const hasInlineImages = useMemo(() => /\sdata-att-id=["']/i.test(emailContent), [emailContent]);
+  const hasInlineImages = useMemo(
+    () =>
+      /\sdata-att-id=["']/i.test(emailContent) ||
+      /\/attachments\/[^/"'\s]+\/download/i.test(emailContent),
+    [emailContent],
+  );
 
   const toInputRef = React.useRef<HTMLInputElement>(null);
   const ccInputRef = React.useRef<HTMLInputElement>(null);
@@ -1433,7 +1438,12 @@ export const EmailComposer = ({
       let imgMatch: RegExpExecArray | null;
       while ((imgMatch = imgRe.exec(emailContent)) !== null) {
         const attMatch = /data-att-id="([^"]+)"/i.exec(imgMatch[0]);
-        if (attMatch?.[1]) inlineIdsFromBody.add(attMatch[1]);
+        if (attMatch?.[1]) {
+          inlineIdsFromBody.add(attMatch[1]);
+          continue;
+        }
+        const srcMatch = /\ssrc="[^"]*\/attachments\/([^/"]+)\/download[^"]*"/i.exec(imgMatch[0]);
+        if (srcMatch?.[1]) inlineIdsFromBody.add(srcMatch[1]);
       }
       const attachmentIds = Array.from(new Set([...regularAttachmentIds, ...inlineIdsFromBody]));
 
