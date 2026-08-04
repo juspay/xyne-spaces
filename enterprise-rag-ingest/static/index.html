@@ -20,6 +20,7 @@
         --muted: #8d9ca0;
         --green: #68f7b2;
         --green-soft: rgba(104, 247, 178, 0.12);
+        --blue: #74c7ff;
         --amber: #ffc66d;
         --red: #ff7d7d;
       }
@@ -54,12 +55,17 @@
       .panel-title { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; margin-bottom: 22px; }
       .panel-title h2 { margin: 0; font-size: 15px; letter-spacing: -.01em; }
       .panel-title span { color: var(--muted); font-size: 12px; }
+      .panel-title select { width: auto; min-width: 190px; padding: 8px 34px 8px 11px; font-size: 12px; text-transform: capitalize; }
 
       .progress-number { font-variant-numeric: tabular-nums; font-size: clamp(54px, 9vw, 92px); font-weight: 760; letter-spacing: -.075em; line-height: .92; }
       .progress-number span { color: var(--muted); font-size: .3em; letter-spacing: -.03em; margin-left: 8px; }
       .bar { height: 8px; margin: 25px 0 13px; overflow: hidden; border-radius: 99px; background: #202a31; }
       .bar-fill { width: 0%; height: 100%; background: linear-gradient(90deg, #35db93, var(--green)); border-radius: inherit; transition: width .4s ease; box-shadow: 0 0 22px rgba(104,247,178,.35); }
+      .bar-fill.vespa { background: linear-gradient(90deg, #438dff, var(--blue)); box-shadow: 0 0 22px rgba(116,199,255,.35); }
       .bar-meta { display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+      .vespa-progress { margin-bottom: 18px; }
+      .vespa-progress .progress-number { color: var(--blue); }
+      .progress-note { margin-top: 15px; color: var(--muted); font-size: 12px; line-height: 1.5; }
 
       .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
       label { display: grid; gap: 7px; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; }
@@ -67,10 +73,11 @@
       input:focus, select:focus { border-color: var(--green); box-shadow: 0 0 0 3px var(--green-soft); }
       .source-field { grid-column: 1 / -1; }
       .source-hint { color: var(--muted); font-size: 11px; font-weight: 500; letter-spacing: 0; text-transform: none; }
-      .actions { display: grid; grid-template-columns: 1fr auto; gap: 10px; margin-top: 16px; }
+      .actions { display: grid; grid-template-columns: 1fr auto auto; gap: 10px; margin-top: 16px; }
       button { border: 0; border-radius: 11px; padding: 12px 17px; cursor: pointer; font-weight: 800; }
       button:disabled { opacity: .42; cursor: not-allowed; }
       .start { color: #03130c; background: var(--green); }
+      .resume { color: var(--blue); background: rgba(116,199,255,.08); border: 1px solid rgba(116,199,255,.35); }
       .stop { color: var(--text); background: transparent; border: 1px solid var(--line); }
       .form-error { min-height: 18px; margin-top: 11px; color: var(--red); font-size: 12px; }
 
@@ -100,6 +107,20 @@
       .count-card strong { display: block; font-size: 21px; font-variant-numeric: tabular-nums; }
       .count-card span { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; text-transform: capitalize; }
 
+      .queue-panel { margin-bottom: 18px; }
+      .queue-summary { display: flex; flex-wrap: wrap; gap: 9px; margin-bottom: 14px; }
+      .queue-pill { padding: 7px 10px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: #0a0e11; font-size: 12px; font-variant-numeric: tabular-nums; }
+      .queue-pill strong { color: var(--text); }
+      .queue-pill.pending strong { color: var(--amber); }
+      .queue-pill.active strong { color: var(--blue); }
+      .queue-pill.failed strong { color: var(--red); }
+      .queue-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+      .queue-card { padding: 15px; border: 1px solid var(--line); border-radius: 13px; background: #0a0e11; }
+      .queue-card h3 { margin: 0 0 12px; color: var(--blue); font-size: 13px; overflow-wrap: anywhere; }
+      .queue-counts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+      .queue-counts strong { display: block; font-size: 18px; font-variant-numeric: tabular-nums; }
+      .queue-counts span { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .05em; }
+
       .browser-panel { margin-top: 18px; }
       .schema-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
       .schema-tab { padding: 8px 11px; color: var(--muted); background: #0a0e11; border: 1px solid var(--line); border-radius: 999px; font-size: 12px; }
@@ -125,14 +146,14 @@
       @keyframes pulse { 50% { transform: scale(.75); opacity: .65; } }
 
       @media (max-width: 820px) {
-        .hero, .detail-grid, .data-grid, .document-layout { grid-template-columns: 1fr; }
+        .hero, .detail-grid, .data-grid, .document-layout, .queue-grid { grid-template-columns: 1fr; }
         .metrics { grid-template-columns: repeat(3, 1fr); }
         header { align-items: flex-start; flex-direction: column; }
       }
 
       @media (max-width: 520px) {
         .shell { width: min(100% - 24px, 1180px); padding-top: 24px; }
-        .metrics, .form-grid, .timing, .count-grid { grid-template-columns: 1fr; }
+        .metrics, .form-grid, .timing, .count-grid, .actions { grid-template-columns: 1fr; }
         .error-row { grid-template-columns: 1fr; }
       }
     </style>
@@ -149,7 +170,7 @@
 
       <section class="hero">
         <article class="panel">
-          <div class="panel-title"><h2>Run progress</h2><span id="rowRange">Rows —</span></div>
+          <div class="panel-title"><h2>Submission progress</h2><span id="rowRange">Rows —</span></div>
           <div class="progress-number"><b id="progressPercent">0.0</b><span>%</span></div>
           <div class="bar"><div class="bar-fill" id="progressBar"></div></div>
           <div class="bar-meta"><span id="progressCount">0 of 0 attempted</span><span id="remainingCount">0 remaining</span></div>
@@ -169,10 +190,19 @@
           </div>
           <div class="actions">
             <button class="start" id="startButton">Start ingestion</button>
+            <button class="resume" id="resumeButton" disabled>Resume from last</button>
             <button class="stop" id="stopButton" disabled>Stop</button>
           </div>
           <div class="form-error" id="formError"></div>
         </aside>
+      </section>
+
+      <section class="panel vespa-progress">
+        <div class="panel-title"><h2>Vespa indexing progress</h2><select id="vespaProgressSource" aria-label="Vespa progress source"><option value="all">All sources</option></select></div>
+        <div class="progress-number"><b id="vespaProgressPercent">—</b><span>%</span></div>
+        <div class="bar"><div class="bar-fill vespa" id="vespaProgressBar"></div></div>
+        <div class="bar-meta"><span id="vespaProgressCount">Waiting for Xyne stats</span><span id="vespaRemainingCount">— remaining</span></div>
+        <div class="progress-note">Counts only documents confirmed in Vespa. Queued Redis jobs are not counted until the Xyne worker finishes indexing them.</div>
       </section>
 
       <section class="metrics">
@@ -182,6 +212,13 @@
         <article class="metric"><div class="metric-label">Messages</div><div class="metric-value" id="messageDocuments">—</div></article>
         <article class="metric"><div class="metric-label">All Vespa docs</div><div class="metric-value" id="vespaDocuments">—</div></article>
         <article class="metric"><div class="metric-label">Failed this run</div><div class="metric-value failure" id="failed">0</div></article>
+      </section>
+
+      <section class="panel queue-panel">
+        <div class="panel-title"><h2>Vespa queue monitor</h2><span>Live Redis/Bull queues</span></div>
+        <div class="queue-summary" id="queueSummary"><span class="queue-pill">Waiting for queue stats</span></div>
+        <div class="queue-grid" id="queueGrid"><div class="empty">Queue data will appear after the dashboard service reloads.</div></div>
+        <div class="progress-note">Waiting and delayed jobs are queued but not yet confirmed in Vespa. Queue counts are infrastructure-wide and are not limited to the source selected above.</div>
       </section>
 
       <section class="detail-grid">
@@ -248,6 +285,7 @@
       let documentContinuation = null;
       let loadedDocuments = [];
       let datasetSummary = null;
+      let vespaProgressSelectionInitialized = false;
 
       function duration(seconds) {
         if (seconds == null || !Number.isFinite(seconds)) return "—";
@@ -266,6 +304,10 @@
         $("statusBadge").dataset.state = state.status;
         $("statusText").textContent = state.status.charAt(0).toUpperCase() + state.status.slice(1);
         $("startButton").disabled = active;
+        $("resumeButton").disabled = active || !state.can_resume;
+        $("resumeButton").textContent = state.resume_row == null
+          ? "Resume from last"
+          : `Resume row ${number.format(state.resume_row)}`;
         $("stopButton").disabled = !active || state.status === "stopping";
         $("datasetTotal").textContent = `${number.format(state.dataset_rows)} rows available`;
         $("workspaceId").textContent = `Workspace ${state.workspace_id || "—"}`;
@@ -286,6 +328,45 @@
         $("rowRange").textContent = state.requested ? `${sourceLabel}rows ${number.format(state.start_row)}–${number.format(state.end_row - 1)}` : "Rows —";
 
         const bySchema = state.vespa_by_schema || {};
+        const selectedVespaSource = $("vespaProgressSource").value;
+        const vespaSource = vespaProgressSelectionInitialized
+          ? (selectedVespaSource === "all" ? null : selectedVespaSource)
+          : (state.vespa_progress_source || state.source_type || null);
+        const sourceSchemaFallback = { slack: "chat_message", gmail: "mail" };
+        const serverProgressSource = state.vespa_progress_source || null;
+        const serverProgressMatchesSelection = vespaSource === serverProgressSource;
+        let vespaTotal = serverProgressMatchesSelection ? state.vespa_progress_total : null;
+        let vespaIndexed = serverProgressMatchesSelection ? state.vespa_progress_indexed : null;
+        if (vespaTotal == null) {
+          vespaTotal = vespaSource
+            ? datasetSummary?.by_source_type?.[vespaSource]
+            : state.dataset_rows;
+        }
+        if (vespaIndexed == null) {
+          vespaIndexed = vespaSource
+            ? state.vespa_by_source?.[vespaSource]
+            : state.vespa_source_rows;
+        }
+        if (vespaIndexed == null && sourceSchemaFallback[vespaSource]) {
+          vespaIndexed = bySchema[sourceSchemaFallback[vespaSource]];
+        }
+        const vespaPercent = serverProgressMatchesSelection && state.vespa_percentage != null
+          ? Number(state.vespa_percentage)
+          : (vespaTotal ? Number(vespaIndexed || 0) / Number(vespaTotal) * 100 : null);
+        const vespaRemaining = serverProgressMatchesSelection && state.vespa_progress_remaining != null
+          ? state.vespa_progress_remaining
+          : (vespaTotal != null && vespaIndexed != null
+            ? Math.max(0, Number(vespaTotal) - Number(vespaIndexed))
+            : null);
+        $("vespaProgressPercent").textContent = vespaPercent == null ? "—" : vespaPercent.toFixed(1);
+        $("vespaProgressBar").style.width = `${Math.min(100, Math.max(0, vespaPercent || 0))}%`;
+        $("vespaProgressCount").textContent = vespaIndexed == null || vespaTotal == null
+          ? "Waiting for Xyne stats"
+          : `${number.format(vespaIndexed)} of ${number.format(vespaTotal)} indexed`;
+        $("vespaRemainingCount").textContent = vespaRemaining == null
+          ? "— remaining"
+          : `${number.format(vespaRemaining)} remaining`;
+
         $("allDatasetRows").textContent = number.format(state.dataset_rows || 0);
         $("vespaSourceRows").textContent = state.vespa_source_rows == null ? "—" : number.format(state.vespa_source_rows);
         $("datasetRemaining").textContent = state.dataset_remaining == null ? "—" : number.format(state.dataset_remaining);
@@ -295,6 +376,7 @@
         $("vespaComposition").innerHTML = schemas.map(([schema, label]) =>
           `<div class="count-card"><strong>${number.format(bySchema[schema] || 0)}</strong><span>${escapeHtml(label)}</span></div>`
         ).join("");
+        renderQueues(state.vespa_queues || {}, state.vespa_queue_error);
         renderSchemaTabs(bySchema);
         $("rate").textContent = `${Number(state.rate_per_second || 0).toFixed(2)}/s`;
         $("elapsed").textContent = duration(state.elapsed_seconds);
@@ -322,6 +404,38 @@
         return String(value ?? "").replace(/[&<>'"]/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"})[char]);
       }
 
+      function renderQueues(queues, queueError) {
+        const entries = Object.entries(queues || {}).sort(([left], [right]) => left.localeCompare(right));
+        if (!entries.length) {
+          $("queueSummary").innerHTML = `<span class="queue-pill${queueError ? " failed" : ""}">${escapeHtml(queueError || "Waiting for queue stats")}</span>`;
+          $("queueGrid").innerHTML = '<div class="empty">Queue data will appear after the dashboard service reloads.</div>';
+          return;
+        }
+        const totals = entries.reduce((result, [, counts]) => {
+          for (const key of ["waiting", "active", "completed", "failed", "delayed"]) {
+            result[key] += Number(counts[key] || 0);
+          }
+          return result;
+        }, { waiting: 0, active: 0, completed: 0, failed: 0, delayed: 0 });
+        $("queueSummary").innerHTML = `
+          <span class="queue-pill pending"><strong>${number.format(totals.waiting + totals.delayed)}</strong> pending</span>
+          <span class="queue-pill active"><strong>${number.format(totals.active)}</strong> active</span>
+          <span class="queue-pill"><strong>${number.format(totals.completed)}</strong> completed</span>
+          <span class="queue-pill failed"><strong>${number.format(totals.failed)}</strong> failed</span>`;
+        $("queueGrid").innerHTML = entries.map(([name, counts]) => `
+          <article class="queue-card">
+            <h3>${escapeHtml(name)}</h3>
+            <div class="queue-counts">
+              <div><strong>${number.format(Number(counts.waiting || 0))}</strong><span>Waiting</span></div>
+              <div><strong>${number.format(Number(counts.active || 0))}</strong><span>Active</span></div>
+              <div><strong>${number.format(Number(counts.delayed || 0))}</strong><span>Delayed</span></div>
+              <div><strong>${number.format(Number(counts.completed || 0))}</strong><span>Done</span></div>
+              <div><strong>${number.format(Number(counts.failed || 0))}</strong><span>Failed</span></div>
+              <div><strong>${number.format(Number(counts.total || 0))}</strong><span>Total</span></div>
+            </div>
+          </article>`).join("");
+      }
+
       function renderSchemaTabs(bySchema = {}) {
         $("schemaTabs").innerHTML = schemas.map(([schema, label]) =>
           `<button class="schema-tab ${schema === selectedSchema ? "active" : ""}" data-schema="${schema}">${escapeHtml(label)} · ${number.format(bySchema[schema] || 0)}</button>`
@@ -342,6 +456,18 @@
           $("sourceType").innerHTML = '<option value="">All sources · dataset order</option>' + sources
             .map((source) => `<option value="${escapeHtml(source)}">${escapeHtml(source.replaceAll("_", " "))} · ${number.format(counts[source])} rows</option>`)
             .join("");
+          $("vespaProgressSource").innerHTML = '<option value="all">All sources</option>' + sources
+            .map((source) => `<option value="${escapeHtml(source)}">${escapeHtml(source.replaceAll("_", " "))}</option>`)
+            .join("");
+          if (latestState?.source_type && counts[latestState.source_type] != null) {
+            $("sourceType").value = latestState.source_type;
+          }
+          if (!vespaProgressSelectionInitialized) {
+            $("vespaProgressSource").value = latestState?.source_type && counts[latestState.source_type] != null
+              ? latestState.source_type
+              : "all";
+            vespaProgressSelectionInitialized = true;
+          }
           $("datasetComposition").innerHTML = Object.entries(counts)
             .sort((a, b) => b[1] - a[1])
             .map(([source, count]) => `<div class="count-card"><strong>${number.format(count)}</strong><span>${escapeHtml(source.replaceAll("_", " "))}</span></div>`)
@@ -456,6 +582,15 @@
         }
       });
 
+      $("resumeButton").addEventListener("click", async () => {
+        try {
+          $("formError").textContent = "";
+          await post("/api/resume");
+        } catch (error) {
+          $("formError").textContent = error.message;
+        }
+      });
+
       $("sourceType").addEventListener("change", () => {
         const source = $("sourceType").value;
         const range = datasetSummary?.source_ranges?.[source];
@@ -472,6 +607,11 @@
         $("startRow").max = end;
         $("limit").max = end - start + 1;
         $("sourceHint").textContent = `Only ${source.replaceAll("_", " ")} rows ${number.format(start)}–${number.format(end)} will be submitted.`;
+      });
+
+      $("vespaProgressSource").addEventListener("change", () => {
+        vespaProgressSelectionInitialized = true;
+        if (latestState) render(latestState);
       });
 
       $("stopButton").addEventListener("click", async () => {

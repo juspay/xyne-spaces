@@ -615,12 +615,17 @@ const countByCollection = async (collectionId: string): Promise<number> => {
 
 export const getEnterpriseRagDocumentCounts = async (
   workspaceId: string,
-): Promise<{ total: number; sourceRows: number; bySchema: Record<string, number> }> => {
+): Promise<{
+  total: number;
+  sourceRows: number;
+  bySchema: Record<string, number>;
+  bySource: Record<EnterpriseRagSourceType, number>;
+}> => {
   const channels = await db.channel.findMany({
     where: { workspaceId, name: { startsWith: `${RESOURCE_PREFIX} ` } },
     select: { id: true, name: true },
   });
-  const bySource = new Map(
+  const channelBySource = new Map(
     channels.map(channel => [channel.name.slice(`${RESOURCE_PREFIX} `.length), channel.id]),
   );
   const collections = await db.collection.findMany({
@@ -629,21 +634,38 @@ export const getEnterpriseRagDocumentCounts = async (
       name: { startsWith: `${RESOURCE_PREFIX} `, endsWith: ' KB' },
       deletedAt: null,
     },
-    select: { id: true },
+    select: { id: true, name: true },
   });
 
-  const [messages, mails, gmailTickets, jiraTickets, linearTickets, transcripts, kbFiles] = await Promise.all([
-    bySource.get('slack') ? countByChannel(messageSchema, bySource.get('slack')!) : 0,
-    bySource.get('gmail') ? countByChannel(mailSchema, bySource.get('gmail')!) : 0,
-    bySource.get('gmail') ? countByChannel(ticketSchema, bySource.get('gmail')!) : 0,
-    bySource.get('jira') ? countByChannel(ticketSchema, bySource.get('jira')!) : 0,
-    bySource.get('linear') ? countByChannel(ticketSchema, bySource.get('linear')!) : 0,
-    bySource.get('fireflies') ? countByChannel(fileSchema, bySource.get('fireflies')!) : 0,
-    Promise.all(collections.map(collection => countByCollection(collection.id))).then(counts =>
-      counts.reduce((sum, count) => sum + count, 0),
-    ),
-  ]);
+  const [messages, mails, gmailTickets, jiraTickets, linearTickets, transcripts, collectionCounts] = await Promise.all([
+    channelBySource.get('slack') ? countByChannel(messageSchema, channelBySource.get('slack')!) : 0,
+    channelBySource.get('gmail') ? countByChannel(mailSchema, channelBySource.get('gmail')!) : 0,
+    channelBySource.get('gmail') ? countByChannel(ticketSchema, channelBySource.get('gmail')!) : 0,
+    channelBySource.get('jira') ? countByChannel(ticketSchema, channelBySource.get('jira')!) : 0,
+    channelBySource.get('linear') ? countByChannel(ticketSchema, channelBySource.get('linear')!) : 0,
+    channelBySource.get('fireflies') ? countByChannel(fileSchema, channelBySource.get('fireflies')!) : 0,
+    Promise.all(collections.map(async (collection): Promise<[string, number]> => {
+      const source = collection.name
+        .slice(`${RESOURCE_PREFIX} `.length, -' KB'.length);
+      return [source, await countByCollection(collection.id)];
+    })),
+  ] as const);
 
+  const bySource = Object.fromEntries(
+    ENTERPRISE_RAG_SOURCE_TYPES.map(source => [source, 0]),
+  ) as Record<EnterpriseRagSourceType, number>;
+  bySource.slack = messages;
+  bySource.gmail = mails;
+  bySource.jira = jiraTickets;
+  bySource.linear = linearTickets;
+  bySource.fireflies = transcripts;
+  for (const [source, count] of collectionCounts) {
+    if (ENTERPRISE_RAG_SOURCE_TYPES.includes(source as EnterpriseRagSourceType)) {
+      bySource[source as EnterpriseRagSourceType] += count;
+    }
+  }
+
+  const kbFiles = collectionCounts.reduce((sum, [, count]) => sum + count, 0);
   const tickets = gmailTickets + jiraTickets + linearTickets;
   const files = transcripts + kbFiles;
   const bySchema = {
@@ -654,9 +676,11 @@ export const getEnterpriseRagDocumentCounts = async (
     sam_transcript: 0,
   };
   const total = Object.values(bySchema).reduce((sum, count) => sum + count, 0);
+  const sourceRows = Object.values(bySource).reduce((sum, count) => sum + count, 0);
   return {
     total,
-    sourceRows: messages + mails + jiraTickets + linearTickets + transcripts + kbFiles,
+    sourceRows,
     bySchema,
+    bySource,
   };
 };

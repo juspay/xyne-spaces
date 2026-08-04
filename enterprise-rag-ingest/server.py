@@ -332,7 +332,18 @@ class BackendStats:
                         str(schema): int(count)
                         for schema, count in (body.get("bySchema") or {}).items()
                     },
+                    "by_source": {
+                        str(source): int(count)
+                        for source, count in (body.get("bySource") or {}).items()
+                    },
                 }
+                try:
+                    queue_body = backend_request("/api/admin/enterprise-rag/queues")
+                    self._value["queues"] = queue_body.get("queues") or {}
+                    self._value["queue_error"] = None
+                except Exception as queue_exc:
+                    self._value["queues"] = {}
+                    self._value["queue_error"] = str(queue_exc)
                 context = backend_request("/api/admin/enterprise-rag/context")
                 self._value["workspace_id"] = context.get("workspaceId")
                 self._value["user_id"] = context.get("userId")
@@ -416,6 +427,16 @@ class ProgressTracker:
         state["percentage"] = (
             state["attempted"] / state["requested"] * 100 if state["requested"] else 0.0
         )
+        state["resume_row"] = (
+            min(state["end_row"], state["start_row"] + state["attempted"])
+            if state["requested"]
+            else None
+        )
+        state["can_resume"] = bool(
+            state["resume_row"] is not None
+            and state["resume_row"] < state["end_row"]
+            and state["status"] not in {"running", "stopping"}
+        )
         state["dataset_rows"] = dataset_row_count()
         vespa_stats, vespa_error = VESPA_STATS.snapshot()
         state["workspace_id"] = (
@@ -424,11 +445,43 @@ class ProgressTracker:
         state["vespa_documents"] = vespa_stats["total"] if vespa_stats else None
         state["vespa_source_rows"] = vespa_stats["source_rows"] if vespa_stats else None
         state["vespa_by_schema"] = vespa_stats["by_schema"] if vespa_stats else {}
+        state["vespa_by_source"] = vespa_stats["by_source"] if vespa_stats else {}
+        state["vespa_queues"] = vespa_stats.get("queues", {}) if vespa_stats else {}
+        state["vespa_queue_error"] = vespa_stats.get("queue_error") if vespa_stats else None
         state["dataset_remaining"] = (
             max(0, state["dataset_rows"] - vespa_stats["source_rows"])
             if vespa_stats
             else None
         )
+        if vespa_stats:
+            progress_source = state.get("source_type")
+            if progress_source:
+                source_counts = DATASET_SUMMARY.snapshot()["by_source_type"]
+                vespa_progress_total = int(source_counts.get(progress_source, 0))
+                vespa_progress_indexed = int(
+                    vespa_stats["by_source"].get(progress_source, 0)
+                )
+            else:
+                vespa_progress_total = state["dataset_rows"]
+                vespa_progress_indexed = int(vespa_stats["source_rows"])
+            state["vespa_progress_source"] = progress_source
+            state["vespa_progress_total"] = vespa_progress_total
+            state["vespa_progress_indexed"] = vespa_progress_indexed
+            state["vespa_progress_remaining"] = max(
+                0, vespa_progress_total - vespa_progress_indexed
+            )
+            state["vespa_percentage"] = min(
+                100.0,
+                vespa_progress_indexed / vespa_progress_total * 100
+                if vespa_progress_total
+                else 0.0,
+            )
+        else:
+            state["vespa_progress_source"] = state.get("source_type")
+            state["vespa_progress_total"] = None
+            state["vespa_progress_indexed"] = None
+            state["vespa_progress_remaining"] = None
+            state["vespa_percentage"] = None
         state["vespa_count_error"] = vespa_error
         return state
 
@@ -502,6 +555,18 @@ class ProgressTracker:
                 self._stop_event.set()
                 self._persist(force=True)
         return self.snapshot()
+
+    def resume(self) -> dict[str, Any]:
+        with self._lock:
+            if self._state["status"] in {"running", "stopping"}:
+                raise RuntimeError("An ingestion run is already active")
+            start_row = int(self._state["start_row"]) + int(self._state["attempted"])
+            end_row = int(self._state["end_row"])
+            concurrency = int(self._state["concurrency"])
+            source_type = self._state.get("source_type")
+        if start_row >= end_row:
+            raise RuntimeError("The previous submission range is already complete")
+        return self.start(start_row, end_row - start_row, concurrency, source_type)
 
     @staticmethod
     def _safe_feed(row_index: int, row: dict[str, Any]) -> dict[str, Any]:
@@ -704,6 +769,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(202, state)
             elif path == "/api/stop":
                 self.send_json(202, PROGRESS.stop())
+            elif path == "/api/resume":
+                self.send_json(202, PROGRESS.resume())
             elif path == "/ingest-one":
                 self.send_json(200, feed_one(int(body.get("row_index", 0))))
             else:
