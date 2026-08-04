@@ -1946,13 +1946,18 @@ interface TicketRow {
 const spacesMessages: ToolDef = {
   name: "spaces-messages",
   description:
-    "Read messages in a conversation thread. Use the conversationId field from spaces-tickets results (NOT the channel ID or ticket ID). " +
+    "Read messages in a conversation thread by exact conversationId. ID sources: the conversationId field from " +
+    "spaces-tickets / spaces-activity / search results, OR a Spaces message link pasted by the user — in a URL like " +
+    "…/chat/dir/<channelId>/<conversationId> or with a #origin=<id> hash fragment, that id IS the conversationId. " +
+    "When the user provides a message/thread link, extract the id and call THIS tool first — never search or browse the " +
+    "channel to \"find\" the linked thread; if this returns nothing, report that, don't substitute a similar thread. " +
+    "(Not the channel ID or ticket ID.) " +
     "Messages are returned in chronological order, each showing the sender's name <email>, edited/attachment markers, and reaction counts; " +
     "the header shows the channel name and total reply count — no follow-up call needed to resolve who said what.",
   inputSchema: {
     type: "object",
     properties: {
-      conversationId: { type: "string", description: "The conversationId from spaces-tickets or spaces-activity results." },
+      conversationId: { type: "string", description: "Exact conversationId — from prior tool results, or extracted from a pasted Spaces URL (#origin=<id>, or the path segment after the channelId)." },
       limit: { type: "number", minimum: 1, maximum: 100, default: 100, description: "Max messages (default 100)" },
       offset: { type: "number", minimum: 0, default: 0, description: "Pagination offset" },
       sortOrder: { type: "string", enum: ["asc", "desc"], default: "asc", description: "Order by message time: asc (default, oldest→newest, normal reading order) or desc (newest first — pair with limit to grab the latest replies)." },
@@ -2072,12 +2077,14 @@ interface MessageRow {
 const spacesMessageDetail: ToolDef = {
   name: "spaces-message-detail",
   description:
-    "Get detailed information about a specific message including full content, sender details, " +
-    "reactions (with counts), and attachments. Use messageId from spaces-messages or spaces-activity results.",
+    "Get detailed information about a specific message (full content, sender details, reactions with counts, attachments) " +
+    "by exact messageId. ID sources: spaces-messages / spaces-activity results, OR the #messageId=<id> parameter of a " +
+    "pasted Spaces message link. If the user's link contains #messageId, call this tool with that id directly — " +
+    "never search for the message by its content or recency.",
   inputSchema: {
     type: "object",
     properties: {
-      messageId: { type: "string", description: "The messageId from spaces-messages or spaces-activity results." },
+      messageId: { type: "string", description: "Exact messageId — from prior tool results, or the #messageId=<id> parameter in a pasted Spaces URL." },
     },
     required: ["messageId"],
   },
