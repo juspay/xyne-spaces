@@ -24,6 +24,22 @@ export function extractDomain(addr: string): string {
   return email.split('@')[1] ?? '';
 }
 
+/** Build a link to a specific email in a desk ticket. */
+function buildEmailUrl(params: {
+  ticketUrl: string | null | undefined;
+  conversationId: string | null | undefined;
+  ticketId: string | null | undefined;
+  emailId: string;
+}): string | null {
+  const { ticketUrl, conversationId, ticketId, emailId } = params;
+  if (!ticketUrl || !conversationId || !emailId) return null;
+
+  const query = new URLSearchParams({ conversationId });
+  if (ticketId) query.set('ticketId', ticketId);
+  query.set('mail', emailId);
+  return `${ticketUrl}?${query.toString()}`;
+}
+
 function uniqueAddresses(addrs: readonly string[]): string[] {
   const out = new Set<string>();
   for (const addr of addrs) {
@@ -130,10 +146,16 @@ export async function hydrateEmailReceivedPayload(
   }
 
   const ticketContext = await loadTicketContextForEmail(email.conversationId);
+  const emailUrl = buildEmailUrl({
+    ticketUrl: ticketContext?.ticket.url,
+    conversationId: ticketContext?.ticket.conversationId ?? email.conversationId,
+    ticketId: ticketContext?.ticket.id,
+    emailId: email.id,
+  });
 
   return {
     ...payload,
-    email: emailRowToOutput(email),
+    email: { ...emailRowToOutput(email), url: emailUrl },
     ...(ticketContext ?? {}),
     requester: {
       email: extractEmailAddress(email.from),
@@ -152,6 +174,12 @@ export async function hydrateEmailSentPayload(
   if (!email) return { ...payload };
 
   const ticketContext = await loadTicketContextForEmail(email.conversationId);
+  const emailUrl = buildEmailUrl({
+    ticketUrl: ticketContext?.ticket.url,
+    conversationId: ticketContext?.ticket.conversationId ?? email.conversationId,
+    ticketId: ticketContext?.ticket.id,
+    emailId: email.id,
+  });
 
   const priorReply = await db.email
     .findFirst({
@@ -168,7 +196,7 @@ export async function hydrateEmailSentPayload(
 
   return {
     ...payload,
-    email: emailRowToOutput(email),
+    email: { ...emailRowToOutput(email), url: emailUrl },
     ...(ticketContext ?? {}),
     sender: {
       email: extractEmailAddress(email.from),
