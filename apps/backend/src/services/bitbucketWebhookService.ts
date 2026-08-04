@@ -2,17 +2,18 @@
 // Handles different Bitbucket webhook event types based on X-Event-Key header
 
 import { PRStatus } from '@prisma/client';
+import { PRStatusEvent } from '@xyne/shared';
 import { PRMetricsRepository } from '@/database/repositories/pullRequestsRepository';
-import { prTicketStatusSyncService } from '@/services/prTicketStatusSyncService';
+import { prTicketStatusSyncService, type ReadyToMergeTransition } from '@/services/prTicketStatusSyncService';
 import { pullRequestValidationService } from '@/services/pullRequestValidationService';
 import { logger } from '@/utils/logger';
 import { BitbucketWebhookEnvelope, BitbucketPullRequest } from '@/routes/webhooks';
 import { DatabaseClient } from '@/database/client';
 import { config } from '@/config/env';
-import { PRStatusEvent } from '@prisma/client';
 import { xyneCommentService } from '@/services/xyneCommentService';
 import { prCheckApprovalService } from '@/services/prCheckApprovalService';
 import { runWithContext } from '@/database/tenant/context';
+import { bitbucketManager } from '@/git-providers/bitbucket/apis';
 /**
  * Bitbucket Server webhook event types for pull requests
  * Based on Bitbucket Server 8.6 documentation
@@ -21,6 +22,7 @@ export enum BitbucketPREventType {
   PR_OPENED = 'pr:opened',
   PR_MODIFIED = 'pr:modified',
   PR_FROM_REF_UPDATED = 'pr:from_ref_updated',
+  PR_REVIEWER_APPROVED = 'pr:reviewer:approved',
   PR_MERGED = 'pr:merged',
   PR_DECLINED = 'pr:declined',
   PR_COMMENT_ADDED = 'pr:comment:added',
@@ -34,6 +36,7 @@ interface PREventContext {
   repoName: string;
   repoUrl: string;
   projectName: string;
+  repoSlug: string;
   workspace: string;
   sourceBranch: string;
   destinationBranch: string;
@@ -221,6 +224,7 @@ export class BitbucketWebhookService {
       repoName,
       repoUrl,
       projectName,
+      repoSlug,
       workspace: workspaceId, // In Server, project key serves as workspace
       sourceBranch: pr.fromRef.displayId,
       destinationBranch: pr.toRef.displayId,
@@ -258,6 +262,10 @@ export class BitbucketWebhookService {
 
       case BitbucketPREventType.PR_DELETED:
         await this.handlePRDeleted(context);
+        break;
+
+      case BitbucketPREventType.PR_REVIEWER_APPROVED:
+        await this.handleMergeReadinessRecheck(context, validationResult);
         break;
 
       default:
@@ -379,15 +387,109 @@ export class BitbucketWebhookService {
       }).catch(err => logger.error('[Bitbucket-Webhook] PR check approval button error:', err));
     }
 
-    // Sync ticket status with the appropriate event type
+    // Fold merge-readiness into the single sync below (READY_TO_MERGE supersedes UPDATED, not CREATED).
+    // When it applies, reuse the objects the gate already resolved so sync doesn't re-query.
+    const mergeReady = prEvent === PRStatusEvent.UPDATED
+      ? await this.evaluateMergeReadiness(context.prId, context.prUrl, context.projectName, context.repoSlug)
+      : null;
+
+    await prTicketStatusSyncService.syncTicketStatusOnPRChange(
+      mergeReady
+        ? {
+            prId: context.prId,
+            prUrl: context.prUrl,
+            newStatus: PRStatus.OPEN,
+            prAuthor: context.prAuthor,
+            prAuthorEmail: context.prAuthorEmail,
+            prEvent: PRStatusEvent.READY_TO_MERGE,
+            pr: mergeReady.pr,
+            ticket: mergeReady.ticket,
+            targetStage: mergeReady.targetStage,
+          }
+        : {
+            prId: context.prId,
+            prUrl: context.prUrl,
+            newStatus: PRStatus.OPEN,
+            prAuthor: context.prAuthor,
+            prAuthorEmail: context.prAuthorEmail,
+            prEvent,
+          }
+    );
+  }
+
+  private async evaluateMergeReadiness(
+    prId: number,
+    prUrl: string,
+    projectKey: string,
+    repoSlug: string
+  ): Promise<ReadyToMergeTransition | null> {
+    try {
+      const transition = await prTicketStatusSyncService.wouldTransitionToReadyToMerge(prId, prUrl);
+      if (!transition) {
+        logger.debug(
+          `[Bitbucket-Webhook] PR ${prId}: no READY_TO_MERGE transition (unmapped or ticket already in stage) → skipping merge-status check`
+        );
+        return null;
+      }
+
+      const mergeStatus = await bitbucketManager.getMergeStatus(projectKey, repoSlug, prId);
+      if (!mergeStatus) return null;
+      if (!mergeStatus.canMerge) {
+        logger.debug(
+          `[Bitbucket-Webhook] PR ${prId} not merge-ready yet (${mergeStatus.vetoes.length} veto(s))`
+        );
+        return null;
+      }
+      logger.info(
+        `[Bitbucket-Webhook] PR ${prId} is merge-ready (canMerge=true) → READY_TO_MERGE`
+      );
+      return transition;
+    } catch (error) {
+      logger.error(`[Bitbucket-Webhook] Error evaluating merge readiness for PR ${prId}:`, error);
+      return null;
+    }
+  }
+
+  // XYNE-17075: reviewer-approval events don't reach handlePRUpdated — re-check merge readiness and move the ticket if the PR just became mergeable.
+  private async handleMergeReadinessRecheck(
+    context: PREventContext,
+    validationResult: { isValid: boolean; ticketId?: string }
+  ): Promise<void> {
+    if (!validationResult.isValid) return;
+    await this.recheckMergeReadinessForPR(
+      context.prId,
+      context.prUrl,
+      context.projectName,
+      context.repoSlug,
+      context.prAuthor,
+      context.prAuthorEmail
+    );
+  }
+
+  // XYNE-17075: shared merge-readiness re-check for out-of-band triggers (reviewer approval, Jenkins build success). Idempotent; returns true if the ticket transitioned to READY_TO_MERGE.
+  async recheckMergeReadinessForPR(
+    prId: number,
+    prUrl: string,
+    projectKey: string,
+    repoSlug: string,
+    prAuthor?: string,
+    prAuthorEmail?: string
+  ): Promise<boolean> {
+    const mergeReady = await this.evaluateMergeReadiness(prId, prUrl, projectKey, repoSlug);
+    if (!mergeReady) return false;
+
     await prTicketStatusSyncService.syncTicketStatusOnPRChange({
-      prId: context.prId,
-      prUrl: context.prUrl,
+      prId,
+      prUrl,
       newStatus: PRStatus.OPEN,
-      prAuthor: context.prAuthor,
-      prAuthorEmail: context.prAuthorEmail,
-      prEvent,
+      prAuthor,
+      prAuthorEmail,
+      prEvent: PRStatusEvent.READY_TO_MERGE,
+      pr: mergeReady.pr,
+      ticket: mergeReady.ticket,
+      targetStage: mergeReady.targetStage,
     });
+    return true;
   }
 
   /**

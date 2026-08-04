@@ -1,7 +1,8 @@
 // PR to Ticket Status Sync Service
 // Handles mapping PR status changes to ticket stage updates based on configurable PR status mappings
 
-import { PRStatus, TicketStatusV2, PRStatusEvent, ActivityType } from '@prisma/client';
+import { PRStatus, TicketStatusV2, ActivityType } from '@prisma/client';
+import { PRStatusEvent } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
 import { ticketService } from '@/services/ticketService';
 import { ActivitySource } from '@/types/ticket';
@@ -42,6 +43,7 @@ enum PRActionText {
   RAISED = 'raised',
   UPDATED = 'updated',
   MERGED = 'merged',
+  READY_TO_MERGE = 'ready to merge',
   DECLINED = 'declined',
   DELETED = 'deleted',
 }
@@ -55,6 +57,9 @@ interface PRStatusUpdateParams {
   prAuthor?: string;
   prAuthorEmail?: string;
   remainingOpenPRs?: number;
+  pr?: PRInfo;
+  ticket?: TicketInfo;
+  targetStage?: StageInfo;
 }
 
 interface TicketInfo {
@@ -86,6 +91,11 @@ interface PRInfo {
   repoName: string;
   sourceBranchName: string;
   destinationBranchName: string;
+}
+export interface ReadyToMergeTransition {
+  pr: PRInfo;
+  ticket: TicketInfo;
+  targetStage: StageInfo;
 }
 
 export class PRTicketStatusSyncService {
@@ -232,6 +242,28 @@ export class PRTicketStatusSyncService {
   }
 
   /**
+   * Resolves whether this PR would transition its ticket into the READY_TO_MERGE stage: the
+   * board must map READY_TO_MERGE to a stage AND the ticket must not already be in it. Returns
+   * the resolved { pr, ticket, targetStage } so the caller can hand them to
+   * syncTicketStatusOnPRChange without re-querying; returns null when no transition applies
+   * (the caller then degrades to its normal event, e.g. UPDATED). Cheap DB-only gate, so we
+   * skip the external merge-status check on boards that don't use the event.
+   */
+  async wouldTransitionToReadyToMerge(
+    prId: number,
+    prUrl: string
+  ): Promise<ReadyToMergeTransition | null> {
+    const pr = await this.findPR(prId, prUrl);
+    if (!pr) return null;
+    const ticket = await this.findTicketForPR(pr);
+    if (!ticket) return null;
+    const targetStage = await this.findStageForPRStatus(ticket.boardId, PRStatusEvent.READY_TO_MERGE);
+    if (!targetStage) return null;
+    if (targetStage.name === ticket.stageName) return null; // already in stage → degrade to UPDATED
+    return { pr, ticket, targetStage };
+  }
+
+  /**
    * Synchronize ticket stage based on PR status change
    * Uses configurable stage-based PR status mappings from the database
    *
@@ -243,15 +275,15 @@ export class PRTicketStatusSyncService {
         `[PR-Ticket-Sync] Starting sync for PR ${params.prId} with event: ${params.prEvent}`
       );
 
-      // 1. Get the PR record from database
-      const pr = await this.findPR(params.prId, params.prUrl);
+      // 1. Get the PR record from database (reuse a pre-resolved one if the caller passed it)
+      const pr = params.pr ?? await this.findPR(params.prId, params.prUrl);
       if (!pr) {
         logger.warn(`[PR-Ticket-Sync] PR not found: ${params.prId}`);
         return;
       }
 
-      // 2. Find the associated ticket
-      const ticket = await this.findTicketForPR(pr);
+      // 2. Find the associated ticket (reuse if pre-resolved)
+      const ticket = params.ticket ?? await this.findTicketForPR(pr);
       if (!ticket) {
         logger.warn(`[PR-Ticket-Sync] No ticket found for PR ${params.prId}`);
         return;
@@ -260,8 +292,19 @@ export class PRTicketStatusSyncService {
       // 3. Resolve the user who triggered the update
       const updatedBy = await this.resolveUpdatedBy(params.prAuthorEmail, ticket.workspaceId);
 
-      // 4. Find stage with this PR status mapped
-      const targetStage = await this.findStageForPRStatus(ticket.boardId, params.stageEvent ?? params.prEvent);
+      // 4. Find stage with this PR status mapped (reuse if pre-resolved)
+      const targetStage = params.targetStage ?? await this.findStageForPRStatus(ticket.boardId, params.stageEvent ?? params.prEvent);
+
+      if (
+        params.prEvent === PRStatusEvent.READY_TO_MERGE &&
+        (!targetStage || targetStage.name === ticket.stageName)
+      ) {
+        logger.debug(
+          `[PR-Ticket-Sync] READY_TO_MERGE no-op for ticket ${ticket.xyneId} (already in "${ticket.stageName}" or no mapping)`
+        );
+        return;
+      }
+
       if (!targetStage) {
         logger.debug(
           `[PR-Ticket-Sync] No stage mapped for PR status: ${params.prEvent} in board ${ticket.boardId}, logging activity only`
@@ -391,6 +434,39 @@ export class PRTicketStatusSyncService {
         params.prEvent === PRStatusEvent.DECLINED) &&
       remainingOpenPRs > 0
     );
+  }
+
+  /**
+   * XYNE-17075: resolve a unique OPEN PR from a build's reliable payload fields when Jenkins gives
+   * no prUrl (branch builds leave CHANGE_URL empty). The built branch is the reliable identity and
+   * the stored PR row carries the canonical prUrl; ticketXyneId is used only to break ties. Returns
+   * null when there is no single unambiguous match, so the caller logs + skips (never guesses).
+   */
+  async resolveOpenPRByBranch(
+    sourceBranchName: string,
+    ticketXyneId?: string
+  ): Promise<{ prId: number; prUrl: string } | null> {
+    if (!sourceBranchName) return null;
+
+    const openPrs = await prisma.pullRequests.findMany({
+      where: { status: PRStatus.OPEN, sourceBranchName },
+      select: { prId: true, prUrl: true, ticketId: true },
+    });
+    if (openPrs.length === 0) return null;
+
+    let candidates = openPrs;
+    if (candidates.length > 1 && ticketXyneId) {
+      const ticket = await prisma.ticket.findFirst({
+        where: { xyneId: ticketXyneId },
+        select: { id: true },
+      });
+      const narrowed = ticket ? candidates.filter(pr => pr.ticketId === ticket.id) : [];
+      if (narrowed.length > 0) candidates = narrowed;
+    }
+
+    if (candidates.length !== 1) return null;
+    const pr = candidates[0];
+    return pr?.prUrl ? { prId: pr.prId, prUrl: pr.prUrl } : null;
   }
 
   /**
@@ -596,6 +672,7 @@ export class PRTicketStatusSyncService {
       [PRStatusEvent.CREATED]: PRActionText.RAISED,
       [PRStatusEvent.UPDATED]: PRActionText.UPDATED,
       [PRStatusEvent.MERGED]: PRActionText.MERGED,
+      [PRStatusEvent.READY_TO_MERGE]: PRActionText.READY_TO_MERGE,
       [PRStatusEvent.DECLINED]: PRActionText.DECLINED,
       [PRStatusEvent.DELETED]: PRActionText.DELETED,
     };

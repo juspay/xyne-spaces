@@ -102,6 +102,29 @@ export class BitbucketManager {
       }
     }
 
+    async getMergeStatus(
+      projectKey: string,
+      repoSlug: string,
+      prId: number
+    ): Promise<{ canMerge: boolean; conflicted: boolean; vetoes: Array<{ summaryMessage?: string; detailedMessage?: string }> } | null> {
+      try {
+        const url = `${this.buildPullRequestUrl(projectKey, repoSlug, prId)}/merge`;
+        const response = await this.makeRequest<{
+          canMerge?: boolean;
+          conflicted?: boolean;
+          vetoes?: Array<{ summaryMessage?: string; detailedMessage?: string }>;
+        }>(url, 'GET');
+        return {
+          canMerge: response.data.canMerge === true,
+          conflicted: response.data.conflicted === true,
+          vetoes: response.data.vetoes ?? [],
+        };
+      } catch (error) {
+        logger.error(`[Bitbucket API] Error getting merge status for ${projectKey}/${repoSlug} PR #${prId}:`, { error: error instanceof Error ? error.message : error });
+        return null;
+      }
+    }
+
     extractPRIdFromUrl(prUrl: string): number | null {
       try {
         const prMatch = prUrl.match(/\/pull-requests\/(\d+)/);

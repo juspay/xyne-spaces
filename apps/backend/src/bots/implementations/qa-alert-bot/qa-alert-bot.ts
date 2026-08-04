@@ -15,6 +15,9 @@ import { MessagesSideEffectHandler } from '@/zero/side-effects/tables/messages-h
 import { config } from '@/config/env';
 import { db } from '@/database/client';
 import { UserRepository } from '@/database/repositories/users';
+import { bitbucketWebhookService } from '@/services/bitbucketWebhookService';
+import { prTicketStatusSyncService } from '@/services/prTicketStatusSyncService';
+import { parseBitbucketPrUrl } from '@/utils/repoUrlParser';
 import {
   formatGroupMention,
   formatJenkinsAlertMessage,
@@ -291,6 +294,53 @@ export const qaAlertBot = new QaAlertBot();
  * Express handler for Jenkins webhook alerts
  * Receives webhook from Jenkins and posts alert to ticket conversation
  */
+// XYNE-17075: one delayed re-check to cover the lag between Jenkins reporting success and Bitbucket recomputing canMerge (which folds the build status into its merge vetoes).
+const BUILD_SUCCESS_RECHECK_DELAY_MS = 15000;
+
+// XYNE-17075: on a green build, re-ask Bitbucket if the PR is now mergeable and move the ticket.
+// Prefer the payload prUrl; branch builds leave CHANGE_URL empty, so fall back to deriving PR
+// identity from the reliable payload fields (the built branch). Logs + skips when unresolved.
+async function triggerBuildSuccessMergeReadiness(payload: JenkinsWebhookPayload): Promise<void> {
+  const { prUrl, branch, ticketXyneId, contributor } = payload;
+
+  let resolvedPrUrl = prUrl;
+  if (!resolvedPrUrl) {
+    const derived = await prTicketStatusSyncService.resolveOpenPRByBranch(branch, ticketXyneId);
+    if (!derived) {
+      logger.warn(
+        `[JenkinsWebhook] Skipping build_success merge-readiness recheck: no unique OPEN PR for branch "${branch}".`
+      );
+      return;
+    }
+    resolvedPrUrl = derived.prUrl;
+  }
+
+  const prRef = parseBitbucketPrUrl(resolvedPrUrl);
+  if (!prRef) {
+    logger.warn(`[JenkinsWebhook] Skipping build_success merge-readiness recheck: invalid prUrl ${resolvedPrUrl}`);
+    return;
+  }
+
+  try {
+    const moved = await bitbucketWebhookService.recheckMergeReadinessForPR(
+      prRef.prId,
+      resolvedPrUrl,
+      prRef.projectKey,
+      prRef.repoSlug,
+      contributor
+    );
+    if (moved) return;
+    // Bitbucket may not have recomputed canMerge yet; one delayed retry (no loop). Idempotent gate makes it safe.
+    setTimeout(() => {
+      bitbucketWebhookService
+        .recheckMergeReadinessForPR(prRef.prId, resolvedPrUrl, prRef.projectKey, prRef.repoSlug, contributor)
+        .catch(err => logger.error('[JenkinsWebhook] Delayed merge-readiness recheck failed:', err));
+    }, BUILD_SUCCESS_RECHECK_DELAY_MS);
+  } catch (err) {
+    logger.error('[JenkinsWebhook] build_success merge-readiness recheck failed:', err);
+  }
+}
+
 export async function handleJenkinsWebhook(req: Request, res: Response): Promise<void> {
   try {
     console.log('[JenkinsWebhook] Received webhook:', req.body);
@@ -318,6 +368,11 @@ if (Buffer.isBuffer(req.body)) {
     }
 
     logger.info(`[JenkinsWebhook] Received ${payload.event} event for branch ${payload.branch}`);
+
+    // XYNE-17075: a green build can make the PR mergeable without any PR webhook — re-check (fire-and-forget).
+    if (payload.alertCategory === 'build_success') {
+      void triggerBuildSuccessMergeReadiness(payload);
+    }
 
     const result = await qaAlertBot.pushMessageToChannel(payload);
 

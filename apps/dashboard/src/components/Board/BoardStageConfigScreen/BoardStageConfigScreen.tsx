@@ -19,6 +19,7 @@ import { mutators } from '../../../zero/mutators';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { v4 as uuidv4 } from 'uuid';
 import { Button } from '../../../components/ui/Button';
+import { getPRStatusLabel } from '../../../utils/board';
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -939,7 +940,7 @@ const BoardStageConfigScreen = ({
       prStatuses.forEach(prStatus => {
         conditions.push({
           id: `pr-${s.id}-${prStatus}`,
-          name: `PR Status - ${prStatus}`,
+          name: `PR Status - ${getPRStatusLabel(prStatus)}`,
           whenField: 'pr_status',
           whenCondition: 'is',
           whenValue: prStatus,

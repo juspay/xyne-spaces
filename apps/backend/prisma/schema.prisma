@@ -1699,6 +1699,7 @@ model PullRequests {
 
   @@index([workflowExecutionId])
   @@index([date])
+  @@index([sourceBranchName, status])
   @@map("pull_requests")
   @@schema("public")
 }
@@ -2182,7 +2183,7 @@ model StagePRStatusMapping {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id        String        @id @default(cuid())
   stageId   String        // Stage ID (no FK constraint)
-  prStatus  PRStatusEvent
+  prStatus  String
   createdAt DateTime      @default(now())
 
   @@unique([stageId, prStatus])

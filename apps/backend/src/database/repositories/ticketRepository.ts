@@ -1,4 +1,4 @@
-import { TicketStatusV2, TicketPriority, Prisma, ActivityType, PRStatusEvent, PrismaClient, EmailType } from '@prisma/client';
+import { TicketStatusV2, TicketPriority, Prisma, ActivityType, PrismaClient, EmailType } from '@prisma/client';
 import { extractEmailAddress } from '@/utils/email';
 import { CreateTicketRequest, ActivitySource } from '../../types/ticket';
 import { websocketService } from '@/services/websocketService';
@@ -7,7 +7,7 @@ import { recordTicketTimelineEvent } from '@/services/ticketTimelineEventService
 import { logger } from '@/utils/logger';
 import { DatabaseClient } from '@/database/client';
 import { calculateETADeadline } from '@/utils/etaCalculation';
-import { BaseTicketType, isReleaseTicket, PRActivityValue } from '@xyne/shared';
+import { BaseTicketType, isReleaseTicket, PRActivityValue, PRStatusEvent } from '@xyne/shared';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { generateKeyBetween } from 'fractional-indexing';
 import { eventRouter } from '@/automations/engine/event-router';
@@ -658,6 +658,7 @@ export class TicketRepository {
       [PRStatusEvent.CREATED]: 'raised',
       [PRStatusEvent.UPDATED]: 'updated',
       [PRStatusEvent.MERGED]: 'merged',
+      [PRStatusEvent.READY_TO_MERGE]: 'ready to merge',
       [PRStatusEvent.DECLINED]: 'declined',
       [PRStatusEvent.DELETED]: 'deleted',
     };
