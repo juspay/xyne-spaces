@@ -205,15 +205,6 @@ export class EmailAuthController {
         // Invited user hasn't accepted yet — set pending auth cookie (mirrors OAuth flow)
         // and return a signal so the frontend redirects to the invite page.
         const userName = normalizedEmail.split('@')[0];
-        const pendingAuthJwtId = crypto.randomUUID();
-
-        // Store the pending-auth token ID in Redis with 10-minute TTL.
-        // acceptInvitation will verify this entry exists before proceeding.
-        await redisService.set(
-          `pendingauth:jwtid:${pendingAuthJwtId}`,
-          normalizedEmail,
-          10 * 60, // 10 minutes
-        );
 
         res.cookie(
           'google_access_token',
@@ -225,7 +216,6 @@ export class EmailAuthController {
               provider: 'EMAIL',
               refreshToken: null,
               accessToken: null,
-              jwtId: pendingAuthJwtId,
             },
             process.env.JWT_SECRET!,
             { expiresIn: '10m' },
