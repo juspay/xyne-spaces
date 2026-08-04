@@ -1,5 +1,6 @@
 import winston from 'winston';
 import { AsyncLocalStorage } from 'async_hooks';
+import fluentLogger from 'fluent-logger';
 import { config } from '@/config/env';
 
 export interface LogContext {
@@ -84,10 +85,44 @@ const devFormat = winston.format.combine(
   })
 );
 
+// Streamed straight to Fluent Bit's forward input (docker/fluent-bit/) over
+// TCP -- no intermediate log file. The forward protocol carries its own
+// event time, so unlike a file-tailed format there's no timestamp string to
+// keep in sync with a Fluent Bit parser.
+const fluentFormat = winston.format.combine(
+  winston.format.timestamp(),
+  winston.format.errors({ stack: true }),
+  normalizeErrors(),
+  injectContext(),
+  winston.format.json()
+);
+
+const transports: winston.transport[] = [
+  new winston.transports.Console({
+    format: config.env === 'development' || config.env === 'test' ? devFormat : productionFormat,
+  }),
+];
+
+if (config.logging.fluent.enabled) {
+  const FluentTransport = fluentLogger.support.winstonTransport();
+  transports.push(
+    new FluentTransport('error.backend', {
+      host: config.logging.fluent.host,
+      port: config.logging.fluent.port,
+      timeout: 3.0,
+      reconnectInterval: 30000,
+      level: 'error',
+      format: fluentFormat,
+    }) as winston.transport
+  );
+}
+
 export const logger = winston.createLogger({
   level: config.logging.level,
-  format: config.env === 'development' || config.env === 'test' ? devFormat : productionFormat,
-  transports: [new winston.transports.Console()],
+  // No logger-level `format`: it would run before each transport's own
+  // format (e.g. devFormat's colorize() would corrupt `level` for the
+  // Fluent transport too), so format is set per-transport instead.
+  transports,
   exitOnError: false,
   defaultMeta: {
     version: '1.0',
