@@ -1,4 +1,5 @@
 import { ReadonlyJSONValue, Transaction, defineMutator, defineMutators, ApplicationError } from '@rocicorp/zero';
+import { getVideoPreviewMetadata } from '@/services/videoPreviewMetadata';
 import { AutomationStatus } from '../automations/types/status';
 import {
   ChannelRole,
@@ -4159,6 +4160,10 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                       if (attachment.thumbnailUrl) {
                         await storageService.deleteFile(attachment.thumbnailUrl);
                       }
+                      const previewUrl = getVideoPreviewMetadata(attachment.metadata)?.previewUrl;
+                      if (previewUrl && previewUrl !== attachment.url) {
+                        await storageService.deleteFile(previewUrl);
+                      }
                     }
                   } catch (error) {
                     // Don't throw - continue deleting other files even if one fails
@@ -4194,6 +4199,10 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   await storageService.deleteFile(attachment.url);
                   if (attachment.thumbnailUrl) {
                     await storageService.deleteFile(attachment.thumbnailUrl);
+                  }
+                  const previewUrl = getVideoPreviewMetadata(attachment.metadata)?.previewUrl;
+                  if (previewUrl && previewUrl !== attachment.url) {
+                    await storageService.deleteFile(previewUrl);
                   }
                 }
               } catch (error) {
@@ -4266,6 +4275,10 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 // Also delete thumbnail if it exists
                 if (attachment.thumbnailUrl) {
                   await storageService.deleteFile(attachment.thumbnailUrl);
+                }
+                const previewUrl = getVideoPreviewMetadata(attachment.metadata)?.previewUrl;
+                if (previewUrl && previewUrl !== attachment.url) {
+                  await storageService.deleteFile(previewUrl);
                 }
               }
             } catch (error) {

@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback, useImperativeHandle } from 'react';
 import { Play, Pause, Volume2, VolumeX, Maximize2, Minimize2, Settings } from 'lucide-react';
 import { BaseViewerProps } from './utils';
-import { BASE_URL } from '../../services/clients/apiClient';
+import { apiInstance, BASE_URL } from '../../services/clients/apiClient';
 import { useScope, useShortcutById } from '../../shortcuts';
 import { usePlatform } from '../../hooks/usePlatform';
 import { useMobileZoom } from '../../hooks/useMobileZoom';
@@ -14,6 +14,7 @@ import {
   getVideoPosition,
   saveVideoPosition,
 } from '../../utils/videoPlaybackPositions';
+import { downloadAttachment } from '../Chat/MessageAttachment/utils';
 
 interface VideoViewerProps extends BaseViewerProps {
   attachmentId?: string;
@@ -29,6 +30,7 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
   (
     {
       source,
+      fileName,
       attachmentId,
       width,
       height,
@@ -56,7 +58,11 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
     const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const retryCountRef = useRef(0);
     const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const previewPollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const previewPollCountRef = useRef(0);
+    const previewRequestStateRef = useRef<'idle' | 'pending' | 'spent'>('idle');
     const videoObserverRef = useRef<IntersectionObserver | null>(null);
+    const [streamRevision, setStreamRevision] = useState(0);
     const MAX_VIDEO_RETRIES = 5;
     const { isMobile } = usePlatform();
 
@@ -77,14 +83,14 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
     const streamUrl = React.useMemo((): string => {
       if (attachmentId) {
         // Use the streaming endpoint for range request support
-        return `${BASE_URL}/attachments/${attachmentId}/stream`;
+        return `${BASE_URL}/attachments/${attachmentId}/stream?preview=${streamRevision}`;
       }
       // Fallback: create object URL from File
       if (source instanceof File) {
         return URL.createObjectURL(source);
       }
       return '';
-    }, [attachmentId, source]);
+    }, [attachmentId, source, streamRevision]);
 
     // Mobile zoom hook for pinch-to-zoom and pan
     const {
@@ -118,11 +124,17 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
     // Reset retry state whenever the stream URL changes (new video)
     useEffect(() => {
       retryCountRef.current = 0;
+      previewPollCountRef.current = 0;
+      previewRequestStateRef.current = 'idle';
       if (retryTimeoutRef.current) {
         clearTimeout(retryTimeoutRef.current);
         retryTimeoutRef.current = null;
       }
-    }, [streamUrl]);
+      if (previewPollTimeoutRef.current) {
+        clearTimeout(previewPollTimeoutRef.current);
+        previewPollTimeoutRef.current = null;
+      }
+    }, [attachmentId]);
 
     const isViewerActive = isViewerFocused;
 
@@ -377,6 +389,86 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
       }
     };
 
+    const finishPreviewRequest = (status: string): void => {
+      previewRequestStateRef.current = 'spent';
+      if (status === 'ready') {
+        retryCountRef.current = 0;
+        previewPollCountRef.current = 0;
+        setError(null);
+        setIsLoading(true);
+        setStreamRevision(revision => revision + 1);
+        return;
+      }
+      if (status === 'failed' || status === 'not_required') {
+        setIsLoading(false);
+        setError(
+          status === 'failed'
+            ? 'A compatible preview could not be generated. You can still download the original video.'
+            : 'This video format is not supported by this device. You can still download the original video.',
+        );
+      }
+    };
+
+    const pollVideoPreview = async (): Promise<void> => {
+      if (!attachmentId || previewPollCountRef.current >= 90) {
+        previewRequestStateRef.current = 'spent';
+        setIsLoading(false);
+        setError(
+          'Video preview is taking longer than expected. You can still download the original video.',
+        );
+        return;
+      }
+
+      previewPollCountRef.current += 1;
+      try {
+        const { data: result } = await apiInstance.get<{ status?: string }>(
+          `/attachments/${attachmentId}/video-preview`,
+        );
+        const status = result.status || 'failed';
+        if (status === 'ready' || status === 'failed' || status === 'not_required') {
+          finishPreviewRequest(status);
+          return;
+        }
+      } catch {
+        // A transient status failure should not cancel a conversion already in progress.
+      }
+
+      previewPollTimeoutRef.current = setTimeout(() => {
+        void pollVideoPreview();
+      }, 2000);
+    };
+
+    const requestCompatiblePreview = async (): Promise<void> => {
+      if (!attachmentId) return;
+      if (previewRequestStateRef.current === 'pending') return;
+      if (previewRequestStateRef.current === 'spent') {
+        setIsLoading(false);
+        setError(
+          'The compatible preview also failed to load. You can still download the original video.',
+        );
+        return;
+      }
+      previewRequestStateRef.current = 'pending';
+      setIsLoading(true);
+      setError(null);
+
+      try {
+        const { data: result } = await apiInstance.post<{ status?: string }>(
+          `/attachments/${attachmentId}/video-preview`,
+        );
+        const status = result.status || 'pending';
+        if (status === 'ready' || status === 'failed' || status === 'not_required') {
+          finishPreviewRequest(status);
+          return;
+        }
+        await pollVideoPreview();
+      } catch {
+        previewRequestStateRef.current = 'spent';
+        setIsLoading(false);
+        setError('This video format is not supported. You can still download the original video.');
+      }
+    };
+
     const handleError = (): void => {
       // Retry on ANY error while retries remain.
       //
@@ -410,9 +502,7 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
           }
         }, delay);
       } else {
-        // Retries exhausted → show error UI
-        setIsLoading(false);
-        setError('Failed to load video. The video format may not be supported.');
+        void requestCompatiblePreview();
       }
     };
 
@@ -491,7 +581,7 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
 
       videoObserverRef.current.observe(video);
 
-      return () => {
+      return (): void => {
         videoObserverRef.current?.disconnect();
         videoObserverRef.current = null;
       };
@@ -506,6 +596,9 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
         if (retryTimeoutRef.current) {
           clearTimeout(retryTimeoutRef.current);
         }
+        if (previewPollTimeoutRef.current) {
+          clearTimeout(previewPollTimeoutRef.current);
+        }
       };
     }, []);
 
@@ -515,6 +608,19 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
           <div className='text-center text-white'>
             <p className='text-lg font-semibold mb-2'>Failed to load video</p>
             <p className='text-sm text-muted-foreground px-4'>{error}</p>
+            {attachmentId && (
+              <button
+                type='button'
+                className='inline-flex mt-4 rounded-md bg-white px-3 py-2 text-sm font-medium text-gray-900 hover:bg-gray-100'
+                onClick={() => {
+                  void downloadAttachment(attachmentId, fileName || 'video');
+                }}
+                data-track-category='VIDEO_PLAYER'
+                data-track-name='DownloadOriginalVideo'
+              >
+                Download original
+              </button>
+            )}
           </div>
         </div>
       );

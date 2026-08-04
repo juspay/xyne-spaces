@@ -96,6 +96,7 @@ const envSchema = Joi.object({
   TAG_GENERATION_CONCURRENCY: Joi.number().integer().min(1).max(20).default(1),
   TAG_GENERATION_LLM_TIMEOUT_MS: Joi.number().integer().min(1000).default(120000),
   ENABLE_STITCH_WORKER: Joi.boolean().default(false),
+  ENABLE_VIDEO_PREVIEW_WORKER: Joi.boolean().default(false),
   ENABLE_AI_PROVISIONING_WORKER: Joi.boolean().default(false),
   ENABLE_USER_AI_PROVISIONING: Joi.boolean().default(false),
   XYNE_CLAW_AUTH_INTERNAL_URL: Joi.string().uri().allow('').default(''),
@@ -571,6 +572,7 @@ export const config = {
   tagGenerationConcurrency: envVars.TAG_GENERATION_CONCURRENCY as number,
   tagGenerationLlmTimeoutMs: envVars.TAG_GENERATION_LLM_TIMEOUT_MS as number,
   enableStitchWorker: envVars.ENABLE_STITCH_WORKER,
+  enableVideoPreviewWorker: envVars.ENABLE_VIDEO_PREVIEW_WORKER,
   enableAiProvisioningWorker: envVars.ENABLE_AI_PROVISIONING_WORKER,
   aiProvisioning: {
     xyneClawAuthInternalUrl: envVars.XYNE_CLAW_AUTH_INTERNAL_URL as string,

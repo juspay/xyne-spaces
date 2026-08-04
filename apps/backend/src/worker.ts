@@ -191,6 +191,12 @@ class WorkerService {
         stitchWorker.start();
       }
 
+      if (appConfig.enableVideoPreviewWorker) {
+        logger.info('Starting video preview worker...');
+        const { videoPreviewQueue } = await import('@/queues/videoPreviewQueue');
+        videoPreviewQueue.startConsumer();
+      }
+
       if (appConfig.enableScheduledMessageWorker) {
         logger.info('Initializing notification service for scheduled message worker...');
         await notificationService.initialize();
@@ -394,6 +400,11 @@ class WorkerService {
 
       if (appConfig.enableConversationIngestionWorker) {
         await conversationIngestionWorker.shutdown();
+      }
+
+      if (appConfig.enableVideoPreviewWorker) {
+        const { videoPreviewQueue } = await import('@/queues/videoPreviewQueue');
+        await videoPreviewQueue.close();
       }
 
       if (appConfig.enableScheduledMessageWorker) {

@@ -6,6 +6,8 @@ import { uploadFiles, UploadedFileResult } from '../services/fileUploadService';
 import { logger } from '../utils/logger';
 import { AttachmentEntityType, Prisma } from '@prisma/client';
 import { config } from '@/config/env';
+import { scheduleVideoPreview } from '@/services/videoPreviewScheduler';
+import { shouldScheduleVideoPreview } from '@/services/videoPreviewMetadata';
 
 export class DraftAttachmentController {
   private db = DatabaseClient.getInstance();
@@ -245,6 +247,23 @@ export class DraftAttachmentController {
           }
 
           logger.info(`Successfully processed draft attachment ${attachmentId}: ${fileUrl}`);
+
+          // Browser thumbnail generation fails for codecs such as HEVC, MPEG-4
+          // Part 2, and unsupported profiles. Queue a
+          // server-side H.264 derivative immediately so both the thumbnail and
+          // inline player recover without waiting for the user to press play.
+          if (
+            shouldScheduleVideoPreview(
+              file.mimetype,
+              thumbnailUrl,
+              completeMetadata,
+              config.enableVideoPreviewWorker
+            )
+          ) {
+            void scheduleVideoPreview(attachmentId).catch((error) => {
+              logger.error(`Failed to schedule video preview for ${attachmentId}:`, error);
+            });
+          }
 
           results.push({
             attachmentId,

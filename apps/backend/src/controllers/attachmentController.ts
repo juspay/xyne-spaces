@@ -18,6 +18,12 @@ import { fileSchema, SubApp } from '@/vespa/src/types';
 import { DatabaseClient } from '../database/client';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import { isSupportedMimeType } from '@/services/fileProcessor';
+import {
+  getVideoPlaybackSource,
+  getVideoPreviewMetadata,
+  shouldScheduleVideoPreview,
+} from '@/services/videoPreviewMetadata';
+import { scheduleVideoPreview } from '@/services/videoPreviewScheduler';
 
 const db = DatabaseClient.getInstance();
 
@@ -31,6 +37,72 @@ export class AttachmentController {
     this.conversationRepository = new ConversationRepository();
     this.channelParticipantRepository = new ChannelParticipantRepository();
   }
+
+  getVideoPreviewStatus = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const attachment = await this.messageAttachmentRepository.findById(req.params.attachmentId);
+      const userId = req.user?.id;
+      if (!userId) {
+        res.status(401).json({ error: 'Unauthorized - user not authenticated' });
+        return;
+      }
+      if (!attachment) {
+        res.status(404).json({ error: 'Attachment not found' });
+        return;
+      }
+      const access = await this.assertAttachmentAccess(attachment, userId, req.user?.workspaceId);
+      if (!access.ok) {
+        res.status(access.status).json(access.body);
+        return;
+      }
+
+      const preview = getVideoPreviewMetadata(attachment.metadata);
+      res.json({ status: preview?.status || 'idle' });
+    } catch (error) {
+      logger.error('Error fetching video preview status:', error);
+      res.status(500).json({ error: 'Failed to fetch video preview status' });
+    }
+  };
+
+  requestVideoPreview = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const attachment = await this.messageAttachmentRepository.findById(req.params.attachmentId);
+      const userId = req.user?.id;
+      if (!userId) {
+        res.status(401).json({ error: 'Unauthorized - user not authenticated' });
+        return;
+      }
+      if (!attachment) {
+        res.status(404).json({ error: 'Attachment not found' });
+        return;
+      }
+      const access = await this.assertAttachmentAccess(attachment, userId, req.user?.workspaceId);
+      if (!access.ok) {
+        res.status(access.status).json(access.body);
+        return;
+      }
+      if (!attachment.mimetype.startsWith('video/')) {
+        res.status(400).json({ error: 'Attachment is not a video' });
+        return;
+      }
+      if (!config.enableVideoPreviewWorker) {
+        res.status(503).json({ error: 'Video preview service is unavailable' });
+        return;
+      }
+
+      const existing = getVideoPreviewMetadata(attachment.metadata);
+      if (existing?.status === 'processing' || existing?.status === 'pending') {
+        res.status(202).json({ status: existing.status });
+        return;
+      }
+
+      const status = await scheduleVideoPreview(attachment.id);
+      res.status(status === 'pending' || status === 'processing' ? 202 : 200).json({ status });
+    } catch (error) {
+      logger.error('Error requesting video preview:', error);
+      res.status(500).json({ error: 'Failed to request video preview' });
+    }
+  };
 
   private async pushVespaJobForAttachments(
     attachments: Array<{ id: string; mimetype: string }>,
@@ -353,7 +425,13 @@ export class AttachmentController {
         return;
       }
 
-      const filePath = normalizeStoragePath(attachment.url);
+      const playbackSource = getVideoPlaybackSource(
+        attachment.url,
+        attachment.mimetype,
+        attachment.originalFilename,
+        attachment.metadata
+      );
+      const filePath = normalizeStoragePath(playbackSource.url);
       if (!filePath) {
         res.status(404).json({ error: 'Attachment not yet uploaded' });
         return;
@@ -383,18 +461,12 @@ export class AttachmentController {
         logger.info(`Streaming entire file: ${filePath}`);
 
         setSafeDownloadHeaders(res, {
-          mimetype: attachment.mimetype,
-          filename: attachment.originalFilename,
+          mimetype: playbackSource.mimetype,
+          filename: playbackSource.filename,
         });
         res.setHeader('Content-Length', fileSize);
         res.setHeader('Accept-Ranges', 'bytes');
-        if (meta?.type === 'transcript' || meta?.type === 'identified_transcript') {
-          res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-          res.setHeader('Pragma', 'no-cache');
-          res.setHeader('Expires', '0');
-        } else {
-          res.setHeader('Cache-Control', 'private, max-age=3600');
-        }
+        res.setHeader('Cache-Control', 'private, no-cache, must-revalidate');
 
         const stream = await service.createReadStream(filePath);
         stream.pipe(res);
@@ -441,19 +513,13 @@ export class AttachmentController {
       // Set headers for partial content
       res.status(206); // Partial Content
       setSafeDownloadHeaders(res, {
-        mimetype: attachment.mimetype,
-        filename: attachment.originalFilename,
+        mimetype: playbackSource.mimetype,
+        filename: playbackSource.filename,
       });
       res.setHeader('Content-Length', chunkSize);
       res.setHeader('Content-Range', `bytes ${start}-${end}/${fileSize}`);
       res.setHeader('Accept-Ranges', 'bytes');
-      if (meta?.type === 'transcript' || meta?.type === 'identified_transcript') {
-        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-        res.setHeader('Pragma', 'no-cache');
-        res.setHeader('Expires', '0');
-      } else {
-        res.setHeader('Cache-Control', 'private, max-age=3600');
-      }
+      res.setHeader('Cache-Control', 'private, no-cache, must-revalidate');
 
       const stream = await service.createReadStream(filePath, { start, end });
       stream.pipe(res);
@@ -563,10 +629,30 @@ export class AttachmentController {
           : savedAttachments;
 
       if (responseAttachments.length > 0) {
-        const attachments = responseAttachments.map(a => ({ id: a.id, mimetype: a.mimetype }));
-        this.pushVespaJobForAttachments(attachments, userId, req.user?.workspaceId).catch(error => {
-          logger.error(`[AttachmentController] Error pushing Vespa job for attachments for entity ${entityId}:`, error);
-        });
+        const attachments = responseAttachments.map((a) => ({ id: a.id, mimetype: a.mimetype }));
+        this.pushVespaJobForAttachments(attachments, userId, req.user?.workspaceId).catch(
+          (error) => {
+            logger.error(
+              `[AttachmentController] Error pushing Vespa job for attachments for entity ${entityId}:`,
+              error
+            );
+          }
+        );
+
+        for (const attachment of responseAttachments) {
+          if (
+            shouldScheduleVideoPreview(
+              attachment.mimetype,
+              attachment.thumbnailUrl,
+              attachment.metadata,
+              config.enableVideoPreviewWorker
+            )
+          ) {
+            void scheduleVideoPreview(attachment.id).catch((error) => {
+              logger.error(`Failed to schedule video preview for ${attachment.id}:`, error);
+            });
+          }
+        }
       }
 
       res.status(200).json({

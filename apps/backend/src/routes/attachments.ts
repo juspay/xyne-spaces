@@ -57,6 +57,16 @@ router.get(
   attachmentController.streamAttachment.bind(attachmentController)
 );
 
+router.get(
+  '/attachments/:attachmentId/video-preview',
+  attachmentController.getVideoPreviewStatus.bind(attachmentController)
+);
+
+router.post(
+  '/attachments/:attachmentId/video-preview',
+  attachmentController.requestVideoPreview.bind(attachmentController)
+);
+
 // Download attachment by ID
 router.get('/attachments/:attachmentId/download', attachmentController.downloadAttachment.bind(attachmentController));
 
