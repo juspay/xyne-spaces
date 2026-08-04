@@ -88,6 +88,17 @@ export interface RegenerateRecordingSummaryResult {
   detailedSummaryCanvasId: string | null;
 }
 
+export interface ExportRecordingGoogleDocResult {
+  documentId: string;
+  documentUrl: string;
+}
+
+export interface RecordingGoogleDocComposeContext {
+  canExport: boolean;
+  unavailableReason?: string;
+  summary: string | null;
+}
+
 export interface BulkDeleteRecordingsResult {
   success: boolean;
   deleted: string[];
@@ -253,6 +264,20 @@ class RecordingService {
       await apiInstance.post(`/calls/recordings/${callId}/generate-summary`, {
         summaryTemplateId,
       });
+    return response.data;
+  }
+
+  async exportGoogleDoc(callId: string): Promise<ExportRecordingGoogleDocResult> {
+    const response = await apiInstance.post<{ success: true } & ExportRecordingGoogleDocResult>(
+      `/calls/recordings/${callId}/export-google-doc`,
+    );
+    return response.data;
+  }
+
+  async getGoogleDocComposeContext(callId: string): Promise<RecordingGoogleDocComposeContext> {
+    const response = await apiInstance.get<{ success: true } & RecordingGoogleDocComposeContext>(
+      `/calls/recordings/${callId}/google-doc-compose-context`,
+    );
     return response.data;
   }
 

@@ -26,9 +26,11 @@ export async function syncCalendar(provider: CalendarProvider): Promise<void> {
 
 export async function initCalendarOAuth(
   platform: CalendarOAuthPlatform = 'web',
+  returnPath?: string,
 ): Promise<CalendarOAuthInitResponse> {
   const response = await apiInstance.post<CalendarOAuthInitResponse>('/calendar/oauth/init', {
     platform,
+    ...(returnPath ? { returnPath } : {}),
   });
   return response.data;
 }

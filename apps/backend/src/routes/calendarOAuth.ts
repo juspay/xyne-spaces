@@ -19,6 +19,7 @@ import {
 } from '@/services/calendarOAuthFlow';
 import { logger } from '@/utils/logger';
 import { getBackendUrl, getFrontendUrl } from '@/utils/publicUrls';
+import { sanitizeReturnPath } from '@/integrations/routes/urlHelpers';
 
 const router = express.Router();
 
@@ -27,6 +28,7 @@ const GOOGLE_CALENDAR_SCOPES = [
   'email',
   'profile',
   'https://www.googleapis.com/auth/calendar.readonly',
+  'https://www.googleapis.com/auth/documents',
 ];
 const MICROSOFT_CALENDAR_SCOPES = [
   'openid',
@@ -179,12 +181,14 @@ router.post('/init', authMiddleware.authenticate, async (req: Request, res: Resp
     }
 
     const platform = getPlatform(req);
+    const returnPath = sanitizeReturnPath(req.body?.returnPath);
     const { state, codeChallenge } = await calendarOAuthStateService.create({
       provider,
       ownerUserId: user.id,
       workspaceId: user.workspaceId,
       expectedEmail: user.email,
       platform,
+      ...(returnPath ? { returnPath } : {}),
     });
 
     let authUrl: string;

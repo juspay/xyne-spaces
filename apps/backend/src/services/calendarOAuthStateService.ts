@@ -11,6 +11,8 @@ export interface CalendarOAuthState {
   workspaceId: string;
   expectedEmail: string;
   platform: CalendarOAuthPlatform;
+  /** Optional in-app location to resume after authorization. */
+  returnPath?: string;
   codeVerifier: string;
   createdAt: number;
 }
