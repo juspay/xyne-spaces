@@ -240,6 +240,7 @@ For example, 175,785 attempted Slack rows out of 285,605 selected Slack rows is
 | Counter | Meaning |
 | --- | --- |
 | Run percentage | Rows attempted by the Python submitter divided by rows requested |
+| Vespa indexing percentage | Actual indexed rows for the selected source divided by all Parquet rows for that source; for an all-source run, actual indexed source rows divided by the full dataset |
 | Attempted | Backend requests completed, including successes and failures |
 | Queued | Xyne accepted the row and created/queued its normal domain work |
 | Duplicates | Stable ID already existed; the backend avoided creating a second record |
@@ -268,6 +269,7 @@ and the Xyne worker continues draining Redis.
 | `GET` | `/api/document?schema=file&doc_id=<id>` | Fetch one actual Vespa document and its fields/chunks |
 | `POST` | `/api/start` | Start a range/source submission run |
 | `POST` | `/api/stop` | Stop submitting new rows |
+| `POST` | `/api/resume` | Resume the previous range at its first unsubmitted row |
 | `POST` | `/ingest-one` | Submit one Parquet row by zero-based row index |
 
 Valid browser schemas are `chat_message`, `file`, `mail`, `ticket`, and
@@ -305,6 +307,17 @@ curl -sS -X POST http://127.0.0.1:8090/ingest-one \
   -d '{"row_index": 0}'
 ```
 
+### Resume the previous range
+
+```bash
+curl -sS -X POST http://127.0.0.1:8090/api/resume \
+  -H 'Content-Type: application/json' \
+  -d '{}'
+```
+
+The dashboard also shows a **Resume row N** button when the previous range stopped or
+was interrupted before all rows were submitted.
+
 ## Xyne benchmark endpoints (`http://127.0.0.1:3001`)
 
 These routes are mounted under `/api/admin/enterprise-rag`.
@@ -312,7 +325,8 @@ These routes are mounted under `/api/admin/enterprise-rag`.
 | Method | Endpoint | Purpose |
 | --- | --- | --- |
 | `POST` | `/api/admin/enterprise-rag/ingest` | Validate, classify, and submit one mapped row to Xyne |
-| `GET` | `/api/admin/enterprise-rag/stats` | Count benchmark resources currently stored in Vespa |
+| `GET` | `/api/admin/enterprise-rag/stats` | Count benchmark resources currently stored in Vespa by schema and by source |
+| `GET` | `/api/admin/enterprise-rag/queues` | Return live waiting, active, delayed, completed, and failed counts for every registered Vespa Bull queue |
 | `GET` | `/api/admin/enterprise-rag/context` | Return the actual org, workspace, and user used by ingestion |
 
 In local development, authentication can be bypassed only for loopback requests when
@@ -430,16 +444,26 @@ curl -sS http://127.0.0.1:8090/api/status
 ```
 
 Use `attempted`, `queued`, `duplicates`, and `failed` to monitor submission. Use
-`vespa_source_rows` and `vespa_by_schema` to monitor completed indexing.
+`vespa_percentage`, `vespa_source_rows`, `vespa_by_source`, and `vespa_by_schema` to
+monitor completed indexing.
+
+The Vespa progress selector is independent of the submission selector. For example,
+Slack may keep indexing from its Redis backlog while the submitter starts Confluence;
+select either source in the Vespa panel to see its actual indexed coverage. The queue
+monitor shows infrastructure-wide Bull queue counts, including the normal message
+queue, file queue, and any additional registered fan-out queues.
 
 ## Resume and duplicate behavior
 
 Progress is persisted in the ignored `progress.json` file next to `server.py`. If the
 dashboard stops while a run is active, the restored state becomes `interrupted`.
 
-To resume, start a new run at the next desired Parquet row. Stable IDs make repeated
-submissions idempotent for normal messages, mail, and tickets. Knowledge-base items
-may be requeued so an existing file can be indexed again.
+To resume, use the **Resume row N** button or `POST /api/resume`. It calculates the
+first unsubmitted row as the previous start row plus its completed attempts. Failed
+rows are already attempts and remain visible in the failure list; retry them
+separately. Stable IDs make repeated submissions idempotent for normal messages, mail,
+and tickets. Knowledge-base items may be requeued so an existing file can be indexed
+again.
 
 ## Troubleshooting
 

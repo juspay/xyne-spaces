@@ -2,6 +2,7 @@ import { Router, type NextFunction, type Request, type Response } from 'express'
 import { z } from 'zod';
 import { DatabaseClient } from '@/database/client';
 import { authMiddleware } from '@/middleware/auth';
+import { vespaQueue } from '@/queues/vespaQueue';
 import {
   ENTERPRISE_RAG_SOURCE_TYPES,
   getEnterpriseRagDocumentCounts,
@@ -178,6 +179,19 @@ router.get('/stats', ...authenticateAdmin, async (req: Request, res: Response): 
     res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Unknown stats error',
+    });
+  }
+});
+
+router.get('/queues', ...authenticateAdmin, async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const queues = await vespaQueue.getAllStats();
+    res.status(200).json({ success: true, queues });
+  } catch (error) {
+    logger.error('[EnterpriseRAG] Failed to read Vespa queue stats', { error });
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown queue stats error',
     });
   }
 });
