@@ -98,12 +98,13 @@ export interface SearchEvalVespaParams {
   type?: string;
   /** datetime-local string ("YYYY-MM-DDTHH:MM") — results must be at/before this. */
   before?: string;
-  /** Explicit rank profile name, passed through to Vespa as-is — not
-   *  allow-listed (see buildYqlFromParams in vespa-search-areas.ts). The eval
-   *  UI's dropdown sources valid names live from vespa-schema-profiles.ts, or
-   *  a free-typed "Custom…" name — either way a name that doesn't exist on
-   *  the queried schema just fails at Vespa. Undefined/"" → buildYqlFromParams
-   *  auto-picks (default_native for scored text). */
+  /** Explicit rank profile name, passed through to Vespa as-is — this caller
+   *  opts out of buildYqlFromParams' allow-list (skipRankProfileValidation;
+   *  see vespa-search-areas.ts) since the eval UI's dropdown sources valid
+   *  names live from vespa-schema-profiles.ts, or a free-typed "Custom…"
+   *  name — either way a name that doesn't exist on the queried schema just
+   *  fails at Vespa. Undefined/"" → buildYqlFromParams auto-picks
+   *  (default_native for scored text). */
   rankProfile?: string;
   workspaceId: string;
   limit?: number;
@@ -171,11 +172,11 @@ export async function searchEvalVespa(
   const built =
     areas.length === 1
       ? params.permissionMode === "with"
-        ? buildYqlFromParams({ ...commonParams, searchArea: areas[0]! }, params.userId!, params.workspaceId)
-        : buildYqlFromParams({ ...commonParams, searchArea: areas[0]! }, "search-eval-public-only", params.workspaceId, { publicOnly: true })
+        ? buildYqlFromParams({ ...commonParams, searchArea: areas[0]! }, params.userId!, params.workspaceId, { skipRankProfileValidation: true })
+        : buildYqlFromParams({ ...commonParams, searchArea: areas[0]! }, "search-eval-public-only", params.workspaceId, { publicOnly: true, skipRankProfileValidation: true })
       : params.permissionMode === "with"
-        ? buildFederatedYqlFromParams(areas, commonParams, params.userId!, params.workspaceId)
-        : buildFederatedYqlFromParams(areas, commonParams, "search-eval-public-only", params.workspaceId, { publicOnly: true });
+        ? buildFederatedYqlFromParams(areas, commonParams, params.userId!, params.workspaceId, { skipRankProfileValidation: true })
+        : buildFederatedYqlFromParams(areas, commonParams, "search-eval-public-only", params.workspaceId, { publicOnly: true, skipRankProfileValidation: true });
 
   const datedYql = convertDateLiteralsToMs(built.yql);
   const stageLabel = areas.length === 1 ? areas[0]! : `federated (${areas.join(", ")})`;
