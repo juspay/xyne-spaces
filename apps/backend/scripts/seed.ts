@@ -77,7 +77,7 @@ const DEFAULT_ADMIN_USER = {
   name: 'System Administrator',
   email: 'admin@xyne.ai',
   authProvider: AuthProvider.EMAIL,
-  providerUserId: 'email-admin-seed-user-001',
+  providerUserId: 'email-admin@xyne.ai',
   status: UserStatus.ACTIVE,
 };
 
