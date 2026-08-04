@@ -24,6 +24,14 @@ mermaid.initialize({
   theme: 'default',
   securityLevel: 'antiscript',
   fontFamily: 'Inter, sans-serif',
+  // On a parse/render failure mermaid.render() (called with no container) appends a
+  // temporary <div id="d{id}"> holding its "Syntax error in text" bomb SVG to
+  // document.body and then throws WITHOUT removing that div — so every failed diagram
+  // leaks a floating bomb into the DOM (very visible in the Electron desktop shell).
+  // suppressErrorRendering makes mermaid skip drawing the bomb and clean up the temp
+  // node before throwing, so the error is handled solely by our own catch handler in
+  // MermaidBlock.utils.ts (which shows an inline red error box instead).
+  suppressErrorRendering: true,
 });
 
 /**
