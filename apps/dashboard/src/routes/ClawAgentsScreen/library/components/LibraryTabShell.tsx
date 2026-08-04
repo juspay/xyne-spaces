@@ -11,7 +11,7 @@ export interface LibraryEmptyState {
 }
 
 export function LibraryGrid({ children }: { children: ReactNode }): ReactElement {
-  return <div className='grid grid-cols-1 gap-x-3 gap-y-2 sm:grid-cols-2'>{children}</div>;
+  return <div className='grid grid-cols-1 gap-4 sm:grid-cols-2'>{children}</div>;
 }
 
 export function LibrarySections({
@@ -33,11 +33,6 @@ export function LibrarySections({
   );
 }
 
-/**
- * Renders the loading / error / empty branches every library tab shares, so a
- * tab only describes its own data. The toolbar stays mounted in every branch —
- * it is portaled into the shared header and must not disappear while loading.
- */
 export function LibraryTabShell({
   toolbar,
   isLoading,

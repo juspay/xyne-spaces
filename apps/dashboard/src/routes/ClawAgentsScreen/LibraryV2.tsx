@@ -1,5 +1,5 @@
 import { ComponentType, ReactElement, useRef, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { PlusDefault, SearchDefault } from '@xyne/icons';
 import { cn } from '@/utils/classNames';
 import { Button } from '@/components/ui/Button';
@@ -23,21 +23,21 @@ const LIBRARY_TABS = [
     label: 'Agents',
     content: AgentsV2,
     searchPlaceholder: 'Search agents',
-    create: { label: 'Create Agent', path: '/claw-agents/create' },
+    create: { label: 'Create Agent', path: '/ai/library/agent/create' },
   },
   {
     id: 'subagents',
     label: 'Subagents',
     content: SubagentsV2,
     searchPlaceholder: 'Search subagents',
-    create: { label: 'Create Subagent', path: '/claw-agents/subagents/create' },
+    create: { label: 'Create Subagent', path: '/ai/library/subagent/create' },
   },
   {
     id: 'skills',
     label: 'Skills',
     content: SkillsV2,
     searchPlaceholder: 'Search skills',
-    create: { label: 'Create Skill', path: '/claw-agents/skills/create' },
+    create: { label: 'Create Skill', path: '/ai/library/skill/create' },
   },
   {
     id: 'mcp',
@@ -53,6 +53,10 @@ const TAB_SCOPED_PARAMS = ['q', 'category', 'source'];
 
 const LibraryV2 = (): ReactElement => {
   const navigate = useNavigate();
+  const { workspaceId } = useParams<{ workspaceId?: string }>();
+  // Every app route lives under `/:workspaceId`, so the create targets below
+  // have to carry the prefix when we're inside a workspace.
+  const prefixWs = (path: string): string => (workspaceId ? `/${workspaceId}${path}` : path);
   const [searchParams, setSearchParams] = useSearchParams();
   const [toolbarSlot, setToolbarSlot] = useState<HTMLDivElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
@@ -91,9 +95,9 @@ const LibraryV2 = (): ReactElement => {
   };
 
   return (
-    <div className='mx-auto flex w-full max-w-[800px] flex-col gap-8 px-6 pb-16'>
-      <div className='flex flex-col gap-5 pt-5'>
-        <div className='flex items-center gap-5'>
+    <div className='mx-auto flex w-full max-w-[800px] flex-col px-6 pb-16'>
+      <div className='sticky top-0 z-10 flex flex-col bg-background'>
+        <div className='flex items-center gap-5 pt-5'>
           <div className='flex min-w-0 flex-1 flex-col justify-center gap-1'>
             <h1 className='text-2xl font-semibold leading-[1.2] tracking-[-0.24px] text-foreground'>
               Library
@@ -106,7 +110,7 @@ const LibraryV2 = (): ReactElement => {
             <Button
               type='button'
               className='shrink-0'
-              onClick={() => void navigate(activeTab.create.path)}
+              onClick={() => void navigate(prefixWs(activeTab.create.path))}
               data-track-category='Claw Agents'
               data-track-name={activeTab.create.label}
             >
@@ -116,72 +120,76 @@ const LibraryV2 = (): ReactElement => {
           )}
         </div>
 
-        <div className='flex items-center justify-between gap-4'>
-          <div className='flex items-start gap-1'>
-            {LIBRARY_TABS.map(tab => (
+        <div className='mt-3 flex flex-col gap-5 pb-3 pt-2'>
+          <div className='flex items-center justify-between gap-4'>
+            <div className='flex items-start gap-1'>
+              {LIBRARY_TABS.map(tab => (
+                <button
+                  key={tab.id}
+                  type='button'
+                  onClick={() => setActiveTab(tab.id)}
+                  aria-current={tab.id === activeTab.id ? 'page' : undefined}
+                  data-track-category='Claw Agents'
+                  data-track-name={`Library tab: ${tab.label}`}
+                  className={cn(
+                    'flex h-8 items-center justify-center rounded-[10px] px-3 py-1 text-sm transition-colors',
+                    tab.id === activeTab.id
+                      ? 'bg-muted text-foreground'
+                      : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+                  )}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            <div className='flex items-center justify-center gap-1.5'>
               <button
-                key={tab.id}
                 type='button'
-                onClick={() => setActiveTab(tab.id)}
-                aria-current={tab.id === activeTab.id ? 'page' : undefined}
-                data-track-category='Claw Agents'
-                data-track-name={`Library tab: ${tab.label}`}
+                onClick={toggleSearch}
+                aria-label={activeTab.searchPlaceholder}
+                aria-expanded={searchOpen}
                 className={cn(
-                  'flex h-8 items-center justify-center rounded-[10px] px-3 py-1 text-sm transition-colors',
-                  tab.id === activeTab.id
-                    ? 'bg-muted text-foreground'
-                    : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+                  'flex size-7 items-center justify-center rounded-[10px] transition-colors hover:bg-muted',
+                  searchOpen ? 'bg-muted text-foreground' : 'text-muted-foreground',
                 )}
+                data-track-category='Claw Agents'
+                data-track-name='Toggle library search'
               >
-                {tab.label}
+                <SearchDefault className='size-4' />
               </button>
-            ))}
+              <div ref={setToolbarSlot} className='flex items-center' />
+            </div>
           </div>
 
-          <div className='flex items-center justify-center gap-1.5'>
-            <button
-              type='button'
-              onClick={toggleSearch}
-              aria-label={activeTab.searchPlaceholder}
-              aria-expanded={searchOpen}
-              className={cn(
-                'flex size-7 items-center justify-center rounded-[10px] transition-colors hover:bg-muted',
-                searchOpen ? 'bg-muted text-foreground' : 'text-muted-foreground',
-              )}
-              data-track-category='Claw Agents'
-              data-track-name='Toggle library search'
-            >
-              <SearchDefault className='size-4' />
-            </button>
-            <div ref={setToolbarSlot} className='flex items-center' />
-          </div>
+          {searchOpen && (
+            <div className='relative'>
+              <SearchDefault className='pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground' />
+              <input
+                ref={searchRef}
+                type='text'
+                value={query}
+                onChange={e => setQuery(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Escape') {
+                    setQuery('');
+                    setSearchOpen(false);
+                  }
+                }}
+                data-track-category='Claw Agents'
+                data-track-name='Search library'
+                placeholder={activeTab.searchPlaceholder}
+                className='h-9 w-full rounded-[10px] border border-border bg-background pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
+              />
+            </div>
+          )}
         </div>
-
-        {searchOpen && (
-          <div className='relative'>
-            <SearchDefault className='pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground' />
-            <input
-              ref={searchRef}
-              type='text'
-              value={query}
-              onChange={e => setQuery(e.target.value)}
-              onKeyDown={e => {
-                if (e.key === 'Escape') {
-                  setQuery('');
-                  setSearchOpen(false);
-                }
-              }}
-              data-track-category='Claw Agents'
-              data-track-name='Search library'
-              placeholder={activeTab.searchPlaceholder}
-              className='h-9 w-full rounded-[10px] border border-border bg-background pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
-            />
-          </div>
-        )}
       </div>
 
       <LibraryToolbarSlotProvider value={toolbarSlot}>
-        <TabContent key={activeTab.id} query={query} />
+        <div className='mt-5'>
+          <TabContent key={activeTab.id} query={query} />
+        </div>
       </LibraryToolbarSlotProvider>
     </div>
   );
