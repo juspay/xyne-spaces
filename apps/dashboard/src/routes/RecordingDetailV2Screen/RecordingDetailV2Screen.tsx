@@ -442,7 +442,11 @@ export default function RecordingDetailV2Screen(): ReactElement {
       const selected = RECORDING_SUMMARY_TEMPLATES.find(
         template => template.id === result.summaryTemplateId,
       );
-      toast.success(selected?.id === 'default' ? 'Default summary generated' : `${selected?.name ?? 'Recording'} summary generated`);
+      toast.success(
+        selected?.id === 'default'
+          ? 'Default summary generated'
+          : `${selected?.name ?? 'Recording'} summary generated`,
+      );
     } catch (err) {
       logRecordingError('RecordingDetailV2Screen.regenerateSummary', err);
       // Drop the placeholder too: a failed request leaves nothing on its way, and
