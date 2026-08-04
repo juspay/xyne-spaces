@@ -58,6 +58,11 @@ interface ParticipantInfo {
   userPicture?: string;
 }
 
+interface CanvasSideEffectContext {
+  canvasHandler: CanvasSideEffectHandler;
+  workspaceId: string;
+}
+
 import { executeStreamingLlmRequest } from './callLlmRetry';
 import { initializeYSweetDoc, syncToYSweet } from '@/utils/ysweetUtils.js';
 
@@ -92,6 +97,7 @@ function renderPromptTemplate(template: string, values: Record<string, string>):
 // frontend chip can open the transcript at that moment.
 const CITATION_TOKEN_RE = /\[clf-(\d+)\]/g;
 const MAX_CITATION_SNIPPET = 300;
+const INITIAL_DETAILED_SUMMARY_CANVAS_VERSION = 1;
 
 interface CitationSegment {
   n: number;
@@ -731,20 +737,22 @@ export class CallDocumentService {
 
   private async createCanvasSideEffectHandler(
     createdByUserId: string,
-  ): Promise<{ canvasHandler: CanvasSideEffectHandler; workspaceId: string }> {
+  ): Promise<CanvasSideEffectContext> {
     const user = await db.user.findUnique({
       where: { id: createdByUserId },
-      select: { id: true, email: true, workspaceId: true, role: true },
+      select: {
+        id: true,
+        workspaceId: true,
+        role: true,
+        orgMember: {
+          select: { memberId: true, role: true },
+        },
+      },
     });
-    if (!user || !user.workspaceId) {
+    if (!user?.workspaceId) {
       throw new Error(`User ${createdByUserId} not found or has no workspace assigned`);
     }
-
-    // Email is globally unique in orgMember, single lookup is sufficient.
-    const orgMember = await db.orgMember.findUnique({
-      where: { email: user.email },
-    });
-    if (!orgMember) {
+    if (!user.orgMember) {
       throw new Error(`User ${createdByUserId} is not a member of any organization`);
     }
 
@@ -753,8 +761,8 @@ export class CallDocumentService {
         userID: user.id,
         workspaceId: user.workspaceId,
         role: user.role,
-        memberId: orgMember.memberId,
-        orgRole: orgMember.role,
+        memberId: user.orgMember.memberId,
+        orgRole: user.orgMember.role,
       }),
       workspaceId: user.workspaceId,
     };
@@ -1227,7 +1235,7 @@ export class CallDocumentService {
             isAiGenerated: true,
             generatedAt: now.toISOString(),
             mentionedUserIds, // Store mentioned users for side effect handler
-            version: 1, // Initial version for new canvases
+            version: INITIAL_DETAILED_SUMMARY_CANVAS_VERSION,
           },
         },
       });
@@ -1377,6 +1385,7 @@ export class CallDocumentService {
     callStartedAt: Date,
     callTitle?: string | null,
     citationCtx?: CitationContext,
+    sideEffectContextPromise?: Promise<CanvasSideEffectContext | null>,
   ): Promise<boolean> {
     try {
       const prisma = DatabaseClient.getInstance();
@@ -1398,7 +1407,7 @@ export class CallDocumentService {
         return false;
       }
 
-      // Refresh title + mentions metadata at the SAME reserved version (1).
+      // Refresh title + mentions metadata at the same reserved initial version.
       await prisma.canvas.update({
         where: { id: canvasId },
         data: {
@@ -1413,7 +1422,7 @@ export class CallDocumentService {
             isAiGenerated: true,
             generatedAt: now.toISOString(),
             mentionedUserIds,
-            version: 1,
+            version: INITIAL_DETAILED_SUMMARY_CANVAS_VERSION,
           },
         },
       });
@@ -1425,12 +1434,16 @@ export class CallDocumentService {
       // Creation side effects were intentionally deferred while this canvas was
       // empty. Run them now so the handler reads the finalized mention metadata.
       try {
-        const { canvasHandler } = await this.createCanvasSideEffectHandler(updatedByUserId);
-        await canvasHandler.onDeferredInsert({
-          entityId: canvasId,
-          entityType: 'canvases',
-          operation: 'insert',
-        });
+        const sideEffectContext = sideEffectContextPromise
+          ? await sideEffectContextPromise
+          : await this.createCanvasSideEffectHandler(updatedByUserId);
+        if (sideEffectContext) {
+          await sideEffectContext.canvasHandler.onDeferredInsert({
+            entityId: canvasId,
+            entityType: 'canvases',
+            operation: 'insert',
+          });
+        }
       } catch (sideEffectError) {
         logger.error('[CallDocumentService] Failed to run finalized canvas insert side effects:', sideEffectError);
       }
@@ -1527,7 +1540,7 @@ export class CallDocumentService {
 
     return {
       canvasId,
-      version: 1,
+      version: INITIAL_DETAILED_SUMMARY_CANVAS_VERSION,
     };
   }
 
@@ -1850,9 +1863,8 @@ A comprehensive detailed summary has been generated from this call.
       logger.error('[CallDocumentService] Cleanup: failed to delete canvas database rows:', error);
     }
 
-    // A feed is queued when the provisional canvas is created. Always enqueue a
-    // matching delete so a feed that already completed cannot leave a searchable
-    // Vespa document after generation fails.
+    // Deferred streaming creation does not queue a feed. Keep a defensive delete
+    // in case an older or retried indexing job exists for this canvas id.
     try {
       await vespaQueue.addJob({
         schema: fileSchema,
@@ -1975,7 +1987,16 @@ A comprehensive detailed summary has been generated from this call.
       // Best-effort: attach each speaker's participant userId (matched by name) so
       // the citation chip + hover can show the real user avatar. Unmatched speakers
       // fall back to initials on the frontend.
-      const speakerParticipantMap = await buildParticipantMap(call.channelId || conversation.channelId);
+      const participantMapPromise = buildParticipantMap(call.channelId || conversation.channelId)
+        .catch(participantMapError => {
+          logger.warn(`[${callId}] detailed_summary_participant_map_unavailable`, {
+            error: participantMapError instanceof Error
+              ? participantMapError.message
+              : String(participantMapError),
+          });
+          return new Map<string, ParticipantInfo>();
+        });
+      const speakerParticipantMap = await participantMapPromise;
       for (const s of segments) {
         const info = speakerParticipantMap.get(s.speaker.toLowerCase());
         if (info) s.speakerId = info.userId;
@@ -2068,7 +2089,6 @@ A comprehensive detailed summary has been generated from this call.
       // canvas with that content already in Y-Sweet, then publishes its URL.
       // This avoids both an empty dangling canvas and waiting for call-title
       // generation before detailed-summary streaming can begin.
-      const participantMapPromise = buildParticipantMap(conversation.channelId);
       const SYNC_INTERVAL_MS = 300;
       const sleepMs = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
       let latestMarkdown = '';
@@ -2077,6 +2097,8 @@ A comprehensive detailed summary has been generated from this call.
       let postedCanvasTitle: string | null = null;
       let canvasInitialization: Promise<void> | null = null;
       let canvasInitializationError: Error | null = null;
+      const getCanvasInitializationError = (): Error | null => canvasInitializationError;
+      let sideEffectContextPromise: Promise<CanvasSideEffectContext | null> | null = null;
       let writerActive = false;
       let writerLoop: Promise<void> | null = null;
 
@@ -2144,6 +2166,18 @@ A comprehensive detailed summary has been generated from this call.
             throw new Error('Failed to create detailed summary canvas');
           }
 
+          // Resolve the side-effect identity once, concurrently with streaming,
+          // and reuse it during finalization without delaying this first chunk.
+          sideEffectContextPromise = this.createCanvasSideEffectHandler(xyneAutomaticBot.id)
+            .catch(sideEffectIdentityError => {
+              logger.error(`[${callId}] detailed_summary_side_effect_identity_unavailable`, {
+                error: sideEffectIdentityError instanceof Error
+                  ? sideEffectIdentityError.message
+                  : String(sideEffectIdentityError),
+              });
+              return null;
+            });
+
           newCanvasId = canvasId;
           renderedMarkdown = firstMarkdown;
           canvasUrl = getCanvasUrl(canvasId);
@@ -2157,7 +2191,7 @@ A comprehensive detailed summary has been generated from this call.
             canvasUrl,
             postedCanvasTitle,
             channel.workspaceId,
-            1,
+            INITIAL_DETAILED_SUMMARY_CANVAS_VERSION,
           );
 
           if (startLiveWriter) {
@@ -2216,9 +2250,7 @@ A comprehensive detailed summary has been generated from this call.
       if (!newCanvasId && !canvasInitializationError) {
         await ensureStreamingCanvas(detailedSummaryMarkdown, false);
       }
-      // Initialization runs inside the delta callback, so TypeScript cannot see
-      // the closure assignment when narrowing this value here.
-      const initializationFailure = canvasInitializationError as Error | null;
+      const initializationFailure = getCanvasInitializationError();
       if (initializationFailure || !newCanvasId || !canvasUrl) {
         if (newCanvasId) {
           await this.cleanupFailedDetailedSummaryCanvas(newCanvasId, conversationId, callId);
@@ -2233,7 +2265,7 @@ A comprehensive detailed summary has been generated from this call.
       const finalizedCanvasId = newCanvasId;
       const finalizedCanvasUrl = canvasUrl;
 
-      // Finalize at the SAME version (1): authoritative content + title/mentions
+      // Finalize at the same initial version: authoritative content + title/mentions
       // + re-index. Returns false if the Y-Sweet write fails so we don't report
       // success on a lost final write.
       const finalized = await this.finalizeDetailedSummaryCanvas(
@@ -2245,6 +2277,7 @@ A comprehensive detailed summary has been generated from this call.
         call.startedAt,
         resolvedCallTitle,
         citationCtx,
+        sideEffectContextPromise ?? undefined,
       );
       if (!finalized) {
         await this.cleanupFailedDetailedSummaryCanvas(finalizedCanvasId, conversationId, callId);
@@ -2253,7 +2286,7 @@ A comprehensive detailed summary has been generated from this call.
 
       // If the title LLM completed after the first content delta, update the
       // already-posted link to match the finalized canvas title. This remains
-      // version 1 and therefore does not display an "updated" indicator.
+      // at the initial version and therefore does not display an "updated" indicator.
       const finalizedCanvasTitle = buildCanvasTitle(resolvedCallTitle);
       if (postedCanvasTitle !== finalizedCanvasTitle) {
         try {
@@ -2263,7 +2296,7 @@ A comprehensive detailed summary has been generated from this call.
             finalizedCanvasUrl,
             finalizedCanvasTitle,
             channel.workspaceId,
-            1,
+            INITIAL_DETAILED_SUMMARY_CANVAS_VERSION,
           );
         } catch (messageTitleError) {
           logger.warn(`[${callId}] detailed_summary_message_title_refresh_failed`, {

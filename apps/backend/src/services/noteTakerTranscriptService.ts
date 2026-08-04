@@ -523,6 +523,7 @@ class NoteTakerTranscriptService {
       let newCanvasId: string | null = null;
       let canvasInitialization: Promise<void> | null = null;
       let canvasInitializationError: Error | null = null;
+      const getCanvasInitializationError = (): Error | null => canvasInitializationError;
       let writerActive = false;
       let writerLoop: Promise<void> | null = null;
 
@@ -650,7 +651,7 @@ class NoteTakerTranscriptService {
         await ensureStreamingCanvas(generated.summary, false);
       }
 
-      const initializationFailure = canvasInitializationError as Error | null;
+      const initializationFailure = getCanvasInitializationError();
       if (initializationFailure || !newCanvasId) {
         logger.error(`[${callId}] detailed_summary_skipped`, {
           reason: initializationFailure?.message ?? 'canvas_create_failed',
