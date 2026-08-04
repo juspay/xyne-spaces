@@ -755,9 +755,10 @@ function QueryDebugDialog({ row, onClose }: { row: SearchEvalResultRow; onClose:
       leftOffset={100}
       maxWidth={1560}
       maxHeight="85vh"
+      bodyClassName="flex-1 overflow-hidden p-[var(--comp-dialog-padding)]"
       footer={<Button variant="secondary" size="sm" onClick={onClose}>Close</Button>}
     >
-      <div className="max-h-[calc(85vh-140px)] w-full space-y-[20px] overflow-y-auto">
+      <div className="max-h-[calc(85vh-140px)] min-w-0 w-full space-y-[20px] overflow-y-auto pr-[4px]">
         {(!row.debug || row.debug.length === 0) && (
           <p className="text-[12px] text-xyne-fg-tertiary">No YQL/debug info captured for this row.</p>
         )}
@@ -771,7 +772,7 @@ function QueryDebugDialog({ row, onClose }: { row: SearchEvalResultRow; onClose:
               </p>
               {/* Side by side once there's room — inputs table stays a fixed
                   readable width, YQL takes the rest, instead of stacking. */}
-              <div className="flex flex-col gap-[12px] lg:flex-row">
+              <div className="flex min-w-0 flex-col gap-[12px] lg:flex-row">
                 {inputs.length > 0 && (
                   <table className="w-full shrink-0 self-start text-[11px] lg:w-[340px]">
                     <tbody>
@@ -784,7 +785,7 @@ function QueryDebugDialog({ row, onClose }: { row: SearchEvalResultRow; onClose:
                     </tbody>
                   </table>
                 )}
-                <pre className="max-h-[220px] min-w-0 flex-1 overflow-auto rounded-lg bg-xyne-surface-sunken p-[8px] text-[10.5px] leading-[1.4] text-xyne-fg-secondary whitespace-pre-wrap">
+                <pre className="max-h-[220px] min-w-0 flex-1 overflow-auto break-words rounded-lg bg-xyne-surface-sunken p-[8px] text-[10.5px] leading-[1.4] text-xyne-fg-secondary whitespace-pre-wrap">
                   {stage.yql}
                 </pre>
               </div>
@@ -796,8 +797,8 @@ function QueryDebugDialog({ row, onClose }: { row: SearchEvalResultRow; onClose:
           <p className="mb-[8px] text-[11px] font-medium uppercase tracking-[0.06em] text-xyne-fg-tertiary">
             Top {results.length} results — click a row to inspect its full values
           </p>
-          <div className="grid grid-cols-1 gap-[12px] lg:grid-cols-[380px_1fr]">
-            <div className="max-h-[420px] overflow-y-auto rounded-xl border border-xyne-border">
+          <div className="grid min-w-0 grid-cols-1 gap-[12px] lg:grid-cols-[minmax(280px,420px)_minmax(0,1fr)]">
+            <div className="min-w-0 max-h-[420px] overflow-auto rounded-xl border border-xyne-border">
               <table className="w-full text-[11.5px]">
                 <thead className="sticky top-0">
                   <tr className="border-b border-xyne-border bg-xyne-surface-subtle text-left text-xyne-fg-tertiary">
@@ -838,13 +839,13 @@ function QueryDebugDialog({ row, onClose }: { row: SearchEvalResultRow; onClose:
               </table>
             </div>
 
-            <div className="max-h-[420px] overflow-y-auto rounded-xl border border-xyne-border bg-xyne-surface-sunken p-[10px]">
+            <div className="min-w-0 max-h-[420px] overflow-auto rounded-xl border border-xyne-border bg-xyne-surface-sunken p-[10px]">
               {selected ? (
                 <>
                   <p className="mb-[6px] text-[11px] font-medium text-xyne-fg-tertiary">
                     #{selectedIdx + 1} — all values
                   </p>
-                  <pre className="text-[10.5px] leading-[1.4] text-xyne-fg-secondary whitespace-pre-wrap">
+                  <pre className="break-words text-[10.5px] leading-[1.4] text-xyne-fg-secondary whitespace-pre-wrap">
                     {JSON.stringify(selected.raw ?? selected, null, 2)}
                   </pre>
                 </>
@@ -879,7 +880,7 @@ function MatchFeaturesTable({ results, goldId }: { results: SearchEvalTopResult[
       <p className="mb-[8px] text-[11px] font-medium uppercase tracking-[0.06em] text-xyne-fg-tertiary">
         Match features
       </p>
-      <div className="overflow-x-auto rounded-xl border border-xyne-border">
+      <div className="min-w-0 overflow-x-auto rounded-xl border border-xyne-border">
         <table className="w-full text-[11px]">
           <thead>
             <tr className="border-b border-xyne-border bg-xyne-surface-subtle text-left text-xyne-fg-tertiary">
