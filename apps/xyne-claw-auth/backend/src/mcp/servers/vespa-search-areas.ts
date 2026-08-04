@@ -842,15 +842,14 @@ export function buildYqlFromParams(
     })}`;
   }
 
-  // 8. Validate an agent-supplied rank profile early, against the profiles that
-  //    actually exist on this area's source — fail with the allowed list rather
-  //    than let Vespa 400 or silently fall back.
+  // 8. An agent/eval-supplied rank profile is passed through as-is. The eval
+  //    UI sources its dropdown live from Vespa's deployed schema (see
+  //    vespa-schema-profiles.ts), or a free-typed "Custom…" name, rather than
+  //    a hardcoded allow-list, so this no longer pre-validates — a name that
+  //    doesn't exist on this area's source just fails at Vespa (400),
+  //    surfaced per-query in the eval UI.
   let rankProfile: string | undefined;
   if (params.rankProfile != null && params.rankProfile !== "") {
-    const allowed = rankProfilesForArea(area);
-    if (!allowed.includes(params.rankProfile)) {
-      throw new Error(`rankProfile "${params.rankProfile}" is not available for area "${params.searchArea}". Allowed: ${allowed.join(", ")}.`);
-    }
     rankProfile = params.rankProfile;
   } else if (query) {
     // A text query always scores (hybrid retrieval), EVEN when grouping — pin
@@ -887,9 +886,13 @@ export interface FederatedBuiltQuery {
  * single-schema queries and merging results client-side.
  *
  * Vespa applies exactly ONE ranking.profile to the whole query, so it must be
- * a profile that exists on every involved source — only "default_native"
- * (present on message/file/ticket/channel/mail) and "unranked" qualify;
- * anything else throws. No sort/groupBy here — federating differing schemas'
+ * a profile that exists on every involved source to work cleanly — passed
+ * through as-is (not allow-listed, see buildYqlFromParams above); the eval
+ * UI's dropdown restricts "All types" to the live intersection
+ * (getCommonRankProfiles, vespa-schema-profiles.ts) unless a free-typed
+ * "Custom…" name is used, so a profile missing from one of the merged
+ * schemas here just fails that query at Vespa. No
+ * sort/groupBy here — federating differing schemas'
  * field vocabularies under one sort/group key isn't well-defined, and no
  * caller currently needs it (search-eval-vespa.ts's only use is a plain
  * "All types" query+date-filter, never sort/groupBy).
@@ -922,9 +925,6 @@ export function buildFederatedYqlFromParams(
 
   let rankProfile: string | undefined;
   if (params.rankProfile != null && params.rankProfile !== "") {
-    if (!BASE_RANK_PROFILES.includes(params.rankProfile)) {
-      throw new Error(`rankProfile "${params.rankProfile}" is not valid for a federated ("All types") query — it must exist on every involved source. Allowed: ${BASE_RANK_PROFILES.join(", ")}.`);
-    }
     rankProfile = params.rankProfile;
   } else if (query) {
     rankProfile = "default_native";

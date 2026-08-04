@@ -186,6 +186,33 @@ export const CONFIG = {
   vespaNamespace: process.env["VESPA_NAMESPACE"] ?? "namespace",
   vespaCluster: process.env["VESPA_CLUSTER"] ?? "my_content",
   /**
+   * Vespa CONFIG SERVER endpoint (port 19071, distinct from the query port
+   * above) — used only to fetch each schema's deployed .sd text
+   * (GET .../content/schemas/<schema>.sd) so rank-profile names can be read
+   * live off the running deployment instead of hand-maintained in code (see
+   * vespa-schema-profiles.ts). Defaults to VESPA_QUERY_ENDPOINT's host on
+   * port 19071 — query and config server are normally the same pod.
+   * Tenant/application/environment/region/instance default to "default",
+   * matching this app's own deployed session scripts (reindex.sh) for a
+   * plain single-node `vespa deploy`.
+   */
+  vespaConfigEndpoint: (() => {
+    const explicit = process.env["VESPA_CONFIG_ENDPOINT"];
+    if (explicit) return explicit.replace(/\/+$/, "");
+    try {
+      const u = new URL(process.env["VESPA_QUERY_ENDPOINT"] ?? "http://localhost:8081");
+      u.port = "19071";
+      return u.toString().replace(/\/+$/, "");
+    } catch {
+      return "http://localhost:19071";
+    }
+  })(),
+  vespaConfigTenant: process.env["VESPA_CONFIG_TENANT"] ?? "default",
+  vespaConfigApplication: process.env["VESPA_CONFIG_APPLICATION"] ?? "default",
+  vespaConfigEnvironment: process.env["VESPA_CONFIG_ENVIRONMENT"] ?? "default",
+  vespaConfigRegion: process.env["VESPA_CONFIG_REGION"] ?? "default",
+  vespaConfigInstance: process.env["VESPA_CONFIG_INSTANCE"] ?? "default",
+  /**
    * Pause (ms) the search-eval-run-worker inserts after each row's Vespa
    * query, in BOTH permission modes — a large sheet (hundreds/thousands of
    * rows) run at full QUERY_CONCURRENCY would otherwise hammer the Vespa

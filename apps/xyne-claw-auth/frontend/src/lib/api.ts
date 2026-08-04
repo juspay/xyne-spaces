@@ -5946,6 +5946,18 @@ export async function startSearchEvalRun(
   );
 }
 
+/** Live rank-profile names for a UI entity type ("messages"/"tickets"/
+ *  "files"/"emails"/"channels"), or the common-to-every-schema set when
+ *  `queryType` is "" ("All types") — read straight off Vespa's deployed .sd
+ *  schema (see rank-profiles.ts), not a hardcoded list. */
+export async function getSearchEvalRankProfiles(queryType: string, userId: string): Promise<string[]> {
+  const data = await request<{ success: boolean; profiles: string[] }>(
+    `${AUTH_API_URL}/api/v1/search-evals/rank-profiles?type=${encodeURIComponent(queryType)}`,
+    { headers: { "x-user-id": userId } },
+  );
+  return data.profiles ?? [];
+}
+
 interface SearchEvalTopKStat {
   count: number;
   pct: number | null;

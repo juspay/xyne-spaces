@@ -55,7 +55,10 @@ import { CONFIG } from "../../config.js";
 import { buildYqlFromParams, buildFederatedYqlFromParams, type StructuredQueryParams } from "./vespa-search-areas.js";
 import { convertDateLiteralsToMs, defaultNativeInputs, callVespa, transformHit, type SearchResult } from "./vespa-direct.js";
 
-const TYPE_TO_AREA: Record<string, string> = {
+// Exported for the rank-profiles route (vespa-schema-profiles.ts +
+// routes/search-evals/rank-profiles.ts) to map a UI entity type to the
+// SearchArea whose .sd schema it should list live rank-profiles from.
+export const TYPE_TO_AREA: Record<string, string> = {
   messages: "message",
   files: "file",
   tickets: "ticket",
@@ -63,7 +66,7 @@ const TYPE_TO_AREA: Record<string, string> = {
   emails: "mail",
 };
 
-const ALL_AREAS = Object.values(TYPE_TO_AREA);
+export const ALL_AREAS = Object.values(TYPE_TO_AREA);
 
 // Mirrors vespa-direct.ts's (unexported) IST_OFFSET_MS — kept in lockstep so
 // the literal this produces round-trips through convertDateLiteralsToMs back
@@ -95,10 +98,12 @@ export interface SearchEvalVespaParams {
   type?: string;
   /** datetime-local string ("YYYY-MM-DDTHH:MM") — results must be at/before this. */
   before?: string;
-  /** Explicit rank profile ("default_native" | "unranked"), validated per-area
-   *  via rankProfilesForArea(). Undefined/"" → buildYqlFromParams auto-picks
-   *  (default_native for scored text). Only these two are safe across every
-   *  area — no SEARCH_AREA declares a wider allowedRankProfiles list. */
+  /** Explicit rank profile name, passed through to Vespa as-is — not
+   *  allow-listed (see buildYqlFromParams in vespa-search-areas.ts). The eval
+   *  UI's dropdown sources valid names live from vespa-schema-profiles.ts, or
+   *  a free-typed "Custom…" name — either way a name that doesn't exist on
+   *  the queried schema just fails at Vespa. Undefined/"" → buildYqlFromParams
+   *  auto-picks (default_native for scored text). */
   rankProfile?: string;
   workspaceId: string;
   limit?: number;
