@@ -568,7 +568,7 @@ export class SlackController {
 		}
 
 		if (parsed.data.channel) {
-			const channelId = await resolveSlackChannel(parsed.data.channel);
+			const channelId = await resolveSlackChannel(parsed.data.channel, botUser.workspaceId);
 			const isParticipant =
 				await repositories.channelParticipants.isParticipant(channelId, userId);
 			if (!isParticipant) {
@@ -677,8 +677,13 @@ export class SlackController {
 			return;
 		}
 
-		const channelId = await resolveSlackChannel(args.channelId);
 		const context = getSlackAuthContext(req);
+		if (!context.workspaceId) {
+			res.status(200).json({ ok: false, error: "workspace_not_found" });
+			return;
+		}
+
+		const channelId = await resolveSlackChannel(args.channelId, context.workspaceId);
 		const isParticipant = await repositories.channelParticipants.isParticipant(
 			channelId,
 			context.userId,
@@ -901,7 +906,7 @@ export class SlackController {
 
 			const { files, channel_id, channels, initial_comment, thread_ts } =
 				parsed.data;
-			const { userId } = getSlackAuthContext(req);
+			const { userId, workspaceId } = getSlackAuthContext(req);
 
 			const uploadedResults: UploadedFileResult[] = [];
 			const redisKeys: string[] = [];
@@ -956,7 +961,11 @@ export class SlackController {
 				return;
 			}
 
-			const channelId = await resolveSlackChannel(shareChannel);
+			if (!workspaceId) {
+				res.status(200).json({ ok: false, error: "workspace_not_found" });
+				return;
+			}
+			const channelId = await resolveSlackChannel(shareChannel, workspaceId);
 			const isParticipant =
 				await repositories.channelParticipants.isParticipant(channelId, userId);
 			if (!isParticipant) {

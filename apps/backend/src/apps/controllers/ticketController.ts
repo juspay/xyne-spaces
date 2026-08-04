@@ -607,7 +607,7 @@ export class TicketController {
       }
 
       // Resolve channelId from channelName if not provided
-      const resolvedChannelId = await resolveChannelId(channelId, undefined, channelName);
+      const resolvedChannelId = await resolveChannelId(channelId, undefined, channelName, req.user?.workspaceId);
 
       const channel = await repositories.channels.findById(resolvedChannelId);
       if (!channel) {

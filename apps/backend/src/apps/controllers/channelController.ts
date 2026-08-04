@@ -49,10 +49,16 @@ export class ChannelController {
 
       const { channelId, channelName } = bodyResult.data;
 
-      // Find channel by ID or name
+      const workspaceId = req.user?.workspaceId;
+      if (!channelId && !workspaceId) {
+        res.status(401).json({ error: 'Unauthorized', code: 'UNAUTHORIZED' });
+        return;
+      }
+
+      // Find channel by ID or name (name lookups are scoped to the caller's workspace)
       const channel = channelId
         ? await repositories.channels.findById(channelId)
-        : await repositories.channels.findByName(channelName!);
+        : await repositories.channels.findByName(channelName!, workspaceId!);
 
       if (!channel) {
         res.status(404).json({ 
@@ -105,9 +111,15 @@ export class ChannelController {
 
       const { channelId, channelName } = bodyResult.data;
 
+      const workspaceId = req.user?.workspaceId;
+      if (!channelId && !workspaceId) {
+        res.status(401).json({ error: 'Unauthorized', code: 'UNAUTHORIZED' });
+        return;
+      }
+
       const channel = channelId
         ? await repositories.channels.findById(channelId)
-        : await repositories.channels.findByName(channelName!);
+        : await repositories.channels.findByName(channelName!, workspaceId!);
 
       if (!channel) {
         res.status(404).json({

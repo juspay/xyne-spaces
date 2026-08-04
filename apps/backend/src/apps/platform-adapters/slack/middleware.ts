@@ -32,11 +32,14 @@ export function getResolvedChannelId(req: Request): string {
 	return channelId;
 }
 
-export async function resolveSlackChannel(channel: string): Promise<string> {
+export async function resolveSlackChannel(
+	channel: string,
+	workspaceId: string,
+): Promise<string> {
 	const existing = await repositories.channels.findById(channel);
 	if (existing) return existing.id;
 
-	const byName = await repositories.channels.findByName(channel);
+	const byName = await repositories.channels.findByName(channel, workspaceId);
 	if (byName) return byName.id;
 
 	throw new Error("Channel not found");
@@ -63,7 +66,7 @@ export async function resolveSlackChannelForUser(
 		return { channelId: dmChannel.id, isDM: true };
 	}
 
-	const channelId = await resolveSlackChannel(channel);
+	const channelId = await resolveSlackChannel(channel, workspaceId);
 	return { channelId, isDM: false };
 }
 

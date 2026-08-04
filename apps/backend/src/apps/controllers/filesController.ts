@@ -134,7 +134,7 @@ export class FilesController {
       const userId = req.user!.id; // bot's userId from the verified app token
 
       // Resolve channelId from channelName or conversationId if not provided
-      const resolvedChannelId = await resolveChannelId(channelId, conversationId, channelName);
+      const resolvedChannelId = await resolveChannelId(channelId, conversationId, channelName, req.user?.workspaceId);
 
       // Extract files from multer
       // uploadMultiple uses fields() so files are in object format

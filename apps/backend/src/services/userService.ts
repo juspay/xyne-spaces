@@ -324,7 +324,7 @@ export class UserService {
 
       // Find the general channel by name
       logger.info(`[GENERAL_CHANNEL] Looking for channel with name 'general'`);
-      const generalChannel = await repositories.channels.findByName('general');
+      const generalChannel = await repositories.channels.findByName('general', user.workspaceId);
 
       if (generalChannel) {
         // Check if user is already a participant

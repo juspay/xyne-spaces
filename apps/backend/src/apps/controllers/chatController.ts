@@ -226,7 +226,7 @@ export class ChatController {
         return;
       }
 
-      const resolvedChannelId = await resolveChannelId(channelId, conversationId, channelName);
+      const resolvedChannelId = await resolveChannelId(channelId, conversationId, channelName, req.user?.workspaceId);
 
       let content: string;
       let isMarkdown = !!markdownText || contentFormat === ContentFormat.MARKDOWN;
@@ -505,7 +505,7 @@ export class ChatController {
       }
 
       const { channelId, channelName, conversationId, limit, cursor } = queryResult.data;
-      const resolvedChannelId = await resolveChannelId(channelId, conversationId, channelName);
+      const resolvedChannelId = await resolveChannelId(channelId, conversationId, channelName, req.user?.workspaceId);
       const response = await getChannelHistory(resolvedChannelId, limit, cursor);
 
       res.status(200).json(response);
@@ -551,7 +551,7 @@ export class ChatController {
       }
 
       const { channelId, channelName, conversationId, limit, cursor } = queryResult.data;
-      const resolvedChannelId = await resolveChannelId(channelId, conversationId, channelName);
+      const resolvedChannelId = await resolveChannelId(channelId, conversationId, channelName, req.user?.workspaceId);
       const response = await getConversationReplies(resolvedChannelId, conversationId, limit, cursor);
 
       res.status(200).json(response);

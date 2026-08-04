@@ -290,9 +290,10 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
     return !!existingChannel;
   }
 
-  async findByName(name: string): Promise<Channel | null> {
+  async findByName(name: string, workspaceId: string): Promise<Channel | null> {
     return await this.db.channel.findFirst({
       where: {
+        workspaceId,
         name: {
           equals: name,
           mode: 'insensitive'
