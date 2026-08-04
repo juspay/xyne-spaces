@@ -2,7 +2,6 @@ import { apiInstance } from './apiClient';
 
 export type CalendarOAuthPlatform = 'web' | 'electron';
 export type CalendarProvider = 'GOOGLE' | 'MICROSOFT';
-export type CalendarOAuthPurpose = 'calendar_reauth' | 'docs_export';
 
 type CalendarProviderResponse = {
   success: true;
@@ -27,13 +26,9 @@ export async function syncCalendar(provider: CalendarProvider): Promise<void> {
 
 export async function initCalendarOAuth(
   platform: CalendarOAuthPlatform = 'web',
-  returnPath?: string,
-  purpose: CalendarOAuthPurpose = 'calendar_reauth',
 ): Promise<CalendarOAuthInitResponse> {
   const response = await apiInstance.post<CalendarOAuthInitResponse>('/calendar/oauth/init', {
     platform,
-    ...(returnPath ? { returnPath } : {}),
-    purpose,
   });
   return response.data;
 }

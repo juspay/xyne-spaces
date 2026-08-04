@@ -99,6 +99,10 @@ export interface RecordingGoogleDocComposeContext {
   summary: string | null;
 }
 
+interface GoogleRecordingDocConnectionResponse {
+  authUrl: string;
+}
+
 export interface BulkDeleteRecordingsResult {
   success: boolean;
   deleted: string[];
@@ -279,6 +283,14 @@ class RecordingService {
       `/calls/recordings/${callId}/google-doc-compose-context`,
     );
     return response.data;
+  }
+
+  async connectGoogleDoc(returnPath: string): Promise<string> {
+    const response = await apiInstance.post<GoogleRecordingDocConnectionResponse>(
+      '/integrations/google/connect/recording-doc/init',
+      { returnPath },
+    );
+    return response.data.authUrl;
   }
 
   async grantRecordingAccess(

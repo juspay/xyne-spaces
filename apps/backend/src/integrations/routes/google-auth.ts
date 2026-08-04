@@ -77,7 +77,8 @@ export type OAuthStateValue = {
     | 'workspace'
     | 'dl-member-sync'
     | 'channel-email-workspace'
-    | 'recording-email';
+    | 'recording-email'
+    | 'recording-doc';
   expectedEmail?: string;
   workspaceId?: string;
   returnPath?: string;
@@ -134,6 +135,13 @@ const RECORDING_EMAIL_GMAIL_SCOPES = [
   'https://www.googleapis.com/auth/gmail.send',
 ];
 const RECORDING_EMAIL_SOURCE_TYPE = 'google-recording-email';
+const RECORDING_DOC_SOURCE_TYPE = 'google-recording-doc';
+const RECORDING_DOC_SCOPES = [
+  'openid',
+  'email',
+  'profile',
+  'https://www.googleapis.com/auth/drive.file',
+];
 
 export function getGoogleIntegrationRedirectUri(req: Request | null = null): string {
   return `${getBackendUrl(req)}/api/integrations/google/auth/callback`;
@@ -313,6 +321,36 @@ async function createGoogleRecordingEmailAuthUrl(
   return createOAuth2Client(getGoogleIntegrationRedirectUri(req)).generateAuthUrl({
     access_type: 'offline',
     scope: RECORDING_EMAIL_GMAIL_SCOPES,
+    prompt: 'consent',
+    state,
+  });
+}
+
+async function createGoogleRecordingDocAuthUrl(
+  userId: string,
+  workspaceId: string,
+  returnPath: string,
+  req: Request,
+): Promise<string> {
+  const user = await db.user.findFirst({
+    where: { id: userId, workspaceId },
+    select: { email: true },
+  });
+  if (!user) throw new GoogleAuthRouteError('User account not found', 401);
+
+  const state = randomUUID();
+  await setOAuthState(state, {
+    mode: 'recording-doc',
+    userId,
+    workspaceId,
+    expectedEmail: user.email.trim().toLowerCase(),
+    returnPath,
+    platform: 'web',
+    timestamp: Date.now(),
+  });
+  return createOAuth2Client(getGoogleIntegrationRedirectUri(req)).generateAuthUrl({
+    access_type: 'offline',
+    scope: RECORDING_DOC_SCOPES,
     prompt: 'consent',
     state,
   });
@@ -542,6 +580,32 @@ router.post(
   },
 );
 
+router.post(
+  '/connect/recording-doc/init',
+  authV2Middleware.authenticate,
+  async (req: Request, res: Response): Promise<void> => {
+    const returnPath = sanitizeReturnPath(req.body.returnPath);
+    if (!returnPath) {
+      res.status(400).json({ error: 'A valid return path is required' });
+      return;
+    }
+    try {
+      const authUrl = await createGoogleRecordingDocAuthUrl(
+        req.user!.id,
+        req.user!.workspaceId,
+        returnPath,
+        req,
+      );
+      res.json({ authUrl });
+    } catch (error: unknown) {
+      logger.error(`${TAG} Error initiating recording Google Docs connect`, error);
+      res.status(error instanceof GoogleAuthRouteError ? error.status : 400).json({
+        error: error instanceof GoogleAuthRouteError ? error.message : 'Unable to start Google Docs connection',
+      });
+    }
+  },
+);
+
 // Legacy /auth/start flow removed.
 // The frontend now uses the authenticated /connect/* entry points, which
 // validate workspace ownership before generating OAuth URLs.
@@ -556,12 +620,15 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
   const stateWorkspaceId =
     stateData?.workspaceId ?? stateData?.channelData?.workspaceId;
   const redirectCallbackError = (message: string): void => {
-    if (stateData?.mode === 'recording-email') {
+    if (stateData?.mode === 'recording-email' || stateData?.mode === 'recording-doc') {
       redirectRecordingEmailOAuthResult(
         res,
         frontendUrl,
         stateData,
-        new URLSearchParams({ recordingEmailError: message }),
+        new URLSearchParams({
+          [stateData.mode === 'recording-doc' ? 'recordingGoogleDocError' : 'recordingEmailError']:
+            message,
+        }),
       );
       return;
     }
@@ -599,9 +666,10 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
     }
     logger.info(`${TAG} Tokens obtained successfully`);
 
-    if (stateData.mode === 'recording-email') {
+    if (stateData.mode === 'recording-email' || stateData.mode === 'recording-doc') {
+      const isRecordingDoc = stateData.mode === 'recording-doc';
       if (!stateData.userId || !stateData.workspaceId || !stateData.expectedEmail || !tokens.id_token) {
-        throw new Error('Invalid recording email OAuth state');
+        throw new Error(`Invalid recording ${isRecordingDoc ? 'Google Docs' : 'email'} OAuth state`);
       }
 
       const ticket = await oauth2Client.verifyIdToken({
@@ -615,7 +683,10 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
           res,
           frontendUrl,
           stateData,
-          new URLSearchParams({ recordingEmailError: 'Google did not verify this email address' }),
+          new URLSearchParams({
+            [isRecordingDoc ? 'recordingGoogleDocError' : 'recordingEmailError']:
+              'Google did not verify this email address',
+          }),
         );
         return;
       }
@@ -625,7 +696,8 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
           frontendUrl,
           stateData,
           new URLSearchParams({
-            recordingEmailError: `Connect ${stateData.expectedEmail} to send recording recaps`,
+            [isRecordingDoc ? 'recordingGoogleDocError' : 'recordingEmailError']:
+              `Connect ${stateData.expectedEmail} to ${isRecordingDoc ? 'export recordings' : 'send recording recaps'}`,
           }),
         );
         return;
@@ -636,10 +708,10 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
         select: { email: true },
       });
       if (currentUser?.email.trim().toLowerCase() !== stateData.expectedEmail) {
-        throw new Error('Your Xyne account changed while connecting Google email');
+        throw new Error(`Your Xyne account changed while connecting Google ${isRecordingDoc ? 'Docs' : 'email'}`);
       }
 
-      const sourceName = `google-recording-email-${stateData.userId}`;
+      const sourceName = `${isRecordingDoc ? 'google-recording-doc' : 'google-recording-email'}-${stateData.userId}`;
       const existingSource = await db.externalSource.findUnique({
         where: { name: sourceName },
         select: { id: true, workspaceId: true, ownerUserId: true },
@@ -649,7 +721,7 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
         (existingSource.workspaceId !== stateData.workspaceId ||
           existingSource.ownerUserId !== stateData.userId)
       ) {
-        throw new Error('Recording email connection is owned by another user');
+        throw new Error(`Recording ${isRecordingDoc ? 'Google Docs' : 'email'} connection is owned by another user`);
       }
 
       const credentials = encrypt(
@@ -662,7 +734,7 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
       await db.externalSource.upsert({
         where: { name: sourceName },
         update: {
-          sourceType: RECORDING_EMAIL_SOURCE_TYPE,
+          sourceType: isRecordingDoc ? RECORDING_DOC_SOURCE_TYPE : RECORDING_EMAIL_SOURCE_TYPE,
           displayName: emailAddress,
           channelId: null,
           workspaceId: stateData.workspaceId,
@@ -672,7 +744,7 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
         },
         create: {
           name: sourceName,
-          sourceType: RECORDING_EMAIL_SOURCE_TYPE,
+          sourceType: isRecordingDoc ? RECORDING_DOC_SOURCE_TYPE : RECORDING_EMAIL_SOURCE_TYPE,
           displayName: emailAddress,
           channelId: null,
           workspaceId: stateData.workspaceId,
@@ -682,7 +754,7 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
         },
       });
 
-      logger.info(`${TAG} Recording email connection established`, {
+      logger.info(`${TAG} Recording ${isRecordingDoc ? 'Google Docs' : 'email'} connection established`, {
         workspaceId: stateData.workspaceId,
         userId: stateData.userId,
         sourceName,
@@ -691,7 +763,9 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
         res,
         frontendUrl,
         stateData,
-        new URLSearchParams({ recordingEmailConnected: 'true' }),
+        new URLSearchParams({
+          [isRecordingDoc ? 'recordingGoogleDocConnected' : 'recordingEmailConnected']: 'true',
+        }),
       );
       return;
     }

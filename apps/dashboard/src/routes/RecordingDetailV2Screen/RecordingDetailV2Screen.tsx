@@ -186,21 +186,20 @@ export default function RecordingDetailV2Screen(): ReactElement {
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
-    const connected = params.get('calendarOAuth') === 'success';
-    const connectionError = params.get('calendarOAuthError');
+    const connected = params.get('recordingGoogleDocConnected') === 'true';
+    const connectionError = params.get('recordingGoogleDocError');
     if (!connected && !connectionError) return;
 
     if (connected) {
-      toast.success('Google Calendar connected');
+      toast.success('Google Docs connected');
       setShowGoogleDocPreviewModal(true);
     }
     if (connectionError) {
-      toast.error('Google Calendar connection failed. Please try again.');
+      toast.error('Google Docs connection failed. Please try again.');
       setShowGoogleDocPreviewModal(true);
     }
-    params.delete('calendarOAuth');
-    params.delete('calendarOAuthError');
-    params.delete('syncCalendar');
+    params.delete('recordingGoogleDocConnected');
+    params.delete('recordingGoogleDocError');
     const search = params.toString();
     void navigate(
       { pathname: location.pathname, ...(search ? { search: `?${search}` } : {}) },

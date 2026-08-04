@@ -7,7 +7,6 @@ import {
   type RecordingDetail,
   type RecordingGoogleDocComposeContext,
 } from '../../../services/Recording/recordingService';
-import { initCalendarOAuth } from '../../../services/clients/calendarApi';
 
 interface GoogleDocPreviewModalProps {
   recording: RecordingDetail;
@@ -47,12 +46,12 @@ export function GoogleDocPreviewModal({
     setIsConnecting(true);
     try {
       const returnPath = `${window.location.pathname}${window.location.search}`;
-      const { authUrl } = await initCalendarOAuth('web', returnPath, 'docs_export');
+      const authUrl = await recordingService.connectGoogleDoc(returnPath);
       window.location.assign(authUrl);
     } catch (error) {
       toast.error(
         (error as { response?: { data?: { error?: string } } })?.response?.data?.error ||
-          (error instanceof Error ? error.message : 'Unable to start Google Calendar connection'),
+          (error instanceof Error ? error.message : 'Unable to start Google Docs connection'),
       );
       setIsConnecting(false);
     }
@@ -135,7 +134,7 @@ export function GoogleDocPreviewModal({
                 data-track-category='RecordingDetailV2'
                 data-track-name='recording_google_doc_connect_calendar'
               >
-                Connect Google Calendar
+                Connect Google Docs
               </Button>
             </div>
           </div>

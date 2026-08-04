@@ -3,7 +3,6 @@ import type {
   CalendarOAuthProvider,
   CalendarOAuthState,
 } from '@/services/calendarOAuthStateService';
-import { appendQueryToReturnPath } from '@/integrations/routes/urlHelpers';
 
 type BoundCalendarUser = {
   id: string;
@@ -46,15 +45,9 @@ function getCallsPath(workspaceId: string, params: Record<string, string>): stri
 
 export function buildCalendarOAuthRedirect(
   frontendUrl: string,
-  state: Pick<CalendarOAuthState, 'workspaceId' | 'platform' | 'returnPath'>,
+  state: Pick<CalendarOAuthState, 'workspaceId' | 'platform'>,
   params: Record<string, string>
 ): string {
-  if (state.returnPath) {
-    const path = appendQueryToReturnPath(state.returnPath, new URLSearchParams(params));
-    return state.platform === 'electron'
-      ? `${frontendUrl}/launch?path=${encodeURIComponent(path)}`
-      : `${frontendUrl}${path}`;
-  }
   const callsPath = getCallsPath(state.workspaceId, params);
   return state.platform === 'electron'
     ? `${frontendUrl}/launch?path=${encodeURIComponent(callsPath)}`

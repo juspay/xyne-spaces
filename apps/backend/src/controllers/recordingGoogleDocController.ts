@@ -1,14 +1,15 @@
 import type { Request, Response } from 'express';
-import { AuthProvider, CallType } from '@prisma/client';
+import { CallType } from '@prisma/client';
+import { google } from 'googleapis';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { callShareService } from '@/services/callShareService';
-import { getCalendarCredentialsByOwnerUserId } from '@/services/calendarTokenRefresh';
+import { decrypt, encrypt } from '@/services/encryptionService';
 import { convertBlockNoteToMarkdown } from '@/services/canvasService';
 import { readFromYSweet } from '@/utils/ysweetUtils';
 import { logger } from '@/utils/logger';
 
-const GOOGLE_DOCS_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+const RECORDING_DOC_SOURCE_TYPE = 'google-recording-doc';
 
 function recordingTitle(value: string | null): string {
   return (value?.trim() || 'Untitled Recording').slice(0, 240);
@@ -43,14 +44,29 @@ function markdownToDocumentText(markdown: string): string {
   return text;
 }
 
-async function hasGoogleDocsScope(accessToken: string): Promise<boolean> {
-  const response = await fetch(
-    `https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(accessToken)}`,
-    { signal: AbortSignal.timeout(10_000) },
-  );
-  if (!response.ok) throw new Error(`Unable to verify Google Docs access (${response.status})`);
-  const tokenInfo = (await response.json()) as { scope?: string };
-  return tokenInfo.scope?.split(' ').includes(GOOGLE_DOCS_SCOPE) ?? false;
+async function getRecordingDocAccessToken(userId: string): Promise<string | null> {
+  const source = await db.externalSource.findFirst({
+    where: { ownerUserId: userId, sourceType: RECORDING_DOC_SOURCE_TYPE, isActive: true },
+    orderBy: { updatedAt: 'desc' },
+  });
+  if (!source) return null;
+
+  const credentials = JSON.parse(decrypt(source.credentials)) as {
+    accessToken?: string;
+    refreshToken?: string;
+    email?: string;
+  };
+  if (!credentials.refreshToken) return null;
+  const client = new google.auth.OAuth2(process.env.GOOGLE_CLIENT_ID, process.env.GOOGLE_CLIENT_SECRET);
+  client.setCredentials({ access_token: credentials.accessToken, refresh_token: credentials.refreshToken });
+  const accessToken = (await client.getAccessToken()).token;
+  if (!accessToken) return null;
+
+  await db.externalSource.update({
+    where: { id: source.id },
+    data: { credentials: encrypt(JSON.stringify({ ...credentials, accessToken })) },
+  });
+  return accessToken;
 }
 
 async function readDetailedSummary(
@@ -99,8 +115,8 @@ export class RecordingGoogleDocController {
         return;
       }
 
-      const credentials = await getCalendarCredentialsByOwnerUserId(userId, AuthProvider.GOOGLE);
-      const canExport = !!credentials && (await hasGoogleDocsScope(credentials.accessToken));
+      const accessToken = await getRecordingDocAccessToken(userId);
+      const canExport = !!accessToken;
       const metadata = call.metadata as Record<string, unknown> | null;
       const detailedSummaryCanvasId =
         typeof metadata?.detailedSummaryCanvasId === 'string'
@@ -114,9 +130,7 @@ export class RecordingGoogleDocController {
         success: true,
         canExport,
         summary: summary ? markdownToDocumentText(summary) : null,
-        unavailableReason: credentials
-          ? 'Reconnect Google Calendar to grant access for creating Google Docs.'
-          : 'Connect Google Calendar to create a Google Doc from this recording.',
+        unavailableReason: 'Connect Google Docs to create a document from this recording.',
       });
     } catch (error) {
       logger.error('[RecordingGoogleDoc] Failed to prepare export context', { error });
@@ -153,11 +167,11 @@ export class RecordingGoogleDocController {
         return;
       }
 
-      const credentials = await getCalendarCredentialsByOwnerUserId(userId, AuthProvider.GOOGLE);
-      if (!credentials) {
+      const accessToken = await getRecordingDocAccessToken(userId);
+      if (!accessToken) {
         res.status(409).json({
           success: false,
-          error: 'Connect Google Calendar before exporting a recording to Google Docs',
+          error: 'Connect Google Docs before exporting a recording',
         });
         return;
       }
@@ -189,7 +203,7 @@ export class RecordingGoogleDocController {
       const createResponse = await fetch('https://docs.googleapis.com/v1/documents', {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${credentials.accessToken}`,
+          Authorization: `Bearer ${accessToken}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ title }),
@@ -218,7 +232,7 @@ export class RecordingGoogleDocController {
           success: false,
           error:
             missingDocsScope
-              ? `Google Docs access is required. Reconnect Google Calendar and grant access to Google Docs (${GOOGLE_DOCS_SCOPE}).`
+              ? 'Google Docs access is required. Reconnect Google Docs and grant access to create files.'
               : googleError?.message || 'Failed to create Google Doc',
         });
         return;
@@ -229,7 +243,7 @@ export class RecordingGoogleDocController {
         {
           method: 'POST',
           headers: {
-            Authorization: `Bearer ${credentials.accessToken}`,
+          Authorization: `Bearer ${accessToken}`,
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
