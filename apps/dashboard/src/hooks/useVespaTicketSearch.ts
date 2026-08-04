@@ -155,6 +155,7 @@ function toTicket(r: DisplaySearchResult): Ticket {
     aiPriority: null,
     firstRespondedAt: null,
     emailReplyEnabled: false,
+    mobiusReleaseId: null,
   } as unknown as Ticket;
 }
 

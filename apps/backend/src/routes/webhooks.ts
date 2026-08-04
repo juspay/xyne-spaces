@@ -4,6 +4,8 @@ import { bitbucketWebhookMiddleware } from "@/middleware/bitbucketWebhookValidat
 import { jenkinsWebhookMiddleware } from "@/middleware/jenkinsWebhookValidator";
 import { githubWebhookService } from "@/services/githubWebhookService";
 import { githubWebhookMiddleware } from "@/middleware/githubWebhookValidator";
+import { mobiusWebhookService } from "@/services/mobiusWebhookService";
+import { mobiusWebhookMiddleware } from "@/middleware/mobiusWebhookValidator";
 import { logger } from "@/utils/logger";
 import { handleJenkinsWebhook } from '@/bots/implementations/qa-alert-bot/qa-alert-bot';
 
@@ -228,6 +230,39 @@ async function handleGitHubWebhook(req: Request, res: Response): Promise<void> {
 }
 
 router.post('/github', githubWebhookMiddleware.verify, handleGitHubWebhook);
+
+/**
+ * Mobius release-update webhook: Mobius POSTs release lifecycle events here and
+ * they are surfaced on the linked Xyne ticket's activity feed. Mounted under
+ * /api/webhooks, so the full path Mobius calls is /api/webhooks/mobius/:workspaceId.
+ * The mobius validator verifies the x-api-key header before this handler runs.
+ */
+async function handleMobiusWebhook(req: Request, res: Response): Promise<void> {
+  try {
+    const payload = req.body;
+    if (!payload) {
+      res.status(400).json({ success: false, error: 'No data provided' });
+      return;
+    }
+
+    // Extract workspaceId from URL path
+    const workspaceId = req.params.workspaceId;
+    if (!workspaceId) {
+      logger.warn('[Mobius-Webhook] Missing workspaceId in URL path');
+      res.status(400).json({ success: false, error: 'Missing workspaceId' });
+      return;
+    }
+
+    const result = await mobiusWebhookService.handleWebhookEvent(payload, workspaceId);
+    res.status(200).json(result);
+  } catch (error) {
+    logger.error('[Mobius-Webhook] Error:', error);
+    // Acknowledge to avoid Mobius retry storms; failures are logged above.
+    res.status(200).json({ success: true, message: 'Acknowledged' });
+  }
+}
+
+router.post('/mobius/:workspaceId', mobiusWebhookMiddleware.verify, handleMobiusWebhook);
 
 // Use raw body parser for Jenkins webhook to preserve exact bytes for HMAC verification
 router.post('/qa-alerts', 

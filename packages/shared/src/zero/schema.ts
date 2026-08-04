@@ -371,6 +371,7 @@ export enum ActivityType {
   EMAIL_SENT = 'EMAIL_SENT',
   TICKET_CREATED = 'TICKET_CREATED',
   CSAT_RECEIVED = 'CSAT_RECEIVED',
+  MOBIUS_RELEASE_UPDATE = 'MOBIUS_RELEASE_UPDATE',
 }
 
 // @ts-ignore TS1294
@@ -1110,6 +1111,7 @@ export const ticketTable = table('tickets')
     aiPriority: string().optional(),
     firstRespondedAt: number().optional(),
     emailReplyEnabled: boolean(),
+    mobiusReleaseId: string().optional(),
   })
   .primaryKey('id');
 
