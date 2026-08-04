@@ -943,6 +943,7 @@ export class CallDocumentService {
     transcript: string,
     callId: string,
     templateId?: BuiltinRecordingSummaryTemplateId,
+    onDelta?: (accumulatedContent: string) => void | Promise<void>,
   ): Promise<{ summary: string; template: BuiltinRecordingSummaryTemplate } | null> {
     const template = templateId
       ? getBuiltinRecordingSummaryTemplate(templateId)
@@ -964,6 +965,7 @@ export class CallDocumentService {
       undefined,
       RECORDING_DETAILED_SUMMARY_PROMPT,
       DEFAULT_RECORDING_SUMMARY_FIELDS,
+      onDelta,
     );
 
     return summary ? { summary, template } : null;
@@ -1366,7 +1368,7 @@ export class CallDocumentService {
    * false if the Y-Sweet write fails, so the caller can surface it rather than
    * reporting success.
    */
-  private async finalizeDetailedSummaryCanvas(
+  async finalizeDetailedSummaryCanvas(
     canvasId: string,
     markdownSummary: string,
     updatedByUserId: string,
@@ -1436,6 +1438,37 @@ export class CallDocumentService {
       return true;
     } catch (error) {
       logger.error('[CallDocumentService] Failed to finalize detailed summary canvas:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Replace the Y-Sweet content of an in-progress detailed-summary canvas
+   * without changing its title, metadata, version, or search index. The final
+   * authoritative write is still handled by finalizeDetailedSummaryCanvas.
+   */
+  async syncStreamingDetailedSummaryCanvas(
+    canvasId: string,
+    markdownSummary: string,
+    citationCtx?: CitationContext,
+  ): Promise<boolean> {
+    try {
+      const { blocks } = await convertMarkdownToBlockNote(
+        markdownSummary,
+        new Map<string, ParticipantInfo>(),
+        citationCtx,
+      );
+      if (blocks.length === 0) return true;
+
+      return await syncToYSweet(
+        canvasId,
+        sanitizeBlockNoteContent(blocks) as unknown as BlockNoteBlock[],
+      );
+    } catch (error) {
+      logger.error(
+        `[CallDocumentService] Failed to sync streaming detailed summary canvas ${canvasId}:`,
+        error,
+      );
       return false;
     }
   }
