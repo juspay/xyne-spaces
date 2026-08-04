@@ -7,8 +7,8 @@ import Cookies from 'js-cookie';
 import { API_BASE_URL } from '../../config';
 import {
   authActor,
-  PENDING_COMMUNITY_WORKSPACE_ID_KEY,
-  PENDING_COMMUNITY_WORKSPACE_NAME_KEY,
+  PENDING_WORKSPACE_ID_KEY,
+  PENDING_WORKSPACE_NAME_KEY,
   setLastActiveWorkspaceId,
 } from '../../machines/authMachine';
 
@@ -93,8 +93,8 @@ export const AcceptInvitation = (): ReactElement => {
     document.cookie = `pending_invitation_id=${invitationId}; path=/; max-age=600; SameSite=Lax`;
     // ALSO store in localStorage so it survives navigation
     localStorage.setItem('pending_invitation_id', invitationId);
-    localStorage.removeItem(PENDING_COMMUNITY_WORKSPACE_ID_KEY);
-    localStorage.removeItem(PENDING_COMMUNITY_WORKSPACE_NAME_KEY);
+    localStorage.removeItem(PENDING_WORKSPACE_ID_KEY);
+    localStorage.removeItem(PENDING_WORKSPACE_NAME_KEY);
     authActor.send({ type: 'LOGOUT' });
     void navigate(`/auth?invitationId=${invitationId}`);
   }, [loginComplete, invitationId, navigate]);
