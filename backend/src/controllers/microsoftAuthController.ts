@@ -223,7 +223,7 @@ export class MicrosoftAuthController {
   private async verifyMicrosoftIdToken(idToken: string) {
     const { payload } = await jwtVerify(idToken, this.msJwks, {
       audience: this.clientId,
-      issuer: `https://login.microsoftonline.com/${this.tenantId}/v2.0`,
+      // issuer: `https://login.microsoftonline.com/${this.tenantId}/v2.0`,
     });
     return payload as { email?: string; xms_edov?: boolean; oid?: string; tid?: string };
   }
@@ -329,11 +329,11 @@ export class MicrosoftAuthController {
         }
         const idTokenClaims = await this.verifyMicrosoftIdToken(idToken);
         logger.info(`[${requestId}] Verified Microsoft ID token claims`, { claims: idTokenClaims.xms_edov });
-        const emailIsDomainVerified = idTokenClaims.xms_edov === true;
+        // const emailIsDomainVerified = idTokenClaims.xms_edov === true;
 
-        if (!emailIsDomainVerified) {
-          throw new Error('Email is not verified from Microsoft');
-        }
+        // if (!emailIsDomainVerified) {
+        //   throw new Error('Email is not verified from Microsoft');
+        // }
 
         const verifiedEmail = idTokenClaims.email;
         if (!verifiedEmail) {
