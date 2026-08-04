@@ -3,6 +3,26 @@ import type { VariablePickerSource } from '../VariablePicker/VariablePicker.type
 import { parseReference } from '../VariablePicker/VariablePicker.utils';
 import { resolveSchema } from '../SchemaForm/SchemaForm.utils';
 
+export function hasInvalidTagCondition(condition: Condition): boolean {
+  if (isLeaf(condition)) {
+    if (condition.operator !== 'has_tag') return false;
+    const val = typeof condition.value === 'string' ? condition.value : '';
+    const firstColon = val.indexOf(':');
+    const secondColon = val.indexOf(':', firstColon + 1);
+    if (firstColon === -1 || secondColon === -1) return true;
+    const category = val.slice(0, firstColon);
+    if (!category) return true;
+    const tags = val
+      .slice(secondColon + 1)
+      .split(',')
+      .filter(Boolean);
+    return tags.length === 0;
+  }
+  if (isAndGroup(condition)) return condition.all.some(hasInvalidTagCondition);
+  if (isOrGroup(condition)) return condition.any.some(hasInvalidTagCondition);
+  return false;
+}
+
 export function makeEmptyLeaf(): LeafCondition {
   return { variable: '', operator: 'eq', value: '' };
 }
@@ -34,6 +54,7 @@ const OPERATOR_VERBS: Record<string, string> = {
   lt: '<',
   lte: '≤',
   exists: 'exists',
+  has_tag: 'has tag',
 };
 
 export function summarizeCondition(condition: Condition | undefined): string {

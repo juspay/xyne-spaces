@@ -9,6 +9,7 @@ import {
 } from '../triggers/ticket-updated.trigger';
 import { MESSAGE_RECEIVED_EVENT } from '../triggers/message-received.trigger';
 import { CALL_EVENT, CALL_STARTED, CALL_ENDED } from '../triggers/call.trigger';
+import { TAG_GENERATED_EVENT } from '../triggers/tag-generated.trigger';
 import type { MessageType, CallType } from '@prisma/client';
 
 export interface TicketCreatedEventPayload {
@@ -57,6 +58,13 @@ export interface CallEventPayload {
   conversationId: string | null;
 }
 
+export interface TagGeneratedEventPayload {
+  sourceId: string;
+  sourceType: string;
+  channelId: string;
+  tags: Array<{ category: string; tag: string; reason: string | null }>;
+}
+
 export type AutomationEvent =
   | { type: typeof EMAIL_RECEIVED_EVENT; payload: EmailEventPayload }
   | { type: typeof EMAIL_SENT_EVENT; payload: EmailEventPayload }
@@ -64,6 +72,7 @@ export type AutomationEvent =
   | { type: typeof TICKET_CREATED_EVENT; payload: TicketCreatedEventPayload }
   | { type: typeof TICKET_UPDATED_EVENT; payload: TicketUpdatedEventPayload }
   | { type: typeof MESSAGE_RECEIVED_EVENT; payload: MessageReceivedEventPayload }
-  | { type: typeof CALL_EVENT; payload: CallEventPayload };
+  | { type: typeof CALL_EVENT; payload: CallEventPayload }
+  | { type: typeof TAG_GENERATED_EVENT; payload: TagGeneratedEventPayload };
 
 export type AutomationEventType = AutomationEvent['type'];

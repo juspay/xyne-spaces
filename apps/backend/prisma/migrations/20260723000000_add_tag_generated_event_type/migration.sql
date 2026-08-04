@@ -1,0 +1,1 @@
+ALTER TYPE "public"."WorkflowEventType" ADD VALUE IF NOT EXISTS 'TAG_GENERATED';
