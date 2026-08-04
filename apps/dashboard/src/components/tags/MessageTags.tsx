@@ -16,6 +16,11 @@ interface MessageTagsProps {
   messageActs: string | null | undefined;
   slot: MessageTagSlot;
   /**
+   * Whether this user may change the acts. Chips are read-only without it — everyone in a
+   * thread sees them, but only those the server would accept get a remove control.
+   */
+  canEdit?: boolean;
+  /**
    * Reports popover open/close. The picker renders inside the shared hover toolbar, which
    * hides when the pointer leaves the message row — so the toolbar pins itself open while
    * this is true, or the popover unmounts as soon as you reach for it.
@@ -36,6 +41,7 @@ export const MessageTags = ({
   messageId,
   messageActs,
   slot,
+  canEdit = false,
   onOpenChange,
 }: MessageTagsProps): JSX.Element | null => {
   const zero = useZero();
@@ -123,18 +129,25 @@ export const MessageTags = ({
               title={entry?.description ?? name}
             >
               {entry?.label ?? name}
-              <button
-                type='button'
-                aria-label={`Remove ${entry?.label ?? name}`}
-                onClick={() => toggle(name)}
-                // Width reserved, revealed on hover — removing is rare next to reading, and
-                // opacity keeps the chip from resizing under the cursor.
-                className='opacity-0 group-hover/tag:opacity-100 focus:opacity-100 transition-opacity rounded-full'
-                data-track-category='Tags'
-                data-track-name='RemoveMessageTag'
-              >
-                <X className='size-2.5' />
-              </button>
+              {canEdit && (
+                <button
+                  type='button'
+                  aria-label={`Remove ${entry?.label ?? name}`}
+                  // The chip sits inside the message row, which on mobile opens the thread
+                  // on tap — without this, removing a tag also navigates.
+                  onClick={event => {
+                    event.stopPropagation();
+                    void toggle(name);
+                  }}
+                  // Width reserved, revealed on hover — removing is rare next to reading, and
+                  // opacity keeps the chip from resizing under the cursor.
+                  className='opacity-0 group-hover/tag:opacity-100 focus:opacity-100 transition-opacity rounded-full'
+                  data-track-category='Tags'
+                  data-track-name='RemoveMessageTag'
+                >
+                  <X className='size-2.5' />
+                </button>
+              )}
             </span>
           );
         })}

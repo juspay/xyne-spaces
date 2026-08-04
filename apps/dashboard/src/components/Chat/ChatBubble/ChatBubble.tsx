@@ -909,6 +909,9 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   // they land beside the "(edited)" marker instead of adding a line under every message.
   // afterTextContent renders inside the same inline-block as the message HTML, which is
   // exactly where RenderMessageWithHTML appends "(edited)".
+  // Mirrors MessagesACL.canUpdate; hiding the controls avoids clicking into a server error.
+  const canEditMessageActs = useCanEditMessageActs(message.senderId, channelId);
+
   const composedAfterTextContent = useMemo(() => {
     if (isMessageDeleted || isSystemMessage) return afterTextContent;
     return (
@@ -920,6 +923,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
               messageId={message.messageId}
               messageActs={message.messageActs}
               slot='chips'
+              canEdit={canEditMessageActs}
             />
           </span>
         )}
@@ -932,9 +936,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     message.messageId,
     message.messageActs,
     context,
+    canEditMessageActs,
   ]);
-
-  const canEditMessageActs = useCanEditMessageActs(message.senderId, channelId);
 
   const hoverToolbarKey = useId();
   const canShowHoverToolbar =
