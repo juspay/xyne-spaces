@@ -31,6 +31,7 @@ export type { MentionResult } from '../types/mention.js';
 export {
   searchUsers,
   useUsers,
+  useUsersMap,
   useUser,
   useSelf,
   useUserSearch,

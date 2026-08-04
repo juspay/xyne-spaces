@@ -4073,6 +4073,7 @@ model DraftMessage {
   userId          String      // User who is drafting (no FK constraint)
   content         String      // Draft content
   hasAttachment   Boolean     @default(false) // Whether the draft has attachments
+  recipientIds    String?     // Comma-separated recipient user ids for compose-DM drafts; NULL for channel/conversation drafts
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
 

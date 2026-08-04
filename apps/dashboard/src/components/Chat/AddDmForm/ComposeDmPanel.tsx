@@ -16,7 +16,7 @@ import { useAuth } from '../../../hooks/useAuth';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { InputBoxHandle } from '../../../hooks/useDragAndDropAreaRef';
 import { usePlatform } from '../../../hooks/usePlatform';
-import { useActiveUserSearch, useActiveUsers, useUser } from '../../../hooks/useUsers';
+import { useActiveUserSearch, useActiveUsers, useUsersMap, useUser } from '../../../hooks/useUsers';
 import { cn } from '../../../utils/classNames';
 import {
   EVENT_PROPERTIES,
@@ -26,10 +26,12 @@ import {
 import { mutators } from '../../../zero/mutators';
 import { queries } from '../../../zero/queries';
 import { InputBox } from '../../ui/InputBox';
+import type { UploadedFile } from '../../ui/files/Files.types';
 import { SearchUserV2, type SearchEntry } from '../../ui/SearchUser/SearchUserV2';
 import ChatListV2 from '../ChatList/ChatListV2';
 import { sendConversationWithAttachments, useExistingDmChannel } from './useExistingDmChannel';
 import { useDebouncedDmCreation } from './useDebouncedDmCreation';
+import { useComposeDmDraftAutosave } from '../../../hooks/useComposeDmDraftAutosave';
 import {
   useChannelSearch,
   useAllVisibleChannels,
@@ -40,6 +42,21 @@ import { userToMentionResult } from '../../../utils/userDisplayName';
 export interface CreateDmFormData {
   participants: User[];
   message: string;
+}
+
+/**
+ * Payload passed via router `location.state.restoreDraft` when a persisted compose-DM
+ * draft is re-opened from Drafts & Sent. Hydrates the panel with the saved
+ * recipients + content and reuses the draft identity so autosave edits it in place
+ * instead of creating a duplicate.
+ */
+export interface RestoreComposeDraft {
+  draftId: string;
+  channelId: string;
+  content: string;
+  recipientIds: string[];
+  /** Already-uploaded attachments to re-seed into the InputBox tray on restore. */
+  attachments?: UploadedFile[];
 }
 
 export const ComposeDmPanel: React.FC = () => {
@@ -61,6 +78,23 @@ export const ComposeDmPanel: React.FC = () => {
   const preselectedUserId = searchParams.get('userId');
   const zero = useZero();
 
+  // Restore payload when this panel was opened from Drafts & Sent to edit an existing
+  // compose-DM draft (see DraftsPanel). Undefined for a brand-new compose.
+  const restoreDraft = (location.state as { restoreDraft?: RestoreComposeDraft } | null)
+    ?.restoreDraft;
+
+  const {
+    draftId: composeDraftId,
+    save,
+    markSent,
+    persistAttachment,
+    deleteAttachment,
+    flushPendingPersists,
+  } = useComposeDmDraftAutosave(
+    restoreDraft ? { draftId: restoreDraft.draftId, channelId: restoreDraft.channelId } : undefined,
+  );
+  const latestContentRef = useRef<string>(restoreDraft?.content ?? '');
+
   // Look up the pre-selected user by ID (from the DM search sidebar)
   const preselectedUser = useUser(preselectedUserId ?? '');
 
@@ -72,17 +106,45 @@ export const ComposeDmPanel: React.FC = () => {
     }
   }, [searchUserRef]);
 
-  // Pre-populate selectedUsers with the user passed via ?userId= search param.
-  // KeyedComposeDmPanel (in AppRoot) remounts this component fresh on every sidebar
-  // selection, so a simple one-shot boolean is sufficient to avoid an infinite loop
-  // when preselectedUser loads asynchronously while still allowing the user to
-  // manually remove the pre-selected person via the X badge.
+  // All workspace users — used for draft recipient rehydration, conversation-history
+  // ordering, and recipient search.
+  const usersById = useUsersMap();
+
+  // Pre-populate selectedUsers from a restored compose-DM draft or the pre-selected
+  // user from ?userId=. Re-runs when usersById updates (after async hydration). If some
+  // recipients can't be resolved after 1.5s (e.g. deleted from workspace), restores with
+  // whatever resolved and warns about the dropped recipients.
   useEffect(() => {
     if (preselectedInitialized) return;
-    if (!preselectedUserId || !preselectedUser) return;
-    setSelectedUsers([preselectedUser]);
-    setPreselectedInitialized(true);
-  }, [preselectedUserId, preselectedUser, preselectedInitialized]);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    if (restoreDraft && restoreDraft.recipientIds.length > 0) {
+      const resolved = restoreDraft.recipientIds
+        .map(id => usersById.get(id))
+        .filter((u): u is User => !!u);
+      if (resolved.length === restoreDraft.recipientIds.length) {
+        setSelectedUsers(resolved);
+        setPreselectedInitialized(true);
+      } else {
+        timer = setTimeout(() => {
+          if (preselectedInitialized) return;
+          const unresolved = restoreDraft.recipientIds.filter(id => !usersById.get(id));
+          setSelectedUsers(resolved);
+          setPreselectedInitialized(true);
+          if (unresolved.length > 0) {
+            toast.warning('Some recipients could not be restored', {
+              description: `${unresolved.length} recipient${unresolved.length === 1 ? '' : 's'} no longer in the workspace were removed from this draft.`,
+            });
+          }
+        }, 1500);
+      }
+    } else if (preselectedUserId && preselectedUser) {
+      setSelectedUsers([preselectedUser]);
+      setPreselectedInitialized(true);
+    }
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
+  }, [preselectedUserId, preselectedUser, restoreDraft, usersById, preselectedInitialized]);
 
   const existingDmChannel = useExistingDmChannel(selectedUsers);
 
@@ -102,6 +164,16 @@ export const ComposeDmPanel: React.FC = () => {
     setCreatedChannelId(undefined);
   }, [selectedUsers]);
 
+  // Autosave when the recipient set changes. `save` detects the recipient change
+  // internally and fires a 500ms-debounced POST (content + recipients). Content-only
+  // changes (onContentChange below) store in the state machine but don't POST.
+  useEffect(() => {
+    save({
+      content: latestContentRef.current,
+      recipientIds: selectedUsers.map(u => u.id),
+    });
+  }, [selectedUsers, save]);
+
   const navigateToChannel = useCallback(
     (channelId: string) => {
       const targetPath = location.pathname.includes('/chat/dm')
@@ -113,7 +185,7 @@ export const ComposeDmPanel: React.FC = () => {
   );
 
   const handleSendMessage = useCallback(
-    async (_plainText: string, html: string, files: File[]): Promise<void> => {
+    async (_plainText: string, html: string, _files: File[]): Promise<void> => {
       // Cancel any pending auto-create debounce — we'll create immediately
       cancelAutoCreate();
 
@@ -152,7 +224,15 @@ export const ComposeDmPanel: React.FC = () => {
 
       // Send the message (with or without attachments)
       try {
-        await sendConversationWithAttachments(channelId, html, files);
+        // Wait for any in-flight attachment persist POSTs to complete before
+        // sending.
+        await flushPendingPersists();
+        // Send with composeDraftId so the backend re-parents this draft's
+        // already-persisted attachments (DRAFT → CHAT) instead of re-uploading local copies.
+        await sendConversationWithAttachments(channelId, html, [], composeDraftId);
+        // Message sent: suppress the teardown flush so we don't re-persist a sent draft, then
+        // delete the persisted draft so it disappears from Drafts & Sent.
+        markSent();
         navigateToChannel(channelId);
       } catch (error) {
         toast.error('Failed to send message', {
@@ -161,12 +241,22 @@ export const ComposeDmPanel: React.FC = () => {
         throw error;
       }
     },
-    [selectedUsers, effectiveChannelId, cancelAutoCreate, createDm, navigateToChannel, zero],
+    [
+      selectedUsers,
+      effectiveChannelId,
+      cancelAutoCreate,
+      createDm,
+      navigateToChannel,
+      zero,
+      markSent,
+      composeDraftId,
+      flushPendingPersists,
+    ],
   );
 
   const form = useForm({
     defaultValues: {
-      message: '',
+      message: restoreDraft?.content ?? '',
     },
     onSubmit: () => {},
   });
@@ -294,15 +384,6 @@ export const ComposeDmPanel: React.FC = () => {
     // No DM history – fall back to all workspace users (excluding self)
     return allWorkspaceUsers.filter(u => u.id !== currentUserId).map(u => u.id);
   }, [visibleChannels, user?.id, allWorkspaceUsers]);
-
-  // Build a lookup map for quick access by id
-  const usersById = useMemo(() => {
-    const map = new Map<string, User>();
-    for (const u of allWorkspaceUsers) {
-      map.set(u.id, u);
-    }
-    return map;
-  }, [allWorkspaceUsers]);
 
   // Filter and map users to items, ordered by conversation history
   const filteredUsers = useMemo(() => {
@@ -571,9 +652,24 @@ export const ComposeDmPanel: React.FC = () => {
                     onChannelSearch={handleChannelSearch}
                     onContentChange={(html: string) => {
                       field.handleChange(html);
+                      latestContentRef.current = html;
+                      save({
+                        content: html,
+                        recipientIds: selectedUsers.map(u => u.id),
+                      });
                     }}
                     disabled={selectedUsers.length > 9}
                     disableDraftUpload
+                    onComposeDmAttachmentAdded={(attachmentId, file) =>
+                      persistAttachment(
+                        attachmentId,
+                        file,
+                        selectedUsers.map(u => u.id),
+                        failedId => inputBoxRef.current?.removeAttachment?.(failedId),
+                      )
+                    }
+                    initialAttachments={restoreDraft?.attachments ?? []}
+                    onComposeDmAttachmentRemoved={deleteAttachment}
                     onSendMessage={handleSendMessage}
                     features={{
                       richText: true,
