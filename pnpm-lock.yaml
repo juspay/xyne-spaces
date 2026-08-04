@@ -1592,6 +1592,9 @@ importers:
       '@upstash/context7-mcp':
         specifier: ^2.1.7
         version: 2.3.0(@cfworker/json-schema@4.1.1)
+      '@xyne/litellm-client':
+        specifier: workspace:*
+        version: link:../../packages/litellm-client
       deepwiki-mcp:
         specifier: ^0.0.6
         version: 0.0.6(@cfworker/json-schema@4.1.1)
@@ -1999,6 +2002,19 @@ importers:
       '@types/node':
         specifier: ^22.0.0
         version: 22.20.1
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
+  packages/litellm-client:
+    dependencies:
+      undici:
+        specifier: 6.27.0
+        version: 6.27.0
+    devDependencies:
+      '@types/node':
+        specifier: ^20.19.0
+        version: 20.19.43
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
