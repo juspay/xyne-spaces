@@ -124,6 +124,7 @@ import notificationSettingsBackfillRoutes from '@/routes/notificationSettingsBac
 import appSigningSecretBackfillRoutes from '@/routes/appSigningSecretBackfill';
 import installedAppCommandsBackfillRoutes from '@/routes/installedAppCommandsBackfill';
 import productInsightsReclusterRoutes from '@/routes/productInsightsRecluster';
+import enterpriseRagBenchmarkRoutes from '@/routes/enterpriseRagBenchmark';
 import gmailWatchRenewalRoutes from '@/routes/gmailWatchRenewal';
 import aiRoutes from '@/routes/aiRoutes';
 import productInsightsRoutes from '@/routes/productInsights';
@@ -396,6 +397,11 @@ export class App {
     if (process.env.ENABLE_VESPA_BACKFILL_ROUTES === 'true') {
       this.app.use('/api/admin/vespa-backfill', vespaBackfillRoutes);
       this.app.use('/migrate/api/admin/vespa-backfill', vespaBackfillRoutes);
+    }
+
+    // Keep benchmark-only ingestion unavailable unless it is explicitly enabled.
+    if (process.env.ENABLE_ENTERPRISE_RAG_BENCHMARK_ROUTES === 'true') {
+      this.app.use('/api/admin/enterprise-rag', enterpriseRagBenchmarkRoutes);
     }
 
     // Ticket migration route (admin-only)
