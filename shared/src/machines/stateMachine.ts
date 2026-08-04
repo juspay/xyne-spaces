@@ -173,6 +173,9 @@ export interface OnlineUser {
 export interface UserStatusUpdatedEvent {
   userId: string;
   status: PresenceStatus;
+}
+
+export interface UserStatusSyncEvent {
   onlineUsers: OnlineUser[];
 }
 
@@ -197,7 +200,9 @@ interface StateMachineContext {
   delayedMessages: DelayedMessageDB[];
   userPreference: UserPreference;
   allUserGroups: UserGroup[];
+  allUserGroupsHydrated: boolean;
   userGroupMappings: UserGroupMapping[];
+  currentUserRoleIds: string[];
   metrics: MetricsState;
   filteredTicketIds: string[];
   zeroRefreshCounter?: number;
@@ -226,7 +231,9 @@ type StateMachineEvent =
   | { type: 'SAVE_DRAFT'; lookupId: string; html: string; text: string }
   | { type: 'REMOVE_DRAFT'; lookupId: string }
   | { type: 'ADD_ALL_USER_GROUPS'; userGroups: UserGroup[] }
+  | { type: 'RESET_ALL_USER_GROUPS' }
   | { type: 'ADD_USER_GROUP_MAPPINGS'; userGroupMappings: UserGroupMapping[] }
+  | { type: 'SET_CURRENT_USER_ROLE_IDS'; roleIds: string[] }
   | { type: 'ADD_USER_DRAFTS'; draftMessages: DraftMessageDB[] }
   | { type: 'ADD_USER_DELAYED_MESSAGES'; delayedMessages: DelayedMessageDB[] }
   | { type: 'SET_USER_PREFERENCE'; userPreference: UserPreference }
@@ -234,7 +241,6 @@ type StateMachineEvent =
   | { type: 'SET_METRICS_LOADING'; loading: boolean }
   | { type: 'SET_METRICS_ERROR'; error: string | null }
   | { type: 'REFRESH_ZERO' }
-  | { type: 'RESET_WORKSPACE_SESSION' }
   | {
       type: 'UPDATE_METRIC';
       period: 'today' | 'allTime';
@@ -243,13 +249,15 @@ type StateMachineEvent =
     }
   | { type: 'SET_FILTERED_TICKET_IDS'; ids: string[] }
   | { type: 'SET_ONLINE_USERS'; onlineUsers: OnlineUser[] }
+  | { type: 'UPDATE_USER_STATUS'; userId: string; status: PresenceStatus }
   | { type: 'PUSH_OVERLAY' }
   | { type: 'POP_OVERLAY' }
   | { type: 'ARCHIVE_CHANNEL'; channelId: string }
   | { type: 'UNARCHIVE_CHANNEL'; channelId: string }
   | { type: 'SET_THREAD_LAST_READ'; conversationId: string; lastReadAt: number }
   | { type: 'SET_THREAD_SCROLL'; conversationId: string; scrollTop: number }
-  | { type: 'SET_UNREAD_ACTIVITIES'; unreadActivities: UnreadActivity[] };
+  | { type: 'SET_UNREAD_ACTIVITIES'; unreadActivities: UnreadActivity[] }
+  | { type: 'RESET_WORKSPACE_SESSION' };
 
 export const stateMachine = setup({
   types: {
@@ -451,6 +459,11 @@ export const stateMachine = setup({
         }
         return context.allUserGroups;
       },
+      allUserGroupsHydrated: ({ event }) => event.type === 'ADD_ALL_USER_GROUPS',
+    }),
+    resetAllUserGroups: assign({
+      allUserGroups: [],
+      allUserGroupsHydrated: false,
     }),
     addUserGroupMappings: assign({
       userGroupMappings: ({ context, event }) => {
@@ -458,6 +471,14 @@ export const stateMachine = setup({
           return event.userGroupMappings;
         }
         return context.userGroupMappings;
+      },
+    }),
+    addCurrentUserRoleMappings: assign({
+      currentUserRoleIds: ({ context, event }) => {
+        if (event.type === 'SET_CURRENT_USER_ROLE_IDS') {
+          return event.roleIds;
+        }
+        return context.currentUserRoleIds;
       },
     }),
     addUserDrafts: assign({
@@ -509,22 +530,6 @@ export const stateMachine = setup({
         return (context.zeroRefreshCounter || 0) + 1;
       },
     }),
-    resetWorkspaceSession: assign({
-      users: [],
-      watermark: { usersUpdatedAt: 0, allChannelsUpdatedAt: 0 },
-      bookmarks: [],
-      visibleChannels: [],
-      allChannels: [],
-      permissions: [],
-      userChannelStatuses: [],
-      allUserGroups: [],
-      userGroupMappings: [],
-      draftMessages: [],
-      delayedMessages: [],
-      unreadActivities: [],
-      filteredTicketIds: [],
-      onlineUsers: [],
-    }),
     setMetricsError: assign({
       metrics: ({ context, event }) => {
         if (event.type === 'SET_METRICS_ERROR') {
@@ -562,6 +567,24 @@ export const stateMachine = setup({
         }
         return [];
       },
+    }),
+    updateUserStatus: assign({
+      onlineUsers: ({ context, event }) => {
+        if (event.type === 'UPDATE_USER_STATUS') {
+          if (event.status === 'OFFLINE') {
+            return context.onlineUsers.filter(u => u.userId !== event.userId);
+          }
+          const existing = context.onlineUsers.find(u => u.userId === event.userId);
+          if (existing) {
+            return context.onlineUsers.map(u => 
+              u.userId === event.userId ? { ...u, status: event.status } : u
+            );
+          } else {
+            return [...context.onlineUsers, { userId: event.userId, status: event.status }];
+          }
+        }
+        return context.onlineUsers;
+      }
     }),
     pushOverlay: assign({
       overlayDepth: ({ context }) => context.overlayDepth + 1,
@@ -651,6 +674,26 @@ export const stateMachine = setup({
         return [];
       },
     }),
+    // Clears user-scoped state on workspace switch so the app renders the
+    // new workspace's data instead of stale entries from the previous one.
+    // Zero queries refill the context via ADD_USERS / ADD_ALL_CHANNELS / etc.
+    // after the switch completes.
+    resetWorkspaceSession: assign({
+      users: [],
+      watermark: { usersUpdatedAt: 0, allChannelsUpdatedAt: 0 },
+      bookmarks: [],
+      visibleChannels: [],
+      allChannels: [],
+      permissions: [],
+      userChannelStatuses: [],
+      allUserGroups: [],
+      userGroupMappings: [],
+      draftMessages: [],
+      delayedMessages: [],
+      unreadActivities: [],
+      filteredTicketIds: [],
+      onlineUsers: [],
+    }),
   },
 }).createMachine({
   id: 'stateMachine',
@@ -701,7 +744,9 @@ export const stateMachine = setup({
     delayedMessages: [],
     userPreference: undefined,
     allUserGroups: [],
+    allUserGroupsHydrated: false,
     userGroupMappings: [],
+    currentUserRoleIds: [],
     metrics: initialMetricsState,
     filteredTicketIds: [],
     onlineUsers: [],
@@ -755,8 +800,14 @@ export const stateMachine = setup({
         ADD_ALL_USER_GROUPS: {
           actions: 'addAllUserGroups',
         },
+        RESET_ALL_USER_GROUPS: {
+          actions: 'resetAllUserGroups',
+        },
         ADD_USER_GROUP_MAPPINGS: {
           actions: 'addUserGroupMappings',
+        },
+        SET_CURRENT_USER_ROLE_IDS: {
+          actions: 'addCurrentUserRoleMappings',
         },
         ADD_USER_DRAFTS: {
           actions: 'addUserDrafts',
@@ -785,11 +836,11 @@ export const stateMachine = setup({
         REFRESH_ZERO: {
           actions: 'refreshZero',
         },
-        RESET_WORKSPACE_SESSION: {
-          actions: 'resetWorkspaceSession',
-        },
         SET_ONLINE_USERS: {
           actions: 'setOnlineUsers',
+        },
+        UPDATE_USER_STATUS: {
+          actions: 'updateUserStatus',
         },
         PUSH_OVERLAY: {
           actions: 'pushOverlay',
@@ -811,6 +862,9 @@ export const stateMachine = setup({
         },
         SET_UNREAD_ACTIVITIES: {
           actions: 'setUnreadActivities',
+        },
+        RESET_WORKSPACE_SESSION: {
+          actions: 'resetWorkspaceSession',
         },
       },
     },
@@ -861,8 +915,12 @@ export function setupPresenceListeners(
 
   // Listen for status updates - backend sends fresh onlineUsers list
   // This is sent on connect (for connecting user) and on any status change
-  websocketService.on<UserStatusUpdatedEvent>('user_status_updated', data => {
+  websocketService.on<UserStatusSyncEvent>('user_status_sync', data => {
     stateMachineActor.send({ type: 'SET_ONLINE_USERS', onlineUsers: data.onlineUsers });
+  });
+
+  websocketService.on<UserStatusUpdatedEvent>('user_status_updated', data => {
+    stateMachineActor.send({ type: 'UPDATE_USER_STATUS', userId: data.userId, status: data.status });
   });
 
   presenceListenersSetup = true;
@@ -877,6 +935,7 @@ export function cleanupPresenceListeners(websocketService: {
   if (!presenceListenersSetup) return;
 
   websocketService.removeListener('user_status_updated');
+  websocketService.removeListener('user_status_sync');
 
   stateMachineActor.send({ type: 'SET_ONLINE_USERS', onlineUsers: [] });
   presenceListenersSetup = false;
