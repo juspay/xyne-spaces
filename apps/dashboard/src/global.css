@@ -2406,7 +2406,7 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   margin: 3.5px 0;
 }
 
-/* Lists — 8px above / 4px below, 24px marker box with a 12px gutter. The marker
+/* Lists — 8px above / 4px below, 16px marker box with a 4px gutter. The marker
    is pinned to the first line (BlockNote centres it across the whole block). */
 .canvas-surface .bn-editor .bn-block-content[data-content-type="bulletListItem"],
 .canvas-surface .bn-editor .bn-block-content[data-content-type="numberedListItem"] {
@@ -2422,11 +2422,11 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   .bn-block
   .bn-block-content[data-content-type="bulletListItem"]::before {
   content: "";
-  min-width: 24px;
+  min-width: 16px;
   height: 1.55em;
   align-self: flex-start;
   padding-right: 0;
-  margin-right: 12px;
+  margin-right: 4px;
   background-image: radial-gradient(circle at center, currentColor 3px, transparent 3px);
 }
 
@@ -2498,6 +2498,7 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 .canvas-surface .bn-editor [data-content-type="table"] td,
 .canvas-surface .bn-editor [data-content-type="table"] th {
   border-color: hsl(var(--border));
+  padding: 4px 8px;
 }
 .canvas-surface .bn-editor [data-content-type="table"] th {
   background-color: hsl(var(--muted));
