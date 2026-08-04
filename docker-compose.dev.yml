@@ -74,6 +74,8 @@ services:
       - "${LIVEKIT_HTTP_BIND_PORT:-7880}:7880"
       - "${LIVEKIT_HTTPS_BIND_PORT:-7881}:7881"
       - "${LIVEKIT_UDP_BIND_PORT:-7882}:7882/udp"
+    volumes:
+      - ./docker/livekit.yaml:/etc/livekit.yaml
     environment:
       - LIVEKIT_API_KEY=devkey
       - LIVEKIT_API_SECRET=devsecret
