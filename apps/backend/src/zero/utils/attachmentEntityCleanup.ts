@@ -1,10 +1,11 @@
 import type { Transaction } from '@rocicorp/zero';
 import { AttachmentEntityType, type Schema } from '@xyne/shared';
 import { AttachmentEntityType as PrismaAttachmentEntityType } from '@prisma/client';
-import { gcsService } from '@/services/gcsService';
+import { storageService } from '@/services/storage';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { zql } from '../queries';
+import { getVideoPreviewMetadata } from '@/services/videoPreviewMetadata';
 
 async function deleteEntityAttachmentsByType(
   tx: Transaction<Schema>,
@@ -19,13 +20,17 @@ async function deleteEntityAttachmentsByType(
   for (const attachment of attachments) {
     const url = attachment.url;
     const thumbnailUrl = attachment.thumbnailUrl;
+    const previewUrl = getVideoPreviewMetadata(attachment.metadata)?.previewUrl;
     await tx.mutate.message_attachments.delete({ id: attachment.id });
     asyncTasks.push(async () => {
       try {
         if (url) {
-          await gcsService.deleteFile(url);
+          await storageService.deleteFile(url);
           if (thumbnailUrl) {
-            await gcsService.deleteFile(thumbnailUrl);
+            await storageService.deleteFile(thumbnailUrl);
+          }
+          if (previewUrl && previewUrl !== url) {
+            await storageService.deleteFile(previewUrl);
           }
         }
       } catch (error) {
@@ -78,12 +83,16 @@ export async function cleanupDelayedMessageAttachmentsPrisma(
   });
 
   for (const attachment of attachments) {
+    const previewUrl = getVideoPreviewMetadata(attachment.metadata)?.previewUrl;
     await db.messageAttachment.delete({ where: { id: attachment.id } });
     try {
       if (attachment.url) {
-        await gcsService.deleteFile(attachment.url);
+        await storageService.deleteFile(attachment.url);
         if (attachment.thumbnailUrl) {
-          await gcsService.deleteFile(attachment.thumbnailUrl);
+          await storageService.deleteFile(attachment.thumbnailUrl);
+        }
+        if (previewUrl && previewUrl !== attachment.url) {
+          await storageService.deleteFile(previewUrl);
         }
       }
     } catch (error) {

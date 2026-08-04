@@ -37,6 +37,8 @@ import {
   updatePulseMerchant as rewritePulseMerchant,
 } from '../utils/markPulseItemAsSent';
 import { userActivityTrackingService } from '@/services/userActivityTrackingService';
+import { scheduleVideoPreview } from '@/services/videoPreviewScheduler';
+import { shouldScheduleVideoPreview } from '@/services/videoPreviewMetadata';
 import { ConversationV3Repository } from '../database/repositories/conversationV3Repository';
 import { RecentConversationsRepository } from '../database/repositories/recentConversationsRepository';
 import { serializeConversationV3Row } from '../serializers/conversationV3Serializer';
@@ -548,6 +550,21 @@ export class ConversationController {
         uploadedFiles.length > 0
           ? await this.messageAttachmentRepository.findByMessageId(message.messageId)
           : [];
+
+      for (const attachment of attachments) {
+        if (
+          shouldScheduleVideoPreview(
+            attachment.mimetype,
+            attachment.thumbnailUrl,
+            attachment.metadata,
+            config.enableVideoPreviewWorker
+          )
+        ) {
+          void scheduleVideoPreview(attachment.id).catch((error) => {
+            logger.error(`Failed to schedule video preview for ${attachment.id}:`, error);
+          });
+        }
+      }
 
       // Push Vespa job for message indexing
       this.pushVespaJobForMessage(message.messageId, userId, req.user!.workspaceId!).catch(
@@ -1070,6 +1087,21 @@ export class ConversationController {
         uploadedFiles.length > 0
           ? await this.messageAttachmentRepository.findByMessageId(message.messageId)
           : [];
+
+      for (const attachment of attachments) {
+        if (
+          shouldScheduleVideoPreview(
+            attachment.mimetype,
+            attachment.thumbnailUrl,
+            attachment.metadata,
+            config.enableVideoPreviewWorker
+          )
+        ) {
+          void scheduleVideoPreview(attachment.id).catch((error) => {
+            logger.error(`Failed to schedule video preview for ${attachment.id}:`, error);
+          });
+        }
+      }
 
       // Push Vespa job for message indexing
       this.pushVespaJobForMessage(message.messageId, userId, req.user!.workspaceId!).catch(
