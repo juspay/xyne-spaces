@@ -210,8 +210,28 @@ export function redactSecrets(value) {
   );
   replaceAndCount(
     state,
-    /(^|[^A-Z0-9_.-])((?:["']?)[A-Z0-9_.-]{0,64}(?:API[_-]?KEY|[_-]KEY|[_-]AUTH|[_-]BASE64|TOKEN|SECRET|PASSWORD|PASSWD|PWD|PRIVATE[_-]?KEY|CLIENT[_-]?SECRET|CREDENTIALS?|DATABASE_URL|REDIS_URL|DSN|AUTHORIZATION|COOKIE)[A-Z0-9_.-]{0,64}(?:["']?)\s*[:=]\s*)(?:"(?:\\.|[^"\\\r\n])*"|'(?:\\.|[^'\\\r\n])*'|(?:(?:basic|bearer|token|digest)\s+)?[^\s"']+)/gi,
-    (_match, boundary, prefix) => `${boundary}${prefix}[REDACTED]`,
+    // The leading boundary is what makes this linear — it stops every offset
+    // inside a long token from being a candidate start. The {0,128} bounds are
+    // belt-and-braces; measured identical at 64 and 256, so they are set well
+    // clear of the longest real env var name here (45 chars) to avoid trading
+    // the backtracking blowup for a silent miss on a long label.
+    // The lookbehind must stay zero-width. Consuming the preceding character
+    // instead means two secrets glued together (`TOKEN="a"SECRET=b`) leave the
+    // second with no free position to match at, and it leaks in cleartext.
+    // `(?![A-Z0-9])` after the bare-word branches keeps `_KEY`/`_AUTH` from
+    // firing inside KEYNOTE, KEYBOARD, AUTHOR or a Co-Authored-By trailer.
+    /(?<![A-Z0-9_.-])((?:["']?)[A-Z0-9_.-]{0,128}(?:API[_-]?KEY|[_-]KEY(?![A-Z0-9])|[_-]AUTH(?![A-Z0-9])|[_-]BASE64(?![A-Z0-9])|TOKEN|SECRET|PASSWORD|PASSWD|PWD|PRIVATE[_-]?KEY|CLIENT[_-]?SECRET|CREDENTIALS?|DATABASE_URL|REDIS_URL|DSN|AUTHORIZATION|COOKIE)[A-Z0-9_.-]{0,128}(?:["']?)\s*[:=]\s*)(?:"(?:\\.|[^"\\\r\n])*"|'(?:\\.|[^'\\\r\n])*'|(?:(?:basic|bearer|token|digest)\s+)?[^\s"']+)/gi,
+    (_match, prefix) => `${prefix}[REDACTED]`,
+  );
+  replaceAndCount(
+    state,
+    // A value wrapped across lines (base64 service-account blobs, PEM bodies)
+    // loses its label the moment the ring buffer trims into it, and no
+    // line-local pattern can attribute the continuation lines. Match the shape
+    // instead: two or more consecutive full lines of pure encoded payload.
+    // Anchored per line, so each iteration consumes a whole line deterministically.
+    /(?:^[A-Za-z0-9+/]{60,}={0,2}$\r?\n?){2,}/gm,
+    "[REDACTED_ENCODED_BLOCK]\n",
   );
   replaceAndCount(
     state,

@@ -182,6 +182,15 @@ test("redacts this repository's own credential-bearing env var shapes", () => {
     redactSecrets("GENIUS_API_KEY=Basic realkeyvalue_SUPERSECRET123").text,
     /realkeyvalue/,
   );
+
+  // The bounds that keep the pattern linear must not become a silent miss on a
+  // label longer than they allow — the longest real name here is 45 chars.
+  for (const long of [
+    `${"A".repeat(80)}_API_KEY=longprefixsecret123`,
+    `API_KEY${"Z".repeat(80)}=longsuffixsecret123`,
+  ]) {
+    assert.doesNotMatch(redactSecrets(long).text, /longprefixsecret|longsuffixsecret/);
+  }
 });
 
 test("leaves public identifiers and ordinary output alone", () => {
@@ -191,11 +200,48 @@ test("leaves public identifiers and ordinary output alone", () => {
     "MONKEY_VALUE=bananas",
     "KEYWORDS=alpha,beta",
     "src/App.tsx:42:7 - error TS2345: Argument of type 'string'",
+    // The bare-word label branches must not fire mid-word. Without a right
+    // boundary these all matched on `_KEY`/`_AUTH` and ate their values.
+    "PASS_KEYNOTE=ordinary-value",
+    "MY_KEYBOARD_LAYOUT=qwerty",
+    "FOO_AUTHOR=jane",
+    "CO_AUTHORED_BY=jane",
+    "Co-Authored-By: Jane Roe",
   ];
 
   for (const line of untouched) {
     assert.equal(redactSecrets(line).text, line, `over-redacted: ${line}`);
   }
+});
+
+test("adjacent secrets with no separator are both redacted", () => {
+  // A consuming boundary left the second secret with no position to match at,
+  // so it survived in cleartext. The lookbehind has to stay zero-width.
+  for (const [input, leaked] of [
+    ['TOKEN="secret1"SECRET=secret2visible', "secret2visible"],
+    ['A_TOKEN="x"B_SECRET="yleakedvalue"', "yleakedvalue"],
+    ['TOKEN="s1"SECRET="s2leak"PASSWORD="s3"', "s2leak"],
+  ]) {
+    assert.doesNotMatch(redactSecrets(input).text, new RegExp(leaked));
+  }
+});
+
+test("a value wrapped across lines does not survive the buffer trim", () => {
+  // Continuation lines of a wrapped base64 credential carry no label, so no
+  // line-local pattern can attribute them once the trim eats the first line.
+  const encoded =
+    "CohbYgQgcgl9AyxmvN1QH0dUnNPbVvp2wRLFDRNWGmEGJsZ9hOAKMsfQSOmkBcr8CM5UEqZB";
+  const capture = createLogCapture();
+  capture.append(
+    `FCM_SERVICE_ACCOUNT_BASE64=${Array.from({ length: 900 }, () => encoded).join("\n")}\n`,
+  );
+  capture.append("ordinary build output line\n".repeat(600));
+  const sanitized = sanitizeCaptureSnapshot(capture.snapshot(), {
+    homeDirectory: "",
+  });
+
+  assert.doesNotMatch(sanitized.text, new RegExp(encoded));
+  assert.ok(sanitized.count > 0);
 });
 
 test("redaction stays linear on keyword-shaped input with no delimiter", () => {
