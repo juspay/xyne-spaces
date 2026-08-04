@@ -1,22 +1,18 @@
-import { Router, Request, Response, NextFunction } from 'express';
+import { Router } from 'express';
 import { ActivityThreadBackfillController } from '@/controllers/activityThreadBackfillController';
-import { authMiddleware } from '@/middleware/auth';
+import { backfillAdminAuth } from '@/middleware/backfillAdminAuth';
 
 const router = Router();
-
-const requireAuth = (req: Request, res: Response, next: NextFunction) => {
-  authMiddleware.authenticate(req, res, next);
-};
 
 /**
  * @route POST /api/admin/activity-thread-backfill
  * @desc Backfill isThreadActivity column on activities table
  * @body { batchSize?: number, delayMs?: number } - defaults: 50, 1000ms
- * @access Authenticated users
+ * @access Admin (TICKET-MIGRATION ADMIN)
  */
 router.post(
   '/',
-  requireAuth,
+  ...backfillAdminAuth,
   ActivityThreadBackfillController.triggerBackfill
 );
 

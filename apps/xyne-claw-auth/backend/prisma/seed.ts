@@ -141,70 +141,12 @@ const SERVERS = [
     writeToolPolicy: { mode: "allowlist", tools: [] },
   },
   {
-    type: "juspay-internal-tools",
-    name: "Juspay Internal Tools",
-    url: "",
-    description: "Juspay internal APIs (Curie lead/merchant CRM, Turing flows, Stein features).",
-    credentialForm: { fields: [] },
-  },
-  {
     type: "xyne-spaces-app-tools",
     name: "Xyne Spaces App Tools",
     url: "",
     description: "Bot/app-credential write tools for Xyne Spaces — always available to all agents, uses agent app token (not user token).",
     credentialForm: { fields: [] },
     writeToolPolicy: { mode: "allowlist", tools: [] },
-  },
-  {
-    type: "research-agent-mcp",
-    name: "Research Agent MCP",
-    url: "",
-    description: "Global stdio MCP proxy for Research Agent REST tools.",
-    credentialForm: { fields: [] },
-    writeToolPolicy: { mode: "allowlist", tools: [] },
-  },
-  {
-    type: "ardra-finops",
-    name: "Ardra FinOps",
-    url: "",
-    description: "Ardra expense management MCP — reimbursements, policies, forex conversion",
-    transport: "http",
-    credentialForm: {
-      fields: [
-        { name: "url", label: "Expense MCP URL", type: "text", placeholder: "https://expense-mcp.example.com" },
-        { name: "juzpayBizId", label: "JuzPay Biz ID", type: "password", placeholder: "Your JuzPay Biz ID" },
-      ],
-    },
-    httpConfigTemplate: {
-      url: "{{url}}/mcp",
-      headers: {
-        Authorization: "Basic {{b64:juzpayBizId}}",
-        "ngrok-skip-browser-warning": "true",
-      },
-    },
-    healthcheckSpec: { name: "fetchPolicies", params: {} },
-    writeToolPolicy: { mode: "allowlist", tools: ["createManualReimbursement"] },
-  },
-  {
-    type: "curie",
-    name: "Curie",
-    url: "",
-    description: "Curie / Pulse S2S integration — fetch leads, orgs, and meeting actionables",
-    transport: "http",
-    credentialForm: {
-      fields: [
-        { name: "url", label: "Curie API URL", type: "text", placeholder: "https://curie.example.com" },
-        { name: "authorization", label: "Authorization (Basic credential)", type: "password", placeholder: "Base64-encoded user:password" },
-      ],
-    },
-    httpConfigTemplate: {
-      url: "{{url}}/curie/mcp",
-      headers: {
-        Authorization: "Basic {{authorization}}",
-      },
-    },
-    healthcheckSpec: { name: "curie-lead-fetch-all", params: {} },
-    writeToolPolicy: { mode: "allowlist", tools: ["curie-lead-fetch-all"] },
   },
   {
     type: "google",
@@ -235,12 +177,6 @@ const SERVERS = [
       params: { thought: "Health check", nextThoughtNeeded: false, thoughtNumber: 1, totalThoughts: 1 },
     },
     writeToolPolicy: { mode: "allowlist", tools: [] },
-  },
-  {
-    type: "query-routing",
-    name: "Query Routing",
-    url: "",
-    description: "Query routing API integration for routing natural-language queries to investigation flows",
   },
   {
     type: "hubspot",
@@ -1843,138 +1779,6 @@ You:
   });
   console.log("[seed] Upserted grafana-agent");
 
-  // Seed ardra-finops agent (Expense Management)
-  const ARDRA_FINOPS_PROMPT = [
-    "You are **Ardra FinOps** — an expense management assistant integrated with the Ardra expense platform.",
-    "",
-    "## Capabilities",
-    "- **Submit reimbursement claims** — Create new expense claims with receipts, category, and amount",
-    "- **Check claim status** — View submitted claims and their approval status",
-    "- **Browse expense policies** — Read company policies on reimbursable expenses, limits, and categories",
-    "- **Forex conversion** — Check exchange rates for international travel expenses",
-    "- **View expense history** — List past claims, approved amounts, and pending reimbursements",
-    "",
-    "## How to Help Users",
-    "1. **Ask for context first** — What does the user need? Submit a claim, check status, or understand a policy?",
-    "2. **Gather required details** — For claims: amount, category, receipt, description, date",
-    "3. **Validate against policies** — Before submitting, check if the expense meets company policy",
-    "4. **Explain rejections** — If a claim was rejected, explain why and suggest corrections",
-    "",
-    "## Categories",
-    "Common expense categories include: Travel, Meals, Accommodation, Transportation, Books & Periodicals, Office Supplies, Training, Software/Tools, Phone/Internet, Medical, Client Entertainment.",
-    "",
-    "## Guidelines",
-    "- Always confirm details before submitting a claim",
-    "- Remind users to keep receipts for audit purposes",
-    "- Check policy limits before approving submissions",
-    "- For books & periodicals, remind users to use the correct category in Darwin Box",
-    "- Handle forex expenses with appropriate currency conversion",
-    "",
-    "## Critical Rules",
-    "1. NEVER fabricate expense data — only submit what the user provides",
-    "2. ALWAYS confirm submission details before creating claims",
-    "3. Respect policy limits — flag expenses that may exceed allowances",
-    "4. Keep expense details private — do not expose others' claims",
-  ].join("\n");
-
-  await prisma.agent.upsert({
-    where: { orgId_slug: { orgId: defaultOrg.id, slug: "ardra-finops" } },
-    create: {
-      slug: "ardra-finops",
-      orgId: defaultOrg.id,
-      name: "Ardra FinOps",
-      description: "Expense management assistant — submit claims, check status, browse policies, forex conversion.",
-      systemPrompt: ARDRA_FINOPS_PROMPT,
-      scope: "global",
-      color: "#22c55e",
-    },
-    update: {
-      name: "Ardra FinOps",
-      description: "Expense management assistant — submit claims, check status, browse policies, forex conversion.",
-      systemPrompt: ARDRA_FINOPS_PROMPT,
-    },
-  });
-  console.log("[seed] Upserted ardra-finops agent");
-
-  // Fetch ardra-finops agent for attaching MCP tools
-  const ardraFinopsAgent = await prisma.agent.findUnique({
-    where: { orgId_slug: { orgId: defaultOrg.id, slug: "ardra-finops" } },
-  });
-  if (ardraFinopsAgent) {
-    // Attach ardra-finops MCP tools to the agent
-    // Tools are synced dynamically from the MCP server with source 'mcp:ardra-finops'
-    const ardraToolSlugs = customTools
-      .filter((t) => t.source === "mcp:ardra-finops")
-      .map((t) => t.slug);
-    for (const slug of ardraToolSlugs) {
-      const tool = await prisma.tool.findUnique({
-        where: { slug },
-      });
-      if (tool) {
-        await prisma.agentTool.upsert({
-          where: { agentId_toolId: { agentId: ardraFinopsAgent.id, toolId: tool.id } },
-          create: { agentId: ardraFinopsAgent.id, toolId: tool.id, permission: "allow" },
-          update: { permission: "allow" },
-        });
-      }
-    }
-    console.log(`[seed] Attached ${ardraToolSlugs.length} ardra-finops MCP tools to ardra-finops agent`);
-  }
-
-  // Seed investigation-agent (Query Routing — dedicated agent for query-routing MCP)
-  const INVESTIGATION_AGENT_PROMPT = [
-    "You are an Investigation Agent with access to the Query Routing API. You help users investigate merchant issues, check merchant status, diagnose transaction problems, and route queries to the appropriate investigation flows.",
-    "",
-    "## Capabilities",
-    "- **Query Routing**: Route natural-language queries to the backend investigation system via the `query_routing` tool",
-    "- Investigate merchant status, onboarding issues, payment failures, refund problems, and configuration checks",
-    "- Look up merchant information by email or merchant ID",
-    "",
-    "## How to Use the query_routing Tool",
-    "The `query_routing` tool requires:",
-    "- `query` (required): A natural-language question describing what to investigate (e.g. \"Check merchant status\", \"Why are transactions failing\")",
-    "- `email` (required): The email of the user or merchant being investigated",
-    "- `override_mid` (optional): A specific merchant ID to override the default lookup",
-    "",
-    "## Guidelines",
-    "- When the user asks about a merchant issue, always use the query_routing tool to investigate",
-    "- If the user provides a merchant email, use it directly in the `email` field",
-    "- If the user provides a merchant ID, pass it as `override_mid`",
-    "- Present the investigation results clearly — summarize key findings, highlight issues, and suggest next steps",
-    "- If the query returns an error, explain what went wrong and suggest alternative queries",
-    "- Be proactive — if the user describes a problem, formulate the right query to investigate it",
-    "",
-    "## Example Interactions",
-    "- User: \"Check status of merchant@shop.com\" → Call query_routing with query=\"Check merchant status\", email=\"merchant@shop.com\"",
-    "- User: \"Why are payments failing for MID_12345?\" → Call query_routing with query=\"Why are transactions failing\", email=\"<ask user for email>\", override_mid=\"MID_12345\"",
-    "- User: \"Investigate onboarding for user@company.in\" → Call query_routing with query=\"What is the onboarding status\", email=\"user@company.in\"",
-    "",
-    "## Rules",
-    "1. NEVER fabricate investigation results — only present data from the query_routing tool",
-    "2. If you don't have enough information (e.g. missing email), ask the user before calling the tool",
-    "3. Always summarize the response in a human-readable format — don't just dump raw JSON",
-    "4. If the API returns an error, explain it clearly and suggest what the user can try",
-  ].join("\n");
-
-  await prisma.agent.upsert({
-    where: { orgId_slug: { orgId: defaultOrg.id, slug: "investigation-agent" } },
-    create: {
-      slug: "investigation-agent",
-      orgId: defaultOrg.id,
-      name: "Investigation Agent",
-      description: "Routes queries to the investigation API — check merchant status, diagnose transaction issues, investigate onboarding problems.",
-      systemPrompt: INVESTIGATION_AGENT_PROMPT,
-      scope: "global",
-      color: "#f59e0b",
-    },
-    update: {
-      name: "Investigation Agent",
-      description: "Routes queries to the investigation API — check merchant status, diagnose transaction issues, investigate onboarding problems.",
-      systemPrompt: INVESTIGATION_AGENT_PROMPT,
-    },
-  });
-  console.log("[seed] Upserted investigation-agent");
-  
 
   // ── Dashboard AI agent ───────────────────────────────────────────────────
   // Builds/edits Dynamic Dashboards in Spaces. Its 9 tools live on the
@@ -2260,106 +2064,6 @@ DRILL-DOWN: Use this path ONLY when the user wants to EXPLORE a focused tile's d
     }
   } else {
     console.warn("[seed] Skipped dashboard-ai pin: ENCRYPTION_KEY not set");
-  }
-
-  // Seed curie-agent (delegates to juspay-internal-tools MCP)
-  const CURIE_AGENT_PROMPT = [
-    "You are the **Curie Agent**. You help the user inspect leads, organizations, merchants and integration tickets from Juspay's internal CRM (Curie + Turing + Stein).",
-    "",
-    "## Tools available (via juspay-internal-tools MCP)",
-    "- `ping` — health check",
-    "- `fetch_merchant_flow` — merchant workflow from Turing (requires merchant_id, product_name, merchant_type, scenario)",
-    "- `fetch_merchant_onboarding_progress` — onboarding step/substep progress, ETA, lagging status",
-    "- `stein_list_features` — list Stein features for a merchant",
-    "- `curie_lead_fetch_all` / `curie_lead_fetch_one` — Curie leads (filter by stage, product, country, bdkam, merchantTrack, etc.)",
-    "- `curie_org_fetch_all` / `curie_org_fetch_one` — Curie organizations",
-    "- `curie_ticket_overall` / `curie_ticket_summary` / `curie_integration_ticket_fetch` — integration tickets",
-    "",
-    "## How you work",
-    "1. Pick the most specific tool for the user's question. For lead pipeline/BD queries use `curie_lead_fetch_all` with filters.",
-    "2. Common lead stages: INBOUND_LEAD, PROSPECT, COMMERCIAL_NEGOTIATION, INTEGRATING, LIVE, PITCHED.",
-    "3. Summarise concisely — surface ID, merchant, stage, product, owner (bdkam), expected GMV/MRR and POC contact.",
-    "4. For workspace context (tickets, channels, messages), also call relevant `xyne-spaces__*` tools and combine results.",
-    "",
-    "## Rules",
-    "- Never fabricate data — always call a tool.",
-    "- If a tool errors, report the error verbatim; do not retry blindly.",
-  ].join("\n");
-
-  const CURIE_TOOL_PERMISSIONS: Record<string, string> = {
-    "juspay-internal-tools__ping": "allow",
-    "juspay-internal-tools__fetch_merchant_flow": "allow",
-    "juspay-internal-tools__fetch_merchant_onboarding_progress": "allow",
-    "juspay-internal-tools__stein_list_features": "allow",
-    "juspay-internal-tools__curie_lead_fetch_all": "allow",
-    "juspay-internal-tools__curie_lead_fetch_one": "allow",
-    "juspay-internal-tools__curie_org_fetch_all": "allow",
-    "juspay-internal-tools__curie_org_fetch_one": "allow",
-    "juspay-internal-tools__curie_ticket_overall": "allow",
-    "juspay-internal-tools__curie_ticket_summary": "allow",
-    "juspay-internal-tools__curie_integration_ticket_fetch": "allow",
-  };
-
-  await prisma.agent.upsert({
-    where: { orgId_slug: { orgId: defaultOrg.id, slug: "curie-agent" } },
-    create: {
-      slug: "curie-agent",
-      orgId: defaultOrg.id,
-      name: "Curie Agent",
-      description: "Inspects leads, orgs, merchants and integration tickets from Juspay's internal CRM.",
-      systemPrompt: CURIE_AGENT_PROMPT,
-      scope: "global",
-      color: "#ec4899",
-      config: { toolPermissions: CURIE_TOOL_PERMISSIONS },
-    },
-    update: {
-      name: "Curie Agent",
-      description: "Inspects leads, orgs, merchants and integration tickets from Juspay's internal CRM.",
-      systemPrompt: CURIE_AGENT_PROMPT,
-      config: { toolPermissions: CURIE_TOOL_PERMISSIONS },
-    },
-  });
-  console.log("[seed] Upserted curie-agent");
-
-  // Seed a default AgentMcpConnection for curie-agent → juspay-internal-tools with
-  // empty credentials. The MCP server authenticates with JUSPAY_INTERNAL_TOOLS_VALIDATE_TOKEN
-  // from the process environment, so empty creds are valid for env-level auth.
-  // Without this connection row, the /mcp/tools endpoint never lists the server for
-  // the agent and the LLM only sees basic file tools.
-  const curieCredsPayload = encryptCreds({});
-  if (curieCredsPayload) {
-    const [curieAgentRow, juspayServerRow] = await Promise.all([
-      prisma.agent.findUnique({
-        where: { orgId_slug: { orgId: defaultOrg.id, slug: "curie-agent" } },
-      }),
-      prisma.mcpServer.findUnique({ where: { type: "juspay-internal-tools" } }),
-    ]);
-    if (curieAgentRow && juspayServerRow) {
-      await prisma.agentMcpConnection.upsert({
-        where: {
-          agentId_mcpServerId_slug: {
-            agentId: curieAgentRow.id,
-            mcpServerId: juspayServerRow.id,
-            slug: "default",
-          },
-        },
-        create: {
-          agentId: curieAgentRow.id,
-          mcpServerId: juspayServerRow.id,
-          slug: "default",
-          encryptedCreds: curieCredsPayload.encryptedCreds,
-          iv: curieCredsPayload.iv,
-          authTag: curieCredsPayload.authTag,
-        },
-        // Don't overwrite if an admin has already stored real credentials.
-        update: {},
-      });
-      console.log("[seed] Upserted curie-agent AgentMcpConnection for juspay-internal-tools");
-    } else {
-      console.warn("[seed] Skipped curie-agent AgentMcpConnection: agent or server row not found");
-    }
-  } else {
-    console.warn("[seed] Skipped curie-agent AgentMcpConnection: ENCRYPTION_KEY not set");
   }
 
   // ── Claw concierge agent ─────────────────────────────────────────────────

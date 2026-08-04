@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { logger } from '@/utils/logger';
 import { repositories } from '@/database/repositories';
+import { assertWebhookUrlSafe, SsrfBlockedError } from '@/utils/ssrfGuard';
 import {
   validateActionRequest,
   validateFlowDefinition,
@@ -62,10 +63,22 @@ export class FlowController {
         return;
       }
 
-      // 4. Look up the installed app to get its webhook/action URL
-      // Note: Webhook is configured per-app, not per-user
+      // 4. Look up the installed app to get its webhook/action URL. Multiple InstalledApps
+      // rows can exist for the same appId (one per workspace) and only some carry a
+      // webhookUrl, so scope the lookup to the user's workspace and require a configured
+      // webhook.
+      const workspaceId = req.user?.workspaceId;
+      if (!workspaceId) {
+        res.status(400).json({ error: 'Workspace not found for user' });
+        return;
+      }
       const installedApp = await repositories.installedApps.findFirst({
-        where: { appId },
+        where: {
+          appId,
+          webhookUrl: { not: null },
+          AND: [{ webhookUrl: { not: '' } }],
+          user: { workspaceId },
+        },
       });
       if (!installedApp?.webhookUrl) {
         res.status(502).json({ error: `No webhook URL configured for app: ${appId}` });
@@ -87,7 +100,19 @@ export class FlowController {
 
       logger.info('[FLOW-ACTION] Calling app backend', { appId, actionId, type, messageId });
 
-      // 6. Call the app backend synchronously
+      // Reject webhook URLs whose host resolves to an internal/private address.
+      try {
+        await assertWebhookUrlSafe(installedApp.webhookUrl);
+      } catch (err) {
+        if (err instanceof SsrfBlockedError) {
+          logger.warn('[FLOW-ACTION] Blocked SSRF-unsafe webhook URL', { appId, reason: err.message });
+          res.status(502).json({ error: 'App webhook URL is not allowed' });
+          return;
+        }
+        throw err;
+      }
+
+      // 6. Call the app backend synchronously.
       const appResponse = await fetch(installedApp.webhookUrl, {
         method: 'POST',
         headers: {
@@ -95,6 +120,7 @@ export class FlowController {
           'X-Xyne-Event': 'flow_action',
         },
         body: JSON.stringify(appPayload),
+        redirect: 'manual',
         signal: AbortSignal.timeout(30_000),
       });
 

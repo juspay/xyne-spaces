@@ -1,0 +1,176 @@
+name: Bug report
+description: Report something that is broken in Xyne Spaces
+title: "[BUG] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this. Two things before you start:
+
+        1. **If setup failed**, check [Troubleshooting](https://github.com/juspay/xyne-spaces/blob/main/docs/setup/troubleshooting.md) first — most `pnpm run up` failures are covered there.
+        2. **Search open and closed issues** so we don't split the discussion: https://github.com/juspay/xyne-spaces/issues?q=is%3Aissue+sort%3Aupdated-desc
+
+        A report with exact steps and the actual output gets fixed much faster than one without.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      description: Where does this show up? Pick everything that applies.
+      multiple: true
+      options:
+        - Dashboard / web UI
+        - Backend API
+        - Real-time sync (Zero)
+        - Access control / permissions
+        - Agents (Xyne Claw)
+        - Agent tools / MCP (Claw Auth)
+        - Connectors and ingestion (Slack, Gmail, Microsoft, Jira, Confluence)
+        - Search and retrieval (Vespa)
+        - Calls, recordings and transcription
+        - Desktop app (Electron)
+        - Local setup / developer environment
+        - Documentation
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: bug-description
+    attributes:
+      label: What went wrong
+      description: A clear and concise description of the bug.
+      placeholder: Changing a ticket's status in a shared channel ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps-to-reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Walk us through it. Include the exact command you ran if the bug is in setup or the CLI.
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: Expected behaviour
+      placeholder: The ticket should ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual-behavior
+    attributes:
+      label: Actual behaviour
+      description: Screenshots or a short recording help a lot for UI bugs.
+      placeholder: Instead, it ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: run-mode
+    attributes:
+      label: How were you running it?
+      options:
+        - Local dev — pnpm run up
+        - Local dev — individual dev servers
+        - Test mode — dev:test
+        - Sandbox / claw test mode — claw:test
+        - Docker Compose
+        - Electron desktop build
+        - A deployed instance
+        - Other / not applicable
+    validations:
+      required: true
+
+  - type: dropdown
+    id: sign-in
+    attributes:
+      label: How were you signed in?
+      description: Auth-related bugs often reproduce on only one provider.
+      options:
+        - Google
+        - Microsoft
+        - Dev auth (ENABLE_DEV_AUTH)
+        - Not applicable
+    validations:
+      required: true
+
+  - type: dropdown
+    id: users-involved
+    attributes:
+      label: How many users were involved?
+      description: Sync and permission bugs frequently need a second account to reproduce.
+      options:
+        - One user
+        - Two or more users / accounts
+        - Same user in multiple tabs or devices
+        - Not applicable
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs and console output
+      description: Backend or worker logs, browser console errors, failing command output. Redact tokens and secrets before pasting.
+      render: shell
+    validations:
+      required: false
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      value: |
+        - OS:
+        - Node version (`node --version`):
+        - pnpm version (`pnpm --version`):
+        - Container runtime (Docker / OrbStack / Podman):
+        - Browser and version (for UI bugs):
+        - Branch or commit (`git rev-parse --short HEAD`):
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Anything else
+      description: What were you trying to accomplish? How has this affected you? Any workaround you found?
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: no-duplicate-issues
+    attributes:
+      label: Have you checked whether this has been reported already?
+      options:
+        - label: I searched open and closed issues and did not find a match
+          required: true
+
+  - type: checkboxes
+    id: read-contributing-guidelines
+    attributes:
+      label: Have you read the Contributing Guidelines?
+      options:
+        - label: I have read the [Contributing Guidelines](https://github.com/juspay/xyne-spaces/blob/main/CONTRIBUTING.md)
+          required: true
+
+  - type: dropdown
+    id: willing-to-submit-pr
+    attributes:
+      label: Are you willing to submit a PR?
+      description: Not required at all, but we are happy to guide you through it.
+      options:
+        - Yes, I am willing to submit a PR
+        - No, but I am happy to collaborate on a PR with someone else
+        - No, I don't have time to work on this right now
+    validations:
+      required: false

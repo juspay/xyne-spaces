@@ -15,6 +15,7 @@ import { tenantScopeMiddleware } from '@/database/tenant/context';
 import { redactSensitiveUrl } from '@/utils/redact';
 import { aclMiddleware } from '@/middleware/acl';
 import { authMiddleware } from '@/middleware/auth';
+import { backfillMountGuard } from '@/middleware/backfillAdminAuth';
 import { authenticateUserOrApp } from '@/middleware/authenticateUserOrApp';
 import { verifyTranscriptionAgent } from '@/middleware/transcriptionAgentAuth';
 import { DatabaseClient } from '@/database/client';
@@ -140,6 +141,7 @@ import emailClassificationRoutes from '@/routes/emailClassification';
 import deskTagsConfigRoutes from '@/routes/deskTagsConfig';
 import priorityClassificationRoutes from '@/routes/priorityClassificationRoutes';
 import deskMetricsRoutes from '@/routes/deskMetricsRoutes';
+import deskMetricsAggregateRoutes from '@/routes/deskMetricsAggregateRoutes';
 import deskMetricsBackfillRoutes from '@/routes/deskMetricsBackfill';
 import aiRetriggerRoutes from '@/routes/aiRetriggerRoutes';
 import testAuthRoutes from '@/routes/testAuth';
@@ -348,6 +350,7 @@ export class App {
     this.app.use('/api/channels/:channelId/tags-config', authMiddleware.authenticate, deskTagsConfigRoutes);
     this.app.use('/api/channels/:channelId/priority-classification', authMiddleware.authenticate, priorityClassificationRoutes);
     this.app.use('/api/channels/:channelId/metrics', authMiddleware.authenticate, deskMetricsRoutes);
+    this.app.use('/api/desk-metrics', authMiddleware.authenticate, deskMetricsAggregateRoutes);
     this.app.use('/api/channels/:channelId/ai-retrigger', authMiddleware.authenticate, aiRetriggerRoutes);
 
     // Meet callback route (API key auth - called by SAM service)
@@ -384,6 +387,9 @@ export class App {
     this.app.use('/api/csat', csatRoutes);
 
     this.app.use('/api/transcriptionAgent', verifyTranscriptionAgent, transcriptionAgentRoutes);
+
+    this.app.use('/api/admin', backfillMountGuard);
+    this.app.use('/migrate/api/admin', backfillMountGuard);
 
     // Admin backfill routes (must be before generic /api routes to avoid auth conflicts)
     // Only enable when ENABLE_VESPA_BACKFILL_ROUTES environment variable is true
@@ -449,6 +455,7 @@ export class App {
     this.app.use('/api/admin/desk-metrics-backfill', deskMetricsBackfillRoutes);
     this.app.use('/migrate/api/admin/desk-metrics-backfill', deskMetricsBackfillRoutes);
     this.app.use('/api/admin/conversation-participant-backfill', conversationParticipantBackfillRoutes);
+    this.app.use('/migrate/api/admin/conversation-participant-backfill', conversationParticipantBackfillRoutes);
     this.app.use('/api/admin/call-participant-count-backfill', callParticipantCountBackfillRoutes);
     this.app.use('/migrate/api/admin/call-participant-count-backfill', callParticipantCountBackfillRoutes);
     this.app.use('/migrate/api/admin/form-field-sequence-backfill', formFieldSequenceBackfillRoutes);

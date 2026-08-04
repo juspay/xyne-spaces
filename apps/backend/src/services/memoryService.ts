@@ -1,4 +1,5 @@
 import { logger } from '@/utils/logger';
+import { escapeYqlString } from '@/utils/yqlEscape';
 import { vespaClient } from '@/services/vespaSearch';
 import { NAMESPACE, CLUSTER } from '@/vespa/vespaConfig';
 import {
@@ -77,12 +78,22 @@ async function buildMemoryYql(params: {
 
   const conditions: string[] = [];
 
-  // NOTE: These are *scoping* filters over cumulative memory, not an access-control
-  // boundary. Memory documents are shared, so widening this WHERE clause only surfaces
-  // records the user is already permitted to read (confirmed with the Vespa/memory team).
-  // Values are therefore interpolated directly into the YQL string. If memory ever becomes
-  // per-user/tenant-confidential, revisit this and bind user input as @-parameters
-  // (see YqlBuilder) so it can't break out of the string literal and rewrite the query.
+  // Escape any value interpolated into a YQL string literal: a raw `"` or `\` in a filter
+  // value (a docId/tag/repoUrl, or an ingested value such as an email subject that lands in
+  // these fields) would otherwise terminate the `"…"` literal and change the WHERE clause.
+  // The free-text `query` is NOT interpolated: it is bound as the @query parameter
+  // (userInput(@query)), so it stays parameterized.
+
+  // NOTE: These `contains` filters are *scoping* filters over cumulative memory, not an
+  // access-control boundary. Memory documents are shared, so these values are string-
+  // interpolated (escaped) rather than bound as @-parameters. If memory ever becomes
+  // per-user/tenant-confidential, bind values as @-parameters (see YqlBuilder) instead.
+  //
+  // `scope: 'ALL'` applies no user/workspace filter — memory is shared across users. Memory
+  // docs are also not stamped with `workspaceId` at ingest today, so a tenant filter here
+  // would match nothing without an ingest change + backfill. If the tenancy model changes to
+  // make memory per-workspace, this is where the workspaceId filter belongs (and ingestion
+  // must stamp workspaceId).
 
   // get the email of that user
   const prisma = DatabaseClient.getInstance();
@@ -92,58 +103,58 @@ async function buildMemoryYql(params: {
 
   // Scope filter: 'my' restricts to user's own documents
   if (scope === 'my') {
-    conditions.push(`userId contains "${user?.email}"`);
+    conditions.push(`userId contains "${escapeYqlString(user?.email)}"`);
   }
 
   // DocType filter
   if (docType) {
-    conditions.push(`docType contains "${docType}"`);
+    conditions.push(`docType contains "${escapeYqlString(docType)}"`);
   }
 
   // DocId filter
   if (docId) {
-    conditions.push(`docId contains "${docId}"`);
+    conditions.push(`docId contains "${escapeYqlString(docId)}"`);
   }
 
   // Tags filter
   if (tags && tags.length > 0) {
-    const tagConditions = tags.map((tag) => `tags contains "${tag}"`);
+    const tagConditions = tags.map((tag) => `tags contains "${escapeYqlString(tag)}"`);
     conditions.push(`(${tagConditions.join(' or ')})`);
   }
 
   // RepoUrl filter
   if (repoUrl) {
-    conditions.push(`repoUrl contains "${repoUrl}"`);
+    conditions.push(`repoUrl contains "${escapeYqlString(repoUrl)}"`);
   }
 
   // CommitId filter (exact match)
   if (commitId) {
-    conditions.push(`commitId contains "${commitId}"`);
+    conditions.push(`commitId contains "${escapeYqlString(commitId)}"`);
   }
 
   // SessionId filter (exact match)
   if (sessionId) {
-    conditions.push(`sessionId contains "${sessionId}"`);
+    conditions.push(`sessionId contains "${escapeYqlString(sessionId)}"`);
   }
 
   // FilePointers filter
   if (filePointers) {
-    conditions.push(`filePointers contains "${filePointers}"`);
+    conditions.push(`filePointers contains "${escapeYqlString(filePointers)}"`);
   }
 
   // TicketId filter
   if (ticketId) {
-    conditions.push(`ticketId contains "${ticketId}"`);
+    conditions.push(`ticketId contains "${escapeYqlString(ticketId)}"`);
   }
 
   // ParentRef filter (exact match)
   if (parentRef) {
-    conditions.push(`parentRef contains "${parentRef}"`);
+    conditions.push(`parentRef contains "${escapeYqlString(parentRef)}"`);
   }
 
   // ReviewStatus filter
   if (reviewStatus) {
-    conditions.push(`reviewStatus contains "${reviewStatus}"`);
+    conditions.push(`reviewStatus contains "${escapeYqlString(reviewStatus)}"`);
   }
 
   // Search condition (text + vector)
@@ -268,7 +279,7 @@ export async function searchMemory(
   // Add query and embedding input only when query is present
   if (query && query.trim()) {
     payload.query = query;
-    payload['input.query(e)'] = 'embed(@query)';
+    payload['input.query(e)'] = 'embed(hf-embedder, @query)';
     payload['input.query(alpha)'] = 0.5;
     payload['input.query(includeSummary)'] = Number(includeSummary);
     payload['input.query(includeQuery)'] = Number(includeQuery);

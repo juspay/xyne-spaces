@@ -1296,20 +1296,49 @@ export interface AppMentionAgentRequest {
   userName: string;
   conversationId: string;
   channelId: string;
+  workspaceId: string;
   resultForwardUrl: string;
 }
 
 export async function runClawAgent(
   req: AppMentionAgentRequest,
 ): Promise<{ dispatched: boolean }> {
-  const installedApp = await db.installedApps.findFirst({
-    where: { webhookUrl: { endsWith: `/webhook/${req.agentSlug}` } },
-    // Signing secret is app-level now (apps.signingSecret); the per-install column is deprecated.
-    select: { webhookUrl: true, app: { select: { signingSecret: true } } },
-  });
+  // Current Claw installations use /webhook/app/<spacesAppId>. The old
+  // /webhook/<agentSlug> URL was removed from the installation flow, so the
+  // webhook cannot be resolved from its URL suffix anymore. Resolve the agent
+  // first and use its Spaces app user id to find the corresponding install.
+  const agents = await listS2SClawAgents();
+  const agent = agents.find(candidate => candidate.slug === req.agentSlug);
+
+  let installedApp = agent?.spacesAppUserId
+    ? await db.installedApps.findFirst({
+        where: {
+          userId: agent.spacesAppUserId,
+          user: { workspaceId: req.workspaceId },
+          webhookUrl: { contains: '/claw/api/v1/webhook/' },
+        },
+        // Signing secret is app-level now (apps.signingSecret); the per-install column is deprecated.
+        select: { webhookUrl: true, app: { select: { signingSecret: true } } },
+      })
+    : null;
+
+  // Keep legacy installations working while they are being migrated.
+  if (!installedApp) {
+    installedApp = await db.installedApps.findFirst({
+      where: {
+        user: { workspaceId: req.workspaceId },
+        webhookUrl: { endsWith: `/webhook/${req.agentSlug}` },
+      },
+      select: { webhookUrl: true, app: { select: { signingSecret: true } } },
+    });
+  }
+
   if (!installedApp?.webhookUrl) {
     logger.warn('[ClawAgentService] runClawAgent: no installed-app webhook for agent', {
       agentSlug: req.agentSlug,
+      channelId: req.channelId,
+      workspaceId: req.workspaceId,
+      spacesAppUserId: agent?.spacesAppUserId ?? null,
     });
     return { dispatched: false };
   }
@@ -1317,6 +1346,8 @@ export async function runClawAgent(
   if (!signingSecretEnc) {
     logger.warn('[ClawAgentService] runClawAgent: app has no signing secret', {
       agentSlug: req.agentSlug,
+      channelId: req.channelId,
+      workspaceId: req.workspaceId,
     });
     return { dispatched: false };
   }

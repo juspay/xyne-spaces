@@ -9,8 +9,16 @@ export class CacConfigController {
       return;
     }
 
-    const userEmail = req.user?.email;
-    const config = await CacConfigService.fetch(key, userEmail ? { email: userEmail } : undefined);
+    const userEmail = req.user?.email?.trim();
+    const isPlayground = req.get('x-route-env')?.trim().toLowerCase() === 'playground';
+    const context = userEmail || isPlayground
+      ? {
+          ...(userEmail ? { email: userEmail } : {}),
+          ...(isPlayground ? { environment: 'playground' } : {}),
+        }
+      : undefined;
+
+    const config = await CacConfigService.fetch(key, context);
     res.json({ key, config });
   };
 }

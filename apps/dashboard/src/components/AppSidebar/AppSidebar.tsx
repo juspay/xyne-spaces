@@ -59,6 +59,7 @@ import { ErrorReportModal } from '../ErrorReportModal/ErrorReportModal';
 import { isDMChannel } from '../Chat/ChatDirectory/ChatDirectory.utils';
 import { SupportRail } from './SupportRail';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher';
+import { ZeroConnectionStatus } from '../ZeroConnectionStatus/ZeroConnectionStatus';
 
 const mobileNavigationItems = [
   {
@@ -518,6 +519,8 @@ const AppSidebar = (): ReactElement => {
         <div
           className={cn('flex flex-col items-center justify-center', !isElectronApp() && 'pb-4')}
         >
+          <ZeroConnectionStatus className='mb-2' />
+
           <Popover
             open={isSupportOpen}
             onOpenChange={setIsSupportOpen}

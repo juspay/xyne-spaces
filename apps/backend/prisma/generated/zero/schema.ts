@@ -584,6 +584,7 @@ export enum NotificationType {
   EMAIL_FETCH_COMPLETED = "EMAIL_FETCH_COMPLETED",
   EMAIL_FETCH_FAILED = "EMAIL_FETCH_FAILED",
   CANVAS_SHARED = "CANVAS_SHARED",
+  RECORDING_SHARED = "RECORDING_SHARED",
   EMAIL_REPLY_RECEIVED = "EMAIL_REPLY_RECEIVED",
   MESSAGE_DELETED = "MESSAGE_DELETED",
   MESSAGE_EDITED = "MESSAGE_EDITED",
@@ -2471,6 +2472,39 @@ export const callTable = table("calls")
     callUpdatesChannel: string().optional(),
     participantCount: number().optional(),
     participantPreviewUserIds: string().optional(),
+    summaryTemplateId: string().optional(),
+    labels: json<string[]>(),
+    markedItems: json<any[]>(),
+  })
+  .primaryKey("id");
+
+export const entityAccessTable = table("entity_access")
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    shareableEntityType: string(),
+    entityId: string(),
+    userId: string().optional(),
+    userGroupId: string().optional(),
+    channelId: string().optional(),
+    entityUserAccess: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
+export const summaryTemplateTable = table("summary_templates")
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    name: string(),
+    autoTriggerPrompt: string().optional(),
+    sections: json(),
+    version: number(),
+    systemPrompt: string(),
+    defaultOutlet: string(),
+    createdBy: string(),
+    createdAt: number(),
   })
   .primaryKey("id");
 
@@ -3553,6 +3587,32 @@ export const doclingAsyncPartTable = table("docling_async_parts")
     updatedAt: number().from('updated_at'),
   })
   .primaryKey("fileId", "partIndex");
+
+export const entityTable = table("entities")
+  .columns({
+    workspaceId: string().optional(),
+    id: string(),
+    type: string(),
+    canonicalName: string(),
+    normalizedName: string(),
+    mentionCount: number(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
+export const entityAliasTable = table("entity_aliases")
+  .columns({
+    workspaceId: string().optional(),
+    id: string(),
+    entityId: string(),
+    type: string(),
+    surfaceForm: string(),
+    normalizedForm: string(),
+    count: number(),
+    createdAt: number(),
+  })
+  .primaryKey("id");
 
 
 // Define relationships
@@ -5317,6 +5377,22 @@ export const doclingAsyncPartTableRelationships = relationships(doclingAsyncPart
   })
 }));
 
+export const entityTableRelationships = relationships(entityTable, ({ many }) => ({
+  aliases: many({
+    sourceField: ["id"],
+    destField: ["entityId"],
+    destSchema: entityAliasTable,
+  })
+}));
+
+export const entityAliasTableRelationships = relationships(entityAliasTable, ({ one }) => ({
+  entity: one({
+    sourceField: ["entityId"],
+    destField: ["id"],
+    destSchema: entityTable,
+  })
+}));
+
 // Define schema
 
 export const schema = createSchema(
@@ -5418,6 +5494,8 @@ export const schema = createSchema(
       notificationPreferenceTable,
       browserNotificationSubscriptionTable,
       callTable,
+      entityAccessTable,
+      summaryTemplateTable,
       callParticipantTable,
       callRecordingTable,
       recurringCallSeriesTable,
@@ -5488,6 +5566,8 @@ export const schema = createSchema(
       tagsConfigTable,
       doclingAsyncFileTable,
       doclingAsyncPartTable,
+      entityTable,
+      entityAliasTable,
     ],
     relationships: [
       agentTableRelationships,
@@ -5590,6 +5670,8 @@ export const schema = createSchema(
       installedAppPermissionTableRelationships,
       doclingAsyncFileTableRelationships,
       doclingAsyncPartTableRelationships,
+      entityTableRelationships,
+      entityAliasTableRelationships,
     ],
   }
 );
@@ -5692,6 +5774,8 @@ export type Notification = Row<typeof schema.tables.notifications>;
 export type NotificationPreference = Row<typeof schema.tables.notification_preferences>;
 export type BrowserNotificationSubscription = Row<typeof schema.tables.browser_notification_subscriptions>;
 export type Call = Row<typeof schema.tables.calls>;
+export type EntityAccess = Row<typeof schema.tables.entity_access>;
+export type SummaryTemplate = Row<typeof schema.tables.summary_templates>;
 export type CallParticipant = Row<typeof schema.tables.call_participants>;
 export type CallRecording = Row<typeof schema.tables.call_recordings>;
 export type RecurringCallSeries = Row<typeof schema.tables.recurring_call_series>;
@@ -5762,3 +5846,5 @@ export type Tag = Row<typeof schema.tables.tags>;
 export type TagsConfig = Row<typeof schema.tables.tags_config>;
 export type DoclingAsyncFile = Row<typeof schema.tables.docling_async_files>;
 export type DoclingAsyncPart = Row<typeof schema.tables.docling_async_parts>;
+export type Entity = Row<typeof schema.tables.entities>;
+export type EntityAlias = Row<typeof schema.tables.entity_aliases>;

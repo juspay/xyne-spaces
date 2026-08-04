@@ -10,6 +10,13 @@ export type XyneAIContextType = 'chat' | 'ticket' | 'call' | 'canvas' | 'general
 // Thread info interface
 export interface ThreadInfo {
   conversationId: string;
+  // The channel the context was captured from. Pinned here rather than read off
+  // the machine's live `channelId`, which `SET_CHANNEL` repoints on every chat
+  // route change while leaving `threadInfo` attached — without it, clicking the
+  // pill after navigating elsewhere routes the captured conversation into
+  // whatever channel is currently open. Absent on sessions persisted before it
+  // existed; the pill falls back to the current channel then.
+  channelId?: string;
   senderName?: string;
   // Lets the context pill show the sender's avatar instead of their name. Absent
   // on non-message contexts (tickets, calls, recordings) and on sessions

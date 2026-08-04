@@ -5,14 +5,11 @@
  */
 
 import { v4 as uuidv4 } from 'uuid';
-import { Agent, type AgentConfig } from '@framework';
-import { LogLevel } from '@framework';
 import { DatabaseClient } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { DEFAULT_SUMMARY_FIELDS, MessageType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
-import { config } from '@/config/env';
 import { formatToISTLocaleString } from '@/utils/dateUtils';
 import { CanvasRole } from '@prisma/client';
 import { ServerBlockNoteEditor } from '@blocknote/server-util';
@@ -26,6 +23,19 @@ import type {
   BlockNoteTableBlock,
   BlockNoteInlineContent,
 } from '@/types/blockNoteTypes';
+import {
+  buildSummaryTemplateSelectionPrompt,
+  parseSelectedSummaryTemplate,
+  type SummaryTemplateCandidate,
+} from './summaryTemplateSelection';
+import {
+  BUILTIN_RECORDING_SUMMARY_TEMPLATES,
+  DEFAULT_RECORDING_SUMMARY_FIELDS,
+  RECORDING_DETAILED_SUMMARY_PROMPT,
+  getBuiltinRecordingSummaryTemplate,
+  type BuiltinRecordingSummaryTemplate,
+  type BuiltinRecordingSummaryTemplateId,
+} from './recordingSummaryTemplates';
 
 // PRD Document structure
 interface PRDDocument {
@@ -48,15 +58,7 @@ interface ParticipantInfo {
   userPicture?: string;
 }
 
-// Participant information for mentions
-interface ParticipantInfo {
-  userId: string;
-  username: string;
-  userEmail: string;
-  userPicture?: string;
-}
-
-import { executeCallLlmWithRetry } from './callLlmRetry';
+import { executeStreamingLlmRequest } from './callLlmRetry';
 import { initializeYSweetDoc, syncToYSweet } from '@/utils/ysweetUtils.js';
 
 /**
@@ -81,6 +83,164 @@ function renderPromptTemplate(template: string, values: Record<string, string>):
   );
 }
 
+// ── Call-summary citations ───────────────────────────────────────────────────
+// Mirrors xyne-claw's `clf-` pattern: the summariser LLM emits a compact inline
+// token `[clf-<n>]` after a claim (never a link), where <n> is the transcript
+// SEGMENT number shown in the numbered transcript we feed it. Each token is
+// mapped to a self-contained BlockNote `citation` inline node whose props carry
+// the segment's metadata, so a citation survives canvas regeneration and the
+// frontend chip can open the transcript at that moment.
+const CITATION_TOKEN_RE = /\[clf-(\d+)\]/g;
+const MAX_CITATION_SNIPPET = 300;
+
+interface CitationSegment {
+  n: number;
+  timestamp: string; // "MM:SS" or "HH:MM:SS"
+  speaker: string;
+  speakerId?: string; // resolved participant userId (best-effort) → real avatar on the chip
+  text: string;
+}
+export interface CitationContext {
+  callId: string;
+  segments: Map<number, CitationSegment>;
+}
+
+// A single formatted transcript line: "[MM:SS] Speaker: text".
+const TRANSCRIPT_LINE_RE = /^\[(\d{1,2}:\d{2}(?::\d{2})?)\]\s*(.+?):\s*([\s\S]*)$/;
+
+/**
+ * Parse a formatted transcript ("[MM:SS] Speaker: text" lines) into numbered
+ * segments AND produce a copy with each line prefixed by its segment number
+ * (`[12] [03:24] Alice: …`) for the LLM to cite. Deterministic, so numbering for
+ * the prompt and building the citation map from the SAME transcript string always
+ * agree on segment ids. Non-matching lines pass through and are not numbered.
+ */
+export function numberTranscriptSegments(formatted: string): { numbered: string; segments: CitationSegment[] } {
+  const numberedLines: string[] = [];
+  const segments: CitationSegment[] = [];
+  let n = 0;
+  for (const rawLine of formatted.split('\n')) {
+    const m = rawLine.trimEnd().match(TRANSCRIPT_LINE_RE);
+    if (!m) {
+      numberedLines.push(rawLine);
+      continue;
+    }
+    n += 1;
+    const [, timestamp, speaker, text] = m;
+    segments.push({ n, timestamp, speaker: speaker.trim(), text: text.trim() });
+    numberedLines.push(`[${n}] [${timestamp}] ${speaker}: ${text}`);
+  }
+  return { numbered: numberedLines.join('\n'), segments };
+}
+
+/**
+ * Build one BlockNote `citation` inline node from one-or-more consecutive
+ * segments. Top-level props mirror the FIRST segment (single-chip render + the
+ * modal-open default + the server-spec textContent); the full run is carried as
+ * a JSON `segments` array so the frontend can render a grouped "cluster" chip.
+ */
+function buildCitationNode(callId: string, segs: CitationSegment[]): BlockNoteInlineContent {
+  const first = segs[0]!;
+  return {
+    type: 'citation',
+    props: {
+      callId,
+      segment: String(first.n),
+      timestamp: first.timestamp,
+      speaker: first.speaker,
+      speakerId: first.speakerId ?? '',
+      snippet: first.text.slice(0, MAX_CITATION_SNIPPET),
+      segments: JSON.stringify(
+        segs.map(s => ({
+          n: s.n,
+          timestamp: s.timestamp,
+          speaker: s.speaker,
+          speakerId: s.speakerId ?? '',
+          snippet: s.text.slice(0, MAX_CITATION_SNIPPET),
+        })),
+      ),
+    },
+  };
+}
+
+/**
+ * Expand `[clf-<n>]` tokens in a text run into BlockNote `citation` inline nodes.
+ * - a RUN of tokens separated only by whitespace → ONE grouped citation node
+ * - known segment  → included in the group's metadata
+ * - unknown segment / no context → dropped (never leaks as literal text); a group
+ *   whose tokens are ALL unknown collapses to nothing
+ * Returns the input as a single text node when there is nothing to expand, so
+ * callers can splice the result unconditionally.
+ */
+function expandCitations(
+  text: string,
+  styles: { bold?: boolean; italic?: boolean; code?: boolean },
+  citationCtx?: CitationContext,
+): BlockNoteInlineContent[] {
+  if (!text) return [];
+  if (text.indexOf('[clf-') === -1) return [{ type: 'text', text, styles }];
+
+  const out: BlockNoteInlineContent[] = [];
+  const re = new RegExp(CITATION_TOKEN_RE.source, 'g');
+  const matches: Array<{ index: number; end: number; n: number }> = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    matches.push({ index: m.index, end: m.index + m[0].length, n: Number(m[1]) });
+  }
+
+  let last = 0;
+  let i = 0;
+  while (i < matches.length) {
+    // Coalesce consecutive tokens separated ONLY by whitespace into one group.
+    let j = i;
+    while (j + 1 < matches.length && /^\s*$/.test(text.slice(matches[j]!.end, matches[j + 1]!.index))) {
+      j += 1;
+    }
+    const groupStart = matches[i]!.index;
+    const groupEnd = matches[j]!.end;
+    let pre = text.slice(last, groupStart);
+
+    const segs: CitationSegment[] = [];
+    for (let k = i; k <= j; k++) {
+      const seg = citationCtx?.segments.get(matches[k]!.n);
+      if (seg) segs.push(seg);
+    }
+
+    if (segs.length > 0) {
+      // Chip hugs the preceding word (drop the space before), KEEP the space after.
+      if (pre.endsWith(' ')) pre = pre.slice(0, -1);
+      if (pre) out.push({ type: 'text', text: pre, styles });
+      out.push(buildCitationNode(citationCtx!.callId, segs));
+      last = groupEnd;
+    } else {
+      // Whole group unknown → strip the token(s) and NORMALIZE the surrounding
+      // whitespace so no stray leading / doubled / pre-punctuation space is left
+      // (mirrors the resolved branch, which drops the space before the chip):
+      //   "in Q4 [clf-x]."  → "in Q4."      (drop space before punctuation)
+      //   "foo [clf-x] bar" → "foo bar"     (collapse the doubled space)
+      //   "[clf-x] bar"     → "bar"         (drop the leading space at run start)
+      if (pre.endsWith(' ')) {
+        pre = pre.slice(0, -1); // drop the space before the removed token; keep what follows
+        last = groupEnd;
+      } else if (text[groupEnd] === ' ') {
+        last = groupEnd + 1; // run start / after punctuation: drop the space AFTER instead
+      } else {
+        last = groupEnd;
+      }
+      if (pre) out.push({ type: 'text', text: pre, styles });
+    }
+    i = j + 1;
+  }
+
+  const tail = text.slice(last);
+  if (tail) out.push({ type: 'text', text: tail, styles });
+  // NOTE: `out` may be empty here — the whole run was citation token(s) that got
+  // stripped/converted. Returning the ORIGINAL text would leak the raw `[clf-n]`
+  // token as literal prose, so return `out` as-is (the early no-token guard
+  // already handled the nothing-to-expand case).
+  return out;
+}
+
 /**
  * Parse text content to extract @mentions and convert to BlockNote inline content.
  * Example: "Task for @Mayank Bansal" -> [text, mention, text]
@@ -94,14 +254,15 @@ function parseTextWithMentions(
   participantMap: Map<string, ParticipantInfo>,
   applyBold = false,
   mentionedIds?: Set<string>,
+  citationCtx?: CitationContext,
 ): BlockNoteInlineContent[] {
   if (!text) return [];
 
   const textStyles = applyBold ? { bold: true } : {};
 
-  // Fast path: no participants to match against
+  // Fast path: no participants to match against (still expand/strip citations).
   if (participantMap.size === 0) {
-    return [{ type: 'text', text, styles: textStyles }];
+    return expandCitations(text, textStyles, citationCtx);
   }
 
   // Escape special regex chars in each name; sort longest-first for greedy match
@@ -137,8 +298,8 @@ function parseTextWithMentions(
       }
     }
 
-    // Plain text segment (or unmatched @ — keep as-is)
-    result.push({ type: 'text', text: segment, styles: textStyles });
+    // Plain text segment (or unmatched @) — expand/strip citation tokens within.
+    result.push(...expandCitations(segment, textStyles, citationCtx));
   }
 
   return result;
@@ -151,7 +312,7 @@ function parseTextWithMentions(
  * Using channel participants (not just call attendees) ensures the AI prompt
  * and @mention resolution covers everyone who could be referenced.
  */
-async function buildParticipantMap(channelId: string): Promise<Map<string, ParticipantInfo>> {
+export async function buildParticipantMap(channelId: string): Promise<Map<string, ParticipantInfo>> {
   const participantMap = new Map<string, ParticipantInfo>();
 
   try {
@@ -260,6 +421,13 @@ MARKDOWN TEMPLATE:
 - For very short calls, the "Consolidated Outcomes" section may be the most valuable part
 - In Action Items: Use @ before FULL NAMES for participants in the call (e.g., @Mayank Bansal)
 - In Action Items: For people NOT in the participant list, write their name plainly with "(not in channel)" notation
+
+**CITATIONS (IMPORTANT):**
+- Each transcript line is prefixed with a segment number in square brackets, e.g. "[12] [03:24] Alice: ...". The number 12 is that line's segment id.
+- After any specific claim, decision, action item, number, date, name, or quote you draw from the transcript, cite the segment(s) it came from INLINE using the exact token [clf-N], where N is that segment's number. Example: "The team agreed to ship the API redesign in Q4 [clf-12]."
+- Cite the MOST specific segment(s) that support the statement. You may place up to 3 tokens together, e.g. "...scope was cut [clf-8][clf-9]".
+- Copy the number EXACTLY from the transcript. Do NOT invent segment numbers. Do NOT use ranges like [clf-8-11]. Only cite segment numbers that actually appear in the transcript above; if a line has no bracketed number, do not cite it.
+- Write ONLY the bare token [clf-N] — never a link, URL, footnote, or a separate "Citations"/"Sources" section.
 
 Only output valid Markdown.
 No extra text.
@@ -410,7 +578,8 @@ function formatPRDToBlockNote(prd: PRDDocument, callId: string): BlockNoteBlock[
  */
 async function convertMarkdownToBlockNote(
   markdown: string,
-  participantMap: Map<string, ParticipantInfo> = new Map()
+  participantMap: Map<string, ParticipantInfo> = new Map(),
+  citationCtx?: CitationContext,
 ): Promise<{ blocks: BlockNoteBlock[]; mentionedUserIds: string[] }> {
   try {
     const editor = ServerBlockNoteEditor.create();
@@ -418,7 +587,7 @@ async function convertMarkdownToBlockNote(
 
     // Collect mentioned IDs during the mention-processing pass
     const mentionedIds = new Set<string>();
-    const blocks = processBlocksForMentions(parsed as BlockNoteBlock[], participantMap, mentionedIds);
+    const blocks = processBlocksForMentions(parsed as BlockNoteBlock[], participantMap, mentionedIds, citationCtx);
 
     logger.info(`[CallDocumentService] Total unique mentioned user IDs found: ${mentionedIds.size}`);
     return { blocks, mentionedUserIds: Array.from(mentionedIds) };
@@ -436,13 +605,15 @@ function processBlocksForMentions(
   blocks: BlockNoteBlock[],
   participantMap: Map<string, ParticipantInfo>,
   mentionedIds: Set<string>,
+  citationCtx?: CitationContext,
 ): BlockNoteBlock[] {
-  // Processes an array of inline items: text nodes are split on @mentions,
-  // everything else (existing mentions, links, etc.) passes through untouched.
+  // Processes an array of inline items: text nodes are split on @mentions and
+  // `[clf-n]` citation tokens; everything else (existing mentions, links, etc.)
+  // passes through untouched.
   const processInline = (content: BlockNoteInlineContent[]): BlockNoteInlineContent[] =>
     content.flatMap(item =>
       item.type === 'text' && item.text
-        ? parseTextWithMentions(item.text, participantMap, item.styles?.bold ?? false, mentionedIds)
+        ? parseTextWithMentions(item.text, participantMap, item.styles?.bold ?? false, mentionedIds, citationCtx)
         : [item]
     );
 
@@ -467,7 +638,7 @@ function processBlocksForMentions(
         ? { content: processInline(block.content as BlockNoteInlineContent[]) }
         : {}),
       ...('children' in block && Array.isArray(block.children)
-        ? { children: processBlocksForMentions(block.children, participantMap, mentionedIds) }
+        ? { children: processBlocksForMentions(block.children, participantMap, mentionedIds, citationCtx) }
         : {}),
     } as BlockNoteBlock;
   });
@@ -507,9 +678,10 @@ export class CallDocumentService {
    */
   private async prepareCanvasContent(
     markdownSummary: string,
-    channelId: string,
+    channelId: string | null,
     callStartedAt?: Date,
-    callTitle?: string | null
+    callTitle?: string | null,
+    citationCtx?: CitationContext
   ): Promise<{
     title: string;
     content: any;
@@ -534,13 +706,14 @@ export class CallDocumentService {
       }
     }
 
-    // Build participant map from channel members for mention resolution
-    const participantMap = await buildParticipantMap(channelId);
+    // Build participant map from channel members for mention resolution.
+    // NOTE_TAKER calls have no channel — mentions simply resolve to none.
+    const participantMap = channelId ? await buildParticipantMap(channelId) : new Map();
     const logContext = callStartedAt ? '' : ' (update)';
     logger.info(`[CallDocumentService] Built channel participant map with ${participantMap.size} participants for mentions${logContext}`);
 
-    // Convert markdown to BlockNote with mention support
-    const { blocks: content, mentionedUserIds } = await convertMarkdownToBlockNote(markdownSummary, participantMap);
+    // Convert markdown to BlockNote with mention + citation support
+    const { blocks: content, mentionedUserIds } = await convertMarkdownToBlockNote(markdownSummary, participantMap, citationCtx);
 
     // Sanitize content to remove undefined values for Prisma
     const sanitizedContent = sanitizeBlockNoteContent(content);
@@ -565,62 +738,6 @@ export class CallDocumentService {
       logger.info(`[CallDocumentService] Queued Vespa ${action} for canvas ${canvasId}`);
     } catch (error) {
       logger.error(`[CallDocumentService] Failed to queue Vespa job for canvas ${canvasId}:`, error);
-    }
-  }
-
-  /**
-   * Create a fresh Agent instance for each request
-   * This prevents state pollution between concurrent requests
-   */
-  private createAgent(): Agent | null {
-    try {
-      const apiKey = config.llm.callLitellmApiKey;
-      const baseUrl = config.llm.litellmBaseUrl;
-
-      if (!apiKey || !baseUrl) {
-        logger.warn('[CallDocumentService] LiteLLM not configured. Document generation disabled.');
-        return null;
-      }
-
-      const agentConfig: AgentConfig = {
-        model: {
-          provider: {
-            type: 'litellm',
-            config: {
-              apiKey,
-              baseUrl,
-              timeout: 300000,
-            },
-          },
-          defaultModel: config.llm.callLitellmModel || 'glm-latest',
-        },
-        tools: {
-          enabled: [],
-          config: {},
-          execution: { timeout: 300000 },
-        },
-        execution: {
-          maxTurns: 1,
-          mode: 'single',
-          timeouts: { llm: 300000 },
-          limits: {},
-          errorHandling: {
-            maxRetries: 3,
-            retryDelay: 120000,
-            maxDelay: 960000,
-          },
-        },
-        events: {
-          logging: LogLevel.WARN,
-        },
-      };
-
-      const agent = Agent.create(agentConfig);
-      logger.info('[CallDocumentService] Agent created for document generation');
-      return agent;
-    } catch (error) {
-      logger.error('[CallDocumentService] Failed to create Agent:', error);
-      return null;
     }
   }
 
@@ -654,20 +771,19 @@ export class CallDocumentService {
       return prompt;
     };
 
-    const extracted = await executeCallLlmWithRetry(
-      () => this.createAgent(),
-      buildPrompt,
-      'prd_generation',
-      logCallId,
-    );
+    const result = await executeStreamingLlmRequest({
+      userPrompt: buildPrompt(),
+      operation: 'prd_generation',
+      callId: logCallId,
+    });
 
-    if (!extracted.ok) {
-      logger.error(`[${logCallId}] prd_generation_failed`, { reason: extracted.reason, status: extracted.status });
+    if (!result.ok) {
+      logger.error(`[${logCallId}] prd_generation_failed`, { reason: result.reason });
       return null;
     }
 
     // Extract JSON from response
-    const jsonMatch = extracted.content.match(/\{[\s\S]*\}/);
+    const jsonMatch = result.content.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
       logger.error(`[${logCallId}] Could not find JSON in PRD response`);
       return null;
@@ -684,16 +800,167 @@ export class CallDocumentService {
   }
 
   /**
+   * Select the most suitable workspace summary template for a transcript.
+   * A null result means the caller should use the hardcoded default summary.
+   */
+  async selectSummaryTemplateForTranscript(
+    transcript: string,
+    workspaceId: string,
+    callId: string,
+  ): Promise<SummaryTemplateCandidate | null> {
+    let templates: SummaryTemplateCandidate[];
+    try {
+      templates = await repositories.summaryTemplates.listByWorkspace(workspaceId);
+    } catch (error) {
+      logger.error(`[${callId}] summary_template_lookup_failed`, { error });
+      return null;
+    }
+
+    if (templates.length === 0) {
+      logger.info(`[${callId}] summary_template_selection_skipped`, {
+        reason: 'no_templates',
+        fallback: 'hardcoded_default',
+      });
+      return null;
+    }
+
+    const result = await executeStreamingLlmRequest({
+      userPrompt: buildSummaryTemplateSelectionPrompt(transcript, templates),
+      operation: 'summary_template_selection',
+      callId,
+    });
+
+    if (!result.ok) {
+      logger.error(`[${callId}] summary_template_selection_failed`, {
+        reason: result.reason,
+        fallback: 'hardcoded_default',
+      });
+      return null;
+    }
+
+    const selectedTemplate = parseSelectedSummaryTemplate(result.content, templates);
+    if (!selectedTemplate) {
+      logger.error(`[${callId}] summary_template_selection_invalid`, {
+        fallback: 'hardcoded_default',
+      });
+      return null;
+    }
+
+    logger.info(`[${callId}] summary_template_selected`, {
+      template_id: selectedTemplate.id,
+      template_name: selectedTemplate.name,
+      template_version: selectedTemplate.version,
+    });
+    return selectedTemplate;
+  }
+
+  /**
+   * Select one of the built-in recording templates. These templates are
+   * intentionally code-backed for the v1 rollout, so every workspace gets the
+   * same choices without requiring seed rows in summary_templates.
+   */
+  async selectRecordingSummaryTemplateForTranscript(
+    transcript: string,
+    callId: string,
+  ): Promise<BuiltinRecordingSummaryTemplate> {
+    const candidates: SummaryTemplateCandidate[] = BUILTIN_RECORDING_SUMMARY_TEMPLATES.map(
+      template => ({
+        id: template.id,
+        name: template.name,
+        version: 1,
+        autoTriggerPrompt: template.selectionCriteria,
+        sections: template.fields,
+        systemPrompt: '',
+      }),
+    );
+
+    const result = await executeStreamingLlmRequest({
+      userPrompt: buildSummaryTemplateSelectionPrompt(transcript, candidates),
+      operation: 'recording_summary_template_selection',
+      callId,
+    });
+
+    if (result.ok) {
+      const selected = parseSelectedSummaryTemplate(result.content, candidates);
+      const template = selected ? getBuiltinRecordingSummaryTemplate(selected.id) : undefined;
+      if (template) {
+        logger.info(`[${callId}] recording_summary_template_selected`, {
+          template_id: template.id,
+          template_name: template.name,
+        });
+        return template;
+      }
+    }
+
+    logger.warn(`[${callId}] recording_summary_template_selection_fallback`, {
+      template_id: 'default',
+      reason: result.ok ? 'invalid_selection' : result.reason,
+    });
+    return getBuiltinRecordingSummaryTemplate('default')!;
+  }
+
+  /** Generate a headless-recording summary using the supplied v1 seed prompt. */
+  async generateRecordingSummary(
+    transcript: string,
+    callId: string,
+    templateId?: BuiltinRecordingSummaryTemplateId,
+  ): Promise<{ summary: string; template: BuiltinRecordingSummaryTemplate } | null> {
+    const template = templateId
+      ? getBuiltinRecordingSummaryTemplate(templateId)
+      : await this.selectRecordingSummaryTemplateForTranscript(transcript, callId);
+
+    if (!template) {
+      logger.error(`[${callId}] recording_summary_generation_failed`, {
+        reason: 'invalid_template',
+        template_id: templateId,
+      });
+      return null;
+    }
+
+    const summary = await this.generateDetailedSummary(
+      transcript,
+      callId,
+      undefined,
+      template.fields,
+      undefined,
+      RECORDING_DETAILED_SUMMARY_PROMPT,
+      DEFAULT_RECORDING_SUMMARY_FIELDS,
+    );
+
+    return summary ? { summary, template } : null;
+  }
+
+  /**
    * Generate detailed summary from transcript with explicit retry loop.
    */
-  async generateDetailedSummary(transcript: string, callId: string, customPrompt?: string, summaryFields?: string): Promise<string | null> {
+  async generateDetailedSummary(
+    transcript: string,
+    callId: string,
+    customPrompt?: string,
+    summaryFields?: string,
+    systemPrompt?: string,
+    promptTemplate = DETAILED_SUMMARY_PROMPT,
+    defaultSummaryFields = DEFAULT_SUMMARY_FIELDS,
+  ): Promise<string | null> {
     // Resolve channelId and build participant map once (expensive DB lookups)
     const call = await repositories.calls.findByExternalId(callId);
     const channelId = call?.channelId;
 
-    const participantMap = channelId
+    const participantMap: Map<string, ParticipantInfo> = channelId
       ? await buildParticipantMap(channelId)
       : new Map<string, ParticipantInfo>();
+
+    if (!channelId && call) {
+      const callParticipants = await repositories.calls.getCallParticipantsWithUserDetails(callId);
+      for (const participant of callParticipants) {
+        participantMap.set(participant.userName.toLowerCase(), {
+          userId: participant.userId,
+          username: participant.userName,
+          userEmail: participant.userEmail,
+          userPicture: participant.userPicture || undefined,
+        });
+      }
+    }
 
     const participantList = Array.from(participantMap.values())
       .map(p => `- ${p.username}`)
@@ -702,10 +969,11 @@ export class CallDocumentService {
     const sanitizedTranscript = sanitizeInput(transcript);
     const sanitizedCustomPrompt = customPrompt ? sanitizeInput(customPrompt) : '';
     const sanitizedFields = summaryFields?.trim() ? sanitizeInput(summaryFields) : '';
+    const sanitizedSystemPrompt = systemPrompt ? sanitizeInput(systemPrompt) : '';
 
     const buildPrompt = () => {
-      let prompt = renderPromptTemplate(DETAILED_SUMMARY_PROMPT, {
-        fields: sanitizedFields || DEFAULT_SUMMARY_FIELDS,
+      let prompt = renderPromptTemplate(promptTemplate, {
+        fields: sanitizedFields || defaultSummaryFields,
         participants: participantList || '- No participants found',
         transcript: sanitizedTranscript,
       });
@@ -716,20 +984,20 @@ export class CallDocumentService {
       return prompt;
     };
 
-    const extracted = await executeCallLlmWithRetry(
-      () => this.createAgent(),
-      buildPrompt,
-      'detailed_summary_generation',
+    const result = await executeStreamingLlmRequest({
+      userPrompt: buildPrompt(),
+      operation: 'detailed_summary_generation',
       callId,
-    );
+      ...(sanitizedSystemPrompt ? { systemPrompt: sanitizedSystemPrompt } : {}),
+    });
 
-    if (!extracted.ok) {
-      logger.error(`[${callId}] detailed_summary_generation_failed`, { reason: extracted.reason, status: extracted.status });
+    if (!result.ok) {
+      logger.error(`[${callId}] detailed_summary_generation_failed`, { reason: result.reason });
       return null;
     }
 
     logger.info(`[${callId}] Successfully generated detailed summary`);
-    return extracted.content;
+    return result.content;
   }
 
   async editSummaryStructureWithAI(
@@ -746,19 +1014,18 @@ export class CallDocumentService {
         instruction: sanitizedInstruction,
       });
 
-    const extracted = await executeCallLlmWithRetry(
-      () => this.createAgent(),
-      buildPrompt,
-      'summary_prompt_edit',
-      callId || 'prompt-edit',
-    );
+    const result = await executeStreamingLlmRequest({
+      userPrompt: buildPrompt(),
+      operation: 'summary_prompt_edit',
+      callId: callId || 'prompt-edit',
+    });
 
-    if (!extracted.ok) {
-      logger.error('[CallDocumentService] summary_prompt_edit_failed', { reason: extracted.reason, status: extracted.status });
+    if (!result.ok) {
+      logger.error('[CallDocumentService] summary_prompt_edit_failed', { reason: result.reason });
       return null;
     }
 
-    return extracted.content.trim();
+    return result.content.trim();
   }
 
   /**
@@ -862,11 +1129,13 @@ export class CallDocumentService {
     callId: string,
     markdownSummary: string,
     createdByUserId: string,
-    conversationId: string,
-    channelId: string,
+    conversationId: string | null,
+    channelId: string | null,
     callStartedAt: Date,
     callCreatorUserId: string,
-    callTitle?: string | null
+    callTitle?: string | null,
+    citationCtx?: CitationContext,
+    workspaceIdOverride?: string
   ): Promise<string | null> {
     try {
       const prisma = DatabaseClient.getInstance();
@@ -874,17 +1143,24 @@ export class CallDocumentService {
 
       const canvasId = uuidv4();
       const participantId = uuidv4();
-      const workspaceId = await repositories.channels.getWorkspaceId(channelId);
+      const workspaceId = workspaceIdOverride ?? (channelId ? await repositories.channels.getWorkspaceId(channelId) : undefined);
+      if (!workspaceId) {
+        throw new Error(`Cannot resolve workspaceId for detailed summary canvas (call ${callId})`);
+      }
 
-      // Prepare canvas content (title, content, mentions)
+      // Prepare canvas content (title, content, mentions, citations)
       const { title, content: sanitizedContent, mentionedUserIds } = await this.prepareCanvasContent(
         markdownSummary,
         channelId,
         callStartedAt,
-        callTitle
+        callTitle,
+        citationCtx
       );
 
-      // Create canvas with empty content (Y-Sweet is source of truth)
+      // Create canvas with empty content (Y-Sweet is source of truth).
+      // PRIVATE — note-taker recordings are shared per-user/group/channel via
+      // entity_access, and the recording sharing API updates canvas_participants
+      // in the same transaction.
       await prisma.canvas.create({
         data: {
           id: canvasId,
@@ -893,7 +1169,7 @@ export class CallDocumentService {
           channelId,
           workspaceId,
           createdBy: createdByUserId,
-          visibility: 'PUBLIC',
+          visibility: 'PRIVATE',
           isTemplate: false,
           isCollaborative: true,
           lastEditedBy: createdByUserId,
@@ -995,21 +1271,23 @@ export class CallDocumentService {
     canvasId: string,
     markdownSummary: string,
     updatedByUserId: string,
-    channelId: string,
+    channelId: string | null,
     currentVersion: number,
     callId: string,
-    callTitle?: string | null
+    callTitle?: string | null,
+    citationCtx?: CitationContext
   ): Promise<string | null> {
     try {
       const prisma = DatabaseClient.getInstance();
       const now = new Date();
 
-      // Prepare canvas content (title, content, mentions)
+      // Prepare canvas content (title, content, mentions, citations)
       const { title, content: sanitizedContent, mentionedUserIds } = await this.prepareCanvasContent(
         markdownSummary,
         channelId,
         undefined,
-        callTitle
+        callTitle,
+        citationCtx
       );
 
       const newVersion = currentVersion + 1;
@@ -1061,11 +1339,13 @@ export class CallDocumentService {
     callId: string,
     markdownSummary: string,
     createdByUserId: string,
-    conversationId: string,
-    channelId: string,
+    conversationId: string | null,
+    channelId: string | null,
     callStartedAt: Date,
     callCreatorUserId: string,
-    callTitle?: string | null
+    callTitle?: string | null,
+    citationCtx?: CitationContext,
+    workspaceIdOverride?: string
   ): Promise<{ canvasId: string | null; version: number }> {
     // Check if an existing canvas exists for this call
     const existingCanvas = await findExistingDetailedSummaryCanvas(callId);
@@ -1079,7 +1359,8 @@ export class CallDocumentService {
         channelId,
         existingCanvas.version,
         callId,
-        callTitle
+        callTitle,
+        citationCtx
       );
 
       return {
@@ -1097,7 +1378,9 @@ export class CallDocumentService {
       channelId,
       callStartedAt,
       callCreatorUserId,
-      callTitle
+      callTitle,
+      citationCtx,
+      workspaceIdOverride
     );
 
     return {
@@ -1449,7 +1732,24 @@ A comprehensive detailed summary has been generated from this call.
         return { success: false, error: 'Channel workspace not found' };
       }
 
-      const detailedSummaryMarkdown = await this.generateDetailedSummary(transcript, callId, customPrompt, channel.callSummaryPrompt ?? undefined);
+      // Number the transcript segments so the LLM can cite them, and build the
+      // token→segment map used to turn `[clf-n]` tokens into canvas citation chips.
+      // Both derive from the SAME transcript string, so segment ids always agree.
+      const { numbered: numberedTranscript, segments } = numberTranscriptSegments(transcript);
+      // Best-effort: attach each speaker's participant userId (matched by name) so
+      // the citation chip + hover can show the real user avatar. Unmatched speakers
+      // fall back to initials on the frontend.
+      const speakerParticipantMap = await buildParticipantMap(call.channelId || conversation.channelId);
+      for (const s of segments) {
+        const info = speakerParticipantMap.get(s.speaker.toLowerCase());
+        if (info) s.speakerId = info.userId;
+      }
+      const citationCtx: CitationContext = {
+        callId,
+        segments: new Map(segments.map(s => [s.n, s])),
+      };
+
+      const detailedSummaryMarkdown = await this.generateDetailedSummary(numberedTranscript, callId, customPrompt, channel.callSummaryPrompt ?? undefined);
       if (!detailedSummaryMarkdown) {
         return { success: false, error: 'Failed to generate detailed summary' };
       }
@@ -1469,7 +1769,8 @@ A comprehensive detailed summary has been generated from this call.
         conversation.channelId,
         call.startedAt,
         call.createdByUserId,
-        call.title
+        call.title,
+        citationCtx
       );
       if (!canvasId) {
         return { success: false, error: 'Failed to create or update detailed summary canvas' };

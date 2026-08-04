@@ -17,7 +17,6 @@ import {
   TicketStatusV2,
   isFieldActive,
   orderFieldsWithBranchChildrenAfterParent,
-  resolveParentOption,
   toSelectOptions,
   type User as UserType,
 } from '@xyne/shared';
@@ -92,7 +91,7 @@ import {
   type TicketFormSnapshot,
 } from './createTicket.utils';
 import { DatePicker } from '../../ui/DatePicker/DatePicker';
-import { TextShimmer } from './ShimmerText';
+import { TextShimmer } from '../../ui/ShimmerText';
 import { SearchUserV2 } from '../../ui/SearchUser/SearchUserV2';
 import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
@@ -1656,28 +1655,16 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       }));
   }, [availableTags, newTags, initialTags, formValues?.tags]);
 
-  // Required fields, plus any (possibly optional) parent a required branch field needs set.
   const requiredDynamicFields = useMemo(() => {
-    const allFields = resolvedFormFields;
-    const required = allFields.filter(field => field.isOptional === false);
-    const neededParentIds = new Set(
-      required
-        .map(field =>
-          field.parentOptionId
-            ? resolveParentOption(allFields, field.parentOptionId)?.parentField.id
-            : undefined,
-        )
-        .filter((id): id is string => !!id),
-    );
-    const neededOptionalParents = allFields.filter(
-      field => neededParentIds.has(field.id) && field.isOptional !== false,
-    );
-    const bySequence = [...neededOptionalParents, ...required].sort(
+    const visibilityMap = boardMetadata?.customFieldVisibility;
+    const allFields = visibilityMap
+      ? resolvedFormFields.filter(f => visibilityMap[f.id] !== false)
+      : resolvedFormFields;
+    const bySequence = [...allFields].sort(
       (a, b) => (a.sequenceNumber ?? 0) - (b.sequenceNumber ?? 0),
     );
-    // Keep each branch child directly under its parent
     return orderFieldsWithBranchChildrenAfterParent(bySequence);
-  }, [resolvedFormFields]);
+  }, [resolvedFormFields, boardMetadata]);
 
   // Of those, only the ones currently active given the parent values selected so far.
   const activeDynamicFields = useMemo(() => {

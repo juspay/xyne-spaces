@@ -311,6 +311,11 @@ export interface VespaUserDocument extends VespaDocument {
   createdAt: number;
   lastLoggedIn: number;
   owner: string;
+  // Personalization signals — owned exclusively by PersonalizationSyncWorker. The
+  // profile-ingestion path (setupUserVespaSync → transformUserToVespa) must NEVER write
+  // these: it uses a partial `update` job (never a full `feed`) and omits them, so the
+  // worker's values survive. Writing them from a profile update — or feeding the whole
+  // doc — would overwrite/wipe them.
   channelWeights?: Record<string, number>;
   userWeights?: Record<string, number>;
   channelTimestamps?: Record<string, number>;

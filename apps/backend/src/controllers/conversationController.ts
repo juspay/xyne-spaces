@@ -38,7 +38,9 @@ import {
 } from '../utils/markPulseItemAsSent';
 import { userActivityTrackingService } from '@/services/userActivityTrackingService';
 import { ConversationV3Repository } from '../database/repositories/conversationV3Repository';
+import { RecentConversationsRepository } from '../database/repositories/recentConversationsRepository';
 import { serializeConversationV3Row } from '../serializers/conversationV3Serializer';
+import { serializeRecentChannelConversations } from '../serializers/recentConversationsSerializer';
 import {
   serializeConversationMessageRow,
   type SerializedConversationMessageRow,
@@ -85,6 +87,7 @@ export class ConversationController {
   private channelUserStatusRespository: ChannelUserStatusRepository;
   private conversationV3Repository: ConversationV3Repository;
   private conversationParticipantRepository: ConversationParticipantRepository;
+  private recentConversationsRepository: RecentConversationsRepository;
 
   constructor() {
     this.conversationRepository = new ConversationRepository();
@@ -97,6 +100,7 @@ export class ConversationController {
     this.channelUserStatusRespository = new ChannelUserStatusRepository();
     this.conversationV3Repository = new ConversationV3Repository();
     this.conversationParticipantRepository = new ConversationParticipantRepository();
+    this.recentConversationsRepository = new RecentConversationsRepository();
   }
 
   /**
@@ -108,7 +112,7 @@ export class ConversationController {
   getUserThreads = async (req: Request, res: Response): Promise<void> => {
     const queryResult = z
       .object({
-        limit: z.coerce.number().int().min(1).max(50).default(20),
+        limit: z.coerce.number().int().min(1).max(50).default(10),
         cursor: z.string().min(1).max(2048).optional(),
       })
       .safeParse(req.query);
@@ -253,6 +257,28 @@ export class ConversationController {
       res.status(200).json(serialized);
     } catch (error) {
       logger.error('Error fetching conversation by message ID:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  getRecentVisitedConversations = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const userId = req.user!.id;
+      const days = config.recentVisitedConversations.lookbackDays;
+      const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+      const channels =
+        await this.recentConversationsRepository.getRecentVisitedChannelConversations(
+          userId,
+          cutoff
+        );
+
+      res.status(200).json({
+        days,
+        channels: serializeRecentChannelConversations(channels),
+      });
+    } catch (error) {
+      logger.error('Error fetching recent visited conversations:', error);
       res.status(500).json({ error: 'Internal server error' });
     }
   };

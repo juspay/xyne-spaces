@@ -16,6 +16,9 @@ import {
   FileCode,
   Trash2,
 } from 'lucide-react';
+// Lucide has no PDF-specific glyph, so PDFs used to fall back to the same
+// generic document sheet as Word/Excel/text. The design system ships one.
+import { FilePdfFormat } from '@xyne/icons';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { cn } from '../../../utils/classNames';
 import { useAuth } from '../../../hooks/useAuth';
@@ -57,11 +60,20 @@ const formatFileSize = (bytes?: number): string => {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 };
 
+interface FileTypeConfig {
+  // Widened past `LucideIcon` so design-system glyphs can sit alongside the
+  // lucide set — the pill only ever passes `className`.
+  icon: React.ComponentType<{ className?: string }>;
+  color: string;
+  textColor: string;
+  label: string;
+}
+
 /**
  * Get file type configuration based on MIME type
  * Returns icon, color, and label for the file type
  */
-const getFileTypeConfig = (mimeType: string, fileName: string) => {
+const getFileTypeConfig = (mimeType: string, fileName: string): FileTypeConfig => {
   // Images
   if (mimeType.startsWith('image/')) {
     return {
@@ -95,7 +107,7 @@ const getFileTypeConfig = (mimeType: string, fileName: string) => {
   // PDF
   if (mimeType === 'application/pdf') {
     return {
-      icon: FileText,
+      icon: FilePdfFormat,
       color: 'bg-red-500',
       textColor: 'text-red-500',
       label: 'PDF',

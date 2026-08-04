@@ -8,6 +8,56 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(self.clients.claim());
 });
 
+/**
+ * Validates and sanitizes a URL that originated from a push notification
+ * payload before it is passed to clients.openWindow().
+ *
+ * Only URLs that belong to the service worker's own origin are accepted.
+ * Everything else (cross-origin, javascript:, data:, blob:, file:, etc.,
+ * or URLs with embedded credentials) falls back to the app root so that a
+ * malicious notification cannot open an arbitrary attacker-controlled page
+ * in the user's browser.
+ */
+function sanitizeNotificationUrl(rawUrl) {
+  try {
+    // Accept only absolute HTTP(S) URLs or root-relative paths. Anything
+    // else (e.g. "javascript:...", "//evil.com", bare words, empty string)
+    // is treated as untrusted.
+    const isAbsoluteHttp = /^https?:/i.test(rawUrl);
+    if (!isAbsoluteHttp && !rawUrl.startsWith('/')) {
+      console.warn('[Service Worker] Rejecting notification URL with unexpected format:', rawUrl);
+      return self.location.origin + '/';
+    }
+
+    const url = new URL(rawUrl, self.location.origin);
+
+    // Reject non-HTTP(S) schemes (e.g. javascript:, data:, blob:, file:)
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      console.warn('[Service Worker] Rejecting notification URL with unsupported protocol:', rawUrl);
+      return self.location.origin + '/';
+    }
+
+    // Reject cross-origin URLs. Protocol-relative URLs such as //evil.com
+    // are resolved against the current origin by the URL constructor, so
+    // their resulting origin will differ and be caught here.
+    if (url.origin !== self.location.origin) {
+      console.warn('[Service Worker] Rejecting cross-origin notification URL:', rawUrl);
+      return self.location.origin + '/';
+    }
+
+    // Reject URLs containing embedded credentials (e.g. https://user:pass@...).
+    if (url.username || url.password) {
+      console.warn('[Service Worker] Rejecting notification URL with credentials:', rawUrl);
+      return self.location.origin + '/';
+    }
+
+    return url.href;
+  } catch (error) {
+    console.error('[Service Worker] Invalid notification URL:', rawUrl, error);
+    return self.location.origin + '/';
+  }
+}
+
 self.addEventListener('push', (event) => {
   console.log('Push event received:', event);
   
@@ -118,6 +168,10 @@ self.addEventListener('notificationclick', (event) => {
   if (urlToOpen.startsWith('/')) {
     urlToOpen = self.location.origin + urlToOpen;
   }
+
+  // Validate the URL before opening a window. The actionUrl comes from the
+  // push notification payload and must not be trusted blindly.
+  urlToOpen = sanitizeNotificationUrl(urlToOpen);
 
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {

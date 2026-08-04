@@ -22,14 +22,7 @@ export interface TicketKeysetWindow<Row> {
 export function useTicketKeysetWindow<Row, Cursor>(
   args: UseTicketKeysetWindowArgs<Row, Cursor>,
 ): TicketKeysetWindow<Row> {
-  const {
-    currentId,
-    currentRow,
-    seed,
-    radius = 5,
-    pageSize = 10,
-    enabled = true,
-  } = args;
+  const { currentId, currentRow, seed, radius = 5, pageSize = 10, enabled = true } = args;
 
   const fnRef = useRef(args);
   fnRef.current = args;
@@ -104,7 +97,7 @@ export function useTicketKeysetWindow<Row, Cursor>(
 
   if (idx === -1) return { prev: null, next: null };
   return {
-    prev: idx > 0 ? buffer[idx - 1] ?? null : null,
-    next: idx < buffer.length - 1 ? buffer[idx + 1] ?? null : null,
+    prev: idx > 0 ? (buffer[idx - 1] ?? null) : null,
+    next: idx < buffer.length - 1 ? (buffer[idx + 1] ?? null) : null,
   };
 }

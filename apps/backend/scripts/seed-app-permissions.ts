@@ -1,9 +1,10 @@
 #!/usr/bin/env npx tsx
 
 import { PrismaClient } from '@prisma/client';
-import { repositories } from '../src/database/repositories';
+import { AppPermissionRepository } from '../src/database/repositories/appPermissionRepository';
 
 const prisma = new PrismaClient();
+const appPermissions = new AppPermissionRepository();
 
 const APP_PERMISSION_SCOPES = [
   { scope: 'calls:write', description: 'Schedule and manage calls from apps' },
@@ -25,10 +26,7 @@ async function main() {
   console.log('Seeding app permission registry...');
 
   for (const permission of APP_PERMISSION_SCOPES) {
-    await repositories.appPermissions.upsertByScope(
-      permission.scope,
-      permission.description,
-    );
+    await appPermissions.upsertByScope(permission.scope, permission.description);
     console.log(`  Registered ${permission.scope}`);
   }
 

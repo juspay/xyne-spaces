@@ -139,6 +139,14 @@ pnpm --filter xyne-claw-auth        run dev
 
 Open **http://localhost:5173**.
 
+## 6. Turn the AI on
+
+Everything above gets you a working workspace — chat, tickets, calls, and documents.
+The AI features stay silent until you point the apps at an OpenAI-compatible endpoint,
+and they fail without an error in the UI, so this step is easy to miss.
+
+→ [AI Providers](ai-providers.md)
+
 ## Database work
 
 Prisma schemas live in `apps/backend/prisma` (application) and
@@ -195,4 +203,4 @@ so add security pins there rather than in individual packages, where they are ig
 
 ## Next
 
-→ [Services](services.md) · [Troubleshooting](troubleshooting.md)
+→ [AI Providers](ai-providers.md) · [Services](services.md) · [Troubleshooting](troubleshooting.md)

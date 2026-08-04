@@ -101,6 +101,7 @@ import {
   MAX_EMAIL_ATTACHMENT_FILES,
   MAX_EMAIL_ATTACHMENT_FILE_SIZE_BYTES,
   parseFromField,
+  sanitizeSignatureHtml,
   stripHtml,
 } from './helpers';
 
@@ -446,7 +447,12 @@ export const EmailComposer = ({
 
   const hasEmailBody = useMemo(() => stripHtml(emailContent).trim().length > 0, [emailContent]);
   const isDirty = emailContent !== lastLoadedContentRef.current;
-  const hasInlineImages = useMemo(() => /\sdata-att-id=["']/i.test(emailContent), [emailContent]);
+  const hasInlineImages = useMemo(
+    () =>
+      /\sdata-att-id=["']/i.test(emailContent) ||
+      /\/attachments\/[^/"'\s]+\/download/i.test(emailContent),
+    [emailContent],
+  );
 
   const toInputRef = React.useRef<HTMLInputElement>(null);
   const ccInputRef = React.useRef<HTMLInputElement>(null);
@@ -1433,7 +1439,12 @@ export const EmailComposer = ({
       let imgMatch: RegExpExecArray | null;
       while ((imgMatch = imgRe.exec(emailContent)) !== null) {
         const attMatch = /data-att-id="([^"]+)"/i.exec(imgMatch[0]);
-        if (attMatch?.[1]) inlineIdsFromBody.add(attMatch[1]);
+        if (attMatch?.[1]) {
+          inlineIdsFromBody.add(attMatch[1]);
+          continue;
+        }
+        const srcMatch = /\ssrc="[^"]*\/attachments\/([^/"]+)\/download[^"]*"/i.exec(imgMatch[0]);
+        if (srcMatch?.[1]) inlineIdsFromBody.add(srcMatch[1]);
       }
       const attachmentIds = Array.from(new Set([...regularAttachmentIds, ...inlineIdsFromBody]));
 
@@ -2020,7 +2031,7 @@ export const EmailComposer = ({
                     <p className='text-xs text-muted-foreground mb-1'>--</p>
                     <div
                       className='text-sm text-foreground/80 prose prose-sm dark:prose-invert max-w-none'
-                      dangerouslySetInnerHTML={{ __html: activeSig.content ?? '' }}
+                      dangerouslySetInnerHTML={{ __html: sanitizeSignatureHtml(activeSig.content) }}
                     />
                   </div>
                 </div>
@@ -2139,7 +2150,7 @@ export const EmailComposer = ({
                       <div
                         className='prose prose-sm dark:prose-invert mt-4 break-words border-t border-border pt-4 text-sm text-muted-foreground [overflow-wrap:anywhere]'
                         dangerouslySetInnerHTML={{
-                          __html: DOMPurify.sanitize(activeSig.content),
+                          __html: sanitizeSignatureHtml(activeSig.content),
                         }}
                       />
                     );

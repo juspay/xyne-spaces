@@ -34,6 +34,11 @@ export class UserRepository extends BaseRepository<User, CreateUserInput, Update
       data,
     });
 
+    // No Vespa ingestion needed here: `this.db` is the shared client (DatabaseClient.getInstance),
+    // so the setupUserVespaSync Prisma middleware fires on THIS create too — as it does for every
+    // user create/upsert — and upserts the full user doc. If ever reviving the dead block below,
+    // use a PARTIAL upsert, never a full 'feed' (a feed replaces the doc and wipes the
+    // personalization worker's weights).
     // Queue user for Vespa ingestion
     // try {
     //   await queueUserIngestion(user, 'feed');

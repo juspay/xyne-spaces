@@ -30,6 +30,8 @@ export interface CanvasEditorProps {
   onMentionInsert?: (params: { type: 'user' | 'group'; id: string; blockId: string }) => void;
   /** When set, focus and scroll to this block on load (e.g. from activity notification) */
   initialBlockIdToFocus?: string | undefined;
+  /** When set with initialBlockIdToFocus, open the matching comment thread on load. */
+  initialCommentThreadId?: string | undefined;
   /** Auto-focus the editor on mount */
   autoFocus?: boolean;
   /** Optional preloaded canvas participants to avoid duplicate query */

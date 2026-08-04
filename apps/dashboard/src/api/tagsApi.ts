@@ -29,6 +29,15 @@ export const tagsApi = {
     return res.data.values;
   },
 
+  /** Bulk-resolve Tag ids (e.g. Call.labels entries) to their `{ id, tag }` rows. */
+  getTagsByIds: async (ids: string[]): Promise<{ id: string; tag: string }[]> => {
+    if (ids.length === 0) return [];
+    const res = await apiInstance.get<{ tags: { id: string; tag: string }[] }>('/tags/by-ids', {
+      params: { ids: ids.join(',') },
+    });
+    return res.data.tags;
+  },
+
   // ─── Generic entity endpoints ──────────────────────────────────────────────
   getEntityTags: async (sourceType: string, sourceId: string): Promise<TagGroup[]> => {
     const res = await apiInstance.get<{ groups: TagGroup[] }>(

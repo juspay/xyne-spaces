@@ -300,6 +300,8 @@ export class ConversationParticipantRepository extends BaseRepository<
       userId,
       isSubscribed: true,
       lastReplyAt: { not: null },
+      // Skip orphan participants so a missing required conversation does not fail the entire query.
+      conversation: { is: {} },
       ...sectionWhere,
     });
 

@@ -1,3 +1,4 @@
+import DOMPurify from 'dompurify';
 import { parseSingleEmailAddress } from '../../../utils/emailAddress';
 
 // Match Gmail's 25MB per-message ceiling.
@@ -38,3 +39,7 @@ export const stripHtml = (html: string): string => {
   tmp.innerHTML = html;
   return tmp.textContent || tmp.innerText || '';
 };
+
+/** Sanitize signature HTML before rendering via dangerouslySetInnerHTML. */
+export const sanitizeSignatureHtml = (html: string | null | undefined): string =>
+  DOMPurify.sanitize(html ?? '');

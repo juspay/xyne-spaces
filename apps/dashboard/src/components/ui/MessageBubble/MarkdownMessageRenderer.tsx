@@ -1,4 +1,4 @@
-import { type FC, type ComponentPropsWithoutRef } from 'react';
+import { memo, useMemo, type FC, type ComponentPropsWithoutRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -136,11 +136,23 @@ const MentionAwareSpan: FC<ComponentPropsWithoutRef<'span'>> = ({ children, ...p
  * The wrapper class is derived from `messageSubtype` so subtype-specific
  * styling (e.g. call_summary) stays co-located with the renderer.
  *
+ * Perf: react-markdown re-parses `content` into an mdast/hast AST, runs
+ * rehype-raw + rehype-sanitize, and rebuilds a React element tree on every
+ * render. In the chat feed these bubbles re-render on every Zero poke (new
+ * message, reaction, presence), so an un-memoized parse is paid repeatedly per
+ * agent message. Two guards keep that work off the hot path:
+ *   1. `memo` on the export skips re-render entirely when props are unchanged.
+ *      Both call sites (MessageBubble.tsx, PlanPreview.tsx) already wrap
+ *      `markdownComponents` in `useMemo`, so the prop is referentially stable.
+ *   2. `useMemo` around the <Markdown> element caches the parsed tree keyed on
+ *      the only inputs that change its output (`content`, `markdownComponents`),
+ *      so any re-render that still slips through does not re-parse.
+ *
  * Note: there is no in-bubble loader mode — live agent progress is surfaced
  * by the <AgentProgressIndicator /> pill rendered above the chat input
  * (ChatInput.tsx).
  */
-export const MarkdownMessageRenderer: FC<MarkdownMessageRendererProps> = ({
+const MarkdownMessageRendererComponent: FC<MarkdownMessageRendererProps> = ({
   content,
   markdownComponents,
   messageSubtype,
@@ -150,8 +162,10 @@ export const MarkdownMessageRenderer: FC<MarkdownMessageRendererProps> = ({
       ? 'bot-markdown-content-call-summary'
       : 'bot-markdown-content';
 
-  return (
-    <div className={`${className} min-w-0`}>
+  // `messageSubtype` only drives the wrapper className (below), not the parsed
+  // tree, so it is intentionally excluded from the dependency list.
+  const rendered = useMemo(
+    () => (
       <Markdown
         remarkPlugins={[remarkGfm]}
         // Bypass react-markdown's built-in href sanitizer so the synthetic
@@ -167,6 +181,11 @@ export const MarkdownMessageRenderer: FC<MarkdownMessageRendererProps> = ({
       >
         {content}
       </Markdown>
-    </div>
+    ),
+    [content, markdownComponents],
   );
+
+  return <div className={`${className} min-w-0`}>{rendered}</div>;
 };
+
+export const MarkdownMessageRenderer = memo(MarkdownMessageRendererComponent);
