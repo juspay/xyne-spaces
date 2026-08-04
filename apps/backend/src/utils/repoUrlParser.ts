@@ -26,3 +26,14 @@ export function parseBitbucketRepoUrl(url: string): { projectKey: string; repoSl
 
   return null;
 }
+
+// Parses a Bitbucket PR URL (.../projects/<KEY>/repos/<slug>/pull-requests/<id>) into
+// projectKey + repoSlug + prId. Returns null for non-matching URLs so callers can log+skip.
+export function parseBitbucketPrUrl(
+  url: string,
+): { projectKey: string; repoSlug: string; prId: number } | null {
+  if (!url) return null;
+  const m = /\/projects\/([^/]+)\/repos\/([^/]+)\/pull-requests\/(\d+)/i.exec(url);
+  if (!m?.[1] || !m[2] || !m[3]) return null;
+  return { projectKey: m[1].toUpperCase(), repoSlug: m[2], prId: parseInt(m[3], 10) };
+}

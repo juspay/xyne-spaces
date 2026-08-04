@@ -19,6 +19,7 @@ import {
   THEN_FIELD_OPTIONS,
   THEN_CONDITION_OPTIONS,
   PR_STATUS_OPTIONS,
+  getPRStatusLabel,
 } from '../../../utils/board';
 import { TransitionFormPicker } from '../TransitionFormPicker/TransitionFormPicker';
 import {
@@ -154,7 +155,7 @@ export const ConditionBuilder = ({
     }
     // For PR Status conditions: "PR Status - ${prStatus}"
     if (whenField === 'pr_status' && whenValue) {
-      return `PR Status - ${whenValue}`;
+      return `PR Status - ${getPRStatusLabel(whenValue)}`;
     }
     // For Form conditions: "${formName}"
     if (thenField === 'form' && thenValue) {

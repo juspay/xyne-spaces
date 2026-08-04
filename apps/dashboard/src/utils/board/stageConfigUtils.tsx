@@ -43,9 +43,14 @@ export const PR_STATUS_OPTIONS: SelectOption[] = [
   { value: PRStatusEvent.CREATED, label: 'Created' },
   { value: PRStatusEvent.UPDATED, label: 'Updated' },
   { value: PRStatusEvent.MERGED, label: 'Merged' },
+  { value: PRStatusEvent.READY_TO_MERGE, label: 'Ready to Merge' },
   { value: PRStatusEvent.DECLINED, label: 'Declined' },
   { value: PRStatusEvent.DELETED, label: 'Deleted' },
 ];
+
+/** Human-readable label for a PR status value (falls back to the raw value). */
+export const getPRStatusLabel = (value: string): string =>
+  PR_STATUS_OPTIONS.find(option => option.value === value)?.label ?? value;
 
 export const FIELD_TYPE_OPTIONS: FieldTypeOption[] = [
   { value: FormFieldType.STRING, label: 'Text' },
