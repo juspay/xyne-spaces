@@ -20,401 +20,12 @@ datasource db {
   relationMode = "prisma"
 }
 
-
 // Enums for Workflow model
-enum WorkflowCategory {
-  USER_ONBOARDING
-  BUG_WORKFLOW
-  BUG_WORKFLOW_EVAL
-  BUG_WORKFLOW_EVAL_INNER_STEPS
-  BUG_WORKFLOW_EVAL_INNER_STEPS_EXPERIMENTAL
-  FEATURE_IMPLEMENTATION
-  FEATURE_PLANNING
-  XYNE_SPACES_FEATURE_IMPLEMENTATION
-  FIDO_SERVER_WORKFLOW
-  CONNECTOR_MIGRATION
-  CODER_WORKFLOW
-  QUERY_WORKFLOW
-  QUERY
-  ISSUE
-  REQUIREMENT_NEW
-  REQUIREMENT_ENHANCEMENT
-  FULL_PG_INTEGRATION
-  INVESTIGATION_WORKFLOW
-  GENIUS_INVESTIGATION_WORKFLOW
-  STAGE_APPROVAL_WORKFLOW
-  @@schema("public")
-}
-
-enum WorkflowExecutionMode {
-  AUTOMATIC
-  MANUAL
-  @@schema("public")
-}
-
-enum AutoDraftMode {
-  OFF
-  DRAFT
-  @@schema("public")
-}
-
-enum AutoDraftStatus {
-  GENERATING
-  READY
-  @@schema("public")
-}
-
-enum TicketStatus {      // Deprecated
-  NEW                    // Ticket created, awaiting triage or auto-assignment
-  IN_PROGRESS            // Work actively ongoing
-  WAIT_FOR_APPROVAL      // Awaiting approval from authorized personnel
-  REJECTED               // Ticket invalid or not approved. Cannot be reopened
-  RESOLVED               // Final terminal state
-  @@schema("public")
-}
-
-enum TicketStatusV2 {
-  TODO                   // Ticket created, awaiting triage or auto-assignment
-  STARTED                // Work actively ongoing
-  PAUSED                 // Awaiting approval from authorized personnel
-  CANCELLED              // Ticket invalid or not approved. Cannot be reopened
-  COMPLETED              // Final terminal state
-  @@schema("public")
-}
-
 // Gmail-style mailbox location for a ticket, per-user (see TicketUserMailbox).
 // ARCHIVED = removed from Inbox but still in All Mail. Absence of a row = INBOX.
-enum MailboxState {
-  INBOX
-  ARCHIVED
-  SPAM
-  @@schema("public")
-}
-
-enum TicketPriority {
-  LOW
-  MEDIUM
-  HIGH
-  CRITICAL
-  @@schema("public")
-}
-
-enum TicketReferenceRelation {
-  LINKED
-  DUPLICATE_CONFIRMED
-  DUPLICATE_POSSIBLE
-  MERGED_INTO
-  @@schema("public")
-}
-
-enum EmailMergeMode {
-  DISABLED  // Every new email thread creates a separate ticket
-  ENABLED   // Auto-merge cross-thread duplicates and per-email demerge
-  @@schema("public")
-}
-
-enum DeskType {
-  EMAIL
-  DL
-  SLACK
-  APP
-  CALL
-  @@schema("public")
-}
-
-enum UserResponsibility {
-  MANAGER
-  TEAM_LEAD
-  MEMBER
-  PR_REVIEWER
-  QA
-  @@schema("public")
-}
-
-enum RotationInterval {
-  WEEKLY
-  BIWEEKLY
-  MONTHLY
-  @@schema("public")
-}
-
-enum QueryVisualizationType {
-  KPI
-  BAR_CHART
-  PIE_CHART
-  DONUT_CHART
-  LINE_CHART
-  FUNNEL
-  HEATMAP
-  DATA_TABLE
-  AREA_CHART
-  KPI_COMPARE
-  SCATTER_CHART
-  @@schema("public")
-}
-
-enum EntityType {
-  MERCHANT
-  GATEWAY
-  @@schema("public")
-}
-
-enum RecapEntityType {
-  PROJECT
-  CHANNEL
-  @@schema("public")
-}
-
-enum ActivityType {
-  TITLE
-  DESCRIPTION
-  STATUS
-  ASSIGNED_TO
-  TICKET_TYPE
-  PRIORITY
-  ETA
-  STAGE_ETA
-  METADATA
-  CLOSED_AT
-  CLOSED_BY
-  REFERENCE_TICKET
-  STAGE_NAME
-  TAGS
-  ENTITY
-  PR
-  SUBTICKET_CREATED
-  BOARD
-  USER_GROUP_ID
-  PR_REVIEWER
-  QA
-  STAGE_CHANGE_REQUEST
-  STAGE_CHANGE_APPROVED
-  STAGE_CHANGE_REJECTED
-  IS_ARCHIVED
-  MERGED
-  UNMERGED
-  RCA_CREATED
-  RCA_UPDATED
-  EMAIL_SENT
-  TICKET_CREATED
-  CSAT_RECEIVED
-  @@schema("public")
-}
-
-enum AttachmentEntityType {
-  TICKET
-  CHAT
-  CANVAS
-  EMAIL
-  DRAFT
-  DELAYED_MESSAGE
-  WORKFLOW_STEPS
-  IMPACT
-  COLLECTION
-  FORM_ENTITY_VALUE
-  @@schema("public")
-}
-
-enum AttachmentUploadStatus {
-  PENDING
-  STARTED
-  COMPLETED
-  FAILED
-  @@schema("public")
-}
-
-enum TicketEnvironment {
-  DEVELOPMENT
-  STAGING
-  PRODUCTION
-  @@schema("public")
-}
-
-enum ReportedBy {
-  MERCHANT
-  INTERNAL
-  @@schema("public")
-}
-
 // Chat Feature Enums
-enum ChannelScopeType {
-  DEFAULT
-  DM
-  TICKET
-  DOCUMENT
-  GROUP_DM
-  @@schema("public")
-}
-
-enum ChannelType {
-  DEFAULT
-  EMAIL
-  SUPPORT
-  SLACK
-  APP
-  CALL
-  @@schema("public")
-}
-
-enum ChannelRole {
-  ADMIN
-  MEMBER
-  @@schema("public")
-}
-
-enum ChannelVisibility {
-  PUBLIC
-  PRIVATE
-  @@schema("public")
-}
-
-enum AppIncomingWebhookType {
-  SLACK
-  SENTINELONE
-  @@schema("workflow")
-}
-
-enum AppIncomingWebhookAction {
-  MESSAGE
-  TICKET
-  @@schema("workflow")
-}
-
-enum CalendarVisibility {
-  PUBLIC
-  PRIVATE
-  @@schema("public")
-}
-
-enum ChannelAddUserPolicy {
-  EVERYONE
-  ADMINS_ONLY
-  @@schema("public")
-}
-
-enum ChannelSortOrder {
-  UNREAD
-  RECENCY
-  ALPHABETICAL
-  @@schema("public")
-}
-
-enum MessageType {
-  USER
-  BOT
-  SYSTEM
-  FORWARDED
-  @@schema("public")
-}
-
-enum OrgRole {
-  OWNER
-  ADMIN
-  MEMBER
-  VIEWER
-  COMMUNITY_MEMBER
-  GUEST
-  @@schema("public")
-}
-
 // Call Feature Enums
-enum RecordingType {
-  AUDIO_ONLY
-  AUDIO_SCREEN
-  AUDIO_VIDEO
-  @@schema("public")
-}
-
 // Lifecycle of a single call_recordings row. See docs/call_recording_tech_review.md.
-enum RecordingStatus {
-  RECORDING_ACTIVE         // egress running, writing HLS segments — only status the single-active lock guards
-  RECORDING_STOPPED        // user stopped; egress finalizing last segments (lock freed)
-  PROCESSING_RECORDING     // segments in cloud; stitching HLS → single MP4
-  RECORDING_UPLOADED       // stitched MP4 confirmed in cloud — terminal success
-  RECORDING_FAILED         // startEgress threw / egress failed before any segment
-  RECORDING_UPLOAD_FAILED  // egress reported failure / segments never landed
-  PROCESSING_FAILED        // segments landed but the stitch failed (retryable)
-  RECORDING_EXPIRED        // retention removed the file (+ attachment/message cleaned)
-  RECORDING_DELETED        // user manually deleted (soft delete)
-  @@schema("non_zero")
-}
-
-enum CallType {
-  AUDIO
-  VIDEO
-  HEADLESS
-  @@schema("public")
-}
-
-enum CallOrigin {
-  CHANNEL
-  CONVERSATION
-  GOOGLE_CALENDAR
-  MICROSOFT_CALENDAR
-  @@schema("public")
-}
-
-enum CallStatus {
-  SCHEDULED
-  ACTIVE
-  IN_PROGRESS
-  ENDED
-  CANCELLED
-  @@schema("public")
-}
-
-enum InvitationResponse {
-  INVITED
-  REQUESTED    // External user waiting in lobby
-  ACCEPTED
-  DECLINED
-  MISSED
-  LEFT
-  @@schema("public")
-}
-
-enum MeetingStatus {
-  PENDING
-  ACCEPTED
-  DECLINED
-  MAYBE
-  HIDDEN
-  @@schema("public")
-}
-
-enum RecurringCallSeriesStatus {
-  ACTIVE    // Instances are still being generated
-  ENDED     // endsOn has passed
-  CANCELLED // Organizer cancelled the series
-  @@schema("public")
-}
-
-enum ConversationParticipation {
-  AUTHOR      // Sent at least one message in the conversation
-  MENTIONED   // Tagged/mentioned but hasn't replied yet
-  @@schema("public")
-}
-
-enum ProjectType {
-  DEFAULT
-  DM
-  @@schema("public")
-}
-
-enum VCSProviderType {
-  GITHUB
-  BITBUCKET_CLOUD
-  BITBUCKET_SERVER
-  @@schema("public")
-}
-
-enum ReleaseTrackingMode {
-  COMMIT_RANGE
-  VERSION
-
-  @@schema("public")
-}
-
 model Agent {
   id            String   @id @default(cuid())
   userDefinedId String   @unique
@@ -787,21 +398,6 @@ model TicketStageEta {
   @@schema("public")
 }
 
-enum WorkflowEventType {
-  NO_OP
-  TICKET_CREATED
-  TICKET_UPDATED
-  TICKET_COMMENTED
-  EMAIL_RECEIVED
-  EMAIL_SENT
-  WEBHOOK
-  MESSAGE_RECEIVED
-  CALL_EVENT
-  TAG_GENERATED
-
-  @@schema("public")
-}
-
 model Workflow {
   id               String    @id @default(cuid())
   ticketId         String?   // Foreign key
@@ -887,12 +483,6 @@ model WorkflowExecutionState {
 
 /// Discriminates what an encrypted WorkflowMapping secret belongs to. Add new
 /// values here as more entities need encrypted secrets stored centrally.
-enum WorkflowMappingEntityType {
-  AUTOMATION_WEBHOOK
-
-  @@schema("workflow")
-}
-
 /// Stores encrypted secrets for workflow-adjacent entities (e.g. external-event
 /// webhook triggers). entitySecret is AES-256-CBC encrypted with ENCRYPTION_KEY.
 /// For automation webhook triggers: entityType=AUTOMATION_WEBHOOK,
@@ -1039,9 +629,6 @@ model AgentStep {
   @@schema("workflow")
 }
 
-
-
-
 model ExternalStepResponse {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id                  String   @id @default(cuid())
@@ -1061,41 +648,6 @@ model ExternalStepResponse {
 }
 
 // Enums for User Management
-enum AuthProvider {
-  GOOGLE
-  MICROSOFT
-  API_KEY
-  EMAIL
-  @@schema("public")
-}
-
-enum UserStatus {
-  ACTIVE
-  INACTIVE
-  @@schema("public")
-}
-
-enum UserType {
-  USER
-  BOT
-  APP
-  @@schema("public")
-}
-
-enum UserPresenceStatus {
-  ONLINE
-  AWAY
-  OFFLINE
-  @@schema("public")
-}
-
-enum AccessType {
-  ADMIN
-  READ
-  WRITE
-  @@schema("public")
-}
-
 // API Key Management
 model ApiKey {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
@@ -1194,28 +746,7 @@ model UserRoleMapping {
   @@schema("public")
 }
 
-enum SessionStatus {
-  ACTIVE
-  EXPIRED
-  REVOKED
-  @@schema("public")
-}
-
-enum Status {
-  ACTIVE
-  ARCHIVED
-  DELETED
-  @@schema("public")
-}
-
-enum WorkspaceRole {
-  OWNER
-  ADMIN
-  MEMBER
-  GUEST
-  COMMUNITY_MEMBER
-  @@schema("public")
-} 
+ 
 
 model UserSession {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
@@ -1581,7 +1112,6 @@ model Resource {
   // Relations
   resourceAccess ResourceAccess[]
 
-
   @@index([name, id])
   @@map("resources")
   @@schema("public")
@@ -1615,28 +1145,6 @@ model ResourceAccess {
 }
 
 // ACL Audit Trail
-enum ACLAuditEventType {
-  RESOURCE_CREATED
-  RESOURCE_UPDATED
-  RESOURCE_DELETED
-  PERMISSION_GRANTED
-  PERMISSION_REVOKED
-  PERMISSION_UPDATED
-  USER_GROUP_CREATED
-  USER_GROUP_UPDATED
-  USER_GROUP_DELETED
-  USER_GROUP_REACTIVATED
-  USER_GROUP_DEACTIVATED
-  @@schema("public")
-}
-
-enum ACLAuditTargetType {
-  RESOURCE
-  RESOURCE_ACCESS
-  USER_GROUP
-  @@schema("public")
-}
-
 model ACLAuditLog {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id          String               @id @default(cuid())
@@ -1657,24 +1165,6 @@ model ACLAuditLog {
   @@index([actorUserId])
   @@map("acl_audit_logs")
   @@schema("workflow")
-}
-
-enum PRStatus {
-  OPEN
-  UPDATED
-  DECLINED
-  MERGED
-  DELETED
-  @@schema("public")
-}
-
-enum PRStatusEvent {
-  CREATED
-  UPDATED
-  MERGED
-  DECLINED
-  DELETED
-  @@schema("public")
 }
 
 // PR Analytics models
@@ -1701,40 +1191,6 @@ model PullRequests {
   @@index([date])
   @@map("pull_requests")
   @@schema("public")
-}
-
-enum TeamIntelligenceBatchStatus {
-  RECEIVED
-  QUEUED
-  PARTIALLY_QUEUED
-  PROCESSING
-  COMPLETED
-  FAILED
-
-  @@schema("non_zero")
-}
-
-enum TeamIntelligenceUserIngestionStatus {
-  RECEIVED
-  QUEUED
-  PROCESSING
-  COMPLETED
-  FAILED
-
-  @@schema("non_zero")
-}
-
-enum TeamIntelligenceBulletCategory {
-  SHIPPED
-  ACHIEVEMENT
-  COLLABORATION
-  LEARNING
-  RECOGNITION
-  LEARNED
-  HELPED
-  MILESTONE
-
-  @@schema("non_zero")
 }
 
 model TeamIntelligenceIngestionBatchV2 {
@@ -2038,7 +1494,6 @@ model OrgLLMServiceAccountCredential {
   @@schema("non_zero")
 }
 
-
 model Invitation {
   id           String        @id @default(cuid())
   orgId        String?
@@ -2215,12 +1670,6 @@ model StageTransition {
   @@index([boardId, toStageId])
   @@index([toStageId])
   @@map("stage_transitions")
-  @@schema("public")
-}
-
-enum ApproverType {
-  USER
-  ROLE
   @@schema("public")
 }
 
@@ -2450,14 +1899,6 @@ model ConversationParticipant {
 
   @@index([userId, id])
   @@map("conversation_participants")
-  @@schema("public")
-}
-
-enum EmailType {
-  DEFAULT
-  REPLY
-  REPLY_ALL
-  COMPOSE
   @@schema("public")
 }
 
@@ -2740,7 +2181,6 @@ model MessageSearch {
   @@schema("workflow")
 }
 
-
 // File Attachment Models
 model MessageAttachment {
   id                 String                @id @default(cuid())
@@ -2857,7 +2297,6 @@ model Activity {
   updatedAt       DateTime @updatedAt  // For tracking when batched activity was last updated
   conversationSeenCutoffAt  DateTime?    // Track createdAt of the 25th most recent conversation from the activity
 
-
   @@index([userId, createdAt, id]) // for userActivitiesPaginated
   @@index([workspaceId]) // ACL workspace filtering
   @@index([userId, actorAction, createdAt, id]) // for userActivitiesPaginated
@@ -2937,15 +2376,6 @@ model ExternalSource {
   @@schema("workflow")
 }
 
-enum ExternalEntityType {
-  MESSAGE
-  EMAIL
-  TICKET
-  ATTACHMENT
-  CANVAS
-  @@schema("public")
-}
-
 model ExternalMessage {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id                 String   @id @default(cuid())
@@ -2967,58 +2397,6 @@ model ExternalMessage {
   @@index([messageId])                           // Fast lookup by message
   @@map("external_messages")
   @@schema("workflow")
-}
-
-enum MessageDirection {
-  INCOMING   // From external source → Xyne
-  OUTGOING   // From Xyne → external source (Phase 2)
-  @@schema("public")
-}
-
-enum ActivityClassification {
-  ACTIONABLE
-  FYI
-  SKIP
-  PENDING
-  PROCESSING
-  ERROR
-  @@schema("public")
-}
-
-enum ActivityClassificationJobType {
-  SINGLE
-  SPECIAL_MENTION_AUDIENCE
-  @@schema("public")
-}
-
-enum NudgeType {
-  EXISTING_TICKET
-  CREATE_TICKET
-  SET_REMINDER
-  ADD_TO_KB
-  REVERSE_KB_LOOKUP
-  THREAD_FOLLOW_UP
-  DECISION_PENDING
-  WAITING_ON_BLOCKED_BY
-  @@schema("public")
-}
-
-enum NudgeKind {
-  CREATE_TICKET_FROM_MESSAGE
-  FIND_RELATED_TICKET_FROM_MESSAGE
-  FIND_RELATED_MESSAGE_FROM_MESSAGE
-  LINK_PASTE_TO_SURFACE
-  FORWARD_MESSAGE_LINK
-  DELETE_MESSAGE_CLEANUP
-  SCHEDULE_CALL_FROM_THREAD
-  @@schema("public")
-}
-
-enum NudgeState {
-  ACTIVE
-  DISMISSED
-  ACTED_ON
-  @@schema("public")
 }
 
 model ProactiveNudge {
@@ -3106,74 +2484,6 @@ model SurfaceNudgeCount {
 }
 
 // Notification System Enums
-enum NotificationType {
-  TICKET_STATUS_CHANGE
-  TICKET_ASSIGNMENT
-  TICKET_REASSIGNMENT
-  TICKET_DUE_DATE_CHANGED
-  TICKET_PRIORITY_CHANGED
-  TICKET_USER_GROUP_CHANGED
-  TICKET_TITLE_CHANGED
-  TICKET_DESCRIPTION_CHANGED
-  TICKET_RCA_CREATED
-  TICKET_RCA_UPDATED
-  TICKET_SUBTICKET_ADDED
-  TICKET_RELATED_TICKET_ADDED
-  TICKET_RELATED_TICKET_REMOVED
-  CHANNEL_READ
-  THREAD_READ
-  CHANNEL_MESSAGE
-  MENTION
-  DIRECT_MESSAGE
-  WORKFLOW_COMPLETION
-  WORKFLOW_FAILURE
-  THREAD_REPLY
-  INCOMING_CALL
-  MISSED_CALL
-  CALL_DISMISS
-  CALL_REMINDER
-  CALL_SCHEDULED
-  CALL_UPDATED
-  EMAIL_FETCH_COMPLETED
-  EMAIL_FETCH_FAILED
-  CANVAS_SHARED
-  RECORDING_SHARED
-  EMAIL_REPLY_RECEIVED
-  MESSAGE_DELETED
-  MESSAGE_EDITED
-  STAGE_APPROVAL_REQUESTED
-  STAGE_APPROVAL_APPROVED
-  STAGE_APPROVAL_REJECTED
-  @@schema("public")
-}
-
-enum NotificationStatus {
-  UNREAD
-  READ
-  DISMISSED
-  DELIVERED
-  FAILED
-  @@schema("public")
-}
-
-enum NotificationDeliveryMethod {
-  BROWSER
-  EMAIL
-  SLACK
-  MOBILE
-  IOS
-  ANDROID
-  @@schema("public")
-}
-
-enum NotificationLevel {
-  ALL                    // All new posts - Messages and threads you follow
-  MENTIONS_ONLY          // Just mentions - @you, @channel, @here
-  THREADS_ONLY           // Only thread replies - For threads a user is subscribed to
-  NONE
-  @@schema("public")
-}
-
 // Notification System Models
 model Notification {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
@@ -3468,25 +2778,6 @@ model RecurringCallParticipant {
 
 // Canvas Feature Models (Notion/Slack Canvas-like documents)
 
-enum CanvasVisibility {
-  PUBLIC
-  PRIVATE
-  @@schema("public")
-}
-
-enum CanvasRole {
-  OWNER
-  EDITOR
-  VIEWER
-  @@schema("public")
-}
-
-enum DocType {
-  Canvas
-  Quarto
-  @@schema("public")
-}
-
 // Canvas folders for manual canvas organization within a project, a specific
 // channel, or a user's personal "My Canvases" scope.
 model CanvasFolder {
@@ -3681,14 +2972,6 @@ model CanvasUserStatus {
 }
 
 // Bookmark Feature Models
-enum BookmarkEntityType {
-  MESSAGE
-  CONVERSATION
-  TICKET
-  CANVAS
-  @@schema("public")
-}
-
 model Bookmark {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id         String             @id @default(cuid())
@@ -3712,12 +2995,6 @@ model Bookmark {
 }
 
 // Link Sharing Feature Models
-enum LinkVisibility {
-  DEFAULT  // Visible to all channel members
-  PERSONAL // Only visible to creator + explicitly shared participants
-  @@schema("public")
-}
-
 model Link {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id          String         @id @default(cuid())
@@ -3753,21 +3030,6 @@ model LinkAccess {
 }
 
 // Vespa Insertion Logs
-enum VespaInsertionStatus {
-  PENDING
-  FAILED
-  FAILED_MAX_RETRIES
-  @@schema("public")
-}
-
-enum VespaOperationType {
-  INSERT
-  UPDATE
-  DELETE
-  POST_INGEST_CLEAN
-  @@schema("public")
-}
-
 model VespaInsertionLogs {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id           String                @id @default(cuid())
@@ -3811,76 +3073,7 @@ model Repo {
 }
 
 // Form Models
-enum FormFieldType {
-  STRING
-  NUMBER
-  BOOLEAN
-  DATE
-  SINGLE_SELECT
-  MULTI_SELECT
-  USER
-  DOC
-  @@schema("public")
-}
-
-enum FormContextType {
-  BOARD
-  RELEASE_CHANGE
-  STAGE
-  @@schema("public")
-}
-
-enum BoardType {
-  DEFAULT
-  RELEASE
-  NON_LINEAR
-  @@schema("public")
-}
-
-enum VisitSlaMode {
-  STAGE_DEFAULT
-  NONE
-  FIXED_HOURS
-  @@schema("public")
-}
-
-enum ReenterMode {
-  RESET
-  CONTINUE
-  @@schema("public")
-}
-
-enum FormEntityType {
-  TICKET
-  SUB_TICKET
-  RELEASE_MIGRATION_FORM
-  RELEASE_ENV_FORM
-  @@schema("public")
-}
-
 // Lookup value types for dynamic enumeration values
-enum LookupType {
-  TICKET_TYPE
-  COE_ACTION_TYPE
-  COE_ACTION_TYPE_RELIABILITY_CHANGE
-  COE_ACTION_TYPE_RELIABILITY_CAPACITY
-  COE_ACTION_TYPE_RELIABILITY_FAULT
-  COE_ACTION_TYPE_PERF
-  COE_ACTION_TYPE_UIUX
-  IMPACT_TYPE
-  BUG_TYPE
-  BUG_CATEGORY_TYPE
-  BUG_ISSUE_TYPE
-  BUG_ISSUE_CATEGORY_CAPACITY
-  BUG_ISSUE_CATEGORY_CHANGE
-  BUG_ISSUE_CATEGORY_FAULT
-  BUG_RESOLUTION_CAPACITY
-  BUG_RESOLUTION_CHANGE
-  BUG_RESOLUTION_FAULT
-  QUICK_FIX_OPTION
-  @@schema("public")
-}
-
 // Lookup values table - stores dynamic enumeration values for various entities
 model LookupValue {
   id        String          @id @default(cuid())
@@ -4058,7 +3251,6 @@ model Merchant {
   id        String   @id @default(cuid())
   mid       String   @unique // Merchant identifier (matches TicketEntityMapping.entityName)
 
-
   @@index([mid, id])
   @@map("merchants")
   @@schema("public")
@@ -4081,13 +3273,6 @@ model DraftMessage {
   @@unique([channelId, conversationId, messageId, userId])
   @@map("draft_messages")
   @@schema("public")
-}
-
-enum Platform {
-  WEB
-  ELECTRON
-  MOBILE
-  @@schema("workflow")
 }
 
 model UserActivityEvent {
@@ -4130,22 +3315,6 @@ model ActivityAlias {
 }
 
 // Collection-related Enums
-enum IngestionStatus {
-  PENDING
-  PROCESSING
-  COMPLETED
-  FAILED
-  NONE
-  @@schema("public")
-}
-
-enum CollectionRole {
-  OWNER
-  EDITOR
-  VIEWER
-  @@schema("public")
-}
-
 // Collection serves as BOTH the root collection AND any sub-folder.
 // parentId = null  →  root collection (has its own permissions)
 // parentId = <id>  →  sub-folder whose parent is that Collection row
@@ -4270,24 +3439,6 @@ model StageApprovers {
 
 // Release Management Enums
 
-enum ReleaseEventType {
-  RELEASE
-  TICKET
-  SUBTICKET
-  TESTING
-  SYSTEM
-  CANVAS
-  @@schema("public")
-}
-
-enum RCAStatus {
-  DRAFT
-  IN_REVIEW
-  APPROVED
-  CLOSED
-  @@schema("public")
-}
-
 // Services that can be released
 model Application {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
@@ -4342,7 +3493,6 @@ model ApplicationReleaseTicket {
   @@map("application_release_tickets")
   @@schema("public")
 }
-
 
 // Captures all events tied to the release for audit trail
 model ReleaseEvent {
@@ -4418,15 +3568,6 @@ model ReleaseChangeType {
   @@schema("public")
 }
 
-enum TicketStageRequestStatus {
-  DRAFT
-  SUBMITTED
-  APPROVED
-  REJECTED
-
-  @@schema("public")
-}
-
 model TicketStageRequest {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id                        String                    @id @default(cuid())
@@ -4448,21 +3589,6 @@ model TicketStageRequest {
   @@map("ticket_stage_requests")
   @@schema("public")
 }
-enum COEStatus {
-  OPEN
-  IN_PROGRESS
-  COMPLETED
-  @@schema("public")
-}
-
-enum SEVERITY {
-  SEV_1
-  SEV_2
-  SEV_3
-  @@schema("public")
-}
-
-
 // Root cause analysis for issues
 model RCA {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
@@ -4523,13 +3649,6 @@ model COE {
   @@index([status])
   @@index([actionTypeId])
   @@map("coes")
-  @@schema("public")
-}
-
-enum AttributionConfidence {
-  LOW
-  MEDIUM
-  HIGH
   @@schema("public")
 }
 
@@ -4605,32 +3724,9 @@ model ChannelRecap {
   @@schema("public")
 }
 
-
 // ============================================================================
 // SURFACE NUDGE FRAMEWORK
 // ============================================================================
-
-enum SurfaceAreaType {
-  MESSAGE
-  TICKET
-  CANVAS
-  CALL
-  CONVERSATION
-  @@schema("public")
-}
-
-enum SurfaceLinkKind {
-  RELATES_TO
-  @@schema("public")
-}
-
-enum SessionRecordingProcessStatus {
-  PENDING      // File synced to GCS, needs SOP/fact extraction
-  PROCESSING   // Extraction job running
-  COMPLETED    // Extraction done
-  FAILED       // Extraction failed
-  @@schema("workflow")
-}
 
 // GCS Path format: sessions/${userId}/${sessionId}/recording.json
 model SessionRecordingFile {
@@ -4670,7 +3766,6 @@ model SurfaceLink {
   @@map("surface_links")
   @@schema("public")
 }
-
 
 model Apps {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
@@ -4774,23 +3869,6 @@ model AppIncomingWebhook {
   @@schema("workflow")
 }
 
-enum CommandType {
-  COMMAND
-  SHORTCUT
-
-  @@schema("public")
-}
-
-enum CommandAccessibility {
-  CHAT
-  THREAD
-  BOTH
-  MESSAGE
-  GLOBAL
-
-  @@schema("public")
-}
-
 model AppCommand {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id                    String               @id @default(cuid())
@@ -4815,26 +3893,6 @@ model AppCommand {
 }
 
 // Saved Views Enums
-enum SavedConfigContextType {
-  BOARD
-
-  @@schema("public")
-}
-
-enum SavedConfigVisibility {
-  PRIVATE
-  PUBLIC
-
-  @@schema("public")
-}
-
-enum SavedConfigEntityName {
-  TICKET
-  FORM_ENTITY_VALUE
-
-  @@schema("public")
-}
-
 // Saved Views Models
 model SavedUserConfiguration {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
@@ -4875,16 +3933,6 @@ model SavedUserConfigurationValue {
 }
 
 // Scheduled Message Models
-enum DelayedMessageStatus {
-  PENDING    // Waiting to be sent
-  SENDING    // Currently being processed
-  SENT       // Successfully delivered
-  FAILED     // Delivery failed (retries exhausted)
-  CANCELLED  // Cancelled by user before send time
-
-  @@schema("public")
-}
-
 model DelayedMessage {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id              String                 @id @default(cuid())
@@ -5003,20 +4051,6 @@ model DataSourceRelationship {
   @@schema("non_zero")
 }
 
-
-enum DashboardVisibility {
-  PUBLIC
-  PRIVATE
-  @@schema("non_zero")
-}
-
-enum DashboardRole {
-  OWNER
-  EDITOR
-  VIEWER
-  @@schema("non_zero")
-}
-
 model DynamicDashboard {
   id           String              @id @default(cuid())
   workspaceId  String
@@ -5057,7 +4091,6 @@ model DashboardParticipant {
   @@schema("non_zero")
 }
 
-
 model DashboardActivity {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id          String    @id @default(cuid())
@@ -5072,14 +4105,6 @@ model DashboardActivity {
   @@index([createdAt(sort: Desc)])
   @@index([actorUserId])
   @@map("dashboard_activity")
-  @@schema("non_zero")
-}
-
-
-enum QueryType {
-  internal
-  external
-
   @@schema("non_zero")
 }
 
@@ -5125,22 +4150,7 @@ model DynamicDashboardQueryMapping {
 }
 
 // Action/access type for a permission scope (the part after the colon, e.g. chat:WRITE)
-enum AppPermissionType {
-  READ    // read-only access
-  WRITE   // create / update access
-
-  @@schema("public")
-}
-
 // Status of a permission on an installed app
-enum AppPermissionStatus {
-  UNAPPROVED    // Added after install, pending activation via reinstall
-  APPROVED      // Active — confirmed during install or reinstall
-  PENDINGDELETE // Marked for removal, still active until next reinstall
-
-  @@schema("public")
-}
-
 // App Permission System
 /// Registry of all available permissions.
 /// The full scope string used in requirePermission() is composed as "name:type" (e.g. "chat:WRITE").
@@ -5202,13 +4212,6 @@ model InstalledAppPermission {
 // ─────────────────────────────────────────────────────────────────────────
 // Generic Tag Framework (V1)
 // ─────────────────────────────────────────────────────────────────────────
-
-enum TagMethod {
-  MANUAL
-  LLM
-  AUTOMATED
-  @@schema("non_zero")
-}
 
 model Tag {
   id          String    @id @default(cuid())
@@ -5333,7 +4336,6 @@ model DoclingAsyncPart {
   @@map("docling_async_parts")
   @@schema("non_zero")
 }
-
 
 model Entity {
   workspaceId String?
