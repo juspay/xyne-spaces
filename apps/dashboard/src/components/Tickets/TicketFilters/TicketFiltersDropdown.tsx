@@ -1024,6 +1024,8 @@ export const TicketFiltersDropdown = ({
             />
           </div>
         </div>
+
+        {trailingControl}
       </div>
     </div>
   );

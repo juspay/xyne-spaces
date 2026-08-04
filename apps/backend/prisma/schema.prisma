@@ -1480,6 +1480,7 @@ model Workspace {
   tools             Tool[]
   userGroups        UserGroup[]
   roles             Role[]
+  ticketExports     TicketExport[]
 
   @@unique([orgId, name])
   @@index([orgId])

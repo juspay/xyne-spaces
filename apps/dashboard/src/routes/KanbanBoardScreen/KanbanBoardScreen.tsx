@@ -38,6 +38,7 @@ import {
   ArrowLeft,
 } from 'lucide-react';
 import { CalendarView } from '../../components/Tickets/CalendarView';
+import TicketReportsScreen from '../../routes/TicketReportsScreen/TicketReportsScreen';
 import ReactFlow, {
   Background,
   BackgroundVariant,
