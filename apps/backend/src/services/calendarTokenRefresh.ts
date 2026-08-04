@@ -317,12 +317,3 @@ export async function getCalendarCredentialsBySourceId(
 
   return null;
 }
-
-/** Resolve a user's connected calendar credentials for a Google Workspace action. */
-export async function getCalendarCredentialsByOwnerUserId(
-  ownerUserId: string,
-  provider: AuthProvider
-): Promise<CalendarCredentials | null> {
-  const source = await readStoredCalendarSource(provider, { ownerUserId });
-  return source ? getCalendarCredentialsBySourceId(source.id, provider) : null;
-}
