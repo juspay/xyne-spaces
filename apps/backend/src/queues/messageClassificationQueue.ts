@@ -18,30 +18,48 @@ export type MessageClassificationJob = { conversationId: string };
  */
 class MessageClassificationQueue {
   private queue: Bull.Queue<MessageClassificationJob> | null = null;
+  private isInitialized = false;
   private processorRegistered = false;
 
-  private getQueue(): Bull.Queue<MessageClassificationJob> {
-    if (this.queue) return this.queue;
+  /**
+   * Call once at startup, in both the API (producer) and worker (consumer) processes.
+   * A no-op when the feature is off, which is what keeps the producer from filling a
+   * queue nobody drains — jobs are only removed once processed.
+   */
+  async initialize(): Promise<void> {
+    if (this.isInitialized) return;
+    if (process.env['ENABLE_MESSAGE_CLASSIFICATION'] !== 'true') {
+      logger.info('[MessageClassificationQueue] Disabled; not initializing');
+      return;
+    }
+    try {
+      this.queue = new Bull<MessageClassificationJob>(QUEUE_NAME, {
+        redis: { ...redisService.getRedisConfig(), lazyConnect: false },
+        defaultJobOptions: {
+          attempts: 2,
+          backoff: { type: 'exponential', delay: 5000 },
+          removeOnComplete: 100,
+          removeOnFail: 100,
+        },
+      });
+      this.queue.on('error', err => logger.error('[MessageClassificationQueue] error:', err));
+      this.isInitialized = true;
+      logger.info('[MessageClassificationQueue] Initialized');
+    } catch (err) {
+      logger.error('[MessageClassificationQueue] Failed to initialize:', err);
+    }
+  }
 
-    this.queue = new Bull<MessageClassificationJob>(QUEUE_NAME, {
-      redis: { ...redisService.getRedisConfig(), lazyConnect: false },
-      defaultJobOptions: {
-        attempts: 2,
-        backoff: { type: 'exponential', delay: 5000 },
-        removeOnComplete: 100,
-        removeOnFail: 100,
-      },
-    });
-
+  getQueue(): Bull.Queue<MessageClassificationJob> | null {
     return this.queue;
   }
 
-  /** Register the worker. Call once at startup. */
+  /** Register the worker. Call after initialize(). */
   startProcessing(concurrency = 2): void {
-    if (this.processorRegistered) return;
+    if (!this.queue || this.processorRegistered) return;
     this.processorRegistered = true;
 
-    void this.getQueue().process(JOB_NAME, concurrency, async job => {
+    void this.queue.process(JOB_NAME, concurrency, async job => {
       const { conversationId } = job.data;
       try {
         const result = await classifyAndTagThread(conversationId);
@@ -67,6 +85,7 @@ class MessageClassificationQueue {
     // Let in-flight classifications finish rather than killing them mid-LLM-call.
     await this.queue.close();
     this.queue = null;
+    this.isInitialized = false;
     this.processorRegistered = false;
     logger.info('[MessageClassificationQueue] Shut down');
   }
@@ -79,6 +98,8 @@ class MessageClassificationQueue {
    * id, which is how a growing thread gets re-classified.
    */
   async enqueueForMessage(conversationId: string): Promise<void> {
+    if (!this.queue || !conversationId) return;
+
     try {
       // replyCount off the row, not COUNT(*): a PK lookup on a path that runs per message.
       const conversation = await db.conversation.findUnique({
@@ -91,7 +112,7 @@ class MessageClassificationQueue {
       if (messageCount < MIN_THREAD_SIZE) return;
 
       const bucket = Math.floor(messageCount / BATCH_SIZE);
-      await this.getQueue().add(
+      await this.queue.add(
         JOB_NAME,
         { conversationId },
         { jobId: `classify:${conversationId}:${bucket}` },

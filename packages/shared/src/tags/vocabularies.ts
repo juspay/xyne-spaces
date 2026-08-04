@@ -80,13 +80,6 @@ export const MESSAGE_ACTS: readonly VocabularyEntry[] = [
     description:
       'Supplies the information an earlier question asked for, and creates nothing new.',
   },
-  {
-    name: 'FYI',
-    label: 'FYI',
-    color: '#6b7280',
-    description:
-      'Shares information with nothing owed, nothing chosen, nothing asked. The default when no other act is performed.',
-  },
 ];
 
 /**
@@ -144,6 +137,13 @@ export const THREAD_TYPES: readonly VocabularyEntry[] = [
 ];
 
 /**
+ * Sentinel the classifier may return for a message that performs no act. Deliberately NOT
+ * in MESSAGE_ACTS: it is never stored and never rendered, it is mapped to an empty act
+ * list. Asking the model to name a value is more reliable than asking it for [].
+ */
+export const NO_ACT = 'NONE';
+
+/**
  * Tag names as a const tuple, strongest act first. Exported separately from MESSAGE_ACTS
  * because Zod's z.enum needs a literal tuple, and because precedence ordering is derived
  * from this array's order rather than stored on each entry.
@@ -156,7 +156,6 @@ export const MESSAGE_ACT_NAMES = [
   'RESOLUTION',
   'STATUS_UPDATE',
   'ANSWER',
-  'FYI',
 ] as const;
 
 const VOCABULARY_BY_TYPE: Record<ProjectTagType, readonly VocabularyEntry[]> = {

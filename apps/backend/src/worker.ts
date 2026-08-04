@@ -158,11 +158,12 @@ class WorkerService {
         await callValidationWorker.start();
       }
 
-      // LLM auto-tagging of messages (message act + thread type). Producer-side enqueue
-      // happens in the API process; only this worker consumes, so leaving the flag off
-      // means jobs queue up harmlessly instead of spending model calls.
+      // LLM auto-tagging of messages (message act + thread type). The API process enqueues,
+      // this worker consumes. Both sides call initialize(), which no-ops when the flag is
+      // off — so with it off nothing is produced either, and no backlog builds up.
       if (messageClassificationEnabled) {
         logger.info('Starting message classification worker service...')
+        await messageClassificationQueue.initialize()
         messageClassificationQueue.startProcessing()
       }
 

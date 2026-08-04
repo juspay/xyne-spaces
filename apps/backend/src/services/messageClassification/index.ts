@@ -2,6 +2,7 @@ import { z } from 'zod';
 import {
   MESSAGE_ACTS,
   MESSAGE_ACT_NAMES,
+  NO_ACT,
   THREAD_TYPES,
   OrgLLMServiceAccountPurpose,
 } from '@xyne/shared';
@@ -148,6 +149,21 @@ export async function classifyAndTagThread(conversationId: string): Promise<Clas
     tagged += messageActs.length;
   }
 
+  // Anything the model skipped, or whose acts all failed validation, is marked attempted
+  // rather than left null. Without this it stays eligible forever, so `unclassified` is
+  // never empty and every future bucket pays a full-thread call that can only skip it
+  // again. No Vespa refeed — an empty act list changes nothing in the index.
+  const giveUps = unclassified.filter(m => !acts.has(m.id));
+  for (const message of giveUps) {
+    await writeActs(message.id, []);
+  }
+  if (giveUps.length > 0) {
+    logger.info(`${TAG} Messages judged to perform no act`, {
+      conversationId,
+      count: giveUps.length,
+    });
+  }
+
   const threadType = modelThreadType;
 
 
@@ -197,8 +213,9 @@ async function writeActs(messageId: string, acts: string[]): Promise<void> {
 
   await db.message.update({
     where: { messageId },
-    // null rather than '[]' for "no acts" — one representation, so readers never handle both.
-    data: { messageActs: valid.length > 0 ? JSON.stringify(valid) : null },
+    // '[]' rather than null, matching the picker: null means "never classified" and would
+    // make this message eligible again next pass, re-dropping the same acts every time.
+    data: { messageActs: valid.length > 0 ? JSON.stringify(valid) : '[]' },
   });
 }
 
@@ -313,6 +330,8 @@ interface Classification {
 }
 
 const VALID_ACTS = new Set(MESSAGE_ACTS.map(entry => entry.name));
+/** Its own set so the sentinel gets the same spelling tolerance as a real act. */
+const NO_ACT_SET = new Set<string>([NO_ACT]);
 const VALID_THREAD_TYPES = new Set(THREAD_TYPES.map(entry => entry.name));
 
 // Lenient on purpose: the model's raw shape is untrusted. Anything unrecognised becomes
@@ -388,11 +407,16 @@ async function classifyThread(
     // Dedupe: a model asked for several tags will sometimes repeat one.
     const tagged = [...new Set(raw.map(value => coerce(value, VALID_ACTS)).filter(Boolean))] as string[];
 
+    // NO_ACT is the expected answer for chatter, not a failure — only warn when the model
+    // sent something that was meant to be a real act and failed to land on the vocabulary.
     if (tagged.length === 0) {
-      logger.warn('[MessageClassifier] No usable message act returned; dropping', {
-        messageId: entry.id,
-        returned: entry.messageActs,
-      });
+      const declaredNoAct = raw.some(value => coerce(value, NO_ACT_SET) !== null);
+      if (!declaredNoAct && raw.length > 0) {
+        logger.warn('[MessageClassifier] No usable message act returned; dropping', {
+          messageId: entry.id,
+          returned: entry.messageActs,
+        });
+      }
       continue;
     }
     acts.set(entry.id, tagged);

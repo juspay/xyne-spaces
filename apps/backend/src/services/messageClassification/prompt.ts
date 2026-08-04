@@ -1,4 +1,4 @@
-import { MESSAGE_ACTS, THREAD_TYPES } from '@xyne/shared';
+import { MESSAGE_ACTS, NO_ACT, THREAD_TYPES } from '@xyne/shared';
 
 /**
  * The classifier prompt is GENERATED from the vocabularies rather than written out by hand,
@@ -53,11 +53,17 @@ precedence: ${ACT_NAMES.join(' > ')}.
 
 Critical: ANSWER and RESOLUTION are not intrinsic to the message — they depend on what is
 open earlier in the thread. Only use ANSWER when an earlier message actually asked a
-question. Only use RESOLUTION when an earlier message opened an issue or commitment. When
-nothing is open, an informative message is FYI, not ANSWER.
+question. Only use RESOLUTION when an earlier message opened an issue or commitment.
 
-If the message performs no other act, it is FYI. Prefer FYI over a forced guess. FYI is
-never combined with another tag — if the message performs a real act, it is not FYI.
+Return exactly ["${NO_ACT}"] when the message genuinely performs no act — acknowledgements
+("ok", "thanks", "+1"), greetings, one-word fragments, thinking aloud. Do not stretch a tag
+to fit.
+
+${NO_ACT} is not a way to avoid judging. A message that reports the state of work, assigns
+or accepts it, asks something, decides something or raises urgency DOES perform an act —
+including when it is long, list-shaped, or covers many items at once. A list of workstreams
+with owners is a STATUS_UPDATE; an agenda someone commits to is a COMMITMENT. Tag the
+dominant act.
 
 ## Second task — the thread as a whole
 
@@ -87,14 +93,14 @@ Return current_thread_type unchanged if in doubt.
 {
   "threadType": one of [${THREAD_TYPE_CHOICES.map(e => e.name).join(', ')}],
   "classifications": [
-    { "id": "<message id from thread_messages>", "messageActs": [one or more of ${ACT_NAMES.join(', ')}] }
+    { "id": "<message id from thread_messages>", "messageActs": [one or more of ${ACT_NAMES.join(', ')}, or exactly ["${NO_ACT}"]] }
   ]
 }
 
-One classifications entry per message WITHOUT existing_acts, using the exact ids given.
-Messages that already have existing_acts must not appear in classifications at all.
-messageActs must have at least one value. Use the exact strings above — no other spelling,
-casing or punctuation.
+One classifications entry per message WITHOUT existing_acts, using the exact ids given —
+including the ones that perform no act, as ["${NO_ACT}"]. Messages that already have
+existing_acts must not appear in classifications at all. messageActs must always have at
+least one value. Use the exact strings above — no other spelling, casing or punctuation.
 
 threadType covers the whole thread and is always required, even when every message was
 already classified.`;
