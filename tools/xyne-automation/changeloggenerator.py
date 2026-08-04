@@ -1,28 +1,17 @@
 import subprocess
 import csv
 import sys
-import re
 
-# GitHub PR base URL
-REPO_BASE_URL = "https://github.com/juspay/xyne-spaces-test/pull"
-
-
-def extract_pr_number(message):
-    """Extract GitHub PR number from commit messages."""
-    match = re.search(r'\(#(\d+)\)', message)
-    if match:
-        return match.group(1)
-    match = re.search(r'\b(?:PR|Pull request|Merge pull request)\s*#(\d+)', message, re.IGNORECASE)
-    if match:
-        return match.group(1)
-    return None
+# GitHub commit base URL. Commit messages may contain PR numbers from another
+# repo/import, so deriving PR links from "(#123)" can open the wrong PR.
+REPO_COMMIT_BASE_URL = "https://github.com/juspay/xyne-spaces/commit"
 
 
-def generate_pr_link(pr_number):
-    """Generate PR link URL"""
-    if not pr_number:
+def generate_commit_link(commit_id):
+    """Generate a stable commit link URL."""
+    if not commit_id:
         return ""
-    return f"{REPO_BASE_URL}/{pr_number}"
+    return f"{REPO_COMMIT_BASE_URL}/{commit_id}"
 
 
 def generate_changelog(prev_commit, output_file="changelog.csv"):
@@ -50,15 +39,14 @@ def generate_changelog(prev_commit, output_file="changelog.csv"):
 
         with open(output_file, mode="w", newline="", encoding="utf-8") as file:
             writer = csv.writer(file)
-            writer.writerow(["Commit ID", "Author", "Date", "Message", "PR Link"])
+            writer.writerow(["Commit ID", "Author", "Date", "Message", "Commit Link"])
 
             for commit in commits:
                 parts = commit.split(",", 3)
                 if len(parts) == 4:
                     commit_id, author, date, message = parts
-                    pr_number = extract_pr_number(message)
-                    pr_link = generate_pr_link(pr_number)
-                    writer.writerow([commit_id, author, date, message, pr_link])
+                    commit_link = generate_commit_link(commit_id)
+                    writer.writerow([commit_id, author, date, message, commit_link])
 
         print(f":white_check_mark: Changelog generated successfully: {output_file}")
 
