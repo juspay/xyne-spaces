@@ -18,7 +18,7 @@ import { Router, type Request, type Response } from "express";
 import { getRequesterId, isOrgAdmin, isOrgOwner } from "../middleware/agent-acl.js";
 import { userRepository } from "../repositories/index.js";
 import { prisma } from "../db.js";
-import { agentScope, generateServiceToken, SERVICE_TOKEN_SCOPES } from "../lib/service-tokens.js";
+import { agentScope, CHANNELS_POST_SCOPE, generateServiceToken, SERVICE_TOKEN_SCOPES } from "../lib/service-tokens.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("organizations");
@@ -135,7 +135,7 @@ router.post("/:id/service-tokens", async (req: Request, res: Response) => {
       return;
     }
 
-    const body = req.body as { name?: unknown; userId?: unknown; expiresAt?: unknown; allowedAgentSlugs?: unknown };
+    const body = req.body as { name?: unknown; userId?: unknown; expiresAt?: unknown; allowedAgentSlugs?: unknown; allowChannelPost?: unknown };
     const name = typeof body.name === "string" ? body.name.trim() : "";
     const userId = typeof body.userId === "string" ? body.userId.trim() : "";
     if (!name) {
@@ -199,6 +199,11 @@ router.post("/:id/service-tokens", async (req: Request, res: Response) => {
       return;
     }
 
+    // Elevated: only when the admin explicitly opts in does the token get the
+    // spaces:channels:post scope, letting its runs post results and approval
+    // cards into Spaces channels the agent's app can reach. Deny-by-default.
+    const allowChannelPost = body.allowChannelPost === true;
+
     const token = generateServiceToken();
     const created = await prisma.surfaceAccessToken.create({
       data: {
@@ -209,7 +214,7 @@ router.post("/:id/service-tokens", async (req: Request, res: Response) => {
         name,
         tokenHash: token.hashed,
         prefix: token.prefix,
-        scopes: [...SERVICE_TOKEN_SCOPES, ...allowedAgentSlugs.map(agentScope)],
+        scopes: [...SERVICE_TOKEN_SCOPES, ...allowedAgentSlugs.map(agentScope), ...(allowChannelPost ? [CHANNELS_POST_SCOPE] : [])],
         expiresAt,
       },
       select: {
