@@ -198,7 +198,7 @@ class RecordingService {
       {
         isHeadless: true,
         callType: 'AUDIO',
-        sttModel: params?.sttModel || 'azure',
+        sttModel: params?.sttModel || 'google',
       },
     );
 
