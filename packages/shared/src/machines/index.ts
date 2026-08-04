@@ -37,6 +37,7 @@ export {
   useHasOverlay,
   useOverlayEffect,
   getThreadTrackingSnapshot,
+  getDraftMessageLookupId,
   setThreadLastRead,
   setThreadScroll,
 } from './stateMachine.js';
@@ -53,6 +54,7 @@ export type {
   UserChannelStatus,
   Conversation,
   DraftMessageDB,
+  DraftMessagesByLookupId,
   DelayedMessageDB,
   UserPreference,
   PeriodMetrics,

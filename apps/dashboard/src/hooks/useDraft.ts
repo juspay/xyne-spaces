@@ -1,6 +1,6 @@
 import { useCallback, useMemo } from 'react';
 import { useSelector } from '@xstate/react';
-import { stateMachineActor } from '../machines/stateMachine';
+import { getDraftMessageLookupId, stateMachineActor } from '../machines/stateMachine';
 import { useZero } from './useZero';
 import { mutators } from '../zero/mutators';
 import { apiInstance } from '../services/clients/apiClient';
@@ -58,11 +58,8 @@ export function removeDraft(lookupId: string): void {
 }
 
 export function useDraftFromDB(channelId: string, conversationId: string | null) {
-  return useSelector(stateMachineActor, state =>
-    state.context.draftMessages.find(
-      draft => draft.channelId === channelId && draft.conversationId === conversationId,
-    ),
-  );
+  const lookupId = getDraftMessageLookupId(channelId, conversationId);
+  return useSelector(stateMachineActor, state => state.context.draftMessagesByLookupId[lookupId]);
 }
 
 export function useDraft(channelId: string, conversationId: string | null) {
@@ -70,10 +67,10 @@ export function useDraft(channelId: string, conversationId: string | null) {
     stateMachineActor,
     state => state.context.drafts[conversationId ?? channelId],
   );
-  const draftFromDB = useSelector(stateMachineActor, state =>
-    state.context.draftMessages.find(
-      draft => draft.channelId === channelId && draft.conversationId === conversationId,
-    ),
+  const lookupId = getDraftMessageLookupId(channelId, conversationId);
+  const draftFromDB = useSelector(
+    stateMachineActor,
+    state => state.context.draftMessagesByLookupId[lookupId],
   );
 
   return useMemo(() => {
@@ -91,9 +88,8 @@ export function getDraft(channelId: string, conversationId: string | null) {
 
   const draftFromLocal = state.context.drafts[conversationId ?? channelId];
 
-  const draftFromDB = state.context.draftMessages.find(
-    draft => draft.channelId === channelId && draft.conversationId === conversationId,
-  );
+  const draftFromDB =
+    state.context.draftMessagesByLookupId[getDraftMessageLookupId(channelId, conversationId)];
 
   return draftFromDB && draftFromLocal && draftFromDB.updatedAt > draftFromLocal.updatedAt
     ? draftFromDB.content
@@ -102,7 +98,10 @@ export function getDraft(channelId: string, conversationId: string | null) {
 
 export function useDraftAttachments() {
   const zero = useZero();
-  const draftMessages = useSelector(stateMachineActor, state => state.context.draftMessages);
+  const draftMessagesByLookupId = useSelector(
+    stateMachineActor,
+    state => state.context.draftMessagesByLookupId,
+  );
 
   const addDroppedFiles = useCallback(
     async (files: File | File[], channelId: string, conversationId?: string) => {
@@ -348,9 +347,7 @@ export function useDraftAttachments() {
     // eslint-disable-next-line @typescript-eslint/require-await
     async (channelId: string, conversationId: string | null) => {
       // Find the draft message matching the channelId and conversationId
-      const draftMessage = draftMessages.find(
-        d => d.channelId === channelId && d.conversationId === conversationId,
-      );
+      const draftMessage = draftMessagesByLookupId[getDraftMessageLookupId(channelId, conversationId)];
 
       if (!draftMessage || !draftMessage.attachments) return;
 
@@ -364,7 +361,7 @@ export function useDraftAttachments() {
         delete filesMapRef[attachment.id];
       });
     },
-    [zero, draftMessages],
+    [zero, draftMessagesByLookupId],
   );
 
   const getDroppedFilesForEntity = useCallback(
@@ -375,9 +372,7 @@ export function useDraftAttachments() {
       }
 
       // Find the draft message matching the channelId and conversationId
-      const draftMessage = draftMessages.find(
-        d => d.channelId === channelId && d.conversationId === conversationId,
-      );
+      const draftMessage = draftMessagesByLookupId[getDraftMessageLookupId(channelId, conversationId)];
 
       if (!draftMessage || !draftMessage.attachments) {
         return new Map();
@@ -423,7 +418,7 @@ export function useDraftAttachments() {
 
       return result;
     },
-    [draftMessages],
+    [draftMessagesByLookupId],
   );
 
   return useMemo(
