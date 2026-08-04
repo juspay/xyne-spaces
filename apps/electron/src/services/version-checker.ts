@@ -16,10 +16,16 @@ const VERSION_FETCH_TIMEOUT_MS = 10000; // 10 second timeout for fetching versio
  * Fetch the latest version from the frontend server
  */
 async function fetchLatestVersion(): Promise<VersionInfo | null> {
-  const versionUrl = `${config.FRONTEND_URL}/version.json`;
+  const versionUrl = new URL('/version.json', config.FRONTEND_URL);
+  versionUrl.searchParams.set('updateCheck', Date.now().toString());
   
   return new Promise((resolve) => {
-    const request = net.request(versionUrl);
+    const request = net.request({
+      url: versionUrl.toString(),
+      method: 'GET',
+    });
+    request.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    request.setHeader('Pragma', 'no-cache');
     let data = '';
     let resolved = false;
 
@@ -98,19 +104,24 @@ async function getCurrentLoadedVersion(): Promise<string | null> {
 }
 
 /**
- * Notify the frontend that an update is available
+ * Notify the frontend of the authoritative version state.
+ *
+ * This is sent even when the versions match so the renderer can clear a
+ * persisted update nudge after a rollback or a previously failed refresh.
  */
-function notifyUpdateAvailable(currentVersion: string, latestVersion: string): void {
+function notifyUpdateStatus(currentVersion: string, latestVersion: string): void {
   const mainWindow = getMainWindow();
   if (!mainWindow) {
     log.warn('[VersionChecker] Cannot notify - main window not available');
     return;
   }
 
-  log.info('[VersionChecker] Notifying frontend about available update');
+  const updateAvailable = currentVersion !== latestVersion;
+  log.info('[VersionChecker] Notifying frontend about update status:', updateAvailable);
   mainWindow.webContents.send('app-update-available', {
     currentVersion,
     latestVersion,
+    updateAvailable,
     loadType: 'manual',
   });
 }
@@ -154,10 +165,6 @@ async function checkVersionAndReload(): Promise<void> {
     log.debug('[VersionChecker] Skipping check - main window not available');
     return;
   }
-  if (mainWindow.isFocused()) {
-    log.debug('[VersionChecker] Skipping check - window is focused');
-    return;
-  }
   let [latestVersionInfo, currentVersion] = await Promise.all([
     fetchLatestVersion(),
     getCurrentLoadedVersion(),
@@ -170,17 +177,16 @@ async function checkVersionAndReload(): Promise<void> {
 
   if (!currentVersion) {
     log.debug('[VersionChecker] Could not get current loaded version');
-    currentVersion = "unknown"
+    return;
   }
 
   log.info(`[VersionChecker] Current version: ${currentVersion}, Latest version: ${latestVersionInfo.version}`);
 
-  if (latestVersionInfo.version && currentVersion !== latestVersionInfo.version) {
-   
-    log.info(`[VersionChecker] Version mismatch detected! Notifying frontend...`);
-    notifyUpdateAvailable(currentVersion, latestVersionInfo.version);
-     
-    
+  if (latestVersionInfo.version) {
+    if (currentVersion !== latestVersionInfo.version) {
+      log.info('[VersionChecker] Version mismatch detected! Notifying frontend...');
+    }
+    notifyUpdateStatus(currentVersion, latestVersionInfo.version);
   }
 }
 
