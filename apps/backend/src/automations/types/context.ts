@@ -74,5 +74,6 @@ export interface AutomationContext {
   __meta?: {
     error?: string | null;
     chain?: readonly string[];
+    resumePath?: string;
   };
 }

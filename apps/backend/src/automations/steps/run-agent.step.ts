@@ -65,9 +65,10 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
 
     const stepCount = Object.keys(context.steps).length;
     const currentIndex = Math.max(0, stepCount - 1);
+    const stepName = store.currentStepName ?? `step_${currentIndex}`;
 
-    const sessionId = `${store.runId}:step_${currentIndex}`;
-    const callbackUrl = buildCallbackUrl(store.runId, `step_${currentIndex}`);
+    const sessionId = `${store.runId}:${stepName}`;
+    const callbackUrl = buildCallbackUrl(store.runId, stepName);
 
     const agentSlug = cfg.agentSlug as string;
     const prompt = cfg.prompt as string;
@@ -161,10 +162,7 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
     if (!store) {
       throw new Error('[RUN_AGENT] retry attempted outside an automation context');
     }
-    const stepName =
-      typeof rowData['stepName'] === 'string'
-        ? (rowData['stepName'] as string)
-        : deriveStepNameFromCtx(context);
+    const stepName = store.currentStepName ?? deriveStepNameFromCtx(context);
     if (!stepName) {
       throw new Error('[RUN_AGENT] cannot derive stepName for retry');
     }
