@@ -857,6 +857,16 @@ export class InvitationService {
 
     logger.info(`[InvitationService] User ${userData.email} accepted invitation to workspace ${invitation.workspaceId}`);
 
+    try {
+      await aiProvisioningService.enqueueUserSync(newWorkspaceUser.id);
+    } catch (error) {
+      logger.error('[InvitationService] Failed to enqueue AI user provisioning', {
+        userId: newWorkspaceUser.id,
+        workspaceId: invitation.workspaceId,
+        error,
+      });
+    }
+
     return { user: newWorkspaceUser, redirectPath };
   }
 }
