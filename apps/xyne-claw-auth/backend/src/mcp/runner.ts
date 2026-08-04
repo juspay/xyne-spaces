@@ -4,6 +4,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { McpAdapter, McpCallResult, McpServerTools, McpToolInfo } from "./types.js";
+import { extForMime, fileNameFromResource } from "./attachment-filename.js";
 import { STATIC_ADAPTERS } from "./static-adapters.js";
 import { resolveConnectorDefinition } from "./connector-definitions.js";
 import { getSpacesAuthForUser, getWorkspaceIdForUser } from "../lib/spaces-db.js";
@@ -386,18 +387,6 @@ async function shouldForwardFiles(serverType: string): Promise<boolean> {
   return val;
 }
 
-function extForMime(mime: string): string {
-  const m = mime.toLowerCase();
-  if (m.includes("pdf")) return "pdf";
-  if (m.includes("png")) return "png";
-  if (m.includes("jpeg") || m.includes("jpg")) return "jpg";
-  if (m.includes("csv")) return "csv";
-  if (m.includes("spreadsheet") || m.includes("excel") || m.includes("xlsx")) return "xlsx";
-  if (m.includes("json")) return "json";
-  if (m.includes("zip")) return "zip";
-  return "bin";
-}
-
 /**
  * Many file-fetching MCP tools (e.g. bitbucket-mcp-server's get_file_content)
  * return the fetched file as a STRING field nested inside a JSON envelope —
@@ -436,7 +425,8 @@ function unwrapFileContentEnvelope(text: string): string {
 
 /**
  * Pull binary files out of an MCP result's content array:
- *   • EmbeddedResource ({type:"resource", resource:{blob, mimeType}}) → file
+ *   • EmbeddedResource ({type:"resource", resource:{blob, mimeType, uri}}) → file
+ *     (download name is taken from the resource `uri`; see fileNameFromResource)
  *   • ImageContent / AudioContent ({type:"image"|"audio", data, mimeType}) → file
  * Returns base64 attachments; ignores text items (incl. base64 text fallbacks).
  */
@@ -452,7 +442,7 @@ function extractAttachments(
       const res = c["resource"] as Record<string, unknown>;
       if (typeof res["blob"] === "string") {
         const mime = typeof res["mimeType"] === "string" ? res["mimeType"] : "application/octet-stream";
-        out.push({ fileName: `${tool}-${++idx}.${extForMime(mime)}`, mimeType: mime, data: res["blob"] });
+        out.push({ fileName: fileNameFromResource(res["uri"], mime, tool, ++idx), mimeType: mime, data: res["blob"] });
       }
     } else if ((type === "image" || type === "audio") && typeof c["data"] === "string") {
       const mime = typeof c["mimeType"] === "string"
