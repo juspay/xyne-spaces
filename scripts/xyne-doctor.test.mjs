@@ -161,6 +161,56 @@ test("redacts common secrets while preserving hashes and UUIDs", () => {
   assert.match(result.text, new RegExp(uuid));
 });
 
+test("redacts this repository's own credential-bearing env var shapes", () => {
+  const leaky = [
+    "ENCRYPTION_KEY=abcdef0123456789abcdef0123456789abcdef0123456789abcdef01",
+    "XYNE_CLAW_S2S_KEY=s2s-super-secret-value-9876543210",
+    "APP_JWT_KEY=jwtkeymaterial1234567890abcdef",
+    "APNS_P8_BASE64=TUlHVEFnRUFNQk1HQnlxR1NNNDlBZ0VHQ0NxR1NNNDlBd0VI",
+    "OUTAGE_VERIFICATION_AUTH_KEY=outagesecret123456",
+    "GENIUS_API_KEY=Basic realkeyvalue_SUPERSECRET123",
+    "github_pat_11ABCDEFG0123456789_abcdefghijklmnopqrstuvwxyz0123456789ABC",
+    "ATATT3xFfGF0T1o2K3n4M5p6Q7r8S9t0U1v2W3x4Y5z6",
+    '"auth": "dXNlcm5hbWU6cGFzc3dvcmQxMjM0NTY3"',
+  ];
+
+  for (const line of leaky) {
+    assert.notEqual(redactSecrets(line).text, line, `not redacted: ${line}`);
+  }
+  // The scheme word must not absorb the redaction and leave the key behind.
+  assert.doesNotMatch(
+    redactSecrets("GENIUS_API_KEY=Basic realkeyvalue_SUPERSECRET123").text,
+    /realkeyvalue/,
+  );
+});
+
+test("leaves public identifiers and ordinary output alone", () => {
+  const untouched = [
+    "Author: Jane Roe",
+    "OAUTH_CLIENT_ID=1234567890-abc.apps.googleusercontent.com",
+    "MONKEY_VALUE=bananas",
+    "KEYWORDS=alpha,beta",
+    "src/App.tsx:42:7 - error TS2345: Argument of type 'string'",
+  ];
+
+  for (const line of untouched) {
+    assert.equal(redactSecrets(line).text, line, `over-redacted: ${line}`);
+  }
+});
+
+test("redaction stays linear on keyword-shaped input with no delimiter", () => {
+  // This shape took ~27s at 16KB before the pattern was bounded and anchored.
+  const hostile = "SOMETHING_API_KEYS_BUT_NO_DELIM_".repeat(2176);
+  const startedAt = process.hrtime.bigint();
+  redactSecrets(hostile);
+  const elapsedMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
+
+  assert.ok(
+    elapsedMs < 1000,
+    `redaction took ${elapsedMs.toFixed(0)}ms on ${hostile.length} chars`,
+  );
+});
+
 test("normalizes repository and home paths before handoff", () => {
   const result = sanitizeCapturedOutput(
     "/Users/alice/work/xyne/apps/backend/src/index.ts\n/Users/alice/.cache/tool.log",

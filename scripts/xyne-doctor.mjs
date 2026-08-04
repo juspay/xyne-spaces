@@ -182,7 +182,9 @@ export function stripTerminalSequences(value) {
     .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, "");
 }
 
-/** Redact credential-bearing values without hiding ordinary hashes or UUIDs. */
+/**
+ * Redact credential-bearing values without hiding ordinary hashes or UUIDs.
+ */
 export function redactSecrets(value) {
   const state = { text: value, count: 0 };
 
@@ -208,8 +210,8 @@ export function redactSecrets(value) {
   );
   replaceAndCount(
     state,
-    /((?:["']?)[A-Z0-9_.-]*(?:API[_-]?KEY|TOKEN|SECRET|PASSWORD|PASSWD|PWD|PRIVATE[_-]?KEY|CLIENT[_-]?SECRET|CREDENTIALS?|DATABASE_URL|REDIS_URL|DSN|AUTHORIZATION|COOKIE)[A-Z0-9_.-]*(?:["']?)\s*[:=]\s*)(?:"(?:\\.|[^"\\\r\n])*"|'(?:\\.|[^'\\\r\n])*'|[^\s"']+)/gi,
-    (_match, prefix) => `${prefix}[REDACTED]`,
+    /(^|[^A-Z0-9_.-])((?:["']?)[A-Z0-9_.-]{0,64}(?:API[_-]?KEY|[_-]KEY|[_-]AUTH|[_-]BASE64|TOKEN|SECRET|PASSWORD|PASSWD|PWD|PRIVATE[_-]?KEY|CLIENT[_-]?SECRET|CREDENTIALS?|DATABASE_URL|REDIS_URL|DSN|AUTHORIZATION|COOKIE)[A-Z0-9_.-]{0,64}(?:["']?)\s*[:=]\s*)(?:"(?:\\.|[^"\\\r\n])*"|'(?:\\.|[^'\\\r\n])*'|(?:(?:basic|bearer|token|digest)\s+)?[^\s"']+)/gi,
+    (_match, boundary, prefix) => `${boundary}${prefix}[REDACTED]`,
   );
   replaceAndCount(
     state,
@@ -218,8 +220,18 @@ export function redactSecrets(value) {
   );
   replaceAndCount(
     state,
-    /\b(?:sk-(?:proj-)?|gh[pousr]_|glpat-|xox[baprs]-|npm_|AKIA|ASIA)[A-Za-z0-9_\-]{12,}\b/g,
+    /\b(?:sk-(?:proj-)?|github_pat_|gh[pousr]_|glpat-|xox[baprs]-|npm_|AKIA|ASIA|ATATT|ATBB|BBDC-)[A-Za-z0-9_\-]{12,}\b/g,
     "[REDACTED_TOKEN]",
+  );
+  replaceAndCount(
+    state,
+    /("auth"\s*:\s*")[A-Za-z0-9+/=]{16,}"/g,
+    (_match, prefix) => `${prefix}[REDACTED]"`,
+  );
+  replaceAndCount(
+    state,
+    /PuTTY-User-Key-File-\d+:[\s\S]{0,8192}?Private-MAC:[^\r\n]*/gi,
+    "[REDACTED_PRIVATE_KEY]",
   );
   replaceAndCount(
     state,
