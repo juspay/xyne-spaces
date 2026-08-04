@@ -12,4 +12,5 @@ if [ -z "$TERM" ] || [ "$TERM" = "dumb" ]; then
   export OUTPUT_MODE=plain
 fi
 
-exec pnpm exec ts-node --project "$AUTOMATION_DIR/tsconfig.json" "$AUTOMATION_DIR/scripts/runner/index.ts" "$@"
+# ts-node by path (not `pnpm exec`): keeps cwd at PROJECT_ROOT, which the runner uses to place artifacts.
+exec "$AUTOMATION_DIR/node_modules/.bin/ts-node" --project "$AUTOMATION_DIR/tsconfig.json" "$AUTOMATION_DIR/scripts/runner/index.ts" "$@"

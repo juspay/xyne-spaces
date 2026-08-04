@@ -64,7 +64,7 @@ export type StepKind = (typeof StepKindValues)[keyof typeof StepKindValues];
 export interface OperatorMeta {
   value: string;
   label: string;
-  valueType: 'string' | 'number' | 'boolean' | 'none';
+  valueType: 'string' | 'number' | 'boolean' | 'none' | 'tag';
 }
 
 export interface TriggerCatalogItem {

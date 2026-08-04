@@ -7,6 +7,7 @@ import {
 } from '../database/repositories/customEmojiRepository';
 import { getStorageService } from '../services/storage';
 import { cleanupProxiedFile } from '../utils/attachmentUtils';
+import { setSafeInlineImageHeaders } from '../utils/safeAttachmentDownload';
 
 const storageService = getStorageService();
 
@@ -242,11 +243,10 @@ export class CustomEmojiController {
 
       // Get file metadata to determine content type and size
       const metadata = await storageService.getFileMetadata(gcsPath);
-      const contentType = metadata.contentType || 'image/png';
       const fileSize = parseInt(String(metadata.size || '0'), 10);
 
       // Set response headers
-      res.setHeader('Content-Type', contentType);
+      setSafeInlineImageHeaders(res, metadata.contentType || 'image/png');
       res.setHeader('Content-Length', fileSize);
       res.setHeader('Cache-Control', 'public, max-age=31536000'); // Cache for 1 year
 

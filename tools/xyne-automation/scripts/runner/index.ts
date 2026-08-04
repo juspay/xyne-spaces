@@ -237,6 +237,19 @@ function prepareArtifactDirectory(artifactDir: string): void {
   fs.mkdirSync(artifactDir, { recursive: true });
 }
 
+// Walk up to the monorepo root (where the compose files live) instead of assuming a fixed depth.
+function findMonorepoRoot(start: string): string {
+  let dir = start;
+  for (;;) {
+    if (fs.existsSync(path.join(dir, 'docker-compose.dev.yml'))) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) {
+      throw new Error(`Could not find monorepo root (docker-compose.dev.yml) above ${start}`);
+    }
+    dir = parent;
+  }
+}
+
 const MAX_DOCKER_START_ATTEMPTS = 3;
 const PORT_BIND_CONFLICT_REGEX =
   /address already in use|failed to bind host port|port is already allocated/i;
@@ -259,10 +272,7 @@ async function main(): Promise<void> {
   let portMap = await buildPortMap(mode);
   const projectRoot = await resolveProjectRoot(mode, originalRoot, !cliArgs.plain);
 
-  // Docker compose files are in the monorepo root
-  // Resolve monorepo root: if running from xyne-automation, go up one level
-  const monorepoRoot =
-    path.basename(projectRoot) === 'xyne-automation' ? path.dirname(projectRoot) : projectRoot;
+  const monorepoRoot = findMonorepoRoot(projectRoot);
 
   const composeFiles = [
     path.join(monorepoRoot, 'docker-compose.dev.yml'),

@@ -332,7 +332,7 @@ export class InvitationService {
     return result;
   }
 
-  private async ensureChannelGuestState(channelId: string, userId: string, tx: TxClient): Promise<void> {
+  private async ensureChannelGuestState(channelId: string, userId: string, workspaceId: string, tx: TxClient): Promise<void> {
     await tx.channelParticipant.upsert({
       where: {
         channelId_userId: {
@@ -345,6 +345,7 @@ export class InvitationService {
         channelId,
         userId,
         role: ChannelRole.MEMBER,
+        workspaceId,
       },
     });
 
@@ -533,7 +534,7 @@ export class InvitationService {
         throw new Error('Guest invitation target channel is archived');
       }
 
-      await this.ensureChannelGuestState(entityId, userId, tx);
+      await this.ensureChannelGuestState(entityId, userId, workspaceId, tx);
       return `/${workspaceId}/chat/dir/${entityId}`;
     }
 
@@ -551,6 +552,7 @@ export class InvitationService {
           canvasId: entityId,
           userId,
           role: CanvasRole.VIEWER,
+          workspaceId,
         },
       });
       return `/${workspaceId}/chat/canvas/${entityId}`;
@@ -584,7 +586,7 @@ export class InvitationService {
         throw new Error('Guest invitation target channel does not exist in this project');
       }
 
-      await this.ensureChannelGuestState(targetChannelId, userId, tx);
+      await this.ensureChannelGuestState(targetChannelId, userId, workspaceId, tx);
       return `/${workspaceId}/chat/dir/${targetChannelId}`;
     }
 
@@ -856,6 +858,16 @@ export class InvitationService {
     logger.info(`[InvitationService] Permission grants completed for ${invitation.role} user ${userData.email}`);
 
     logger.info(`[InvitationService] User ${userData.email} accepted invitation to workspace ${invitation.workspaceId}`);
+
+    try {
+      await aiProvisioningService.enqueueUserSync(newWorkspaceUser.id);
+    } catch (error) {
+      logger.error('[InvitationService] Failed to enqueue AI user provisioning', {
+        userId: newWorkspaceUser.id,
+        workspaceId: invitation.workspaceId,
+        error,
+      });
+    }
 
     return { user: newWorkspaceUser, redirectPath };
   }

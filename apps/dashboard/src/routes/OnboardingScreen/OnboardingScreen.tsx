@@ -3,10 +3,9 @@ import { useNavigate } from 'react-router';
 import Cookies from 'js-cookie';
 import { useAuth } from '../../hooks/useAuth';
 import { useUser } from '../../hooks/useUsers';
-import { useMigratedChannels } from '../../hooks/useChannels';
+import { useMigratedChannels, useChannelByName } from '../../hooks/useChannels';
 import { useProfilePictureUrl } from '../../hooks/useProfilePicture';
 import { authActor } from '../../machines/authMachine';
-import { setAIOnboardingPending } from '../../contexts/AIOnboardingContext';
 import Confetti from 'react-confetti';
 
 const OnboardingScreen: React.FC = () => {
@@ -19,6 +18,10 @@ const OnboardingScreen: React.FC = () => {
 
   // Get migrated channels using the hook
   const migratedChannels = useMigratedChannels();
+
+  // Resolve the default "general" channel so first-time users land there after
+  // onboarding instead of the user guide.
+  const generalChannel = useChannelByName('general');
 
   // Build onboarding steps dynamically based on whether user has migrated channels
   const hasMigratedChannels = migratedChannels?.length > 0;
@@ -99,21 +102,15 @@ const OnboardingScreen: React.FC = () => {
   const handleCompleteOnboarding = (): void => {
     setIsCompleting(true);
 
-    // Capture new-user status before COMPLETE_ONBOARDING flips isNewUser to false.
-    const isNewUser = Cookies.get('is_new_user') === 'true';
-
-    // Mark AI onboarding as pending so AppRoot can auto-trigger it
-    setAIOnboardingPending();
-
     // Send event to auth machine to update isNewUser state
     authActor.send({ type: 'COMPLETE_ONBOARDING' });
 
     const workspaceId = currentUser?.workspaceId;
     if (workspaceId) {
-      // First-time users land on the user guide for an oriented walkthrough before
-      // dropping into an empty inbox; returning users go straight to chat.
-      const landing = isNewUser ? 'guide' : 'chat/dir';
-      void navigate(`/${workspaceId}/${landing}`);
+      // After onboarding, land directly in the chat directory on the general
+      // channel instead of the user guide.
+      const landing = generalChannel?.id ? `/chat/dir/${generalChannel.id}` : '/chat/dir';
+      void navigate(`/${workspaceId}${landing}`);
     }
   };
 

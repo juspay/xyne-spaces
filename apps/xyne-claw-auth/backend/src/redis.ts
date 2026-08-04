@@ -11,6 +11,7 @@
 
 import { Redis } from "ioredis";
 import { CONFIG } from "./config.js";
+import { retryForever } from "./retry.js";
 
 import { createLogger } from "./logger.js";
 const log = createLogger("redis");
@@ -26,26 +27,36 @@ class RedisService {
       ...(CONFIG.redisTls ? { tls: { rejectUnauthorized: false } } : {}),
       maxRetriesPerRequest: null as null, // required by BullMQ
       lazyConnect: true,
+      retryStrategy: (times: number) => Math.min(times * 200, 5_000),
+      enableOfflineQueue: true,
+      reconnectOnError: (err: Error) => /READONLY/.test(err.message),
+      connectTimeout: 10_000,
+      keepAlive: 30_000,
     };
+  }
+
+  private attachHandlers(client: Redis): void {
+    client.on("connect", () => {
+      log.info("[redis] Connected successfully");
+    });
+
+    client.on("error", (err: Error) => {
+      log.error("[redis] Connection error:", err.message);
+    });
+
+    client.on("reconnecting", (delayMs: number) => {
+      log.warn(`[redis] reconnecting in ${delayMs}ms`);
+    });
   }
 
   async connect(): Promise<void> {
     if (this.redis) return;
-    try {
-      this.redis = new Redis(this.getRedisConfig());
 
-      this.redis.on("connect", () => {
-        log.info("[redis] Connected successfully");
-      });
+    this.redis = new Redis(this.getRedisConfig());
+    this.attachHandlers(this.redis);
 
-      this.redis.on("error", (err: Error) => {
-        log.error("[redis] Connection error:", err.message);
-      });
-
-      await this.redis.connect();
-    } catch (err) {
-      log.error("[redis] Failed to initialize:", err);
-    }
+    const client = this.redis;
+    await retryForever(() => client.connect(), "redis.connect");
   }
 
   async disconnect(): Promise<void> {
@@ -60,9 +71,7 @@ class RedisService {
   getConnection(): Redis {
     if (!this.redis) {
       this.redis = new Redis(this.getRedisConfig());
-      this.redis.on("error", (err: Error) => {
-        log.error("[redis] Connection error:", err.message);
-      });
+      this.attachHandlers(this.redis);
     }
     return this.redis;
   }

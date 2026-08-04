@@ -92,7 +92,7 @@ export async function loadApp(window: BrowserWindow) {
 /**
  * Creates the main application window
  */
-export async function createMainWindow(): Promise<BrowserWindow> {
+export async function createMainWindow(options?: { inactive?: boolean }): Promise<BrowserWindow> {
   const iconPath = path.join(__dirname, '..', '..', 'assets', 'images', 'xyne.ico');
 
   const createOpts = getCreateOptions();
@@ -119,7 +119,9 @@ export async function createMainWindow(): Promise<BrowserWindow> {
   // Restore maximized/windowed state, then reveal once painted to avoid a resize flash.
   applyPostCreate(mainWindow);
   track(mainWindow, () => isCompactMode);
-  mainWindow.once('ready-to-show', () => mainWindow?.show());
+  mainWindow.once('ready-to-show', () =>
+    options?.inactive ? mainWindow?.showInactive() : mainWindow?.show(),
+  );
 
   // Handle external links
   mainWindow.webContents.setWindowOpenHandler((details) => {

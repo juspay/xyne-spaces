@@ -24,6 +24,9 @@ import {
   organizationDomainService,
 } from '@/services/organizationDomainService';
 import { migrateLegacyIdentity } from '@/services/legacyIdentityMigrationHelper';
+import { redisService } from '@/services/redisService';
+import { randomUUID } from 'crypto';
+import { aiProvisioningService } from '@/services/aiProvisioningService';
 
 /**
  * Result type for single workspace auto-login
@@ -51,6 +54,24 @@ export class AuthV2Controller {
   private userSessionService: UserSessionService;
   private microsoftAuthController: MicrosoftAuthController;
   private prisma = DatabaseClient.getInstance();
+
+  private async storePendingOAuthTokens(
+    refreshToken?: string | null,
+    accessToken?: string | null,
+    accessTokenExpiry?: Date,
+  ): Promise<string> {
+    const tokenKey = randomUUID();
+    await redisService.set(
+      `${config.pendingOAuthTokens.redisKeyPrefix}${tokenKey}`,
+      JSON.stringify({
+        refreshToken: refreshToken ?? null,
+        accessToken: accessToken ?? null,
+        accessTokenExpiry: accessTokenExpiry?.toISOString() ?? null,
+      }),
+      config.pendingOAuthTokens.ttlSeconds,
+    );
+    return tokenKey;
+  }
 
   constructor() {
     const clientId = process.env.GOOGLE_CLIENT_ID;
@@ -298,6 +319,16 @@ export class AuthV2Controller {
         code_challenge_method: CodeChallengeMethod.S256,
       });
 
+      // sameSite=lax so the cookie survives Google's top-level callback redirect.
+      const isProduction = process.env.NODE_ENV === 'production';
+      res.cookie('oauth_state', state, {
+        httpOnly: true,
+        secure: isProduction,
+        sameSite: 'lax' as const,
+        maxAge: 10 * 60 * 1000,
+        path: '/',
+      });
+
       logger.info(`[${requestId}] Redirecting to Google OAuth`);
       res.redirect(authUrl);
     } catch (error) {
@@ -372,6 +403,20 @@ export class AuthV2Controller {
         const launchUrl = `${frontendUrl}/launch?${launchParams.toString()}`;
         logger.info(`[${requestId}] Redirecting to Frontend launch page: ${launchUrl}`);
         res.redirect(launchUrl);
+        return;
+      }
+
+      // The state must match the oauth_state cookie; reject when absent or different. The
+      // cookie is single-use and cleared here regardless of outcome. Checked only on the
+      // browser-driven path: desktop returns above, and the cookie is host-only.
+      const boundState = req.cookies?.oauth_state as string | undefined;
+      res.clearCookie('oauth_state', { path: '/' });
+      if (!boundState || boundState !== state) {
+        logger.error(`[${requestId}] OAuth state cookie missing or mismatched — rejecting`);
+        const frontendUrl = getFrontendUrl(req);
+        res.redirect(
+          `${frontendUrl}?error=invalid_state&message=${encodeURIComponent('Invalid or expired state')}`
+        );
         return;
       }
 
@@ -505,15 +550,18 @@ export class AuthV2Controller {
       }
 
       const isProduction = process.env.NODE_ENV === 'production';
+      const tokenKey = await this.storePendingOAuthTokens(
+        refresh_token,
+        access_token,
+        accessTokenExpiry,
+      );
       res.cookie('google_access_token', jwt.sign({
         googleId: googleUserData.googleId,
         email: googleUserData.email,
         name: googleUserData.name,
         picture: googleUserData.picture,
         provider: AuthProvider.GOOGLE,
-        refreshToken: refresh_token,
-        accessToken: access_token,
-        accessTokenExpiry: accessTokenExpiry?.toISOString(),
+        tokenKey,
       }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
         httpOnly: true,
         secure: isProduction,
@@ -867,14 +915,18 @@ export class AuthV2Controller {
       const effectiveInvitationId = stateData.invitationId || invitationId;
       if (effectiveInvitationId) {
         logger.info(`[${requestId}] Invitation detected (${effectiveInvitationId}) — returning hasInvitation signal to Electron`);
+        const tokenKey = await this.storePendingOAuthTokens(
+          refresh_token,
+          access_token,
+          accessTokenExpiry,
+        );
         res.cookie('google_access_token', jwt.sign({
           googleId: googleUserData.googleId,
           email: googleUserData.email,
           name: googleUserData.name,
           picture: googleUserData.picture,
           provider: AuthProvider.GOOGLE,
-          refreshToken: refresh_token,
-          accessToken: access_token,
+          tokenKey,
         }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
           httpOnly: true,
           secure: isProduction,
@@ -949,15 +1001,18 @@ export class AuthV2Controller {
       }
 
       // Store pending auth data for later loginWorkspace/createOrg call (multi-workspace case)
+      const tokenKey = await this.storePendingOAuthTokens(
+        refresh_token,
+        access_token,
+        accessTokenExpiry,
+      );
       res.cookie('google_access_token', jwt.sign({
         googleId: googleUserData.googleId,
         email: googleUserData.email,
         name: googleUserData.name,
         picture: googleUserData.picture,
         provider: AuthProvider.GOOGLE,
-        refreshToken: refresh_token,
-        accessToken: access_token,
-        accessTokenExpiry: accessTokenExpiry?.toISOString(),
+        tokenKey,
       }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
         httpOnly: true,
         secure: isProduction,
@@ -989,8 +1044,21 @@ export class AuthV2Controller {
     const requestId = `EXCHANGE_CODE_${Date.now()}`;
     const frontendUrl = getFrontendUrl(req);
 
-    const isMobileNative =
-      req.headers['x-platform'] === 'mobile' || req.query.platform === 'mobile';
+    // Select the native branch via the `x-platform` header. `?platform=mobile` is kept for
+    // older mobile builds, but only when the request carries no browser cross-site markers;
+    // otherwise it is treated as a web request and must pass state + PKCE.
+    const secFetchSite = req.headers['sec-fetch-site'];
+    const looksBrowserInitiated =
+      !!req.headers.origin ||
+      (typeof secFetchSite === 'string' && secFetchSite !== 'none');
+    const nativeByHeader = req.headers['x-platform'] === 'mobile';
+    const nativeByQuery = req.query.platform === 'mobile' && !looksBrowserInitiated;
+    if (req.query.platform === 'mobile' && !nativeByHeader) {
+      logger.warn(
+        `[${requestId}] mobile-exchange selected via query parameter without the x-platform header (browserInitiated=${looksBrowserInitiated})`,
+      );
+    }
+    const isMobileNative = nativeByHeader || nativeByQuery;
 
     // Helper to send error response (JSON for mobile, redirect for web)
     const sendError = (errorCode: string, message: string, statusCode = 400) => {
@@ -1031,6 +1099,30 @@ export class AuthV2Controller {
         return;
       }
 
+      // Native does PKCE inside the Google SDK, so only the web branch verifies it server-side.
+      let codeVerifier: string | undefined;
+      if (!isMobileNative) {
+        const state = (req.query.state || req.body?.state) as string | undefined;
+        if (!state) {
+          logger.error(`[${requestId}] Missing state on web mobile-exchange`);
+          sendError('missing_params', 'Missing state');
+          return;
+        }
+        const stateData = await oauthStateServiceV2.validateState(state, false);
+        if (!stateData) {
+          logger.error(`[${requestId}] Invalid or expired state`);
+          sendError('invalid_state', 'Invalid or expired state');
+          return;
+        }
+        await oauthStateServiceV2.deleteState(state);
+        codeVerifier = (await pkceServiceV2.getAndDeleteVerifier(state)) ?? undefined;
+        if (!codeVerifier) {
+          logger.error(`[${requestId}] PKCE verifier not found`);
+          sendError('pkce_failed', 'PKCE verification failed');
+          return;
+        }
+      }
+
       await oauthStateServiceV2.markCodeAsUsed(code as string);
 
       // For mobile native apps using serverAuthCode, use empty string as redirect_uri
@@ -1043,9 +1135,11 @@ export class AuthV2Controller {
       const { tokens } = await this.mobileGoogleClient.getToken({
         code: code as string,
         redirect_uri: redirectUri,
+        ...(codeVerifier ? { codeVerifier } : {}),
       });
 
       const { id_token, refresh_token, access_token } = tokens;
+      const accessTokenExpiry = tokens.expiry_date ? new Date(tokens.expiry_date) : undefined;
 
       if (!id_token) {
         logger.error(`[${requestId}] No ID token received`);
@@ -1112,15 +1206,19 @@ export class AuthV2Controller {
         maxAge: 10 * 60 * 1000, // 10 minutes
       };
 
-      // Store all Google auth data in one cookie (until workspace selection)
+      // Keep provider tokens in Redis; the cookie contains only the lookup key.
+      const tokenKey = await this.storePendingOAuthTokens(
+        refresh_token,
+        access_token,
+        accessTokenExpiry,
+      );
       res.cookie('google_access_token', jwt.sign({
         googleId: googleUserData.googleId,
         email: googleUserData.email,
         name: googleUserData.name,
         picture: googleUserData.picture,
         provider: AuthProvider.GOOGLE,
-        refreshToken: refresh_token || null,
-        accessToken: access_token || null,
+        tokenKey,
       }, process.env.JWT_SECRET!, { expiresIn: '10m' }), cookieOptions);
       logger.info(`[${requestId}] Stored pending auth data for workspace selection`);
 
@@ -1306,9 +1404,10 @@ export class AuthV2Controller {
       let pendingRefreshToken: string | undefined;
       let pendingAccessToken: string | undefined;
       let pendingAccessTokenExpiry: Date | undefined;
+      let pendingTokenKey: string | undefined;
 
       if (pendingAuthCookie) {
-        const parsed = this.parsePendingAuthCookie(pendingAuthCookie);
+        const parsed = await this.parsePendingAuthCookie(pendingAuthCookie);
         if (!parsed) {
           res.status(401).json({
             error: 'Invalid auth data',
@@ -1324,6 +1423,7 @@ export class AuthV2Controller {
           pendingRefreshToken = parsed.pendingRefreshToken;
           pendingAccessToken = parsed.pendingAccessToken;
           pendingAccessTokenExpiry = parsed.pendingAccessTokenExpiry;
+          pendingTokenKey = parsed.pendingTokenKey;
         } else {
           res.status(401).json({
             error: 'Invalid auth data',
@@ -1384,6 +1484,18 @@ export class AuthV2Controller {
         workspaceId,
         authProvider: provider,
       });
+
+      if (isNewUser) {
+        try {
+          await aiProvisioningService.enqueueUserSync(workspaceUser.id);
+        } catch (error) {
+          logger.error('[LOGIN-WORKSPACE] Failed to enqueue AI user provisioning', {
+            userId: workspaceUser.id,
+            workspaceId,
+            error,
+          });
+        }
+      }
 
       // Check if user is inactive or has left the workspace
       if (workspaceUser.status === UserStatus.INACTIVE || workspaceUser.leftAt !== null) {
@@ -1488,6 +1600,11 @@ export class AuthV2Controller {
         : '';
 
       // Clear pending auth cookie and return success
+      if (pendingTokenKey) {
+        await redisService.del(
+          `${config.pendingOAuthTokens.redisKeyPrefix}${pendingTokenKey}`,
+        );
+      }
       res.clearCookie('google_access_token', { path: '/' });
       res.status(200).json({
         success: true,
@@ -1534,7 +1651,7 @@ export class AuthV2Controller {
         return;
       }
 
-      const parsedAuth = this.parsePendingAuthCookie(pendingAuthCookie);
+      const parsedAuth = await this.parsePendingAuthCookie(pendingAuthCookie);
       if (!parsedAuth) {
         res.status(401).json({
           error: 'Invalid auth data',
@@ -1542,7 +1659,7 @@ export class AuthV2Controller {
         });
         return;
       }
-      const { oauthUserData, provider, pendingRefreshToken } = parsedAuth;
+      const { oauthUserData, provider, pendingRefreshToken, pendingTokenKey } = parsedAuth;
 
       if (!oauthUserData?.email) {
         res.status(401).json({
@@ -1663,6 +1780,11 @@ export class AuthV2Controller {
       });
 
       // Clear pending auth cookie
+      if (pendingTokenKey) {
+        await redisService.del(
+          `${config.pendingOAuthTokens.redisKeyPrefix}${pendingTokenKey}`,
+        );
+      }
       res.clearCookie('google_access_token', { path: '/' });
 
       logger.info(`[CREATE-ORG] Created org ${organization.orgId} with workspace ${workspace.id}`);
@@ -1847,7 +1969,7 @@ export class AuthV2Controller {
         return;
       }
 
-      const parsedAuth = this.parsePendingAuthCookie(pendingAuthCookie);
+      const parsedAuth = await this.parsePendingAuthCookie(pendingAuthCookie);
       if (!parsedAuth) {
         res.status(401).json({
           error: 'Invalid auth data',
@@ -1855,7 +1977,7 @@ export class AuthV2Controller {
         });
         return;
       }
-      const { oauthUserData, provider, pendingRefreshToken } = parsedAuth;
+      const { oauthUserData, provider, pendingRefreshToken, pendingTokenKey } = parsedAuth;
         if (!oauthUserData?.email) {
           res.status(401).json({
             error: 'Invalid auth data',
@@ -1896,9 +2018,22 @@ export class AuthV2Controller {
           picture: oauthUserData.picture,
         };
 
-        // Ensure OrgMember exists — find the org by email domain and upsert the user as MEMBER
-        const existingOrg = await organizationDomainService.findExistingOrgByEmailDomain(userData.email);
-        if (!existingOrg) {
+        // Ensure OrgMember exists — find the org by email domain, or fall back to
+        // the user's existing OrgMember record (e.g. when domain mapping is missing).
+        let existingOrgId: string | null = null;
+        const existingOrgByDomain = await organizationDomainService.findExistingOrgByEmailDomain(userData.email);
+
+        if (existingOrgByDomain) {
+          existingOrgId = existingOrgByDomain.orgId;
+        } else {
+          const existingOrgMember = await this.prisma.orgMember.findFirst({
+            where: { email: userData.email.toLowerCase(), leftAt: null },
+            select: { orgId: true },
+          });
+          existingOrgId = existingOrgMember?.orgId ?? null;
+        }
+
+        if (!existingOrgId) {
           res.status(409).json({
             error: 'No organization found',
             message: 'No organization found for your email domain. Please create an organization first.',
@@ -1906,11 +2041,10 @@ export class AuthV2Controller {
           return;
         }
 
-        const prisma = DatabaseClient.getInstance();
-        await prisma.orgMember.upsert({
+        await this.prisma.orgMember.upsert({
           where: { email: userData.email.toLowerCase() },
           create: {
-            orgId: existingOrg.orgId,
+            orgId: existingOrgId,
             email: userData.email.toLowerCase(),
             role: 'MEMBER',
           },
@@ -2003,6 +2137,11 @@ export class AuthV2Controller {
           maxAge: 24 * 60 * 60 * 1000,
         });
 
+        if (pendingTokenKey) {
+          await redisService.del(
+            `${config.pendingOAuthTokens.redisKeyPrefix}${pendingTokenKey}`,
+          );
+        }
         res.clearCookie('google_access_token', { path: '/' });
 
         logger.info(`[CREATE-WORKSPACE-PENDING] Created workspace "${workspaceName}" for ${oauthUserData.email} in org ${organization.orgId}`);
@@ -2170,13 +2309,14 @@ export class AuthV2Controller {
    * Parses and verifies the google_access_token pending-auth cookie (signed JWT).
    * Returns null if the token is invalid, expired, or cannot be verified.
    */
-  private parsePendingAuthCookie(cookie: string): {
+  private async parsePendingAuthCookie(cookie: string): Promise<{
     oauthUserData: { email: string; name: string; googleId?: string; providerUserId?: string; picture?: string };
     provider: string;
     pendingRefreshToken: string | undefined;
     pendingAccessToken: string | undefined;
     pendingAccessTokenExpiry: Date | undefined;
-  } | null {
+    pendingTokenKey: string | undefined;
+  } | null> {
     try {
       const decoded = jwt.verify(cookie, process.env.JWT_SECRET!) as {
         googleId?: string;
@@ -2188,10 +2328,28 @@ export class AuthV2Controller {
         refreshToken?: string | null;
         accessToken?: string | null;
         accessTokenExpiry?: string | null;
+        tokenKey?: string;
       };
       if (!decoded?.email) throw new Error('Invalid JWT payload');
-      const pendingAccessTokenExpiry = decoded.accessTokenExpiry
-        ? new Date(decoded.accessTokenExpiry)
+
+      let redisTokens: {
+        refreshToken?: string | null;
+        accessToken?: string | null;
+        accessTokenExpiry?: string | null;
+      } | null = null;
+      if (decoded.tokenKey) {
+        const storedTokens = await redisService.get(
+          `${config.pendingOAuthTokens.redisKeyPrefix}${decoded.tokenKey}`,
+        );
+        if (!storedTokens) return null;
+        redisTokens = JSON.parse(storedTokens);
+      }
+
+      const refreshToken = redisTokens?.refreshToken ?? decoded.refreshToken;
+      const accessToken = redisTokens?.accessToken ?? decoded.accessToken;
+      const accessTokenExpiry = redisTokens?.accessTokenExpiry ?? decoded.accessTokenExpiry;
+      const pendingAccessTokenExpiry = accessTokenExpiry
+        ? new Date(accessTokenExpiry)
         : undefined;
       return {
         oauthUserData: {
@@ -2202,12 +2360,13 @@ export class AuthV2Controller {
           picture: decoded.picture,
         },
         provider: decoded.provider || AuthProvider.GOOGLE,
-        pendingRefreshToken: decoded.refreshToken || undefined,
-        pendingAccessToken: decoded.accessToken || undefined,
+        pendingRefreshToken: refreshToken || undefined,
+        pendingAccessToken: accessToken || undefined,
         pendingAccessTokenExpiry:
           pendingAccessTokenExpiry && !Number.isNaN(pendingAccessTokenExpiry.getTime())
             ? pendingAccessTokenExpiry
             : undefined,
+        pendingTokenKey: decoded.tokenKey,
       };
     } catch {
       return null;

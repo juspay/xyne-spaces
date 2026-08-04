@@ -98,7 +98,7 @@ const McpV2 = ({ query }: { query: string }): ReactElement => {
                 to={`/claw-agents/mcp/${server.id}`}
                 testId='claw-mcp-card'
                 dimmed={server.enabled === false}
-                icon={<McpServerIcon server={server} />}
+                icon={<McpServerIcon server={server} size='sm' />}
                 name={server.name}
                 meta={isConnected ? 'Connected' : undefined}
                 statusDot={
