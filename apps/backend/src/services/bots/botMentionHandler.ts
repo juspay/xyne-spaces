@@ -1,10 +1,10 @@
 import { logger } from '@/utils/logger';
+import { UserType } from '@xyne/shared';
 import { executionOrchestrator } from '@/bots/unified/orchestrator/execution-orchestrator';
 import { typingService } from '@/services/typingService';
 import { botCatalog } from '@/bots/unified/catalog/bot-catalog';
 import { extractUserMentions } from '@/utils/mentionParser';
 import { db } from '@/database/client';
-import { UserType } from '@prisma/client';
 import type { BotDefinition } from '@/bots/unified/types/unified-bot';
 import { MessagesSideEffectHandler } from '@/zero/side-effects/tables/messages-handler';
 

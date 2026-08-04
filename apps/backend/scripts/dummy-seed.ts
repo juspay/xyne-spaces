@@ -15,7 +15,7 @@ import { PrismaClient } from '@prisma/client';
 import {
   AccessType,
   AuthProvider,
-  UserStatus, 
+  UserStatus,
   SessionStatus,
   TicketStatus,
   TicketStatusV2,

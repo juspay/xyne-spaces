@@ -1,4 +1,3 @@
-import { UserStatus } from '@prisma/client';
 import { db } from '@/database/client';
 import { UserStatus, AuthProvider } from '@xyne/shared';
 import { config } from '@/config/env';

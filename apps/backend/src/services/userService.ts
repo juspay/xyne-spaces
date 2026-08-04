@@ -880,7 +880,7 @@ export class UserService {
       });
 
       // Grant permissions based on invitation role (fixes V2 auth zero-permissions bug)
-      await grantPermissionsForRole(workspaceUser.id, workspaceUser.email, role, userData.workspaceId);
+      await grantPermissionsForRole(workspaceUser.id, workspaceUser.email, role as WorkspaceRole, userData.workspaceId);
 
       // Join the workspace's general channel (creates it when missing, e.g. legacy
       // enterprise workspaces that predate the general-channel default)

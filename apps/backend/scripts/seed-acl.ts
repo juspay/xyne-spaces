@@ -652,7 +652,7 @@ async function main() {
     // Step 8: Ensure all bot users are in OrgMember table
     console.log('\n🤖 Ensuring all bot users are in org_member table...');
     try {
-      const { UserType } = await import('@prisma/client');
+      const { UserType } = await import('@xyne/shared');
 
       // Find all bots (using string literal since UserType enum may not be generated yet)
       const botUsers = await prisma.user.findMany({

@@ -32,7 +32,7 @@ export const linkPasteToSurface: NudgeDefinition<ActivityEventNudgePayload, Nudg
         return /https?:\/\//.test(message.content);
       },
     },
-    direction: { from: 'MESSAGE', to: 'MESSAGE' },
+    direction: { from: SurfaceAreaType.MESSAGE, to: SurfaceAreaType.MESSAGE },
 
     async buildContext(
       _payload: ActivityEventNudgePayload,
@@ -45,7 +45,7 @@ export const linkPasteToSurface: NudgeDefinition<ActivityEventNudgePayload, Nudg
         source: {
           sourceId: runtime.messagePayload?.messageId ?? null,
           projectId: runtime.messagePayload?.projectId ?? null,
-          sourceType: 'MESSAGE',
+          sourceType: SurfaceAreaType.MESSAGE,
         },
         activityContext: EMPTY_ACTIVITY_CONTEXT,
       };

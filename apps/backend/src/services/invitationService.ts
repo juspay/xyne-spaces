@@ -118,8 +118,8 @@ export class InvitationService {
 
     // Validate role — provision flow (explicit orgId) allows OWNER; normal flow allows ADMIN/MEMBER
     const validRoles: WorkspaceRole[] = explicitOrgId
-      ? ['OWNER', 'ADMIN', 'MEMBER']
-      : ['ADMIN', 'MEMBER', 'GUEST'];
+      ? [WorkspaceRole.OWNER, WorkspaceRole.ADMIN, WorkspaceRole.MEMBER]
+      : [WorkspaceRole.ADMIN, WorkspaceRole.MEMBER, WorkspaceRole.GUEST];
     const invitationRole = role && validRoles.includes(role) ? role : 'MEMBER';
 
     if (invitationRole === 'GUEST' && (!params.entityId || !params.entityType)) {
@@ -788,7 +788,7 @@ export class InvitationService {
           data: {
             orgId: resolvedOrgId,
             email: userData.email.toLowerCase(),
-            role: this.toEnterpriseOrgRole(invitation.role),
+            role: this.toEnterpriseOrgRole(invitation.role as WorkspaceRole),
           },
           select: { memberId: true },
         });
@@ -799,7 +799,7 @@ export class InvitationService {
           data: {
             leftAt: null,
             orgId: resolvedOrgId,
-            role: this.toEnterpriseOrgRole(invitation.role),
+            role: this.toEnterpriseOrgRole(invitation.role as WorkspaceRole),
           },
           select: { memberId: true },
         });
@@ -834,12 +834,12 @@ export class InvitationService {
         create: {
           orgId: resolvedOrgId,
           email: userData.email.toLowerCase(),
-          role: this.toEnterpriseOrgRole(invitation.role),
+          role: this.toEnterpriseOrgRole(invitation.role as WorkspaceRole),
         },
         update: {
           leftAt: null,
           orgId: resolvedOrgId,
-          role: this.toEnterpriseOrgRole(invitation.role),
+          role: this.toEnterpriseOrgRole(invitation.role as WorkspaceRole),
         }, // reactivate and update orgId/role if needed
       });
       logger.info(`[DEBUG] [acceptInvitation] OrgMember upserted for email=${userData.email} orgId=${resolvedOrgId}`);
@@ -859,7 +859,7 @@ export class InvitationService {
     await grantPermissionsForRole(
       newWorkspaceUser.id,
       newWorkspaceUser.email,
-      invitation.role,
+      invitation.role as WorkspaceRole,
       invitation.workspaceId ?? undefined,
     );
     logger.info(`[InvitationService] Permission grants completed for ${invitation.role} user ${userData.email}`);

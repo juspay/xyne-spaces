@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { UserStatus } from '@prisma/client';
+import { UserStatus } from '@xyne/shared';
 import { userActivationService } from '../services/userActivationService';
 import { logger } from '../utils/logger';
 

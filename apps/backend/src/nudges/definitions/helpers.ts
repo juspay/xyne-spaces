@@ -148,7 +148,7 @@ export async function buildMessageNudgeContext(
     source: {
       sourceId: runtime.messagePayload?.messageId ?? payload.messageId,
       projectId: payload.projectId,
-      sourceType: 'MESSAGE',
+      sourceType: SurfaceAreaType.MESSAGE,
     },
     threadMessages,
     projectTags: existingProjectTags,

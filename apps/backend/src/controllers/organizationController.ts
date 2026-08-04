@@ -223,7 +223,7 @@ export class OrganizationController {
       // 6. Create and send invitation to the workspace
       const invitation = await invitationService.createInvitation({
         email: ownerEmail.trim().toLowerCase(),
-        role: 'OWNER',
+        role: WorkspaceRole.OWNER,
         workspaceId: workspace.id,
         invitedBy: userId,
         orgId: organization.orgId,

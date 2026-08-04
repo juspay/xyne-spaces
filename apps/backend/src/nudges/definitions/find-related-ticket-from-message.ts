@@ -288,7 +288,7 @@ export const findRelatedTicketFromMessage: NudgeDefinition<
       return isEligibleMessage({ messageId, channelId, conversationId });
     },
   },
-  direction: { from: 'MESSAGE', to: 'TICKET' },
+  direction: { from: SurfaceAreaType.MESSAGE, to: SurfaceAreaType.TICKET },
 
   async buildContext(payload, activityContext, runtime) {
     const base = await buildMessageNudgeContext(payload, activityContext, runtime);

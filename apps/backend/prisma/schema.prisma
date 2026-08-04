@@ -815,7 +815,7 @@ model Workflow {
   /// Trigger discriminator for automations. `NO_OP` for everything else so the
   /// event router skips it. Indexed (eventType, status) for cheap "active
   /// workflows for event X" lookups.
-  eventType        WorkflowEventType @default(NO_OP)
+  eventType        String            @default("NO_OP")
   automationSeriesId String?
   scheduledAt      DateTime? // Do the deployment only after 12 AM
   createdAt        DateTime  @default(now())
@@ -852,7 +852,7 @@ model WorkflowExecution {
   createdAt                 DateTime @default(now())
   updatedAt                 DateTime @updatedAt
   ignoreDuration            Int      @default(0) // ~22 days max (PAUSED or Waiting for external input)
-  mode                      WorkflowExecutionMode @default(AUTOMATIC) // for agent step continuation control
+  mode                      String                @default("AUTOMATIC") // for agent step continuation control
   createdBy                 String?  // User ID of who created/triggered this execution
 
   // Relations
@@ -899,7 +899,7 @@ enum WorkflowMappingEntityType {
 /// entityId=automationSeriesId (stable across versions of the same automation).
 model WorkflowMapping {
   id           String                    @id @default(cuid())
-  entityType   WorkflowMappingEntityType
+  entityType   String
   entityId     String
   entitySecret String
 
@@ -1225,7 +1225,7 @@ model UserSession {
   refreshTokenExpiry  DateTime
   accessToken         String?       // Store the current access token
   accessTokenExpiry   DateTime?
-  status              SessionStatus @default(ACTIVE)
+  status              String        @default("ACTIVE")
   deviceInfo          String?       // JSON string containing device/browser info
   deviceId            String?       // Native mobile device identifier
   fcmToken            String?       // Stored as <platform>:<raw token>
@@ -1253,12 +1253,12 @@ model User {
   picture        String?      // Google profile picture URL
   authProvider   String       @default("GOOGLE")
   providerUserId String
-  status         UserStatus   @default(ACTIVE)
-  userType       UserType     @default(USER) // USER or BOT
+  status         String       @default("ACTIVE")
+  userType       String       @default("USER") // USER or BOT
   metadata       Json? // Flexible user metadata
   displayName    String?
   workspaceId    String
-  role           WorkspaceRole   @default(MEMBER)
+  role           String          @default("MEMBER")
   orgMemberId    String       // Links to org_members.memberId for organization membership
   leftAt         DateTime?
   createdAt      DateTime     @default(now())
@@ -1526,7 +1526,7 @@ model UserPresence {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id            String            @id @default(cuid())
   userId        String            @unique // One-to-one with User
-  status        UserPresenceStatus @default(OFFLINE)
+  status        String             @default("OFFLINE")
   lastActiveAt  DateTime          @default(now()) // @deprecated — use User.lastActiveAt
   lastSeenAt    DateTime          @default(now())
   isManual      Boolean           @default(false) // If user manually set status
@@ -1750,7 +1750,7 @@ model TeamIntelligenceIngestionBatchV2 {
   totalUsers      Int
   queuedUsers     Int                              @default(0)
   failedUsers     Int                              @default(0)
-  status          TeamIntelligenceBatchStatus      @default(RECEIVED)
+  status          String                           @default("RECEIVED")
   receivedAt      DateTime                         @default(now())
   queuedAt        DateTime?
   completedAt     DateTime?
@@ -1783,7 +1783,7 @@ model TeamIntelligenceUserIngestionV2 {
   contentUrl       String?
   contentSize      Int?
   contentChecksum  String?
-  processingStatus TeamIntelligenceUserIngestionStatus   @default(RECEIVED)
+  processingStatus String                                @default("RECEIVED")
   queueJobId       String?
   queuedAt         DateTime?
   startedAt        DateTime?
@@ -1818,7 +1818,7 @@ model TeamIntelligenceTeamSummaryV2 {
   contentUrl      String?
   contentSize     Int?
   contentChecksum String?
-  status          TeamIntelligenceBatchStatus   @default(RECEIVED)
+  status          String                        @default("RECEIVED")
   queueJobId      String?
   queuedAt        DateTime?
   startedAt       DateTime?
@@ -1851,7 +1851,7 @@ model TeamIntelligenceOrgSummaryV2 {
   contentUrl      String?
   contentSize     Int?
   contentChecksum String?
-  status          TeamIntelligenceBatchStatus   @default(RECEIVED)
+  status          String                        @default("RECEIVED")
   queueJobId      String?
   queuedAt        DateTime?
   startedAt       DateTime?
@@ -1880,7 +1880,7 @@ model Organization {
   createdBy   String   // User ID (no FK constraint)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
-  status      Status   @default(ACTIVE)
+  status      String   @default("ACTIVE")
   metadata    Json?
 
   // Relations
@@ -1936,7 +1936,7 @@ model WorkspaceOrganization {
   id           String      @id @default(cuid())
   orgId        String
   workspaceId  String
-  role         WorkspaceRole
+  role         String
   leftAt       DateTime?
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
@@ -1959,7 +1959,7 @@ model Workspace {
   name        String
   description String?
   createdBy   String
-  status      Status   @default(ACTIVE)
+  status      String   @default("ACTIVE")
   metadata    Json?
   workspaceType String?
   joinPolicy    String?
@@ -2044,7 +2044,7 @@ model Invitation {
   orgId        String?
   workspaceId  String?
   email        String
-  role         WorkspaceRole @default(MEMBER)
+  role         String        @default("MEMBER")
   invitedBy    String
   invitedAt    DateTime      @default(now())
   expiredAt    DateTime?     // Expiration date - 15 days from creation by default, or updated on revoke
@@ -3773,8 +3773,8 @@ model VespaInsertionLogs {
   id           String                @id @default(cuid())
   entityId     String
   entityType   String
-  type         VespaOperationType    // INSERT | UPDATE | DELETE | POST_INGEST_CLEAN
-  status       VespaInsertionStatus  @default(PENDING)
+  type         String                // INSERT | UPDATE | DELETE | POST_INGEST_CLEAN
+  status       String                @default("PENDING")
   namespace    String?
   cluster      String?
   errorMessage String?
@@ -4639,7 +4639,7 @@ model SessionRecordingFile {
   sessionId         String   @unique
   userId            String
   url               String?  // Full GCS URI: gs://bucket/path/to/file.json
-  status            SessionRecordingProcessStatus @default(PENDING)
+  status            String                        @default("PENDING")
   lastProcessedTurn Int?     // Last turn ID that was processed for SOP/fact extraction
 
   @@index([status])
@@ -4652,13 +4652,13 @@ model SurfaceLink {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id          String          @id @default(cuid())
 
-  sourceType  SurfaceAreaType
+  sourceType  String
   sourceId    String
 
-  targetType  SurfaceAreaType
+  targetType  String
   targetId    String
 
-  linkKind    SurfaceLinkKind
+  linkKind    String
   createdBy   String
   projectId   String
   createdAt   DateTime        @default(now())
@@ -4841,9 +4841,9 @@ model SavedUserConfiguration {
   id          String                  @id @default(cuid())
   userId      String
   name        String
-  contextType SavedConfigContextType
+  contextType String
   contextId   String
-  visibility  SavedConfigVisibility
+  visibility  String
   isStarred   Boolean                 @default(false)
   createdAt   DateTime
   updatedAt   DateTime
@@ -4861,7 +4861,7 @@ model SavedUserConfigurationValue {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id         String                  @id @default(cuid())
   configId   String
-  entityName SavedConfigEntityName
+  entityName String
   fieldName  String
   fieldValue String
   createdAt  DateTime
@@ -5218,7 +5218,7 @@ model Tag {
   configKey   String?
   tagCategory String
   tag         String
-  method      TagMethod
+  method      String
   reason      String?
   createdBy   String?
   updatedBy   String?

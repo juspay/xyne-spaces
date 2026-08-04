@@ -541,7 +541,7 @@ export class InvitationController {
       // Create invitation outside the transaction (sends email — non-DB side-effect)
       const invitation = await invitationService.createInvitation({
         email: normalizedOwnerEmail,
-        role: 'OWNER',
+        role: WorkspaceRole.OWNER,
         workspaceId: workspace.id,
         orgId: org.orgId,
         invitedBy,

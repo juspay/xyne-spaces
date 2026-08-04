@@ -25,7 +25,7 @@ export const forwardMessageLink: NudgeDefinition<
       return !!(messageId && originalMessageId);
     },
   },
-  direction: { from: 'MESSAGE', to: 'MESSAGE' },
+  direction: { from: SurfaceAreaType.MESSAGE, to: SurfaceAreaType.MESSAGE },
 
   async buildContext(
     _payload: ActivityEventNudgePayload,
@@ -38,7 +38,7 @@ export const forwardMessageLink: NudgeDefinition<
       source: {
         sourceId: runtime.messagePayload?.messageId ?? null,
         projectId: runtime.messagePayload?.projectId ?? null,
-        sourceType: 'MESSAGE',
+        sourceType: SurfaceAreaType.MESSAGE,
       },
       activityContext: EMPTY_ACTIVITY_CONTEXT,
     };

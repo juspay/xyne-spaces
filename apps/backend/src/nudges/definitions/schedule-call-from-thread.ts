@@ -171,7 +171,7 @@ export const scheduleCallFromThread: NudgeDefinition<
       return threadEvents.length >= 2;
     },
   },
-  direction: { from: 'MESSAGE', to: 'CALL' },
+  direction: { from: SurfaceAreaType.MESSAGE, to: SurfaceAreaType.CALL },
 
   async buildContext(payload, activityContext, runtime) {
     return buildMessageNudgeContext(payload, activityContext, runtime);

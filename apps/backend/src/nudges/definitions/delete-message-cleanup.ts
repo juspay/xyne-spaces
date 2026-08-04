@@ -22,7 +22,7 @@ export const deleteMessageCleanup: NudgeDefinition<
       return typeof meta.messageId === 'string' && meta.messageId.length > 0;
     },
   },
-  direction: { from: 'MESSAGE', to: 'MESSAGE' },
+  direction: { from: SurfaceAreaType.MESSAGE, to: SurfaceAreaType.MESSAGE },
 
   async buildContext(
     _payload: ActivityEventNudgePayload,
@@ -35,7 +35,7 @@ export const deleteMessageCleanup: NudgeDefinition<
       source: {
         sourceId: null,
         projectId: null,
-        sourceType: 'MESSAGE',
+        sourceType: SurfaceAreaType.MESSAGE,
       },
       activityContext: EMPTY_ACTIVITY_CONTEXT,
     };

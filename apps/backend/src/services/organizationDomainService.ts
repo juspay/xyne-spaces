@@ -1,8 +1,8 @@
 import { randomUUID } from 'crypto';
-import { PrismaClient, Status } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
 import { config } from '@/config/env';
-import { OrganizationDomainVerificationStatus } from '@xyne/shared';
+import { OrganizationDomainVerificationStatus, Status } from '@xyne/shared';
 
 const PERSONAL_EMAIL_DOMAINS = new Set([
   'gmail.com',
