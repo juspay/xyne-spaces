@@ -311,6 +311,7 @@ const envSchema = Joi.object({
   PULSE_ENABLED_CHANNELS: Joi.string().allow('').default(''),
   PULSE_API_URL: Joi.string().uri().default(''),
   PULSE_AUTHORIZATION: Joi.string().allow('').default(''),
+  DESK_BETA_CHANNELS: Joi.string().allow('').default(''),
   // Jira Configuration
   JUSPAY_JIRA_BASEURL: Joi.string().uri().default(''),
   JIRA_EULER_BOT_EMAIL: Joi.string().allow('').default(''),
@@ -815,6 +816,12 @@ export const config = {
       .filter(Boolean),
     apiUrl: envVars.PULSE_API_URL as string,
     authorization: envVars.PULSE_AUTHORIZATION as string,
+  },
+  desk: {
+    betaChannels: (envVars.DESK_BETA_CHANNELS as string)
+      .split(',')
+      .map((s: string) => s.trim())
+      .filter(Boolean),
   },
   jira: {
     baseUrl: envVars.JUSPAY_JIRA_BASEURL as string,
