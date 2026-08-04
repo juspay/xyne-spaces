@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
+import { OrgRole, WorkspaceRole } from '@xyne/shared';
 import { createHash } from 'crypto';
-import { OrgRole, WorkspaceRole } from '@prisma/client';
 // import { OAuth2Client } from 'google-auth-library';
 import { logger } from '../utils/logger';
 import { loggerContext, LogContext } from '@/utils/logger';

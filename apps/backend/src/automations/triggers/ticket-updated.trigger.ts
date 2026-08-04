@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { TicketPriority, TicketStatusV2 } from '@prisma/client';
+import { TicketPriority, TicketStatusV2 } from '@xyne/shared';
 import { BaseTrigger } from './base-trigger';
 import { TriggerCategory } from '../types/categories';
 import { eventRouter } from '../engine/event-router';

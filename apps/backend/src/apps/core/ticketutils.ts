@@ -4,9 +4,15 @@ import { findOrCreateConversation } from './conversationUtils';
 import { TicketRepository } from '@/database/repositories/ticketRepository';
 import { DatabaseClient } from '@/database/client';
 import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
-import { FormEntityType, MessageType, TicketPriority, VespaInsertionStatus, VespaOperationType } from '@prisma/client';
 import type { Prisma } from '@prisma/client';
-import { serializeTicketMd } from '@xyne/shared';
+import {
+  serializeTicketMd,
+  FormEntityType,
+  MessageType,
+  TicketPriority,
+  VespaInsertionStatus,
+  VespaOperationType,
+} from '@xyne/shared';
 import type { TicketCardSummary } from '@xyne/shared';
 import { TicketActionResponse, TicketEventType } from '../types';
 import { resolveSlackMentions } from '@/integrations/adapters/slack-webhook-tickets/utils/slackUserResolver';

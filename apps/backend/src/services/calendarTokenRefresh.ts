@@ -6,8 +6,8 @@
  * refreshes access tokens when needed and updates the stored copy.
  */
 
-import { AuthProvider } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
+import { AuthProvider } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import {
   getCalendarSourceType,

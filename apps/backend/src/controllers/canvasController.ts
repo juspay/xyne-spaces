@@ -1,8 +1,8 @@
 import { Request, Response } from 'express';
+import { AttachmentEntityType, ActivityClassification } from '@xyne/shared';
 import { z } from 'zod';
 import { uploadFiles } from '../services/fileUploadService.js';
 import { MessageAttachmentRepository } from '../database/repositories/messageAttachmentRepository.js';
-import { AttachmentEntityType } from '@prisma/client';
 import { logger } from '../utils/logger';
 import { canvasAuthService } from '../services/canvasAuthService.js';
 import { config } from '../config/env.js';
@@ -14,7 +14,6 @@ import { getGroupMembersForNotification } from '../utils/mentionUtils.js';
 import { getSlackRecipientEmails } from '../utils/notificationHelper.js';
 import { cleanupProxiedFile } from '../utils/attachmentUtils';
 import { v4 as uuidv4 } from 'uuid';
-import { ActivityClassification } from '@prisma/client';
 import {initializeYSweetDoc, syncToYSweet} from '../utils/ysweetUtils.js';
 import { convertMarkdownToBlockNote, convertBlockNoteToMarkdown, getCanvasUrl, getCanvasById } from '../services/canvasService.js';
 

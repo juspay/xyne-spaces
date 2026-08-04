@@ -5,8 +5,8 @@
  * Handles resolution, context building, persistence, and streaming.
  */
 
-import { MessageType } from '@prisma/client';
 import { MessageRepository } from '@/database/repositories/messageRepository';
+import { MessageType } from '@xyne/shared';
 import { ConversationRepository } from '@/database/repositories/conversationRepository';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { websocketService } from '@/services/websocketService';

@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
+import { ChannelRole } from '@xyne/shared';
 import { db } from '@/database/client';
-import { ChannelRole } from '@prisma/client';
 import { logger } from '@/utils/logger';
 import { buildCronPattern } from '@/utils/cronUtils';
 import { scheduledMessageService } from '@/services/scheduledMessageService';

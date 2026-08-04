@@ -1,4 +1,5 @@
-import { PrismaClient, PullRequests, PRStatus } from '@prisma/client';
+import { PrismaClient, PullRequests } from '@prisma/client';
+import { PRStatus } from '@xyne/shared';
 import { db } from '../client';
 import {logger} from '@/utils/logger';
 

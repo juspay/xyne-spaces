@@ -1,4 +1,5 @@
-import { PrismaClient, Collection, CollectionRole, IngestionStatus } from '@prisma/client';
+import { PrismaClient, Collection } from '@prisma/client';
+import { CollectionRole, IngestionStatus } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
 
 /**
@@ -195,7 +196,7 @@ export async function listAccessibleRootCollections(
     for (const row of rows) {
         const { role } = await resolveCollectionAccess(
             userId,
-            { ownerId: row.ownerId, isPrivate: row.isPrivate, permissions: row.permissions },
+            { ownerId: row.ownerId, isPrivate: row.isPrivate, permissions: row.permissions as Array<{ userId: string | null; userGroupId: string | null; role: CollectionRole }> },
             { userGroupIds }
         );
         if (!role) continue;
@@ -277,7 +278,7 @@ export async function expandCollectionTrees(
             name: file.name,
             itemType: 'file',
             fileId: file.fileId,
-            ingestionStatus: file.ingestionStatus,
+            ingestionStatus: file.ingestionStatus as IngestionStatus,
             createdAt: file.createdAt,
             updatedAt: file.updatedAt,
         });

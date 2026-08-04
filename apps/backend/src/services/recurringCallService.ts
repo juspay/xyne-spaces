@@ -1,7 +1,8 @@
 import rruleLib from 'rrule';
 const { RRule } = rruleLib;
 import { v4 as uuidv4 } from 'uuid';
-import { CallOrigin, CallStatus, CallType, RecurringCallSeriesStatus, type Prisma } from '@prisma/client';
+import { type Prisma } from '@prisma/client';
+import { CallOrigin, CallStatus, CallType, RecurringCallSeriesStatus } from '@xyne/shared';
 import { repositories } from '@/database/repositories';
 import { livekitService } from '@/services/liveKitService';
 import { logger } from '@/utils/logger';

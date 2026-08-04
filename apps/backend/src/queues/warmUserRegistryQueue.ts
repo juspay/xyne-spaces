@@ -12,7 +12,7 @@
  */
 
 import Bull from 'bull';
-import { UserStatus, UserType } from '@prisma/client';
+import { UserStatus, UserType } from '@xyne/shared';
 import { redisService } from '@/services/redisService';
 import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';

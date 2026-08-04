@@ -1,6 +1,5 @@
-import { Prisma, PrismaClient, ProjectType } from '@prisma/client';
-import { ChannelRole } from '@prisma/client';
-import { sanitizeProjectCode } from '@xyne/shared';
+import { Prisma, PrismaClient } from '@prisma/client';
+import { sanitizeProjectCode, ProjectType, ChannelRole } from '@xyne/shared';
 import { repositories } from '@/database/repositories';
 
 type PrismaClientLike = PrismaClient | Prisma.TransactionClient;
@@ -84,7 +83,7 @@ export async function ensureGeneralChannelForWorkspace(
   });
 
   if (userId) {
-    await repositories.channelParticipants.addParticipant(channel.id, userId, role);
+    await repositories.channelParticipants.addParticipant(channel.id, userId, role as ChannelRole);
   }
 
   return {
@@ -103,7 +102,7 @@ export async function ensureUserInGeneralChannel(
   db: PrismaClientLike,
   workspaceId: string,
   userId: string,
-  role: ChannelRole = 'MEMBER',
+  role: ChannelRole = ChannelRole.MEMBER,
 ): Promise<string | null> {
   const generalChannel = await db.channel.findFirst({
     where: {
