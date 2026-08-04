@@ -13,6 +13,7 @@ import crypto from 'crypto';
 import { hashPassword } from '../utils/passwordUtils';
 import { organizationDomainService } from './organizationDomainService';
 import { ChannelUserStatusRepository } from '@/database/repositories/channelUserStatusRepository';
+import { aiProvisioningService } from './aiProvisioningService';
 
 type TxClient = Parameters<Parameters<PrismaClient['$transaction']>[0]>[0];
 
@@ -331,7 +332,7 @@ export class InvitationService {
     return result;
   }
 
-  private async ensureChannelGuestState(channelId: string, userId: string, tx: TxClient): Promise<void> {
+  private async ensureChannelGuestState(channelId: string, userId: string, workspaceId: string, tx: TxClient): Promise<void> {
     await tx.channelParticipant.upsert({
       where: {
         channelId_userId: {
@@ -344,6 +345,7 @@ export class InvitationService {
         channelId,
         userId,
         role: ChannelRole.MEMBER,
+        workspaceId,
       },
     });
 
@@ -532,7 +534,7 @@ export class InvitationService {
         throw new Error('Guest invitation target channel is archived');
       }
 
-      await this.ensureChannelGuestState(entityId, userId, tx);
+      await this.ensureChannelGuestState(entityId, userId, workspaceId, tx);
       return `/${workspaceId}/chat/dir/${entityId}`;
     }
 
@@ -550,6 +552,7 @@ export class InvitationService {
           canvasId: entityId,
           userId,
           role: CanvasRole.VIEWER,
+          workspaceId,
         },
       });
       return `/${workspaceId}/chat/canvas/${entityId}`;
@@ -583,7 +586,7 @@ export class InvitationService {
         throw new Error('Guest invitation target channel does not exist in this project');
       }
 
-      await this.ensureChannelGuestState(targetChannelId, userId, tx);
+      await this.ensureChannelGuestState(targetChannelId, userId, workspaceId, tx);
       return `/${workspaceId}/chat/dir/${targetChannelId}`;
     }
 
@@ -762,12 +765,14 @@ export class InvitationService {
       }
 
       // Fetch existing orgMember by email
-      let orgMember = await this.prisma.orgMember.findUnique({
+      const existingOrgMember = await this.prisma.orgMember.findUnique({
         where: { email: userData.email.toLowerCase() },
-        select: { memberId: true }
+        select: { memberId: true, role: true }
       });
 
-      if (!orgMember) {
+      let orgMember: { memberId: string };
+
+      if (!existingOrgMember) {
         if (!resolvedOrgId) {
           throw new Error(`orgMember not found for email ${userData.email}. User must be invited to the organization first.`);
         }
@@ -781,8 +786,9 @@ export class InvitationService {
           select: { memberId: true },
         });
       } else if (resolvedOrgId) {
+        const wasCommunityMember = existingOrgMember.role === 'COMMUNITY_MEMBER';
         orgMember = await this.prisma.orgMember.update({
-          where: { memberId: orgMember.memberId },
+          where: { memberId: existingOrgMember.memberId },
           data: {
             leftAt: null,
             orgId: resolvedOrgId,
@@ -790,6 +796,12 @@ export class InvitationService {
           },
           select: { memberId: true },
         });
+
+        if (wasCommunityMember) {
+          await aiProvisioningService.upgradeCommunityToEnterpriseBudget(orgMember.memberId);
+        }
+      } else {
+        orgMember = { memberId: existingOrgMember.memberId };
       }
 
       // Create new user in the workspace
@@ -846,6 +858,16 @@ export class InvitationService {
     logger.info(`[InvitationService] Permission grants completed for ${invitation.role} user ${userData.email}`);
 
     logger.info(`[InvitationService] User ${userData.email} accepted invitation to workspace ${invitation.workspaceId}`);
+
+    try {
+      await aiProvisioningService.enqueueUserSync(newWorkspaceUser.id);
+    } catch (error) {
+      logger.error('[InvitationService] Failed to enqueue AI user provisioning', {
+        userId: newWorkspaceUser.id,
+        workspaceId: invitation.workspaceId,
+        error,
+      });
+    }
 
     return { user: newWorkspaceUser, redirectPath };
   }

@@ -196,7 +196,7 @@ export class VespaWorker {
 
 			const handlers: Record<VespaJobType, () => Promise<void>> = {
 				feed: () => this.handleFeed(schema, mappedData as InsertDocument),
-				update: () => this.handleUpdate(docId, schema, mappedData as InsertDocument),
+				update: () => this.handleUpdate(docId, schema, mappedData as InsertDocument, job.data.create),
 				delete: () => this.handleDelete(schema, docId),
 			}
 			const handler = handlers[jobType];
@@ -237,9 +237,16 @@ export class VespaWorker {
 		docId: string,
 		schema: VespaSchema,
 		data: Partial<InsertDocument>,
+		create?: boolean,
 	): Promise<void> {
 		logger.info(`[Vespa-Worker]: queue ${schema} update ${schema}/${docId}`);
-		const [result] = await vespaClient.crudService.update([{ docId, fields: data }], schema);
+		// create=true upserts a missing doc (used for user docs); undefined keeps the
+		// default partial-update behaviour for every other schema.
+		const [result] = await vespaClient.crudService.update(
+			[{ docId, fields: data }],
+			schema,
+			create ? { create: true } : undefined,
+		);
 		if (!result.success) {
 			throw new Error(`Failed to update ${docId}: ${result.error}`);
 		}

@@ -48,6 +48,8 @@ import {
 import { StageFormModal } from '../../components/Tickets/StageFormModal/StageFormModal';
 import { useMachine } from '@xstate/react';
 import { ticketFiltersMachine } from '../../machines/ticketFiltersMachine';
+import { setBoardNavParams } from '../../components/Tickets/boardNavStore';
+import type { KanbanTicketsPageBaseArgs } from './useKanbanTicketsPage';
 import type { TicketFilters } from '../../components/Tickets/TicketFilters/types';
 import { KanbanColumns } from '../../components/Tickets/KanbanColumns/KanbanColumns';
 import { ViewBoardPicker } from '../../components/Project/ViewBoardPicker/ViewBoardPicker';
@@ -1613,6 +1615,39 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     isWorkspaceView ||
     (!filteredSingleBoardId && ['project', 'my-tickets'].includes(viewMode)) ||
     (channelId && viewMode === 'project' && channelViewType !== 'stage');
+
+  const navBaseArgs = useMemo<KanbanTicketsPageBaseArgs>(
+    () => ({
+      ...ticketsQueryParams,
+      searchTerm,
+      filters: deferredFilters,
+      formEntityValueFieldIds: fevFieldIds,
+      dynamicFieldVespaTokens,
+      dynamicFieldDateRanges,
+      zeroOnlyDynamicFieldIds,
+      showOverdueOnly,
+      groupBy,
+    }),
+    [
+      ticketsQueryParams,
+      searchTerm,
+      deferredFilters,
+      fevFieldIds,
+      dynamicFieldVespaTokens,
+      dynamicFieldDateRanges,
+      zeroOnlyDynamicFieldIds,
+      showOverdueOnly,
+      groupBy,
+    ],
+  );
+  useEffect(() => {
+    if (!isKanbanLayout || !channelId) return;
+    setBoardNavParams({
+      channelId,
+      baseArgs: navBaseArgs,
+      columnType: shouldUseStatusColumns ? 'status' : 'stage',
+    });
+  }, [isKanbanLayout, channelId, navBaseArgs, shouldUseStatusColumns]);
 
   const kanbanColumnQueryKey = useMemo(
     () =>

@@ -223,10 +223,14 @@ class VespaClient {
 
   async updateDocument(
     updatedFields: Record<string, any>,
-    options: VespaConfigValues & { docId: string },
+    options: VespaConfigValues & { docId: string; create?: boolean },
   ): Promise<void> {
-    const { docId, namespace, schema } = options;
-    const url = `${this.feedEndpoint}/document/v1/${namespace}/${schema}/docid/${docId}`;
+    const { docId, namespace, schema, create } = options;
+    // create=true upserts: Vespa builds the doc from these assign ops when it
+    // doesn't exist yet, instead of silently no-oping the partial update.
+    const url = `${this.feedEndpoint}/document/v1/${namespace}/${schema}/docid/${docId}${
+      create ? '?create=true' : ''
+    }`;
 
     try {
       // Clean updated fields to remove Unicode replacement characters
@@ -317,7 +321,7 @@ class VespaClient {
 
   async updateBatch(
     updates: { docId: string; fields: Record<string, any> }[],
-    options: VespaConfigValues,
+    options: VespaConfigValues & { create?: boolean },
   ): Promise<BatchResult[]> {
     this.logger.info(`[BATCH UPDATE] Starting batch update of ${updates.length} documents with concurrency limit`);
     const startTime = Date.now();

@@ -1,8 +1,6 @@
 import { Router } from 'express';
 import { TicketDuplicateBackfillController } from '@/controllers/ticketDuplicateBackfillController';
-import { authMiddleware } from '@/middleware/auth';
-import { authorize } from '@/middleware/authorize';
-import { AccessType } from '@prisma/client';
+import { backfillAdminAuth } from '@/middleware/backfillAdminAuth';
 
 const router = Router();
 
@@ -11,8 +9,7 @@ const router = Router();
  */
 router.post(
   '/',
-  authMiddleware.authenticate,
-  authorize('TICKETS', AccessType.ADMIN),
+  ...backfillAdminAuth,
   TicketDuplicateBackfillController.triggerBackfill
 );
 

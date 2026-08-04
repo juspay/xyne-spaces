@@ -181,6 +181,9 @@ function mapVespaCallResultToCall(result: DisplaySearchResult, workspaceId: stri
         )
         .filter((entry): entry is { userId: string; hasJoined: boolean } => entry !== null),
     ),
+    summaryTemplateId: null,
+    labels: [],
+    markedItems: [],
     participants: Array.from({ length: participantCount }, (_, index) => {
       const userId = participantUserIds[index] || '';
       const displayName = stripSearchHighlight(participantNames[index]);

@@ -48,9 +48,18 @@ Any of these work — the scripts detect what is available:
 - **Docker Engine** with the Compose plugin (Linux)
 - **Podman** with `podman-compose`
 
-Allocate at least **8 GB of memory** to the container runtime. The infrastructure
-stack runs Postgres (×3), Redis, LiveKit, MinIO, Y-Sweet, Zero, and an OpenTelemetry
-collector concurrently.
+**Start it before you run anything.** Installed is not the same as running — Docker
+Desktop and OrbStack must actually be launched, and the daemon has to be up on Linux.
+`pnpm run services` stops immediately if it cannot find a live runtime:
+
+```
+❌ No container runtime available. Please start Docker/OrbStack or install Podman.
+```
+
+Allocate at least **8 GB of memory** (and ~20 GB of disk) to the container runtime. The
+infrastructure stack runs Postgres (×3), Redis, LiveKit, MinIO, Y-Sweet, Zero, Vespa,
+and an OpenTelemetry collector concurrently, and Vespa downloads an embedding model on
+its first run.
 
 
 ## Platform notes

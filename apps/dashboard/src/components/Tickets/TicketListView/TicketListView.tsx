@@ -76,6 +76,10 @@ export interface SelectableRow {
   createdAt: number;
   channelId: string;
   conversationId: string;
+  stageName?: string | null;
+  priority?: TicketListItem['priority'];
+  assignedTo?: string | null;
+  userGroupId?: string | null;
 }
 
 export const TicketListView = function TicketListView({
@@ -465,7 +469,7 @@ export const TicketListView = function TicketListView({
             {...(onToggleSelect
               ? {
                   isSelected: selectedIds?.has(row.id) ?? false,
-                  onToggleSelect: () => {
+                  onToggleSelect: (): void => {
                     const emailReads = row.emailReads as
                       | ReadonlyArray<{ userId: string; lastReadEmailAt: number }>
                       | undefined;
@@ -477,6 +481,10 @@ export const TicketListView = function TicketListView({
                       createdAt: row.createdAt ?? 0,
                       channelId: row.channelId ?? '',
                       conversationId: row.conversationId ?? '',
+                      stageName: row.stageName,
+                      priority: row.priority,
+                      assignedTo: row.assignedTo,
+                      userGroupId: row.userGroupId,
                       ...(emailReads ? { emailReads } : {}),
                     });
                   },
@@ -503,6 +511,10 @@ export const TicketListView = function TicketListView({
       createdAt: t.createdAt ?? 0,
       channelId: t.channelId ?? '',
       conversationId: t.conversationId ?? '',
+      stageName: t.stageName,
+      priority: t.priority,
+      assignedTo: t.assignedTo,
+      userGroupId: t.userGroupId,
     };
     const emailReads = t.emailReads as
       | ReadonlyArray<{ userId: string; lastReadEmailAt: number }>
@@ -530,14 +542,14 @@ export const TicketListView = function TicketListView({
     { label: 'None', run: () => onToggleSelectAll?.(pageRows, false) },
     {
       label: 'Read',
-      run: () => {
+      run: (): void => {
         onToggleSelectAll?.(pageRows, false);
         onToggleSelectAll?.(readRows, true);
       },
     },
     {
       label: 'Unread',
-      run: () => {
+      run: (): void => {
         onToggleSelectAll?.(pageRows, false);
         onToggleSelectAll?.(unreadRows, true);
       },
@@ -602,30 +614,42 @@ export const TicketListView = function TicketListView({
         ) : (
           <span />
         )}
-        <div data-slot='ticket-list-pagination' className='flex items-center gap-2'>
-          <span className='text-sm text-muted-foreground px-1'>{rangeLabel}</span>
-          <button
-            type='button'
-            onClick={goToPrevPage}
-            disabled={pageIndex === 0}
-            aria-label='Previous page'
-            data-track-category='Support'
-            data-track-name='PaginationPrev'
-            className='p-1.5 rounded-full border border-border hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed'
-          >
-            <ChevronLeft size={14} />
-          </button>
-          <button
-            type='button'
-            onClick={goToNextPage}
-            disabled={isLastPage}
-            aria-label='Next page'
-            data-track-category='Support'
-            data-track-name='PaginationNext'
-            className='p-1.5 rounded-full border border-border hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed'
-          >
-            <ChevronRight size={14} />
-          </button>
+        <div className='flex flex-col items-end gap-1'>
+          <div data-slot='ticket-list-pagination' className='flex items-center gap-2'>
+            <span className='text-sm text-muted-foreground px-1'>{rangeLabel}</span>
+            <button
+              type='button'
+              onClick={goToPrevPage}
+              disabled={pageIndex === 0}
+              aria-label='Previous page'
+              data-track-category='Support'
+              data-track-name='PaginationPrev'
+              className='p-1.5 rounded-full border border-border hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed'
+            >
+              <ChevronLeft size={14} />
+            </button>
+            <button
+              type='button'
+              onClick={goToNextPage}
+              disabled={isLastPage}
+              aria-label='Next page'
+              data-track-category='Support'
+              data-track-name='PaginationNext'
+              className='p-1.5 rounded-full border border-border hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed'
+            >
+              <ChevronRight size={14} />
+            </button>
+          </div>
+          <div className='flex items-center gap-3' aria-hidden='true'>
+            <span className='w-[100px]' />
+            <span className='w-5' />
+            <span className='w-[118px] text-right text-[10px] font-medium uppercase tracking-wide text-muted-foreground'>
+              Created at
+            </span>
+            <span className='w-[120px] text-right text-[10px] font-medium uppercase tracking-wide text-muted-foreground'>
+              Latest email
+            </span>
+          </div>
         </div>
       </div>
       <div className='flex-1 min-h-0'>{list}</div>

@@ -92,6 +92,7 @@ const EmailReceivedConfigSchema = z.object({
 export const EmailReceivedOutputSchema = TicketContextSchema.partial().extend({
   email: z.object({
     id: z.string(),
+    url: z.string().url().nullable(),
     subject: z.string(),
     body: z.string(),
     from: z.string(),

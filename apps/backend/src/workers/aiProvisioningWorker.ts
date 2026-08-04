@@ -38,6 +38,7 @@ interface OrgLiteLLMServiceAccountCredentials {
   keyAlias?: string;
   providerUrl: string;
   defaultModel?: string | null;
+  defaultModels?: string[];
   serviceAccountName?: string;
   serviceAccountAlias?: string;
   expires?: string;
@@ -51,6 +52,7 @@ const ORG_SERVICE_ACCOUNT_PURPOSES = [
   OrgLLMServiceAccountPurpose.ASK_AI,
   OrgLLMServiceAccountPurpose.CALL_TRANSCRIPT,
   OrgLLMServiceAccountPurpose.ACTIVITY_CLASSIFICATION,
+  OrgLLMServiceAccountPurpose.CLAW_ORG_KEY,
 ] as const;
 
 type AIProvisioningUserPayload = ClawSyncUserPayload & {
@@ -173,6 +175,12 @@ class AIProvisioningWorker {
         await this.provisionWorkspace(subjectId);
         return;
       case AIProvisioningSubjectType.USER:
+        if (!config.aiProvisioning.enableUserProvisioning) {
+          logger.info('[AI-PROVISIONING-WORKER] User provisioning is disabled, skipping', {
+            subjectId,
+          });
+          return;
+        }
         await this.provisionUser(subjectId);
         return;
       default:
@@ -387,6 +395,18 @@ class AIProvisioningWorker {
       serviceAccountAlias: serviceAccount.alias,
       expires: key.expires,
     });
+
+    if (purpose === OrgLLMServiceAccountPurpose.CLAW_ORG_KEY) {
+      await litellmProvisioningClient.storeOrgKey({
+        orgId: orgPayload.spacesOrgId,
+        key: key.key,
+        teamId: litellmTeamId,
+        tokenId: key.tokenId,
+        keyName: key.keyName,
+        keyAlias: key.keyAlias,
+        expires: key.expires,
+      });
+    }
   }
 
   private buildOrgServiceAccountIdentity(
@@ -461,7 +481,8 @@ class AIProvisioningWorker {
       keyName,
       keyAlias,
       providerUrl: config.litellm.baseUrl,
-      defaultModel: null,
+      defaultModel: config.aiProvisioning.orgDefaultModels[0] ?? null,
+      defaultModels: config.aiProvisioning.orgDefaultModels,
       serviceAccountName,
       serviceAccountAlias,
       expires,

@@ -9,6 +9,7 @@ matches what you are doing.
 | ---------- | ----- |
 | Check I have the right tooling | [Prerequisites](prerequisites.md) |
 | Get a full local environment running | [Local Development](local-development.md) |
+| Make the AI features actually respond | [AI Providers](ai-providers.md) |
 | Understand what each background service does | [Services](services.md) |
 | Fix something that broke | [Troubleshooting](troubleshooting.md) |
 

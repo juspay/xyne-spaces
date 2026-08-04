@@ -39,7 +39,7 @@ export const DeskMailboxSidebar = ({
                 'flex items-center gap-3 w-full h-9 rounded-[10px] px-3 border border-transparent text-left text-sm font-medium tracking-[-0.14px] transition-colors',
                 active
                   ? 'text-sidebar-accent-foreground bg-sidebar-accent border-sidebar-border'
-                  : 'text-sidebar-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent hover:border-sidebar-border',
+                  : 'text-sidebar-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent',
               )}
               data-track-category='Support'
               data-track-name='SelectMailboxFolder'

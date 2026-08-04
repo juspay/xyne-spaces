@@ -237,7 +237,7 @@ const CanvasPanel = (): ReactElement => {
       <div className='w-full h-[52px] shrink-0'>
         <AppNavigator />
       </div>
-      <div className='flex-1 min-h-0 flex flex-col overflow-hidden border-t border-border'>
+      <div className='flex-1 min-h-0 flex flex-col overflow-hidden border-t border-sidebar-border-muted'>
         {/* Header — the frame is a bare title row; the list controls live behind
             the overflow menu so the chrome stays as quiet as the design. */}
         <div className='shrink-0 px-3 pt-3'>
@@ -249,7 +249,7 @@ const CanvasPanel = (): ReactElement => {
               <Tooltip content='New canvas' side='bottom' delayDuration={300}>
                 <button
                   type='button'
-                  className='size-7 flex items-center justify-center rounded-[10px] border border-transparent text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:border-sidebar-border hover:text-sidebar-accent-foreground disabled:opacity-40'
+                  className='size-7 flex items-center justify-center rounded-[10px] border border-transparent text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground disabled:opacity-40'
                   onClick={() => void handleCreateCanvas()}
                   disabled={isCreatingCanvas}
                   aria-label='New Canvas'
@@ -267,7 +267,7 @@ const CanvasPanel = (): ReactElement => {
                 <DropdownMenuTrigger asChild>
                   <button
                     type='button'
-                    className='size-7 flex items-center justify-center rounded-[10px] border border-transparent text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:border-sidebar-border hover:text-sidebar-accent-foreground'
+                    className='size-7 flex items-center justify-center rounded-[10px] border border-transparent text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
                     aria-label='Canvas list options'
                     data-track-category='CANVAS'
                     data-track-name='CANVAS_LIST_OPTIONS_MENU'

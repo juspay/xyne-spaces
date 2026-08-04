@@ -9,7 +9,7 @@ import { ticketAssignmentService, primaryUserIdOf } from '@/services/ticketAssig
 import { syncUserWorkload } from '@/utils/workloadUtils';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { activityService } from '@/services/activity/activityService';
-import { ActivityClassification, ActivityType } from '@prisma/client';
+import { ActivityClassification, ActivityType, EmailType } from '@prisma/client';
 import type { BoardMetadata } from '@xyne/shared';
 import { emitTicketUpdated } from '@/automations/triggers/ticket-updated.trigger';
 import { runWithContext } from '@/database/tenant/context';
@@ -95,7 +95,7 @@ class EmailClassificationWorker {
 
     const emailRecord = await prisma.email.findUnique({
       where: { id: emailId },
-      select: { subject: true, body: true, from: true, to: true, cc: true, bcc: true, replyTo: true, createdAt: true },
+      select: { subject: true, body: true, from: true, to: true, cc: true, bcc: true, replyTo: true, createdAt: true, type: true },
     });
     if (!emailRecord) {
       logger.warn(`[EMAIL-CLASSIFICATION-WORKER] Email ${emailId} not found, skipping classification for ticket ${ticketId}`);
@@ -200,7 +200,7 @@ class EmailClassificationWorker {
     let newAssignedTo: string | undefined;
     let assignmentSucceeded = false;
 
-    if (shouldAssignPerson) {
+    if (shouldAssignPerson && emailRecord.type !== EmailType.COMPOSE) {
       try {
         const boardRow = await prisma.board.findUnique({
           where: { id: ticket.boardId! },

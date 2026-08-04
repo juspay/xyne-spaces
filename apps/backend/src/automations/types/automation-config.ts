@@ -3,6 +3,21 @@ import type { TriggerType } from './trigger-types';
 import type { StepType } from './step-types';
 import { ControlFlowStepType } from './known-types';
 import { ConditionOperator, ConditionOperatorSchema } from './operators';
+import { TAG_FORMAT_REGEX } from '@xyne/shared';
+
+function isValidHasTagValue(value: unknown): boolean {
+  if (typeof value !== 'string') return false;
+  const firstColon = value.indexOf(':');
+  const secondColon = value.indexOf(':', firstColon + 1);
+  if (firstColon === -1 || secondColon === -1) return false;
+  const category = value.slice(0, firstColon);
+  const match = value.slice(firstColon + 1, secondColon);
+  const tags = value.slice(secondColon + 1).split(',').filter(Boolean);
+  if (!category || !TAG_FORMAT_REGEX.test(category)) return false;
+  if (match !== 'any' && match !== 'all') return false;
+  if (tags.length === 0) return false;
+  return tags.every(t => TAG_FORMAT_REGEX.test(t));
+}
 
 export {
   VARIABLE_REF_REGEX,
@@ -50,6 +65,14 @@ export const LeafConditionSchema: z.ZodType<LeafCondition> = z.object({
   variable: variableRefStringSchema,
   operator: ConditionOperatorSchema,
   value: z.unknown().optional(),
+}).superRefine((val, ctx) => {
+  if (val.operator === ConditionOperator.HAS_TAG && !isValidHasTagValue(val.value)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['value'],
+      message: 'has_tag value must be "category:any|all:tag1,tag2,..." with valid tag names',
+    });
+  }
 });
 
 export const ConditionSchema: z.ZodType<Condition> = z.lazy(() =>

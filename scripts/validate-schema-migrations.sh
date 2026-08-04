@@ -121,17 +121,58 @@ get_migration_content() {
     git show ":$migration_file" 2>/dev/null || cat "$migration_file" 2>/dev/null || echo ""
 }
 
+# Get schema content from the index so validation matches the staged diff.
+# Falls back to the working tree for callers using an unstaged schema fixture.
+get_schema_content() {
+    local schema_file="$1"
+    git show ":$schema_file" 2>/dev/null || cat "$schema_file" 2>/dev/null || echo ""
+}
+
+# Resolve a Prisma model's mapped SQL table name, if it has an @@map annotation.
+# Arguments: $1 = schema_file, $2 = model_name
+get_mapped_model_name() {
+    local schema_file="$1"
+    local model_name="$2"
+
+    get_schema_content "$schema_file" | awk -v model_name="$model_name" '
+        $1 == "model" && $2 == model_name { in_model=1; next }
+        in_model && /@@map[[:space:]]*\("[^"]+"\)/ {
+            mapped_name=$0
+            sub(/^.*@@map[[:space:]]*\("/, "", mapped_name)
+            sub(/"\).*$/, "", mapped_name)
+            print mapped_name
+            exit
+        }
+        in_model && /^[[:space:]]*}/ { exit }
+    '
+}
+
 # Check if a model/enum name exists in migration files
+# For models with @@map, also check the mapped SQL table name.
+# Arguments: $1 = identifier, $2 = schema_file, $3 = definition_type, remaining = migration files
 # Returns: 0 if found, 1 if not found
 identifier_in_migrations() {
     local identifier="$1"
-    shift
+    local schema_file="$2"
+    local definition_type="$3"
+    shift 3
     local migration_files=("$@")
+    local mapped_identifier=""
+
+    if [ "$definition_type" = "model" ]; then
+        mapped_identifier=$(get_mapped_model_name "$schema_file" "$identifier")
+    fi
 
     for migration_file in "${migration_files[@]}"; do
         # Check if migration file contains the identifier (case-insensitive)
         # Use get_migration_content to handle both staged and unstaged files
         if get_migration_content "$migration_file" | grep -qi "\b${identifier}\b"; then
+            return 0
+        fi
+
+        # Prisma migration SQL uses the mapped table name rather than the model name.
+        if [ -n "$mapped_identifier" ] && \
+            get_migration_content "$migration_file" | grep -qiF -- "$mapped_identifier"; then
             return 0
         fi
     done
@@ -267,6 +308,7 @@ validate_prisma_zero_sync() {
 validate_schema_migrations() {
     local found_schema_change=false
     local all_new_models=()
+    local model_schema_files=()
     local all_new_enums=()
     local all_staged_migrations=()
     local schema_to_migrations_map=()
@@ -310,7 +352,10 @@ validate_schema_migrations() {
         # Store results
         if [ -n "$new_models" ]; then
             while IFS= read -r model; do
-                [ -n "$model" ] && all_new_models+=("$model")
+                if [ -n "$model" ]; then
+                    all_new_models+=("$model")
+                    model_schema_files+=("$schema_file")
+                fi
             done <<< "$new_models"
         fi
 
@@ -352,8 +397,10 @@ validate_schema_migrations() {
 
     # Validate new models
     local missing_models=()
-    for model in "${all_new_models[@]}"; do
-        if ! identifier_in_migrations "$model" "${all_staged_migrations[@]}"; then
+    for i in "${!all_new_models[@]}"; do
+        local model="${all_new_models[$i]}"
+        local model_schema="${model_schema_files[$i]}"
+        if ! identifier_in_migrations "$model" "$model_schema" "model" "${all_staged_migrations[@]}"; then
             missing_models+=("$model")
         fi
     done
@@ -361,7 +408,7 @@ validate_schema_migrations() {
     # Validate new enums
     local missing_enums=()
     for enum in "${all_new_enums[@]}"; do
-        if ! identifier_in_migrations "$enum" "${all_staged_migrations[@]}"; then
+        if ! identifier_in_migrations "$enum" "" "enum" "${all_staged_migrations[@]}"; then
             missing_enums+=("$enum")
         fi
     done

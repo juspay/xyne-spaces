@@ -1,0 +1,235 @@
+# syntax=docker/dockerfile:1
+# =============================================================================
+# xyne-dev-infra — Single supervisord image for local development.
+#
+# Groups many lightweight services into one image so that a feature-selected
+# subset can be launched in a single container via supervisord.
+# Heavy / special-runtime services (transcription-agent, livekit-egress,
+# vespa) stay as their own containers — see docker-compose.local.yml.
+#
+# Build:
+#   docker build -f docker/Dockerfile.dev-infra -t xyne-dev-infra .
+# =============================================================================
+
+# ---- Multi-stage: extract binaries from existing Docker images --------------
+FROM ghcr.io/xynehq/y-sweet:sha-dceb9d1 AS ysweet-src
+RUN find / -name "y-sweet" -type f -executable 2>/dev/null | head -1 \
+      | xargs -I{} cp {} /tmp/y-sweet
+
+FROM ghcr.io/juspay/superposition-demo:latest AS superposition-src
+RUN cp /app/superposition /tmp/superposition
+
+FROM mirror.gcr.io/rocicorp/zero:1.6.0 AS zero-src
+RUN cp /usr/local/bin/litestream /tmp/litestream && \
+    cp /usr/local/bin/litestream-v5 /tmp/litestream-v5 && \
+    cp /etc/litestream.yml /tmp/litestream.yml
+
+# ---- Main image -------------------------------------------------------------
+FROM ubuntu:22.04
+
+ARG TARGETARCH
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=UTC
+
+# ---------------------------------------------------------------------------
+# 1. System packages + supervisord
+# ---------------------------------------------------------------------------
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl wget ca-certificates gnupg lsb-release \
+    supervisor \
+    libc6 \
+    && rm -rf /var/lib/apt/lists/*
+
+# ---------------------------------------------------------------------------
+# 1b. Download helper
+# ---------------------------------------------------------------------------
+# Remote downloads are the flakiest part of this build — a single dropped
+# connection to GitHub's CDN fifteen minutes in fails the whole image:
+#
+#   curl: (56) OpenSSL SSL_read: unexpected eof while reading, errno 32
+#
+# `fetch` retries transient failures, including a mid-stream EOF like the above
+# (plain --retry ignores those; --retry-all-errors is what covers them).
+#
+# It writes to a file rather than stdout on purpose. Piping a download straight
+# into `tar` cannot be made safe by retrying: by the time the stream breaks the
+# decompressor has already consumed a truncated prefix, and curl starting over
+# just appends a second copy. Download first, extract second.
+RUN printf '%s\n' \
+      '#!/bin/sh' \
+      '# usage: fetch <url> <output-path>' \
+      'set -eu' \
+      'curl -fL --retry 5 --retry-delay 2 --retry-all-errors \' \
+      '     --connect-timeout 20 --max-time 900 --no-progress-meter \' \
+      '     -o "$2" "$1"' \
+    > /usr/local/bin/fetch \
+    && chmod +x /usr/local/bin/fetch
+
+# ---------------------------------------------------------------------------
+# 2. PostgreSQL 16  (one instance, multiple databases — see entrypoint)
+# ---------------------------------------------------------------------------
+RUN install -d /usr/share/postgresql-common/pgdg && \
+    fetch https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+      /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc && \
+    echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] \
+      https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+      > /etc/apt/sources.list.d/pgdg.list && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends postgresql-16 && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN install -d -o postgres -g postgres /var/lib/postgresql/data && \
+    chmod 700 /var/lib/postgresql/data
+
+# ---------------------------------------------------------------------------
+# 3. Redis 7
+# ---------------------------------------------------------------------------
+RUN fetch https://packages.redis.io/gpg /tmp/redis.gpg && \
+    gpg --dearmor -o /usr/share/keyrings/redis-archive-keyring.gpg < /tmp/redis.gpg && \
+    rm -f /tmp/redis.gpg && \
+    echo "deb [signed-by=/usr/share/keyrings/redis-archive-keyring.gpg] https://packages.redis.io/deb $(lsb_release -cs) main" \
+      > /etc/apt/sources.list.d/redis.list && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends redis && \
+    rm -rf /var/lib/apt/lists/*
+
+# ---------------------------------------------------------------------------
+# 4. Node.js 20  (needed by zero-cache)
+# ---------------------------------------------------------------------------
+RUN fetch https://deb.nodesource.com/setup_22.x /tmp/nodesource_setup.sh && \
+    bash /tmp/nodesource_setup.sh && \
+    rm -f /tmp/nodesource_setup.sh && \
+    apt-get install -y --no-install-recommends nodejs && \
+    rm -rf /var/lib/apt/lists/*
+
+# ---------------------------------------------------------------------------
+# 5. Zero-cache  (npm package @rocicorp/zero)
+# ---------------------------------------------------------------------------
+RUN npm install -g @rocicorp/zero@1.6.1 || \
+    echo "WARN: zero-cache npm install failed — zero-cache program will not start"
+
+# Litestream (zero-patched fork, required by zero-cache for replica restore)
+COPY --from=zero-src /tmp/litestream /usr/local/bin/litestream
+COPY --from=zero-src /tmp/litestream-v5 /usr/local/bin/litestream-v5
+COPY --from=zero-src /tmp/litestream.yml /etc/litestream.yml
+RUN chmod +x /usr/local/bin/litestream /usr/local/bin/litestream-v5
+
+# ---------------------------------------------------------------------------
+# 6. MinIO  (single binary download)
+# ---------------------------------------------------------------------------
+RUN case "$TARGETARCH" in \
+      arm64) MINIO_ARCH=arm64 ;; \
+      *)     MINIO_ARCH=amd64 ;; \
+    esac && \
+    fetch "https://dl.min.io/server/minio/release/linux-${MINIO_ARCH}/minio" \
+      /usr/local/bin/minio && \
+    chmod +x /usr/local/bin/minio
+
+# ---------------------------------------------------------------------------
+# 7. Fake GCS Server  (GitHub release binary)
+# ---------------------------------------------------------------------------
+ARG FAKE_GCS_VERSION=1.55.1
+RUN case "$TARGETARCH" in \
+      arm64) FGCS_ARCH=arm64 ;; \
+      *)     FGCS_ARCH=x86_64 ;; \
+    esac && \
+    fetch "https://github.com/fsouza/fake-gcs-server/releases/download/v${FAKE_GCS_VERSION}/fake-gcs-server_${FAKE_GCS_VERSION}_Linux_${FGCS_ARCH}.tar.gz" \
+      /tmp/fake-gcs.tar.gz && \
+    tar xzf /tmp/fake-gcs.tar.gz -C /usr/local/bin fake-gcs-server && \
+    rm -f /tmp/fake-gcs.tar.gz && \
+    chmod +x /usr/local/bin/fake-gcs-server
+
+# ---------------------------------------------------------------------------
+# 8. VictoriaMetrics  (GitHub release binary)
+# ---------------------------------------------------------------------------
+ARG VM_VERSION=1.148.0
+RUN case "$TARGETARCH" in \
+      arm64) VM_ARCH=arm64 ;; \
+      *)     VM_ARCH=amd64 ;; \
+    esac && \
+    fetch "https://github.com/VictoriaMetrics/VictoriaMetrics/releases/download/v${VM_VERSION}/victoria-metrics-linux-${VM_ARCH}-v${VM_VERSION}.tar.gz" \
+      /tmp/victoria-metrics.tar.gz && \
+    tar xzf /tmp/victoria-metrics.tar.gz -C /usr/local/bin victoria-metrics-prod && \
+    rm -f /tmp/victoria-metrics.tar.gz && \
+    mv /usr/local/bin/victoria-metrics-prod /usr/local/bin/victoria-metrics && \
+    chmod +x /usr/local/bin/victoria-metrics
+
+# ---------------------------------------------------------------------------
+# 9. OpenTelemetry Collector contrib  (GitHub release binary)
+# ---------------------------------------------------------------------------
+ARG OTEL_VERSION=0.157.0
+RUN case "$TARGETARCH" in \
+      arm64) OTEL_ARCH=arm64 ;; \
+      *)     OTEL_ARCH=amd64 ;; \
+    esac && \
+    fetch "https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v${OTEL_VERSION}/otelcol-contrib_${OTEL_VERSION}_linux_${OTEL_ARCH}.tar.gz" \
+      /tmp/otelcol.tar.gz && \
+    tar xzf /tmp/otelcol.tar.gz -C /usr/local/bin otelcol-contrib && \
+    rm -f /tmp/otelcol.tar.gz && \
+    chmod +x /usr/local/bin/otelcol-contrib
+
+# ---------------------------------------------------------------------------
+# 10. Grafana  (apt package from official repo)
+# ---------------------------------------------------------------------------
+RUN fetch https://packages.grafana.com/gpg.key /tmp/grafana.gpg && \
+    gpg --dearmor -o /usr/share/keyrings/grafana-archive-keyring.gpg < /tmp/grafana.gpg && \
+    rm -f /tmp/grafana.gpg && \
+    echo "deb [signed-by=/usr/share/keyrings/grafana-archive-keyring.gpg] \
+      https://apt.grafana.com stable main" \
+      > /etc/apt/sources.list.d/grafana.list && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends grafana && \
+    rm -rf /var/lib/apt/lists/*
+
+# ---------------------------------------------------------------------------
+# 11. Y-Sweet  (binary extracted from existing Docker image via multi-stage)
+# ---------------------------------------------------------------------------
+COPY --from=ysweet-src /tmp/y-sweet /usr/local/bin/y-sweet
+RUN chmod +x /usr/local/bin/y-sweet
+
+# ---------------------------------------------------------------------------
+# 12. LiveKit Server  (GitHub release binary)
+# ---------------------------------------------------------------------------
+ARG LIVEKIT_VERSION=1.13.4
+RUN case "$TARGETARCH" in \
+      arm64) LK_ARCH=arm64 ;; \
+      *)     LK_ARCH=amd64 ;; \
+    esac && \
+    fetch "https://github.com/livekit/livekit/releases/download/v${LIVEKIT_VERSION}/livekit_${LIVEKIT_VERSION}_linux_${LK_ARCH}.tar.gz" \
+      /tmp/livekit.tar.gz && \
+    tar xzf /tmp/livekit.tar.gz -C /usr/local/bin livekit-server && \
+    rm -f /tmp/livekit.tar.gz && \
+    chmod +x /usr/local/bin/livekit-server
+
+# ---------------------------------------------------------------------------
+# 13. Superposition  (binary extracted from existing Docker image)
+# ---------------------------------------------------------------------------
+COPY --from=superposition-src /tmp/superposition /usr/local/bin/superposition
+RUN chmod +x /usr/local/bin/superposition
+
+# ---------------------------------------------------------------------------
+# 14. Create data and log directories
+# ---------------------------------------------------------------------------
+RUN mkdir -p \
+    /data/gcs \
+    /data/minio \
+    /data/ysweet \
+    /data/victoriametrics \
+    /data/livekit \
+    /var/zero \
+    /var/zero/backup \
+    /var/log/supervisor \
+    && chmod -R 777 /data /var/zero /var/log
+
+# ---------------------------------------------------------------------------
+# 15. Copy configs, entrypoint, and provisioning files
+# ---------------------------------------------------------------------------
+COPY docker/dev-infra/supervisord/supervisord.conf /etc/supervisor/supervisord.conf
+COPY docker/dev-infra/configs/                   /etc/dev-infra/configs/
+COPY docker/dev-infra/grafana/provisioning/      /etc/grafana/provisioning/
+COPY docker/entrypoint.sh                        /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENV CONTAINER_TYPE=dev-infra
+
+ENTRYPOINT ["/entrypoint.sh"]

@@ -28,6 +28,7 @@ export interface UseAuthReturn {
   isLoggingInToWorkspace: boolean;
   userExistsButRemoved: boolean;
   selfDmChannelId: string | null;
+  landingChannelId: string | null;
   communityJoinRequest: CommunityJoinRequestContext | null;
   enterpriseJoinTarget: EnterpriseJoinTarget | null;
 
@@ -107,14 +108,16 @@ export const useAuth = (): UseAuthReturn => {
           } as OAuthCallbackOutput,
         });
       } catch (err) {
-        if (axios.isAxiosError(err)) {
-          const data = err.response?.data as { error?: string; message?: string } | undefined;
-          if (data?.message) {
-            send({ type: 'AUTH_ERROR', message: data.message });
-            return;
-          }
-        }
-        send({ type: 'AUTH_ERROR', message: 'Email login failed. Please check your credentials.' });
+        const serverMessage =
+          (err as { responseData?: { message?: string } })?.responseData?.message ??
+          (axios.isAxiosError(err)
+            ? (err.response?.data as { message?: string } | undefined)?.message
+            : undefined);
+
+        send({
+          type: 'AUTH_ERROR',
+          message: serverMessage ?? 'Email login failed. Please check your credentials.',
+        });
       }
     },
     [send],
@@ -173,6 +176,7 @@ export const useAuth = (): UseAuthReturn => {
       state.matches('loggingInToWorkspace') || state.matches('joiningCommunityWorkspace'),
     userExistsButRemoved: state.context.userExistsButRemoved,
     selfDmChannelId: state.context.selfDmChannelId,
+    landingChannelId: state.context.landingChannelId,
     communityJoinRequest: state.context.communityJoinRequest,
     enterpriseJoinTarget: state.context.enterpriseJoinTarget,
 

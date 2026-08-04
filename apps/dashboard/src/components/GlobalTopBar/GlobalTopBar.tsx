@@ -15,7 +15,6 @@ import {
   Share2,
   Square,
 } from 'lucide-react';
-import { ZeroConnectionStatus } from '../ZeroConnectionStatus/ZeroConnectionStatus';
 import { invokeShortcut } from '../../shortcuts';
 import { useSearchMode } from '../../hooks/useSearchMode';
 import { toast } from 'sonner';
@@ -349,11 +348,11 @@ const GlobalTopBar = ({
           className='flex items-center gap-1'
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
         >
-          {/* Pills collapse from the left as the bar narrows: Connected first
-              (below 1100px), then Support (below 950px). Update always stays. */}
+          {/* Pills collapse from the left as the bar narrows: Invite first
+              (below 1100px), then Support (below 950px). Update always stays.
+              Connection status now lives in the sidebar rail. */}
           <div className='flex items-center gap-1 max-[1100px]:hidden'>
             <WorkspaceInviteButton />
-            <ZeroConnectionStatus />
           </div>
           {isRecording && onStopRecording && (
             <Tooltip content='Stop recording'>

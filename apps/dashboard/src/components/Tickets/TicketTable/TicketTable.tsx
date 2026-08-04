@@ -50,6 +50,8 @@ interface TicketTableProps {
   visibleColumns?: Set<string>;
   isComfortView?: boolean;
   extraColumns?: ColDef<Ticket>[];
+  selectedIds?: ReadonlySet<string>;
+  onSelectionChange?: (tickets: Ticket[]) => void;
 }
 
 // Index header renderer component
@@ -156,6 +158,8 @@ export const TicketTable: React.FC<TicketTableProps> = ({
   isComfortView = false,
   visibleColumns = new Set(['assignee', 'dueDate', 'status', 'priority', 'stage', 'tags']),
   extraColumns,
+  selectedIds,
+  onSelectionChange,
 }) => {
   const zero = useZero();
   const users = useUsers();
@@ -209,6 +213,15 @@ export const TicketTable: React.FC<TicketTableProps> = ({
 
   const [gridApi, setGridApi] = useState<GridApi | null>(null);
   const [selectedCount, setSelectedCount] = useState(0);
+
+  useEffect(() => {
+    if (!gridApi || selectedIds === undefined) return;
+    gridApi.forEachNode(node => {
+      if (!node.data) return;
+      const shouldBeSelected = selectedIds.has((node.data as Ticket).id);
+      if (node.isSelected() !== shouldBeSelected) node.setSelected(shouldBeSelected);
+    });
+  }, [gridApi, selectedIds, tickets]);
 
   const userGroups = useUserGroups();
 
@@ -273,7 +286,7 @@ export const TicketTable: React.FC<TicketTableProps> = ({
             params.node?.setDataValue('title', oldValue);
           }
         },
-        cellRenderer: (params: ICellRendererParams<Ticket>) => {
+        cellRenderer: (params: ICellRendererParams<Ticket>): React.ReactNode => {
           if (!params.data) return null;
 
           const handleClick = (e: React.MouseEvent) => {
@@ -360,6 +373,35 @@ export const TicketTable: React.FC<TicketTableProps> = ({
                 <span className='truncate font-medium text-foreground'>{params.value}</span>
               </TruncatedTooltip>
             </div>
+          );
+        },
+      },
+
+      {
+        key: 'createdAt',
+        headerName: 'Created at',
+        field: 'createdAt',
+        minWidth: 175,
+        cellRenderer: (params: ICellRendererParams<Ticket>) => {
+          if (!params.value) return <span className='text-muted-foreground'>—</span>;
+          const createdAt = new Date(params.value as string | number | Date);
+          if (Number.isNaN(createdAt.getTime())) {
+            return <span className='text-muted-foreground'>—</span>;
+          }
+          const fullTimestamp = createdAt.toLocaleString('en-US', {
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric',
+            hour: 'numeric',
+            minute: '2-digit',
+            hour12: true,
+          });
+          return (
+            <Tooltip content={fullTimestamp}>
+              <span className='text-sm text-muted-foreground whitespace-nowrap'>
+                {fullTimestamp}
+              </span>
+            </Tooltip>
           );
         },
       },
@@ -712,8 +754,9 @@ export const TicketTable: React.FC<TicketTableProps> = ({
               }
             }}
             onSelectionChanged={params => {
-              const count = params.api.getSelectedRows().length;
-              setSelectedCount(count);
+              const selectedRows = params.api.getSelectedRows() as Ticket[];
+              setSelectedCount(selectedRows.length);
+              onSelectionChange?.(selectedRows);
             }}
             rowData={tickets}
             columnDefs={columnDefs}

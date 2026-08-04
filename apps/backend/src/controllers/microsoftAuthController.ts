@@ -16,8 +16,13 @@ import { jwtVerify, createRemoteJWKSet } from 'jose';
 import { WorkspaceType } from '@xyne/shared';
 import {
   OrganizationDomainConflictError,
+  PublicEmailDomainError,
   organizationDomainService,
 } from '@/services/organizationDomainService';
+import { migrateLegacyIdentity } from '@/services/legacyIdentityMigrationHelper';
+import { signMicrosoftInvitationPendingAuthToken } from '@/utils/microsoftPendingAuth';
+import { redisService } from '@/services/redisService';
+import { randomUUID } from 'crypto';
 
 export class MicrosoftAuthController {
   private oauthClient: AuthorizationCode | undefined;
@@ -26,6 +31,24 @@ export class MicrosoftAuthController {
   private clientId: string | undefined;
   private tenantId: string = '';
   private msJwks!: ReturnType<typeof createRemoteJWKSet>;
+
+  private async storePendingOAuthTokens(
+    refreshToken?: string | null,
+    accessToken?: string | null,
+    accessTokenExpiry?: Date,
+  ): Promise<string> {
+    const tokenKey = randomUUID();
+    await redisService.set(
+      `${config.pendingOAuthTokens.redisKeyPrefix}${tokenKey}`,
+      JSON.stringify({
+        refreshToken: refreshToken ?? null,
+        accessToken: accessToken ?? null,
+        accessTokenExpiry: accessTokenExpiry?.toISOString() ?? null,
+      }),
+      config.pendingOAuthTokens.ttlSeconds,
+    );
+    return tokenKey;
+  }
 
   constructor() {
     const clientId = process.env.MICROSOFT_CLIENT_ID;
@@ -186,6 +209,18 @@ export class MicrosoftAuthController {
 
         await pkceServiceV2.storeVerifier(state, codeVerifier);
 
+        // The callback echoes this state back via the HttpOnly cookie. sameSite=lax lets the
+        // cookie ride Microsoft's top-level callback redirect. Mirrors the Google flow; only
+        // the web callback verifies it.
+        const isProduction = process.env.NODE_ENV === 'production';
+        res.cookie('oauth_state', state, {
+          httpOnly: true,
+          secure: isProduction,
+          sameSite: 'lax' as const,
+          maxAge: 10 * 60 * 1000,
+          path: '/',
+        });
+
         const redirectUri = this.getMicrosoftRedirectUri(req);
 
         logger.info('[OAuth] Redirect URI:', redirectUri);
@@ -222,9 +257,17 @@ export class MicrosoftAuthController {
   private async verifyMicrosoftIdToken(idToken: string) {
     const { payload } = await jwtVerify(idToken, this.msJwks, {
       audience: this.clientId,
-      // issuer: `https://login.microsoftonline.com/${this.tenantId}/v2.0`,
+      // issuer: `https://login.microsoftonline.com/${this.tenantId}/v2.0`, unpinned for multi-tenet
     });
-    return payload as { email?: string; xms_edov?: boolean; oid?: string; tid?: string };
+    return payload as {
+      email?: string;
+      name?: string;
+      preferred_username?: string;
+      xms_edov?: boolean;
+      oid?: string;
+      sub?: string;
+      tid?: string;
+    };
   }
 
   handleCallback = async (req: Request, res: Response): Promise<void> => {
@@ -292,6 +335,26 @@ export class MicrosoftAuthController {
           return;
         }
 
+        // The state must match the oauth_state cookie. Only the browser-driven path is
+        // checked: electron returned above, and the mobile app posts code+state directly
+        // rather than being redirected here. `resolvedPlatform` comes from the stored state
+        // record.
+        if (resolvedPlatform !== 'mobile') {
+          const boundState = req.cookies?.oauth_state as string | undefined;
+          res.clearCookie('oauth_state', { path: '/' });
+          if (!boundState || boundState !== state) {
+            logger.error(`[${requestId}] OAuth state cookie missing or mismatched — rejecting`);
+            await oauthStateServiceV2.deleteState(state as string);
+            res.redirect(
+              this.getRedirectUrl(req, resolvedPlatform, {
+                error: 'invalid_state',
+                message: 'Login session expired or invalid. Please try signing in again.',
+              })
+            );
+            return;
+          }
+        }
+
         // Now consume the state (delete it)
         await oauthStateServiceV2.deleteState(state as string);
 
@@ -327,13 +390,6 @@ export class MicrosoftAuthController {
           throw new Error('No ID token received from Microsoft');
         }
         const idTokenClaims = await this.verifyMicrosoftIdToken(idToken);
-        logger.info(`[${requestId}] Verified Microsoft ID token claims`, { claims: idTokenClaims.xms_edov });
-        // const emailIsDomainVerified = idTokenClaims.xms_edov === true;
-
-        // if (!emailIsDomainVerified) {
-        //   throw new Error('Email is not verified from Microsoft');
-        // }
-
         const verifiedEmail = idTokenClaims.email;
         if (!verifiedEmail) {
           throw new Error('No email claim in ID token');
@@ -346,38 +402,62 @@ export class MicrosoftAuthController {
           throw new Error('No access token received from Microsoft');
         }
 
-        // Fetch user profile from Microsoft Graph API
-        logger.info(`[${requestId}] Fetching user profile from Microsoft Graph`);
-        const graphResponse = await fetch('https://graph.microsoft.com/v1.0/me', {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
-        });
-
-        if (!graphResponse.ok) {
-          throw new Error(
-            `Microsoft Graph API error: ${graphResponse.status} ${graphResponse.statusText}`
-          );
+        // Identity comes straight from the verified ID token — no Microsoft Graph
+        // call needed. `sub` is the stable, app-scoped subject (like Google's sub)
+        // and is what we persist as providerUserId; `oid` is tenant-scoped and only
+        // kept here to migrate legacy rows off it (see below).
+        if (!idTokenClaims.sub) {
+          throw new Error('No sub claim in ID token');
         }
 
-        const profile = (await graphResponse.json()) as {
-          id: string;
-          mail?: string;
-          userPrincipalName?: string;
-          displayName: string;
-        };
-
-        // Extract user data from Microsoft profile
         const microsoftUserData = {
           provider: AuthProvider.MICROSOFT,
-          providerUserId: profile.id,
+          providerUserId: idTokenClaims.sub,
           email: verifiedEmail,
-          name: profile.displayName,
-          picture: undefined, // Microsoft Graph requires separate call for photo
+          name: idTokenClaims.name ?? idTokenClaims.preferred_username ?? verifiedEmail,
+          picture: undefined,
         };
 
         if (!microsoftUserData.email) {
           throw new Error('Email not available in Microsoft profile');
+        }
+
+        // MIGRATION: legacy Microsoft users were stored with the tenant-scoped `oid`
+        // as providerUserId. Move any such rows for this email onto the stable `sub`
+        // BEFORE the identity check, so those users match instead of being rejected.
+        if (idTokenClaims.oid) {
+          await this.userService.migrateProviderUserId(
+            microsoftUserData.email,
+            AuthProvider.MICROSOFT,
+            idTokenClaims.oid,
+            microsoftUserData.providerUserId,
+          );
+        }
+
+        await migrateLegacyIdentity({
+          email: microsoftUserData.email,
+          authProvider: AuthProvider.MICROSOFT,
+          providerUserId: microsoftUserData.providerUserId,
+        });
+        
+        // SECURITY: reject provider mismatch before issuing any pending-auth cookie
+        // or touching workspace state. Account linking is intentionally NOT done here
+        // (it enables account takeover). If an account already exists for this email
+        // under a different login method (providerUserId differs — e.g. Google), stop
+        // and tell the UI to use the original method.
+        const existingIdentity = await this.userService.findAuthIdentityByEmail(microsoftUserData.email);
+        if (existingIdentity && existingIdentity.providerUserId !== microsoftUserData.providerUserId) {
+          logger.warn(
+            `[${requestId}] Provider mismatch for ${microsoftUserData.email}: account registered with ${existingIdentity.authProvider}, attempted login with MICROSOFT`,
+          );
+          res.redirect(
+            this.getRedirectUrl(req, resolvedPlatform, {
+              error: 'provider_mismatch',
+              message: 'This account uses a different login method. Please continue with your original sign-in method.',
+              existingProvider: existingIdentity.authProvider,
+            })
+          );
+          return;
         }
 
         const workspaces = this.getEnterpriseAwareWorkspaces(
@@ -389,24 +469,89 @@ export class MicrosoftAuthController {
         const refreshToken = token.refresh_token as string | undefined;
         const isProduction = process.env.NODE_ENV === 'production';
 
+        // Keep Microsoft provider tokens in Redis; the cookie contains identity
+        // plus only the short-lived Redis lookup key.
+        const cookieInvitationId = req.cookies?.pending_invitation_id as string | undefined;
+        const pendingInvitationId = cookieInvitationId || peekedState?.invitationId;
+        if (resolvedPlatform !== 'mobile' && pendingInvitationId) {
+          const tokenKey = await this.storePendingOAuthTokens(
+            refreshToken,
+            accessToken,
+            accessTokenExpiry,
+          );
+          res.cookie(
+            'google_access_token',
+            signMicrosoftInvitationPendingAuthToken(
+              microsoftUserData,
+              tokenKey,
+              process.env.JWT_SECRET!,
+            ),
+            {
+              httpOnly: true,
+              secure: isProduction,
+              sameSite: 'lax' as const,
+              path: '/',
+              maxAge: 10 * 60 * 1000,
+            },
+          );
+
+          const frontendUrl = peekedState?.redirectTo ?? getFrontendUrl(req);
+          logger.info(
+            `[${requestId}] Pending invitation ${pendingInvitationId} found — redirecting to invite page for ${microsoftUserData.email}`,
+          );
+          res.clearCookie('pending_invitation_id', { path: '/' });
+          const inviteParams = new URLSearchParams({
+            loginComplete: 'true',
+            invitationId: pendingInvitationId,
+            loggedInEmail: microsoftUserData.email,
+          });
+          res.redirect(`${frontendUrl}/invite?${inviteParams.toString()}`);
+          return;
+        }
+
         if (resolvedPlatform !== 'mobile' && workspaces.length === 0) {
           const userExistsButRemoved = await this.userService.userExistsButNoActiveWorkspaces(
             microsoftUserData.email,
           );
-          const domainConflict = !userExistsButRemoved
-            ? await organizationDomainService.findEnterpriseWorkspaceByEmailDomain(microsoftUserData.email)
-            : null;
-          const domainConflictError = domainConflict
-            ? new OrganizationDomainConflictError(domainConflict.domain, domainConflict)
-            : null;
 
+
+          let domainConflict = null;
+          let domainConflictError = null;
+          let publicEmailError = null;
+
+          if (!userExistsButRemoved) {
+            if (peekedState?.enterpriseLogin) {
+              try {
+                await organizationDomainService.assertCanCreateOrgForEmail(microsoftUserData.email);
+              } catch (error) {
+                if (error instanceof PublicEmailDomainError) {
+                  publicEmailError = error;
+                } else if (error instanceof OrganizationDomainConflictError) {
+                  domainConflictError = error;
+                }
+              }
+            }
+
+            if (!domainConflictError && !publicEmailError) {
+              domainConflict = await organizationDomainService.findEnterpriseWorkspaceByEmailDomain(microsoftUserData.email);
+              domainConflictError = domainConflict
+                ? new OrganizationDomainConflictError(domainConflict.domain, domainConflict)
+                : null;
+            }
+          }
+
+          const tokenKey = await this.storePendingOAuthTokens(
+            refreshToken,
+            accessToken,
+            accessTokenExpiry,
+          );
           res.cookie('google_access_token', jwt.sign({
             providerUserId: microsoftUserData.providerUserId,
             email: microsoftUserData.email,
             name: microsoftUserData.name,
             picture: microsoftUserData.picture,
             provider: AuthProvider.MICROSOFT,
-            refreshToken: refreshToken ?? null,
+            tokenKey,
           }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
             httpOnly: true,
             secure: isProduction,
@@ -426,9 +571,11 @@ export class MicrosoftAuthController {
           });
           if (domainConflictError && domainConflict) {
             params.set('domainConflictError', domainConflictError.message);
-            params.set('enterpriseJoinWorkspaceId', domainConflict.workspace.id);
-            params.set('enterpriseJoinWorkspaceName', domainConflict.workspace.name);
             params.set('enterpriseJoinOrgName', domainConflict.name);
+            params.set('enterpriseJoinWorkspaces', JSON.stringify(domainConflict.workspaces));
+          }
+          if (publicEmailError) {
+            params.set('publicEmailDomainError', publicEmailError.message);
           }
 
           logger.info(
@@ -523,20 +670,19 @@ export class MicrosoftAuthController {
           path: '/',
         };
 
-        // Set pending-auth cookie. This must be a pending-auth JWT (not the
-        // session customToken): loginWorkspace/createOrg read it via
-        // parsePendingAuthCookie, which needs providerUserId AND provider — the
-        // session token has neither, so it would mislabel the user as GOOGLE and
-        // drop the refresh token. Mirrors Google's web callback + MS electron.
+        // Keep provider identity in the signed cookie and provider tokens in Redis.
+        const tokenKey = await this.storePendingOAuthTokens(
+          refreshToken,
+          accessToken,
+          accessTokenExpiry,
+        );
         res.cookie('google_access_token', jwt.sign({
           providerUserId: microsoftUserData.providerUserId,
           email: microsoftUserData.email,
           name: microsoftUserData.name,
           picture: microsoftUserData.picture,
           provider: AuthProvider.MICROSOFT,
-          refreshToken: refreshToken ?? null,
-          accessToken: accessToken ?? null,
-          accessTokenExpiry: accessTokenExpiry?.toISOString(),
+          tokenKey,
         }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
           ...cookieOptions,
           maxAge: 10 * 60 * 1000, // 10 minutes pending auth window
@@ -716,39 +862,56 @@ export class MicrosoftAuthController {
         throw new Error('No ID token received from Microsoft');
       }
       const idTokenClaims = await this.verifyMicrosoftIdToken(idToken);
-      logger.info(`[${requestId}] Verified Microsoft ID token claims`, { claims: idTokenClaims.xms_edov });
-
-      const emailIsDomainVerified = idTokenClaims.xms_edov === true;
-      if (!emailIsDomainVerified) {
-        throw new Error('Email is not verified from Microsoft');
-      }
-
       const email = idTokenClaims.email;
       if (!email) {
         throw new Error('No email claim in ID token');
       }
 
-      logger.info(`[${requestId}] Fetching user profile from Microsoft Graph`);
-      const graphResponse = await fetch('https://graph.microsoft.com/v1.0/me', {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      });
+      // Identity comes from the verified ID token — no Microsoft Graph call needed.
+      // `sub` is the stable, app-scoped subject we persist as providerUserId; `oid`
+      // is tenant-scoped and kept only to migrate legacy rows off it.
+      if (!idTokenClaims.sub) {
+        throw new Error('No sub claim in ID token');
+      }
+      const profile = {
+        id: idTokenClaims.sub,
+        displayName: idTokenClaims.name ?? idTokenClaims.preferred_username ?? email,
+      };
 
-      if (!graphResponse.ok) {
-        throw new Error(
-          `Microsoft Graph API error: ${graphResponse.status} ${graphResponse.statusText}`
+      // MIGRATION: legacy Microsoft users stored the tenant-scoped `oid` as
+      // providerUserId. Move any such rows for this email onto the stable `sub`
+      // before we resolve/create the user, so multi-tenant logins line up.
+      if (idTokenClaims.oid) {
+        await this.userService.migrateProviderUserId(
+          email,
+          AuthProvider.MICROSOFT,
+          idTokenClaims.oid,
+          profile.id,
         );
       }
 
-      const profile = (await graphResponse.json()) as {
-        id: string;
-        mail?: string;
-        userPrincipalName?: string;
-        displayName: string;
-      };
+      await migrateLegacyIdentity({
+        email: email,
+        authProvider: AuthProvider.MICROSOFT,
+        providerUserId: profile.id,
+      });
 
-      // Email was already verified from the ID token above.
+      // SECURITY: reject provider mismatch (runs AFTER migration so legacy oid
+      // rows are already on sub). Account linking is intentionally not done here
+      // (it enables account takeover). Mirrors the web callback + Google/email.
+      const existingIdentity = await this.userService.findAuthIdentityByEmail(email);
+      if (existingIdentity && existingIdentity.providerUserId !== profile.id) {
+        logger.warn(
+          `[${requestId}] Provider mismatch for ${email}: account registered with ${existingIdentity.authProvider}, attempted login with MICROSOFT`,
+        );
+        res.status(403).json({
+          success: false,
+          error: 'provider_mismatch',
+          message: 'This account uses a different login method. Please continue with your original sign-in method.',
+          existingProvider: existingIdentity.authProvider,
+        });
+        return;
+      }
 
       const workspaces = this.getEnterpriseAwareWorkspaces(
         await this.userService.getWorkspacesByEmail(email),
@@ -766,13 +929,18 @@ export class MicrosoftAuthController {
       // This mirrors Google's exchangeElectronCode which always sets google_access_token (line 842).
       if (workspaces.length === 0 && !userExistsButRemoved && !stateData.invitationId && !bodyInvitationId) {
         logger.info(`[${requestId}] User has no workspaces and no invitation - setting google_access_token and returning no-access`);
+        const tokenKey = await this.storePendingOAuthTokens(
+          token.refresh_token as string | undefined,
+          accessToken,
+          accessTokenExpiry,
+        );
         res.cookie('google_access_token', jwt.sign({
           providerUserId: profile.id,
           email,
           name: profile.displayName,
           picture: undefined,
           provider: 'microsoft',
-          refreshToken: (token.refresh_token as string | undefined) ?? null,
+          tokenKey,
         }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
           httpOnly: true,
           secure: isProduction,
@@ -802,13 +970,18 @@ export class MicrosoftAuthController {
         logger.info(`[${requestId}] Invitation detected (${effectiveInvitationId}) — returning hasInvitation signal to Electron`);
         // Use sameSite: 'lax' for Electron invitation flow - cookies need to be sent
         // from the renderer (localhost:5173) to backend (localhost:3001)
+        const tokenKey = await this.storePendingOAuthTokens(
+          token.refresh_token as string | undefined,
+          accessToken,
+          accessTokenExpiry,
+        );
         res.cookie('google_access_token', jwt.sign({
           providerUserId: profile.id,
           email,
           name: profile.displayName,
           picture: undefined,
           provider: 'microsoft',
-          refreshToken: (token.refresh_token as string | undefined) ?? null,
+          tokenKey,
         }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
           httpOnly: true,
           secure: isProduction,
@@ -927,15 +1100,18 @@ export class MicrosoftAuthController {
           });
         }
 
+        const tokenKey = await this.storePendingOAuthTokens(
+          refreshToken,
+          accessToken,
+          accessTokenExpiry,
+        );
         res.cookie('google_access_token', jwt.sign({
           providerUserId: profile.id,
           email,
           name: profile.displayName,
           picture: undefined,
           provider: 'microsoft',
-          refreshToken: refreshToken ?? null,
-          accessToken,
-          accessTokenExpiry: accessTokenExpiry?.toISOString(),
+          tokenKey,
         }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
           httpOnly: true,
           secure: isProduction,
@@ -1007,15 +1183,18 @@ export class MicrosoftAuthController {
       }
 
       // Store pending auth data for later loginWorkspace / acceptInvitation call
+      const tokenKey = await this.storePendingOAuthTokens(
+        refreshToken,
+        accessToken,
+        accessTokenExpiry,
+      );
       res.cookie('google_access_token', jwt.sign({
         providerUserId: profile.id,
         email,
         name: profile.displayName,
         picture: undefined,
         provider: 'microsoft',
-        refreshToken: refreshToken ?? null,
-        accessToken,
-        accessTokenExpiry: accessTokenExpiry?.toISOString(),
+        tokenKey,
       }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
         httpOnly: true,
         secure: isProduction,
@@ -1151,44 +1330,63 @@ export class MicrosoftAuthController {
       const idTokenClaims = await this.verifyMicrosoftIdToken(idToken);
       logger.info(`[${requestId}] Verified Microsoft ID token claims`, { claims: idTokenClaims.xms_edov });
 
-      const emailIsDomainVerified = idTokenClaims.xms_edov === true;
-      if (!emailIsDomainVerified) {
-        throw new Error('Email is not verified from Microsoft');
-      }
+      // const emailIsDomainVerified = idTokenClaims.xms_edov === true;
+      // if (!emailIsDomainVerified) {
+      //   throw new Error('Email is not verified from Microsoft');
+      // }
 
       const verifiedEmail = idTokenClaims.email;
       if (!verifiedEmail) {
         throw new Error('No email claim in ID token');
       }
 
-      // Verify the user's profile via Microsoft Graph using the access token
-      logger.info(`[${requestId}] Fetching user profile from Microsoft Graph`);
-      const graphResponse = await fetch('https://graph.microsoft.com/v1.0/me', {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      });
-
-      if (!graphResponse.ok) {
-        logger.error(
-          `[${requestId}] Microsoft Graph API error: ${graphResponse.status} ${graphResponse.statusText}`
-        );
-        res.status(401).json({
-          success: false,
-          error: 'graph_api_error',
-          message: `Microsoft Graph API error: ${graphResponse.status}`,
-        });
-        return;
+      // Identity comes from the verified ID token — no Microsoft Graph call needed.
+      // `sub` is the stable, app-scoped subject we persist as providerUserId; `oid`
+      // is tenant-scoped and kept only to migrate legacy rows off it.
+      if (!idTokenClaims.sub) {
+        throw new Error('No sub claim in ID token');
       }
-
-      const profile = (await graphResponse.json()) as {
-        id: string;
-        mail?: string;
-        userPrincipalName?: string;
-        displayName: string;
+      const profile = {
+        id: idTokenClaims.sub,
+        displayName: idTokenClaims.name ?? idTokenClaims.preferred_username ?? verifiedEmail,
       };
 
       const email = verifiedEmail;
+
+      // MIGRATION: legacy Microsoft users stored the tenant-scoped `oid` as
+      // providerUserId. Move any such rows for this email onto the stable `sub`
+      // before we resolve/create the user, so multi-tenant logins line up.
+      if (idTokenClaims.oid) {
+        await this.userService.migrateProviderUserId(
+          email,
+          AuthProvider.MICROSOFT,
+          idTokenClaims.oid,
+          profile.id,
+        );
+      }
+
+      await migrateLegacyIdentity({
+        email: email,
+        authProvider: AuthProvider.MICROSOFT,
+        providerUserId: profile.id,
+      });
+
+      // SECURITY: reject provider mismatch (runs AFTER migration so legacy oid
+      // rows are already on sub). Account linking is intentionally not done here
+      // (it enables account takeover). Mirrors the web callback + Google/email.
+      const existingIdentity = await this.userService.findAuthIdentityByEmail(email);
+      if (existingIdentity && existingIdentity.providerUserId !== profile.id) {
+        logger.warn(
+          `[${requestId}] Provider mismatch for ${email}: account registered with ${existingIdentity.authProvider}, attempted login with MICROSOFT`,
+        );
+        res.status(403).json({
+          success: false,
+          error: 'provider_mismatch',
+          message: 'This account uses a different login method. Please continue with your original sign-in method.',
+          existingProvider: existingIdentity.authProvider,
+        });
+        return;
+      }
 
       const workspaces = await this.userService.getWorkspacesByEmail(email);
       logger.info(`[${requestId}] User has ${workspaces.length} workspace(s)`);
@@ -1257,21 +1455,23 @@ export class MicrosoftAuthController {
         path: '/',
       };
 
-      // Pending-auth cookie must carry provider identity (providerUserId +
-      // provider) so a later loginWorkspace / createOrg / acceptInvitation call
-      // resolves the Microsoft user correctly. Mirrors Google's mobile exchange.
+      // Keep provider identity in the signed cookie and provider tokens in Redis.
       const mobileExpiresIn = token.expires_in as number | undefined;
+      const mobileAccessTokenExpiry = mobileExpiresIn
+        ? new Date(Date.now() + mobileExpiresIn * 1000)
+        : undefined;
+      const tokenKey = await this.storePendingOAuthTokens(
+        refreshToken,
+        accessToken,
+        mobileAccessTokenExpiry,
+      );
       res.cookie('google_access_token', jwt.sign({
         providerUserId: profile.id,
         email,
         name: profile.displayName,
         picture: undefined,
         provider: 'microsoft',
-        refreshToken: refreshToken ?? null,
-        accessToken: accessToken ?? null,
-        accessTokenExpiry: mobileExpiresIn
-          ? new Date(Date.now() + mobileExpiresIn * 1000).toISOString()
-          : undefined,
+        tokenKey,
       }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
         ...cookieOptions,
         maxAge: 10 * 60 * 1000, // 10 minutes pending auth window

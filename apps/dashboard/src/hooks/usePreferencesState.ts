@@ -12,6 +12,8 @@ import { useCallJoinSettings } from './useCallJoinSettings';
 import { useClawDashboardVisibility } from './useClawDashboardVisibility';
 import { useCallMediaQualitySettings } from './useCallMediaQualitySettings';
 import { useRecordingDefaultLayout } from './useRecordingDefaultLayout';
+import { useRecordingVersion } from './useRecordingVersion';
+import { useRecordingStore } from './useRecordingStore';
 import {
   getLinkOpenExternalDefault,
   setLinkOpenExternalDefault,
@@ -57,6 +59,9 @@ export function usePreferencesState(enabled: boolean) {
     setScreenShareQuality: setCallScreenShareQuality,
   } = useCallMediaQualitySettings();
   const { recordingDefaultLayout, setRecordingDefaultLayout } = useRecordingDefaultLayout();
+  const { recordingVersion, setRecordingVersion } = useRecordingVersion();
+  const recordingStatus = useRecordingStore(context => context.status);
+  const canSwitchRecordingVersion = recordingStatus === 'idle' || recordingStatus === 'error';
   const linksOpenExternalByDefault = useSyncExternalStore(
     subscribeLinkOpenPref,
     getLinkOpenExternalDefault,
@@ -162,6 +167,9 @@ export function usePreferencesState(enabled: boolean) {
     setCallScreenShareQuality,
     recordingDefaultLayout,
     setRecordingDefaultLayout,
+    recordingVersion,
+    setRecordingVersion,
+    canSwitchRecordingVersion,
   };
 }
 

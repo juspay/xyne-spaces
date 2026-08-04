@@ -1,0 +1,204 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1460" height="1252" viewBox="0 0 1460 1252" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="fw" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#334155"/>
+    </marker>
+    <marker id="bw" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#059669"/>
+    </marker>
+    <marker id="pu" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#7e22ce"/>
+    </marker>
+    <marker id="rd" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#be123c"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1460" height="1252" fill="#ffffff"/>
+
+  <!-- ===== LEGEND ===== -->
+  <line x1="812" y1="42" x2="856" y2="42" stroke="#334155" stroke-width="2.4" marker-end="url(#fw)"/>
+  <text x="866" y="46" font-size="12" font-weight="600" fill="#334155">forward — request, query, write</text>
+  <line x1="1120" y1="42" x2="1164" y2="42" stroke="#059669" stroke-width="2.4" marker-end="url(#bw)"/>
+  <text x="1174" y="46" font-size="12" font-weight="600" fill="#059669">backward — result, live sync</text>
+
+  <!-- ================= 01 CLIENTS ================= -->
+  <rect x="60" y="76" width="1240" height="118" rx="14" fill="#dbeafe" stroke="#60a5fa" stroke-width="1.5"/>
+  <rect x="76" y="102" width="32" height="21" rx="5" fill="#1d4ed8"/>
+  <text x="92" y="117" font-size="12" font-weight="700" fill="#ffffff" text-anchor="middle">01</text>
+  <text x="76" y="142" font-size="13" font-weight="700" fill="#1d4ed8" letter-spacing="0.04em">CLIENTS</text>
+
+  <rect x="240" y="103" width="330" height="64" rx="9" fill="#ffffff" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="405" y="129" font-size="15.5" font-weight="700" fill="#0f172a" text-anchor="middle">Dashboard</text>
+  <text x="405" y="148" font-size="11.5" fill="#475569" text-anchor="middle">React 19 · Vite · Zero client cache</text>
+
+  <rect x="597" y="103" width="330" height="64" rx="9" fill="#ffffff" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="762" y="129" font-size="15.5" font-weight="700" fill="#0f172a" text-anchor="middle">Desktop</text>
+  <text x="762" y="148" font-size="11.5" fill="#475569" text-anchor="middle">Electron</text>
+
+  <rect x="954" y="103" width="330" height="64" rx="9" fill="#ffffff" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="1119" y="129" font-size="15.5" font-weight="700" fill="#0f172a" text-anchor="middle">Public and external web</text>
+  <text x="1119" y="148" font-size="11.5" fill="#475569" text-anchor="middle">marketing site · embedded dashboard</text>
+
+  <!-- ================= 02 EDGE ================= -->
+  <rect x="60" y="240" width="1240" height="130" rx="14" fill="#cffafe" stroke="#22d3ee" stroke-width="1.5"/>
+  <rect x="76" y="270" width="32" height="21" rx="5" fill="#0e7490"/>
+  <text x="92" y="285" font-size="12" font-weight="700" fill="#ffffff" text-anchor="middle">02</text>
+  <text x="76" y="310" font-size="13" font-weight="700" fill="#0e7490" letter-spacing="0.04em">EDGE</text>
+  <text x="76" y="328" font-size="13" font-weight="700" fill="#0e7490" letter-spacing="0.04em">SYNC + API</text>
+
+  <rect x="240" y="271" width="300" height="68" rx="9" fill="#ffffff" stroke="#06b6d4" stroke-width="1.5"/>
+  <text x="390" y="298" font-size="15.5" font-weight="700" fill="#0f172a" text-anchor="middle">zero-cache</text>
+  <text x="390" y="317" font-size="11.5" fill="#475569" text-anchor="middle">:4848 · live queries + replica</text>
+
+  <rect x="620" y="271" width="300" height="68" rx="9" fill="#ffffff" stroke="#06b6d4" stroke-width="1.5"/>
+  <text x="770" y="298" font-size="15.5" font-weight="700" fill="#0f172a" text-anchor="middle">Zero endpoints</text>
+  <text x="770" y="317" font-size="11.5" fill="#475569" text-anchor="middle">/api/zero/query · /api/zero/push</text>
+
+  <rect x="946" y="271" width="338" height="68" rx="9" fill="#ffffff" stroke="#06b6d4" stroke-width="1.5"/>
+  <text x="1115" y="298" font-size="15.5" font-weight="700" fill="#0f172a" text-anchor="middle">REST API</text>
+  <text x="1115" y="317" font-size="11.5" fill="#475569" text-anchor="middle">Express · webhooks · OAuth · uploads</text>
+
+  <line x1="544" y1="298" x2="614" y2="298" stroke="#334155" stroke-width="2.2" marker-end="url(#fw)"/>
+  <line x1="614" y1="320" x2="544" y2="320" stroke="#059669" stroke-width="2.2" marker-end="url(#bw)"/>
+
+  <!-- ================= 03 ACCESS CONTROL ================= -->
+  <rect x="60" y="416" width="1240" height="124" rx="14" fill="#fef3c7" stroke="#f59e0b" stroke-width="2"/>
+  <rect x="76" y="444" width="32" height="21" rx="5" fill="#b45309"/>
+  <text x="92" y="459" font-size="12" font-weight="700" fill="#ffffff" text-anchor="middle">03</text>
+  <text x="76" y="484" font-size="13" font-weight="700" fill="#b45309" letter-spacing="0.04em">ACCESS</text>
+  <text x="76" y="502" font-size="13" font-weight="700" fill="#b45309" letter-spacing="0.04em">CONTROL</text>
+
+  <rect x="240" y="446" width="509" height="64" rx="9" fill="#fde68a" stroke="#d97706" stroke-width="2"/>
+  <path d="M 266 462 L 288 462 L 288 480 Q 288 492 277 497 Q 266 492 266 480 Z" fill="#b45309"/>
+  <path d="M 272 478 L 276 483 L 284 471" fill="none" stroke="#fde68a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="512" y="474" font-size="14.5" font-weight="700" fill="#78350f" text-anchor="middle">Zero path — query + mutation ACLs</text>
+  <text x="512" y="493" font-size="11.5" fill="#92400e" text-anchor="middle">canSelect() narrows the query · mutators ACL-wrapped</text>
+
+  <rect x="775" y="446" width="509" height="64" rx="9" fill="#fde68a" stroke="#d97706" stroke-width="2"/>
+  <path d="M 801 462 L 823 462 L 823 480 Q 823 492 812 497 Q 801 492 801 480 Z" fill="#b45309"/>
+  <path d="M 807 478 L 811 483 L 819 471" fill="none" stroke="#fde68a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="1047" y="474" font-size="14.5" font-weight="700" fill="#78350f" text-anchor="middle">REST path — permission matrix</text>
+  <text x="1047" y="493" font-size="11.5" fill="#92400e" text-anchor="middle">resource × access level, per user and group</text>
+
+  <!-- ================= 04 DOMAIN AND WORKERS ================= -->
+  <rect x="60" y="586" width="1240" height="118" rx="14" fill="#d1fae5" stroke="#34d399" stroke-width="1.5"/>
+  <rect x="76" y="612" width="32" height="21" rx="5" fill="#15803d"/>
+  <text x="92" y="627" font-size="12" font-weight="700" fill="#ffffff" text-anchor="middle">04</text>
+  <text x="76" y="652" font-size="13" font-weight="700" fill="#15803d" letter-spacing="0.04em">DOMAIN</text>
+  <text x="76" y="670" font-size="13" font-weight="700" fill="#15803d" letter-spacing="0.04em">AND WORKERS</text>
+
+  <rect x="240" y="613" width="509" height="64" rx="9" fill="#ffffff" stroke="#10b981" stroke-width="1.5"/>
+  <text x="494" y="639" font-size="15.5" font-weight="700" fill="#0f172a" text-anchor="middle">Domain services</text>
+  <text x="494" y="658" font-size="11.5" fill="#475569" text-anchor="middle">tickets · channels · calls · docs · boards</text>
+
+  <rect x="775" y="613" width="509" height="64" rx="9" fill="#ffffff" stroke="#10b981" stroke-width="1.5"/>
+  <text x="1029" y="639" font-size="15.5" font-weight="700" fill="#0f172a" text-anchor="middle">Background workers</text>
+  <text x="1029" y="658" font-size="11.5" fill="#475569" text-anchor="middle">Bull queues · ingestion · indexing · schedules</text>
+
+  <!-- ================= 05 DATA ================= -->
+  <rect x="60" y="750" width="1240" height="146" rx="14" fill="#e0e7ff" stroke="#818cf8" stroke-width="1.5"/>
+  <rect x="76" y="790" width="32" height="21" rx="5" fill="#4338ca"/>
+  <text x="92" y="805" font-size="12" font-weight="700" fill="#ffffff" text-anchor="middle">05</text>
+  <text x="76" y="830" font-size="13" font-weight="700" fill="#4338ca" letter-spacing="0.04em">DATA AND</text>
+  <text x="76" y="848" font-size="13" font-weight="700" fill="#4338ca" letter-spacing="0.04em">RETRIEVAL</text>
+
+  <path d="M 240 790 L 240 856 A 122 14 0 0 0 484 856 L 484 790 Z" fill="#ffffff" stroke="#6366f1" stroke-width="1.5"/>
+  <ellipse cx="362" cy="790" rx="122" ry="14" fill="#ffffff" stroke="#6366f1" stroke-width="1.5"/>
+  <text x="362" y="828" font-size="15" font-weight="700" fill="#0f172a" text-anchor="middle">PostgreSQL</text>
+  <text x="362" y="847" font-size="11.5" fill="#475569" text-anchor="middle">system of record</text>
+
+  <path d="M 506 790 L 506 856 A 122 14 0 0 0 750 856 L 750 790 Z" fill="#ffffff" stroke="#6366f1" stroke-width="1.5"/>
+  <ellipse cx="628" cy="790" rx="122" ry="14" fill="#ffffff" stroke="#6366f1" stroke-width="1.5"/>
+  <text x="628" y="828" font-size="15" font-weight="700" fill="#0f172a" text-anchor="middle">Redis</text>
+  <text x="628" y="847" font-size="11.5" fill="#475569" text-anchor="middle">queues · cache · presence</text>
+
+  <path d="M 772 790 L 772 856 A 122 14 0 0 0 1016 856 L 1016 790 Z" fill="#ffffff" stroke="#6366f1" stroke-width="1.5"/>
+  <ellipse cx="894" cy="790" rx="122" ry="14" fill="#ffffff" stroke="#6366f1" stroke-width="1.5"/>
+  <text x="894" y="828" font-size="15" font-weight="700" fill="#0f172a" text-anchor="middle">Vespa</text>
+  <text x="894" y="847" font-size="11.5" fill="#475569" text-anchor="middle">hybrid search index</text>
+
+  <path d="M 1038 790 L 1038 856 A 122 14 0 0 0 1282 856 L 1282 790 Z" fill="#ffffff" stroke="#6366f1" stroke-width="1.5"/>
+  <ellipse cx="1160" cy="790" rx="122" ry="14" fill="#ffffff" stroke="#6366f1" stroke-width="1.5"/>
+  <text x="1160" y="828" font-size="15" font-weight="700" fill="#0f172a" text-anchor="middle">Object store</text>
+  <text x="1160" y="847" font-size="11.5" fill="#475569" text-anchor="middle">GCS · S3</text>
+
+  <!-- ================= 06 AGENT PLANE ================= -->
+  <rect x="60" y="942" width="1240" height="118" rx="14" fill="#f3e8ff" stroke="#c084fc" stroke-width="1.5"/>
+  <rect x="76" y="968" width="32" height="21" rx="5" fill="#7e22ce"/>
+  <text x="92" y="983" font-size="12" font-weight="700" fill="#ffffff" text-anchor="middle">06</text>
+  <text x="76" y="1008" font-size="13" font-weight="700" fill="#7e22ce" letter-spacing="0.04em">AGENT</text>
+  <text x="76" y="1026" font-size="13" font-weight="700" fill="#7e22ce" letter-spacing="0.04em">PLANE</text>
+
+  <rect x="240" y="969" width="460" height="64" rx="9" fill="#ffffff" stroke="#a855f7" stroke-width="1.8" stroke-dasharray="8 5"/>
+  <text x="470" y="995" font-size="15.5" font-weight="700" fill="#0f172a" text-anchor="middle">Xyne Claw · sandbox</text>
+  <text x="470" y="1014" font-size="11.5" fill="#475569" text-anchor="middle">own kernel · holds no connector credentials</text>
+
+  <rect x="824" y="969" width="460" height="64" rx="9" fill="#ffffff" stroke="#a855f7" stroke-width="1.5"/>
+  <text x="1054" y="995" font-size="15.5" font-weight="700" fill="#0f172a" text-anchor="middle">Claw Auth</text>
+  <text x="1054" y="1014" font-size="11.5" fill="#475569" text-anchor="middle">credential store · MCP gateway · executes the call</text>
+
+  <line x1="704" y1="993" x2="818" y2="993" stroke="#7e22ce" stroke-width="2.2" marker-end="url(#pu)"/>
+  <text x="761" y="983" font-size="10.5" font-weight="600" fill="#7e22ce" text-anchor="middle">tool name + params</text>
+  <line x1="818" y1="1017" x2="704" y2="1017" stroke="#7e22ce" stroke-width="2.2" marker-end="url(#pu)"/>
+  <text x="761" y="1032" font-size="10.5" font-weight="600" fill="#7e22ce" text-anchor="middle">result only</text>
+
+  <!-- ================= 07 OUTSIDE WORLD ================= -->
+  <rect x="60" y="1106" width="1240" height="118" rx="14" fill="#ffe4e6" stroke="#fb7185" stroke-width="1.5"/>
+  <rect x="76" y="1132" width="32" height="21" rx="5" fill="#be123c"/>
+  <text x="92" y="1147" font-size="12" font-weight="700" fill="#ffffff" text-anchor="middle">07</text>
+  <text x="76" y="1172" font-size="13" font-weight="700" fill="#be123c" letter-spacing="0.04em">OUTSIDE</text>
+  <text x="76" y="1190" font-size="13" font-weight="700" fill="#be123c" letter-spacing="0.04em">WORLD</text>
+
+  <rect x="240" y="1133" width="330" height="64" rx="9" fill="#ffffff" stroke="#f43f5e" stroke-width="1.5"/>
+  <text x="405" y="1159" font-size="15.5" font-weight="700" fill="#0f172a" text-anchor="middle">LLM providers</text>
+  <text x="405" y="1178" font-size="11.5" fill="#475569" text-anchor="middle">via LiteLLM</text>
+
+  <rect x="597" y="1133" width="330" height="64" rx="9" fill="#ffffff" stroke="#f43f5e" stroke-width="1.5"/>
+  <text x="762" y="1159" font-size="15.5" font-weight="700" fill="#0f172a" text-anchor="middle">MCP servers</text>
+  <text x="762" y="1178" font-size="11.5" fill="#475569" text-anchor="middle">50+ tool integrations</text>
+
+  <rect x="954" y="1133" width="330" height="64" rx="9" fill="#ffffff" stroke="#f43f5e" stroke-width="1.5"/>
+  <text x="1119" y="1159" font-size="15.5" font-weight="700" fill="#0f172a" text-anchor="middle">Connectors</text>
+  <text x="1119" y="1178" font-size="11.5" fill="#475569" text-anchor="middle">Slack · Jira · Confluence · Gmail · Microsoft</text>
+
+  <!-- ================= FORWARD / BACKWARD SPINE ================= -->
+  <line x1="360" y1="194" x2="360" y2="236" stroke="#334155" stroke-width="2.4" marker-end="url(#fw)"/>
+  <text x="348" y="221" font-size="11" font-weight="600" fill="#334155" text-anchor="end">queries + mutations</text>
+  <line x1="440" y1="240" x2="440" y2="198" stroke="#059669" stroke-width="2.4" marker-end="url(#bw)"/>
+  <text x="452" y="221" font-size="11" font-weight="600" fill="#059669">live updates over WebSocket</text>
+
+  <line x1="620" y1="370" x2="620" y2="412" stroke="#334155" stroke-width="2.4" marker-end="url(#fw)"/>
+  <text x="608" y="397" font-size="11" font-weight="600" fill="#334155" text-anchor="end">request + user identity</text>
+  <line x1="700" y1="416" x2="700" y2="374" stroke="#059669" stroke-width="2.4" marker-end="url(#bw)"/>
+  <text x="712" y="397" font-size="11" font-weight="600" fill="#059669">authorized result</text>
+
+  <line x1="620" y1="540" x2="620" y2="582" stroke="#334155" stroke-width="2.4" marker-end="url(#fw)"/>
+  <text x="608" y="567" font-size="11" font-weight="600" fill="#334155" text-anchor="end">scoped query · wrapped mutation</text>
+  <line x1="700" y1="586" x2="700" y2="544" stroke="#059669" stroke-width="2.4" marker-end="url(#bw)"/>
+  <text x="712" y="567" font-size="11" font-weight="600" fill="#059669">permitted rows only</text>
+
+  <line x1="620" y1="704" x2="620" y2="746" stroke="#334155" stroke-width="2.4" marker-end="url(#fw)"/>
+  <text x="608" y="731" font-size="11" font-weight="600" fill="#334155" text-anchor="end">read · write · index</text>
+  <line x1="700" y1="750" x2="700" y2="708" stroke="#059669" stroke-width="2.4" marker-end="url(#bw)"/>
+  <text x="712" y="731" font-size="11" font-weight="600" fill="#059669">rows + search hits</text>
+
+  <!-- agent plane down to outside world -->
+  <line x1="450" y1="1037" x2="415" y2="1102" stroke="#334155" stroke-width="2.2" marker-end="url(#fw)"/>
+  <line x1="1000" y1="1037" x2="800" y2="1102" stroke="#334155" stroke-width="2.2" marker-end="url(#fw)"/>
+
+  <!-- ===== replication: postgres back up to zero-cache ===== -->
+  <path d="M 236 823 L 32 823 L 32 356 L 390 356 L 390 343" fill="none" stroke="#059669" stroke-width="2.4" marker-end="url(#bw)"/>
+  <rect x="6" y="450" width="21" height="250" rx="5" fill="#ffffff"/>
+  <text x="17" y="575" font-size="11.5" font-weight="600" fill="#059669" text-anchor="middle" transform="rotate(-90 17 575)">logical replication keeps the replica live</text>
+
+  <!-- ===== agent plane into the edge ===== -->
+  <path d="M 1288 1001 L 1330 1001 L 1330 290 L 1292 290" fill="none" stroke="#7e22ce" stroke-width="2.4" marker-start="url(#pu)" marker-end="url(#pu)"/>
+  <rect x="1338" y="500" width="21" height="330" rx="5" fill="#ffffff"/>
+  <text x="1349" y="665" font-size="11.5" font-weight="600" fill="#7e22ce" text-anchor="middle" transform="rotate(-90 1349 665)">agent runs invoked · context read as the user, same ACLs</text>
+
+  <!-- ===== connectors into the edge ===== -->
+  <path d="M 1288 1165 L 1390 1165 L 1390 322 L 1292 322" fill="none" stroke="#be123c" stroke-width="2.4" marker-start="url(#rd)" marker-end="url(#rd)"/>
+  <rect x="1398" y="620" width="21" height="240" rx="5" fill="#ffffff"/>
+  <text x="1409" y="740" font-size="11.5" font-weight="600" fill="#be123c" text-anchor="middle" transform="rotate(-90 1409 740)">webhooks in · scheduled pulls out</text>
+</svg>

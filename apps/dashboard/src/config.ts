@@ -58,15 +58,6 @@ export const ENABLE_ACTIVITY_LOG: boolean = import.meta.env['VITE_ENABLE_ACTIVIT
 
 export const SEARCH_VERSION = import.meta.env['VITE_SEARCH_VERSION'] as string;
 
-const configuredAllTabRankProfile = import.meta.env['VITE_CMDK_ALL_DEFAULT_RANK_PROFILE']
-  ?.trim()
-  .toLowerCase();
-
-// Shared by CmdK and the full-search screen. The value is intentionally not
-// restricted to known profiles so newly deployed Vespa rank profiles can be
-// selected through configuration alone.
-export const CMDK_ALL_DEFAULT_RANK_PROFILE = configuredAllTabRankProfile || 'default_native';
-
 // Working hours configuration (in IST) - should match backend defaults
 export const WORKING_HOUR_START: number = parseInt(
   (import.meta.env['VITE_WORKING_HOUR_START'] as string) || '11',
@@ -84,8 +75,6 @@ export const LOGGER_BASE_URL = isElectronBundled
   : `${protocol}://${hostname}/godel/events`;
 
 export const MAX_RETRIES = 3;
-
-export const SHAREABLE_ORIGIN = window.location.origin;
 
 // Feature flag: show manual GENERATE SUMMARY action button (Generate PRD, Generate Summary, Chat with Transcript)
 // Auto-generation still runs regardless of this flag

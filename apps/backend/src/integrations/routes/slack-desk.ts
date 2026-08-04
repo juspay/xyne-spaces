@@ -8,6 +8,7 @@
  */
 
 import express, { Request, Response } from 'express';
+import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
 import { authV2Middleware } from '@/middleware/authV2Middleware';
 import { db } from '@/database/client';
 import { ChannelType } from '@prisma/client';
@@ -33,7 +34,7 @@ router.get(
     try {
       const workspaceId = req.user!.workspaceId!;
       const slackSource = await db.externalSource.findFirst({
-        where: { workspaceId, sourceType: 'slack', isActive: true },
+        where: { workspaceId, ...WORKSPACE_LEVEL, sourceType: 'slack', isActive: true },
       });
       if (!slackSource) {
         res.status(503).json({ error: 'Slack is not connected for this workspace. Please connect Slack first.' });
@@ -243,7 +244,7 @@ router.get(
 
       // Cache miss — fetch from Slack API
       const slackSource = await db.externalSource.findFirst({
-        where: { workspaceId, sourceType: 'slack', isActive: true },
+        where: { workspaceId, ...WORKSPACE_LEVEL, sourceType: 'slack', isActive: true },
       });
       if (!slackSource) {
         res.status(503).json({ error: 'Slack is not connected for this workspace' });

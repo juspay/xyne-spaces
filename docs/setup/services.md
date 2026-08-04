@@ -1,20 +1,23 @@
 # Services
 
 Infrastructure containers defined in `docker-compose.dev.yml` and started by
-`pnpm run services`.
+`pnpm run services`, which asks which features you need and starts only those.
+
+Three of these exist purely to make the workspace collaborative: **zero-cache** keeps every
+client's local replica in sync so edits appear for everyone without a refresh, **ysweet**
+merges concurrent edits to documents and canvases, and **livekit** carries calls. Nothing
+else in the stack is required for two people to work in the same place at the same time.
 
 ## Ports
 
 | Service | Host port | Purpose |
 | ------- | --------- | ------- |
-| `postgres` | 5433 | Application database (Prisma `schema.prisma`) |
-| `common-postgres` | 5434 | Shared reference data (`prisma-common`) |
-| `claw-auth-postgres` | 5435 | Credential store for `claw-auth` |
+| `postgres` | 5433 | All three databases — `xyne_dev_db`, `xyne_common`, `claw_auth_db` |
 | `redis` | 6379 | Cache, BullMQ job queues, pub/sub |
-| `zero-cache` | 4848, 4849 | Zero sync server — reactive queries for the dashboard |
-| `ysweet` | 8080 | Y-Sweet CRDT server — realtime document state |
-| `livekit` | 7880–7882 | WebRTC SFU for voice and huddles |
-| `livekit-egress` | — | Recording and stream egress |
+| `zero-cache` | 4848, 4849 | Zero sync server — reactive queries and live updates |
+| `ysweet` | 8080 | Y-Sweet CRDT server — concurrent document and canvas editing |
+| `livekit` | 7880–7882 | WebRTC SFU for calls and huddles |
+| `livekit-egress` | — | Call recording and stream egress |
 | `minio` | 9000, 9001 | S3-compatible object storage (9001 is the console) |
 | `fake-gcs` | 4443 | Google Cloud Storage emulator |
 | `transcription-agent` | 8001 | Python speech-to-text worker |
@@ -22,11 +25,13 @@ Infrastructure containers defined in `docker-compose.dev.yml` and started by
 | `otel-collector` | 4317, 4318, 8888 | OpenTelemetry traces and metrics |
 | `victoriametrics` | 8428 | Metrics storage |
 | `grafana` | 3333 | Dashboards |
+| `vespa` | 8081, 8083, 19071 | Search — its own compose file under `vespa-core/deployment` |
 
 Application ports, for reference: **backend 3001**, **dashboard 5173**.
 
-> Postgres is on **5433**, not the default 5432, so it does not collide with a
-> system Postgres. The two extra Postgres instances follow on 5434 and 5435.
+> Postgres listens on **5433**, not the default 5432, so it does not collide with a system
+> Postgres. One instance holds all three logical databases; `docker/init-db.sh` creates
+> `xyne_common` and `claw_auth_db` alongside the application database on first start.
 
 ## Common operations
 

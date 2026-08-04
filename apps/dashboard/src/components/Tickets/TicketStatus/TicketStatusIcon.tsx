@@ -6,6 +6,12 @@ interface TicketStatusIconProps {
   size?: number;
 }
 
+const getStatusColor = (progressPercentage: number, zeroColor: string): string => {
+  if (progressPercentage === 100) return 'var(--status-success)';
+  if (progressPercentage > 0) return 'var(--status-scheduled)';
+  return zeroColor;
+};
+
 export const TicketStatusIcon: React.FC<TicketStatusIconProps> = ({
   progressPercentage,
   size = 16,
@@ -38,12 +44,7 @@ export const TicketStatusIcon: React.FC<TicketStatusIconProps> = ({
     `;
   };
 
-  const getColor = () => {
-    if (progressPercentage === 100) return 'var(--status-success)';
-    if (progressPercentage > 0) return 'var(--status-scheduled)';
-    return 'transparent';
-  };
-  const color = getColor();
+  const color = getStatusColor(progressPercentage, 'transparent');
   const innerRadius = radius - 2;
 
   return (
@@ -70,6 +71,8 @@ interface TicketStatusWithStagesProps {
   labelClassName?: string;
 }
 
+const STAGE_PROGRESS = 25;
+
 export const TicketStatusWithStages: React.FC<TicketStatusWithStagesProps> = ({
   currentStageName,
   showLeadingDot = true,
@@ -78,13 +81,16 @@ export const TicketStatusWithStages: React.FC<TicketStatusWithStagesProps> = ({
   labelClassName,
 }) => {
   if (iconOnly) {
-    return <TicketStatusIcon progressPercentage={25} size={12} />;
+    return <TicketStatusIcon progressPercentage={STAGE_PROGRESS} size={12} />;
   }
   return (
     <div className={cn('flex items-center gap-1.5', className)}>
       {showLeadingDot && <div className='rounded-full h-1 w-1 bg-muted-foreground'></div>}
-      <TicketStatusIcon progressPercentage={25} size={12} />
-      <span className={cn('text-xs line-clamp-1 break-all text-primary', labelClassName)}>
+      <TicketStatusIcon progressPercentage={STAGE_PROGRESS} size={12} />
+      <span
+        className={cn('text-xs line-clamp-1 break-all', labelClassName)}
+        style={{ color: getStatusColor(STAGE_PROGRESS, 'hsl(var(--muted-foreground))') }}
+      >
         {currentStageName || 'Not Started'}
       </span>
     </div>

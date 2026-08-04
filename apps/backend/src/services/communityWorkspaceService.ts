@@ -18,6 +18,8 @@ import { communityJoinApprovedEmailHtml } from '@/services/email/templates/commu
 import { grantPermissionsForRole } from '@/services/permissionMatrix';
 import { aiProvisioningService } from '@/services/aiProvisioningService';
 import { organizationDomainService } from '@/services/organizationDomainService';
+import { repositories } from '@/database/repositories';
+import { ensureUserInGeneralChannel as joinUserToGeneralChannel } from '@/utils/workspaceGeneralChannel';
 
 const COMMUNITY_MEMBER_WORKSPACE_ROLE = 'COMMUNITY_MEMBER' as WorkspaceRole;
 const TEMPLATE_TOKEN_PATTERN = /{{\s*(workspaceName|workspaceId|joinLink|email)\s*}}/g;
@@ -364,12 +366,45 @@ export class CommunityWorkspaceService {
       return { workspaceUser, isNewUser };
     });
 
+    if (landingChannelId) {
+      try {
+        await repositories.channelParticipants.addParticipant(
+          landingChannelId,
+          result.workspaceUser.id,
+          'MEMBER',
+        );
+      } catch (error) {
+        logger.error('[CommunityWorkspaceService] Failed to add user to landing channel', {
+          workspaceId: params.workspace.id,
+          userId: result.workspaceUser.id,
+          landingChannelId,
+          error,
+        });
+      }
+    }
+
     await grantPermissionsForRole(
       result.workspaceUser.id,
       result.workspaceUser.email,
       COMMUNITY_MEMBER_WORKSPACE_ROLE,
       params.workspace.id
     );
+
+    // Join the community workspace's general channel (idempotent)
+    try {
+      await joinUserToGeneralChannel(
+        this.prisma,
+        params.workspace.id,
+        result.workspaceUser.id,
+        'MEMBER'
+      );
+    } catch (error) {
+      logger.error('[CommunityWorkspaceService] Failed to join user to general channel', {
+        workspaceId: params.workspace.id,
+        userId: result.workspaceUser.id,
+        error,
+      });
+    }
 
     try {
       await aiProvisioningService.enqueueUserSync(result.workspaceUser.id);
@@ -667,6 +702,11 @@ export class CommunityWorkspaceService {
       return;
     }
 
+    const existingOrgMember = await this.prisma.orgMember.findUnique({
+      where: { email: request.email },
+      select: { memberId: true, role: true },
+    });
+
     await this.prisma.orgMember.upsert({
       where: { email: request.email },
       create: {
@@ -681,6 +721,10 @@ export class CommunityWorkspaceService {
         leftAt: null,
       },
     });
+
+    if (existingOrgMember?.role === OrgRole.COMMUNITY_MEMBER) {
+      await aiProvisioningService.upgradeCommunityToEnterpriseBudget(existingOrgMember.memberId);
+    }
   }
 
   private async sendJoinRequestApprovalEmail(request: CommunityJoinRequestListItem): Promise<void> {

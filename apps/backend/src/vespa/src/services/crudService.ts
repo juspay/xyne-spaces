@@ -34,12 +34,14 @@ export class CRUDService {
   update = async (
     updates: { docId: string; fields: Record<string, any> }[],
     schema: VespaSchema,
+    opts?: { create?: boolean },
   ): Promise<BatchResult[]> => {
     try {
       return this.vespa.updateBatch(updates, {
         namespace: this.config.namespace,
         cluster: this.config.cluster,
         schema,
+        ...(opts?.create ? { create: true } : {}),
       });
     } catch (error) {
       this.logger.error(

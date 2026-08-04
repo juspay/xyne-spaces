@@ -122,8 +122,8 @@ const DEFAULT_ADMIN_EMAIL = process.env.DEFAULT_ADMIN_EMAIL || 'admin@xyne.ai';
 const DEFAULT_ADMIN_USER = {
   name: DEFAULT_ADMIN_EMAIL.split('@')[0],
   email: DEFAULT_ADMIN_EMAIL,
-  authProvider: AuthProvider.GOOGLE,
-  providerUserId: 'admin-seed-user-001',
+  authProvider: AuthProvider.EMAIL,
+  providerUserId: `email-${DEFAULT_ADMIN_EMAIL}`,
   status: UserStatus.ACTIVE,
   role: WorkspaceRole.ADMIN,
 };

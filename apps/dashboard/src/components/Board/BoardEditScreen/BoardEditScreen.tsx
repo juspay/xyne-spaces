@@ -599,7 +599,14 @@ const BoardEditScreen = ({
               visibleInCreate = config.enabled;
             }
           }
-          // For custom fields, required is already set from activeFormMapping (line 173: required: !field.isOptional)
+          // For custom fields, read visibleInCreate from board metadata
+          if (!isCore) {
+            const visibilityMap = boardMetadata?.customFieldVisibility;
+            const storedVisibility = visibilityMap?.[field.id];
+            if (storedVisibility !== undefined) {
+              visibleInCreate = storedVisibility;
+            }
+          }
 
           return {
             ...field,
@@ -610,7 +617,7 @@ const BoardEditScreen = ({
         });
       });
     }
-  }, [fieldOrderFromMetadata, ticketFormConfig]);
+  }, [fieldOrderFromMetadata, ticketFormConfig, boardMetadata]);
 
   const handleDragStart = useCallback((fieldId: string) => {
     setIsDragging(fieldId);
@@ -1137,10 +1144,16 @@ const BoardEditScreen = ({
         const initialMetadataBase: BoardMetadata = { ...boardMetadata };
         delete initialMetadataBase.customFieldsFormId;
 
+        const customFieldVisibility: Record<string, boolean> = {};
+        customFields.forEach(f => {
+          customFieldVisibility[f.id] = f.visibleInCreate;
+        });
+
         const initialMetadata: BoardMetadata = {
           ...initialMetadataBase,
           fieldOrder,
           ticketFormConfig,
+          customFieldVisibility,
           ...(!isNonLinearBoardData && { showNextStageFormInTicketDetails }),
           ...(customFieldsFormId && { customFieldsFormId }),
         };
@@ -1358,11 +1371,17 @@ const BoardEditScreen = ({
         }
       }
 
+      const customFieldVisibility: Record<string, boolean> = {};
+      customFields.forEach(f => {
+        customFieldVisibility[f.id] = f.visibleInCreate;
+      });
+
       // Update board with metadata
       const newMetadata: BoardMetadata = {
         ...existingMetadata,
         fieldOrder,
         ticketFormConfig,
+        customFieldVisibility,
         ...(!isNonLinearBoardData && { showNextStageFormInTicketDetails }),
         ...(nextCustomFieldsFormId && { customFieldsFormId: nextCustomFieldsFormId }),
       };

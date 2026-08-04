@@ -54,7 +54,7 @@ const SubItem = ({ icon, label, active, onClick, trackName }: SubItemProps): Rea
       'flex items-center gap-3 h-9 rounded-[10px] px-3 border border-transparent cursor-pointer transition-colors text-left w-full text-sm font-medium tracking-[-0.14px]',
       active
         ? 'text-sidebar-accent-foreground bg-sidebar-accent border-sidebar-border'
-        : 'text-sidebar-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent hover:border-sidebar-border',
+        : 'text-sidebar-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent',
     )}
     data-track-category='Support'
     data-track-name={trackName}

@@ -73,10 +73,13 @@ import {
 } from './supportSidebarWidth';
 import { useHasResourceAccess } from '../../hooks/usePermissions';
 import { cn } from '../../utils/classNames';
+import { Hashtag, Star } from '@xyne/icons';
+import ChannelIcon from '../../components/Chat/ChannelIcon/ChannelIcon';
 import { logger, Event } from '../../utils/logger';
 import Tooltip, { TruncatedTooltip } from '../../components/ui/Tooltip';
 import { useZero } from '../../hooks/useZero';
 import { queries } from '../../zero/queries';
+import { useTicketKeysetWindow } from '../../hooks/useTicketKeysetWindow';
 import { QueryResultType } from '@rocicorp/zero';
 import ThreadList from '../../components/Chat/ThreadList/ThreadList';
 import { ChatInput } from '../../components/Chat/ChatInput/ChatInput';
@@ -215,7 +218,8 @@ import {
 import AddChannelForm from '../../components/Chat/AddChannelForm/AddChannelForm';
 import Info, { ChannelTab } from '../../components/Chat/Info/Info';
 import { useVisibleChannel } from '../../hooks/useChannels';
-import { API_BASE_URL, SHAREABLE_ORIGIN } from '../../config';
+import { API_BASE_URL } from '../../config';
+import { useShareableOrigin } from '../../hooks/useShareableOrigin';
 import { initDeskChannelOAuth } from '../../services/clients/integrationOAuthApi';
 import Dialog from '../../components/ui/Dialog';
 import { MergeTicketsDialog } from '../../components/Tickets/MergeTicketsDialog/MergeTicketsDialog';
@@ -790,9 +794,12 @@ const SupportScreen = (): ReactElement => {
 
   // deskBoardId (channel preference first) rather than the row-derived
   // channelBoardId, so stage options load on first visit before any ticket row.
-  const [boardStages] = useCachedQuery(queries.stagesByBoard({ boardId: deskBoardId ?? '' }), {
-    enabled: filterOptionsEnabled && !!deskBoardId,
-  });
+  const [boardStages, boardStagesDetails] = useCachedQuery(
+    queries.stagesByBoard({ boardId: deskBoardId ?? '' }),
+    {
+      enabled: !!deskBoardId,
+    },
+  );
   const availableStages = useMemo(
     () =>
       boardStages?.map(s => ({
@@ -1327,12 +1334,27 @@ const SupportScreen = (): ReactElement => {
   // and to flip the body to a Join-channel CTA when the user is on a public
   // channel they haven't joined yet.
   const isSelectedChannelJoined = !!selectedChannelId && joinedChannelIds.has(selectedChannelId);
+
+  const metricsSelectableDesks = useMemo(
+    () =>
+      sortedEmailChannels
+        .filter(c => joinedChannelIds.has(c.id))
+        .map(c => ({ id: c.id, name: c.name?.trim() || 'Untitled desk' })),
+    [sortedEmailChannels, joinedChannelIds],
+  );
   // A selected channelId that doesn't appear in useEmailChannels() means the
   // channel either doesn't exist or is a private channel the user isn't in —
   // in both cases we show a "Channel not found" message instead of the Join
   // CTA (there is nothing to join).
   const isSelectedChannelKnown =
     !!selectedChannelId && sortedEmailChannels.some(c => c.id === selectedChannelId);
+  const isSelectedChannelStarred = !!selectedChannelId && starredChannelIds.has(selectedChannelId);
+  const handleToggleSelectedChannelStar = useCallback((): void => {
+    if (!selectedChannelId || selectedChannelId === ALL_CHANNELS_ID) return;
+    void zero.mutate(
+      mutators.channel.toggleStarred({ channelId: selectedChannelId, updatedAt: Date.now() }),
+    );
+  }, [selectedChannelId, zero]);
 
   useEffect(() => {
     if (!selectedChannelId || !isSelectedChannelJoined) return;
@@ -1378,6 +1400,10 @@ const SupportScreen = (): ReactElement => {
     createdAt: number;
     channelId: string;
     conversationId: string;
+    stageName?: string | null | undefined;
+    priority?: string | null | undefined;
+    assignedTo?: string | null | undefined;
+    userGroupId?: string | null | undefined;
   };
   const [selectedTickets, setSelectedTickets] = useState<Map<string, SelectedTicket>>(
     () => new Map(),
@@ -1399,6 +1425,10 @@ const SupportScreen = (): ReactElement => {
       createdAt: number;
       channelId: string;
       conversationId: string;
+      stageName?: string | null | undefined;
+      priority?: string | null | undefined;
+      assignedTo?: string | null | undefined;
+      userGroupId?: string | null | undefined;
     }): void => {
       setSelectedTickets(prev => {
         const next = new Map(prev);
@@ -1414,6 +1444,10 @@ const SupportScreen = (): ReactElement => {
             createdAt: row.createdAt,
             channelId: row.channelId,
             conversationId: row.conversationId,
+            stageName: row.stageName,
+            priority: row.priority,
+            assignedTo: row.assignedTo,
+            userGroupId: row.userGroupId,
           });
         }
         return next;
@@ -1449,6 +1483,10 @@ const SupportScreen = (): ReactElement => {
         createdAt: number;
         channelId: string;
         conversationId: string;
+        stageName?: string | null | undefined;
+        priority?: string | null | undefined;
+        assignedTo?: string | null | undefined;
+        userGroupId?: string | null | undefined;
       }>,
       select: boolean,
     ): void => {
@@ -1465,6 +1503,10 @@ const SupportScreen = (): ReactElement => {
               createdAt: row.createdAt,
               channelId: row.channelId,
               conversationId: row.conversationId,
+              stageName: row.stageName,
+              priority: row.priority,
+              assignedTo: row.assignedTo,
+              userGroupId: row.userGroupId,
             });
           } else {
             next.delete(row.id);
@@ -1475,6 +1517,35 @@ const SupportScreen = (): ReactElement => {
     },
     [],
   );
+
+  const handleTableSelectionChange = useCallback((tickets: Ticket[]): void => {
+    setSelectedTickets(
+      new Map(
+        tickets.map(ticket => [
+          ticket.id,
+          {
+            id: ticket.id,
+            lastEmailAt: ticket.lastEmailAt ?? 0,
+            emailReads:
+              (
+                ticket as Ticket & {
+                  emailReads?: ReadonlyArray<{ userId: string; lastReadEmailAt: number }>;
+                }
+              ).emailReads ?? [],
+            title: ticket.title ?? '',
+            xyneId: ticket.xyneId ?? '',
+            createdAt: ticket.createdAt ?? 0,
+            channelId: ticket.channelId ?? '',
+            conversationId: ticket.conversationId ?? '',
+            stageName: ticket.stageName,
+            priority: ticket.priority,
+            assignedTo: ticket.assignedTo,
+            userGroupId: ticket.userGroupId,
+          },
+        ]),
+      ),
+    );
+  }, []);
 
   const handleMergeSelectedTickets = useCallback(
     async (parentTicketId: string): Promise<void> => {
@@ -1522,7 +1593,7 @@ const SupportScreen = (): ReactElement => {
   // Only the setter is read (onTicketsLoaded callbacks below); the loaded ticket
   // array itself is not consumed here since the merge dialog is built from the
   // selection map. See mergeDialogTickets for the rationale.
-  const [, setKanbanTickets] = useState<Ticket[]>([]);
+  const [kanbanTickets, setKanbanTickets] = useState<Ticket[]>([]);
 
   const [showMergeDialog, setShowMergeDialog] = useState(false);
 
@@ -1900,13 +1971,13 @@ const SupportScreen = (): ReactElement => {
           role='button'
           tabIndex={0}
           className={cn(
-            'flex items-center gap-3 h-9 group rounded-[10px] px-3 border border-transparent cursor-pointer transition-colors',
+            'flex items-center gap-3 h-9 mt-px group rounded-[10px] px-3 border border-transparent cursor-pointer transition-colors',
             // The active highlight lives on the selected mailbox folder (Inbox) in the
             // subtree below, not on the channel header — so the channel row only gets text
             // emphasis when active, not a background.
             isActive
               ? 'text-sidebar-accent-foreground font-medium'
-              : 'text-sidebar-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent hover:border-sidebar-border',
+              : 'text-sidebar-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent',
           )}
           onClick={() => selectDesk(c.id)}
           onKeyDown={e => {
@@ -2026,7 +2097,7 @@ const SupportScreen = (): ReactElement => {
                 <div className='w-full h-[52px] shrink-0'>
                   <AppNavigator />
                 </div>
-                <div className='flex-1 min-h-0 px-3 pt-3 pb-12 sm:pb-0 flex flex-col border-t border-border'>
+                <div className='flex-1 min-h-0 px-3 pt-3 pb-12 sm:pb-0 flex flex-col border-t border-sidebar-border-muted'>
                   {/* Header */}
                   <div className='flex pt-2 pb-3 px-2 h-10 items-center justify-between mb-2'>
                     <h2 className='text-base font-semibold leading-normal text-sidebar-accent-foreground'>
@@ -2071,7 +2142,7 @@ const SupportScreen = (): ReactElement => {
                     <div className='shrink-0'>
                       <button
                         onClick={() => void navigate('/projects')}
-                        className='flex items-center justify-start gap-3 w-full px-3 py-2 text-sm font-medium tracking-[-0.14px] rounded-[10px] border border-transparent transition-colors text-sidebar-foreground hover:bg-sidebar-accent hover:border-sidebar-border hover:text-sidebar-accent-foreground'
+                        className='flex items-center justify-start gap-3 w-full px-3 py-2 text-sm font-medium tracking-[-0.14px] rounded-[10px] border border-transparent transition-colors text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
                         aria-label='Go to Tickets'
                         title='Tickets'
                         data-track-category='Support'
@@ -2170,7 +2241,7 @@ const SupportScreen = (): ReactElement => {
                   )}
                 >
                   <div className='flex h-14 shrink-0 items-center justify-between gap-2 border-b border-border px-4 min-w-0'>
-                    <div className='flex items-center gap-2 font-semibold min-w-0 flex-1'>
+                    <div className='flex items-center gap-2 text-foreground min-w-0 flex-1'>
                       {!isSidebarOpen && (
                         <button
                           onClick={() => setIsSidebarOpen(true)}
@@ -2182,21 +2253,61 @@ const SupportScreen = (): ReactElement => {
                           <ChevronRight size={16} />
                         </button>
                       )}
-                      <Hash size={14} className='text-muted-foreground shrink-0' />
+                      {selectedChannelId &&
+                        selectedChannelId !== ALL_CHANNELS_ID &&
+                        isSelectedChannelJoined && (
+                          <Tooltip content={isSelectedChannelStarred ? 'Unstar' : 'Star'}>
+                            <Button
+                              variant='ghost'
+                              size='sm'
+                              onClick={e => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                handleToggleSelectedChannelStar();
+                              }}
+                              className='h-7 w-7 rounded-lg shrink-0 text-muted-foreground hover:text-foreground'
+                              aria-label={isSelectedChannelStarred ? 'Unstar desk' : 'Star desk'}
+                              data-track-category='Support'
+                              data-track-name='ToggleStarChannel'
+                              data-track-metadata={JSON.stringify({
+                                channelId: selectedChannelId,
+                                isStarred: isSelectedChannelStarred,
+                              })}
+                            >
+                              <Star
+                                size={16}
+                                variant={isSelectedChannelStarred ? 'Solid' : 'Stroke'}
+                                className={isSelectedChannelStarred ? 'text-status-pending' : ''}
+                              />
+                            </Button>
+                          </Tooltip>
+                        )}
                       {selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID ? (
-                        <button
-                          onClick={() => {
-                            setInfoDefaultTab('about');
-                            setIsInfoOpen(true);
-                          }}
-                          className='text-base font-semibold hover:underline tracking-[-0.17px] flex items-center gap-1 truncate'
-                          data-track-category='Support'
-                          data-track-name='OpenChannelInfo'
-                        >
-                          {selectedChannelName}
-                        </button>
+                        <Tooltip content='Get channel details' side='bottom' delayDuration={500}>
+                          <button
+                            onClick={() => {
+                              setInfoDefaultTab('about');
+                              setIsInfoOpen(true);
+                            }}
+                            className='text-base font-semibold tracking-[-0.32px] flex items-center gap-2 min-w-0 px-1.5 py-0.5 rounded-md hover:bg-muted transition-colors duration-100'
+                            data-track-category='Support'
+                            data-track-name='OpenChannelInfo'
+                          >
+                            <span className='shrink-0 inline-flex items-center leading-none'>
+                              {selectedChannelFull ? (
+                                <ChannelIcon channel={selectedChannelFull} />
+                              ) : (
+                                <Hashtag size={16} />
+                              )}
+                            </span>
+                            <span className='truncate'>{selectedChannelName}</span>
+                          </button>
+                        </Tooltip>
                       ) : (
-                        <span className='truncate'>{selectedChannelName}</span>
+                        <span className='flex items-center gap-2 min-w-0 px-1.5 py-0.5'>
+                          <Hashtag size={16} className='shrink-0' />
+                          <span className='truncate'>{selectedChannelName}</span>
+                        </span>
                       )}
                     </div>
                     <div className='flex items-center gap-2 shrink-0'>
@@ -2496,6 +2607,7 @@ const SupportScreen = (): ReactElement => {
                                   handleFilterChange('stages', stages)
                                 }
                                 availableStages={availableStages}
+                                isLoading={!!deskBoardId && boardStagesDetails.type !== 'complete'}
                               />
                             </Popover.Content>
                           </Popover.Root>
@@ -2683,7 +2795,7 @@ const SupportScreen = (): ReactElement => {
                               const Icon =
                                 column.key === 'assignee'
                                   ? User
-                                  : column.key === 'dueDate'
+                                  : column.key === 'dueDate' || column.key === 'createdAt'
                                     ? CalendarDays
                                     : column.key === 'priority'
                                       ? BarChart4Icon
@@ -2929,6 +3041,7 @@ const SupportScreen = (): ReactElement => {
                   }}
                   channelId={selectedChannelId}
                   channelName={selectedChannelName ?? undefined}
+                  availableDesks={metricsSelectableDesks}
                 />
               )}
               <div className='h-full flex-1 min-h-0 overflow-y-auto no-scrollbar'>
@@ -3025,6 +3138,8 @@ const SupportScreen = (): ReactElement => {
                         dynamicFieldColumns={tableDynamicFieldColumns}
                         onBoardIdResolved={setChannelBoardId}
                         onTicketsLoaded={setKanbanTickets}
+                        selectedIds={selectedTicketIds}
+                        onSelectionChange={handleTableSelectionChange}
                         onTicketClick={ticket => {
                           void navigate(`${supportBase}/${ticket.channelId}/${ticket.xyneId}`, {
                             state: {
@@ -3074,6 +3189,7 @@ const SupportScreen = (): ReactElement => {
                 ticketFilter={ticketFilter}
                 isMember={isSelectedChannelJoined}
                 onMailtoClick={handleMailtoClick}
+                navTickets={kanbanTickets}
               />
             </div>
           </Panel>
@@ -3308,6 +3424,14 @@ type SupportTicketDetailProps = {
    * channel ticket list.
    */
   onBack?: () => void;
+  navTickets?: ReadonlyArray<{
+    id: string;
+    xyneId?: string | null;
+    channelId?: string | null;
+    conversationId: string;
+    title: string;
+    lastEmailAt?: number | null;
+  }>;
 };
 
 export const SupportTicketDetail = ({
@@ -3316,6 +3440,7 @@ export const SupportTicketDetail = ({
   onMailtoClick,
   navBasePath,
   onBack,
+  navTickets,
 }: SupportTicketDetailProps): ReactElement => {
   const {
     workspaceId: routeWorkspaceId,
@@ -3327,6 +3452,7 @@ export const SupportTicketDetail = ({
     ticketId?: string;
   }>();
   const supportBase = routeWorkspaceId ? `/${routeWorkspaceId}/support` : '/support';
+  const shareableOrigin = useShareableOrigin();
   const { workspaceId, userID } = useAuthContextValues();
   const [isRightPanelOpen, setIsRightPanelOpen] = useState<boolean>(true);
   const isAIPanelOpen = useSelector(
@@ -3462,6 +3588,47 @@ export const SupportTicketDetail = ({
       });
     return Array.from(ids);
   }, [ticket?.conversationId, ticket?.referencesIn]);
+
+  // conversationId -> the manually-merged-in ticket that owns it (needed so its
+  // thread-root email uses the ticket-level unmerge action; see mergedRootEmailSource).
+  const mergedSourceByConversationId = useMemo(() => {
+    const map = new Map<string, { id: string; xyneId?: string | null | undefined }>();
+    (ticket?.referencesIn ?? [])
+      .filter(ref => ref.relationType === TicketReferenceRelation.MERGED_INTO)
+      .forEach(ref => {
+        if (ref.sourceTicket?.id && ref.sourceTicket?.conversationId) {
+          map.set(ref.sourceTicket.conversationId, {
+            id: ref.sourceTicket.id,
+            xyneId: ref.sourceTicket.xyneId,
+          });
+        }
+      });
+    return map;
+  }, [ticket?.referencesIn]);
+
+  const handleUnmergeMergedSource = useCallback(
+    async (sourceTicketId: string, sourceTicketXyneId?: string | null): Promise<void> => {
+      const toastId = toast.loading('Unmerging ticket...');
+      try {
+        await apiInstance.post(`/tickets/${sourceTicketId}/unmerge`);
+        toast.success('Ticket unmerged successfully', {
+          id: toastId,
+          description: sourceTicketXyneId
+            ? `${sourceTicketXyneId} is now a separate ticket`
+            : undefined,
+        });
+        if (sourceTicketXyneId && channelIdParam) {
+          void navigate(`${navBasePath ?? supportBase}/${channelIdParam}/${sourceTicketXyneId}`);
+        }
+      } catch {
+        toast.error('Unmerge Failed', {
+          id: toastId,
+          description: 'Operation failed. Please try again.',
+        });
+      }
+    },
+    [channelIdParam, navigate, navBasePath, supportBase],
+  );
 
   const [allEmails] = useCachedQuery(
     queries.getEmailsForConversations({ conversationIds: allConversationIds }),
@@ -3681,6 +3848,52 @@ export const SupportTicketDetail = ({
     });
   };
 
+  type DeskNavRow = {
+    id: string;
+    xyneId?: string | null;
+    channelId?: string | null;
+    conversationId: string;
+    title: string;
+    lastEmailAt?: number | null;
+  };
+  const currentNavRow: DeskNavRow | null = ticket
+    ? {
+        id: ticket.id,
+        xyneId: ticket.xyneId,
+        channelId: ticket.channelId,
+        conversationId: ticket.conversationId,
+        title: ticket.title,
+        lastEmailAt: ticket.lastEmailAt,
+      }
+    : null;
+  const { prev: windowPrev, next: windowNext } = useTicketKeysetWindow<
+    DeskNavRow,
+    { id: string; lastEmailAt: number }
+  >({
+    currentId: ticket?.id ?? null,
+    currentRow: currentNavRow,
+    seed: navTickets,
+    idOf: r => r.id,
+    cursorOf: r => ({ id: r.id, lastEmailAt: r.lastEmailAt ?? 0 }),
+    fetchPage: async (start, dir, limit) => {
+      if (!channelId) return [];
+      const { conversationIdWhitelist: _ciw, ...restTicketFilter } = ticketFilter;
+      return (await zero.run(
+        queries.supportTicketsPageV3({
+          channelId,
+          isMember,
+          ...restTicketFilter,
+          ...(_ciw !== undefined ? { conversationIds: _ciw } : {}),
+          limit,
+          start,
+          dir,
+        }),
+        { type: 'complete' },
+      )) as DeskNavRow[];
+    },
+    enabled: !!channelId && !!ticket?.id,
+  });
+
   const goBackToTicketList = useCallback((): void => {
     if (onBack) {
       onBack();
@@ -3702,6 +3915,11 @@ export const SupportTicketDetail = ({
   }, [channelIdParam, navBasePath, navigate, onBack, routerState?.returnToUrl, supportBase]);
 
   const navigateAdjacent = async (dir: 'forward' | 'backward'): Promise<void> => {
+    const windowTarget = dir === 'forward' ? windowNext : windowPrev;
+    if (windowTarget) {
+      goToTicket(windowTarget);
+      return;
+    }
     if (!cursorStart || !channelId) return;
     try {
       const { conversationIdWhitelist: _ciw, ...restTicketFilter } = ticketFilter;
@@ -4148,7 +4366,7 @@ export const SupportTicketDetail = ({
                           toast.error('Cannot copy link');
                           return;
                         }
-                        const url = `${SHAREABLE_ORIGIN}/support/${channelId}/${ticketIdParam}`;
+                        const url = `${shareableOrigin}/support/${channelId}/${ticketIdParam}`;
                         void navigator.clipboard
                           .writeText(url)
                           .then(() => toast.success('Link copied'))
@@ -4558,6 +4776,8 @@ export const SupportTicketDetail = ({
                       }}
                       deskEmail={deskEmail}
                       onMailtoClick={onMailtoClick}
+                      mergedSourceByConversationId={mergedSourceByConversationId}
+                      onUnmergeSource={handleUnmergeMergedSource}
                     />
                   )}
                 </div>
@@ -5077,6 +5297,8 @@ const EmailThread = ({
   onReplyToEmail,
   deskEmail,
   onMailtoClick,
+  mergedSourceByConversationId,
+  onUnmergeSource,
 }: {
   collapseState: EmailCollapseState;
   ticketId?: string | null | undefined;
@@ -5085,9 +5307,16 @@ const EmailThread = ({
   onReplyToEmail?: (emailId: string, mode: 'reply' | 'replyAll') => void;
   deskEmail?: string | null | undefined;
   onMailtoClick: (email: string) => void;
+  mergedSourceByConversationId?: ReadonlyMap<
+    string,
+    { id: string; xyneId?: string | null | undefined }
+  >;
+  onUnmergeSource?: (
+    sourceTicketId: string,
+    sourceTicketXyneId?: string | null,
+  ) => void | Promise<void>;
 }): ReactElement => {
   const { sortedEmails, collapsedIds, toggleOne, lastEmailId } = collapseState;
-  const rootEmail = sortedEmails[0];
   // Thread-level: upsert the current user's email_reads row. `isRead` compares
   // the stored lastReadEmailAt snapshot against the ticket's lastEmailAt, so
   // every email header in the thread flips read/unread together.
@@ -5102,29 +5331,56 @@ const EmailThread = ({
     () => sortedEmails.flatMap(e => e.attachments ?? []),
     [sortedEmails],
   );
+  // The first email (by position in this already-createdAt-sorted list) seen for
+  // each conversationId is that conversation's own root. For a foreign
+  // conversationId this is a manually-merged-in ticket's thread root, which must
+  // use the ticket-level unmerge action — see mergedSourceByConversationId. Root status is
+  // tracked per-conversationId (not against the combined thread's overall first
+  // email) because auto-merge demerge eligibility is validated per-conversation
+  // server-side (EmailDemergeController resolves "root" via
+  // findByConversationIdOrdered on that email's own conversationId).
+  const { mergedRootEmailSource, conversationRootEmailIds } = useMemo(() => {
+    const mergedMap = new Map<string, { id: string; xyneId?: string | null | undefined }>();
+    const rootIds = new Set<string>();
+    const seenConversationIds = new Set<string>();
+    for (const e of sortedEmails) {
+      if (!seenConversationIds.has(e.conversationId)) {
+        seenConversationIds.add(e.conversationId);
+        rootIds.add(e.id);
+        const source = mergedSourceByConversationId?.get(e.conversationId);
+        if (source) mergedMap.set(e.id, source);
+      }
+    }
+    return { mergedRootEmailSource: mergedMap, conversationRootEmailIds: rootIds };
+  }, [sortedEmails, mergedSourceByConversationId]);
   return (
     <div className='divide-y divide-gray-200 relative'>
-      {sortedEmails.map(email => (
-        <EmailThreadItem
-          key={email.id}
-          email={email}
-          isCollapsed={collapsedIds.has(email.id)}
-          canCollapse={email.id !== lastEmailId}
-          onToggleCollapse={() => toggleOne(email.id)}
-          isRead={isRead}
-          threadAttachments={threadAttachments}
-          {...(onReplyToEmail &&
-            email.id !== lastEmailId && {
-              // Per-email Reply / Reply all only on older messages — the
-              // latest already has the dedicated bar at the thread footer,
-              // so showing one here would be a duplicate.
-              onReply: (mode: 'reply' | 'replyAll') => onReplyToEmail(email.id, mode),
-            })}
-          deskEmail={deskEmail}
-          rootEmail={rootEmail}
-          onMailtoClick={onMailtoClick}
-        />
-      ))}
+      {sortedEmails.map(email => {
+        const mergedSource = mergedRootEmailSource.get(email.id);
+        return (
+          <EmailThreadItem
+            key={email.id}
+            email={email}
+            isCollapsed={collapsedIds.has(email.id)}
+            canCollapse={email.id !== lastEmailId}
+            onToggleCollapse={() => toggleOne(email.id)}
+            isRead={isRead}
+            threadAttachments={threadAttachments}
+            {...(onReplyToEmail &&
+              email.id !== lastEmailId && {
+                // Per-email Reply / Reply all only on older messages — the
+                // latest already has the dedicated bar at the thread footer,
+                // so showing one here would be a duplicate.
+                onReply: (mode: 'reply' | 'replyAll') => onReplyToEmail(email.id, mode),
+              })}
+            deskEmail={deskEmail}
+            isConversationRoot={conversationRootEmailIds.has(email.id)}
+            onMailtoClick={onMailtoClick}
+            {...(mergedSource && { mergedSource })}
+            {...(onUnmergeSource && { onUnmergeSource })}
+          />
+        );
+      })}
     </div>
   );
 };
@@ -5137,9 +5393,11 @@ const EmailThreadItem = ({
   isRead = true,
   onReply,
   deskEmail,
-  rootEmail,
+  isConversationRoot,
   threadAttachments,
   onMailtoClick,
+  mergedSource,
+  onUnmergeSource,
 }: {
   email: Email;
   isCollapsed?: boolean;
@@ -5148,9 +5406,19 @@ const EmailThreadItem = ({
   isRead?: boolean;
   onReply?: (mode: 'reply' | 'replyAll') => void;
   deskEmail?: string | null | undefined;
-  rootEmail: Email | undefined;
+  /** True when this email is the earliest email in its own conversationId —
+   * scoped per-conversation (not the combined thread's overall first email) to
+   * match the backend's per-conversation root check. See canDemerge below. */
+  isConversationRoot: boolean;
   threadAttachments?: NonNullable<Email['attachments']>;
   onMailtoClick: (email: string) => void;
+  /** Set when this email is the thread-root of a manually-merged-in ticket and
+   * must use the ticket-level unmerge action. */
+  mergedSource?: { id: string; xyneId?: string | null | undefined };
+  onUnmergeSource?: (
+    sourceTicketId: string,
+    sourceTicketXyneId?: string | null,
+  ) => void | Promise<void>;
 }): ReactElement => {
   const { channelId: channelIdParam } = useParams<{ channelId?: string }>();
   const navigate = useNavigate();
@@ -5162,11 +5430,21 @@ const EmailThreadItem = ({
 
   const [isDemerging, setIsDemerging] = useState(false);
 
+  // mergedSource routes to the ticket-level unmerge API; otherwise email-level demerge.
   const handleDemerge = async (): Promise<void> => {
     if (isDemerging) return;
     setIsDemerging(true);
 
-    const toastId = toast.loading('Demerging email...', {
+    if (mergedSource) {
+      try {
+        await onUnmergeSource?.(mergedSource.id, mergedSource.xyneId);
+      } finally {
+        setIsDemerging(false);
+      }
+      return;
+    }
+
+    const toastId = toast.loading('Unmerging email...', {
       description: 'Creating new ticket from this email',
     });
 
@@ -5176,7 +5454,7 @@ const EmailThreadItem = ({
       });
 
       if (response.data?.success && response.data.newTicket) {
-        toast.success('Demerge Successful', {
+        toast.success('Unmerge Successful', {
           id: toastId,
           description: `Created new ticket ${response.data.newTicket.xyneId}`,
         });
@@ -5192,7 +5470,7 @@ const EmailThreadItem = ({
         }
       }
     } catch {
-      toast.error('Demerge Failed', {
+      toast.error('Unmerge Failed', {
         id: toastId,
         description: 'Operation failed. Please try again.',
       });
@@ -5202,10 +5480,10 @@ const EmailThreadItem = ({
   };
 
   const canDemerge =
-    email.type === EmailType.DEFAULT &&
-    !!rootEmail &&
-    email.id !== rootEmail.id &&
-    email.externalThreadId === email.externalMessageId;
+    !!mergedSource ||
+    (email.type === EmailType.DEFAULT &&
+      !isConversationRoot &&
+      email.externalThreadId === email.externalMessageId);
 
   const demergeButton = canDemerge ? (
     <button
@@ -5215,16 +5493,17 @@ const EmailThreadItem = ({
       }}
       disabled={isDemerging}
       className='flex items-center gap-1 px-2 py-0.5 text-xs font-medium text-orange-600 bg-orange-50 hover:bg-orange-100 rounded-full transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed'
-      title='Demerge this email to a new ticket'
+      title={mergedSource ? 'Unmerge this ticket' : 'Unmerge this email to a new ticket'}
       data-track-category='SUPPORT'
-      data-track-name='DemergeEmail'
+      data-track-name={mergedSource ? 'UnmergeTicket' : 'DemergeEmail'}
       data-track-metadata={JSON.stringify({
         emailId: email.id,
         conversationId: email.conversationId,
+        ...(mergedSource && { sourceTicketId: mergedSource.id }),
       })}
     >
       <Split size={12} />
-      {isDemerging ? 'Demerging...' : 'Demerge'}
+      {isDemerging ? 'Unmerging...' : 'Unmerge'}
     </button>
   ) : null;
 

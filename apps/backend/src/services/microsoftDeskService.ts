@@ -5,6 +5,7 @@
  */
 
 import crypto from 'crypto';
+import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
 import { AuthorizationCode } from 'simple-oauth2';
 import { logger } from '../utils/logger';
 import { decrypt, encrypt } from './encryptionService';
@@ -413,7 +414,7 @@ export class MicrosoftDeskService {
 
     const existingByName = await db.externalSource.findUnique({ where: { name: sourceName } });
     const existingForWorkspace = await db.externalSource.findFirst({
-      where: { workspaceId: channelData.workspaceId, sourceType: 'microsoft' },
+      where: { workspaceId: channelData.workspaceId, ...WORKSPACE_LEVEL, sourceType: 'microsoft' },
     });
 
     // Only reject if an active source with this name exists on a different workspace.

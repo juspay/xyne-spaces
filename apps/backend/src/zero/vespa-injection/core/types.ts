@@ -21,6 +21,10 @@ export interface VespaJobConfig<S extends keyof SchemaDataMap> {
   app?: SubApp; // when schema can belong to multiple sub-applications
   data?: SchemaDataMap[S] | Partial<SchemaDataMap[S]>;
   fields?: string[]; // when jobType is 'update', restrict the Vespa write to just these document fields
+  // when jobType is 'update', upsert: pass ?create=true so a MISSING Vespa doc is created
+  // from the assign ops instead of no-oping. Used for user docs, which are written via
+  // partial update (never a full feed, which would wipe personalization weights).
+  create?: boolean;
   // Scope modifier on a 'feed' job for the `file` schema: when true, insert only
   // the file's metadata (name, mime, size, permissions, …) with empty chunks —
   // skipping the slow GCS-download + content-parse step. Makes the file

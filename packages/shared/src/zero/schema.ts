@@ -304,6 +304,7 @@ export const OrgLLMServiceAccountPurpose = {
   SUMMARISER: 'SUMMARISER',
   WORKFLOW: 'WORKFLOW',
   DEFAULT: 'DEFAULT',
+  CLAW_ORG_KEY: 'CLAW_ORG_KEY',
 } as const;
 
 export type OrgLLMServiceAccountPurpose =
@@ -646,6 +647,12 @@ export enum CanvasRole {
 }
 
 // @ts-ignore TS1294
+export enum CanvasCommentThreadStatus {
+  OPEN = 'OPEN',
+  RESOLVED = 'RESOLVED',
+}
+
+// @ts-ignore TS1294
 export enum DashboardVisibility {
   PUBLIC = 'PUBLIC',
   PRIVATE = 'PRIVATE',
@@ -977,6 +984,35 @@ export enum ApproverType {
   ROLE = 'ROLE',
 }
 
+// Recording / sharing enums. New Prisma enums are frozen at the DB level (see
+// scripts/validate-no-new-enums.sh) — the corresponding columns are plain
+// Strings validated app-side. These consts are the single source of truth for
+// valid values; import them everywhere instead of hardcoding string literals.
+export const ShareableEntityType = {
+  NOTE_TAKER: 'NOTE_TAKER',
+} as const;
+
+export type ShareableEntityType = typeof ShareableEntityType[keyof typeof ShareableEntityType];
+
+export const EntityUserAccess = {
+  VIEW: 'VIEW',
+  EDIT: 'EDIT',
+  ADMIN: 'ADMIN',
+  REVOKED: 'REVOKED',
+} as const;
+
+export type EntityUserAccess = typeof EntityUserAccess[keyof typeof EntityUserAccess];
+
+// Role that may be granted when sharing/updating access. REVOKED is reached via
+// update/revoke, not by explicitly "sharing" with that role.
+export type GrantableEntityUserAccess = Exclude<EntityUserAccess, 'REVOKED'>;
+
+export const DefaultOutlet = {
+  EMAIL: 'EMAIL',
+  MESSAGE: 'MESSAGE',
+} as const;
+
+export type DefaultOutlet = typeof DefaultOutlet[keyof typeof DefaultOutlet];
 
 // Define tables
 
@@ -1998,6 +2034,39 @@ export const callTable = table('calls')
     callUpdatesChannel: string().optional(),
     participantCount: number().optional(),
     participantPreviewUserIds: string().optional(),
+    summaryTemplateId: string().optional(),
+    labels: json<string[]>(),
+    markedItems: json<any[]>(),
+  })
+  .primaryKey('id');
+
+export const entityAccessTable = table('entity_access' /* EntityAccess */)
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    shareableEntityType: string(),
+    entityId: string(),
+    userId: string().optional(),
+    userGroupId: string().optional(),
+    channelId: string().optional(),
+    entityUserAccess: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
+
+export const summaryTemplateTable = table('summary_templates' /* SummaryTemplate */)
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    name: string(),
+    autoTriggerPrompt: string().optional(),
+    sections: json(),
+    version: number(),
+    systemPrompt: string(),
+    defaultOutlet: string(),
+    createdBy: string(),
+    createdAt: number(),
   })
   .primaryKey('id');
 
@@ -2114,6 +2183,36 @@ export const canvasVersionTable = table('canvas_versions')
     createdBy: string().optional(),
     createdAt: number(),
     updatedAt: number(),
+  })
+  .primaryKey('id');
+
+export const canvasCommentThreadTable = table('canvas_comment_threads' /* CanvasCommentThread */)
+  .columns({
+    id: string(),
+    canvasId: string(),
+    blockId: string(),
+    anchorText: string().optional(),
+    initialCommentId: string().optional(),
+    status: enumeration<CanvasCommentThreadStatus>(),
+    statusUpdatedBy: string().optional(),
+    statusUpdatedAt: number().optional(),
+    createdBy: string(),
+    createdAt: number(),
+  })
+  .primaryKey('id');
+
+export const canvasCommentTable = table('canvas_comments' /* CanvasComment */)
+  .columns({
+    id: string(),
+    threadId: string(),
+    canvasId: string(),
+    body: string(),
+    mentionedUserIds: string(),
+    isInitial: boolean(),
+    createdBy: string(),
+    editedAt: number().optional(),
+    deletedAt: number().optional(),
+    createdAt: number(),
   })
   .primaryKey('id');
 
@@ -3696,6 +3795,21 @@ export const userTableRelationships = relationships(userTable, ({ one, many }) =
     destField: ['userId'],
     destSchema: guestAccessTable,
   }),
+  createdCanvasCommentThreads: many({
+    sourceField: ['id'],
+    destField: ['createdBy'],
+    destSchema: canvasCommentThreadTable,
+  }),
+  statusUpdatedCanvasCommentThreads: many({
+    sourceField: ['id'],
+    destField: ['statusUpdatedBy'],
+    destSchema: canvasCommentThreadTable,
+  }),
+  createdCanvasComments: many({
+    sourceField: ['id'],
+    destField: ['createdBy'],
+    destSchema: canvasCommentTable,
+  }),
   sentMessages: many({
     sourceField: ['id'],
     destField: ['senderId'],
@@ -4268,7 +4382,76 @@ export const callTableRelationships = relationships(callTable, ({ one, many }) =
     destField: ['callId'],
     destSchema: callParticipantTable,
   }),
+  shares: many({
+    sourceField: ['id'],
+    destField: ['entityId'],
+    destSchema: entityAccessTable,
+  }),
+  summaryTemplate: one({
+    sourceField: ['summaryTemplateId'],
+    destField: ['id'],
+    destSchema: summaryTemplateTable,
+  }),
 }));
+
+export const entityAccessTableRelationships = relationships(
+  entityAccessTable,
+  ({ one, many }) => ({
+    call: one({
+      sourceField: ['entityId'],
+      destField: ['id'],
+      destSchema: callTable,
+    }),
+    user: one({
+      sourceField: ['userId'],
+      destField: ['id'],
+      destSchema: userTable,
+    }),
+    userGroup: one({
+      sourceField: ['userGroupId'],
+      destField: ['id'],
+      destSchema: userGroupTable,
+    }),
+    channel: one({
+      sourceField: ['channelId'],
+      destField: ['id'],
+      destSchema: channelTable,
+    }),
+    workspace: one({
+      sourceField: ['workspaceId'],
+      destField: ['id'],
+      destSchema: workspaceTable,
+    }),
+    // Used to check whether the viewing user is a member of the shared
+    // userGroupId/channelId (see CallsACL.canSelect) — not a direct FK.
+    userGroupMemberships: many({
+      sourceField: ['userGroupId'],
+      destField: ['userGroupId'],
+      destSchema: userGroupMappingTable,
+    }),
+    channelMembers: many({
+      sourceField: ['channelId'],
+      destField: ['channelId'],
+      destSchema: channelParticipantTable,
+    }),
+  }),
+);
+
+export const summaryTemplateTableRelationships = relationships(
+  summaryTemplateTable,
+  ({ one }) => ({
+    workspace: one({
+      sourceField: ['workspaceId'],
+      destField: ['id'],
+      destSchema: workspaceTable,
+    }),
+    creator: one({
+      sourceField: ['createdBy'],
+      destField: ['id'],
+      destSchema: userTable,
+    }),
+  }),
+);
 
 export const callParticipantTableRelationships = relationships(callParticipantTable, ({ one }) => ({
   call: one({
@@ -4369,6 +4552,11 @@ export const canvasTableRelationships = relationships(canvasTable, ({ one, many 
     destField: ['canvasId'],
     destSchema: canvasVersionTable,
   }),
+  commentThreads: many({
+    sourceField: ['id'],
+    destField: ['canvasId'],
+    destSchema: canvasCommentThreadTable,
+  }),
   channelParticipants: many({
     sourceField: ['channelId'],
     destField: ['channelId'],
@@ -4408,6 +4596,53 @@ export const canvasVersionTableRelationships = relationships(canvasVersionTable,
     destSchema: canvasTable,
   }),
 }));
+
+export const canvasCommentThreadTableRelationships = relationships(
+  canvasCommentThreadTable,
+  ({ one, many }) => ({
+    canvas: one({
+      sourceField: ['canvasId'],
+      destField: ['id'],
+      destSchema: canvasTable,
+    }),
+    comments: many({
+      sourceField: ['id'],
+      destField: ['threadId'],
+      destSchema: canvasCommentTable,
+    }),
+    initialComment: one({
+      sourceField: ['initialCommentId'],
+      destField: ['id'],
+      destSchema: canvasCommentTable,
+    }),
+    createdByUser: one({
+      sourceField: ['createdBy'],
+      destField: ['id'],
+      destSchema: userTable,
+    }),
+    statusUpdatedByUser: one({
+      sourceField: ['statusUpdatedBy'],
+      destField: ['id'],
+      destSchema: userTable,
+    }),
+  }),
+);
+
+export const canvasCommentTableRelationships = relationships(
+  canvasCommentTable,
+  ({ one }) => ({
+    thread: one({
+      sourceField: ['threadId'],
+      destField: ['id'],
+      destSchema: canvasCommentThreadTable,
+    }),
+    createdByUser: one({
+      sourceField: ['createdBy'],
+      destField: ['id'],
+      destSchema: userTable,
+    }),
+  }),
+);
 
 export const canvasParticipantTableRelationships = relationships(canvasParticipantTable, ({ one }) => ({
   canvas: one({
@@ -5165,12 +5400,16 @@ export const schema = createSchema({
     surfaceNudgeTable,
     surfaceNudgeCountTable,
     callTable,
+    entityAccessTable,
+    summaryTemplateTable,
     callParticipantTable,
     recurringCallSeriesTable,
     recurringCallParticipantTable,
     canvasFolderTable,
     canvasTable,
     canvasVersionTable,
+    canvasCommentThreadTable,
+    canvasCommentTable,
     canvasParticipantTable,
     canvasUserStatusTable,
     bookmarkTable,
@@ -5281,12 +5520,16 @@ export const schema = createSchema({
     surfaceNudgeTableRelationships,
     surfaceNudgeCountTableRelationships,
     callTableRelationships,
+    entityAccessTableRelationships,
+    summaryTemplateTableRelationships,
     callParticipantTableRelationships,
     recurringCallSeriesTableRelationships,
     recurringCallParticipantTableRelationships,
     canvasFolderTableRelationships,
     canvasTableRelationships,
     canvasVersionTableRelationships,
+    canvasCommentThreadTableRelationships,
+    canvasCommentTableRelationships,
     canvasParticipantTableRelationships,
     canvasUserStatusTableRelationships,
     pullRequestsTableRelationships,
@@ -5414,12 +5657,16 @@ export type ProactiveNudge = Row<typeof schema.tables.proactive_nudges>;
 export type SurfaceNudge = Row<typeof schema.tables.surface_nudges>;
 export type SurfaceNudgeCount = Row<typeof schema.tables.surface_nudge_counts>;
 export type Call = Row<typeof schema.tables.calls>;
+export type EntityAccess = Row<typeof schema.tables.entity_access>;
+export type SummaryTemplate = Row<typeof schema.tables.summary_templates>;
 export type CallParticipant = Row<typeof schema.tables.call_participants>;
 export type RecurringCallSeries = Row<typeof schema.tables.recurring_call_series>;
 export type RecurringCallParticipant = Row<typeof schema.tables.recurring_call_participants>;
 export type ConversationParticipant = Row<typeof schema.tables.conversation_participants>;
 export type Canvas = Row<typeof schema.tables.canvases>;
 export type CanvasVersion = Row<typeof schema.tables.canvas_versions>;
+export type CanvasCommentThread = Row<typeof schema.tables.canvas_comment_threads>;
+export type CanvasComment = Row<typeof schema.tables.canvas_comments>;
 export type CanvasParticipant = Row<typeof schema.tables.canvas_participants>;
 export type CanvasUserStatus = Row<typeof schema.tables.canvas_user_status>;
 export type Bookmark = Row<typeof schema.tables.bookmarks>;

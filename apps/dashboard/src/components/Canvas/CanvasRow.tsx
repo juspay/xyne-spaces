@@ -111,7 +111,7 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
             'group flex items-center gap-3 h-9 px-3 rounded-[10px] border border-transparent transition-colors',
             isSelected
               ? 'bg-sidebar-accent border-sidebar-border text-sidebar-accent-foreground'
-              : 'text-sidebar-foreground hover:bg-sidebar-accent hover:border-sidebar-border hover:text-sidebar-accent-foreground',
+              : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
           )}
         >
           <button

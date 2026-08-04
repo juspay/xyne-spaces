@@ -33,6 +33,7 @@ import { validateChannelIdsAccess } from '../middelware/channelValidation';
 import { calculateETADeadline } from '@/utils/etaCalculation';
 import { generateKeyBetween } from 'fractional-indexing';
 import { resolveFormFieldDefinitionsForForm } from '@/utils/fieldDefinition';
+import type { TicketCustomFormData } from '@/database/repositories/formsRepository';
 import {
   fetchTicketInfoByIdentifier,
   normalizeCustomFieldValue,
@@ -196,6 +197,7 @@ const SearchTicketsBodySchema = z.object({
   senderName: z.string().trim().min(1, 'senderName must not be empty').optional(),
   filters: TicketFiltersSchema.optional(),
   customFields: z.record(z.unknown()).optional(),
+  includeCustomFields: z.boolean().optional(),
   limit: z.coerce.number().int().min(1).max(100).default(20),
   cursor: z.string().optional(),
 }).superRefine((data, ctx) => {
@@ -1204,7 +1206,7 @@ export class TicketController {
         return;
       }
 
-      const { channelId, boardIds, projectId, senderEmail, senderName, filters, customFields, limit, cursor } = bodyResult.data;
+      const { channelId, boardIds, projectId, senderEmail, senderName, filters, customFields, includeCustomFields, limit, cursor } = bodyResult.data;
       const channelIds = channelId ? [channelId] : [];
 
       // Channel scope keeps its participant ACL; board/project rely on the workspace backstop.
@@ -1383,6 +1385,18 @@ export class TicketController {
         tickets = matchedTickets;
       }
 
+      const customFormDataByTicketId = new Map<string, TicketCustomFormData | null>();
+      if (includeCustomFields) {
+        await Promise.all(
+          tickets
+            .filter((ticket): ticket is typeof ticket & { boardId: string } => !!ticket.boardId)
+            .map(async ticket => {
+              const customFormData = await repositories.forms.getTicketCustomFormData(ticket.id, ticket.boardId);
+              customFormDataByTicketId.set(ticket.id, customFormData);
+            }),
+        );
+      }
+
       const items: MerchantTicketListItem[] = tickets.map(ticket => {
         return {
           ticketId: ticket.id,
@@ -1397,6 +1411,7 @@ export class TicketController {
           channelId: ticket.channelId,
           boardId: ticket.boardId,
           projectId: ticket.projectId,
+          ...(includeCustomFields ? { customFormData: customFormDataByTicketId.get(ticket.id) ?? null } : {}),
         };
       });
 

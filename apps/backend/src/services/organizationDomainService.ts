@@ -28,10 +28,10 @@ export interface ExistingOrganizationForDomain {
 }
 
 export interface ExistingEnterpriseWorkspaceForDomain extends ExistingOrganizationForDomain {
-  workspace: {
+  workspaces: Array<{
     id: string;
     name: string;
-  };
+  }>;
 }
 
 export class OrganizationDomainConflictError extends Error {
@@ -125,7 +125,7 @@ export class OrganizationDomainService {
       return null;
     }
 
-    const mapping = await this.prisma.organizationDomain.findFirst({
+    const mappings = await this.prisma.organizationDomain.findMany({
       where: {
         domain,
         verificationStatus: { in: MATCHABLE_DOMAIN_STATUSES },
@@ -133,13 +133,13 @@ export class OrganizationDomainService {
       orderBy: { createdAt: 'asc' },
     });
 
-    if (!mapping) {
+    if (mappings.length === 0) {
       return null;
     }
 
-    const organization = await this.prisma.organization.findFirst({
+    const activeOrgs = await this.prisma.organization.findMany({
       where: {
-        orgId: mapping.orgId,
+        orgId: { in: mappings.map(mapping => mapping.orgId) },
         status: Status.ACTIVE,
       },
       select: {
@@ -149,15 +149,20 @@ export class OrganizationDomainService {
       },
     });
 
-    if (!organization) {
-      return null;
+    const activeOrgById = new Map(activeOrgs.map(org => [org.orgId, org]));
+
+    for (const mapping of mappings) {
+      const organization = activeOrgById.get(mapping.orgId);
+      if (organization) {
+        return {
+          ...organization,
+          domain: mapping.domain,
+          verificationStatus: mapping.verificationStatus,
+        };
+      }
     }
 
-    return {
-      ...organization,
-      domain: mapping.domain,
-      verificationStatus: mapping.verificationStatus,
-    };
+    return null;
   }
 
   async findEnterpriseWorkspaceByEmailDomain(
@@ -168,7 +173,7 @@ export class OrganizationDomainService {
       return null;
     }
 
-    const workspace = await this.prisma.workspace.findFirst({
+    const workspaces = await this.prisma.workspace.findMany({
       where: {
         orgId: existingOrg.orgId,
         status: Status.ACTIVE,
@@ -181,13 +186,13 @@ export class OrganizationDomainService {
       },
     });
 
-    if (!workspace) {
+    if (workspaces.length === 0) {
       return null;
     }
 
     return {
       ...existingOrg,
-      workspace,
+      workspaces,
     };
   }
 

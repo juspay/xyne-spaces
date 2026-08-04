@@ -595,6 +595,7 @@ export class EmailService {
     
     const hasDeskSignature = signatureCount > 0;
     const autoDraftAgentSlug = preference.autoDraftAgentSlug?.trim() || null;
+    const workspaceId = await this.channelRepository.getWorkspaceId(channelId);
 
     const streamStart = Date.now();
     logger.info('[AutoDraft] stream invoke', {
@@ -626,6 +627,7 @@ export class EmailService {
         userName: userInfo.userName,
         conversationId,
         channelId,
+        workspaceId,
         resultForwardUrl: callbackUrl,
       });
       if (!dispatched) {

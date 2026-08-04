@@ -79,6 +79,9 @@ jobs:
       - name: Build workspace libraries
         run: pnpm --filter @xyne/shared --filter @xyne/icons run build
 
+      - name: Format check
+        run: pnpm --filter xyne-spaces-dashboard run format:check
+
       # errors-only (warnings ignored); heap bump avoids OOM on type-aware lint.
       - name: Lint (errors only)
         env:

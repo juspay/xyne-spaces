@@ -231,9 +231,9 @@ export const ActivityItemCard = ({
       onClick={handleClick}
       className={cn(
         'group flex w-full font-normal items-start gap-3 px-3 pt-2.5 pb-2 text-left transition-colors duration-150 h-auto rounded-[14px] border border-transparent',
-        activity.isRead ? 'bg-transparent' : 'bg-[var(--activity-sidebar-primary)]',
-        'hover:!bg-[var(--activity-sidebar-accent)]',
-        'data-[selected]:!bg-[var(--activity-sidebar-accent)] data-[selected]:border-[var(--activity-sidebar-border)]',
+        activity.isRead ? 'bg-transparent' : 'bg-activity-sidebar-primary',
+        'hover:!bg-sidebar-accent',
+        'data-[selected]:!bg-sidebar-accent data-[selected]:border-sidebar-border',
         className,
       )}
       data-activity-id={activity.id}

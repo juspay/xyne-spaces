@@ -4,6 +4,8 @@ import { ActivitiesACL } from '../tables/activities-acl';
 import { CallParticipantsACL } from '../tables/call-participants-acl';
 import { CallsACL } from '../tables/calls-acl';
 import { CanvasFoldersACL } from '../tables/canvas-folders-acl';
+import { CanvasCommentsACL } from '../tables/canvas-comments-acl';
+import { CanvasCommentThreadsACL } from '../tables/canvas-comment-threads-acl';
 import { CanvasParticipantsACL } from '../tables/canvas-participants-acl';
 import { CanvasUserStatusACL } from '../tables/canvas-user-status-acl';
 import { CanvasesACL } from '../tables/canvases-acl';
@@ -156,6 +158,10 @@ export class ACLFactory {
         return new CallsACL(ctx);
       case 'canvas_folders':
         return new CanvasFoldersACL(ctx);
+      case 'canvas_comment_threads':
+        return new CanvasCommentThreadsACL(ctx);
+      case 'canvas_comments':
+        return new CanvasCommentsACL(ctx);
       case 'canvas_participants':
         return new CanvasParticipantsACL(ctx);
       case 'canvas_user_status':

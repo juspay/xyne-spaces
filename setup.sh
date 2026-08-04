@@ -373,6 +373,15 @@ while [ $elapsed -lt $TIMEOUT ]; do
       print_error "Failed to seed dummy data"
       echo -e "${YELLOW}  ⚠️  Continuing anyway (backend may work without dummy data)${NC}"
     fi
+
+    # Seed the app permission
+    echo "  Seeding app permission registry..."
+    if pnpm exec dotenv -e .env.local -- pnpm exec tsx scripts/seed-app-permissions.ts; then
+      print_success "App permissions seeded successfully"
+    else
+      print_error "Failed to seed app permissions"
+      echo -e "${YELLOW}  ⚠️  Continuing anyway (apps will not be grantable until this is run)${NC}"
+    fi
     
     cd ..
     echo ""

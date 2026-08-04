@@ -125,12 +125,13 @@ const ChatView = (): ReactElement => {
     }
   }, [channel, channelId, context.userID, zero]);
 
-  // Save the current channelId as the last visited channel
+  // Save the current channelId as the last visited channel.
   useEffect(() => {
     if (!channelId || !channel) return;
+    if (baseRoute !== '/chat/dir') return;
     if (isDeskChannelType(channel.type)) return;
     setLastVisitedChannel(channelId, workspaceId ?? '');
-  }, [channelId, channel]);
+  }, [channelId, channel, baseRoute]);
 
   // Check for canvas in hash with validation
   const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

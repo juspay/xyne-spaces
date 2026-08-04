@@ -110,6 +110,14 @@ export const shortcuts = {
     preventDefault: true,
     useKey: true,
   },
+  'recording.start': {
+    keys: 'mod+alt+x',
+    scope: 'global',
+    description: 'Start recording',
+    category: 'Recording',
+    priority: 50,
+    preventDefault: true,
+  },
 
   'global.openPreferences': {
     keys: 'mod+comma',

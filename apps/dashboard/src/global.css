@@ -54,9 +54,10 @@
     --sidebar-foreground: #232229cc;
     --sidebar-primary: #fd6b6b;
     --sidebar-primary-foreground: #ffffff;
-    --sidebar-accent: #f7f9f6;
+    --sidebar-accent: #ffffff;
     --sidebar-accent-foreground: #181b1d;
-    --sidebar-border: #e5ebf0;
+    --sidebar-border: rgba(35 34 41 / 0.16);
+    --sidebar-border-muted: rgba(35, 34, 41, 0.06);
     --sidebar-accent-ring: #fd6b6b66;
     --action-primary: #57ab02;
     --action-accent: 90 98% 34%;
@@ -139,8 +140,9 @@
     --claw-ai-solid-hover: #6d28d9;
 
     --activity-sidebar-primary: hsl(0 0% 100% / 0.5);
-    --activity-sidebar-accent: #ffffff;
-    --activity-sidebar-border: rgba(35 34 41 / 0.16);
+
+    --chat-composer-border: rgba(35, 34, 41, 0.06);
+    --chat-composer-border-active: rgba(35, 34, 41, 0.2);
   }
 
   /* Classic theme - default theme with current design */
@@ -179,9 +181,10 @@
     --sidebar-foreground: #232229cc;
     --sidebar-primary: #fd6b6b;
     --sidebar-primary-foreground: #ffffff;
-    --sidebar-accent: #f7f9f6;
+    --sidebar-accent: #ffffff;
     --sidebar-accent-foreground: #181b1d;
-    --sidebar-border: #e5ebf0;
+    --sidebar-border: rgba(35 34 41 / 0.16);
+    --sidebar-border-muted: rgba(35, 34, 41, 0.06);
     --sidebar-accent-ring: #fd6b6b66;
     --action-primary: #6e7aa6;
     --action-accent: 225 24% 54%;
@@ -256,8 +259,9 @@
     --claw-ai-solid-hover: #6d28d9;
 
     --activity-sidebar-primary: hsl(0 0% 100% / 0.5);
-    --activity-sidebar-accent: #ffffff;
-    --activity-sidebar-border: rgba(35 34 41 / 0.15);
+
+    --chat-composer-border: rgba(35, 34, 41, 0.06);
+    --chat-composer-border-active: rgba(35, 34, 41, 0.2);
   }
 
   /* Midnight theme - dark theme variant */
@@ -300,9 +304,10 @@
     --sidebar-foreground: rgba(255, 255, 255, 0.6);
     --sidebar-primary: #fd6b6b;
     --sidebar-primary-foreground: #ffffff;
-    --sidebar-accent: rgba(255, 255, 255, 0.12);
+    --sidebar-accent: #2d2e34;
     --sidebar-accent-foreground: #ffffff;
-    --sidebar-border: #36373f; /* same as --border */
+    --sidebar-border: rgba(255, 255, 255, 0.2);
+    --sidebar-border-muted: rgba(255, 255, 255, 0.04);
     --sidebar-accent-ring: #fd6b6b66;
     --action-primary: #0073bf;
     --action-accent: 204 100% 37%;
@@ -387,8 +392,9 @@
     --claw-ai-solid-hover: #8b5cf6;
 
     --activity-sidebar-primary: rgba(45, 46, 52, 0.5);
-    --activity-sidebar-accent: #2d2e34;
-    --activity-sidebar-border: rgba(255, 255, 255, 0.2);
+
+    --chat-composer-border: rgba(255, 255, 255, 0.06);
+    --chat-composer-border-active: rgba(255, 255, 255, 0.2);
   }
 }
 
@@ -902,7 +908,7 @@
 
   .chat-input-field .ProseMirror .tableWrapper table td,
   .chat-input-field .ProseMirror .tableWrapper table th {
-    border: 1px solid hsl(var(--border));
+    border: 1px solid hsl(var(--border)) !important;
     padding: 0.375rem 0.625rem;
     text-align: left;
     min-width: 50px;
@@ -910,8 +916,8 @@
   }
 
   .chat-input-field .ProseMirror .tableWrapper table th {
-    background-color: hsl(var(--muted));
-    color: hsl(var(--foreground));
+    background-color: hsl(var(--muted)) !important;
+    color: hsl(var(--foreground)) !important;
     font-weight: 600;
   }
 
@@ -1783,11 +1789,12 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 .jp-message-html th {
   text-align: left;
   font-weight: 600;
-  color: hsl(var(--foreground));
+  color: hsl(var(--foreground)) !important;
   padding: 8px 12px;
-  border-bottom: 2px solid hsl(var(--border));
-  border-right: 1px solid hsl(var(--border));
-  background: hsl(var(--muted));
+  border-color: hsl(var(--border)) !important;
+  border-bottom: 2px solid hsl(var(--border)) !important;
+  border-right: 1px solid hsl(var(--border)) !important;
+  background: hsl(var(--muted)) !important;
   white-space: nowrap;
 }
 
@@ -1797,8 +1804,9 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 
 .jp-message-html td {
   padding: 6px 12px;
-  border-bottom: 1px solid hsl(var(--border));
-  border-right: 1px solid hsl(var(--border));
+  border-color: hsl(var(--border)) !important;
+  border-bottom: 1px solid hsl(var(--border)) !important;
+  border-right: 1px solid hsl(var(--border)) !important;
   color: hsl(var(--foreground));
 }
 
@@ -2400,7 +2408,7 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   margin: 3.5px 0;
 }
 
-/* Lists — 8px above / 4px below, 24px marker box with a 12px gutter. The marker
+/* Lists — 8px above / 4px below, 16px marker box with a 4px gutter. The marker
    is pinned to the first line (BlockNote centres it across the whole block). */
 .canvas-surface .bn-editor .bn-block-content[data-content-type="bulletListItem"],
 .canvas-surface .bn-editor .bn-block-content[data-content-type="numberedListItem"] {
@@ -2416,11 +2424,11 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   .bn-block
   .bn-block-content[data-content-type="bulletListItem"]::before {
   content: "";
-  min-width: 24px;
+  min-width: 16px;
   height: 1.55em;
   align-self: flex-start;
   padding-right: 0;
-  margin-right: 12px;
+  margin-right: 4px;
   background-image: radial-gradient(circle at center, currentColor 3px, transparent 3px);
 }
 
@@ -2492,6 +2500,7 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 .canvas-surface .bn-editor [data-content-type="table"] td,
 .canvas-surface .bn-editor [data-content-type="table"] th {
   border-color: hsl(var(--border));
+  padding: 4px 8px;
 }
 .canvas-surface .bn-editor [data-content-type="table"] th {
   background-color: hsl(var(--muted));
@@ -3570,6 +3579,122 @@ img.inline-emoji,
   border-top-color: #374151 !important;
 }
 
+/* Recording detail keeps summaries unframed and easy to scan. */
+.recording-summary-content.bot-markdown-content-call-summary {
+  border-left: 0;
+  margin: 0;
+  max-width: 100%;
+  padding-left: 0;
+}
+
+.recording-summary-content.bot-markdown-content-call-summary::before,
+.recording-summary-content.bot-markdown-content-call-summary h2::before {
+  display: none;
+}
+
+.recording-summary-content.bot-markdown-content-call-summary h1,
+.recording-summary-content.bot-markdown-content-call-summary h2 {
+  margin: 26px 0 10px !important;
+  padding-left: 0 !important;
+  color: hsl(var(--foreground)) !important;
+  font-size: 16px !important;
+  font-weight: 650 !important;
+  line-height: 1.35 !important;
+}
+
+.recording-summary-content.bot-markdown-content-call-summary h1:first-child,
+.recording-summary-content.bot-markdown-content-call-summary h2:first-child {
+  margin-top: 0 !important;
+}
+
+.recording-summary-content.bot-markdown-content-call-summary h3 {
+  margin: 20px 0 8px !important;
+  padding-left: 0 !important;
+  color: hsl(var(--foreground)) !important;
+  font-size: 14px !important;
+  font-weight: 650 !important;
+}
+
+.recording-summary-content.bot-markdown-content-call-summary p {
+  margin: 0 0 12px !important;
+  padding-left: 0 !important;
+  color: hsl(var(--muted-foreground)) !important;
+  font-size: 15px !important;
+  line-height: 1.62 !important;
+}
+
+.recording-summary-content.bot-markdown-content-call-summary ul,
+.recording-summary-content.bot-markdown-content-call-summary ol {
+  margin: 8px 0 14px !important;
+  padding-left: 20px !important;
+}
+
+.recording-summary-content.bot-markdown-content-call-summary li {
+  margin: 5px 0 !important;
+  color: hsl(var(--muted-foreground)) !important;
+  line-height: 1.55 !important;
+}
+
+.recording-summary-content.bot-markdown-content-call-summary strong {
+  color: hsl(var(--foreground)) !important;
+}
+
+.recording-notes-canvas-editor .thin-scrollbar {
+  padding-top: 0 !important;
+}
+
+.recording-notes-canvas-editor .bn-editor {
+  max-width: 100% !important;
+  padding: 0 0 5rem !important;
+}
+
+.detailed-summary-canvas-editor .thin-scrollbar {
+  padding-top: 0 !important;
+}
+
+.detailed-summary-canvas-editor .bn-editor {
+  max-width: 100% !important;
+  padding: 1rem 1.25rem 5rem !important;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* Headless detailed summaries use muted body copy while section headings retain
+   foreground contrast. List markers inherit this color from their content block. */
+.detailed-summary-canvas-editor
+  .bn-editor
+  .bn-block-content:is(
+    [data-content-type="paragraph"],
+    [data-content-type="bulletListItem"],
+    [data-content-type="numberedListItem"],
+    [data-content-type="checkListItem"],
+    [data-content-type="toggleListItem"],
+    [data-content-type="quote"]
+  ) {
+  color: hsl(var(--muted-foreground)) !important;
+}
+
+.detailed-summary-canvas-editor .bn-editor .bn-block-content[data-content-type="heading"] {
+  color: hsl(var(--foreground)) !important;
+}
+
+.detailed-summary-canvas-editor
+  .bn-editor
+  .bn-block
+  .bn-block-content[data-content-type="heading"][data-level="3"] {
+  font-size: 1rem;
+  line-height: 1.4;
+  padding-top: 12px;
+}
+
+.detailed-summary-canvas-editor
+  .bn-editor
+  .bn-block
+  .bn-block-content[data-content-type="heading"][data-level="4"] {
+  font-size: 0.9375rem;
+  line-height: 1.4;
+}
+
 /* Code blocks (fenced ``` ... ```) */
 .bot-markdown-content pre {
   background-color: #f6f8fa !important;
@@ -3825,6 +3950,19 @@ img.inline-emoji,
 /* Hide the decorative sky background on the AI landing page in midnight (dark) mode */
 [data-theme="midnight"] .ai-landing-bg {
   display: none;
+}
+
+/* 404 illustration. A background rather than an <img> so the container stays free
+   to hold markup (e.g. the 404 numerals as HTML) layered over the artwork. */
+.not-found-illustration {
+  background-image: url("/images/404-light.png");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+}
+
+[data-theme="midnight"] .not-found-illustration {
+  background-image: url("/images/404-dark.png");
 }
 
 /* AI page background — soft neutral for light themes, near-black for midnight */
@@ -4176,6 +4314,9 @@ img.inline-emoji,
 .rec-overlay-waveform-bar {
   height: var(--rec-wave-height, 6%);
   opacity: var(--rec-wave-opacity, 0.4);
+  transition:
+    height 110ms linear,
+    opacity 110ms linear;
 }
 
 /* Live reasoning streaming: fade in each newly-arrived chunk at the writing edge
@@ -4318,4 +4459,11 @@ img.inline-emoji,
 ::highlight(xyne-find-active) {
   background-color: var(--search-result-active-bg, #fb923c);
   color: inherit;
+}
+/* 
+ Virtualized message rows are transformed stacking contexts. Lift only the
+   row containing an inline edit composer so a collision-flipped emoji picker
+   can render over the following message rows.  */
+[data-testid="virtuoso-item-list"] [data-index]:has([data-input-id]) {
+  z-index: 10;
 }

@@ -5,6 +5,7 @@ import {
   ChannelVisibility,
   MessageType,
   CallStatus,
+  CallType,
   RecurringCallSeriesStatus,
   InvitationResponse,
   MeetingStatus,
@@ -20,6 +21,7 @@ import {
   AutoDraftMode,
   CanvasVisibility,
   CanvasRole,
+  CanvasCommentThreadStatus,
   BookmarkEntityType,
   AttachmentEntityType,
   UserPresenceStatus,
@@ -93,6 +95,9 @@ import { DEFAULT_ROLE_NAME_TO_ENUM } from '../utils/roleFrameworkUtils.js';
 import { SUMMARY_PROMPT_MAX_LENGTH } from '../templates/callSummary.js';
 import { z } from 'zod';
 import type { CallParticipantMetadata } from '../types/call.js';
+
+const serializeCanvasCommentMentionedUserIds = (mentionedUserIds: string[]): string =>
+  JSON.stringify([...new Set(mentionedUserIds)]);
 
 /** Build initial_message_md from message data. Single helper for all conversation creation sites. */
 function buildInitialMessageMd(msg: {
@@ -338,6 +343,36 @@ async function hasCanvasVersionEditAccess(
   }
 
   return false;
+}
+
+async function assertCanvasCommentEditAccess(
+  tx: Transaction<Schema>,
+  canvasId: string,
+  userId: string,
+): Promise<{ id: string; createdBy: string }> {
+  const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
+  if (!canvas) {
+    throw new Error('Canvas not found');
+  }
+
+  const canEdit = await hasCanvasVersionEditAccess(tx, canvas, userId);
+  if (!canEdit) {
+    throw new Error('You do not have permission to comment on this canvas');
+  }
+
+  return canvas;
+}
+
+async function assertCanvasThreadManageAccess(
+  tx: Transaction<Schema>,
+  thread: { canvasId: string; createdBy: string },
+  userId: string,
+): Promise<void> {
+  if (thread.createdBy === userId) {
+    return;
+  }
+
+  await assertCanvasCommentEditAccess(tx, thread.canvasId, userId);
 }
 
 async function deleteConversationWithParticipants(
@@ -1424,16 +1459,6 @@ export const mutators = defineMutators({
         // Prevent modifying the channel creator's role
         if (targetUserId === channel.createdBy) {
           throw new Error("Cannot modify the channel creator's role");
-        }
-
-        // Only creators can grant admin role
-        if (newRole === ChannelRole.ADMIN && !isCreator) {
-          throw new Error('Only channel creators can grant admin role');
-        }
-
-        // Non-creators cannot change admin roles
-        if (targetParticipant.role === ChannelRole.ADMIN && !isCreator) {
-          throw new Error('Only channel creators can modify admin roles');
         }
 
         // Update the participant's role
@@ -3141,6 +3166,38 @@ export const mutators = defineMutators({
         await tx.mutate.calls.update({
           id: call.id,
           metadata: { ...currentMetadata, notesCanvasId },
+        });
+      },
+    ),
+    // Append a moment the user flagged mid-recording to Call.markedItems. The same
+    // column holds the decisions/actions the summary pipeline extracts once the call
+    // ends (which preserves these), so entries are told apart by `type`.
+    // `timestampSeconds` is measured from the first transcript line, matching how
+    // transcriptService.formatTranscript timestamps the transcript itself..
+    
+    markMoment: defineMutator(
+      z.object({
+        callId: z.string(),
+        type: z.literal('moment'),
+        timestampSeconds: z.number().nonnegative(),
+        text: z.string(),
+      }),
+      async ({ tx, ctx, args: { callId, type, timestampSeconds, text } }) => {
+        const call = await tx.run(zql.calls.where('externalId', callId).one());
+        // Headless recording calls are fetched via the oats* named queries and may not
+        // be synced into the client's optimistic cache. Skip and let the authoritative
+        // server mutator perform the write against Postgres, where the call exists.
+        if (!call) {
+          return;
+        }
+        if (call.createdByUserId !== ctx.userID) {
+          throw new Error('Access denied');
+        }
+
+        const markedItems = Array.isArray(call.markedItems) ? call.markedItems : [];
+        await tx.mutate.calls.update({
+          id: call.id,
+          markedItems: [...markedItems, { type, text, timestampSeconds }],
         });
       },
     ),
@@ -6052,6 +6109,163 @@ export const mutators = defineMutators({
           isStarred: true,
           createdAt: timestamp,
           updatedAt: timestamp,
+        });
+      },
+    ),
+  },
+  canvasComment: {
+    createThread: defineMutator(
+      z.object({
+        threadId: z.string(),
+        commentId: z.string(),
+        canvasId: z.string(),
+        blockId: z.string().min(1),
+        anchorText: z.string().optional(),
+        body: z.string().min(1),
+        mentionedUserIds: z.array(z.string()).default([]),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { threadId, commentId, canvasId, blockId, anchorText, body, mentionedUserIds, timestamp } }) => {
+        await assertCanvasCommentEditAccess(tx, canvasId, ctx.userID);
+
+        await tx.mutate.canvas_comment_threads.insert({
+          id: threadId,
+          canvasId,
+          blockId,
+          anchorText: anchorText || null,
+          initialCommentId: commentId,
+          status: CanvasCommentThreadStatus.OPEN,
+          statusUpdatedBy: null,
+          statusUpdatedAt: null,
+          createdBy: ctx.userID,
+          createdAt: timestamp,
+        });
+
+        await tx.mutate.canvas_comments.insert({
+          id: commentId,
+          threadId,
+          canvasId,
+          body,
+          mentionedUserIds: serializeCanvasCommentMentionedUserIds(mentionedUserIds),
+          isInitial: true,
+          createdBy: ctx.userID,
+          editedAt: null,
+          deletedAt: null,
+          createdAt: timestamp,
+        });
+      },
+    ),
+    reply: defineMutator(
+      z.object({
+        commentId: z.string(),
+        threadId: z.string(),
+        canvasId: z.string(),
+        body: z.string().min(1),
+        mentionedUserIds: z.array(z.string()).default([]),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { commentId, threadId, canvasId, body, mentionedUserIds, timestamp } }) => {
+        const thread = await tx.run(zql.canvas_comment_threads.where('id', threadId).one());
+        if (!thread || thread.canvasId !== canvasId) {
+          throw new Error('Comment thread not found');
+        }
+
+        await assertCanvasCommentEditAccess(tx, canvasId, ctx.userID);
+
+        await tx.mutate.canvas_comments.insert({
+          id: commentId,
+          threadId,
+          canvasId,
+          body,
+          mentionedUserIds: serializeCanvasCommentMentionedUserIds(mentionedUserIds),
+          isInitial: false,
+          createdBy: ctx.userID,
+          editedAt: null,
+          deletedAt: null,
+          createdAt: timestamp,
+        });
+
+        if (thread.status === CanvasCommentThreadStatus.RESOLVED) {
+          await tx.mutate.canvas_comment_threads.update({
+            id: threadId,
+            status: CanvasCommentThreadStatus.OPEN,
+            statusUpdatedBy: ctx.userID,
+            statusUpdatedAt: timestamp,
+          });
+        }
+      },
+    ),
+    updateComment: defineMutator(
+      z.object({
+        commentId: z.string(),
+        body: z.string().min(1),
+        mentionedUserIds: z.array(z.string()).default([]),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { commentId, body, mentionedUserIds, timestamp } }) => {
+        const comment = await tx.run(zql.canvas_comments.where('id', commentId).one());
+        if (!comment) {
+          throw new Error('Comment not found');
+        }
+        if (comment.createdBy !== ctx.userID) {
+          throw new Error('Only the comment author can edit this comment');
+        }
+        if (comment.deletedAt) {
+          throw new Error('Deleted comments cannot be edited');
+        }
+
+        await tx.mutate.canvas_comments.update({
+          id: commentId,
+          body,
+          mentionedUserIds: serializeCanvasCommentMentionedUserIds(mentionedUserIds),
+          editedAt: timestamp,
+        });
+      },
+    ),
+    deleteComment: defineMutator(
+      z.object({
+        commentId: z.string(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { commentId, timestamp } }) => {
+        const comment = await tx.run(zql.canvas_comments.where('id', commentId).one());
+        if (!comment) {
+          throw new Error('Comment not found');
+        }
+        if (comment.createdBy !== ctx.userID) {
+          throw new Error('Only the comment author can delete this comment');
+        }
+        if (comment.deletedAt) {
+          return;
+        }
+
+        await tx.mutate.canvas_comments.update({
+          id: commentId,
+          body: '',
+          mentionedUserIds: '[]',
+          deletedAt: timestamp,
+        });
+      },
+    ),
+    setThreadStatus: defineMutator(
+      z.object({
+        threadId: z.string(),
+        status: z.nativeEnum(CanvasCommentThreadStatus),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { threadId, status, timestamp } }) => {
+        const thread = await tx.run(zql.canvas_comment_threads.where('id', threadId).one());
+        if (!thread) {
+          throw new Error('Comment thread not found');
+        }
+
+        await assertCanvasThreadManageAccess(tx, thread, ctx.userID);
+
+        await tx.mutate.canvas_comment_threads.update({
+          id: threadId,
+          status,
+          statusUpdatedBy: ctx.userID,
+          statusUpdatedAt: timestamp,
         });
       },
     ),
