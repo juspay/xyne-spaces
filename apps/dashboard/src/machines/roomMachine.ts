@@ -39,6 +39,7 @@ import {
   CALL_MEDIA_QUALITY_CONFIG,
   getCallMediaQualitySettings,
 } from '../hooks/useCallMediaQualitySettings';
+import { getCallRoomDebugSettings } from '../hooks/useCallRoomDebugSettings';
 import {
   reactNativeBridge,
   detectReactNativeWebView,
@@ -1063,13 +1064,18 @@ export const roomMachine = setup({
         }
 
         const mediaQualitySettings = getCallMediaQualitySettings();
+        const roomDebugSettings = getCallRoomDebugSettings();
         const videoQuality = CALL_MEDIA_QUALITY_CONFIG[mediaQualitySettings.videoQuality];
         const screenShareQuality =
           CALL_MEDIA_QUALITY_CONFIG[mediaQualitySettings.screenShareQuality];
 
-        const room = new Room({
-          adaptiveStream: true,
+        const roomOptions: ConstructorParameters<typeof Room>[0] & {
+          enableStartAtDesiredQuality?: boolean;
+        } = {
+          adaptiveStream: roomDebugSettings.adaptiveStream,
           dynacast: true,
+          // Escape hatch for testing against LiveKit builds that recognize this flag.
+          enableStartAtDesiredQuality: roomDebugSettings.enableStartAtDesiredQuality,
           videoCaptureDefaults: {
             resolution: {
               width: videoQuality.width,
@@ -1091,7 +1097,9 @@ export const roomMachine = setup({
             // Maintain resolution over framerate for screen sharing
             degradationPreference: 'maintain-resolution',
           },
-        });
+        };
+
+        const room = new Room(roomOptions);
         return room;
       },
     }),
