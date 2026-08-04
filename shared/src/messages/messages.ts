@@ -8,18 +8,52 @@ import type { ChannelRef, ConversationRef, ThreadRef } from './conversationRef.j
 
 const WARM_CHANNEL_TAIL_SIZE = 25;
 
+type ChatCacheSnapshotSource = 'actor' | 'storage' | 'miss';
+
+type ChatCacheSnapshot<T> = {
+  value: T;
+  source: ChatCacheSnapshotSource;
+};
+
+export function getChannelSnapshotWithSource(
+  ref: ChannelRef,
+): ChatCacheSnapshot<Conversation[]> {
+  const fromActor =
+    queryCacheActor.getSnapshot().context.channelConversations[ref.channelId];
+  if (fromActor) return { value: fromActor, source: 'actor' };
+
+  const fromStorage = getStorageAdapter()?.readChannelConversationsSync?.(
+    ref.channelId,
+  ) as Conversation[] | null | undefined;
+  return fromStorage
+    ? { value: fromStorage, source: 'storage' }
+    : { value: [], source: 'miss' };
+}
+
 /**
  * Sync cache snapshot for a channel. Returns [] when the channel has never
  * been cached (cold start on this device / evicted by LRU).
  */
 export function getChannelSnapshot(ref: ChannelRef): Conversation[] {
+  return getChannelSnapshotWithSource(ref).value;
+}
+
+export function getThreadSnapshotWithSource(
+  ref: ThreadRef,
+): ChatCacheSnapshot<ThreadConversation | null> {
   const fromActor =
-    queryCacheActor.getSnapshot().context.channelConversations[ref.channelId];
-  if (fromActor) return fromActor;
-  const fromStorage = getStorageAdapter()?.readChannelConversationsSync?.(
-    ref.channelId,
-  );
-  return (fromStorage as Conversation[] | null) ?? [];
+    queryCacheActor.getSnapshot().context.threadConversations[
+      ref.conversationId
+    ];
+  if (fromActor) return { value: fromActor, source: 'actor' };
+
+  const fromStorage = getStorageAdapter()?.readChatEntitySync?.(
+    'thread',
+    ref.conversationId,
+  ) as ThreadConversation | null | undefined;
+  return fromStorage
+    ? { value: fromStorage, source: 'storage' }
+    : { value: null, source: 'miss' };
 }
 
 /**
@@ -27,17 +61,7 @@ export function getChannelSnapshot(ref: ChannelRef): Conversation[] {
  * been cached.
  */
 export function getThreadSnapshot(ref: ThreadRef): ThreadConversation | null {
-  const fromActor =
-    queryCacheActor.getSnapshot().context.threadConversations[
-      ref.conversationId
-    ];
-  if (fromActor) return fromActor;
-  return (
-    (getStorageAdapter()?.readChatEntitySync?.('thread', ref.conversationId) as
-      | ThreadConversation
-      | null
-      | undefined) ?? null
-  );
+  return getThreadSnapshotWithSource(ref).value;
 }
 
 export type MessagesSnapshot<Ref extends ConversationRef> = Ref extends ChannelRef

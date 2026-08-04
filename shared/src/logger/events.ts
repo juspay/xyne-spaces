@@ -48,6 +48,7 @@ export const Event = {
   ZERO_CACHED_QUERY_CALLED: "zero_cached_query_called",
   ZERO_CACHED_QUERY_COMPLETE: "zero_cached_query_complete",
   ZERO_CACHED_QUERY_ERROR: "zero_cached_query_error",
+  CHAT_NOTIFICATION_CACHE_READ: "chat_notification_cache_read",
   ZERO_MUTATION_CALLED: "zero_mutation_called",
   ZERO_MUTATION_COMPLETE: "zero_mutation_complete",
   ZERO_MUTATION_ERROR: "zero_mutation_error",
