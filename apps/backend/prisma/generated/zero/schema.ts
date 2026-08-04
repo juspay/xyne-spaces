@@ -367,6 +367,7 @@ export enum WorkflowEventType {
   WEBHOOK = "WEBHOOK",
   MESSAGE_RECEIVED = "MESSAGE_RECEIVED",
   CALL_EVENT = "CALL_EVENT",
+  TAG_GENERATED = "TAG_GENERATED",
 }
 
 export enum WorkflowMappingEntityType {
@@ -2645,6 +2646,36 @@ export const canvasVersionTable = table("canvas_versions")
   })
   .primaryKey("id");
 
+export const canvasCommentThreadTable = table("canvas_comment_threads")
+  .columns({
+    id: string(),
+    canvasId: string(),
+    blockId: string(),
+    anchorText: string().optional(),
+    initialCommentId: string().optional(),
+    status: string(),
+    statusUpdatedBy: string().optional(),
+    statusUpdatedAt: number().optional(),
+    createdBy: string(),
+    createdAt: number(),
+  })
+  .primaryKey("id");
+
+export const canvasCommentTable = table("canvas_comments")
+  .columns({
+    id: string(),
+    threadId: string(),
+    canvasId: string(),
+    body: string(),
+    mentionedUserIds: string(),
+    isInitial: boolean(),
+    createdBy: string(),
+    editedAt: number().optional(),
+    deletedAt: number().optional(),
+    createdAt: number(),
+  })
+  .primaryKey("id");
+
 export const canvasParticipantTable = table("canvas_participants")
   .columns({
     workspaceId: string().optional(),
@@ -4155,6 +4186,21 @@ export const userTableRelationships = relationships(userTable, ({ one, many }) =
     destField: ["userId"],
     destSchema: canvasUserStatusTable,
   }),
+  createdCanvasCommentThreads: many({
+    sourceField: ["id"],
+    destField: ["createdBy"],
+    destSchema: canvasCommentThreadTable,
+  }),
+  statusUpdatedCanvasCommentThreads: many({
+    sourceField: ["id"],
+    destField: ["statusUpdatedBy"],
+    destSchema: canvasCommentThreadTable,
+  }),
+  createdCanvasComments: many({
+    sourceField: ["id"],
+    destField: ["createdBy"],
+    destSchema: canvasCommentTable,
+  }),
   sentMessages: many({
     sourceField: ["id"],
     destField: ["senderId"],
@@ -4962,6 +5008,11 @@ export const canvasTableRelationships = relationships(canvasTable, ({ one, many 
     destField: ["canvasId"],
     destSchema: canvasVersionTable,
   }),
+  commentThreads: many({
+    sourceField: ["id"],
+    destField: ["canvasId"],
+    destSchema: canvasCommentThreadTable,
+  }),
   folder: one({
     sourceField: ["folderId"],
     destField: ["id"],
@@ -4979,6 +5030,52 @@ export const canvasVersionTableRelationships = relationships(canvasVersionTable,
     sourceField: ["canvasId"],
     destField: ["id"],
     destSchema: canvasTable,
+  })
+}));
+
+export const canvasCommentThreadTableRelationships = relationships(canvasCommentThreadTable, ({ one, many }) => ({
+  canvas: one({
+    sourceField: ["canvasId"],
+    destField: ["id"],
+    destSchema: canvasTable,
+  }),
+  comments: many({
+    sourceField: ["id"],
+    destField: ["threadId"],
+    destSchema: canvasCommentTable,
+  }),
+  initialComment: one({
+    sourceField: ["initialCommentId"],
+    destField: ["id"],
+    destSchema: canvasCommentTable,
+  }),
+  createdByUser: one({
+    sourceField: ["createdBy"],
+    destField: ["id"],
+    destSchema: userTable,
+  }),
+  statusUpdatedByUser: one({
+    sourceField: ["statusUpdatedBy"],
+    destField: ["id"],
+    destSchema: userTable,
+  })
+}));
+
+export const canvasCommentTableRelationships = relationships(canvasCommentTable, ({ one, many }) => ({
+  thread: one({
+    sourceField: ["threadId"],
+    destField: ["id"],
+    destSchema: canvasCommentThreadTable,
+  }),
+  initialForThreads: many({
+    sourceField: ["id"],
+    destField: ["initialCommentId"],
+    destSchema: canvasCommentThreadTable,
+  }),
+  createdByUser: one({
+    sourceField: ["createdBy"],
+    destField: ["id"],
+    destSchema: userTable,
   })
 }));
 
@@ -5503,6 +5600,8 @@ export const schema = createSchema(
       canvasFolderTable,
       canvasTable,
       canvasVersionTable,
+      canvasCommentThreadTable,
+      canvasCommentTable,
       canvasParticipantTable,
       canvasUserStatusTable,
       bookmarkTable,
@@ -5640,6 +5739,8 @@ export const schema = createSchema(
       canvasFolderTableRelationships,
       canvasTableRelationships,
       canvasVersionTableRelationships,
+      canvasCommentThreadTableRelationships,
+      canvasCommentTableRelationships,
       canvasParticipantTableRelationships,
       canvasUserStatusTableRelationships,
       formTableRelationships,
@@ -5783,6 +5884,8 @@ export type RecurringCallParticipant = Row<typeof schema.tables.recurring_call_p
 export type CanvasFolder = Row<typeof schema.tables.canvas_folders>;
 export type Canvas = Row<typeof schema.tables.canvases>;
 export type CanvasVersion = Row<typeof schema.tables.canvas_versions>;
+export type CanvasCommentThread = Row<typeof schema.tables.canvas_comment_threads>;
+export type CanvasComment = Row<typeof schema.tables.canvas_comments>;
 export type CanvasParticipant = Row<typeof schema.tables.canvas_participants>;
 export type CanvasUserStatus = Row<typeof schema.tables.canvas_user_status>;
 export type Bookmark = Row<typeof schema.tables.bookmarks>;
