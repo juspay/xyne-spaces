@@ -686,178 +686,204 @@ export class InvitationService {
 
     logger.info(`[DEBUG] [acceptInvitation] Invitation valid. workspaceId=${invitation.workspaceId} orgId=${invitation.orgId ?? 'null'} role=${invitation.role}`);
 
-    // Resolve orgId before user creation so a COMMUNITY_MEMBER org row can be
-    // moved/upgraded into the enterprise org when the invite is accepted.
-    const resolvedOrgId = invitation.orgId ?? (
-      await this.prisma.workspace.findUnique({
-        where: { id: invitation.workspaceId! },
-        select: { orgId: true },
-      })
-    )?.orgId ?? null;
-
-    logger.info(`[DEBUG] [acceptInvitation] resolvedOrgId=${resolvedOrgId ?? 'null'} (from invitation.orgId=${invitation.orgId ?? 'null'})`);
-
-    // Check if user already exists in this workspace (duplicate accept guard)
-    const existingWorkspaceUser = await this.prisma.user.findFirst({
-      where: {
-        workspaceId: invitation.workspaceId!,
-        OR: [
-          { providerUserId: userData.providerUserId },
-          { email: userData.email },
-          { email: userData.email.toLowerCase() },
-        ],
-      },
+    // Atomically claim the invitation: flip acceptedAt from NULL -> now in a single
+    // conditional UPDATE (check-and-set). Only one concurrent request can match the
+    // `acceptedAt: null` predicate, so exactly one caller wins; a second concurrent
+    // request (or a replay) updates zero rows and is treated as already-accepted.
+    // This serialises acceptance at the database and prevents double membership.
+    const claim = await this.prisma.invitation.updateMany({
+      where: { invitationId: invitationId, acceptedAt: null },
+      data: { acceptedAt: new Date() },
     });
-    logger.info(`[DEBUG] [acceptInvitation] User providerUserId=${userData.providerUserId} already in workspace ${invitation.workspaceId}: ${!!existingWorkspaceUser}`);
+    if (claim.count === 0) {
+      logger.warn(`[DEBUG] [acceptInvitation] Invitation ${invitationId} already accepted (atomic claim matched 0 rows)`);
+      throw new Error('Invitation has already been accepted');
+    }
+    logger.info(`[DEBUG] [acceptInvitation] Atomically claimed invitation ${invitationId} (acceptedAt set)`);
 
-    let newWorkspaceUser;
-    let redirectPath: string | null = null;
+    try {
+      // Resolve orgId before user creation so a COMMUNITY_MEMBER org row can be
+      // moved/upgraded into the enterprise org when the invite is accepted.
+      const resolvedOrgId = invitation.orgId ?? (
+        await this.prisma.workspace.findUnique({
+          where: { id: invitation.workspaceId! },
+          select: { orgId: true },
+        })
+      )?.orgId ?? null;
 
-    if (!existingWorkspaceUser && invitation.role === 'GUEST') {
-      const guestResult = await this.handleGuestAcceptance(invitation, userData);
-      newWorkspaceUser = guestResult.user;
-      redirectPath = guestResult.redirectPath;
-    } else if (existingWorkspaceUser) {
-      if (invitation.role === 'GUEST') {
-        if (existingWorkspaceUser.role !== 'GUEST') {
-          throw new Error('Existing workspace members cannot accept guest invitations');
-        }
+      logger.info(`[DEBUG] [acceptInvitation] resolvedOrgId=${resolvedOrgId ?? 'null'} (from invitation.orgId=${invitation.orgId ?? 'null'})`);
 
-        const orgMember = await this.prisma.orgMember.findUnique({
-          where: { email: userData.email.toLowerCase() },
-          select: { leftAt: true },
-        });
-        if (orgMember?.leftAt) {
-          throw new Error(`Cannot accept invitation — ${userData.email} is no longer part of the organization`);
-        }
+      // Check if user already exists in this workspace (duplicate accept guard)
+      const existingWorkspaceUser = await this.prisma.user.findFirst({
+        where: {
+          workspaceId: invitation.workspaceId!,
+          OR: [
+            { providerUserId: userData.providerUserId },
+            { email: userData.email },
+            { email: userData.email.toLowerCase() },
+          ],
+        },
+      });
+      logger.info(`[DEBUG] [acceptInvitation] User providerUserId=${userData.providerUserId} already in workspace ${invitation.workspaceId}: ${!!existingWorkspaceUser}`);
 
-        const guestResult = await this.prisma.$transaction(async (tx) => {
-          const reactivatedUser = await tx.user.update({
+      let newWorkspaceUser;
+      let redirectPath: string | null = null;
+
+      if (!existingWorkspaceUser && invitation.role === 'GUEST') {
+        const guestResult = await this.handleGuestAcceptance(invitation, userData);
+        newWorkspaceUser = guestResult.user;
+        redirectPath = guestResult.redirectPath;
+      } else if (existingWorkspaceUser) {
+        if (invitation.role === 'GUEST') {
+          if (existingWorkspaceUser.role !== 'GUEST') {
+            throw new Error('Existing workspace members cannot accept guest invitations');
+          }
+
+          const orgMember = await this.prisma.orgMember.findUnique({
+            where: { email: userData.email.toLowerCase() },
+            select: { leftAt: true },
+          });
+          if (orgMember?.leftAt) {
+            throw new Error(`Cannot accept invitation — ${userData.email} is no longer part of the organization`);
+          }
+
+          const guestResult = await this.prisma.$transaction(async (tx) => {
+            const reactivatedUser = await tx.user.update({
+              where: { id: existingWorkspaceUser.id },
+              data: {
+                leftAt: null,
+                status: 'ACTIVE',
+              },
+            });
+            const path = await this.grantGuestEntityAccess(reactivatedUser.id, invitation, tx);
+            return { user: reactivatedUser, redirectPath: path };
+          });
+          newWorkspaceUser = guestResult.user;
+          redirectPath = guestResult.redirectPath;
+          logger.info(`[DEBUG] [acceptInvitation] Granted existing guest user id=${newWorkspaceUser.id} access to invitation entity`);
+        } else {
+          // User exists - reactivate them if they were removed (leftAt is set)
+          newWorkspaceUser = await this.prisma.user.update({
             where: { id: existingWorkspaceUser.id },
             data: {
               leftAt: null,
+              role: invitation.role,
               status: 'ACTIVE',
             },
           });
-          const path = await this.grantGuestEntityAccess(reactivatedUser.id, invitation, tx);
-          return { user: reactivatedUser, redirectPath: path };
-        });
-        newWorkspaceUser = guestResult.user;
-        redirectPath = guestResult.redirectPath;
-        logger.info(`[DEBUG] [acceptInvitation] Granted existing guest user id=${newWorkspaceUser.id} access to invitation entity`);
+          logger.info(`[DEBUG] [acceptInvitation] Reactivated existing user id=${newWorkspaceUser.id}`);
+        }
       } else {
-        // User exists - reactivate them if they were removed (leftAt is set)
-        newWorkspaceUser = await this.prisma.user.update({
-          where: { id: existingWorkspaceUser.id },
-          data: {
-            leftAt: null,
-            role: invitation.role,
-            status: 'ACTIVE',
-          },
-        });
-        logger.info(`[DEBUG] [acceptInvitation] Reactivated existing user id=${newWorkspaceUser.id}`);
-      }
-    } else {
-      if (resolvedOrgId) {
-        await organizationDomainService.assertOrgMemberLimit(resolvedOrgId, userData.email);
-      }
-
-      // Fetch existing orgMember by email
-      const existingOrgMember = await this.prisma.orgMember.findUnique({
-        where: { email: userData.email.toLowerCase() },
-        select: { memberId: true, role: true }
-      });
-
-      let orgMember: { memberId: string };
-
-      if (!existingOrgMember) {
-        if (!resolvedOrgId) {
-          throw new Error(`orgMember not found for email ${userData.email}. User must be invited to the organization first.`);
+        if (resolvedOrgId) {
+          await organizationDomainService.assertOrgMemberLimit(resolvedOrgId, userData.email);
         }
 
-        orgMember = await this.prisma.orgMember.create({
+        // Fetch existing orgMember by email
+        const existingOrgMember = await this.prisma.orgMember.findUnique({
+          where: { email: userData.email.toLowerCase() },
+          select: { memberId: true, role: true }
+        });
+
+        let orgMember: { memberId: string };
+
+        if (!existingOrgMember) {
+          if (!resolvedOrgId) {
+            throw new Error(`orgMember not found for email ${userData.email}. User must be invited to the organization first.`);
+          }
+
+          orgMember = await this.prisma.orgMember.create({
+            data: {
+              orgId: resolvedOrgId,
+              email: userData.email.toLowerCase(),
+              role: this.toEnterpriseOrgRole(invitation.role),
+            },
+            select: { memberId: true },
+          });
+        } else if (resolvedOrgId) {
+          const wasCommunityMember = existingOrgMember.role === 'COMMUNITY_MEMBER';
+          orgMember = await this.prisma.orgMember.update({
+            where: { memberId: existingOrgMember.memberId },
+            data: {
+              leftAt: null,
+              orgId: resolvedOrgId,
+              role: this.toEnterpriseOrgRole(invitation.role),
+            },
+            select: { memberId: true },
+          });
+
+          if (wasCommunityMember) {
+            await aiProvisioningService.upgradeCommunityToEnterpriseBudget(orgMember.memberId);
+          }
+        } else {
+          orgMember = { memberId: existingOrgMember.memberId };
+        }
+
+        // Create new user in the workspace
+        newWorkspaceUser = await this.prisma.user.create({
           data: {
+            email: userData.email,
+            name: userData.name,
+            providerUserId: userData.providerUserId,
+            authProvider: userData.authProvider as AuthProvider,
+            workspaceId: invitation.workspaceId!,
+            role: invitation.role,
+            status: 'ACTIVE',
+            orgMemberId: orgMember.memberId,
+          },
+        });
+        logger.info(`[DEBUG] [acceptInvitation] Created new workspace user id=${newWorkspaceUser.id}`);
+      }
+
+      // Ensure an OrgMember entry exists for this email (upsert by email - now globally unique)
+      if (resolvedOrgId && invitation.role !== 'GUEST') {
+        await this.prisma.orgMember.upsert({
+          where: { email: userData.email.toLowerCase() },
+          create: {
             orgId: resolvedOrgId,
             email: userData.email.toLowerCase(),
             role: this.toEnterpriseOrgRole(invitation.role),
           },
-          select: { memberId: true },
-        });
-      } else if (resolvedOrgId) {
-        const wasCommunityMember = existingOrgMember.role === 'COMMUNITY_MEMBER';
-        orgMember = await this.prisma.orgMember.update({
-          where: { memberId: existingOrgMember.memberId },
-          data: {
+          update: {
             leftAt: null,
             orgId: resolvedOrgId,
             role: this.toEnterpriseOrgRole(invitation.role),
-          },
-          select: { memberId: true },
+          }, // reactivate and update orgId/role if needed
         });
-
-        if (wasCommunityMember) {
-          await aiProvisioningService.upgradeCommunityToEnterpriseBudget(orgMember.memberId);
-        }
-      } else {
-        orgMember = { memberId: existingOrgMember.memberId };
+        logger.info(`[DEBUG] [acceptInvitation] OrgMember upserted for email=${userData.email} orgId=${resolvedOrgId}`);
+      } else if (invitation.role !== 'GUEST') {
+        logger.warn(`[DEBUG] [acceptInvitation] ⚠️ Could not resolve orgId — OrgMember NOT created for email=${userData.email}`);
       }
 
-      // Create new user in the workspace
-      newWorkspaceUser = await this.prisma.user.create({
-        data: {
-          email: userData.email,
-          name: userData.name,
-          providerUserId: userData.providerUserId,
-          authProvider: userData.authProvider as AuthProvider,
-          workspaceId: invitation.workspaceId!,
-          role: invitation.role,
-          status: 'ACTIVE',
-          orgMemberId: orgMember.memberId,
-        },
-      });
-      logger.info(`[DEBUG] [acceptInvitation] Created new workspace user id=${newWorkspaceUser.id}`);
+      // acceptedAt was already set atomically by the claim above.
+
+      // Grant role-based resource permissions via the centralized permission matrix
+      await grantPermissionsForRole(
+        newWorkspaceUser.id,
+        newWorkspaceUser.email,
+        invitation.role,
+        invitation.workspaceId ?? undefined,
+      );
+      logger.info(`[InvitationService] Permission grants completed for ${invitation.role} user ${userData.email}`);
+
+      logger.info(`[InvitationService] User ${userData.email} accepted invitation to workspace ${invitation.workspaceId}`);
+
+      return { user: newWorkspaceUser, redirectPath };
+    } catch (err) {
+      // The claim already flipped acceptedAt -> now. If the acceptance work above
+      // failed (validation reject, transient DB/service error), release the claim
+      // so the invitation stays usable and the user can retry. The reset is itself
+      // conditional to avoid clobbering a different, successful acceptance.
+      try {
+        await this.prisma.invitation.updateMany({
+          where: { invitationId: invitationId, acceptedAt: { not: null } },
+          data: { acceptedAt: null },
+        });
+        logger.warn(`[DEBUG] [acceptInvitation] Released claim on invitation ${invitationId} after failure`);
+      } catch (resetErr) {
+        logger.error(`[DEBUG] [acceptInvitation] Failed to release claim on invitation ${invitationId}`, resetErr);
+      }
+      throw err;
     }
-
-    // Ensure an OrgMember entry exists for this email (upsert by email - now globally unique)
-    if (resolvedOrgId && invitation.role !== 'GUEST') {
-      await this.prisma.orgMember.upsert({
-        where: { email: userData.email.toLowerCase() },
-        create: {
-          orgId: resolvedOrgId,
-          email: userData.email.toLowerCase(),
-          role: this.toEnterpriseOrgRole(invitation.role),
-        },
-        update: {
-          leftAt: null,
-          orgId: resolvedOrgId,
-          role: this.toEnterpriseOrgRole(invitation.role),
-        }, // reactivate and update orgId/role if needed
-      });
-      logger.info(`[DEBUG] [acceptInvitation] OrgMember upserted for email=${userData.email} orgId=${resolvedOrgId}`);
-    } else if (invitation.role !== 'GUEST') {
-      logger.warn(`[DEBUG] [acceptInvitation] ⚠️ Could not resolve orgId — OrgMember NOT created for email=${userData.email}`);
-    }
-
-    // Update invitation with acceptedAt timestamp instead of deleting
-    await this.prisma.invitation.update({
-      where: { invitationId: invitationId },
-      data: {
-        acceptedAt: new Date(),
-      },
-    });
-
-    // Grant role-based resource permissions via the centralized permission matrix
-    await grantPermissionsForRole(
-      newWorkspaceUser.id,
-      newWorkspaceUser.email,
-      invitation.role,
-      invitation.workspaceId ?? undefined,
-    );
-    logger.info(`[InvitationService] Permission grants completed for ${invitation.role} user ${userData.email}`);
-
-    logger.info(`[InvitationService] User ${userData.email} accepted invitation to workspace ${invitation.workspaceId}`);
-
-    return { user: newWorkspaceUser, redirectPath };
   }
 }
 

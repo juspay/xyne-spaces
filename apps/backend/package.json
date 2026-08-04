@@ -26,6 +26,7 @@
     "ysweet": "podman-compose -f ../../docker-compose.dev.yml up -d ysweet",
     "ysweet:down": "podman-compose -f ../../docker-compose.dev.yml stop ysweet",
     "test": "jest",
+    "test:contract": "jest --config jest.contract.cjs",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "test:zero-fallback": "pnpm exec tsx tests/verify-zero-fallback.ts 2>&1 | sed -n '/Summary/,/procedure/p'",
