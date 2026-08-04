@@ -45,6 +45,7 @@ import { API_BASE_URL } from '../../../config';
 import { FlowScreenManager } from '../../flowUI/FlowScreenManager';
 import { ChannelScopeType, type FlowDefinition } from '@xyne/shared';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
+import { withWorkspacePrefix } from '../../../hooks/useShareableOrigin';
 import { formatChannelLabel } from '../ChatDirectory/ChatDirectory.utils';
 
 interface RenderMessageWithHTMLProps {
@@ -103,6 +104,8 @@ const InternalXyneLink = ({
 }: React.AnchorHTMLAttributes<HTMLAnchorElement>): JSX.Element => {
   const resolvedHref = href ?? '';
   const parsedLink = parseInternalXyneLink(resolvedHref);
+  const { workspaceId } = useParams<{ workspaceId?: string }>();
+  const copyHref = withWorkspacePrefix(resolvedHref, workspaceId);
   const channel = useChannel(parsedLink?.channelId ?? '');
   const { userID } = useAuthContextValues();
   const { displayName: channelDisplayName } = useChannelDisplayName(channel, userID);
@@ -133,7 +136,7 @@ const InternalXyneLink = ({
   const handleCopy = (event: React.MouseEvent<HTMLButtonElement>): void => {
     event.preventDefault();
     event.stopPropagation();
-    void navigator.clipboard.writeText(resolvedHref).then(() => {
+    void navigator.clipboard.writeText(copyHref).then(() => {
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1200);
     });
@@ -164,7 +167,7 @@ const InternalXyneLink = ({
         onClick={onClick}
         data-track-category='MESSAGE'
         data-track-name='OPEN_INTERNAL_LINK'
-        data-track-metadata={JSON.stringify({ href: resolvedHref, kind: parsedLink.kind })}
+        data-track-metadata={JSON.stringify({ href: copyHref, kind: parsedLink.kind })}
         {...props}
       >
         {children}
