@@ -29,11 +29,6 @@ const ChartBlockComponent = ({ jsonSource }: ChartBlockProps): ReactElement => {
   // Non-null: parseChartJSON only returns types the registry can render.
   const Renderer = getRendererForType(visualType)!;
 
-  // Reserve enough width for every x-axis label; recharts otherwise drops ticks
-  // to fit, so labels vanish as the Ask AI sidebar narrows. Applies to BAR too:
-  // BarChartRenderer has its own guard, but it sizes slots by BAR width
-  // (CHART_MIN_BAR_SLOT_PX, 48px), which is narrower than a typical label, so
-  // its labels drop as well. 0 for types with no text x-axis → no wrapper.
   const minWidth = chartMinContentWidth(visualType, data);
 
   return (
