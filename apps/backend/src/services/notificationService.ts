@@ -1625,6 +1625,7 @@ class NotificationService {
       relatedEntityId: messageId,
       actionUrl: `/${workspaceId}/chat/dm/${channelId}#origin=${conversationId}&messageId=${messageId}`,
       metadata: {
+        workspaceId,
         senderId,
         senderName,
         senderPicture,
