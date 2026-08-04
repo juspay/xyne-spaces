@@ -3,7 +3,6 @@ import { JSX, ReactNode, useState } from 'react';
 import { toast } from 'sonner';
 import { cn } from '../../../utils/classNames';
 import { useAuth } from '../../../hooks/useAuth';
-import { useDebugSettings } from '../../../hooks/useDebugSettings';
 import { Popover } from '../../ui/Popover/Popover';
 import { EmailTagsBadge } from './TagsBadgePopover';
 import {
@@ -86,7 +85,6 @@ export const EmailThreadHeader = ({
   const { user } = useAuth();
   const meEmail = deskEmail ?? user?.email ?? null;
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const { settings } = useDebugSettings();
   const [copied, setCopied] = useState(false);
 
   const copyEmailId = (): void => {
@@ -117,9 +115,9 @@ export const EmailThreadHeader = ({
       {bcc && bcc.length > 0 && <DetailRow label='bcc' values={bcc} />}
       {replyTo && replyTo.length > 0 && <DetailRow label='reply-to' values={replyTo} />}
       <DetailRow label='date' values={[date.full]} />
-      {settings.showEmailIdCopyButton && emailId && (
+      {emailId && (
         <div className='flex gap-3 text-sm items-center'>
-          <span className='text-muted-foreground w-14 shrink-0 pt-0.5'>debug id:</span>
+          <span className='text-muted-foreground w-15 shrink-0 pt-0.5'>debug id:</span>
           <span className='flex items-center gap-1.5 flex-1 min-w-0'>
             <span className='text-foreground font-mono text-xs truncate' title={emailId}>
               {emailId}

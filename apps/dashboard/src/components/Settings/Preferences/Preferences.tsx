@@ -925,34 +925,6 @@ const DeveloperSection: FC<{ state: PreferencesState }> = ({ state }) => {
           />
         </div>
 
-        <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
-          <div>
-            <p className='text-sm font-medium text-foreground'>Copy email id button</p>
-            <p className='text-xs text-muted-foreground mt-0.5'>
-              Show a copy button for the email id on open support tickets.
-            </p>
-          </div>
-          <Switch
-            id='show-email-id-copy-button'
-            checked={state.debugSettings.showEmailIdCopyButton}
-            onCheckedChange={state.toggleEmailIdCopyButton}
-          />
-        </div>
-
-        <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
-          <div>
-            <p className='text-sm font-medium text-foreground'>Copy ticket id button</p>
-            <p className='text-xs text-muted-foreground mt-0.5'>
-              Show a copy button for the internal ticket id in ticket details.
-            </p>
-          </div>
-          <Switch
-            id='show-ticket-id-copy-button'
-            checked={state.debugSettings.showTicketIdCopyButton}
-            onCheckedChange={state.toggleTicketIdCopyButton}
-          />
-        </div>
-
         {!isMobile && (
           <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
             <div>

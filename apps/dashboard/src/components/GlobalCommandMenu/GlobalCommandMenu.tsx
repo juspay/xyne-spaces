@@ -95,6 +95,9 @@ const GlobalCommandMenu = ({
   const effectiveHideTabs = hideTabs !== undefined ? hideTabs : internalHideTabs;
   const effectiveEnabledTabs = enabledTabs !== undefined ? enabledTabs : internalEnabledTabs;
   const location = useLocation();
+  const pathParts = location.pathname.split('/').filter(Boolean);
+  const automationIndex = pathParts.indexOf('automations');
+  const isAutomationRunsRoute = automationIndex !== -1 && pathParts[automationIndex + 2] === 'runs';
   const allUsers = useUsers();
 
   const unreadCounts = useAllUnreadCount();
@@ -209,7 +212,7 @@ const GlobalCommandMenu = ({
   // Only the search-mode instance owns Cmd+F; the context-picker copy mounted in
   // ThreadPannel would otherwise win the tiebreak and hijack the shortcut.
   useShortcutById('global.findInChannel', handleFindInChannel, {
-    enabled: !contextSelectionMode,
+    enabled: !contextSelectionMode && !isAutomationRunsRoute,
   });
 
   // Group channels by scope type

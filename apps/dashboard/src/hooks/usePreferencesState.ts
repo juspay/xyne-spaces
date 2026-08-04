@@ -41,12 +41,7 @@ export function usePreferencesState(enabled: boolean) {
   );
   const { theme, changeTheme } = useTheme();
   const { aiLandingDefault, setAiLandingDefault } = useAILandingDefault();
-  const {
-    settings: debugSettings,
-    toggleSendIndicators,
-    toggleEmailIdCopyButton,
-    toggleTicketIdCopyButton,
-  } = useDebugSettings();
+  const { settings: debugSettings, toggleSendIndicators } = useDebugSettings();
   const { enterSendsMessage, setEnterSendsMessage } = useEnterSendsMessage();
   const { showThreadTags, setShowThreadTags } = useShowThreadTags();
   const { searchMode, setSearchMode } = useSearchMode();
@@ -140,8 +135,6 @@ export function usePreferencesState(enabled: boolean) {
     setAiLandingDefault,
     debugSettings,
     toggleSendIndicators,
-    toggleEmailIdCopyButton,
-    toggleTicketIdCopyButton,
     enterSendsMessage,
     showThreadTags,
     setShowThreadTags,
