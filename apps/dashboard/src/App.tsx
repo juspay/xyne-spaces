@@ -149,7 +149,8 @@ const App = (): ReactElement => {
                         classNames: {
                           toast: 'relative items-start group !pt-3 !pr-3 !pb-3 !pl-4',
                           icon: 'mt-1',
-                          title: '!text-card-foreground !font-semibold !max-w-[calc(100%-2rem)] !mr-8',
+                          title:
+                            '!text-card-foreground !font-semibold !max-w-[calc(100%-2rem)] !mr-8',
                           description: '!text-card-foreground/80',
 
                           actionButton:
