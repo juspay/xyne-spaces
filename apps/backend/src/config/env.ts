@@ -790,6 +790,10 @@ export const config = {
   session: {
     expiryDays: envVars.SESSION_EXPIRY_DAYS,
   },
+  pendingOAuthTokens: {
+    redisKeyPrefix: 'pendingauth:oauth:',
+    ttlSeconds: 10 * 60,
+  },
   pulse: {
     // Comma-separated channel IDs that have Pulse enabled (empty = disabled everywhere)
     enabledChannels: (envVars.PULSE_ENABLED_CHANNELS as string)

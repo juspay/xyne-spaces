@@ -56,6 +56,8 @@ import {
 import { getRecordingDefaultLayout } from '../../hooks/useRecordingDefaultLayout';
 import { DEFAULT_NOTES_TITLE } from '../../stores/recordingStore';
 
+const AUTO_START_TTL_MS = 60_000;
+
 /** Loading skeleton that mimics RecordingCanvasPane structure */
 const CanvasPaneSkeleton = (): ReactElement => (
   <div className='flex flex-col h-full overflow-hidden bg-secondary/50'>
@@ -148,6 +150,7 @@ export default function RecordingsScreen(): ReactElement {
   const channelId = useRecordingStore(ctx => ctx.channelId);
   const notesCanvasId = useRecordingStore(ctx => ctx.notesCanvasId);
   const pendingAutoStart = useRecordingStore(ctx => ctx.pendingAutoStart);
+  const autoStartRequestedAt = useRecordingStore(ctx => ctx.autoStartRequestedAt);
   const pendingStop = useRecordingStore(ctx => ctx.pendingStop);
   const agentLeft = useRecordingStore(ctx => ctx.agentLeft);
   const room = useRecordingStore(ctx => ctx.room);
@@ -199,13 +202,18 @@ export default function RecordingsScreen(): ReactElement {
     sendRecordingEvent({ type: 'startRecording', sttModel, defaultLayout });
   };
 
-  // Auto-start recording when triggered from the meeting popup
+  // Auto-start recording when triggered from the meeting popup, tray or shortcut
   useEffect(() => {
-    if (pendingAutoStart && (recordingStatus === 'idle' || recordingStatus === 'error')) {
+    if (!pendingAutoStart) return;
+    if (autoStartRequestedAt !== null && Date.now() - autoStartRequestedAt > AUTO_START_TTL_MS) {
+      sendRecordingEvent({ type: 'clearAutoStart' });
+      return;
+    }
+    if (recordingStatus === 'idle' || recordingStatus === 'error') {
       handleStartRecording();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingAutoStart]);
+  }, [pendingAutoStart, autoStartRequestedAt]);
 
   // auto canvas creation while default tab is notes or split
   const hasAttemptedAutoCanvasRef = useRef(false);

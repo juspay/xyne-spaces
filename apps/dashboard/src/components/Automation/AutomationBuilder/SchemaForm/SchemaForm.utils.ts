@@ -207,7 +207,13 @@ export function getVariableRefInner(schema: JsonSchema): JsonSchema | null {
         (s.pattern === VARIABLE_REF_REGEX.source || /context/.test(s.pattern ?? ''))
       ),
   );
-  return inner ?? null;
+  if (!inner) return null;
+  // If inner is itself a union (anyOf), prefer the enum branch so the UI renders a dropdown.
+  if (!inner.enum && Array.isArray(inner.anyOf)) {
+    const enumBranch = inner.anyOf.find(s => Array.isArray(s.enum) && s.enum.length > 0);
+    if (enumBranch) return enumBranch;
+  }
+  return inner;
 }
 
 export function isVariableRefValue(value: unknown): value is string {

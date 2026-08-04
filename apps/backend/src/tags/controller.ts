@@ -58,6 +58,30 @@ export async function listTags(req: Request, res: Response) {
   }
 }
 
+/**
+ * Bulk-resolve Tag ids to their display values. Used to resolve
+ * id-referencing arrays (e.g. Call.labels) back to display text without
+ * exposing raw Tag ids in the UI.
+ */
+export async function getTagsByIds(req: Request, res: Response) {
+  const workspaceId = requireWorkspaceId(req, res);
+  if (!workspaceId) return;
+
+  const { ids } = req.query;
+  const idList = typeof ids === 'string' ? ids.split(',').map(id => id.trim()).filter(Boolean) : [];
+  if (idList.length === 0) {
+    return res.json({ tags: [] });
+  }
+
+  try {
+    const tags = await tagService.getTagsByIds(idList, workspaceId);
+    return res.json({ tags: tags.map(t => ({ id: t.id, tag: t.tag })) });
+  } catch (error) {
+    logger.error('[TAG][CTRL] Get tags by ids failed:', error);
+    return res.status(500).json({ error: 'Failed to resolve tags' });
+  }
+}
+
 export async function createTag(req: Request, res: Response) {
   const userId = requireUserId(req, res);
   if (!userId) return;

@@ -262,6 +262,11 @@ export class TagService {
     return tagRepository.findActiveTags(sourceId, sourceType, tagCategory);
   }
 
+  /** Bulk-resolve Tag ids to their display values, scoped to a workspace. */
+  async getTagsByIds(ids: string[], workspaceId: string): Promise<Tag[]> {
+    return tagRepository.findByIds(ids, workspaceId);
+  }
+
   // ─── Bulk operations used by the framework & manual-tagging UI ───────────────
 
   async setManualTags(

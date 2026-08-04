@@ -22,7 +22,10 @@ import type {
   ValidationIssue,
 } from '../../Automation.types';
 import { ConditionEditor } from '../ConditionEditor/ConditionEditor';
-import { summarizeCondition } from '../ConditionEditor/ConditionEditor.utils';
+import {
+  summarizeCondition,
+  hasInvalidTagCondition,
+} from '../ConditionEditor/ConditionEditor.utils';
 import { BranchSteps } from '../BranchSteps/BranchSteps';
 import type { SwitchCardProps } from './SwitchCard.types';
 
@@ -49,6 +52,7 @@ export function SwitchCard({
   const [collapsed, setCollapsed] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [editingCaseIndex, setEditingCaseIndex] = useState<number | null>(null);
+  const [tagConditionError, setTagConditionError] = useState<string | null>(null);
   const [draftCondition, setDraftCondition] = useState<Condition>({
     variable: '',
     operator: 'eq',
@@ -88,6 +92,13 @@ export function SwitchCard({
 
   const handleCaseConditionSave = (): void => {
     if (editingCaseIndex === null) return;
+    if (hasInvalidTagCondition(draftCondition)) {
+      setTagConditionError(
+        'One or more tag conditions are invalid — a category must be selected and at least one tag must be added.',
+      );
+      return;
+    }
+    setTagConditionError(null);
     const cases = step.config.cases.slice();
     const existing = cases[editingCaseIndex];
     if (!existing) return;
@@ -352,13 +363,23 @@ export function SwitchCard({
               variableSources={variableSources}
             />
           </div>
-          <div className='flex justify-end gap-2 border-t border-border bg-background px-5 py-3'>
-            <Button variant='outline' size='sm' onClick={() => setEditingCaseIndex(null)}>
-              Cancel
-            </Button>
-            <Button size='sm' onClick={handleCaseConditionSave}>
-              Save condition
-            </Button>
+          <div className='flex flex-col gap-2 border-t border-border bg-background px-5 py-3'>
+            {tagConditionError && <p className='text-xs text-red-500'>{tagConditionError}</p>}
+            <div className='flex justify-end gap-2'>
+              <Button
+                variant='outline'
+                size='sm'
+                onClick={() => {
+                  setTagConditionError(null);
+                  setEditingCaseIndex(null);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button size='sm' onClick={handleCaseConditionSave}>
+                Save condition
+              </Button>
+            </div>
           </div>
         </div>
       </Dialog>

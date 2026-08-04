@@ -8,21 +8,19 @@ export interface MicrosoftPendingAuthIdentity {
 }
 
 /**
- * Microsoft access tokens are large enough that embedding one alongside the
- * refresh token can exceed the browser's per-cookie size limit. Invitation
- * acceptance only needs the verified identity, while loginWorkspace can create
- * the new workspace session from the refresh token.
+ * Invitation acceptance needs the verified identity. Provider tokens remain in
+ * Redis and this JWT carries only their short-lived lookup key.
  */
 export function signMicrosoftInvitationPendingAuthToken(
   identity: MicrosoftPendingAuthIdentity,
-  refreshToken: string | undefined,
+  tokenKey: string,
   jwtSecret: string
 ): string {
   return jwt.sign(
     {
       ...identity,
       provider: 'MICROSOFT',
-      refreshToken: refreshToken ?? null,
+      tokenKey,
     },
     jwtSecret,
     { expiresIn: '10m' }

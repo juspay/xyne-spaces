@@ -10,6 +10,7 @@ import {
 import {
   useCreateBlockNote,
   SuggestionMenuController,
+  FormattingToolbarController,
   getDefaultReactSlashMenuItems,
   DefaultReactSuggestionItem,
 } from '@blocknote/react';
@@ -56,6 +57,7 @@ import { insertGroupMention } from 'blocknote-layout-extensions';
 import { buildMentionProps, CanvasMentionContext } from '../CanvasMentionSpec';
 import { canvasSchema } from '../canvasSchema';
 import { createElement } from 'react';
+import { MessageSquare, MessageSquarePlus } from 'lucide-react';
 import { RiGroupLine } from 'react-icons/ri';
 import Avatar from '../../ui/Avatar/Avatar';
 import { TableOfContents, TocHeading } from '../TableOfContents';
@@ -70,6 +72,11 @@ import { useSelector } from '@xstate/react';
 import { xyneAIActor } from '../../../machines/xyneAIMachine';
 import { useCanvasEditorMentionSharing } from '@/hooks/useCanvasEditorMentionSharing';
 import { CanvasRole } from '@xyne/shared';
+import Button from '../../ui/Button';
+import { Tooltip } from '../../ui/Tooltip';
+import { CanvasCommentsPanel } from '../CanvasCommentsPanel/CanvasCommentsPanel';
+import { createCanvasFormattingToolbar } from '../CanvasFormattingToolbar/CanvasFormattingToolbar';
+import { useCanvasCommentEditorBridge } from '../useCanvasCommentEditorBridge';
 
 const canvasDictionary = {
   ...en,
@@ -94,6 +101,8 @@ interface CollaborativeCanvasEditorProps {
   initialLegacyContent?: PartialBlock[] | undefined;
   /** When set, focus and scroll to this block on load (e.g. from activity notification) */
   initialBlockIdToFocus?: string | undefined;
+  /** When set with initialBlockIdToFocus, open the matching comment thread on load. */
+  initialCommentThreadId?: string | undefined;
   /** Auto-focus the editor on mount */
   autoFocus?: boolean;
   /** Optional preloaded canvas participants to avoid duplicate query */
@@ -122,6 +131,7 @@ export const CollaborativeCanvasEditor = forwardRef<
       onCollaboratorsChange,
       initialLegacyContent,
       initialBlockIdToFocus,
+      initialCommentThreadId,
       autoFocus,
       canvasParticipants: preloadedParticipants,
       canvasCreatedBy,
@@ -491,6 +501,32 @@ export const CollaborativeCanvasEditor = forwardRef<
     const [isFocused, setIsFocused] = useState(false);
 
     useCanvasTableFilters(containerRef);
+    const getCanvasCommentEditor = useCallback(
+      () =>
+        editor
+          ? (editor as unknown as BlockNoteEditor<BlockSchema, InlineContentSchema, StyleSchema>)
+          : null,
+      [editor],
+    );
+    const {
+      isCommentsOpen,
+      setIsCommentsOpen,
+      activeCommentBlockId,
+      activeCommentThreadId,
+      activeCommentAnchor,
+      refreshCommentHighlights,
+      openCommentsForCurrentBlock,
+      focusCommentBlock,
+      applyCommentAnchorStyle,
+      removeCommentAnchorStyle,
+    } = useCanvasCommentEditorBridge({
+      canvasId,
+      containerRef,
+      getEditor: getCanvasCommentEditor,
+      initialBlockIdToFocus,
+      initialCommentThreadId,
+      ready: isEditorReady,
+    });
 
     useScope('canvas', isFocused);
 
@@ -512,13 +548,19 @@ export const CollaborativeCanvasEditor = forwardRef<
     }, [extractHeadings]);
 
     const handleCollaborativeChange = useCallback(() => {
+      refreshCommentHighlights();
       debouncedExtractHeadings();
       onChange?.(editor.document as PartialBlock[]);
-    }, [debouncedExtractHeadings, editor, onChange]);
+    }, [debouncedExtractHeadings, editor, onChange, refreshCommentHighlights]);
 
     const handleHeadingClick = useCallback((id: string) => {
       scrollToHeading(id, containerRef.current);
     }, []);
+
+    const canvasFormattingToolbar = useMemo(
+      () => createCanvasFormattingToolbar(openCommentsForCurrentBlock),
+      [openCommentsForCurrentBlock],
+    );
 
     useEffect((): (() => void) | void => {
       if (isEditorReady && editor) {
@@ -526,22 +568,6 @@ export const CollaborativeCanvasEditor = forwardRef<
         return (): void => clearTimeout(timer);
       }
     }, [isEditorReady, editor, extractHeadings]);
-
-    // Focus and scroll to block when navigating from activity notification
-    useEffect(() => {
-      if (!isEditorReady || !editor || !initialBlockIdToFocus || !containerRef.current) return;
-      const editorTyped = editor as unknown as BlockNoteEditor<
-        BlockSchema,
-        InlineContentSchema,
-        StyleSchema
-      >;
-      try {
-        editorTyped.setTextCursorPosition(initialBlockIdToFocus, 'start');
-        scrollToHeading(initialBlockIdToFocus, containerRef.current);
-      } catch {
-        scrollToHeading(initialBlockIdToFocus, containerRef.current);
-      }
-    }, [isEditorReady, editor, initialBlockIdToFocus]);
 
     useEffect(() => {
       return (): void => {
@@ -604,43 +630,87 @@ export const CollaborativeCanvasEditor = forwardRef<
         tabIndex={-1}
         data-testid='canvas-editor'
       >
-        <div
-          className='thin-scrollbar flex-1 overflow-auto pt-8 min-h-0'
-          style={{
-            maxWidth: '100%',
-            wordBreak: 'break-word',
-            overflowWrap: 'break-word',
-          }}
-        >
+        <div className='flex min-h-0 flex-1 overflow-hidden'>
           <div
-            className='blocknote-editor-wrapper w-full max-w-full'
+            className='thin-scrollbar relative min-h-0 flex-1 overflow-auto pt-8'
             style={{
+              maxWidth: '100%',
               wordBreak: 'break-word',
               overflowWrap: 'break-word',
             }}
           >
-            {editor && (
-              <CanvasMentionContext.Provider value={mentionContextValue}>
-                <BlockNoteView
-                  editor={
-                    editor as unknown as BlockNoteEditor<
-                      BlockSchema,
-                      InlineContentSchema,
-                      StyleSchema
-                    >
-                  }
-                  editable={editable && !isReadOnly}
-                  theme={theme === 'midnight' ? 'dark' : 'light'}
-                  formattingToolbar={true}
-                  slashMenu={false}
-                  onChange={handleCollaborativeChange}
+            <div className='absolute right-4 top-3 z-10 flex items-center gap-1 rounded-md border border-border bg-background/95 p-1 shadow-sm backdrop-blur'>
+              {editable && !isReadOnly && (
+                <Tooltip content='Add comment'>
+                  <Button
+                    variant='ghost'
+                    size='iconSm'
+                    onClick={openCommentsForCurrentBlock}
+                    aria-label='Add comment'
+                  >
+                    <MessageSquarePlus className='size-4' />
+                  </Button>
+                </Tooltip>
+              )}
+              <Tooltip content='Comments'>
+                <Button
+                  variant={isCommentsOpen ? 'secondary' : 'ghost'}
+                  size='iconSm'
+                  onClick={() => setIsCommentsOpen(open => !open)}
+                  aria-label='Comments'
                 >
-                  <SuggestionMenuController triggerCharacter='/' getItems={getSlashMenuItems} />
-                  <SuggestionMenuController triggerCharacter='@' getItems={getMentionItems} />
-                </BlockNoteView>
-              </CanvasMentionContext.Provider>
-            )}
+                  <MessageSquare className='size-4' />
+                </Button>
+              </Tooltip>
+            </div>
+
+            <div
+              className='blocknote-editor-wrapper w-full max-w-full'
+              style={{
+                wordBreak: 'break-word',
+                overflowWrap: 'break-word',
+              }}
+            >
+              {editor && (
+                <CanvasMentionContext.Provider value={mentionContextValue}>
+                  <BlockNoteView
+                    editor={
+                      editor as unknown as BlockNoteEditor<
+                        BlockSchema,
+                        InlineContentSchema,
+                        StyleSchema
+                      >
+                    }
+                    editable={editable && !isReadOnly}
+                    theme={theme === 'midnight' ? 'dark' : 'light'}
+                    formattingToolbar={false}
+                    slashMenu={false}
+                    onChange={handleCollaborativeChange}
+                  >
+                    <FormattingToolbarController formattingToolbar={canvasFormattingToolbar} />
+                    <SuggestionMenuController triggerCharacter='/' getItems={getSlashMenuItems} />
+                    <SuggestionMenuController triggerCharacter='@' getItems={getMentionItems} />
+                  </BlockNoteView>
+                </CanvasMentionContext.Provider>
+              )}
+            </div>
           </div>
+
+          {isCommentsOpen && (
+            <CanvasCommentsPanel
+              canvasId={canvasId}
+              canvasTitle={title}
+              channelId={channelId}
+              activeBlockId={activeCommentBlockId}
+              activeThreadId={activeCommentThreadId}
+              activeAnchor={activeCommentAnchor}
+              editable={editable && !isReadOnly}
+              onClose={() => setIsCommentsOpen(false)}
+              onSelectBlock={focusCommentBlock}
+              onBeforeCreateThread={applyCommentAnchorStyle}
+              onCreateThreadFailed={removeCommentAnchorStyle}
+            />
+          )}
         </div>
 
         {/* Presentation Modal */}
