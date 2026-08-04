@@ -5,6 +5,7 @@ import { StepCategory } from '../types/categories';
 import { variableRef } from '../engine/variable-ref';
 import { OutputSchemaSchema } from '../engine/declared-schema';
 import { decryptHeaderValue, isSensitiveHeader } from '../engine/webhook-step-encryption';
+import { assertWebhookUrlSafe } from '@/utils/ssrfGuard';
 import { logger } from '@/utils/logger';
 
 const HttpMethod = z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']);
@@ -86,6 +87,10 @@ export class TriggerWebhookStep extends BaseActionStep<
     cfg: z.infer<typeof TriggerWebhookConfigSchema>,
   ): Promise<TriggerWebhookOutput> {
     const { url, method, headers, encoding, body, timeoutMs } = cfg;
+
+    // SSRF guard: resolve the host and reject internal/private/link-local
+    // addresses at request time (the schema only blocks literal private IPs).
+    await assertWebhookUrlSafe(url);
 
     const init: RequestInit = {
       method,

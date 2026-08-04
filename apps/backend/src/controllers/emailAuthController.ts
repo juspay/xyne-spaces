@@ -87,9 +87,10 @@ export class EmailAuthController {
       });
 
       if (!orgMember || orgMember.leftAt) {
+        // Keep this response identical to the wrong-password response below.
         res.status(401).json({
           error: 'Invalid credentials',
-          message: 'User is not a member of org',
+          message: 'Email or password is incorrect',
         });
         return;
       }
