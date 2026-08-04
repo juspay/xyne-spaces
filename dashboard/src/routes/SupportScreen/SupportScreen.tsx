@@ -1526,10 +1526,9 @@ const SupportScreen = (): ReactElement => {
   }, []);
 
   const handleMergeSelectedTickets = useCallback(
-    async (parentTicketId: string): Promise<void> => {
-      if (selectedTickets.size < 2) return;
+    async (parentTicketId: string, ticketIds: string[]): Promise<void> => {
+      if (ticketIds.length < 2) return;
       try {
-        const ticketIds = Array.from(selectedTickets.keys());
         await Promise.all(
           ticketIds
             .filter(id => id !== parentTicketId)
