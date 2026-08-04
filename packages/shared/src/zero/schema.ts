@@ -277,7 +277,7 @@ export const projectTagTable = table('project_tags')
   })
   .primaryKey('id');
 
-export const ticketExportTable = table('ticket_exports')
+export const ticketExportTable = table('ticket_exports') // TicketExport
   .columns({
     id: string(),
     workspaceId: string(),

@@ -599,6 +599,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       ? requestedLayoutView
       : 'kanban';
   const isKanbanLayout = layoutView === 'kanban';
+  const showTicketReport = searchParams.get('ticketReport') === '1';
   // Flow view: the open run lives in the URL so browser back returns to the
   // main-tickets grid and run links are shareable.
   const selectedGraphRootTicketId = layoutView === 'flow' ? searchParams.get('run') : null;
