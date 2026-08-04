@@ -223,7 +223,7 @@ export function resolveGlassWindowOptions(): BrowserWindowConstructorOptions {
       vibrancy: MACOS_VIBRANCY_MATERIAL,
       // `followWindow` lets the material go inert whenever the window loses
       // focus, which in an always-open workspace app reads as a rendering bug.
-      visualEffectState: 'active',
+      visualEffectState: 'followWindow',
     };
   }
 
