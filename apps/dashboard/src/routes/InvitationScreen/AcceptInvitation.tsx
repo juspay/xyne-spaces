@@ -14,7 +14,6 @@ import {
 
 interface InvitationDetails {
   id: string;
-  email: string;
   role: string;
   workspaceName?: string;
   organizationName?: string;
@@ -57,7 +56,6 @@ interface ApiErrorResponse {
 type PageState =
   | { status: 'redirecting' }
   | { status: 'verifying' }
-  | { status: 'email_mismatch'; loggedInEmail: string; invitedEmail: string }
   | { status: 'ready'; invitation: InvitationDetails }
   | { status: 'accepting' }
   | {
@@ -75,7 +73,6 @@ export const AcceptInvitation = (): ReactElement => {
 
   const invitationId = searchParams.get('invitationId');
   const loginComplete = searchParams.get('loginComplete') === 'true';
-  const loggedInEmail = searchParams.get('loggedInEmail') ?? '';
 
   const [state, setState] = useState<PageState>(
     loginComplete ? { status: 'verifying' } : { status: 'redirecting' },
@@ -99,7 +96,7 @@ export const AcceptInvitation = (): ReactElement => {
     void navigate(`/auth?invitationId=${invitationId}`);
   }, [loginComplete, invitationId, navigate]);
 
-  // Post-OAuth return: verify invitation and check logged-in email matches
+  // Post-OAuth return: verify invitation (email match is enforced server-side at accept time)
   useEffect(() => {
     if (!loginComplete) return;
 
@@ -115,14 +112,7 @@ export const AcceptInvitation = (): ReactElement => {
         );
 
         if (response.data.valid && response.data.invitation) {
-          const inv = response.data.invitation;
-
-          // Frontend email-match guard (backend also validates this on accept)
-          if (loggedInEmail && inv.email.toLowerCase() !== loggedInEmail.toLowerCase()) {
-            setState({ status: 'email_mismatch', loggedInEmail, invitedEmail: inv.email });
-          } else {
-            setState({ status: 'ready', invitation: inv });
-          }
+          setState({ status: 'ready', invitation: response.data.invitation });
         }
       } catch (error) {
         if (axios.isAxiosError<ApiErrorResponse>(error)) {
@@ -144,7 +134,7 @@ export const AcceptInvitation = (): ReactElement => {
     };
 
     void verify();
-  }, [loginComplete, invitationId, loggedInEmail]);
+  }, [loginComplete, invitationId]);
 
   const handleAccept = async (): Promise<void> => {
     if (!invitationId || state.status !== 'ready') return;
@@ -231,24 +221,6 @@ export const AcceptInvitation = (): ReactElement => {
                 ? 'Verifying invitation...'
                 : 'Accepting invitation...'}
           </p>
-        </div>
-      </div>
-    );
-  }
-
-  if (state.status === 'email_mismatch') {
-    return (
-      <div className='min-h-screen bg-background flex items-center justify-center p-4'>
-        <div className='max-w-md w-full bg-card border border-border rounded-lg p-8 text-center'>
-          <div className='w-16 h-16 bg-destructive/10 rounded-full flex items-center justify-center mx-auto mb-4'>
-            <XCircle className='w-8 h-8 text-destructive' />
-          </div>
-          <h1 className='text-2xl font-semibold text-foreground mb-2'>
-            You are not supposed to access this invitation
-          </h1>
-          <Button onClick={handleGoHome} className='w-full'>
-            Go to Home
-          </Button>
         </div>
       </div>
     );
@@ -377,9 +349,6 @@ export const AcceptInvitation = (): ReactElement => {
             <CheckCircle className='w-5 h-5 text-green-500' />
             <span className='text-sm text-foreground'>Invitation verified</span>
           </div>
-          <p className='text-sm text-muted-foreground'>
-            Email: <span className='text-foreground'>{invitation.email}</span>
-          </p>
           <p className='text-sm text-muted-foreground'>
             Role:{' '}
             <span className='text-foreground capitalize'>{invitation.role?.toLowerCase()}</span>

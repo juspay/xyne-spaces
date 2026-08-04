@@ -73,6 +73,7 @@ import { GlobalFieldsACL } from '../tables/global-fields-acl';
 import { FormEntityValuesACL } from '../tables/form-entity-values-acl';
 import { DelayedMessagesACL } from '../tables/delayed-messages-acl';
 import { DraftMessagesACL } from '../tables/draft-messages-acl';
+import { ClassificationMappingsACL } from '../tables/classification-mappings-acl';
 
 // Tables where GUEST users may perform mutations.
 // All other tables default to DenyGuestsACL for guest users.
@@ -290,6 +291,8 @@ export class ACLFactory {
         return new DelayedMessagesACL(ctx);
       case 'draft_messages':
         return new DraftMessagesACL(ctx);
+      case 'classification_mappings':
+        return new ClassificationMappingsACL(ctx);
       default:
         return new DenyGuestsACL<any>(ctx, table);
     }
