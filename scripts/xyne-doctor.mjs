@@ -353,7 +353,10 @@ export function sanitizeCaptureSnapshot(capture, options = {}) {
     // One line outgrew the whole buffer, so the retained head lost the label
     // that identified it. Mask the orphaned run rather than emit a token no
     // pattern can attribute — a truncated base64 credential looks like noise.
-    const masked = source.replace(/^\S{32,}/, "[REDACTED_TRUNCATED_VALUE]");
+    // Allow leading whitespace: the trim offset has no relationship to word
+    // boundaries, so it can land exactly on the space in `LABEL: value` and
+    // leave the buffer starting with it. Anchoring on \S alone missed that.
+    const masked = source.replace(/^\s*\S{32,}/, "[REDACTED_TRUNCATED_VALUE]");
     if (masked !== source) {
       severedCount = 1;
       source = masked;
@@ -756,7 +759,10 @@ export function buildFailureReport({ capture, command, cwd, label, result }) {
       tail: safeLog.text.trim(),
       totalCharacters: capture.totalCharacters,
       totalLines: capture.totalLines,
-      capturedCharacters: capture.capturedCharacters,
+      // Measure what the report actually carries. capture.capturedCharacters
+      // is only a claim about the pre-redaction budget, and masking shrinks the
+      // text after it — reporting the claim overstates the context on hand.
+      capturedCharacters: safeLog.text.trim().length,
       endsWithNewline: capture.endsWithNewline,
       truncated: capture.truncated,
       redactionCount:

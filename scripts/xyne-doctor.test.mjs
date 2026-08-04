@@ -226,6 +226,43 @@ test("adjacent secrets with no separator are both redacted", () => {
   }
 });
 
+test("a value severed on its label's whitespace is still masked", () => {
+  // The trim offset has no word-boundary alignment, so it can land exactly on
+  // the space in `LABEL: value`. Anchoring the mask on \S alone missed that and
+  // shipped ~1900 raw characters. Sweep at 1-char granularity to hit the offset.
+  const prefix = "some preceding build output\n";
+  const label = "DATABASE_URL: ";
+  const secret = "z".repeat(6000);
+  const head = `${prefix}${label}${secret}TRAILER\n`;
+  const spacePosition = prefix.length + label.length - 1;
+
+  for (let pad = 0; pad < 40; pad += 1) {
+    const capture = createLogCapture();
+    capture.append(head);
+    const fillerLength = 69632 + spacePosition - head.length + pad;
+    capture.append(`${"f".repeat(Math.max(0, fillerLength - 1))}\n`);
+    const snapshot = capture.snapshot();
+    if (!snapshot.severedValue) continue;
+    const sanitized = sanitizeCaptureSnapshot(snapshot, { homeDirectory: "" });
+    assert.doesNotMatch(sanitized.text, /z{50,}/, `leaked at pad=${pad}`);
+  }
+});
+
+test("the retained-character count matches what the report actually carries", () => {
+  const capture = createLogCapture();
+  capture.append(`DATABASE_URL: ${"z".repeat(6000)}TRAILER\n`);
+  capture.append("filler build output line\n".repeat(2600));
+  const report = buildFailureReport({
+    capture: capture.snapshot(),
+    command: ["pnpm", "run", "x"],
+    cwd: process.cwd(),
+    label: "count-check",
+    result: { code: 1, durationMs: 5, signal: null },
+  });
+
+  assert.equal(report.output.capturedCharacters, report.output.tail.length);
+});
+
 test("a value wrapped across lines does not survive the buffer trim", () => {
   // Continuation lines of a wrapped base64 credential carry no label, so no
   // line-local pattern can attribute them once the trim eats the first line.
