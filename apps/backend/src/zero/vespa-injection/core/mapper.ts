@@ -22,6 +22,7 @@ import { getStorageService } from '@/services/storage';
 import { convertBlockNoteToMarkdown } from '@/services/canvasService';
 import { buildFormFields, type TicketDynamicFieldValue } from './form-fields';
 import { DESK_EMAIL_SOURCE_TYPE } from '@/tags';
+import { chunkPlainText } from '@/utils/vespaChunking';
 
 type ChannelsSchema = Schema['tables']['channels'];
 type MessagesSchema = Schema['tables']['messages'];
@@ -328,6 +329,7 @@ export const mapChannel = async (
     docId: args.id,
     channelName: channelName,
     description: args.description || '',
+    chunks: chunkPlainText(args.description || ''),
     createdAt: toTimestamp(args.createdAt),
     updatedAt: toTimestamp(args.updatedAt),
     permissions: channelParticipants,
@@ -529,6 +531,7 @@ export const mapApp = async (args: Apps): Promise<VespaAppDocument> => {
     version: args.version,
     name: args.name,
     description: args.description ?? '',
+    chunks: chunkPlainText(args.description ?? ''),
     createdBy: args.createdBy,
     creatorName: creator?.name ?? '',
     creatorEmail: creator?.email ?? '',
@@ -650,6 +653,7 @@ export const mapTicket = async (args: InsertValue<TicketsSchema>): Promise<Vespa
     title: args.title,
     workflowType: "",// later we should populate workflow type
     description: args.description,
+    chunks: chunkPlainText(args.description),
     ticketType: "", // later we should populate ticket type
     priority: args.priority,
     stage: args.stageName,
@@ -1344,26 +1348,6 @@ export const mapFile = async (
     workspaceId: effectiveWorkspaceId,
     orgId: effectiveOrgId,
   };
-};
-
-/**
- * Chunk a plain-text string into segments of at most `maxLen` characters,
- * splitting on word boundaries so search snippets are coherent.
- */
-const chunkPlainText = (text: string, maxLen = 1500): string[] => {
-  const words = text.split(/\s+/).filter(Boolean);
-  const chunks: string[] = [];
-  let current = '';
-  for (const word of words) {
-    if (current.length + word.length + 1 > maxLen && current.length > 0) {
-      chunks.push(current);
-      current = word;
-    } else {
-      current = current ? `${current} ${word}` : word;
-    }
-  }
-  if (current) chunks.push(current);
-  return chunks.length > 0 ? chunks : [''];
 };
 
 /**

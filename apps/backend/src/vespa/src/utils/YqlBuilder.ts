@@ -40,6 +40,77 @@ const userInputClause = (defaultIndex?: string, grammar = 'grammar:"tokenize"'):
   return `({${annotations}} userInput(@query))`;
 };
 
+type SemanticField = { field: string; approximate?: boolean };
+
+// Single source of truth for the dual-embedding (hf1) migration switch. When the
+// `vespa_search_use_v2_embeddings` Superposition flag is on, every semantic path
+// swaps to the bge-large (1024) fields + `hf1` embedder + `e_v2` query tensor;
+// otherwise it stays on the bge-base (768) fields + `hf-embedder` + `e` tensor.
+// The v2 fields are the base field name with a `_v2` suffix (see vespa-core schemas).
+export type EmbeddingVariant = { tensor: string; embedder: string; fieldSuffix: string };
+export const resolveEmbeddingVariant = (useV2: boolean): EmbeddingVariant =>
+  useV2
+    ? { tensor: 'e_v2', embedder: 'hf1', fieldSuffix: '_v2' }
+    : { tensor: 'e', embedder: 'hf-embedder', fieldSuffix: '' };
+
+// Only emit nearest-neighbour clauses for fields declared by at least one of
+// the selected schemas. Vespa rejects a YQL field reference when none of the
+// sources in the query declares that field.
+const SEMANTIC_FIELDS_BY_SCHEMA: Partial<Record<VespaSchema, SemanticField[]>> = {
+  [messageSchema]: [
+    { field: 'text_embeddings' },
+    { field: 'chunk_embeddings' },
+  ],
+  [attachmentSchema]: [{ field: 'chunk_embeddings' }],
+  [channelSchema]: [
+    { field: 'chunk_embeddings' },
+    { field: 'content_chunk_embeddings' },
+  ],
+  [ticketSchema]: [
+    { field: 'combined_embeddings', approximate: false },
+    { field: 'chunk_embeddings' },
+  ],
+  [fileSchema]: [
+    { field: 'chunk_embeddings' },
+    { field: 'image_chunk_embeddings' },
+  ],
+  [mailSchema]: [
+    { field: 'subject_embeddings' },
+    { field: 'chunk_embeddings' },
+  ],
+  [samTranscriptSchema]: [
+    { field: 'meetingSummary_embeddings' },
+    { field: 'chapters_embeddings' },
+    { field: 'actionItems_embeddings' },
+    { field: 'others_embeddings' },
+    { field: 'qna_embeddings' },
+    { field: 'chunk_embeddings' },
+  ],
+  [appSchema]: [
+    { field: 'text_embeddings' },
+    { field: 'chunk_embeddings' },
+  ],
+  [callSchema]: [{ field: 'title_embeddings' }],
+};
+
+const semanticClausesForSchemas = (schemas: VespaSchema[], targetHits: number, useV2: boolean): string[] => {
+  const { tensor, fieldSuffix } = resolveEmbeddingVariant(useV2);
+  const fields = new Map<string, SemanticField>();
+  for (const schema of schemas) {
+    for (const semanticField of SEMANTIC_FIELDS_BY_SCHEMA[schema] ?? []) {
+      fields.set(semanticField.field, semanticField);
+    }
+  }
+
+  return [...fields.values()].map(({ field, approximate }) => {
+    const annotations = [
+      `targetHits:${targetHits}`,
+      approximate === false ? 'approximate:false' : undefined,
+    ].filter(Boolean).join(', ');
+    return `({${annotations}} nearestNeighbor(${field}${fieldSuffix}, ${tensor}))`;
+  });
+};
+
 export interface SlackFilters {
   channelId?: string[];
   projectId?: string[];
@@ -200,6 +271,7 @@ export class YqlBuilder {
     workspaceId?: string,
     sort?: string,
     useExactMatch: boolean = false,
+    useV2Embeddings: boolean = false,
   ): { yql: string; params: Record<string, string> } {
     const schemaNames = schemas.join(', ');
     // `limit` is interpolated raw into non-bindable YQL grammar ({targetHits:N}, max(N)); coerce to
@@ -215,6 +287,8 @@ export class YqlBuilder {
 
     // Optimization: Skip semantic search for short queries (< 3 chars) - lexical only
     const useSemantic = useSemanticAnyway && queryLength > 3;
+    const semanticClauses = semanticClausesForSchemas(schemas, safeLimit, useV2Embeddings);
+    const semanticDisjunction = semanticClauses.join('\n      or ');
 
     if (query && query !== '*') {
       if (useExactMatch) {
@@ -226,13 +300,11 @@ export class YqlBuilder {
       } else if (useFuzzy) {
         // Same user-query fields for both fuzzy branches; grammar:"tokenize" applied per clause.
         const lexicalFieldClauses = LEXICAL_FUZZY_FIELDS.map((field) => userInputClause(field)).join('\n      or ');
-        if (useSemantic) {
+        if (useSemantic && semanticClauses.length > 0) {
           // Hybrid: fuzzy lexical + semantic
           whereConditions.push(`(
       ${lexicalFieldClauses}
-      or ({targetHits:${safeLimit}} nearestNeighbor(text_embeddings, e))
-      or ({targetHits:${safeLimit}} nearestNeighbor(chunk_embeddings, e))
-      or ({targetHits:${safeLimit}, approximate:false} nearestNeighbor(combined_embeddings, e))
+      or ${semanticDisjunction}
     )`);
         } else {
           // Lexical only: short query, skip semantic
@@ -241,24 +313,17 @@ export class YqlBuilder {
     )`);
         }
       } else if (isTranscriptOnly) {
-        // sam_transcript schema uses its own embedding fields; text_embeddings/chunk_embeddings don't exist on it
+        // Transcript search uses the section vectors plus the combined chunk vectors.
         whereConditions.push(`(
         ${userInputClause()}
-      or ({targetHits:${safeLimit}} nearestNeighbor(meetingSummary_embeddings, e))
-      or ({targetHits:${safeLimit}} nearestNeighbor(chapters_embeddings, e))
-      or ({targetHits:${safeLimit}} nearestNeighbor(actionItems_embeddings, e))
-      or ({targetHits:${safeLimit}} nearestNeighbor(others_embeddings, e))
-      or ({targetHits:${safeLimit}} nearestNeighbor(qna_embeddings, e))
+      or ${semanticDisjunction}
     )`);
       } else {
         // Lexical only: short query
-        if (useSemantic) {
-          // approximate:false — combined_embeddings' HNSW returns 0 hits under any filter; drop after index rebuild.
+        if (useSemantic && semanticClauses.length > 0) {
           whereConditions.push(`(
           ${userInputClause()}
-        or ({targetHits:${safeLimit}} nearestNeighbor(text_embeddings, e))
-        or ({targetHits:${safeLimit}} nearestNeighbor(chunk_embeddings, e))
-        or ({targetHits:${safeLimit}, approximate:false} nearestNeighbor(combined_embeddings, e))
+        or ${semanticDisjunction}
         )`);
         } else {
           whereConditions.push(userInputClause());
