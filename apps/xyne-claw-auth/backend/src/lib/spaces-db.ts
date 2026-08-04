@@ -23,6 +23,7 @@
 import { PrismaClient } from "@prisma/client";
 import { CONFIG } from "../config.js";
 import { prisma } from "../db.js";
+import { withRetry } from "../retry.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("spaces-db");
@@ -108,7 +109,22 @@ async function refreshSpacesAccessToken(sessionId: string, workspaceId: string):
   }
 }
 
-let _client: PrismaClient | null = null;
+function buildClient() {
+  return new PrismaClient({
+    datasourceUrl: CONFIG.spacesDbUrl,
+    log: ["error"],
+  }).$extends({
+    query: {
+      $allOperations({ operation, model, args, query }) {
+        return withRetry(() => query(args), `spaces-db.${model ?? "raw"}.${operation}`);
+      },
+    },
+  });
+}
+
+type SpacesDbClient = ReturnType<typeof buildClient>;
+
+let _client: SpacesDbClient | null = null;
 let _initFailed = false;
 
 /**
@@ -117,16 +133,13 @@ let _initFailed = false;
  * unreachable DB) we mark it so subsequent calls short-circuit without
  * thrashing on retries; the operator can fix env + restart.
  */
-function getClient(): PrismaClient | null {
+function getClient(): SpacesDbClient | null {
   if (_initFailed) return null;
   if (_client) return _client;
   if (!CONFIG.spacesDbUrl) return null;
 
   try {
-    _client = new PrismaClient({
-      datasourceUrl: CONFIG.spacesDbUrl,
-      log: ["error"],
-    });
+    _client = buildClient();
     log.info("[spaces-db] Read-only client initialized");
     return _client;
   } catch (err) {

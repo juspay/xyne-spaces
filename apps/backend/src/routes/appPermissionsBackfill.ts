@@ -1,7 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { AccessType } from '@prisma/client';
-import { authMiddleware } from '@/middleware/auth';
-import { authorize } from '@/middleware/authorize';
+import { backfillAdminAuth } from '@/middleware/backfillAdminAuth';
 import {
   appPermissionsBackfillService,
   type AppPermissionsBackfillConfig,
@@ -11,20 +9,17 @@ import { ApiResponse } from '@/types/express';
 
 const router = Router();
 
-const appPermissionsBackfillAdminAuth = authorize('XYNE-APPS', AccessType.ADMIN);
-
 /**
  * @route POST /api/admin/app-permissions-backfill
  * @desc  Grant every available permission (as APPROVED) to every installed app.
  *        Processes apps in cursor-based batches with a sleep between each batch.
  *        Safe to re-run — skips permissions already present.
  * @body  { batchSize?: number, sleepMs?: number }  (optional, defaults: 50 / 2000)
- * @access XYNE-APPS Admin only
+ * @access Admin (TICKET-MIGRATION ADMIN)
  */
 router.post(
   '/',
-  authMiddleware.authenticate,
-  appPermissionsBackfillAdminAuth,
+  ...backfillAdminAuth,
   async (req: Request, res: Response): Promise<void> => {
     try {
       const { batchSize, sleepMs } = req.body as Partial<AppPermissionsBackfillConfig>;

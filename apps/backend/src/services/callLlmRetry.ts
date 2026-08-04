@@ -73,6 +73,7 @@ export async function executeCallLlmWithRetry(
   buildPrompt: () => string,
   operation: string,
   callId: string,
+  buildSystemPrompt?: () => string | undefined,
 ): Promise<ExtractedContent> {
   const logCallId = callId || 'unknown';
   const totalStart = Date.now();
@@ -95,8 +96,10 @@ export async function executeCallLlmWithRetry(
         return failedResult('agent_creation_failed');
       }
 
+      const systemPrompt = buildSystemPrompt?.()?.trim();
       const result = await agent.execute({
         messages: [createUserMessage(buildPrompt())],
+        ...(systemPrompt ? { systemPrompt } : {}),
       });
 
       const extracted = extractAgentContent(result);
