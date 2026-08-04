@@ -254,10 +254,6 @@ router.get('/github/oauth/callback', async (req: Request, res: Response) => {
 });
 
 router.post('/github', githubWebhookMiddleware.verify, handleGitHubWebhook);
-// Tolerant alias: the App webhook URL may include a trailing segment (e.g.
-// /github/local-test). The handler ignores it — the community workspace comes
-// from config — so both forms work.
-router.post('/github/:workspaceId', githubWebhookMiddleware.verify, handleGitHubWebhook);
 
 // Use raw body parser for Jenkins webhook to preserve exact bytes for HMAC verification
 router.post('/qa-alerts', 
