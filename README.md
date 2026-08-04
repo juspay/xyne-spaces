@@ -194,6 +194,11 @@ re-running it on an existing checkout is safe — and you can run any phase on i
 | `pnpm run services` | Starts infrastructure containers, runs migrations, seeds the databases |
 | `pnpm run dev:all` | Starts backend, dashboard, `xyne-claw` and `xyne-claw-auth` in parallel |
 
+`pnpm run up`, `services`, `dev`, `dev:all`, and `validate` use **Xyne Doctor**. In an interactive
+terminal, a nonzero exit can package a redacted local failure report and hand it to Claude Code or
+Codex without leaving the terminal. Plain and automated runs keep normal output without persisting
+a report. See [Xyne Doctor](docs/setup/xyne-doctor.md) for safety behavior and a demo.
+
 </details>
 
 Once it finishes:
