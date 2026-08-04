@@ -91,6 +91,18 @@ class AutomationQueue {
     return this.getQueue().add(data, options);
   }
 
+  /**
+   * Graceful stop. Bull's close() stops the processor from picking up NEW jobs
+   * and resolves only after in-flight jobs settle. Idempotent.
+   */
+  async close(): Promise<void> {
+    if (!this.queue) return;
+    await this.queue.close();
+    this.queue = null;
+    this.isInitialized = false;
+    logger.info('[AUTOMATION-QUEUE] Closed');
+  }
+
   get isReady(): boolean {
     return this.isInitialized && this.queue !== null;
   }

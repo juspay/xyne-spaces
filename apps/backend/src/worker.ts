@@ -37,6 +37,7 @@ import { teamIntelligenceWorker } from '@/workers/teamIntelligenceWorker';
 import { emailClassificationWorker } from '@/workers/emailClassificationWorker';
 import { autoDraftWorker } from '@/workers/autoDraftWorker';
 import { entityExtractionWorker } from '@/workers/entityExtractionWorker';
+import { drainRole } from '@/workers/drain';
 import { tagGenerationPipeline, registerDeskEmailTags, DESK_EMAIL_SOURCE_TYPE, enqueueTagVespaRefeed } from '@/tags';
 import { emitTagGenerated } from '@/automations/triggers/tag-generated.trigger';
 import { recoveryService } from './workflows/services/recovery-service'
@@ -46,6 +47,11 @@ config()
 class WorkerService {
   private isShuttingDown = false
   private automationTemplateCleanupTimer: NodeJS.Timeout | null = null
+  // References to roles that are started via dynamic import(), captured at start()
+  // so shutdown() can reach their stop()/close() paths (XYNE-55093).
+  private stitchWorkerRef: { stop(): Promise<void> } | null = null
+  private automationWorkerRef: { stop(): Promise<void> } | null = null
+  private automationScheduleWorkerRef: { stop(): Promise<void> } | null = null
 
   async start(): Promise<void> {
     try {
@@ -189,6 +195,7 @@ class WorkerService {
         logger.info('Starting recording stitch worker...');
         const { stitchWorker } = await import('@/workers/stitchWorker');
         stitchWorker.start();
+        this.stitchWorkerRef = stitchWorker;
       }
 
       if (appConfig.enableScheduledMessageWorker) {
@@ -217,11 +224,13 @@ class WorkerService {
         const { automationWorker } = await import('@/automations/queue/automation.worker');
         logger.info('Starting automation run worker...');
         await automationWorker.start();
+        this.automationWorkerRef = automationWorker;
         const { automationScheduleWorker } = await import(
           '@/automations/queue/automation-schedule.worker'
         );
         logger.info('Starting automation schedule worker...');
         await automationScheduleWorker.start();
+        this.automationScheduleWorkerRef = automationScheduleWorker;
 
         const { cleanupUnreferencedAutomationTemplates } = await import(
           '@/automations/services/automation-template.service'
@@ -323,6 +332,17 @@ class WorkerService {
       return
     }
     this.isShuttingDown = true
+
+    // Overall deadline. Bull v3 close() has no native timeout and each role is
+    // drained with its own bounded budget (drainRole), but this is the backstop:
+    // if the total drain still overruns, force-exit so Kubernetes doesn't SIGKILL
+    // us at an arbitrary point (which would drop every remaining in-flight job).
+    const HARD_EXIT_MS = Number(process.env.WORKER_SHUTDOWN_DEADLINE_MS ?? 90_000)
+    const hardExitTimer = setTimeout(() => {
+      logger.error(`[shutdown] deadline ${HARD_EXIT_MS}ms exceeded — forcing exit(1)`)
+      process.exit(1)
+    }, HARD_EXIT_MS)
+    hardExitTimer.unref()
 
     try {
       logger.info('Shutting down worker service...')
@@ -444,6 +464,28 @@ class WorkerService {
       if (delayedMessageWorkerEnabled) {
         await delayedMessageWorker.shutdown();
       }
+
+      // --- Roles previously missing from graceful shutdown (XYNE-55093) ---
+      // entity-extraction is started unconditionally in start(), so stop it the same way.
+      await drainRole('entity-extraction', () => entityExtractionWorker.stop())
+
+      if (appConfig.enableStitchWorker && this.stitchWorkerRef) {
+        await drainRole('stitch', () => this.stitchWorkerRef!.stop())
+      }
+
+      if (appConfig.enableAutomationWorker) {
+        // Drain the run worker first (it may enqueue deferred jobs onto the
+        // schedule queue), then drain the schedule worker.
+        if (this.automationWorkerRef) {
+          await drainRole('automation', () => this.automationWorkerRef!.stop())
+        }
+        if (this.automationScheduleWorkerRef) {
+          await drainRole('automation-schedule', () => this.automationScheduleWorkerRef!.stop())
+        }
+      }
+      // Docling scheduler roles (splitter/writer/reaper/submitter) observe their
+      // own SIGTERM handler (registerDoclingShutdownSignals) and drain their loops
+      // in parallel with the awaits above; see workers/docling scheduler.
 
       await DatabaseClient.disconnect()
       await CommonDatabaseClient.disconnect()
