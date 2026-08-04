@@ -3318,7 +3318,7 @@ model EntityAccess {
 
   entityUserAccess    String   @default("VIEW") // VIEW/EDIT/ADMIN/REVOKED (see EntityUserAccess in @xyne/shared; app-validated, no DB enum)
   createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  updatedAt           DateTime
 
   @@unique([workspaceId, shareableEntityType, entityId, userId])
   @@index([workspaceId, shareableEntityType, entityId])
