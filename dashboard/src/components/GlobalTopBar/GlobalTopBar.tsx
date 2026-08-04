@@ -25,6 +25,7 @@ import type { MentionData } from '../Chat/ChatDirectory/ChannelCommandMenu.types
 import { formatElapsedTime } from '../../utils/recordingUtils';
 import { queries } from '../../zero/queries';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
+import { WorkspaceJoinPolicy } from '@xyne/shared';
 
 interface GlobalTopBarProps {
   onOpenErrorReport?: () => void;
@@ -267,6 +268,11 @@ const WorkspaceInviteButton = (): ReactElement | null => {
   });
 
   if (!workspaceId) {
+    return null;
+  }
+
+  const joinPolicy = workspace?.joinPolicy ?? WorkspaceJoinPolicy.INVITE_ONLY;
+  if (joinPolicy === WorkspaceJoinPolicy.INVITE_ONLY) {
     return null;
   }
 
