@@ -1,54 +1,31 @@
 import type { Request, Response } from 'express';
 import { CallType } from '@prisma/client';
 import { google } from 'googleapis';
+import z from 'zod';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { callShareService } from '@/services/callShareService';
 import { decrypt, encrypt } from '@/services/encryptionService';
 import { convertBlockNoteToMarkdown } from '@/services/canvasService';
+import { GoogleDocsApiError, googleDocsService } from '@/services/googleDocsService';
 import { readFromYSweet } from '@/utils/ysweetUtils';
+import { markdownToPlainText } from '@/utils/markdownToPlainText';
 import { logger } from '@/utils/logger';
 
 const RECORDING_DOC_SOURCE_TYPE = 'google-recording-doc';
+const RecordingGoogleDocParamsSchema = z.object({
+  callId: z.string().trim().min(1, 'Recording ID is required'),
+});
 
 function recordingTitle(value: string | null): string {
   return (value?.trim() || 'Untitled Recording').slice(0, 240);
 }
 
-/** Google Docs receives plain text here, so turn Markdown into readable text first. */
-function markdownToDocumentText(markdown: string): string {
-  const text = markdown
-    .replace(/\r/g, '')
-    .split('\n')
-    .map((line) => {
-      if (/^\s*(?:\*{3,}|-{3,}|_{3,})\s*$/.test(line)) return '';
-
-      const heading = /^(\s*)#{1,6}\s+(.+)$/.exec(line);
-      if (heading) return `${heading[1]}${heading[2]}`;
-
-      const unorderedItem = /^(\s*)[*+-]\s+(.+)$/.exec(line);
-      if (unorderedItem) return `${unorderedItem[1]}• ${unorderedItem[2]}`;
-
-      const quote = /^(\s*)>\s?(.+)$/.exec(line);
-      if (quote) return `${quote[1]}${quote[2]}`;
-
-      return line;
-    })
-    .join('\n')
-    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
-    .replace(/(\*\*|__|~~|`)/g, '')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-
-  return text;
-}
-
 async function getRecordingDocAccessToken(userId: string): Promise<string | null> {
-  const source = await db.externalSource.findFirst({
-    where: { ownerUserId: userId, sourceType: RECORDING_DOC_SOURCE_TYPE, isActive: true },
-    orderBy: { updatedAt: 'desc' },
-  });
+  const source = await repositories.externalSources.findActiveByOwnerAndSourceType(
+    userId,
+    RECORDING_DOC_SOURCE_TYPE,
+  );
   if (!source) return null;
 
   const credentials = JSON.parse(decrypt(source.credentials)) as {
@@ -62,9 +39,8 @@ async function getRecordingDocAccessToken(userId: string): Promise<string | null
   const accessToken = (await client.getAccessToken()).token;
   if (!accessToken) return null;
 
-  await db.externalSource.update({
-    where: { id: source.id },
-    data: { credentials: encrypt(JSON.stringify({ ...credentials, accessToken })) },
+  await repositories.externalSources.update(source.id, {
+    credentials: encrypt(JSON.stringify({ ...credentials, accessToken })),
   });
   return accessToken;
 }
@@ -92,11 +68,16 @@ export class RecordingGoogleDocController {
     try {
       const userId = req.user?.id;
       const workspaceId = req.user?.workspaceId;
-      const { callId } = req.params;
       if (!userId || !workspaceId) {
         res.status(401).json({ success: false, error: 'Unauthorized' });
         return;
       }
+      const parsedParams = RecordingGoogleDocParamsSchema.safeParse(req.params);
+      if (!parsedParams.success) {
+        res.status(400).json({ success: false, error: 'Recording ID is required' });
+        return;
+      }
+      const { callId } = parsedParams.data;
 
       const call = await repositories.calls.findByExternalId(callId);
       if (
@@ -129,7 +110,7 @@ export class RecordingGoogleDocController {
       res.json({
         success: true,
         canExport,
-        summary: summary ? markdownToDocumentText(summary) : null,
+        summary: summary ? markdownToPlainText(summary) : null,
         unavailableReason: 'Connect Google Docs to create a document from this recording.',
       });
     } catch (error) {
@@ -141,12 +122,17 @@ export class RecordingGoogleDocController {
   export = async (req: Request, res: Response): Promise<void> => {
     const userId = req.user?.id;
     const workspaceId = req.user?.workspaceId;
-    const { callId } = req.params;
 
     if (!userId || !workspaceId) {
       res.status(401).json({ success: false, error: 'Unauthorized' });
       return;
     }
+    const parsedParams = RecordingGoogleDocParamsSchema.safeParse(req.params);
+    if (!parsedParams.success) {
+      res.status(400).json({ success: false, error: 'Recording ID is required' });
+      return;
+    }
+    const { callId } = parsedParams.data;
 
     try {
       const call = await repositories.calls.findByExternalId(callId);
@@ -199,78 +185,43 @@ export class RecordingGoogleDocController {
       }
 
       const title = recordingTitle(call.title);
-      const content = markdownToDocumentText(summary).slice(0, 900_000);
-      const createResponse = await fetch('https://docs.googleapis.com/v1/documents', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ title }),
-        signal: AbortSignal.timeout(20_000),
-      });
-      const created = (await createResponse.json()) as {
-        documentId?: string;
-        error?: { message?: string; status?: string; errors?: Array<{ reason?: string }> };
-      };
-      if (!createResponse.ok || !created.documentId) {
-        const googleError = created.error;
-        const errorText = [
-          googleError?.message,
-          googleError?.status,
-          ...(googleError?.errors?.map((error) => error.reason) ?? []),
-        ]
-          .filter(Boolean)
-          .join(' ');
+      const content = markdownToPlainText(summary).slice(0, 900_000);
+      let documentId: string;
+      try {
+        documentId = await googleDocsService.createDocument(accessToken, title);
+      } catch (error) {
+        if (!(error instanceof GoogleDocsApiError)) throw error;
+        const errorText = [error.message, ...error.reasons].join(' ');
         const missingDocsScope =
-          createResponse.status === 401 ||
+          error.status === 401 ||
           /insufficient authentication scopes|insufficientpermissions|insufficient permission/i.test(
             errorText,
           );
-        const status = missingDocsScope ? 409 : 502;
-        res.status(status).json({
+        res.status(missingDocsScope ? 409 : 502).json({
           success: false,
           error:
             missingDocsScope
               ? 'Google Docs access is required. Reconnect Google Docs and grant access to create files.'
-              : googleError?.message || 'Failed to create Google Doc',
+              : error.message,
         });
         return;
       }
 
-      const updateResponse = await fetch(
-        `https://docs.googleapis.com/v1/documents/${encodeURIComponent(created.documentId)}:batchUpdate`,
-        {
-          method: 'POST',
-          headers: {
-          Authorization: `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            requests: [{ insertText: { location: { index: 1 }, text: content } }],
-          }),
-          signal: AbortSignal.timeout(20_000),
-        }
-      );
-      if (!updateResponse.ok) {
-        const response = (await updateResponse.json().catch(() => null)) as {
-          error?: { message?: string };
-        } | null;
-        res
-          .status(updateResponse.status === 401 || updateResponse.status === 403 ? 409 : 502)
-          .json({
-            success: false,
-            error:
-              response?.error?.message ||
-              'Google Doc was created but its content could not be exported',
-          });
+      try {
+        await googleDocsService.insertText(accessToken, documentId, content);
+      } catch (error) {
+        if (!(error instanceof GoogleDocsApiError)) throw error;
+        res.status(error.status === 401 || error.status === 403 ? 409 : 502).json({
+          success: false,
+          error: error.message || 'Google Doc was created but its content could not be exported',
+        });
         return;
       }
 
       res.json({
         success: true,
-        documentId: created.documentId,
-        documentUrl: `https://docs.google.com/document/d/${created.documentId}/edit`,
+        documentId,
+        documentUrl: `https://docs.google.com/document/d/${documentId}/edit`,
       });
     } catch (error) {
       logger.error('[RecordingGoogleDoc] Failed to export recording', { callId, userId, error });
