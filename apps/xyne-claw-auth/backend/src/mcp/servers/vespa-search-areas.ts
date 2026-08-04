@@ -793,7 +793,7 @@ export function buildYqlFromParams(
   params: StructuredQueryParams,
   userId: string,
   workspaceId: string,
-  opts?: { publicOnly?: boolean; skipRankProfileValidation?: boolean },
+  opts?: { publicOnly?: boolean },
 ): BuiltQuery {
   const area = resolveArea(params.searchArea);
   if (!area) {
@@ -844,19 +844,12 @@ export function buildYqlFromParams(
 
   // 8. Validate an agent-supplied rank profile early, against the profiles that
   //    actually exist on this area's source — fail with the allowed list rather
-  //    than let Vespa 400 or silently fall back. The search-eval caller opts out
-  //    (skipRankProfileValidation) since its UI sources options live from Vespa's
-  //    deployed schema (see vespa-schema-profiles.ts) or a free-typed "Custom…"
-  //    name, rather than this hardcoded allow-list — a name that doesn't exist
-  //    on this area's source there just fails at Vespa (400), surfaced per-query
-  //    in the eval UI.
+  //    than let Vespa 400 or silently fall back.
   let rankProfile: string | undefined;
   if (params.rankProfile != null && params.rankProfile !== "") {
-    if (!opts?.skipRankProfileValidation) {
-      const allowed = rankProfilesForArea(area);
-      if (!allowed.includes(params.rankProfile)) {
-        throw new Error(`rankProfile "${params.rankProfile}" is not available for area "${params.searchArea}". Allowed: ${allowed.join(", ")}.`);
-      }
+    const allowed = rankProfilesForArea(area);
+    if (!allowed.includes(params.rankProfile)) {
+      throw new Error(`rankProfile "${params.rankProfile}" is not available for area "${params.searchArea}". Allowed: ${allowed.join(", ")}.`);
     }
     rankProfile = params.rankProfile;
   } else if (query) {
@@ -896,12 +889,7 @@ export interface FederatedBuiltQuery {
  * Vespa applies exactly ONE ranking.profile to the whole query, so it must be
  * a profile that exists on every involved source — only "default_native"
  * (present on message/file/ticket/channel/mail) and "unranked" qualify;
- * anything else throws, UNLESS the caller opts out (skipRankProfileValidation
- * — the search-eval caller's UI already restricts "All types" to the live
- * intersection across schemas, getCommonRankProfiles in
- * vespa-schema-profiles.ts, or a free-typed "Custom…" name, so a profile
- * missing from one of the merged schemas there just fails that query at
- * Vespa instead). No sort/groupBy here — federating differing schemas'
+ * anything else throws. No sort/groupBy here — federating differing schemas'
  * field vocabularies under one sort/group key isn't well-defined, and no
  * caller currently needs it (search-eval-vespa.ts's only use is a plain
  * "All types" query+date-filter, never sort/groupBy).
@@ -911,7 +899,7 @@ export function buildFederatedYqlFromParams(
   params: Omit<StructuredQueryParams, "searchArea">,
   userId: string,
   workspaceId: string,
-  opts?: { publicOnly?: boolean; skipRankProfileValidation?: boolean },
+  opts?: { publicOnly?: boolean },
 ): FederatedBuiltQuery {
   if (areaNames.length === 0) {
     throw new Error("buildFederatedYqlFromParams: at least one area is required.");
@@ -934,7 +922,7 @@ export function buildFederatedYqlFromParams(
 
   let rankProfile: string | undefined;
   if (params.rankProfile != null && params.rankProfile !== "") {
-    if (!opts?.skipRankProfileValidation && !BASE_RANK_PROFILES.includes(params.rankProfile)) {
+    if (!BASE_RANK_PROFILES.includes(params.rankProfile)) {
       throw new Error(`rankProfile "${params.rankProfile}" is not valid for a federated ("All types") query — it must exist on every involved source. Allowed: ${BASE_RANK_PROFILES.join(", ")}.`);
     }
     rankProfile = params.rankProfile;
