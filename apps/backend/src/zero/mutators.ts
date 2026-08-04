@@ -15206,9 +15206,19 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             );
           }
 
+          // Recompute hasAttachment from the actual attachment rows so the
+          // denormalized column stays truthful for the worker's DB read
+          // (attachments are the source of truth, resolved by entityId at delivery).
+          const scheduledAttachments = await tx.run(
+            zql.message_attachments
+              .where('entityId', id)
+              .where('entityType', AttachmentEntityType.DELAYED_MESSAGE),
+          );
+
           await tx.mutate.delayed_messages.update({
             id,
             content: content.trim(),
+            hasAttachment: scheduledAttachments.length > 0,
             updatedAt,
           });
         }
