@@ -1,9 +1,11 @@
 import { Request, Response } from 'express';
 import { z } from 'zod';
+import { CallType } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';
 import { transcriptService } from '@/services/transcriptService';
+import { noteTakerTranscriptService } from '@/services/noteTakerTranscriptService';
 import { redisService } from '@/services/redisService';
 import { computeSttHintNames, STT_HINT_NAMES_REDIS_KEY } from '@/queues/warmUserRegistryQueue';
 import { TicketController } from './ticketController';
@@ -46,32 +48,6 @@ class TranscriptionAgentController {
         return;
       }
 
-      // Find the call system message
-      const db = DatabaseClient.getInstance();
-      const callMessage = await db.message.findFirst({
-        where: {
-          AND: [
-            { metadata: { path: ['callId'], equals: callId } },
-            { metadata: { path: ['isCallMessage'], equals: true } },
-          ],
-        },
-      });
-
-      // For headless calls (recordingEnabled=true), message is optional
-      // Normal calls should always have a system message
-      if (!callMessage) {
-        // Headless call without system message - skip summary processing
-        if (call.recordingEnabled) {
-          logger.info(`[TranscriptReady] Headless call ${callId} - no system message, skipping summary`);
-          res.json({ success: true, message: 'Headless call processed' });
-          return;
-        } else {
-          logger.error(`[TranscriptReady] Call message not found for call: ${callId}`);
-          res.status(404).json({ success: false, error: 'Call message not found' });
-          return;
-        }
-      }
-
       // Validate request body
       const transcriptReadySchema = z.object({
         hasTranscript: z.boolean().optional(),
@@ -86,6 +62,23 @@ class TranscriptionAgentController {
 
       const { hasTranscript } = validationResult.data;
       logger.info(`[TranscriptReady] hasTranscript=${hasTranscript} for call ${callId}`);
+
+      // NOTE_TAKER (HEADLESS / "Xyne Oats") calls never have a channel or message —
+      // route straight to their own pipeline, skipping the message lookup entirely.
+      if (call.callType === CallType.HEADLESS) {
+        await noteTakerTranscriptService.processTranscript(call, hasTranscript ?? true);
+        res.json({ success: true, message: 'Note taker call processed' });
+        return;
+      }
+
+      // Find the call system message
+      const callMessage = await repositories.messages.findHeadMessageByCallId(callId);
+
+      if (!callMessage) {
+        logger.error(`[TranscriptReady] Call message not found for call: ${callId}`);
+        res.status(404).json({ success: false, error: 'Call message not found' });
+        return;
+      }
 
       // Process transcript and generate AI summary
       await transcriptService.processCallWithSummary(callId, callMessage.messageId, hasTranscript);
@@ -131,14 +124,7 @@ class TranscriptionAgentController {
       }
 
       // 2. Get call message to find conversationId
-      const callMessage = await db.message.findFirst({
-        where: {
-          AND: [
-            { metadata: { path: ['callId'], equals: callId } },
-            { metadata: { path: ['isCallMessage'], equals: true } },
-          ],
-        },
-      });
+      const callMessage = await repositories.messages.findHeadMessageByCallId(callId);
 
       if (!callMessage) {
         logger.error(`[TicketTool] Call message not found for call: ${callId}`);

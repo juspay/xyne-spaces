@@ -15,6 +15,7 @@ import { tenantScopeMiddleware } from '@/database/tenant/context';
 import { redactSensitiveUrl } from '@/utils/redact';
 import { aclMiddleware } from '@/middleware/acl';
 import { authMiddleware } from '@/middleware/auth';
+import { backfillMountGuard } from '@/middleware/backfillAdminAuth';
 import { authenticateUserOrApp } from '@/middleware/authenticateUserOrApp';
 import { verifyTranscriptionAgent } from '@/middleware/transcriptionAgentAuth';
 import { DatabaseClient } from '@/database/client';
@@ -386,6 +387,9 @@ export class App {
     this.app.use('/api/csat', csatRoutes);
 
     this.app.use('/api/transcriptionAgent', verifyTranscriptionAgent, transcriptionAgentRoutes);
+
+    this.app.use('/api/admin', backfillMountGuard);
+    this.app.use('/migrate/api/admin', backfillMountGuard);
 
     // Admin backfill routes (must be before generic /api routes to avoid auth conflicts)
     // Only enable when ENABLE_VESPA_BACKFILL_ROUTES environment variable is true

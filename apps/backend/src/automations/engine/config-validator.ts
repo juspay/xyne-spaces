@@ -181,6 +181,10 @@ function isZodCompatible(upstream: z.ZodTypeAny, consumer: z.ZodTypeAny): boolea
 
   if (conType === 'ZodString') return true;
 
+  if (consumer instanceof z.ZodUnion) {
+    return (consumer._def.options as z.ZodTypeAny[]).some(branch => isZodCompatible(upstream, branch));
+  }
+
   return false;
 }
 

@@ -98,6 +98,7 @@ import {
 import { requireAuth, requireS2S, requireStrictS2S, requireInternalS2S, requireUserAuth, s2sKeyMatches } from "./middleware/require-auth.js";
 import { requireClawAdmin, requireSearchEvalAccess } from "./middleware/agent-acl.js";
 import { redisService } from "./redis.js";
+import { connectDb } from "./db.js";
 
 const app = express();
 // Capture the raw request body so verify-spaces-signature middleware can
@@ -284,6 +285,10 @@ app.use(`${BASE}/gateway`, mcpGatewayRouter);
 const server = app.
 listen(CONFIG.port, () => {
   log.info(`[xyne-claw-auth] Server listening on port ${CONFIG.port}`);
+
+  void connectDb().catch(err => {
+    log.error('[xyne-claw-auth] Database warmup failed:', err);
+  });
   // npx cache scrub: prior deploys left half-installed package trees in
   // ~/.npm/_npx (e.g. node-fetch present, data-uri-to-buffer missing),
   // which made every stdio MCP spawn (github, etc.) die with

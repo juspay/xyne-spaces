@@ -108,6 +108,18 @@ export class TagRepository {
     });
   }
 
+  /**
+   * Bulk-resolve Tag ids to their `{ id, tag }` rows, scoped to a workspace.
+   * Used to resolve id-referencing arrays (e.g. Call.labels) back to display
+   * text without exposing raw Tag ids in the UI.
+   */
+  async findByIds(ids: string[], workspaceId: string, tx?: TxClient): Promise<Tag[]> {
+    if (ids.length === 0) return [];
+    return this.client(tx).tag.findMany({
+      where: { id: { in: ids }, workspaceId, isDeleted: false },
+    });
+  }
+
   async distinctTagsByCategory(
     workspaceId: string,
     sourceType: string,

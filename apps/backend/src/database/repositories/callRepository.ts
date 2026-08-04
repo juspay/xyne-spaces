@@ -47,6 +47,9 @@ export interface UpdateCallInput {
   transcript?: string;
   startedAt?: Date;
   recordingUrl?: string | null;
+  labels?: string[];
+  markedItems?: Prisma.InputJsonValue[];
+  summaryTemplateId?: string | null;
 }
 
 export interface CreateCallWithParticipantsInput {
@@ -217,6 +220,15 @@ export class CallRepository {
     });
     queueCallVespaFeed(result.id, { source: CallVespaFeedSource.CallRepositoryUpdate });
     return result;
+  }
+
+  async appendMarkedItem(externalId: string, item: Prisma.InputJsonValue): Promise<boolean> {
+    const rowsUpdated = await DatabaseClient.getInstance().$executeRaw`
+      UPDATE "calls"
+      SET "markedItems" = "markedItems" || ${JSON.stringify(item)}::jsonb
+      WHERE "externalId" = ${externalId}
+    `;
+    return rowsUpdated > 0;
   }
 
   async findById(id: string): Promise<Call | null> {

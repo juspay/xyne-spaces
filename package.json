@@ -13,7 +13,7 @@
     "secrets": "node scripts/generate-local-secrets.mjs",
     "env:setup": "node scripts/setup-env-files.mjs",
     "services:stop": "docker info > /dev/null 2>&1 && docker compose -f docker-compose.local.yml --profile transcription --profile egress --profile search down || (command -v podman-compose > /dev/null && podman-compose -f docker-compose.local.yml --profile transcription --profile egress --profile search down || podman compose -f docker-compose.local.yml --profile transcription --profile egress --profile search down)",
-    "dev:all": "pnpm exec concurrently --names 'backend,worker,dashboard,claw,auth' --prefix-colors 'blue,cyan,green,yellow,magenta' --kill-others --kill-signal SIGTERM --kill-timeout 5000 'pnpm --filter xyne-spaces-backend dev' 'pnpm --filter xyne-spaces-backend dev:worker' 'pnpm --filter xyne-spaces-dashboard dev' 'pnpm --filter xyne-claw dev' 'pnpm --filter xyne-claw-auth dev'",
+    "dev:all": "pnpm exec concurrently --names 'backend,worker,dashboard,claw,auth,auth-ui' --prefix-colors 'blue,cyan,green,yellow,magenta,red' --kill-others --kill-signal SIGTERM --kill-timeout 5000 'pnpm --filter xyne-spaces-backend dev' 'pnpm --filter xyne-spaces-backend dev:worker' 'pnpm --filter xyne-spaces-dashboard dev' 'pnpm --filter xyne-claw dev' 'pnpm --filter xyne-claw-auth dev' 'pnpm --filter xyne-claw-auth-ui dev'",
     "bootstrap": "pnpm run env:setup && pnpm run setup && pnpm run secrets && pnpm run services && pnpm run dev:all",
     "up": "pnpm run bootstrap",
     "services:vespa": "chmod +x vespa-core/scripts/deploy-dev.sh && ./vespa-core/scripts/deploy-dev.sh",

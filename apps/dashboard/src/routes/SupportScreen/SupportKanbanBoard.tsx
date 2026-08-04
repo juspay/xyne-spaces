@@ -49,6 +49,14 @@ const toStageColumn = (stage: { id: string; name: string; sequenceNumber?: numbe
   ...(stage.sequenceNumber !== undefined && { sequenceNumber: stage.sequenceNumber }),
 });
 
+const DESK_KANBAN_VISIBLE_COLUMNS = new Set([
+  'assignee',
+  'dueDate',
+  'priority',
+  'tags',
+  'createdAt',
+]);
+
 export interface SupportKanbanBoardProps {
   channelId: string;
   boardId: string | null;
@@ -419,6 +427,7 @@ export const SupportKanbanBoard = ({
           onTicketClick={onTicketClick}
           containerClassName='h-full'
           showEmailReads={true}
+          visibleColumns={DESK_KANBAN_VISIBLE_COLUMNS}
           {...(activeTicketId !== undefined && { activeTicketId })}
           slaPolicies={slaPolicies}
         />
@@ -427,6 +436,7 @@ export const SupportKanbanBoard = ({
             <TicketCard
               ticket={activeTicket}
               isCompact={true}
+              visibleColumns={DESK_KANBAN_VISIBLE_COLUMNS}
               onClick={() => {}}
               data-track-category='Support'
               data-track-name='DragOverlayTicketClick'

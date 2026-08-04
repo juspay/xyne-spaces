@@ -13,6 +13,7 @@ interface RecordingStoreSnapshot {
 
 export type RecordingStoreEvent =
   | { type: 'requestAutoStart' }
+  | { type: 'clearAutoStart' }
   | { type: 'requestStop' }
   | {
       type: 'startRecording';
@@ -23,7 +24,8 @@ export type RecordingStoreEvent =
       type: 'recordingStarted';
       room: unknown;
       externalId: string;
-      channelId: string;
+      channelId: string | null;
+      notesCanvasId: string;
       startTime: number;
       defaultLayout?: RecordingLayout;
     }
@@ -35,8 +37,10 @@ export type RecordingStoreEvent =
   | { type: 'reset' }
   | { type: 'addTranscript'; entry: RecordingState['transcripts'][number] }
   | { type: 'clearTranscripts' }
+  | { type: 'markMoment'; moment: RecordingState['markedMoments'][number] }
   | { type: 'setNotesCanvas'; canvasId: string; title?: string }
   | { type: 'setNotesCanvasTitle'; title: string }
+  | { type: 'setTitle'; title: string }
   | { type: 'setActiveLayout'; layout: RecordingLayout }
   | { type: 'setTranscriptMinimized'; isMinimized: boolean }
   | { type: 'agentLeftUnexpectedly' };

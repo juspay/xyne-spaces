@@ -808,6 +808,12 @@ if [ -f "apps/xyne-claw-auth/backend/.env" ]; then
     NODE_OPTIONS="" pnpm exec tsx prisma/seed.ts
     echo -e "${GREEN}✓ xyne-claw-auth database schema ready${NC}"
     cd "$REPO_ROOT"
+
+    echo -e "${BLUE}  Registering Claw agents as Spaces apps...${NC}"
+    cd "$REPO_ROOT/apps/backend"
+    pnpm exec dotenv -e .env.local -- pnpm exec tsx scripts/seed-claw-agent-apps.ts \
+        || echo -e "${YELLOW}  Agent registration failed — agents will not be mentionable until it is re-run.${NC}"
+    cd "$REPO_ROOT"
 fi
 
 # Setup xyne-claw-auth frontend

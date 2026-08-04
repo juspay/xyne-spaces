@@ -100,6 +100,38 @@ function readOnlyGuard(session: Session, opts: { command?: string; write?: boole
   return null;
 }
 
+// Narrow set of destructive command patterns blocked on the sandbox shell path.
+// Enforced at the execute() chokepoint below, so it fires on every sandbox-run
+// path regardless of which agent framework dispatched the call.
+const DESTRUCTIVE_SANDBOX_PATTERNS: { pattern: RegExp; label: string }[] = [
+  { pattern: /\brm\s+-\w*r\w*(?:\s+-\S+)*\s+(?:\/|~|\$HOME|\.\.)(?:\s|\/|\*|$)/, label: "recursive rm of /, ~, $HOME or .." },
+  { pattern: /\bgit\s+push\b[^\n]*--force(?!-with-lease)\b/, label: "git push --force" },
+  { pattern: /\bgit\s+push\b[^\n]*\s-f(?=\s|$)/, label: "git push -f" },
+  { pattern: /\bcurl\b[^\n|]*\|\s*(?:ba)?sh\b/, label: "curl | sh" },
+  { pattern: /\bwget\b[^\n|]*\|\s*(?:ba)?sh\b/, label: "wget | sh" },
+  { pattern: /\bnpm\s+publish\b/, label: "npm publish" },
+  { pattern: /\bmkfs\b/, label: "mkfs" },
+  { pattern: /\bdd\b[^\n]*\bof=\/dev\//, label: "dd to device" },
+  { pattern: /:\s*\(\s*\)\s*\{\s*:/, label: "fork bomb" },
+  { pattern: />\s*\/dev\/(?:sd|nvme|disk)/, label: "write to disk device" },
+];
+
+/** Reject an obviously-destructive sandbox command. Returns an error string, or null if allowed. */
+function destructiveCommandGuard(cmd: string | undefined): string | null {
+  if (!cmd) return null;
+  for (const { pattern, label } of DESTRUCTIVE_SANDBOX_PATTERNS) {
+    if (pattern.test(cmd)) {
+      return (
+        `Error: command blocked by the sandbox safety guard ("${label}"). ` +
+        "This pattern is not allowed. Narrow it (target a specific subdirectory, " +
+        "use `git push --force-with-lease` instead of `--force`, avoid piping remote " +
+        "scripts into a shell) and retry."
+      );
+    }
+  }
+  return null;
+}
+
 const STALE_PATTERNS = [
   /could not connect to the backend sandbox/i,
   /HTTP request failed/i,
@@ -494,6 +526,8 @@ export const sandboxRun: ToolDefinition = {
     const cmd = (params["cmd"] ?? params["command"]) as string;
     const timeoutMs = (params["timeoutMs"] as number | undefined) ?? 60_000;
     if (!cmd?.trim()) return "Error: cmd or command is required.";
+    const destructive = destructiveCommandGuard(cmd);
+    if (destructive) return destructive;
 
     // Try explicit sessionId first
     const explicitSessionId = params["sessionId"] as string | undefined;
@@ -594,6 +628,8 @@ export const sandboxRunDetached: ToolDefinition = {
     if (!context) return "Error: No execution context available.";
     const sessionId = params["sessionId"] as string;
     const cmd = (params["cmd"] ?? params["command"]) as string;
+    const destructive = destructiveCommandGuard(cmd);
+    if (destructive) return destructive;
 
     const session = SESSION_STORE.get(sessionId);
     if (!session) return `Error: Session ${sessionId} not found. Create one with sandbox-create first.`;
