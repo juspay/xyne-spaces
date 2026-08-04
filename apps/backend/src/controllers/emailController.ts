@@ -394,7 +394,7 @@ export class EmailController {
 
         const ticketForActivity = await db.ticket.findFirst({
           where: { conversationId },
-          select: { id: true },
+          select: { id: true, workspaceId: true },
         });
 
         await recordTicketTimelineEvent({
@@ -408,6 +408,7 @@ export class EmailController {
                   type: emailType,
                   to: toRecipients,
                 } as Prisma.InputJsonValue,
+                workspaceId: ticketForActivity.workspaceId,
               }
             : undefined,
           message: {
