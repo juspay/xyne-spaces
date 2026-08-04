@@ -42,6 +42,7 @@ import { LegacyKbRedirect } from '../components/knowledgeBaseV2/LegacyKbRedirect
 import { MemoryScreen } from './MemoryScreen';
 import { FileViewerLayout } from '../components/knowledgeBase/layout/FileViewerLayout';
 import AnalyticsScreen from './AnalyticsScreen/AnalyticsScreen';
+import TelepresenceAnalyticsScreen from './TelepresenceAnalyticsScreen';
 import ProjectsScreen from './ProjectsScreen/ProjectsScreen';
 import UserGroupsScreen from './UserGroupsScreen/UserGroupsScreen';
 import ProjectDetailScreen from './ProjectDetailScreen/ProjectDetailScreen';
@@ -1130,6 +1131,13 @@ export const router = createBrowserRouter([
                     <AnalyticsScreen />
                   </ResourceProtectedRoute>
                 ),
+              },
+              {
+                // Email-allow-listed; the screen renders a 403 view for other
+                // users (direct URL access included) and its data routes reject
+                // them server-side as well.
+                path: 'analytics/telepresence',
+                element: <TelepresenceAnalyticsScreen />,
               },
               {
                 path: 'projects',

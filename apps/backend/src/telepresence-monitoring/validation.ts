@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { TELEPRESENCE_DEVICE_TYPES, TELEPRESENCE_HEALTH_STATUSES } from './utils';
 
@@ -9,6 +10,10 @@ const isoDateTimeString = z.string().min(1).refine((val) => !Number.isNaN(Date.p
   message: 'must be a valid date-time string',
 });
 
+const jsonValueSchema: z.ZodType<Prisma.InputJsonValue> = z.lazy(() =>
+  z.union([z.string(), z.number(), z.boolean(), z.array(jsonValueSchema), z.record(jsonValueSchema)])
+);
+
 const TelepresenceDeviceReportSchema = z.object({
   deviceType: TelepresenceDeviceTypeSchema,
   name: z.string().optional(),
@@ -16,6 +21,7 @@ const TelepresenceDeviceReportSchema = z.object({
   connected: z.number().int().nonnegative(),
   detected: z.number().int().nonnegative(),
   description: z.string().optional(),
+  layoutConfig: jsonValueSchema.optional(),
 }).passthrough();
 
 export const TelepresenceHealthReportRequestSchema = z.object({

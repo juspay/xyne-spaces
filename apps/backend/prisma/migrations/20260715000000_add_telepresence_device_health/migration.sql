@@ -12,6 +12,7 @@ CREATE TABLE "non_zero"."telepresence_health_view" (
   "detected" INT NOT NULL,
   "cpuTemperature" DOUBLE PRECISION NOT NULL,
   "lastReportedAt" TIMESTAMP(3) NOT NULL,
+  "layoutConfig" JSONB,
   "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -31,6 +32,7 @@ CREATE TABLE "non_zero"."telepresence_health_log" (
   "cpuTemperature" DOUBLE PRECISION NOT NULL,
   "description" TEXT,
   "reportedAt" TIMESTAMP(3) NOT NULL,
+  "layoutConfig" JSONB,
   "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
   CONSTRAINT "telepresence_health_log_pkey" PRIMARY KEY ("id")

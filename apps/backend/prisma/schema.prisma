@@ -5406,6 +5406,7 @@ model TelepresenceHealthView {
   detected       Int
   cpuTemperature Float
   lastReportedAt DateTime
+  layoutConfig   Json?
   createdAt      DateTime                 @default(now())
   updatedAt      DateTime                 @updatedAt
 
@@ -5426,6 +5427,7 @@ model TelepresenceHealthLog {
   cpuTemperature Float
   description    String?
   reportedAt     DateTime
+  layoutConfig   Json?
   createdAt      DateTime                 @default(now())
 
   @@index([userId, reportedAt])

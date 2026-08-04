@@ -1,4 +1,4 @@
-import { TelepresenceDeviceType, TelepresenceHealthStatus } from '@prisma/client';
+import { Prisma, TelepresenceDeviceType, TelepresenceHealthStatus } from '@prisma/client';
 
 export interface TelepresenceDeviceReportInput {
   deviceType: TelepresenceDeviceType;
@@ -8,6 +8,7 @@ export interface TelepresenceDeviceReportInput {
   /** Number of those devices currently detected/working. */
   detected: number;
   description?: string;
+  layoutConfig?: Prisma.InputJsonValue;
   [key: string]: unknown;
 }
 
@@ -27,6 +28,7 @@ export interface TelepresenceDeviceHealthRecord {
   connected: number;
   detected: number;
   lastReportedAt: Date;
+  layoutConfig?: Prisma.JsonValue;
 }
 
 export interface TelepresenceRoomHealthSummary {
@@ -62,4 +64,5 @@ export interface TelepresenceHealthLogPoint {
   cpuTemperature: number;
   description: string | null;
   reportedAt: Date;
+  layoutConfig?: Prisma.JsonValue;
 }
