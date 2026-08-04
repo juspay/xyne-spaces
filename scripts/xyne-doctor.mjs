@@ -274,6 +274,7 @@ export function createLogCapture(maxCharacters = MAX_CAPTURE_CHARACTERS) {
   let totalCharacters = 0;
   let totalLines = 0;
   let endsWithNewline = false;
+  let severedValue = false;
 
   return {
     append(chunk) {
@@ -283,13 +284,25 @@ export function createLogCapture(maxCharacters = MAX_CAPTURE_CHARACTERS) {
       if (text.length > 0) endsWithNewline = text.endsWith("\n");
       tail += text;
       const bufferLimit = maxCharacters + REDACTION_CONTEXT_CHARACTERS;
-      if (tail.length > bufferLimit) tail = tail.slice(-bufferLimit);
+      if (tail.length > bufferLimit) {
+        // Trim to a line start. A mid-line slice can strip the `LABEL=` prefix
+        // off its value, and the assignment patterns only match a value that
+        // still carries its label — so a severed value survives redaction.
+        // Only skip forward to a boundary within the redaction context, or a
+        // single line longer than the buffer would discard the whole capture.
+        const excess = tail.length - bufferLimit;
+        const boundary = tail.indexOf("\n", excess);
+        severedValue =
+          boundary === -1 || boundary - excess > REDACTION_CONTEXT_CHARACTERS;
+        tail = severedValue ? tail.slice(excess) : tail.slice(boundary + 1);
+      }
     },
     snapshot() {
       return {
         rawTail: tail.slice(-maxCharacters),
         redactionTail: tail,
         endsWithNewline,
+        severedValue,
         totalCharacters,
         totalLines:
           totalCharacters === 0 ? 0 : totalLines + (endsWithNewline ? 0 : 1),
@@ -301,12 +314,23 @@ export function createLogCapture(maxCharacters = MAX_CAPTURE_CHARACTERS) {
 }
 
 export function sanitizeCaptureSnapshot(capture, options = {}) {
-  const sanitized = sanitizeCapturedOutput(
-    capture.redactionTail ?? capture.rawTail,
-    options,
-  );
+  let source = capture.redactionTail ?? capture.rawTail;
+  let severedCount = 0;
+
+  if (capture.severedValue) {
+    // One line outgrew the whole buffer, so the retained head lost the label
+    // that identified it. Mask the orphaned run rather than emit a token no
+    // pattern can attribute — a truncated base64 credential looks like noise.
+    const masked = source.replace(/^\S{32,}/, "[REDACTED_TRUNCATED_VALUE]");
+    if (masked !== source) {
+      severedCount = 1;
+      source = masked;
+    }
+  }
+
+  const sanitized = sanitizeCapturedOutput(source, options);
   return {
-    count: sanitized.count,
+    count: sanitized.count + severedCount,
     text: sanitized.text.slice(-capture.capturedCharacters),
   };
 }

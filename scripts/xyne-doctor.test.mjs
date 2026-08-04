@@ -239,6 +239,38 @@ test("redacts with context retained just before the bounded tail", () => {
   assert.match(sanitized.text, /REDACTED/);
 });
 
+test("a secret straddling the buffer trim never survives into the report", () => {
+  // The trim used to slice mid-line, stripping `LABEL=` off its value; the
+  // assignment patterns need the label adjacent, so the tail leaked raw while
+  // the report still claimed zero redactions.
+  const filler = "ordinary build output line here\n";
+  for (const total of [70500, 71500, 72500, 73500]) {
+    const capture = createLogCapture();
+    const head = `LITELLM_API_KEY=${"X".repeat(9000)}SECRET_MARKER\n`;
+    capture.append(head);
+    capture.append(filler.repeat(Math.floor((total - head.length) / filler.length)));
+    const sanitized = sanitizeCaptureSnapshot(capture.snapshot(), {
+      homeDirectory: "",
+    });
+
+    assert.doesNotMatch(sanitized.text, /SECRET_MARKER/);
+    assert.doesNotMatch(sanitized.text, /X{50,}/);
+    assert.ok(sanitized.count > 0);
+  }
+});
+
+test("a single line larger than the buffer is masked, not dropped or leaked", () => {
+  const capture = createLogCapture();
+  capture.append(`FCM_SERVICE_ACCOUNT_BASE64=${"QUJDREVG".repeat(9000)}TAILMARKER\n`);
+  const sanitized = sanitizeCaptureSnapshot(capture.snapshot(), {
+    homeDirectory: "",
+  });
+
+  assert.doesNotMatch(sanitized.text, /TAILMARKER/);
+  assert.match(sanitized.text, /\[REDACTED_TRUNCATED_VALUE\]/);
+  assert.ok(sanitized.count > 0);
+});
+
 test("counts a newline-terminated capture without a phantom final line", () => {
   const capture = createLogCapture();
   capture.append("one\n");
