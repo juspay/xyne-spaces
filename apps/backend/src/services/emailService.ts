@@ -20,10 +20,22 @@ import { UserRepository } from '@/database/repositories/users';
 import { BoardRepository } from '@/database/repositories/boardRepository';
 import { EmailChannelPreferenceRepository } from '@/database/repositories/emailChannelPreferenceRepository';
 import { DatabaseClient } from '@/database/client';
+import { Prisma } from '@prisma/client';
+import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
+import { adapterRegistry } from '@/integrations/core/adapterRegistry';
+import { websocketService } from './websocketService';
+import { redisService } from './redisService';
+import { isRegisteredBot, getBotInfo } from '@/bots/core/bot-utils';
+import { PrismaClient } from '@prisma/client';
+import { evaluateAssignmentRule } from '@/utils/assignmentEngine';
+import { syncUserWorkload } from '@/utils/workloadUtils';
+import { ticketAssignmentService, primaryUserIdOf } from '@/services/ticketAssignmentService';
 import {
+  BaseTicketType,
+  type BoardMetadata,
+  isDeskChannelType,
   EmailType,
   ChannelType,
-  Prisma,
   AttachmentEntityType,
   VespaOperationType,
   VespaInsertionStatus,
@@ -31,17 +43,9 @@ import {
   ExternalEntityType,
   TicketPriority,
   ActivityType,
-} from '@prisma/client';
-import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
-import { adapterRegistry } from '@/integrations/core/adapterRegistry';
-import { websocketService } from './websocketService';
-import { redisService } from './redisService';
-import { isRegisteredBot, getBotInfo } from '@/bots/core/bot-utils';
-import { PrismaClient, EmailMergeMode } from '@prisma/client';
-import { evaluateAssignmentRule } from '@/utils/assignmentEngine';
-import { syncUserWorkload } from '@/utils/workloadUtils';
-import { ticketAssignmentService, primaryUserIdOf } from '@/services/ticketAssignmentService';
-import { BaseTicketType, type BoardMetadata, isDeskChannelType } from '@xyne/shared';
+  EmailMergeMode,
+  NotificationType,
+} from '@xyne/shared';
 import { UploadedFileResult } from './fileUploadService';
 import { config } from '@/config/env';
 import { superpositionClient } from './superpositionClient';
@@ -76,6 +80,7 @@ import { runClawAgent } from '@/services/clawAgentService';
 import { convert as htmlToText } from 'html-to-text';
 import type { UserInfo as AgentUserInfo } from '@/agents/xyne-ai/tools/types';
 import { computeSlaDueDates } from '@/utils/slaCalculator';
+import type { TicketLike } from '@/automations/triggers/ticket-context';
 
 export function stripCitationBlock(text: string): string {
   if (!text) return text;
@@ -1561,7 +1566,7 @@ export class EmailService {
 
     if (ticket.userGroupId) {
       void emitTicketUpdated({
-        ticket,
+        ticket: ticket as TicketLike,
         changes: { userGroupId: { previousValue: null, newValue: ticket.userGroupId } },
         performedById: userId,
       });

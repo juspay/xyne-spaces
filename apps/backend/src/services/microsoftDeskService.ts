@@ -5,6 +5,7 @@
  */
 
 import crypto from 'crypto';
+import { EmailMergeMode, DeskType } from '@xyne/shared';
 import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
 import { AuthorizationCode } from 'simple-oauth2';
 import { logger } from '../utils/logger';
@@ -12,7 +13,6 @@ import { decrypt, encrypt } from './encryptionService';
 import { redisService } from './redisService';
 import { db } from '../database/client';
 import { config } from '../config/env';
-import { EmailMergeMode, DeskType } from '@prisma/client';
 import { ExternalSourceRepository } from '../database/repositories/externalSourceRepository';
 import { AttachmentUploadError } from '../integrations/core/baseMailReplySender';
 import { CHANNEL_EMAIL_SOURCE_TYPES } from './channelEmailAliasService';

@@ -336,7 +336,7 @@ export class UserService {
         this.prisma,
         user.workspaceId!,
         user.id,
-        'MEMBER'
+        ChannelRole.MEMBER
       );
 
       if (channelId) {
@@ -890,7 +890,7 @@ export class UserService {
         workspaceName: workspace.name,
         createdBy: workspace.createdBy || workspaceUser.id,
         userId: workspaceUser.id,
-        role: 'MEMBER',
+        role: ChannelRole.MEMBER,
       });
 
       logger.info(`Created workspace user for ${userData.email} in workspace ${userData.workspaceId}`);
@@ -1040,7 +1040,7 @@ export class UserService {
         workspaceName,
         createdBy: workspaceUser.id,
       });
-      await repositories.channelParticipants.addParticipant(defaults.channel.id, workspaceUser.id, 'ADMIN');
+      await repositories.channelParticipants.addParticipant(defaults.channel.id, workspaceUser.id, ChannelRole.ADMIN);
 
       // Grant full owner resource access to the workspace owner
       await grantPermissionsForRole(workspaceUser.id, workspaceUser.email, WorkspaceRole.OWNER, workspace.id);
@@ -1197,7 +1197,7 @@ export class UserService {
     });
 
     workspace = { ...workspace, landingChannelId: defaults.workspace.landingChannelId };
-    await repositories.channelParticipants.addParticipant(defaults.channel.id, workspaceUser.id, 'ADMIN');
+    await repositories.channelParticipants.addParticipant(defaults.channel.id, workspaceUser.id, ChannelRole.ADMIN);
 
     // Grant full admin resource access to the workspace owner
     await grantPermissionsForRole(workspaceUser.id, workspaceUser.email, WorkspaceRole.OWNER, workspace.id);

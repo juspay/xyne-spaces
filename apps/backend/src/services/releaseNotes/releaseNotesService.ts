@@ -8,7 +8,7 @@ import { generateReleaseNotesContent, ReleaseNotesGeneratorInput } from '@/servi
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
 import { config } from '@/config/env';
 import { AgentsConfig } from '@/agents/config';
-import { FormEntityType } from '@xyne/shared';
+import { FormEntityType, MessageType } from '@xyne/shared';
 import { BitbucketService } from '@/services/bitbucketService';
 
 type LinkedPrTicket = {

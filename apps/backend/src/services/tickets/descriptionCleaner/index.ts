@@ -1,9 +1,8 @@
 import { logger } from '@/utils/logger';
 import { cleanTicketDescriptionHtml } from './htmlCleaner';
 import { cleanTicketDescriptionWithLlm } from '@/agents/ticket-cleaning-and-themes';
-import { ChannelType } from '@prisma/client';
 import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
-import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
+import { OrgLLMServiceAccountPurpose, ChannelType } from '@xyne/shared';
 
 export interface TicketDescriptionCleanerResult {
   description_clean: string;

@@ -9,8 +9,8 @@
  * Inserts the pending_split row; the splitter takes over.
  */
 import { db } from '@/database/client';
+import { IngestionStatus } from '@xyne/shared';
 import { runWithContext } from '@/database/tenant/context';
-import { IngestionStatus } from '@prisma/client';
 import { SubApp } from '@/vespa/src/types';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';

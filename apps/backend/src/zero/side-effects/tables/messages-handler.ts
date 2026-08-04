@@ -467,7 +467,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         channelParticipants,
         mentionType,
         message.createdAt,
-        channel.scopeType,
+        channel.scopeType as ChannelScopeType,
         message.hasAttachment,
         dmPrefetchedData,
       );

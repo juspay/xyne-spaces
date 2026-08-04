@@ -1,9 +1,8 @@
 import Bull from 'bull';
+import { InvitationResponse, NotificationType } from '@xyne/shared';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { notificationService } from '@/services/notificationService';
-import { InvitationResponse } from '@prisma/client';
-import { NotificationType } from '@prisma/client';
 
 const CALL_TIMEOUT_QUEUE_NAME = 'call-timeout-queue';
 

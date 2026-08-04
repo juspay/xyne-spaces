@@ -988,7 +988,7 @@ export class ConfluenceImportService {
     });
 
     if (existingChannel) {
-      await channelParticipantRepository.addParticipant(existingChannel.id, input.actorUserId, 'ADMIN');
+      await channelParticipantRepository.addParticipant(existingChannel.id, input.actorUserId, ChannelRole.ADMIN);
       return { channelId: existingChannel.id, created: false };
     }
 
@@ -996,14 +996,14 @@ export class ConfluenceImportService {
     const channel = await channelRepository.create({
       name: uniqueName,
       description: `Created for Confluence import`,
-      scopeType: 'DEFAULT',
-      visibility: 'PUBLIC',
+      scopeType: ChannelScopeType.DEFAULT,
+      visibility: ChannelVisibility.PUBLIC,
       createdBy: input.actorUserId,
       projectId: input.projectId,
       workspaceId,
     });
 
-    await channelParticipantRepository.addParticipant(channel.id, input.actorUserId, 'ADMIN');
+    await channelParticipantRepository.addParticipant(channel.id, input.actorUserId, ChannelRole.ADMIN);
     return { channelId: channel.id, created: true };
   }
 

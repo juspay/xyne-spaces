@@ -1328,7 +1328,7 @@ model UserPreference {
   id                      String   @id @default(cuid())
   userId                  String   @unique  // One preference record per user
   askai_custom_instruction String?  // Custom instruction for Ask AI
-  channelSortOrder         ChannelSortOrder @default(RECENCY) // Sidebar channel sort
+  channelSortOrder         String           @default("RECENCY") // Sidebar channel sort
   enterSendsMessage        Boolean  @default(true) // true: Enter sends, false: Shift+Enter sends
   allowThreadBroadcastMentions Boolean @default(false) // Allow @channel/@here in thread replies
 
@@ -2229,9 +2229,9 @@ model Channel {
   id              String            @id @default(cuid())
   name            String
   description     String?
-  type            ChannelType       @default(DEFAULT)
-  scopeType       ChannelScopeType  // DEFAULT | DM | TICKET | DOCUMENT | GROUP_DM
-  visibility      ChannelVisibility @default(PUBLIC) // PUBLIC | PRIVATE
+  type            String            @default("DEFAULT")
+  scopeType       String            // DEFAULT | DM | TICKET | DOCUMENT | GROUP_DM
+  visibility      String            @default("PUBLIC") // PUBLIC | PRIVATE
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
   lastActivityAt  DateTime          @default(now())
@@ -2241,7 +2241,7 @@ model Channel {
   workspaceId     String            // Workspace for ACL optimization (denormalized from project)
   participantCount Int                    @default(0)
   isMigrated      Boolean?                @default(false)
-  addUserPolicy   ChannelAddUserPolicy?  @default(EVERYONE)
+  addUserPolicy   String?                @default("EVERYONE")
   isArchived      Boolean                @default(false)
   showTicketsTabTicketsInChat Boolean?   @default(true)
   callSummaryPrompt String?              // Per-channel detailed call summary sections override; null = default
@@ -2276,7 +2276,7 @@ model ChannelStats {
   channelId        String                @id
   lastActivityAt   DateTime              
   participantCount Int                   @default(0)
-  addUserPolicy    ChannelAddUserPolicy? @default(EVERYONE)
+  addUserPolicy    String?               @default("EVERYONE")
   lastRecapHadMessages   Boolean?             // null = not processed, true = recap with messages, false = recap with 0 messages
 
   // Relations
@@ -2293,7 +2293,7 @@ model ChannelParticipant {
   channelId                 String      // Channel ID (no FK constraint)
   userId                    String      // User ID (no FK constraint)
   joinedAt                  DateTime    @default(now())
-  role                      ChannelRole @default(MEMBER) // ADMIN | MEMBER
+  role                      String      @default("MEMBER") // ADMIN | MEMBER
 
   // deprecated columns will be removed in future
   lastViewedAt              DateTime    @default(now()) // Track when user last viewed channel
@@ -2372,7 +2372,7 @@ model ChannelSection {
   position    String    // Fractional index (generateKeyBetween) among the user's sections
   isCollapsed Boolean           @default(false) // Per-user collapse state, synced across devices
   isDeleted   Boolean           @default(false) // Soft delete flag
-  sortOrder   ChannelSortOrder? // Optional per-section channel sort order
+  sortOrder   String?           // Optional per-section channel sort order
   createdAt   DateTime          @default(now())
   updatedAt   DateTime? // Nullable, set manually in code (matches ChannelUserStatus convention)
 
@@ -2429,7 +2429,7 @@ model ConversationParticipant {
   id                String                        @id @default(cuid())
   conversationId    String                        // Conversation ID (no FK constraint)
   userId            String                        // User ID (no FK constraint)
-  participationType ConversationParticipation?    // AUTHOR, MENTIONED, or NULL (manual subscription)
+  participationType String?                       // AUTHOR, MENTIONED, or NULL (manual subscription)
   isSubscribed      Boolean                       @default(true) // Notification subscription status
   joinedAt          DateTime                      @default(now())
   lastReadAt        DateTime?                     // Track when user last read this thread conversation
@@ -2464,7 +2464,7 @@ enum EmailType {
 model Email {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id String @id @default(cuid())
-  type EmailType
+  type String
   subject String
   body String
   to String[]
@@ -2622,14 +2622,14 @@ model EmailChannelPreference {
   classificationPrompt         String?  // Custom system prompt for the classification LLM
   categoryField                String?  // Label for the top-level category
   subCategoryField             String?  // Label for the sub-category
-  emailMergeMode               EmailMergeMode @default(ENABLED) // Auto-merge similar emails (cross-thread duplicate merge + per-email demerge); enum so future variants can be added
+  emailMergeMode               String         @default("ENABLED") // Auto-merge similar emails (cross-thread duplicate merge + per-email demerge); enum so future variants can be added
   twoStepSendEnabled           Boolean  @default(false) // When on, sending shows a review/confirm step before the email actually goes out
   priorityClassificationEnabled Boolean @default(false)
   priorityClassificationPrompt String?  // Custom system prompt for the priority classification LLM
   priorityClassificationThreshold Float @default(0.5) // Minimum confidence threshold (0.0 - 1.0) to auto-apply priority
   autoDraftMode          String        @default("OFF")
   autoDraftAgentSlug     String?
-  deskType               DeskType @default(EMAIL)
+  deskType               String   @default("EMAIL")
   dlEmail                String?
   workspaceId            String?
   metricsEnabled         Boolean? // Gates the desk metrics dashboard
@@ -2952,7 +2952,7 @@ model ExternalMessage {
   externalSourceId   String                // External source ID (no FK constraint)
   externalId         String                // Message ID in external system (for deduplication)
   externalThreadId   String                // Thread/ticket ID in external system (to find conversation)
-  entityType         ExternalEntityType    @default(MESSAGE)            
+  entityType         String                @default("MESSAGE")
   entityId           String?               // Entity ID for MESSAGE, Email ID
   messageId          String                // Link to our Message (no FK constraint)
   direction          MessageDirection      // INCOMING | OUTGOING
@@ -3354,8 +3354,8 @@ model CallParticipant {
   userId       String              // User ID (no FK constraint)
   invitedBy    String              // User who sent invitation (no FK constraint)
   invitedAt    DateTime            @default(now())
-  response     InvitationResponse? // INVITED | REQUESTED | ACCEPTED | null (rejected/left)
-  meetingStatus MeetingStatus      @default(PENDING)
+  response     String?             // INVITED | REQUESTED | ACCEPTED | null (rejected/left)
+  meetingStatus String             @default("PENDING")
   respondedAt  DateTime?           // When they accepted/rejected
   joinedAt     DateTime?           // NULL = not joined yet
   leftAt       DateTime?           // NULL = still in call
@@ -3445,8 +3445,8 @@ model RecurringCallParticipant {
   userId            String              // User ID for internal participants; synthetic ID for external invitees
   invitedBy         String              // User who sent invitation (no FK constraint)
   invitedAt         DateTime
-  response          InvitationResponse? // INVITED | REQUESTED | ACCEPTED | null (rejected/left)
-  meetingStatus     MeetingStatus       @default(PENDING)
+  response          String?             // INVITED | REQUESTED | ACCEPTED | null (rejected/left)
+  meetingStatus     String              @default("PENDING")
   respondedAt       DateTime?           // When they accepted/rejected
   metadata          Json?               // Future participant-level metadata
   displayName       String?             // Name for external users
@@ -3535,7 +3535,7 @@ model Canvas {
   isCollaborative   Boolean   @default(false)
 
   // Doc type - Canvas or Quarto
-  docType      DocType          @default(Canvas)
+  docType      String           @default("Canvas")
 
   // Relations
   participants CanvasParticipant[]
@@ -3727,7 +3727,7 @@ model Link {
   favicon     String?
   channelId   String
   createdBy   String         // User ID (no FK constraint)
-  visibility  LinkVisibility @default(DEFAULT)
+  visibility  String         @default("DEFAULT")
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
 
@@ -3898,8 +3898,8 @@ model Form {
   id              String         @id @default(cuid())
   formName        String
   formDescription String?
-  entityType      FormEntityType
-  contextType     FormContextType
+  entityType      String
+  contextType     String
   workspaceId     String         // Workspace for ACL optimization
   createdBy       String
   createdAt       DateTime       @default(now())
@@ -3921,8 +3921,8 @@ model FormContextMapping {
   id          String         @id @default(cuid())
   formId      String
   contextId   String
-  contextType FormContextType
-  entityType  FormEntityType
+  contextType String
+  entityType  String
 
   @@unique([contextId, contextType, formId])
   @@unique([contextId, entityType])
@@ -3938,7 +3938,7 @@ model GlobalField {
   id          String        @id @default(cuid())
   projectId   String        // Project scope for reuse + ACL
   fieldName   String        // Name of the field
-  fieldType   FormFieldType
+  fieldType   String
   fieldEnum   String?         // Legacy string[]
   fieldOptions String?      // Canonical {id,value}[] options, JSON-stringified
   createdAt   DateTime      @default(now())
@@ -3963,7 +3963,7 @@ model FormFields {
   formId         String         // Form this membership row belongs to
   globalFieldId  String?        // Definition in global_fields (null for legacy rows)
   fieldName      String?        // DEPRECATED: legacy definition only; new definitions live in global_fields
-  fieldType      FormFieldType? // DEPRECATED: legacy definition only
+  fieldType      String?        // DEPRECATED: legacy definition only
   fieldEnum      Json?          // DEPRECATED: legacy definition only; string[] projection kept for backward compat
   fieldOptions   String?        // Canonical {id,value}[] options, JSON-stringified; new clients read this, old clients never receive it
   isOptional     Boolean        @default(false) // Per-form optional
@@ -4027,7 +4027,7 @@ model Query {
   id             String          @id @default(cuid())
   title          String
   queryJson      Json
-  entityType     FormEntityType? // Deprecated: use targetEntity instead
+  entityType     String?         // Deprecated: use targetEntity instead
   targetEntity   String?         // Entity/table being queried (e.g., TICKET, USER_WORKLOAD_MAPPING)
   visualType     QueryVisualizationType?
   position       String?
@@ -4201,7 +4201,7 @@ model CollectionItem {
   name             String
   uploadedById     String?
 
-  ingestionStatus  IngestionStatus @default(NONE)
+  ingestionStatus  String          @default("NONE")
   versionNumber    Int          @default(1)
   isLatest         Boolean      @default(true)
   createdAt        DateTime
@@ -4223,7 +4223,7 @@ model CollectionPermission {
   collectionId String
   userId       String?
   userGroupId  String?
-  role         CollectionRole
+  role         String
   canShare     Boolean        @default(false)
   grantedBy    String?
   createdAt    DateTime
@@ -4732,8 +4732,8 @@ model InstalledAppCommand {
   sourceCommandId String
   commandName          String
   description          String
-  commandType          CommandType
-  commandAccessibility CommandAccessibility
+  commandType          String
+  commandAccessibility String
   createdAt       DateTime
   updatedAt       DateTime
 
@@ -4797,8 +4797,8 @@ model AppCommand {
   appId                 String
   commandName           String               // e.g. "sell" for commands, "create_task" (callbackId) for shortcuts
   description           String               // shown in the / dropdown or shortcut picker
-  commandType           CommandType
-  commandAccessibility  CommandAccessibility
+  commandType           String
+  commandAccessibility  String
   // @deprecated — use commandAccessibility instead
   isForThread           Boolean?
   // @deprecated — use commandAccessibility instead
@@ -4894,7 +4894,7 @@ model DelayedMessage {
   content         String                 // Message content (HTML)
   hasAttachment   Boolean                @default(false)
   scheduledFor    Float                  // Unix ms timestamp when the message should be sent
-  status          DelayedMessageStatus @default(PENDING)
+  status          String               @default("PENDING")
   failureReason   String?                // Error details if status=FAILED
   sentAt          DateTime?              // Actual send time (set when status=SENT)
   createdAt       DateTime
@@ -5023,7 +5023,7 @@ model DynamicDashboard {
   name         String
   description  String?
   createdBy    String
-  visibility   DashboardVisibility @default(PRIVATE)
+  visibility   String              @default("PRIVATE")
   config       String              @default("{}")              // JSON: { timeRange?, autoRefresh?, variables? } — DashboardConfigSchema on parse
   createdAt    DateTime            @default(now())
   updatedAt    DateTime            @updatedAt
@@ -5044,7 +5044,7 @@ model DashboardParticipant {
   id          String        @id @default(cuid())
   dashboardId String
   userId      String
-  role        DashboardRole @default(VIEWER)
+  role        String        @default("VIEWER")
   joinedAt    DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
 
@@ -5089,7 +5089,7 @@ model DynamicDashboardQuery {
   title        String?
   queryType    QueryType               @default(internal)
   queryJson    Json
-  entityType   FormEntityType?
+  entityType   String?
   targetEntity String?
   visualType   QueryVisualizationType?
   position     String                  @default("{}")

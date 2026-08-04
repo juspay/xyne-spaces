@@ -373,7 +373,7 @@ export class CommunityWorkspaceService {
         await repositories.channelParticipants.addParticipant(
           landingChannelId,
           result.workspaceUser.id,
-          'MEMBER',
+          ChannelRole.MEMBER,
         );
       } catch (error) {
         logger.error('[CommunityWorkspaceService] Failed to add user to landing channel', {
@@ -398,7 +398,7 @@ export class CommunityWorkspaceService {
         this.prisma,
         params.workspace.id,
         result.workspaceUser.id,
-        'MEMBER'
+        ChannelRole.MEMBER
       );
     } catch (error) {
       logger.error('[CommunityWorkspaceService] Failed to join user to general channel', {

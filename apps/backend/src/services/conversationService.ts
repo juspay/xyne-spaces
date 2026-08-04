@@ -353,7 +353,7 @@ export class ConversationService {
       const isParticipant = await this.channelParticipantRepository.isParticipant(channelId, userId);
       if (!isParticipant && !isBot) {
         // Auto-add user as participant when they send first message
-        await this.channelParticipantRepository.addParticipant(channelId, userId, 'MEMBER');
+        await this.channelParticipantRepository.addParticipant(channelId, userId, ChannelRole.MEMBER);
         // Re-index channel in Vespa so permissions/memberCount reflect the new participant
         this.pushVespaJobForChannel(channelId, userId, channel?.workspaceId).catch((error) => {
           logger.error(`[ConversationService] Error pushing Vespa job for channel ${channelId} after adding participant:`, error);
@@ -592,7 +592,7 @@ export class ConversationService {
         await this.channelParticipantRepository.addParticipant(
           conversation.channelId,
           userId,
-          'MEMBER'
+          ChannelRole.MEMBER
         );
         // Re-index channel in Vespa so permissions/memberCount reflect the new participant
         this.pushVespaJobForChannel(conversation.channelId, userId).catch((error) => {

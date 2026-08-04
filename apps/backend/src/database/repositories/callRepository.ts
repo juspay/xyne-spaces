@@ -553,7 +553,7 @@ export class CallRepository {
         userId: true,
         response: true,
       },
-    });
+    })) as Array<{ userId: string; response: InvitationResponse | null }>;
   }
 
   /**
@@ -1422,8 +1422,8 @@ export class CallRepository {
           userName: externalName,
           userEmail: p.email ?? '',
           userPicture: null,
-          response: p.response,
-          meetingStatus: p.meetingStatus,
+          response: p.response as InvitationResponse | null,
+          meetingStatus: p.meetingStatus as MeetingStatus,
           joinedAt: p.joinedAt,
           leftAt: p.leftAt,
         };
@@ -1434,8 +1434,8 @@ export class CallRepository {
         userName: (user?.displayName || user?.name) ?? 'Unknown',
         userEmail: user?.email ?? '',
         userPicture: user?.picture ?? null,
-        response: p.response,
-        meetingStatus: p.meetingStatus,
+        response: p.response as InvitationResponse | null,
+        meetingStatus: p.meetingStatus as MeetingStatus,
         joinedAt: p.joinedAt,
         leftAt: p.leftAt,
       };
@@ -1636,7 +1636,7 @@ export class CallRepository {
       },
       select: { response: true },
     });
-    return row;
+    return row as { response: InvitationResponse | null } | null;
   }
 
   async findExternalParticipantById(params: {
@@ -1852,7 +1852,7 @@ export class CallRepository {
         ? (p.displayName || 'Guest')
         : (userNameMap.get(p.userId) || 'Unknown'),
       isExternal: p.isExternal,
-      response: p.response,
+      response: p.response as InvitationResponse | null,
     }));
   }
 

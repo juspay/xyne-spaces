@@ -744,7 +744,7 @@ export class JiraMigrationImportService {
 
       for (const mapping of existingMappings) {
         if (!mapping.entityId) continue;
-        this.cacheExternalMapping(mapping.externalId, mapping.entityId, mapping.entityType);
+        this.cacheExternalMapping(mapping.externalId, mapping.entityId, mapping.entityType as ExternalEntityType);
       }
     }
   }
@@ -1003,7 +1003,7 @@ export class JiraMigrationImportService {
 
       for (const mapping of existingMappings) {
         if (!mapping.entityId) continue;
-        this.cacheExternalMapping(mapping.externalId, mapping.entityId, mapping.entityType);
+        this.cacheExternalMapping(mapping.externalId, mapping.entityId, mapping.entityType as ExternalEntityType);
       }
     }
   }

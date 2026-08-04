@@ -431,7 +431,7 @@ export class ConversationController {
       if (!isParticipant) {
         // Only auto-add for PUBLIC channels
         if (channel.visibility === 'PUBLIC') {
-          await this.channelParticipantRepository.addParticipant(channelId, userId, 'MEMBER');
+          await this.channelParticipantRepository.addParticipant(channelId, userId, ChannelRole.MEMBER);
         } else {
           // PRIVATE channels require explicit invitation
           res.status(403).json({
@@ -477,7 +477,7 @@ export class ConversationController {
           channelId,
           conversationId: conversation.conversationId,
           senderId: userId,
-          scopeType: channel.scopeType,
+          scopeType: channel.scopeType as ChannelScopeType,
         });
 
         // Handle bot command with the new conversation ID
@@ -515,7 +515,7 @@ export class ConversationController {
         channelId,
         conversationId: conversation.conversationId,
         senderId: userId,
-        scopeType: channel.scopeType,
+        scopeType: channel.scopeType as ChannelScopeType,
       });
 
       // Create attachment records if files were uploaded
@@ -990,7 +990,7 @@ export class ConversationController {
           await this.channelParticipantRepository.addParticipant(
             conversation.channelId,
             userId,
-            'MEMBER'
+            ChannelRole.MEMBER
           );
         } else {
           // PRIVATE channels require explicit invitation

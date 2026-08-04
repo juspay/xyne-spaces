@@ -2075,7 +2075,7 @@ export class TicketController {
         }
         await emailChannelPreferenceRepo.upsert({
           channelId,
-          deskType: channelPref?.deskType ?? DeskType.EMAIL,
+          deskType: (channelPref?.deskType ?? DeskType.EMAIL) as DeskType,
           boardId: boardIdToConfigure,
         });
       }

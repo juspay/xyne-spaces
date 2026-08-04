@@ -1,5 +1,4 @@
 import { Request, Response } from 'express';
-import { ChannelRole } from '@prisma/client';
 import {
   livekitService,
   allowedSourcesForHostControls,

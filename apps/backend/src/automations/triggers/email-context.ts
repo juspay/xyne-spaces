@@ -1,8 +1,9 @@
-import { EmailType } from '@prisma/client';
 import { db } from '@/database/client';
+import { EmailType } from '@xyne/shared';
 import { repositories } from '@/database/repositories';
 import { buildTicketContext } from './ticket-context';
 import type { EmailEventPayload } from '../types/automation-events';
+import type { TicketLike } from './ticket-context';
 
 export function extractEmailAddress(raw: string): string {
   if (!raw) return '';
@@ -81,7 +82,7 @@ async function loadTicketContextForEmail(
   if (!ticketStub) return null;
   const ticket = await repositories.tickets.getTicketById(ticketStub.id);
   if (!ticket) return null;
-  return buildTicketContext(ticket);
+  return buildTicketContext(ticket as TicketLike);
 }
 
 /** Derived address / domain fields shared by both email triggers. */
@@ -155,14 +156,14 @@ export async function hydrateEmailReceivedPayload(
 
   return {
     ...payload,
-    email: { ...emailRowToOutput(email), url: emailUrl },
+    email: { ...emailRowToOutput(email as EmailRow), url: emailUrl },
     ...(ticketContext ?? {}),
     requester: {
       email: extractEmailAddress(email.from),
       name: extractDisplayName(email.from),
     },
     fromDomain: extractDomain(email.from),
-    ...deriveAddressFields(email),
+    ...deriveAddressFields(email as EmailRow),
     isReply,
   };
 }
@@ -196,14 +197,14 @@ export async function hydrateEmailSentPayload(
 
   return {
     ...payload,
-    email: { ...emailRowToOutput(email), url: emailUrl },
+    email: { ...emailRowToOutput(email as EmailRow), url: emailUrl },
     ...(ticketContext ?? {}),
     sender: {
       email: extractEmailAddress(email.from),
       name: extractDisplayName(email.from),
     },
     senderDomain: extractDomain(email.from),
-    ...deriveAddressFields(email),
+    ...deriveAddressFields(email as EmailRow),
     isFirstReply,
   };
 }
