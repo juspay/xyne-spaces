@@ -1,5 +1,5 @@
-import { ActivityClassification, ApproverType, TicketStageRequestStatus } from '@prisma/client';
 import { BaseSideEffectHandler } from '../base-handler';
+import { ActivityClassification, ApproverType, TicketStageRequestStatus } from '@xyne/shared';
 import type { SideEffectJobConfig, TicketStageRequestPreviousValue } from '../types';
 import { db } from '@/database/client';
 import { activityService } from '@/services/activity/activityService';

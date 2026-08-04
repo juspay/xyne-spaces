@@ -1,8 +1,15 @@
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
-import { BoardType, type Channel, type TicketStatusV2 } from '@prisma/client';
+import { type Channel } from '@prisma/client';
 import { formService } from '../formService';
-import { FormContextType, FormEntityType, LookupType, type FieldEnumOption } from '@xyne/shared';
+import {
+  FormContextType,
+  FormEntityType,
+  LookupType,
+  type FieldEnumOption,
+  BoardType,
+  TicketStatusV2,
+} from '@xyne/shared';
 import { randomUUID } from 'crypto';
 import { XyneChangeType, XyneFormSchemaProvider } from './xyne/xyneReleaseForm';
 import { BaseTicketType } from '@xyne/shared';

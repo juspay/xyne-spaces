@@ -1,5 +1,6 @@
 import request from 'supertest';
-import { PrismaClient, TicketCategory, TicketEnvironment, ReportedBy, TicketStatus } from '@prisma/client';
+import { PrismaClient, TicketCategory } from '@prisma/client';
+import { TicketEnvironment, ReportedBy, TicketStatus } from '@xyne/shared';
 import { App } from '../app';
 
 const prisma = new PrismaClient();

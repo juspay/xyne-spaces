@@ -3,13 +3,13 @@
 
 import { PRStatus } from '@prisma/client';
 import { PRMetricsRepository } from '@/database/repositories/pullRequestsRepository';
+import { PRStatus, PRStatusEvent } from '@xyne/shared';
 import { prTicketStatusSyncService } from '@/services/prTicketStatusSyncService';
 import { pullRequestValidationService } from '@/services/pullRequestValidationService';
 import { logger } from '@/utils/logger';
 import { BitbucketWebhookEnvelope, BitbucketPullRequest } from '@/routes/webhooks';
 import { DatabaseClient } from '@/database/client';
 import { config } from '@/config/env';
-import { PRStatusEvent } from '@prisma/client';
 import { xyneCommentService } from '@/services/xyneCommentService';
 import { prCheckApprovalService } from '@/services/prCheckApprovalService';
 import { runWithContext } from '@/database/tenant/context';

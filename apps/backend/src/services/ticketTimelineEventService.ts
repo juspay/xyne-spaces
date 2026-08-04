@@ -1,5 +1,5 @@
-import { MessageType, Prisma } from '@prisma/client';
-import type { ActivityType } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import { MessageType, ActivityType } from '@xyne/shared';
 import { db } from '@/database/client';
 
 /**

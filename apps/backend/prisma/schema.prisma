@@ -505,8 +505,8 @@ model Ticket {
   id               String            @id @default(cuid())
   title            String
   description      String
-  status           TicketStatus      @default(NEW)  // Deprecated - use statusV2
-  statusV2         TicketStatusV2    @default(TODO)
+  status           String            @default("NEW")  // Deprecated - use statusV2
+  statusV2         String            @default("TODO")
   createdBy        String            // Foreign key to User - Reporter/Owner of the ticket
   updatedBy        String           // Foreign key to User
   assignedTo       String?           // Foreign key to User
@@ -518,7 +518,7 @@ model Ticket {
   channelId        String            // The channel to which the ticket is linked
   eta              DateTime?         // Calculated ETA for a ticket based on ETA of task Type
   firstRespondedAt DateTime?         // Timestamp of the first outbound agent reply (set once, never overwritten)
-  priority         TicketPriority    @default(LOW)
+  priority         String            @default("LOW")
   metadata         Json?             // Additional metadata - external source tracking, domain-specific context
   closedAt         DateTime?         // When the reporter closed the ticket after verification
   closedBy         String?           // User who closed the ticket
@@ -644,7 +644,7 @@ model TicketAssignment {
   id                 String             @id @default(cuid())
   ticketId           String             // Foreign key to Ticket
   userId             String?             // User ID assigned to this responsibility
-  userResponsibility UserResponsibility? // PR_REVIEWER | QA | etc.
+  userResponsibility String?             // PR_REVIEWER | QA | etc.
   roleId             String?             // nullable for legacy enum rows
   createdAt          DateTime           @default(now())
   createdBy          String             // User who created the assignment
@@ -668,7 +668,7 @@ model TicketActivity {
   ticketId     String       // Ticket reference
   updatedBy    String       // User who made the change
   timestamp    DateTime     @default(now())
-  activityType ActivityType // Type of data stored in value (STRING, NUMBER, JSON, OBJECT)
+  activityType String       // Type of data stored in value (STRING, NUMBER, JSON, OBJECT)
   value        Json         // The value containing field info, old/new values, etc.
   channelId    String?      // Denormalized from Ticket so desk metrics can query this table alone (no FK constraint)
 
@@ -687,7 +687,7 @@ model TicketEntityMapping {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id         String     @id @default(cuid())
   ticketId   String     // Ticket reference
-  entityType EntityType // MERCHANT or GATEWAY
+  entityType String     // MERCHANT or GATEWAY
   entityName String     // merchant_id or gateway_name
 
   // Relations
@@ -745,7 +745,7 @@ model TicketReferenceMapping {
   id             String                   @id @default(cuid())
   sourceTicketId String                   // Ticket owning the reference
   targetTicketId String                   // Referenced ticket
-  relationType   TicketReferenceRelation
+  relationType   String
   createdBy      String
   createdAt      DateTime                 @default(now())
   updatedAt      DateTime                 @updatedAt
@@ -1400,7 +1400,7 @@ model UserGroupMapping {
   userId         String              // No FK constraint
   userGroupId    String              // No FK constraint
   roleId         String?             // References Role.id; null = legacy rows using responsibility column
-  responsibility UserResponsibility? // Legacy column; new writes set roleId instead
+  responsibility String?             // Legacy column; new writes set roleId instead
   onCallSetNumber    Int?                // Deprecated: use onCallSetNumbers instead. Only set when autoRotationEnabled is true
   onCallSetNumbers   Int[]               // Array of set numbers for on-call rotation
   createdAt      DateTime            @default(now())
@@ -2163,8 +2163,8 @@ model Stage {
   updatedBy            String?      // User ID (no FK constraint)
   createdAt            DateTime     @default(now())
   updatedAt            DateTime?    @updatedAt
-  defaultTicketStatus     TicketStatus    @default(IN_PROGRESS)  // Deprecated - use defaultTicketStatusV2
-  defaultTicketStatusV2   TicketStatusV2 @default(STARTED)
+  defaultTicketStatus     String          @default("IN_PROGRESS")  // Deprecated - use defaultTicketStatusV2
+  defaultTicketStatusV2   String         @default("STARTED")
   requestApprovalOnEntry  Boolean?       // NULL treated as false in code; auto-create approval request when a ticket enters the PREVIOUS stage (linear/DEFAULT boards only)
 
   // Relations
@@ -2182,7 +2182,7 @@ model StagePRStatusMapping {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id        String        @id @default(cuid())
   stageId   String        // Stage ID (no FK constraint)
-  prStatus  PRStatusEvent
+  prStatus  String
   createdAt DateTime      @default(now())
 
   @@unique([stageId, prStatus])
@@ -2201,9 +2201,9 @@ model StageTransition {
   requiresApproval            Boolean?      // NULL treated as false in code
   bypassApprovalForAutomation Boolean?      // NULL treated as false in code
   requestApprovalOnEntry      Boolean?      // NULL treated as false in code; auto-create approval request when ticket enters the fromStage (single-outgoing edges only)
-  visitSlaMode                VisitSlaMode? // NULL treated as STAGE_DEFAULT in code
+  visitSlaMode                String?       // NULL treated as STAGE_DEFAULT in code
   fixedEtaHours               Int?
-  onReenter                   ReenterMode?  // NULL treated as RESET in code
+  onReenter                   String?       // NULL treated as RESET in code
   createdAt                   DateTime?     // set by app on insert; NULL treated as creation time in code
   updatedAt                   DateTime      @updatedAt
 
@@ -2584,7 +2584,7 @@ model TicketUserMailbox {
   userId      String       // Owner — the overlay is private to this agent (no FK constraint)
   channelId   String       // Denormalized for ACL + per-user view filtering
   workspaceId String       // Denormalized
-  state       MailboxState? // No DDL default on the custom enum type — mutators always write it; readers treat null/absent as INBOX
+  state       String?       // No DDL default on the custom enum type — mutators always write it; readers treat null/absent as INBOX
   starred     Boolean      @default(false)
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     // Set manually in code — written only by Zero mutators, never Prisma Client
@@ -2666,7 +2666,7 @@ model BoardSlaPolicy {
   workspaceId String? // denormalized tenant key (nullable; stamped on insert)
   id              String         @id @default(cuid())
   boardId         String
-  priority        TicketPriority
+  priority        String
   responseHours   Float          // SLA first-response window in hours
   resolutionHours Float          // SLA resolution window in hours
   businessHoursOnly Boolean      @default(true)
@@ -4246,7 +4246,7 @@ model StageApprovers {
   id                   String       @id @default(cuid())
   userId               String?      // set when approverType = USER
   roleId               String?      // set when approverType = ROLE
-  approverType         ApproverType? // NULL treated as ApproverType.USER in code
+  approverType         String?       // NULL treated as ApproverType.USER in code
   stageId              String?      // Stage ID for linear boards (no FK constraint)
   transitionId         String?      // Transition ID for NON_LINEAR boards
   createdAt            DateTime     @default(now())
@@ -4433,7 +4433,7 @@ model TicketStageRequest {
   ticketId                  String
   stageId                   String
   formId                    String?
-  status                    TicketStageRequestStatus @default(DRAFT)
+  status                    String                   @default("DRAFT")
   submittedBy               String
   reviewedBy                String?
   reviewerCommentMessageId  String?                   // messages.messageId of the reviewer's comment (required on REJECTED, optional on APPROVED). Bare-string FK to match this model's existing convention.
