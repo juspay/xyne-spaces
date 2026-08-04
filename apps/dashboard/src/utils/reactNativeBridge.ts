@@ -1,5 +1,12 @@
 import { CallType } from '@xyne/shared';
-import { logger, Event as LogEvent } from './logger';
+import { Event as LogEvent, noopLogger, type Logger } from '@xyne/shared/logger';
+
+let logger: Logger = noopLogger;
+
+export const setReactNativeBridgeLogger = (nextLogger: Logger): void => {
+  logger = nextLogger;
+};
+
 const BRIDGE_VERSION = 1 as const;
 const BRIDGE_CHANNEL = 'xyne-spaces-bridge';
 const WEB_SOURCE = 'xyne-dashboard';

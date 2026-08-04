@@ -9,7 +9,11 @@ import {
 } from '../config';
 import type { WorkerMessage } from './logger.worker';
 import { v4 as uuidv4 } from 'uuid';
-import { detectReactNativeWebView, reactNativeBridge } from './reactNativeBridge';
+import {
+  detectReactNativeWebView,
+  reactNativeBridge,
+  setReactNativeBridgeLogger,
+} from './reactNativeBridge';
 
 import { Event as LoggerEvent, LogLevel } from '@xyne/shared/logger';
 
@@ -541,6 +545,7 @@ export const getLogger = async (): Promise<Logger> => {
 };
 
 export const logger = await getLogger();
+setReactNativeBridgeLogger(logger);
 
 export const cleanupLogger = (): void => {
   if (loggerInstance) {
