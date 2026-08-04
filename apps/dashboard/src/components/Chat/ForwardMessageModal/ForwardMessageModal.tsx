@@ -13,6 +13,7 @@ import {
 } from '../../../hooks/useChannels';
 import { useMentionSearch } from '../../../hooks/useMentionSearch';
 import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWithHTML';
+import { MarkdownMessageRenderer } from '../../ui/MessageBubble/MarkdownMessageRenderer';
 import { MessageAttachment } from '../MessageAttachment/MessageAttachment';
 import { formatRelativeTimestamp } from '../../../utils/dateUtils';
 import HuddleIcon from '../../icons/HuddleIcon';
@@ -46,6 +47,7 @@ import { queries } from '../../../zero/queries';
 import { useQuery } from '../../../hooks/useQuery';
 import { VisibleChannel } from '../../../machines/stateMachine';
 import { logger, Event } from '../../../utils/logger';
+import { createMarkdownComponents } from '../../../utils/markdownComponents';
 
 /**
  * ForwardMessageForm component allows users to forward a message to channels or users.
@@ -265,6 +267,10 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
 
   // Check if we're using optionalText (affects both content and attachments display)
   const useOptionalText = isReForwarding && !!forwardedMessageData?.optionalText;
+  const messageMetadata = message.metadata as Record<string, unknown> | undefined;
+  const shouldRenderPreviewAsMarkdown =
+    !useOptionalText && messageMetadata?.['contentFormat'] === 'markdown';
+  const markdownComponents = useMemo(() => createMarkdownComponents(message.messageId), [message.messageId]);
 
   // Compute the preview content for the modal
   // For forwarded messages: show optionalText as main content (if exists), otherwise show forwarded content
@@ -815,7 +821,14 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
                   <div
                     className={`text-foreground whitespace-pre-wrap break-words ${getEmojiFontSizeClass(previewContent)}`}
                   >
-                    <RenderMessageWithHTML message={previewContent} />
+                    {shouldRenderPreviewAsMarkdown ? (
+                      <MarkdownMessageRenderer
+                        content={previewContent}
+                        markdownComponents={markdownComponents}
+                      />
+                    ) : (
+                      <RenderMessageWithHTML message={previewContent} />
+                    )}
                   </div>
                 )}
                 {/* Attachments - hide when using optionalText (it's either optionalText OR content with attachments) */}

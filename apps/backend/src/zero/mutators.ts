@@ -2719,6 +2719,20 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           const originalAttachments = useOptionalText
             ? []
             : await tx.run(zql.message_attachments.where('entityId', originalMessageId));
+          const originalMetadata = originalMessage.metadata as Record<string, unknown> | undefined;
+          const isOriginalMarkdownContent =
+          !useOptionalText && originalMetadata?.['contentFormat'] === 'markdown';
+          const isCallMessage = originalMetadata?.['isCallMessage'] === true;
+          const forwardedMessageMetadata = {} as Record<string, unknown>;
+          if (isOriginalMarkdownContent) {
+            forwardedMessageMetadata['contentFormat'] = 'markdown';
+          }
+          if (isCallMessage) {
+            forwardedMessageMetadata['isCallMessage'] = true;
+            if (originalMetadata?.['callId']) {
+              forwardedMessageMetadata['callId'] = originalMetadata['callId'];
+            }
+          }
 
           const now = timestamp;
 
@@ -2765,7 +2779,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             isSent: true,
             showInChannel: false,
             createdAt: now,
-            metadata: undefined,
+            metadata: Object.keys(forwardedMessageMetadata).length > 0 ? forwardedMessageMetadata as any : undefined,
           });
 
           // Copy attachments from the original message
@@ -2794,23 +2808,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           // --- Call Message Forwarding Specifics ---
 
           let replyCount = 0;
-          const originalMetadata = originalMessage.metadata as Record<string, unknown> | undefined;
-          const isCallMessage = originalMetadata?.['isCallMessage'] === true;
-
-          // Define metadata for the new forwarded message
-          if (isCallMessage) {
-            const forwardedMessageMetadata = { ...(originalMessage.metadata as Record<string, unknown> || {}) };
-            forwardedMessageMetadata['isCallMessage'] = true;
-            if (originalMetadata?.['callId']) {
-              forwardedMessageMetadata['callId'] = originalMetadata['callId'];
-            }
-
-            // Re-update the inserted message metadata with call indicators
-            await tx.mutate.messages.update({
-              messageId,
-              metadata: forwardedMessageMetadata as any,
-            });
-          }
 
           // If it is a call message, we want to clone all non-user messages (like transcipts/summaries/system msg)
           if (isCallMessage) {
