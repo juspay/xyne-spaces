@@ -1,11 +1,12 @@
 import { logger } from '@/utils/logger';
+import { config } from '@/config/env';
 
 /**
  * Default bounded wait, per role, for in-flight jobs to finish on shutdown.
  * Kept well under a typical Kubernetes terminationGracePeriodSeconds so the
- * pod is never SIGKILLed mid-drain. Override with WORKER_DRAIN_TIMEOUT_MS.
+ * pod is never SIGKILLed mid-drain. Sourced from config (WORKER_DRAIN_TIMEOUT_MS).
  */
-export const DEFAULT_DRAIN_MS = Number(process.env.WORKER_DRAIN_TIMEOUT_MS ?? 25_000);
+export const DEFAULT_DRAIN_MS = config.workerShutdown.drainTimeoutMs;
 
 const timeout = (ms: number): Promise<'timeout'> =>
   new Promise((resolve) => {

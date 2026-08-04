@@ -337,7 +337,7 @@ class WorkerService {
     // drained with its own bounded budget (drainRole), but this is the backstop:
     // if the total drain still overruns, force-exit so Kubernetes doesn't SIGKILL
     // us at an arbitrary point (which would drop every remaining in-flight job).
-    const HARD_EXIT_MS = Number(process.env.WORKER_SHUTDOWN_DEADLINE_MS ?? 90_000)
+    const HARD_EXIT_MS = appConfig.workerShutdown.deadlineMs
     const hardExitTimer = setTimeout(() => {
       logger.error(`[shutdown] deadline ${HARD_EXIT_MS}ms exceeded — forcing exit(1)`)
       process.exit(1)
