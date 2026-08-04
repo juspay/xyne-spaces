@@ -38,6 +38,7 @@ interface OrgLiteLLMServiceAccountCredentials {
   keyAlias?: string;
   providerUrl: string;
   defaultModel?: string | null;
+  defaultModels?: string[];
   serviceAccountName?: string;
   serviceAccountAlias?: string;
   expires?: string;
@@ -174,6 +175,12 @@ class AIProvisioningWorker {
         await this.provisionWorkspace(subjectId);
         return;
       case AIProvisioningSubjectType.USER:
+        if (!config.aiProvisioning.enableUserProvisioning) {
+          logger.info('[AI-PROVISIONING-WORKER] User provisioning is disabled, skipping', {
+            subjectId,
+          });
+          return;
+        }
         await this.provisionUser(subjectId);
         return;
       default:
@@ -474,7 +481,8 @@ class AIProvisioningWorker {
       keyName,
       keyAlias,
       providerUrl: config.litellm.baseUrl,
-      defaultModel: null,
+      defaultModel: config.aiProvisioning.orgDefaultModels[0] ?? null,
+      defaultModels: config.aiProvisioning.orgDefaultModels,
       serviceAccountName,
       serviceAccountAlias,
       expires,

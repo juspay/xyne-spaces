@@ -38,7 +38,9 @@ COPY apps/dashboard apps/dashboard
 COPY package.json /package.json
 
 # Run validation (TypeScript + ESLint)
-RUN pnpm --filter xyne-spaces-dashboard run validate
+# validate:raw, not validate: the image has no scripts/ directory, and an image
+# build has no use for the interactive agent handoff the wrapper adds.
+RUN pnpm --filter xyne-spaces-dashboard run validate:raw
 
 # Accept build argument for source commit
 ARG SOURCE_COMMIT
