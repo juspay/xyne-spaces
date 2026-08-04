@@ -1,6 +1,6 @@
 import { repositories } from '@/database/repositories';
+import { AccessType, MessageType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
-import { AccessType, MessageType } from '@prisma/client';
 import { conversationService } from '@/services/conversationService';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service';
 import { config } from '@/config/env';

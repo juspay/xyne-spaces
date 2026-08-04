@@ -1,14 +1,13 @@
 import {
   Prisma,
   PrismaClient,
-  TeamIntelligenceBatchStatus,
   TeamIntelligenceIngestionBatchV2,
   TeamIntelligenceOrgSummaryV2,
   TeamIntelligenceTeamSummaryV2,
   TeamIntelligenceUserIngestionV2,
-  TeamIntelligenceUserIngestionStatus,
 } from '@prisma/client';
 import { db } from '@/database/client';
+import { TeamIntelligenceBatchStatus, TeamIntelligenceUserIngestionStatus } from '@xyne/shared';
 
 export interface CreateTeamIntelligenceBatchData {
   reportDate: Date;

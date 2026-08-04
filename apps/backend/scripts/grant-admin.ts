@@ -1,6 +1,7 @@
 #!/usr/bin/env npx tsx
 
-import { PrismaClient, AccessType, WorkspaceRole, AuthProvider, UserStatus } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
+import { AccessType, WorkspaceRole, AuthProvider, UserStatus } from '@xyne/shared';
 
 const prisma = new PrismaClient();
 

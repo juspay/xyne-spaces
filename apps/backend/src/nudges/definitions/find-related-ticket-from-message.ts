@@ -1,4 +1,3 @@
-import { TicketStatus, TicketStatusV2 } from '@prisma/client';
 import { z } from 'zod';
 import {
   makeLiteLLMProvider,
@@ -12,7 +11,7 @@ import {
 } from '@juspay-jaf/jaf';
 import { DatabaseClient, db } from '@/database/client';
 import { logger } from '@/utils/logger';
-import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
+import { OrgLLMServiceAccountPurpose, TicketStatus, TicketStatusV2, NudgeKind, SurfaceAreaType } from '@xyne/shared';
 import { getPromptFromLangfuse } from '@/agents/xyne-ai/langfuse/index.js';
 import { createAgentEventLogger } from '@/agents/agentLogger';
 import { vespaService } from '@/services/vespaSearch';
@@ -275,7 +274,7 @@ export const findRelatedTicketFromMessage: NudgeDefinition<
   MessageNudgePayload,
   MessageNudgeEvaluationContext
 > = {
-  kind: 'FIND_RELATED_TICKET_FROM_MESSAGE',
+  kind: NudgeKind.FIND_RELATED_TICKET_FROM_MESSAGE,
   mode: 'explicit',
   priority: 'medium',
   trigger: {
@@ -289,7 +288,7 @@ export const findRelatedTicketFromMessage: NudgeDefinition<
       return isEligibleMessage({ messageId, channelId, conversationId });
     },
   },
-  direction: { from: 'MESSAGE', to: 'TICKET' },
+  direction: { from: SurfaceAreaType.MESSAGE, to: SurfaceAreaType.TICKET },
 
   async buildContext(payload, activityContext, runtime) {
     const base = await buildMessageNudgeContext(payload, activityContext, runtime);

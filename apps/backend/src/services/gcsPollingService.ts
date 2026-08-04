@@ -18,6 +18,7 @@
  */
 
 import { logger } from '@/utils/logger';
+import { MessageType } from '@xyne/shared';
 import { db } from '@/database/client';
 import { runWithContext } from '@/database/tenant/context';
 import { config } from '@/config/env';
@@ -313,7 +314,7 @@ export class GcsPollingService {
         channelId: this.channelId,
         userId: this.systemUserId,
         content: systemMessageContent,
-        msgType: 'USER',
+        msgType: MessageType.USER,
       });
 
       const ticket = await this.ticketController.createTicketWithConversation({

@@ -1,4 +1,5 @@
 import { db } from '@/database/client';
+import { ChannelType, VespaInsertionStatus, VespaOperationType } from '@xyne/shared';
 import { getContextOrNull } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import vespaClient from '@/vespa/client';
@@ -7,7 +8,6 @@ import { NAMESPACE } from '@/vespa/vespaConfig';
 import { cleanTicketDescriptionHtml } from '@/services/tickets/descriptionCleaner/htmlCleaner';
 import { cleanTicketDescriptionWithLlm } from '@/agents/ticket-cleaning-and-themes';
 import type { VespaJobType } from '@/zero/vespa-injection/core/types';
-import { ChannelType, VespaInsertionStatus, VespaOperationType } from '@prisma/client';
 
 type TicketDescriptionCleanContext = {
   docId: string;
@@ -48,7 +48,7 @@ async function resolveChannelType(mapped: Record<string, unknown>): Promise<Chan
     select: { type: true },
   });
 
-  return channel?.type ?? null;
+  return (channel?.type ?? null) as ChannelType;
 }
 
 async function resolveTicketProjectId(

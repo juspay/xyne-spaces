@@ -1,4 +1,5 @@
-import { WorkflowEventType, type Workflow, type WorkflowExecution } from '@prisma/client';
+import { type Workflow, type WorkflowExecution } from '@prisma/client';
+import { WorkflowEventType } from '@xyne/shared';
 import { AutomationStatus, AutomationRunStatus } from './status';
 import type { AutomationConfig } from './automation-config';
 

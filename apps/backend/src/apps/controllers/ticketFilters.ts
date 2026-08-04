@@ -1,4 +1,5 @@
-import { Prisma, TicketPriority, TicketStatusV2 } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import { TicketPriority, TicketStatusV2 } from '@xyne/shared';
 
 // Identity prefixes ticket columns are stored with. Longest first so a value is
 // stripped to its bare id regardless of which form the caller supplied.

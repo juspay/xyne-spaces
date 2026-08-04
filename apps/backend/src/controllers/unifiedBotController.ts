@@ -6,6 +6,7 @@
  */
 
 import { Request, Response } from 'express';
+import { MessageType } from '@xyne/shared';
 import {
   executionOrchestrator,
   botCatalog,
@@ -14,7 +15,6 @@ import {
 } from '@/bots/unified/index.js';
 import { ConversationRepository } from '@/database/repositories/conversationRepository';
 import { MessageRepository } from '@/database/repositories/messageRepository';
-import { MessageType } from '@prisma/client';
 import {logger} from '@/utils/logger';
 import { messageMetadataService } from '@/services/messageMetadataService';
 

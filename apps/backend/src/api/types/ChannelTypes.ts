@@ -1,7 +1,7 @@
+import { ChannelScopeType, ChannelVisibility } from '@xyne/shared';
 // Channel API Response Types
 // These types define the structure of API responses from the channel controller
 
-import { ChannelScopeType, ChannelVisibility } from '@prisma/client';
 
 // Base user info interface for API responses
 export interface ApiUserInfo {

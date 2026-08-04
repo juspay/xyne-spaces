@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from 'express';
-import { WorkflowEventType } from '@prisma/client';
+import { WorkflowEventType } from '@xyne/shared';
 import { db } from '@/database/client';
 import { runWithContext } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';

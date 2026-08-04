@@ -10,10 +10,10 @@
  */
 
 import Bull from 'bull';
+import { AuthProvider } from '@xyne/shared';
 import { createHash } from 'crypto';
 import { redisService } from '@/services/redisService';
 import { logger } from '@/utils/logger';
-import { AuthProvider } from '@prisma/client';
 import { repositories } from '@/database/repositories';
 import { getCalendarCredentialsBySourceId } from '@/services/calendarTokenRefresh';
 import { runWithContext } from '@/database/tenant/context';

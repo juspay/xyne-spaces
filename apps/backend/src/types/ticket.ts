@@ -1,4 +1,4 @@
-import { TicketStatusV2, TicketPriority } from '@prisma/client';
+import { TicketStatusV2, TicketPriority } from '@xyne/shared';
 
 export interface CreateTicketRequest {
   // Required fields

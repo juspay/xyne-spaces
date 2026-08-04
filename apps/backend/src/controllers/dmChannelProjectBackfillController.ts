@@ -1,5 +1,5 @@
-import { ChannelScopeType, ProjectType } from '@prisma/client';
 import { Request, Response } from 'express';
+import { ChannelScopeType, ProjectType } from '@xyne/shared';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { ApiResponse } from '@/types/express';

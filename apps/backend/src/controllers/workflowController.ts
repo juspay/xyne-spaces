@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { AttachmentEntityType } from '@xyne/shared';
 import { WorkflowRepository } from '../database/repositories/workflowRepository';
 import { DatabaseClient } from '@/database/client';
 import { workflowRestoreService } from '../workflows/services/workflow-restore-service';
@@ -20,7 +21,6 @@ import { getStorageService, type StorageService } from '@/services/storage';
 import { v4 as uuidv4 } from 'uuid';
 import { safeSerialize } from '../workflows/storage/serialization';
 import { STEP_TYPES } from '../workflows/storage/step-types';
-import { AttachmentEntityType } from '@prisma/client';
 import { config } from '@/config/env';
 
 export class WorkflowController {

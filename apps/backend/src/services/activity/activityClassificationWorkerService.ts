@@ -1,4 +1,5 @@
-import { Activity, ActivityClassification, ActivityClassificationJobType } from '@prisma/client';
+import { Activity } from '@prisma/client';
+import { ActivityClassification, ActivityClassificationJobType } from '@xyne/shared';
 import { db } from '@/database/client';
 import { activityClassificationService } from '@/services/activity/activityClassificationService';
 import { logger } from '@/utils/logger';

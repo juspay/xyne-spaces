@@ -8,10 +8,10 @@
  */
 
 import { Request, Response } from 'express';
+import { MessageType } from '@xyne/shared';
 import { z } from 'zod';
 import { logger } from '@/utils/logger';
 import { repositories } from '@/database/repositories';
-import { MessageType } from '@prisma/client';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service';
 import { meetLinkService } from '@/services/meetLinkService';
 import { db } from '@/database/client';

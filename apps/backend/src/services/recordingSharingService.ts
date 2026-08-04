@@ -1,12 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import {
-  CallType,
-  CanvasRole,
-  ConversationParticipation,
-  MessageType,
-  Prisma,
-  type EntityAccess,
-} from '@prisma/client';
+import { Prisma, type EntityAccess } from '@prisma/client';
 import {
   addReplyToData,
   EntityUserAccess,
@@ -14,6 +7,10 @@ import {
   serializeRepliesMd,
   ShareableEntityType,
   type GrantableEntityUserAccess,
+  CallType,
+  CanvasRole,
+  ConversationParticipation,
+  MessageType,
 } from '@xyne/shared';
 import { config } from '@/config/env';
 import { db } from '@/database/client';
