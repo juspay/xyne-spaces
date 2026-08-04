@@ -23,6 +23,11 @@ The steps run serially and the chain stops at the first failure, so a broken ste
 never masked by a later one. Every step is idempotent — env files and real secrets are
 never overwritten — so it is safe to re-run on an existing checkout.
 
+The full `up`/`bootstrap` flow, services, development, and dashboard validation commands run
+through [Xyne Doctor](xyne-doctor.md). On a real nonzero exit it can prepare redacted context and
+hand the failure to Claude Code or Codex; Ctrl-C and non-interactive runs keep their normal exit
+behavior.
+
 Expect a few minutes on the first run while container images download. When it
 finishes, open **http://localhost:5173**.
 

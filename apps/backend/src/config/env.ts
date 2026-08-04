@@ -97,6 +97,7 @@ const envSchema = Joi.object({
   TAG_GENERATION_LLM_TIMEOUT_MS: Joi.number().integer().min(1000).default(120000),
   ENABLE_STITCH_WORKER: Joi.boolean().default(false),
   ENABLE_AI_PROVISIONING_WORKER: Joi.boolean().default(false),
+  ENABLE_USER_AI_PROVISIONING: Joi.boolean().default(false),
   XYNE_CLAW_AUTH_INTERNAL_URL: Joi.string().uri().allow('').default(''),
   AI_PROVISIONING_QUEUE_ATTEMPTS: Joi.number().integer().min(1).default(3),
   AI_PROVISIONING_QUEUE_BACKOFF_MS: Joi.number().integer().min(0).default(5000),
@@ -106,6 +107,7 @@ const envSchema = Joi.object({
   LITELLM_MANAGEMENT_BASE_URL: Joi.string().uri().allow('').default(''),
   LITELLM_MANAGEMENT_ADMIN_KEY: Joi.string().allow('').default(''),
   LITELLM_CHANGED_BY: Joi.string().default('external-system:xyne-spaces-external'),
+  ORG_DEFAULT_MODELS: Joi.string().allow('').default('kimi-latest,private-large'),
   BACKEND_URL: Joi.string().default('http://localhost:3001'),
   SLACK_BOT_TOKEN: Joi.string().allow('').default(''),
   SLACK_FRONTEND_URL: Joi.string().allow('').default('http://localhost:5173'),
@@ -200,6 +202,7 @@ const envSchema = Joi.object({
   RECAP_GENERATION_CRON: Joi.string().default('15 0 * * *'), //5:45 IST daily
   RECAP_CLEANUP_CRON: Joi.string().default('30 23 * * *'), //5:00 IST daily
   RECAP_RETENTION_DAYS: Joi.number().default(30),
+  RECENT_VISITED_LOOKBACK_DAYS: Joi.number().integer().min(1).default(7),
   ACTIVITY_CLASSIFICATION_MAX_RETRIES: Joi.number().default(2),
   TICKET_DESC_CLEAN_MODEL: Joi.string().default(''),
   TICKET_DESC_CLEAN_MAX_RETRIES: Joi.number().default(3),
@@ -307,6 +310,7 @@ const envSchema = Joi.object({
   PULSE_ENABLED_CHANNELS: Joi.string().allow('').default(''),
   PULSE_API_URL: Joi.string().uri().default(''),
   PULSE_AUTHORIZATION: Joi.string().allow('').default(''),
+  DESK_BETA_CHANNELS: Joi.string().allow('').default(''),
   // Jira Configuration
   JUSPAY_JIRA_BASEURL: Joi.string().uri().default(''),
   JIRA_EULER_BOT_EMAIL: Joi.string().allow('').default(''),
@@ -570,6 +574,7 @@ export const config = {
   enableAiProvisioningWorker: envVars.ENABLE_AI_PROVISIONING_WORKER,
   aiProvisioning: {
     xyneClawAuthInternalUrl: envVars.XYNE_CLAW_AUTH_INTERNAL_URL as string,
+    enableUserProvisioning: envVars.ENABLE_USER_AI_PROVISIONING as boolean,
     s2sKey: envVars.XYNE_CLAW_S2S_KEY as string,
     queueAttempts: envVars.AI_PROVISIONING_QUEUE_ATTEMPTS as number,
     queueBackoffMs: envVars.AI_PROVISIONING_QUEUE_BACKOFF_MS as number,
@@ -580,6 +585,10 @@ export const config = {
       (envVars.LITELLM_MANAGEMENT_BASE_URL as string) || (envVars.LITELLM_BASE_URL as string),
     litellmManagementAdminKey: envVars.LITELLM_MANAGEMENT_ADMIN_KEY as string,
     litellmChangedBy: envVars.LITELLM_CHANGED_BY as string,
+    orgDefaultModels: (envVars.ORG_DEFAULT_MODELS as string)
+      .split(',')
+      .map((m: string) => m.trim())
+      .filter(Boolean),
   },
   backendUrl: envVars.BACKEND_URL,
   slackBotToken: envVars.SLACK_BOT_TOKEN,
@@ -794,6 +803,9 @@ export const config = {
     redisKeyPrefix: 'pendingauth:oauth:',
     ttlSeconds: 10 * 60,
   },
+  recentVisitedConversations: {
+    lookbackDays: envVars.RECENT_VISITED_LOOKBACK_DAYS,
+  },
   pulse: {
     // Comma-separated channel IDs that have Pulse enabled (empty = disabled everywhere)
     enabledChannels: (envVars.PULSE_ENABLED_CHANNELS as string)
@@ -802,6 +814,12 @@ export const config = {
       .filter(Boolean),
     apiUrl: envVars.PULSE_API_URL as string,
     authorization: envVars.PULSE_AUTHORIZATION as string,
+  },
+  desk: {
+    betaChannels: (envVars.DESK_BETA_CHANNELS as string)
+      .split(',')
+      .map((s: string) => s.trim())
+      .filter(Boolean),
   },
   jira: {
     baseUrl: envVars.JUSPAY_JIRA_BASEURL as string,

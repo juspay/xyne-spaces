@@ -59,6 +59,7 @@ const EmailSentConfigSchema = z.object({
 export const EmailSentOutputSchema = TicketContextSchema.partial().extend({
   email: z.object({
     id: z.string(),
+    url: z.string().url().nullable(),
     subject: z.string(),
     body: z.string(),
     from: z.string(),

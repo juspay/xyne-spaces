@@ -1,5 +1,6 @@
 import { Prisma, PrismaClient, ProjectType, TicketStatusV2 } from '@prisma/client';
 import { sanitizeProjectCode } from '@xyne/shared';
+import { ensureGeneralChannelForWorkspace } from './workspaceGeneralChannel';
 
 type PrismaClientLike = PrismaClient | Prisma.TransactionClient;
 
@@ -37,16 +38,11 @@ export async function createWorkspaceDefaults(
     select: { id: true },
   });
 
-  const channel = await params.db.channel.create({
-    data: {
-      name: 'general',
-      scopeType: 'DEFAULT',
-      visibility: 'PUBLIC',
-      createdBy: params.createdBy,
-      projectId: project.id,
-      workspaceId: params.workspaceId,
-    },
-    select: { id: true },
+  const { channel } = await ensureGeneralChannelForWorkspace({
+    db: params.db,
+    workspaceId: params.workspaceId,
+    workspaceName: params.workspaceName,
+    createdBy: params.createdBy,
   });
 
   const workspace = await params.db.workspace.update({

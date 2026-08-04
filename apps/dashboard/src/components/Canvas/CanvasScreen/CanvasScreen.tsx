@@ -209,6 +209,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   const latestContentRef = useRef<PartialBlock[] | undefined>(undefined);
   const lastSavedContentRef = useRef<string>(''); // Stringify to compare deep equality easily
   const latestHtmlRef = useRef<string>('');
+  const hasPendingCollaborativeTimestampRef = useRef(false);
   const titleRef = useRef(currentTitle);
   const selectedCanvasRef = useRef(selectedCanvas);
   const isCreatingRef = useRef(isCreating);
@@ -707,15 +708,32 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
     void handleSave(blocks, html);
   };
 
+  const flushCollaborativeCanvasTimestamp = useCallback((): void => {
+    if (!hasPendingCollaborativeTimestampRef.current) return;
+
+    const canvasToUpdate = selectedCanvasRef.current;
+    hasPendingCollaborativeTimestampRef.current = false;
+    if (!canvasToUpdate?.id || !canEditRef.current) return;
+
+    z.mutate(
+      mutators.canvas.update({
+        id: canvasToUpdate.id,
+        timestamp: Date.now(),
+      }),
+    );
+  }, [z]);
+
   const handleCollaborativeContentChange = useCallback((blocks: PartialBlock[]): void => {
     latestContentRef.current = blocks;
+    hasPendingCollaborativeTimestampRef.current = true;
   }, []);
 
   useEffect(() => {
     return (): void => {
+      flushCollaborativeCanvasTimestamp();
       saveCanvasExitSnapshotRef.current?.();
     };
-  }, [selectedCanvas?.id]);
+  }, [selectedCanvas?.id, flushCollaborativeCanvasTimestamp]);
 
   useEffect(() => {
     const handlePointerDown = (event: PointerEvent): void => {
@@ -725,6 +743,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
       if (!contentElement || !(target instanceof Node)) return;
       if (contentElement.contains(target)) return;
 
+      flushCollaborativeCanvasTimestamp();
       saveCanvasExitSnapshotRef.current?.();
     };
 
@@ -732,7 +751,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
     return (): void => {
       document.removeEventListener('pointerdown', handlePointerDown, true);
     };
-  }, []);
+  }, [flushCollaborativeCanvasTimestamp]);
 
   const handlePreviewVersion = useCallback((version: CanvasVersionRecord): void => {
     if (!previewVersionRef.current) {

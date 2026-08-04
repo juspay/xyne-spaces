@@ -198,13 +198,15 @@ export class CallParticipantCountBackfillController {
 
         try {
           if (!options.dryRun) {
-            await db.call.update({
-              where: { id: call.id },
-              data: {
-                participantCount: nextCount,
-                participantPreviewUserIds: nextPreviewUserIds,
-              },
-            });
+            await db.$executeRaw(
+              Prisma.sql`
+                UPDATE "public"."calls"
+                SET
+                  "participantCount" = ${nextCount},
+                  "participantPreviewUserIds" = ${nextPreviewUserIds}
+                WHERE "id" = ${call.id}
+              `,
+            );
           }
           summary.updated += 1;
         } catch (error) {
