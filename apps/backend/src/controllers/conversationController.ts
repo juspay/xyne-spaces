@@ -174,7 +174,13 @@ export class ConversationController {
         return;
       }
       const channel = await this.channelRepository.findById(conversation.channelId);
-      if (channel?.visibility === 'PRIVATE') {
+      // A missing channel must deny rather than fall through: the optional chain below
+      // would read as "not PRIVATE" and skip the participant check altogether.
+      if (!channel || channel.workspaceId !== req.user!.workspaceId) {
+        res.status(404).json({ error: 'Conversation not found' });
+        return;
+      }
+      if (channel.visibility === 'PRIVATE') {
         const isParticipant = await this.channelParticipantRepository.isParticipant(
           conversation.channelId,
           userId
@@ -416,9 +422,11 @@ export class ConversationController {
         return;
       }
 
-      // Check if channel exists
+      // Check if channel exists. The repository read is ACL-scoped, so a channel in
+      // another workspace already resolves to null; the explicit comparison keeps the
+      // boundary stated at the route rather than inherited from the layer below.
       const channel = await this.channelRepository.findById(channelId);
-      if (!channel) {
+      if (!channel || channel.workspaceId !== req.user!.workspaceId) {
         res.status(404).json({ error: 'Channel not found' });
         return;
       }
@@ -708,9 +716,11 @@ export class ConversationController {
       const { channelId } = req.params;
       const userId = req.user!.id;
 
-      // Check if channel exists
+      // Check if channel exists. The repository read is ACL-scoped, so a channel in
+      // another workspace already resolves to null; the explicit comparison keeps the
+      // boundary stated at the route rather than inherited from the layer below.
       const channel = await this.channelRepository.findById(channelId);
-      if (!channel) {
+      if (!channel || channel.workspaceId !== req.user!.workspaceId) {
         res.status(404).json({ error: 'Channel not found' });
         return;
       }
