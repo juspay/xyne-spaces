@@ -7,7 +7,7 @@ import Avatar from '../../ui/Avatar/Avatar';
 import Tooltip, { TruncatedTooltip } from '../../ui/Tooltip';
 import { useUser } from '../../../hooks/useUsers';
 import { useUserGroupById } from '../../../hooks/useUserGroup';
-import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { useQuery } from '../../../hooks/useQuery';
 import { queries } from '../../../zero/queries';
 import { TicketStatusWithStages } from '../TicketStatus/TicketStatusIcon';
 import { getPriorityIcon } from '../TicketCard/TicketCard.utils';
@@ -103,21 +103,28 @@ export const MergeTicketsDialog: React.FC<MergeTicketsDialogProps> = ({
   );
 
   const ticketIds = useMemo(() => tickets.map(t => t.id), [tickets]);
-  const [liveTickets] = useCachedQuery(queries.ticketsByIds({ ticketIds }), {
+  // useQuery, not useCachedQuery — the latter can replay a stale "complete" snapshot from its cross-mount cache.
+  const [liveTickets, liveTicketsDetails] = useQuery(queries.ticketsByIds({ ticketIds }), {
     enabled: open && ticketIds.length > 0,
   });
+  // Fail closed until the live archived check has actually resolved, not just "no data yet".
+  const archivedStateLoaded = ticketIds.length === 0 || liveTicketsDetails.type === 'complete';
   const archivedIds = useMemo(() => {
     const ids = new Set<string>();
+    if (!archivedStateLoaded) return ids;
     for (const t of liveTickets ?? []) {
       if (t.isArchived) ids.add(t.id);
     }
     return ids;
-  }, [liveTickets]);
+  }, [liveTickets, archivedStateLoaded]);
 
   const excludedTickets = sortedTickets.filter(t => archivedIds.has(t.id));
   const visibleTickets = useMemo(
-    () => sortedTickets.filter(t => !archivedIds.has(t.id) && !removedIds.has(t.id)),
-    [sortedTickets, archivedIds, removedIds],
+    () =>
+      archivedStateLoaded
+        ? sortedTickets.filter(t => !archivedIds.has(t.id) && !removedIds.has(t.id))
+        : [],
+    [sortedTickets, archivedIds, removedIds, archivedStateLoaded],
   );
 
   useEffect(() => {
@@ -128,17 +135,17 @@ export const MergeTicketsDialog: React.FC<MergeTicketsDialogProps> = ({
   }, [open]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || !archivedStateLoaded) return;
     if (selectedParentTicketId && visibleTickets.some(t => t.id === selectedParentTicketId)) return;
     setSelectedParentTicketId(visibleTickets[0]?.id ?? null);
-  }, [open, visibleTickets, selectedParentTicketId]);
+  }, [open, archivedStateLoaded, visibleTickets, selectedParentTicketId]);
 
   const handleRemoveTicket = (ticketId: string): void => {
     setRemovedIds(prev => new Set(prev).add(ticketId));
   };
 
   const handleMerge = async (): Promise<void> => {
-    if (!selectedParentTicketId) return;
+    if (!selectedParentTicketId || !archivedStateLoaded) return;
     setIsMerging(true);
     try {
       await onMerge(
@@ -165,6 +172,8 @@ export const MergeTicketsDialog: React.FC<MergeTicketsDialogProps> = ({
 
         {sortedTickets.length === 0 ? (
           <p className='text-sm text-destructive'>Could not load ticket details.</p>
+        ) : !archivedStateLoaded ? (
+          <p className='text-sm text-muted-foreground'>Checking ticket status…</p>
         ) : visibleTickets.length === 0 ? (
           <p className='text-sm text-muted-foreground'>
             All selected tickets are already archived. Cancel and reselect to start over.
@@ -295,7 +304,12 @@ export const MergeTicketsDialog: React.FC<MergeTicketsDialogProps> = ({
           </Button>
           <Button
             onClick={() => void handleMerge()}
-            disabled={isMerging || !selectedParentTicketId || visibleTickets.length < 2}
+            disabled={
+              isMerging ||
+              !archivedStateLoaded ||
+              !selectedParentTicketId ||
+              visibleTickets.length < 2
+            }
             data-track-category='Support'
             data-track-name='ConfirmMergeTickets'
           >
