@@ -3,8 +3,15 @@
  * Handles invitation creation, sending emails, and acceptance
  */
 
-import { PrismaClient, WorkspaceRole, Invitation, AuthProvider, ChannelRole, CanvasRole, User, ChannelScopeType } from '@prisma/client';
-import { GuestEntity } from '@xyne/shared';
+import { PrismaClient, Invitation, User } from '@prisma/client';
+import {
+  GuestEntity,
+  WorkspaceRole,
+  AuthProvider,
+  ChannelRole,
+  CanvasRole,
+  ChannelScopeType,
+} from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { emailService } from './email/factory';

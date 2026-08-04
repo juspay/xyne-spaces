@@ -16,7 +16,18 @@ import {
 import { FormFieldType } from '@xyne/shared';
 import { VespaJobType, VespaPayload } from './types';
 import { db } from '@/database/client';
-import { Channel, Message, Project, Ticket, Email, User, AttachmentEntityType, VespaOperationType as VespaOpType, Canvas, Call, CollectionItem, Apps } from '@prisma/client';
+import {
+  Channel,
+  Message,
+  Project,
+  Ticket,
+  Email,
+  User,
+  Canvas,
+  Call,
+  CollectionItem,
+  Apps,
+} from '@prisma/client';
 import { FileProcessor } from '@/services/fileProcessor';
 import { transformUserToVespa } from '@/services/vespaTransformers';
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';

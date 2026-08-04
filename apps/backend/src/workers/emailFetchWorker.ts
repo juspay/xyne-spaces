@@ -1,5 +1,5 @@
 import Bull from 'bull';
-import { ActivityClassification, NotificationType } from '@prisma/client';
+import { ActivityClassification, NotificationType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
 import { adapterRegistry } from '@/integrations/core/adapterRegistry';

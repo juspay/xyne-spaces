@@ -4,12 +4,12 @@
  */
 
 import { logger } from '../../utils/logger';
+import { AuthProvider, ExternalEntityType, MessageDirection, WorkspaceRole, UserType, MessageType } from '@xyne/shared';
 import { UserRepository } from '../../database/repositories/users';
 import { MessageRepository } from '../../database/repositories/messageRepository';
 import { ExternalMessageRepository } from '../../database/repositories/externalMessageRepository';
 import { ExternalSourceRepository } from '../../database/repositories/externalSourceRepository';
 import { ChannelRepository } from '../../database/repositories/channelRepository';
-import { AuthProvider, ExternalEntityType, MessageDirection, WorkspaceRole, UserType} from '@prisma/client';
 import crypto from 'crypto';
 import { SlackMessage, SlackFile, UserInfoCache } from '../slack/utils/extractConversation';
 import {

@@ -1,5 +1,5 @@
-import { CallStatus, MessageType } from '@prisma/client';
 import { db } from '@/database/client';
+import { CallStatus, MessageType, NudgeKind, SurfaceAreaType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { getPromptFromLangfuse } from '@/agents/xyne-ai/langfuse/index.js';
 import { z } from 'zod';

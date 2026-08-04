@@ -1,5 +1,4 @@
 import { v4 as uuidv4 } from 'uuid';
-import { ActivityClassification, ActivityClassificationJobType, AttachmentEntityType, ChannelScopeType, NotificationDeliveryMethod, NotificationType, UserStatus, UserType } from '@prisma/client';
 import { BaseSideEffectHandler } from '../base-handler';
 import type { SideEffectJobConfig, MessagePreviousValue } from '../types';
 import { db } from '@/database/client';
@@ -21,7 +20,21 @@ import { userActivityTrackingService } from '@/services/userActivityTrackingServ
 import { logger } from '@/utils/logger';
 import { emitMessageReceived } from '@/automations/triggers/message-received.trigger';
 import { activityTrackingService } from '@/services/activityTrackingService';
-import { Platform, serializeMessagePreviewMd, serializeLinkPreviewMd, parseLinkPreviewMd, parseForwardedMessageXml, type MessagePreviewData, type TicketPreviewSnapshot } from '@xyne/shared';
+import { Platform,
+  serializeMessagePreviewMd,
+  serializeLinkPreviewMd,
+  parseLinkPreviewMd,
+  parseForwardedMessageXml,
+  type MessagePreviewData,
+  type TicketPreviewSnapshot,
+  ActivityClassification,
+  ActivityClassificationJobType,
+  AttachmentEntityType,
+  ChannelScopeType,
+  NotificationDeliveryMethod,
+  NotificationType,
+  UserStatus,
+  UserType, MessageType } from '@xyne/shared';
 import { handleEventSubscriptionsForUsers } from '@/apps/core/eventSubscriptionUtils';
 import { BaseAppEvent, AppEventType, AppMentionEventPayload, DMEventPayload, UserMentionedEventPayload } from '@/apps/types';
 import { MessageAttachmentRepository } from '@/database/repositories/messageAttachmentRepository';

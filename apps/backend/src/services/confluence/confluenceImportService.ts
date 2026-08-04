@@ -1,6 +1,5 @@
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
-import { AttachmentEntityType, CanvasRole, CanvasVisibility, DocType, ExternalEntityType, MessageDirection } from '@prisma/client';
 import type { Prisma } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
@@ -12,7 +11,13 @@ import { config } from '@/config/env';
 import { ProjectRepository } from '@/database/repositories/projectRepository';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { ChannelParticipantRepository } from '@/database/repositories/channelParticipantRepository';
-import { sanitizeProjectCode } from '@xyne/shared';
+import { sanitizeProjectCode,
+  AttachmentEntityType,
+  CanvasRole,
+  CanvasVisibility,
+  DocType,
+  ExternalEntityType,
+  MessageDirection, ChannelRole, ChannelScopeType, ChannelVisibility } from '@xyne/shared';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
 import { encrypt } from '@/services/encryptionService';

@@ -14,9 +14,20 @@ import { MessageAttachmentRepository } from '../database/repositories/messageAtt
 import { UserRepository } from '../database/repositories/users';
 import { UserGroupRepository } from '../database/repositories/userGroups';
 import { ProjectRepository } from '../database/repositories/projectRepository';
-import { ChannelScopeType, ChannelVisibility, MessageType, AttachmentEntityType, Prisma, DeskType, EmailMergeMode, AppPermissionStatus, AppPermissionType, ActivityClassification, ActivityClassificationJobType } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
-import { createForwardedMessageXml, parseForwardedMessageXml } from '@xyne/shared';
+import { createForwardedMessageXml,
+  parseForwardedMessageXml,
+  ChannelScopeType,
+  ChannelVisibility,
+  MessageType,
+  AttachmentEntityType,
+  DeskType,
+  EmailMergeMode,
+  AppPermissionStatus,
+  AppPermissionType,
+  ActivityClassification,
+  ActivityClassificationJobType, ChannelType, ChannelRole } from '@xyne/shared';
 import '../types/express'; // Import to enable Express types augmentation
 import { unreadService } from '../services/unreadService';
 import { redisService } from '../services/redisService';

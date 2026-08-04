@@ -1,5 +1,6 @@
 import { UserStatus } from '@prisma/client';
 import { db } from '@/database/client';
+import { UserStatus, AuthProvider } from '@xyne/shared';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { UserService } from '@/services/userService';
@@ -157,7 +158,7 @@ export class MettleUserSyncService {
 
     const createdUser = await this.userService.createUser(
       {
-        provider: 'API_KEY',
+        provider: AuthProvider.API_KEY,
         providerUserId: providerUserId ?? `mettle_${Buffer.from(email).toString('base64')}`,
         email,
         name: name ?? email,

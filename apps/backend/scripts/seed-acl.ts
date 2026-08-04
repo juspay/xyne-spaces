@@ -10,9 +10,18 @@
  * 4. Cleaning up expired user sessions
  */
 
-import { PrismaClient, AccessType, AuthProvider, UserStatus, SessionStatus, WorkspaceRole, ProjectType } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 import { repositories } from '../src/database/repositories/index';
-import { WorkspaceJoinPolicy, WorkspaceType } from '@xyne/shared';
+import {
+  WorkspaceJoinPolicy,
+  WorkspaceType,
+  AccessType,
+  AuthProvider,
+  UserStatus,
+  SessionStatus,
+  WorkspaceRole,
+  ProjectType,
+} from '@xyne/shared';
 import { hashPassword } from '../src/utils/passwordUtils';
 
 const prisma = new PrismaClient();

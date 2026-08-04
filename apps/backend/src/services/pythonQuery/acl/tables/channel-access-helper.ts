@@ -1,10 +1,4 @@
-import {
-  CanvasVisibility,
-  ChannelVisibility,
-  PrismaClient,
-} from '@prisma/client'
-import { GuestEntity } from '@xyne/shared'
-import type { ACLContext } from '../base-acl'
+import { PrismaClient } from '@prisma/client';import { GuestEntity, CanvasVisibility, ChannelVisibility } from '@xyne/shared';import type { ACLContext } from '../base-acl'
 
 type GuestScope = {
   workspaceId: string

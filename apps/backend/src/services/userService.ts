@@ -1,4 +1,4 @@
-import { PrismaClient, User, UserPresenceStatus, AuthProvider, ProjectType, UserStatus, WorkspaceRole, Status } from '@prisma/client';
+import { PrismaClient, User } from '@prisma/client';
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
 import { logger } from '../utils/logger';
 import { repositories } from '../database/repositories/index';
@@ -6,7 +6,15 @@ import { DatabaseClient } from '@/database/client';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { grantPermissionsForRole, syncOrgResourceAdminAccess } from './permissionMatrix';
 import { USER_PREFERENCE_NOTIFICATION_DEFAULTS } from '@/constants/userPreferenceDefaults';
-import { OrgRole, WorkspaceJoinPolicy, WorkspaceType } from '@xyne/shared';
+import { OrgRole,
+  WorkspaceJoinPolicy,
+  WorkspaceType,
+  UserPresenceStatus,
+  AuthProvider,
+  ProjectType,
+  UserStatus,
+  WorkspaceRole,
+  Status, ChannelRole } from '@xyne/shared';
 import type { WorkspaceJoinPolicy as WorkspaceJoinPolicyValue, WorkspaceType as WorkspaceTypeValue } from '@xyne/shared';
 import { aiProvisioningService } from '@/services/aiProvisioningService';
 import { isOrganizationPolicyError, organizationDomainService } from '@/services/organizationDomainService';
@@ -151,7 +159,7 @@ export class UserService {
         orderBy: { createdAt: 'asc' },
       });
       return user
-        ? { authProvider: user.authProvider, providerUserId: user.providerUserId }
+        ? { authProvider: user.authProvider as AuthProvider, providerUserId: user.providerUserId }
         : null;
     } catch (error) {
       logger.error('Error finding auth identity by email:', error);

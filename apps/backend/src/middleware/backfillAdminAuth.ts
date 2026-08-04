@@ -1,5 +1,5 @@
 import { RequestHandler, Request, Response, NextFunction } from 'express';
-import { AccessType } from '@prisma/client';
+import { AccessType } from '@xyne/shared';
 import { authMiddleware } from '@/middleware/auth';
 import { authorize } from '@/middleware/authorize';
 

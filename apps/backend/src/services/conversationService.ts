@@ -17,14 +17,8 @@ import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { ChannelParticipantRepository } from '@/database/repositories/channelParticipantRepository';
 import { ConversationParticipantRepository } from '@/database/repositories/conversationParticipantRepository';
 import { UserRepository } from '@/database/repositories/users';
-import {
-  Conversation,
-  ConversationParticipation,
-  Message,
-  MessageType,
-  AttachmentEntityType,
-  ChannelScopeType,
-} from '@prisma/client';
+import { Conversation, Message } from '@prisma/client';
+import { ConversationParticipation, MessageType, AttachmentEntityType, ChannelScopeType, ChannelRole } from '@xyne/shared';
 import { uploadFiles, UploadedFileResult } from '@/services/fileUploadService';
 import { websocketService } from './websocketService';
 import { redisService } from './redisService';

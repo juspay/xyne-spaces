@@ -1,4 +1,5 @@
-import { ActivityClassification, ActivityClassificationJobType, PrismaClient } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
+import { ActivityClassification, ActivityClassificationJobType } from '@xyne/shared';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { getContextOrNull } from '@/database/tenant/context';

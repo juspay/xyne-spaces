@@ -1,16 +1,8 @@
 import { DatabaseClient } from '../client';
 import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import { v4 as uuidv4 } from 'uuid';
-import {
-  CallOrigin,
-  CallStatus,
-  CallType,
-  InvitationResponse,
-  MeetingStatus,
-  Prisma,
-  type Call,
-  type CallParticipant,
-} from '@prisma/client';
+import { Prisma, type Call, type CallParticipant } from '@prisma/client';
+import { CallOrigin, CallStatus, CallType, InvitationResponse, MeetingStatus } from '@xyne/shared';
 import { updateCallSystemMessageIfNeeded } from '@/zero/utils/systemMessagesUtils';
 import { repositories } from './index';
 import { logger } from '@/utils/logger';
@@ -553,7 +545,7 @@ export class CallRepository {
    * - INVITED: participant has not yet joined
    */
   async findParticipantsWithStatus(callId: string): Promise<Array<{ userId: string; response: InvitationResponse | null }>> {
-    return await DatabaseClient.getInstance().callParticipant.findMany({
+    return (await DatabaseClient.getInstance().callParticipant.findMany({
       where: {
         callId,
       },
@@ -1589,8 +1581,8 @@ export class CallRepository {
     if (!call) return null;
     return {
       title: call.title,
-      callType: call.callType,
-      status: call.status,
+      callType: call.callType as CallType,
+      status: call.status as CallStatus,
       callId: call.id,
       createdByUserId: call.createdByUserId,
       roomName: call.externalId, // LiveKit room name == externalId

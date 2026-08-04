@@ -1,7 +1,6 @@
 import { Request, Response } from 'express';
 import { formService } from '@/services/formService';
-import { FormFieldType } from '@xyne/shared';
-import { AccessType } from '@prisma/client';
+import { FormFieldType, AccessType } from '@xyne/shared';
 import { repositories } from '@/database/repositories';
 import {logger} from '@/utils/logger';
 

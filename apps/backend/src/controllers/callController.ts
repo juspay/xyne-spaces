@@ -11,16 +11,7 @@ import { DatabaseClient, db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { v4 as uuidv4 } from 'uuid';
 import { transcriptService } from '@/services/transcriptService';
-import {
-  CallOrigin,
-  CallStatus,
-  CallType,
-  InvitationResponse,
-  MeetingStatus,
-  NotificationType,
-  RecordingType,
-  Prisma,
-} from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { callSideEffectService } from '@/services/callSideEffectService';
 import { userActivityTrackingService } from '@/services/userActivityTrackingService';
@@ -41,6 +32,14 @@ import {
   type CallParticipantMetadata,
   SUMMARY_PROMPT_MAX_LENGTH,
   ShareableEntityType,
+  ChannelRole,
+  CallOrigin,
+  CallStatus,
+  CallType,
+  InvitationResponse,
+  MeetingStatus,
+  NotificationType,
+  RecordingType,
 } from '@xyne/shared';
 import { storageService } from '@/services/storage';
 import { CallVespaFeedSource, queueCallVespaFeed } from '@/services/callVespaQueue';

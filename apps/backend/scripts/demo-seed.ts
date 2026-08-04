@@ -35,6 +35,14 @@ import {
   MessageType as SharedMessageType,
   TicketStatusV2 as SharedTicketStatusV2,
   TicketPriority as SharedTicketPriority,
+  ChannelType,
+  ChannelScopeType,
+  ChannelVisibility,
+  ChannelRole,
+  AuthProvider,
+  UserStatus,
+  OrgRole,
+  WorkspaceRole,
 } from '@xyne/shared';
 import { CHANNELS, DEMO_USERS, TICKETS, type Line } from './demo-seed-content';
 

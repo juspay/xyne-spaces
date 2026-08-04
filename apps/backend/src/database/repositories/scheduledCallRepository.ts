@@ -1,5 +1,6 @@
 import { DatabaseClient } from '../client';
-import { CallStatus, RecurringCallSeriesStatus, type Prisma } from '@prisma/client';
+import { type Prisma } from '@prisma/client';
+import { CallStatus, RecurringCallSeriesStatus } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 
 export class ScheduledCallRepository {

@@ -11,7 +11,6 @@ import { WorkflowState, ParallelWorkflowConfig, BaseWorkflowContext, ValidatedWo
 import { WorkflowStepRepository, WorkflowExecutionRepository, ExternalStepResponseRepository, MessageAttachmentRepository } from '@/database/repositories'
 import { repositories } from '@/database/repositories'
 import { WorkflowExecutionStatus } from '../types/workflow-enums'
-import { AttachmentEntityType } from '@prisma/client'
 // import { WorkflowPausedException } from '../exceptions/workflow-exceptions' // Unused for now
 import {
   DeserializationError,
@@ -38,7 +37,7 @@ import { buildWorkflowStepKey, WORKFLOW_KEYS_SET } from '@/workflows/utils/workf
 import { getStorageService } from '@/services/storage';
 import { config } from '@/config/env';
 import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
-import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
+import { OrgLLMServiceAccountPurpose, AttachmentEntityType, MessageType } from '@xyne/shared';
 
 const prisma = DatabaseClient.getInstance()
 function normalizeToolName(toolName: string): string {

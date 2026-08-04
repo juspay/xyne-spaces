@@ -1251,7 +1251,7 @@ model User {
   name           String
   email          String
   picture        String?      // Google profile picture URL
-  authProvider   AuthProvider @default(GOOGLE)
+  authProvider   String       @default("GOOGLE")
   providerUserId String
   status         UserStatus   @default(ACTIVE)
   userType       UserType     @default(USER) // USER or BOT
@@ -1270,7 +1270,7 @@ model User {
   lastActiveAt   DateTime?    // @see user_presence.lastActiveAt
   notificationsPausedUntil DateTime? // @see user_presence.notificationsPausedUntil
   assignmentUnavailableUntil DateTime? // @see user_presence.assignmentUnavailableUntil
-  calendarVisibility CalendarVisibility @default(PUBLIC)
+  calendarVisibility String             @default("PUBLIC")
 
   // Relations
   workspace                 Workspace             @relation(fields: [workspaceId], references: [id])
@@ -1593,7 +1593,7 @@ model ResourceAccess {
   groupId    String?
   userId     String?
   resourceId String
-  accessType AccessType
+  accessType String
   createdAt  DateTime   @default(now())
   updatedAt  DateTime   @updatedAt
 
@@ -1642,8 +1642,8 @@ model ACLAuditLog {
   id          String               @id @default(cuid())
   timestamp   DateTime             @default(now())
   actorUserId String?
-  eventType   ACLAuditEventType
-  targetType  ACLAuditTargetType
+  eventType   String
+  targetType  String
   targetId    String
   description String
   createdAt   DateTime             @default(now())
@@ -2120,7 +2120,7 @@ model Project {
 model Board {
   id                  String               @id @default(cuid())
   name                String
-  boardType           BoardType            @default(DEFAULT)
+  boardType           String               @default("DEFAULT")
   projectId           String               // Project ID (no FK constraint)
   workspaceId         String               // Workspace for ACL optimization (denormalized from project)
   createdBy           String               // User ID (no FK constraint)
@@ -2506,7 +2506,7 @@ model EmailDraft {
   toRecipients String? // draft "To" recipients — JSON-stringified string[], parsed app-side
   ccRecipients String? // draft "Cc" recipients — JSON-stringified string[]
   bccRecipients String? // draft "Bcc" recipients — JSON-stringified string[]
-  autoDraftStatus AutoDraftStatus?
+  autoDraftStatus String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -2627,7 +2627,7 @@ model EmailChannelPreference {
   priorityClassificationEnabled Boolean @default(false)
   priorityClassificationPrompt String?  // Custom system prompt for the priority classification LLM
   priorityClassificationThreshold Float @default(0.5) // Minimum confidence threshold (0.0 - 1.0) to auto-apply priority
-  autoDraftMode          AutoDraftMode @default(OFF)
+  autoDraftMode          String        @default("OFF")
   autoDraftAgentSlug     String?
   deskType               DeskType @default(EMAIL)
   dlEmail                String?
@@ -2744,7 +2744,7 @@ model MessageSearch {
 // File Attachment Models
 model MessageAttachment {
   id                 String                @id @default(cuid())
-  entityType         AttachmentEntityType  // TICKET, CHAT, DRAFT, DELAYED_MESSAGE, etc.
+  entityType         String                // TICKET, CHAT, DRAFT, DELAYED_MESSAGE, etc.
   entityId           String                // Ticket id or message id (mandatory)
   workspaceId        String                // Workspace for ACL optimization
   storageProvider    String                // Storage provider where file is stored
@@ -2761,7 +2761,7 @@ model MessageAttachment {
   conversationId     String?                // Every message belongs to a conversation (no FK constraint)
   thumbnailUrl       String?               // For images/videos
   isDeleted          Boolean               @default(false) // Soft-delete: true when attachment has been removed
-  uploadStatus       AttachmentUploadStatus? // Tracks upload state
+  uploadStatus       String?                 // Tracks upload state
 
   // Relations
   conversation       Conversation?          @relation(fields: [conversationId], references: [conversationId])
@@ -2848,9 +2848,9 @@ model Activity {
   canvasId        String?  // FK to canvas.id for canvas mention activities (no constraint)
   blockId         String?  // Block ID within the canvas for canvas mention activities
   actorId         String  // User who performed the action (no FK constraint)
-  classification  ActivityClassification @default(PENDING)
+  classification  String                 @default("PENDING")
   classificationConfidence Float?
-  classificationJobType ActivityClassificationJobType?
+  classificationJobType String?
   isRead          Boolean  @default(false)
   isThreadActivity Boolean?  // True when activity is for a message inside a thread (not the initial message)
   createdAt       DateTime @default(now())
@@ -3247,9 +3247,9 @@ model Call {
   channelId        String?     // Channel where call is happening (null for GOOGLE_CALENDAR origin)
   orgName          String?     // Organization name (no FK constraint)
   description      String?     // Meeting description/agenda
-  callType         CallType    @default(VIDEO)
-  callOrigin       CallOrigin  @default(CHANNEL)
-  status           CallStatus  @default(ACTIVE)
+  callType         String      @default("VIDEO")
+  callOrigin       String      @default("CHANNEL")
+  status           String      @default("ACTIVE")
   roomLink         String?     // LiveKit room URL/token
   startsAt         DateTime?   // Scheduled start time
   endsAt           DateTime?   // Scheduled end time
@@ -3525,7 +3525,7 @@ model Canvas {
   createdBy    String // User ID (no FK constraint)
   viewAccessId String? @unique // Random ID for view-only access
   editAccessId String? @unique // Random ID for edit access
-  visibility   CanvasVisibility @default(PRIVATE)
+  visibility   String           @default("PRIVATE")
   isTemplate   Boolean          @default(false)
   lastEditedBy String? // Last user who edited (no FK constraint)
   lastEditedAt DateTime?
@@ -3642,7 +3642,7 @@ model CanvasParticipant {
   userId      String? // User ID (no FK constraint)
   userGroupId String? // User group share target (no FK constraint)
   channelId   String? // Channel/DM share target (not canvas home channel, no FK constraint)
-  role        CanvasRole @default(VIEWER) // OWNER | EDITOR | VIEWER
+  role        String     @default("VIEWER") // OWNER | EDITOR | VIEWER
   joinedAt    DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
 
@@ -3694,7 +3694,7 @@ model Bookmark {
   id         String             @id @default(cuid())
   userId     String             // User who bookmarked (no FK constraint)
   entityId   String             // ID of the bookmarked entity
-  entityType BookmarkEntityType // Type of entity bookmarked
+  entityType String             // Type of entity bookmarked
   createdAt  DateTime           @default(now())
   updatedAt  DateTime?
   isDeleted  Boolean            @default(false)
@@ -4513,7 +4513,7 @@ model COE {
   ownerId         String        // User ID (no FK constraint)
   actionTypeId    String        // COEActionType ID
   action          String        // Description of the action
-  status          COEStatus     @default(OPEN)
+  status          String        @default("OPEN")
   dueDate         DateTime?
   createdAt       DateTime      @default(now())
   completedAt     DateTime?
@@ -4540,7 +4540,7 @@ model ReleaseAttribution {
   releaseId               String                 // Release ticket ID
   releaseApplicationId    String?                // Application release ID (SubTicket ID)
   rootCauseTicketId       String?                // Root cause ticket
-  confidence              AttributionConfidence  @default(LOW)
+  confidence              String                 @default("LOW")
   createdAt               DateTime               @default(now())
 
   @@index([ticketId])
@@ -4751,8 +4751,8 @@ model AppIncomingWebhook {
   channelId      String
   boardId        String?
   name           String
-  type           AppIncomingWebhookType @default(SLACK)
-  action         AppIncomingWebhookAction @default(MESSAGE)
+  type           String                 @default("SLACK")
+  action         String                   @default("MESSAGE")
   secret         String
   isActive       Boolean   @default(true)
   createdBy      String
@@ -5147,7 +5147,7 @@ enum AppPermissionStatus {
 model AvailableAppPermission {
   id          String            @id @default(cuid())
   name        String            // resource prefix — e.g. "chat", "channels", "tickets"
-  type        AppPermissionType // action — READ, WRITE, HISTORY, DELETE, MANAGE
+  type        String            // action — READ, WRITE, HISTORY, DELETE, MANAGE
   description String?
   createdAt   DateTime          @default(now())
 
@@ -5186,7 +5186,7 @@ model InstalledAppPermission {
   id             String                @id @default(cuid())
   installedAppId String
   permissionId   String
-  status         AppPermissionStatus   @default(UNAPPROVED)
+  status         String                @default("UNAPPROVED")
   createdAt      DateTime              @default(now())
 
   installedApp InstalledApps         @relation(fields: [installedAppId], references: [id])

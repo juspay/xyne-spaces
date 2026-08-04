@@ -1,4 +1,4 @@
-import type { AuthProvider } from '@prisma/client';
+import { AuthProvider } from '@xyne/shared';
 
 export interface LegacyIdentityMigrationInput {
   email: string;
