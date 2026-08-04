@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import * as RadioGroupPrimitive from '@radix-ui/react-radio-group';
-import { User } from 'lucide-react';
+import { User, X } from 'lucide-react';
 import { Dialog } from '../../ui/Dialog';
 import Button from '../../ui/Button';
 import Avatar from '../../ui/Avatar/Avatar';
@@ -12,6 +12,7 @@ import { queries } from '../../../zero/queries';
 import { TicketStatusWithStages } from '../TicketStatus/TicketStatusIcon';
 import { getPriorityIcon } from '../TicketCard/TicketCard.utils';
 import { cn } from '../../../utils/classNames';
+import { htmlToPlainText } from '../../../utils/sanitizer';
 import type { TicketPriority } from '@xyne/shared';
 
 interface MergeTicket {
@@ -29,7 +30,6 @@ interface MergeTicketsDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   tickets: MergeTicket[];
-  /** ticketIds is the eligible (non-archived) subset of `tickets` that should actually be merged. */
   onMerge: (parentTicketId: string, ticketIds: string[]) => void | Promise<void>;
 }
 
@@ -95,16 +95,13 @@ export const MergeTicketsDialog: React.FC<MergeTicketsDialogProps> = ({
 }) => {
   const [isMerging, setIsMerging] = useState(false);
   const [selectedParentTicketId, setSelectedParentTicketId] = useState<string | null>(null);
+  const [removedIds, setRemovedIds] = useState<Set<string>>(() => new Set());
 
   const sortedTickets = useMemo(
     () => [...tickets].sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0)),
     [tickets],
   );
 
-  // Selection can go stale: a ticket picked before opening this dialog may have been
-  // archived in the meantime (merged elsewhere, archived by another agent, etc). Re-check
-  // live status for every candidate so an already-archived ticket can't be picked again —
-  // showing it disabled here is clearer than silently dropping it from the list.
   const ticketIds = useMemo(() => tickets.map(t => t.id), [tickets]);
   const [liveTickets] = useCachedQuery(queries.ticketsByIds({ ticketIds }), {
     enabled: open && ticketIds.length > 0,
@@ -117,32 +114,36 @@ export const MergeTicketsDialog: React.FC<MergeTicketsDialogProps> = ({
     return ids;
   }, [liveTickets]);
 
-  const eligibleTickets = useMemo(
-    () => sortedTickets.filter(t => !archivedIds.has(t.id)),
-    [sortedTickets, archivedIds],
+  const excludedTickets = sortedTickets.filter(t => archivedIds.has(t.id));
+  const visibleTickets = useMemo(
+    () => sortedTickets.filter(t => !archivedIds.has(t.id) && !removedIds.has(t.id)),
+    [sortedTickets, archivedIds, removedIds],
   );
 
   useEffect(() => {
     if (!open) {
       setSelectedParentTicketId(null);
+      setRemovedIds(new Set());
     }
   }, [open]);
 
   useEffect(() => {
     if (!open) return;
-    // Pick (or fix up) a default parent among tickets that aren't archived.
-    if (selectedParentTicketId === null || archivedIds.has(selectedParentTicketId)) {
-      setSelectedParentTicketId(eligibleTickets[0]?.id ?? null);
-    }
-  }, [open, eligibleTickets, archivedIds, selectedParentTicketId]);
+    if (selectedParentTicketId && visibleTickets.some(t => t.id === selectedParentTicketId)) return;
+    setSelectedParentTicketId(visibleTickets[0]?.id ?? null);
+  }, [open, visibleTickets, selectedParentTicketId]);
+
+  const handleRemoveTicket = (ticketId: string): void => {
+    setRemovedIds(prev => new Set(prev).add(ticketId));
+  };
 
   const handleMerge = async (): Promise<void> => {
-    if (!selectedParentTicketId || archivedIds.has(selectedParentTicketId)) return;
+    if (!selectedParentTicketId) return;
     setIsMerging(true);
     try {
       await onMerge(
         selectedParentTicketId,
-        eligibleTickets.map(t => t.id),
+        visibleTickets.map(t => t.id),
       );
     } finally {
       setIsMerging(false);
@@ -150,7 +151,11 @@ export const MergeTicketsDialog: React.FC<MergeTicketsDialogProps> = ({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange} title={`Merge ${sortedTickets.length} Tickets`}>
+    <Dialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title={`Merge ${visibleTickets.length} Tickets`}
+    >
       <div className='p-6 space-y-4'>
         <p className='text-sm text-muted-foreground'>
           Pick the ticket that stays open. The rest will be archived and linked as merged into it —
@@ -160,6 +165,14 @@ export const MergeTicketsDialog: React.FC<MergeTicketsDialogProps> = ({
 
         {sortedTickets.length === 0 ? (
           <p className='text-sm text-destructive'>Could not load ticket details.</p>
+        ) : visibleTickets.length === 0 ? (
+          <p className='text-sm text-muted-foreground'>
+            All selected tickets are already archived. Cancel and reselect to start over.
+          </p>
+        ) : visibleTickets.length < 2 ? (
+          <p className='text-sm text-muted-foreground'>
+            Only one ticket left to merge. Cancel and reselect at least two.
+          </p>
         ) : (
           <>
             <div className='text-xs font-medium text-muted-foreground uppercase tracking-wide'>
@@ -171,26 +184,24 @@ export const MergeTicketsDialog: React.FC<MergeTicketsDialogProps> = ({
               aria-label='Parent ticket'
               className='space-y-1.5 max-h-[360px] overflow-y-auto -mx-1 px-1 py-0.5'
             >
-              {sortedTickets.map(ticket => {
-                const isArchived = archivedIds.has(ticket.id);
-                const isParent = !isArchived && ticket.id === selectedParentTicketId;
+              {visibleTickets.map(ticket => {
+                const isParent = ticket.id === selectedParentTicketId;
                 const priority = ticket.priority as TicketPriority | undefined;
                 const priorityIcon = priority ? getPriorityIcon(priority) : null;
+
+                const plainTitle = ticket.title ? htmlToPlainText(ticket.title) : '';
 
                 return (
                   <RadioGroupPrimitive.Item
                     key={ticket.id}
                     value={ticket.id}
-                    disabled={isArchived}
                     className={cn(
                       'relative flex w-full flex-col gap-1.5 rounded-md border py-2.5 pl-4 pr-3 text-left',
                       'shadow-sm transition-all outline-none',
                       'focus-visible:ring-2 focus-visible:ring-ring/50',
-                      isArchived
-                        ? 'border-border bg-muted/40 opacity-60 cursor-not-allowed'
-                        : isParent
-                          ? 'border-primary/40 bg-primary/[0.04]'
-                          : 'border-border bg-card hover:border-input hover:shadow',
+                      isParent
+                        ? 'border-primary/40 bg-primary/[0.04]'
+                        : 'border-border bg-card hover:border-input hover:shadow',
                     )}
                     data-track-category='Support'
                     data-track-name='SelectMergeParent'
@@ -199,31 +210,38 @@ export const MergeTicketsDialog: React.FC<MergeTicketsDialogProps> = ({
                       <span className='absolute inset-y-1.5 left-1 w-[3px] rounded-full bg-primary' />
                     )}
 
+                    <button
+                      type='button'
+                      onClick={e => {
+                        e.stopPropagation();
+                        handleRemoveTicket(ticket.id);
+                      }}
+                      className='absolute -left-1.5 -top-1.5 flex size-4 items-center justify-center rounded-full border border-border bg-background text-muted-foreground shadow-sm hover:text-foreground hover:border-input'
+                      aria-label={`Remove ${plainTitle || 'ticket'} from merge`}
+                      data-track-category='Support'
+                      data-track-name='RemoveTicketFromMerge'
+                    >
+                      <X className='size-2.5' strokeWidth={2.5} />
+                    </button>
+
                     <div className='flex items-center gap-2 min-w-0'>
                       <span className='font-mono text-xs text-muted-foreground shrink-0'>
                         {ticket.xyneId || ticket.id.slice(0, 8)}
                       </span>
-                      <TruncatedTooltip content={ticket.title || 'No subject'}>
-                        <h3
-                          className={cn(
-                            'flex-1 min-w-0 truncate text-[15px] font-semibold',
-                            isArchived ? 'text-muted-foreground' : 'text-foreground',
-                          )}
-                        >
-                          {ticket.title || 'No subject'}
+                      <TruncatedTooltip content={plainTitle || 'No subject'}>
+                        <h3 className='flex-1 min-w-0 truncate text-[15px] font-semibold text-foreground'>
+                          {plainTitle || 'No subject'}
                         </h3>
                       </TruncatedTooltip>
                       <span
                         className={cn(
                           'shrink-0 inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-medium whitespace-nowrap',
-                          isArchived
-                            ? 'border-border text-muted-foreground'
-                            : isParent
-                              ? 'border-primary/30 bg-primary/10 text-primary'
-                              : 'border-border text-muted-foreground',
+                          isParent
+                            ? 'border-primary/30 bg-primary/10 text-primary'
+                            : 'border-border text-muted-foreground',
                         )}
                       >
-                        {isArchived ? 'Already archived' : isParent ? 'Parent' : 'Merges in'}
+                        {isParent ? 'Parent' : 'Merges in'}
                       </span>
                     </div>
 
@@ -259,6 +277,13 @@ export const MergeTicketsDialog: React.FC<MergeTicketsDialogProps> = ({
           </>
         )}
 
+        {excludedTickets.length > 0 && (
+          <p className='text-xs text-muted-foreground'>
+            Already archived, excluded from this merge:{' '}
+            {excludedTickets.map(t => t.xyneId || t.id.slice(0, 8)).join(', ')}
+          </p>
+        )}
+
         <div className='flex justify-end gap-3 pt-2'>
           <Button
             variant='secondary'
@@ -270,12 +295,7 @@ export const MergeTicketsDialog: React.FC<MergeTicketsDialogProps> = ({
           </Button>
           <Button
             onClick={() => void handleMerge()}
-            disabled={
-              isMerging ||
-              !selectedParentTicketId ||
-              archivedIds.has(selectedParentTicketId) ||
-              eligibleTickets.length < 2
-            }
+            disabled={isMerging || !selectedParentTicketId || visibleTickets.length < 2}
             data-track-category='Support'
             data-track-name='ConfirmMergeTickets'
           >
