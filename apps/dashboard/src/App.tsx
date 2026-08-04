@@ -6,6 +6,7 @@ import { RouterProvider } from 'react-router-dom';
 import { router } from './routes/AppRoot';
 import { ThemeProvider } from '@juspay/blend-design-system';
 import { Toaster } from 'sonner';
+import './styles/sonner-overrides.css';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { queryClient } from './services/clients/queryClient';
 import { XYNE_FOUNDATION_TOKENS } from './themes/XYNE_FOUNDATION_TOKENS';
