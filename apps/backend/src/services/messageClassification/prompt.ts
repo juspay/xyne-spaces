@@ -24,7 +24,8 @@ Output STRICT JSON only. No markdown, no commentary, no explanation.
 You will receive a JSON object with:
 - thread_messages: [{ id, text, author_display_name, timestamp_iso, existing_acts? }] — the
   ENTIRE thread in chronological order, starting with the message that opened it.
-  existing_acts, when present, is the tags that message was already given.
+  existing_acts, when present, is the tags that message was already given — an empty
+  array means someone deliberately cleared it and it must stay untagged.
 - root_is_bot: boolean — true when a bot or automated system posted the opening message.
 - current_thread_type: string, optional — the type this thread already carries.
 

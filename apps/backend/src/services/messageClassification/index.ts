@@ -105,8 +105,9 @@ export async function classifyAndTagThread(conversationId: string): Promise<Clas
         text: stripHtml(m.content ?? ''),
         author_display_name: m.sender?.name ?? 'Unknown',
         timestamp_iso: m.createdAt.toISOString(),
-        // Present => settled; enforced off-limits by the filter in classifyThread().
-        ...(existing.length > 0 && { existing_acts: existing }),
+        // Present at all => settled, empty included: [] is a deliberate clear, and
+        // re-tagging what someone just removed is worse than leaving it blank.
+        ...(m.messageActs !== null && { existing_acts: existing }),
       };
     })
     .filter(m => m.text.length > 0);
@@ -116,7 +117,7 @@ export async function classifyAndTagThread(conversationId: string): Promise<Clas
   }
 
   // Nothing new to tag and a type already set: the call could only rewrite what is there.
-  const unclassified = threadMessages.filter(m => !m.existing_acts);
+  const unclassified = threadMessages.filter(m => m.existing_acts === undefined);
   if (unclassified.length === 0 && conversation.threadType) {
     return { tagged: 0, skipped: 'already-classified' };
   }
@@ -281,7 +282,7 @@ interface ClassifierMessage {
   text: string;
   author_display_name: string;
   timestamp_iso: string;
-  /** Acts this message already carries. Absent means it still needs classifying. */
+  /** Acts already on this message; empty when cleared by hand. Absent => needs classifying. */
   existing_acts?: string[];
 }
 
@@ -367,7 +368,7 @@ async function classifyThread(
   // Sent AND still unclassified. Blocks both a hallucinated id and a model that ignores
   // the prompt and re-classifies a settled message. The prompt asks; this guarantees.
   const eligibleIds = new Set(
-    input.thread_messages.filter(m => !m.existing_acts?.length).map(m => m.id),
+    input.thread_messages.filter(m => m.existing_acts === undefined).map(m => m.id),
   );
   const acts = new Map<string, string[]>();
 

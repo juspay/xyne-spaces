@@ -8828,9 +8828,9 @@ export const mutators = defineMutators({
 
         await tx.mutate.messages.update({
           messageId,
-          // null rather than '[]' when empty — one representation of "no tags", so
-          // readers never have to handle both.
-          messageActs: unique.length > 0 ? JSON.stringify(unique) : null,
+          // '[]' rather than null when cleared: null means "never classified" and the
+          // classifier would tag it again on its next pass. '[]' means deliberately empty.
+          messageActs: unique.length > 0 ? JSON.stringify(unique) : '[]',
         });
       },
     ),
