@@ -20,15 +20,19 @@ import { buildClassifierPrompt } from './prompt';
 const TAG = '[MessageClassification]';
 
 /**
- * A thread is only classified once it has at least this many messages. Several acts are
- * defined by what is open above them (ANSWER, RESOLUTION), so a one-message view guesses.
+ * Minimum thread size to classify. 1 by default: the queue defers every thread to midnight
+ * and dedupes per thread, so a short thread costs one call for its whole life — the
+ * threshold no longer buys anything, and a one-message thread still has a clear type.
  */
 export const MIN_THREAD_SIZE = Number(
-  process.env['MESSAGE_CLASSIFICATION_MIN_THREAD_SIZE'] ?? 5,
+  process.env['MESSAGE_CLASSIFICATION_MIN_THREAD_SIZE'] ?? 1,
 );
 
 /** Upper bound on messages sent to the model in one pass. */
 const MAX_THREAD_CONTEXT = 60;
+
+/** A ticket description can be pages long; the opening is where the intent lives. */
+const TICKET_DESCRIPTION_LIMIT = 1000;
 
 const stripHtml = (html: string): string =>
   html
@@ -69,6 +73,13 @@ export async function classifyAndTagThread(conversationId: string): Promise<Clas
     return { tagged: 0, skipped: 'conversation-not-found' };
   }
 
+  // Once a thread has a type — the classifier's or a person's, including '[]' for cleared —
+  // it is never sent to the model again. Nothing can then overwrite a hand-applied tag, and
+  // an active thread costs one call rather than one every few messages.
+  if (conversation.threadType !== null) {
+    return { tagged: 0, skipped: 'already-classified' };
+  }
+
   const channel = await db.channel.findUnique({
     where: { id: conversation.channelId },
     select: { id: true, projectId: true, workspaceId: true },
@@ -76,6 +87,16 @@ export async function classifyAndTagThread(conversationId: string): Promise<Clas
   if (!channel?.projectId) {
     return { tagged: 0, skipped: 'no-project' };
   }
+
+  // A ticket's title and description are usually the clearest statement of what the thread
+  // is about — someone wrote them deliberately, unlike the conversation itself. Fetched
+  // before the size guard: a thread created FROM a ticket has only a SYSTEM notice in it,
+  // so it would otherwise bail as too short with its best signal unread.
+  const ticket = await db.ticket.findFirst({
+    where: { conversationId },
+    select: { title: true, description: true },
+    orderBy: { createdAt: 'asc' },
+  });
 
   const messages = await db.message.findMany({
     where: {
@@ -113,15 +134,13 @@ export async function classifyAndTagThread(conversationId: string): Promise<Clas
     })
     .filter(m => m.text.length > 0);
 
-  if (threadMessages.length < MIN_THREAD_SIZE) {
+  if (threadMessages.length < MIN_THREAD_SIZE && !ticket) {
     return { tagged: 0, skipped: 'thread-too-short' };
   }
 
-  // Nothing new to tag and a type already set: the call could only rewrite what is there.
+  // Reached only when the thread has no type yet, so an empty list means there is nothing
+  // left to do at all.
   const unclassified = threadMessages.filter(m => m.existing_acts === undefined);
-  if (unclassified.length === 0 && conversation.threadType) {
-    return { tagged: 0, skipped: 'already-classified' };
-  }
 
   // Passed as a fact, not a rule — what it implies lives in the prompt, not in code.
   const rootMessage = await db.message.findUnique({
@@ -131,12 +150,16 @@ export async function classifyAndTagThread(conversationId: string): Promise<Clas
   const rootIsBot = rootMessage?.msgType === 'BOT';
 
   const modelName = process.env['MESSAGE_CLASSIFIER_MODEL'] ?? 'gpt-4o-mini';
-  const { acts, threadType: modelThreadType } = await classifyThread(
+  const { acts, threadTypes } = await classifyThread(
     {
       thread_messages: threadMessages,
       root_is_bot: rootIsBot,
-      // Anchor against re-typing churn: every flip broadcasts a new chip to the channel.
-      ...(conversation.threadType && { current_thread_type: conversation.threadType }),
+      ...(ticket && {
+        ticket: {
+          title: ticket.title,
+          description: stripHtml(ticket.description).slice(0, TICKET_DESCRIPTION_LIMIT),
+        },
+      }),
     },
     channel.projectId,
     modelName,
@@ -164,22 +187,19 @@ export async function classifyAndTagThread(conversationId: string): Promise<Clas
     });
   }
 
-  const threadType = modelThreadType;
-
-
-  // Only write on an actual change. The conversation row is synced to every client in the
-  // channel, so a no-op update would broadcast for nothing.
-  if (threadType && threadType !== conversation.threadType) {
+  // threadType was null to get here, so this is the one and only write.
+  const nextThreadType = threadTypes.length > 0 ? JSON.stringify(threadTypes) : null;
+  if (nextThreadType) {
     await db.conversation.update({
       where: { conversationId },
-      data: { threadType },
+      data: { threadType: nextThreadType },
     });
-    // The root message doc is the one carrying threadType, so it needs refeeding even if
-    // its own acts didn't change.
+    // The root message doc is the one carrying the thread type, so it needs refeeding even
+    // if its own acts didn't change.
     await refeedToVespa(conversation.initialMessageId, conversation.workspaceId);
   }
 
-  return { tagged, threadType };
+  return { tagged, threadType: nextThreadType };
 }
 
 /**
@@ -318,15 +338,15 @@ interface ClassifierInput {
   thread_messages: ClassifierMessage[];
   /** True when a bot or automated system opened the thread. Gates the ALERT type. */
   root_is_bot: boolean;
-  /** The thread's current type, when it already has one. Anchor against re-typing churn. */
-  current_thread_type?: string;
+  /** Present when the thread was turned into a ticket. */
+  ticket?: { title: string; description: string };
 }
 
 interface Classification {
   /** messageId -> its message acts. Messages the model omitted or mis-tagged are absent. */
   acts: Map<string, string[]>;
-  /** The thread as a whole. Null when the model returned nothing usable. */
-  threadType: string | null;
+  /** The thread as a whole — a thread can be several things at once. */
+  threadTypes: string[];
 }
 
 const VALID_ACTS = new Set(MESSAGE_ACTS.map(entry => entry.name));
@@ -337,7 +357,8 @@ const VALID_THREAD_TYPES = new Set(THREAD_TYPES.map(entry => entry.name));
 // Lenient on purpose: the model's raw shape is untrusted. Anything unrecognised becomes
 // null and is dropped rather than failing the whole job.
 const RawOutputSchema = z.object({
-  threadType: z.string().nullish(),
+  // Tolerate a bare string as well as an array — the model collapses single-element arrays.
+  threadTypes: z.union([z.string(), z.array(z.string())]).nullish(),
   classifications: z
     .array(
       z.object({
@@ -422,12 +443,19 @@ async function classifyThread(
     acts.set(entry.id, tagged);
   }
 
-  const threadType = coerce(parsed.threadType, VALID_THREAD_TYPES);
-  if (parsed.threadType && !threadType) {
-    logger.warn('[MessageClassifier] Model returned an unknown thread type; dropping', {
-      returned: parsed.threadType,
+  const rawTypes = Array.isArray(parsed.threadTypes)
+    ? parsed.threadTypes
+    : parsed.threadTypes
+      ? [parsed.threadTypes]
+      : [];
+  const threadTypes = [
+    ...new Set(rawTypes.map(value => coerce(value, VALID_THREAD_TYPES)).filter(Boolean)),
+  ] as string[];
+  if (rawTypes.length > 0 && threadTypes.length === 0) {
+    logger.warn('[MessageClassifier] Model returned no usable thread type; dropping', {
+      returned: parsed.threadTypes,
     });
   }
 
-  return { acts, threadType };
+  return { acts, threadTypes };
 }

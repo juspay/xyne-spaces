@@ -441,6 +441,22 @@ export const mapMessage = async (
     }
   }
 
+  // Thread types, same stringified-array shape as messageActs.
+  let threadType: string[] = [];
+  if (conversation.threadType) {
+    try {
+      const parsed: unknown = JSON.parse(conversation.threadType);
+      threadType = Array.isArray(parsed)
+        ? parsed.filter((v): v is string => typeof v === 'string')
+        : typeof parsed === 'string'
+          ? [parsed]
+          : [];
+    } catch {
+      // Rows written before the column held an array stored a bare name.
+      threadType = [conversation.threadType];
+    }
+  }
+
   // Update parent ticket thread fields if this is a ticket conversation
   await updateTicketThreadFields(args.conversationId);
 
@@ -474,10 +490,11 @@ export const mapMessage = async (
     threadId: args.conversationId,
     isRootMessage: args.messageId === conversation.initialMessageId,
     messageActs,
-    // Only the root message carries the thread's type — one doc to refeed when it changes
-    // rather than the whole thread.
-    ...(args.messageId === conversation.initialMessageId && conversation.threadType
-      ? { threadType: conversation.threadType }
+    // Only the root message carries the thread's types — one doc to refeed when they
+    // change rather than the whole thread. Free-form tags are indexed alongside the
+    // built-in vocabulary, so both are searchable.
+    ...(args.messageId === conversation.initialMessageId && threadType.length > 0
+      ? { threadType }
       : {}),
     channelWeightedSet: {
       [`channel:${conversation.channelId}`]: 1

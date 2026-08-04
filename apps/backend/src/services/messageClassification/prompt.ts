@@ -27,7 +27,12 @@ You will receive a JSON object with:
   existing_acts, when present, is the tags that message was already given — an empty
   array means someone deliberately cleared it and it must stay untagged.
 - root_is_bot: boolean — true when a bot or automated system posted the opening message.
-- current_thread_type: string, optional — the type this thread already carries.
+- ticket: optional — { title, description } when this thread was turned into a ticket.
+  Someone wrote these deliberately, so they state the thread's purpose more reliably than
+  the conversation does. Weigh them heavily for threadTypes; they say nothing about what
+  any individual message does. thread_messages may be EMPTY when a thread was opened from a
+  ticket and nobody has replied — classify threadTypes from the ticket alone and return an
+  empty classifications array.
 
 ## Task — classify ONLY the messages that have no existing_acts
 
@@ -67,7 +72,9 @@ dominant act.
 
 ## Second task — the thread as a whole
 
-Also classify the ENTIRE thread by what "done" would mean for it. Exactly one value:
+Also classify the ENTIRE thread by what "done" would mean for it. Usually ONE value; return
+more only when the thread genuinely is several things at once (a bug report that also
+requests a feature). Never more than three.
 
 ${numbered(THREAD_TYPE_CHOICES)}
 
@@ -84,14 +91,10 @@ tools that already exist? Yes → REQUEST. Needs something built → FEATURE_REQ
 
 When no other type fits, DISCUSSION.
 
-When current_thread_type is given, keep it unless the thread has genuinely changed purpose —
-a question that turned out to be a bug is a real change; a few off-topic replies is not.
-Return current_thread_type unchanged if in doubt.
-
 ## Output
 
 {
-  "threadType": one of [${THREAD_TYPE_CHOICES.map(e => e.name).join(', ')}],
+  "threadTypes": [one or more of ${THREAD_TYPE_CHOICES.map(e => e.name).join(', ')}],
   "classifications": [
     { "id": "<message id from thread_messages>", "messageActs": [one or more of ${ACT_NAMES.join(', ')}, or exactly ["${NO_ACT}"]] }
   ]
@@ -102,5 +105,5 @@ including the ones that perform no act, as ["${NO_ACT}"]. Messages that already 
 existing_acts must not appear in classifications at all. messageActs must always have at
 least one value. Use the exact strings above — no other spelling, casing or punctuation.
 
-threadType covers the whole thread and is always required, even when every message was
+threadTypes covers the whole thread and is always required, even when every message was
 already classified.`;

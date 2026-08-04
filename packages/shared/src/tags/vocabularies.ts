@@ -1,82 +1,59 @@
 /**
- * Controlled tag vocabularies.
+ * Controlled tag vocabularies for the classifier.
  *
- * These are closed lists: `applyTag` refuses to create a typed tag that isn't already in
- * the catalog, so every value here must be seeded into `project_tags` before it can be
- * applied. Free-form tags (ProjectTag.type null) are unaffected and still create-on-use —
- * that is what ticket tagging uses.
- *
- * Values are UPPER_SNAKE identifiers as specified, deliberately unlike the
- * lowercase-hyphenated format free-typed tags use (see TAG_FORMAT_REGEX), so the two are
- * distinguishable at a glance. `label` is what the UI renders.
+ * Values are UPPER_SNAKE, deliberately unlike the lowercase-hyphenated shape people type
+ * for free-form thread tags, so built-in and custom are distinguishable at a glance.
  */
 
-export const PROJECT_TAG_TYPE = {
-  MESSAGE_ACT: 'MESSAGE_ACT',
-  THREAD_TYPE: 'THREAD_TYPE',
-} as const;
-
-export type ProjectTagType = (typeof PROJECT_TAG_TYPE)[keyof typeof PROJECT_TAG_TYPE];
-
-export interface VocabularyEntry {
+/** Message acts are never rendered — the classifier writes them, nothing displays them. */
+export interface ActEntry {
   name: string;
+  /** One-line definition, used to generate the classifier prompt. */
+  description: string;
+}
+
+export interface VocabularyEntry extends ActEntry {
   label: string;
   color: string;
-  /** One-line definition. Feeds both the UI tooltip and the classifier prompt. */
-  description: string;
 }
 
 /**
  * What a message creates going forward. A message carries exactly one of these — when it
  * performs several acts, the strongest wins. Order here IS the precedence, strongest first.
  */
-export const MESSAGE_ACTS: readonly VocabularyEntry[] = [
+export const MESSAGE_ACTS: readonly ActEntry[] = [
   {
     name: 'DECISION',
-    label: 'Decision',
-    color: '#8b5cf6',
     description:
       'A choice among alternatives is made or announced by someone with authority to make it, binding what happens next.',
   },
   {
     name: 'COMMITMENT',
-    label: 'Commitment',
-    color: '#3b82f6',
     description:
       'A specific person takes on a specific obligation, optionally with a deadline.',
   },
   {
     name: 'ESCALATION',
-    label: 'Escalation',
-    color: '#ef4444',
     description:
       'Raises urgency, severity or visibility: pulls in more senior people, or flags that something is stuck and needs intervention.',
   },
   {
     name: 'QUESTION',
-    label: 'Question',
-    color: '#f97316',
     description:
       'The sender wants information or a response. Creates an open expectation: someone now owes an answer.',
   },
   {
     name: 'RESOLUTION',
-    label: 'Resolution',
-    color: '#22c55e',
     description:
       'Declares a piece of work finished or a problem no longer present. The claim of doneness, not the proof.',
   },
   {
     name: 'STATUS_UPDATE',
-    label: 'Status update',
-    color: '#14b8a6',
     description:
       'Reports progress or state of ongoing work without completing it or creating anything new.',
   },
   {
     name: 'ANSWER',
-    label: 'Answer',
-    color: '#06b6d4',
     description:
       'Supplies the information an earlier question asked for, and creates nothing new.',
   },
@@ -158,12 +135,17 @@ export const MESSAGE_ACT_NAMES = [
   'ANSWER',
 ] as const;
 
-const VOCABULARY_BY_TYPE: Record<ProjectTagType, readonly VocabularyEntry[]> = {
-  [PROJECT_TAG_TYPE.MESSAGE_ACT]: MESSAGE_ACTS,
-  [PROJECT_TAG_TYPE.THREAD_TYPE]: THREAD_TYPES,
-};
+/** Thread types as a const tuple — z.enum needs a literal tuple. Order is display order. */
+export const THREAD_TYPE_NAMES = [
+  'ISSUE',
+  'ALERT',
+  'QUESTION',
+  'REQUEST',
+  'FEATURE_REQUEST',
+  'DISCUSSION',
+  'ANNOUNCEMENT',
+] as const;
 
-export const vocabularyEntry = (
-  type: ProjectTagType,
-  name: string,
-): VocabularyEntry | undefined => VOCABULARY_BY_TYPE[type].find(entry => entry.name === name);
+/** Built-in thread type by name; undefined for a free-form tag. */
+export const threadTypeEntry = (name: string): VocabularyEntry | undefined =>
+  THREAD_TYPES.find(entry => entry.name === name);

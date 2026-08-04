@@ -71,7 +71,7 @@ import {
   serializeInitialMessageMd,
   serializeParentMessageMd,
 } from '../utils/activityMetadataParser.js';
-import { MESSAGE_ACT_NAMES } from '../tags/vocabularies.js';
+import { THREAD_TYPE_NAMES } from '../tags/vocabularies.js';
 import { assertCanvasDestinationAccess } from '../utils/canvasDestinationAccess.js';
 import {
   getCanvasFolderNameConflictMessage,
@@ -8796,41 +8796,42 @@ export const mutators = defineMutators({
       },
     ),
   },
-  // Message acts — what a message creates going forward (DECISION, COMMITMENT, QUESTION,
-  // ...). Stored as a stringified JSON array on the message row itself, so it inherits
-  // MessagesACL and needs no separate table, ACL or side-effect handler.
+  // Thread types — what kind of thread this is, as a stringified JSON array on the
+  // conversation row. The caller sends the FULL desired set: the column is one value, so a
+  // partial update would be a read-modify-write race.
   //
-  // The caller sends the FULL desired set rather than a single add/remove. Two reasons:
-  // the column is one value so a partial update would be a read-modify-write race, and
-  // the picker already knows the complete selection it wants.
-  //
-  // KEEP IN SYNC with apps/backend/src/zero/mutators.ts messageTag.
-  messageTag: {
-    setActs: defineMutator(
+  // KEEP IN SYNC with apps/backend/src/zero/mutators.ts threadTag.
+  threadTag: {
+    setTypes: defineMutator(
       z.object({
-        messageId: z.string(),
-        // Validated against the closed vocabulary — an unknown value is rejected rather
-        // than silently widening what the column can hold.
-        acts: z.array(z.enum(MESSAGE_ACT_NAMES)),
+        conversationId: z.string(),
+        // Free-form, not z.enum: the built-in vocabulary is a starting point, and projects
+        // add their own. Length-capped so a tag stays a label rather than a paragraph.
+        types: z.array(z.string().trim().min(1).max(40)),
       }),
-      async ({ tx, args: { messageId, acts } }) => {
-        // resolveMessage, not a raw zql.messages lookup: the channel list never syncs
-        // messages rows, so a direct lookup would throw there. This falls back to the
-        // conversation's initial_message_md.
-        const message = await resolveMessage(tx, messageId);
-        if (!message) throw new Error('Message not found');
+      async ({ tx, args: { conversationId, types } }) => {
+        const conversation = await tx.run(
+          zql.conversations.where('conversationId', conversationId).one(),
+        );
+        if (!conversation) throw new Error('Conversation not found');
 
-        // Dedupe and order by the vocabulary's own precedence (strongest act first), so
-        // chips render in a stable order regardless of what order they were picked in.
-        const unique = [...new Set(acts)].sort(
-          (a, b) => MESSAGE_ACT_NAMES.indexOf(a) - MESSAGE_ACT_NAMES.indexOf(b),
+        // Built-in types first in vocabulary order, then custom ones alphabetically, so
+        // chips render in a stable order regardless of the order they were picked.
+        const rank = (name: string): number => {
+          const i = (THREAD_TYPE_NAMES as readonly string[]).indexOf(name);
+          return i === -1 ? THREAD_TYPE_NAMES.length : i;
+        };
+        const unique = [...new Set(types.map(t => t.trim()).filter(Boolean))].sort(
+          (a, b) => rank(a) - rank(b) || a.localeCompare(b),
         );
 
-        // '[]' rather than null when cleared: null means "never classified" and the
-        // classifier would tag it again on its next pass. '[]' means deliberately empty.
-        const next = unique.length > 0 ? JSON.stringify(unique) : '[]';
 
-        await tx.mutate.messages.update({ messageId, messageActs: next });
+        // '[]' rather than null when cleared: null means "never classified" and the
+        // classifier would re-derive it on its next pass.
+        await tx.mutate.conversations.update({
+          conversationId,
+          threadType: unique.length > 0 ? JSON.stringify(unique) : '[]',
+        });
       },
     ),
   },
@@ -8949,6 +8950,7 @@ export const mutators = defineMutators({
             threadReplyNotificationsEnabled: true,
             channelWideMentionsEnabled: true,
             notificationKeywords: '[]',
+            showThreadTags: false,
             createdAt: timestamp,
             updatedAt: timestamp,
           });
@@ -8984,6 +8986,43 @@ export const mutators = defineMutators({
             threadReplyNotificationsEnabled: true,
             channelWideMentionsEnabled: true,
             notificationKeywords: '[]',
+            showThreadTags: false,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          });
+        }
+      },
+    ),
+    setShowThreadTags: defineMutator(
+      z.object({
+        id: z.string(),
+        showThreadTags: z.boolean(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { id, showThreadTags, timestamp } }) => {
+        const existing = await tx.run(
+          zql.user_preferences.where('userId', ctx.userID).one(),
+        );
+        if (existing) {
+          await tx.mutate.user_preferences.update({
+            id: existing.id,
+            showThreadTags,
+            updatedAt: timestamp,
+          });
+        } else {
+          await tx.mutate.user_preferences.insert({
+            workspaceId: ctx.workspaceId,
+            id,
+            userId: ctx.userID,
+            channelSortOrder: ChannelSortOrder.RECENCY,
+            enterSendsMessage: true,
+            allowThreadBroadcastMentions: false,
+            globalDesktopNotificationLevel: NotificationLevel.MENTIONS_ONLY,
+            globalMobileNotificationLevel: NotificationLevel.MENTIONS_ONLY,
+            threadReplyNotificationsEnabled: true,
+            channelWideMentionsEnabled: true,
+            notificationKeywords: '[]',
+            showThreadTags,
             createdAt: timestamp,
             updatedAt: timestamp,
           });
@@ -9019,6 +9058,7 @@ export const mutators = defineMutators({
             threadReplyNotificationsEnabled: true,
             channelWideMentionsEnabled: true,
             notificationKeywords: '[]',
+            showThreadTags: false,
             createdAt: timestamp,
             updatedAt: timestamp,
           });
@@ -9071,6 +9111,7 @@ export const mutators = defineMutators({
             threadReplyNotificationsEnabled: threadReplyNotificationsEnabled ?? true,
             channelWideMentionsEnabled: channelWideMentionsEnabled ?? true,
             notificationKeywords: '[]',
+            showThreadTags: false,
             createdAt: timestamp,
             updatedAt: timestamp,
           });
@@ -9107,6 +9148,7 @@ export const mutators = defineMutators({
             threadReplyNotificationsEnabled: true,
             channelWideMentionsEnabled: true,
             notificationKeywords,
+            showThreadTags: false,
             createdAt: timestamp,
             updatedAt: timestamp,
           });

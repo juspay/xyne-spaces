@@ -14,7 +14,7 @@ import { useChannel, useGetChannelUserStatus } from '../../hooks/useChannels';
 import { useRouteContext } from '../../hooks/useRouteContext';
 import { usePlatform } from '../../hooks/usePlatform';
 import { useIsInPanelWebview } from '../../hooks/useIsInPanelWebview';
-import { X, FileText, ClipboardCheck, Hash } from 'lucide-react';
+import { X, FileText, ClipboardCheck, Hash, Tag as TagIcon, ChevronRight } from 'lucide-react';
 import {
   ArrowLeft,
   ArrowTurnDownRight,
@@ -35,6 +35,9 @@ import {
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
 } from '../ui/dropdown-menu';
 import { ChatInput } from './ChatInput';
 import ThreadList from './ThreadList/ThreadList';
@@ -49,7 +52,9 @@ import * as Tabs from '@radix-ui/react-tabs';
 import { cn } from '../../utils/classNames';
 import JoinChannel from './JoinChannel/JoinChannel';
 import { BotBubble } from './BotBubble';
-import { ThreadTypeChip } from '../tags/ThreadTypeChip';
+import { ThreadTags, parseThreadTypes, useSetThreadTypes } from '../tags/ThreadTags';
+import { ThreadTagMenuItems } from '../tags/ThreadTagMenuItems';
+import { useShowThreadTags } from '../../hooks/useShowThreadTags';
 import { toast } from 'sonner';
 import { TicketDetails } from '../Tickets/TicketDetails/TicketDetails';
 import { FileBubble } from '../ui/FileBubble/FileBubble';
@@ -509,6 +514,9 @@ export const ThreadMessages = ({
   // Create thread info for XyneAI context
   const initialMessage = conversation?.messages?.[0] ?? null;
   const initialMessageSender = useUser(initialMessage?.senderId || '');
+  const setThreadTypes = useSetThreadTypes(derivedConversationId);
+  const { showThreadTags } = useShowThreadTags();
+
   const threadInfo: ThreadInfo | null = useMemo(() => {
     if (!derivedConversationId || !initialMessage) return null;
 
@@ -947,9 +955,6 @@ export const ThreadMessages = ({
               <h3 className='text-[17px] font-semibold whitespace-nowrap overflow-hidden text-ellipsis min-w-0'>
                 {isTicketThread && ticket ? ticket.title : 'Thread message'}
               </h3>
-              {/* Sits in the panel header, not beside a message: this classifies the whole
-                  thread, while the chips on each message below classify that message. */}
-              <ThreadTypeChip threadType={conversation?.threadType} />
             </div>
 
             {derivedConversationId && (
@@ -1054,6 +1059,32 @@ export const ThreadMessages = ({
                       <MaximizeTwoArrow size={16} className='shrink-0' />
                       <span className='flex-1'>Expand view</span>
                     </DropdownMenuItem>
+                  )}
+                  {showThreadTags && !channel?.isArchived && (
+                    <DropdownMenuSub>
+                      <DropdownMenuSubTrigger
+                        className='gap-2'
+                        data-track-category='THREAD_PANEL'
+                        data-track-name='OPEN_THREAD_TAG_MENU'
+                      >
+                        <TagIcon size={16} className='shrink-0' />
+                        <span className='flex-1'>Thread tags</span>
+                        <ChevronRight size={16} className='shrink-0 text-muted-foreground' />
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuSubContent className='min-w-[220px]'>
+                        <ThreadTagMenuItems
+                          applied={parseThreadTypes(conversation?.threadType)}
+                          onToggle={name => {
+                            const applied = parseThreadTypes(conversation?.threadType);
+                            void setThreadTypes(
+                              applied.includes(name)
+                                ? applied.filter(value => value !== name)
+                                : [...applied, name],
+                            );
+                          }}
+                        />
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
                   )}
                   {!isMobile && !channel?.isArchived && (
                     <DropdownMenuItem
@@ -1295,6 +1326,15 @@ export const ThreadMessages = ({
                         ? ticket.title
                         : 'Thread message'}
                   </h3>
+                  {/* Classifies the whole thread, so it belongs beside the title rather
+                      than against any one message. */}
+                  {!simpleView && (
+                    <ThreadTags
+                      conversationId={derivedConversationId}
+                      threadType={conversation?.threadType}
+                      canEdit
+                    />
+                  )}
                   {!simpleView && focusedChannelBreadcrumb}
                 </div>
 
@@ -1364,6 +1404,32 @@ export const ThreadMessages = ({
                             className='px-2 py-1.5'
                           />
                         </DropdownMenuItem>
+                      )}
+                      {showThreadTags && !channel?.isArchived && (
+                        <DropdownMenuSub>
+                          <DropdownMenuSubTrigger
+                            className='gap-2'
+                            data-track-category='THREAD_PANEL'
+                            data-track-name='OPEN_THREAD_TAG_MENU'
+                          >
+                            <TagIcon size={16} className='shrink-0' />
+                            <span className='flex-1'>Thread tags</span>
+                            <ChevronRight size={16} className='shrink-0 text-muted-foreground' />
+                          </DropdownMenuSubTrigger>
+                          <DropdownMenuSubContent className='min-w-[220px]'>
+                            <ThreadTagMenuItems
+                              applied={parseThreadTypes(conversation?.threadType)}
+                              onToggle={name => {
+                                const applied = parseThreadTypes(conversation?.threadType);
+                                void setThreadTypes(
+                                  applied.includes(name)
+                                    ? applied.filter(value => value !== name)
+                                    : [...applied, name],
+                                );
+                              }}
+                            />
+                          </DropdownMenuSubContent>
+                        </DropdownMenuSub>
                       )}
                       {!isMobile && !channel?.isArchived && (
                         <DropdownMenuItem

@@ -13,3 +13,4 @@ ALTER TABLE "public"."conversations" ADD COLUMN "threadType" TEXT;
 -- AlterTable
 -- Stringified JSON array of message acts: '["DECISION","QUESTION"]'
 ALTER TABLE "public"."messages" ADD COLUMN "messageActs" TEXT;
+ALTER TABLE "public"."user_preferences" ADD COLUMN "showThreadTags" BOOLEAN NOT NULL DEFAULT false;

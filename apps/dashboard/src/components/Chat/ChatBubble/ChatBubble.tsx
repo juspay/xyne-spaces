@@ -15,8 +15,6 @@ import {
   unregisterMessageHoverActions,
   type MessageHoverToolbarActions,
 } from '../HoverActionsToolbar/messageHoverActionsRegistry';
-import { MessageTags } from '../../tags/MessageTags';
-import { useCanEditMessageActs } from '../../tags/useCanEditMessageActs';
 import { useAuthContext } from '../../../providers/AuthProvider';
 import { ChatInput } from '../ChatInput';
 import { usePin } from '../../../hooks/usePin';
@@ -41,6 +39,8 @@ import { copyHtmlToClipboard, markdownToHtml } from '../../../utils/clipboardUti
 import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWithHTML';
 import { getEmojiFontSizeClass } from '../../../utils/emojiUtils';
 import ReplyLayoutV2 from '../ReplyLayout/ReplyLayoutV2';
+import { ThreadTags, parseThreadTypes, useSetThreadTypes } from '../../tags/ThreadTags';
+import { useShowThreadTags } from '../../../hooks/useShowThreadTags';
 import { CallLayout } from '../CallLayout';
 import { Dialog } from '../../ui/Dialog/Dialog';
 import { Button } from '../../ui/Button/Button';
@@ -905,41 +905,15 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   // bubble only keeps its current per-message capabilities/handlers registered
   // (keyed by a per-instance id stamped on the root node as data-hover-key) so
   // the overlay can derive them at show time. Hover never sets state here.
-  // Tag chips ride along with the message text rather than sitting on their own row, so
-  // they land beside the "(edited)" marker instead of adding a line under every message.
-  // afterTextContent renders inside the same inline-block as the message HTML, which is
-  // exactly where RenderMessageWithHTML appends "(edited)".
-  // Mirrors MessagesACL.canUpdate; hiding the controls avoids clicking into a server error.
-  const canEditMessageActs = useCanEditMessageActs(message.senderId, channelId);
-
-  const composedAfterTextContent = useMemo(() => {
-    if (isMessageDeleted || isSystemMessage) return afterTextContent;
-    return (
-      <>
-        {afterTextContent}
-        {context === 'thread' && (
-          <span className='inline-flex align-middle ml-1.5'>
-            <MessageTags
-              messageId={message.messageId}
-              messageActs={message.messageActs}
-              slot='chips'
-              canEdit={canEditMessageActs}
-            />
-          </span>
-        )}
-      </>
-    );
-  }, [
-    afterTextContent,
-    isMessageDeleted,
-    isSystemMessage,
-    message.messageId,
-    message.messageActs,
-    context,
-    canEditMessageActs,
-  ]);
 
   const hoverToolbarKey = useId();
+  const appliedThreadTypes = useMemo(
+    () => parseThreadTypes(conversation?.threadType),
+    [conversation?.threadType],
+  );
+  const setThreadTypes = useSetThreadTypes(conversation?.conversationId);
+  const { showThreadTags } = useShowThreadTags();
+
   const canShowHoverToolbar =
     !isMobile &&
     !searchItemView &&
@@ -970,13 +944,25 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         initialMessageId: conversation.initialMessageId,
       }),
       reactionsMd: message.reactions_md,
-      // Thread-only: a channel-list row stands for the whole thread and shows its type,
-      // and it builds from initial_message_md, which carries no acts to display.
-      ...(context === 'thread' &&
-        canEditMessageActs &&
-        !isMessageDeleted &&
-        !isSystemMessage && { taggableMessageActs: message.messageActs ?? null }),
       onCopyLink,
+      // Channel rows only: inside a thread the panel header already carries this, and the
+      // tag is the thread's — one entry point per thread, not one per reply.
+      ...(showThreadTags &&
+        context === 'channel' &&
+        !isSystemMessage &&
+        !isMessageDeleted &&
+        conversation?.conversationId && {
+          threadTags: {
+            applied: appliedThreadTypes,
+            onToggle: (name: string) => {
+              void setThreadTypes(
+                appliedThreadTypes.includes(name)
+                  ? appliedThreadTypes.filter(value => value !== name)
+                  : [...appliedThreadTypes, name],
+              );
+            },
+          },
+        }),
       ...(!isMessageDeleted && shouldShowCopyButton && { onCopyMessage: handleCopyMessage }),
       ...(!isMessageDeleted && { onEmojiPickerOpenChange: setIsEmojiPickerOpen }),
       isChannelArchived: channel?.isArchived ?? false,
@@ -1241,9 +1227,18 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             {...(onUserClick && { onUserClick })}
             {...(allThreadAttachments && { allThreadAttachments })}
             workflowNumber={workflowNumber}
-            {...(composedAfterTextContent !== undefined && {
-              afterTextContent: composedAfterTextContent,
-            })}
+            {...(afterTextContent !== undefined && { afterTextContent })}
+            {...(context === 'channel' &&
+              !isSystemMessage &&
+              !isMessageDeleted && {
+                headerContent: (
+                  <ThreadTags
+                    conversationId={conversation?.conversationId}
+                    threadType={conversation?.threadType}
+                    canEdit
+                  />
+                ),
+              })}
             {...(conversation && { conversation: conversation })}
             {...(shouldEnableMobileThreadOpen && {
               onClick: handleMobileBubbleThreadOpen,

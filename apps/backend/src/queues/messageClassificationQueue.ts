@@ -1,11 +1,13 @@
 import Bull from 'bull';
 import { logger } from '@/utils/logger';
-import { db } from '@/database/client';
 import { redisService } from '@/services/redisService';
-import { classifyAndTagThread, MIN_THREAD_SIZE } from '@/services/messageClassification';
+import { classifyAndTagThread } from '@/services/messageClassification';
 
-/** Re-classify once every this many messages rather than on every message. */
-const BATCH_SIZE = Number(process.env['MESSAGE_CLASSIFICATION_BATCH_SIZE'] ?? 5);
+/**
+ * Wait this long before classifying. Short enough to read as immediate, long enough that a
+ * burst of replies collapses into one pass instead of one call per message.
+ */
+const DEBOUNCE_MS = Number(process.env['MESSAGE_CLASSIFICATION_DEBOUNCE_MS'] ?? 30_000);
 
 const QUEUE_NAME = 'message-classification';
 const JOB_NAME = 'classify-message';
@@ -93,29 +95,27 @@ class MessageClassificationQueue {
   /**
    * Consider a thread for classification. Guarded internally so callers can fire-and-forget.
    *
-   * Short threads are skipped. Past that, the jobId is keyed on the bucket and Bull drops a
-   * duplicate id, so a burst of replies collapses into one pass; a new bucket mints a new
-   * id, which is how a growing thread gets re-classified.
+   * Deliberately does NO database read. This runs inside the Zero transaction that created
+   * the message, so a brand-new conversation is not visible to Prisma yet — a lookup here
+   * silently dropped every new thread while replies worked. All real gating (thread size,
+   * already-classified, no project) happens in the consumer, which runs after commit.
+   *
+   * The debounce collapses a burst of replies into one pass; the jobId is the thread, so
+   * Bull drops repeat adds while that job is still pending.
    */
   async enqueueForMessage(conversationId: string): Promise<void> {
-    if (!this.queue || !conversationId) return;
+    if (!conversationId) return;
+    if (!this.queue) {
+      // Not silent: an uninitialized producer drops every message with no other trace.
+      logger.warn('[MessageClassificationQueue] Not initialized; nothing will be classified');
+      return;
+    }
 
     try {
-      // replyCount off the row, not COUNT(*): a PK lookup on a path that runs per message.
-      const conversation = await db.conversation.findUnique({
-        where: { conversationId },
-        select: { replyCount: true },
-      });
-      if (!conversation) return;
-
-      const messageCount = conversation.replyCount + 1; // replies + the root message
-      if (messageCount < MIN_THREAD_SIZE) return;
-
-      const bucket = Math.floor(messageCount / BATCH_SIZE);
       await this.queue.add(
         JOB_NAME,
         { conversationId },
-        { jobId: `classify:${conversationId}:${bucket}` },
+        { jobId: `classify:${conversationId}`, delay: DEBOUNCE_MS },
       );
     } catch (error) {
       logger.error('[MessageClassificationQueue] Failed to enqueue', { conversationId, error });

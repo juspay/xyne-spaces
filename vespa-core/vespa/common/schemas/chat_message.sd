@@ -59,7 +59,7 @@ schema chat_message {
       attribute: fast-search
     }
 
-    field threadType type string {
+    field threadType type array<string> {
       indexing: attribute | summary
       attribute: fast-search
       match: exact

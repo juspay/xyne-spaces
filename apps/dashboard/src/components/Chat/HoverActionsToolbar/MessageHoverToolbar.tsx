@@ -42,7 +42,6 @@ export const MessageHoverToolbar: React.FC<MessageHoverToolbarProps> = ({ contai
   const [activeRow, setActiveRow] = useState<ActiveRow | null>(null);
   const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState(false);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-  const [isTagPickerOpen, setIsTagPickerOpen] = useState(false);
 
   // Mirrors for the DOM listeners (attached once) and post-close checks.
   const activeRowRef = useRef<ActiveRow | null>(null);
@@ -51,7 +50,7 @@ export const MessageHoverToolbar: React.FC<MessageHoverToolbarProps> = ({ contai
   // Any popover anchored in the toolbar must pin it open: reaching the popover means
   // moving the pointer off the message row, which would otherwise hide the toolbar and
   // unmount the popover before it can be clicked.
-  pinnedOpenRef.current = isEmojiPickerOpen || isDropdownOpen || isTagPickerOpen;
+  pinnedOpenRef.current = isEmojiPickerOpen || isDropdownOpen;
 
   // The overlay wrapper — pointerover events from inside it must never move
   // or clear the row highlight (the toolbar floats over/near rows).
@@ -200,12 +199,7 @@ export const MessageHoverToolbar: React.FC<MessageHoverToolbarProps> = ({ contai
   const handleDropdownOpenChange = (open: boolean): void => {
     setIsDropdownOpen(open);
     actions.onDropdownOpenChange?.(open);
-    if (!open && !isEmojiPickerOpen && !isTagPickerOpen) scheduleHideIfPointerOutside();
-  };
-
-  const handleTagPickerOpenChange = (open: boolean): void => {
-    setIsTagPickerOpen(open);
-    if (!open && !isEmojiPickerOpen && !isDropdownOpen) scheduleHideIfPointerOutside();
+    if (!open && !isEmojiPickerOpen) scheduleHideIfPointerOutside();
   };
 
   return (
@@ -222,7 +216,6 @@ export const MessageHoverToolbar: React.FC<MessageHoverToolbarProps> = ({ contai
           onEmojiPickerOpenChange: handleEmojiPickerOpenChange,
         })}
         onDropdownOpenChange={handleDropdownOpenChange}
-        onTagPickerOpenChange={handleTagPickerOpenChange}
       />
     </div>
   );

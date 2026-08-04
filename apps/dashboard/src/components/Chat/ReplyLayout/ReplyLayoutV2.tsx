@@ -5,7 +5,6 @@ import AvatarGroup from '../../ui/Avatar/AvatarGroup';
 import { formatRelativeTime } from '../../../utils/dateUtils';
 import { ViewNewerRepliesButton } from '../../ui/MessageBubble/ThreadMessageIndicators';
 import { parseRepliesMd } from '@xyne/shared';
-import { ThreadTypeChip } from '../../tags/ThreadTypeChip';
 
 const ReplyLayoutV2: React.FC<{
   replies: ThreadData;
@@ -92,7 +91,6 @@ const ReplyLayoutV2: React.FC<{
             message text: this row is the thread-level affordance, so a chip here reads as
             "this thread is an Issue" instead of appearing to label the message it sits
             under — which is what made it clash with that message's own act chip. */}
-        <ThreadTypeChip threadType={replies.conversation?.threadType} />
 
         {replies.lastActivityAt && (
           <span className='relative inline-flex items-baseline text-muted-foreground whitespace-nowrap w-[140px]'>

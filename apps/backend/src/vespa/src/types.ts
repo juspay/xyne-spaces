@@ -225,7 +225,7 @@ export interface VespaChatMessageDocument extends Omit<VespaDocument, 'orgId' | 
   /** What this message does — DECISION, COMMITMENT, ... Mirrors messages.messageActs. */
   messageActs?: string[];
   /** What kind of thread this is. Set only on the thread's root message. */
-  threadType?: string;
+  threadType?: string[];
   channelWeightedSet: any,
   userWeightedSet: any,
   channelRef: string;

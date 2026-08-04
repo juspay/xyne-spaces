@@ -62,46 +62,7 @@ export class MessagesACL extends BaseACL<'messages'> {
     if (message.senderId === this.ctx.userID || message.msgType === MessageType.SYSTEM) {
       return;
     }
-
-    const changedFields = Object.keys(args).filter(field => field !== 'messageId');
-
-    // Keyed on the field, not on the update being acts-only, so acts cannot ride along in
-    // a content edit. Tagging a colleague's message is open; rewriting their words is not.
-    if (changedFields.length === 1 && changedFields[0] === 'messageActs') {
-      await this.verifyChannelMemberCanTag(args.messageId, tx);
-      return;
-    }
-
     throw new MutationACLError('Message update failed: only the original sender can edit this message', 'messages');
-  }
-
-  /**
-   * Who, other than the sender, may tag a message: any member of its channel. Open on
-   * purpose — changes are logged, so the policy can be tightened against real usage.
-   */
-  private async verifyChannelMemberCanTag(messageId: string, tx: Transaction<Schema>): Promise<void> {
-    const allowed = await tx.run(
-      zql.messages
-        .where('messageId', messageId)
-        .where(({ or, cmp }) => or(cmp('visibleTo', 'IS', null), cmp('visibleTo', this.ctx.userID)))
-        .whereExists('conversation', conversation =>
-          conversation.whereExists('channel', channel =>
-            channel
-              .where('workspaceId', '=', this.ctx.workspaceId)
-              .whereExists('participants', participant =>
-                participant.where('userId', this.ctx.userID),
-              ),
-          ),
-        )
-        .one(),
-    );
-
-    if (!allowed) {
-      throw new MutationACLError(
-        'Message update failed: only channel members can change message tags',
-        'messages',
-      );
-    }
   }
 
   async canDelete(args: DeleteID<TableSchema<'messages'>>, tx: Transaction<Schema>): Promise<void> {
