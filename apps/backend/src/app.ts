@@ -370,6 +370,11 @@ export class App {
     // it isn't present (i.e. in a standalone public build).
     registerPrivateBackfillRoutes(this.app);
 
+    // Keep benchmark-only ingestion unavailable unless it is explicitly enabled.
+    if (process.env.ENABLE_ENTERPRISE_RAG_BENCHMARK_ROUTES === 'true') {
+      this.app.use('/api/admin/enterprise-rag', enterpriseRagBenchmarkRoutes);
+    }
+
     // Ticket migration route (admin-only)
     this.app.use('/api/admin/migrate-tickets-xyneid', workspaceScopedRoute, ticketMigrationRoutes);
     this.app.use('/api/admin/gmail-watch-renewal', workspaceScopedRoute, gmailWatchRenewalRoutes);

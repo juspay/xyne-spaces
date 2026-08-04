@@ -1,0 +1,505 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>EnterpriseRAG Vespa Loader</title>
+    <script>
+      if (window.location.protocol === "file:") {
+        window.location.replace("http://127.0.0.1:8090/");
+      }
+    </script>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #080b0e;
+        --panel: #10151a;
+        --panel-2: #151c22;
+        --line: #253039;
+        --text: #edf4f2;
+        --muted: #8d9ca0;
+        --green: #68f7b2;
+        --green-soft: rgba(104, 247, 178, 0.12);
+        --amber: #ffc66d;
+        --red: #ff7d7d;
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background:
+          radial-gradient(circle at 80% -10%, rgba(104, 247, 178, 0.12), transparent 34rem),
+          var(--bg);
+        color: var(--text);
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      button, input, select { font: inherit; }
+
+      .shell { width: min(1180px, calc(100% - 40px)); margin: 0 auto; padding: 38px 0 64px; }
+
+      header { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 44px; }
+
+      .eyebrow { color: var(--green); font-size: 12px; font-weight: 800; letter-spacing: .16em; text-transform: uppercase; }
+      h1 { margin: 7px 0 0; font-size: clamp(28px, 5vw, 48px); letter-spacing: -.055em; line-height: 1; }
+      .status { display: inline-flex; align-items: center; gap: 9px; border: 1px solid var(--line); border-radius: 999px; padding: 9px 13px; color: var(--muted); background: rgba(16, 21, 26, .86); font-size: 13px; }
+      .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); box-shadow: 0 0 0 4px rgba(141, 156, 160, .1); }
+      .status[data-state="running"] .status-dot { background: var(--green); box-shadow: 0 0 0 4px var(--green-soft); animation: pulse 1.4s infinite; }
+      .status[data-state="failed"] .status-dot { background: var(--red); }
+
+      .hero { display: grid; grid-template-columns: 1.7fr 1fr; gap: 18px; margin-bottom: 18px; }
+      .panel { background: linear-gradient(145deg, rgba(21, 28, 34, .96), rgba(13, 18, 22, .96)); border: 1px solid var(--line); border-radius: 20px; padding: 24px; box-shadow: 0 22px 60px rgba(0,0,0,.25); }
+      .panel-title { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; margin-bottom: 22px; }
+      .panel-title h2 { margin: 0; font-size: 15px; letter-spacing: -.01em; }
+      .panel-title span { color: var(--muted); font-size: 12px; }
+
+      .progress-number { font-variant-numeric: tabular-nums; font-size: clamp(54px, 9vw, 92px); font-weight: 760; letter-spacing: -.075em; line-height: .92; }
+      .progress-number span { color: var(--muted); font-size: .3em; letter-spacing: -.03em; margin-left: 8px; }
+      .bar { height: 8px; margin: 25px 0 13px; overflow: hidden; border-radius: 99px; background: #202a31; }
+      .bar-fill { width: 0%; height: 100%; background: linear-gradient(90deg, #35db93, var(--green)); border-radius: inherit; transition: width .4s ease; box-shadow: 0 0 22px rgba(104,247,178,.35); }
+      .bar-meta { display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+
+      .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+      label { display: grid; gap: 7px; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; }
+      input, select { width: 100%; color: var(--text); background: #090d10; border: 1px solid var(--line); border-radius: 10px; padding: 12px 13px; outline: none; font-variant-numeric: tabular-nums; }
+      input:focus, select:focus { border-color: var(--green); box-shadow: 0 0 0 3px var(--green-soft); }
+      .source-field { grid-column: 1 / -1; }
+      .source-hint { color: var(--muted); font-size: 11px; font-weight: 500; letter-spacing: 0; text-transform: none; }
+      .actions { display: grid; grid-template-columns: 1fr auto; gap: 10px; margin-top: 16px; }
+      button { border: 0; border-radius: 11px; padding: 12px 17px; cursor: pointer; font-weight: 800; }
+      button:disabled { opacity: .42; cursor: not-allowed; }
+      .start { color: #03130c; background: var(--green); }
+      .stop { color: var(--text); background: transparent; border: 1px solid var(--line); }
+      .form-error { min-height: 18px; margin-top: 11px; color: var(--red); font-size: 12px; }
+
+      .metrics { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin-bottom: 18px; }
+      .metric { border: 1px solid var(--line); border-radius: 15px; padding: 18px; background: rgba(16,21,26,.72); }
+      .metric-label { color: var(--muted); font-size: 11px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
+      .metric-value { margin-top: 8px; font-size: 29px; font-weight: 720; letter-spacing: -.045em; font-variant-numeric: tabular-nums; }
+      .metric-value.success { color: var(--green); }
+      .metric-value.failure { color: var(--red); }
+
+      .detail-grid { display: grid; grid-template-columns: 1.4fr 1fr; gap: 18px; }
+      .last-doc { min-height: 96px; }
+      .doc-title { margin: 0 0 9px; font-size: 18px; line-height: 1.35; }
+      .doc-meta, .dataset-line { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+      .timing { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+      .timing strong { display: block; margin-top: 5px; font-size: 18px; font-variant-numeric: tabular-nums; }
+      .timing span { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .07em; }
+
+      .errors { margin-top: 18px; }
+      .error-row { display: grid; grid-template-columns: 82px 1fr 1.6fr; gap: 12px; padding: 13px 0; border-top: 1px solid var(--line); font-size: 12px; }
+      .error-row code { color: var(--amber); }
+      .empty { color: var(--muted); font-size: 13px; }
+
+      .data-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-top: 18px; }
+      .count-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+      .count-card { padding: 13px; border: 1px solid var(--line); border-radius: 12px; background: #0b1014; }
+      .count-card strong { display: block; font-size: 21px; font-variant-numeric: tabular-nums; }
+      .count-card span { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; text-transform: capitalize; }
+
+      .browser-panel { margin-top: 18px; }
+      .schema-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+      .schema-tab { padding: 8px 11px; color: var(--muted); background: #0a0e11; border: 1px solid var(--line); border-radius: 999px; font-size: 12px; }
+      .schema-tab.active { color: #04130c; border-color: var(--green); background: var(--green); }
+      .document-layout { display: grid; grid-template-columns: minmax(280px, .85fr) minmax(0, 1.5fr); gap: 16px; min-height: 500px; }
+      .document-list { max-height: 650px; overflow: auto; border: 1px solid var(--line); border-radius: 14px; background: #0a0e11; }
+      .document-item { display: block; width: 100%; padding: 14px; color: var(--text); text-align: left; background: transparent; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; }
+      .document-item:hover, .document-item.active { background: var(--green-soft); }
+      .document-item strong { display: block; margin-bottom: 6px; font-size: 13px; line-height: 1.35; }
+      .document-item span { display: block; color: var(--muted); font-size: 11px; line-height: 1.45; }
+      .document-tools { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px; }
+      .load-more { color: var(--text); background: transparent; border: 1px solid var(--line); padding: 8px 11px; }
+      .inspector { min-width: 0; padding: 18px; border: 1px solid var(--line); border-radius: 14px; background: #0a0e11; overflow: auto; }
+      .inspector h3 { margin: 0 0 6px; font-size: 20px; }
+      .inspector-meta { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+      .field-json { max-height: 240px; overflow: auto; margin: 16px 0; padding: 13px; border-radius: 10px; color: #c9d6d3; background: #050708; font: 11px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+      .chunks { display: grid; gap: 9px; }
+      .chunk { border: 1px solid var(--line); border-radius: 10px; background: #0d1317; }
+      .chunk summary { padding: 11px 13px; cursor: pointer; color: var(--green); font-size: 12px; font-weight: 750; }
+      .chunk pre { margin: 0; padding: 0 13px 13px; color: #dbe5e2; font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+      .browser-error { min-height: 18px; margin-top: 9px; color: var(--red); font-size: 12px; }
+
+      @keyframes pulse { 50% { transform: scale(.75); opacity: .65; } }
+
+      @media (max-width: 820px) {
+        .hero, .detail-grid, .data-grid, .document-layout { grid-template-columns: 1fr; }
+        .metrics { grid-template-columns: repeat(3, 1fr); }
+        header { align-items: flex-start; flex-direction: column; }
+      }
+
+      @media (max-width: 520px) {
+        .shell { width: min(100% - 24px, 1180px); padding-top: 24px; }
+        .metrics, .form-grid, .timing, .count-grid { grid-template-columns: 1fr; }
+        .error-row { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <header>
+        <div>
+          <div class="eyebrow">EnterpriseRAG · Vespa</div>
+          <h1>Ingestion control room</h1>
+        </div>
+        <div class="status" id="statusBadge" data-state="idle"><span class="status-dot"></span><span id="statusText">Connecting</span></div>
+      </header>
+
+      <section class="hero">
+        <article class="panel">
+          <div class="panel-title"><h2>Run progress</h2><span id="rowRange">Rows —</span></div>
+          <div class="progress-number"><b id="progressPercent">0.0</b><span>%</span></div>
+          <div class="bar"><div class="bar-fill" id="progressBar"></div></div>
+          <div class="bar-meta"><span id="progressCount">0 of 0 attempted</span><span id="remainingCount">0 remaining</span></div>
+        </article>
+
+        <aside class="panel">
+          <div class="panel-title"><h2>Start a run</h2><span id="datasetTotal">— rows available</span></div>
+          <div class="dataset-line" id="workspaceId">Workspace —</div>
+          <div class="form-grid">
+            <label class="source-field">Ingest source first
+              <select id="sourceType"><option value="">All sources · dataset order</option></select>
+              <span class="source-hint" id="sourceHint">Runs across the selected row range.</span>
+            </label>
+            <label>Start row<input id="startRow" type="number" value="1" min="0" /></label>
+            <label>Documents<input id="limit" type="number" value="100" min="1" /></label>
+            <label>Concurrency<input id="concurrency" type="number" value="2" min="1" max="8" /></label>
+          </div>
+          <div class="actions">
+            <button class="start" id="startButton">Start ingestion</button>
+            <button class="stop" id="stopButton" disabled>Stop</button>
+          </div>
+          <div class="form-error" id="formError"></div>
+        </aside>
+      </section>
+
+      <section class="metrics">
+        <article class="metric"><div class="metric-label">Dataset rows</div><div class="metric-value" id="allDatasetRows">—</div></article>
+        <article class="metric"><div class="metric-label">Rows ingested</div><div class="metric-value success" id="vespaSourceRows">—</div></article>
+        <article class="metric"><div class="metric-label">Rows left</div><div class="metric-value" id="datasetRemaining">—</div></article>
+        <article class="metric"><div class="metric-label">Messages</div><div class="metric-value" id="messageDocuments">—</div></article>
+        <article class="metric"><div class="metric-label">All Vespa docs</div><div class="metric-value" id="vespaDocuments">—</div></article>
+        <article class="metric"><div class="metric-label">Failed this run</div><div class="metric-value failure" id="failed">0</div></article>
+      </section>
+
+      <section class="detail-grid">
+        <article class="panel last-doc">
+          <div class="panel-title"><h2>Latest document</h2><span id="currentRow">Row —</span></div>
+          <h3 class="doc-title" id="lastTitle">Waiting for an ingestion run</h3>
+          <div class="doc-meta" id="lastMeta">Waiting for the Xyne backend.</div>
+        </article>
+        <article class="panel">
+          <div class="panel-title"><h2>Throughput</h2><span id="chunkCount">0 Vespa writes</span></div>
+          <div class="timing">
+            <div><span>Rate</span><strong id="rate">0/s</strong></div>
+            <div><span>Elapsed</span><strong id="elapsed">0s</strong></div>
+            <div><span>ETA</span><strong id="eta">—</strong></div>
+          </div>
+        </article>
+      </section>
+
+      <section class="data-grid">
+        <article class="panel">
+          <div class="panel-title"><h2>Dataset composition</h2><span>Rows in Parquet</span></div>
+          <div class="count-grid" id="datasetComposition"><div class="empty">Reading source types…</div></div>
+        </article>
+        <article class="panel">
+          <div class="panel-title"><h2>Stored in Vespa</h2><span>By document schema</span></div>
+          <div class="count-grid" id="vespaComposition"><div class="empty">Waiting for Vespa stats…</div></div>
+        </article>
+      </section>
+
+      <section class="panel browser-panel">
+        <div class="panel-title"><h2>Vespa document browser</h2><span>Loaded from Document API, not search</span></div>
+        <div class="schema-tabs" id="schemaTabs"></div>
+        <div class="document-layout">
+          <div>
+            <div class="document-list" id="documentList"><div class="document-tools empty">Select a document type.</div></div>
+            <div class="document-tools"><span class="empty" id="documentListCount">0 loaded</span><button class="load-more" id="loadMoreButton" disabled>Load more</button></div>
+            <div class="browser-error" id="browserError"></div>
+          </div>
+          <article class="inspector" id="documentInspector">
+            <div class="empty">Select a stored document to view its actual Vespa fields and chunks.</div>
+          </article>
+        </div>
+      </section>
+
+      <section class="panel errors">
+        <div class="panel-title"><h2>Recent failures</h2><span>Last 20</span></div>
+        <div id="errors"><div class="empty">No failures recorded.</div></div>
+      </section>
+    </main>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const number = new Intl.NumberFormat();
+      const schemas = [
+        ["chat_message", "Messages"],
+        ["file", "Files"],
+        ["mail", "Mail"],
+        ["ticket", "Tickets"],
+        ["sam_transcript", "Transcripts"],
+      ];
+      let latestState = null;
+      let selectedSchema = "file";
+      let selectedDocumentId = null;
+      let documentContinuation = null;
+      let loadedDocuments = [];
+      let datasetSummary = null;
+
+      function duration(seconds) {
+        if (seconds == null || !Number.isFinite(seconds)) return "—";
+        seconds = Math.max(0, Math.round(seconds));
+        const h = Math.floor(seconds / 3600);
+        const m = Math.floor((seconds % 3600) / 60);
+        const s = seconds % 60;
+        if (h) return `${h}h ${m}m`;
+        if (m) return `${m}m ${s}s`;
+        return `${s}s`;
+      }
+
+      function render(state) {
+        latestState = state;
+        const active = state.status === "running" || state.status === "stopping";
+        $("statusBadge").dataset.state = state.status;
+        $("statusText").textContent = state.status.charAt(0).toUpperCase() + state.status.slice(1);
+        $("startButton").disabled = active;
+        $("stopButton").disabled = !active || state.status === "stopping";
+        $("datasetTotal").textContent = `${number.format(state.dataset_rows)} rows available`;
+        $("workspaceId").textContent = `Workspace ${state.workspace_id || "—"}`;
+        const selectedRange = datasetSummary?.source_ranges?.[$("sourceType").value];
+        $("limit").max = selectedRange
+          ? Number(selectedRange.end_row) - Number(selectedRange.start_row) + 1
+          : state.dataset_rows;
+        $("startRow").max = selectedRange
+          ? Number(selectedRange.end_row)
+          : Math.max(0, state.dataset_rows - 1);
+
+        const percent = Number(state.percentage || 0);
+        $("progressPercent").textContent = percent.toFixed(1);
+        $("progressBar").style.width = `${Math.min(100, percent)}%`;
+        $("progressCount").textContent = `${number.format(state.attempted)} of ${number.format(state.requested)} attempted`;
+        $("remainingCount").textContent = `${number.format(Math.max(0, state.requested - state.attempted))} remaining`;
+        const sourceLabel = state.source_type ? `${state.source_type.replaceAll("_", " ")} · ` : "";
+        $("rowRange").textContent = state.requested ? `${sourceLabel}rows ${number.format(state.start_row)}–${number.format(state.end_row - 1)}` : "Rows —";
+
+        const bySchema = state.vespa_by_schema || {};
+        $("allDatasetRows").textContent = number.format(state.dataset_rows || 0);
+        $("vespaSourceRows").textContent = state.vespa_source_rows == null ? "—" : number.format(state.vespa_source_rows);
+        $("datasetRemaining").textContent = state.dataset_remaining == null ? "—" : number.format(state.dataset_remaining);
+        $("messageDocuments").textContent = number.format(bySchema.chat_message || 0);
+        $("failed").textContent = number.format(state.failed);
+        $("vespaDocuments").textContent = state.vespa_documents == null ? "—" : number.format(state.vespa_documents);
+        $("vespaComposition").innerHTML = schemas.map(([schema, label]) =>
+          `<div class="count-card"><strong>${number.format(bySchema[schema] || 0)}</strong><span>${escapeHtml(label)}</span></div>`
+        ).join("");
+        renderSchemaTabs(bySchema);
+        $("rate").textContent = `${Number(state.rate_per_second || 0).toFixed(2)}/s`;
+        $("elapsed").textContent = duration(state.elapsed_seconds);
+        $("eta").textContent = duration(state.eta_seconds);
+        $("chunkCount").textContent = `${number.format(state.vespa_writes || 0)} explicit queue jobs`;
+        $("currentRow").textContent = state.current_row == null ? "Row —" : `Row ${number.format(state.current_row)}`;
+
+        if (state.last_document) {
+          $("lastTitle").textContent = state.last_document.title;
+          const classification = state.last_document.classification || "backend ingestion";
+          const schemas = Array.isArray(state.last_document.schemas)
+            ? state.last_document.schemas.join(", ")
+            : "file";
+          const ingestionStatus = state.last_document.ingestion_status || "queued";
+          $("lastMeta").textContent = `${state.last_document.doc_id} · ${state.last_document.source_type} → ${classification} · ${ingestionStatus} · ${schemas}`;
+        }
+
+        const errors = state.recent_errors || [];
+        $("errors").innerHTML = errors.length
+          ? errors.map((error) => `<div class="error-row"><code>row ${error.row_index ?? "—"}</code><span>${escapeHtml(error.title || error.doc_id)}</span><span>${escapeHtml(error.error)}</span></div>`).join("")
+          : '<div class="empty">No failures recorded.</div>';
+      }
+
+      function escapeHtml(value) {
+        return String(value ?? "").replace(/[&<>'"]/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"})[char]);
+      }
+
+      function renderSchemaTabs(bySchema = {}) {
+        $("schemaTabs").innerHTML = schemas.map(([schema, label]) =>
+          `<button class="schema-tab ${schema === selectedSchema ? "active" : ""}" data-schema="${schema}">${escapeHtml(label)} · ${number.format(bySchema[schema] || 0)}</button>`
+        ).join("");
+      }
+
+      async function loadDatasetSummary() {
+        try {
+          const response = await fetch("/api/dataset-summary", { cache: "no-store" });
+          const body = await response.json();
+          if (!response.ok) throw new Error(body.error || `Dataset summary failed (${response.status})`);
+          datasetSummary = body;
+          const counts = body.by_source_type || {};
+          const ranges = body.source_ranges || {};
+          const sources = Object.keys(counts).sort((a, b) =>
+            Number(ranges[a]?.start_row || 0) - Number(ranges[b]?.start_row || 0)
+          );
+          $("sourceType").innerHTML = '<option value="">All sources · dataset order</option>' + sources
+            .map((source) => `<option value="${escapeHtml(source)}">${escapeHtml(source.replaceAll("_", " "))} · ${number.format(counts[source])} rows</option>`)
+            .join("");
+          $("datasetComposition").innerHTML = Object.entries(counts)
+            .sort((a, b) => b[1] - a[1])
+            .map(([source, count]) => `<div class="count-card"><strong>${number.format(count)}</strong><span>${escapeHtml(source.replaceAll("_", " "))}</span></div>`)
+            .join("") || '<div class="empty">No dataset rows found.</div>';
+        } catch (error) {
+          $("datasetComposition").innerHTML = `<div class="browser-error">${escapeHtml(error.message)}</div>`;
+        }
+      }
+
+      function renderDocumentList() {
+        $("documentList").innerHTML = loadedDocuments.length
+          ? loadedDocuments.map((doc, index) => `
+              <button class="document-item ${doc.doc_id === selectedDocumentId ? "active" : ""}" data-index="${index}">
+                <strong>${escapeHtml(doc.title)}</strong>
+                <span>${escapeHtml(doc.doc_id)}${doc.row_index == null ? "" : ` · row ${number.format(doc.row_index)}`}</span>
+                <span>${number.format(doc.chunk_count || 0)} chunks${doc.source_type ? ` · ${escapeHtml(doc.source_type)}` : ""}</span>
+              </button>`).join("")
+          : '<div class="document-tools empty">No documents found for this schema.</div>';
+        $("documentListCount").textContent = `${number.format(loadedDocuments.length)} loaded`;
+        $("loadMoreButton").disabled = !documentContinuation;
+      }
+
+      async function loadDocuments(reset = true) {
+        try {
+          $("browserError").textContent = "";
+          if (reset) {
+            loadedDocuments = [];
+            documentContinuation = null;
+            selectedDocumentId = null;
+            $("documentList").innerHTML = '<div class="document-tools empty">Loading documents…</div>';
+            $("documentInspector").innerHTML = '<div class="empty">Select a stored document to inspect it.</div>';
+          }
+          const params = new URLSearchParams({ schema: selectedSchema, limit: "20" });
+          if (!reset && documentContinuation) params.set("continuation", documentContinuation);
+          const response = await fetch(`/api/documents?${params}`, { cache: "no-store" });
+          const body = await response.json();
+          if (!response.ok) throw new Error(body.error || `Document list failed (${response.status})`);
+          loadedDocuments = reset ? body.documents : [...loadedDocuments, ...body.documents];
+          documentContinuation = body.continuation || null;
+          renderDocumentList();
+          if (reset && loadedDocuments.length) await inspectDocument(loadedDocuments[0]);
+        } catch (error) {
+          $("browserError").textContent = error.message;
+          if (reset) $("documentList").innerHTML = '<div class="document-tools empty">Could not load documents.</div>';
+        }
+      }
+
+      async function inspectDocument(document) {
+        try {
+          selectedDocumentId = document.doc_id;
+          renderDocumentList();
+          $("documentInspector").innerHTML = '<div class="empty">Loading fields and chunks from Vespa…</div>';
+          const params = new URLSearchParams({ schema: document.schema, doc_id: document.doc_id });
+          const response = await fetch(`/api/document?${params}`, { cache: "no-store" });
+          const body = await response.json();
+          if (!response.ok) throw new Error(body.error || `Document fetch failed (${response.status})`);
+          const fields = body.fields || {};
+          const chunks = Array.isArray(fields.chunks) ? fields.chunks : [];
+          const title = fields.fileName || fields.subject || fields.title || fields.name || fields.messageChannelName || fields.username || body.doc_id;
+          const fieldsWithoutChunks = { ...fields };
+          delete fieldsWithoutChunks.chunks;
+          $("documentInspector").innerHTML = `
+            <h3>${escapeHtml(title)}</h3>
+            <div class="inspector-meta">${escapeHtml(body.schema)} · ${escapeHtml(body.doc_id)} · ${number.format(body.chunk_count || 0)} chunks</div>
+            <pre class="field-json" id="fieldJson"></pre>
+            <div class="panel-title"><h2>Stored chunks</h2><span>${number.format(chunks.length)} total</span></div>
+            <div class="chunks">${chunks.length
+              ? chunks.map((chunk, index) => `<details class="chunk" ${index === 0 ? "open" : ""}><summary>Chunk ${index + 1}</summary><pre>${escapeHtml(chunk)}</pre></details>`).join("")
+              : '<div class="empty">This schema stores its content in fields rather than a chunks array.</div>'}
+            </div>`;
+          $("fieldJson").textContent = JSON.stringify(fieldsWithoutChunks, null, 2);
+        } catch (error) {
+          $("documentInspector").innerHTML = `<div class="browser-error">${escapeHtml(error.message)}</div>`;
+        }
+      }
+
+      async function refresh() {
+        try {
+          const response = await fetch("/api/status", { cache: "no-store" });
+          if (!response.ok) throw new Error(`Status request failed (${response.status})`);
+          render(await response.json());
+          $("formError").textContent = "";
+        } catch (error) {
+          $("statusBadge").dataset.state = "failed";
+          $("statusText").textContent = "Disconnected";
+          $("formError").textContent = error.message;
+        }
+      }
+
+      async function post(path, payload = {}) {
+        const response = await fetch(path, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.error || `Request failed (${response.status})`);
+        render(body);
+      }
+
+      $("startButton").addEventListener("click", async () => {
+        try {
+          $("formError").textContent = "";
+          await post("/api/start", {
+            start_row: Number($("startRow").value),
+            limit: Number($("limit").value),
+            concurrency: Number($("concurrency").value),
+            source_type: $("sourceType").value || null,
+          });
+        } catch (error) {
+          $("formError").textContent = error.message;
+        }
+      });
+
+      $("sourceType").addEventListener("change", () => {
+        const source = $("sourceType").value;
+        const range = datasetSummary?.source_ranges?.[source];
+        if (!source || !range) {
+          $("sourceHint").textContent = "Runs across the selected row range in dataset order.";
+          $("startRow").min = 0;
+          $("startRow").max = Math.max(0, Number(datasetSummary?.total || 1) - 1);
+          return;
+        }
+        const start = Number(range.start_row);
+        const end = Number(range.end_row);
+        $("startRow").value = start;
+        $("startRow").min = start;
+        $("startRow").max = end;
+        $("limit").max = end - start + 1;
+        $("sourceHint").textContent = `Only ${source.replaceAll("_", " ")} rows ${number.format(start)}–${number.format(end)} will be submitted.`;
+      });
+
+      $("stopButton").addEventListener("click", async () => {
+        try { await post("/api/stop"); }
+        catch (error) { $("formError").textContent = error.message; }
+      });
+
+      $("schemaTabs").addEventListener("click", async (event) => {
+        const button = event.target.closest("[data-schema]");
+        if (!button) return;
+        selectedSchema = button.dataset.schema;
+        renderSchemaTabs(latestState?.vespa_by_schema || {});
+        await loadDocuments(true);
+      });
+
+      $("documentList").addEventListener("click", async (event) => {
+        const button = event.target.closest("[data-index]");
+        if (!button) return;
+        const document = loadedDocuments[Number(button.dataset.index)];
+        if (document) await inspectDocument(document);
+      });
+
+      $("loadMoreButton").addEventListener("click", async () => loadDocuments(false));
+
+      refresh();
+      loadDatasetSummary();
+      loadDocuments(true);
+      setInterval(refresh, 1000);
+    </script>
+  </body>
+</html>
